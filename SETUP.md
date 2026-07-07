@@ -51,13 +51,19 @@ přidej všechny adresy, ze kterých se bude přihlašovat:
 ```
 cz.kuzelky.rezervator://login-callback
 https://<tvůj-github-username>.github.io/rezervator/
-http://localhost:*
+http://localhost:**
 ```
 
 - První řádek je deep link pro mobilní appku (Android/iOS).
 - Druhý řádek je produkční web na GitHub Pages (krok 5) — uprav
   `<tvůj-github-username>` na skutečné jméno účtu/organizace.
-- Třetí řádek je pro lokální vývoj webové verze (`flutter run -d chrome`).
+- Třetí řádek je pro lokální vývoj webové verze (`flutter run -d chrome`);
+  používáme dvě hvězdičky, protože Supabase glob `*` nepřekračuje lomítko,
+  takže by nenašel shodu s koncovým lomítkem, které appka posílá.
+- V **Authentication → URL Configuration** ještě nastav **Site URL** na
+  produkční adresu `https://<tvůj-github-username>.github.io/rezervator/` —
+  je to záložní cíl, kam Supabase přesměruje, pokud odkaz z e-mailu
+  neodpovídá žádnému vzoru výše.
 
 Magic-link e-mail je defaultně zapnutý, ale vestavěné odesílání Supabase je
 silně rate-limitované a jen anglicky. Doporučuje se vlastní **SMTP** (např.
@@ -80,7 +86,8 @@ flutter run \
 **První člověk, který se přihlásí, se automaticky stane administrátorem** —
 žádný pozvánkový kód není potřeba (na rozdíl od Termínátoru). Všichni další
 uživatelé se zaregistrují jako hráči se stavem „čeká na schválení" a čekají
-na schválení od administrátora (schvalovací obrazovka přijde v další fázi).
+na schválení od administrátora — ten je schvaluje přímo v appce (ikona
+skupiny → Hráči → Schválit).
 
 Aplikace zatím používá i proměnné `FIREBASE_API_KEY`, `FIREBASE_APP_ID`,
 `FIREBASE_SENDER_ID` a `FIREBASE_PROJECT_ID` v `lib/config.dart` — ty jsou

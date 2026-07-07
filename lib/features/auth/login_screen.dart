@@ -142,7 +142,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     const SizedBox(height: 12),
                     Text(
                       'Hotovo! Poslali jsme ti e-mail.\n'
-                      'Otevři ho v telefonu a klikni na odkaz.\n'
+                      'Otevři odkaz na tomhle zařízení — ve stejném prohlížeči,\n'
+                      'ze kterého sis o něj řekl(a).\n'
                       'Odkaz platí hodinu a funguje jen ten z nejnovějšího '
                       'e-mailu.',
                       textAlign: TextAlign.center,

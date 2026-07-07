@@ -485,7 +485,9 @@ $$;
 
 -- ---------------------------------------------------------------------------
 -- Conflict triggers: a new/edited match or rental cancels the live
--- reservations it overlaps, so nobody is silently double-booked.
+-- reservations it overlaps, so nobody is silently double-booked. Only
+-- today/future reservations are touched: retroactively entered matches/
+-- rentals must not corrupt attendance history.
 -- ---------------------------------------------------------------------------
 
 create or replace function cancel_res_for_match()
@@ -493,12 +495,15 @@ returns trigger
 language plpgsql security definer set search_path = public
 as $$
 begin
+  -- Never cancel past reservations: preserves attendance history when a
+  -- match is entered retroactively.
   update reservations r
   set cancelled_at = now(), cancelled_via = 'admin',
       cancel_note = 'zápas: ' || new.opponent
   from time_blocks b
   where r.block_id = b.id
     and r.cancelled_at is null
+    and r.date >= (now() at time zone 'Europe/Prague')::date
     and r.date = new.date
     and b.starts_at < new.ends_at and b.ends_at > new.starts_at;
   return new;
@@ -514,12 +519,15 @@ returns trigger
 language plpgsql security definer set search_path = public
 as $$
 begin
+  -- Never cancel past reservations: preserves attendance history when a
+  -- rental is entered retroactively.
   update reservations r
   set cancelled_at = now(), cancelled_via = 'admin',
       cancel_note = 'pronájem: ' || new.renter_name
   from time_blocks b
   where r.block_id = b.id
     and r.cancelled_at is null
+    and r.date >= (now() at time zone 'Europe/Prague')::date
     and r.lane = any (new.lanes)
     and b.starts_at < new.ends_at and b.ends_at > new.starts_at
     and (
