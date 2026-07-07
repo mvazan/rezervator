@@ -335,5 +335,20 @@ void main() {
               myPlayerId: 'p1'),
           isFalse);
     });
+
+    test('admin may book past/beyond-horizon free slots and ignores limit', () {
+      const past = FreeSlot(inPast: true, beyondHorizon: false);
+      const far = FreeSlot(inPast: false, beyondHorizon: true);
+      expect(canBook(state: past, myActiveCount: 99, settings: settings, isAdmin: true), isTrue);
+      expect(canBook(state: far, myActiveCount: 99, settings: settings, isAdmin: true), isTrue);
+      expect(
+          canBook(
+              state: ReservedSlot(res(date: thursday, blockId: 'b1', lane: 1),
+                  inPast: false, beyondHorizon: false),
+              myActiveCount: 0,
+              settings: settings,
+              isAdmin: true),
+          isFalse);
+    });
   });
 }

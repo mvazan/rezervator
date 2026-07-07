@@ -213,11 +213,14 @@ bool canBook({
   required SlotState state,
   required int myActiveCount,
   required ScheduleSettings settings,
-}) =>
-    state is FreeSlot &&
-    !state.inPast &&
-    !state.beyondHorizon &&
-    myActiveCount < settings.maxActiveReservations;
+  bool isAdmin = false,
+}) {
+  if (state is! FreeSlot) return false;
+  if (isAdmin) return true;
+  return !state.inPast &&
+      !state.beyondHorizon &&
+      myActiveCount < settings.maxActiveReservations;
+}
 
 /// Own reservation whose block has not started yet may be cancelled in-app.
 /// (Admin cancel-anything is a Phase 2 admin affordance.)
