@@ -9,21 +9,30 @@ import '../domain/models.dart';
 
 const weekdaysShort = ['po', 'út', 'st', 'čt', 'pá', 'so', 'ne'];
 const _weekdaysFull = [
-  'pondělí', 'úterý', 'středa', 'čtvrtek', 'pátek', 'sobota', 'neděle',
+  'pondělí',
+  'úterý',
+  'středa',
+  'čtvrtek',
+  'pátek',
+  'sobota',
+  'neděle',
 ];
 
 /// "čt 23.4."
-String dayLabel(Day d) => '${weekdaysShort[d.weekday - 1]} ${d.day}.${d.month}.';
+String dayLabel(Day d) =>
+    '${weekdaysShort[d.weekday - 1]} ${d.day}.${d.month}.';
 
 /// "čtvrtek 23. 4."
 String dayFull(Day d) =>
     '${_weekdaysFull[d.weekday - 1]} ${d.day}. ${d.month}.';
 
+/// Full Czech weekday name for an ISO weekday (1 = pondělí … 7 = neděle).
+String weekdayFull(int weekday) => _weekdaysFull[weekday - 1];
+
 Day today() => Day.fromDateTime(DateTime.now());
 
 void snack(BuildContext context, String message) {
-  ScaffoldMessenger.of(context)
-      .showSnackBar(SnackBar(content: Text(message)));
+  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
 }
 
 /// Maps the schema's `raise exception` codes to Czech user copy.
@@ -52,8 +61,12 @@ String friendlyDbError(Object error) {
 
 /// Runs [action]; on failure shows the error as a snackbar.
 /// Returns true when the action succeeded.
-Future<bool> tryAction(BuildContext context, Future<void> Function() action,
-    {String? success, String Function(Object)? errorText}) async {
+Future<bool> tryAction(
+  BuildContext context,
+  Future<void> Function() action, {
+  String? success,
+  String Function(Object)? errorText,
+}) async {
   try {
     await action();
     if (success != null && context.mounted) snack(context, success);
@@ -81,11 +94,13 @@ Future<bool> confirmDialog(
       content: Text(message),
       actions: [
         TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: Text(cancelLabel)),
+          onPressed: () => Navigator.pop(dialogContext, false),
+          child: Text(cancelLabel),
+        ),
         FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: Text(confirmLabel)),
+          onPressed: () => Navigator.pop(dialogContext, true),
+          child: Text(confirmLabel),
+        ),
       ],
     ),
   );
@@ -116,8 +131,9 @@ Future<String?> promptText(
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Zrušit')),
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Zrušit'),
+          ),
           FilledButton(
             onPressed: () =>
                 Navigator.pop(dialogContext, controller.text.trim()),
@@ -134,7 +150,10 @@ Future<String?> promptText(
 
 /// Shows the platform time picker forced to 24h display, returning a
 /// [HourMinute] (or null on cancel).
-Future<HourMinute?> pickTime(BuildContext context, {HourMinute? initial}) async {
+Future<HourMinute?> pickTime(
+  BuildContext context, {
+  HourMinute? initial,
+}) async {
   final now = TimeOfDay.now();
   final picked = await showTimePicker(
     context: context,
@@ -156,8 +175,8 @@ void launchEmail(String address) =>
 void launchPhone(String number) =>
     _launchExternal(Uri.parse('tel:${number.replaceAll(' ', '')}'));
 
-void launchWeb(String url) => _launchExternal(
-    Uri.parse(url.contains('://') ? url : 'https://$url'));
+void launchWeb(String url) =>
+    _launchExternal(Uri.parse(url.contains('://') ? url : 'https://$url'));
 
 void _launchExternal(Uri uri) =>
     launchUrl(uri, mode: LaunchMode.externalApplication);
