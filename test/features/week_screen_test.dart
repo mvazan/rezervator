@@ -34,6 +34,15 @@ void main() {
     status: ProfileStatus.approved,
   );
 
+  const admin = Profile(
+    id: 'me',
+    displayName: 'Já Hráč',
+    club: '',
+    email: 'me@example.com',
+    role: Role.admin,
+    status: ProfileStatus.approved,
+  );
+
   Reservation res(String id, String playerId, Day date) => Reservation(
         id: id,
         playerId: playerId,
@@ -48,6 +57,7 @@ void main() {
     List<DayOverride> overrides = const [],
     List<Match> matches = const [],
     List<Reservation> reservations = const [],
+    Profile profile = me,
   }) {
     return ProviderScope(
       overrides: [
@@ -60,7 +70,7 @@ void main() {
             .overrideWith((ref, monday) => Stream.value(reservations)),
         myActiveReservationsProvider
             .overrideWith((ref) => Stream.value(reservations)),
-        myProfileProvider.overrideWith((ref) => Stream.value(me)),
+        myProfileProvider.overrideWith((ref) => Stream.value(profile)),
         playersProvider.overrideWith((ref) async => const [
               PlayerName(id: 'me', displayName: 'Já Hráč', club: ''),
               PlayerName(id: 'p2', displayName: 'Petr Novák', club: ''),
@@ -104,6 +114,39 @@ void main() {
     await tester.tap(find.byIcon(Icons.add).first);
     await tester.pumpAndSettle();
     expect(find.text('Rezervovat termín?'), findsOneWidget);
+  });
+
+  testWidgets('admin booking dialog shows a player-picker dropdown',
+      (tester) async {
+    await tester.pumpWidget(app(profile: admin));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.add).first);
+    await tester.pumpAndSettle();
+    expect(find.text('Rezervovat termín?'), findsOneWidget);
+    expect(find.byType(DropdownButtonFormField<String>), findsOneWidget);
+  });
+
+  testWidgets('admin tap on foreign reservation opens the note prompt',
+      (tester) async {
+    await tester.pumpWidget(
+        app(profile: admin, reservations: [res('r2', 'p2', tomorrow)]));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Petr Novák').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Petr Novák').first);
+    await tester.pumpAndSettle();
+    expect(find.text('Zrušit rezervaci — poznámka'), findsOneWidget);
+  });
+
+  testWidgets('non-admin tap on foreign reservation stays inert',
+      (tester) async {
+    await tester.pumpWidget(app(reservations: [res('r2', 'p2', tomorrow)]));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Petr Novák').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Petr Novák').first);
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsNothing);
   });
 
   testWidgets('match renders banner and Zápas cells', (tester) async {

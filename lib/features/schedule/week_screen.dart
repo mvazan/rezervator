@@ -19,35 +19,67 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
 
   Day _monday(Day today) => today.addDays(1 - today.weekday + 7 * _weekOffset);
 
-  Future<void> _book(Day date, TimeBlock block, int lane, String playerId) async {
-    final ok = await confirmDialog(
-      context,
-      title: 'Rezervovat termín?',
-      message: '${dayFull(date)} · ${block.label} · Dráha $lane',
-      confirmLabel: 'Rezervovat',
-    );
-    if (!ok || !mounted) return;
+  Future<void> _book(
+      Day date, TimeBlock block, int lane, Profile me, bool isAdmin) async {
+    final message = '${dayFull(date)} · ${block.label} · Dráha $lane';
+    String? playerId;
+    if (isAdmin) {
+      playerId = await showDialog<String>(
+        context: context,
+        builder: (dialogContext) => _BookingDialog(
+          message: message,
+          me: me,
+          players: ref.read(playersProvider).value ?? const [],
+        ),
+      );
+    } else {
+      final confirmed = await confirmDialog(
+        context,
+        title: 'Rezervovat termín?',
+        message: message,
+        confirmLabel: 'Rezervovat',
+      );
+      playerId = confirmed ? me.id : null;
+    }
+    if (playerId == null || !mounted) return;
     await tryAction(
       context,
       () => Api.createReservation(
-          playerId: playerId, date: date, blockId: block.id, lane: lane),
+          playerId: playerId!, date: date, blockId: block.id, lane: lane),
       success: 'Zarezervováno.',
       errorText: friendlyDbError,
     );
   }
 
-  Future<void> _cancel(Day date, TimeBlock block, Reservation r) async {
-    final ok = await confirmDialog(
+  Future<void> _cancel(Day date, TimeBlock block, Reservation r,
+      {required bool ownFuture}) async {
+    if (ownFuture) {
+      final ok = await confirmDialog(
+        context,
+        title: 'Zrušit rezervaci?',
+        message: '${dayFull(date)} · ${block.label} · Dráha ${r.lane}',
+        confirmLabel: 'Zrušit rezervaci',
+        cancelLabel: 'Zpět',
+      );
+      if (!ok || !mounted) return;
+      await tryAction(
+        context,
+        () => Api.cancelReservation(r.id),
+        success: 'Rezervace zrušena.',
+        errorText: friendlyDbError,
+      );
+      return;
+    }
+    final note = await promptText(
       context,
-      title: 'Zrušit rezervaci?',
-      message: '${dayFull(date)} · ${block.label} · Dráha ${r.lane}',
+      title: 'Zrušit rezervaci — poznámka',
+      hint: 'nepřišel',
       confirmLabel: 'Zrušit rezervaci',
-      cancelLabel: 'Zpět',
     );
-    if (!ok || !mounted) return;
+    if (note == null || !mounted) return;
     await tryAction(
       context,
-      () => Api.cancelReservation(r.id),
+      () => Api.cancelReservation(r.id, note: note),
       success: 'Rezervace zrušena.',
       errorText: friendlyDbError,
     );
@@ -184,8 +216,10 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
                   settings: settings,
                   nameById: nameById,
                   interactive: interactive,
-                  onBook: _book,
-                  onCancel: _cancel,
+                  onBook: (date, block, lane) =>
+                      _book(date, block, lane, me!, me.isAdmin),
+                  onCancel: (date, block, r, {required ownFuture}) =>
+                      _cancel(date, block, r, ownFuture: ownFuture),
                 ),
             ],
           ),
@@ -216,8 +250,9 @@ class _DaySection extends StatelessWidget {
   /// False while blocks are the placeholder grid or this week's reservation
   /// stream isn't loaded yet — see the doc comment in build() for why.
   final bool interactive;
-  final void Function(Day, TimeBlock, int, String) onBook;
-  final void Function(Day, TimeBlock, Reservation) onCancel;
+  final void Function(Day, TimeBlock, int lane) onBook;
+  final void Function(Day, TimeBlock, Reservation,
+      {required bool ownFuture}) onCancel;
 
   @override
   Widget build(BuildContext context) {
@@ -295,8 +330,10 @@ class _DaySection extends StatelessWidget {
                     nameById: nameById,
                     interactive: interactive,
                     onBook: () =>
-                        me == null ? null : onBook(day.date, block, lane, me!.id),
-                    onCancel: (r) => onCancel(day.date, block, r),
+                        me == null ? null : onBook(day.date, block, lane),
+                    onCancel: (r, {required ownFuture}) => onCancel(
+                        day.date, block, r,
+                        ownFuture: ownFuture),
                   ),
               ],
             ),
@@ -325,7 +362,7 @@ class _SlotCell extends StatelessWidget {
   final Map<String, String> nameById;
   final bool interactive;
   final VoidCallback? onBook;
-  final void Function(Reservation) onCancel;
+  final void Function(Reservation, {required bool ownFuture}) onCancel;
 
   @override
   Widget build(BuildContext context) {
@@ -363,11 +400,15 @@ class _SlotCell extends StatelessWidget {
         // Pozn.: RPC dovoluje rezervovat i dnešní už začatý blok (kontroluje
         // jen p_date < today); klient ho schovává jako inPast. Kiosk může
         // chtít tuto benevolenci využít.
-        final cancellable = interactive &&
-            me != null &&
-            canCancel(state: state, myPlayerId: me!.id);
+        final ownFuture = isMine && canCancel(state: state, myPlayerId: me!.id);
+        // Admins may cancel any reservation (own/foreign, past/future); a
+        // non-admin may only cancel their own not-yet-started one.
+        final cancellable =
+            interactive && me != null && (me!.isAdmin || ownFuture);
         return InkWell(
-          onTap: cancellable ? () => onCancel(reservation) : null,
+          onTap: cancellable
+              ? () => onCancel(reservation, ownFuture: ownFuture)
+              : null,
           child: Container(
             height: height,
             color: isMine
@@ -391,15 +432,29 @@ class _SlotCell extends StatelessWidget {
           ),
         );
       case FreeSlot():
+        final isAdmin = me?.isAdmin ?? false;
         final bookable = interactive &&
             me != null &&
-            canBook(state: state, myActiveCount: myCount, settings: settings);
+            canBook(
+                state: state,
+                myActiveCount: myCount,
+                settings: settings,
+                isAdmin: isAdmin);
         if (!bookable) {
           return Container(
             height: height,
             color: scheme.surface.withValues(alpha: 0.4),
           );
         }
+        // Cells only bookable through the admin exemption (inPast or
+        // beyondHorizon, which a regular player could never book) render the
+        // '+' quieter, so admins can tell at a glance which slots are
+        // ordinarily locked.
+        final normallyBookable = canBook(
+            state: state,
+            myActiveCount: myCount,
+            settings: settings,
+            isAdmin: false);
         return InkWell(
           onTap: onBook,
           child: Container(
@@ -407,9 +462,68 @@ class _SlotCell extends StatelessWidget {
             alignment: Alignment.center,
             child: Icon(Icons.add,
                 size: 18,
-                color: scheme.primary.withValues(alpha: 0.45)),
+                color: scheme.primary
+                    .withValues(alpha: normallyBookable ? 0.45 : 0.25)),
           ),
         );
     }
+  }
+}
+
+/// Admin-only booking dialog: same confirmation as the plain player flow,
+/// plus a player picker (defaults to the admin themself, labelled 'já').
+/// Pops the chosen player's id, or null on cancel.
+class _BookingDialog extends StatefulWidget {
+  const _BookingDialog({
+    required this.message,
+    required this.me,
+    required this.players,
+  });
+
+  final String message;
+  final Profile me;
+  final List<PlayerName> players;
+
+  @override
+  State<_BookingDialog> createState() => _BookingDialogState();
+}
+
+class _BookingDialogState extends State<_BookingDialog> {
+  late String _playerId = widget.me.id;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Rezervovat termín?'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(widget.message),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            initialValue: _playerId,
+            decoration: const InputDecoration(labelText: 'Rezervovat pro'),
+            items: [
+              DropdownMenuItem(value: widget.me.id, child: const Text('já')),
+              for (final p in widget.players)
+                if (p.id != widget.me.id)
+                  DropdownMenuItem(value: p.id, child: Text(p.displayName)),
+            ],
+            onChanged: (v) => setState(() => _playerId = v!),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Zrušit'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _playerId),
+          child: const Text('Rezervovat'),
+        ),
+      ],
+    );
   }
 }

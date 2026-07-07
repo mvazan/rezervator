@@ -5,10 +5,29 @@ import '../../core/ui.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
 
-/// Admin: approve pending registrations, see the member list.
-/// (Role management and richer admin tools arrive in Phase 2.)
+/// Admin: approve pending registrations, see the member list, manage roles.
 class PlayersScreen extends ConsumerWidget {
   const PlayersScreen({super.key});
+
+  Future<void> _setRole(BuildContext context, Profile p, Role role) =>
+      tryAction(
+        context,
+        () => Api.setRole(p.id, role),
+        success: 'Hotovo.',
+        errorText: friendlyDbError,
+      );
+
+  Future<void> _makeKiosk(BuildContext context, Profile p) async {
+    final confirmed = await confirmDialog(
+      context,
+      title: 'Nastavit jako kiosk?',
+      message:
+          'Účet se změní na kioskový — po přihlášení uvidí jen kioskovou obrazovku.',
+      confirmLabel: 'Nastavit',
+    );
+    if (!confirmed || !context.mounted) return;
+    await _setRole(context, p, Role.kiosk);
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -19,6 +38,7 @@ class PlayersScreen extends ConsumerWidget {
         .where((p) =>
             p.status == ProfileStatus.approved && p.role != Role.kiosk)
         .toList();
+    final kiosks = profiles.where((p) => p.role == Role.kiosk).toList();
 
     return Scaffold(
       appBar: AppBar(title: const Text('Hráči')),
@@ -49,8 +69,52 @@ class PlayersScreen extends ConsumerWidget {
             ListTile(
               title: Text(p.displayName),
               subtitle: p.club.isEmpty ? null : Text(p.club),
-              trailing: p.role == Role.admin ? const Chip(label: Text('admin')) : null,
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (p.role == Role.admin)
+                    const Padding(
+                      padding: EdgeInsets.only(right: 8),
+                      child: Chip(label: Text('admin')),
+                    ),
+                  PopupMenuButton<String>(
+                    onSelected: (action) {
+                      switch (action) {
+                        case 'make_admin':
+                          _setRole(context, p, Role.admin);
+                        case 'remove_admin':
+                          _setRole(context, p, Role.player);
+                        case 'make_kiosk':
+                          _makeKiosk(context, p);
+                      }
+                    },
+                    itemBuilder: (context) => [
+                      PopupMenuItem(
+                        value: p.role == Role.admin
+                            ? 'remove_admin'
+                            : 'make_admin',
+                        child: Text(p.role == Role.admin
+                            ? 'Odebrat správce'
+                            : 'Udělat správcem'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'make_kiosk',
+                        child: Text('Nastavit jako kiosk'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
+          if (kiosks.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            Text('Kiosk', style: Theme.of(context).textTheme.titleMedium),
+            for (final p in kiosks)
+              ListTile(
+                title: Text(p.displayName),
+                subtitle: p.club.isEmpty ? null : Text(p.club),
+              ),
+          ],
         ],
       ),
     );

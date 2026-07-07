@@ -10,6 +10,6 @@ void main() {
     expect(friendlyDbError(Exception('too_late')),
         'Trénink už začal — rezervaci může zrušit jen správce.');
     expect(friendlyDbError(Exception('something else')),
-        startsWith('Nepovedlo se:'));
+        startsWith('Něco se nepovedlo.'));
   });
 }

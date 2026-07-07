@@ -52,11 +52,12 @@ String friendlyDbError(Object error) {
     'invalid_lane': 'Tahle dráha neexistuje.',
     'player_not_approved': 'Hráč ještě není schválený.',
     'not_allowed': 'Na tohle nemáš oprávnění.',
+    'cannot_demote_self': 'Sám sebe správcovství nezbavíš.',
   };
   for (final entry in messages.entries) {
     if (raw.contains(entry.key)) return entry.value;
   }
-  return 'Nepovedlo se: $error';
+  return 'Něco se nepovedlo. ($error)';
 }
 
 /// Runs [action]; on failure shows the error as a snackbar.
