@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'config.dart';
+import 'features/auth/auth_gate.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -21,21 +22,13 @@ Future<void> main() async {
 
 final _router = GoRouter(
   routes: [
-    GoRoute(path: '/', builder: (_, _) => const _Home()),
+    GoRoute(
+      path: '/',
+      builder: (_, _) =>
+          AppConfig.hasSupabase ? const AuthGate() : const _NotConfigured(),
+    ),
   ],
 );
-
-/// Placeholder root — replaced by AuthGate in the auth task.
-class _Home extends StatelessWidget {
-  const _Home();
-
-  @override
-  Widget build(BuildContext context) {
-    return AppConfig.hasSupabase
-        ? const Scaffold(body: Center(child: Text('Rezervátor 🎳')))
-        : const _NotConfigured();
-  }
-}
 
 class RezervatorApp extends StatelessWidget {
   const RezervatorApp({super.key});
