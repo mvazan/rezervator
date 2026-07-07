@@ -132,6 +132,24 @@ Future<String?> promptText(
   }
 }
 
+/// Shows the platform time picker forced to 24h display, returning a
+/// [HourMinute] (or null on cancel).
+Future<HourMinute?> pickTime(BuildContext context, {HourMinute? initial}) async {
+  final now = TimeOfDay.now();
+  final picked = await showTimePicker(
+    context: context,
+    initialTime: initial == null
+        ? now
+        : TimeOfDay(hour: initial.hour, minute: initial.minute),
+    builder: (context, child) => MediaQuery(
+      data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: true),
+      child: child!,
+    ),
+  );
+  if (picked == null) return null;
+  return HourMinute(picked.hour, picked.minute);
+}
+
 void launchEmail(String address) =>
     _launchExternal(Uri.parse('mailto:$address'));
 
