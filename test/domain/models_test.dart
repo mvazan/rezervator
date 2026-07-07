@@ -96,6 +96,14 @@ void main() {
       expect(r.occursOn(Day(2026, 8, 5)), isFalse); // Wed after window
       expect(weekly().occursOn(Day(2026, 8, 5)), isTrue); // open-ended
     });
+
+    test('weekly matches exactly on validity boundaries', () {
+      final r = weekly(from: Day(2026, 7, 1), until: Day(2026, 7, 15));
+      expect(r.occursOn(Day(2026, 7, 1)), isTrue);  // == validFrom (Wednesday)
+      expect(r.occursOn(Day(2026, 7, 15)), isTrue); // == validUntil (Wednesday)
+      expect(r.occursOn(Day(2026, 6, 24)), isFalse); // Wednesday before window
+      expect(r.occursOn(Day(2026, 7, 22)), isFalse); // Wednesday after window
+    });
   });
 
   group('Reservation', () {
