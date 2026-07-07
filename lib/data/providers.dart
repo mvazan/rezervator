@@ -21,8 +21,9 @@ String? get currentUserId => _db.auth.currentUser?.id;
 /// The signed-in user's profile row (null before registration).
 /// Live — flips when approved or when the role changes.
 final myProfileProvider = StreamProvider<Profile?>((ref) {
-  final auth = ref.watch(authStateProvider).value;
-  final uid = auth?.session?.user.id ?? currentUserId;
+  final uid = ref.watch(
+          authStateProvider.select((a) => a.value?.session?.user.id)) ??
+      currentUserId;
   if (uid == null) return Stream.value(null);
   return _db
       .from('profiles')
@@ -85,4 +86,70 @@ class Api {
     if (uid == null) return;
     await _db.from('profiles').update({'fcm_token': token}).eq('id', uid);
   }
+
+  static Future<void> createReservation({
+    required String playerId,
+    required Day date,
+    required String blockId,
+    required int lane,
+  }) =>
+      _db.rpc('create_reservation', params: {
+        'p_player_id': playerId,
+        'p_date': date.toSql(),
+        'p_block_id': blockId,
+        'p_lane': lane,
+      });
+
+  static Future<void> cancelReservation(String id, {String note = ''}) =>
+      _db.rpc('cancel_reservation', params: {'p_id': id, 'p_note': note});
 }
+
+// ---------------------------------------------------------------------------
+// Reservation data streams (Phase 1)
+// ---------------------------------------------------------------------------
+
+/// Live reservations of one week (family key = that week's Monday).
+/// Server-side lower bound keeps the stream bounded as history accumulates;
+/// the upper bound and liveness are filtered client-side.
+final weekReservationsProvider =
+    StreamProvider.family<List<Reservation>, Day>((ref, monday) {
+  final sunday = monday.addDays(6);
+  return _db
+      .from('reservations')
+      .stream(primaryKey: ['id'])
+      .gte('date', monday.toSql())
+      .map((rows) => rows
+          .map(Reservation.fromJson)
+          .where((r) => r.isLive && !r.date.isAfter(sunday))
+          .toList());
+});
+
+final dayOverridesProvider = StreamProvider<List<DayOverride>>((ref) {
+  return _db.from('day_overrides').stream(primaryKey: ['date']).map(
+      (rows) => rows.map(DayOverride.fromJson).toList());
+});
+
+final matchesProvider = StreamProvider<List<Match>>((ref) {
+  return _db.from('matches').stream(primaryKey: ['id']).map(
+      (rows) => rows.map(Match.fromJson).toList());
+});
+
+final rentalsProvider = StreamProvider<List<Rental>>((ref) {
+  return _db.from('rentals').stream(primaryKey: ['id']).map(
+      (rows) => rows.map(Rental.fromJson).toList());
+});
+
+/// The signed-in player's reservations (all of them; the UI derives the
+/// active count via activeReservationCount).
+final myActiveReservationsProvider =
+    StreamProvider<List<Reservation>>((ref) {
+  final uid = ref.watch(
+      authStateProvider.select((a) => a.value?.session?.user.id)) ??
+      currentUserId;
+  if (uid == null) return Stream.value(const []);
+  return _db
+      .from('reservations')
+      .stream(primaryKey: ['id'])
+      .eq('player_id', uid)
+      .map((rows) => rows.map(Reservation.fromJson).toList());
+});

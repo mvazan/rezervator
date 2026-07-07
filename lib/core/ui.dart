@@ -26,16 +26,42 @@ void snack(BuildContext context, String message) {
       .showSnackBar(SnackBar(content: Text(message)));
 }
 
+/// Maps the schema's `raise exception` codes to Czech user copy.
+String friendlyDbError(Object error) {
+  final raw = '$error';
+  const messages = {
+    'slot_taken': 'Termín je už obsazený.',
+    'limit_reached': 'Máš už maximální počet rezervací.',
+    'beyond_horizon': 'Tak daleko dopředu zatím rezervovat nejde.',
+    'date_past': 'Tenhle termín už je v minulosti.',
+    'day_closed': 'V tento den je zavřeno.',
+    'blocked_by_match': 'V tomhle čase se hraje zápas.',
+    'blocked_by_rental': 'Dráha je v tomhle čase pronajatá.',
+    'too_late': 'Trénink už začal — rezervaci může zrušit jen správce.',
+    'unknown_block': 'Tenhle blok už neplatí — mrkni na aktuální rozvrh.',
+    'invalid_block': 'Tenhle blok už neplatí — mrkni na aktuální rozvrh.',
+    'invalid_lane': 'Tahle dráha neexistuje.',
+    'player_not_approved': 'Hráč ještě není schválený.',
+    'not_allowed': 'Na tohle nemáš oprávnění.',
+  };
+  for (final entry in messages.entries) {
+    if (raw.contains(entry.key)) return entry.value;
+  }
+  return 'Nepovedlo se: $error';
+}
+
 /// Runs [action]; on failure shows the error as a snackbar.
 /// Returns true when the action succeeded.
 Future<bool> tryAction(BuildContext context, Future<void> Function() action,
-    {String? success}) async {
+    {String? success, String Function(Object)? errorText}) async {
   try {
     await action();
     if (success != null && context.mounted) snack(context, success);
     return true;
   } catch (e) {
-    if (context.mounted) snack(context, 'Nepovedlo se: $e');
+    if (context.mounted) {
+      snack(context, errorText != null ? errorText(e) : 'Nepovedlo se: $e');
+    }
     return false;
   }
 }
