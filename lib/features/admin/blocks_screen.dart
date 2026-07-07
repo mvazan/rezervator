@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/ui.dart';
 import '../../data/providers.dart';
@@ -21,8 +22,13 @@ class BlocksScreen extends ConsumerWidget {
 
     try {
       await Api.deleteTimeBlock(block.id);
+      if (context.mounted) snack(context, 'Blok smazán.');
       return;
-    } catch (_) {
+    } on PostgrestException catch (e) {
+      if (e.code != '23503') {
+        if (context.mounted) snack(context, friendlyDbError(e));
+        return;
+      }
       // FK restrict: block already has reservations — deactivate instead.
     }
 

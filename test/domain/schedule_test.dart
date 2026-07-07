@@ -126,6 +126,21 @@ void main() {
       expect(day.laneCount, 2);
     });
 
+    test(
+        'blocks are sorted by start time, not insertion/position order',
+        () {
+      // b4 starts earlier than b1 but has a higher position — time must win.
+      const b4 = TimeBlock(
+          id: 'b4',
+          startsAt: HourMinute(9, 0),
+          endsAt: HourMinute(10, 0),
+          position: 5,
+          active: true);
+      final day =
+          build(blocks: const [b1, b2, b4]).days[1] as OpenDay; // Tuesday
+      expect(day.blocks.map((b) => b.id), ['b4', 'b1', 'b2']);
+    });
+
     test('closed override wins with its reason', () {
       final day = build(overrides: [
         DayOverride(date: thursday, closed: true, reason: 'Malování'),

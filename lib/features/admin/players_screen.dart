@@ -29,8 +29,23 @@ class PlayersScreen extends ConsumerWidget {
     await _setRole(context, p, Role.kiosk);
   }
 
+  Future<void> _returnToPlayer(BuildContext context, Profile p) => tryAction(
+        context,
+        () => Api.setRole(p.id, Role.player),
+        success: 'Účet vrácen mezi hráče.',
+        errorText: friendlyDbError,
+      );
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final profile = ref.watch(myProfileProvider).value;
+    if (profile?.isAdmin != true) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Hráči')),
+        body: const Center(child: Text('Jen pro správce.')),
+      );
+    }
+
     final profiles = ref.watch(profilesProvider).value ?? const <Profile>[];
     final pending =
         profiles.where((p) => p.status == ProfileStatus.pending).toList();
@@ -113,6 +128,10 @@ class PlayersScreen extends ConsumerWidget {
               ListTile(
                 title: Text(p.displayName),
                 subtitle: p.club.isEmpty ? null : Text(p.club),
+                trailing: TextButton(
+                  onPressed: () => _returnToPlayer(context, p),
+                  child: const Text('Vrátit mezi hráče'),
+                ),
               ),
           ],
         ],

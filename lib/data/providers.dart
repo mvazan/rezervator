@@ -49,7 +49,11 @@ final settingsProvider = StreamProvider<ScheduleSettings?>((ref) {
 final timeBlocksProvider = StreamProvider<List<TimeBlock>>((ref) {
   return _db.from('time_blocks').stream(primaryKey: ['id']).map(
       (rows) => rows.map(TimeBlock.fromJson).toList()
-        ..sort((a, b) => a.position.compareTo(b.position)));
+        ..sort((a, b) {
+          final byStart = a.startsAt.minutesFromMidnight
+              .compareTo(b.startsAt.minutesFromMidnight);
+          return byStart != 0 ? byStart : a.position.compareTo(b.position);
+        }));
 });
 
 /// Approved player names from the `players` view. Views cannot stream —

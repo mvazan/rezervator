@@ -93,6 +93,14 @@ T? _firstWhereOrNull<T>(Iterable<T> items, bool Function(T) test) {
   return null;
 }
 
+/// Time-ordered display: earlier start wins; [TimeBlock.position] only
+/// breaks ties between blocks that start at the same time.
+int _byStartThenPosition(TimeBlock a, TimeBlock b) {
+  final byStart = a.startsAt.minutesFromMidnight
+      .compareTo(b.startsAt.minutesFromMidnight);
+  return byStart != 0 ? byStart : a.position.compareTo(b.position);
+}
+
 WeekSchedule buildWeekSchedule({
   required Day monday,
   required Day today,
@@ -107,7 +115,7 @@ WeekSchedule buildWeekSchedule({
   final overrideByDate = {for (final o in overrides) o.date: o};
   final blockById = {for (final b in blocks) b.id: b};
   final activeBlocks = blocks.where((b) => b.active).toList()
-    ..sort((a, b) => a.position.compareTo(b.position));
+    ..sort(_byStartThenPosition);
 
   final days = <DaySchedule>[];
   for (var i = 0; i < 7; i++) {
@@ -132,7 +140,7 @@ WeekSchedule buildWeekSchedule({
         dayBlocks = [
           for (final id in override.blockIds!)
             if (blockById[id] != null) blockById[id]!,
-        ]..sort((a, b) => a.position.compareTo(b.position));
+        ]..sort(_byStartThenPosition);
       }
     } else if (!settings.trainingWeekdays.contains(date.weekday)) {
       days.add(ClosedDay(date: date, matches: dayMatches));

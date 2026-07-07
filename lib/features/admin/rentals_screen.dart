@@ -5,6 +5,17 @@ import '../../core/ui.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
 
+/// One-time rentals first (sorted by date, ascending), then weekly rentals
+/// (sorted by weekday, Monday..Sunday).
+int _compareRentals(Rental a, Rental b) {
+  final aDate = a.date;
+  final bDate = b.date;
+  if (aDate != null && bDate != null) return aDate.compareTo(bDate);
+  if (aDate != null) return -1;
+  if (bDate != null) return 1;
+  return a.weekday!.compareTo(b.weekday!);
+}
+
 /// Admin: manage lane rentals (one-time or weekly-recurring) that block
 /// reservations for the rented lanes/time.
 class RentalsScreen extends ConsumerWidget {
@@ -47,7 +58,9 @@ class RentalsScreen extends ConsumerWidget {
     } else if (validUntil != null) {
       lines.add('platí do ${dayLabel(validUntil)}');
     }
-    return lines.join('\n');
+    var subtitle = lines.join('\n');
+    if (rental.note.isNotEmpty) subtitle += ' · ${rental.note}';
+    return subtitle;
   }
 
   @override
@@ -61,17 +74,18 @@ class RentalsScreen extends ConsumerWidget {
     }
 
     final rentals = ref.watch(rentalsProvider).value ?? const <Rental>[];
+    final sorted = [...rentals]..sort(_compareRentals);
     final laneCount =
         ref.watch(settingsProvider).value?.laneCount ??
         ScheduleSettings.defaults.laneCount;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Pronájmy')),
-      body: rentals.isEmpty
+      body: sorted.isEmpty
           ? const Center(child: Text('Zatím žádné pronájmy.'))
           : ListView(
               children: [
-                for (final rental in rentals)
+                for (final rental in sorted)
                   ListTile(
                     title: Text(rental.renterName),
                     subtitle: Text(_subtitle(rental)),
@@ -128,6 +142,7 @@ class _RentalDialog extends StatefulWidget {
 
 class _RentalDialogState extends State<_RentalDialog> {
   final _renterName = TextEditingController();
+  final _note = TextEditingController();
   _RentalMode _mode = _RentalMode.oneTime;
   Day? _date;
   int _weekday = DateTime.monday;
@@ -143,6 +158,7 @@ class _RentalDialogState extends State<_RentalDialog> {
     super.initState();
     final existing = widget.existing;
     _renterName.text = existing?.renterName ?? '';
+    _note.text = existing?.note ?? '';
     _start = existing?.startsAt;
     _end = existing?.endsAt;
     _lanes.addAll(existing?.lanes ?? const []);
@@ -162,6 +178,7 @@ class _RentalDialogState extends State<_RentalDialog> {
   @override
   void dispose() {
     _renterName.dispose();
+    _note.dispose();
     super.dispose();
   }
 
@@ -219,6 +236,14 @@ class _RentalDialogState extends State<_RentalDialog> {
       snack(context, 'Vyber aspoň jednu dráhu.');
       return;
     }
+    final validFrom = _mode == _RentalMode.weekly ? _validFrom : null;
+    final validUntil = _mode == _RentalMode.weekly ? _validUntil : null;
+    if (validFrom != null &&
+        validUntil != null &&
+        validUntil.isBefore(validFrom)) {
+      snack(context, '„Platí od" musí být před „Platí do".');
+      return;
+    }
 
     setState(() => _saving = true);
     final lanes = _lanes.toList()..sort();
@@ -232,8 +257,9 @@ class _RentalDialogState extends State<_RentalDialog> {
         weekday: _mode == _RentalMode.weekly ? _weekday : null,
         startsAt: start,
         endsAt: end,
-        validFrom: _mode == _RentalMode.weekly ? _validFrom : null,
-        validUntil: _mode == _RentalMode.weekly ? _validUntil : null,
+        validFrom: validFrom,
+        validUntil: validUntil,
+        note: _note.text.trim(),
       ),
       success: 'Pronájem uložen. Kolidující rezervace byly zrušeny.',
       errorText: friendlyDbError,
@@ -360,6 +386,11 @@ class _RentalDialogState extends State<_RentalDialog> {
                     }),
                   ),
               ],
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _note,
+              decoration: const InputDecoration(labelText: 'Poznámka'),
             ),
           ],
         ),
