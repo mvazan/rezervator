@@ -111,8 +111,10 @@ class Api {
 /// Live reservations of one week (family key = that week's Monday).
 /// Server-side lower bound keeps the stream bounded as history accumulates;
 /// the upper bound and liveness are filtered client-side.
+/// autoDispose: each distinct Monday otherwise leaks a permanent realtime
+/// channel; autoDispose closes channels for weeks no longer on screen.
 final weekReservationsProvider =
-    StreamProvider.family<List<Reservation>, Day>((ref, monday) {
+    StreamProvider.autoDispose.family<List<Reservation>, Day>((ref, monday) {
   final sunday = monday.addDays(6);
   return _db
       .from('reservations')

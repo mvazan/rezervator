@@ -53,6 +53,14 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
     );
   }
 
+  void _go(int delta) {
+    setState(() => _weekOffset = delta == 0 ? 0 : _weekOffset + delta);
+    // Views cannot stream (see playersProvider doc), so an explicit refresh
+    // on navigation is the only way approved-after-start players stop
+    // rendering as '?' without a full app restart.
+    ref.invalidate(playersProvider);
+  }
+
   @override
   Widget build(BuildContext context) {
     final nowDt = DateTime.now();
@@ -62,16 +70,89 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
 
     final settings =
         ref.watch(settingsProvider).value ?? ScheduleSettings.defaults;
-    final dbBlocks = ref.watch(timeBlocksProvider).value ?? const [];
-    final blocks = dbBlocks.isEmpty ? defaultTimeBlocks() : dbBlocks;
+    final timeBlocks = ref.watch(timeBlocksProvider);
     final overrides = ref.watch(dayOverridesProvider).value ?? const [];
     final matches = ref.watch(matchesProvider).value ?? const [];
     final rentals = ref.watch(rentalsProvider).value ?? const [];
-    final reservations =
-        ref.watch(weekReservationsProvider(monday)).value ?? const [];
+    final weekReservations = ref.watch(weekReservationsProvider(monday));
     final players = ref.watch(playersProvider).value ?? const [];
     final me = ref.watch(myProfileProvider).value;
     final mine = ref.watch(myActiveReservationsProvider).value ?? const [];
+
+    final header = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: Row(
+        children: [
+          IconButton(
+            icon: const Icon(Icons.chevron_left),
+            onPressed: () => _go(-1),
+          ),
+          Expanded(
+            child: Text(
+              rangeLabel(monday, monday.addDays(6)),
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+          ),
+          if (_weekOffset != 0)
+            TextButton(
+              onPressed: () => _go(0),
+              child: const Text('dnes'),
+            ),
+          IconButton(
+            icon: const Icon(Icons.chevron_right),
+            onPressed: () => _go(1),
+          ),
+        ],
+      ),
+    );
+
+    if (timeBlocks.isLoading) {
+      return Column(
+        children: [
+          header,
+          const Expanded(
+            child: Center(child: CircularProgressIndicator()),
+          ),
+        ],
+      );
+    }
+
+    if (timeBlocks.hasError) {
+      return Column(
+        children: [
+          header,
+          Expanded(
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Rozvrh se nepodařilo načíst.'),
+                  const SizedBox(height: 12),
+                  OutlinedButton(
+                    onPressed: () => ref.invalidate(timeBlocksProvider),
+                    child: const Text('Zkusit znovu'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    final dbBlocks = timeBlocks.value ?? const [];
+    final blocksFromDb = dbBlocks.isNotEmpty;
+    final blocks = blocksFromDb ? dbBlocks : defaultTimeBlocks();
+    final reservations = weekReservations.value ?? const [];
+    // Cells stay inert while the placeholder grid is shown (placeholder ids
+    // like 'default-N' are not UUIDs — the RPC would reject them with an
+    // unmapped error; the placeholder only shows the shape of the schedule
+    // before the backend is seeded) and while this week's reservations are
+    // still loading/erroring (booking against a stale/absent view of who
+    // already holds the slot would race the RPC's own authoritative check).
+    final interactive =
+        blocksFromDb && weekReservations.hasValue && me != null;
 
     final week = buildWeekSchedule(
       monday: monday,
@@ -90,33 +171,7 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
 
     return Column(
       children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: Row(
-            children: [
-              IconButton(
-                icon: const Icon(Icons.chevron_left),
-                onPressed: () => setState(() => _weekOffset--),
-              ),
-              Expanded(
-                child: Text(
-                  rangeLabel(monday, monday.addDays(6)),
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-              ),
-              if (_weekOffset != 0)
-                TextButton(
-                  onPressed: () => setState(() => _weekOffset = 0),
-                  child: const Text('dnes'),
-                ),
-              IconButton(
-                icon: const Icon(Icons.chevron_right),
-                onPressed: () => setState(() => _weekOffset++),
-              ),
-            ],
-          ),
-        ),
+        header,
         Expanded(
           child: ListView(
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 24),
@@ -128,6 +183,7 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
                   myCount: myCount,
                   settings: settings,
                   nameById: nameById,
+                  interactive: interactive,
                   onBook: _book,
                   onCancel: _cancel,
                 ),
@@ -146,6 +202,7 @@ class _DaySection extends StatelessWidget {
     required this.myCount,
     required this.settings,
     required this.nameById,
+    required this.interactive,
     required this.onBook,
     required this.onCancel,
   });
@@ -155,6 +212,10 @@ class _DaySection extends StatelessWidget {
   final int myCount;
   final ScheduleSettings settings;
   final Map<String, String> nameById;
+
+  /// False while blocks are the placeholder grid or this week's reservation
+  /// stream isn't loaded yet — see the doc comment in build() for why.
+  final bool interactive;
   final void Function(Day, TimeBlock, int, String) onBook;
   final void Function(Day, TimeBlock, Reservation) onCancel;
 
@@ -232,6 +293,7 @@ class _DaySection extends StatelessWidget {
                     myCount: myCount,
                     settings: settings,
                     nameById: nameById,
+                    interactive: interactive,
                     onBook: () =>
                         me == null ? null : onBook(day.date, block, lane, me!.id),
                     onCancel: (r) => onCancel(day.date, block, r),
@@ -251,6 +313,7 @@ class _SlotCell extends StatelessWidget {
     required this.myCount,
     required this.settings,
     required this.nameById,
+    required this.interactive,
     required this.onBook,
     required this.onCancel,
   });
@@ -260,6 +323,7 @@ class _SlotCell extends StatelessWidget {
   final int myCount;
   final ScheduleSettings settings;
   final Map<String, String> nameById;
+  final bool interactive;
   final VoidCallback? onBook;
   final void Function(Reservation) onCancel;
 
@@ -296,7 +360,11 @@ class _SlotCell extends StatelessWidget {
       case ReservedSlot(:final reservation):
         final isMine = me != null && reservation.playerId == me!.id;
         final name = nameById[reservation.playerId] ?? '?';
-        final cancellable = me != null &&
+        // Pozn.: RPC dovoluje rezervovat i dnešní už začatý blok (kontroluje
+        // jen p_date < today); klient ho schovává jako inPast. Kiosk může
+        // chtít tuto benevolenci využít.
+        final cancellable = interactive &&
+            me != null &&
             canCancel(state: state, myPlayerId: me!.id);
         return InkWell(
           onTap: cancellable ? () => onCancel(reservation) : null,
@@ -323,7 +391,8 @@ class _SlotCell extends StatelessWidget {
           ),
         );
       case FreeSlot():
-        final bookable = me != null &&
+        final bookable = interactive &&
+            me != null &&
             canBook(state: state, myActiveCount: myCount, settings: settings);
         if (!bookable) {
           return Container(

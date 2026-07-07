@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -118,5 +120,34 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('KK Slavoj'), findsOneWidget);
     expect(find.text('Zápas'), findsNWidgets(2)); // 2 lanes × 1 block
+  });
+
+  testWidgets(
+      'cells stay inert while weekReservationsProvider never emits',
+      (tester) async {
+    // Everything else has data, but this week's reservation stream is stuck
+    // loading forever — no cell may be bookable while that's true.
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          settingsProvider.overrideWith((ref) => Stream.value(settings)),
+          timeBlocksProvider.overrideWith((ref) => Stream.value(const [b1])),
+          dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
+          matchesProvider.overrideWith((ref) => Stream.value(const [])),
+          rentalsProvider.overrideWith((ref) => Stream.value(const [])),
+          weekReservationsProvider.overrideWith(
+              (ref, monday) => StreamController<List<Reservation>>().stream),
+          myActiveReservationsProvider
+              .overrideWith((ref) => Stream.value(const [])),
+          myProfileProvider.overrideWith((ref) => Stream.value(me)),
+          playersProvider.overrideWith((ref) async => const [
+                PlayerName(id: 'me', displayName: 'Já Hráč', club: ''),
+              ]),
+        ],
+        child: const MaterialApp(home: Scaffold(body: WeekScreen())),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.add), findsNothing);
   });
 }
