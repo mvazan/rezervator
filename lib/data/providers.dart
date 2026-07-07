@@ -102,6 +102,124 @@ class Api {
 
   static Future<void> cancelReservation(String id, {String note = ''}) =>
       _db.rpc('cancel_reservation', params: {'p_id': id, 'p_note': note});
+
+  // --- admin: settings & blocks ---
+  static Future<void> updateSettings({
+    required int laneCount,
+    required Set<int> trainingWeekdays,
+    required int bookingHorizonDays,
+    required int maxActiveReservations,
+  }) =>
+      _db.from('schedule_settings').update({
+        'lane_count': laneCount,
+        'training_weekdays': trainingWeekdays.toList()..sort(),
+        'booking_horizon_days': bookingHorizonDays,
+        'max_active_reservations': maxActiveReservations,
+      }).eq('id', true);
+
+  static Future<void> addTimeBlock(HourMinute startsAt, HourMinute endsAt, int position) =>
+      _db.from('time_blocks').insert({
+        'starts_at': startsAt.toSql(),
+        'ends_at': endsAt.toSql(),
+        'position': position,
+      });
+
+  static Future<void> updateTimeBlock(String id,
+          {HourMinute? startsAt, HourMinute? endsAt, int? position, bool? active}) =>
+      _db.from('time_blocks').update({
+        if (startsAt != null) 'starts_at': startsAt.toSql(),
+        if (endsAt != null) 'ends_at': endsAt.toSql(),
+        'position': ?position,
+        'active': ?active,
+      }).eq('id', id);
+
+  /// Delete only works for never-referenced blocks (FK restrict) — callers
+  /// fall back to deactivation on failure.
+  static Future<void> deleteTimeBlock(String id) =>
+      _db.from('time_blocks').delete().eq('id', id);
+
+  // --- admin: day overrides (RPC — cascades reservation cancellations) ---
+  static Future<void> setDayOverride({
+    required Day date,
+    required bool closed,
+    String reason = '',
+    List<String>? blockIds,
+  }) =>
+      _db.rpc('set_day_override', params: {
+        'p_date': date.toSql(),
+        'p_closed': closed,
+        'p_reason': reason,
+        'p_block_ids': blockIds,
+      });
+
+  static Future<void> deleteDayOverride(Day date) =>
+      _db.from('day_overrides').delete().eq('date', date.toSql());
+
+  // --- admin: matches ---
+  static Future<void> saveMatch({
+    String? id,
+    required Day date,
+    required HourMinute startsAt,
+    required HourMinute endsAt,
+    required String opponent,
+    String description = '',
+  }) async {
+    final row = {
+      'date': date.toSql(),
+      'starts_at': startsAt.toSql(),
+      'ends_at': endsAt.toSql(),
+      'opponent': opponent,
+      'description': description,
+      if (id == null) 'created_by': currentUserId!,
+    };
+    if (id == null) {
+      await _db.from('matches').insert(row);
+    } else {
+      await _db.from('matches').update(row).eq('id', id);
+    }
+  }
+
+  static Future<void> deleteMatch(String id) =>
+      _db.from('matches').delete().eq('id', id);
+
+  // --- admin: rentals ---
+  static Future<void> saveRental({
+    String? id,
+    required String renterName,
+    required List<int> lanes,
+    Day? date,
+    int? weekday,
+    required HourMinute startsAt,
+    required HourMinute endsAt,
+    Day? validFrom,
+    Day? validUntil,
+    String note = '',
+  }) async {
+    final row = {
+      'renter_name': renterName,
+      'lanes': lanes,
+      'date': date?.toSql(),
+      'weekday': weekday,
+      'starts_at': startsAt.toSql(),
+      'ends_at': endsAt.toSql(),
+      'valid_from': validFrom?.toSql(),
+      'valid_until': validUntil?.toSql(),
+      'note': note,
+      if (id == null) 'created_by': currentUserId!,
+    };
+    if (id == null) {
+      await _db.from('rentals').insert(row);
+    } else {
+      await _db.from('rentals').update(row).eq('id', id);
+    }
+  }
+
+  static Future<void> deleteRental(String id) =>
+      _db.from('rentals').delete().eq('id', id);
+
+  // --- admin: roles ---
+  static Future<void> setRole(String userId, Role role) =>
+      _db.rpc('set_role', params: {'p_user_id': userId, 'p_role': role.name});
 }
 
 // ---------------------------------------------------------------------------
