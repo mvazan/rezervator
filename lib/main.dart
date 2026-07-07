@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'config.dart';
 import 'features/auth/auth_gate.dart';
+import 'features/kiosk/kiosk_login_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -26,6 +27,12 @@ final _router = GoRouter(
       path: '/',
       builder: (_, _) =>
           AppConfig.hasSupabase ? const AuthGate() : const _NotConfigured(),
+    ),
+    GoRoute(
+      path: '/kiosk-login',
+      builder: (_, _) => AppConfig.hasSupabase
+          ? const KioskLoginScreen()
+          : const _NotConfigured(),
     ),
   ],
 );

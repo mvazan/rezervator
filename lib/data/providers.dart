@@ -74,6 +74,9 @@ class Api {
   static Future<void> sendMagicLink(String email, String redirectTo) =>
       _db.auth.signInWithOtp(email: email, emailRedirectTo: redirectTo);
 
+  static Future<void> signInWithPassword(String email, String password) =>
+      _db.auth.signInWithPassword(email: email, password: password);
+
   static Future<void> signOut() => _db.auth.signOut();
 
   static Future<void> registerProfile(String displayName, String club) =>
