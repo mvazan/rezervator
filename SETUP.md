@@ -2,8 +2,8 @@
 
 Aplikace je hotová, chybí jí jen vlastní backend účet a pár kliknutí v
 Supabase. Kroky 1–4 rozjedou rezervace tréninků v aplikaci (mobil i desktop).
-Krok 5 nasadí webovou verzi na GitHub Pages. Krok 6 shrnuje, co v této fázi
-ještě záměrně nefunguje.
+Krok 5 nasadí webovou verzi na GitHub Pages. Krok 6 zapne e-mailové
+notifikace. Krok 7 shrnuje, co v této fázi ještě záměrně nefunguje.
 
 ## 1. Supabase projekt (zdarma, bez kreditní karty)
 
@@ -116,10 +116,66 @@ Fázi 5). Klidně je teď ignoruj, appka běží i bez nich.
 Nezapomeň tuhle finální adresu doplnit do Auth redirect URLs v kroku 3, pokud
 jsi ji tam ještě nezadal/a s reálným uživatelským jménem.
 
-## 6. Co zatím nefunguje
+## 6. Notifikace (Fáze 3)
 
-Tohle je Fáze 0 — kostra appky (přihlášení + statický rozvrh). Záměrně chybí:
+Od téhle fáze appka posílá e-maily: nový hráč čekající na schválení (admini),
+zrušení tréninku administrátorem (hráč) a potvrzení rezervace z kiosku
+(hráč, s odkazem na zrušení jedním kliknutím — kiosek samotný přijde až ve
+Fázi 4). Push notifikace zatím spí, viz poznámka na konci.
 
-- **Notifikace** (push, e-mail o nové rezervaci apod.) — Fáze 3.
+1. **Resend** (e-mail): registrace na <https://resend.com> → **API Keys** →
+   vytvoř nový klíč. Free tier stačí na začátek: **100 e-mailů/den, 3 000/
+   měsíc**. Odesílat se zatím bude z defaultní adresy `onboarding@resend.dev`
+   (funguje bez ověřování domény) — vlastní doménu (`RESEND_FROM`, např.
+   `Rezervátor <rezervace@tvoje-domena.cz>`) lze dodat kdykoliv později, není
+   to blokující.
+2. Propoj lokální Supabase CLI s projektem (jen jednou):
+   ```bash
+   supabase link --project-ref <tvůj-project-ref>
+   ```
+   (`<tvůj-project-ref>` je stejná hodnota, kterou jsi použil/a v kroku 2 za
+   `<PROJECT_REF>`.)
+3. Nastav secrets pro Edge Functions:
+   ```bash
+   supabase secrets set \
+     WEBHOOK_SECRET=<hodnota-z-kroku-2> \
+     RESEND_API_KEY=<klíč-z-Resend> \
+     CANCEL_TOKEN_SECRET=$(openssl rand -hex 24)
+   ```
+   **`WEBHOOK_SECRET` musí být přesně stejná hodnota**, kterou jsi vložil/a
+   za `<WEBHOOK_SECRET>` do `0001_schema.sql` v kroku 2 (Databázové schéma) —
+   jinak databázový trigger (`notify_webhook`) bude volat funkci `notify` se
+   špatným hlavičkovým tokenem a ta ho odmítne (401). `CANCEL_TOKEN_SECRET` je
+   nový, nezávislý řetězec — používá se jen k podepisování odkazů na zrušení
+   rezervace v e-mailech.
+4. Nasaď obě funkce:
+   ```bash
+   supabase functions deploy notify --no-verify-jwt
+   supabase functions deploy cancel --no-verify-jwt
+   ```
+   `--no-verify-jwt` je nutné u obou: `notify` volá databázový trigger (ten
+   žádný JWT nemá a nemůže) a je místo toho chráněný hlavičkou
+   `x-webhook-secret`; `cancel` otevírají lidé přímo z e-mailu (taky bez
+   JWT) a je chráněný podepsaným HMAC tokenem v odkazu.
+5. **Test hned teď** (bez kiosku — ten přijde ve Fázi 4, takže plný test
+   „rezervace z kiosku → e-mail se zrušovacím odkazem" počká do té doby):
+   - Zaregistruj v appce nového hráče (jiný účet/e-mail) → admini by měli
+     do pár vteřin dostat e-mail **„Nový hráč čeká na schválení"**.
+   - Jako admin zruš existující nadcházející rezervaci hráče, který **nemá
+     appku nainstalovanou** (aby bylo jasné, že jde o e-mail, ne push) →
+     hráči by měl přijít e-mail **„Trénink zrušen"**.
+   - Pokud e-mail nedorazí, zkontroluj **Edge Functions → notify → Logs**
+     v Supabase dashboardu a ověř shodu `WEBHOOK_SECRET` z kroku 3 výše.
+6. **Push notifikace zatím nejsou aktivní** — potřebují `FIREBASE_SERVICE_ACCOUNT`,
+   který se nastavuje až ve Fázi 5. Do té doby chodí všem uživatelům e-mail,
+   takže nikomu žádná notifikace neujde — jen bez FCM push zvonění na mobilu.
+
+## 7. Co zatím nefunguje
+
+Tohle je Fáze 0–3 — kostra appky, přihlášení, statický rozvrh a notifikace
+e-mailem. Záměrně chybí:
+
 - **Kiosek** (dotykový režim pro tablet na kuželně) — Fáze 4.
 - **Reporty** (docházka, statistiky) — Fáze 5.
+- **Push notifikace** (FCM) — aktivují se ve Fázi 5 spolu s `FIREBASE_SERVICE_ACCOUNT`;
+  do té doby e-mail (Fáze 3) pokrývá všechny stejné události.
