@@ -1,11 +1,11 @@
 {
-    "name": "rezervator",
-    "short_name": "rezervator",
+    "name": "Rezervátor",
+    "short_name": "Rezervátor",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#ffffff",
+    "theme_color": "#00695C",
+    "description": "Rezervace tréninků na kuželně.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [
