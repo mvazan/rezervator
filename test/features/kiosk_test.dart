@@ -292,4 +292,192 @@ void main() {
       await finish(tester);
     },
   );
+
+  testWidgets(
+    'h: a player with a nick shows the nick on the board; one without shows '
+    'displayName',
+    (tester) async {
+      const withNick = PlayerName(
+        id: 'nick1',
+        displayName: 'Zdeněk Procházka',
+        club: '',
+        nick: 'Zdenda',
+      );
+      const withoutNick = PlayerName(
+        id: 'nonick1',
+        displayName: 'Bořivoj Novotný',
+        club: '',
+      );
+      await tester.pumpWidget(
+        kioskApp(
+          roster: [withNick, withoutNick],
+          reservations: [
+            res('r1', withNick.id, t),
+            Reservation(
+              id: 'r2',
+              playerId: withoutNick.id,
+              date: t,
+              blockId: 'b1',
+              lane: 1,
+              createdVia: 'app',
+              createdAt: DateTime.utc(2026, 1, 1),
+            ),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Board shows the nick, never the full displayName, for withNick…
+      expect(find.text('Zdenda'), findsOneWidget);
+      expect(find.text(withNick.displayName), findsNothing);
+      // …and falls back to displayName for a player with no nick set.
+      expect(find.text(withoutNick.displayName), findsOneWidget);
+
+      await finish(tester);
+    },
+  );
+
+  testWidgets(
+    'i: a block overlapping only the prep window shows the 🛠 cell; the '
+    'block overlapping the real match window shows the 🏆 cell with the '
+    'match title',
+    (tester) async {
+      // Two adjacent blocks: bPrep (20:00-21:00) and bMatch (21:00-22:00).
+      // A match starting at 21:00 with 60 min prep blocks [20:00,22:00):
+      // bPrep overlaps only the prep window (isPrep=true → 🛠), bMatch
+      // overlaps the real [21:00,22:00) match window (isPrep=false → 🏆).
+      const bPrep = TimeBlock(
+        id: 'bPrep',
+        startsAt: HourMinute(20, 0),
+        endsAt: HourMinute(21, 0),
+        position: 0,
+        active: true,
+      );
+      const bMatch = TimeBlock(
+        id: 'bMatch',
+        startsAt: HourMinute(21, 0),
+        endsAt: HourMinute(22, 0),
+        position: 1,
+        active: true,
+      );
+      final match = Match(
+        id: 'm1',
+        date: t,
+        startsAt: const HourMinute(21, 0),
+        endsAt: const HourMinute(22, 0),
+        homeTeam: '',
+        awayTeam: 'KK Slavoj',
+        prepMinutes: 60,
+        description: '',
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            settingsProvider.overrideWith((ref) => Stream.value(settings)),
+            timeBlocksProvider
+                .overrideWith((ref) => Stream.value(const [bPrep, bMatch])),
+            dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
+            matchesProvider.overrideWith((ref) => Stream.value([match])),
+            rentalsProvider.overrideWith((ref) => Stream.value(const [])),
+            weekReservationsProvider.overrideWith(
+              (ref, monday) => Stream.value(const []),
+            ),
+            playersProvider.overrideWith((ref) async => players),
+          ],
+          child: const MaterialApp(home: KioskShell()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('🛠 Příprava drah'), findsOneWidget);
+      // The match-cell body text is specifically
+      // '🏆 {title}\n{start}–{end}' (_matchCell) — distinct from the header
+      // banner's '🏆 {title}' (BoardColumnHeader, joined with ' · ' and no
+      // times), so matching on the newline-joined form isolates the block
+      // cell instead of also catching the header.
+      expect(
+        find.text(
+          '🏆 ${match.title}\n'
+          '${match.startsAt.display()}–${match.endsAt.display()}',
+        ),
+        findsOneWidget,
+      );
+
+      await finish(tester);
+    },
+  );
+
+  testWidgets(
+    'j: a fully closed day renders the dimmed ✕ zavřeno column and still '
+    'shows that day\'s match cell',
+    (tester) async {
+      final match = Match(
+        id: 'm2',
+        date: t,
+        startsAt: const HourMinute(23, 0),
+        endsAt: const HourMinute(23, 30),
+        homeTeam: '',
+        awayTeam: 'TJ Sokol',
+        prepMinutes: 0,
+        description: '',
+      );
+      // A second rail block the match never touches — b1 (22:58-23:59) fully
+      // covers the match window, so its row-group renders the 🏆 cell;
+      // bOther (08:00-09:00) has no overlap at all, so its row-group falls
+      // through to the plain dimmed "✕ zavřeno" filler. A closed day with
+      // only one rail block that happens to be entirely covered by a match
+      // would never show the filler text at all (see _closedCell), so this
+      // asserts both cells actually coexist on the one closed column.
+      const bOther = TimeBlock(
+        id: 'bOther',
+        startsAt: HourMinute(8, 0),
+        endsAt: HourMinute(9, 0),
+        position: 1,
+        active: true,
+      );
+      // Close only today via a day override (reason left empty — the exact
+      // '✕ zavřeno' text with no trailing reason). Every weekday stays a
+      // training day so the rest of the week remains open and still
+      // contributes b1/bOther to the rail — otherwise, with every day
+      // closed, the rail (union of OPEN days' blocks) would be empty and no
+      // row-group (hence no closed cell at all) would render.
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            settingsProvider.overrideWith((ref) => Stream.value(settings)),
+            timeBlocksProvider
+                .overrideWith((ref) => Stream.value(const [b1, bOther])),
+            dayOverridesProvider.overrideWith(
+              (ref) => Stream.value(
+                [DayOverride(date: t, closed: true, reason: '')],
+              ),
+            ),
+            matchesProvider.overrideWith((ref) => Stream.value([match])),
+            rentalsProvider.overrideWith((ref) => Stream.value(const [])),
+            weekReservationsProvider.overrideWith(
+              (ref, monday) => Stream.value(const []),
+            ),
+            playersProvider.overrideWith((ref) async => players),
+          ],
+          child: const MaterialApp(home: KioskShell()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('✕ zavřeno'), findsOneWidget);
+      // Same disambiguation as test i: the closed-column match cell renders
+      // '🏆 {title}\n{start}–{end}' (_matchCell via _closedCell), distinct
+      // from the header banner's plain '🏆 {title}'.
+      expect(
+        find.text(
+          '🏆 ${match.title}\n'
+          '${match.startsAt.display()}–${match.endsAt.display()}',
+        ),
+        findsOneWidget,
+      );
+
+      await finish(tester);
+    },
+  );
 }
