@@ -87,7 +87,7 @@ void main() {
         playersProvider.overrideWith(
           (ref) async => const [
             PlayerName(id: 'me', displayName: 'Já Hráč', club: ''),
-            PlayerName(id: 'p2', displayName: 'Petr Novák', club: ''),
+            PlayerName(id: 'p2', displayName: 'Petr Novák', club: '', nick: 'Péťa'),
           ],
         ),
       ],
@@ -107,10 +107,13 @@ void main() {
     expect(find.textContaining('Zavřeno — Malování'), findsOneWidget);
   });
 
-  testWidgets('reserved cell shows player name; own name bold', (tester) async {
+  testWidgets('reserved cell shows player nick when set, never full name', (
+    tester,
+  ) async {
     await tester.pumpWidget(app(reservations: [res('r2', 'p2', tomorrow)]));
     await tester.pumpAndSettle();
-    expect(find.text('Petr Novák'), findsOneWidget);
+    expect(find.text('Péťa'), findsOneWidget);
+    expect(find.text('Petr Novák'), findsNothing);
   });
 
   testWidgets('tap on own reservation opens cancel dialog', (tester) async {
@@ -153,9 +156,9 @@ void main() {
       app(profile: admin, reservations: [res('r2', 'p2', tomorrow)]),
     );
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Petr Novák').first);
+    await tester.ensureVisible(find.text('Péťa').first);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Petr Novák').first);
+    await tester.tap(find.text('Péťa').first);
     await tester.pumpAndSettle();
     expect(find.text('Zrušit rezervaci — poznámka'), findsOneWidget);
   });
@@ -165,9 +168,9 @@ void main() {
   ) async {
     await tester.pumpWidget(app(reservations: [res('r2', 'p2', tomorrow)]));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Petr Novák').first);
+    await tester.ensureVisible(find.text('Péťa').first);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Petr Novák').first);
+    await tester.tap(find.text('Péťa').first);
     await tester.pumpAndSettle();
     expect(find.byType(AlertDialog), findsNothing);
   });

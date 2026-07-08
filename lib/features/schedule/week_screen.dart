@@ -315,7 +315,10 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
     final myCount = me == null
         ? 0
         : activeReservationCount(mine, me.id, todayDay);
-    final nameById = {for (final p in players) p.id: p.displayName};
+    // Prefer the board nick when set, matching the kiosk board.
+    final nameById = {
+      for (final p in players) p.id: p.nick.isNotEmpty ? p.nick : p.displayName,
+    };
     final myCountByIndex = [
       for (var i = 0; i < 7; i++)
         _myLiveCountOn(mine, me?.id, monday.addDays(i)),
