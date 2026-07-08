@@ -374,3 +374,25 @@ class Reservation {
         cancelNote: json['cancel_note'] as String? ?? '',
       );
 }
+
+/// One row of the monthly_attendance RPC result.
+class AttendanceRow {
+  const AttendanceRow({
+    required this.playerId,
+    required this.displayName,
+    required this.club,
+    required this.attended,
+  });
+
+  final String playerId;
+  final String displayName;
+  final String club;
+  final int attended;
+
+  factory AttendanceRow.fromJson(Map<String, dynamic> json) => AttendanceRow(
+        playerId: json['player_id'] as String,
+        displayName: json['display_name'] as String,
+        club: json['club'] as String? ?? '',
+        attended: json['attended'] as int,
+      );
+}

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/providers.dart';
-import '../admin/players_screen.dart';
+import '../admin/admin_screen.dart';
 import 'week_screen.dart';
 
 class HomeShell extends ConsumerWidget {
@@ -17,10 +17,10 @@ class HomeShell extends ConsumerWidget {
         actions: [
           if (profile?.isAdmin ?? false)
             IconButton(
-              icon: const Icon(Icons.group_outlined),
-              tooltip: 'Hráči',
+              icon: const Icon(Icons.admin_panel_settings_outlined),
+              tooltip: 'Správa',
               onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const PlayersScreen()),
+                MaterialPageRoute(builder: (_) => const AdminScreen()),
               ),
             ),
           IconButton(
