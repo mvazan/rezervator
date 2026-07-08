@@ -18,3 +18,9 @@ user = "milos.vazan@gmail.com"
 pass = "env(SMTP_PASS)"
 admin_email = "milos.vazan@gmail.com"
 sender_name = "Rezervátor"
+
+# Česká šablona přihlašovacího e-mailu — obsahuje odkaz i číselný kód
+# ({{ .Token }}), aby fungoval fallback „Zadat kód z e-mailu".
+[auth.email.template.magic_link]
+subject = "Přihlášení do Rezervátoru"
+content_path = "./supabase/templates/magic_link.html"
