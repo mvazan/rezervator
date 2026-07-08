@@ -227,6 +227,18 @@ class Api {
   // --- admin: roles ---
   static Future<void> setRole(String userId, Role role) =>
       _db.rpc('set_role', params: {'p_user_id': userId, 'p_role': role.name});
+
+  // --- admin: reports ---
+  static Future<List<AttendanceRow>> monthlyAttendance(
+      int year, int month) async {
+    final rows = await _db.rpc('monthly_attendance', params: {
+      'p_year': year,
+      'p_month': month,
+    });
+    return (rows as List)
+        .map((r) => AttendanceRow.fromJson(r as Map<String, dynamic>))
+        .toList();
+  }
 }
 
 // ---------------------------------------------------------------------------

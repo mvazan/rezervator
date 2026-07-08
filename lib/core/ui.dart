@@ -18,6 +18,24 @@ const _weekdaysFull = [
   'neděle',
 ];
 
+/// Czech month names, 1-indexed (index 0 unused so `monthsFull[month]` works
+/// directly with a 1–12 month number).
+const monthsFull = [
+  '',
+  'leden',
+  'únor',
+  'březen',
+  'duben',
+  'květen',
+  'červen',
+  'červenec',
+  'srpen',
+  'září',
+  'říjen',
+  'listopad',
+  'prosinec',
+];
+
 /// "čt 23.4."
 String dayLabel(Day d) =>
     '${weekdaysShort[d.weekday - 1]} ${d.day}.${d.month}.';

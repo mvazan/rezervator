@@ -7,6 +7,7 @@ import 'matches_screen.dart';
 import 'overrides_screen.dart';
 import 'players_screen.dart';
 import 'rentals_screen.dart';
+import 'report_screen.dart';
 import 'settings_screen.dart';
 
 /// Admin hub: entry point to every admin-only screen.
@@ -32,6 +33,13 @@ class AdminScreen extends ConsumerWidget {
             title: const Text('Hráči'),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const PlayersScreen()),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.fact_check_outlined),
+            title: const Text('Docházka'),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const ReportScreen()),
             ),
           ),
           ListTile(
