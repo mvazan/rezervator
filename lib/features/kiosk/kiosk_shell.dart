@@ -72,7 +72,11 @@ class _KioskShellState extends ConsumerState<KioskShell> {
   }
 
   Future<void> _openPicker() async {
-    final picked = await showNamePicker(context);
+    final kioskDark = ref.read(settingsProvider).value?.kioskDark ?? true;
+    final picked = await showNamePicker(
+      context,
+      brightness: kioskDark ? Brightness.dark : Brightness.light,
+    );
     if (!mounted) return;
     setState(() {
       if (picked != null) _selected = picked;

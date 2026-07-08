@@ -69,11 +69,19 @@ void main() {
     List<Reservation> reservations = const [],
     List<PlayerName>? roster,
     ThemeData? theme,
+    bool kioskDark = true,
   }) {
     final effectiveRoster = roster ?? players;
+    final effSettings = ScheduleSettings(
+      laneCount: settings.laneCount,
+      trainingWeekdays: settings.trainingWeekdays,
+      bookingHorizonDays: settings.bookingHorizonDays,
+      maxActiveReservations: settings.maxActiveReservations,
+      kioskDark: kioskDark,
+    );
     return ProviderScope(
       overrides: [
-        settingsProvider.overrideWith((ref) => Stream.value(settings)),
+        settingsProvider.overrideWith((ref) => Stream.value(effSettings)),
         timeBlocksProvider.overrideWith((ref) => Stream.value(const [b1])),
         dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
         matchesProvider.overrideWith((ref) => Stream.value(matches)),
@@ -285,6 +293,32 @@ void main() {
       expect(
         Theme.of(tester.element(find.text('Kdo si rezervuje?'))).brightness,
         Brightness.dark,
+      );
+
+      await tester.tap(find.byIcon(Icons.close));
+      await tester.pumpAndSettle();
+      await finish(tester);
+    },
+  );
+
+  testWidgets(
+    'g2: NamePicker follows the admin light kiosk theme when kioskDark=false',
+    (tester) async {
+      // Admin set the kiosk to light mode (settings.kioskDark=false); the
+      // picker must render light too, even though the ambient app theme is
+      // dark here — proving the shell threads the kiosk brightness into
+      // showNamePicker rather than the picker hardcoding dark.
+      await tester.pumpWidget(
+        kioskApp(theme: buildTheme(Brightness.dark), kioskDark: false),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Rezervovat'));
+      await tester.pumpAndSettle();
+
+      expect(
+        Theme.of(tester.element(find.text('Kdo si rezervuje?'))).brightness,
+        Brightness.light,
       );
 
       await tester.tap(find.byIcon(Icons.close));
