@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/providers.dart';
 import '../admin/admin_screen.dart';
+import '../profile/profile_screen.dart';
 import 'week_screen.dart';
 
 class HomeShell extends ConsumerWidget {
@@ -23,6 +24,13 @@ class HomeShell extends ConsumerWidget {
                 MaterialPageRoute(builder: (_) => const AdminScreen()),
               ),
             ),
+          IconButton(
+            icon: const Icon(Icons.account_circle_outlined),
+            tooltip: 'Můj profil',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const ProfileScreen()),
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.logout),
             tooltip: 'Odhlásit se',
