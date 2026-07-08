@@ -498,10 +498,12 @@ class _DaySection extends StatelessWidget {
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Table(
-        defaultColumnWidth: const FixedColumnWidth(72),
-        columnWidths: const {0: FixedColumnWidth(100)},
-        border: TableBorder.all(
-          color: scheme.outlineVariant.withValues(alpha: 0.5),
+        defaultColumnWidth: const FixedColumnWidth(84),
+        columnWidths: const {0: FixedColumnWidth(92)},
+        border: TableBorder(
+          horizontalInside: BorderSide(
+            color: scheme.outlineVariant.withValues(alpha: 0.35),
+          ),
         ),
         defaultVerticalAlignment: TableCellVerticalAlignment.middle,
         children: [
@@ -510,7 +512,7 @@ class _DaySection extends StatelessWidget {
               const SizedBox.shrink(),
               for (var lane = 1; lane <= day.laneCount; lane++)
                 Padding(
-                  padding: const EdgeInsets.all(6),
+                  padding: const EdgeInsets.all(4),
                   child: Text(
                     'Dráha $lane',
                     textAlign: TextAlign.center,
@@ -523,25 +525,28 @@ class _DaySection extends StatelessWidget {
             TableRow(
               children: [
                 Padding(
-                  padding: const EdgeInsets.all(6),
+                  padding: const EdgeInsets.all(4),
                   child: Text(
                     block.label,
                     style: const TextStyle(fontSize: 12),
                   ),
                 ),
                 for (var lane = 1; lane <= day.laneCount; lane++)
-                  slotTileFor(
-                    day: day,
-                    block: block,
-                    lane: lane,
-                    size: SlotTileSize.compact,
-                    me: me,
-                    myCount: myCount,
-                    settings: settings,
-                    nameById: nameById,
-                    interactive: interactive,
-                    onBook: onBook,
-                    onCancel: onCancel,
+                  Padding(
+                    padding: const EdgeInsets.all(4),
+                    child: slotTileFor(
+                      day: day,
+                      block: block,
+                      lane: lane,
+                      size: SlotTileSize.compact,
+                      me: me,
+                      myCount: myCount,
+                      settings: settings,
+                      nameById: nameById,
+                      interactive: interactive,
+                      onBook: onBook,
+                      onCancel: onCancel,
+                    ),
                   ),
               ],
             ),
