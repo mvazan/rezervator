@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../config.dart';
 import '../../core/ui.dart';
+import '../../core/widgets/auth_background.dart';
 import '../../data/providers.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
@@ -66,7 +67,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       _authError = null;
     });
     final ok = await tryAction(
-        context, () => Api.sendMagicLink(email, AppConfig.authRedirectUrl));
+      context,
+      () => Api.sendMagicLink(email, AppConfig.authRedirectUrl),
+    );
     if (!mounted) return;
     setState(() {
       _sending = false;
@@ -89,99 +92,99 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
     return Scaffold(
       body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 400),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const Text('🎳', textAlign: TextAlign.center, style: TextStyle(fontSize: 96)),
-                  const SizedBox(height: 12),
-                  Text('Rezervátor',
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.headlineMedium),
-                  Text('Kuželna na klik.',
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.bodyMedium),
-                  const SizedBox(height: 32),
-                  if (_authError != null) ...[
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.errorContainer,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Icon(Icons.error_outline,
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onErrorContainer),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              _authError!,
-                              style: TextStyle(
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .onErrorContainer,
-                              ),
+        child: AuthBackground(
+          child: AuthCard(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Center(child: AuthLogo()),
+                const SizedBox(height: 12),
+                Text(
+                  'Rezervátor',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.headlineMedium,
+                ),
+                Text(
+                  'Kuželna na klik.',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 32),
+                if (_authError != null) ...[
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.errorContainer,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(
+                          Icons.error_outline,
+                          color: Theme.of(context).colorScheme.onErrorContainer,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _authError!,
+                            style: TextStyle(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onErrorContainer,
                             ),
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 16),
-                  ],
-                  if (_sent) ...[
-                    const Icon(Icons.mark_email_read_outlined, size: 48),
-                    const SizedBox(height: 12),
-                    Text(
-                      'Hotovo! Poslali jsme ti e-mail.\n'
-                      'Otevři odkaz na tomhle zařízení — ve stejném prohlížeči,\n'
-                      'ze kterého sis o něj řekl(a).\n'
-                      'Odkaz platí hodinu a funguje jen ten z nejnovějšího '
-                      'e-mailu.',
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.bodyLarge,
-                    ),
-                    const SizedBox(height: 16),
-                    TextButton(
-                      onPressed: () => setState(() => _sent = false),
-                      child: const Text('Poslat znovu / jiný e-mail'),
-                    ),
-                  ] else ...[
-                    TextField(
-                      controller: _email,
-                      keyboardType: TextInputType.emailAddress,
-                      autocorrect: false,
-                      decoration: const InputDecoration(
-                        labelText: 'Tvůj e-mail',
-                        border: OutlineInputBorder(),
-                      ),
-                      onSubmitted: (_) => _send(),
-                    ),
-                    const SizedBox(height: 16),
-                    FilledButton(
-                      onPressed: _sending ? null : _send,
-                      child: Text(_sending
-                          ? 'Odesílám…'
-                          : 'Poslat přihlašovací odkaz'),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Žádné heslo. Přijde ti e-mail s odkazem, '
-                      'kliknutím se přihlásíš.',
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
+                  ),
+                  const SizedBox(height: 16),
                 ],
-              ),
+                if (_sent) ...[
+                  const Icon(Icons.mark_email_read_outlined, size: 48),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Hotovo! Poslali jsme ti e-mail.\n'
+                    'Otevři odkaz na tomhle zařízení — ve stejném prohlížeči,\n'
+                    'ze kterého sis o něj řekl(a).\n'
+                    'Odkaz platí hodinu a funguje jen ten z nejnovějšího '
+                    'e-mailu.',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodyLarge,
+                  ),
+                  const SizedBox(height: 16),
+                  TextButton(
+                    onPressed: () => setState(() => _sent = false),
+                    child: const Text('Poslat znovu / jiný e-mail'),
+                  ),
+                ] else ...[
+                  TextField(
+                    controller: _email,
+                    keyboardType: TextInputType.emailAddress,
+                    autocorrect: false,
+                    decoration: const InputDecoration(
+                      labelText: 'Tvůj e-mail',
+                      border: OutlineInputBorder(),
+                    ),
+                    onSubmitted: (_) => _send(),
+                  ),
+                  const SizedBox(height: 16),
+                  FilledButton(
+                    onPressed: _sending ? null : _send,
+                    child: Text(
+                      _sending ? 'Odesílám…' : 'Poslat přihlašovací odkaz',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Žádné heslo. Přijde ti e-mail s odkazem, '
+                    'kliknutím se přihlásíš.',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+              ],
             ),
           ),
         ),

@@ -73,8 +73,7 @@ class _NamePickerState extends ConsumerState<NamePicker> {
             ),
             Expanded(
               child: players.when(
-                loading: () =>
-                    const Center(child: CircularProgressIndicator()),
+                loading: () => const Center(child: CircularProgressIndicator()),
                 error: (e, _) => Center(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
@@ -112,29 +111,31 @@ class _NamePickerState extends ConsumerState<NamePicker> {
           if (_prefix.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(bottom: 12),
-              child: Text('$_prefix…',
-                  style: Theme.of(context).textTheme.titleLarge),
+              child: Text(
+                '$_prefix…',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
             ),
           Expanded(
             child: SingleChildScrollView(
               child: switch (node) {
                 PrefixesNode(:final prefixes, :final exactMatches) => Wrap(
-                    spacing: 12,
-                    runSpacing: 12,
-                    children: [
-                      if (_prefix.isNotEmpty) _backTile(),
-                      for (final p in exactMatches) _nameTile(p),
-                      for (final prefix in prefixes) _prefixTile(prefix),
-                    ],
-                  ),
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: [
+                    if (_prefix.isNotEmpty) _backTile(),
+                    for (final p in exactMatches) _nameTile(p),
+                    for (final prefix in prefixes) _prefixTile(prefix),
+                  ],
+                ),
                 NamesNode(:final players) => Wrap(
-                    spacing: 12,
-                    runSpacing: 12,
-                    children: [
-                      if (_prefix.isNotEmpty) _backTile(),
-                      for (final p in players) _nameTile(p),
-                    ],
-                  ),
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: [
+                    if (_prefix.isNotEmpty) _backTile(),
+                    for (final p in players) _nameTile(p),
+                  ],
+                ),
               },
             ),
           ),
@@ -148,9 +149,9 @@ class _NamePickerState extends ConsumerState<NamePicker> {
     return _Tile(
       minWidth: 72,
       minHeight: 72,
-      color: scheme.surfaceContainerHighest,
+      outlineColor: scheme.primary.withValues(alpha: 0.45),
       onTap: _back,
-      child: const Text('←', style: TextStyle(fontSize: 28)),
+      child: Text('←', style: TextStyle(fontSize: 28, color: scheme.onSurface)),
     );
   }
 
@@ -159,21 +160,23 @@ class _NamePickerState extends ConsumerState<NamePicker> {
     return _Tile(
       minWidth: 72,
       minHeight: 72,
-      color: scheme.secondaryContainer,
+      outlineColor: scheme.primary.withValues(alpha: 0.45),
       onTap: () => _drillInto(prefix),
       child: Text(
         prefix.substring(prefix.length - 1),
-        style: TextStyle(fontSize: 28, color: scheme.onSecondaryContainer),
+        style: TextStyle(fontSize: 28, color: scheme.onSurface),
       ),
     );
   }
 
   Widget _nameTile(PlayerName player) {
-    final scheme = Theme.of(context).colorScheme;
+    // The name tile IS the selection action (tapping it immediately pops
+    // the picker with this player) — it gets the indigo→cyan gradient fill
+    // per spec, vs. the plain indigo-outline nav tiles above.
     return _Tile(
       minWidth: 200,
       minHeight: 64,
-      color: scheme.primaryContainer,
+      gradient: true,
       onTap: () => Navigator.pop(context, player),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -182,7 +185,11 @@ class _NamePickerState extends ConsumerState<NamePicker> {
           textAlign: TextAlign.center,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: TextStyle(fontSize: 20, color: scheme.onPrimaryContainer),
+          style: const TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.w700,
+            color: Colors.white,
+          ),
         ),
       ),
     );
@@ -193,24 +200,44 @@ class _Tile extends StatelessWidget {
   const _Tile({
     required this.minWidth,
     required this.minHeight,
-    required this.color,
     required this.onTap,
     required this.child,
+    this.outlineColor,
+    this.gradient = false,
   });
 
   final double minWidth;
   final double minHeight;
-  final Color color;
   final VoidCallback onTap;
   final Widget child;
 
+  /// Dark tile look: transparent fill, indigo outline. Used by the
+  /// navigation tiles (back / next-letter prefix).
+  final Color? outlineColor;
+
+  /// Selection tile look: indigo→cyan gradient fill, no outline. Used by
+  /// name tiles — the actual pick.
+  final bool gradient;
+
+  static const _gradientColors = [Color(0xFF6366F1), Color(0xFF22D3EE)];
+
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: color,
-      borderRadius: BorderRadius.circular(16),
+    final radius = BorderRadius.circular(16);
+    final scheme = Theme.of(context).colorScheme;
+    return Ink(
+      decoration: BoxDecoration(
+        borderRadius: radius,
+        gradient: gradient
+            ? const LinearGradient(colors: _gradientColors)
+            : null,
+        color: gradient ? null : scheme.surfaceContainerHigh,
+        border: outlineColor != null
+            ? Border.all(color: outlineColor!, width: 1.5)
+            : null,
+      ),
       child: InkWell(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: radius,
         onTap: onTap,
         child: ConstrainedBox(
           constraints: BoxConstraints(minWidth: minWidth, minHeight: minHeight),
