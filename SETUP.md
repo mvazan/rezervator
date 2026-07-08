@@ -208,10 +208,11 @@ neukazuje seznam hráčů ani rozvrh správy — jen svůj vlastní rozvrh a tla
 5. U řádku „Kiosk" klikni na nabídku (⋮) → **Nastavit jako kiosk** →
    potvrdit. Tím se účtu zároveň nastaví `status = schváleno`, i kdyby
    předtím čekal na schválení — žádný samostatný krok navíc není potřeba.
-6. Na tabletu appku obnov (kiosek se sám nepřesměruje, dokud neuvidí novou
-   roli přes svůj právě otevřený profilový stream — jednoduchý F5/reload
-   stačí). Místo registračního formuláře se teď zobrazí fullscreen kioskový
-   rozvrh bez navigace a bez tlačítka odhlásit.
+6. Tablet by se měl přepnout sám — profilový stream je živý a změna role
+   obrazovku přepne do pár vteřin. Kdyby se nepřepnul (výpadek realtime
+   spojení), jednoduchý F5/reload pomůže. Místo registračního formuláře se
+   teď zobrazí fullscreen kioskový rozvrh bez navigace a bez tlačítka
+   odhlásit.
 
 ### 7.2 Fully Kiosk Browser (uzamčení tabletu)
 
