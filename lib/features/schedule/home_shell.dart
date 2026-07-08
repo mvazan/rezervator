@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/ui.dart';
 import '../../data/providers.dart';
 import '../admin/admin_screen.dart';
 import '../profile/profile_screen.dart';
@@ -34,7 +35,15 @@ class HomeShell extends ConsumerWidget {
           IconButton(
             icon: const Icon(Icons.logout),
             tooltip: 'Odhlásit se',
-            onPressed: Api.signOut,
+            onPressed: () async {
+              final ok = await confirmDialog(
+                context,
+                title: 'Odhlásit se',
+                message: 'Opravdu se chceš odhlásit?',
+                confirmLabel: 'Odhlásit se',
+              );
+              if (ok) await Api.signOut();
+            },
           ),
         ],
       ),
