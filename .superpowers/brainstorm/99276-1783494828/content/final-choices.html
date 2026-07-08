@@ -1,0 +1,47 @@
+<h2>Posledné dve voľby</h2>
+<p class="subtitle">Layout je dohodnutý: <b>oba pohľady (deň aj týždeň) s prepínačom priamo v lište</b>, kiosk vždy celý týždeň. Zostáva paleta a navigácia.</p>
+
+<h3>1) Paleta</h3>
+<div class="options">
+  <div class="option" data-choice="paleta-fresh" onclick="toggleSelect(this)">
+    <div class="letter" style="background:linear-gradient(135deg,#10B981,#A3E635);color:#fff;">A</div>
+    <div class="content">
+      <h3>Svěží zeleň <span style="display:inline-block;vertical-align:middle;margin-left:6px;"><i style="display:inline-block;width:14px;height:14px;border-radius:4px;background:#10B981;"></i> <i style="display:inline-block;width:14px;height:14px;border-radius:4px;background:#A3E635;"></i> <i style="display:inline-block;width:14px;height:14px;border-radius:4px;background:#F0FDF4;border:1px solid #D1FAE5;"></i></span></h3>
+      <p>Smaragd + limetka na vzdušnom svetlom podklade; mäkké farebné tiene. Športové, priateľské.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="paleta-club" onclick="toggleSelect(this)">
+    <div class="letter" style="background:linear-gradient(135deg,#14532D,#A16207);color:#F5EBD8;">B</div>
+    <div class="content">
+      <h3>Klubová kolkáreň <span style="display:inline-block;vertical-align:middle;margin-left:6px;"><i style="display:inline-block;width:14px;height:14px;border-radius:4px;background:#14532D;"></i> <i style="display:inline-block;width:14px;height:14px;border-radius:4px;background:#A16207;"></i> <i style="display:inline-block;width:14px;height:14px;border-radius:4px;background:#FAF6EF;border:1px solid #EADFC8;"></i></span></h3>
+      <p>Lesná zelená + jantár na krémovom podklade. Teplé, klubové, tradičnejšie.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="paleta-league" onclick="toggleSelect(this)">
+    <div class="letter" style="background:linear-gradient(135deg,#6366F1,#22D3EE);color:#fff;">C</div>
+    <div class="content">
+      <h3>Nočná liga <span style="display:inline-block;vertical-align:middle;margin-left:6px;"><i style="display:inline-block;width:14px;height:14px;border-radius:4px;background:#6366F1;"></i> <i style="display:inline-block;width:14px;height:14px;border-radius:4px;background:#22D3EE;"></i> <i style="display:inline-block;width:14px;height:14px;border-radius:4px;background:#0F172A;"></i></span></h3>
+      <p>Indigo + kyan, gradientové akcenty, tmavým plochám to pristane najviac (kiosk!). Najvýraznejšia zmena.</p>
+    </div>
+  </div>
+</div>
+
+<h3 style="margin-top:18px;">2) Spodná navigácia + záložka „Moje rezervácie"</h3>
+<div class="options">
+  <div class="option" data-choice="nav-bottom" onclick="toggleSelect(this)">
+    <div class="letter">1</div>
+    <div class="content">
+      <h3>Áno — Rozvrh · Moje · Správa</h3>
+      <p>Nový prehľad vlastných rezervácií (zrušenie jedným ťahom, vidno aj termíny mimo zobrazeného týždňa). Správa len adminom.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="nav-top" onclick="toggleSelect(this)">
+    <div class="letter">2</div>
+    <div class="content">
+      <h3>Nie — ikonky hore ako teraz</h3>
+      <p>Bez novej záložky; „Moje rezervácie" nateraz nevznikne.</p>
+    </div>
+  </div>
+</div>
+
+<p class="subtitle" style="margin-top:14px;">Klikni jednu voľbu v každej skupine a napíš mi „hotovo" (alebo rovno napíš voľby do terminálu).</p>
