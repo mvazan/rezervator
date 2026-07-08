@@ -56,6 +56,24 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     return 'Přihlášení selhalo: $raw';
   }
 
+  /// Fallback when the mail app drops the code from the magic link
+  /// (e.g. Seznam's in-app browser): the e-mail also shows a numeric code.
+  /// On success the auth stream fires and AuthGate navigates away.
+  Future<void> _enterCode() async {
+    final email = _email.text.trim();
+    final code = await promptText(
+      context,
+      title: 'Kód z e-mailu',
+      hint: 'např. 123456',
+      confirmLabel: 'Přihlásit',
+      keyboardType: TextInputType.number,
+    );
+    if (code == null || code.trim().isEmpty || !mounted) return;
+    await tryAction(context, () => Api.verifyEmailOtp(email, code),
+        errorText: friendlyDbError);
+    // AuthGate re-routes via the (now-refreshing) auth stream on success.
+  }
+
   Future<void> _send() async {
     final email = _email.text.trim();
     if (email.isEmpty || !email.contains('@')) {
@@ -149,11 +167,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     'Otevři odkaz na tomhle zařízení — ve stejném prohlížeči,\n'
                     'ze kterého sis o něj řekl(a).\n'
                     'Odkaz platí hodinu a funguje jen ten z nejnovějšího '
-                    'e-mailu.',
+                    'e-mailu.\n'
+                    'Pokud odkaz neotevře appku (u některých e-mailů), '
+                    'opiš 6místný kód z e-mailu.',
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodyLarge,
                   ),
                   const SizedBox(height: 16),
+                  TextButton(
+                    onPressed: _sending ? null : _enterCode,
+                    child: const Text('Zadat kód z e-mailu'),
+                  ),
                   TextButton(
                     onPressed: () => setState(() => _sent = false),
                     child: const Text('Poslat znovu / jiný e-mail'),
