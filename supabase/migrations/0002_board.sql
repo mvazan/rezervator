@@ -1,4 +1,8 @@
 -- 0002 — board: nick, match prep + home/away, players view, set_nick.
+-- Atomic on purpose: the opponent→away_team rename and the
+-- cancel_res_for_match replacement must land together, otherwise the live
+-- match_conflicts trigger references a missing column between statements.
+begin;
 
 alter table profiles add column nick text not null default ''
   check (char_length(nick) <= 14);
@@ -193,3 +197,5 @@ begin
   return new;
 end;
 $$;
+
+commit;
