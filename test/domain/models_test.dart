@@ -141,4 +141,13 @@ void main() {
       expect(blocks.first.label, '16:00–17:00');
     });
   });
+
+  group('AttendanceRow', () {
+    test('parses rpc row', () {
+      final row = AttendanceRow.fromJson(
+          {'player_id': 'p1', 'display_name': 'Ján', 'club': 'KK', 'attended': 3});
+      expect(row.attended, 3);
+      expect(row.club, 'KK');
+    });
+  });
 }
