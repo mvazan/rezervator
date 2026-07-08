@@ -33,11 +33,6 @@ class _KioskShellState extends ConsumerState<KioskShell> {
   PlayerName? _selected;
   int _weekOffset = 0;
 
-  /// Guards the idle handler's dialog pop: only try to close the picker
-  /// route if one is actually open, and only once (popUntil is otherwise
-  /// harmless-but-redundant when nothing is pushed).
-  bool _pickerOpen = false;
-
   @override
   void initState() {
     super.initState();
@@ -61,12 +56,11 @@ class _KioskShellState extends ConsumerState<KioskShell> {
 
   void _onIdle() {
     if (!mounted) return;
-    if (_pickerOpen) {
-      // Root navigator: showDialog (and Dialog.fullscreen) push onto it, not
-      // onto any nested Navigator this Scaffold might sit under.
-      Navigator.of(context, rootNavigator: true)
-          .popUntil((r) => r.isFirst);
-    }
+    // Pop unconditionally (root navigator — dialogs push onto it): besides
+    // the name picker this also dismisses an abandoned booking-confirm
+    // dialog, which captured the previously selected player and would let
+    // the next visitor book under their name.
+    Navigator.of(context, rootNavigator: true).popUntil((r) => r.isFirst);
     setState(() {
       _selected = null;
       _weekOffset = 0;
@@ -75,11 +69,9 @@ class _KioskShellState extends ConsumerState<KioskShell> {
   }
 
   Future<void> _openPicker() async {
-    setState(() => _pickerOpen = true);
     final picked = await showNamePicker(context);
     if (!mounted) return;
     setState(() {
-      _pickerOpen = false;
       if (picked != null) _selected = picked;
     });
   }

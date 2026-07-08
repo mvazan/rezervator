@@ -327,8 +327,11 @@ async function handle(payload: WebhookPayload) {
 }
 
 Deno.serve(async (request) => {
+  // Fail closed: the function is deployed --no-verify-jwt, so a missing
+  // WEBHOOK_SECRET must reject everything (loud 401) rather than open the
+  // endpoint to forged payloads.
   const secret = Deno.env.get("WEBHOOK_SECRET");
-  if (secret && request.headers.get("x-webhook-secret") !== secret) {
+  if (!secret || request.headers.get("x-webhook-secret") !== secret) {
     return new Response("unauthorized", { status: 401 });
   }
   try {
