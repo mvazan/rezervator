@@ -49,6 +49,23 @@ String weekdayFull(int weekday) => _weekdaysFull[weekday - 1];
 
 Day today() => Day.fromDateTime(DateTime.now());
 
+/// Two-letter avatar initials for [displayName]: first letter of the first
+/// two words, uppercased. A single-word name uses its first two characters;
+/// an empty name falls back to '?'.
+String initialsOf(String displayName) {
+  final words =
+      displayName.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty);
+  if (words.isEmpty) return '?';
+  if (words.length == 1) {
+    final word = words.first;
+    return word.length >= 2
+        ? word.substring(0, 2).toUpperCase()
+        : word.toUpperCase();
+  }
+  return (words.first.substring(0, 1) + words.elementAt(1).substring(0, 1))
+      .toUpperCase();
+}
+
 void snack(BuildContext context, String message) {
   ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
 }

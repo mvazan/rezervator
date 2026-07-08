@@ -5,6 +5,8 @@ import '../../core/ui.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
 import '../../domain/schedule.dart';
+import 'widgets/day_header.dart';
+import 'widgets/slot_tile.dart';
 
 /// Live week view: grid computed by buildWeekSchedule, booking via RPCs.
 class WeekScreen extends ConsumerStatefulWidget {
@@ -256,37 +258,45 @@ class _DaySection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(dayFull(day.date),
-                style: Theme.of(context)
-                    .textTheme
-                    .titleSmall
-                    ?.copyWith(fontWeight: FontWeight.w700)),
-            for (final m in day.matches)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text(
-                  '🏆 ${m.opponent} · ${m.startsAt.display()}–${m.endsAt.display()}',
-                  style: TextStyle(color: scheme.primary, fontSize: 13),
-                ),
-              ),
-            const SizedBox(height: 8),
-            switch (day) {
-              ClosedDay(:final reason) => Text(
-                  reason.isEmpty ? 'Zavřeno' : 'Zavřeno — $reason',
-                  style: TextStyle(color: scheme.onSurfaceVariant),
-                ),
-              OpenDay() => _grid(context, day as OpenDay),
-            },
-          ],
-        ),
+        child: switch (day) {
+          ClosedDay(:final reason) => DayHeader(
+              date: day.date,
+              matches: day.matches,
+              closedReason: reason,
+            ),
+          OpenDay() => _openDay(context, day as OpenDay),
+        },
       ),
+    );
+  }
+
+  Widget _openDay(BuildContext context, OpenDay day) {
+    final isAdmin = me?.isAdmin ?? false;
+    final freeCount = day.blocks
+        .expand((block) =>
+            [for (var lane = 1; lane <= day.laneCount; lane++) (block, lane)])
+        .where((entry) => canBook(
+              state: day.slot(entry.$1.id, entry.$2),
+              myActiveCount: myCount,
+              settings: settings,
+              isAdmin: isAdmin,
+            ))
+        .length;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        DayHeader(
+          date: day.date,
+          matches: day.matches,
+          chipLabel: '$freeCount volných',
+        ),
+        const SizedBox(height: 6),
+        _grid(context, day),
+      ],
     );
   }
 
@@ -322,78 +332,24 @@ class _DaySection extends StatelessWidget {
                       Text(block.label, style: const TextStyle(fontSize: 12)),
                 ),
                 for (var lane = 1; lane <= day.laneCount; lane++)
-                  _SlotCell(
-                    state: day.slot(block.id, lane),
-                    me: me,
-                    myCount: myCount,
-                    settings: settings,
-                    nameById: nameById,
-                    interactive: interactive,
-                    onBook: () =>
-                        me == null ? null : onBook(day.date, block, lane),
-                    onCancel: (r, {required ownFuture}) => onCancel(
-                        day.date, block, r,
-                        ownFuture: ownFuture),
-                  ),
+                  _slotTile(day, block, lane),
               ],
             ),
         ],
       ),
     );
   }
-}
 
-class _SlotCell extends StatelessWidget {
-  const _SlotCell({
-    required this.state,
-    required this.me,
-    required this.myCount,
-    required this.settings,
-    required this.nameById,
-    required this.interactive,
-    required this.onBook,
-    required this.onCancel,
-  });
-
-  final SlotState state;
-  final Profile? me;
-  final int myCount;
-  final ScheduleSettings settings;
-  final Map<String, String> nameById;
-  final bool interactive;
-  final VoidCallback? onBook;
-  final void Function(Reservation, {required bool ownFuture}) onCancel;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    const height = 44.0;
-
+  /// Resolves the same booking/cancel policy the old `_SlotCell` computed
+  /// inline (canBook/canCancel, admin exemptions, name lookup) into the
+  /// slim SlotTile contract: a display name, isMine/quiet flags, and a
+  /// single resolved tap handler (or null to render the cell inert).
+  Widget _slotTile(OpenDay day, TimeBlock block, int lane) {
+    final state = day.slot(block.id, lane);
     switch (state) {
       case MatchSlot():
-        return Container(
-          height: height,
-          color: scheme.errorContainer.withValues(alpha: 0.6),
-          alignment: Alignment.center,
-          child: Text('Zápas',
-              style: TextStyle(
-                  fontSize: 11, color: scheme.onErrorContainer)),
-        );
-      case RentedSlot(:final rental):
-        return Container(
-          height: height,
-          color: scheme.tertiaryContainer.withValues(alpha: 0.7),
-          alignment: Alignment.center,
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: Text(
-            rental.renterName,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.center,
-            style:
-                TextStyle(fontSize: 10, color: scheme.onTertiaryContainer),
-          ),
-        );
+      case RentedSlot():
+        return SlotTile(state: state, size: SlotTileSize.compact);
       case ReservedSlot(:final reservation):
         final isMine = me != null && reservation.playerId == me!.id;
         final name = nameById[reservation.playerId] ?? '?';
@@ -405,31 +361,15 @@ class _SlotCell extends StatelessWidget {
         // non-admin may only cancel their own not-yet-started one.
         final cancellable =
             interactive && me != null && (me!.isAdmin || ownFuture);
-        return InkWell(
+        return SlotTile(
+          state: state,
+          size: SlotTileSize.compact,
+          playerName: name,
+          isMine: isMine,
           onTap: cancellable
-              ? () => onCancel(reservation, ownFuture: ownFuture)
+              ? () => onCancel(day.date, block, reservation,
+                  ownFuture: ownFuture)
               : null,
-          child: Container(
-            height: height,
-            color: isMine
-                ? scheme.primaryContainer
-                : scheme.surfaceContainerHighest,
-            alignment: Alignment.center,
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: Text(
-              name,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 10,
-                fontWeight: isMine ? FontWeight.w700 : FontWeight.w400,
-                color: isMine
-                    ? scheme.onPrimaryContainer
-                    : scheme.onSurfaceVariant,
-              ),
-            ),
-          ),
         );
       case FreeSlot():
         final isAdmin = me?.isAdmin ?? false;
@@ -440,12 +380,6 @@ class _SlotCell extends StatelessWidget {
                 myActiveCount: myCount,
                 settings: settings,
                 isAdmin: isAdmin);
-        if (!bookable) {
-          return Container(
-            height: height,
-            color: scheme.surface.withValues(alpha: 0.4),
-          );
-        }
         // Cells only bookable through the admin exemption (inPast or
         // beyondHorizon, which a regular player could never book) render the
         // '+' quieter, so admins can tell at a glance which slots are
@@ -455,16 +389,11 @@ class _SlotCell extends StatelessWidget {
             myActiveCount: myCount,
             settings: settings,
             isAdmin: false);
-        return InkWell(
-          onTap: onBook,
-          child: Container(
-            height: height,
-            alignment: Alignment.center,
-            child: Icon(Icons.add,
-                size: 18,
-                color: scheme.primary
-                    .withValues(alpha: normallyBookable ? 0.45 : 0.25)),
-          ),
+        return SlotTile(
+          state: state,
+          size: SlotTileSize.compact,
+          quiet: !normallyBookable,
+          onTap: bookable ? () => onBook(day.date, block, lane) : null,
         );
     }
   }
