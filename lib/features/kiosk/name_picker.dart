@@ -15,15 +15,23 @@ import '../../domain/name_index.dart';
 /// before falling back to next-letter prefix tiles.
 const _capacity = 24;
 
-Future<PlayerName?> showNamePicker(BuildContext context) {
+Future<PlayerName?> showNamePicker(
+  BuildContext context, {
+  Brightness brightness = Brightness.dark,
+}) {
   return showDialog<PlayerName>(
     context: context,
-    builder: (_) => const NamePicker(),
+    builder: (_) => NamePicker(brightness: brightness),
   );
 }
 
 class NamePicker extends ConsumerStatefulWidget {
-  const NamePicker({super.key});
+  const NamePicker({super.key, this.brightness = Brightness.dark});
+
+  /// The kiosk theme brightness (admin-configurable). The picker is opened
+  /// from the shell's State context, which sits above the kiosk Theme wrap,
+  /// so it must re-apply the theme itself — see build().
+  final Brightness brightness;
 
   @override
   ConsumerState<NamePicker> createState() => _NamePickerState();
@@ -50,15 +58,15 @@ class _NamePickerState extends ConsumerState<NamePicker> {
   Widget build(BuildContext context) {
     final players = ref.watch(playersProvider);
 
-    // The kiosk always renders dark (spec §4), but showNamePicker is called
-    // with the kiosk shell's own State context — which sits *above* the
-    // Theme(dark) wrap in kiosk_shell.dart's build(), not below it — so
-    // showDialog's route, and this dialog's content, would otherwise inherit
-    // whatever theme is ambient at the call site (light, on a light-system
-    // device). Wrapping the whole dialog content here — including
-    // Dialog.fullscreen itself, whose own background color also resolves
-    // Theme.of(context) — makes the picker dark unconditionally, regardless
-    // of which context it was opened from.
+    // The kiosk follows the admin-configured theme (spec §4), but
+    // showNamePicker is called with the kiosk shell's own State context —
+    // which sits *above* the kiosk Theme wrap in kiosk_shell.dart's build(),
+    // not below it — so showDialog's route, and this dialog's content, would
+    // otherwise inherit whatever theme is ambient at the call site. Wrapping
+    // the whole dialog content here — including Dialog.fullscreen itself,
+    // whose own background color also resolves Theme.of(context) — re-applies
+    // the kiosk brightness passed in by the shell, regardless of which
+    // context it was opened from.
     //
     // The Builder below matters, not just the Theme: every Theme.of(context)
     // call in this file that builds a color/text style (the header, _body,
@@ -69,7 +77,7 @@ class _NamePickerState extends ConsumerState<NamePicker> {
     // theme even though everything actually painted on screen (Dialog's
     // background, _Tile's own Theme.of lookups) is correctly dark.
     return Theme(
-      data: buildTheme(Brightness.dark),
+      data: buildTheme(widget.brightness),
       child: Builder(
         builder: (context) => Dialog.fullscreen(
           child: SafeArea(

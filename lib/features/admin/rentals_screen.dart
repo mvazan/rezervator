@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/ui.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
+import 'widgets/color_picker.dart';
 
 /// One-time rentals first (sorted by date, ascending), then weekly rentals
 /// (sorted by weekday, Monday..Sunday).
@@ -151,6 +152,7 @@ class _RentalDialogState extends State<_RentalDialog> {
   HourMinute? _start;
   HourMinute? _end;
   final Set<int> _lanes = {};
+  int _color = -2;
   bool _saving = false;
 
   @override
@@ -162,6 +164,7 @@ class _RentalDialogState extends State<_RentalDialog> {
     _start = existing?.startsAt;
     _end = existing?.endsAt;
     _lanes.addAll(existing?.lanes ?? const []);
+    _color = existing?.color ?? -2;
     if (existing == null) {
       _mode = _RentalMode.oneTime;
     } else if (existing.date != null) {
@@ -260,6 +263,7 @@ class _RentalDialogState extends State<_RentalDialog> {
         validFrom: validFrom,
         validUntil: validUntil,
         note: _note.text.trim(),
+        color: _color,
       ),
       success: 'Pronájem uložen. Kolidující rezervace byly zrušeny.',
       errorText: friendlyDbError,
@@ -391,6 +395,15 @@ class _RentalDialogState extends State<_RentalDialog> {
             TextField(
               controller: _note,
               decoration: const InputDecoration(labelText: 'Poznámka'),
+            ),
+            const SizedBox(height: 16),
+            Text('Barva', style: Theme.of(context).textTheme.titleSmall),
+            const SizedBox(height: 8),
+            ColorPickerGrid(
+              selected: _color,
+              noneValue: -2,
+              noneLabel: 'Výchozí',
+              onChanged: (index) => setState(() => _color = index),
             ),
           ],
         ),

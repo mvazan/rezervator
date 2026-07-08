@@ -61,6 +61,14 @@ final settingsProvider = StreamProvider<ScheduleSettings?>((ref) {
       (rows) => rows.isEmpty ? null : ScheduleSettings.fromJson(rows.first));
 });
 
+/// Club roster (name + palette color), sorted by name.
+final clubsProvider = StreamProvider<List<Club>>((ref) {
+  if (ref.watch(_authUidProvider) == null) return Stream.value(const []);
+  return _db.from('clubs').stream(primaryKey: ['id']).map((rows) =>
+      rows.map(Club.fromJson).toList()
+        ..sort((a, b) => a.name.compareTo(b.name)));
+});
+
 final timeBlocksProvider = StreamProvider<List<TimeBlock>>((ref) {
   if (ref.watch(_authUidProvider) == null) return Stream.value(const []);
   return _db.from('time_blocks').stream(primaryKey: ['id']).map(
@@ -111,6 +119,27 @@ class Api {
   static Future<void> approvePlayer(String userId) =>
       _db.rpc('approve_player', params: {'p_user_id': userId});
 
+  // --- admin: clubs ---
+  static Future<void> setPlayerClub(String userId, String? clubId) =>
+      _db.rpc('set_player_club', params: {
+        'p_user_id': userId,
+        'p_club_id': clubId,
+      });
+
+  static Future<void> upsertClub({
+    String? id,
+    required String name,
+    required int colorIndex,
+  }) =>
+      _db.rpc('upsert_club', params: {
+        'p_id': id,
+        'p_name': name,
+        'p_color': colorIndex,
+      });
+
+  static Future<void> deleteClub(String id) =>
+      _db.rpc('delete_club', params: {'p_id': id});
+
   static Future<void> updateFcmToken(String? token) async {
     final uid = currentUserId;
     if (uid == null) return;
@@ -146,6 +175,11 @@ class Api {
         'booking_horizon_days': bookingHorizonDays,
         'max_active_reservations': maxActiveReservations,
       }).eq('id', true);
+
+  /// Toggles the kiosk board's dark/light theme (spec §4).
+  static Future<void> setKioskDark(bool kioskDark) => _db
+      .from('schedule_settings')
+      .update({'kiosk_dark': kioskDark}).eq('id', true);
 
   static Future<void> addTimeBlock(HourMinute startsAt, HourMinute endsAt, int position) =>
       _db.from('time_blocks').insert({
@@ -247,6 +281,7 @@ class Api {
     Day? validFrom,
     Day? validUntil,
     String note = '',
+    int color = -2,
   }) async {
     final row = {
       'renter_name': renterName,
@@ -258,6 +293,7 @@ class Api {
       'valid_from': validFrom?.toSql(),
       'valid_until': validUntil?.toSql(),
       'note': note,
+      'color': color,
       if (id == null) 'created_by': currentUserId!,
     };
     if (id == null) {
