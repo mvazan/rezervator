@@ -3,8 +3,9 @@
 Aplikace je hotová, chybí jí jen vlastní backend účet a pár kliknutí v
 Supabase. Kroky 1–4 rozjedou rezervace tréninků v aplikaci (mobil i desktop).
 Krok 5 nasadí webovou verzi na GitHub Pages. Krok 6 zapne e-mailové
-notifikace. Krok 7 rozjede kioskový tablet na kuželně. Krok 8 shrnuje, co
-v této fázi ještě záměrně nefunguje.
+notifikace. Krok 7 rozjede kioskový tablet na kuželně. Krok 8 doplní
+docházkový report, volitelný push a keep-alive workflow — poslední kousky
+skládačky.
 
 ## 1. Supabase projekt (zdarma, bez kreditní karty)
 
@@ -246,12 +247,79 @@ omylem přepne na plochu nebo jinou appku.
 Hotovo — kiosek je teď samostatné zařízení, které kdokoliv schválený použije
 jedním dotykem bez hesla, bez appky v mobilu a bez dohledu obsluhy.
 
-## 8. Co zatím nefunguje
+## 8. Reporty, push notifikace a keep-alive (Fáze 5)
 
-Tohle je Fáze 0–4 — kostra appky, přihlášení, statický rozvrh, notifikace
-e-mailem a kiosek na tabletu. Záměrně chybí:
+### 8.1 Docházka (report a export)
 
-- **Reporty** (docházka, statistiky) — Fáze 5.
-- **Push notifikace** (FCM) — aktivují se ve Fázi 5 spolu s `FIREBASE_SERVICE_ACCOUNT`;
-  do té doby e-mail (Fáze 3) pokrývá všechny stejné události, včetně
-  potvrzení rezervace založené z kiosku.
+Admin najde měsíční přehled docházky v **Správa kuželny → Docházka**:
+šipky (chevrony) vlevo/vpravo od názvu měsíce přepínají mezi měsíci a
+tlačítko **Export CSV** stáhne aktuálně zobrazený měsíc jako soubor
+`dochazka-RRRR-MM.csv` (jméno, klub, počet tréninků) — hodí se pro
+tabulku mimo appku (Excel/Sheets) nebo archivaci.
+
+**Zpětné označení „nepřišel"**: pokud hráč na trénink nedorazil, admin v
+appce klikne na jeho obsazenou buňku v rozvrhu (i zpětně, u proběhlého
+tréninku) a zvolí zrušení rezervace s poznámkou — napíše `nepřišel` (je to
+jen našeptávaný text v poli, ne pevná hodnota, takže jde napsat i jiný
+důvod). Rezervace se zruší a do měsíční docházky se už nezapočítá, takže
+report odpovídá skutečné účasti, ne jen tomu, kdo si trénink rezervoval.
+
+### 8.2 Push notifikace (FCM) — volitelné
+
+Appka od začátku (Fáze 0) umí číst 4 `FIREBASE_*` dart-defines (viz krok 4
+výše), ale bez dalšího nastavení zůstávají push notifikace vypnuté a
+appka běží normálně dál jen s e-mailem (Fáze 3). Zapnutí push je volitelné
+a vyžaduje dvě samostatné věci — klientskou konfiguraci (Firebase projekt)
+a serverovou (`FIREBASE_SERVICE_ACCOUNT`):
+
+1. Založ **Firebase projekt** na <https://console.firebase.google.com> →
+   **Add project** (Google Analytics není potřeba, klidně vypni).
+2. V projektu přidej **Android app** s package name `cz.kuzelky.rezervator`
+   (najdeš v `android/app/build.gradle.kts` jako `applicationId`, kdyby se
+   měnil) a z **Project settings → General** si poznamenej čtyři hodnoty:
+   - **Web API Key** → `FIREBASE_API_KEY`
+   - **App ID** (Android app, tvar `1:123...:android:abc...`) → `FIREBASE_APP_ID`
+   - **Project number** → `FIREBASE_SENDER_ID`
+   - **Project ID** → `FIREBASE_PROJECT_ID`
+3. Tyhle čtyři hodnoty doplň jako `--dart-define` do **všech lokálních
+   buildů** (stejný vzor jako `flutter run` v kroku 4 — jen s dalšími
+   čtyřmi `--dart-define` navíc), a zároveň je přidej jako **repository
+   secrets** do GitHubu (stejné místo jako
+   `SUPABASE_URL`/`SUPABASE_ANON_KEY` v kroku 5, bodu 2: **Settings →
+   Secrets and variables → Actions**) — workflow
+   [`deploy-web.yml`](.github/workflows/deploy-web.yml) je od téhle fáze
+   předává do web buildu automaticky. Necháš-li je nevyplněné, web build
+   proběhne úplně stejně jako dřív, jen bez push (na webu push stejně
+   nefunguje — týká se jen Android/iOS buildů).
+4. Server-side: nastav Supabase secret `FIREBASE_SERVICE_ACCOUNT` (JSON
+   service-account klíč z **Firebase → Project settings → Service accounts
+   → Generate new private key**, vlož **celý obsah** staženého souboru jako
+   jednořádkovou hodnotu):
+   ```bash
+   supabase secrets set FIREBASE_SERVICE_ACCOUNT='<obsah staženého JSON souboru>'
+   ```
+   Tenhle secret aktivuje odesílání přes FCM v Edge Function `notify` —
+   bez něj (nebo dokud ho nenastavíš) `notify` posílá jen e-mail, přesně
+   jako ve Fázi 3, takže appka funguje i bez tohoto kroku a nikomu nic
+   neujde.
+
+### 8.3 Keep-alive (Supabase free tier usíná po 7 dnech nečinnosti)
+
+Supabase projekt na free tieru se po ~7 dnech bez API aktivity sám
+pozastaví. Přiložený workflow
+[`.github/workflows/keepalive.yml`](.github/workflows/keepalive.yml) mu
+v tom brání — dvakrát týdně (pondělí a čtvrtek 6:00 UTC) zavolá lehký
+GET dotaz na tabulku `time_blocks`. Používá stejné dva repository secrets
+jako `deploy-web.yml` (`SUPABASE_URL` a `SUPABASE_ANON_KEY`, viz krok 5,
+bod 2) — pokud jsi je tam už přidal/a, keepalive workflow není potřeba nijak
+dál zapínat, GitHub Actions ho spustí sám podle rozvrhu (`cron`) hned po
+pushnutí do `main`. Chceš-li ho vyzkoušet hned teď, běž do **Actions →
+Supabase keep-alive → Run workflow** (ruční spuštění přes
+`workflow_dispatch`).
+
+## Hotovo
+
+Fáze 0–5 jsou nasazené: rezervace tréninků (appka i web), auth s
+magic linky, e-mailové i (volitelně) push notifikace, kiosek na
+tabletu, měsíční docházka s CSV exportem a keep-alive, co drží
+Supabase projekt vzhůru. Appka je připravená k běžnému provozu.
