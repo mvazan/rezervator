@@ -83,11 +83,15 @@ class _KioskShellState extends ConsumerState<KioskShell> {
 
   @override
   Widget build(BuildContext context) {
-    // The kiosk is a shared, always-on tablet — it stays dark regardless of
-    // the device's system brightness (spec §4), unlike the rest of the app
-    // which follows light/dark via MaterialApp.theme/darkTheme.
+    // The kiosk is a shared, always-on tablet whose brightness is an admin
+    // choice (spec §4), independent of the device's system brightness and of
+    // the rest of the app (which follows light/dark via MaterialApp.theme/
+    // darkTheme). Defaults to dark — the historical kiosk look — until the
+    // settings stream resolves.
+    final kioskDark =
+        ref.watch(settingsProvider).value?.kioskDark ?? true;
     return Theme(
-      data: buildTheme(Brightness.dark),
+      data: buildTheme(kioskDark ? Brightness.dark : Brightness.light),
       child: Listener(
         onPointerDown: (_) => _touch(),
         behavior: HitTestBehavior.translucent,

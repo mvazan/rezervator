@@ -316,6 +316,7 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
         ? 0
         : activeReservationCount(mine, me.id, todayDay);
     final nameById = {for (final p in players) p.id: p.displayName};
+    final clubColorById = {for (final p in players) p.id: p.clubColor};
     final myCountByIndex = [
       for (var i = 0; i < 7; i++)
         _myLiveCountOn(mine, me?.id, monday.addDays(i)),
@@ -341,6 +342,7 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
                   myCount: myCount,
                   settings: settings,
                   nameById: nameById,
+                  clubColorById: clubColorById,
                   interactive: interactive,
                   onBook: onBook,
                   onCancel: onCancel,
@@ -360,6 +362,7 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
                   myCount: myCount,
                   myCountByIndex: myCountByIndex,
                   nameById: nameById,
+                  clubColorById: clubColorById,
                   interactive: interactive,
                   onBook: onBook,
                   onCancel: onCancel,
@@ -383,6 +386,7 @@ class WeekListView extends StatelessWidget {
     required this.myCount,
     required this.settings,
     required this.nameById,
+    required this.clubColorById,
     required this.interactive,
     required this.onBook,
     required this.onCancel,
@@ -393,6 +397,7 @@ class WeekListView extends StatelessWidget {
   final int myCount;
   final ScheduleSettings settings;
   final Map<String, String> nameById;
+  final Map<String, int> clubColorById;
   final bool interactive;
   final void Function(Day, TimeBlock, int lane) onBook;
   final void Function(Day, TimeBlock, Reservation, {required bool ownFuture})
@@ -410,6 +415,7 @@ class WeekListView extends StatelessWidget {
             myCount: myCount,
             settings: settings,
             nameById: nameById,
+            clubColorById: clubColorById,
             interactive: interactive,
             onBook: onBook,
             onCancel: onCancel,
@@ -426,6 +432,7 @@ class _DaySection extends StatelessWidget {
     required this.myCount,
     required this.settings,
     required this.nameById,
+    required this.clubColorById,
     required this.interactive,
     required this.onBook,
     required this.onCancel,
@@ -436,6 +443,7 @@ class _DaySection extends StatelessWidget {
   final int myCount;
   final ScheduleSettings settings;
   final Map<String, String> nameById;
+  final Map<String, int> clubColorById;
 
   /// False while blocks are the placeholder grid or this week's reservation
   /// stream isn't loaded yet — see the doc comment in build() for why.
@@ -543,6 +551,7 @@ class _DaySection extends StatelessWidget {
                       myCount: myCount,
                       settings: settings,
                       nameById: nameById,
+                      clubColorById: clubColorById,
                       interactive: interactive,
                       onBook: onBook,
                       onCancel: onCancel,

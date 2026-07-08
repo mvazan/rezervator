@@ -14,6 +14,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/ui.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
+import '../../domain/palette.dart';
 import '../../domain/schedule.dart';
 
 /// True when [date] resolves as an [OpenDay] under exactly the resolution the
@@ -373,6 +374,7 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
       for (final p in players)
         p.id: p.nick.isNotEmpty ? p.nick : p.displayName,
     };
+    final clubColorById = {for (final p in players) p.id: p.clubColor};
 
     // Row rail = union of every day on the board (not just whichever column
     // happens to be scrolled into view — the rail is a single fixed
@@ -424,6 +426,7 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
                           rowGroupHeight: rowGroupHeight,
                           laneCount: settings.laneCount,
                           nameById: nameById,
+                          clubColorById: clubColorById,
                           interactive: interactive,
                           selected: widget.selected,
                           onBook: (date, block, lane) => _book(
@@ -568,6 +571,7 @@ class _DayColumn extends StatelessWidget {
     required this.rowGroupHeight,
     required this.laneCount,
     required this.nameById,
+    required this.clubColorById,
     required this.interactive,
     required this.selected,
     required this.onBook,
@@ -579,6 +583,7 @@ class _DayColumn extends StatelessWidget {
   final double rowGroupHeight;
   final int laneCount;
   final Map<String, String> nameById;
+  final Map<String, int> clubColorById;
   final bool interactive;
   final PlayerName? selected;
   final void Function(Day date, TimeBlock block, int lane) onBook;
@@ -728,25 +733,42 @@ class _DayColumn extends StatelessWidget {
 
     switch (state) {
       case RentedSlot(:final rental):
+        // Rental colour (spec §3): a 0–11 index paints the row with that
+        // palette colour; the default (-2, ClubColors.of → null) keeps the
+        // amber tertiary tint.
+        final rentalClub = ClubColors.of(rental.color, scheme.brightness);
         return _rowShell(
           context,
-          background: scheme.tertiaryContainer.withValues(alpha: 0.5),
+          background:
+              rentalClub?.$1 ?? scheme.tertiaryContainer.withValues(alpha: 0.5),
           lane: lane,
           child: Text(
             '🔒 ${rental.renterName}',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: 11, color: scheme.onTertiaryContainer),
+            style: TextStyle(
+              fontSize: 11,
+              color: rentalClub?.$2 ?? scheme.onTertiaryContainer,
+            ),
           ),
         );
       case ReservedSlot(:final reservation):
         final isMine = selected != null && reservation.playerId == selected!.id;
         final name = nameById[reservation.playerId] ?? '?';
+        // Foreign reservations carry the player's club colour (spec §5) so
+        // spectators tell clubs apart at a glance; "mine" is never club-tinted
+        // — it keeps the indigo primaryContainer highlight so the selected
+        // player's own bookings stay unmistakable over any club background.
+        final club = isMine
+            ? null
+            : ClubColors.of(clubColorById[reservation.playerId] ?? -1,
+                scheme.brightness);
         return _rowShell(
           context,
           background: isMine
               ? scheme.primaryContainer
-              : scheme.surfaceContainerHighest.withValues(alpha: 0.6),
+              : club?.$1 ??
+                  scheme.surfaceContainerHighest.withValues(alpha: 0.6),
           lane: lane,
           child: Text(
             name,
@@ -755,8 +777,9 @@ class _DayColumn extends StatelessWidget {
             style: TextStyle(
               fontSize: 11,
               fontWeight: isMine ? FontWeight.w700 : FontWeight.w500,
-              color:
-                  isMine ? scheme.onPrimaryContainer : scheme.onSurfaceVariant,
+              color: isMine
+                  ? scheme.onPrimaryContainer
+                  : club?.$2 ?? scheme.onSurfaceVariant,
             ),
           ),
         );

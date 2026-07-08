@@ -40,6 +40,7 @@ class DayPagerView extends StatefulWidget {
     required this.myCount,
     required this.myCountByIndex,
     required this.nameById,
+    required this.clubColorById,
     required this.interactive,
     required this.onBook,
     required this.onCancel,
@@ -82,6 +83,7 @@ class DayPagerView extends StatefulWidget {
   /// reservations, for the [DayChipStrip].
   final List<int> myCountByIndex;
   final Map<String, String> nameById;
+  final Map<String, int> clubColorById;
   final bool interactive;
   final void Function(Day, TimeBlock, int lane) onBook;
   final void Function(Day, TimeBlock, Reservation, {required bool ownFuture})
@@ -240,6 +242,7 @@ class _DayPagerViewState extends State<DayPagerView> {
               myCount: widget.myCount,
               settings: widget.settings,
               nameById: widget.nameById,
+              clubColorById: widget.clubColorById,
               interactive: page >= _firstRealPage && page <= _lastRealPage
                   ? widget.interactive
                   : false,
@@ -289,6 +292,7 @@ class _DayPage extends StatelessWidget {
     required this.myCount,
     required this.settings,
     required this.nameById,
+    required this.clubColorById,
     required this.interactive,
     required this.onBook,
     required this.onCancel,
@@ -300,6 +304,7 @@ class _DayPage extends StatelessWidget {
   final int myCount;
   final ScheduleSettings settings;
   final Map<String, String> nameById;
+  final Map<String, int> clubColorById;
   final bool interactive;
   final void Function(Day, TimeBlock, int lane) onBook;
   final void Function(Day, TimeBlock, Reservation, {required bool ownFuture})
@@ -450,6 +455,7 @@ class _DayPage extends StatelessWidget {
                   myCount: myCount,
                   settings: settings,
                   nameById: nameById,
+                  clubColorById: clubColorById,
                   interactive: interactive,
                   onBook: onBook,
                   onCancel: onCancel,

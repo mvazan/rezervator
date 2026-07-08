@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/ui.dart';
 import '../../../domain/models.dart';
+import '../../../domain/palette.dart';
 import '../../../domain/schedule.dart';
 
 enum SlotTileSize { compact, large }
@@ -20,6 +21,7 @@ class SlotTile extends StatelessWidget {
     required this.size,
     this.playerName,
     this.isMine = false,
+    this.clubColorIndex = -1,
     this.quiet = false,
     this.onTap,
   });
@@ -33,6 +35,13 @@ class SlotTile extends StatelessWidget {
   /// Whether a [ReservedSlot] belongs to the caller — bolds the name and
   /// tints the cell with the primary container instead of the neutral one.
   final bool isMine;
+
+  /// Club palette index (spec §5) of a foreign [ReservedSlot]'s player: 0–11
+  /// tints the cell with that club's colour, anything else (-1 = no club)
+  /// keeps the neutral surface tint. Ignored for "mine" cells, which stay
+  /// primaryContainer so the caller's own bookings never blend into a club's
+  /// colour.
+  final int clubColorIndex;
 
   /// For a bookable [FreeSlot]: true when the cell is only bookable through
   /// the admin exemption (inPast/beyondHorizon) rather than the ordinary
@@ -92,10 +101,14 @@ class SlotTile extends StatelessWidget {
           ),
         );
       case RentedSlot(:final rental):
+        // Rental colour (spec §3): a 0–11 palette index paints the cell with
+        // that club colour; the default (-2) keeps today's amber tertiary
+        // tint. ClubColors.of returns null for -2, which selects that branch.
+        final club = ClubColors.of(rental.color, scheme.brightness);
         return _shell(
           minHeight: minHeight,
           decoration: BoxDecoration(
-            color: scheme.tertiaryContainer.withValues(alpha: 0.7),
+            color: club?.$1 ?? scheme.tertiaryContainer.withValues(alpha: 0.7),
             borderRadius: BorderRadius.circular(_compact ? 8 : 12),
           ),
           padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -106,16 +119,25 @@ class SlotTile extends StatelessWidget {
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: _compact ? 10 : 12,
-              color: scheme.onTertiaryContainer,
+              color: club?.$2 ?? scheme.onTertiaryContainer,
             ),
           ),
         );
       case ReservedSlot():
         final name = playerName ?? '?';
+        // Foreign reservations are tinted by the player's club colour (spec
+        // §5) so spectators can tell clubs apart at a glance; "mine" is never
+        // club-tinted — it keeps primaryContainer so the caller's own
+        // bookings stay unmistakable regardless of which club they're in.
+        final club = isMine
+            ? null
+            : ClubColors.of(clubColorIndex, scheme.brightness);
+        final foreignBg = club?.$1 ?? scheme.surfaceContainerHighest;
+        final foreignFg = club?.$2 ?? scheme.onSurfaceVariant;
         final nameStyle = TextStyle(
           fontSize: _compact ? 10 : 12,
           fontWeight: isMine ? FontWeight.w700 : FontWeight.w500,
-          color: isMine ? scheme.onPrimaryContainer : scheme.onSurfaceVariant,
+          color: isMine ? scheme.onPrimaryContainer : foreignFg,
         );
         final content = isMine || _compact
             ? Text(
@@ -130,13 +152,20 @@ class SlotTile extends StatelessWidget {
                 children: [
                   CircleAvatar(
                     radius: 12,
-                    backgroundColor: scheme.surfaceContainerHighest,
+                    // Over a club-tinted cell the avatar can't reuse the old
+                    // surface tint (it would clash with the club bg) — a
+                    // translucent wash of the club's own foreground colour
+                    // keeps the initials legible in either palette; falls back
+                    // to the neutral surface tint when there's no club.
+                    backgroundColor: club == null
+                        ? scheme.surfaceContainerHighest
+                        : foreignFg.withValues(alpha: 0.2),
                     child: Text(
                       initialsOf(name),
                       style: TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.w700,
-                        color: scheme.onSurfaceVariant,
+                        color: foreignFg,
                       ),
                     ),
                   ),
@@ -154,9 +183,7 @@ class SlotTile extends StatelessWidget {
           minHeight: minHeight,
           onTap: onTap,
           decoration: BoxDecoration(
-            color: isMine
-                ? scheme.primaryContainer
-                : scheme.surfaceContainerHighest,
+            color: isMine ? scheme.primaryContainer : foreignBg,
             borderRadius: BorderRadius.circular(_compact ? 8 : 12),
           ),
           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
@@ -229,6 +256,7 @@ Widget slotTileFor({
   required int myCount,
   required ScheduleSettings settings,
   required Map<String, String> nameById,
+  required Map<String, int> clubColorById,
   required bool interactive,
   required void Function(Day, TimeBlock, int lane) onBook,
   required void Function(Day, TimeBlock, Reservation, {required bool ownFuture})
@@ -255,6 +283,7 @@ Widget slotTileFor({
         size: size,
         playerName: name,
         isMine: isMine,
+        clubColorIndex: clubColorById[reservation.playerId] ?? -1,
         onTap: cancellable
             ? () => onCancel(day.date, block, reservation, ownFuture: ownFuture)
             : null,
