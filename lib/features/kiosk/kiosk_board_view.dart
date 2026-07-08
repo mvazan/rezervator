@@ -101,6 +101,17 @@ bool _overlapsBlock(HourMinute start, HourMinute end, TimeBlock block) =>
     start.minutesFromMidnight < block.endsAt.minutesFromMidnight &&
     end.minutesFromMidnight > block.startsAt.minutesFromMidnight;
 
+/// Faint horizontal divider between time-slot row-groups, shared by [_Rail]
+/// and [_DayColumn] so the lines land on the same y-offset in both (spec:
+/// subtle time-slot gridlines, no vertical/lane dividers). `null` after the
+/// last block — nothing to separate it from below.
+Border? _gridlineBorder(ColorScheme scheme, {required bool isLast}) {
+  if (isLast) return null;
+  return Border(
+    bottom: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.25)),
+  );
+}
+
 /// Column-snap scroll physics for the board's horizontal `ListView` (spec
 /// §1: "horizontálnym scrollom (snap po stĺpcoch)"). A plain [PageView]
 /// can't be used instead because its `viewportFraction` — the mechanism
@@ -173,18 +184,68 @@ class KioskBoardView extends ConsumerStatefulWidget {
 
 class KioskBoardViewState extends ConsumerState<KioskBoardView> {
   final _hScroll = ScrollController();
+  final _vScroll = ScrollController();
+
+  // Snapshot of the most recent build's row rail, kept so resetToToday can
+  // locate "now"'s row-group without threading a HourMinute through the
+  // shell's imperative reset call — the shell only holds a GlobalKey to this
+  // state, no board-shaped data of its own to pass.
+  List<TimeBlock> _railBlocks = const [];
+  double _rowGroupHeight = 0;
 
   @override
   void dispose() {
     _hScroll.dispose();
+    _vScroll.dispose();
     super.dispose();
   }
 
-  /// Scrolls the board back to today (leftmost column) — called by the
-  /// shell on idle reset (spec §1: "Idle reset resetuje aj horizontálny
-  /// scroll na DNES").
-  void resetToToday() {
-    if (_hScroll.hasClients) _hScroll.jumpTo(0);
+  static const _scrollDuration = Duration(milliseconds: 300);
+  static const _scrollCurve = Curves.easeInOut;
+
+  /// Scrolls the board back to today (leftmost column) and to the row-group
+  /// covering the current time — called by the shell on idle reset (spec
+  /// §1: "Idle reset resetuje aj horizontálny scroll na DNES") and extended
+  /// here to also settle the vertical scroll on "now" so a kiosk that's sat
+  /// idle re-centers on the relevant time slot instead of the day's first
+  /// block.
+  void resetToNow(HourMinute now) {
+    if (_hScroll.hasClients) {
+      _hScroll.animateTo(0, duration: _scrollDuration, curve: _scrollCurve);
+    }
+    if (_vScroll.hasClients && _rowGroupHeight > 0) {
+      final index = _currentOrNextBlockIndex(now);
+      final target = _headerHeight + index * _rowGroupHeight;
+      final clamped =
+          target.clamp(0.0, _vScroll.position.maxScrollExtent);
+      _vScroll.animateTo(clamped, duration: _scrollDuration, curve: _scrollCurve);
+    }
+  }
+
+  /// Same as [resetToNow], reading the current time itself — kept as the
+  /// name the shell already calls (`_boardKey.currentState?.resetToToday()`)
+  /// so no shell change is needed beyond this widget growing a vertical
+  /// scroll too.
+  void resetToToday() => resetToNow(HourMinute(DateTime.now().hour, DateTime.now().minute));
+
+  /// Index (into [_railBlocks]) of the block whose `[startsAt, endsAt)`
+  /// window contains [now]; else the next upcoming block; else 0 (start of
+  /// day) once every block is already in the past.
+  int _currentOrNextBlockIndex(HourMinute now) {
+    final nowMinutes = now.minutesFromMidnight;
+    for (var i = 0; i < _railBlocks.length; i++) {
+      final block = _railBlocks[i];
+      if (nowMinutes >= block.startsAt.minutesFromMidnight &&
+          nowMinutes < block.endsAt.minutesFromMidnight) {
+        return i;
+      }
+    }
+    for (var i = 0; i < _railBlocks.length; i++) {
+      if (_railBlocks[i].startsAt.minutesFromMidnight >= nowMinutes) {
+        return i;
+      }
+    }
+    return 0;
   }
 
   Future<void> _book(
@@ -329,11 +390,17 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
     final rowGroupHeight = settings.laneCount * _rowHeight;
     final gridHeight = railBlocks.length * rowGroupHeight;
     final totalHeight = _headerHeight + gridHeight;
+    // Snapshot for resetToNow's imperative scroll-target math (see field
+    // docs above) — assignment only, no setState, so it can't trigger a
+    // rebuild loop.
+    _railBlocks = railBlocks;
+    _rowGroupHeight = rowGroupHeight;
 
     return LayoutBuilder(
       builder: (context, constraints) {
         final columnWidth = boardColumnWidth(constraints.maxWidth);
         return SingleChildScrollView(
+          controller: _vScroll,
           child: SizedBox(
             height: totalHeight,
             child: Row(
@@ -398,15 +465,18 @@ class _Rail extends StatelessWidget {
       child: Column(
         children: [
           const SizedBox(height: _headerHeight),
-          for (final block in blocks)
-            SizedBox(
+          for (var i = 0; i < blocks.length; i++)
+            Container(
               height: rowGroupHeight,
+              decoration: BoxDecoration(
+                border: _gridlineBorder(scheme, isLast: i == blocks.length - 1),
+              ),
               child: Align(
                 alignment: Alignment.topCenter,
                 child: Padding(
                   padding: const EdgeInsets.only(top: 4),
                   child: Text(
-                    block.label,
+                    blocks[i].label,
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 11,
@@ -536,12 +606,16 @@ class _DayColumn extends StatelessWidget {
             isToday: isToday,
             matches: day.matches,
           ),
-          for (final block in railBlocks)
-            SizedBox(
+          for (var i = 0; i < railBlocks.length; i++)
+            Container(
               height: rowGroupHeight,
+              decoration: BoxDecoration(
+                border:
+                    _gridlineBorder(scheme, isLast: i == railBlocks.length - 1),
+              ),
               child: closed
-                  ? _closedCell(context, scheme, block)
-                  : _openCell(context, block),
+                  ? _closedCell(context, scheme, railBlocks[i])
+                  : _openCell(context, railBlocks[i]),
             ),
         ],
       ),

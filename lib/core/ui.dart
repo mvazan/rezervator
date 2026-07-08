@@ -93,6 +93,14 @@ String friendlyDbError(Object error) {
   for (final entry in messages.entries) {
     if (raw.contains(entry.key)) return entry.value;
   }
+  // Email OTP verification failures (wrong/expired code from the e-mail).
+  final lower = raw.toLowerCase();
+  if (lower.contains('otp') ||
+      lower.contains('token has expired') ||
+      lower.contains('invalid') && lower.contains('token')) {
+    return 'Kód je špatně nebo už vypršel. Zkontroluj ho, nebo si nech '
+        'poslat nový e-mail.';
+  }
   return 'Něco se nepovedlo. ($error)';
 }
 

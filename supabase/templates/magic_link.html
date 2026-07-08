@@ -1,0 +1,19 @@
+<div style="font-family:Manrope,Arial,sans-serif;max-width:460px;margin:0 auto;color:#0f172a">
+  <h2 style="color:#6366F1;margin:0 0 12px">Přihlášení do Rezervátoru 🎳</h2>
+  <p style="margin:0 0 16px">Klikni na tlačítko a přihlásíš se:</p>
+  <p style="margin:0 0 20px">
+    <a href="{{ .ConfirmationURL }}"
+       style="display:inline-block;background:#6366F1;color:#fff;text-decoration:none;
+              font-weight:700;padding:12px 22px;border-radius:12px">Přihlásit se</a>
+  </p>
+  <p style="margin:0 0 8px;color:#475569">
+    Pokud odkaz neotevře aplikaci (stává se v některých e-mailových aplikacích,
+    např. Seznam), zadej na přihlašovací obrazovce tento kód:
+  </p>
+  <p style="font-size:26px;font-weight:800;letter-spacing:4px;color:#0f172a;margin:0 0 20px">
+    {{ .Token }}
+  </p>
+  <p style="color:#94a3b8;font-size:13px;margin:0">
+    Kód i odkaz platí jednu hodinu. Pokud ses nepřihlašoval(a) ty, tento e-mail ignoruj.
+  </p>
+</div>

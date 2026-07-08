@@ -480,4 +480,69 @@ void main() {
       await finish(tester);
     },
   );
+
+  testWidgets(
+    'k: idle reset scrolls to today and now without throwing, and the board '
+    'renders faint time-slot gridlines between row-groups',
+    (tester) async {
+      // Two rail blocks (unlike kioskApp()'s single b1) so at least one
+      // non-last row-group boundary exists for a gridline to sit on.
+      const bMorning = TimeBlock(
+        id: 'bMorning',
+        startsAt: HourMinute(8, 0),
+        endsAt: HourMinute(9, 0),
+        position: 0,
+        active: true,
+      );
+      const bEvening = TimeBlock(
+        id: 'bEvening',
+        startsAt: HourMinute(20, 0),
+        endsAt: HourMinute(21, 0),
+        position: 1,
+        active: true,
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            settingsProvider.overrideWith((ref) => Stream.value(settings)),
+            timeBlocksProvider
+                .overrideWith((ref) => Stream.value(const [bMorning, bEvening])),
+            dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
+            matchesProvider.overrideWith((ref) => Stream.value(const [])),
+            rentalsProvider.overrideWith((ref) => Stream.value(const [])),
+            weekReservationsProvider.overrideWith(
+              (ref, monday) => Stream.value(const []),
+            ),
+            playersProvider.overrideWith((ref) async => players),
+          ],
+          child: const MaterialApp(home: KioskShell()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final scheme =
+          Theme.of(tester.element(find.byType(KioskBoardView))).colorScheme;
+      final gridlineContainers = tester
+          .widgetList<Container>(find.byType(Container))
+          .where((c) {
+            final decoration = c.decoration;
+            if (decoration is! BoxDecoration) return false;
+            final border = decoration.border;
+            if (border is! Border) return false;
+            return border.bottom.color ==
+                scheme.outlineVariant.withValues(alpha: 0.25);
+          });
+      expect(gridlineContainers, isNotEmpty);
+
+      // resetToToday (imperative idle-reset entry point the shell calls)
+      // must not throw even mid-animation, and settles cleanly.
+      final boardState = tester.state<KioskBoardViewState>(
+        find.byType(KioskBoardView),
+      );
+      expect(() => boardState.resetToToday(), returnsNormally);
+      await tester.pumpAndSettle();
+
+      await finish(tester);
+    },
+  );
 }

@@ -18,12 +18,25 @@ final authStateProvider = StreamProvider<AuthState>(
 
 String? get currentUserId => _db.auth.currentUser?.id;
 
+/// The signed-in user's id, tracked through auth changes. Every RLS-protected
+/// data stream watches this so it is *recreated* on sign-in.
+///
+/// Why this matters: `.stream()` fetches its initial snapshot from PostgREST
+/// with whatever JWT is current at subscription time, and only re-fetches on a
+/// socket reconnect — not on a plain token update. On the OTP-code login path
+/// the app is already running with no session, so streams first opened as anon
+/// return nothing (RLS) and never refill. Rebuilding them on sign-in reopens
+/// each stream under the authenticated JWT. (The magic-link path avoids this
+/// because the session exists before any stream is first read.)
+final _authUidProvider = Provider<String?>((ref) {
+  ref.watch(authStateProvider);
+  return currentUserId;
+});
+
 /// The signed-in user's profile row (null before registration).
 /// Live — flips when approved or when the role changes.
 final myProfileProvider = StreamProvider<Profile?>((ref) {
-  final uid = ref.watch(
-          authStateProvider.select((a) => a.value?.session?.user.id)) ??
-      currentUserId;
+  final uid = ref.watch(_authUidProvider);
   if (uid == null) return Stream.value(null);
   return _db
       .from('profiles')
@@ -35,6 +48,7 @@ final myProfileProvider = StreamProvider<Profile?>((ref) {
 /// All profile rows the caller may see. Admins receive everyone (drives the
 /// approval screen); regular players only receive their own row under RLS.
 final profilesProvider = StreamProvider<List<Profile>>((ref) {
+  if (ref.watch(_authUidProvider) == null) return Stream.value(const []);
   return _db.from('profiles').stream(primaryKey: ['id']).map(
       (rows) => rows.map(Profile.fromJson).toList()
         ..sort((a, b) => a.displayName.compareTo(b.displayName)));
@@ -42,11 +56,13 @@ final profilesProvider = StreamProvider<List<Profile>>((ref) {
 
 /// Alley configuration singleton (null until the backend is seeded).
 final settingsProvider = StreamProvider<ScheduleSettings?>((ref) {
+  if (ref.watch(_authUidProvider) == null) return Stream.value(null);
   return _db.from('schedule_settings').stream(primaryKey: ['id']).map(
       (rows) => rows.isEmpty ? null : ScheduleSettings.fromJson(rows.first));
 });
 
 final timeBlocksProvider = StreamProvider<List<TimeBlock>>((ref) {
+  if (ref.watch(_authUidProvider) == null) return Stream.value(const []);
   return _db.from('time_blocks').stream(primaryKey: ['id']).map(
       (rows) => rows.map(TimeBlock.fromJson).toList()
         ..sort((a, b) {
@@ -59,6 +75,7 @@ final timeBlocksProvider = StreamProvider<List<TimeBlock>>((ref) {
 /// Approved player names from the `players` view. Views cannot stream —
 /// re-read on screen entry (and on kiosk idle reset in Phase 4).
 final playersProvider = FutureProvider<List<PlayerName>>((ref) async {
+  if (ref.watch(_authUidProvider) == null) return const [];
   final rows = await _db.from('players').select();
   return (rows as List)
       .map((r) => PlayerName.fromJson(r as Map<String, dynamic>))
@@ -73,6 +90,12 @@ final playersProvider = FutureProvider<List<PlayerName>>((ref) async {
 class Api {
   static Future<void> sendMagicLink(String email, String redirectTo) =>
       _db.auth.signInWithOtp(email: email, emailRedirectTo: redirectTo);
+
+  /// Fallback for mail apps that drop the code from the magic link
+  /// (e.g. Seznam's in-app browser): the e-mail also carries a numeric
+  /// code the user can type in.
+  static Future<void> verifyEmailOtp(String email, String code) =>
+      _db.auth.verifyOTP(type: OtpType.email, email: email, token: code.trim());
 
   static Future<void> signInWithPassword(String email, String password) =>
       _db.auth.signInWithPassword(email: email, password: password);
@@ -320,6 +343,7 @@ class StrandableReservation {
 /// channel; autoDispose closes channels for weeks no longer on screen.
 final weekReservationsProvider =
     StreamProvider.autoDispose.family<List<Reservation>, Day>((ref, monday) {
+  if (ref.watch(_authUidProvider) == null) return Stream.value(const []);
   final sunday = monday.addDays(6);
   return _db
       .from('reservations')
@@ -332,16 +356,19 @@ final weekReservationsProvider =
 });
 
 final dayOverridesProvider = StreamProvider<List<DayOverride>>((ref) {
+  if (ref.watch(_authUidProvider) == null) return Stream.value(const []);
   return _db.from('day_overrides').stream(primaryKey: ['date']).map(
       (rows) => rows.map(DayOverride.fromJson).toList());
 });
 
 final matchesProvider = StreamProvider<List<Match>>((ref) {
+  if (ref.watch(_authUidProvider) == null) return Stream.value(const []);
   return _db.from('matches').stream(primaryKey: ['id']).map(
       (rows) => rows.map(Match.fromJson).toList());
 });
 
 final rentalsProvider = StreamProvider<List<Rental>>((ref) {
+  if (ref.watch(_authUidProvider) == null) return Stream.value(const []);
   return _db.from('rentals').stream(primaryKey: ['id']).map(
       (rows) => rows.map(Rental.fromJson).toList());
 });
@@ -350,9 +377,7 @@ final rentalsProvider = StreamProvider<List<Rental>>((ref) {
 /// active count via activeReservationCount).
 final myActiveReservationsProvider =
     StreamProvider<List<Reservation>>((ref) {
-  final uid = ref.watch(
-      authStateProvider.select((a) => a.value?.session?.user.id)) ??
-      currentUserId;
+  final uid = ref.watch(_authUidProvider);
   if (uid == null) return Stream.value(const []);
   return _db
       .from('reservations')

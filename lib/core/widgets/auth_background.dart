@@ -1,6 +1,6 @@
 /// Shared chrome for the auth-family screens (login, register, waiting,
 /// kiosk login): a centered card floating over a subtle radial gradient
-/// backdrop, with the 🎳 logo in a gradient-bordered circle above it.
+/// backdrop, with the app logo in a gradient-bordered circle above it.
 /// Purely presentational — callers keep their own Scaffold/AppBar/state;
 /// this only wraps the body content, so no screen's behavior changes.
 library;
@@ -61,7 +61,7 @@ class AuthCard extends StatelessWidget {
   }
 }
 
-/// 🎳 logo inside a circle with a 2px indigo→cyan gradient border.
+/// App logo inside a circle with a 2px indigo→cyan gradient border.
 class AuthLogo extends StatelessWidget {
   const AuthLogo({super.key, this.size = 96});
 
@@ -87,7 +87,14 @@ class AuthLogo extends StatelessWidget {
           color: scheme.surface,
         ),
         alignment: Alignment.center,
-        child: Text('🎳', style: TextStyle(fontSize: size * 0.5)),
+        child: ClipOval(
+          child: Image.asset(
+            'assets/images/logo_circle.png',
+            width: size,
+            height: size,
+            fit: BoxFit.cover,
+          ),
+        ),
       ),
     );
   }
