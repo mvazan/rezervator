@@ -58,6 +58,101 @@ void main() {
     });
   });
 
+  group('PlayerName', () {
+    test('fromJson reads nick, defaults to empty', () {
+      final withNick = PlayerName.fromJson({
+        'id': 'p1',
+        'display_name': 'Ján',
+        'club': 'KK Praha',
+        'nick': 'Jenda',
+      });
+      expect(withNick.nick, 'Jenda');
+
+      final withoutNick = PlayerName.fromJson({
+        'id': 'p2',
+        'display_name': 'Eva',
+        'club': '',
+      });
+      expect(withoutNick.nick, '');
+    });
+  });
+
+  group('Match', () {
+    Match match({
+      String homeTeam = '',
+      String awayTeam = 'KK Slavoj',
+      int prepMinutes = 0,
+      HourMinute startsAt = const HourMinute(16, 30),
+    }) =>
+        Match(
+          id: 'm1',
+          date: Day(2026, 7, 8),
+          startsAt: startsAt,
+          endsAt: const HourMinute(18, 0),
+          homeTeam: homeTeam,
+          awayTeam: awayTeam,
+          prepMinutes: prepMinutes,
+          description: '',
+        );
+
+    test('title falls back to awayTeam alone when homeTeam is empty', () {
+      expect(match(homeTeam: '', awayTeam: 'KK Slavoj').title, 'KK Slavoj');
+    });
+
+    test('title combines home – away when homeTeam is set', () {
+      expect(
+        match(homeTeam: 'Sokol Brno', awayTeam: 'KK Slavoj').title,
+        'Sokol Brno – KK Slavoj',
+      );
+    });
+
+    test('blockingStart subtracts prepMinutes from startsAt', () {
+      final m = match(startsAt: const HourMinute(16, 30), prepMinutes: 30);
+      expect(m.blockingStart, const HourMinute(16, 0));
+    });
+
+    test('blockingStart is startsAt when prepMinutes is 0', () {
+      final m = match(startsAt: const HourMinute(16, 30), prepMinutes: 0);
+      expect(m.blockingStart, const HourMinute(16, 30));
+    });
+
+    test('blockingStart clamps to 00:00 instead of wrapping past midnight', () {
+      final m = match(startsAt: const HourMinute(0, 15), prepMinutes: 30);
+      expect(m.blockingStart, const HourMinute(0, 0));
+    });
+
+    test('fromJson reads home_team/away_team/prep_minutes round-trip', () {
+      final m = Match.fromJson({
+        'id': 'm2',
+        'date': '2026-07-08',
+        'starts_at': '16:30:00',
+        'ends_at': '18:00:00',
+        'home_team': 'Sokol Brno',
+        'away_team': 'KK Slavoj',
+        'prep_minutes': 30,
+        'description': 'Liga',
+      });
+      expect(m.homeTeam, 'Sokol Brno');
+      expect(m.awayTeam, 'KK Slavoj');
+      expect(m.prepMinutes, 30);
+      expect(m.title, 'Sokol Brno – KK Slavoj');
+      expect(m.blockingStart, const HourMinute(16, 0));
+    });
+
+    test('fromJson defaults prep_minutes to 0 when absent', () {
+      final m = Match.fromJson({
+        'id': 'm3',
+        'date': '2026-07-08',
+        'starts_at': '16:30:00',
+        'ends_at': '18:00:00',
+        'home_team': '',
+        'away_team': 'KK Slavoj',
+        'description': '',
+      });
+      expect(m.prepMinutes, 0);
+    });
+  });
+
   group('Rental.occursOn', () {
     Rental weekly({Day? from, Day? until}) => Rental(
           id: 'r1',

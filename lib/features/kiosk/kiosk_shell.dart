@@ -15,7 +15,7 @@ import '../../core/ui.dart';
 import '../../core/widgets/gradient_button.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
-import 'kiosk_week_view.dart';
+import 'kiosk_board_view.dart';
 import 'name_picker.dart';
 
 const _idleTimeout = Duration(seconds: 60);
@@ -33,7 +33,7 @@ class _KioskShellState extends ConsumerState<KioskShell> {
   Timer? _clockTimer;
   DateTime _now = DateTime.now();
   PlayerName? _selected;
-  int _weekOffset = 0;
+  final _boardKey = GlobalKey<KioskBoardViewState>();
 
   @override
   void initState() {
@@ -63,10 +63,11 @@ class _KioskShellState extends ConsumerState<KioskShell> {
     // dialog, which captured the previously selected player and would let
     // the next visitor book under their name.
     Navigator.of(context, rootNavigator: true).popUntil((r) => r.isFirst);
-    setState(() {
-      _selected = null;
-      _weekOffset = 0;
-    });
+    setState(() => _selected = null);
+    // Board horizontal scroll resets to today too (spec §1) — imperative
+    // because the board owns its own PageController; there's no offset
+    // field on this shell to reset via rebuild the way _weekOffset used to.
+    _boardKey.currentState?.resetToToday();
     ref.invalidate(playersProvider);
   }
 
@@ -96,15 +97,12 @@ class _KioskShellState extends ConsumerState<KioskShell> {
               _StatusBar(
                 now: _now,
                 selected: _selected,
-                weekOffset: _weekOffset,
                 onReserve: _openPicker,
                 onClearSelection: _clearSelection,
               ),
               Expanded(
-                child: KioskWeekView(
-                  weekOffset: _weekOffset,
-                  onWeekOffsetChanged: (offset) =>
-                      setState(() => _weekOffset = offset),
+                child: KioskBoardView(
+                  key: _boardKey,
                   selected: _selected,
                   onBooked: () {}, // selection persists — no-op by design.
                 ),
@@ -121,14 +119,12 @@ class _StatusBar extends ConsumerWidget {
   const _StatusBar({
     required this.now,
     required this.selected,
-    required this.weekOffset,
     required this.onReserve,
     required this.onClearSelection,
   });
 
   final DateTime now;
   final PlayerName? selected;
-  final int weekOffset;
   final VoidCallback onReserve;
   final VoidCallback onClearSelection;
 
@@ -140,7 +136,7 @@ class _StatusBar extends ConsumerWidget {
       return todaysMatches
           .map(
             (m) =>
-                '🏆 ${m.opponent} ${m.startsAt.display()}–${m.endsAt.display()}',
+                '🏆 ${m.title} ${m.startsAt.display()}–${m.endsAt.display()}',
           )
           .join(' · ');
     }

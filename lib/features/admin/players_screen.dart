@@ -36,6 +36,31 @@ class PlayersScreen extends ConsumerWidget {
         errorText: friendlyDbError,
       );
 
+  Future<void> _editNick(BuildContext context, Profile p) async {
+    final input = await promptText(
+      context,
+      title: 'Zkratka na tabuli',
+      hint: 'Tom P.',
+      initial: p.nick,
+    );
+    if (input == null || !context.mounted) return;
+    await tryAction(
+      context,
+      () => Api.setNick(p.id, input),
+      success: 'Uloženo.',
+      errorText: friendlyDbError,
+    );
+  }
+
+  /// "club · „nick“" (either half may be absent).
+  String? _subtitle(Profile p) {
+    final parts = [
+      if (p.club.isNotEmpty) p.club,
+      if (p.nick.isNotEmpty) '„${p.nick}“',
+    ];
+    return parts.isEmpty ? null : parts.join(' · ');
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final profile = ref.watch(myProfileProvider).value;
@@ -83,7 +108,7 @@ class PlayersScreen extends ConsumerWidget {
           for (final p in approved)
             ListTile(
               title: Text(p.displayName),
-              subtitle: p.club.isEmpty ? null : Text(p.club),
+              subtitle: _subtitle(p) == null ? null : Text(_subtitle(p)!),
               trailing: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -101,6 +126,8 @@ class PlayersScreen extends ConsumerWidget {
                           _setRole(context, p, Role.player);
                         case 'make_kiosk':
                           _makeKiosk(context, p);
+                        case 'edit_nick':
+                          _editNick(context, p);
                       }
                     },
                     itemBuilder: (context) => [
@@ -115,6 +142,10 @@ class PlayersScreen extends ConsumerWidget {
                       const PopupMenuItem(
                         value: 'make_kiosk',
                         child: Text('Nastavit jako kiosk'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'edit_nick',
+                        child: Text('Zkratka na tabuli…'),
                       ),
                     ],
                   ),
