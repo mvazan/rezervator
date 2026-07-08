@@ -109,6 +109,7 @@ class Profile {
     required this.status,
     this.fcmToken,
     this.nick = '',
+    this.clubId,
   });
 
   final String id;
@@ -121,6 +122,9 @@ class Profile {
 
   /// Short board name (<=14 chars); empty means "use displayName".
   final String nick;
+
+  /// FK into `clubs`; null when the player has no assigned club.
+  final String? clubId;
 
   bool get isApproved => status == ProfileStatus.approved;
   bool get isAdmin => role == Role.admin && isApproved;
@@ -136,6 +140,28 @@ class Profile {
             : ProfileStatus.pending,
         fcmToken: json['fcm_token'] as String?,
         nick: json['nick'] as String? ?? '',
+        clubId: json['club_id'] as String?,
+      );
+}
+
+/// A club (spec §2): a named group of players sharing a palette color.
+class Club {
+  const Club({
+    required this.id,
+    required this.name,
+    this.colorIndex = -1,
+  });
+
+  final String id;
+  final String name;
+
+  /// Palette index 0–11, or -1 for "no color assigned".
+  final int colorIndex;
+
+  factory Club.fromJson(Map<String, dynamic> json) => Club(
+        id: json['id'] as String,
+        name: json['name'] as String,
+        colorIndex: json['color'] as int? ?? -1,
       );
 }
 
@@ -146,6 +172,8 @@ class PlayerName {
     required this.displayName,
     required this.club,
     this.nick = '',
+    this.clubId,
+    this.clubColor = -1,
   });
 
   final String id;
@@ -155,11 +183,19 @@ class PlayerName {
   /// Short board name (<=14 chars); empty means "use displayName".
   final String nick;
 
+  /// FK into `clubs`; null when the player has no assigned club.
+  final String? clubId;
+
+  /// Palette index 0–11 of the player's club, or -1 for "no color".
+  final int clubColor;
+
   factory PlayerName.fromJson(Map<String, dynamic> json) => PlayerName(
         id: json['id'] as String,
         displayName: json['display_name'] as String,
         club: json['club'] as String? ?? '',
         nick: json['nick'] as String? ?? '',
+        clubId: json['club_id'] as String?,
+        clubColor: json['club_color'] as int? ?? -1,
       );
 }
 
@@ -169,6 +205,7 @@ class ScheduleSettings {
     required this.trainingWeekdays,
     required this.bookingHorizonDays,
     required this.maxActiveReservations,
+    this.kioskDark = true,
   });
 
   final int laneCount;
@@ -177,6 +214,9 @@ class ScheduleSettings {
   final Set<int> trainingWeekdays;
   final int bookingHorizonDays;
   final int maxActiveReservations;
+
+  /// Whether the kiosk board renders in the dark theme (spec §4).
+  final bool kioskDark;
 
   static const defaults = ScheduleSettings(
     laneCount: 4,
@@ -193,6 +233,7 @@ class ScheduleSettings {
         },
         bookingHorizonDays: json['booking_horizon_days'] as int,
         maxActiveReservations: json['max_active_reservations'] as int,
+        kioskDark: json['kiosk_dark'] as bool? ?? true,
       );
 }
 
@@ -320,11 +361,15 @@ class Rental {
     required this.validFrom,
     required this.validUntil,
     required this.note,
+    this.color = -2,
   });
 
   final String id;
   final String renterName;
   final List<int> lanes;
+
+  /// Palette index 0–11, or -2 for "use the default rental tint".
+  final int color;
 
   /// Exactly one of [date] (one-time) and [weekday] (weekly, ISO) is set —
   /// enforced by a DB check constraint.
@@ -359,6 +404,7 @@ class Rental {
             ? null
             : Day.parse(json['valid_until'] as String),
         note: json['note'] as String? ?? '',
+        color: json['color'] as int? ?? -2,
       );
 }
 
