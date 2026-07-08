@@ -140,16 +140,21 @@ class PlayerName {
     required this.id,
     required this.displayName,
     required this.club,
+    this.nick = '',
   });
 
   final String id;
   final String displayName;
   final String club;
 
+  /// Short board name (<=14 chars); empty means "use displayName".
+  final String nick;
+
   factory PlayerName.fromJson(Map<String, dynamic> json) => PlayerName(
         id: json['id'] as String,
         displayName: json['display_name'] as String,
         club: json['club'] as String? ?? '',
+        nick: json['nick'] as String? ?? '',
       );
 }
 
@@ -257,7 +262,9 @@ class Match {
     required this.date,
     required this.startsAt,
     required this.endsAt,
-    required this.opponent,
+    required this.homeTeam,
+    required this.awayTeam,
+    this.prepMinutes = 0,
     required this.description,
   });
 
@@ -265,15 +272,33 @@ class Match {
   final Day date;
   final HourMinute startsAt;
   final HourMinute endsAt;
-  final String opponent;
+  final String homeTeam;
+  final String awayTeam;
+
+  /// Minutes of lane prep required before [startsAt]; reservations that
+  /// overlap this window (as well as the match itself) are blocked.
+  final int prepMinutes;
   final String description;
+
+  /// `'{home} – {away}'`, or just `away` when there's no home team.
+  String get title => homeTeam.isEmpty ? awayTeam : '$homeTeam – $awayTeam';
+
+  /// [startsAt] minus [prepMinutes], clamped to 00:00 (never wraps past
+  /// midnight into the previous day).
+  HourMinute get blockingStart {
+    final minutes = startsAt.minutesFromMidnight - prepMinutes;
+    if (minutes <= 0) return const HourMinute(0, 0);
+    return HourMinute(minutes ~/ 60, minutes % 60);
+  }
 
   factory Match.fromJson(Map<String, dynamic> json) => Match(
         id: json['id'] as String,
         date: Day.parse(json['date'] as String),
         startsAt: HourMinute.parse(json['starts_at'] as String),
         endsAt: HourMinute.parse(json['ends_at'] as String),
-        opponent: json['opponent'] as String,
+        homeTeam: json['home_team'] as String? ?? '',
+        awayTeam: json['away_team'] as String,
+        prepMinutes: json['prep_minutes'] as int? ?? 0,
         description: json['description'] as String? ?? '',
       );
 }

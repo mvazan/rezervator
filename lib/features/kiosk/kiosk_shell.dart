@@ -140,7 +140,7 @@ class _StatusBar extends ConsumerWidget {
       return todaysMatches
           .map(
             (m) =>
-                '🏆 ${m.opponent} ${m.startsAt.display()}–${m.endsAt.display()}',
+                '🏆 ${m.title} ${m.startsAt.display()}–${m.endsAt.display()}',
           )
           .join(' · ');
     }

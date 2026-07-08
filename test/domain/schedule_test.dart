@@ -59,13 +59,16 @@ void main() {
     Day? date,
     HourMinute startsAt = const HourMinute(16, 30),
     HourMinute endsAt = const HourMinute(17, 30),
+    int prepMinutes = 0,
   }) =>
       Match(
         id: 'm1',
         date: date ?? tuesday,
         startsAt: startsAt,
         endsAt: endsAt,
-        opponent: 'KK Slavoj',
+        homeTeam: '',
+        awayTeam: 'KK Slavoj',
+        prepMinutes: prepMinutes,
         description: '',
       );
 
@@ -201,6 +204,86 @@ void main() {
       final day = build(matches: [match(date: wednesday)]).days[2];
       expect(day, isA<ClosedDay>());
       expect(day.matches, hasLength(1));
+    });
+
+    test('prep window blocks a block ending exactly at blockingStart is free',
+        () {
+      // Match starts 17:00, prep 60 -> blockingStart 16:00. b1 ends 17:00,
+      // which is inside [16:00, endsAt) of the match's real window? No —
+      // real window is [17:00, ends), b1 (16:00-17:00) only touches prep.
+      final day = build(matches: [
+        match(startsAt: const HourMinute(17, 0), endsAt: const HourMinute(18, 0),
+            prepMinutes: 60),
+      ]).days[1] as OpenDay;
+      final b1Slot = day.slot('b1', 1);
+      expect(b1Slot, isA<MatchSlot>());
+      expect((b1Slot as MatchSlot).isPrep, isTrue);
+
+      // A block ending exactly at blockingStart (16:00) does not overlap.
+      final day2 = build(
+        blocks: const [
+          TimeBlock(
+              id: 'b0',
+              startsAt: HourMinute(15, 0),
+              endsAt: HourMinute(16, 0),
+              position: -1,
+              active: true),
+          b1,
+          b2,
+          b3,
+        ],
+        matches: [
+          match(startsAt: const HourMinute(17, 0), endsAt: const HourMinute(18, 0),
+              prepMinutes: 60),
+        ],
+      ).days[1] as OpenDay;
+      expect(day2.slot('b0', 1), isA<FreeSlot>());
+    });
+
+    test('isPrep is true only for cells that overlap prep but not the real match window',
+        () {
+      // Match starts 17:00, prep 60 -> blockingStart 16:00. b1 (16:00-17:00)
+      // is prep-only; b2 (17:00-18:00) overlaps the real match window.
+      final day = build(matches: [
+        match(startsAt: const HourMinute(17, 0), endsAt: const HourMinute(18, 0),
+            prepMinutes: 60),
+      ]).days[1] as OpenDay;
+      final prepSlot = day.slot('b1', 1) as MatchSlot;
+      final realSlot = day.slot('b2', 1) as MatchSlot;
+      expect(prepSlot.isPrep, isTrue);
+      expect(realSlot.isPrep, isFalse);
+    });
+
+    test('isPrep is false when the block overlaps both prep and the real window',
+        () {
+      // Match starts 16:30 (mid-b1), prep 45 -> blockingStart 15:45. b1
+      // (16:00-17:00) overlaps the real window [16:30, ends) too.
+      final day = build(matches: [
+        match(startsAt: const HourMinute(16, 30), endsAt: const HourMinute(17, 30),
+            prepMinutes: 45),
+      ]).days[1] as OpenDay;
+      final slot = day.slot('b1', 1) as MatchSlot;
+      expect(slot.isPrep, isFalse);
+    });
+
+    test('midnight clamp: match 00:15 with 30min prep blocks from 00:00', () {
+      const bMidnight = TimeBlock(
+          id: 'bm',
+          startsAt: HourMinute(0, 0),
+          endsAt: HourMinute(0, 15),
+          position: -1,
+          active: true);
+      final day = build(
+        blocks: const [bMidnight, b1, b2, b3],
+        matches: [
+          match(startsAt: const HourMinute(0, 15), endsAt: const HourMinute(1, 0),
+              prepMinutes: 30),
+        ],
+      ).days[1] as OpenDay;
+      // Without clamping, blockingStart would be -00:15 (wrap); clamped to
+      // 00:00 it still blocks the 00:00-00:15 block, and as prep-only.
+      final slot = day.slot('bm', 1) as MatchSlot;
+      expect(slot.isPrep, isTrue);
     });
   });
 

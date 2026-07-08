@@ -168,14 +168,14 @@ class Api {
     required Day date,
     required HourMinute startsAt,
     required HourMinute endsAt,
-    required String opponent,
+    required String awayTeam,
     String description = '',
   }) async {
     final row = {
       'date': date.toSql(),
       'starts_at': startsAt.toSql(),
       'ends_at': endsAt.toSql(),
-      'opponent': opponent,
+      'away_team': awayTeam,
       'description': description,
       if (id == null) 'created_by': currentUserId!,
     };

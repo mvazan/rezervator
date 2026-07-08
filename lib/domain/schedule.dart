@@ -34,9 +34,15 @@ class RentedSlot extends SlotState {
 
 class MatchSlot extends SlotState {
   const MatchSlot(this.match,
-      {required super.inPast, required super.beyondHorizon});
+      {required super.inPast, required super.beyondHorizon, this.isPrep = false});
 
   final Match match;
+
+  /// True when this cell is covered only by the match's prep-time extension
+  /// ([Match.blockingStart]..[Match.startsAt]) and does NOT overlap the real
+  /// `[startsAt, endsAt)` match window — UI shows "🛠 Příprava drah" instead
+  /// of the match banner.
+  final bool isPrep;
 }
 
 sealed class DaySchedule {
@@ -167,13 +173,15 @@ WeekSchedule buildWeekSchedule({
               block.startsAt.minutesFromMidnight <= now.minutesFromMidnight);
       final blockMatch = _firstWhereOrNull(
           dayMatches,
-          (Match m) =>
-              _overlaps(block.startsAt, block.endsAt, m.startsAt, m.endsAt));
+          (Match m) => _overlaps(
+              block.startsAt, block.endsAt, m.blockingStart, m.endsAt));
       for (var lane = 1; lane <= settings.laneCount; lane++) {
         final SlotState state;
         if (blockMatch != null) {
+          final isPrep = !_overlaps(block.startsAt, block.endsAt,
+              blockMatch.startsAt, blockMatch.endsAt);
           state = MatchSlot(blockMatch,
-              inPast: inPast, beyondHorizon: beyondHorizon);
+              inPast: inPast, beyondHorizon: beyondHorizon, isPrep: isPrep);
         } else {
           final laneRental = _firstWhereOrNull(
               dayRentals,

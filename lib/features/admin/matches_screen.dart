@@ -13,7 +13,7 @@ class MatchesScreen extends ConsumerWidget {
     final confirmed = await confirmDialog(
       context,
       title: 'Smazat zápas?',
-      message: 'Opravdu smazat zápas se soupeřem ${match.opponent}?',
+      message: 'Opravdu smazat zápas se soupeřem ${match.awayTeam}?',
     );
     if (!confirmed) return;
     if (!context.mounted) return;
@@ -49,7 +49,7 @@ class MatchesScreen extends ConsumerWidget {
                     title: Text(
                       '${dayLabel(match.date)} · '
                       '${match.startsAt.display()}–${match.endsAt.display()} · '
-                      '${match.opponent}',
+                      '${match.awayTeam}',
                     ),
                     subtitle: match.description.isEmpty
                         ? null
@@ -100,7 +100,7 @@ class _MatchDialogState extends State<_MatchDialog> {
   Day? _date;
   HourMinute? _start;
   HourMinute? _end;
-  final _opponent = TextEditingController();
+  final _awayTeam = TextEditingController();
   final _description = TextEditingController();
   bool _saving = false;
 
@@ -111,13 +111,13 @@ class _MatchDialogState extends State<_MatchDialog> {
     _date = existing?.date;
     _start = existing?.startsAt;
     _end = existing?.endsAt;
-    _opponent.text = existing?.opponent ?? '';
+    _awayTeam.text = existing?.awayTeam ?? '';
     _description.text = existing?.description ?? '';
   }
 
   @override
   void dispose() {
-    _opponent.dispose();
+    _awayTeam.dispose();
     _description.dispose();
     super.dispose();
   }
@@ -173,8 +173,8 @@ class _MatchDialogState extends State<_MatchDialog> {
       snack(context, 'Konec musí být po začátku.');
       return;
     }
-    final opponent = _opponent.text.trim();
-    if (opponent.isEmpty) {
+    final awayTeam = _awayTeam.text.trim();
+    if (awayTeam.isEmpty) {
       snack(context, 'Vyplň soupeře.');
       return;
     }
@@ -187,7 +187,7 @@ class _MatchDialogState extends State<_MatchDialog> {
         date: date,
         startsAt: start,
         endsAt: end,
-        opponent: opponent,
+        awayTeam: awayTeam,
         description: _description.text.trim(),
       ),
       success: 'Zápas uložen. Kolidující rezervace byly zrušeny.',
@@ -229,7 +229,7 @@ class _MatchDialogState extends State<_MatchDialog> {
             ),
             const SizedBox(height: 8),
             TextField(
-              controller: _opponent,
+              controller: _awayTeam,
               decoration: const InputDecoration(labelText: 'Soupeř'),
             ),
             const SizedBox(height: 8),
