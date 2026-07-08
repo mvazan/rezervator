@@ -168,9 +168,9 @@ Fázi 4). Push notifikace zatím spí, viz poznámka na konci.
      hráči by měl přijít e-mail **„Trénink zrušen"**.
    - Pokud e-mail nedorazí, zkontroluj **Edge Functions → notify → Logs**
      v Supabase dashboardu a ověř shodu `WEBHOOK_SECRET` z kroku 3 výše.
-6. **Push notifikace zatím nejsou aktivní** — potřebují `FIREBASE_SERVICE_ACCOUNT`,
-   který se nastavuje až ve Fázi 5. Do té doby chodí všem uživatelům e-mail,
-   takže nikomu žádná notifikace neujde — jen bez FCM push zvonění na mobilu.
+6. **Push notifikace** — nastavení viz Fáze 8. Bez něj chodí všem e-mail;
+   s ním dostanou uživatelé s nainstalovanou Android appkou push, ostatní
+   (web, kiosek) dál e-mail.
 
 ## 7. Kiosek (Fáze 4)
 
@@ -291,6 +291,17 @@ a serverovou (`FIREBASE_SERVICE_ACCOUNT`):
    předává do web buildu automaticky. Necháš-li je nevyplněné, web build
    proběhne úplně stejně jako dřív, jen bez push (na webu push stejně
    nefunguje — týká se jen Android/iOS buildů).
+3b. **Nutné pro Android push:** ve Firebase u té Android app stáhni
+   **`google-services.json`** a ulož ho do `android/app/google-services.json`
+   (soubor je v `.gitignore`, protože obsahuje klíče — vzor viz
+   `android/app/google-services.json.example`). Bez něj se **nativní**
+   `FirebaseApp[DEFAULT]` na Androidu neinicializuje (v logu
+   „Default FirebaseApp failed to initialize because no default options were
+   found") a `firebase_messaging` nikdy nevydá token — samotné
+   `--dart-define` hodnoty z bodu 2 na to nestačí, protože jde o
+   Dart-side inicializaci. Gradle plugin `com.google.gms.google-services`
+   je už v projektu zapojený, takže stačí ten soubor doplnit a APK
+   přestavět.
 4. Server-side: nastav Supabase secret `FIREBASE_SERVICE_ACCOUNT` (JSON
    service-account klíč z **Firebase → Project settings → Service accounts
    → Generate new private key**, vlož **celý obsah** staženého souboru jako

@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:rezervator/core/ui.dart' show today;
+import 'package:rezervator/core/ui.dart' show today, dayFull;
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/schedule/week_screen.dart';
@@ -133,7 +133,19 @@ void main() {
   testWidgets('free bookable cell opens booking dialog', (tester) async {
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
-    await tester.tap(find.byIcon(Icons.add).first);
+    // Book in `tomorrow`'s section, never in today's — the harness block
+    // (22:58–23:59) makes today's slot `inPast` (so not bookable) once the
+    // suite runs after 22:58, which would flake a `.first` (Monday) tap.
+    final addInTomorrow = find.descendant(
+      of: find.ancestor(
+        of: find.text(dayFull(tomorrow)),
+        matching: find.byType(Card),
+      ),
+      matching: find.byIcon(Icons.add),
+    );
+    await tester.ensureVisible(addInTomorrow.first);
+    await tester.pumpAndSettle();
+    await tester.tap(addInTomorrow.first);
     await tester.pumpAndSettle();
     expect(find.text('Rezervovat termín?'), findsOneWidget);
   });
@@ -235,6 +247,27 @@ void main() {
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
     expect(find.byType(DayChipStrip), findsOneWidget);
+
+    // Select a day strictly after today within the shown week, so the visible
+    // day is never `inPast` (today's slot goes past once the suite runs after
+    // the harness block's start). today.weekday (1..7) is the 0-based index of
+    // tomorrow within this Mon..Sun strip; when today is Sunday there is no
+    // later day in-week, so tap the current week's Saturday and shift a week
+    // forward instead — every path lands on a future, bookable day.
+    final chips = find.descendant(
+      of: find.byType(DayChipStrip),
+      matching: find.byType(InkWell),
+    );
+    final t = today();
+    if (t.weekday < DateTime.sunday) {
+      await tester.tap(chips.at(t.weekday)); // tomorrow, same week
+    } else {
+      // Sunday: go to next week and land on its Monday.
+      await tester.tap(find.byIcon(Icons.chevron_right));
+      await tester.pumpAndSettle();
+      await tester.tap(chips.at(0));
+    }
+    await tester.pumpAndSettle();
 
     await tester.tap(find.byIcon(Icons.add).first);
     await tester.pumpAndSettle();
