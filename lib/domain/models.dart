@@ -108,6 +108,7 @@ class Profile {
     required this.role,
     required this.status,
     this.fcmToken,
+    this.nick = '',
   });
 
   final String id;
@@ -117,6 +118,9 @@ class Profile {
   final Role role;
   final ProfileStatus status;
   final String? fcmToken;
+
+  /// Short board name (<=14 chars); empty means "use displayName".
+  final String nick;
 
   bool get isApproved => status == ProfileStatus.approved;
   bool get isAdmin => role == Role.admin && isApproved;
@@ -131,6 +135,7 @@ class Profile {
             ? ProfileStatus.approved
             : ProfileStatus.pending,
         fcmToken: json['fcm_token'] as String?,
+        nick: json['nick'] as String? ?? '',
       );
 }
 

@@ -13,7 +13,7 @@ class MatchesScreen extends ConsumerWidget {
     final confirmed = await confirmDialog(
       context,
       title: 'Smazat zápas?',
-      message: 'Opravdu smazat zápas se soupeřem ${match.awayTeam}?',
+      message: 'Opravdu smazat zápas ${match.title}?',
     );
     if (!confirmed) return;
     if (!context.mounted) return;
@@ -49,7 +49,7 @@ class MatchesScreen extends ConsumerWidget {
                     title: Text(
                       '${dayLabel(match.date)} · '
                       '${match.startsAt.display()}–${match.endsAt.display()} · '
-                      '${match.awayTeam}',
+                      '${match.title}',
                     ),
                     subtitle: match.description.isEmpty
                         ? null
@@ -85,8 +85,12 @@ class MatchesScreen extends ConsumerWidget {
   }
 }
 
+/// Prep-minute presets shown as SegmentedButton segments; anything else
+/// selects the "Jiná…" (custom) segment.
+const _prepPresets = [0, 30, 60];
+
 /// Add/edit dialog: date + two time pickers (end defaults to start + 3h),
-/// opponent (required) and description (optional).
+/// home team (optional), away team (required) and description (optional).
 class _MatchDialog extends StatefulWidget {
   const _MatchDialog({this.existing});
 
@@ -100,8 +104,10 @@ class _MatchDialogState extends State<_MatchDialog> {
   Day? _date;
   HourMinute? _start;
   HourMinute? _end;
+  final _homeTeam = TextEditingController();
   final _awayTeam = TextEditingController();
   final _description = TextEditingController();
+  int _prepMinutes = 0;
   bool _saving = false;
 
   @override
@@ -111,12 +117,15 @@ class _MatchDialogState extends State<_MatchDialog> {
     _date = existing?.date;
     _start = existing?.startsAt;
     _end = existing?.endsAt;
+    _homeTeam.text = existing?.homeTeam ?? '';
     _awayTeam.text = existing?.awayTeam ?? '';
     _description.text = existing?.description ?? '';
+    _prepMinutes = existing?.prepMinutes ?? 0;
   }
 
   @override
   void dispose() {
+    _homeTeam.dispose();
     _awayTeam.dispose();
     _description.dispose();
     super.dispose();
@@ -161,6 +170,24 @@ class _MatchDialogState extends State<_MatchDialog> {
     if (picked != null) setState(() => _end = picked);
   }
 
+  Future<void> _pickCustomPrep() async {
+    final input = await promptText(
+      context,
+      title: 'Příprava drah',
+      hint: '0–240',
+      initial: _prepMinutes.toString(),
+      keyboardType: TextInputType.number,
+      suffixText: 'min',
+    );
+    if (input == null) return;
+    final minutes = int.tryParse(input);
+    if (minutes == null || minutes < 0 || minutes > 240) {
+      if (mounted) snack(context, 'Zadej 0–240 minut.');
+      return;
+    }
+    setState(() => _prepMinutes = minutes);
+  }
+
   Future<void> _save() async {
     final date = _date;
     final start = _start;
@@ -175,7 +202,7 @@ class _MatchDialogState extends State<_MatchDialog> {
     }
     final awayTeam = _awayTeam.text.trim();
     if (awayTeam.isEmpty) {
-      snack(context, 'Vyplň soupeře.');
+      snack(context, 'Vyplň hosty.');
       return;
     }
 
@@ -187,7 +214,9 @@ class _MatchDialogState extends State<_MatchDialog> {
         date: date,
         startsAt: start,
         endsAt: end,
+        homeTeam: _homeTeam.text.trim(),
         awayTeam: awayTeam,
+        prepMinutes: _prepMinutes,
         description: _description.text.trim(),
       ),
       success: 'Zápas uložen. Kolidující rezervace byly zrušeny.',
@@ -229,13 +258,50 @@ class _MatchDialogState extends State<_MatchDialog> {
             ),
             const SizedBox(height: 8),
             TextField(
+              controller: _homeTeam,
+              decoration: const InputDecoration(labelText: 'Domácí'),
+            ),
+            const SizedBox(height: 8),
+            TextField(
               controller: _awayTeam,
-              decoration: const InputDecoration(labelText: 'Soupeř'),
+              decoration: const InputDecoration(labelText: 'Hosté'),
             ),
             const SizedBox(height: 8),
             TextField(
               controller: _description,
               decoration: const InputDecoration(labelText: 'Popis'),
+            ),
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Příprava drah',
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+            ),
+            const SizedBox(height: 4),
+            SegmentedButton<int>(
+              segments: [
+                for (final preset in _prepPresets)
+                  ButtonSegment(value: preset, label: Text('$preset min')),
+                ButtonSegment(
+                  value: -1,
+                  label: Text(
+                    _prepPresets.contains(_prepMinutes)
+                        ? 'Jiná…'
+                        : '$_prepMinutes min',
+                  ),
+                ),
+              ],
+              selected: {_prepPresets.contains(_prepMinutes) ? _prepMinutes : -1},
+              onSelectionChanged: (selected) {
+                final value = selected.first;
+                if (value == -1) {
+                  _pickCustomPrep();
+                } else {
+                  setState(() => _prepMinutes = value);
+                }
+              },
             ),
           ],
         ),

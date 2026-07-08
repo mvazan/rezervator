@@ -88,6 +88,7 @@ String friendlyDbError(Object error) {
     'player_not_approved': 'Hráč ještě není schválený.',
     'not_allowed': 'Na tohle nemáš oprávnění.',
     'cannot_demote_self': 'Sám sebe správcovství nezbavíš.',
+    'nick_too_long': 'Zkratka je moc dlouhá (max 14 znaků).',
   };
   for (final entry in messages.entries) {
     if (raw.contains(entry.key)) return entry.value;

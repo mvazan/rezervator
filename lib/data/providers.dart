@@ -131,6 +131,25 @@ class Api {
         'position': position,
       });
 
+  /// Inserts a new inactive "special" block for the day-override custom-times
+  /// editor (see [matchSpecialBlocks]) and returns its id.
+  static Future<String> addSpecialTimeBlock(
+    HourMinute start,
+    HourMinute end,
+  ) async {
+    final row = await _db
+        .from('time_blocks')
+        .insert({
+          'starts_at': start.toSql(),
+          'ends_at': end.toSql(),
+          'position': start.minutesFromMidnight,
+          'active': false,
+        })
+        .select('id')
+        .single();
+    return row['id'] as String;
+  }
+
   static Future<void> updateTimeBlock(String id,
           {HourMinute? startsAt, HourMinute? endsAt, int? position, bool? active}) =>
       _db.from('time_blocks').update({
@@ -168,14 +187,18 @@ class Api {
     required Day date,
     required HourMinute startsAt,
     required HourMinute endsAt,
+    String homeTeam = '',
     required String awayTeam,
+    int prepMinutes = 0,
     String description = '',
   }) async {
     final row = {
       'date': date.toSql(),
       'starts_at': startsAt.toSql(),
       'ends_at': endsAt.toSql(),
+      'home_team': homeTeam,
       'away_team': awayTeam,
+      'prep_minutes': prepMinutes,
       'description': description,
       if (id == null) 'created_by': currentUserId!,
     };
@@ -227,6 +250,10 @@ class Api {
   // --- admin: roles ---
   static Future<void> setRole(String userId, Role role) =>
       _db.rpc('set_role', params: {'p_user_id': userId, 'p_role': role.name});
+
+  // --- admin: nick (board short name) ---
+  static Future<void> setNick(String userId, String nick) =>
+      _db.rpc('set_nick', params: {'p_user_id': userId, 'p_nick': nick});
 
   // --- admin: reports ---
   static Future<List<AttendanceRow>> monthlyAttendance(
