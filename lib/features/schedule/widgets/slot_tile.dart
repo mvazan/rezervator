@@ -8,6 +8,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../../../core/ui.dart';
+import '../../../domain/models.dart';
 import '../../../domain/schedule.dart';
 
 enum SlotTileSize { compact, large }
@@ -186,5 +187,80 @@ class SlotTile extends StatelessWidget {
       borderRadius: decoration?.borderRadius?.resolve(TextDirection.ltr),
       child: body,
     );
+  }
+}
+
+/// Resolves the same booking/cancel policy the original inline `_SlotCell`
+/// computed (canBook/canCancel, admin exemptions, name lookup) into the slim
+/// [SlotTile] contract: a display name, isMine/quiet flags, and a single
+/// resolved tap handler (or null to render the cell inert). Shared by the
+/// week list view (compact tiles) and the day pager view (large tiles) so
+/// the policy has exactly one implementation regardless of layout.
+Widget slotTileFor({
+  required OpenDay day,
+  required TimeBlock block,
+  required int lane,
+  required SlotTileSize size,
+  required Profile? me,
+  required int myCount,
+  required ScheduleSettings settings,
+  required Map<String, String> nameById,
+  required bool interactive,
+  required void Function(Day, TimeBlock, int lane) onBook,
+  required void Function(Day, TimeBlock, Reservation, {required bool ownFuture})
+  onCancel,
+}) {
+  final state = day.slot(block.id, lane);
+  switch (state) {
+    case MatchSlot():
+    case RentedSlot():
+      return SlotTile(state: state, size: size);
+    case ReservedSlot(:final reservation):
+      final isMine = me != null && reservation.playerId == me.id;
+      final name = nameById[reservation.playerId] ?? '?';
+      // Pozn.: RPC dovoluje rezervovat i dnešní už začatý blok (kontroluje
+      // jen p_date < today); klient ho schovává jako inPast. Kiosk může
+      // chtít tuto benevolenci využít.
+      final ownFuture = isMine && canCancel(state: state, myPlayerId: me.id);
+      // Admins may cancel any reservation (own/foreign, past/future); a
+      // non-admin may only cancel their own not-yet-started one.
+      final cancellable =
+          interactive && me != null && (me.isAdmin || ownFuture);
+      return SlotTile(
+        state: state,
+        size: size,
+        playerName: name,
+        isMine: isMine,
+        onTap: cancellable
+            ? () => onCancel(day.date, block, reservation, ownFuture: ownFuture)
+            : null,
+      );
+    case FreeSlot():
+      final isAdmin = me?.isAdmin ?? false;
+      final bookable =
+          interactive &&
+          me != null &&
+          canBook(
+            state: state,
+            myActiveCount: myCount,
+            settings: settings,
+            isAdmin: isAdmin,
+          );
+      // Cells only bookable through the admin exemption (inPast or
+      // beyondHorizon, which a regular player could never book) render the
+      // '+' quieter, so admins can tell at a glance which slots are
+      // ordinarily locked.
+      final normallyBookable = canBook(
+        state: state,
+        myActiveCount: myCount,
+        settings: settings,
+        isAdmin: false,
+      );
+      return SlotTile(
+        state: state,
+        size: size,
+        quiet: !normallyBookable,
+        onTap: bookable ? () => onBook(day.date, block, lane) : null,
+      );
   }
 }

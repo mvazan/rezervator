@@ -236,6 +236,56 @@ void main() {
     expect(find.text('Rezervovat termín?'), findsOneWidget);
   });
 
+  testWidgets(
+    'day view: selecting the last day and swiping past the week boundary '
+    'shifts the week with no exceptions',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({'schedule_view': 'day'});
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+      expect(find.byType(DayChipStrip), findsOneWidget);
+
+      // The header's "20.4.–3.5." range label is the same Text shown above
+      // both views (see WeekScreen.build's `header`) — capturing it before
+      // and after the swipe is a week-offset-agnostic way to assert the
+      // week actually shifted, without this test re-deriving `today()`'s
+      // Monday itself (today() is real wall-clock time, not fixed here).
+      String rangeLabelText() => tester
+          .widgetList<Text>(find.byType(Text))
+          .map((t) => t.data)
+          .whereType<String>()
+          .firstWhere((s) => s.contains('–'));
+      final before = rangeLabelText();
+
+      // Select the last day (Sunday, chip index 6) — one InkWell per chip,
+      // in Monday..Sunday order, under DayChipStrip.
+      final chips = find.descendant(
+        of: find.byType(DayChipStrip),
+        matching: find.byType(InkWell),
+      );
+      expect(chips, findsNWidgets(7));
+      await tester.tap(chips.at(6));
+      await tester.pumpAndSettle();
+
+      // A single fling on the PageView lands on exactly the next page
+      // regardless of velocity (PageScrollPhysics always snaps to the
+      // nearest page in the fling's direction) — from Sunday (the last real
+      // page) that's the sentinel-after page, which is the boundary swipe
+      // this fix targets (day_pager_view.dart's _onPageChanged sentinelAfter
+      // branch → onShiftWeek → the shell's setState → didUpdateWidget's
+      // programmatic resync of the PageController). Before the fix, that
+      // resync's synchronous jumpToPage during didUpdateWidget (itself
+      // called mid-build) threw "setState() or markNeedsBuild() called
+      // during build" in debug — pumpAndSettle would surface it as a thrown
+      // FlutterError, failing this test.
+      await tester.fling(find.byType(PageView), const Offset(-400, 0), 800);
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(rangeLabelText(), isNot(equals(before)));
+    },
+  );
+
   testWidgets('cells stay inert while weekReservationsProvider never emits', (
     tester,
   ) async {

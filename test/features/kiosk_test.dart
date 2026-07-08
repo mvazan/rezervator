@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rezervator/core/theme.dart';
 import 'package:rezervator/core/ui.dart' show today;
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
@@ -58,10 +59,17 @@ void main() {
   /// Builds a kiosk-profile app harness, wiring the same provider set as
   /// `week_screen_test.dart`'s `app()` helper directly around [KioskShell]
   /// (no AuthGate/role routing — the shell is pumped in isolation).
+  ///
+  /// [theme] defaults to Flutter's own default (unspecified, as every
+  /// pre-existing test here relied on) — pass an explicit light theme to
+  /// reproduce the real app's actual light/dark split (see main.dart's
+  /// `theme: buildTheme(Brightness.light)`) for tests that care whether the
+  /// kiosk correctly stays dark regardless of the ambient app theme.
   Widget kioskApp({
     List<Match> matches = const [],
     List<Reservation> reservations = const [],
     List<PlayerName>? roster,
+    ThemeData? theme,
   }) {
     final effectiveRoster = roster ?? players;
     return ProviderScope(
@@ -76,7 +84,7 @@ void main() {
         ),
         playersProvider.overrideWith((ref) async => effectiveRoster),
       ],
-      child: const MaterialApp(home: KioskShell()),
+      child: MaterialApp(theme: theme, home: const KioskShell()),
     );
   }
 
@@ -242,4 +250,38 @@ void main() {
 
     await finish(tester);
   });
+
+  testWidgets(
+    'g: NamePicker renders dark even when the app theme is light',
+    (tester) async {
+      // Unlike every other test in this file (which relies on this
+      // harness's implicit default theme), this one must pin the ambient
+      // MaterialApp theme to light explicitly — mirroring main.dart's
+      // `theme: buildTheme(Brightness.light)` — so a pass here can't be
+      // credited to the test harness happening to already be dark; only
+      // NamePicker's own Theme(dark) wrap (name_picker.dart) should make it
+      // render dark. No darkTheme is supplied, so MaterialApp's ThemeMode
+      // .system resolution (see _themeBuilder in the framework's app.dart)
+      // always falls through to `theme` regardless of the test platform's
+      // own brightness — the ambient theme here is deterministically light.
+      await tester.pumpWidget(kioskApp(theme: buildTheme(Brightness.light)));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Rezervovat'));
+      await tester.pumpAndSettle();
+
+      // showNamePicker(context) in kiosk_shell.dart uses the shell State's
+      // own context, which sits *above* KioskShell's Theme(dark) wrap — so
+      // without name_picker.dart's own Theme(dark) wrap around the dialog
+      // content, this would inherit the ambient light theme instead.
+      expect(
+        Theme.of(tester.element(find.text('Kdo si rezervuje?'))).brightness,
+        Brightness.dark,
+      );
+
+      await tester.tap(find.byIcon(Icons.close));
+      await tester.pumpAndSettle();
+      await finish(tester);
+    },
+  );
 }
