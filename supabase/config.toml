@@ -1,0 +1,20 @@
+# Remote config pro `supabase config push` — jen sekce, které spravujeme
+# (SMTP + auth URL). Heslo se bere z env(SMTP_PASS), do repa nepatří.
+project_id = "wgwijvcnslkesyqgaeul"
+
+[auth]
+site_url = "https://mvazan.github.io/rezervator/"
+additional_redirect_urls = [
+  "cz.kuzelky.rezervator://login-callback",
+  "https://mvazan.github.io/rezervator/",
+  "http://localhost:**",
+]
+
+[auth.email.smtp]
+enabled = true
+host = "smtp.gmail.com"
+port = 587
+user = "milos.vazan@gmail.com"
+pass = "env(SMTP_PASS)"
+admin_email = "milos.vazan@gmail.com"
+sender_name = "Rezervátor"
