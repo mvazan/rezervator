@@ -141,6 +141,18 @@ Fix the cramped `Table`: drop `TableBorder.all` in favor of breathing room — e
 
 ---
 
-### Task 6: Verify + apply + review + PR
+### Task 6: Player self-profile (edit own nick)
+
+**Files:** modify `lib/features/schedule/home_shell.dart` (add a profile entry point in the AppBar for every user), create `lib/features/profile/profile_screen.dart`.
+
+Context: `set_nick(p_user_id, p_nick)` RPC already allows `auth.uid() = p_user_id` (self) — no schema change. `Api.setNick` exists. `myProfileProvider` gives the signed-in Profile (has displayName, club, nick).
+
+**Spec:** AppBar in HomeShell gets a person icon (`Icons.account_circle_outlined`, tooltip `Můj profil`) for ALL signed-in users → `ProfileScreen`. ProfileScreen (ConsumerWidget, own scaffold, title `Můj profil`): reads `myProfileProvider`; shows read-only display name + club (those are set at registration; editing them is out of scope — note "Jméno a oddíl nastavuje správce" or just show them), and an editable **Přezdívka (na tabuli)** field. Row/ListTile with current nick (or „nenastavena") + button `Upravit` → `promptText(title: 'Přezdívka na tabuli', hint: 'Tom P.', initial: current nick, confirmLabel: 'Uložit')` → `Api.setNick(currentUserId, value)` via tryAction (empty clears), success `Uloženo.`. Live-updates via myProfileProvider stream. Keep it minimal — this is the first player-facing profile screen; structure it so future editable fields slot in.
+
+**Verify:** analyze + tests green (add a widget test: profile screen shows current nick and the edit affordance). Commit `feat: player profile screen with editable nick`.
+
+---
+
+### Task 7: Verify + apply + review + PR
 - Full analyze/tests; web + apk builds.
 - Controller: apply email template via `supabase config push` (SMTP_PASS env); phase review; fixes; push; PR (note migration 0002 still needs applying with merge — this branch stacks on kiosk-board).
