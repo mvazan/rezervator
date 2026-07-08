@@ -3,7 +3,8 @@
 Aplikace je hotová, chybí jí jen vlastní backend účet a pár kliknutí v
 Supabase. Kroky 1–4 rozjedou rezervace tréninků v aplikaci (mobil i desktop).
 Krok 5 nasadí webovou verzi na GitHub Pages. Krok 6 zapne e-mailové
-notifikace. Krok 7 shrnuje, co v této fázi ještě záměrně nefunguje.
+notifikace. Krok 7 rozjede kioskový tablet na kuželně. Krok 8 shrnuje, co
+v této fázi ještě záměrně nefunguje.
 
 ## 1. Supabase projekt (zdarma, bez kreditní karty)
 
@@ -170,12 +171,86 @@ Fázi 4). Push notifikace zatím spí, viz poznámka na konci.
    který se nastavuje až ve Fázi 5. Do té doby chodí všem uživatelům e-mail,
    takže nikomu žádná notifikace neujde — jen bez FCM push zvonění na mobilu.
 
-## 7. Co zatím nefunguje
+## 7. Kiosek (Fáze 4)
 
-Tohle je Fáze 0–3 — kostra appky, přihlášení, statický rozvrh a notifikace
-e-mailem. Záměrně chybí:
+Od téhle fáze appka umí i sdílený dotykový tablet zavěšený na kuželně: kdokoliv
+schválený si na něm najde svoje jméno a rezervuje si termín bez přihlašování
+vlastním účtem. Kiosek nikdy nic neruší (na to slouží appka na mobilu) a nikdy
+neukazuje seznam hráčů ani rozvrh správy — jen svůj vlastní rozvrh a tlačítko
+„Rezervovat".
 
-- **Kiosek** (dotykový režim pro tablet na kuželně) — Fáze 4.
+### 7.1 Kioskový účet
+
+1. Supabase dashboard → **Authentication → Users → Add user** → e-mail ve
+   tvaru `kiosk@tvoje-domena.cz` (nemusí být skutečná schránka — kiosek se
+   nikdy nesnaží nic odeslat ani přijmout přes e-mail) + silné heslo
+   (kiosek si ho pamatuje jen v prohlížeči na tabletu, nikdo jiný ho
+   nezadává). Zaškrtni **Auto Confirm User**, aby se e-mail nemusel ověřovat
+   klikem z pošty, která ani neexistuje.
+2. Na tabletu otevři **`https://<tvůj-github-username>.github.io/rezervator/#/kiosk-login`**
+   — všimni si `#` před `/kiosk-login`: appka běží jako Flutter web bez
+   `usePathUrlStrategy()`, takže routing jede přes hash a tahle podoba adresy
+   je jediná, která na GitHub Pages (statický hosting bez server-side
+   rewrite pravidel) skutečně zafunguje. Adresa bez `#` by po refresh/přímém
+   vstupu skončila 404 dřív, než se appka vůbec stihne načíst.
+3. Přihlas se e-mailem a heslem z kroku 1 (samostatný formulář — kiosek
+   nepoužívá magic linky jako běžní hráči, protože jde o sdílené zařízení
+   bez vlastní schránky). Appka po přihlášení nikoho nezná (žádný profil
+   ještě neexistuje), takže se ukáže běžný registrační formulář — vyplň
+   jméno **„Kiosk"** (na displeji samotného tabletu ho nikdo neuvidí a
+   nikde jinde v appce se veřejně nezobrazí — pohled na hráče v appce i na
+   kiosku kioskové účty schválně vynechává) a potvrď **Zaregistrovat se**.
+4. V appce (na mobilu/desktopu, přihlášený jako admin) otevři **Správa →
+   Hráči**. Nový účet „Kiosk" se objeví buď mezi **Čekají na schválení**,
+   nebo (je-li to úplně první účet, který kdy appku vůbec viděl) rovnou mezi
+   schválenými s odznakem „admin" — v obou případech ho **neschvaluj ručně**,
+   přeskoč rovnou na další krok: změna role na kiosk schválení obstará sama.
+5. U řádku „Kiosk" klikni na nabídku (⋮) → **Nastavit jako kiosk** →
+   potvrdit. Tím se účtu zároveň nastaví `status = schváleno`, i kdyby
+   předtím čekal na schválení — žádný samostatný krok navíc není potřeba.
+6. Na tabletu appku obnov (kiosek se sám nepřesměruje, dokud neuvidí novou
+   roli přes svůj právě otevřený profilový stream — jednoduchý F5/reload
+   stačí). Místo registračního formuláře se teď zobrazí fullscreen kioskový
+   rozvrh bez navigace a bez tlačítka odhlásit.
+
+### 7.2 Fully Kiosk Browser (uzamčení tabletu)
+
+Appka na tabletu poběží spolehlivě celý den bez dohledu jedině v prohlížeči
+uzamčeném do kiosk režimu — jinak stačí systémové gesto zpět/domů a někdo
+omylem přepne na plochu nebo jinou appku.
+
+1. Na tabletu (Android) nainstaluj **Fully Kiosk Browser** z Play Store
+   (zdarma s reklamou, nebo placená Plus licence bez ní — na jeden tablet
+   v klubovně stačí i free verze).
+2. **Settings → Web Content Settings → Start URL** nastav přesně na adresu
+   z kroku 7.1.2 výše (s `#/kiosk-login`) — po každém restartu appky/tabletu
+   se tak znovu naběhne rovnou na přihlašovací obrazovku, případně (je-li
+   session v localStorage prohlížeče pořád platná) appka sama přeskočí
+   rovnou do kioskového rozvrhu.
+3. **Settings → Other Settings → Enable Kiosk Mode** (blokuje tlačítko
+   Home/Recent Apps a stavovou lištu) a **Set as Device Launcher**
+   (nahradí domovskou obrazovku tabletu appkou Fully Kiosk, takže restart
+   tabletu naběhne rovnou do kiosku, ne na plochu).
+4. **Settings → Device Management → Keep Screen On** zapni, ať se displej
+   sám nezhasne uprostřed dne — appka má vlastní 60s reset výběru hráče při
+   nečinnosti, ale to nic nepomůže, když je celá obrazovka černá.
+5. **Settings → Other Settings → Auto Reload / Restart Browser** nastav
+   na jednou denně v noci (např. 4:00) — kiosek pak každé ráno naběhne s
+   čerstvou session a čerstvě načtenými daty, i kdyby přes noc vypadlo
+   Wi-Fi nebo appka zůstala „zaseknutá" na starém stavu.
+6. Volitelně **Settings → Motion Detection → Screen Saver** vypni (kiosek
+   má vlastní logiku pro nečinnost, systémový spořič displeje navíc by jen
+   plodil zbytečné dotyky navíc při probouzení).
+
+Hotovo — kiosek je teď samostatné zařízení, které kdokoliv schválený použije
+jedním dotykem bez hesla, bez appky v mobilu a bez dohledu obsluhy.
+
+## 8. Co zatím nefunguje
+
+Tohle je Fáze 0–4 — kostra appky, přihlášení, statický rozvrh, notifikace
+e-mailem a kiosek na tabletu. Záměrně chybí:
+
 - **Reporty** (docházka, statistiky) — Fáze 5.
 - **Push notifikace** (FCM) — aktivují se ve Fázi 5 spolu s `FIREBASE_SERVICE_ACCOUNT`;
-  do té doby e-mail (Fáze 3) pokrývá všechny stejné události.
+  do té doby e-mail (Fáze 3) pokrývá všechny stejné události, včetně
+  potvrzení rezervace založené z kiosku.
