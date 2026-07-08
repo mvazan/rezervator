@@ -11,6 +11,39 @@ import '../../domain/models.dart';
 class BlocksScreen extends ConsumerWidget {
   const BlocksScreen({super.key});
 
+  /// If deactivating [blockId] would strand future live reservations
+  /// (invisible, uncancellable from the grid), asks the admin to confirm.
+  /// Returns true when it's safe to proceed (nothing stranded, or the admin
+  /// confirmed anyway); false when the admin declined.
+  Future<bool> _confirmIfStrands(BuildContext context, String blockId) async {
+    final reservations = await Api.futureLiveReservations(today());
+    final stranded =
+        reservations.where((r) => r.blockId == blockId).length;
+    if (stranded == 0) return true;
+    if (!context.mounted) return false;
+    return confirmDialog(
+      context,
+      title: 'Pozor — osiřelé rezervace',
+      message:
+          '$stranded budoucích rezervací na tomto bloku zůstane mimo rozvrh. Opravdu deaktivovat?',
+      confirmLabel: 'Uložit i tak',
+    );
+  }
+
+  Future<void> _setActive(
+      BuildContext context, TimeBlock block, bool active) async {
+    if (!active) {
+      final ok = await _confirmIfStrands(context, block.id);
+      if (!ok) return;
+      if (!context.mounted) return;
+    }
+    await tryAction(
+      context,
+      () => Api.updateTimeBlock(block.id, active: active),
+      errorText: friendlyDbError,
+    );
+  }
+
   Future<void> _delete(BuildContext context, TimeBlock block) async {
     final confirmed = await confirmDialog(
       context,
@@ -32,6 +65,9 @@ class BlocksScreen extends ConsumerWidget {
       // FK restrict: block already has reservations — deactivate instead.
     }
 
+    if (!context.mounted) return;
+    final ok = await _confirmIfStrands(context, block.id);
+    if (!ok) return;
     if (!context.mounted) return;
     await tryAction(
       context,
@@ -71,11 +107,7 @@ class BlocksScreen extends ConsumerWidget {
               subtitle: Text('Pozice ${block.position}'),
               leading: Switch(
                 value: block.active,
-                onChanged: (active) => tryAction(
-                  context,
-                  () => Api.updateTimeBlock(block.id, active: active),
-                  errorText: friendlyDbError,
-                ),
+                onChanged: (active) => _setActive(context, block, active),
               ),
               trailing: Row(
                 mainAxisSize: MainAxisSize.min,

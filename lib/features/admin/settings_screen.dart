@@ -52,6 +52,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     return null;
   }
 
+  /// Fetches future live reservations and counts those that would fall
+  /// outside the grid under [newLaneCount]/[newWeekdays]. This is a
+  /// conservative upper bound: a day override with custom blocks may keep
+  /// some of these visible even off the regular weekday set, but the admin
+  /// still gets warned rather than silently orphaning anyone.
+  Future<int> _countStranded(int newLaneCount, Set<int> newWeekdays) async {
+    final reservations = await Api.futureLiveReservations(today());
+    return reservations
+        .where((r) =>
+            r.lane > newLaneCount || !newWeekdays.contains(r.date.weekday))
+        .length;
+  }
+
   Future<void> _save() async {
     final laneCount = int.tryParse(_laneCount.text);
     final horizonDays = int.tryParse(_horizonDays.text);
@@ -66,6 +79,26 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       return;
     }
 
+    final current = ref.read(settingsProvider).value;
+    final shrinksGrid = current != null &&
+        (laneCount < current.laneCount ||
+            !_trainingWeekdays.containsAll(current.trainingWeekdays));
+    if (shrinksGrid) {
+      final stranded = await _countStranded(laneCount, _trainingWeekdays);
+      if (stranded > 0) {
+        if (!mounted) return;
+        final confirmed = await confirmDialog(
+          context,
+          title: 'Pozor — osiřelé rezervace',
+          message:
+              '$stranded budoucích rezervací zůstane mimo rozvrh (nezobrazí se a nepůjdou zrušit z mřížky). Opravdu uložit?',
+          confirmLabel: 'Uložit i tak',
+        );
+        if (!confirmed) return;
+      }
+    }
+
+    if (!mounted) return;
     setState(() => _saving = true);
     await tryAction(
       context,

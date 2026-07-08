@@ -239,6 +239,47 @@ class Api {
         .map((r) => AttendanceRow.fromJson(r as Map<String, dynamic>))
         .toList();
   }
+
+  // --- admin: stranded-reservation warnings ---
+  /// Live reservations from [today] onward, as a light projection (not the
+  /// full `Reservation` — this select only needs `date`/`lane`/`block_id`,
+  /// and `Reservation.fromJson` requires columns like `id`/`player_id` this
+  /// query doesn't fetch). Used by admin screens to warn before a config
+  /// change (fewer lanes, a removed weekday, a deactivated block) would
+  /// strand future reservations outside the grid.
+  static Future<List<StrandableReservation>> futureLiveReservations(
+      Day today) async {
+    final rows = await _db
+        .from('reservations')
+        .select('date, lane, block_id')
+        .gte('date', today.toSql())
+        .isFilter('cancelled_at', null);
+    return (rows as List)
+        .map((r) => StrandableReservation.fromJson(r as Map<String, dynamic>))
+        .toList();
+  }
+}
+
+/// Light projection of a future live reservation — just enough to detect
+/// whether it would fall outside the grid after a config change. See
+/// [Api.futureLiveReservations].
+class StrandableReservation {
+  const StrandableReservation({
+    required this.date,
+    required this.lane,
+    required this.blockId,
+  });
+
+  final Day date;
+  final int lane;
+  final String blockId;
+
+  factory StrandableReservation.fromJson(Map<String, dynamic> json) =>
+      StrandableReservation(
+        date: Day.parse(json['date'] as String),
+        lane: json['lane'] as int,
+        blockId: json['block_id'] as String,
+      );
 }
 
 // ---------------------------------------------------------------------------
