@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rezervator/core/theme.dart';
 import 'package:rezervator/core/ui.dart' show today;
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/kiosk/kiosk_shell.dart';
+import 'package:rezervator/features/kiosk/kiosk_week_view.dart';
+import 'package:rezervator/features/schedule/widgets/day_header.dart';
 
 void main() {
   const settings = ScheduleSettings(
@@ -14,11 +17,12 @@ void main() {
     maxActiveReservations: 3,
   );
   const b1 = TimeBlock(
-      id: 'b1',
-      startsAt: HourMinute(22, 58),
-      endsAt: HourMinute(23, 59),
-      position: 0,
-      active: true);
+    id: 'b1',
+    startsAt: HourMinute(22, 58),
+    endsAt: HourMinute(23, 59),
+    position: 0,
+    active: true,
+  );
 
   final t = today();
   final tomorrow = t.addDays(1);
@@ -43,22 +47,29 @@ void main() {
   final petr = players[15]; // 'PP Hráč'
 
   Reservation res(String id, String playerId, Day date) => Reservation(
-        id: id,
-        playerId: playerId,
-        date: date,
-        blockId: 'b1',
-        lane: 2,
-        createdVia: 'app',
-        createdAt: DateTime.utc(2026, 1, 1),
-      );
+    id: id,
+    playerId: playerId,
+    date: date,
+    blockId: 'b1',
+    lane: 2,
+    createdVia: 'app',
+    createdAt: DateTime.utc(2026, 1, 1),
+  );
 
   /// Builds a kiosk-profile app harness, wiring the same provider set as
   /// `week_screen_test.dart`'s `app()` helper directly around [KioskShell]
   /// (no AuthGate/role routing — the shell is pumped in isolation).
+  ///
+  /// [theme] defaults to Flutter's own default (unspecified, as every
+  /// pre-existing test here relied on) — pass an explicit light theme to
+  /// reproduce the real app's actual light/dark split (see main.dart's
+  /// `theme: buildTheme(Brightness.light)`) for tests that care whether the
+  /// kiosk correctly stays dark regardless of the ambient app theme.
   Widget kioskApp({
     List<Match> matches = const [],
     List<Reservation> reservations = const [],
     List<PlayerName>? roster,
+    ThemeData? theme,
   }) {
     final effectiveRoster = roster ?? players;
     return ProviderScope(
@@ -68,11 +79,12 @@ void main() {
         dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
         matchesProvider.overrideWith((ref) => Stream.value(matches)),
         rentalsProvider.overrideWith((ref) => Stream.value(const [])),
-        weekReservationsProvider
-            .overrideWith((ref, monday) => Stream.value(reservations)),
+        weekReservationsProvider.overrideWith(
+          (ref, monday) => Stream.value(reservations),
+        ),
         playersProvider.overrideWith((ref) async => effectiveRoster),
       ],
-      child: const MaterialApp(home: KioskShell()),
+      child: MaterialApp(theme: theme, home: const KioskShell()),
     );
   }
 
@@ -86,22 +98,23 @@ void main() {
   }
 
   testWidgets(
-      'a: shell shows status bar with Rezervovat and no logout/admin icons',
-      (tester) async {
-    await tester.pumpWidget(kioskApp());
-    await tester.pumpAndSettle();
+    'a: shell shows status bar with Rezervovat and no logout/admin icons',
+    (tester) async {
+      await tester.pumpWidget(kioskApp());
+      await tester.pumpAndSettle();
 
-    expect(find.text('Rezervovat'), findsOneWidget);
-    expect(find.byIcon(Icons.logout), findsNothing);
-    expect(find.byIcon(Icons.admin_panel_settings), findsNothing);
-    expect(find.byType(AppBar), findsNothing);
+      expect(find.text('Rezervovat'), findsOneWidget);
+      expect(find.byIcon(Icons.logout), findsNothing);
+      expect(find.byIcon(Icons.admin_panel_settings), findsNothing);
+      expect(find.byType(AppBar), findsNothing);
 
-    await finish(tester);
-  });
+      await finish(tester);
+    },
+  );
 
-  testWidgets(
-      'b: tapping Rezervovat opens picker with first-letter tiles',
-      (tester) async {
+  testWidgets('b: tapping Rezervovat opens picker with first-letter tiles', (
+    tester,
+  ) async {
     await tester.pumpWidget(kioskApp());
     await tester.pumpAndSettle();
 
@@ -120,28 +133,30 @@ void main() {
   });
 
   testWidgets(
-      'c: drilling to a name and tapping it shows the Rezervuje: banner',
-      (tester) async {
-    await tester.pumpWidget(kioskApp());
-    await tester.pumpAndSettle();
+    'c: drilling to a name and tapping it shows the Rezervuje: banner',
+    (tester) async {
+      await tester.pumpWidget(kioskApp());
+      await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Rezervovat'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('A')); // drill into the 'A' prefix tile
-    await tester.pumpAndSettle();
-    await tester.tap(find.text(anna.displayName)); // 'AA Hráč'
-    await tester.pumpAndSettle();
+      await tester.tap(find.text('Rezervovat'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('A')); // drill into the 'A' prefix tile
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(anna.displayName)); // 'AA Hráč'
+      await tester.pumpAndSettle();
 
-    expect(
-        find.textContaining('Rezervuje: ${anna.displayName}'), findsOneWidget);
-    // The picker button is replaced by the selection banner.
-    expect(find.text('Rezervovat'), findsNothing);
+      expect(
+        find.textContaining('Rezervuje: ${anna.displayName}'),
+        findsOneWidget,
+      );
+      // The picker button is replaced by the selection banner.
+      expect(find.text('Rezervovat'), findsNothing);
 
-    await finish(tester);
-  });
+      await finish(tester);
+    },
+  );
 
-  testWidgets(
-      'd: with a selected player, tapping a + cell opens the booking '
+  testWidgets('d: with a selected player, tapping a + cell opens the booking '
       'confirm dialog containing the player\'s name', (tester) async {
     await tester.pumpWidget(kioskApp());
     await tester.pumpAndSettle();
@@ -171,10 +186,12 @@ void main() {
     await finish(tester);
   });
 
-  testWidgets('e: reserved cells have no cancel affordance (tap → no dialog)',
-      (tester) async {
+  testWidgets('e: reserved cells have no cancel affordance (tap → no dialog)', (
+    tester,
+  ) async {
     await tester.pumpWidget(
-        kioskApp(reservations: [res('r1', petr.id, tomorrow)]));
+      kioskApp(reservations: [res('r1', petr.id, tomorrow)]),
+    );
     await tester.pumpAndSettle();
 
     // `tomorrow`'s day Card isn't necessarily built yet on this test
@@ -193,4 +210,78 @@ void main() {
 
     await finish(tester);
   });
+
+  testWidgets('f: kiosk always renders dark and shows the full week', (
+    tester,
+  ) async {
+    await tester.pumpWidget(kioskApp());
+    await tester.pumpAndSettle();
+
+    // The kiosk stays dark regardless of the device's system brightness
+    // (spec §4) — MaterialApp's default theme in this harness is light, so
+    // this only passes because KioskShell wraps itself in
+    // Theme(data: buildTheme(Brightness.dark)).
+    expect(
+      Theme.of(tester.element(find.byType(KioskWeekView))).brightness,
+      Brightness.dark,
+    );
+    // Always the full week — one DayHeader per day, Monday..Sunday. Only a
+    // handful of day Cards are built at once near the viewport on this
+    // 800×600 test surface (see the drag/ensureVisible comments on the
+    // tests above), and no single scroll position builds all 7
+    // simultaneously — so accumulate the distinct dates seen while
+    // scrolling through the whole list.
+    final seenDates = <Day>{};
+    void collect() {
+      for (final header in tester.widgetList<DayHeader>(
+        find.byType(DayHeader),
+      )) {
+        seenDates.add(header.date);
+      }
+    }
+
+    collect();
+    for (var i = 0; i < 8; i++) {
+      await tester.drag(find.byType(ListView), const Offset(0, -400));
+      await tester.pumpAndSettle();
+      collect();
+    }
+    expect(seenDates, hasLength(7));
+
+    await finish(tester);
+  });
+
+  testWidgets(
+    'g: NamePicker renders dark even when the app theme is light',
+    (tester) async {
+      // Unlike every other test in this file (which relies on this
+      // harness's implicit default theme), this one must pin the ambient
+      // MaterialApp theme to light explicitly — mirroring main.dart's
+      // `theme: buildTheme(Brightness.light)` — so a pass here can't be
+      // credited to the test harness happening to already be dark; only
+      // NamePicker's own Theme(dark) wrap (name_picker.dart) should make it
+      // render dark. No darkTheme is supplied, so MaterialApp's ThemeMode
+      // .system resolution (see _themeBuilder in the framework's app.dart)
+      // always falls through to `theme` regardless of the test platform's
+      // own brightness — the ambient theme here is deterministically light.
+      await tester.pumpWidget(kioskApp(theme: buildTheme(Brightness.light)));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Rezervovat'));
+      await tester.pumpAndSettle();
+
+      // showNamePicker(context) in kiosk_shell.dart uses the shell State's
+      // own context, which sits *above* KioskShell's Theme(dark) wrap — so
+      // without name_picker.dart's own Theme(dark) wrap around the dialog
+      // content, this would inherit the ambient light theme instead.
+      expect(
+        Theme.of(tester.element(find.text('Kdo si rezervuje?'))).brightness,
+        Brightness.dark,
+      );
+
+      await tester.tap(find.byIcon(Icons.close));
+      await tester.pumpAndSettle();
+      await finish(tester);
+    },
+  );
 }

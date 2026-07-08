@@ -10,6 +10,8 @@ import '../../core/ui.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
 import '../../domain/schedule.dart';
+import '../schedule/widgets/day_header.dart';
+import '../schedule/widgets/slot_tile.dart';
 
 /// True when [date] resolves as an [OpenDay] under exactly the resolution the
 /// grid renders with (buildWeekSchedule): closed overrides and non-training
@@ -58,11 +60,12 @@ Day? nextTrainingDay({
   for (var offset = 1; offset <= horizonDays; offset++) {
     final date = today.addDays(offset);
     if (isDayOpen(
-        date: date,
-        today: today,
-        settings: settings,
-        blocks: blocks,
-        overrides: overrides)) {
+      date: date,
+      today: today,
+      settings: settings,
+      blocks: blocks,
+      overrides: overrides,
+    )) {
       return date;
     }
   }
@@ -92,8 +95,14 @@ class KioskWeekView extends ConsumerWidget {
 
   Day _monday(Day today) => today.addDays(1 - today.weekday + 7 * weekOffset);
 
-  Future<void> _book(BuildContext context, WidgetRef ref, Day date,
-      TimeBlock block, int lane, PlayerName player) async {
+  Future<void> _book(
+    BuildContext context,
+    WidgetRef ref,
+    Day date,
+    TimeBlock block,
+    int lane,
+    PlayerName player,
+  ) async {
     final message =
         '${player.displayName} · ${dayFull(date)} · ${block.label} · Dráha $lane';
     final confirmed = await confirmDialog(
@@ -106,7 +115,11 @@ class KioskWeekView extends ConsumerWidget {
     await tryAction(
       context,
       () => Api.createReservation(
-          playerId: player.id, date: date, blockId: block.id, lane: lane),
+        playerId: player.id,
+        date: date,
+        blockId: block.id,
+        lane: lane,
+      ),
       success: 'Zarezervováno.',
       errorText: friendlyDbError,
     );
@@ -255,37 +268,49 @@ class _KioskDaySection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(dayFull(day.date),
-                style: Theme.of(context)
-                    .textTheme
-                    .titleMedium
-                    ?.copyWith(fontWeight: FontWeight.w700)),
-            for (final m in day.matches)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text(
-                  '🏆 ${m.opponent} · ${m.startsAt.display()}–${m.endsAt.display()}',
-                  style: TextStyle(color: scheme.primary, fontSize: 14),
-                ),
-              ),
-            const SizedBox(height: 8),
-            switch (day) {
-              ClosedDay(:final reason) => Text(
-                  reason.isEmpty ? 'Zavřeno' : 'Zavřeno — $reason',
-                  style: TextStyle(color: scheme.onSurfaceVariant),
-                ),
-              OpenDay() => _grid(context, day as OpenDay),
-            },
-          ],
-        ),
+        child: switch (day) {
+          ClosedDay(:final reason) => DayHeader(
+            date: day.date,
+            matches: day.matches,
+            closedReason: reason,
+          ),
+          OpenDay() => _openDay(context, day as OpenDay),
+        },
       ),
+    );
+  }
+
+  Widget _openDay(BuildContext context, OpenDay day) {
+    // "Volných" counts cells that are free in principle (not in the past,
+    // not beyond the booking horizon) — the kiosk has no per-player/admin
+    // policy the way the app does, so this is independent of `selected` and
+    // `interactive`.
+    final freeCount = day.blocks
+        .expand(
+          (block) => [
+            for (var lane = 1; lane <= day.laneCount; lane++)
+              day.slot(block.id, lane),
+          ],
+        )
+        .where(
+          (state) => state is FreeSlot && !state.inPast && !state.beyondHorizon,
+        )
+        .length;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        DayHeader(
+          date: day.date,
+          matches: day.matches,
+          chipLabel: '$freeCount volných',
+        ),
+        const SizedBox(height: 6),
+        _grid(context, day),
+      ],
     );
   }
 
@@ -297,7 +322,8 @@ class _KioskDaySection extends StatelessWidget {
         defaultColumnWidth: const FixedColumnWidth(88),
         columnWidths: const {0: FixedColumnWidth(100)},
         border: TableBorder.all(
-            color: scheme.outlineVariant.withValues(alpha: 0.5)),
+          color: scheme.outlineVariant.withValues(alpha: 0.5),
+        ),
         defaultVerticalAlignment: TableCellVerticalAlignment.middle,
         children: [
           TableRow(
@@ -306,9 +332,11 @@ class _KioskDaySection extends StatelessWidget {
               for (var lane = 1; lane <= day.laneCount; lane++)
                 Padding(
                   padding: const EdgeInsets.all(6),
-                  child: Text('Dráha $lane',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(fontWeight: FontWeight.w600)),
+                  child: Text(
+                    'Dráha $lane',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
                 ),
             ],
           ),
@@ -317,15 +345,16 @@ class _KioskDaySection extends StatelessWidget {
               children: [
                 Padding(
                   padding: const EdgeInsets.all(6),
-                  child:
-                      Text(block.label, style: const TextStyle(fontSize: 13)),
+                  child: Text(
+                    block.label,
+                    style: const TextStyle(fontSize: 13),
+                  ),
                 ),
                 for (var lane = 1; lane <= day.laneCount; lane++)
-                  _KioskSlotCell(
-                    state: day.slot(block.id, lane),
-                    nameById: nameById,
-                    interactive: interactive,
-                    selected: selected,
+                  _kioskSlotTile(
+                    day: day,
+                    block: block,
+                    lane: lane,
                     onBook: () => onBook(day.date, block, lane),
                   ),
               ],
@@ -334,95 +363,38 @@ class _KioskDaySection extends StatelessWidget {
       ),
     );
   }
-}
 
-class _KioskSlotCell extends StatelessWidget {
-  const _KioskSlotCell({
-    required this.state,
-    required this.nameById,
-    required this.interactive,
-    required this.selected,
-    required this.onBook,
-  });
-
-  final SlotState state;
-  final Map<String, String> nameById;
-  final bool interactive;
-  final PlayerName? selected;
-  final VoidCallback onBook;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    // Kiosk cells are ≥ 56 px tall (spec: big touch targets on a tablet),
-    // taller than WeekScreen's 44 px equivalents.
-    const height = 56.0;
-
+  /// Resolves a single kiosk cell's [SlotTile]: booking-only policy — a
+  /// [FreeSlot] is tappable only when the grid is interactive, a player is
+  /// selected, and the slot isn't in the past or beyond the booking horizon;
+  /// a [ReservedSlot] NEVER gets a tap handler regardless of whose
+  /// reservation it is (kiosk performs exactly one action type — booking —
+  /// never cancellation, unlike the app's `slotTileFor` policy helper).
+  Widget _kioskSlotTile({
+    required OpenDay day,
+    required TimeBlock block,
+    required int lane,
+    required VoidCallback onBook,
+  }) {
+    final state = day.slot(block.id, lane);
     switch (state) {
       case MatchSlot():
-        return Container(
-          height: height,
-          color: scheme.errorContainer.withValues(alpha: 0.6),
-          alignment: Alignment.center,
-          child: Text('Zápas',
-              style: TextStyle(fontSize: 12, color: scheme.onErrorContainer)),
-        );
-      case RentedSlot(:final rental):
-        return Container(
-          height: height,
-          color: scheme.tertiaryContainer.withValues(alpha: 0.7),
-          alignment: Alignment.center,
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: Text(
-            rental.renterName,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 11, color: scheme.onTertiaryContainer),
-          ),
-        );
+      case RentedSlot():
+        return SlotTile(state: state, size: SlotTileSize.large);
       case ReservedSlot(:final reservation):
-        // Kiosk never cancels — no InkWell, no tap handler, regardless of
-        // whose reservation this is or whether it's admin-cancellable.
         final name = nameById[reservation.playerId] ?? '?';
-        return Container(
-          height: height,
-          color: scheme.surfaceContainerHighest,
-          alignment: Alignment.center,
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: Text(
-            name,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
-          ),
+        return SlotTile(
+          state: state,
+          size: SlotTileSize.large,
+          playerName: name,
         );
       case FreeSlot(:final inPast, :final beyondHorizon):
         final bookable =
             interactive && selected != null && !inPast && !beyondHorizon;
-        if (!bookable) {
-          // Free but not currently bookable (no player selected yet, or the
-          // slot is out of range) still reads as "free" via a subtle outline
-          // so the schedule communicates availability at a glance even
-          // before anyone picks up the picker.
-          return Container(
-            height: height,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              border: Border.all(
-                  color: scheme.outlineVariant.withValues(alpha: 0.6)),
-            ),
-          );
-        }
-        return InkWell(
-          onTap: onBook,
-          child: Container(
-            height: height,
-            alignment: Alignment.center,
-            color: scheme.primary.withValues(alpha: 0.9),
-            child: const Icon(Icons.add, size: 28, color: Colors.white),
-          ),
+        return SlotTile(
+          state: state,
+          size: SlotTileSize.large,
+          onTap: bookable ? onBook : null,
         );
     }
   }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/ui.dart';
+import '../../core/widgets/auth_background.dart';
 import '../../data/providers.dart';
 
 /// First sign-in: pick a display name (and optionally a club). The very
@@ -33,7 +34,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
     setState(() => _saving = true);
     await tryAction(
-        context, () => Api.registerProfile(name, _club.text.trim()));
+      context,
+      () => Api.registerProfile(name, _club.text.trim()),
+    );
     // AuthGate re-routes automatically via the profile stream.
     if (mounted) setState(() => _saving = false);
   }
@@ -47,45 +50,42 @@ class _RegisterScreenState extends State<RegisterScreen> {
           TextButton(onPressed: Api.signOut, child: const Text('Odhlásit')),
         ],
       ),
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 400),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  'Ještě tě neznáme. Napiš své jméno — pod ním tě uvidí '
-                  'ostatní v rozvrhu i na kiosku.',
-                  style: Theme.of(context).textTheme.bodyLarge,
+      body: AuthBackground(
+        child: AuthCard(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Ještě tě neznáme. Napiš své jméno — pod ním tě uvidí '
+                'ostatní v rozvrhu i na kiosku.',
+                style: Theme.of(context).textTheme.bodyLarge,
+              ),
+              const SizedBox(height: 24),
+              TextField(
+                controller: _name,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(
+                  labelText: 'Jméno a příjmení',
+                  border: OutlineInputBorder(),
                 ),
-                const SizedBox(height: 24),
-                TextField(
-                  controller: _name,
-                  textCapitalization: TextCapitalization.words,
-                  decoration: const InputDecoration(
-                    labelText: 'Jméno a příjmení',
-                    border: OutlineInputBorder(),
-                  ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _club,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(
+                  labelText: 'Oddíl / klub (nepovinné)',
+                  border: OutlineInputBorder(),
                 ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: _club,
-                  textCapitalization: TextCapitalization.words,
-                  decoration: const InputDecoration(
-                    labelText: 'Oddíl / klub (nepovinné)',
-                    border: OutlineInputBorder(),
-                  ),
-                  onSubmitted: (_) => _register(),
-                ),
-                const SizedBox(height: 24),
-                FilledButton(
-                  onPressed: _saving ? null : _register,
-                  child: Text(_saving ? 'Ukládám…' : 'Zaregistrovat se'),
-                ),
-              ],
-            ),
+                onSubmitted: (_) => _register(),
+              ),
+              const SizedBox(height: 24),
+              FilledButton(
+                onPressed: _saving ? null : _register,
+                child: Text(_saving ? 'Ukládám…' : 'Zaregistrovat se'),
+              ),
+            ],
           ),
         ),
       ),

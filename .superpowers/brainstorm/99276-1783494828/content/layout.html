@@ -1,0 +1,114 @@
+<h2>Ako má vyzerať hlavná obrazovka s rozvrhom?</h2>
+<p class="subtitle">Dva rôzne koncepty rozloženia (farby sú zatiaľ ilustračné — paletu doladíme potom). Dole je ešte otázka navigácie.</p>
+
+<style>
+  .ph { border-radius: 18px; overflow: hidden; border: 1px solid #E2E8F0; background: #F8FAFC; }
+  .ph * { box-sizing: border-box; }
+  .bar { display:flex; justify-content:space-between; align-items:center; padding: 10px 14px; background:#fff; border-bottom:1px solid #EEF2F7; font-weight:800; font-size:13px; color:#0F172A; }
+  .bar .ico { color:#64748B; font-weight:400; }
+  .daychips { display:flex; gap:6px; padding:10px 12px; background:#fff; }
+  .dc { flex:1; text-align:center; border-radius: 12px; padding: 7px 0 5px; font-size: 10.5px; color:#475569; background:#F1F5F9; }
+  .dc b { display:block; font-size:14px; color:#0F172A; }
+  .dc.on { background:#10B981; color:#D1FAE5; box-shadow:0 4px 10px rgba(16,185,129,.3); }
+  .dc.on b { color:#fff; }
+  .dc .dots { font-size:8px; letter-spacing:1px; color:#10B981; }
+  .dc.on .dots { color:#A7F3D0; }
+  .dc.off { opacity:.45; }
+  .grid1 { padding: 12px; }
+  .lanehead { display:grid; grid-template-columns: 46px repeat(3,1fr); gap:6px; font-size:10px; color:#64748B; text-align:center; margin-bottom:6px; }
+  .grow { display:grid; grid-template-columns: 46px repeat(3,1fr); gap:6px; margin-bottom:6px; align-items:stretch; }
+  .tlab { font-size:10.5px; color:#64748B; display:flex; align-items:center; }
+  .cell { border-radius: 12px; min-height: 44px; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:600; }
+  .free { background:#fff; border:1.6px dashed #94E3C6; color:#10B981; font-size:16px; font-weight:400; }
+  .mine { background:#10B981; color:#fff; }
+  .oth  { background:#E2E8F0; color:#334155; }
+  .rent { background:#FDE9C8; color:#92400E; }
+  .zap  { background:#FECDD3; color:#9F1239; }
+  .ava { display:inline-flex; width:20px; height:20px; border-radius:99px; background:#CBD5E1; color:#334155; align-items:center; justify-content:center; font-size:9px; margin-right:5px; }
+  .weekcard { background:#fff; margin:10px 12px; border-radius:16px; padding:12px; box-shadow:0 2px 8px rgba(15,23,42,.06); }
+  .wc-h { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+  .datebadge { width:36px; height:36px; border-radius:11px; background:#ECFDF5; color:#059669; display:flex; flex-direction:column; align-items:center; justify-content:center; font-size:8.5px; font-weight:700; }
+  .datebadge b { font-size:14px; }
+  .wc-t { font-weight:800; font-size:12.5px; color:#0F172A; flex:1; }
+  .pill { font-size:9.5px; background:#ECFDF5; color:#059669; border-radius:99px; padding:3px 8px; }
+  .mrow { display:grid; grid-template-columns: 40px repeat(4,1fr); gap:5px; margin-bottom:5px; }
+  .mrow .cell { min-height: 34px; border-radius:10px; font-size:10px; }
+  .matchstrip { background:#FFF1F2; color:#9F1239; border-left:3px solid #FB7185; border-radius:8px; padding:5px 8px; font-size:10.5px; margin-bottom:8px; }
+  .navbar { display:flex; background:#fff; border-top:1px solid #EEF2F7; padding:6px 0 4px; }
+  .nv { flex:1; text-align:center; font-size:9.5px; color:#94A3B8; }
+  .nv.on { color:#10B981; font-weight:700; }
+  .nv .i { font-size:16px; display:block; }
+  .fabb { position:relative; }
+  .fabb .f { position:absolute; right:14px; bottom:14px; background:#10B981; color:#fff; border-radius:16px; padding:12px 16px; font-weight:800; font-size:12px; box-shadow:0 8px 20px rgba(16,185,129,.4); }
+</style>
+
+<div class="cards">
+
+  <div class="card" data-choice="daypager" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:10px; background:#EEF2F7;">
+      <div class="ph">
+        <div class="bar">Rezervátor <span class="ico">⚙ ↩</span></div>
+        <div class="daychips">
+          <div class="dc off">po<b>6</b></div>
+          <div class="dc">út<b>7</b><span class="dots">●●</span></div>
+          <div class="dc on">st<b>8</b><span class="dots">●●●</span></div>
+          <div class="dc off">čt<b>9</b></div>
+          <div class="dc off">pá<b>10</b></div>
+          <div class="dc off">so<b>11</b></div>
+          <div class="dc off">ne<b>12</b></div>
+        </div>
+        <div class="grid1">
+          <div class="matchstrip">🏆 KK Slavoj · 16:30–19:30 — přijď fandit!</div>
+          <div class="lanehead"><span></span><span>Dráha 1</span><span>Dráha 2</span><span>Dráha 3</span></div>
+          <div class="grow"><span class="tlab">17:00</span><div class="cell free">＋</div><div class="cell oth"><span class="ava">JN</span>Novák</div><div class="cell free">＋</div></div>
+          <div class="grow"><span class="tlab">18:00</span><div class="cell mine">Ty ✓</div><div class="cell free">＋</div><div class="cell rent">Firma X</div></div>
+          <div class="grow"><span class="tlab">19:00</span><div class="cell free">＋</div><div class="cell free">＋</div><div class="cell oth"><span class="ava">EV</span>Eva V.</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A — Deň v centre (day pager)</h3>
+      <p>Hore pásik dní s obsadenosťou (bodky = tvoje rezervácie), vybraný deň zaberá celú obrazovku s veľkými bunkami — mená s iniciálkovými avatarmi, voľné „＋" výrazné. Swipe doľava/doprava = ďalší deň. Menej scrollovania, väčšie touch plochy; kiosku sadne 1:1 (auto-dnes).</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="weeklist" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:10px; background:#EEF2F7;">
+      <div class="ph">
+        <div class="bar">‹ 6.–12. 7. › <span class="ico">dnes</span></div>
+        <div class="weekcard">
+          <div class="wc-h"><div class="datebadge">st<b>8</b></div><div class="wc-t">středa</div><span class="pill">5 volných</span></div>
+          <div class="matchstrip">🏆 KK Slavoj · 16:30</div>
+          <div class="mrow"><span class="tlab">17:00</span><div class="cell free">＋</div><div class="cell oth">Novák</div><div class="cell free">＋</div><div class="cell free">＋</div></div>
+          <div class="mrow"><span class="tlab">18:00</span><div class="cell mine">Ty</div><div class="cell free">＋</div><div class="cell rent">Firma</div><div class="cell free">＋</div></div>
+        </div>
+        <div class="weekcard" style="opacity:.75;">
+          <div class="wc-h"><div class="datebadge">čt<b>9</b></div><div class="wc-t">čtvrtek</div><span class="pill" style="background:#F1F5F9;color:#64748B;">Zavřeno — malování</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B — Týždeň pod sebou (vylepšené súčasné)</h3>
+      <p>Ostáva scroll celým týždňom, ale každý deň je moderná karta: dátumový badge, chip obsadenosti, zápas ako farebný prúžok, bunky ako pill-tiles s menami. Najmenšia zmena zvykov, celý týždeň na jeden pohľad.</p>
+    </div>
+  </div>
+
+</div>
+
+<h3 style="margin-top:20px;">A k tomu spodná navigácia + nová záložka „Moje"?</h3>
+<div class="options" style="margin-top:8px;">
+  <div class="option" data-choice="bottomnav" onclick="toggleSelect(this)">
+    <div class="letter">1</div>
+    <div class="content">
+      <h3>Áno — bottom nav: Rozvrh · Moje rezervácie · Správa</h3>
+      <p>Pribudne prehľad „Moje rezervácie" (zoznam tvojich termínov so zrušením jedným ťahom — dnes vidíš svoje termíny len v mriežke). Správa len pre admina. Moderný appkový pocit.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="topbar" onclick="toggleSelect(this)">
+    <div class="letter">2</div>
+    <div class="content">
+      <h3>Nie — nechať ikonky hore</h3>
+      <p>Všetko ostáva v hornej lište ako teraz (správa/odhlásenie), žiadna nová záložka.</p>
+    </div>
+  </div>
+</div>

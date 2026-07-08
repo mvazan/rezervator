@@ -12,4 +12,11 @@ void main() {
     expect(friendlyDbError(Exception('something else')),
         startsWith('Něco se nepovedlo.'));
   });
+
+  test('initialsOf takes first letters of the first two words, uppercased',
+      () {
+    expect(initialsOf('Ján Novák'), 'JN');
+    expect(initialsOf('Cher'), 'CH');
+    expect(initialsOf(''), '?');
+  });
 }

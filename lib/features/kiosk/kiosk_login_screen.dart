@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/ui.dart';
+import '../../core/widgets/auth_background.dart';
 import '../../data/providers.dart';
 
 /// Password login for the shared kiosk device account. A separate route from
@@ -51,7 +52,9 @@ class _KioskLoginScreenState extends ConsumerState<KioskLoginScreen> {
     }
     setState(() => _sending = true);
     final ok = await tryAction(
-        context, () => Api.signInWithPassword(email, password));
+      context,
+      () => Api.signInWithPassword(email, password),
+    );
     if (!mounted) return;
     setState(() => _sending = false);
     // AuthGate routes onward by role once the session lands.
@@ -62,52 +65,52 @@ class _KioskLoginScreenState extends ConsumerState<KioskLoginScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 400),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text('Kiosk — přihlášení',
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.headlineMedium),
-                  const SizedBox(height: 32),
-                  TextField(
-                    controller: _email,
-                    keyboardType: TextInputType.emailAddress,
-                    autocorrect: false,
-                    decoration: const InputDecoration(
-                      labelText: 'E-mail',
-                      border: OutlineInputBorder(),
-                    ),
+        child: AuthBackground(
+          child: AuthCard(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Center(child: AuthLogo(size: 72)),
+                const SizedBox(height: 12),
+                Text(
+                  'Kiosk — přihlášení',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.headlineMedium,
+                ),
+                const SizedBox(height: 32),
+                TextField(
+                  controller: _email,
+                  keyboardType: TextInputType.emailAddress,
+                  autocorrect: false,
+                  decoration: const InputDecoration(
+                    labelText: 'E-mail',
+                    border: OutlineInputBorder(),
                   ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: _password,
-                    obscureText: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Heslo',
-                      border: OutlineInputBorder(),
-                    ),
-                    onSubmitted: (_) => _signIn(),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: _password,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Heslo',
+                    border: OutlineInputBorder(),
                   ),
-                  const SizedBox(height: 16),
-                  FilledButton(
-                    onPressed: _sending ? null : _signIn,
-                    child: Text(_sending ? 'Přihlašuji…' : 'Přihlásit'),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Přihlas kioskový účet — vytvoří ho správce podle '
-                    'SETUP.md.',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ],
-              ),
+                  onSubmitted: (_) => _signIn(),
+                ),
+                const SizedBox(height: 16),
+                FilledButton(
+                  onPressed: _sending ? null : _signIn,
+                  child: Text(_sending ? 'Přihlašuji…' : 'Přihlásit'),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Přihlas kioskový účet — vytvoří ho správce podle '
+                  'SETUP.md.',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
             ),
           ),
         ),

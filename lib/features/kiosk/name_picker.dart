@@ -6,6 +6,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/theme.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
 import '../../domain/name_index.dart';
@@ -49,49 +50,72 @@ class _NamePickerState extends ConsumerState<NamePicker> {
   Widget build(BuildContext context) {
     final players = ref.watch(playersProvider);
 
-    return Dialog.fullscreen(
-      child: SafeArea(
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      'Kdo si rezervuje?',
-                      style: Theme.of(context).textTheme.headlineSmall,
-                    ),
-                  ),
-                  IconButton(
-                    iconSize: 32,
-                    icon: const Icon(Icons.close),
-                    onPressed: () => Navigator.pop(context),
-                  ),
-                ],
-              ),
-            ),
-            Expanded(
-              child: players.when(
-                loading: () =>
-                    const Center(child: CircularProgressIndicator()),
-                error: (e, _) => Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
+    // The kiosk always renders dark (spec §4), but showNamePicker is called
+    // with the kiosk shell's own State context — which sits *above* the
+    // Theme(dark) wrap in kiosk_shell.dart's build(), not below it — so
+    // showDialog's route, and this dialog's content, would otherwise inherit
+    // whatever theme is ambient at the call site (light, on a light-system
+    // device). Wrapping the whole dialog content here — including
+    // Dialog.fullscreen itself, whose own background color also resolves
+    // Theme.of(context) — makes the picker dark unconditionally, regardless
+    // of which context it was opened from.
+    //
+    // The Builder below matters, not just the Theme: every Theme.of(context)
+    // call in this file that builds a color/text style (the header, _body,
+    // _backTile, _prefixTile) must use a BuildContext that's a *descendant*
+    // of this Theme, not this State's own context — the State's context sits
+    // above the widget tree this build() method returns, so Theme.of(context)
+    // calls made directly with it would still resolve to the stale ambient
+    // theme even though everything actually painted on screen (Dialog's
+    // background, _Tile's own Theme.of lookups) is correctly dark.
+    return Theme(
+      data: buildTheme(Brightness.dark),
+      child: Builder(
+        builder: (context) => Dialog.fullscreen(
+          child: SafeArea(
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+                  child: Row(
                     children: [
-                      const Text('Nepodařilo se načíst hráče.'),
-                      const SizedBox(height: 12),
-                      OutlinedButton(
-                        onPressed: () => ref.invalidate(playersProvider),
-                        child: const Text('Zkusit znovu'),
+                      Expanded(
+                        child: Text(
+                          'Kdo si rezervuje?',
+                          style: Theme.of(context).textTheme.headlineSmall,
+                        ),
+                      ),
+                      IconButton(
+                        iconSize: 32,
+                        icon: const Icon(Icons.close),
+                        onPressed: () => Navigator.pop(context),
                       ),
                     ],
                   ),
                 ),
-                data: (allPlayers) => _body(context, allPlayers),
-              ),
+                Expanded(
+                  child: players.when(
+                    loading: () =>
+                        const Center(child: CircularProgressIndicator()),
+                    error: (e, _) => Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Text('Nepodařilo se načíst hráče.'),
+                          const SizedBox(height: 12),
+                          OutlinedButton(
+                            onPressed: () => ref.invalidate(playersProvider),
+                            child: const Text('Zkusit znovu'),
+                          ),
+                        ],
+                      ),
+                    ),
+                    data: (allPlayers) => _body(context, allPlayers),
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -112,29 +136,32 @@ class _NamePickerState extends ConsumerState<NamePicker> {
           if (_prefix.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(bottom: 12),
-              child: Text('$_prefix…',
-                  style: Theme.of(context).textTheme.titleLarge),
+              child: Text(
+                '$_prefix…',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
             ),
           Expanded(
             child: SingleChildScrollView(
               child: switch (node) {
                 PrefixesNode(:final prefixes, :final exactMatches) => Wrap(
-                    spacing: 12,
-                    runSpacing: 12,
-                    children: [
-                      if (_prefix.isNotEmpty) _backTile(),
-                      for (final p in exactMatches) _nameTile(p),
-                      for (final prefix in prefixes) _prefixTile(prefix),
-                    ],
-                  ),
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: [
+                    if (_prefix.isNotEmpty) _backTile(context),
+                    for (final p in exactMatches) _nameTile(p),
+                    for (final prefix in prefixes)
+                      _prefixTile(context, prefix),
+                  ],
+                ),
                 NamesNode(:final players) => Wrap(
-                    spacing: 12,
-                    runSpacing: 12,
-                    children: [
-                      if (_prefix.isNotEmpty) _backTile(),
-                      for (final p in players) _nameTile(p),
-                    ],
-                  ),
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: [
+                    if (_prefix.isNotEmpty) _backTile(context),
+                    for (final p in players) _nameTile(p),
+                  ],
+                ),
               },
             ),
           ),
@@ -143,37 +170,39 @@ class _NamePickerState extends ConsumerState<NamePicker> {
     );
   }
 
-  Widget _backTile() {
+  Widget _backTile(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return _Tile(
       minWidth: 72,
       minHeight: 72,
-      color: scheme.surfaceContainerHighest,
+      outlineColor: scheme.primary.withValues(alpha: 0.45),
       onTap: _back,
-      child: const Text('←', style: TextStyle(fontSize: 28)),
+      child: Text('←', style: TextStyle(fontSize: 28, color: scheme.onSurface)),
     );
   }
 
-  Widget _prefixTile(String prefix) {
+  Widget _prefixTile(BuildContext context, String prefix) {
     final scheme = Theme.of(context).colorScheme;
     return _Tile(
       minWidth: 72,
       minHeight: 72,
-      color: scheme.secondaryContainer,
+      outlineColor: scheme.primary.withValues(alpha: 0.45),
       onTap: () => _drillInto(prefix),
       child: Text(
         prefix.substring(prefix.length - 1),
-        style: TextStyle(fontSize: 28, color: scheme.onSecondaryContainer),
+        style: TextStyle(fontSize: 28, color: scheme.onSurface),
       ),
     );
   }
 
   Widget _nameTile(PlayerName player) {
-    final scheme = Theme.of(context).colorScheme;
+    // The name tile IS the selection action (tapping it immediately pops
+    // the picker with this player) — it gets the indigo→cyan gradient fill
+    // per spec, vs. the plain indigo-outline nav tiles above.
     return _Tile(
       minWidth: 200,
       minHeight: 64,
-      color: scheme.primaryContainer,
+      gradient: true,
       onTap: () => Navigator.pop(context, player),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -182,7 +211,11 @@ class _NamePickerState extends ConsumerState<NamePicker> {
           textAlign: TextAlign.center,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: TextStyle(fontSize: 20, color: scheme.onPrimaryContainer),
+          style: const TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.w700,
+            color: Colors.white,
+          ),
         ),
       ),
     );
@@ -193,24 +226,44 @@ class _Tile extends StatelessWidget {
   const _Tile({
     required this.minWidth,
     required this.minHeight,
-    required this.color,
     required this.onTap,
     required this.child,
+    this.outlineColor,
+    this.gradient = false,
   });
 
   final double minWidth;
   final double minHeight;
-  final Color color;
   final VoidCallback onTap;
   final Widget child;
 
+  /// Dark tile look: transparent fill, indigo outline. Used by the
+  /// navigation tiles (back / next-letter prefix).
+  final Color? outlineColor;
+
+  /// Selection tile look: indigo→cyan gradient fill, no outline. Used by
+  /// name tiles — the actual pick.
+  final bool gradient;
+
+  static const _gradientColors = [Color(0xFF6366F1), Color(0xFF22D3EE)];
+
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: color,
-      borderRadius: BorderRadius.circular(16),
+    final radius = BorderRadius.circular(16);
+    final scheme = Theme.of(context).colorScheme;
+    return Ink(
+      decoration: BoxDecoration(
+        borderRadius: radius,
+        gradient: gradient
+            ? const LinearGradient(colors: _gradientColors)
+            : null,
+        color: gradient ? null : scheme.surfaceContainerHigh,
+        border: outlineColor != null
+            ? Border.all(color: outlineColor!, width: 1.5)
+            : null,
+      ),
       child: InkWell(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: radius,
         onTap: onTap,
         child: ConstrainedBox(
           constraints: BoxConstraints(minWidth: minWidth, minHeight: minHeight),

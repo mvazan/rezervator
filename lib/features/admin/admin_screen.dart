@@ -29,56 +29,78 @@ class AdminScreen extends ConsumerWidget {
       body: ListView(
         children: [
           ListTile(
-            leading: const Icon(Icons.group_outlined),
+            leading: const _AdminIcon(Icons.group_outlined),
             title: const Text('Hráči'),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const PlayersScreen()),
-            ),
+            onTap: () => Navigator.of(
+              context,
+            ).push(MaterialPageRoute(builder: (_) => const PlayersScreen())),
           ),
           ListTile(
-            leading: const Icon(Icons.fact_check_outlined),
+            leading: const _AdminIcon(Icons.fact_check_outlined),
             title: const Text('Docházka'),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const ReportScreen()),
-            ),
+            onTap: () => Navigator.of(
+              context,
+            ).push(MaterialPageRoute(builder: (_) => const ReportScreen())),
           ),
           ListTile(
-            leading: const Icon(Icons.tune),
+            leading: const _AdminIcon(Icons.tune),
             title: const Text('Nastavení rozvrhu'),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const SettingsScreen()),
-            ),
+            onTap: () => Navigator.of(
+              context,
+            ).push(MaterialPageRoute(builder: (_) => const SettingsScreen())),
           ),
           ListTile(
-            leading: const Icon(Icons.schedule),
+            leading: const _AdminIcon(Icons.schedule),
             title: const Text('Tréninkové bloky'),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const BlocksScreen()),
-            ),
+            onTap: () => Navigator.of(
+              context,
+            ).push(MaterialPageRoute(builder: (_) => const BlocksScreen())),
           ),
           ListTile(
-            leading: const Icon(Icons.event_busy),
+            leading: const _AdminIcon(Icons.event_busy),
             title: const Text('Výjimky dnů'),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const OverridesScreen()),
-            ),
+            onTap: () => Navigator.of(
+              context,
+            ).push(MaterialPageRoute(builder: (_) => const OverridesScreen())),
           ),
           ListTile(
-            leading: const Icon(Icons.emoji_events_outlined),
+            leading: const _AdminIcon(Icons.emoji_events_outlined),
             title: const Text('Zápasy'),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const MatchesScreen()),
-            ),
+            onTap: () => Navigator.of(
+              context,
+            ).push(MaterialPageRoute(builder: (_) => const MatchesScreen())),
           ),
           ListTile(
-            leading: const Icon(Icons.storefront_outlined),
+            leading: const _AdminIcon(Icons.storefront_outlined),
             title: const Text('Pronájmy'),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const RentalsScreen()),
-            ),
+            onTap: () => Navigator.of(
+              context,
+            ).push(MaterialPageRoute(builder: (_) => const RentalsScreen())),
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Admin hub leading icon: tonal 40×40 rounded square around the glyph.
+class _AdminIcon extends StatelessWidget {
+  const _AdminIcon(this.icon);
+
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      width: 40,
+      height: 40,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: scheme.primaryContainer,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Icon(icon, color: scheme.onPrimaryContainer, size: 22),
     );
   }
 }

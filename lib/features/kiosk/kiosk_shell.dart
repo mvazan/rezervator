@@ -10,7 +10,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/theme.dart';
 import '../../core/ui.dart';
+import '../../core/widgets/gradient_button.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
 import 'kiosk_week_view.dart';
@@ -80,29 +82,35 @@ class _KioskShellState extends ConsumerState<KioskShell> {
 
   @override
   Widget build(BuildContext context) {
-    return Listener(
-      onPointerDown: (_) => _touch(),
-      behavior: HitTestBehavior.translucent,
-      child: Scaffold(
-        body: Column(
-          children: [
-            _StatusBar(
-              now: _now,
-              selected: _selected,
-              weekOffset: _weekOffset,
-              onReserve: _openPicker,
-              onClearSelection: _clearSelection,
-            ),
-            Expanded(
-              child: KioskWeekView(
-                weekOffset: _weekOffset,
-                onWeekOffsetChanged: (offset) =>
-                    setState(() => _weekOffset = offset),
+    // The kiosk is a shared, always-on tablet — it stays dark regardless of
+    // the device's system brightness (spec §4), unlike the rest of the app
+    // which follows light/dark via MaterialApp.theme/darkTheme.
+    return Theme(
+      data: buildTheme(Brightness.dark),
+      child: Listener(
+        onPointerDown: (_) => _touch(),
+        behavior: HitTestBehavior.translucent,
+        child: Scaffold(
+          body: Column(
+            children: [
+              _StatusBar(
+                now: _now,
                 selected: _selected,
-                onBooked: () {}, // selection persists — no-op by design.
+                weekOffset: _weekOffset,
+                onReserve: _openPicker,
+                onClearSelection: _clearSelection,
               ),
-            ),
-          ],
+              Expanded(
+                child: KioskWeekView(
+                  weekOffset: _weekOffset,
+                  onWeekOffsetChanged: (offset) =>
+                      setState(() => _weekOffset = offset),
+                  selected: _selected,
+                  onBooked: () {}, // selection persists — no-op by design.
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -130,8 +138,10 @@ class _StatusBar extends ConsumerWidget {
       ..sort((a, b) => a.startsAt.compareTo(b.startsAt));
     if (todaysMatches.isNotEmpty) {
       return todaysMatches
-          .map((m) =>
-              '🏆 ${m.opponent} ${m.startsAt.display()}–${m.endsAt.display()}')
+          .map(
+            (m) =>
+                '🏆 ${m.opponent} ${m.startsAt.display()}–${m.endsAt.display()}',
+          )
           .join(' · ');
     }
 
@@ -190,11 +200,17 @@ class _StatusBar extends ConsumerWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(clock,
-                    style: const TextStyle(
-                        fontSize: 28, fontWeight: FontWeight.bold)),
-                Text(dayFull(todayDay),
-                    style: TextStyle(color: scheme.onSurfaceVariant)),
+                Text(
+                  clock,
+                  style: const TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                Text(
+                  dayFull(todayDay),
+                  style: TextStyle(color: scheme.onSurfaceVariant),
+                ),
               ],
             ),
             const SizedBox(width: 16),
@@ -208,18 +224,18 @@ class _StatusBar extends ConsumerWidget {
             ),
             const SizedBox(width: 16),
             selected == null
-                ? SizedBox(
-                    height: 56,
-                    child: FilledButton.icon(
-                      onPressed: onReserve,
-                      icon: const Icon(Icons.person_add),
-                      label: const Text('Rezervovat'),
-                    ),
+                ? GradientButton(
+                    onPressed: onReserve,
+                    icon: Icons.person_add,
+                    minHeight: 56,
+                    child: const Text('Rezervovat'),
                   )
                 : Container(
                     constraints: const BoxConstraints(minHeight: 56),
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 8),
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
                     decoration: BoxDecoration(
                       color: scheme.primaryContainer,
                       borderRadius: BorderRadius.circular(12),
@@ -227,6 +243,21 @@ class _StatusBar extends ConsumerWidget {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
+                        CircleAvatar(
+                          radius: 16,
+                          backgroundColor: scheme.onPrimaryContainer.withValues(
+                            alpha: 0.16,
+                          ),
+                          child: Text(
+                            initialsOf(selected!.displayName),
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: scheme.onPrimaryContainer,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
                         Flexible(
                           child: Text(
                             'Rezervuje: ${selected!.displayName}',
