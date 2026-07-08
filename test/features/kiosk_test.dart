@@ -5,9 +5,8 @@ import 'package:rezervator/core/theme.dart';
 import 'package:rezervator/core/ui.dart' show today;
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
+import 'package:rezervator/features/kiosk/kiosk_board_view.dart';
 import 'package:rezervator/features/kiosk/kiosk_shell.dart';
-import 'package:rezervator/features/kiosk/kiosk_week_view.dart';
-import 'package:rezervator/features/schedule/widgets/day_header.dart';
 
 void main() {
   const settings = ScheduleSettings(
@@ -168,13 +167,10 @@ void main() {
     await tester.tap(find.text(anna.displayName));
     await tester.pumpAndSettle();
 
-    // The grid's ListView only builds day-section Cards near the viewport
-    // (a plain, non-lazy ListView still sits under a lazy sliver), so on
-    // this narrow 800×600 test surface the first + cell may not exist in
-    // the tree yet — ensureVisible both scrolls it in and asserts it landed
-    // inside the viewport before tap() hit-tests it (c.f. the analogous
-    // scroll-into-view step in week_screen_test.dart).
-    final addCell = find.byIcon(Icons.add).first;
+    // Today is the board's first (always-built) column, so the + cell is
+    // already in the tree — the board renders free lanes as a literal '＋'
+    // character (spec §1), not the Material add icon.
+    final addCell = find.text('＋').first;
     await tester.ensureVisible(addCell);
     await tester.pumpAndSettle();
     await tester.tap(addCell);
@@ -194,11 +190,14 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // `tomorrow`'s day Card isn't necessarily built yet on this test
-    // surface (see comment above) — drag the grid up first so the
-    // reserved-slot Text actually exists to be found before ensureVisible
-    // fine-tunes its position.
-    await tester.drag(find.byType(ListView), const Offset(0, -600));
+    // `tomorrow` is board column index 1 — the board's horizontal ListView
+    // only builds columns near the viewport, so the reserved-slot Text
+    // doesn't exist yet until the grid scrolls exactly one column over
+    // (measuring a live column's width rather than hardcoding the
+    // clamp(160, (w-rail)/7, 220) constant keeps this test independent of
+    // that formula's exact numbers).
+    final columnWidth = tester.getSize(find.byType(BoardColumnHeader).first).width;
+    await tester.drag(find.byType(ListView), Offset(-columnWidth, 0));
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.text(petr.displayName).first);
     await tester.pumpAndSettle();
@@ -211,45 +210,54 @@ void main() {
     await finish(tester);
   });
 
-  testWidgets('f: kiosk always renders dark and shows the full week', (
-    tester,
-  ) async {
-    await tester.pumpWidget(kioskApp());
-    await tester.pumpAndSettle();
-
-    // The kiosk stays dark regardless of the device's system brightness
-    // (spec §4) — MaterialApp's default theme in this harness is light, so
-    // this only passes because KioskShell wraps itself in
-    // Theme(data: buildTheme(Brightness.dark)).
-    expect(
-      Theme.of(tester.element(find.byType(KioskWeekView))).brightness,
-      Brightness.dark,
-    );
-    // Always the full week — one DayHeader per day, Monday..Sunday. Only a
-    // handful of day Cards are built at once near the viewport on this
-    // 800×600 test surface (see the drag/ensureVisible comments on the
-    // tests above), and no single scroll position builds all 7
-    // simultaneously — so accumulate the distinct dates seen while
-    // scrolling through the whole list.
-    final seenDates = <Day>{};
-    void collect() {
-      for (final header in tester.widgetList<DayHeader>(
-        find.byType(DayHeader),
-      )) {
-        seenDates.add(header.date);
-      }
-    }
-
-    collect();
-    for (var i = 0; i < 8; i++) {
-      await tester.drag(find.byType(ListView), const Offset(0, -400));
+  testWidgets(
+    'f: kiosk always renders dark and shows 7 board columns from today',
+    (tester) async {
+      await tester.pumpWidget(kioskApp());
       await tester.pumpAndSettle();
-      collect();
-    }
-    expect(seenDates, hasLength(7));
 
-    await finish(tester);
-  });
+      // The kiosk stays dark regardless of the device's system brightness
+      // (spec §4) — MaterialApp's default theme in this harness is light,
+      // so this only passes because KioskShell wraps itself in
+      // Theme(data: buildTheme(Brightness.dark)).
+      expect(
+        Theme.of(tester.element(find.byType(KioskBoardView))).brightness,
+        Brightness.dark,
+      );
+      // Board columns run from today forward (spec §1) — the horizontal
+      // ListView only builds columns near the viewport, so drag exactly one
+      // column width at a time through indices 0..6, collecting each
+      // BoardColumnHeader's date (measuring a live column's width rather
+      // than hardcoding the clamp(160, (w-rail)/7, 220) constant keeps this
+      // test independent of that formula's exact numbers).
+      final columnWidth = tester.getSize(find.byType(BoardColumnHeader).first).width;
+      final seenDates = <Day>{};
+      void collect() {
+        for (final header in tester.widgetList<BoardColumnHeader>(
+          find.byType(BoardColumnHeader),
+        )) {
+          seenDates.add(header.date);
+        }
+      }
+
+      collect();
+      for (var i = 0; i < 6; i++) {
+        await tester.drag(find.byType(ListView), Offset(-columnWidth, 0));
+        await tester.pumpAndSettle();
+        collect();
+      }
+      // Every one of today's next 6 days was visited (the board's 7
+      // originally-visible-without-scroll columns, spec §1)…
+      expect(seenDates.containsAll({for (var i = 0; i < 7; i++) t.addDays(i)}), isTrue);
+      // …and the ListView's look-ahead cache may have also mounted columns
+      // further out, but never one before today — "days from DNES", never
+      // the past (unlike the old week view, which always started on
+      // Monday regardless of today).
+      expect(seenDates.every((d) => !d.isBefore(t)), isTrue);
+
+      await finish(tester);
+    },
+  );
 
   testWidgets(
     'g: NamePicker renders dark even when the app theme is light',
