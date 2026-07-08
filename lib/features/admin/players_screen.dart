@@ -52,6 +52,14 @@ class PlayersScreen extends ConsumerWidget {
     );
   }
 
+  Future<void> _setClub(BuildContext context, Profile p, String? clubId) =>
+      tryAction(
+        context,
+        () => Api.setPlayerClub(p.id, clubId),
+        success: 'Uloženo.',
+        errorText: friendlyDbError,
+      );
+
   /// "club · „nick“" (either half may be absent).
   String? _subtitle(Profile p) {
     final parts = [
@@ -72,6 +80,7 @@ class PlayersScreen extends ConsumerWidget {
     }
 
     final profiles = ref.watch(profilesProvider).value ?? const <Profile>[];
+    final clubs = ref.watch(clubsProvider).value ?? const <Club>[];
     final pending =
         profiles.where((p) => p.status == ProfileStatus.pending).toList();
     final approved = profiles
@@ -117,6 +126,19 @@ class PlayersScreen extends ConsumerWidget {
                       padding: EdgeInsets.only(right: 8),
                       child: Chip(label: Text('admin')),
                     ),
+                  DropdownButton<String?>(
+                    value: clubs.any((c) => c.id == p.clubId)
+                        ? p.clubId
+                        : null,
+                    onChanged: (clubId) => _setClub(context, p, clubId),
+                    items: [
+                      const DropdownMenuItem(
+                          value: null, child: Text('Bez oddílu')),
+                      for (final club in clubs)
+                        DropdownMenuItem(
+                            value: club.id, child: Text(club.name)),
+                    ],
+                  ),
                   PopupMenuButton<String>(
                     onSelected: (action) {
                       switch (action) {
