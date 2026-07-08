@@ -11,13 +11,43 @@ import '../../data/providers.dart';
 import '../../domain/models.dart';
 import '../../domain/schedule.dart';
 
+/// True when [date] resolves as an [OpenDay] under exactly the resolution the
+/// grid renders with (buildWeekSchedule): closed overrides and non-training
+/// weekdays are closed, and an override's blockIds are filtered against the
+/// real block set — an override whose ids no longer resolve to any existing
+/// block is a ClosedDay, not open. Matches/rentals/reservations never affect
+/// open-vs-closed status (only which slots within an open day are free), so
+/// they're passed empty.
+///
+/// This is the ONLY day-type probe outside the grid itself — the status bar
+/// and [nextTrainingDay] both go through it, so they can never disagree with
+/// what the grid shows.
+bool isDayOpen({
+  required Day date,
+  required Day today,
+  required ScheduleSettings settings,
+  required List<TimeBlock> blocks,
+  required List<DayOverride> overrides,
+}) {
+  final week = buildWeekSchedule(
+    monday: date.addDays(1 - date.weekday),
+    today: today,
+    now: const HourMinute(0, 0),
+    settings: settings,
+    blocks: blocks,
+    overrides: overrides,
+    matches: const [],
+    rentals: const [],
+    reservations: const [],
+  );
+  // WeekSchedule.days is contractually Monday..Sunday, so [weekday - 1] is
+  // exactly [date]'s entry.
+  return week.days[date.weekday - 1] is OpenDay;
+}
+
 /// Scans forward from [today] (exclusive) up to [horizonDays] and returns the
-/// first date that would render as an [OpenDay] — i.e. has a non-empty
-/// resolved block list, whether via a day override or the default active
-/// blocks on a training weekday. Matches/rentals/reservations don't affect
-/// open/closed status (only which slots within an open day are free), so
-/// they're passed empty here — cheap, and exactly the same override/weekday
-/// resolution buildWeekSchedule already does for the live grid.
+/// first date that resolves open per [isDayOpen] — the "Další trénink" the
+/// kiosk status bar shows on days without training.
 Day? nextTrainingDay({
   required Day today,
   required ScheduleSettings settings,
@@ -25,31 +55,15 @@ Day? nextTrainingDay({
   required List<DayOverride> overrides,
   required int horizonDays,
 }) {
-  // One buildWeekSchedule call per Monday-aligned week, starting at today's
-  // own Monday and stepping 7 days at a time. Consecutive mondays are always
-  // exactly 7 days apart, so this can never leave a gap between windows —
-  // stopping only once a week's Monday already lies beyond the horizon
-  // (at that point every day in it does too, since day 0 of the week is
-  // already out of range).
-  final todayMonday = today.addDays(1 - today.weekday);
-  for (var monday = todayMonday;
-      monday.differenceInDays(today) <= horizonDays;
-      monday = monday.addDays(7)) {
-    final week = buildWeekSchedule(
-      monday: monday,
-      today: today,
-      now: const HourMinute(0, 0),
-      settings: settings,
-      blocks: blocks,
-      overrides: overrides,
-      matches: const [],
-      rentals: const [],
-      reservations: const [],
-    );
-    for (final day in week.days) {
-      if (!day.date.isAfter(today)) continue;
-      if (day.date.differenceInDays(today) > horizonDays) continue;
-      if (day is OpenDay) return day.date;
+  for (var offset = 1; offset <= horizonDays; offset++) {
+    final date = today.addDays(offset);
+    if (isDayOpen(
+        date: date,
+        today: today,
+        settings: settings,
+        blocks: blocks,
+        overrides: overrides)) {
+      return date;
     }
   }
   return null;

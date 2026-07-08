@@ -153,20 +153,24 @@ class _StatusBar extends ConsumerWidget {
           : 'Zavřeno — ${override.reason}';
     }
 
-    final isTrainingDay = settings.trainingWeekdays.contains(todayDay.weekday);
+    // Same resolution the grid uses (isDayOpen → buildWeekSchedule), so the
+    // status bar can never disagree with what the grid renders — including
+    // overrides whose blockIds no longer resolve to existing blocks.
     final blocks = ref.watch(timeBlocksProvider).value ?? const [];
-    final hasActiveBlocks = blocks.any((b) => b.active);
-    final todayIsOpen = override != null
-        ? (override.blockIds == null
-            ? hasActiveBlocks
-            : override.blockIds!.isNotEmpty)
-        : (isTrainingDay && hasActiveBlocks);
+    final effectiveBlocks = blocks.isNotEmpty ? blocks : defaultTimeBlocks();
+    final todayIsOpen = isDayOpen(
+      date: todayDay,
+      today: todayDay,
+      settings: settings,
+      blocks: effectiveBlocks,
+      overrides: overrides,
+    );
 
     if (!todayIsOpen) {
       final next = nextTrainingDay(
         today: todayDay,
         settings: settings,
-        blocks: blocks.isNotEmpty ? blocks : defaultTimeBlocks(),
+        blocks: effectiveBlocks,
         overrides: overrides,
         horizonDays: settings.bookingHorizonDays,
       );
