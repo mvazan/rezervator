@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'config.dart';
 import 'features/auth/auth_gate.dart';
 import 'features/kiosk/kiosk_login_screen.dart';
+import 'push/push.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -16,6 +17,7 @@ Future<void> main() async {
       url: AppConfig.supabaseUrl,
       publishableKey: AppConfig.supabaseAnonKey,
     );
+    await Push.init();
   }
 
   runApp(const ProviderScope(child: RezervatorApp()));
