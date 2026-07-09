@@ -27,6 +27,17 @@ class ProfileScreen extends ConsumerWidget {
     );
   }
 
+  Future<void> _logout(BuildContext context) async {
+    final ok = await confirmDialog(
+      context,
+      title: 'Odhlásit se',
+      message: 'Opravdu se chceš odhlásit?',
+      confirmLabel: 'Odhlásit se',
+    );
+    if (!ok || !context.mounted) return;
+    await Api.signOut();
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final profile = ref.watch(myProfileProvider).value;
@@ -78,6 +89,22 @@ class ProfileScreen extends ConsumerWidget {
                       onPressed: () => _editNick(context, profile.nick),
                       child: const Text('Upravit'),
                     ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Card(
+                  child: ListTile(
+                    leading: Icon(
+                      Icons.logout,
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                    title: Text(
+                      'Odhlásit se',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                    onTap: () => _logout(context),
                   ),
                 ),
               ],

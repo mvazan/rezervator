@@ -48,18 +48,14 @@ void main() {
     child: const MaterialApp(home: HomeShell()),
   );
 
-  testWidgets('logout asks for confirmation before signing out', (
+  testWidgets('AppBar has no logout icon; profile icon is the entry point', (
     tester,
   ) async {
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byIcon(Icons.logout));
-    await tester.pumpAndSettle();
-
-    // The confirm dialog appears; nothing is signed out until confirmed.
-    expect(find.text('Opravdu se chceš odhlásit?'), findsOneWidget);
-    expect(find.widgetWithText(FilledButton, 'Odhlásit se'), findsOneWidget);
-    expect(find.widgetWithText(TextButton, 'Zrušit'), findsOneWidget);
+    // Logout now lives on the profile screen, not the AppBar.
+    expect(find.byIcon(Icons.logout), findsNothing);
+    expect(find.byIcon(Icons.account_circle_outlined), findsOneWidget);
   });
 }
