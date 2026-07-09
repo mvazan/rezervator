@@ -25,3 +25,20 @@ import 'models.dart';
   }
   return (reuseIds: reuseIds, toCreate: toCreate);
 }
+
+/// Shift every block's [start,end] by [offsetMinutes] (e.g. -30 / +30).
+/// Blocks that would run before 00:00 or past 24:00 are dropped. Returns
+/// (start,end) HourMinute pairs sorted by start — feed into the custom-times
+/// editor rows.
+List<(HourMinute, HourMinute)> shiftBlocks(
+    List<TimeBlock> blocks, int offsetMinutes) {
+  final out = <(HourMinute, HourMinute)>[];
+  for (final b in blocks) {
+    final s = b.startsAt.minutesFromMidnight + offsetMinutes;
+    final e = b.endsAt.minutesFromMidnight + offsetMinutes;
+    if (s < 0 || e > 24 * 60) continue;
+    out.add((HourMinute(s ~/ 60, s % 60), HourMinute(e ~/ 60, e % 60)));
+  }
+  out.sort((a, b) => a.$1.minutesFromMidnight.compareTo(b.$1.minutesFromMidnight));
+  return out;
+}

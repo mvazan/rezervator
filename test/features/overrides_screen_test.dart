@@ -94,4 +94,37 @@ void main() {
       expect(find.byType(AlertDialog), findsOneWidget);
     },
   );
+
+  testWidgets(
+    'tapping + 30 min fills the rows with default blocks shifted +30',
+    (tester) async {
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Přidat výjimku'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Vybrat'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Otevřeno — vlastní časy'));
+      await tester.pumpAndSettle();
+
+      // Prefilled from the default active blocks: 9:00-10:30, 10:00-11:00.
+      expect(find.text('9:00'), findsOneWidget);
+
+      await tester.tap(find.text('+ 30 min'));
+      await tester.pumpAndSettle();
+
+      // Rows are replaced with the default active blocks shifted +30:
+      // 9:30-11:00, 10:30-11:30.
+      expect(find.text('9:00'), findsNothing);
+      expect(find.text('9:30'), findsOneWidget);
+      expect(find.text('11:00'), findsOneWidget);
+      expect(find.text('10:30'), findsOneWidget);
+      expect(find.text('11:30'), findsOneWidget);
+    },
+  );
 }

@@ -1,8 +1,18 @@
 /// Kiosk "board": landscape days-as-columns view replacing the old vertical
 /// week list. Columns run from `today` (first, highlighted DNES) forward
-/// through `booking_horizon_days`, all equally wide; rows are the union of
-/// every visible day's time blocks (sorted by start time), so a lane cell
-/// lines up across columns regardless of which specific day it belongs to.
+/// through `booking_horizon_days`, all equally wide.
+///
+/// Hybrid row model (spec §2): the left rail — the "swimline" — is the
+/// DEFAULT ACTIVE block set (active `time_blocks` from settings, sorted), NOT
+/// a union across every visible day. A "standard" day (its resolved block set
+/// equals that default set) renders one cell per swimline block, aligned to
+/// the rail, WITHOUT per-cell times (the time is read from the rail). A
+/// "shifted" day (an override whose block set differs — e.g. slots pushed
+/// ±30 min) renders as its OWN continuous column: one strip whose total height
+/// exactly matches the swimline, split into the DAY'S own blocks with a small
+/// time label on every cell (free, occupied, prep, match) so a player sees
+/// when to come even though the times don't line up with the shared rail.
+///
 /// Display-only until a player is selected — then free lane rows book for
 /// THAT player. No cancel affordance anywhere (kiosk performs exactly one
 /// action type).
@@ -92,6 +102,20 @@ int _byStartThenPosition(TimeBlock a, TimeBlock b) {
   final byStart =
       a.startsAt.minutesFromMidnight.compareTo(b.startsAt.minutesFromMidnight);
   return byStart != 0 ? byStart : a.position.compareTo(b.position);
+}
+
+/// True when [day]'s resolved block set differs from the default active
+/// (swimline) set — i.e. the day carries an override that shifted or replaced
+/// its times, so it must render as its own continuous own-times column rather
+/// than into the shared swimline grid (spec §2). Compares block-id SETS, not
+/// order: a standard day (override absent, or an override whose block_ids
+/// resolve back to exactly the default set) has the same set → false. A
+/// [ClosedDay] is never "shifted" (it renders the ✕ column regardless).
+bool isShiftedDay(OpenDay day, List<TimeBlock> defaultActive) {
+  final dayIds = {for (final b in day.blocks) b.id};
+  final defaultIds = {for (final b in defaultActive) b.id};
+  return dayIds.length != defaultIds.length ||
+      !dayIds.containsAll(defaultIds);
 }
 
 /// Faint horizontal divider between time-slot row-groups, shared by [_Rail]
@@ -369,19 +393,14 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
     };
     final clubColorById = {for (final p in players) p.id: p.clubColor};
 
-    // Row rail = union of every day on the board (not just whichever column
-    // happens to be scrolled into view — the rail is a single fixed
-    // structure shared by all columns, so it must be stable regardless of
-    // horizontal scroll position), sorted by start time.
-    final blockById = <String, TimeBlock>{};
-    for (final day in days) {
-      if (day is OpenDay) {
-        for (final b in day.blocks) {
-          blockById[b.id] = b;
-        }
-      }
-    }
-    final railBlocks = blockById.values.toList()..sort(_byStartThenPosition);
+    // Swimline rail = the DEFAULT ACTIVE block set only (spec §2), sorted by
+    // start time — NOT a union across every visible day. Standard days align
+    // one cell per rail block; shifted days (different block set) get their
+    // own strip instead of poking holes/duplicates in this shared rail. Mirrors
+    // buildWeekSchedule's own `activeBlocks` so a no-override day resolves to
+    // exactly this set and reads as "standard".
+    final railBlocks = blocks.where((b) => b.active).toList()
+      ..sort(_byStartThenPosition);
     // Per-block row-group height so unequal-duration blocks (e.g. a 30-min vs
     // a 60-min block) render at proportional heights — every column and the
     // rail consume this same list, so all share one vertical grid.
@@ -505,11 +524,16 @@ class BoardColumnHeader extends StatelessWidget {
     required this.date,
     required this.isToday,
     required this.matches,
+    this.shifted = false,
   });
 
   final Day date;
   final bool isToday;
   final List<Match> matches;
+
+  /// A shifted (own-times) day gets a tiny ⚡ before the date so it reads as
+  /// custom (spec §2). Never combined with the DNES prefix on the same column.
+  final bool shifted;
 
   static const _gradientColors = [Color(0xFF6366F1), Color(0xFF22D3EE)];
 
@@ -529,7 +553,9 @@ class BoardColumnHeader extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Text(
-            isToday ? 'DNES · ${dayLabel(date)}' : dayLabel(date),
+            isToday
+                ? 'DNES · ${dayLabel(date)}'
+                : (shifted ? '⚡ ${dayLabel(date)}' : dayLabel(date)),
             textAlign: TextAlign.center,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
@@ -558,10 +584,13 @@ class BoardColumnHeader extends StatelessWidget {
   }
 }
 
-/// One board column: DNES-gradient (today) or plain header, then one
-/// row-group per rail block. A closed day dims the whole column and shows a
-/// vertical "✕ zavřeno[ — reason]" — matches still render on top (spectators
-/// want to see who plays even on a closed day, spec §1).
+/// One board column: DNES-gradient (today) or plain header, then either the
+/// swimline grid (standard day: one row-group per rail block, aligned to the
+/// rail, no per-cell times) or the own-times strip (shifted day: the day's own
+/// blocks, normalized to fill the swimline height exactly, each cell labelled
+/// with its own time — spec §2/§3). A closed day dims the whole column and
+/// shows a vertical "✕ zavřeno[ — reason]" — matches still render on top
+/// (spectators want to see who plays even on a closed day, spec §1).
 class _DayColumn extends StatelessWidget {
   const _DayColumn({
     required this.day,
@@ -590,7 +619,11 @@ class _DayColumn extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final day = this.day;
     final closed = day is ClosedDay;
+    // A shifted (own-times) day carries its own vertical axis, so mark the
+    // header so it reads as custom (spec §2: a subtle ⚡ before the date).
+    final shifted = day is OpenDay && isShiftedDay(day, railBlocks);
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 2),
@@ -609,20 +642,56 @@ class _DayColumn extends StatelessWidget {
             date: day.date,
             isToday: isToday,
             matches: day.matches,
+            shifted: shifted,
           ),
-          for (var i = 0; i < railBlocks.length; i++)
-            Container(
-              height: rowHeights[i],
-              decoration: BoxDecoration(
-                border:
-                    _gridlineBorder(scheme, isLast: i == railBlocks.length - 1),
+          if (shifted)
+            _shiftedStrip(context, scheme, day)
+          else
+            for (var i = 0; i < railBlocks.length; i++)
+              Container(
+                height: rowHeights[i],
+                decoration: BoxDecoration(
+                  border: _gridlineBorder(scheme,
+                      isLast: i == railBlocks.length - 1),
+                ),
+                child: closed
+                    ? _closedCell(context, scheme, railBlocks[i])
+                    : _openCell(context, railBlocks[i]),
               ),
-              child: closed
-                  ? _closedCell(context, scheme, railBlocks[i])
-                  : _openCell(context, railBlocks[i]),
-            ),
         ],
       ),
+    );
+  }
+
+  /// The own-times column for a shifted day (spec §2/§3): ONE continuous strip
+  /// whose total height equals the swimline total (`sum(rowHeights)`) so it
+  /// aligns top-and-bottom with the standard columns, split into the DAY'S own
+  /// blocks. Per-cell heights are each block's [blockGroupHeight] scaled by
+  /// `swimlineTotal / sum(dayBlockHeights)` so they sum EXACTLY to the swimline
+  /// total (never over/underflow — misaligned columns would result). Every
+  /// cell carries its own time label (free ＋, occupied, prep, match).
+  Widget _shiftedStrip(BuildContext context, ColorScheme scheme, OpenDay day) {
+    final swimlineTotal = rowHeights.fold(0.0, (a, b) => a + b);
+    final dayHeights = [
+      for (final b in day.blocks) blockGroupHeight(b, laneCount),
+    ];
+    final rawTotal = dayHeights.fold(0.0, (a, b) => a + b);
+    // Normalization scale — guard against a degenerate zero total (never
+    // reached in practice: an OpenDay always has ≥1 block of positive height).
+    final scale = rawTotal > 0 ? swimlineTotal / rawTotal : 0.0;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (var i = 0; i < day.blocks.length; i++)
+          Container(
+            height: dayHeights[i] * scale,
+            decoration: BoxDecoration(
+              border:
+                  _gridlineBorder(scheme, isLast: i == day.blocks.length - 1),
+            ),
+            child: _openCell(context, day.blocks[i], showTime: true),
+          ),
+      ],
     );
   }
 
@@ -656,26 +725,66 @@ class _DayColumn extends StatelessWidget {
     );
   }
 
-  Widget _openCell(BuildContext context, TimeBlock railBlock) {
+  /// Renders one block cell. [showTime] (shifted own-times column, spec §3)
+  /// stacks a small `HH:MM–HH:MM` label at the top-left of the cell — over the
+  /// free ＋, occupied, prep AND match content alike — so a player reads the
+  /// time even where the shared rail can't supply it. Standard (swimline)
+  /// cells pass `showTime: false` (time comes from the rail).
+  Widget _openCell(BuildContext context, TimeBlock block,
+      {bool showTime = false}) {
     final openDay = day as OpenDay;
     final scheme = Theme.of(context).colorScheme;
-    // The rail's block set is the UNION across every day on the board — an
-    // open day that doesn't itself have this specific block (e.g. a custom
-    // day-override subset) renders a dim empty filler instead.
-    final hasBlock = openDay.blocks.any((b) => b.id == railBlock.id);
+    // The rail's block set is the default active (swimline) set — a standard
+    // open day that doesn't itself have this specific block renders a dim
+    // empty filler instead. Shifted days iterate their OWN blocks, so this
+    // never misses for them.
+    final hasBlock = openDay.blocks.any((b) => b.id == block.id);
     if (!hasBlock) {
       return Container(color: scheme.surfaceContainerLowest.withValues(alpha: 0.3));
     }
 
-    final firstState = openDay.slot(railBlock.id, 1);
+    final firstState = openDay.slot(block.id, 1);
+    final Widget body;
     if (firstState is MatchSlot) {
-      return _matchCell(context, firstState.match, isPrep: firstState.isPrep);
+      body = _matchCell(context, firstState.match, isPrep: firstState.isPrep);
+    } else {
+      body = Column(
+        children: [
+          for (var lane = 1; lane <= laneCount; lane++)
+            Expanded(child: _laneRow(context, openDay, block, lane)),
+        ],
+      );
     }
-
-    return Column(
+    if (!showTime) return body;
+    // Overlay the time label at the top-left without stealing height from the
+    // body (the strip's per-cell heights are already normalized to fill the
+    // swimline exactly — a Column header here would shrink the lanes and break
+    // that alignment). A Stack keeps the body full-height under the label.
+    return Stack(
       children: [
-        for (var lane = 1; lane <= laneCount; lane++)
-          Expanded(child: _laneRow(context, openDay, railBlock, lane)),
+        Positioned.fill(child: body),
+        // Top-right corner: the lane rows put their digit at the left and the
+        // name centered, so the right corner is the least crowded. A faint
+        // surface backdrop keeps the label readable over any club colour.
+        Positioned(
+          top: 1,
+          right: 3,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+            decoration: BoxDecoration(
+              color: scheme.surface.withValues(alpha: 0.7),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              '${block.startsAt.display()}–${block.endsAt.display()}',
+              style: TextStyle(
+                fontSize: 9,
+                fontWeight: FontWeight.w600,
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ),
       ],
     );
   }
