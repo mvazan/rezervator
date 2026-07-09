@@ -42,6 +42,7 @@ class DayPagerView extends StatefulWidget {
     required this.nameById,
     required this.clubColorById,
     required this.interactive,
+    required this.fitWidth,
     required this.onBook,
     required this.onCancel,
     required this.onSelectDay,
@@ -85,6 +86,10 @@ class DayPagerView extends StatefulWidget {
   final Map<String, String> nameById;
   final Map<String, int> clubColorById;
   final bool interactive;
+
+  /// When true the lane grid drops its horizontal scroller and lets lanes
+  /// share the full width (names ellipsis-clipped); see [_DayPage].
+  final bool fitWidth;
   final void Function(Day, TimeBlock, int lane) onBook;
   final void Function(Day, TimeBlock, Reservation, {required bool ownFuture})
   onCancel;
@@ -246,6 +251,7 @@ class _DayPagerViewState extends State<DayPagerView> {
               interactive: page >= _firstRealPage && page <= _lastRealPage
                   ? widget.interactive
                   : false,
+              fitWidth: widget.fitWidth,
               onBook: widget.onBook,
               onCancel: widget.onCancel,
             ),
@@ -294,6 +300,7 @@ class _DayPage extends StatelessWidget {
     required this.nameById,
     required this.clubColorById,
     required this.interactive,
+    required this.fitWidth,
     required this.onBook,
     required this.onCancel,
   });
@@ -306,6 +313,9 @@ class _DayPage extends StatelessWidget {
   final Map<String, String> nameById;
   final Map<String, int> clubColorById;
   final bool interactive;
+
+  /// See [DayPagerView.fitWidth].
+  final bool fitWidth;
   final void Function(Day, TimeBlock, int lane) onBook;
   final void Function(Day, TimeBlock, Reservation, {required bool ownFuture})
   onCancel;
@@ -362,25 +372,38 @@ class _DayPage extends StatelessWidget {
               chipLabel: '$freeCount volných',
             ),
             const SizedBox(height: 12),
-            // Lane header + block rows share one horizontal scroller so they
-            // can never drift out of alignment: both the header labels and
-            // every row's tiles are fixed-width (96px, matching the tile's
-            // SizedBox) siblings of a plain Row (not a Wrap, which could
-            // reflow lanes onto a second line at a laneCount/width combo a
-            // Row can't fit — leaving the header's columns no longer over
-            // the tiles they label). A shared scroller means a day with more
-            // lanes than fit on screen scrolls the header and every row
-            // together instead of reflowing any of them independently.
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Column(
+            // Lane header + block rows always stay column-aligned: every lane
+            // cell is the same width in a given mode, and the header row and
+            // block rows are built the same way, so column N of the header
+            // always sits over column N of every row.
+            //
+            // In fit-width mode lanes flex to share the full width (Expanded)
+            // and there is no horizontal scroller — the whole day is visible,
+            // names ellipsis-clip. Otherwise lanes are fixed-width (96px) and
+            // the header + every row share ONE horizontal scroller (not a
+            // Wrap, which could reflow lanes onto a second line and leave the
+            // header's columns no longer over the tiles they label), so a day
+            // with more lanes than fit scrolls all rows together.
+            if (fitWidth)
+              Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _laneHeaderRow(day),
                   for (final block in day.blocks) _laneRow(context, day, block),
                 ],
+              )
+            else
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _laneHeaderRow(day),
+                    for (final block in day.blocks)
+                      _laneRow(context, day, block),
+                  ],
+                ),
               ),
-            ),
           ],
         ),
       ),
@@ -391,6 +414,29 @@ class _DayPage extends StatelessWidget {
   static const _laneTileWidth = 96.0;
   static const _laneTileSpacing = 8.0;
 
+  /// Wraps a lane cell so it either flexes to share the row's width
+  /// (fit-width) or keeps its fixed 96px column plus inter-lane spacing.
+  Widget _laneCell({
+    required int lane,
+    required int laneCount,
+    required Widget child,
+  }) {
+    if (fitWidth) {
+      return Expanded(
+        child: Padding(
+          padding: EdgeInsets.only(
+            right: lane == laneCount ? 0 : _laneTileSpacing,
+          ),
+          child: child,
+        ),
+      );
+    }
+    return Padding(
+      padding: EdgeInsets.only(right: lane == laneCount ? 0 : _laneTileSpacing),
+      child: SizedBox(width: _laneTileWidth, child: child),
+    );
+  }
+
   Widget _laneHeaderRow(OpenDay day) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
@@ -399,19 +445,16 @@ class _DayPage extends StatelessWidget {
         children: [
           const SizedBox(width: _laneLabelWidth),
           for (var lane = 1; lane <= day.laneCount; lane++)
-            Padding(
-              padding: EdgeInsets.only(
-                right: lane == day.laneCount ? 0 : _laneTileSpacing,
-              ),
-              child: SizedBox(
-                width: _laneTileWidth,
-                child: Text(
-                  'Dráha $lane',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
+            _laneCell(
+              lane: lane,
+              laneCount: day.laneCount,
+              child: Text(
+                'Dráha $lane',
+                textAlign: TextAlign.center,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
             ),
@@ -440,26 +483,22 @@ class _DayPage extends StatelessWidget {
             ),
           ),
           for (var lane = 1; lane <= day.laneCount; lane++)
-            Padding(
-              padding: EdgeInsets.only(
-                right: lane == day.laneCount ? 0 : _laneTileSpacing,
-              ),
-              child: SizedBox(
-                width: _laneTileWidth,
-                child: slotTileFor(
-                  day: day,
-                  block: block,
-                  lane: lane,
-                  size: SlotTileSize.large,
-                  me: me,
-                  myCount: myCount,
-                  settings: settings,
-                  nameById: nameById,
-                  clubColorById: clubColorById,
-                  interactive: interactive,
-                  onBook: onBook,
-                  onCancel: onCancel,
-                ),
+            _laneCell(
+              lane: lane,
+              laneCount: day.laneCount,
+              child: slotTileFor(
+                day: day,
+                block: block,
+                lane: lane,
+                size: SlotTileSize.large,
+                me: me,
+                myCount: myCount,
+                settings: settings,
+                nameById: nameById,
+                clubColorById: clubColorById,
+                interactive: interactive,
+                onBook: onBook,
+                onCancel: onCancel,
               ),
             ),
         ],
