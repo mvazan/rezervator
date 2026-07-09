@@ -16,6 +16,7 @@ import '../../data/providers.dart';
 import '../../domain/models.dart';
 import '../../domain/palette.dart';
 import '../../domain/schedule.dart';
+import 'board_layout.dart';
 
 /// True when [date] resolves as an [OpenDay] under exactly the resolution the
 /// board renders with (buildWeekSchedule): closed overrides and non-training
@@ -82,7 +83,6 @@ double boardColumnWidth(double availableWidth) =>
     ((availableWidth - _railWidth) / 7).clamp(160.0, 220.0);
 
 const _railWidth = 64.0;
-const _rowHeight = 40.0;
 const _headerHeight = 56.0;
 
 /// Sort blocks by start time, breaking ties by [TimeBlock.position] — mirrors
@@ -192,7 +192,7 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
   // shell's imperative reset call — the shell only holds a GlobalKey to this
   // state, no board-shaped data of its own to pass.
   List<TimeBlock> _railBlocks = const [];
-  double _rowGroupHeight = 0;
+  List<double> _rowHeights = const [];
 
   @override
   void dispose() {
@@ -214,9 +214,10 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
     if (_hScroll.hasClients) {
       _hScroll.animateTo(0, duration: _scrollDuration, curve: _scrollCurve);
     }
-    if (_vScroll.hasClients && _rowGroupHeight > 0) {
+    if (_vScroll.hasClients && _rowHeights.isNotEmpty) {
       final index = _currentOrNextBlockIndex(now);
-      final target = _headerHeight + index * _rowGroupHeight;
+      final target =
+          _headerHeight + _rowHeights.take(index).fold(0.0, (a, b) => a + b);
       final clamped =
           target.clamp(0.0, _vScroll.position.maxScrollExtent);
       _vScroll.animateTo(clamped, duration: _scrollDuration, curve: _scrollCurve);
@@ -389,14 +390,19 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
       }
     }
     final railBlocks = blockById.values.toList()..sort(_byStartThenPosition);
-    final rowGroupHeight = settings.laneCount * _rowHeight;
-    final gridHeight = railBlocks.length * rowGroupHeight;
+    // Per-block row-group height so unequal-duration blocks (e.g. a 30-min vs
+    // a 60-min block) render at proportional heights — every column and the
+    // rail consume this same list, so all share one vertical grid.
+    final rowHeights = [
+      for (final b in railBlocks) blockGroupHeight(b, settings.laneCount),
+    ];
+    final gridHeight = rowHeights.fold(0.0, (a, b) => a + b);
     final totalHeight = _headerHeight + gridHeight;
     // Snapshot for resetToNow's imperative scroll-target math (see field
     // docs above) — assignment only, no setState, so it can't trigger a
     // rebuild loop.
     _railBlocks = railBlocks;
-    _rowGroupHeight = rowGroupHeight;
+    _rowHeights = rowHeights;
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -408,7 +414,7 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _Rail(blocks: railBlocks, rowGroupHeight: rowGroupHeight),
+                _Rail(blocks: railBlocks, rowHeights: rowHeights),
                 Expanded(
                   child: SizedBox(
                     height: totalHeight,
@@ -423,7 +429,7 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
                           day: days[index],
                           isToday: index == 0,
                           railBlocks: railBlocks,
-                          rowGroupHeight: rowGroupHeight,
+                          rowHeights: rowHeights,
                           laneCount: settings.laneCount,
                           nameById: nameById,
                           clubColorById: clubColorById,
@@ -452,13 +458,14 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
 }
 
 /// Fixed left rail: one label per row-group (time block), each exactly
-/// [rowGroupHeight] tall — same height every [_DayColumn] gives its own
-/// row-group for that block — so labels line up with cells across columns.
+/// [rowHeights]`[i]` tall — the same per-block height every [_DayColumn] gives
+/// its own row-group for that block — so labels line up with cells across
+/// columns regardless of each block's duration.
 class _Rail extends StatelessWidget {
-  const _Rail({required this.blocks, required this.rowGroupHeight});
+  const _Rail({required this.blocks, required this.rowHeights});
 
   final List<TimeBlock> blocks;
-  final double rowGroupHeight;
+  final List<double> rowHeights;
 
   @override
   Widget build(BuildContext context) {
@@ -470,7 +477,7 @@ class _Rail extends StatelessWidget {
           const SizedBox(height: _headerHeight),
           for (var i = 0; i < blocks.length; i++)
             Container(
-              height: rowGroupHeight,
+              height: rowHeights[i],
               decoration: BoxDecoration(
                 border: _gridlineBorder(scheme, isLast: i == blocks.length - 1),
               ),
@@ -568,7 +575,7 @@ class _DayColumn extends StatelessWidget {
     required this.day,
     required this.isToday,
     required this.railBlocks,
-    required this.rowGroupHeight,
+    required this.rowHeights,
     required this.laneCount,
     required this.nameById,
     required this.clubColorById,
@@ -580,7 +587,7 @@ class _DayColumn extends StatelessWidget {
   final DaySchedule day;
   final bool isToday;
   final List<TimeBlock> railBlocks;
-  final double rowGroupHeight;
+  final List<double> rowHeights;
   final int laneCount;
   final Map<String, String> nameById;
   final Map<String, int> clubColorById;
@@ -613,7 +620,7 @@ class _DayColumn extends StatelessWidget {
           ),
           for (var i = 0; i < railBlocks.length; i++)
             Container(
-              height: rowGroupHeight,
+              height: rowHeights[i],
               decoration: BoxDecoration(
                 border:
                     _gridlineBorder(scheme, isLast: i == railBlocks.length - 1),
