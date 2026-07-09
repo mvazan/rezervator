@@ -1,6 +1,6 @@
 /// Shared chrome for the auth-family screens (login, register, waiting,
 /// kiosk login): a centered card floating over a subtle radial gradient
-/// backdrop, with the app logo in a gradient-bordered circle above it.
+/// backdrop, with the app logo (a rounded-square image) above it.
 /// Purely presentational — callers keep their own Scaffold/AppBar/state;
 /// this only wraps the body content, so no screen's behavior changes.
 library;
@@ -61,40 +61,21 @@ class AuthCard extends StatelessWidget {
   }
 }
 
-/// App logo inside a circle with a 2px indigo→cyan gradient border.
+/// App logo as a rounded-square image — no ring, no background disc.
 class AuthLogo extends StatelessWidget {
   const AuthLogo({super.key, this.size = 96});
 
   final double size;
 
-  static const _gradientColors = [Color(0xFF6366F1), Color(0xFF22D3EE)];
-
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final ringDiameter = size + 24;
-    return Container(
-      width: ringDiameter,
-      height: ringDiameter,
-      padding: const EdgeInsets.all(2),
-      decoration: const BoxDecoration(
-        shape: BoxShape.circle,
-        gradient: LinearGradient(colors: _gradientColors),
-      ),
-      child: Container(
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: scheme.surface,
-        ),
-        alignment: Alignment.center,
-        child: ClipOval(
-          child: Image.asset(
-            'assets/images/logo_circle.png',
-            width: size,
-            height: size,
-            fit: BoxFit.cover,
-          ),
-        ),
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(size * 0.25),
+      child: Image.asset(
+        'assets/images/logo.png',
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
       ),
     );
   }

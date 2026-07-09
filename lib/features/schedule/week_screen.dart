@@ -17,6 +17,12 @@ enum ScheduleView { day, week }
 /// shared_preferences key storing the chosen [ScheduleView] ('day'/'week').
 const scheduleViewPrefKey = 'schedule_view';
 
+/// shared_preferences key storing the per-device "fit width" boolean: when
+/// true both schedule views drop horizontal scrolling and let lanes share the
+/// full screen width (names ellipsis-clipped). Defaults to true on narrow
+/// (< 700px) devices where the whole day rarely fits otherwise.
+const scheduleFitWidthPrefKey = 'fit_width';
+
 /// Live week view: grid computed by buildWeekSchedule, booking via RPCs.
 /// Acts as the "shell": owns navigation (week offset, view toggle) and all
 /// provider wiring; delegates rendering to [WeekListView] or [DayPagerView],
@@ -36,6 +42,10 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
   /// resolved on the first frame — see [_resolveInitialView].
   ScheduleView? _view;
 
+  /// Null until the stored `fit_width` preference (or the width-based default)
+  /// has been resolved on the first frame — see [_resolveInitialView].
+  bool? _fitWidth;
+
   Day _monday(Day today) => today.addDays(1 - today.weekday + 7 * _weekOffset);
 
   @override
@@ -51,10 +61,11 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
     // the current width — captured here (safe: no async gap yet) so
     // _resolveInitialView never has to read `context` after an `await`.
     if (_view == null) {
+      final narrow = MediaQuery.sizeOf(context).width < 700;
       _resolveInitialView(
-        MediaQuery.sizeOf(context).width < 700
-            ? ScheduleView.day
-            : ScheduleView.week,
+        narrow ? ScheduleView.day : ScheduleView.week,
+        // Fit-width is most useful on phones, so it defaults on when narrow.
+        fitWidthDefault: narrow,
       );
     }
   }
@@ -64,8 +75,12 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
   /// Falls back to [widthDefault] if reading the preference throws (e.g.
   /// platform channel unavailable) so the screen never gets stuck without a
   /// view.
-  Future<void> _resolveInitialView(ScheduleView widthDefault) async {
+  Future<void> _resolveInitialView(
+    ScheduleView widthDefault, {
+    required bool fitWidthDefault,
+  }) async {
     ScheduleView resolved;
+    bool fitWidth;
     try {
       final prefs = await SharedPreferences.getInstance();
       resolved = switch (prefs.getString(scheduleViewPrefKey)) {
@@ -73,10 +88,28 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
         'week' => ScheduleView.week,
         _ => widthDefault,
       };
+      fitWidth = prefs.getBool(scheduleFitWidthPrefKey) ?? fitWidthDefault;
     } catch (_) {
       resolved = widthDefault;
+      fitWidth = fitWidthDefault;
     }
-    if (mounted) setState(() => _view = resolved);
+    if (mounted) {
+      setState(() {
+        _view = resolved;
+        _fitWidth = fitWidth;
+      });
+    }
+  }
+
+  Future<void> _setFitWidth(bool fitWidth) async {
+    setState(() => _fitWidth = fitWidth);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(scheduleFitWidthPrefKey, fitWidth);
+    } catch (_) {
+      // Persistence is a per-device nicety; a failed write just means the
+      // next launch falls back to the width-based default.
+    }
   }
 
   Future<void> _setView(ScheduleView view) async {
@@ -206,6 +239,7 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
     final now = HourMinute(nowDt.hour, nowDt.minute);
     final monday = _monday(todayDay);
     final view = _view;
+    final fitWidth = _fitWidth ?? false;
 
     final settings =
         ref.watch(settingsProvider).value ?? ScheduleSettings.defaults;
@@ -253,11 +287,21 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
                     : ScheduleView.week,
               ),
             ),
+          if (_fitWidth != null)
+            IconButton(
+              icon: Icon(
+                fitWidth
+                    ? Icons.width_normal_outlined
+                    : Icons.fit_screen_outlined,
+              ),
+              tooltip: fitWidth ? 'Posuvná mřížka' : 'Roztáhnout na šířku',
+              onPressed: () => _setFitWidth(!fitWidth),
+            ),
         ],
       ),
     );
 
-    if (view == null || timeBlocks.isLoading) {
+    if (view == null || _fitWidth == null || timeBlocks.isLoading) {
       return Column(
         children: [
           header,
@@ -347,11 +391,13 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
                   nameById: nameById,
                   clubColorById: clubColorById,
                   interactive: interactive,
+                  fitWidth: fitWidth,
                   onBook: onBook,
                   onCancel: onCancel,
                 )
               : DayPagerView(
                   week: week,
+                  fitWidth: fitWidth,
                   weekOffset: _weekOffset,
                   dayIndex: _dayIndex,
                   today: todayDay,
@@ -391,6 +437,7 @@ class WeekListView extends StatelessWidget {
     required this.nameById,
     required this.clubColorById,
     required this.interactive,
+    required this.fitWidth,
     required this.onBook,
     required this.onCancel,
   });
@@ -402,14 +449,22 @@ class WeekListView extends StatelessWidget {
   final Map<String, String> nameById;
   final Map<String, int> clubColorById;
   final bool interactive;
+
+  /// When true the compact grid drops its horizontal scroller and lets lanes
+  /// share the full width (names ellipsis-clipped); see [_DaySection._grid].
+  final bool fitWidth;
   final void Function(Day, TimeBlock, int lane) onBook;
   final void Function(Day, TimeBlock, Reservation, {required bool ownFuture})
   onCancel;
 
   @override
   Widget build(BuildContext context) {
+    // Portrait phones get tighter list gutters so more of each day fits.
+    final narrow = MediaQuery.sizeOf(context).width < 700;
     return ListView(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 24),
+      padding: narrow
+          ? const EdgeInsets.fromLTRB(6, 0, 6, 16)
+          : const EdgeInsets.fromLTRB(12, 0, 12, 24),
       children: [
         for (final day in week.days)
           _DaySection(
@@ -420,6 +475,7 @@ class WeekListView extends StatelessWidget {
             nameById: nameById,
             clubColorById: clubColorById,
             interactive: interactive,
+            fitWidth: fitWidth,
             onBook: onBook,
             onCancel: onCancel,
           ),
@@ -437,6 +493,7 @@ class _DaySection extends StatelessWidget {
     required this.nameById,
     required this.clubColorById,
     required this.interactive,
+    required this.fitWidth,
     required this.onBook,
     required this.onCancel,
   });
@@ -451,15 +508,19 @@ class _DaySection extends StatelessWidget {
   /// False while blocks are the placeholder grid or this week's reservation
   /// stream isn't loaded yet — see the doc comment in build() for why.
   final bool interactive;
+
+  /// See [WeekListView.fitWidth].
+  final bool fitWidth;
   final void Function(Day, TimeBlock, int lane) onBook;
   final void Function(Day, TimeBlock, Reservation, {required bool ownFuture})
   onCancel;
 
   @override
   Widget build(BuildContext context) {
+    final narrow = MediaQuery.sizeOf(context).width < 700;
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: EdgeInsets.all(narrow ? 8 : 12),
         child: switch (day) {
           ClosedDay(:final reason) => DayHeader(
             date: day.date,
@@ -506,64 +567,77 @@ class _DaySection extends StatelessWidget {
 
   Widget _grid(BuildContext context, OpenDay day) {
     final scheme = Theme.of(context).colorScheme;
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Table(
-        defaultColumnWidth: const FixedColumnWidth(84),
-        columnWidths: const {0: FixedColumnWidth(92)},
-        border: TableBorder(
-          horizontalInside: BorderSide(
-            color: scheme.outlineVariant.withValues(alpha: 0.35),
-          ),
+    // In fit-width mode the whole day must be visible at once: lanes flex to
+    // share the available width (no horizontal scroll) and cell padding is
+    // tightened so the narrow columns still fit their tiles. Otherwise the
+    // grid keeps its fixed-width columns inside a horizontal scroller.
+    final cellPadding = EdgeInsets.all(fitWidth ? 2 : 4);
+    final table = Table(
+      defaultColumnWidth: fitWidth
+          ? const FlexColumnWidth()
+          : const FixedColumnWidth(84),
+      columnWidths: {0: FixedColumnWidth(fitWidth ? 52 : 92)},
+      border: TableBorder(
+        horizontalInside: BorderSide(
+          color: scheme.outlineVariant.withValues(alpha: 0.35),
         ),
-        defaultVerticalAlignment: TableCellVerticalAlignment.middle,
-        children: [
+      ),
+      defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+      children: [
+        TableRow(
+          children: [
+            const SizedBox.shrink(),
+            for (var lane = 1; lane <= day.laneCount; lane++)
+              Padding(
+                padding: cellPadding,
+                child: Text(
+                  'Dráha $lane',
+                  textAlign: TextAlign.center,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: fitWidth ? 12 : null,
+                  ),
+                ),
+              ),
+          ],
+        ),
+        for (final block in day.blocks)
           TableRow(
             children: [
-              const SizedBox.shrink(),
+              Padding(
+                padding: cellPadding,
+                child: Text(
+                  block.label,
+                  style: TextStyle(fontSize: fitWidth ? 11 : 12),
+                ),
+              ),
               for (var lane = 1; lane <= day.laneCount; lane++)
                 Padding(
-                  padding: const EdgeInsets.all(4),
-                  child: Text(
-                    'Dráha $lane',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  padding: cellPadding,
+                  child: slotTileFor(
+                    day: day,
+                    block: block,
+                    lane: lane,
+                    size: SlotTileSize.compact,
+                    me: me,
+                    myCount: myCount,
+                    settings: settings,
+                    nameById: nameById,
+                    clubColorById: clubColorById,
+                    interactive: interactive,
+                    onBook: onBook,
+                    onCancel: onCancel,
                   ),
                 ),
             ],
           ),
-          for (final block in day.blocks)
-            TableRow(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.all(4),
-                  child: Text(
-                    block.label,
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                ),
-                for (var lane = 1; lane <= day.laneCount; lane++)
-                  Padding(
-                    padding: const EdgeInsets.all(4),
-                    child: slotTileFor(
-                      day: day,
-                      block: block,
-                      lane: lane,
-                      size: SlotTileSize.compact,
-                      me: me,
-                      myCount: myCount,
-                      settings: settings,
-                      nameById: nameById,
-                      clubColorById: clubColorById,
-                      interactive: interactive,
-                      onBook: onBook,
-                      onCancel: onCancel,
-                    ),
-                  ),
-              ],
-            ),
-        ],
-      ),
+      ],
+    );
+    if (fitWidth) return table;
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: table,
     );
   }
 }

@@ -142,7 +142,10 @@ class SlotTile extends StatelessWidget {
         final content = isMine || _compact
             ? Text(
                 name,
-                maxLines: 2,
+                // Compact cells (the fit-width week grid) get a single clipped
+                // line so a long name never overflows the narrow flexed
+                // column; the roomier large "mine" tile keeps its two lines.
+                maxLines: _compact ? 1 : 2,
                 overflow: TextOverflow.ellipsis,
                 textAlign: TextAlign.center,
                 style: nameStyle,

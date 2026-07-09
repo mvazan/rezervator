@@ -99,7 +99,12 @@ void main() {
         playersProvider.overrideWith(
           (ref) async => const [
             PlayerName(id: 'me', displayName: 'Já Hráč', club: ''),
-            PlayerName(id: 'p2', displayName: 'Petr Novák', club: '', nick: 'Péťa'),
+            PlayerName(
+              id: 'p2',
+              displayName: 'Petr Novák',
+              club: '',
+              nick: 'Péťa',
+            ),
           ],
         ),
       ],
@@ -260,6 +265,58 @@ void main() {
       'week',
     );
   });
+
+  testWidgets(
+    'fit-width AppBar toggle flips the icon and persists the choice',
+    (tester) async {
+      tallSurface(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+
+      // At 800px width the fit-width default is false, so the toggle offers
+      // to switch it ON ("Roztáhnout na šířku").
+      expect(find.byTooltip('Roztáhnout na šířku'), findsOneWidget);
+      expect(find.byTooltip('Posuvná mřížka'), findsNothing);
+
+      await tester.tap(find.byTooltip('Roztáhnout na šířku'));
+      await tester.pumpAndSettle();
+
+      // Now the icon flipped to "on"; the pref is persisted as true.
+      expect(find.byTooltip('Posuvná mřížka'), findsOneWidget);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getBool('fit_width'), true);
+
+      // Toggling back flips it and updates the stored value.
+      await tester.tap(find.byTooltip('Posuvná mřížka'));
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Roztáhnout na šířku'), findsOneWidget);
+      expect(
+        (await SharedPreferences.getInstance()).getBool('fit_width'),
+        false,
+      );
+    },
+  );
+
+  testWidgets(
+    'fit-width week grid has no horizontal Scrollable in the day card',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({'fit_width': true});
+      tallSurface(tester);
+      await tester.pumpWidget(app(reservations: [res('r2', 'p2', tomorrow)]));
+      await tester.pumpAndSettle();
+
+      // The week grid still renders (Table present) but, in fit-width mode,
+      // no horizontal scroller wraps it — lanes flex to fill the width.
+      expect(find.byType(Table), findsWidgets);
+      final horizontalScrollables = find
+          .byType(Scrollable)
+          .evaluate()
+          .map((e) => e.widget as Scrollable)
+          .where((s) => s.axisDirection == AxisDirection.right)
+          .toList();
+      expect(horizontalScrollables, isEmpty);
+    },
+  );
 
   testWidgets('booking dialog opens from a large free tile in day view', (
     tester,

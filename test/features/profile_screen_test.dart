@@ -63,4 +63,27 @@ void main() {
     expect(find.text('Uložit'), findsOneWidget);
     expect(find.widgetWithText(TextField, 'Já H.'), findsOneWidget);
   });
+
+  testWidgets('shows a logout action', (tester) async {
+    await tester.pumpWidget(app(me));
+    await tester.pumpAndSettle();
+
+    expect(find.byIcon(Icons.logout), findsOneWidget);
+    expect(find.text('Odhlásit se'), findsOneWidget);
+  });
+
+  testWidgets('tapping logout asks for confirmation before signing out', (
+    tester,
+  ) async {
+    await tester.pumpWidget(app(me));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Odhlásit se'));
+    await tester.pumpAndSettle();
+
+    // The confirm dialog appears; nothing is signed out until confirmed.
+    expect(find.text('Opravdu se chceš odhlásit?'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, 'Odhlásit se'), findsOneWidget);
+    expect(find.widgetWithText(TextButton, 'Zrušit'), findsOneWidget);
+  });
 }
