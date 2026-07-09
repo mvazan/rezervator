@@ -579,4 +579,98 @@ void main() {
       await finish(tester);
     },
   );
+
+  testWidgets(
+    'l: uneven-duration blocks render proportional row heights, and rail '
+    'labels stay aligned with column cells',
+    (tester) async {
+      // A 30-min block followed by a 60-min block. Task 2: each row-group's
+      // height scales with the block's duration (via blockGroupHeight), so
+      // the 30-min block's row-group is strictly shorter than the 60-min
+      // one, yet the rail label and the column cell for a given block still
+      // share the exact same vertical offset (one grid across rail + columns).
+      const bShort = TimeBlock(
+        id: 'bShort',
+        startsAt: HourMinute(8, 0),
+        endsAt: HourMinute(8, 30),
+        position: 0,
+        active: true,
+      );
+      const bLong = TimeBlock(
+        id: 'bLong',
+        startsAt: HourMinute(9, 0),
+        endsAt: HourMinute(10, 0),
+        position: 1,
+        active: true,
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            settingsProvider.overrideWith((ref) => Stream.value(settings)),
+            timeBlocksProvider
+                .overrideWith((ref) => Stream.value(const [bShort, bLong])),
+            dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
+            matchesProvider.overrideWith((ref) => Stream.value(const [])),
+            rentalsProvider.overrideWith((ref) => Stream.value(const [])),
+            weekReservationsProvider.overrideWith(
+              (ref, monday) => Stream.value(const []),
+            ),
+            playersProvider.overrideWith((ref) async => players),
+          ],
+          child: const MaterialApp(home: KioskShell()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // The rail renders one label Container per block, each sized to that
+      // block's row-group height; the innermost Container ancestor of each
+      // label Text is exactly that height-sized cell.
+      Size railCellFor(String label) {
+        final container = find
+            .ancestor(
+              of: find.text(label),
+              matching: find.byType(Container),
+            )
+            .first;
+        return tester.getSize(container);
+      }
+
+      final shortSize = railCellFor(bShort.label);
+      final longSize = railCellFor(bLong.label);
+
+      // Proportional: the 30-min block's row-group is strictly shorter than
+      // the 60-min block's (half the per-lane height, same lane count).
+      expect(shortSize.height, lessThan(longSize.height));
+
+      // Rail vs column alignment: the today column (index 0) is on screen —
+      // its first block cell must start at the same y as the rail's first
+      // label cell, and both blocks' cell tops must line up rail-to-column.
+      final railShortTop = tester
+          .getTopLeft(
+            find
+                .ancestor(
+                  of: find.text(bShort.label),
+                  matching: find.byType(Container),
+                )
+                .first,
+          )
+          .dy;
+      final railLongTop = tester
+          .getTopLeft(
+            find
+                .ancestor(
+                  of: find.text(bLong.label),
+                  matching: find.byType(Container),
+                )
+                .first,
+          )
+          .dy;
+      // The gap between the two rail labels equals the first (short) block's
+      // row-group height — so the second block sits proportionally lower than
+      // it would under equal-height rows.
+      expect(railLongTop - railShortTop, closeTo(shortSize.height, 0.5));
+
+      await finish(tester);
+    },
+  );
 }

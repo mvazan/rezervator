@@ -255,6 +255,9 @@ class TimeBlock {
   /// "16:00–17:00"
   String get label => '${_pad(startsAt)}–${_pad(endsAt)}';
 
+  int get durationMinutes =>
+      endsAt.minutesFromMidnight - startsAt.minutesFromMidnight;
+
   static String _pad(HourMinute t) =>
       '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 
