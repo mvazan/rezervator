@@ -1,17 +1,8 @@
 /// Kiosk "board": landscape days-as-columns view replacing the old vertical
 /// week list. Columns run from `today` (first, highlighted DNES) forward
-/// through `booking_horizon_days`, all equally wide.
-///
-/// Absolute 30-min axis (spec 2026-07-09): the left rail is a regular grid of
-/// 30-minute slots covering `min(all block starts)..max(all block ends)` across
-/// EVERY visible day (default blocks + shifted override blocks), floored/ceiled
-/// to :00/:30 boundaries. Every block — standard or shifted — is placed at its
-/// TRUE time: a block starting at T has the same slot offset (hence the same
-/// y-coordinate) in every column and against the rail, so shifted days line up
-/// vertically with the times on the rail. A shifted day still gets a ⚡ header
-/// marker and per-cell time labels (a small aid since its times differ from the
-/// clean default columns); standard days read their time from the rail.
-///
+/// through `booking_horizon_days`, all equally wide; rows are the union of
+/// every visible day's time blocks (sorted by start time), so a lane cell
+/// lines up across columns regardless of which specific day it belongs to.
 /// Display-only until a player is selected — then free lane rows book for
 /// THAT player. No cancel affordance anywhere (kiosk performs exactly one
 /// action type).
@@ -103,20 +94,6 @@ int _byStartThenPosition(TimeBlock a, TimeBlock b) {
   return byStart != 0 ? byStart : a.position.compareTo(b.position);
 }
 
-/// True when [day]'s resolved block set differs from the default active
-/// (swimline) set — i.e. the day carries an override that shifted or replaced
-/// its times, so it must render as its own continuous own-times column rather
-/// than into the shared swimline grid (spec §2). Compares block-id SETS, not
-/// order: a standard day (override absent, or an override whose block_ids
-/// resolve back to exactly the default set) has the same set → false. A
-/// [ClosedDay] is never "shifted" (it renders the ✕ column regardless).
-bool isShiftedDay(OpenDay day, List<TimeBlock> defaultActive) {
-  final dayIds = {for (final b in day.blocks) b.id};
-  final defaultIds = {for (final b in defaultActive) b.id};
-  return dayIds.length != defaultIds.length ||
-      !dayIds.containsAll(defaultIds);
-}
-
 /// Faint horizontal divider between time-slot row-groups, shared by [_Rail]
 /// and [_DayColumn] so the lines land on the same y-offset in both (spec:
 /// subtle time-slot gridlines, no vertical/lane dividers). `null` after the
@@ -202,13 +179,12 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
   final _hScroll = ScrollController();
   final _vScroll = ScrollController();
 
-  // Snapshot of the most recent build's absolute axis, kept so resetToToday
-  // can locate "now"'s slot without threading a HourMinute through the shell's
-  // imperative reset call — the shell only holds a GlobalKey to this state, no
-  // board-shaped data of its own to pass.
-  HourMinute _axisStart = const HourMinute(0, 0);
-  double _unit = 0;
-  int _slotCount = 0;
+  // Snapshot of the most recent build's row rail, kept so resetToToday can
+  // locate "now"'s row-group without threading a HourMinute through the
+  // shell's imperative reset call — the shell only holds a GlobalKey to this
+  // state, no board-shaped data of its own to pass.
+  List<TimeBlock> _railBlocks = const [];
+  List<double> _rowHeights = const [];
 
   @override
   void dispose() {
@@ -230,9 +206,12 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
     if (_hScroll.hasClients) {
       _hScroll.animateTo(0, duration: _scrollDuration, curve: _scrollCurve);
     }
-    if (_vScroll.hasClients && _slotCount > 0) {
-      final target = _headerHeight + _nowSlot(now) * _unit;
-      final clamped = target.clamp(0.0, _vScroll.position.maxScrollExtent);
+    if (_vScroll.hasClients && _rowHeights.isNotEmpty) {
+      final index = _currentOrNextBlockIndex(now);
+      final target =
+          _headerHeight + _rowHeights.take(index).fold(0.0, (a, b) => a + b);
+      final clamped =
+          target.clamp(0.0, _vScroll.position.maxScrollExtent);
       _vScroll.animateTo(clamped, duration: _scrollDuration, curve: _scrollCurve);
     }
   }
@@ -243,14 +222,24 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
   /// scroll too.
   void resetToToday() => resetToNow(HourMinute(DateTime.now().hour, DateTime.now().minute));
 
-  /// [now]'s position on the absolute axis, in 30-min slots from [_axisStart],
-  /// clamped to `[0, _slotCount]` — so a time before the axis lands at the top
-  /// and a time past the last block lands at the bottom, and the scroll target
-  /// (`_headerHeight + slot * _unit`) always sits inside the grid.
-  double _nowSlot(HourMinute now) {
-    final slots =
-        (now.minutesFromMidnight - _axisStart.minutesFromMidnight) / 30;
-    return slots.clamp(0, _slotCount).toDouble();
+  /// Index (into [_railBlocks]) of the block whose `[startsAt, endsAt)`
+  /// window contains [now]; else the next upcoming block; else 0 (start of
+  /// day) once every block is already in the past.
+  int _currentOrNextBlockIndex(HourMinute now) {
+    final nowMinutes = now.minutesFromMidnight;
+    for (var i = 0; i < _railBlocks.length; i++) {
+      final block = _railBlocks[i];
+      if (nowMinutes >= block.startsAt.minutesFromMidnight &&
+          nowMinutes < block.endsAt.minutesFromMidnight) {
+        return i;
+      }
+    }
+    for (var i = 0; i < _railBlocks.length; i++) {
+      if (_railBlocks[i].startsAt.minutesFromMidnight >= nowMinutes) {
+        return i;
+      }
+    }
+    return 0;
   }
 
   Future<void> _book(
@@ -380,33 +369,32 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
     };
     final clubColorById = {for (final p in players) p.id: p.clubColor};
 
-    // Default active (swimline) block set — still needed to classify a day as
-    // shifted (its own block set differs → ⚡ header + per-cell time labels).
-    // No longer drives geometry: the absolute axis below does.
-    final railBlocks = blocks.where((b) => b.active).toList()
-      ..sort(_byStartThenPosition);
-
-    // Absolute 30-min axis over ALL blocks in view — the default active set
-    // (so standard days always contribute their times even if a given visible
-    // day is closed) unioned with every open day's own blocks (so a shifted
-    // day's own-time blocks widen the axis to cover them). axisRange floors the
-    // earliest start / ceils the latest end to :00/:30 and counts 30-min slots.
-    final allBlocks = <TimeBlock>[
-      ...railBlocks,
-      for (final d in days)
-        if (d is OpenDay) ...d.blocks,
+    // Row rail = union of every day on the board (not just whichever column
+    // happens to be scrolled into view — the rail is a single fixed
+    // structure shared by all columns, so it must be stable regardless of
+    // horizontal scroll position), sorted by start time.
+    final blockById = <String, TimeBlock>{};
+    for (final day in days) {
+      if (day is OpenDay) {
+        for (final b in day.blocks) {
+          blockById[b.id] = b;
+        }
+      }
+    }
+    final railBlocks = blockById.values.toList()..sort(_byStartThenPosition);
+    // Per-block row-group height so unequal-duration blocks (e.g. a 30-min vs
+    // a 60-min block) render at proportional heights — every column and the
+    // rail consume this same list, so all share one vertical grid.
+    final rowHeights = [
+      for (final b in railBlocks) blockGroupHeight(b, settings.laneCount),
     ];
-    final axis = axisRange(allBlocks);
-    final axisStart = axis.start;
-    final slotCount = axis.slots;
-    final unit = axisUnit(settings.laneCount);
-    final gridHeight = slotCount * unit;
+    final gridHeight = rowHeights.fold(0.0, (a, b) => a + b);
     final totalHeight = _headerHeight + gridHeight;
-    // Snapshot for resetToNow's imperative scroll-target math (see field docs
-    // above) — assignment only, no setState, so it can't trigger a rebuild loop.
-    _axisStart = axisStart;
-    _unit = unit;
-    _slotCount = slotCount;
+    // Snapshot for resetToNow's imperative scroll-target math (see field
+    // docs above) — assignment only, no setState, so it can't trigger a
+    // rebuild loop.
+    _railBlocks = railBlocks;
+    _rowHeights = rowHeights;
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -418,7 +406,7 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _Rail(axisStart: axisStart, slotCount: slotCount, unit: unit),
+                _Rail(blocks: railBlocks, rowHeights: rowHeights),
                 Expanded(
                   child: SizedBox(
                     height: totalHeight,
@@ -433,9 +421,7 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
                           day: days[index],
                           isToday: index == 0,
                           railBlocks: railBlocks,
-                          axisStart: axisStart,
-                          slotCount: slotCount,
-                          unit: unit,
+                          rowHeights: rowHeights,
                           laneCount: settings.laneCount,
                           nameById: nameById,
                           clubColorById: clubColorById,
@@ -463,32 +449,15 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
   }
 }
 
-/// The "HH:MM" label for the start of slot [i] on the absolute axis — i.e.
-/// [axisStart] plus `i` half-hours. Formatted from raw minutes-from-midnight
-/// (never via a [HourMinute], which asserts `hour < 24`) so a slot start at
-/// 23:30 is fine and even a would-be 24:00 boundary never crashes; slot starts
-/// are always strictly below the axis end, so this stays within a day anyway.
-String _axisSlotLabel(HourMinute axisStart, int i) {
-  final total = axisStart.minutesFromMidnight + i * 30;
-  final h = total ~/ 60;
-  final m = total % 60;
-  return '$h:${m.toString().padLeft(2, '0')}';
-}
-
-/// Fixed left rail: one label per 30-min axis slot (0..[slotCount]-1), each
-/// exactly [unit] tall so labels line up with the cells every [_DayColumn]
-/// places on the same absolute axis. Whole-hour slot starts are drawn slightly
-/// bolder; a faint gridline sits on each slot boundary.
+/// Fixed left rail: one label per row-group (time block), each exactly
+/// [rowHeights]`[i]` tall — the same per-block height every [_DayColumn] gives
+/// its own row-group for that block — so labels line up with cells across
+/// columns regardless of each block's duration.
 class _Rail extends StatelessWidget {
-  const _Rail({
-    required this.axisStart,
-    required this.slotCount,
-    required this.unit,
-  });
+  const _Rail({required this.blocks, required this.rowHeights});
 
-  final HourMinute axisStart;
-  final int slotCount;
-  final double unit;
+  final List<TimeBlock> blocks;
+  final List<double> rowHeights;
 
   @override
   Widget build(BuildContext context) {
@@ -498,27 +467,22 @@ class _Rail extends StatelessWidget {
       child: Column(
         children: [
           const SizedBox(height: _headerHeight),
-          for (var i = 0; i < slotCount; i++)
+          for (var i = 0; i < blocks.length; i++)
             Container(
-              height: unit,
+              height: rowHeights[i],
               decoration: BoxDecoration(
-                border: _gridlineBorder(scheme, isLast: i == slotCount - 1),
+                border: _gridlineBorder(scheme, isLast: i == blocks.length - 1),
               ),
               child: Align(
                 alignment: Alignment.topCenter,
                 child: Padding(
-                  padding: const EdgeInsets.only(top: 2),
+                  padding: const EdgeInsets.only(top: 4),
                   child: Text(
-                    _axisSlotLabel(axisStart, i),
+                    blocks[i].label,
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      fontSize: 9,
-                      // Whole-hour lines read as the primary grid; the :30
-                      // marks are lighter so the eye anchors on the hours.
-                      fontWeight:
-                          (axisStart.minutesFromMidnight + i * 30) % 60 == 0
-                              ? FontWeight.w700
-                              : FontWeight.w500,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
                       color: scheme.onSurfaceVariant,
                     ),
                   ),
@@ -541,16 +505,11 @@ class BoardColumnHeader extends StatelessWidget {
     required this.date,
     required this.isToday,
     required this.matches,
-    this.shifted = false,
   });
 
   final Day date;
   final bool isToday;
   final List<Match> matches;
-
-  /// A shifted (own-times) day gets a tiny ⚡ before the date so it reads as
-  /// custom (spec §2). Never combined with the DNES prefix on the same column.
-  final bool shifted;
 
   static const _gradientColors = [Color(0xFF6366F1), Color(0xFF22D3EE)];
 
@@ -570,9 +529,7 @@ class BoardColumnHeader extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Text(
-            isToday
-                ? 'DNES · ${dayLabel(date)}'
-                : (shifted ? '⚡ ${dayLabel(date)}' : dayLabel(date)),
+            isToday ? 'DNES · ${dayLabel(date)}' : dayLabel(date),
             textAlign: TextAlign.center,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
@@ -601,22 +558,16 @@ class BoardColumnHeader extends StatelessWidget {
   }
 }
 
-/// One board column, placed on the shared absolute 30-min axis: DNES-gradient
-/// (today) or plain header, then the day's blocks each positioned at their TRUE
-/// time — a block starting at T occupies the same slot (same y) in every
-/// column and against the rail. Standard days read their time from the rail;
-/// shifted days keep a ⚡ header + per-cell time labels since their times don't
-/// match the clean default columns. A closed day dims the whole column and
-/// shows a vertical "✕ zavřeno[ — reason]" — matches still render at their slot
-/// (spectators want to see who plays even on a closed day, spec §1).
+/// One board column: DNES-gradient (today) or plain header, then one
+/// row-group per rail block. A closed day dims the whole column and shows a
+/// vertical "✕ zavřeno[ — reason]" — matches still render on top (spectators
+/// want to see who plays even on a closed day, spec §1).
 class _DayColumn extends StatelessWidget {
   const _DayColumn({
     required this.day,
     required this.isToday,
     required this.railBlocks,
-    required this.axisStart,
-    required this.slotCount,
-    required this.unit,
+    required this.rowHeights,
     required this.laneCount,
     required this.nameById,
     required this.clubColorById,
@@ -628,9 +579,7 @@ class _DayColumn extends StatelessWidget {
   final DaySchedule day;
   final bool isToday;
   final List<TimeBlock> railBlocks;
-  final HourMinute axisStart;
-  final int slotCount;
-  final double unit;
+  final List<double> rowHeights;
   final int laneCount;
   final Map<String, String> nameById;
   final Map<String, int> clubColorById;
@@ -638,25 +587,20 @@ class _DayColumn extends StatelessWidget {
   final PlayerName? selected;
   final void Function(Day date, TimeBlock block, int lane) onBook;
 
-  double get _gridHeight => slotCount * unit;
-
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final day = this.day;
-    // A shifted (own-times) day carries times that don't line up with the
-    // clean default columns, so mark the header (⚡) and label its cells.
-    final shifted = day is OpenDay && isShiftedDay(day, railBlocks);
+    final closed = day is ClosedDay;
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 2),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(10),
       ),
-      // No border: an inset border would eat into the fixed-height column
-      // below (header + gridHeight body summing to exactly the available
-      // height already) and overflow by the border width — column separation
-      // comes from the horizontal margin alone.
+      // No border: an inset border would eat into the fixed-height Column
+      // below (header + one SizedBox per row-group summing to exactly the
+      // available height already) and overflow by the border width —
+      // column separation comes from the horizontal margin alone.
       clipBehavior: Clip.antiAlias,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -665,94 +609,20 @@ class _DayColumn extends StatelessWidget {
             date: day.date,
             isToday: isToday,
             matches: day.matches,
-            shifted: shifted,
           ),
-          SizedBox(
-            height: _gridHeight,
-            child: day is ClosedDay
-                ? _closedBody(context, scheme, day)
-                : _openBody(context, scheme, day as OpenDay, shifted),
-          ),
+          for (var i = 0; i < railBlocks.length; i++)
+            Container(
+              height: rowHeights[i],
+              decoration: BoxDecoration(
+                border:
+                    _gridlineBorder(scheme, isLast: i == railBlocks.length - 1),
+              ),
+              child: closed
+                  ? _closedCell(context, scheme, railBlocks[i])
+                  : _openCell(context, railBlocks[i]),
+            ),
         ],
       ),
-    );
-  }
-
-  /// Places [day]'s own blocks on the absolute axis: for each block (sorted by
-  /// start) an empty dim gap fills any slots before its `startSlot`, then the
-  /// block cell occupies `spanSlots * unit`; a trailing gap fills to
-  /// [slotCount]. Because slot math is integer (÷30) and heights are exactly
-  /// `slots * unit`, a block at a given time has an identical top y in every
-  /// column and on the rail.
-  Widget _openBody(
-      BuildContext context, ColorScheme scheme, OpenDay day, bool shifted) {
-    final sorted = [...day.blocks]..sort(_byStartThenPosition);
-    return _placed(
-      context,
-      scheme,
-      sorted,
-      (block) => _openCell(context, block, showTime: shifted),
-    );
-  }
-
-  /// Closed column: the default active (swimline) blocks placed on the axis so
-  /// any match still shows at its true slot (spectators), the rest rendering
-  /// the dimmed "✕ zavřeno" filler; gaps between/around them are the same dim
-  /// empty slots.
-  Widget _closedBody(
-      BuildContext context, ColorScheme scheme, ClosedDay day) {
-    final sorted = [...railBlocks]..sort(_byStartThenPosition);
-    return _placed(
-      context,
-      scheme,
-      sorted,
-      (block) => _closedCell(context, scheme, block),
-    );
-  }
-
-  /// Builds the vertical Column of gaps + block cells for [blocks] (already
-  /// sorted by start) on the absolute axis, using [cellFor] to render each
-  /// block's body. A faint gridline sits under every emitted piece except the
-  /// last so slot boundaries read across columns and against the rail.
-  Widget _placed(
-    BuildContext context,
-    ColorScheme scheme,
-    List<TimeBlock> blocks,
-    Widget Function(TimeBlock block) cellFor,
-  ) {
-    final pieces = <({double height, Widget? cell})>[];
-    var cursor = 0;
-    for (final block in blocks) {
-      final off = slotOffset(block, axisStart);
-      if (off.startSlot > cursor) {
-        pieces.add((height: (off.startSlot - cursor) * unit, cell: null));
-      }
-      // Blocks are non-overlapping by design, but the schema doesn't enforce
-      // it — if a misconfigured pair overlaps (startSlot < cursor) place the
-      // block right after the previous one instead of overflowing the fixed
-      // gridHeight Column.
-      final start = off.startSlot < cursor ? cursor : off.startSlot;
-      pieces.add((height: off.spanSlots * unit, cell: cellFor(block)));
-      cursor = start + off.spanSlots;
-    }
-    if (cursor < slotCount) {
-      pieces.add((height: (slotCount - cursor) * unit, cell: null));
-    }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        for (var i = 0; i < pieces.length; i++)
-          Container(
-            height: pieces[i].height,
-            decoration: BoxDecoration(
-              border: _gridlineBorder(scheme, isLast: i == pieces.length - 1),
-            ),
-            child: pieces[i].cell ??
-                ColoredBox(
-                  color: scheme.surfaceContainerLowest.withValues(alpha: 0.3),
-                ),
-          ),
-      ],
     );
   }
 
@@ -786,58 +656,26 @@ class _DayColumn extends StatelessWidget {
     );
   }
 
-  /// Renders one of [day]'s own block cells. [showTime] (shifted day, spec §3)
-  /// overlays a small `HH:MM–HH:MM` label at the top-right of the cell — over
-  /// the free ＋, occupied, prep AND match content alike — so a player reads
-  /// the time even though a shifted day's times don't line up with the rail.
-  /// Standard-day cells pass `showTime: false` (time comes from the rail).
-  Widget _openCell(BuildContext context, TimeBlock block,
-      {bool showTime = false}) {
+  Widget _openCell(BuildContext context, TimeBlock railBlock) {
     final openDay = day as OpenDay;
     final scheme = Theme.of(context).colorScheme;
-
-    final firstState = openDay.slot(block.id, 1);
-    final Widget body;
-    if (firstState is MatchSlot) {
-      body = _matchCell(context, firstState.match, isPrep: firstState.isPrep);
-    } else {
-      body = Column(
-        children: [
-          for (var lane = 1; lane <= laneCount; lane++)
-            Expanded(child: _laneRow(context, openDay, block, lane)),
-        ],
-      );
+    // The rail's block set is the UNION across every day on the board — an
+    // open day that doesn't itself have this specific block (e.g. a custom
+    // day-override subset) renders a dim empty filler instead.
+    final hasBlock = openDay.blocks.any((b) => b.id == railBlock.id);
+    if (!hasBlock) {
+      return Container(color: scheme.surfaceContainerLowest.withValues(alpha: 0.3));
     }
-    if (!showTime) return body;
-    // Overlay the time label at the top-right without stealing height from the
-    // body — a Column header here would shrink the lanes and break the exact
-    // slots*unit height the absolute axis relies on. A Stack keeps the body
-    // full-height under the label.
-    return Stack(
+
+    final firstState = openDay.slot(railBlock.id, 1);
+    if (firstState is MatchSlot) {
+      return _matchCell(context, firstState.match, isPrep: firstState.isPrep);
+    }
+
+    return Column(
       children: [
-        Positioned.fill(child: body),
-        // Top-right corner: the lane rows put their digit at the left and the
-        // name centered, so the right corner is the least crowded. A faint
-        // surface backdrop keeps the label readable over any club colour.
-        Positioned(
-          top: 1,
-          right: 3,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
-            decoration: BoxDecoration(
-              color: scheme.surface.withValues(alpha: 0.7),
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Text(
-              '${block.startsAt.display()}–${block.endsAt.display()}',
-              style: TextStyle(
-                fontSize: 9,
-                fontWeight: FontWeight.w600,
-                color: scheme.onSurfaceVariant,
-              ),
-            ),
-          ),
-        ),
+        for (var lane = 1; lane <= laneCount; lane++)
+          Expanded(child: _laneRow(context, openDay, railBlock, lane)),
       ],
     );
   }

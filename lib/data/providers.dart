@@ -188,25 +188,6 @@ class Api {
         'position': position,
       });
 
-  /// Inserts a new inactive "special" block for the day-override custom-times
-  /// editor (see [matchSpecialBlocks]) and returns its id.
-  static Future<String> addSpecialTimeBlock(
-    HourMinute start,
-    HourMinute end,
-  ) async {
-    final row = await _db
-        .from('time_blocks')
-        .insert({
-          'starts_at': start.toSql(),
-          'ends_at': end.toSql(),
-          'position': start.minutesFromMidnight,
-          'active': false,
-        })
-        .select('id')
-        .single();
-    return row['id'] as String;
-  }
-
   static Future<void> updateTimeBlock(String id,
           {HourMinute? startsAt, HourMinute? endsAt, int? position, bool? active}) =>
       _db.from('time_blocks').update({

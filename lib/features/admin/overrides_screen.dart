@@ -3,11 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/ui.dart';
 import '../../data/providers.dart';
-import '../../domain/blocks.dart';
 import '../../domain/models.dart';
 
-/// Admin: manage per-day overrides (closures and custom block sets) that
-/// take precedence over the weekly training-day rule.
+/// Admin: manage per-day closures that take precedence over the weekly
+/// training-day rule. An override closes a day with a reason (e.g. "Malování
+/// drah"); the schedule then shows it as closed and cancels colliding
+/// reservations.
 class OverridesScreen extends ConsumerWidget {
   const OverridesScreen({super.key});
 
@@ -27,22 +28,6 @@ class OverridesScreen extends ConsumerWidget {
     );
   }
 
-  String _subtitle(DayOverride override, List<TimeBlock> blocks) {
-    if (override.closed) {
-      return 'Zavřeno — ${override.reason}';
-    }
-    final blockIds = override.blockIds;
-    if (blockIds == null) {
-      return 'Otevřeno (výchozí bloky)';
-    }
-    final blockById = {for (final b in blocks) b.id: b};
-    final times = [
-      for (final id in blockIds)
-        if (blockById[id] != null) blockById[id]!.label,
-    ];
-    return times.isEmpty ? 'Vlastní časy' : times.join(' · ');
-  }
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final profile = ref.watch(myProfileProvider).value;
@@ -55,8 +40,11 @@ class OverridesScreen extends ConsumerWidget {
 
     final overrides =
         ref.watch(dayOverridesProvider).value ?? const <DayOverride>[];
-    final sorted = [...overrides]..sort((a, b) => a.date.compareTo(b.date));
-    final blocks = ref.watch(timeBlocksProvider).value ?? const <TimeBlock>[];
+    // Only closures are managed here; ignore any legacy open/custom-times rows.
+    final sorted = [
+      for (final o in overrides)
+        if (o.closed) o,
+    ]..sort((a, b) => a.date.compareTo(b.date));
 
     return Scaffold(
       appBar: AppBar(title: const Text('Výjimky dnů')),
@@ -67,7 +55,7 @@ class OverridesScreen extends ConsumerWidget {
                 for (final override in sorted)
                   ListTile(
                     title: Text(dayFull(override.date)),
-                    subtitle: Text(_subtitle(override, blocks)),
+                    subtitle: Text('Zavřeno — ${override.reason}'),
                     trailing: IconButton(
                       icon: const Icon(Icons.delete_outline),
                       onPressed: () => _delete(context, override),
@@ -87,11 +75,8 @@ class OverridesScreen extends ConsumerWidget {
   }
 }
 
-/// Add/edit-override dialog: date picker, closed/open mode radio, and —
-/// when open — a custom-times rows editor (od–do), prefilled from the day's
-/// effective blocks (an existing override's blocks, or else the default
-/// active set). Picking a date that already has an override edits it in
-/// place ([Api.setDayOverride] upserts by date).
+/// Add/edit-closure dialog: date + reason. Picking a date that already has a
+/// closure edits it in place ([Api.setDayOverride] upserts by date).
 class _OverrideDialog extends ConsumerStatefulWidget {
   const _OverrideDialog();
 
@@ -101,34 +86,13 @@ class _OverrideDialog extends ConsumerStatefulWidget {
 
 class _OverrideDialogState extends ConsumerState<_OverrideDialog> {
   Day? _date;
-  bool _closed = true;
   final _reason = TextEditingController();
-  final List<(HourMinute?, HourMinute?)> _rows = [];
   bool _saving = false;
 
   @override
   void dispose() {
     _reason.dispose();
     super.dispose();
-  }
-
-  /// The blocks that apply to [date] today: an existing override's blocks
-  /// when it has a custom set (or all active blocks when it's open with the
-  /// default set), otherwise the default active blocks.
-  List<TimeBlock> _effectiveBlocksFor(Day date) {
-    final blocks = ref.read(timeBlocksProvider).value ?? const <TimeBlock>[];
-    final overrides =
-        ref.read(dayOverridesProvider).value ?? const <DayOverride>[];
-    final override =
-        overrides.where((o) => o.date == date && !o.closed).firstOrNull;
-    final blockById = {for (final b in blocks) b.id: b};
-    if (override?.blockIds != null) {
-      return [
-        for (final id in override!.blockIds!)
-          if (blockById[id] != null) blockById[id]!,
-      ];
-    }
-    return blocks.where((b) => b.active).toList();
   }
 
   Future<void> _pickDate() async {
@@ -149,79 +113,12 @@ class _OverrideDialogState extends ConsumerState<_OverrideDialog> {
     final date = Day.fromDateTime(picked);
     final overrides =
         ref.read(dayOverridesProvider).value ?? const <DayOverride>[];
-    final existing = overrides.where((o) => o.date == date).firstOrNull;
+    final existing =
+        overrides.where((o) => o.date == date && o.closed).firstOrNull;
     setState(() {
       _date = date;
-      _closed = existing?.closed ?? true;
       _reason.text = existing?.reason ?? '';
-      _rows
-        ..clear()
-        ..addAll([
-          for (final block in _effectiveBlocksFor(date))
-            (block.startsAt, block.endsAt),
-        ]);
     });
-  }
-
-  Future<void> _pickRowStart(int index) async {
-    final picked = await pickTime(context, initial: _rows[index].$1);
-    if (picked != null) {
-      setState(() => _rows[index] = (picked, _rows[index].$2));
-    }
-  }
-
-  Future<void> _pickRowEnd(int index) async {
-    final picked = await pickTime(context, initial: _rows[index].$2);
-    if (picked != null) {
-      setState(() => _rows[index] = (_rows[index].$1, picked));
-    }
-  }
-
-  void _addRow() => setState(() => _rows.add((null, null)));
-
-  void _removeRow(int index) => setState(() => _rows.removeAt(index));
-
-  /// Shifts the editor rows by [offsetMinutes] (±30), replacing them with
-  /// the *default* active blocks (not the current rows) shifted by that
-  /// offset. If the shift drops every block (would cross midnight), keeps
-  /// the current rows and shows a snack instead.
-  void _shift(int offsetMinutes) {
-    final blocks = ref.read(timeBlocksProvider).value ?? const <TimeBlock>[];
-    final active = blocks.where((b) => b.active).toList()
-      ..sort((a, b) => a.startsAt.compareTo(b.startsAt));
-    final shifted = shiftBlocks(active, offsetMinutes);
-    if (shifted.isEmpty) {
-      snack(context, 'Posun by přesáhl půlnoc.');
-      return;
-    }
-    setState(() {
-      _rows
-        ..clear()
-        ..addAll([for (final range in shifted) (range.$1, range.$2)]);
-    });
-  }
-
-  /// Validates the rows (all times set, end>start, no pairwise overlap, at
-  /// least one row); returns the error message, or null when valid.
-  String? _rowsError() {
-    if (_rows.isEmpty) return 'Přidej aspoň jeden čas.';
-    final ranges = <(HourMinute, HourMinute)>[];
-    for (final row in _rows) {
-      final start = row.$1;
-      final end = row.$2;
-      if (start == null || end == null) return 'Vyplň všechny časy.';
-      if (end.compareTo(start) <= 0) return 'Konec musí být po začátku.';
-      ranges.add((start, end));
-    }
-    for (var i = 0; i < ranges.length; i++) {
-      for (var j = i + 1; j < ranges.length; j++) {
-        final a = ranges[i];
-        final b = ranges[j];
-        final overlaps = a.$1.compareTo(b.$2) < 0 && b.$1.compareTo(a.$2) < 0;
-        if (overlaps) return 'Časy se nesmí překrývat.';
-      }
-    }
-    return null;
   }
 
   Future<void> _save() async {
@@ -230,47 +127,20 @@ class _OverrideDialogState extends ConsumerState<_OverrideDialog> {
       snack(context, 'Vyber datum.');
       return;
     }
-    if (_closed && _reason.text.trim().isEmpty) {
+    if (_reason.text.trim().isEmpty) {
       snack(context, 'Vyplň důvod.');
       return;
-    }
-    List<(HourMinute, HourMinute)>? ranges;
-    if (!_closed) {
-      final error = _rowsError();
-      if (error != null) {
-        snack(context, error);
-        return;
-      }
-      ranges = [for (final row in _rows) (row.$1!, row.$2!)];
     }
 
     setState(() => _saving = true);
     final ok = await tryAction(
       context,
-      () async {
-        List<String>? blockIds;
-        if (ranges != null) {
-          final existingInactive = (ref.read(timeBlocksProvider).value ??
-                  const <TimeBlock>[])
-              .where((b) => !b.active)
-              .toList();
-          final result = matchSpecialBlocks(
-            existingInactive: existingInactive,
-            requested: ranges,
-          );
-          final createdIds = [
-            for (final range in result.toCreate)
-              await Api.addSpecialTimeBlock(range.$1, range.$2),
-          ];
-          blockIds = [...result.reuseIds, ...createdIds];
-        }
-        await Api.setDayOverride(
-          date: date,
-          closed: _closed,
-          reason: _closed ? _reason.text.trim() : '',
-          blockIds: blockIds,
-        );
-      },
+      () => Api.setDayOverride(
+        date: date,
+        closed: true,
+        reason: _reason.text.trim(),
+        blockIds: null,
+      ),
       success: 'Výjimka uložena. Kolidující rezervace byly zrušeny.',
       errorText: friendlyDbError,
     );
@@ -286,103 +156,24 @@ class _OverrideDialogState extends ConsumerState<_OverrideDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: const Text('Přidat výjimku'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Datum'),
-              trailing: Text(_date == null ? 'Vybrat' : dayFull(_date!)),
-              onTap: _pickDate,
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Datum'),
+            trailing: Text(_date == null ? 'Vybrat' : dayFull(_date!)),
+            onTap: _pickDate,
+          ),
+          TextField(
+            controller: _reason,
+            decoration: const InputDecoration(
+              labelText: 'Důvod (zavřeno)',
+              hintText: 'Malování drah',
             ),
-            RadioGroup<bool>(
-              groupValue: _closed,
-              onChanged: (v) => setState(() => _closed = v!),
-              child: const Column(
-                children: [
-                  RadioListTile<bool>(
-                    contentPadding: EdgeInsets.zero,
-                    title: Text('Zavřeno'),
-                    value: true,
-                  ),
-                  RadioListTile<bool>(
-                    contentPadding: EdgeInsets.zero,
-                    title: Text('Otevřeno — vlastní časy'),
-                    value: false,
-                  ),
-                ],
-              ),
-            ),
-            if (_closed)
-              Padding(
-                padding: const EdgeInsets.only(left: 16, bottom: 8),
-                child: TextField(
-                  controller: _reason,
-                  decoration: const InputDecoration(
-                    labelText: 'Důvod',
-                    hintText: 'Malování drah',
-                  ),
-                ),
-              ),
-            if (!_closed)
-              Padding(
-                padding: const EdgeInsets.only(left: 16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        OutlinedButton.icon(
-                          onPressed: () => _shift(-30),
-                          icon: const Icon(Icons.chevron_left),
-                          label: const Text('− 30 min'),
-                        ),
-                        const SizedBox(width: 8),
-                        OutlinedButton.icon(
-                          onPressed: () => _shift(30),
-                          icon: const Icon(Icons.chevron_right),
-                          label: const Text('+ 30 min'),
-                        ),
-                      ],
-                    ),
-                    for (var i = 0; i < _rows.length; i++)
-                      Row(
-                        children: [
-                          Expanded(
-                            child: OutlinedButton(
-                              onPressed: () => _pickRowStart(i),
-                              child: Text(_rows[i].$1?.display() ?? '--:--'),
-                            ),
-                          ),
-                          const Padding(
-                            padding: EdgeInsets.symmetric(horizontal: 4),
-                            child: Text('–'),
-                          ),
-                          Expanded(
-                            child: OutlinedButton(
-                              onPressed: () => _pickRowEnd(i),
-                              child: Text(_rows[i].$2?.display() ?? '--:--'),
-                            ),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.close),
-                            tooltip: 'Odebrat',
-                            onPressed: () => _removeRow(i),
-                          ),
-                        ],
-                      ),
-                    TextButton.icon(
-                      onPressed: _addRow,
-                      icon: const Icon(Icons.add),
-                      label: const Text('Přidat čas'),
-                    ),
-                  ],
-                ),
-              ),
-          ],
-        ),
+          ),
+        ],
       ),
       actions: [
         TextButton(
