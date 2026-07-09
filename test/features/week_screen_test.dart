@@ -16,8 +16,20 @@ void main() {
   // platform channel behind SharedPreferences.getInstance(), or the read
   // hangs forever and pumpAndSettle times out. No stored value means every
   // pre-existing test keeps hitting the width-based default, which is
-  // `week` at the default 800×600 test surface — i.e. unchanged behavior.
+  // `week` (width ≥ 700) — i.e. unchanged behavior.
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  // Make the surface TALL (800×2400) so all 7 stacked day cards build and lay
+  // out without lazy-list clipping — otherwise a test asserting on e.g.
+  // Friday's card (the 5th) flakes depending on which weekday the suite runs,
+  // since `tomorrow` moves through the week. Width stays 800 (≥700 → `week`).
+  // Auto-reset is registered via addTearDown, so no separate tearDown needed.
+  void tallSurface(WidgetTester tester) {
+    tester.view.physicalSize = const Size(800, 2400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+  }
 
   const settings = ScheduleSettings(
     laneCount: 2,
@@ -96,6 +108,7 @@ void main() {
   }
 
   testWidgets('closed override renders reason', (tester) async {
+    tallSurface(tester);
     await tester.pumpWidget(
       app(
         overrides: [
@@ -110,6 +123,7 @@ void main() {
   testWidgets('reserved cell shows player nick when set, never full name', (
     tester,
   ) async {
+    tallSurface(tester);
     await tester.pumpWidget(app(reservations: [res('r2', 'p2', tomorrow)]));
     await tester.pumpAndSettle();
     expect(find.text('Péťa'), findsOneWidget);
@@ -117,6 +131,7 @@ void main() {
   });
 
   testWidgets('tap on own reservation opens cancel dialog', (tester) async {
+    tallSurface(tester);
     await tester.pumpWidget(app(reservations: [res('r1', 'me', tomorrow)]));
     await tester.pumpAndSettle();
     // `tomorrow`'s day card can sit past the default 800x600 test surface
@@ -131,6 +146,7 @@ void main() {
   });
 
   testWidgets('free bookable cell opens booking dialog', (tester) async {
+    tallSurface(tester);
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
     // Book in `tomorrow`'s section, never in today's — the harness block
@@ -153,6 +169,7 @@ void main() {
   testWidgets('admin booking dialog shows a player-picker dropdown', (
     tester,
   ) async {
+    tallSurface(tester);
     await tester.pumpWidget(app(profile: admin));
     await tester.pumpAndSettle();
     await tester.tap(find.byIcon(Icons.add).first);
@@ -164,6 +181,7 @@ void main() {
   testWidgets('admin tap on foreign reservation opens the note prompt', (
     tester,
   ) async {
+    tallSurface(tester);
     await tester.pumpWidget(
       app(profile: admin, reservations: [res('r2', 'p2', tomorrow)]),
     );
@@ -178,6 +196,7 @@ void main() {
   testWidgets('non-admin tap on foreign reservation stays inert', (
     tester,
   ) async {
+    tallSurface(tester);
     await tester.pumpWidget(app(reservations: [res('r2', 'p2', tomorrow)]));
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('Péťa').first);
@@ -188,6 +207,7 @@ void main() {
   });
 
   testWidgets('match renders banner and Zápas cells', (tester) async {
+    tallSurface(tester);
     await tester.pumpWidget(
       app(
         matches: [
@@ -212,6 +232,7 @@ void main() {
   testWidgets('AppBar toggle switches day/week view and persists the choice', (
     tester,
   ) async {
+    tallSurface(tester);
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
     // Default at the test surface's 800×600 width (>= 700) is week view:
@@ -244,6 +265,7 @@ void main() {
     tester,
   ) async {
     SharedPreferences.setMockInitialValues({'schedule_view': 'day'});
+    tallSurface(tester);
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
     expect(find.byType(DayChipStrip), findsOneWidget);
@@ -279,6 +301,7 @@ void main() {
     'shifts the week with no exceptions',
     (tester) async {
       SharedPreferences.setMockInitialValues({'schedule_view': 'day'});
+      tallSurface(tester);
       await tester.pumpWidget(app());
       await tester.pumpAndSettle();
       expect(find.byType(DayChipStrip), findsOneWidget);
@@ -329,6 +352,7 @@ void main() {
   ) async {
     // Everything else has data, but this week's reservation stream is stuck
     // loading forever — no cell may be bookable while that's true.
+    tallSurface(tester);
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
