@@ -181,6 +181,26 @@ class _OverrideDialogState extends ConsumerState<_OverrideDialog> {
 
   void _removeRow(int index) => setState(() => _rows.removeAt(index));
 
+  /// Shifts the editor rows by [offsetMinutes] (±30), replacing them with
+  /// the *default* active blocks (not the current rows) shifted by that
+  /// offset. If the shift drops every block (would cross midnight), keeps
+  /// the current rows and shows a snack instead.
+  void _shift(int offsetMinutes) {
+    final blocks = ref.read(timeBlocksProvider).value ?? const <TimeBlock>[];
+    final active = blocks.where((b) => b.active).toList()
+      ..sort((a, b) => a.startsAt.compareTo(b.startsAt));
+    final shifted = shiftBlocks(active, offsetMinutes);
+    if (shifted.isEmpty) {
+      snack(context, 'Posun by přesáhl půlnoc.');
+      return;
+    }
+    setState(() {
+      _rows
+        ..clear()
+        ..addAll([for (final range in shifted) (range.$1, range.$2)]);
+    });
+  }
+
   /// Validates the rows (all times set, end>start, no pairwise overlap, at
   /// least one row); returns the error message, or null when valid.
   String? _rowsError() {
@@ -312,6 +332,21 @@ class _OverrideDialogState extends ConsumerState<_OverrideDialog> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    Row(
+                      children: [
+                        OutlinedButton.icon(
+                          onPressed: () => _shift(-30),
+                          icon: const Icon(Icons.chevron_left),
+                          label: const Text('− 30 min'),
+                        ),
+                        const SizedBox(width: 8),
+                        OutlinedButton.icon(
+                          onPressed: () => _shift(30),
+                          icon: const Icon(Icons.chevron_right),
+                          label: const Text('+ 30 min'),
+                        ),
+                      ],
+                    ),
                     for (var i = 0; i < _rows.length; i++)
                       Row(
                         children: [
