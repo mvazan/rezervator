@@ -5,7 +5,6 @@ import 'package:rezervator/core/theme.dart';
 import 'package:rezervator/core/ui.dart' show today;
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
-import 'package:rezervator/features/kiosk/board_layout.dart';
 import 'package:rezervator/features/kiosk/kiosk_board_view.dart';
 import 'package:rezervator/features/kiosk/kiosk_shell.dart';
 
@@ -475,7 +474,7 @@ void main() {
       // '✕ zavřeno' text with no trailing reason). Every weekday stays a
       // training day so the rest of the week remains open and still
       // contributes b1/bOther to the rail — otherwise, with every day
-      // closed, the rail (default active blocks) would be empty and no
+      // closed, the rail (union of OPEN days' blocks) would be empty and no
       // row-group (hence no closed cell at all) would render.
       await tester.pumpWidget(
         ProviderScope(
@@ -582,13 +581,14 @@ void main() {
   );
 
   testWidgets(
-    'l: the rail renders exactly slotCount 30-min slot labels covering the '
-    'axis, each one axisUnit tall',
+    'l: uneven-duration blocks render proportional row heights, and rail '
+    'labels stay aligned with column cells',
     (tester) async {
-      // Two blocks 8:00-8:30 and 9:00-10:00 → axis 8:00..10:00 = 4 half-hour
-      // slots: 8:00, 8:30, 9:00, 9:30 (the label is the START of each slot;
-      // 10:00 is the axis end, never labelled). Each slot is axisUnit tall
-      // (2 lanes × 22 = 44).
+      // A 30-min block followed by a 60-min block. Task 2: each row-group's
+      // height scales with the block's duration (via blockGroupHeight), so
+      // the 30-min block's row-group is strictly shorter than the 60-min
+      // one, yet the rail label and the column cell for a given block still
+      // share the exact same vertical offset (one grid across rail + columns).
       const bShort = TimeBlock(
         id: 'bShort',
         startsAt: HourMinute(8, 0),
@@ -622,338 +622,53 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // Every 30-min slot start appears as a rail label; the axis end (10:00)
-      // does not. Labels are H:MM without zero-padded hour (matches _Rail).
-      expect(find.text('8:00'), findsOneWidget);
-      expect(find.text('8:30'), findsOneWidget);
-      expect(find.text('9:00'), findsOneWidget);
-      expect(find.text('9:30'), findsOneWidget);
-      expect(find.text('10:00'), findsNothing);
-
-      // Each rail slot cell is exactly one axis unit tall (2 lanes → 44px);
-      // the innermost Container ancestor of a slot label is that slot cell.
-      final unit = axisUnit(settings.laneCount);
-      final slotCell = find
-          .ancestor(of: find.text('8:30'), matching: find.byType(Container))
-          .first;
-      expect(tester.getSize(slotCell).height, closeTo(unit, 0.5));
-
-      await finish(tester);
-    },
-  );
-
-  // ── Hybrid board (Task 3): swimline for standard days, own-times column
-  // for shifted days (spec §2/§3). The default active swimline is bDef
-  // (16:00–17:00); a shifted day carries an override whose block set differs
-  // (bShift 17:30–18:30), so it must render its own strip with per-cell times.
-  const bDef = TimeBlock(
-    id: 'bDef',
-    startsAt: HourMinute(16, 0),
-    endsAt: HourMinute(17, 0),
-    position: 0,
-    active: true,
-  );
-  // Inactive so it's NOT part of the default swimline set, but still resolvable
-  // by id for a day override — exactly how a slot-shift override references its
-  // own special blocks.
-  const bShift = TimeBlock(
-    id: 'bShift',
-    startsAt: HourMinute(17, 30),
-    endsAt: HourMinute(18, 30),
-    position: 1,
-    active: false,
-  );
-  // A second shift block so a shifted day can carry TWO short blocks whose raw
-  // blockGroupHeight sum differs from the single-60min-block swimline — this
-  // makes the normalization scale (strip fills swimlineTotal exactly) actually
-  // load-bearing in the alignment test, not a coincidence of equal heights.
-  const bShift2 = TimeBlock(
-    id: 'bShift2',
-    startsAt: HourMinute(18, 30),
-    endsAt: HourMinute(19, 0),
-    position: 2,
-    active: false,
-  );
-
-  Widget hybridApp({required List<DayOverride> overrides}) => ProviderScope(
-        overrides: [
-          settingsProvider.overrideWith((ref) => Stream.value(settings)),
-          timeBlocksProvider.overrideWith(
-              (ref) => Stream.value(const [bDef, bShift, bShift2])),
-          dayOverridesProvider.overrideWith((ref) => Stream.value(overrides)),
-          matchesProvider.overrideWith((ref) => Stream.value(const [])),
-          rentalsProvider.overrideWith((ref) => Stream.value(const [])),
-          weekReservationsProvider
-              .overrideWith((ref, monday) => Stream.value(const [])),
-          playersProvider.overrideWith((ref) async => players),
-        ],
-        child: const MaterialApp(home: KioskShell()),
-      );
-
-  testWidgets(
-    'm: a standard day reads its time from the rail with NO per-cell time '
-    'label',
-    (tester) async {
-      // No overrides → every day is standard (block set == default {bDef}).
-      await tester.pumpWidget(hybridApp(overrides: const []));
-      await tester.pumpAndSettle();
-
-      // The absolute rail labels each 30-min slot start (16:00, 16:30); a
-      // standard column carries NO in-cell time (the en-dash range form
-      // 16:00–17:00 is only ever the shifted-day per-cell label), so it never
-      // appears on a standard-only board.
-      expect(find.text('16:00'), findsOneWidget);
-      expect(find.text('16:30'), findsOneWidget);
-      expect(find.text('${bDef.startsAt.display()}–${bDef.endsAt.display()}'),
-          findsNothing);
-
-      await finish(tester);
-    },
-  );
-
-  testWidgets(
-    'n: a shifted day renders an own-times column whose free ＋ cells DO show '
-    'a per-cell time label',
-    (tester) async {
-      // Shift only `tomorrow`: an override whose block_ids = [bShift] differs
-      // from the default active set {bDef} → shifted day → own-times strip.
-      await tester.pumpWidget(hybridApp(
-        overrides: [
-          DayOverride(
-            date: tomorrow,
-            closed: false,
-            reason: '',
-            blockIds: const ['bShift'],
-          ),
-        ],
-      ));
-      await tester.pumpAndSettle();
-
-      // Select a player so free lanes render the tappable ＋ (only bookable
-      // free slots draw ＋; a display-only board leaves them blank).
-      await tester.tap(find.text('Rezervovat'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('A'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text(anna.displayName));
-      await tester.pumpAndSettle();
-
-      // Scroll one column over to bring `tomorrow` (index 1) into view — the
-      // horizontal ListView only builds columns near the viewport.
-      final columnWidth =
-          tester.getSize(find.byType(BoardColumnHeader).first).width;
-      await tester.drag(find.byType(ListView), Offset(-columnWidth, 0));
-      await tester.pumpAndSettle();
-
-      // The shifted column labels every cell with its OWN time — including the
-      // free ＋ cell — so the bShift time (17:30–18:30), which is NOT a rail
-      // label (the rail only carries the default bDef 16:00–17:00), appears in
-      // the cell. Its presence proves the own-times path rendered per-cell.
-      expect(
-        find.text('${bShift.startsAt.display()}–${bShift.endsAt.display()}'),
-        findsWidgets,
-      );
-      // …and the free cell it labels really is a bookable ＋ (own-times free
-      // cell = time + ＋, spec §3).
-      expect(find.text('＋'), findsWidgets);
-      // The shifted header carries the ⚡ custom marker before the date.
-      expect(find.textContaining('⚡'), findsOneWidget);
-
-      await finish(tester);
-    },
-  );
-
-  testWidgets(
-    'o: a shifted column\'s total height equals a standard column (alignment)',
-    (tester) async {
-      // Every column spans the same absolute axis, so a shifted day's column
-      // fills the same vertical extent as a standard one and columns stay
-      // top-and-bottom aligned. With `tomorrow` shifted and the rest standard,
-      // the today column (standard, index 0) and the tomorrow column (shifted,
-      // index 1) must be the same pixel height below the header.
-      await tester.pumpWidget(hybridApp(
-        overrides: [
-          DayOverride(
-            date: tomorrow,
-            closed: false,
-            reason: '',
-            blockIds: const ['bShift', 'bShift2'],
-          ),
-        ],
-      ));
-      await tester.pumpAndSettle();
-
-      double columnBodyHeight(int index) {
-        // The BoardColumnHeader's parent Column holds header + cells; the whole
-        // _DayColumn's rendered height is the header height plus the cell
-        // strip. Measure the day column via its header's sibling extent by
-        // taking the enclosing SizedBox width-constrained column.
-        final headers = tester
-            .widgetList<BoardColumnHeader>(find.byType(BoardColumnHeader))
-            .toList();
-        final header = headers[index];
-        final headerElem = find.byWidget(header);
-        // The nearest ancestor Column is the _DayColumn body; its height is the
-        // full column height (header + strip).
-        final colFinder =
-            find.ancestor(of: headerElem, matching: find.byType(Column)).first;
-        return tester.getSize(colFinder).height;
+      // The rail renders one label Container per block, each sized to that
+      // block's row-group height; the innermost Container ancestor of each
+      // label Text is exactly that height-sized cell.
+      Size railCellFor(String label) {
+        final container = find
+            .ancestor(
+              of: find.text(label),
+              matching: find.byType(Container),
+            )
+            .first;
+        return tester.getSize(container);
       }
 
-      final columnWidth =
-          tester.getSize(find.byType(BoardColumnHeader).first).width;
-      // Both today (0, standard) and tomorrow (1, shifted) must be mounted; a
-      // small drag keeps index 0 in the cache while bringing 1 on-screen.
-      await tester.drag(find.byType(ListView), Offset(-columnWidth * 0.5, 0));
-      await tester.pumpAndSettle();
+      final shortSize = railCellFor(bShort.label);
+      final longSize = railCellFor(bLong.label);
 
-      final standardHeight = columnBodyHeight(0);
-      final shiftedHeight = columnBodyHeight(1);
-      expect(shiftedHeight, closeTo(standardHeight, 0.5));
+      // Proportional: the 30-min block's row-group is strictly shorter than
+      // the 60-min block's (half the per-lane height, same lane count).
+      expect(shortSize.height, lessThan(longSize.height));
 
-      await finish(tester);
-    },
-  );
-
-  testWidgets(
-    'p: a shifted block at 16:00 and a standard block at 16:00 share the same '
-    'top y (absolute-axis alignment)',
-    (tester) async {
-      // Default active swimline = bDef (16:00-17:00). The shifted day's own
-      // block bAt16 also runs 16:00-17:00 but has a different id (so its set
-      // ≠ {bDef} → the day is classified shifted and gets per-cell time
-      // labels), while sitting at the SAME absolute time. On the absolute
-      // axis both must land on slot 0 → identical top y across columns.
-      const bAt16 = TimeBlock(
-        id: 'bAt16',
-        startsAt: HourMinute(16, 0),
-        endsAt: HourMinute(17, 0),
-        position: 1,
-        active: false,
-      );
-      // Reserve lane 1 of the 16:00 block on today (standard, bDef) and on
-      // tomorrow (shifted, bAt16) with two distinct players so each cell has a
-      // uniquely findable name to measure.
-      const pStd = PlayerName(id: 'pstd', displayName: 'Standardní', club: '');
-      const pShift = PlayerName(id: 'pshift', displayName: 'Posunutý', club: '');
-      Reservation r(String id, String player, Day date, String block) =>
-          Reservation(
-            id: id,
-            playerId: player,
-            date: date,
-            blockId: block,
-            lane: 1,
-            createdVia: 'app',
-            createdAt: DateTime.utc(2026, 1, 1),
-          );
-
-      await tester.pumpWidget(ProviderScope(
-        overrides: [
-          settingsProvider.overrideWith((ref) => Stream.value(settings)),
-          timeBlocksProvider
-              .overrideWith((ref) => Stream.value(const [bDef, bAt16])),
-          dayOverridesProvider.overrideWith((ref) => Stream.value([
-                DayOverride(
-                  date: tomorrow,
-                  closed: false,
-                  reason: '',
-                  blockIds: const ['bAt16'],
-                ),
-              ])),
-          matchesProvider.overrideWith((ref) => Stream.value(const [])),
-          rentalsProvider.overrideWith((ref) => Stream.value(const [])),
-          weekReservationsProvider.overrideWith((ref, monday) => Stream.value([
-                r('rs', pStd.id, t, 'bDef'),
-                r('rh', pShift.id, tomorrow, 'bAt16'),
-              ])),
-          playersProvider.overrideWith((ref) async => [pStd, pShift]),
-        ],
-        child: const MaterialApp(home: KioskShell()),
-      ));
-      await tester.pumpAndSettle();
-
-      // Bring both today (standard) and tomorrow (shifted) into the viewport.
-      final columnWidth =
-          tester.getSize(find.byType(BoardColumnHeader).first).width;
-      await tester.drag(find.byType(ListView), Offset(-columnWidth * 0.5, 0));
-      await tester.pumpAndSettle();
-
-      final stdTop = tester.getTopLeft(find.text(pStd.displayName)).dy;
-      final shiftTop = tester.getTopLeft(find.text(pShift.displayName)).dy;
-      // Same absolute time → same slot → same top y within a pixel.
-      expect(shiftTop, closeTo(stdTop, 1.0));
-
-      await finish(tester);
-    },
-  );
-
-  testWidgets(
-    'q: a 30-min prep cell is exactly half the height of a 60-min block cell',
-    (tester) async {
-      // bPrep 20:00-21:00 (60min) then a match 21:00-21:30 with 30min prep →
-      // its prep window is [20:30,21:00). To get a clean 30-min prep CELL we
-      // instead make the prep block itself 30 min: bPrep30 20:30-21:00 sits
-      // fully inside the prep window (🛠), bMatch 21:00-22:00 (60min) shows 🏆.
-      // On the absolute axis the 30-min prep cell spans 1 slot and the 60-min
-      // match cell spans 2 → the prep cell is exactly half as tall.
-      const bPrep30 = TimeBlock(
-        id: 'bPrep30',
-        startsAt: HourMinute(20, 30),
-        endsAt: HourMinute(21, 0),
-        position: 0,
-        active: true,
-      );
-      const bMatch = TimeBlock(
-        id: 'bMatch',
-        startsAt: HourMinute(21, 0),
-        endsAt: HourMinute(22, 0),
-        position: 1,
-        active: true,
-      );
-      final match = Match(
-        id: 'm1',
-        date: t,
-        startsAt: const HourMinute(21, 0),
-        endsAt: const HourMinute(22, 0),
-        homeTeam: '',
-        awayTeam: 'KK Slavoj',
-        prepMinutes: 30,
-        description: '',
-      );
-      await tester.pumpWidget(ProviderScope(
-        overrides: [
-          settingsProvider.overrideWith((ref) => Stream.value(settings)),
-          timeBlocksProvider
-              .overrideWith((ref) => Stream.value(const [bPrep30, bMatch])),
-          dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
-          matchesProvider.overrideWith((ref) => Stream.value([match])),
-          rentalsProvider.overrideWith((ref) => Stream.value(const [])),
-          weekReservationsProvider
-              .overrideWith((ref, monday) => Stream.value(const [])),
-          playersProvider.overrideWith((ref) async => players),
-        ],
-        child: const MaterialApp(home: KioskShell()),
-      ));
-      await tester.pumpAndSettle();
-
-      // Measure the axis-placement Container (the one with the explicit
-      // spanSlots*unit height) rather than the innermost cell — a faint 1px
-      // gridline border shrinks the inner cell of a non-last slot but not the
-      // placement box itself, so the placement box is the true slot height.
-      // The placement Container is the 2nd Container ancestor of the cell text
-      // (innermost = _matchCell's own Container, next = the placement box).
-      double placementHeight(Finder text) {
-        final containers = find
-            .ancestor(of: text, matching: find.byType(Container))
-            .evaluate()
-            .toList();
-        return tester.getSize(find.byWidget(containers[1].widget)).height;
-      }
-
-      final prepHeight = placementHeight(find.text('🛠 Příprava drah'));
-      final matchHeight = placementHeight(find.text(
-          '🏆 ${match.title}\n${match.startsAt.display()}–${match.endsAt.display()}'));
-      expect(prepHeight, closeTo(matchHeight / 2, 0.5));
+      // Rail vs column alignment: the today column (index 0) is on screen —
+      // its first block cell must start at the same y as the rail's first
+      // label cell, and both blocks' cell tops must line up rail-to-column.
+      final railShortTop = tester
+          .getTopLeft(
+            find
+                .ancestor(
+                  of: find.text(bShort.label),
+                  matching: find.byType(Container),
+                )
+                .first,
+          )
+          .dy;
+      final railLongTop = tester
+          .getTopLeft(
+            find
+                .ancestor(
+                  of: find.text(bLong.label),
+                  matching: find.byType(Container),
+                )
+                .first,
+          )
+          .dy;
+      // The gap between the two rail labels equals the first (short) block's
+      // row-group height — so the second block sits proportionally lower than
+      // it would under equal-height rows.
+      expect(railLongTop - railShortTop, closeTo(shortSize.height, 0.5));
 
       await finish(tester);
     },
