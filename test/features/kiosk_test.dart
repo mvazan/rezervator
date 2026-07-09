@@ -673,4 +673,176 @@ void main() {
       await finish(tester);
     },
   );
+
+  // ── Hybrid board (Task 3): swimline for standard days, own-times column
+  // for shifted days (spec §2/§3). The default active swimline is bDef
+  // (16:00–17:00); a shifted day carries an override whose block set differs
+  // (bShift 17:30–18:30), so it must render its own strip with per-cell times.
+  const bDef = TimeBlock(
+    id: 'bDef',
+    startsAt: HourMinute(16, 0),
+    endsAt: HourMinute(17, 0),
+    position: 0,
+    active: true,
+  );
+  // Inactive so it's NOT part of the default swimline set, but still resolvable
+  // by id for a day override — exactly how a slot-shift override references its
+  // own special blocks.
+  const bShift = TimeBlock(
+    id: 'bShift',
+    startsAt: HourMinute(17, 30),
+    endsAt: HourMinute(18, 30),
+    position: 1,
+    active: false,
+  );
+  // A second shift block so a shifted day can carry TWO short blocks whose raw
+  // blockGroupHeight sum differs from the single-60min-block swimline — this
+  // makes the normalization scale (strip fills swimlineTotal exactly) actually
+  // load-bearing in the alignment test, not a coincidence of equal heights.
+  const bShift2 = TimeBlock(
+    id: 'bShift2',
+    startsAt: HourMinute(18, 30),
+    endsAt: HourMinute(19, 0),
+    position: 2,
+    active: false,
+  );
+
+  Widget hybridApp({required List<DayOverride> overrides}) => ProviderScope(
+        overrides: [
+          settingsProvider.overrideWith((ref) => Stream.value(settings)),
+          timeBlocksProvider.overrideWith(
+              (ref) => Stream.value(const [bDef, bShift, bShift2])),
+          dayOverridesProvider.overrideWith((ref) => Stream.value(overrides)),
+          matchesProvider.overrideWith((ref) => Stream.value(const [])),
+          rentalsProvider.overrideWith((ref) => Stream.value(const [])),
+          weekReservationsProvider
+              .overrideWith((ref, monday) => Stream.value(const [])),
+          playersProvider.overrideWith((ref) async => players),
+        ],
+        child: const MaterialApp(home: KioskShell()),
+      );
+
+  testWidgets(
+    'm: a standard day renders swimline cells with NO per-cell time label',
+    (tester) async {
+      // No overrides → every day is standard (block set == default {bDef}).
+      await tester.pumpWidget(hybridApp(overrides: const []));
+      await tester.pumpAndSettle();
+
+      // The rail shows the block's time as its label (bDef.label = 16:00–17:00);
+      // a standard column's cells must NOT repeat that time inside the cell —
+      // the only 16:00–17:00 text on screen is the single rail label. If any
+      // standard column wrongly rendered per-cell times, this would find more.
+      expect(find.text('${bDef.startsAt.display()}–${bDef.endsAt.display()}'),
+          findsOneWidget);
+
+      await finish(tester);
+    },
+  );
+
+  testWidgets(
+    'n: a shifted day renders an own-times column whose free ＋ cells DO show '
+    'a per-cell time label',
+    (tester) async {
+      // Shift only `tomorrow`: an override whose block_ids = [bShift] differs
+      // from the default active set {bDef} → shifted day → own-times strip.
+      await tester.pumpWidget(hybridApp(
+        overrides: [
+          DayOverride(
+            date: tomorrow,
+            closed: false,
+            reason: '',
+            blockIds: const ['bShift'],
+          ),
+        ],
+      ));
+      await tester.pumpAndSettle();
+
+      // Select a player so free lanes render the tappable ＋ (only bookable
+      // free slots draw ＋; a display-only board leaves them blank).
+      await tester.tap(find.text('Rezervovat'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('A'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(anna.displayName));
+      await tester.pumpAndSettle();
+
+      // Scroll one column over to bring `tomorrow` (index 1) into view — the
+      // horizontal ListView only builds columns near the viewport.
+      final columnWidth =
+          tester.getSize(find.byType(BoardColumnHeader).first).width;
+      await tester.drag(find.byType(ListView), Offset(-columnWidth, 0));
+      await tester.pumpAndSettle();
+
+      // The shifted column labels every cell with its OWN time — including the
+      // free ＋ cell — so the bShift time (17:30–18:30), which is NOT a rail
+      // label (the rail only carries the default bDef 16:00–17:00), appears in
+      // the cell. Its presence proves the own-times path rendered per-cell.
+      expect(
+        find.text('${bShift.startsAt.display()}–${bShift.endsAt.display()}'),
+        findsWidgets,
+      );
+      // …and the free cell it labels really is a bookable ＋ (own-times free
+      // cell = time + ＋, spec §3).
+      expect(find.text('＋'), findsWidgets);
+      // The shifted header carries the ⚡ custom marker before the date.
+      expect(find.textContaining('⚡'), findsOneWidget);
+
+      await finish(tester);
+    },
+  );
+
+  testWidgets(
+    'o: a shifted column\'s total height equals the swimline total (alignment)',
+    (tester) async {
+      // A shifted day's own strip must exactly fill the same vertical extent as
+      // a standard swimline column so columns stay top-and-bottom aligned. With
+      // `tomorrow` shifted and the rest standard, the today column (standard,
+      // index 0) and the tomorrow column (shifted, index 1) must be the same
+      // pixel height below the header. The shifted day carries TWO blocks
+      // (bShift 60min + bShift2 30min) whose raw height sum ≠ the single-block
+      // swimline, so equal totals here can only come from the normalization.
+      await tester.pumpWidget(hybridApp(
+        overrides: [
+          DayOverride(
+            date: tomorrow,
+            closed: false,
+            reason: '',
+            blockIds: const ['bShift', 'bShift2'],
+          ),
+        ],
+      ));
+      await tester.pumpAndSettle();
+
+      double columnBodyHeight(int index) {
+        // The BoardColumnHeader's parent Column holds header + cells; the whole
+        // _DayColumn's rendered height is the header height plus the cell
+        // strip. Measure the day column via its header's sibling extent by
+        // taking the enclosing SizedBox width-constrained column.
+        final headers = tester
+            .widgetList<BoardColumnHeader>(find.byType(BoardColumnHeader))
+            .toList();
+        final header = headers[index];
+        final headerElem = find.byWidget(header);
+        // The nearest ancestor Column is the _DayColumn body; its height is the
+        // full column height (header + strip).
+        final colFinder =
+            find.ancestor(of: headerElem, matching: find.byType(Column)).first;
+        return tester.getSize(colFinder).height;
+      }
+
+      final columnWidth =
+          tester.getSize(find.byType(BoardColumnHeader).first).width;
+      // Both today (0, standard) and tomorrow (1, shifted) must be mounted; a
+      // small drag keeps index 0 in the cache while bringing 1 on-screen.
+      await tester.drag(find.byType(ListView), Offset(-columnWidth * 0.5, 0));
+      await tester.pumpAndSettle();
+
+      final standardHeight = columnBodyHeight(0);
+      final shiftedHeight = columnBodyHeight(1);
+      expect(shiftedHeight, closeTo(standardHeight, 0.5));
+
+      await finish(tester);
+    },
+  );
 }
