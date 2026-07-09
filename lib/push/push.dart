@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
+import 'package:flutter_local_notifications/flutter_local_notifications.dart'
+    hide Day;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config.dart';
@@ -14,10 +16,12 @@ import '../data/providers.dart';
 /// needed). Without them — or on web — the whole module is a silent no-op, so
 /// the app builds and runs before the Firebase project exists.
 ///
-/// This phase only delivers the token to the backend so the notify Edge
-/// Function has somewhere to send to; there's no in-app routing when a
+/// This phase delivers the token to the backend so the notify Edge Function
+/// has somewhere to send to, and shows a local notification for messages that
+/// arrive while the app is in the foreground. There's no in-app routing when a
 /// notification is tapped (YAGNI — the OS opens the app, nothing more).
 class Push {
+  static final _local = FlutterLocalNotificationsPlugin();
   static bool _ready = false;
 
   static Future<void> init() async {
@@ -35,6 +39,13 @@ class Push {
         ),
       );
 
+      await _local.initialize(
+        settings: const InitializationSettings(
+          android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+          iOS: DarwinInitializationSettings(),
+        ),
+      );
+
       await FirebaseMessaging.instance.requestPermission();
 
       // Save the token now (if signed in), on every sign-in, and on refresh.
@@ -44,6 +55,9 @@ class Push {
         if (state.event == AuthChangeEvent.signedIn) unawaited(_saveToken());
       });
       FirebaseMessaging.instance.onTokenRefresh.listen((_) => _saveToken());
+
+      // Foreground messages: show them via a local notification.
+      FirebaseMessaging.onMessage.listen(_showForeground);
     } catch (e) {
       debugPrint('Push init failed (continuing without push): $e');
     }
@@ -58,5 +72,24 @@ class Push {
     } catch (e) {
       debugPrint('FCM token save failed: $e');
     }
+  }
+
+  static Future<void> _showForeground(RemoteMessage message) async {
+    final notification = message.notification;
+    if (notification == null) return;
+    await _local.show(
+      id: notification.hashCode,
+      title: notification.title,
+      body: notification.body,
+      notificationDetails: const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'rezervator',
+          'Rezervátor',
+          channelDescription: 'Upozornění kuželny',
+          importance: Importance.high,
+          priority: Priority.high,
+        ),
+      ),
+    );
   }
 }
