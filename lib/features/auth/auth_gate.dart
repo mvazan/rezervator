@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../core/widgets/auth_background.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
 import '../kiosk/kiosk_shell.dart';
@@ -49,16 +50,8 @@ class _Splash extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Center(
-        child: ClipOval(
-          child: Image.asset(
-            'assets/images/logo_circle.png',
-            width: 96,
-            height: 96,
-          ),
-        ),
-      ),
+    return const Scaffold(
+      body: Center(child: AuthLogo(size: 96)),
     );
   }
 }
