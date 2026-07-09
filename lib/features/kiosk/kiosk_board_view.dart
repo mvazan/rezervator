@@ -727,8 +727,13 @@ class _DayColumn extends StatelessWidget {
       if (off.startSlot > cursor) {
         pieces.add((height: (off.startSlot - cursor) * unit, cell: null));
       }
+      // Blocks are non-overlapping by design, but the schema doesn't enforce
+      // it — if a misconfigured pair overlaps (startSlot < cursor) place the
+      // block right after the previous one instead of overflowing the fixed
+      // gridHeight Column.
+      final start = off.startSlot < cursor ? cursor : off.startSlot;
       pieces.add((height: off.spanSlots * unit, cell: cellFor(block)));
-      cursor = off.startSlot + off.spanSlots;
+      cursor = start + off.spanSlots;
     }
     if (cursor < slotCount) {
       pieces.add((height: (slotCount - cursor) * unit, cell: null));
