@@ -474,7 +474,7 @@ void main() {
       // '✕ zavřeno' text with no trailing reason). Every weekday stays a
       // training day so the rest of the week remains open and still
       // contributes b1/bOther to the rail — otherwise, with every day
-      // closed, the rail (union of OPEN days' blocks) would be empty and no
+      // closed, the rail (default active blocks) would be empty and no
       // row-group (hence no closed cell at all) would render.
       await tester.pumpWidget(
         ProviderScope(

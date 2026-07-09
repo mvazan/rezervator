@@ -763,15 +763,25 @@ class _DayColumn extends StatelessWidget {
     return Stack(
       children: [
         Positioned.fill(child: body),
+        // Top-right corner: the lane rows put their digit at the left and the
+        // name centered, so the right corner is the least crowded. A faint
+        // surface backdrop keeps the label readable over any club colour.
         Positioned(
           top: 1,
-          left: 3,
-          child: Text(
-            '${block.startsAt.display()}–${block.endsAt.display()}',
-            style: TextStyle(
-              fontSize: 9,
-              fontWeight: FontWeight.w600,
-              color: scheme.onSurfaceVariant,
+          right: 3,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+            decoration: BoxDecoration(
+              color: scheme.surface.withValues(alpha: 0.7),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              '${block.startsAt.display()}–${block.endsAt.display()}',
+              style: TextStyle(
+                fontSize: 9,
+                fontWeight: FontWeight.w600,
+                color: scheme.onSurfaceVariant,
+              ),
             ),
           ),
         ),
