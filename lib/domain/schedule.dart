@@ -107,6 +107,28 @@ int _byStartThenPosition(TimeBlock a, TimeBlock b) {
   return byStart != 0 ? byStart : a.position.compareTo(b.position);
 }
 
+/// The block-vs-match resolution shared by every caller that needs to know
+/// whether [block] is covered by a match — [buildWeekSchedule] (open days)
+/// and the kiosk board's closed-day column (which has no [OpenDay]/[MatchSlot]
+/// to read from, since `buildWeekSchedule` only resolves per-lane slot state
+/// for open days). Single source of truth so open and closed columns can
+/// never disagree on a boundary case.
+///
+/// Returns the first (date-sorted) [Match] whose prep-extended window
+/// `[blockingStart, endsAt)` overlaps [block], plus whether that overlap is
+/// prep-only (does NOT also overlap the match's real `[startsAt, endsAt)`
+/// window) — or `(null, false)` when no match covers [block] at all.
+(Match?, bool) matchStateForBlock(TimeBlock block, List<Match> matches) {
+  final blockMatch = _firstWhereOrNull(
+      matches,
+      (Match m) =>
+          _overlaps(block.startsAt, block.endsAt, m.blockingStart, m.endsAt));
+  if (blockMatch == null) return (null, false);
+  final isPrep = !_overlaps(
+      block.startsAt, block.endsAt, blockMatch.startsAt, blockMatch.endsAt);
+  return (blockMatch, isPrep);
+}
+
 WeekSchedule buildWeekSchedule({
   required Day monday,
   required Day today,
@@ -171,15 +193,10 @@ WeekSchedule buildWeekSchedule({
       final inPast = date.isBefore(today) ||
           (date == today &&
               block.startsAt.minutesFromMidnight <= now.minutesFromMidnight);
-      final blockMatch = _firstWhereOrNull(
-          dayMatches,
-          (Match m) => _overlaps(
-              block.startsAt, block.endsAt, m.blockingStart, m.endsAt));
+      final (blockMatch, isPrep) = matchStateForBlock(block, dayMatches);
       for (var lane = 1; lane <= settings.laneCount; lane++) {
         final SlotState state;
         if (blockMatch != null) {
-          final isPrep = !_overlaps(block.startsAt, block.endsAt,
-              blockMatch.startsAt, blockMatch.endsAt);
           state = MatchSlot(blockMatch,
               inPast: inPast, beyondHorizon: beyondHorizon, isPrep: isPrep);
         } else {

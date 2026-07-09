@@ -94,14 +94,6 @@ int _byStartThenPosition(TimeBlock a, TimeBlock b) {
   return byStart != 0 ? byStart : a.position.compareTo(b.position);
 }
 
-/// Half-open interval overlap test, mirroring `schedule.dart`'s private
-/// `_overlaps` — used on closed days to find which rail block (if any) a
-/// match's window falls into, since `buildWeekSchedule` only resolves
-/// block-level match/prep state for [OpenDay]s.
-bool _overlapsBlock(HourMinute start, HourMinute end, TimeBlock block) =>
-    start.minutesFromMidnight < block.endsAt.minutesFromMidnight &&
-    end.minutesFromMidnight > block.startsAt.minutesFromMidnight;
-
 /// Faint horizontal divider between time-slot row-groups, shared by [_Rail]
 /// and [_DayColumn] so the lines land on the same y-offset in both (spec:
 /// subtle time-slot gridlines, no vertical/lane dividers). `null` after the
@@ -638,12 +630,8 @@ class _DayColumn extends StatelessWidget {
   /// top of the dimmed "✕ zavřeno" column filler.
   Widget _closedCell(BuildContext context, ColorScheme scheme, TimeBlock block) {
     final closedDay = day as ClosedDay;
-    final blockMatch = closedDay.matches
-        .where((m) => _overlapsBlock(m.blockingStart, m.endsAt, block))
-        .firstOrNull;
+    final (blockMatch, isPrep) = matchStateForBlock(block, closedDay.matches);
     if (blockMatch != null) {
-      final isPrep =
-          !_overlapsBlock(blockMatch.startsAt, blockMatch.endsAt, block);
       return _matchCell(context, blockMatch, isPrep: isPrep);
     }
     return Container(

@@ -287,6 +287,36 @@ void main() {
     });
   });
 
+  group('matchStateForBlock', () {
+    test('prep-only overlap returns the match with isPrep true', () {
+      // Match starts 17:00, prep 60 -> blockingStart 16:00. b1 (16:00-17:00)
+      // overlaps only the prep window, not the real [17:00, 18:00) window.
+      final m = match(
+          startsAt: const HourMinute(17, 0),
+          endsAt: const HourMinute(18, 0),
+          prepMinutes: 60);
+      final (found, isPrep) = matchStateForBlock(b1, [m]);
+      expect(found, same(m));
+      expect(isPrep, isTrue);
+    });
+
+    test('real-window overlap returns the match with isPrep false', () {
+      final m = match(
+          startsAt: const HourMinute(16, 30), endsAt: const HourMinute(17, 30));
+      final (found, isPrep) = matchStateForBlock(b1, [m]);
+      expect(found, same(m));
+      expect(isPrep, isFalse);
+    });
+
+    test('no overlap returns null', () {
+      final m = match(
+          startsAt: const HourMinute(20, 0), endsAt: const HourMinute(22, 0));
+      final (found, isPrep) = matchStateForBlock(b1, [m]);
+      expect(found, isNull);
+      expect(isPrep, isFalse);
+    });
+  });
+
   group('rentals', () {
     test('one-time rental blocks only its lanes and time', () {
       final day = build(rentals: [
