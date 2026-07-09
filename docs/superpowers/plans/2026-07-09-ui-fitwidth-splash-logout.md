@@ -15,17 +15,25 @@
 
 ---
 
-### Task 1: Splash / AuthLogo — remove white ring
+### Task 1: Splash / AuthLogo — remove white ring (mirror Termínátor)
 
 **Files:** modify `lib/core/widgets/auth_background.dart` (AuthLogo), `lib/features/auth/auth_gate.dart` (_Splash).
 
-**Root cause:** AuthLogo wraps the circular logo image in a `scheme.surface`-filled circle (auth_background.dart:84-88) inside the gradient ring. `logo_circle.png` is a circular image with transparent corners; with `BoxFit.cover` at the same diameter it fills the ring, so the `scheme.surface` disc shows as a light rim between the gradient ring and the image (a "white border" in light mode). The `_Splash` shows the bare `ClipOval` image on a `Scaffold` — on a light theme the scaffold background reads as a border-ish disc too.
+**Root cause:** AuthLogo wraps the square logo image (logo_circle.png) in a gradient ring PLUS an inner `scheme.surface`-filled circle (auth_background.dart:76-99). That surface disc shows as a light rim between the gradient ring and the image — the "white border" in light mode.
 
-**Fix:**
-- AuthLogo (auth_background.dart): remove the inner `scheme.surface` circle entirely — put the `ClipOval(Image.asset(logo_circle.png, fit: cover))` DIRECTLY inside the gradient-ring padding so the image meets the gradient with no light gap. Keep the 2px gradient ring. Net: gradient ring hugs the round logo, no white rim.
-- `_Splash` (auth_gate.dart): the bare `ClipOval` logo is fine but to kill any perceived rim, reuse `AuthLogo()` (now ring-only, no white disc) OR keep the plain image but ensure no decoration/background is added. Simplest + consistent: replace the `_Splash` body's `ClipOval(Image...)` with `const AuthLogo(size: 96)` so splash and login match. Verify it renders centered on the scaffold with no extra container.
+**Fix — use the WORKING pattern from the sibling project /Users/mvazan/Home/terminator** (READ terminator/lib/features/auth/auth_gate.dart:45-59 and login_screen.dart:117-127). Terminator has NO gradient ring and NO surface disc — the logo is just a rounded-rectangle-clipped image:
+```dart
+ClipRRect(
+  borderRadius: BorderRadius.circular(24),
+  child: Image.asset('assets/images/logo.png', width: 96, height: 96, fit: BoxFit.cover),
+)
+```
+- AuthLogo (auth_background.dart): REPLACE the gradient-ring + surface-disc + ClipOval structure with a plain `ClipRRect(borderRadius: BorderRadius.circular(size * 0.25), child: Image.asset('assets/images/logo.png', width: size, height: size, fit: BoxFit.cover))`. No ring, no background disc. Use `logo.png` (the full square master) — not `logo_circle.png` — since a rounded rect suits a square image; keep `_gradientColors` only if still referenced elsewhere (else delete). Drop the now-unused `scheme` if nothing else uses it.
+- `_Splash` (auth_gate.dart): replace its `ClipOval(Image...)` with `const AuthLogo(size: 96)` (now ring-less) so splash + login + register match. Centered on the scaffold, no extra decoration.
 
-**Verify:** analyze + tests green (no test asserts splash internals; if any does, adapt). `flutter build apk --debug`. Commit `fix: drop white disc behind auth/splash logo`.
+Net: logo is a clean rounded-square image everywhere, no white/surface rim, matching terminator's proven look.
+
+**Verify:** analyze + tests green (no test asserts splash internals; if any does, adapt). `flutter build apk --debug`. Commit `fix: drop white disc behind logo, use rounded-square like terminator`.
 
 ---
 
