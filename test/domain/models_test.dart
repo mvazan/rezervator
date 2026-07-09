@@ -291,6 +291,30 @@ void main() {
     });
   });
 
+  group('TimeBlock.durationMinutes', () {
+    test('18:30-19:30 is 60 minutes', () {
+      final b = TimeBlock(
+        id: 'b1',
+        startsAt: const HourMinute(18, 30),
+        endsAt: const HourMinute(19, 30),
+        position: 0,
+        active: true,
+      );
+      expect(b.durationMinutes, 60);
+    });
+
+    test('18:00-18:30 is 30 minutes', () {
+      final b = TimeBlock(
+        id: 'b2',
+        startsAt: const HourMinute(18, 0),
+        endsAt: const HourMinute(18, 30),
+        position: 0,
+        active: true,
+      );
+      expect(b.durationMinutes, 30);
+    });
+  });
+
   group('defaultTimeBlocks', () {
     test('six hourly blocks 16–22', () {
       final blocks = defaultTimeBlocks();
