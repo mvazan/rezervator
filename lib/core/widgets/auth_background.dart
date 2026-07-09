@@ -1,6 +1,6 @@
 /// Shared chrome for the auth-family screens (login, register, waiting,
 /// kiosk login): a centered card floating over a subtle radial gradient
-/// backdrop, with the app logo in a gradient-bordered circle above it.
+/// backdrop, with the app logo (a rounded-square image) above it.
 /// Purely presentational — callers keep their own Scaffold/AppBar/state;
 /// this only wraps the body content, so no screen's behavior changes.
 library;
