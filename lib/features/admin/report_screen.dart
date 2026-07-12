@@ -68,6 +68,10 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
     if (mounted) setState(() => _exporting = false);
   }
 
+  /// Czech pluralization for players: 1 hráč, 2–4 hráči, 5+ hráčů.
+  static String _players(int n) =>
+      n == 1 ? '1 hráč' : (n >= 2 && n <= 4 ? '$n hráči' : '$n hráčů');
+
   /// Rows grouped into club sections ordered by club total (desc), players
   /// by attended (desc) within — "Bez oddílu" always last. Each entry is
   /// (header, members).
@@ -164,7 +168,7 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
                           child: Text(
                             '$club — '
                             '${members.fold(0, (s, r) => s + r.attended)}× / '
-                            '${members.length} hráčů',
+                            '${_players(members.length)}',
                             style: Theme.of(context).textTheme.labelLarge
                                 ?.copyWith(color: scheme.onSurfaceVariant),
                           ),
