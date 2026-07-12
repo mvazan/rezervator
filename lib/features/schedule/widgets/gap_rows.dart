@@ -43,7 +43,7 @@ List<DayGridItem> dayGridItems(DaySchedule day) {
     ClosedDay() => const <TimeBlock>[],
   };
   final events = offBlockEvents(
-    matches: day.matches,
+    priority: day.priority,
     rentals: day.rentals,
     blocks: blocks,
   );
@@ -90,11 +90,13 @@ class GapEventBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final (background, foreground, text) = switch (event) {
-      OffBlockMatch(:final match) => (
-          scheme.errorContainer.withValues(alpha: 0.6),
-          scheme.onErrorContainer,
-          '🏆 ${match.title} · '
-              '${match.startsAt.display()}–${match.endsAt.display()}',
+      OffBlockPriority(:final slot) => (
+          ClubColors.of(slot.type.colorIndex, scheme.brightness)?.$1 ??
+              scheme.errorContainer.withValues(alpha: 0.6),
+          ClubColors.of(slot.type.colorIndex, scheme.brightness)?.$2 ??
+              scheme.onErrorContainer,
+          '${slot.type.isMatch ? '🏆' : '⛔'} ${slot.title} · '
+              '${slot.startsAt.display()}–${slot.endsAt.display()}',
         ),
       OffBlockRental(:final rental) => (
           ClubColors.of(rental.color, scheme.brightness)?.$1 ??

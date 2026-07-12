@@ -80,6 +80,7 @@ String friendlyDbError(Object error) {
     'date_past': 'Tenhle termín už je v minulosti.',
     'day_closed': 'V tento den je zavřeno.',
     'blocked_by_match': 'V tomhle čase se hraje zápas.',
+    'blocked_by_priority': 'V tomhle čase je dráha blokovaná.',
     'blocked_by_rental': 'Dráha je v tomhle čase pronajatá.',
     'too_late': 'Trénink už začal — rezervaci může zrušit jen správce.',
     'unknown_block': 'Tenhle blok už neplatí — mrkni na aktuální rozvrh.',

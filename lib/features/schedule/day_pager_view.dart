@@ -35,7 +35,7 @@ class DayPagerView extends StatefulWidget {
     required this.settings,
     required this.blocks,
     required this.overrides,
-    required this.matches,
+    required this.priority,
     required this.rentals,
     required this.me,
     required this.myCount,
@@ -77,7 +77,7 @@ class DayPagerView extends StatefulWidget {
   /// completes and the shell's real [week] for the new offset arrives.
   final List<TimeBlock> blocks;
   final List<DayOverride> overrides;
-  final List<Match> matches;
+  final List<PrioritySlot> priority;
   final List<Rental> rentals;
 
   final Profile? me;
@@ -290,7 +290,7 @@ class _DayPagerViewState extends State<DayPagerView> {
       settings: widget.settings,
       blocks: widget.blocks,
       overrides: widget.overrides,
-      matches: widget.matches,
+      priority: widget.priority,
       rentals: widget.rentals,
       reservations: const [],
     );
@@ -345,7 +345,7 @@ class _DayPage extends StatelessWidget {
               padding: const EdgeInsets.all(16),
               child: DayHeader(
                 date: day.date,
-                matches: day.matches,
+                priority: day.priority,
                 closedReason: reason,
               ),
             ),
@@ -382,7 +382,7 @@ class _DayPage extends StatelessWidget {
           children: [
             DayHeader(
               date: day.date,
-              matches: day.matches,
+              priority: day.priority,
               chipLabel: '$freeCount volných',
             ),
             const SizedBox(height: 12),

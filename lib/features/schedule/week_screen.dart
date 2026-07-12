@@ -247,7 +247,7 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
         ref.watch(settingsProvider).value ?? ScheduleSettings.defaults;
     final timeBlocks = ref.watch(timeBlocksProvider);
     final overrides = ref.watch(dayOverridesProvider).value ?? const [];
-    final matches = ref.watch(matchesProvider).value ?? const [];
+    final priority = ref.watch(prioritySlotsProvider);
     final rentals = ref.watch(rentalsProvider).value ?? const [];
     final weekReservations = ref.watch(weekReservationsProvider(monday));
     final players = ref.watch(playersProvider).value ?? const [];
@@ -360,7 +360,7 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
       settings: settings,
       blocks: blocks,
       overrides: overrides,
-      matches: matches,
+      priority: priority,
       rentals: rentals,
       reservations: reservations,
     );
@@ -435,7 +435,7 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
                   settings: settings,
                   blocks: blocks,
                   overrides: overrides,
-                  matches: matches,
+                  priority: priority,
                   rentals: rentals,
                   me: me,
                   myCount: myCount,
@@ -569,7 +569,7 @@ class _DaySection extends StatelessWidget {
         child: switch (day) {
           ClosedDay(:final reason) => DayHeader(
             date: day.date,
-            matches: day.matches,
+            priority: day.priority,
             closedReason: reason,
           ),
           OpenDay() => _openDay(context, day as OpenDay),
@@ -601,7 +601,7 @@ class _DaySection extends StatelessWidget {
       children: [
         DayHeader(
           date: day.date,
-          matches: day.matches,
+          priority: day.priority,
           chipLabel: '$freeCount volných',
         ),
         const SizedBox(height: 6),

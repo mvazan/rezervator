@@ -219,14 +219,15 @@ class Api {
   static Future<void> deleteDayOverride(Day date) =>
       _db.from('day_overrides').delete().eq('date', date.toSql());
 
-  // --- admin: matches ---
-  static Future<void> saveMatch({
+  // --- admin: priority slots (matches & other blockages) ---
+  static Future<void> savePrioritySlot({
     String? id,
     required Day date,
     required HourMinute startsAt,
     required HourMinute endsAt,
+    required String typeId,
     String homeTeam = '',
-    required String awayTeam,
+    String awayTeam = '',
     int prepMinutes = 0,
     String description = '',
   }) async {
@@ -234,6 +235,7 @@ class Api {
       'date': date.toSql(),
       'starts_at': startsAt.toSql(),
       'ends_at': endsAt.toSql(),
+      'type_id': typeId,
       'home_team': homeTeam,
       'away_team': awayTeam,
       'prep_minutes': prepMinutes,
@@ -241,14 +243,33 @@ class Api {
       if (id == null) 'created_by': currentUserId!,
     };
     if (id == null) {
-      await _db.from('matches').insert(row);
+      await _db.from('priority_slots').insert(row);
     } else {
-      await _db.from('matches').update(row).eq('id', id);
+      await _db.from('priority_slots').update(row).eq('id', id);
     }
   }
 
-  static Future<void> deleteMatch(String id) =>
-      _db.from('matches').delete().eq('id', id);
+  static Future<void> deletePrioritySlot(String id) =>
+      _db.from('priority_slots').delete().eq('id', id);
+
+  /// Upserts a priority-slot type. Only name/color/lanes are client-writable
+  /// (column grants guard is_match/builtin server-side).
+  static Future<void> upsertSlotType({
+    String? id,
+    required String name,
+    required int colorIndex,
+    required List<int>? lanes,
+  }) async {
+    final row = {'name': name, 'color': colorIndex, 'lanes': lanes};
+    if (id == null) {
+      await _db.from('priority_slot_types').insert(row);
+    } else {
+      await _db.from('priority_slot_types').update(row).eq('id', id);
+    }
+  }
+
+  static Future<void> deleteSlotType(String id) =>
+      _db.from('priority_slot_types').delete().eq('id', id);
 
   // --- admin: rentals ---
   static Future<void> saveRental({
@@ -378,10 +399,26 @@ final dayOverridesProvider = StreamProvider<List<DayOverride>>((ref) {
       (rows) => rows.map(DayOverride.fromJson).toList());
 });
 
-final matchesProvider = StreamProvider<List<Match>>((ref) {
+final slotTypesProvider = StreamProvider<List<PrioritySlotType>>((ref) {
   if (ref.watch(_authUidProvider) == null) return Stream.value(const []);
-  return _db.from('matches').stream(primaryKey: ['id']).map(
-      (rows) => rows.map(Match.fromJson).toList());
+  return _db.from('priority_slot_types').stream(primaryKey: ['id']).map(
+      (rows) => rows.map(PrioritySlotType.fromJson).toList());
+});
+
+/// Raw priority_slots rows joined with the types stream into resolved
+/// [PrioritySlot]s. Plain Provider (not Stream): recomputes whenever either
+/// stream emits; use sites read the list directly.
+final prioritySlotsProvider = Provider<List<PrioritySlot>>((ref) {
+  final types = ref.watch(slotTypesProvider).value ?? const [];
+  final typeById = {for (final t in types) t.id: t};
+  final rows = ref.watch(_prioritySlotRowsProvider).value ?? const [];
+  return [for (final row in rows) PrioritySlot.fromJson(row, typeById)];
+});
+
+final _prioritySlotRowsProvider =
+    StreamProvider<List<Map<String, dynamic>>>((ref) {
+  if (ref.watch(_authUidProvider) == null) return Stream.value(const []);
+  return _db.from('priority_slots').stream(primaryKey: ['id']);
 });
 
 final rentalsProvider = StreamProvider<List<Rental>>((ref) {

@@ -305,32 +305,81 @@ class DayOverride {
       );
 }
 
-class Match {
-  const Match({
+/// A priority-slot šablóna: label, palette color and lane scope. 'Zápas' is
+/// the seeded built-in kind ([isMatch]) that additionally carries teams and
+/// a prep window on its slots.
+class PrioritySlotType {
+  const PrioritySlotType({
+    required this.id,
+    required this.name,
+    this.colorIndex = -1,
+    this.lanes,
+    this.isMatch = false,
+    this.builtin = false,
+  });
+
+  final String id;
+  final String name;
+
+  /// Palette index (0–11); -1 = the default rose (match) tint.
+  final int colorIndex;
+
+  /// Lanes this type blocks; null = the whole alley.
+  final List<int>? lanes;
+  final bool isMatch;
+  final bool builtin;
+
+  bool coversLane(int lane) => lanes == null || lanes!.contains(lane);
+
+  factory PrioritySlotType.fromJson(Map<String, dynamic> json) =>
+      PrioritySlotType(
+        id: json['id'] as String,
+        name: json['name'] as String,
+        colorIndex: json['color'] as int? ?? -1,
+        lanes: (json['lanes'] as List?)?.cast<int>(),
+        isMatch: json['is_match'] as bool? ?? false,
+        builtin: json['builtin'] as bool? ?? false,
+      );
+}
+
+/// One dated priority slot (a match or any other typed blockage). Blocks
+/// reservations on its type's lanes for `[blockingStart, endsAt)` and is
+/// shown to spectators even on closed days.
+class PrioritySlot {
+  const PrioritySlot({
     required this.id,
     required this.date,
     required this.startsAt,
     required this.endsAt,
-    required this.homeTeam,
-    required this.awayTeam,
+    required this.type,
+    this.homeTeam = '',
+    this.awayTeam = '',
     this.prepMinutes = 0,
-    required this.description,
+    this.description = '',
   });
 
   final String id;
   final Day date;
   final HourMinute startsAt;
   final HourMinute endsAt;
+  final PrioritySlotType type;
+
+  /// Team fields are only meaningful when [type.isMatch].
   final String homeTeam;
   final String awayTeam;
 
   /// Minutes of lane prep required before [startsAt]; reservations that
-  /// overlap this window (as well as the match itself) are blocked.
+  /// overlap this window (as well as the slot itself) are blocked.
   final int prepMinutes;
   final String description;
 
-  /// `'{home} – {away}'`, or just `away` when there's no home team.
-  String get title => homeTeam.isEmpty ? awayTeam : '$homeTeam – $awayTeam';
+  /// Match kind: `'{home} – {away}'` (or just `away`); other kinds show the
+  /// type's name.
+  String get title => type.isMatch
+      ? (homeTeam.isEmpty ? awayTeam : '$homeTeam – $awayTeam')
+      : type.name;
+
+  bool coversLane(int lane) => type.coversLane(lane);
 
   /// [startsAt] minus [prepMinutes], clamped to 00:00 (never wraps past
   /// midnight into the previous day).
@@ -340,16 +389,32 @@ class Match {
     return HourMinute(minutes ~/ 60, minutes % 60);
   }
 
-  factory Match.fromJson(Map<String, dynamic> json) => Match(
+  /// [type] is resolved by the caller (the provider joins the types stream);
+  /// an unknown type_id falls back to a built-in-match placeholder so a
+  /// mid-stream row never crashes the board.
+  factory PrioritySlot.fromJson(
+    Map<String, dynamic> json,
+    Map<String, PrioritySlotType> typeById,
+  ) =>
+      PrioritySlot(
         id: json['id'] as String,
         date: Day.parse(json['date'] as String),
         startsAt: HourMinute.parse(json['starts_at'] as String),
         endsAt: HourMinute.parse(json['ends_at'] as String),
+        type: typeById[json['type_id'] as String?] ?? fallbackMatchType,
         homeTeam: json['home_team'] as String? ?? '',
-        awayTeam: json['away_team'] as String,
+        awayTeam: json['away_team'] as String? ?? '',
         prepMinutes: json['prep_minutes'] as int? ?? 0,
         description: json['description'] as String? ?? '',
       );
+
+  /// Placeholder while the types stream hasn't delivered the real row yet.
+  static const fallbackMatchType = PrioritySlotType(
+    id: 'fallback-match',
+    name: 'Zápas',
+    isMatch: true,
+    builtin: true,
+  );
 }
 
 class Rental {

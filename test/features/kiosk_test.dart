@@ -67,7 +67,7 @@ void main() {
   /// `theme: buildTheme(Brightness.light)`) for tests that care whether the
   /// kiosk correctly stays dark regardless of the ambient app theme.
   Widget kioskApp({
-    List<Match> matches = const [],
+    List<PrioritySlot> matches = const [],
     List<Reservation> reservations = const [],
     List<PlayerName>? roster,
     ThemeData? theme,
@@ -86,7 +86,7 @@ void main() {
         settingsProvider.overrideWith((ref) => Stream.value(effSettings)),
         timeBlocksProvider.overrideWith((ref) => Stream.value(const [b1])),
         dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
-        matchesProvider.overrideWith((ref) => Stream.value(matches)),
+        prioritySlotsProvider.overrideWithValue(matches),
         rentalsProvider.overrideWith((ref) => Stream.value(const [])),
         weekReservationsProvider.overrideWith(
           (ref, monday) => Stream.value(reservations),
@@ -396,7 +396,8 @@ void main() {
         position: 1,
         active: true,
       );
-      final match = Match(
+      final match = PrioritySlot(
+        type: PrioritySlot.fallbackMatchType,
         id: 'm1',
         date: t,
         startsAt: const HourMinute(21, 0),
@@ -414,7 +415,7 @@ void main() {
             timeBlocksProvider
                 .overrideWith((ref) => Stream.value(const [bPrep, bMatch])),
             dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
-            matchesProvider.overrideWith((ref) => Stream.value([match])),
+            prioritySlotsProvider.overrideWithValue([match]),
             rentalsProvider.overrideWith((ref) => Stream.value(const [])),
             weekReservationsProvider.overrideWith(
               (ref, monday) => Stream.value(const []),
@@ -448,7 +449,8 @@ void main() {
     'j: a fully closed day renders the dimmed ✕ zavřeno column and still '
     'shows that day\'s match cell',
     (tester) async {
-      final match = Match(
+      final match = PrioritySlot(
+        type: PrioritySlot.fallbackMatchType,
         id: 'm2',
         date: t,
         startsAt: const HourMinute(23, 0),
@@ -489,7 +491,7 @@ void main() {
                 [DayOverride(date: t, closed: true, reason: '')],
               ),
             ),
-            matchesProvider.overrideWith((ref) => Stream.value([match])),
+            prioritySlotsProvider.overrideWithValue([match]),
             rentalsProvider.overrideWith((ref) => Stream.value(const [])),
             weekReservationsProvider.overrideWith(
               (ref, monday) => Stream.value(const []),
@@ -544,7 +546,7 @@ void main() {
             timeBlocksProvider
                 .overrideWith((ref) => Stream.value(const [bMorning, bEvening])),
             dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
-            matchesProvider.overrideWith((ref) => Stream.value(const [])),
+            prioritySlotsProvider.overrideWithValue(const []),
             rentalsProvider.overrideWith((ref) => Stream.value(const [])),
             weekReservationsProvider.overrideWith(
               (ref, monday) => Stream.value(const []),
@@ -612,7 +614,7 @@ void main() {
             timeBlocksProvider
                 .overrideWith((ref) => Stream.value(const [bShort, bLong])),
             dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
-            matchesProvider.overrideWith((ref) => Stream.value(const [])),
+            prioritySlotsProvider.overrideWithValue(const []),
             rentalsProvider.overrideWith((ref) => Stream.value(const [])),
             weekReservationsProvider.overrideWith(
               (ref, monday) => Stream.value(const []),
@@ -717,7 +719,7 @@ void main() {
             timeBlocksProvider
                 .overrideWith((ref) => Stream.value(const [bShort, bLong])),
             dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
-            matchesProvider.overrideWith((ref) => Stream.value(const [])),
+            prioritySlotsProvider.overrideWithValue(const []),
             rentalsProvider.overrideWith((ref) => Stream.value([rental])),
             weekReservationsProvider.overrideWith(
               (ref, monday) => Stream.value(const []),

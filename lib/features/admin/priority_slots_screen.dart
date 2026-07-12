@@ -4,24 +4,27 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/ui.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
+import 'slot_types_screen.dart';
 import 'widgets/admin_body.dart';
 
-/// Admin: manage matches (block reservations for spectators to see).
-class MatchesScreen extends ConsumerWidget {
-  const MatchesScreen({super.key});
+/// Admin: manage priority slots — matches and other typed blockages (block
+/// reservations; spectators see them even on closed days). The types
+/// themselves (šablóny) are managed in [SlotTypesScreen].
+class PrioritySlotsScreen extends ConsumerWidget {
+  const PrioritySlotsScreen({super.key});
 
-  Future<void> _delete(BuildContext context, Match match) async {
+  Future<void> _delete(BuildContext context, PrioritySlot slot) async {
     final confirmed = await confirmDialog(
       context,
-      title: 'Smazat zápas?',
-      message: 'Opravdu smazat zápas ${match.title}?',
+      title: 'Smazat blokaci?',
+      message: 'Opravdu smazat „${slot.title}" (${dayLabel(slot.date)})?',
     );
     if (!confirmed) return;
     if (!context.mounted) return;
 
     await tryAction(
       context,
-      () => Api.deleteMatch(match.id),
+      () => Api.deletePrioritySlot(slot.id),
       errorText: friendlyDbError,
     );
   }
@@ -31,31 +34,48 @@ class MatchesScreen extends ConsumerWidget {
     final profile = ref.watch(myProfileProvider).value;
     if (profile?.isAdmin != true) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Zápasy')),
+        appBar: AppBar(title: const Text('Zápasy a blokace')),
         body: const Center(child: Text('Jen pro správce.')),
       );
     }
 
-    final matches = ref.watch(matchesProvider).value ?? const <Match>[];
-    final sorted = [...matches]..sort((a, b) => b.date.compareTo(a.date));
+    final slots = ref.watch(prioritySlotsProvider);
+    final sorted = [...slots]..sort((a, b) => b.date.compareTo(a.date));
+    final types = ref.watch(slotTypesProvider).value ?? const [];
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Zápasy')),
+      appBar: AppBar(
+        title: const Text('Zápasy a blokace'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.tune),
+            tooltip: 'Typy blokací',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const SlotTypesScreen()),
+            ),
+          ),
+        ],
+      ),
       body: AdminBody(
         child: sorted.isEmpty
-            ? const Center(child: Text('Zatím žádné zápasy.'))
+            ? const Center(child: Text('Zatím žádné zápasy ani blokace.'))
             : ListView(
                 children: [
-                  for (final match in sorted)
+                  for (final slot in sorted)
                     ListTile(
                       title: Text(
-                        '${dayLabel(match.date)} · '
-                        '${match.startsAt.display()}–${match.endsAt.display()} · '
-                        '${match.title}',
+                        '${dayLabel(slot.date)} · '
+                        '${slot.startsAt.display()}–${slot.endsAt.display()} · '
+                        '${slot.title}',
                       ),
-                      subtitle: match.description.isEmpty
-                          ? null
-                          : Text(match.description),
+                      subtitle: switch ([
+                        if (slot.type.lanes != null)
+                          'dráhy ${slot.type.lanes!.join(', ')}',
+                        if (slot.description.isNotEmpty) slot.description,
+                      ].join(' · ')) {
+                        '' => null,
+                        final sub => Text(sub),
+                      },
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
@@ -63,12 +83,13 @@ class MatchesScreen extends ConsumerWidget {
                             icon: const Icon(Icons.edit_outlined),
                             onPressed: () => showDialog<void>(
                               context: context,
-                              builder: (_) => _MatchDialog(existing: match),
+                              builder: (_) => _SlotDialog(
+                                  existing: slot, types: types),
                             ),
                           ),
                           IconButton(
                             icon: const Icon(Icons.delete_outline),
-                            onPressed: () => _delete(context, match),
+                            onPressed: () => _delete(context, slot),
                           ),
                         ],
                       ),
@@ -79,10 +100,10 @@ class MatchesScreen extends ConsumerWidget {
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => showDialog<void>(
           context: context,
-          builder: (_) => const _MatchDialog(),
+          builder: (_) => _SlotDialog(types: types),
         ),
         icon: const Icon(Icons.add),
-        label: const Text('Přidat zápas'),
+        label: const Text('Přidat'),
       ),
     );
   }
@@ -92,26 +113,32 @@ class MatchesScreen extends ConsumerWidget {
 /// selects the "Jiná…" (custom) segment.
 const _prepPresets = [0, 30, 60];
 
-/// Add/edit dialog: date + two time pickers (end defaults to start + 3h),
-/// home team (optional), away team (required) and description (optional).
-class _MatchDialog extends StatefulWidget {
-  const _MatchDialog({this.existing});
+/// Add/edit dialog: type picker + date + two time pickers (end defaults to
+/// start + 3h); the match-specific fields (teams, prep window) only render
+/// for a match-kind type.
+class _SlotDialog extends StatefulWidget {
+  const _SlotDialog({this.existing, required this.types});
 
-  final Match? existing;
+  final PrioritySlot? existing;
+  final List<PrioritySlotType> types;
 
   @override
-  State<_MatchDialog> createState() => _MatchDialogState();
+  State<_SlotDialog> createState() => _SlotDialogState();
 }
 
-class _MatchDialogState extends State<_MatchDialog> {
+class _SlotDialogState extends State<_SlotDialog> {
   Day? _date;
   HourMinute? _start;
   HourMinute? _end;
+  String? _typeId;
   final _homeTeam = TextEditingController();
   final _awayTeam = TextEditingController();
   final _description = TextEditingController();
   int _prepMinutes = 0;
   bool _saving = false;
+
+  PrioritySlotType? get _type =>
+      widget.types.where((t) => t.id == _typeId).firstOrNull;
 
   @override
   void initState() {
@@ -120,6 +147,9 @@ class _MatchDialogState extends State<_MatchDialog> {
     _date = existing?.date;
     _start = existing?.startsAt;
     _end = existing?.endsAt;
+    _typeId = existing?.type.id ??
+        widget.types.where((t) => t.isMatch && t.builtin).firstOrNull?.id ??
+        widget.types.firstOrNull?.id;
     _homeTeam.text = existing?.homeTeam ?? '';
     _awayTeam.text = existing?.awayTeam ?? '';
     _description.text = existing?.description ?? '';
@@ -195,6 +225,11 @@ class _MatchDialogState extends State<_MatchDialog> {
     final date = _date;
     final start = _start;
     final end = _end;
+    final type = _type;
+    if (type == null) {
+      snack(context, 'Vyber typ.');
+      return;
+    }
     if (date == null || start == null || end == null) {
       snack(context, 'Vyber datum a čas.');
       return;
@@ -204,7 +239,7 @@ class _MatchDialogState extends State<_MatchDialog> {
       return;
     }
     final awayTeam = _awayTeam.text.trim();
-    if (awayTeam.isEmpty) {
+    if (type.isMatch && awayTeam.isEmpty) {
       snack(context, 'Vyplň hosty.');
       return;
     }
@@ -212,17 +247,18 @@ class _MatchDialogState extends State<_MatchDialog> {
     setState(() => _saving = true);
     final ok = await tryAction(
       context,
-      () => Api.saveMatch(
+      () => Api.savePrioritySlot(
         id: widget.existing?.id,
         date: date,
         startsAt: start,
         endsAt: end,
-        homeTeam: _homeTeam.text.trim(),
-        awayTeam: awayTeam,
-        prepMinutes: _prepMinutes,
+        typeId: type.id,
+        homeTeam: type.isMatch ? _homeTeam.text.trim() : '',
+        awayTeam: type.isMatch ? awayTeam : '',
+        prepMinutes: type.isMatch ? _prepMinutes : 0,
         description: _description.text.trim(),
       ),
-      success: 'Zápas uložen. Kolidující rezervace byly zrušeny.',
+      success: 'Uloženo. Kolidující rezervace byly zrušeny.',
       errorText: friendlyDbError,
     );
     if (!mounted) return;
@@ -235,12 +271,30 @@ class _MatchDialogState extends State<_MatchDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final type = _type;
+    final isMatch = type?.isMatch ?? false;
     return AlertDialog(
-      title: Text(widget.existing == null ? 'Přidat zápas' : 'Upravit zápas'),
+      title: Text(widget.existing == null ? 'Přidat' : 'Upravit'),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            DropdownButtonFormField<String>(
+              initialValue: _typeId,
+              decoration: const InputDecoration(labelText: 'Typ'),
+              items: [
+                for (final t in widget.types)
+                  DropdownMenuItem(
+                    value: t.id,
+                    child: Text(
+                      t.lanes == null
+                          ? t.name
+                          : '${t.name} (dráhy ${t.lanes!.join(', ')})',
+                    ),
+                  ),
+              ],
+              onChanged: (id) => setState(() => _typeId = id),
+            ),
             ListTile(
               contentPadding: EdgeInsets.zero,
               title: const Text('Datum'),
@@ -259,55 +313,59 @@ class _MatchDialogState extends State<_MatchDialog> {
               trailing: Text(_end?.display() ?? '--:--'),
               onTap: _pickEnd,
             ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _homeTeam,
-              decoration: const InputDecoration(labelText: 'Domácí'),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _awayTeam,
-              decoration: const InputDecoration(labelText: 'Hosté'),
-            ),
+            if (isMatch) ...[
+              const SizedBox(height: 8),
+              TextField(
+                controller: _homeTeam,
+                decoration: const InputDecoration(labelText: 'Domácí'),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _awayTeam,
+                decoration: const InputDecoration(labelText: 'Hosté'),
+              ),
+            ],
             const SizedBox(height: 8),
             TextField(
               controller: _description,
               decoration: const InputDecoration(labelText: 'Popis'),
             ),
-            const SizedBox(height: 12),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                'Příprava drah',
-                style: Theme.of(context).textTheme.labelLarge,
-              ),
-            ),
-            const SizedBox(height: 4),
-            SegmentedButton<int>(
-              segments: [
-                for (final preset in _prepPresets)
-                  ButtonSegment(value: preset, label: Text('$preset min')),
-                ButtonSegment(
-                  value: -1,
-                  label: Text(
-                    _prepPresets.contains(_prepMinutes)
-                        ? 'Jiná…'
-                        : '$_prepMinutes min',
-                  ),
+            if (isMatch) ...[
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Příprava drah',
+                  style: Theme.of(context).textTheme.labelLarge,
                 ),
-              ],
-              selected: {
-                _prepPresets.contains(_prepMinutes) ? _prepMinutes : -1,
-              },
-              onSelectionChanged: (selected) {
-                final value = selected.first;
-                if (value == -1) {
-                  _pickCustomPrep();
-                } else {
-                  setState(() => _prepMinutes = value);
-                }
-              },
-            ),
+              ),
+              const SizedBox(height: 4),
+              SegmentedButton<int>(
+                segments: [
+                  for (final preset in _prepPresets)
+                    ButtonSegment(value: preset, label: Text('$preset min')),
+                  ButtonSegment(
+                    value: -1,
+                    label: Text(
+                      _prepPresets.contains(_prepMinutes)
+                          ? 'Jiná…'
+                          : '$_prepMinutes min',
+                    ),
+                  ),
+                ],
+                selected: {
+                  _prepPresets.contains(_prepMinutes) ? _prepMinutes : -1,
+                },
+                onSelectionChanged: (selected) {
+                  final value = selected.first;
+                  if (value == -1) {
+                    _pickCustomPrep();
+                  } else {
+                    setState(() => _prepMinutes = value);
+                  }
+                },
+              ),
+            ],
           ],
         ),
       ),

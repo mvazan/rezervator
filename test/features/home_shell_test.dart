@@ -34,7 +34,7 @@ void main() {
       settingsProvider.overrideWith((ref) => Stream.value(settings)),
       timeBlocksProvider.overrideWith((ref) => Stream.value(const [])),
       dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
-      matchesProvider.overrideWith((ref) => Stream.value(const [])),
+      prioritySlotsProvider.overrideWithValue(const []),
       rentalsProvider.overrideWith((ref) => Stream.value(const [])),
       weekReservationsProvider.overrideWith(
         (ref, monday) => StreamController<List<Reservation>>().stream,

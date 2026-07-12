@@ -55,13 +55,14 @@ void main() {
         cancelledAt: cancelledAt,
       );
 
-  Match match({
+  PrioritySlot match({
     Day? date,
     HourMinute startsAt = const HourMinute(16, 30),
     HourMinute endsAt = const HourMinute(17, 30),
     int prepMinutes = 0,
   }) =>
-      Match(
+      PrioritySlot(
+        type: PrioritySlot.fallbackMatchType,
         id: 'm1',
         date: date ?? tuesday,
         startsAt: startsAt,
@@ -97,7 +98,7 @@ void main() {
   WeekSchedule build({
     List<TimeBlock> blocks = const [b1, b2, b3],
     List<DayOverride> overrides = const [],
-    List<Match> matches = const [],
+    List<PrioritySlot> matches = const [],
     List<Rental> rentals = const [],
     List<Reservation> reservations = const [],
     ScheduleSettings s = settings,
@@ -111,7 +112,7 @@ void main() {
         settings: s,
         blocks: blocks,
         overrides: overrides,
-        matches: matches,
+        priority: matches,
         rentals: rentals,
         reservations: reservations,
       );
@@ -185,9 +186,9 @@ void main() {
     test('match blocks all lanes of overlapping blocks only', () {
       final day =
           build(matches: [match()]).days[1] as OpenDay; // 16:30–17:30
-      expect(day.slot('b1', 1), isA<MatchSlot>());
-      expect(day.slot('b1', 2), isA<MatchSlot>());
-      expect(day.slot('b2', 1), isA<MatchSlot>());
+      expect(day.slot('b1', 1), isA<PrioritySlotState>());
+      expect(day.slot('b1', 2), isA<PrioritySlotState>());
+      expect(day.slot('b2', 1), isA<PrioritySlotState>());
       // no third block that day — both overlap
     });
 
@@ -197,13 +198,13 @@ void main() {
         match(startsAt: const HourMinute(20, 0), endsAt: const HourMinute(22, 0)),
       ]).days[1] as OpenDay;
       expect(day.slot('b1', 1), isA<FreeSlot>());
-      expect(day.matches, hasLength(1));
+      expect(day.priority, hasLength(1));
     });
 
     test('matches appear on closed days for spectators', () {
       final day = build(matches: [match(date: wednesday)]).days[2];
       expect(day, isA<ClosedDay>());
-      expect(day.matches, hasLength(1));
+      expect(day.priority, hasLength(1));
     });
 
     test('prep window blocks a block ending exactly at blockingStart is free',
@@ -216,8 +217,8 @@ void main() {
             prepMinutes: 60),
       ]).days[1] as OpenDay;
       final b1Slot = day.slot('b1', 1);
-      expect(b1Slot, isA<MatchSlot>());
-      expect((b1Slot as MatchSlot).isPrep, isTrue);
+      expect(b1Slot, isA<PrioritySlotState>());
+      expect((b1Slot as PrioritySlotState).isPrep, isTrue);
 
       // A block ending exactly at blockingStart (16:00) does not overlap.
       final day2 = build(
@@ -248,8 +249,8 @@ void main() {
         match(startsAt: const HourMinute(17, 0), endsAt: const HourMinute(18, 0),
             prepMinutes: 60),
       ]).days[1] as OpenDay;
-      final prepSlot = day.slot('b1', 1) as MatchSlot;
-      final realSlot = day.slot('b2', 1) as MatchSlot;
+      final prepSlot = day.slot('b1', 1) as PrioritySlotState;
+      final realSlot = day.slot('b2', 1) as PrioritySlotState;
       expect(prepSlot.isPrep, isTrue);
       expect(realSlot.isPrep, isFalse);
     });
@@ -262,7 +263,7 @@ void main() {
         match(startsAt: const HourMinute(16, 30), endsAt: const HourMinute(17, 30),
             prepMinutes: 45),
       ]).days[1] as OpenDay;
-      final slot = day.slot('b1', 1) as MatchSlot;
+      final slot = day.slot('b1', 1) as PrioritySlotState;
       expect(slot.isPrep, isFalse);
     });
 
@@ -282,12 +283,12 @@ void main() {
       ).days[1] as OpenDay;
       // Without clamping, blockingStart would be -00:15 (wrap); clamped to
       // 00:00 it still blocks the 00:00-00:15 block, and as prep-only.
-      final slot = day.slot('bm', 1) as MatchSlot;
+      final slot = day.slot('bm', 1) as PrioritySlotState;
       expect(slot.isPrep, isTrue);
     });
   });
 
-  group('matchStateForBlock', () {
+  group('wholeAlleyPriorityFor', () {
     test('prep-only overlap returns the match with isPrep true', () {
       // Match starts 17:00, prep 60 -> blockingStart 16:00. b1 (16:00-17:00)
       // overlaps only the prep window, not the real [17:00, 18:00) window.
@@ -295,7 +296,7 @@ void main() {
           startsAt: const HourMinute(17, 0),
           endsAt: const HourMinute(18, 0),
           prepMinutes: 60);
-      final (found, isPrep) = matchStateForBlock(b1, [m]);
+      final (found, isPrep) = wholeAlleyPriorityFor(b1, [m]);
       expect(found, same(m));
       expect(isPrep, isTrue);
     });
@@ -303,7 +304,7 @@ void main() {
     test('real-window overlap returns the match with isPrep false', () {
       final m = match(
           startsAt: const HourMinute(16, 30), endsAt: const HourMinute(17, 30));
-      final (found, isPrep) = matchStateForBlock(b1, [m]);
+      final (found, isPrep) = wholeAlleyPriorityFor(b1, [m]);
       expect(found, same(m));
       expect(isPrep, isFalse);
     });
@@ -311,7 +312,7 @@ void main() {
     test('no overlap returns null', () {
       final m = match(
           startsAt: const HourMinute(20, 0), endsAt: const HourMinute(22, 0));
-      final (found, isPrep) = matchStateForBlock(b1, [m]);
+      final (found, isPrep) = wholeAlleyPriorityFor(b1, [m]);
       expect(found, isNull);
       expect(isPrep, isFalse);
     });
@@ -369,7 +370,7 @@ void main() {
         rentals: [rental(date: tuesday, lanes: [1, 2])],
         reservations: [res(date: tuesday, blockId: 'b1', lane: 1)],
       ).days[1] as OpenDay;
-      expect(day.slot('b1', 1), isA<MatchSlot>());
+      expect(day.slot('b1', 1), isA<PrioritySlotState>());
       final noMatch = build(
         rentals: [rental(date: tuesday, lanes: [1, 2])],
         reservations: [res(date: tuesday, blockId: 'b1', lane: 1)],
@@ -480,6 +481,66 @@ void main() {
     });
   });
 
+  group('lane-scoped priority types', () {
+    const laneOneType = PrioritySlotType(
+      id: 't-lane1',
+      name: 'Údržba',
+      colorIndex: 3,
+      lanes: [1],
+    );
+    PrioritySlot laneSlot({int prepMinutes = 0}) => PrioritySlot(
+          id: 's1',
+          date: tuesday,
+          startsAt: const HourMinute(16, 30),
+          endsAt: const HourMinute(17, 30),
+          type: laneOneType,
+          prepMinutes: prepMinutes,
+        );
+
+    test('blocks only its lanes; the others stay free/bookable', () {
+      final day = build(matches: [laneSlot()]).days[1] as OpenDay;
+      expect(day.slot('b1', 1), isA<PrioritySlotState>());
+      expect(day.slot('b1', 2), isA<FreeSlot>());
+      expect(day.slot('b2', 1), isA<PrioritySlotState>());
+      expect(day.slot('b2', 2), isA<FreeSlot>());
+    });
+
+    test('never claims the whole block for the kiosk banner', () {
+      final (slot, _) =
+          wholeAlleyPriorityFor(b1, [laneSlot()]);
+      expect(slot, isNull);
+      final (laneHit, isPrep) = priorityStateFor(b1, 1, [laneSlot()]);
+      expect(laneHit, isNotNull);
+      expect(isPrep, isFalse);
+    });
+
+    test('beats a rental on the same lane; rental rules other lanes', () {
+      final day = build(
+        matches: [laneSlot()],
+        rentals: [rental(date: tuesday, lanes: const [1, 2])],
+      ).days[1] as OpenDay;
+      expect(day.slot('b1', 1), isA<PrioritySlotState>());
+      expect(day.slot('b1', 2), isA<RentedSlot>());
+    });
+
+    test('prep window applies per lane too', () {
+      final day = build(matches: [
+        PrioritySlot(
+          id: 's2',
+          date: tuesday,
+          startsAt: const HourMinute(17, 0),
+          endsAt: const HourMinute(18, 0),
+          type: laneOneType,
+          prepMinutes: 60,
+        ),
+      ]).days[1] as OpenDay;
+      final b1Lane1 = day.slot('b1', 1);
+      expect(b1Lane1, isA<PrioritySlotState>());
+      expect((b1Lane1 as PrioritySlotState).isPrep, isTrue);
+      expect(day.slot('b1', 2), isA<FreeSlot>());
+    });
+  });
+
   group('day rentals + off-block events', () {
     test('days expose their rentals — open and closed alike', () {
       final weekly = rental(weekday: 3); // Wednesday is a non-training day
@@ -510,13 +571,13 @@ void main() {
           endsAt: const HourMinute(19, 0)); // overlaps b2 → not off-block
 
       final events = offBlockEvents(
-        matches: [insideMatch, morningMatch],
+        priority: [insideMatch, morningMatch],
         rentals: [lateRental, spillRental],
         blocks: const [b1, b2, b3],
       );
 
       expect(events, hasLength(2));
-      expect(events[0], isA<OffBlockMatch>());
+      expect(events[0], isA<OffBlockPriority>());
       expect(events[0].start, const HourMinute(10, 0));
       expect(events[1], isA<OffBlockRental>());
       expect(events[1].start, const HourMinute(20, 0));
@@ -530,8 +591,8 @@ void main() {
           endsAt: const HourMinute(19, 0),
           prepMinutes: 60);
       final events = offBlockEvents(
-          matches: [prepMatch], rentals: const [], blocks: const [b1, b2]);
-      expect(events.single, isA<OffBlockMatch>());
+          priority: [prepMatch], rentals: const [], blocks: const [b1, b2]);
+      expect(events.single, isA<OffBlockPriority>());
     });
   });
 }

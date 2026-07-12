@@ -66,7 +66,7 @@ void main() {
       container.listen(timeBlocksProvider, (_, _) {}),
       container.listen(settingsProvider, (_, _) {}),
       container.listen(dayOverridesProvider, (_, _) {}),
-      container.listen(matchesProvider, (_, _) {}),
+      container.listen(prioritySlotsProvider, (_, _) {}),
       container.listen(rentalsProvider, (_, _) {}),
       container.listen(myProfileProvider, (_, _) {}),
       container.listen(myActiveReservationsProvider, (_, _) {}),
@@ -79,7 +79,8 @@ void main() {
     expect(await container.read(timeBlocksProvider.future), isEmpty);
     expect(await container.read(settingsProvider.future), isNull);
     expect(await container.read(dayOverridesProvider.future), isEmpty);
-    expect(await container.read(matchesProvider.future), isEmpty);
+    expect(await container.read(slotTypesProvider.future), isEmpty);
+    expect(container.read(prioritySlotsProvider), isEmpty);
     expect(await container.read(rentalsProvider.future), isEmpty);
     expect(await container.read(myProfileProvider.future), isNull);
     expect(

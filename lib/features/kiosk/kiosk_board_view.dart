@@ -43,7 +43,7 @@ bool isDayOpen({
     settings: settings,
     blocks: blocks,
     overrides: overrides,
-    matches: const [],
+    priority: const [],
     rentals: const [],
     reservations: const [],
   );
@@ -263,7 +263,7 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
         ref.watch(settingsProvider).value ?? ScheduleSettings.defaults;
     final timeBlocks = ref.watch(timeBlocksProvider);
     final overrides = ref.watch(dayOverridesProvider).value ?? const [];
-    final matches = ref.watch(matchesProvider).value ?? const [];
+    final priority = ref.watch(prioritySlotsProvider);
     final rentals = ref.watch(rentalsProvider).value ?? const [];
     final players = ref.watch(playersProvider).value ?? const [];
 
@@ -329,7 +329,7 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
         settings: settings,
         blocks: blocks,
         overrides: overrides,
-        matches: matches,
+        priority: priority,
         rentals: rentals,
         reservations: weekReservationsByMonday[monday]!.value ?? const [],
       );
@@ -367,7 +367,7 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
     // (spectators); rentals only exist on open days.
     final eventWindows = <(HourMinute, HourMinute)>[
       for (final day in days) ...[
-        for (final m in day.matches) (m.startsAt, m.endsAt),
+        for (final m in day.priority) (m.startsAt, m.endsAt),
         if (day is OpenDay)
           for (final r in day.rentals) (r.startsAt, r.endsAt),
       ],
@@ -514,12 +514,12 @@ class BoardColumnHeader extends StatelessWidget {
     super.key,
     required this.date,
     required this.isToday,
-    required this.matches,
+    required this.priority,
   });
 
   final Day date;
   final bool isToday;
-  final List<Match> matches;
+  final List<PrioritySlot> priority;
 
   static const _gradientColors = [Color(0xFF6366F1), Color(0xFF22D3EE)];
 
@@ -549,9 +549,9 @@ class BoardColumnHeader extends StatelessWidget {
               color: isToday ? Colors.white : scheme.onSurface,
             ),
           ),
-          if (matches.isNotEmpty)
+          if (priority.isNotEmpty)
             Text(
-              matches.map((m) => '🏆 ${m.title}').join(' · '),
+              priority.map((m) => '${m.type.isMatch ? '🏆' : '⛔'} ${m.title}').join(' · '),
               textAlign: TextAlign.center,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
@@ -616,7 +616,7 @@ class _DayColumn extends StatelessWidget {
           BoardColumnHeader(
             date: day.date,
             isToday: isToday,
-            matches: day.matches,
+            priority: day.priority,
           ),
           for (var i = 0; i < segments.length; i++)
             Container(
@@ -664,16 +664,17 @@ class _DayColumn extends StatelessWidget {
       ));
     }
 
-    for (final m in day.matches) {
+    for (final m in day.priority) {
       if (!timesOverlap(m.startsAt, m.endsAt, gap.start, gap.end)) continue;
+      final club = ClubColors.of(m.type.colorIndex, scheme.brightness);
       addBand(
         m.startsAt,
         m.endsAt,
         _eventBand(
           scheme,
-          background: scheme.errorContainer.withValues(alpha: 0.6),
-          foreground: scheme.onErrorContainer,
-          text: '🏆 ${m.title}\n'
+          background: club?.$1 ?? scheme.errorContainer.withValues(alpha: 0.6),
+          foreground: club?.$2 ?? scheme.onErrorContainer,
+          text: '${m.type.isMatch ? '🏆' : '⛔'} ${m.title}\n'
               '${m.startsAt.display()}–${m.endsAt.display()}',
           bold: true,
         ),
@@ -734,13 +735,14 @@ class _DayColumn extends StatelessWidget {
     );
   }
 
-  /// A closed day still shows any match spanning [block] (spectators), on
-  /// top of the dimmed "✕ zavřeno" column filler.
+  /// A closed day still shows any whole-alley priority slot spanning [block]
+  /// (spectators), on top of the dimmed "✕ zavřeno" column filler.
   Widget _closedCell(BuildContext context, ColorScheme scheme, TimeBlock block) {
     final closedDay = day as ClosedDay;
-    final (blockMatch, isPrep) = matchStateForBlock(block, closedDay.matches);
-    if (blockMatch != null) {
-      return _matchCell(context, blockMatch, isPrep: isPrep);
+    final (blockSlot, isPrep) =
+        wholeAlleyPriorityFor(block, closedDay.priority);
+    if (blockSlot != null) {
+      return _priorityCell(context, blockSlot, isPrep: isPrep);
     }
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 3, vertical: 1.5),
@@ -778,9 +780,13 @@ class _DayColumn extends StatelessWidget {
     final hasBlock = openDay.blocks.any((b) => b.id == railBlock.id);
     if (!hasBlock) return _dimFiller(scheme);
 
-    final firstState = openDay.slot(railBlock.id, 1);
-    if (firstState is MatchSlot) {
-      return _matchCell(context, firstState.match, isPrep: firstState.isPrep);
+    // A WHOLE-ALLEY priority slot claims the entire block cell (banner over
+    // all lanes); lane-scoped slots fall through to per-lane rows so the
+    // remaining lanes stay bookable.
+    final (wholeAlley, wholeIsPrep) =
+        wholeAlleyPriorityFor(railBlock, openDay.priority);
+    if (wholeAlley != null) {
+      return _priorityCell(context, wholeAlley, isPrep: wholeIsPrep);
     }
 
     return Column(
@@ -791,9 +797,11 @@ class _DayColumn extends StatelessWidget {
     );
   }
 
-  /// Match/prep cell spans the whole block (all lanes) per spec §1:
-  /// `🏆 {title}\n{start}–{end}` in rose, or the muted prep banner.
-  Widget _matchCell(BuildContext context, Match match, {required bool isPrep}) {
+  /// Whole-alley priority cell spans the whole block (all lanes):
+  /// `{emoji} {title}\n{start}–{end}` tinted by the type's color (default
+  /// rose), or the muted prep banner.
+  Widget _priorityCell(BuildContext context, PrioritySlot slot,
+      {required bool isPrep}) {
     final scheme = Theme.of(context).colorScheme;
     if (isPrep) {
       return Container(
@@ -818,24 +826,26 @@ class _DayColumn extends StatelessWidget {
         ),
       );
     }
+    final club = ClubColors.of(slot.type.colorIndex, scheme.brightness);
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 3, vertical: 1.5),
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        color: scheme.errorContainer.withValues(alpha: 0.6),
+        color: club?.$1 ?? scheme.errorContainer.withValues(alpha: 0.6),
         borderRadius: BorderRadius.circular(6),
       ),
       alignment: Alignment.center,
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Text(
-        '🏆 ${match.title}\n${match.startsAt.display()}–${match.endsAt.display()}',
+        '${slot.type.isMatch ? '🏆 ' : ''}${slot.title}\n'
+        '${slot.startsAt.display()}–${slot.endsAt.display()}',
         textAlign: TextAlign.center,
         maxLines: 3,
         overflow: TextOverflow.ellipsis,
         style: TextStyle(
           fontSize: 11,
           fontWeight: FontWeight.w700,
-          color: scheme.onErrorContainer,
+          color: club?.$2 ?? scheme.onErrorContainer,
         ),
       ),
     );
@@ -925,12 +935,29 @@ class _DayColumn extends StatelessWidget {
                 )
               : null,
         );
-      case MatchSlot():
-        // Every lane of a matched block resolves to the same MatchSlot —
-        // _openCell already renders the whole-block match/prep banner before
-        // ever reaching per-lane rows, so this case is unreachable in
-        // practice; kept only so the switch stays exhaustive.
-        return const SizedBox.shrink();
+      case PrioritySlotState(:final slot, :final isPrep):
+        // Whole-alley slots never reach here (_openCell renders the banner
+        // first); this is a LANE-SCOPED priority slot blocking just this row.
+        final club = ClubColors.of(slot.type.colorIndex, scheme.brightness);
+        return _rowShell(
+          context,
+          background: isPrep
+              ? scheme.errorContainer.withValues(alpha: 0.25)
+              : club?.$1 ?? scheme.errorContainer.withValues(alpha: 0.6),
+          lane: lane,
+          child: Text(
+            isPrep ? '🛠 Příprava drah' : '⛔ ${slot.title}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: isPrep
+                  ? scheme.onSurfaceVariant
+                  : club?.$2 ?? scheme.onErrorContainer,
+            ),
+          ),
+        );
     }
   }
 

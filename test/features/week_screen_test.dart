@@ -78,7 +78,7 @@ void main() {
 
   Widget app({
     List<DayOverride> overrides = const [],
-    List<Match> matches = const [],
+    List<PrioritySlot> matches = const [],
     List<Reservation> reservations = const [],
     List<TimeBlock> blocks = const [b1],
     List<Rental> rentals = const [],
@@ -89,7 +89,7 @@ void main() {
         settingsProvider.overrideWith((ref) => Stream.value(settings)),
         timeBlocksProvider.overrideWith((ref) => Stream.value(blocks)),
         dayOverridesProvider.overrideWith((ref) => Stream.value(overrides)),
-        matchesProvider.overrideWith((ref) => Stream.value(matches)),
+        prioritySlotsProvider.overrideWithValue(matches),
         rentalsProvider.overrideWith((ref) => Stream.value(rentals)),
         weekReservationsProvider.overrideWith(
           (ref, monday) => Stream.value(reservations),
@@ -218,7 +218,8 @@ void main() {
     await tester.pumpWidget(
       app(
         matches: [
-          Match(
+          PrioritySlot(
+            type: PrioritySlot.fallbackMatchType,
             id: 'm1',
             date: tomorrow,
             startsAt: const HourMinute(22, 0),
@@ -494,7 +495,7 @@ void main() {
           settingsProvider.overrideWith((ref) => Stream.value(settings)),
           timeBlocksProvider.overrideWith((ref) => Stream.value(const [b1])),
           dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
-          matchesProvider.overrideWith((ref) => Stream.value(const [])),
+          prioritySlotsProvider.overrideWithValue(const []),
           rentalsProvider.overrideWith((ref) => Stream.value(const [])),
           weekReservationsProvider.overrideWith(
             (ref, monday) => StreamController<List<Reservation>>().stream,

@@ -32,27 +32,28 @@ class RentedSlot extends SlotState {
   final Rental rental;
 }
 
-class MatchSlot extends SlotState {
-  const MatchSlot(this.match,
+class PrioritySlotState extends SlotState {
+  const PrioritySlotState(this.slot,
       {required super.inPast, required super.beyondHorizon, this.isPrep = false});
 
-  final Match match;
+  final PrioritySlot slot;
 
-  /// True when this cell is covered only by the match's prep-time extension
-  /// ([Match.blockingStart]..[Match.startsAt]) and does NOT overlap the real
-  /// `[startsAt, endsAt)` match window — UI shows "🛠 Příprava drah" instead
-  /// of the match banner.
+  /// True when this cell is covered only by the slot's prep-time extension
+  /// ([PrioritySlot.blockingStart]..[PrioritySlot.startsAt]) and does NOT
+  /// overlap the real `[startsAt, endsAt)` window — UI shows
+  /// "🛠 Příprava drah" instead of the banner.
   final bool isPrep;
 }
 
 sealed class DaySchedule {
   const DaySchedule(
-      {required this.date, required this.matches, this.rentals = const []});
+      {required this.date, required this.priority, this.rentals = const []});
 
   final Day date;
 
-  /// Matches are shown even on closed days — spectators want to see who plays.
-  final List<Match> matches;
+  /// Priority slots (matches & co.) are shown even on closed days —
+  /// spectators want to see who plays.
+  final List<PrioritySlot> priority;
 
   /// The day's rentals (weekly occurrences resolved), so renderers can place
   /// ones lying outside every block at their true time.
@@ -62,7 +63,7 @@ sealed class DaySchedule {
 class ClosedDay extends DaySchedule {
   const ClosedDay(
       {required super.date,
-      required super.matches,
+      required super.priority,
       super.rentals,
       this.reason = ''});
 
@@ -72,7 +73,7 @@ class ClosedDay extends DaySchedule {
 class OpenDay extends DaySchedule {
   OpenDay({
     required super.date,
-    required super.matches,
+    required super.priority,
     super.rentals,
     required this.blocks,
     required this.laneCount,
@@ -112,10 +113,10 @@ sealed class OffBlockEvent {
   final HourMinute end;
 }
 
-class OffBlockMatch extends OffBlockEvent {
-  OffBlockMatch(this.match) : super(match.startsAt, match.endsAt);
+class OffBlockPriority extends OffBlockEvent {
+  OffBlockPriority(this.slot) : super(slot.startsAt, slot.endsAt);
 
-  final Match match;
+  final PrioritySlot slot;
 }
 
 class OffBlockRental extends OffBlockEvent {
@@ -129,7 +130,7 @@ class OffBlockRental extends OffBlockEvent {
 /// their real window (not prep-extended — prep only matters where it blocks
 /// reservations, and off-block time has none).
 List<OffBlockEvent> offBlockEvents({
-  required List<Match> matches,
+  required List<PrioritySlot> priority,
   required List<Rental> rentals,
   required List<TimeBlock> blocks,
 }) {
@@ -138,8 +139,8 @@ List<OffBlockEvent> offBlockEvents({
   // Callers pass a day's own block set (already active-filtered) or the
   // global list; treat inactive blocks as absent either way.
   return <OffBlockEvent>[
-    for (final m in matches)
-      if (outside(m.startsAt, m.endsAt)) OffBlockMatch(m),
+    for (final m in priority)
+      if (outside(m.startsAt, m.endsAt)) OffBlockPriority(m),
     for (final r in rentals)
       if (outside(r.startsAt, r.endsAt)) OffBlockRental(r),
   ]..sort((a, b) => a.start.compareTo(b.start));
@@ -160,26 +161,39 @@ int _byStartThenPosition(TimeBlock a, TimeBlock b) {
   return byStart != 0 ? byStart : a.position.compareTo(b.position);
 }
 
-/// The block-vs-match resolution shared by every caller that needs to know
-/// whether [block] is covered by a match — [buildWeekSchedule] (open days)
-/// and the kiosk board's closed-day column (which has no [OpenDay]/[MatchSlot]
-/// to read from, since `buildWeekSchedule` only resolves per-lane slot state
-/// for open days). Single source of truth so open and closed columns can
-/// never disagree on a boundary case.
-///
-/// Returns the first (date-sorted) [Match] whose prep-extended window
-/// `[blockingStart, endsAt)` overlaps [block], plus whether that overlap is
-/// prep-only (does NOT also overlap the match's real `[startsAt, endsAt)`
-/// window) — or `(null, false)` when no match covers [block] at all.
-(Match?, bool) matchStateForBlock(TimeBlock block, List<Match> matches) {
-  final blockMatch = _firstWhereOrNull(
-      matches,
-      (Match m) =>
+/// The first (start-sorted) WHOLE-ALLEY priority slot whose prep-extended
+/// window `[blockingStart, endsAt)` overlaps [block], plus whether that
+/// overlap is prep-only — or `(null, false)`. Shared by [buildWeekSchedule]
+/// and the kiosk's closed-day column (single source of truth so open and
+/// closed columns can never disagree on a boundary case). Lane-scoped slots
+/// never claim a whole block; they resolve per lane via [priorityStateFor].
+(PrioritySlot?, bool) wholeAlleyPriorityFor(
+    TimeBlock block, List<PrioritySlot> slots) {
+  final hit = _firstWhereOrNull(
+      slots,
+      (PrioritySlot m) =>
+          m.type.lanes == null &&
           timesOverlap(block.startsAt, block.endsAt, m.blockingStart, m.endsAt));
-  if (blockMatch == null) return (null, false);
+  if (hit == null) return (null, false);
   final isPrep = !timesOverlap(
-      block.startsAt, block.endsAt, blockMatch.startsAt, blockMatch.endsAt);
-  return (blockMatch, isPrep);
+      block.startsAt, block.endsAt, hit.startsAt, hit.endsAt);
+  return (hit, isPrep);
+}
+
+/// Per-lane resolution: the first priority slot (whole-alley or covering
+/// [lane]) whose prep-extended window overlaps [block], plus the prep-only
+/// flag — or `(null, false)`.
+(PrioritySlot?, bool) priorityStateFor(
+    TimeBlock block, int lane, List<PrioritySlot> slots) {
+  final hit = _firstWhereOrNull(
+      slots,
+      (PrioritySlot m) =>
+          m.coversLane(lane) &&
+          timesOverlap(block.startsAt, block.endsAt, m.blockingStart, m.endsAt));
+  if (hit == null) return (null, false);
+  final isPrep = !timesOverlap(
+      block.startsAt, block.endsAt, hit.startsAt, hit.endsAt);
+  return (hit, isPrep);
 }
 
 WeekSchedule buildWeekSchedule({
@@ -189,7 +203,7 @@ WeekSchedule buildWeekSchedule({
   required ScheduleSettings settings,
   required List<TimeBlock> blocks,
   required List<DayOverride> overrides,
-  required List<Match> matches,
+  required List<PrioritySlot> priority,
   required List<Rental> rentals,
   required List<Reservation> reservations,
 }) {
@@ -201,7 +215,7 @@ WeekSchedule buildWeekSchedule({
   final days = <DaySchedule>[];
   for (var i = 0; i < 7; i++) {
     final date = monday.addDays(i);
-    final dayMatches = matches.where((m) => m.date == date).toList()
+    final dayPriority = priority.where((m) => m.date == date).toList()
       ..sort((a, b) => a.startsAt.compareTo(b.startsAt));
     final dayRentals = rentals.where((r) => r.occursOn(date)).toList();
 
@@ -209,7 +223,7 @@ WeekSchedule buildWeekSchedule({
     if (override != null && override.closed) {
       days.add(ClosedDay(
           date: date,
-          matches: dayMatches,
+          priority: dayPriority,
           rentals: dayRentals,
           reason: override.reason));
       continue;
@@ -228,7 +242,7 @@ WeekSchedule buildWeekSchedule({
         ]..sort(_byStartThenPosition);
       }
     } else if (!settings.trainingWeekdays.contains(date.weekday)) {
-      days.add(ClosedDay(date: date, matches: dayMatches, rentals: dayRentals));
+      days.add(ClosedDay(date: date, priority: dayPriority, rentals: dayRentals));
       continue;
     } else {
       dayBlocks = activeBlocks;
@@ -236,7 +250,7 @@ WeekSchedule buildWeekSchedule({
 
     if (dayBlocks.isEmpty) {
       days.add(ClosedDay(
-          date: date, matches: dayMatches, rentals: dayRentals, reason: reason));
+          date: date, priority: dayPriority, rentals: dayRentals, reason: reason));
       continue;
     }
 
@@ -250,11 +264,11 @@ WeekSchedule buildWeekSchedule({
       final inPast = date.isBefore(today) ||
           (date == today &&
               block.startsAt.minutesFromMidnight <= now.minutesFromMidnight);
-      final (blockMatch, isPrep) = matchStateForBlock(block, dayMatches);
       for (var lane = 1; lane <= settings.laneCount; lane++) {
+        final (laneSlot, isPrep) = priorityStateFor(block, lane, dayPriority);
         final SlotState state;
-        if (blockMatch != null) {
-          state = MatchSlot(blockMatch,
+        if (laneSlot != null) {
+          state = PrioritySlotState(laneSlot,
               inPast: inPast, beyondHorizon: beyondHorizon, isPrep: isPrep);
         } else {
           final laneRental = _firstWhereOrNull(
@@ -280,7 +294,7 @@ WeekSchedule buildWeekSchedule({
 
     days.add(OpenDay(
       date: date,
-      matches: dayMatches,
+      priority: dayPriority,
       rentals: dayRentals,
       blocks: dayBlocks,
       laneCount: settings.laneCount,
