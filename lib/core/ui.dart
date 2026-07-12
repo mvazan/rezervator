@@ -94,8 +94,15 @@ String friendlyDbError(Object error) {
   for (final entry in messages.entries) {
     if (raw.contains(entry.key)) return entry.value;
   }
-  // Email OTP verification failures (wrong/expired code from the e-mail).
+  // Offline / unreachable backend.
   final lower = raw.toLowerCase();
+  if (lower.contains('socketexception') ||
+      lower.contains('failed host lookup') ||
+      lower.contains('clientexception') ||
+      lower.contains('connection refused')) {
+    return 'Jsi offline — zkus to znovu po připojení.';
+  }
+  // Email OTP verification failures (wrong/expired code from the e-mail).
   if (lower.contains('otp') ||
       lower.contains('token has expired') ||
       lower.contains('invalid') && lower.contains('token')) {
