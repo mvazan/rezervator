@@ -37,7 +37,8 @@ class KioskSettingsScreen extends ConsumerWidget {
                   ? null
                   : (value) => tryAction(
                       context,
-                      () => Api.setKioskDark(value),
+                      () =>
+                          Api.setKioskDark(value, tenantId: settings.tenantId),
                       errorText: friendlyDbError,
                     ),
             ),

@@ -334,3 +334,24 @@ Fáze 0–5 jsou nasazené: rezervace tréninků (appka i web), auth s
 magic linky, e-mailové i (volitelně) push notifikace, kiosek na
 tabletu, měsíční docházka s CSV exportem a keep-alive, co drží
 Supabase projekt vzhůru. Appka je připravená k běžnému provozu.
+
+## Nová kuželna (multitenancia, od migrace 0005)
+
+Kuželny zakládá jen správce projektu (SQL v Supabase SQL editoru):
+
+```sql
+insert into tenants (name, founder_email)
+values ('Kuželna Vracov', 'provozovatel@example.com');
+```
+
+- `founder_email` doporučeně vyplň: první registrovaný uživatel s tímto
+  e-mailem se stane adminem kuželny (bez něj platí „první registrovaný
+  vyhrává"). Řádek `schedule_settings` a vestavěný typ „Zápas" se založí
+  automaticky (trigger `tenant_seed_defaults`).
+- Provozovatel se pak normálně zaregistruje v appce (vybere svou kuželnu
+  v dropdownu) a je rovnou schválený admin.
+- Kiosk pro novou kuželnu: založ auth účet s heslem, přihlas tablet přes
+  `/kiosk-login`, účet se zaregistruje do své kuželny a admin mu dá roli
+  kiosk (Hráči → Nastavit jako kiosk).
+- Data kuželen jsou úplně oddělená (RLS filtruje přes `current_tenant_id()`);
+  jeden uživatel patří právě do jedné kuželny.

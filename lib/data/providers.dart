@@ -55,9 +55,20 @@ final profilesProvider = StreamProvider<List<Profile>>((ref) {
 });
 
 /// Alley configuration singleton (null until the backend is seeded).
+/// Alleys offered at registration (id + name; RLS exposes nothing more).
+/// Session-gated, not profile-gated — the register screen runs pre-profile.
+final tenantsProvider = FutureProvider<List<Tenant>>((ref) async {
+  if (ref.watch(_authUidProvider) == null) return const [];
+  final rows = await _db.from('tenants').select('id, name');
+  return [for (final row in rows) Tenant.fromJson(row)]
+    ..sort((a, b) => a.name.compareTo(b.name));
+});
+
 final settingsProvider = StreamProvider<ScheduleSettings?>((ref) {
   if (ref.watch(_authUidProvider) == null) return Stream.value(null);
-  return _db.from('schedule_settings').stream(primaryKey: ['id']).map(
+  // primaryKey mirrors the 0005 PK (tenant_id): realtime DELETE events carry
+  // only PK columns and bypass RLS, so the key must be tenant-scoped.
+  return _db.from('schedule_settings').stream(primaryKey: ['tenant_id']).map(
       (rows) => rows.isEmpty ? null : ScheduleSettings.fromJson(rows.first));
 });
 
@@ -110,10 +121,12 @@ class Api {
 
   static Future<void> signOut() => _db.auth.signOut();
 
-  static Future<void> registerProfile(String displayName, String club) =>
+  static Future<void> registerProfile(
+          String displayName, String club, String tenantId) =>
       _db.rpc('register_profile', params: {
         'p_display_name': displayName,
         'p_club': club,
+        'p_tenant_id': tenantId,
       });
 
   static Future<void> approvePlayer(String userId) =>
@@ -164,6 +177,7 @@ class Api {
 
   // --- admin: settings & blocks ---
   static Future<void> updateSettings({
+    required String tenantId,
     required int laneCount,
     required Set<int> trainingWeekdays,
     required int bookingHorizonDays,
@@ -174,12 +188,13 @@ class Api {
         'training_weekdays': trainingWeekdays.toList()..sort(),
         'booking_horizon_days': bookingHorizonDays,
         'max_active_reservations': maxActiveReservations,
-      }).eq('id', true);
+      }).eq('tenant_id', tenantId);
 
   /// Toggles the kiosk board's dark/light theme (spec §4).
-  static Future<void> setKioskDark(bool kioskDark) => _db
-      .from('schedule_settings')
-      .update({'kiosk_dark': kioskDark}).eq('id', true);
+  static Future<void> setKioskDark(bool kioskDark, {required String tenantId}) =>
+      _db
+          .from('schedule_settings')
+          .update({'kiosk_dark': kioskDark}).eq('tenant_id', tenantId);
 
   static Future<void> addTimeBlock(HourMinute startsAt, HourMinute endsAt, int position) =>
       _db.from('time_blocks').insert({
@@ -395,7 +410,7 @@ final weekReservationsProvider =
 
 final dayOverridesProvider = StreamProvider<List<DayOverride>>((ref) {
   if (ref.watch(_authUidProvider) == null) return Stream.value(const []);
-  return _db.from('day_overrides').stream(primaryKey: ['date']).map(
+  return _db.from('day_overrides').stream(primaryKey: ['tenant_id', 'date']).map(
       (rows) => rows.map(DayOverride.fromJson).toList());
 });
 

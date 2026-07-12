@@ -111,6 +111,7 @@ class _ScheduleAdminScreenState extends ConsumerState<ScheduleAdminScreen> {
     await tryAction(
       context,
       () => Api.updateSettings(
+        tenantId: current?.tenantId ?? '',
         laneCount: laneCount,
         trainingWeekdays: _trainingWeekdays,
         bookingHorizonDays: horizonDays,

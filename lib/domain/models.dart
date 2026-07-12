@@ -199,6 +199,18 @@ class PlayerName {
       );
 }
 
+/// One alley (kuželna): fully isolated tenant. Players pick theirs at
+/// registration; everything else scopes server-side by the profile's tenant.
+class Tenant {
+  const Tenant({required this.id, required this.name});
+
+  final String id;
+  final String name;
+
+  factory Tenant.fromJson(Map<String, dynamic> json) =>
+      Tenant(id: json['id'] as String, name: json['name'] as String);
+}
+
 class ScheduleSettings {
   const ScheduleSettings({
     required this.laneCount,
@@ -206,6 +218,7 @@ class ScheduleSettings {
     required this.bookingHorizonDays,
     required this.maxActiveReservations,
     this.kioskDark = true,
+    this.tenantId = '',
   });
 
   final int laneCount;
@@ -217,6 +230,10 @@ class ScheduleSettings {
 
   /// Whether the kiosk board renders in the dark theme (spec §4).
   final bool kioskDark;
+
+  /// The settings row's tenant — the update key since 0005 (one row per
+  /// tenant instead of the old singleton).
+  final String tenantId;
 
   static const defaults = ScheduleSettings(
     laneCount: 4,
@@ -234,6 +251,7 @@ class ScheduleSettings {
         bookingHorizonDays: json['booking_horizon_days'] as int,
         maxActiveReservations: json['max_active_reservations'] as int,
         kioskDark: json['kiosk_dark'] as bool? ?? true,
+        tenantId: json['tenant_id'] as String? ?? '',
       );
 }
 
