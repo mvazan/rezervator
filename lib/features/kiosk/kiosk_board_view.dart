@@ -179,12 +179,11 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
   final _hScroll = ScrollController();
   final _vScroll = ScrollController();
 
-  // Snapshot of the most recent build's row rail, kept so resetToToday can
-  // locate "now"'s row-group without threading a HourMinute through the
-  // shell's imperative reset call — the shell only holds a GlobalKey to this
-  // state, no board-shaped data of its own to pass.
-  List<TimeBlock> _railBlocks = const [];
-  List<double> _rowHeights = const [];
+  // Snapshot of the most recent build's timeline segments, kept so
+  // resetToToday can locate "now"'s segment without threading a HourMinute
+  // through the shell's imperative reset call — the shell only holds a
+  // GlobalKey to this state, no board-shaped data of its own to pass.
+  List<BoardSegment> _segments = const [];
 
   @override
   void dispose() {
@@ -206,10 +205,10 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
     if (_hScroll.hasClients) {
       _hScroll.animateTo(0, duration: _scrollDuration, curve: _scrollCurve);
     }
-    if (_vScroll.hasClients && _rowHeights.isNotEmpty) {
-      final index = _currentOrNextBlockIndex(now);
-      final target =
-          _headerHeight + _rowHeights.take(index).fold(0.0, (a, b) => a + b);
+    if (_vScroll.hasClients && _segments.isNotEmpty) {
+      final index = segmentIndexForTime(_segments, now);
+      final target = _headerHeight +
+          _segments.take(index).fold(0.0, (a, s) => a + s.height);
       final clamped =
           target.clamp(0.0, _vScroll.position.maxScrollExtent);
       _vScroll.animateTo(clamped, duration: _scrollDuration, curve: _scrollCurve);
@@ -221,26 +220,6 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
   /// so no shell change is needed beyond this widget growing a vertical
   /// scroll too.
   void resetToToday() => resetToNow(HourMinute(DateTime.now().hour, DateTime.now().minute));
-
-  /// Index (into [_railBlocks]) of the block whose `[startsAt, endsAt)`
-  /// window contains [now]; else the next upcoming block; else 0 (start of
-  /// day) once every block is already in the past.
-  int _currentOrNextBlockIndex(HourMinute now) {
-    final nowMinutes = now.minutesFromMidnight;
-    for (var i = 0; i < _railBlocks.length; i++) {
-      final block = _railBlocks[i];
-      if (nowMinutes >= block.startsAt.minutesFromMidnight &&
-          nowMinutes < block.endsAt.minutesFromMidnight) {
-        return i;
-      }
-    }
-    for (var i = 0; i < _railBlocks.length; i++) {
-      if (_railBlocks[i].startsAt.minutesFromMidnight >= nowMinutes) {
-        return i;
-      }
-    }
-    return 0;
-  }
 
   Future<void> _book(
     BuildContext context,
@@ -382,19 +361,31 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
       }
     }
     final railBlocks = blockById.values.toList()..sort(_byStartThenPosition);
-    // Per-block row-group height so unequal-duration blocks (e.g. a 30-min vs
-    // a 60-min block) render at proportional heights — every column and the
-    // rail consume this same list, so all share one vertical grid.
-    final rowHeights = [
-      for (final b in railBlocks) blockGroupHeight(b, settings.laneCount),
+    // Off-block match/rental windows across EVERY visible day: they carve
+    // occupied gap segments into the shared timeline so out-of-block events
+    // render at their true time. Matches count on closed days too
+    // (spectators); rentals only exist on open days.
+    final eventWindows = <(HourMinute, HourMinute)>[
+      for (final day in days) ...[
+        for (final m in day.matches) (m.startsAt, m.endsAt),
+        if (day is OpenDay)
+          for (final r in day.rentals) (r.startsAt, r.endsAt),
+      ],
     ];
-    final gridHeight = rowHeights.fold(0.0, (a, b) => a + b);
+    // The shared timeline: blocks at proportional heights (as before) plus
+    // gap segments — every column and the rail consume this same list, so
+    // all share one vertical grid.
+    final segments = buildBoardSegments(
+      railBlocks: railBlocks,
+      eventWindows: eventWindows,
+      laneCount: settings.laneCount,
+    );
+    final gridHeight = segments.fold(0.0, (a, s) => a + s.height);
     final totalHeight = _headerHeight + gridHeight;
     // Snapshot for resetToNow's imperative scroll-target math (see field
     // docs above) — assignment only, no setState, so it can't trigger a
     // rebuild loop.
-    _railBlocks = railBlocks;
-    _rowHeights = rowHeights;
+    _segments = segments;
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -406,7 +397,7 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _Rail(blocks: railBlocks, rowHeights: rowHeights),
+                _Rail(segments: segments),
                 Expanded(
                   child: SizedBox(
                     height: totalHeight,
@@ -420,8 +411,7 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
                         child: _DayColumn(
                           day: days[index],
                           isToday: index == 0,
-                          railBlocks: railBlocks,
-                          rowHeights: rowHeights,
+                          segments: segments,
                           laneCount: settings.laneCount,
                           nameById: nameById,
                           clubColorById: clubColorById,
@@ -449,15 +439,15 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
   }
 }
 
-/// Fixed left rail: one label per row-group (time block), each exactly
-/// [rowHeights]`[i]` tall — the same per-block height every [_DayColumn] gives
-/// its own row-group for that block — so labels line up with cells across
-/// columns regardless of each block's duration.
+/// Fixed left rail: one label per timeline segment, each exactly
+/// `segments[i].height` tall — the same heights every [_DayColumn] gives its
+/// own cells — so labels line up with cells across columns. Block segments
+/// carry the block label; occupied gaps a quieter time range; empty-gap
+/// slivers stay unlabeled.
 class _Rail extends StatelessWidget {
-  const _Rail({required this.blocks, required this.rowHeights});
+  const _Rail({required this.segments});
 
-  final List<TimeBlock> blocks;
-  final List<double> rowHeights;
+  final List<BoardSegment> segments;
 
   @override
   Widget build(BuildContext context) {
@@ -467,27 +457,47 @@ class _Rail extends StatelessWidget {
       child: Column(
         children: [
           const SizedBox(height: _headerHeight),
-          for (var i = 0; i < blocks.length; i++)
+          for (var i = 0; i < segments.length; i++)
             Container(
-              height: rowHeights[i],
+              height: segments[i].height,
               decoration: BoxDecoration(
-                border: _gridlineBorder(scheme, isLast: i == blocks.length - 1),
+                border:
+                    _gridlineBorder(scheme, isLast: i == segments.length - 1),
               ),
-              child: Align(
-                alignment: Alignment.topCenter,
-                child: Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(
-                    blocks[i].label,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: scheme.onSurfaceVariant,
+              child: switch (segments[i]) {
+                BlockSegment(:final block) => Align(
+                    alignment: Alignment.topCenter,
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        block.label,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
                     ),
                   ),
-                ),
-              ),
+                OccupiedGapSegment(:final start, :final end) => Align(
+                    alignment: Alignment.topCenter,
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        '${start.display()}–${end.display()}',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w500,
+                          color:
+                              scheme.onSurfaceVariant.withValues(alpha: 0.6),
+                        ),
+                      ),
+                    ),
+                  ),
+                EmptyGapSegment() => const SizedBox.shrink(),
+              },
             ),
         ],
       ),
@@ -566,8 +576,7 @@ class _DayColumn extends StatelessWidget {
   const _DayColumn({
     required this.day,
     required this.isToday,
-    required this.railBlocks,
-    required this.rowHeights,
+    required this.segments,
     required this.laneCount,
     required this.nameById,
     required this.clubColorById,
@@ -578,8 +587,7 @@ class _DayColumn extends StatelessWidget {
 
   final DaySchedule day;
   final bool isToday;
-  final List<TimeBlock> railBlocks;
-  final List<double> rowHeights;
+  final List<BoardSegment> segments;
   final int laneCount;
   final Map<String, String> nameById;
   final Map<String, int> clubColorById;
@@ -598,7 +606,7 @@ class _DayColumn extends StatelessWidget {
         borderRadius: BorderRadius.circular(10),
       ),
       // No border: an inset border would eat into the fixed-height Column
-      // below (header + one SizedBox per row-group summing to exactly the
+      // below (header + one SizedBox per segment summing to exactly the
       // available height already) and overflow by the border width —
       // column separation comes from the horizontal margin alone.
       clipBehavior: Clip.antiAlias,
@@ -610,18 +618,118 @@ class _DayColumn extends StatelessWidget {
             isToday: isToday,
             matches: day.matches,
           ),
-          for (var i = 0; i < railBlocks.length; i++)
+          for (var i = 0; i < segments.length; i++)
             Container(
-              height: rowHeights[i],
+              height: segments[i].height,
               decoration: BoxDecoration(
                 border:
-                    _gridlineBorder(scheme, isLast: i == railBlocks.length - 1),
+                    _gridlineBorder(scheme, isLast: i == segments.length - 1),
               ),
-              child: closed
-                  ? _closedCell(context, scheme, railBlocks[i])
-                  : _openCell(context, railBlocks[i]),
+              child: switch (segments[i]) {
+                BlockSegment(:final block) => closed
+                    ? _closedCell(context, scheme, block)
+                    : _openCell(context, block),
+                final OccupiedGapSegment gap => _gapCell(context, gap),
+                EmptyGapSegment() => _dimFiller(scheme),
+              },
             ),
         ],
+      ),
+    );
+  }
+
+  Widget _dimFiller(ColorScheme scheme) =>
+      Container(color: scheme.surfaceContainerLowest.withValues(alpha: 0.3));
+
+  /// An occupied gap: this day's own off-block matches (open AND closed days
+  /// — spectator parity) and rentals (open days only) render as bands at
+  /// their true sub-position inside the segment; a day with nothing here
+  /// shows the dim filler.
+  Widget _gapCell(BuildContext context, OccupiedGapSegment gap) {
+    final scheme = Theme.of(context).colorScheme;
+    final segStart = gap.start.minutesFromMidnight;
+    final segLen = gap.end.minutesFromMidnight - segStart;
+
+    final bands = <Widget>[];
+    void addBand(HourMinute start, HourMinute end, Widget child) {
+      final s = start.minutesFromMidnight.clamp(segStart, segStart + segLen);
+      final e = end.minutesFromMidnight.clamp(segStart, segStart + segLen);
+      if (e <= s || segLen <= 0) return;
+      bands.add(Positioned(
+        left: 0,
+        right: 0,
+        top: (s - segStart) / segLen * gap.height,
+        height: (e - s) / segLen * gap.height,
+        child: child,
+      ));
+    }
+
+    for (final m in day.matches) {
+      if (!timesOverlap(m.startsAt, m.endsAt, gap.start, gap.end)) continue;
+      addBand(
+        m.startsAt,
+        m.endsAt,
+        _eventBand(
+          scheme,
+          background: scheme.errorContainer.withValues(alpha: 0.6),
+          foreground: scheme.onErrorContainer,
+          text: '🏆 ${m.title}\n'
+              '${m.startsAt.display()}–${m.endsAt.display()}',
+          bold: true,
+        ),
+      );
+    }
+    if (day case final OpenDay openDay) {
+      for (final r in openDay.rentals) {
+        if (!timesOverlap(r.startsAt, r.endsAt, gap.start, gap.end)) continue;
+        final club = ClubColors.of(r.color, scheme.brightness);
+        addBand(
+          r.startsAt,
+          r.endsAt,
+          _eventBand(
+            scheme,
+            background:
+                club?.$1 ?? scheme.tertiaryContainer.withValues(alpha: 0.5),
+            foreground: club?.$2 ?? scheme.onTertiaryContainer,
+            text: '🔒 ${r.renterName}\n'
+                '${r.startsAt.display()}–${r.endsAt.display()}',
+          ),
+        );
+      }
+    }
+
+    if (bands.isEmpty) return _dimFiller(scheme);
+    return Stack(
+      children: [Positioned.fill(child: _dimFiller(scheme)), ...bands],
+    );
+  }
+
+  Widget _eventBand(
+    ColorScheme scheme, {
+    required Color background,
+    required Color foreground,
+    required String text,
+    bool bold = false,
+  }) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 3, vertical: 1.5),
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      alignment: Alignment.center,
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Text(
+        text,
+        textAlign: TextAlign.center,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: bold ? FontWeight.w700 : FontWeight.w600,
+          color: foreground,
+        ),
       ),
     );
   }
@@ -635,7 +743,12 @@ class _DayColumn extends StatelessWidget {
       return _matchCell(context, blockMatch, isPrep: isPrep);
     }
     return Container(
-      color: scheme.surfaceContainerLowest.withValues(alpha: 0.6),
+      margin: const EdgeInsets.symmetric(horizontal: 3, vertical: 1.5),
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerLowest.withValues(alpha: 0.6),
+        borderRadius: BorderRadius.circular(6),
+      ),
       alignment: Alignment.center,
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: RotatedBox(
@@ -663,9 +776,7 @@ class _DayColumn extends StatelessWidget {
     // open day that doesn't itself have this specific block (e.g. a custom
     // day-override subset) renders a dim empty filler instead.
     final hasBlock = openDay.blocks.any((b) => b.id == railBlock.id);
-    if (!hasBlock) {
-      return Container(color: scheme.surfaceContainerLowest.withValues(alpha: 0.3));
-    }
+    if (!hasBlock) return _dimFiller(scheme);
 
     final firstState = openDay.slot(railBlock.id, 1);
     if (firstState is MatchSlot) {
@@ -686,7 +797,12 @@ class _DayColumn extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     if (isPrep) {
       return Container(
-        color: scheme.errorContainer.withValues(alpha: 0.25),
+        margin: const EdgeInsets.symmetric(horizontal: 3, vertical: 1.5),
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          color: scheme.errorContainer.withValues(alpha: 0.25),
+          borderRadius: BorderRadius.circular(6),
+        ),
         alignment: Alignment.center,
         padding: const EdgeInsets.symmetric(horizontal: 4),
         child: Text(
@@ -703,7 +819,12 @@ class _DayColumn extends StatelessWidget {
       );
     }
     return Container(
-      color: scheme.errorContainer.withValues(alpha: 0.6),
+      margin: const EdgeInsets.symmetric(horizontal: 3, vertical: 1.5),
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: scheme.errorContainer.withValues(alpha: 0.6),
+        borderRadius: BorderRadius.circular(6),
+      ),
       alignment: Alignment.center,
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Text(
@@ -813,6 +934,9 @@ class _DayColumn extends StatelessWidget {
     }
   }
 
+  /// Every lane slot renders as its own bounded rounded cell (margin +
+  /// radius) instead of a flush swimlane band; a free non-bookable slot gets
+  /// a faint fill so the card outline still reads at a distance.
   Widget _rowShell(
     BuildContext context, {
     required int lane,
@@ -822,8 +946,15 @@ class _DayColumn extends StatelessWidget {
     Widget? child,
   }) {
     final scheme = Theme.of(context).colorScheme;
+    final radius = BorderRadius.circular(6);
     final body = Container(
-      decoration: BoxDecoration(color: background, border: border),
+      margin: const EdgeInsets.symmetric(horizontal: 3, vertical: 1.5),
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: background ?? scheme.surfaceContainerLow.withValues(alpha: 0.35),
+        border: border,
+        borderRadius: radius,
+      ),
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Row(
         children: [
@@ -834,7 +965,7 @@ class _DayColumn extends StatelessWidget {
               style: TextStyle(
                 fontSize: 10,
                 fontWeight: FontWeight.w700,
-                color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
+                color: scheme.onSurfaceVariant.withValues(alpha: 0.5),
               ),
             ),
           ),
@@ -844,6 +975,6 @@ class _DayColumn extends StatelessWidget {
       ),
     );
     if (onTap == null) return body;
-    return InkWell(onTap: onTap, child: body);
+    return InkWell(onTap: onTap, borderRadius: radius, child: body);
   }
 }
