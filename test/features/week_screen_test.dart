@@ -80,15 +80,17 @@ void main() {
     List<DayOverride> overrides = const [],
     List<Match> matches = const [],
     List<Reservation> reservations = const [],
+    List<TimeBlock> blocks = const [b1],
+    List<Rental> rentals = const [],
     Profile profile = me,
   }) {
     return ProviderScope(
       overrides: [
         settingsProvider.overrideWith((ref) => Stream.value(settings)),
-        timeBlocksProvider.overrideWith((ref) => Stream.value(const [b1])),
+        timeBlocksProvider.overrideWith((ref) => Stream.value(blocks)),
         dayOverridesProvider.overrideWith((ref) => Stream.value(overrides)),
         matchesProvider.overrideWith((ref) => Stream.value(matches)),
-        rentalsProvider.overrideWith((ref) => Stream.value(const [])),
+        rentalsProvider.overrideWith((ref) => Stream.value(rentals)),
         weekReservationsProvider.overrideWith(
           (ref, monday) => Stream.value(reservations),
         ),
@@ -351,6 +353,82 @@ void main() {
     await tester.tap(find.byIcon(Icons.add).first);
     await tester.pumpAndSettle();
     expect(find.text('Rezervovat termín?'), findsOneWidget);
+  });
+
+  testWidgets('off-block rental renders as a gap banner with real times', (
+    tester,
+  ) async {
+    tallSurface(tester);
+    final rental = Rental(
+      id: 'n1',
+      renterName: 'Firma X',
+      lanes: const [1],
+      date: tomorrow,
+      weekday: null,
+      startsAt: const HourMinute(12, 0),
+      endsAt: const HourMinute(14, 0),
+      validFrom: null,
+      validUntil: null,
+      note: '',
+    );
+    await tester.pumpWidget(app(rentals: [rental]));
+    await tester.pumpAndSettle();
+    expect(find.text('🔒 Firma X · 12:00–14:00'), findsOneWidget);
+  });
+
+  const bEarly = TimeBlock(
+    id: 'bEarly',
+    startsAt: HourMinute(20, 0),
+    endsAt: HourMinute(21, 0),
+    position: 1,
+    active: true,
+  );
+
+  testWidgets('admin long-presses a block label into the edit dialog', (
+    tester,
+  ) async {
+    tallSurface(tester);
+    await tester.pumpWidget(app(profile: admin));
+    await tester.pumpAndSettle();
+
+    await tester.longPress(find.text(b1.label).first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Upravit blok'), findsOneWidget);
+    expect(find.text('Deaktivovat'), findsOneWidget);
+  });
+
+  testWidgets(
+    'admin taps an empty gap into a prefilled Nový blok dialog; non-admin '
+    'gets no affordance',
+    (tester) async {
+      tallSurface(tester);
+      // Blocks 20:00–21:00 and 22:58–23:59 leave an event-free hole between.
+      await tester.pumpWidget(app(blocks: const [bEarly, b1], profile: admin));
+      await tester.pumpAndSettle();
+
+      final gapChip = find.text('＋ 21:00–22:58');
+      expect(gapChip, findsWidgets); // one per open day
+      await tester.tap(gapChip.first);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Nový blok'), findsOneWidget);
+      // Prefilled with the gap's exact range.
+      expect(find.text('21:00'), findsWidgets);
+      expect(find.text('22:58'), findsWidgets);
+    },
+  );
+
+  testWidgets('non-admin gets no gap affordance and no long-press dialog', (
+    tester,
+  ) async {
+    tallSurface(tester);
+    await tester.pumpWidget(app(blocks: const [bEarly, b1]));
+    await tester.pumpAndSettle();
+    expect(find.text('＋ 21:00–22:58'), findsNothing);
+    await tester.longPress(find.text(b1.label).first);
+    await tester.pumpAndSettle();
+    expect(find.text('Upravit blok'), findsNothing);
   });
 
   testWidgets(
