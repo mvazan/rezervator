@@ -276,18 +276,18 @@ void main() {
       // At 800px width the fit-width default is false, so the toggle offers
       // to switch it ON ("Roztáhnout na šířku").
       expect(find.byTooltip('Roztáhnout na šířku'), findsOneWidget);
-      expect(find.byTooltip('Posuvná mřížka'), findsNothing);
+      expect(find.byTooltip('Zpět na posuvnou mřížku'), findsNothing);
 
       await tester.tap(find.byTooltip('Roztáhnout na šířku'));
       await tester.pumpAndSettle();
 
-      // Now the icon flipped to "on"; the pref is persisted as true.
-      expect(find.byTooltip('Posuvná mřížka'), findsOneWidget);
+      // Now the button reads as selected; the pref is persisted as true.
+      expect(find.byTooltip('Zpět na posuvnou mřížku'), findsOneWidget);
       final prefs = await SharedPreferences.getInstance();
       expect(prefs.getBool('fit_width'), true);
 
       // Toggling back flips it and updates the stored value.
-      await tester.tap(find.byTooltip('Posuvná mřížka'));
+      await tester.tap(find.byTooltip('Zpět na posuvnou mřížku'));
       await tester.pumpAndSettle();
       expect(find.byTooltip('Roztáhnout na šířku'), findsOneWidget);
       expect(

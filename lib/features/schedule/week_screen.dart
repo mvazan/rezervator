@@ -274,27 +274,33 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
             onPressed: () => _go(1),
           ),
           if (view != null)
-            IconButton(
-              icon: Icon(
-                view == ScheduleView.week
-                    ? Icons.view_day_outlined
-                    : Icons.view_week_outlined,
-              ),
-              tooltip: view == ScheduleView.week ? 'Den' : 'Týden',
-              onPressed: () => _setView(
-                view == ScheduleView.week
-                    ? ScheduleView.day
-                    : ScheduleView.week,
+            SegmentedButton<ScheduleView>(
+              segments: const [
+                ButtonSegment(
+                  value: ScheduleView.day,
+                  icon: Icon(Icons.calendar_view_day_outlined),
+                  tooltip: 'Den',
+                ),
+                ButtonSegment(
+                  value: ScheduleView.week,
+                  icon: Icon(Icons.calendar_view_week_outlined),
+                  tooltip: 'Týden',
+                ),
+              ],
+              selected: {view},
+              onSelectionChanged: (s) => _setView(s.single),
+              showSelectedIcon: false,
+              style: const ButtonStyle(
+                visualDensity: VisualDensity.compact,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
             ),
           if (_fitWidth != null)
             IconButton(
-              icon: Icon(
-                fitWidth
-                    ? Icons.width_normal_outlined
-                    : Icons.fit_screen_outlined,
-              ),
-              tooltip: fitWidth ? 'Posuvná mřížka' : 'Roztáhnout na šířku',
+              icon: const Icon(Icons.fit_screen_outlined),
+              isSelected: fitWidth,
+              tooltip:
+                  fitWidth ? 'Zpět na posuvnou mřížku' : 'Roztáhnout na šířku',
               onPressed: () => _setFitWidth(!fitWidth),
             ),
         ],
