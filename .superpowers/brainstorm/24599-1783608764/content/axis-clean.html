@@ -1,0 +1,90 @@
+<h2>Pravidelná 30-min os — ako to funguje</h2>
+<p class="subtitle">Lavica vľavo má značku každých 30 min. Každý blok začína a končí presne na svojej značke, výška = trvanie. Streda ⚡ má posunuté časy (16:00, 17:00, príprava 18:00–18:30, zápas 18:30) — a lícuje s osou. Pondelok/štvrtok majú default (15:30–16:30…).</p>
+
+<style>
+  .board { background:#0F172A; border-radius:12px; padding:14px; display:grid;
+    grid-template-columns:56px 1fr 1fr 1fr; grid-auto-rows:22px; gap:0; color:#E2E8F0; max-width:640px; }
+  .hd { font-weight:700; font-size:11px; text-align:center; padding:6px 0; background:#1E293B; border-radius:6px; margin:0 2px 4px; }
+  .hd.hl { background:linear-gradient(90deg,#6366F1,#22D3EE); color:#fff; }
+  .corner {}
+  /* rail label sits at each 30-min line */
+  .rail { grid-column:1; font-size:9.5px; color:#94A3B8; text-align:right; padding-right:8px;
+    border-top:1px solid #223049; line-height:1; padding-top:1px; }
+  .rail.major { color:#CBD5E1; }
+  /* cells positioned by grid-row start/span (1 row = 30 min) */
+  .cell { margin:1px 2px; border-radius:6px; font-size:9.5px; padding:5px 6px; box-sizing:border-box;
+    display:flex; flex-direction:column; justify-content:center; overflow:hidden; }
+  .t { font-size:8px; opacity:.7; }
+  .fr { background:#0B1120; border:1px dashed #38BDF8; color:#38BDF8; text-align:center; }
+  .oc { background:#1E3A8A; color:#BFDBFE; }
+  .prep { background:#4C0519; color:#FDA4AF; }
+  .match { background:#7F1D1D; color:#FECACA; font-weight:700; }
+  .legend { max-width:640px; font-size:11px; color:#94A3B8; margin-top:12px; line-height:1.6; }
+  b.hlx { color:#a5b4fc; }
+</style>
+
+<!--
+Rows: 30-min lines from 15:30 to 21:30 → 13 lines (rows 2..14; row1=header).
+Row index: 15:30=r2,16:00=r3,16:30=r4,17:00=r5,17:30=r6,18:00=r7,18:30=r8,
+19:00=r9,19:30=r10,20:00=r11,20:30=r12,21:00=r13,21:30=r14
+-->
+<div class="board">
+  <div class="corner"></div>
+  <div class="hd">po 13</div>
+  <div class="hd hl">st 15 ⚡</div>
+  <div class="hd">čt 16</div>
+
+  <!-- rail labels -->
+  <div class="rail major" style="grid-row:2">15:30</div>
+  <div class="rail" style="grid-row:3">16:00</div>
+  <div class="rail major" style="grid-row:4">16:30</div>
+  <div class="rail" style="grid-row:5">17:00</div>
+  <div class="rail major" style="grid-row:6">17:30</div>
+  <div class="rail" style="grid-row:7">18:00</div>
+  <div class="rail major" style="grid-row:8">18:30</div>
+  <div class="rail" style="grid-row:9">19:00</div>
+  <div class="rail major" style="grid-row:10">19:30</div>
+  <div class="rail" style="grid-row:11">20:00</div>
+  <div class="rail major" style="grid-row:12">20:30</div>
+  <div class="rail" style="grid-row:13">21:00</div>
+  <div class="rail" style="grid-row:14">21:30</div>
+
+  <!-- PONDELOK (default 60-min bloky: 15:30,16:30,17:30,18:30,19:30,20:30) -->
+  <div class="cell fr" style="grid-column:2; grid-row:2 / span 2">＋</div>
+  <div class="cell oc" style="grid-column:2; grid-row:4 / span 2">Novák</div>
+  <div class="cell fr" style="grid-column:2; grid-row:6 / span 2">＋</div>
+  <div class="cell oc" style="grid-column:2; grid-row:8 / span 2">Uher</div>
+  <div class="cell fr" style="grid-column:2; grid-row:10 / span 2">＋</div>
+  <div class="cell fr" style="grid-column:2; grid-row:12 / span 2">＋</div>
+
+  <!-- STREDA ⚡ posunuté: 16:00–17:00, 17:00–18:00, 18:00–18:30 prep, 18:30–21:30 zápas -->
+  <div class="cell fr" style="grid-column:3; grid-row:3 / span 2"><span class="t">16:00–17:00</span>＋</div>
+  <div class="cell oc" style="grid-column:3; grid-row:5 / span 2"><span class="t">17:00–18:00</span>Zubatý</div>
+  <div class="cell prep" style="grid-column:3; grid-row:7 / span 1"><span class="t">18:00–18:30</span>🛠 Příprava</div>
+  <div class="cell match" style="grid-column:3; grid-row:8 / span 6"><span class="t">18:30–21:30</span>🏆 SKK Veverky</div>
+
+  <!-- STVRTOK default -->
+  <div class="cell fr" style="grid-column:4; grid-row:2 / span 2">＋</div>
+  <div class="cell fr" style="grid-column:4; grid-row:4 / span 2">＋</div>
+  <div class="cell oc" style="grid-column:4; grid-row:6 / span 2">Doležal</div>
+  <div class="cell fr" style="grid-column:4; grid-row:8 / span 2">＋</div>
+  <div class="cell oc" style="grid-column:4; grid-row:10 / span 2">Lukáš L.</div>
+  <div class="cell fr" style="grid-column:4; grid-row:12 / span 2">＋</div>
+</div>
+
+<div class="legend">
+  <b class="hlx">Os vľavo</b> = pevná mriežka po 30 min.<br>
+  <b class="hlx">Pondelok/štvrtok</b> (default): 60-min bloky, každý zaberá 2 riadky (napr. 15:30–16:30). Značka 16:00 uprostred neho je len tichá čiara.<br>
+  <b class="hlx">Streda ⚡</b> (posunuté): blok 16:00–17:00 začína presne na značke 16:00, príprava 18:00–18:30 je 1 riadok (30 min), zápas 18:30–21:30 zaberá 6 riadkov. <b>Všetko vertikálne lícuje s osou</b> — 18:30 je v strede na rovnakej výške vo všetkých stĺpcoch.
+</div>
+
+<div class="options" style="margin-top:16px;">
+  <div class="option" data-choice="ok" onclick="toggleSelect(this)">
+    <div class="letter">✓</div>
+    <div class="content"><h3>Áno, takto — 30-min os</h3><p>Pevná os po 30 min, každý blok na svojom čase, výška = trvanie. Posunuté dni lícujú s osou.</p></div>
+  </div>
+  <div class="option" data-choice="tweak" onclick="toggleSelect(this)">
+    <div class="letter">✎</div>
+    <div class="content"><h3>Ešte nie / uprav</h3><p>Napíš čo upraviť alebo čo je nejasné.</p></div>
+  </div>
+</div>

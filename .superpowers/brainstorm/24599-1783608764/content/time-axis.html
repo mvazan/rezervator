@@ -1,0 +1,92 @@
+<h2>Posunuté sloty na absolútnej časovej osi</h2>
+<p class="subtitle">Streda ⚡ má bloky 16:00, 17:00, 18:00–18:30, 18:30–21:30 (posunuté). Ostatné dni default 15:30–16:30… Ako má vyzerať lavica, aby posunutý stĺpec lícoval s časmi na osi?</p>
+
+<style>
+  .kb { background:#0F172A; border-radius:12px; padding:10px; color:#E2E8F0; }
+  .grid { display:grid; gap:0; position:relative; }
+  .rail { font-size:9px; color:#94A3B8; text-align:right; padding-right:6px; border-top:1px solid #1e293b; display:flex; align-items:flex-start; justify-content:flex-end; padding-top:2px; }
+  .colhead { font-weight:700; font-size:10px; text-align:center; padding:4px; background:#1E293B; border-radius:5px; }
+  .colhead.hl { background:linear-gradient(90deg,#6366F1,#22D3EE); color:#fff; }
+  .cell { border-radius:6px; margin:1px; font-size:9px; padding:4px; box-sizing:border-box; display:flex; align-items:center; justify-content:center; text-align:center; overflow:hidden; }
+  .fr { background:#0B1120; border:1px dashed #38BDF8; color:#38BDF8; }
+  .oc { background:#1E3A8A; color:#BFDBFE; }
+  .prep { background:#4C0519; color:#FDA4AF; }
+  .match { background:#7F1D1D; color:#FECACA; font-weight:700; }
+  .empty { background:transparent; }
+  .note { font-size:10px; color:#64748B; margin-top:10px; line-height:1.5; }
+  .h { border-top:1px solid #1e293b; }
+</style>
+
+<div class="cards">
+
+  <!-- OPTION A: 30-min uniform axis -->
+  <div class="card" data-choice="uniform30" onclick="toggleSelect(this)">
+    <div class="card-image" style="background:#020617; padding:12px;">
+      <div class="kb">
+        <!-- 12 rows of 30min: 15:30..21:30; label col + 3 day cols -->
+        <div class="grid" style="grid-template-columns:44px 1fr 1fr 1fr; grid-auto-rows:26px;">
+          <div class="empty"></div>
+          <div class="colhead">po</div><div class="colhead hl">st ⚡</div><div class="colhead">čt</div>
+
+          <!-- 15:30 --><div class="rail">15:30</div>
+            <div class="cell fr" style="grid-row:span 2;">15:30–16:30 ＋</div>
+            <div class="empty h"></div>
+            <div class="cell oc" style="grid-row:span 2;">Novák</div>
+          <!-- 16:00 --><div class="rail">16:00</div>
+            <div class="empty h" style="grid-column:3;"></div>
+          <!-- wait: st starts 16:00 -->
+        </div>
+        <div class="note" style="color:#f87171;">(zjednodušené — plná verzia nižšie)</div>
+        <!-- Simpler explicit grid -->
+        <div class="grid" style="grid-template-columns:44px 1fr 1fr 1fr; grid-auto-rows:24px; margin-top:6px;">
+          <div class="empty"></div><div class="colhead">po</div><div class="colhead hl">st ⚡</div><div class="colhead">čt</div>
+          <div class="rail">15:30</div><div class="cell fr" style="grid-row:span 2">15:30 ＋</div><div class="empty h"></div><div class="cell oc" style="grid-row:span 2">Novák</div>
+          <div class="rail">16:00</div><div class="cell fr" style="grid-row:span 2">16:00 ＋</div>
+          <div class="rail">16:30</div><div class="cell fr" style="grid-row:span 2">16:30 ＋</div><div class="empty h"></div><div class="cell fr" style="grid-row:span 2">16:30 ＋</div>
+          <div class="rail">17:00</div><div class="cell fr" style="grid-row:span 2">17:00 ＋</div>
+          <div class="rail">17:30</div><div class="cell fr" style="grid-row:span 2">17:30 ＋</div><div class="empty h"></div><div class="cell oc" style="grid-row:span 2">Doležal</div>
+          <div class="rail">18:00</div><div class="cell prep">🛠</div>
+          <div class="rail">18:30</div><div class="cell oc" style="grid-row:span 2">Uher</div><div class="cell match" style="grid-row:span 6">🏆 SKK<br>18:30–21:30</div><div class="cell fr" style="grid-row:span 2">18:30 ＋</div>
+          <div class="rail">19:00</div>
+          <div class="rail">19:30</div><div class="cell fr" style="grid-row:span 2">19:30 ＋</div><div class="cell fr" style="grid-row:span 2">19:30 ＋</div>
+          <div class="rail">20:00</div>
+          <div class="rail">20:30</div><div class="cell fr" style="grid-row:span 2">20:30 ＋</div><div class="cell oc" style="grid-row:span 2">Lukáš</div>
+          <div class="rail">21:00</div>
+          <div class="rail">21:30</div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A — Pravidelná 30-min os</h3>
+      <p>Lavica má každých 30 min (15:30, 16:00, 16:30…). Každý blok sadne na svoj čas, výška = trvanie (60min = 2 riadky, 30min prep = 1 riadok). Posunutý stĺpec (streda) lícuje presne — 16:00 blok je na úrovni 16:00 na osi. Default dni (po/čt) majú prázdne medziriadky (15:30–16:30 preskočí 16:00 značku). Board o niečo vyšší, ale úplne čitateľný a všetko lícuje.</p>
+    </div>
+  </div>
+
+  <!-- OPTION B: boundary union -->
+  <div class="card" data-choice="boundary" onclick="toggleSelect(this)">
+    <div class="card-image" style="background:#020617; padding:12px;">
+      <div class="kb">
+        <div class="grid" style="grid-template-columns:52px 1fr 1fr 1fr; grid-auto-rows:auto;">
+          <div class="empty"></div><div class="colhead">po</div><div class="colhead hl">st ⚡</div><div class="colhead">čt</div>
+          <!-- boundaries: 15:30,16:00,16:30,17:00,17:30,18:00,18:30,19:30,20:30,21:30 -->
+          <div class="rail" style="height:48px">15:30</div><div class="cell fr" style="height:44px;grid-row:span 2">15:30–16:30 ＋</div><div class="empty"></div><div class="cell oc" style="height:44px;grid-row:span 2">Novák</div>
+          <div class="rail" style="height:24px">16:00</div><div class="cell fr" style="height:22px;grid-row:span 2">16:00–17:00 ＋</div>
+          <div class="rail" style="height:24px">16:30</div><div class="cell fr" style="height:44px;grid-row:span 2">16:30 ＋</div><div class="cell fr" style="height:44px;grid-row:span 2">16:30 ＋</div>
+          <div class="rail" style="height:24px">17:00</div><div class="cell fr" style="height:22px;grid-row:span 2">17:00–18:00 ＋</div>
+          <div class="rail" style="height:24px">17:30</div><div class="cell fr" style="height:44px">17:30 ＋</div><div class="cell oc" style="height:44px">Doležal</div>
+          <div class="rail" style="height:22px">18:00</div><div class="cell prep" style="height:20px">🛠 18:00–18:30</div>
+          <div class="rail" style="height:44px">18:30</div><div class="cell oc" style="height:40px">Uher</div><div class="cell match" style="height:120px;grid-row:span 3">🏆 SKK<br>18:30–21:30</div><div class="cell fr" style="height:40px">18:30 ＋</div>
+          <div class="rail" style="height:44px">19:30</div><div class="cell fr" style="height:40px">19:30 ＋</div><div class="cell fr" style="height:40px">19:30 ＋</div>
+          <div class="rail" style="height:44px">20:30</div><div class="cell fr" style="height:40px">20:30 ＋</div><div class="cell oc" style="height:40px">Lukáš</div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B — Zjednotenie hraníc</h3>
+      <p>Lavica ukazuje len časy, kde niečo začína/končí (15:30, 16:00, 16:30, 17:00, 17:30, 18:00, 18:30, 19:30, 20:30). Riadky majú nerovnaké výšky (medzi 18:30 a 19:30 je 60 min = vyšší riadok, medzi 18:00 a 18:30 len 30 min). Kompaktnejšie ako A (žiadne prázdne 19:00/20:00/21:00 značky), ale nerovnomerné riadky sú náročnejšie na oko pri viacerých posunoch.</p>
+    </div>
+  </div>
+
+</div>
+
+<p class="subtitle" style="margin-top:14px;">A = jednoduchá pravidelná os (odporúčam, predvídateľné). B = kompaktnejšia ale nepravidelná. Klikni preferovanú.</p>

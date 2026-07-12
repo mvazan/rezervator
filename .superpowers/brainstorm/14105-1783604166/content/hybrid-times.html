@@ -1,0 +1,89 @@
+<h2>Hybrid: swimline + časy v bunke pri posunutom dni</h2>
+<p class="subtitle">Bežné dni používajú spoločnú časovú lavicu vľavo (swimline). Deň s posunutými časmi (streda ⚡) má časy priamo v bunkách — a časy zostanú aj po rezervovaní, aby bolo jasné, kedy prísť. Sedí to takto?</p>
+
+<style>
+  .kb { background:#0F172A; border-radius:12px; padding:10px; color:#E2E8F0; }
+  .kb table { border-collapse:separate; border-spacing:4px; width:100%; table-layout:fixed; }
+  .kb th { font-size:10px; padding:4px 6px; background:#1E293B; border-radius:6px; font-weight:700; }
+  .kb th.hl { background:linear-gradient(90deg,#6366F1,#22D3EE); color:#fff; }
+  .kb th.hl small { display:block; font-weight:400; font-size:8px; color:#E0E7FF; }
+  .kb td { vertical-align:top; }
+  .kb .rail { width:52px; font-size:9px; color:#94A3B8; text-align:right; padding-right:4px; white-space:nowrap; vertical-align:middle; }
+  .cell { border-radius:7px; font-size:10px; padding:8px 6px; min-height:40px; box-sizing:border-box; }
+  .fr { background:#0B1120; border:1px dashed #38BDF8; color:#38BDF8; text-align:center; }
+  .oc { background:#1E3A8A; color:#BFDBFE; }
+  .prep { background:#4C0519; color:#FDA4AF; }
+  .match { background:#7F1D1D; color:#FECACA; font-weight:700; }
+  .empty { background:#0d1526; }
+  .t { font-size:8px; opacity:.75; display:block; margin-bottom:2px; font-weight:600; }
+  .note { font-size:10px; color:#64748B; margin-top:8px; line-height:1.5; }
+</style>
+
+<div class="kb">
+  <table>
+    <tr>
+      <th></th>
+      <th>po 13</th>
+      <th>út 14</th>
+      <th class="hl">st 15 ⚡<small>posunuté</small></th>
+      <th>čt 16</th>
+    </tr>
+    <tr>
+      <td class="rail">15:30–<br>16:30</td>
+      <td class="cell fr">＋</td>
+      <td class="cell oc">Novák</td>
+      <td class="cell empty" rowspan="6" style="vertical-align:top; padding:0;">
+        <div class="cell fr" style="margin:0 0 4px;"><span class="t">16:00–17:00</span>＋</div>
+        <div class="cell oc" style="margin:0 0 4px;"><span class="t">17:00–18:00</span>Zubatý</div>
+        <div class="cell prep" style="margin:0 0 4px;"><span class="t">18:00–18:30</span>🛠 Příprava</div>
+        <div class="cell match" style="margin:0;"><span class="t">18:30–21:30</span>🏆 SKK Veverky</div>
+      </td>
+      <td class="cell fr">＋</td>
+    </tr>
+    <tr>
+      <td class="rail">16:30–<br>17:30</td>
+      <td class="cell oc">Válka</td>
+      <td class="cell fr">＋</td>
+      <td class="cell fr">＋</td>
+    </tr>
+    <tr>
+      <td class="rail">17:30–<br>18:30</td>
+      <td class="cell fr">＋</td>
+      <td class="cell oc">Doležal</td>
+      <td class="cell oc">Pokorný</td>
+    </tr>
+    <tr>
+      <td class="rail">18:30–<br>19:30</td>
+      <td class="cell oc">Uher</td>
+      <td class="cell fr">＋</td>
+      <td class="cell fr">＋</td>
+    </tr>
+    <tr>
+      <td class="rail">19:30–<br>20:30</td>
+      <td class="cell fr">＋</td>
+      <td class="cell fr">＋</td>
+      <td class="cell fr">＋</td>
+    </tr>
+    <tr>
+      <td class="rail">20:30–<br>21:30</td>
+      <td class="cell fr">＋</td>
+      <td class="cell oc">Lukáš L.</td>
+      <td class="cell fr">＋</td>
+    </tr>
+  </table>
+  <div class="note">
+    Bežné dni (po, út, čt) = spoločná lavica vľavo, bunky bez času (čas berú z lavice).<br>
+    Streda ⚡ (posunuté) = jeden súvislý stĺpec s vlastnými časmi v každej bunke — čas ostáva aj keď je obsadené („Zubatý 17:00–18:00"), aby hráč vedel kedy prísť. Blok prípravy je krátky (18:00–18:30), zápas dlhý (18:30–21:30).
+  </div>
+</div>
+
+<div class="options" style="margin-top:16px;">
+  <div class="option" data-choice="ok" onclick="toggleSelect(this)">
+    <div class="letter">✓</div>
+    <div class="content"><h3>Presne tak — implementuj</h3><p>Swimline pre bežné dni, vlastné časy v bunkách pre posunuté dni (aj po rezervovaní). + tlačidlá posun ±30 min vo výnimke dňa.</p></div>
+  </div>
+  <div class="option" data-choice="tweak" onclick="toggleSelect(this)">
+    <div class="letter">✎</div>
+    <div class="content"><h3>Skoro — uprav</h3><p>Napíš úpravy (napr. čas aj pri bežných dňoch v bunke, iné zvýraznenie posunutého dňa…).</p></div>
+  </div>
+</div>

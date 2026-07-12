@@ -8,7 +8,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
-import 'package:rezervator/features/admin/settings_screen.dart';
+import 'package:rezervator/features/admin/kiosk_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -65,7 +65,7 @@ void main() {
       child: const MaterialApp(
         localizationsDelegates: GlobalMaterialLocalizations.delegates,
         supportedLocales: [Locale('cs'), Locale('en')],
-        home: SettingsScreen(),
+        home: KioskSettingsScreen(),
       ),
     );
   }

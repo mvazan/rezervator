@@ -5,6 +5,7 @@ import '../../core/ui.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
 import 'widgets/color_picker.dart';
+import 'widgets/admin_body.dart';
 
 /// One-time rentals first (sorted by date, ascending), then weekly rentals
 /// (sorted by weekday, Monday..Sunday).
@@ -82,38 +83,40 @@ class RentalsScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Pronájmy')),
-      body: sorted.isEmpty
-          ? const Center(child: Text('Zatím žádné pronájmy.'))
-          : ListView(
-              children: [
-                for (final rental in sorted)
-                  ListTile(
-                    title: Text(rental.renterName),
-                    subtitle: Text(_subtitle(rental)),
-                    isThreeLine:
-                        rental.validFrom != null || rental.validUntil != null,
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.edit_outlined),
-                          onPressed: () => showDialog<void>(
-                            context: context,
-                            builder: (_) => _RentalDialog(
-                              existing: rental,
-                              laneCount: laneCount,
+      body: AdminBody(
+        child: sorted.isEmpty
+            ? const Center(child: Text('Zatím žádné pronájmy.'))
+            : ListView(
+                children: [
+                  for (final rental in sorted)
+                    ListTile(
+                      title: Text(rental.renterName),
+                      subtitle: Text(_subtitle(rental)),
+                      isThreeLine:
+                          rental.validFrom != null || rental.validUntil != null,
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.edit_outlined),
+                            onPressed: () => showDialog<void>(
+                              context: context,
+                              builder: (_) => _RentalDialog(
+                                existing: rental,
+                                laneCount: laneCount,
+                              ),
                             ),
                           ),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.delete_outline),
-                          onPressed: () => _delete(context, rental),
-                        ),
-                      ],
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline),
+                            onPressed: () => _delete(context, rental),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-              ],
-            ),
+                ],
+              ),
+      ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => showDialog<void>(
           context: context,

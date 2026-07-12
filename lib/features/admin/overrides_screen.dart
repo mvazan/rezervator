@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/ui.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
+import 'widgets/admin_body.dart';
 
 /// Admin: manage per-day closures that take precedence over the weekly
 /// training-day rule. An override closes a day with a reason (e.g. "Malování
@@ -41,28 +42,49 @@ class OverridesScreen extends ConsumerWidget {
     final overrides =
         ref.watch(dayOverridesProvider).value ?? const <DayOverride>[];
     // Only closures are managed here; ignore any legacy open/custom-times rows.
-    final sorted = [
+    final closures = [
       for (final o in overrides)
         if (o.closed) o,
-    ]..sort((a, b) => a.date.compareTo(b.date));
+    ];
+    final now = today();
+    // Upcoming first (ascending); past collapsed at the bottom (most recent
+    // first), so the default view is only what still matters.
+    final upcoming = closures.where((o) => !o.date.isBefore(now)).toList()
+      ..sort((a, b) => a.date.compareTo(b.date));
+    final past = closures.where((o) => o.date.isBefore(now)).toList()
+      ..sort((a, b) => b.date.compareTo(a.date));
+
+    Widget tile(DayOverride override) => ListTile(
+          title: Text(dayFull(override.date)),
+          subtitle: Text('Zavřeno — ${override.reason}'),
+          trailing: IconButton(
+            icon: const Icon(Icons.delete_outline),
+            onPressed: () => _delete(context, override),
+          ),
+        );
 
     return Scaffold(
       appBar: AppBar(title: const Text('Výjimky dnů')),
-      body: sorted.isEmpty
-          ? const Center(child: Text('Zatím žádné výjimky.'))
-          : ListView(
-              children: [
-                for (final override in sorted)
-                  ListTile(
-                    title: Text(dayFull(override.date)),
-                    subtitle: Text('Zavřeno — ${override.reason}'),
-                    trailing: IconButton(
-                      icon: const Icon(Icons.delete_outline),
-                      onPressed: () => _delete(context, override),
+      body: AdminBody(
+        child: closures.isEmpty
+            ? const Center(child: Text('Zatím žádné výjimky.'))
+            : ListView(
+                children: [
+                  if (upcoming.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.all(16),
+                      child: Text('Žádné nadcházející výjimky.'),
+                    )
+                  else
+                    for (final override in upcoming) tile(override),
+                  if (past.isNotEmpty)
+                    ExpansionTile(
+                      title: Text('Minulé (${past.length})'),
+                      children: [for (final override in past) tile(override)],
                     ),
-                  ),
-              ],
-            ),
+                ],
+              ),
+      ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => showDialog<void>(
           context: context,
@@ -113,8 +135,9 @@ class _OverrideDialogState extends ConsumerState<_OverrideDialog> {
     final date = Day.fromDateTime(picked);
     final overrides =
         ref.read(dayOverridesProvider).value ?? const <DayOverride>[];
-    final existing =
-        overrides.where((o) => o.date == date && o.closed).firstOrNull;
+    final existing = overrides
+        .where((o) => o.date == date && o.closed)
+        .firstOrNull;
     setState(() {
       _date = date;
       _reason.text = existing?.reason ?? '';

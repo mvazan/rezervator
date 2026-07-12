@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/ui.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
+import 'widgets/admin_body.dart';
 
 /// Admin: manage matches (block reservations for spectators to see).
 class MatchesScreen extends ConsumerWidget {
@@ -40,39 +41,41 @@ class MatchesScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Zápasy')),
-      body: sorted.isEmpty
-          ? const Center(child: Text('Zatím žádné zápasy.'))
-          : ListView(
-              children: [
-                for (final match in sorted)
-                  ListTile(
-                    title: Text(
-                      '${dayLabel(match.date)} · '
-                      '${match.startsAt.display()}–${match.endsAt.display()} · '
-                      '${match.title}',
-                    ),
-                    subtitle: match.description.isEmpty
-                        ? null
-                        : Text(match.description),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.edit_outlined),
-                          onPressed: () => showDialog<void>(
-                            context: context,
-                            builder: (_) => _MatchDialog(existing: match),
+      body: AdminBody(
+        child: sorted.isEmpty
+            ? const Center(child: Text('Zatím žádné zápasy.'))
+            : ListView(
+                children: [
+                  for (final match in sorted)
+                    ListTile(
+                      title: Text(
+                        '${dayLabel(match.date)} · '
+                        '${match.startsAt.display()}–${match.endsAt.display()} · '
+                        '${match.title}',
+                      ),
+                      subtitle: match.description.isEmpty
+                          ? null
+                          : Text(match.description),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.edit_outlined),
+                            onPressed: () => showDialog<void>(
+                              context: context,
+                              builder: (_) => _MatchDialog(existing: match),
+                            ),
                           ),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.delete_outline),
-                          onPressed: () => _delete(context, match),
-                        ),
-                      ],
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline),
+                            onPressed: () => _delete(context, match),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-              ],
-            ),
+                ],
+              ),
+      ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => showDialog<void>(
           context: context,
@@ -293,7 +296,9 @@ class _MatchDialogState extends State<_MatchDialog> {
                   ),
                 ),
               ],
-              selected: {_prepPresets.contains(_prepMinutes) ? _prepMinutes : -1},
+              selected: {
+                _prepPresets.contains(_prepMinutes) ? _prepMinutes : -1,
+              },
               onSelectionChanged: (selected) {
                 final value = selected.first;
                 if (value == -1) {
