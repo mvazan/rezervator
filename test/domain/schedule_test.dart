@@ -479,4 +479,59 @@ void main() {
           isFalse);
     });
   });
+
+  group('day rentals + off-block events', () {
+    test('days expose their rentals — open and closed alike', () {
+      final weekly = rental(weekday: 3); // Wednesday is a non-training day
+      final oneTime = rental(date: tuesday, lanes: const [2]);
+      final week = build(rentals: [weekly, oneTime]);
+
+      final wed = week.days[2];
+      expect(wed, isA<ClosedDay>());
+      expect(wed.rentals, [weekly]);
+
+      final tue = week.days[1];
+      expect(tue, isA<OpenDay>());
+      expect(tue.rentals, [oneTime]);
+    });
+
+    test('offBlockEvents keeps only events overlapping no active block', () {
+      // Blocks cover 16:00–18:00 (b1+b2); b3 (10:00–12:00) is inactive.
+      final insideMatch = match(); // 16:30–17:30 → overlaps b1/b2
+      final morningMatch = match(
+          startsAt: const HourMinute(10, 0), endsAt: const HourMinute(11, 0));
+      final lateRental = rental(
+          date: tuesday,
+          startsAt: const HourMinute(20, 0),
+          endsAt: const HourMinute(22, 0));
+      final spillRental = rental(
+          date: tuesday,
+          startsAt: const HourMinute(17, 30),
+          endsAt: const HourMinute(19, 0)); // overlaps b2 → not off-block
+
+      final events = offBlockEvents(
+        matches: [insideMatch, morningMatch],
+        rentals: [lateRental, spillRental],
+        blocks: const [b1, b2, b3],
+      );
+
+      expect(events, hasLength(2));
+      expect(events[0], isA<OffBlockMatch>());
+      expect(events[0].start, const HourMinute(10, 0));
+      expect(events[1], isA<OffBlockRental>());
+      expect(events[1].start, const HourMinute(20, 0));
+    });
+
+    test('offBlockEvents uses the real match window, not prep-extended', () {
+      // Match 18:00–19:00 with 60 min prep: prep window reaches back into
+      // b2 (17:00–18:00), but the REAL window starts at 18:00 — off-block.
+      final prepMatch = match(
+          startsAt: const HourMinute(18, 0),
+          endsAt: const HourMinute(19, 0),
+          prepMinutes: 60);
+      final events = offBlockEvents(
+          matches: [prepMatch], rentals: const [], blocks: const [b1, b2]);
+      expect(events.single, isA<OffBlockMatch>());
+    });
+  });
 }
