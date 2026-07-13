@@ -177,18 +177,39 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
     final me = ref.watch(myProfileProvider).value;
     final mine = ref.watch(myActiveReservationsProvider).value ?? const [];
 
+    // The top row IS the app bar: title (when the width can afford it),
+    // week navigation and the shell's action icons on one line. Landscape
+    // phones (< 700px wide) drop the title — every pixel of height and
+    // width there belongs to the calendar.
+    final showTitle = MediaQuery.sizeOf(context).width >= 700 ||
+        MediaQuery.orientationOf(context) == Orientation.portrait;
     final header = Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Row(
         children: [
+          if (showTitle)
+            Flexible(
+              child: Padding(
+                padding: const EdgeInsets.only(left: 8, right: 4),
+                child: Text(
+                  'Rezervátor',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+              ),
+            ),
           IconButton(
             icon: const Icon(Icons.chevron_left),
+            visualDensity: VisualDensity.compact,
             onPressed: () => _go(-1),
           ),
           Expanded(
             child: Text(
               rangeLabel(monday, monday.addDays(6)),
               textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: Theme.of(context).textTheme.titleMedium,
             ),
           ),
@@ -196,6 +217,7 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
             TextButton(onPressed: () => _go(0), child: const Text('dnes')),
           IconButton(
             icon: const Icon(Icons.chevron_right),
+            visualDensity: VisualDensity.compact,
             onPressed: () => _go(1),
           ),
           ...widget.trailing,

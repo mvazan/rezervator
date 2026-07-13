@@ -105,7 +105,11 @@ class _WeekCalendarViewState extends State<WeekCalendarView> {
   void initState() {
     super.initState();
     _vScroll.addListener(() {
-      final collapsed = _vScroll.hasClients && _vScroll.offset > 8;
+      if (!_vScroll.hasClients) return;
+      // Hysteresis: collapse a bit into the scroll, expand only near the
+      // very top — no flapping around one magic offset.
+      final offset = _vScroll.offset;
+      final collapsed = _collapsed ? offset > 8 : offset > 32;
       if (collapsed != _collapsed) setState(() => _collapsed = collapsed);
     });
   }

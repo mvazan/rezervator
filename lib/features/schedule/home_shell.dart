@@ -13,16 +13,15 @@ class HomeShell extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final profile = ref.watch(myProfileProvider).value;
     final offline = ref.watch(offlineProvider).value ?? false;
-    // Landscape (the week calendar) is height-starved: the AppBar goes away
-    // and its action icons move onto WeekScreen's own week-navigation row —
-    // one shared line instead of two.
-    final landscape =
-        MediaQuery.orientationOf(context) == Orientation.landscape;
+    // No AppBar at all: WeekScreen's week-navigation row doubles as the top
+    // bar — title (where width allows), week arrows and these icons share
+    // ONE line.
     final actions = [
       if (profile?.isAdmin ?? false)
         IconButton(
           icon: const Icon(Icons.admin_panel_settings_outlined),
           tooltip: 'Správa',
+          visualDensity: VisualDensity.compact,
           onPressed: () => Navigator.of(context).push(
             MaterialPageRoute(builder: (_) => const AdminScreen()),
           ),
@@ -30,15 +29,13 @@ class HomeShell extends ConsumerWidget {
       IconButton(
         icon: const Icon(Icons.account_circle_outlined),
         tooltip: 'Můj profil',
+        visualDensity: VisualDensity.compact,
         onPressed: () => Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => const ProfileScreen()),
         ),
       ),
     ];
     return Scaffold(
-      appBar: landscape
-          ? null
-          : AppBar(title: const Text('Rezervátor'), actions: actions),
       body: SafeArea(
         child: Column(
           children: [
@@ -48,9 +45,7 @@ class HomeShell extends ConsumerWidget {
                 leading: const Icon(Icons.cloud_off_outlined),
                 actions: const [SizedBox.shrink()],
               ),
-            Expanded(
-              child: WeekScreen(trailing: landscape ? actions : const []),
-            ),
+            Expanded(child: WeekScreen(trailing: actions)),
           ],
         ),
       ),

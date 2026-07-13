@@ -383,57 +383,62 @@ class BoardColumnHeader extends StatelessWidget {
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
       style: TextStyle(
-        fontSize: collapsed ? 11 : 12,
+        fontSize: 12,
         fontWeight: FontWeight.w800,
         color: isToday ? Colors.white : scheme.onSurface,
       ),
     );
-    final body = Container(
+    // The content is ALWAYS the full top-anchored column; collapsing just
+    // animates the container height down so the event lines clip away —
+    // that's what makes the squeeze read as one smooth motion instead of a
+    // content swap.
+    final body = AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOutCubic,
       height: collapsed ? collapsedHeaderHeight : height,
-      padding: EdgeInsets.symmetric(horizontal: 6, vertical: collapsed ? 2 : 4),
+      padding: EdgeInsets.symmetric(horizontal: 6, vertical: collapsed ? 3 : 4),
+      clipBehavior: Clip.hardEdge,
       decoration: BoxDecoration(
         gradient:
             isToday ? const LinearGradient(colors: _gradientColors) : null,
         color: isToday ? null : scheme.surfaceContainerHigh,
       ),
-      child: collapsed
-          ? Center(child: dayText)
-          : Column(
-              // Top-anchored: the day+date line sits on ONE height across
-              // all columns; events stack under it.
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                dayText,
-                if (priority.isNotEmpty)
-                  for (final m in priority)
-                    Text(
-                      headerEventLabel(m),
-                      textAlign: TextAlign.center,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 10,
-                        height: 1.25,
-                        color: isToday
-                            ? Colors.white.withValues(alpha: 0.9)
-                            : scheme.primary,
-                      ),
-                    )
-                else if (subtitle != null)
-                  Text(
-                    subtitle!,
-                    textAlign: TextAlign.center,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: isToday
-                          ? Colors.white.withValues(alpha: 0.85)
-                          : scheme.onSurfaceVariant.withValues(alpha: 0.7),
-                    ),
-                  ),
-              ],
+      child: Column(
+        // Top-anchored: the day+date line sits on ONE height across all
+        // columns; events stack under it (and clip first when collapsing).
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          dayText,
+          if (priority.isNotEmpty)
+            for (final m in priority)
+              Text(
+                headerEventLabel(m),
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 10,
+                  height: 1.25,
+                  color: isToday
+                      ? Colors.white.withValues(alpha: 0.9)
+                      : scheme.primary,
+                ),
+              )
+          else if (subtitle != null)
+            Text(
+              subtitle!,
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 10,
+                color: isToday
+                    ? Colors.white.withValues(alpha: 0.85)
+                    : scheme.onSurfaceVariant.withValues(alpha: 0.7),
+              ),
             ),
+        ],
+      ),
     );
     if (onAdd == null) return body;
     return InkWell(onTap: onAdd, child: body);

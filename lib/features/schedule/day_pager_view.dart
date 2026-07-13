@@ -337,12 +337,13 @@ class _DayPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView(
-      padding: const EdgeInsets.fromLTRB(12, 6, 12, 16),
+      padding: const EdgeInsets.fromLTRB(6, 6, 6, 12),
       children: [
         switch (day) {
           ClosedDay(:final reason) => Card(
+            margin: const EdgeInsets.symmetric(vertical: 4),
             child: Padding(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
               child: DayHeader(
                 date: day.date,
                 priority: headerEvents(day),
@@ -375,8 +376,9 @@ class _DayPage extends StatelessWidget {
         .length;
 
     return Card(
+      margin: const EdgeInsets.symmetric(vertical: 4),
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -435,9 +437,9 @@ class _DayPage extends StatelessWidget {
     );
   }
 
-  static const _laneLabelWidth = 64.0;
+  static const _laneLabelWidth = 56.0;
   static const _laneTileWidth = 96.0;
-  static const _laneTileSpacing = 8.0;
+  static const _laneTileSpacing = 6.0;
 
   /// Fixed row width in the horizontally-scrolling mode, so full-width gap
   /// rows can match the lane grid exactly.
