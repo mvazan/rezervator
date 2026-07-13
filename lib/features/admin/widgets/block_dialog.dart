@@ -46,7 +46,7 @@ class BlockDialog extends StatefulWidget {
     this.initialEnd,
     this.dayContext,
     this.dayBaseIds,
-    this.dayRenderedBlocks,
+    this.dayHasOverride = false,
     this.dayReason = '',
   });
 
@@ -67,9 +67,9 @@ class BlockDialog extends StatefulWidget {
   /// permanently lost.
   final List<String>? dayBaseIds;
 
-  /// Day-scoped mode: the day's RENDERED blocks — what the overlap warning
-  /// checks against (a block cancelled by a match isn't a visible conflict).
-  final List<TimeBlock>? dayRenderedBlocks;
+  /// Day-scoped mode: whether the day already has an override row — shows
+  /// the "Obnovit týdenní rozvrh" escape hatch.
+  final bool dayHasOverride;
 
   /// Day-scoped mode: the day's existing override reason, preserved on save.
   final String dayReason;
@@ -165,6 +165,40 @@ class _BlockDialogState extends State<BlockDialog> {
     }
   }
 
+  /// One-tap escape hatch: drop the day's fork and return to the weekly
+  /// template (reservations on day-only specials get cancelled by the RPC
+  /// first; deleting the row afterwards restores full weekday rules —
+  /// including closing a non-training day again).
+  Future<void> _restoreTemplate() async {
+    final date = widget.dayContext!;
+    final templateIds = [
+      for (final b in widget.blocks)
+        if (b.active && b.position >= 0) b.id,
+    ];
+    setState(() => _saving = true);
+    final ok = await _confirmDayCancellations(date, templateIds.toSet());
+    if (!ok || !mounted) {
+      if (mounted) setState(() => _saving = false);
+      return;
+    }
+    final done = await tryAction(
+      context,
+      () async {
+        await Api.setDayOverride(
+            date: date, closed: false, reason: '', blockIds: templateIds);
+        await Api.deleteDayOverride(date);
+      },
+      success: 'Den vrácen k týdennímu rozvrhu.',
+      errorText: friendlyDbError,
+    );
+    if (!mounted) return;
+    if (done) {
+      Navigator.of(context).pop();
+    } else {
+      setState(() => _saving = false);
+    }
+  }
+
   Future<void> _deactivateGlobal() async {
     final existing = widget.existing!;
     final ok = await confirmIfBlockStrands(context, existing.id);
@@ -208,67 +242,33 @@ class _BlockDialogState extends State<BlockDialog> {
       if (mounted) setState(() => _saving = false);
     }
 
-    // Overlap warning: in day mode against the day's rendered blocks (a
-    // block cancelled by a match isn't a visible conflict); in global mode
-    // against every active weekly block — that one would silently overlap
-    // on every other training day.
-    final warnPool = _dayMode
-        ? widget.dayRenderedBlocks!
-        : [
-            for (final b in widget.blocks)
-              if (b.active) b,
-          ];
-    final overlapping = [
-      for (final b in warnPool)
-        if (b.id != existing?.id &&
-            timesOverlap(start, end, b.startsAt, b.endsAt))
-          b,
-    ];
-    if (overlapping.isNotEmpty) {
-      final proceed = await confirmDialog(
-        context,
-        title: 'Pozor — překryv bloků',
-        message: _dayMode
-            ? 'Blok se v tomto dni překrývá s '
-                '${overlapping.map((b) => b.label).join(', ')}. Opravdu uložit?'
-            : 'Blok se překrývá s '
-                '${overlapping.map((b) => b.label).join(', ')}. Bloky platí '
-                'pro každý tréninkový den — pro jednorázovou změnu použij '
-                'kalendář (podržení bloku v daném dni). Opravdu uložit?',
-        confirmLabel: 'Uložit i tak',
-      );
-      if (!proceed || !mounted) {
-        bail();
-        return;
-      }
-    }
-
     if (_dayMode) {
-      // A hidden BASE block (match-cancelled today, so not rendered) that
-      // overlaps the new times resurfaces the moment the match is deleted —
-      // warn so the admin doesn't build tomorrow's double-booking.
-      final renderedIds = {for (final b in widget.dayRenderedBlocks!) b.id};
-      final hiddenOverlaps = [
+      // The day-scoped block beats the weekly template like a priority
+      // slot: template blocks the new times touch are HIDDEN for this day
+      // (and reappear as soon as the edit shrinks or goes away) — say so.
+      final blockById = {for (final b in widget.blocks) b.id: b};
+      final hidden = [
         for (final id in widget.dayBaseIds!)
-          if (!renderedIds.contains(id) && id != existing?.id)
-            for (final b in widget.blocks)
-              if (b.id == id && timesOverlap(start, end, b.startsAt, b.endsAt))
-                b,
+          if (id != existing?.id &&
+              blockById[id] != null &&
+              blockById[id]!.position >= 0 &&
+              timesOverlap(
+                  start, end, blockById[id]!.startsAt, blockById[id]!.endsAt))
+            blockById[id]!,
       ];
-      if (hiddenOverlaps.isNotEmpty) {
+      if (hidden.isNotEmpty) {
         final proceed = await confirmDialog(
           context,
-          title: 'Pozor — skrytý blok',
-          message: 'V tomto čase je blok '
-              '${hiddenOverlaps.map((b) => b.label).join(', ')}, teď skrytý '
-              'prioritním slotem. Až slot zmizí, bloky se budou překrývat. '
-              'Opravdu uložit?',
-          confirmLabel: 'Uložit i tak',
+          title: 'Blok bude skryt',
+          message: 'Upravený blok v tomto dni skryje '
+              '${hidden.map((b) => b.label).join(', ')}. Zobrazí se zase, '
+              'když úpravu zrušíš nebo zkrátíš. Pokračovat?',
+          confirmLabel: 'Pokračovat',
         );
         if (!proceed || !mounted) {
-        bail();
-        return;
-      }
+          bail();
+          return;
+        }
       }
 
       // Confirm using the RPC's exact cancellation predicate: everything on
@@ -283,6 +283,31 @@ class _BlockDialogState extends State<BlockDialog> {
       if (!ok || !mounted) {
         bail();
         return;
+      }
+    } else {
+      // Global mode: a weekly block overlapping another would silently
+      // stack on every training day.
+      final overlapping = [
+        for (final b in widget.blocks)
+          if (b.active &&
+              b.id != existing?.id &&
+              timesOverlap(start, end, b.startsAt, b.endsAt))
+            b,
+      ];
+      if (overlapping.isNotEmpty) {
+        final proceed = await confirmDialog(
+          context,
+          title: 'Pozor — překryv bloků',
+          message: 'Blok se překrývá s '
+              '${overlapping.map((b) => b.label).join(', ')}. Bloky platí '
+              'pro každý tréninkový den — pro jednorázovou změnu použij '
+              'kalendář (podržení bloku v daném dni). Opravdu uložit?',
+          confirmLabel: 'Uložit i tak',
+        );
+        if (!proceed || !mounted) {
+          bail();
+          return;
+        }
       }
     }
 
@@ -359,6 +384,11 @@ class _BlockDialogState extends State<BlockDialog> {
         ],
       ),
       actions: [
+        if (_dayMode && widget.dayHasOverride)
+          TextButton(
+            onPressed: _saving ? null : _restoreTemplate,
+            child: const Text('Obnovit týdenní rozvrh'),
+          ),
         if (widget.existing != null && _dayMode)
           TextButton(
             onPressed: _saving ? null : _removeForDay,

@@ -348,6 +348,91 @@ void main() {
     });
   });
 
+  group('day-scoped specials beat the template', () {
+    // A special (position < 0, override-selected) hides template blocks it
+    // overlaps — render-time only, so shrinking/removing it brings them
+    // back untouched.
+    const special = TimeBlock(
+        id: 'sp',
+        startsAt: HourMinute(16, 30),
+        endsAt: HourMinute(17, 30),
+        position: -1,
+        active: false);
+
+    test('an overlapping special hides the template blocks for that day', () {
+      final day = build(
+        blocks: const [b1, b2, special],
+        overrides: [
+          DayOverride(
+              date: tuesday,
+              closed: false,
+              reason: '',
+              blockIds: const ['b1', 'b2', 'sp']),
+        ],
+      ).days[1] as OpenDay;
+      // sp (16:30–17:30) overlaps both b1 (16–17) and b2 (17–18) → hidden.
+      expect(day.blocks.map((b) => b.id), ['sp']);
+      expect(day.slot('sp', 1), isA<FreeSlot>());
+    });
+
+    test('a non-overlapping special coexists with the template', () {
+      const late = TimeBlock(
+          id: 'late',
+          startsAt: HourMinute(20, 0),
+          endsAt: HourMinute(21, 0),
+          position: -1,
+          active: false);
+      final day = build(
+        blocks: const [b1, b2, late],
+        overrides: [
+          DayOverride(
+              date: tuesday,
+              closed: false,
+              reason: '',
+              blockIds: const ['b1', 'b2', 'late']),
+        ],
+      ).days[1] as OpenDay;
+      expect(day.blocks.map((b) => b.id), ['b1', 'b2', 'late']);
+    });
+
+    test('shrinking the special restores the template block — reversible by '
+        'construction', () {
+      // Same override list, the special no longer overlaps b2: b2 is back.
+      const shrunk = TimeBlock(
+          id: 'sp2',
+          startsAt: HourMinute(16, 30),
+          endsAt: HourMinute(17, 0),
+          position: -1,
+          active: false);
+      final day = build(
+        blocks: const [b1, b2, shrunk],
+        overrides: [
+          DayOverride(
+              date: tuesday,
+              closed: false,
+              reason: '',
+              blockIds: const ['b1', 'b2', 'sp2']),
+        ],
+      ).days[1] as OpenDay;
+      expect(day.blocks.map((b) => b.id), ['sp2', 'b2']); // b1 hidden only
+    });
+
+    test('override-selected inactive specials with position >= 0 (legacy) '
+        'do not suppress', () {
+      // b3 is inactive but position 2 — not a sentinel special.
+      final day = build(
+        overrides: [
+          DayOverride(
+              date: tuesday,
+              closed: false,
+              reason: '',
+              blockIds: const ['b1', 'b3']),
+        ],
+      ).days[1] as OpenDay;
+      expect(day.blocks.map((b) => b.id), ['b3', 'b1']);
+    });
+  });
+
   group('rentals', () {
     test('one-time rental blocks only its lanes and time', () {
       final day = build(rentals: [

@@ -241,6 +241,26 @@ WeekSchedule buildWeekSchedule({
       continue;
     }
 
+    // A day-scoped SPECIAL block (position < 0, selected via a day
+    // override) beats the weekly template the way a priority slot beats
+    // blocks: template blocks it overlaps are hidden for the day — and
+    // reappear the moment the special shrinks or goes away. Render-time
+    // only, so the day's override list keeps every id and the fork is
+    // fully reversible.
+    final specials = [
+      for (final b in dayBlocks)
+        if (b.position < 0) b,
+    ];
+    if (specials.isNotEmpty) {
+      dayBlocks = [
+        for (final b in dayBlocks)
+          if (b.position < 0 ||
+              !specials.any((s) =>
+                  timesOverlap(b.startsAt, b.endsAt, s.startsAt, s.endsAt)))
+            b,
+      ];
+    }
+
     // A WHOLE-ALLEY priority slot CANCELS every training block its blocking
     // window (prep included) touches: the block disappears from that day and
     // the slot renders at its true time instead, leaving the freed space

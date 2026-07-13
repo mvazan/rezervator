@@ -76,7 +76,6 @@ void main() {
       initialEnd: const HourMinute(18, 30),
       dayContext: thursday,
       dayBaseIds: const ['b1', 'b2'],
-      dayRenderedBlocks: const [b1, b2],
     )));
     await tester.pumpAndSettle();
     expect(find.textContaining('Upravit blok — jen'), findsOneWidget);
@@ -139,7 +138,6 @@ void main() {
       initialEnd: const HourMinute(19, 0),
       dayContext: thursday,
       dayBaseIds: const ['b1', 'b2'],
-      dayRenderedBlocks: const [b1, b2],
     )));
     await tester.pumpAndSettle();
 
@@ -165,7 +163,6 @@ void main() {
       blocks: const [b1, b2],
       dayContext: thursday,
       dayBaseIds: const ['b1', 'b2'],
-      dayRenderedBlocks: const [b1, b2],
     )));
     await tester.pumpAndSettle();
 
@@ -176,10 +173,10 @@ void main() {
     expect(find.byType(BlockDialog), findsNothing); // popped
   });
 
-  testWidgets('a hidden BASE block overlapping the new times triggers the '
-      'skrytý blok warning', (tester) async {
-    // b2 is in the base but NOT rendered (a match cancelled it); the new
-    // block 17:00-18:00 collides with it once the match disappears.
+  testWidgets('a base block overlapped by the new times gets the '
+      'informative "Blok bude skryt" confirm; confirming proceeds', (
+    tester,
+  ) async {
     await tester.pumpWidget(app(BlockDialog(
       existing: null,
       blocks: const [b1, b2],
@@ -187,20 +184,48 @@ void main() {
       initialEnd: const HourMinute(18, 0),
       dayContext: thursday,
       dayBaseIds: const ['b1', 'b2'],
-      dayRenderedBlocks: const [b1],
     )));
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Uložit'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Pozor — skrytý blok'), findsOneWidget);
-    // Decline: nothing was written.
-    await tester.tap(find.text('Zrušit').last);
+    // The suppression is reversible, so the confirm explains rather than
+    // alarms — and the base list keeps the hidden block's id.
+    expect(find.text('Blok bude skryt'), findsOneWidget);
+    expect(find.textContaining('Zobrazí se zase'), findsOneWidget);
+    await tester.tap(find.text('Pokračovat'));
     await tester.pumpAndSettle();
+
+    final rpc = requests.firstWhere(
+      (r) => r.method == 'POST' && r.url.path.contains('set_day_override'),
+    );
     expect(
-      requests.any((r) => r.url.path.contains('set_day_override')),
-      isFalse,
+        (jsonDecode(rpc.body) as Map)['p_block_ids'], ['b1', 'b2', 'sb1']);
+  });
+
+  testWidgets('Obnovit týdenní rozvrh composes the template ids and deletes '
+      'the override row', (tester) async {
+    await tester.pumpWidget(app(BlockDialog(
+      existing: b2,
+      blocks: const [b1, b2],
+      dayContext: thursday,
+      dayBaseIds: const ['b1'],
+      dayHasOverride: true,
+    )));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Obnovit týdenní rozvrh'));
+    await tester.pumpAndSettle();
+
+    final rpc = requests.firstWhere(
+      (r) => r.method == 'POST' && r.url.path.contains('set_day_override'),
+    );
+    expect((jsonDecode(rpc.body) as Map)['p_block_ids'], ['b1', 'b2']);
+    expect(
+      requests.any((r) =>
+          r.method == 'DELETE' && r.url.path.contains('day_overrides')),
+      isTrue,
     );
   });
 
@@ -212,7 +237,6 @@ void main() {
       blocks: const [b1, b2],
       dayContext: thursday,
       dayBaseIds: const ['b1', 'b2'],
-      dayRenderedBlocks: const [b1, b2],
     )));
     await tester.pumpAndSettle();
 

@@ -413,13 +413,6 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
       ];
     }
 
-    // The day's RENDERED blocks (post-cancellation) — the overlap warning's
-    // reference: a block a match already cancelled isn't a visible conflict.
-    List<TimeBlock> dayRendered(Day date) {
-      final day = week.days[date.weekday - 1];
-      return day is OpenDay && day.date == date ? day.blocks : const [];
-    }
-
     // Past days are history: set_day_override would cancel their (already
     // played) reservations and corrupt attendance — the gestures refuse.
     bool guardPast(Day date) {
@@ -438,7 +431,7 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
                 blocks: dbBlocks,
                 dayContext: date,
                 dayBaseIds: dayBaseIds(date),
-                dayRenderedBlocks: dayRendered(date),
+                dayHasOverride: overrideByDate[date] != null,
                 dayReason: overrideByDate[date]?.reason ?? '',
               ),
             );
@@ -473,7 +466,7 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
                 initialEnd: end,
                 dayContext: date,
                 dayBaseIds: dayBaseIds(date),
-                dayRenderedBlocks: dayRendered(date),
+                dayHasOverride: overrideByDate[date] != null,
                 dayReason: overrideByDate[date]?.reason ?? '',
               ),
             );
