@@ -398,7 +398,16 @@ class _DayPage extends StatelessWidget {
             // Wrap, which could reflow lanes onto a second line and leave the
             // header's columns no longer over the tiles they label), so a day
             // with more lanes than fit scrolls all rows together.
-            if (fitWidth)
+            // A day whose every block a priority slot cancelled has no lane
+            // grid — a 'Dráha 1..N' header would label rows that don't
+            // exist, so it (and the horizontal scroller) only renders when
+            // blocks do.
+            if (day.blocks.isEmpty)
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: _dayRows(context, day),
+              )
+            else if (fitWidth)
               Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [

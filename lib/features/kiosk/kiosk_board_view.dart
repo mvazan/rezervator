@@ -309,7 +309,9 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
     ];
     final eventWindows = <(HourMinute, HourMinute)>[
       for (final day in days) ...[
-        for (final m in day.priority) (m.startsAt, m.endsAt),
+        // calendarStart = what actually paints: whole-alley slots include
+        // their prep band, lane-scoped ones only their real window.
+        for (final m in day.priority) (m.calendarStart, m.endsAt),
         if (day is OpenDay)
           for (final r in day.rentals) (r.startsAt, r.endsAt),
       ],
@@ -323,14 +325,24 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final columnWidth = boardColumnWidth(constraints.maxWidth);
-        // Fit-height: the whole window stretches to the viewport, floored at
-        // the legibility scale (then the board scrolls vertically instead).
+        // Two admin-selectable modes (settings.kioskFitDay):
+        // - fit-height: the whole window stretches to the viewport, floored
+        //   at the legibility scale (then the board scrolls anyway);
+        // - comfortable scroll: the same fixed scale as the app's week view
+        //   (a 60-min block = laneCount × 40 px), scrolling vertically; the
+        //   idle reset brings the board back to "now".
         final fitScale = (constraints.maxHeight -
                 calendarHeaderHeight -
                 _bottomLabelPad) /
             window.minutes;
         final minScale = _minPxPerMinute(windowBlocks, settings.laneCount);
-        final pxPerMinute = fitScale < minScale ? minScale : fitScale;
+        final comfortableScale = settings.laneCount * 40.0 / 60;
+        final pxPerMinute = settings.kioskFitDay
+            ? (fitScale < minScale ? minScale : fitScale)
+            // The tappability floor applies here too: a very short block
+            // must not squash its lane rows below reach in scroll mode
+            // either.
+            : (comfortableScale < minScale ? minScale : comfortableScale);
         final totalHeight = calendarHeaderHeight +
             window.minutes * pxPerMinute +
             _bottomLabelPad;
@@ -483,21 +495,41 @@ class _DayColumn extends StatelessWidget {
     }
 
     // Off-block pieces of matches/rentals: the part of an event window not
-    // covered by this day's own blocks renders as a positioned band (the
-    // in-block part renders via slot states inside the block card). Matches
-    // band on closed days too; rentals only exist on open days.
+    // covered by this day's own blocks — nor by an earlier band — renders as
+    // a positioned band (the in-block part renders via slot states inside
+    // the block card). Matches band on closed days too; rentals only exist
+    // on open days. `covered` grows with every emitted band, so overlaps
+    // resolve first-wins in emission order: priority slots (start-sorted)
+    // before rentals — a renter band can never paint over a match.
+    final covered = <(int, int)>[...blockUnion];
     void addBands(
         HourMinute start, HourMinute end, Widget Function() bandBuilder) {
       for (final (s, e) in subtractInterval(
-          (start.minutesFromMidnight, end.minutesFromMidnight), blockUnion)) {
+          (start.minutesFromMidnight, end.minutesFromMidnight),
+          mergeIntervals(covered))) {
         entries.add(CalendarEntry(
             start: hourMinuteAt(s), end: hourMinuteAt(e), child: bandBuilder()));
+        covered.add((s, e));
       }
     }
 
     final scheme = Theme.of(context).colorScheme;
     for (final m in day.priority) {
       final club = ClubColors.of(m.type.colorIndex, scheme.brightness);
+      // Whole-alley slots with prep get an honest muted band over the prep
+      // window — the lanes are being prepped there, at that real time.
+      if (m.type.lanes == null && m.blockingStart != m.startsAt) {
+        addBands(
+          m.blockingStart,
+          m.startsAt,
+          () => CalendarEventBand(
+            background: scheme.errorContainer.withValues(alpha: 0.25),
+            foreground: scheme.onSurfaceVariant,
+            text: '🛠 Příprava drah\n'
+                '${m.blockingStart.display()}–${m.startsAt.display()}',
+          ),
+        );
+      }
       addBands(
         m.startsAt,
         m.endsAt,
@@ -553,13 +585,12 @@ class _DayColumn extends StatelessWidget {
     );
   }
 
-  /// One block's calendar card. A WHOLE-ALLEY priority slot claims the
-  /// entire card (banner over all lanes); lane-scoped slots fall through to
-  /// per-lane rows so the remaining lanes stay bookable.
+  /// One block's calendar card: one row per lane. Whole-alley priority
+  /// slots never reach a rendered block (they cancel overlapping blocks in
+  /// buildWeekSchedule and render as true-time bands instead); lane-scoped
+  /// slots resolve per lane row.
   Widget _blockCard(BuildContext context, OpenDay openDay, TimeBlock block) {
     final scheme = Theme.of(context).colorScheme;
-    final (wholeAlley, wholeIsPrep) =
-        wholeAlleyPriorityFor(block, openDay.priority);
 
     return Container(
       // Stable per-block key (unique among one column's entries; other
@@ -574,68 +605,11 @@ class _DayColumn extends StatelessWidget {
           color: scheme.outlineVariant.withValues(alpha: 0.4),
         ),
       ),
-      child: wholeAlley != null
-          ? _priorityCell(context, wholeAlley, isPrep: wholeIsPrep)
-          : Column(
-              children: [
-                for (var lane = 1; lane <= laneCount; lane++)
-                  Expanded(
-                      child: _laneRow(context, openDay, block, lane)),
-              ],
-            ),
-    );
-  }
-
-  /// Whole-alley priority cell spans the whole block (all lanes):
-  /// `{emoji} {title}\n{start}–{end}` tinted by the type's color (default
-  /// rose), or the muted prep banner.
-  Widget _priorityCell(BuildContext context, PrioritySlot slot,
-      {required bool isPrep}) {
-    final scheme = Theme.of(context).colorScheme;
-    if (isPrep) {
-      return Container(
-        margin: const EdgeInsets.symmetric(horizontal: 3, vertical: 1.5),
-        clipBehavior: Clip.antiAlias,
-        decoration: BoxDecoration(
-          color: scheme.errorContainer.withValues(alpha: 0.25),
-          borderRadius: BorderRadius.circular(6),
-        ),
-        alignment: Alignment.center,
-        padding: const EdgeInsets.symmetric(horizontal: 4),
-        child: Text(
-          '🛠 Příprava drah',
-          textAlign: TextAlign.center,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-            color: scheme.onSurfaceVariant,
-          ),
-        ),
-      );
-    }
-    final club = ClubColors.of(slot.type.colorIndex, scheme.brightness);
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 3, vertical: 1.5),
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        color: club?.$1 ?? scheme.errorContainer.withValues(alpha: 0.6),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      alignment: Alignment.center,
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: Text(
-        '${slot.type.isMatch ? '🏆 ' : ''}${slot.title}\n'
-        '${slot.startsAt.display()}–${slot.endsAt.display()}',
-        textAlign: TextAlign.center,
-        maxLines: 3,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-          color: club?.$2 ?? scheme.onErrorContainer,
-        ),
+      child: Column(
+        children: [
+          for (var lane = 1; lane <= laneCount; lane++)
+            Expanded(child: _laneRow(context, openDay, block, lane)),
+        ],
       ),
     );
   }
@@ -721,8 +695,9 @@ class _DayColumn extends StatelessWidget {
               : null,
         );
       case PrioritySlotState(:final slot, :final isPrep):
-        // Whole-alley slots never reach here (_blockCard renders the banner
-        // first); this is a LANE-SCOPED priority slot blocking just this row.
+        // A LANE-SCOPED priority slot blocking just this row — or, briefly,
+        // an unresolved-type slot (renders like a match but doesn't cancel
+        // blocks until its type row streams in).
         final club = ClubColors.of(slot.type.colorIndex, scheme.brightness);
         return _rowShell(
           context,
@@ -731,7 +706,9 @@ class _DayColumn extends StatelessWidget {
               : club?.$1 ?? scheme.errorContainer.withValues(alpha: 0.6),
           lane: lane,
           child: Text(
-            isPrep ? '🛠 Příprava drah' : '⛔ ${slot.title}',
+            isPrep
+                ? '🛠 Příprava drah'
+                : '${slot.type.isMatch ? '🏆' : '⛔'} ${slot.title}',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(

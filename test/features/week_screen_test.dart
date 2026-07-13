@@ -208,9 +208,8 @@ void main() {
     expect(find.byType(AlertDialog), findsNothing);
   });
 
-  testWidgets('whole-alley match claims the block card and the day header', (
-    tester,
-  ) async {
+  testWidgets('whole-alley match cancels the touched block for its day and '
+      'renders as a true-time band', (tester) async {
     wideSurface(tester);
     await tester.pumpWidget(
       app(
@@ -230,14 +229,52 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    // Once in the day header strip, once as the block card's banner — and
-    // no bookable lane rows survive inside that card.
+    // Once in the day header strip, once as the true-time band.
     expect(find.textContaining('KK Slavoj'), findsNWidgets(2));
+    // Tomorrow's block card is CANCELLED (gone), and with it every bookable
+    // lane row; the other six days keep the block.
+    final cardInTomorrow = find.descendant(
+      of: find.byKey(ValueKey(tomorrow)),
+      matching: find.byKey(const ValueKey('cal-block-b1')),
+    );
+    expect(cardInTomorrow, findsNothing);
+    expect(find.byKey(const ValueKey('cal-block-b1')), findsNWidgets(6));
     final addInTomorrow = find.descendant(
       of: find.byKey(ValueKey(tomorrow)),
       matching: find.byIcon(Icons.add),
     );
     expect(addInTomorrow, findsNothing);
+  });
+
+  testWidgets('a match with prep shows the muted prep band at its real time', (
+    tester,
+  ) async {
+    wideSurface(tester);
+    await tester.pumpWidget(
+      app(
+        matches: [
+          PrioritySlot(
+            type: PrioritySlot.fallbackMatchType,
+            id: 'm2',
+            date: tomorrow,
+            startsAt: const HourMinute(23, 30),
+            endsAt: const HourMinute(23, 59),
+            homeTeam: '',
+            awayTeam: 'KK Slavoj',
+            prepMinutes: 32, // blockingStart 22:58 — cancels b1 via prep only
+            description: '',
+          ),
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('🛠 Příprava drah\n22:58–23:30'), findsOneWidget);
+    // The prep-touched block is cancelled for that day too.
+    final cardInTomorrow = find.descendant(
+      of: find.byKey(ValueKey(tomorrow)),
+      matching: find.byKey(const ValueKey('cal-block-b1')),
+    );
+    expect(cardInTomorrow, findsNothing);
   });
 
   testWidgets('AppBar toggle switches day/week view and persists the choice', (
@@ -542,5 +579,195 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.byIcon(Icons.add), findsNothing);
+  });
+
+  testWidgets('a lane-scoped slot keeps the block and labels its lane rows '
+      'with the TYPE name and colour, not "Zápas"', (tester) async {
+    wideSurface(tester);
+    const laneType = PrioritySlotType(
+      id: 't-lane',
+      name: 'Údržba',
+      colorIndex: 3,
+      lanes: [1],
+    );
+    await tester.pumpWidget(
+      app(
+        matches: [
+          PrioritySlot(
+            type: laneType,
+            id: 's1',
+            date: tomorrow,
+            startsAt: const HourMinute(22, 58),
+            endsAt: const HourMinute(23, 59),
+            prepMinutes: 0,
+            description: '',
+          ),
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Block survives on tomorrow (lane-scoped never cancels)…
+    final cardInTomorrow = find.descendant(
+      of: find.byKey(ValueKey(tomorrow)),
+      matching: find.byKey(const ValueKey('cal-block-b1')),
+    );
+    expect(cardInTomorrow, findsOneWidget);
+    // …and the blocked lane row carries the type's name: once in the day
+    // header strip, once in the lane cell — never the generic 'Zápas'.
+    expect(find.text('⛔ Údržba'), findsNWidgets(2));
+    expect(find.text('Zápas'), findsNothing);
+  });
+
+  testWidgets(
+      'tap in space freed by a cancelled block prefills the gap ending at '
+      'the prep band; a tap inside the prep band is a no-op; saving over a '
+      'weekly block warns about the overlap', (tester) async {
+    wideSurface(tester);
+    // bEarly 20:00–21:00 + b1 22:58–23:59; match tomorrow 21:00–22:00 with
+    // 30 min prep (blockingStart 20:30) cancels bEarly on tomorrow only:
+    // 20:00–20:30 is freed, 20:30–21:00 is the prep band.
+    await tester.pumpWidget(app(
+      blocks: const [bEarly, b1],
+      profile: admin,
+      matches: [
+        PrioritySlot(
+          type: PrioritySlot.fallbackMatchType,
+          id: 'm1',
+          date: tomorrow,
+          startsAt: const HourMinute(21, 0),
+          endsAt: const HourMinute(22, 0),
+          homeTeam: '',
+          awayTeam: 'KK Slavoj',
+          prepMinutes: 30,
+          description: '',
+        ),
+      ],
+    ));
+    await tester.pumpAndSettle();
+
+    const pxPerMinute = 2 * 40.0 / 60;
+    final column = find.descendant(
+      of: find.byKey(ValueKey(tomorrow)),
+      matching: find.byType(CalendarColumn),
+    );
+    final columnTop = tester.getTopLeft(column);
+
+    // Tap inside the prep band (20:45) — occupied, silent no-op.
+    await tester.tapAt(
+      columnTop + Offset(40, (20.75 - 20) * 60 * pxPerMinute),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Nový blok'), findsNothing);
+
+    // Tap the freed 20:00–20:30 stripe (20:15) — prefilled gap dialog.
+    await tester.tapAt(
+      columnTop + Offset(40, (20.25 - 20) * 60 * pxPerMinute),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Nový blok'), findsOneWidget);
+    expect(find.text('20:00'), findsWidgets);
+    expect(find.text('20:30'), findsWidgets);
+
+    // Saving would create a WEEKLY block overlapping bEarly on every other
+    // day — the dialog warns first.
+    await tester.tap(find.text('Uložit'));
+    await tester.pumpAndSettle();
+    expect(find.text('Pozor — překryv bloků'), findsOneWidget);
+    // Two dialogs are stacked (BlockDialog below, the warning on top) and
+    // both have a 'Zrušit' — dismiss the topmost.
+    await tester.tap(find.text('Zrušit').last);
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('day pager: a match day with every block cancelled shows the '
+      'true-time banner with the prep suffix and no lane grid', (tester) async {
+    SharedPreferences.setMockInitialValues({'schedule_view': 'day'});
+    wideSurface(tester);
+    await tester.pumpWidget(app(
+      matches: [
+        PrioritySlot(
+          type: PrioritySlot.fallbackMatchType,
+          id: 'm1',
+          date: tomorrow,
+          startsAt: const HourMinute(23, 30),
+          endsAt: const HourMinute(23, 59),
+          homeTeam: '',
+          awayTeam: 'KK Slavoj',
+          prepMinutes: 32, // blockingStart 22:58 — cancels b1 via prep
+          description: '',
+        ),
+      ],
+    ));
+    await tester.pumpAndSettle();
+    expect(find.byType(DayChipStrip), findsOneWidget);
+
+    // Navigate to tomorrow (same pattern as the day-view booking test).
+    final chips = find.descendant(
+      of: find.byType(DayChipStrip),
+      matching: find.byType(InkWell),
+    );
+    final t = today();
+    if (t.weekday < DateTime.sunday) {
+      await tester.tap(chips.at(t.weekday));
+    } else {
+      await tester.tap(find.byIcon(Icons.chevron_right));
+      await tester.pumpAndSettle();
+      await tester.tap(chips.at(0));
+    }
+    await tester.pumpAndSettle();
+
+    // The banner shows real times plus the honest prep suffix; the day is a
+    // normal open card with no bookable rows and no lane header.
+    expect(
+      find.textContaining('· 23:30–23:59 · 🛠 od 22:58'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Zavřeno'), findsNothing);
+    expect(find.text('0 volných'), findsOneWidget);
+    expect(find.text('Dráha 1'), findsNothing);
+    expect(find.byIcon(Icons.add), findsNothing);
+  });
+
+  testWidgets('day pager: a zero-prep match banner has no 🛠 suffix', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({'schedule_view': 'day'});
+    wideSurface(tester);
+    await tester.pumpWidget(app(
+      matches: [
+        PrioritySlot(
+          type: PrioritySlot.fallbackMatchType,
+          id: 'm1',
+          date: tomorrow,
+          startsAt: const HourMinute(23, 30),
+          endsAt: const HourMinute(23, 59),
+          homeTeam: '',
+          awayTeam: 'KK Slavoj',
+          prepMinutes: 0,
+          description: '',
+        ),
+      ],
+    ));
+    await tester.pumpAndSettle();
+
+    final chips = find.descendant(
+      of: find.byType(DayChipStrip),
+      matching: find.byType(InkWell),
+    );
+    final t = today();
+    if (t.weekday < DateTime.sunday) {
+      await tester.tap(chips.at(t.weekday));
+    } else {
+      await tester.tap(find.byIcon(Icons.chevron_right));
+      await tester.pumpAndSettle();
+      await tester.tap(chips.at(0));
+    }
+    await tester.pumpAndSettle();
+
+    // Times render in the day-header strip AND the banner — but neither
+    // may carry a bogus prep suffix for a zero-prep match.
+    expect(find.textContaining('· 23:30–23:59'), findsWidgets);
+    expect(find.textContaining('🛠 od'), findsNothing);
   });
 }

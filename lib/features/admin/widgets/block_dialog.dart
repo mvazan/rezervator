@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../core/ui.dart';
 import '../../../data/providers.dart';
 import '../../../domain/models.dart';
+import '../../../domain/schedule.dart' show timesOverlap;
 
 /// If deactivating [blockId] would strand future live reservations
 /// (invisible, uncancellable from the grid), asks the admin to confirm.
@@ -88,6 +89,29 @@ class _BlockDialogState extends State<BlockDialog> {
     if (end.compareTo(start) <= 0) {
       snack(context, 'Konec musí být po začátku.');
       return;
+    }
+    // Blocks are WEEKLY: one created from a gap that exists only because a
+    // priority slot cancelled a block for one day would silently overlap
+    // that block on every other training day (double-bookable lanes, cards
+    // painted over each other) — warn before saving.
+    final overlapping = [
+      for (final b in widget.blocks)
+        if (b.active &&
+            b.id != widget.existing?.id &&
+            timesOverlap(start, end, b.startsAt, b.endsAt))
+          b,
+    ];
+    if (overlapping.isNotEmpty) {
+      final proceed = await confirmDialog(
+        context,
+        title: 'Pozor — překryv bloků',
+        message:
+            'Blok se překrývá s ${overlapping.map((b) => b.label).join(', ')}. '
+            'Bloky platí pro každý tréninkový den — pro jednorázovou změnu '
+            'použij Výjimky dnů. Opravdu uložit?',
+        confirmLabel: 'Uložit i tak',
+      );
+      if (!proceed || !mounted) return;
     }
 
     setState(() => _saving = true);

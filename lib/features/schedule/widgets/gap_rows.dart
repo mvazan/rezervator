@@ -96,7 +96,9 @@ class GapEventBanner extends StatelessWidget {
           ClubColors.of(slot.type.colorIndex, scheme.brightness)?.$2 ??
               scheme.onErrorContainer,
           '${slot.type.isMatch ? '🏆' : '⛔'} ${slot.title} · '
-              '${slot.startsAt.display()}–${slot.endsAt.display()}',
+              '${slot.startsAt.display()}–${slot.endsAt.display()}'
+              // Prep is honest here too: the lanes are blocked earlier.
+              '${slot.blockingStart != slot.startsAt ? ' · 🛠 od ${slot.blockingStart.display()}' : ''}',
         ),
       OffBlockRental(:final rental) => (
           ClubColors.of(rental.color, scheme.brightness)?.$1 ??

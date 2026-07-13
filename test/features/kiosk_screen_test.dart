@@ -78,7 +78,7 @@ void main() {
 
     expect(find.text('Kiosk: tmavý režim'), findsOneWidget);
 
-    await tester.tap(find.byType(SwitchListTile));
+    await tester.tap(find.widgetWithText(SwitchListTile, 'Kiosk: tmavý režim'));
     await tester.pumpAndSettle();
 
     final patch = requests.firstWhere(
@@ -87,5 +87,29 @@ void main() {
     final body = jsonDecode(patch.body) as Map<String, dynamic>;
     // Started `true` (dark); toggling flips it to `false`.
     expect(body['kiosk_dark'], false);
+  });
+
+  testWidgets(
+      'toggling "Kiosk: celý den na obrazovku" PATCHes '
+      'schedule_settings.kiosk_fit_day', (tester) async {
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+
+    final tile =
+        find.widgetWithText(SwitchListTile, 'Kiosk: celý den na obrazovku');
+    expect(tile, findsOneWidget);
+    await tester.ensureVisible(tile);
+    await tester.tap(tile);
+    await tester.pumpAndSettle();
+
+    final patch = requests.firstWhere(
+      (r) =>
+          r.method == 'PATCH' &&
+          r.url.path.contains('schedule_settings') &&
+          r.body.contains('kiosk_fit_day'),
+    );
+    final body = jsonDecode(patch.body) as Map<String, dynamic>;
+    // Started `true` (fit); toggling flips it to `false` (scroll mode).
+    expect(body['kiosk_fit_day'], false);
   });
 }
