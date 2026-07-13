@@ -213,7 +213,8 @@ void main() {
     // clamp(160, (w-rail)/7, 220) constant keeps this test independent of
     // that formula's exact numbers).
     final columnWidth = tester.getSize(find.byType(BoardColumnHeader).first).width;
-    await tester.drag(find.byType(ListView), Offset(-columnWidth, 0));
+    await tester.drag(find.byWidgetPredicate(
+            (w) => w is ListView && w.physics is ColumnSnapPhysics), Offset(-columnWidth, 0));
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.text(petr.displayName).first);
     await tester.pumpAndSettle();
@@ -258,7 +259,8 @@ void main() {
 
       collect();
       for (var i = 0; i < 6; i++) {
-        await tester.drag(find.byType(ListView), Offset(-columnWidth, 0));
+        await tester.drag(find.byWidgetPredicate(
+            (w) => w is ListView && w.physics is ColumnSnapPhysics), Offset(-columnWidth, 0));
         await tester.pumpAndSettle();
         collect();
       }

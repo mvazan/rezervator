@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import '../../../core/ui.dart';
 import '../../../domain/calendar_layout.dart';
 import '../../../domain/models.dart';
+import '../../../domain/schedule.dart' show headerEventLabel;
 
 /// Width of the hour ruler column.
 const double calendarRulerWidth = 46.0;
@@ -26,6 +27,10 @@ const double calendarHeaderHeight = 56.0;
 /// third match on Thursday never gets clipped away.
 double boardHeaderHeight(int maxEvents) =>
     calendarHeaderHeight + (maxEvents <= 2 ? 0 : (maxEvents - 2) * 13.0);
+
+/// Height of the collapsed (scrolled-down) header strip: just the day+date
+/// line — events hide until the board scrolls back to the top.
+const double collapsedHeaderHeight = 24.0;
 
 /// Equal day-column width: `clamp(160, (width−ruler)/7, 220)` so a typical
 /// tablet shows exactly 7 days without horizontal scroll.
@@ -329,10 +334,13 @@ class CalendarEventBand extends StatelessWidget {
 }
 
 /// One board column's header: the day label (today gets the "DNES · …"
-/// gradient treatment) plus the day's events stacked one per line (pass
-/// [headerEvents]' output — away matches marked "(venku)", úklid children
-/// already filtered out), or a quiet [subtitle] when there are none. Typed
-/// on [date] so widget tests can enumerate visible days.
+/// gradient treatment) pinned to the TOP edge — same y in every column no
+/// matter how many events a day has — with the day's events stacked under
+/// it, one ellipsized line each ('🏠 domáci zápas · od–do', away matches
+/// without any icon, ⛔ blockages; pass [headerEvents]' output). A quiet
+/// [subtitle] shows when there are none. When [collapsed], only the day
+/// label renders as a thin strip. Typed on [date] so widget tests can
+/// enumerate visible days.
 class BoardColumnHeader extends StatelessWidget {
   const BoardColumnHeader({
     super.key,
@@ -340,6 +348,7 @@ class BoardColumnHeader extends StatelessWidget {
     required this.isToday,
     required this.priority,
     this.height = calendarHeaderHeight,
+    this.collapsed = false,
     this.subtitle,
     this.onAdd,
   });
@@ -351,6 +360,10 @@ class BoardColumnHeader extends StatelessWidget {
   /// Shared per-board header height — [boardHeaderHeight] of the busiest
   /// visible day, so every event line fits without clipping.
   final double height;
+
+  /// Scrolled-down mode: a [collapsedHeaderHeight] strip with the day label
+  /// only (events reappear at the top of the scroll).
+  final bool collapsed;
 
   /// Quiet second line shown when [priority] is empty (e.g. "3 volné").
   final String? subtitle;
@@ -364,60 +377,63 @@ class BoardColumnHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final dayText = Text(
+      isToday ? 'DNES · ${dayLabel(date)}' : dayLabel(date),
+      textAlign: TextAlign.center,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(
+        fontSize: collapsed ? 11 : 12,
+        fontWeight: FontWeight.w800,
+        color: isToday ? Colors.white : scheme.onSurface,
+      ),
+    );
     final body = Container(
-      height: height,
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+      height: collapsed ? collapsedHeaderHeight : height,
+      padding: EdgeInsets.symmetric(horizontal: 6, vertical: collapsed ? 2 : 4),
       decoration: BoxDecoration(
         gradient:
             isToday ? const LinearGradient(colors: _gradientColors) : null,
         color: isToday ? null : scheme.surfaceContainerHigh,
       ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Text(
-            isToday ? 'DNES · ${dayLabel(date)}' : dayLabel(date),
-            textAlign: TextAlign.center,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w800,
-              color: isToday ? Colors.white : scheme.onSurface,
+      child: collapsed
+          ? Center(child: dayText)
+          : Column(
+              // Top-anchored: the day+date line sits on ONE height across
+              // all columns; events stack under it.
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                dayText,
+                if (priority.isNotEmpty)
+                  for (final m in priority)
+                    Text(
+                      headerEventLabel(m),
+                      textAlign: TextAlign.center,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 10,
+                        height: 1.25,
+                        color: isToday
+                            ? Colors.white.withValues(alpha: 0.9)
+                            : scheme.primary,
+                      ),
+                    )
+                else if (subtitle != null)
+                  Text(
+                    subtitle!,
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: isToday
+                          ? Colors.white.withValues(alpha: 0.85)
+                          : scheme.onSurfaceVariant.withValues(alpha: 0.7),
+                    ),
+                  ),
+              ],
             ),
-          ),
-          if (priority.isNotEmpty)
-            Text(
-              priority
-                  .map((m) => '${m.type.isMatch ? '🏆' : '⛔'} ${m.title}'
-                      '${m.isAway ? ' (venku)' : ''}')
-                  .join('\n'),
-              textAlign: TextAlign.center,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 10,
-                height: 1.25,
-                color: isToday
-                    ? Colors.white.withValues(alpha: 0.9)
-                    : scheme.primary,
-              ),
-            )
-          else if (subtitle != null)
-            Text(
-              subtitle!,
-              textAlign: TextAlign.center,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 10,
-                color: isToday
-                    ? Colors.white.withValues(alpha: 0.85)
-                    : scheme.onSurfaceVariant.withValues(alpha: 0.7),
-              ),
-            ),
-        ],
-      ),
     );
     if (onAdd == null) return body;
     return InkWell(onTap: onAdd, child: body);

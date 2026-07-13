@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/ui.dart';
 import '../../../domain/models.dart';
+import '../../../domain/schedule.dart' show headerEventLabel;
 
 class DayHeader extends StatelessWidget {
   const DayHeader({
@@ -66,11 +67,9 @@ class DayHeader extends StatelessWidget {
         ),
         for (final m in priority)
           Padding(
-            padding: const EdgeInsets.only(top: 6, left: 52),
+            padding: const EdgeInsets.only(top: 5, left: 52),
             child: Text(
-              '${m.type.isMatch ? '🏆' : '⛔'} ${m.title}'
-              '${m.isAway ? ' (venku)' : ''}'
-              ' · ${m.startsAt.display()}–${m.endsAt.display()}',
+              headerEventLabel(m),
               style: TextStyle(color: scheme.primary, fontSize: 13),
             ),
           ),

@@ -41,6 +41,12 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
   }
 
+  // Day headers live in the sticky strip ABOVE the scrolling columns (not
+  // inside the ValueKey(date) column subtree), so they're found by their
+  // typed date.
+  Finder headerOf(Day date) => find.byWidgetPredicate(
+      (w) => w is BoardColumnHeader && w.date == date);
+
   const settings = ScheduleSettings(
     laneCount: 2,
     trainingWeekdays: {1, 2, 3, 4, 5, 6, 7},
@@ -600,7 +606,8 @@ void main() {
     expect(cardInTomorrow, findsOneWidget);
     // …and the blocked lane row carries the type's name: once in the day
     // header strip, once in the lane cell — never the generic 'Zápas'.
-    expect(find.text('⛔ Údržba'), findsNWidgets(2));
+    // Once in the day header strip (with times), once in the lane cell.
+    expect(find.textContaining('⛔ Údržba'), findsNWidgets(2));
     expect(find.text('Zápas'), findsNothing);
   });
 
@@ -787,10 +794,7 @@ void main() {
     await tester.pumpWidget(app(profile: admin));
     await tester.pumpAndSettle();
 
-    final headerInTomorrow = find.descendant(
-      of: find.byKey(ValueKey(tomorrow)),
-      matching: find.byType(BoardColumnHeader),
-    );
+    final headerInTomorrow = headerOf(tomorrow);
     expect(headerInTomorrow, findsOneWidget);
     await tester.tap(headerInTomorrow);
     await tester.pumpAndSettle();
@@ -804,12 +808,7 @@ void main() {
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
 
-    await tester.tap(find
-        .descendant(
-          of: find.byKey(ValueKey(tomorrow)),
-          matching: find.byType(BoardColumnHeader),
-        )
-        .first);
+    await tester.tap(headerOf(tomorrow));
     await tester.pumpAndSettle();
     expect(find.textContaining('Nový blok'), findsNothing);
   });
@@ -835,9 +834,16 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // Header line (with the venku marker) — and NOTHING else: the block
-    // card survives with all lanes free instead of a match band.
-    expect(find.textContaining('KK Slavoj (venku)'), findsOneWidget);
+    // Header line (times, NO house icon — that's the away marker) — and
+    // NOTHING else: the block card survives with all lanes free instead of
+    // a match band.
+    final headerLine = find.descendant(
+      of: headerOf(tomorrow),
+      matching: find.textContaining('KK Slavoj'),
+    );
+    expect(headerLine, findsOneWidget);
+    final lineText = tester.widget<Text>(headerLine).data!;
+    expect(lineText, 'KK Slavoj · 22:58–23:59');
     final cardInTomorrow = find.descendant(
       of: find.byKey(ValueKey(tomorrow)),
       matching: find.byKey(const ValueKey('cal-block-b1')),
@@ -869,18 +875,15 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    final header = find.descendant(
-      of: find.byKey(ValueKey(tomorrow)),
-      matching: find.byType(BoardColumnHeader),
-    );
+    final header = headerOf(tomorrow);
     for (final team in ['KK Slavoj', 'TJ Sokol', 'KK Vracov']) {
       expect(
         find.descendant(of: header, matching: find.textContaining(team)),
         findsOneWidget,
       );
     }
-    // The busiest day dictates a taller header for EVERY column (shared
-    // geometry with the ruler): base 56 + one extra 13px line.
+    // The busiest day dictates a taller header for EVERY column: base 56 +
+    // one extra 13px line.
     expect(tester.getSize(header).height, 56.0 + 13.0);
   });
 
@@ -912,10 +915,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    final header = find.descendant(
-      of: find.byKey(ValueKey(tomorrow)),
-      matching: find.byType(BoardColumnHeader),
-    );
+    final header = headerOf(tomorrow);
     expect(
       find.descendant(of: header, matching: find.textContaining('KK Slavoj')),
       findsOneWidget,

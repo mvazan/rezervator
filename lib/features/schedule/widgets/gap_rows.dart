@@ -109,9 +109,9 @@ class GapEventBanner extends StatelessWidget {
     };
     return Container(
       constraints: const BoxConstraints(minHeight: 36),
-      // Bottom matches the lane rows' own 10px bottom padding, so a banner
+      // Bottom matches the lane rows' own 8px bottom padding, so a banner
       // and the block row under it don't visually fuse.
-      margin: EdgeInsets.only(top: 3, bottom: compact ? 3 : 10),
+      margin: EdgeInsets.only(top: 3, bottom: compact ? 3 : 8),
       alignment: Alignment.center,
       decoration: BoxDecoration(
         color: background,
