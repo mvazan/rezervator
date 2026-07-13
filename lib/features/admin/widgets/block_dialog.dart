@@ -6,6 +6,7 @@ import '../../../data/providers.dart';
 import '../../../domain/models.dart';
 import '../../../domain/schedule.dart' show timesOverlap;
 import 'move_reservations_dialog.dart';
+import 'notify_choice_dialog.dart';
 
 /// If deactivating [blockId] would strand future live reservations
 /// (invisible, uncancellable from the grid), asks the admin to confirm.
@@ -355,6 +356,11 @@ class _BlockDialogState extends State<BlockDialog> {
       if (mounted) setState(() => _saving = false);
     }
 
+    // Phase 3: the admin's notification choice for sign-ups that MOVE with
+    // the edit (picked in the pre-checks below, consumed by both
+    // moveDayReservations calls).
+    NotifyChoice? moveNotify;
+
     // Dissolve: editing a day-special so it EXACTLY copies an active
     // template block hands the day back to that block — its reservations
     // move over silently and the special vanishes from the override.
@@ -511,6 +517,29 @@ class _BlockDialogState extends State<BlockDialog> {
         bail();
         return;
       }
+
+      // Phase 3: the edited block's own sign-ups MOVE to the new times —
+      // the admin chooses whether (and with what wording) to ping them.
+      if (existing != null) {
+        final movingRows = reservations
+            .where((r) => r.date == date && r.blockId == existing.id)
+            .length;
+        if (movingRows > 0) {
+          moveNotify = await showNotifyChoiceDialog(
+            context,
+            title: 'Upozornit na přesun?',
+            summary: movingRows == 1
+                ? 'Hráč dostane zprávu o novém čase '
+                    '${start.display()}–${end.display()}.'
+                : '$movingRows hráčů dostane zprávu o novém čase '
+                    '${start.display()}–${end.display()}.',
+          );
+          if (moveNotify == null || !mounted) {
+            bail();
+            return;
+          }
+        }
+      }
     } else {
       // Global mode: a weekly block overlapping another would silently
       // stack on every training day.
@@ -562,7 +591,9 @@ class _BlockDialogState extends State<BlockDialog> {
                 widget.dayContext!, dissolveTwin.id);
           }
           await Api.moveDayReservations(
-              widget.dayContext!, existing!.id, dissolveTwin.id);
+              widget.dayContext!, existing!.id, dissolveTwin.id,
+              notify: moveNotify?.notify ?? true,
+              message: moveNotify?.message);
           final seen = <String>{};
           final ids = [
             for (final id in widget.dayBaseIds!)
@@ -622,7 +653,9 @@ class _BlockDialogState extends State<BlockDialog> {
           // 1:1 — the fresh special has no rows). Editing a training's
           // time must not throw its players away.
           await Api.moveDayReservations(
-              widget.dayContext!, existing.id, specialId);
+              widget.dayContext!, existing.id, specialId,
+              notify: moveNotify?.notify ?? true,
+              message: moveNotify?.message);
         }
         final base = widget.dayBaseIds!;
         final ids = existing == null

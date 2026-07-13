@@ -202,7 +202,8 @@ void main() {
     expect(find.byType(DropdownButtonFormField<String>), findsOneWidget);
   });
 
-  testWidgets('admin tap on foreign reservation opens the note prompt', (
+  testWidgets('admin tap on foreign reservation opens the cancel dialog with '
+      'the notify choice', (
     tester,
   ) async {
     wideSurface(tester);
@@ -214,7 +215,9 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Péťa').first);
     await tester.pumpAndSettle();
-    expect(find.text('Zrušit rezervaci — poznámka'), findsOneWidget);
+    expect(find.text('Zrušit rezervaci'), findsOneWidget);
+    expect(find.text('Zrušit a poslat zprávu'), findsOneWidget);
+    expect(find.text('Zrušit bez zprávy'), findsOneWidget);
   });
 
   testWidgets('non-admin tap on foreign reservation stays inert', (
