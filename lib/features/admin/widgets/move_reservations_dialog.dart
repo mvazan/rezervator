@@ -123,6 +123,13 @@ class _MoveReservationsDialogState
                     'Rušený blok ${widget.fromBlock.label}',
                     style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
+                  Text(
+                    'Podrž rezervaci a přetáhni ji na novou dráhu.',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
                   const SizedBox(height: 8),
                   Expanded(
                     child: ListView(
@@ -130,10 +137,19 @@ class _MoveReservationsDialogState
                         for (final r in unmoved)
                           Padding(
                             padding: const EdgeInsets.only(bottom: 4),
-                            child: Draggable<Reservation>(
+                            // LongPressDraggable, not Draggable: inside a
+                            // scrollable, an immediate drag loses the
+                            // gesture arena to the list scroll on touch —
+                            // the chip "springs back" the moment it's
+                            // grabbed. A short hold hands the gesture to
+                            // the drag cleanly on touch AND mouse.
+                            child: LongPressDraggable<Reservation>(
                               data: r,
+                              delay: const Duration(milliseconds: 150),
                               feedback: Material(
                                 color: Colors.transparent,
+                                elevation: 4,
+                                borderRadius: BorderRadius.circular(8),
                                 child: chip(r),
                               ),
                               childWhenDragging: Opacity(
