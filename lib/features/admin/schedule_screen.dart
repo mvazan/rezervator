@@ -184,7 +184,15 @@ class _ScheduleAdminScreenState extends ConsumerState<ScheduleAdminScreen> {
     }
 
     final settingsAsync = ref.watch(settingsProvider);
-    final blocks = ref.watch(timeBlocksProvider).value ?? const <TimeBlock>[];
+    // position < 0 marks day-scoped "special" blocks (calendar edits) —
+    // they belong to day overrides, not the weekly template, so the Rozvrh
+    // list hides them (activating or globally editing one would silently
+    // mutate the days referencing it).
+    final blocks = [
+      for (final b
+          in ref.watch(timeBlocksProvider).value ?? const <TimeBlock>[])
+        if (b.position >= 0) b,
+    ];
 
     return Scaffold(
       appBar: AppBar(title: const Text('Rozvrh')),

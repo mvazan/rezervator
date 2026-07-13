@@ -63,11 +63,17 @@ class HourRuler extends StatelessWidget {
     final hourPx = pxPerMinute * 60;
     final step = hourPx >= 26 ? 1 : (hourPx >= 13 ? 2 : 3);
     final showHalves = halfHourMarks && step == 1 && hourPx >= 28;
+    final firstHour = (window.startMinute + 59) ~/ 60;
     final labels = <Widget>[];
     for (var m = window.startMinute; m <= window.endMinute; m += 30) {
       final isHour = m % 60 == 0;
-      if (isHour && (m ~/ 60) % step != 0) continue;
-      if (!isHour && !showHalves) continue;
+      // Step is anchored to the window's first full hour so the top of the
+      // window always gets a label even when thinning.
+      if (isHour && (m ~/ 60 - firstHour) % step != 0) continue;
+      // A window starting on :30 labels its top edge even without the
+      // half-hour marks (an event can stretch the window to :30 while every
+      // block stays hour-aligned).
+      if (!isHour && !showHalves && m != window.startMinute) continue;
       labels.add(Positioned(
         top: (m - window.startMinute) * pxPerMinute - 6,
         right: 6,

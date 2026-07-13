@@ -770,4 +770,50 @@ void main() {
     expect(find.textContaining('· 23:30–23:59'), findsWidgets);
     expect(find.textContaining('🛠 od'), findsNothing);
   });
+
+  testWidgets('past days refuse calendar edits — long-press shows a snack, '
+      'no dialog (history must not be rewritten)', (tester) async {
+    wideSurface(tester);
+    await tester.pumpWidget(app(profile: admin));
+    await tester.pumpAndSettle();
+
+    // Go one week back: every visible day is strictly before today.
+    await tester.tap(find.byIcon(Icons.chevron_left));
+    await tester.pumpAndSettle();
+
+    await tester.longPress(find.byKey(const ValueKey('cal-block-b1')).first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Minulé dny nelze upravovat.'), findsOneWidget);
+    expect(find.textContaining('Upravit blok'), findsNothing);
+  });
+
+  testWidgets('tapping a closed day asks before REOPENING it; declining '
+      'opens nothing', (tester) async {
+    wideSurface(tester);
+    await tester.pumpWidget(app(
+      profile: admin,
+      overrides: [
+        DayOverride(date: tomorrow, closed: true, reason: 'dovolená'),
+      ],
+    ));
+    await tester.pumpAndSettle();
+
+    const pxPerMinute = 2 * 40.0 / 60;
+    final column = find.descendant(
+      of: find.byKey(ValueKey(tomorrow)),
+      matching: find.byType(CalendarColumn),
+    );
+    // The closed column is empty everywhere — tap mid-window.
+    await tester.tapAt(
+      tester.getTopLeft(column) + Offset(40, 30 * pxPerMinute),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Den je zavřený'), findsOneWidget);
+    expect(find.textContaining('dovolená'), findsWidgets);
+    await tester.tap(find.text('Zrušit'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Nový blok'), findsNothing);
+  });
 }

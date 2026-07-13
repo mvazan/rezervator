@@ -291,15 +291,18 @@ class Api {
 
   /// Inserts an INACTIVE "special" block and returns its id — day-scoped
   /// calendar edits point a day override at it while the weekly template
-  /// ignores it (active=false).
+  /// ignores it. `active=false` keeps it out of the weekly schedule;
+  /// `position=-1` is the SPECIAL sentinel: the Rozvrh list hides such rows
+  /// and the find-or-create reuse pool only matches them (never a
+  /// deactivated template block that happens to share the times).
   static Future<String> addSpecialBlock(
-      HourMinute startsAt, HourMinute endsAt, int position) async {
+      HourMinute startsAt, HourMinute endsAt) async {
     final row = await _db
         .from('time_blocks')
         .insert({
           'starts_at': startsAt.toSql(),
           'ends_at': endsAt.toSql(),
-          'position': position,
+          'position': -1,
           'active': false,
         })
         .select('id')

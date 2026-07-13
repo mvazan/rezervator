@@ -71,6 +71,9 @@ void main() {
     await tester.pumpWidget(app(BlockDialog(
       existing: b2,
       blocks: const [b1, b2],
+      // Changed times (prefill wins over b2's own): 17:00-18:00 → 17:30-18:30.
+      initialStart: const HourMinute(17, 30),
+      initialEnd: const HourMinute(18, 30),
       dayContext: thursday,
       dayBaseIds: const ['b1', 'b2'],
       dayRenderedBlocks: const [b1, b2],
@@ -87,8 +90,9 @@ void main() {
     );
     final insertBody = jsonDecode(insert.body) as Map<String, dynamic>;
     expect(insertBody['active'], false);
-    expect(insertBody['starts_at'], '17:00:00');
-    expect(insertBody['ends_at'], '18:00:00');
+    expect(insertBody['position'], -1);
+    expect(insertBody['starts_at'], '17:30:00');
+    expect(insertBody['ends_at'], '18:30:00');
 
     // 2) The override RPC: b2 replaced by the special block, b1 kept.
     final rpc = requests.firstWhere(
@@ -108,18 +112,31 @@ void main() {
   });
 
   testWidgets(
-      'an existing inactive special with the same times is REUSED — no new '
-      'insert', (tester) async {
+      'an existing inactive SPECIAL (position -1) with the same times is '
+      'REUSED — no new insert; a deactivated template block never is', (
+    tester,
+  ) async {
     const special = TimeBlock(
       id: 'sb-existing',
-      startsAt: HourMinute(17, 0),
-      endsAt: HourMinute(18, 0),
-      position: 7,
+      startsAt: HourMinute(18, 0),
+      endsAt: HourMinute(19, 0),
+      position: -1, // the SPECIAL sentinel — only these are reused
+      active: false,
+    );
+    // Same times, but a deactivated TEMPLATE block (position >= 0): must
+    // NOT be grabbed — it belongs to the weekly template's history.
+    const retired = TimeBlock(
+      id: 'retired',
+      startsAt: HourMinute(18, 0),
+      endsAt: HourMinute(19, 0),
+      position: 3,
       active: false,
     );
     await tester.pumpWidget(app(BlockDialog(
-      existing: b2,
-      blocks: const [b1, b2, special],
+      existing: null,
+      blocks: const [b1, b2, retired, special],
+      initialStart: const HourMinute(18, 0),
+      initialEnd: const HourMinute(19, 0),
       dayContext: thursday,
       dayBaseIds: const ['b1', 'b2'],
       dayRenderedBlocks: const [b1, b2],
@@ -137,7 +154,54 @@ void main() {
     final rpc = requests.firstWhere(
       (r) => r.method == 'POST' && r.url.path.contains('set_day_override'),
     );
-    expect((jsonDecode(rpc.body) as Map)['p_block_ids'], ['b1', 'sb-existing']);
+    expect((jsonDecode(rpc.body) as Map)['p_block_ids'],
+        ['b1', 'b2', 'sb-existing']);
+  });
+
+  testWidgets('unchanged times on a block the day already uses is a NO-OP: '
+      'the dialog closes without any write', (tester) async {
+    await tester.pumpWidget(app(BlockDialog(
+      existing: b2,
+      blocks: const [b1, b2],
+      dayContext: thursday,
+      dayBaseIds: const ['b1', 'b2'],
+      dayRenderedBlocks: const [b1, b2],
+    )));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Uložit'));
+    await tester.pumpAndSettle();
+
+    expect(requests, isEmpty);
+    expect(find.byType(BlockDialog), findsNothing); // popped
+  });
+
+  testWidgets('a hidden BASE block overlapping the new times triggers the '
+      'skrytý blok warning', (tester) async {
+    // b2 is in the base but NOT rendered (a match cancelled it); the new
+    // block 17:00-18:00 collides with it once the match disappears.
+    await tester.pumpWidget(app(BlockDialog(
+      existing: null,
+      blocks: const [b1, b2],
+      initialStart: const HourMinute(17, 0),
+      initialEnd: const HourMinute(18, 0),
+      dayContext: thursday,
+      dayBaseIds: const ['b1', 'b2'],
+      dayRenderedBlocks: const [b1],
+    )));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Uložit'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Pozor — skrytý blok'), findsOneWidget);
+    // Decline: nothing was written.
+    await tester.tap(find.text('Zrušit').last);
+    await tester.pumpAndSettle();
+    expect(
+      requests.any((r) => r.url.path.contains('set_day_override')),
+      isFalse,
+    );
   });
 
   testWidgets('Odebrat v tento den drops only this block from the override', (

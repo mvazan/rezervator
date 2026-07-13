@@ -88,8 +88,10 @@ class _BlockDialogState extends State<BlockDialog> {
   @override
   void initState() {
     super.initState();
-    _start = widget.existing?.startsAt ?? widget.initialStart;
-    _end = widget.existing?.endsAt ?? widget.initialEnd;
+    // Explicit prefill wins over the existing block's times (callers only
+    // pass both when they mean it — e.g. tests driving a changed edit).
+    _start = widget.initialStart ?? widget.existing?.startsAt;
+    _end = widget.initialEnd ?? widget.existing?.endsAt;
   }
 
   Future<void> _pickStart() async {
@@ -107,21 +109,25 @@ class _BlockDialogState extends State<BlockDialog> {
       : widget.blocks.map((b) => b.position).reduce((a, b) => a > b ? a : b) +
           1;
 
-  /// Day-scoped: reservations on [blockId] on exactly [date] get cancelled
-  /// by the override RPC — confirm when any exist.
-  Future<bool> _confirmDayCancellations(Day date, String blockId) async {
+  /// Day-scoped: the override RPC cancels EVERY live reservation on [date]
+  /// whose block is NOT in the new id list — mirror exactly that predicate
+  /// (not just the edited block: a stranded reservation on a long-
+  /// deactivated block gets swept too) and confirm when any would go.
+  Future<bool> _confirmDayCancellations(Day date, Set<String> keptIds) async {
     final reservations = await Api.futureLiveReservations(today());
     final hit = reservations
-        .where((r) => r.date == date && r.blockId == blockId)
+        .where((r) => r.date == date && !keptIds.contains(r.blockId))
         .length;
     if (hit == 0) return true;
     if (!mounted) return false;
+    // The RPC uses the override reason as the cancel note when present.
+    final note =
+        widget.dayReason.trim().isEmpty ? 'změna rozvrhu' : widget.dayReason;
     return confirmDialog(
       context,
       title: 'Pozor — rezervace budou zrušeny',
-      message:
-          '$hit rezervací na tomto bloku (${dayFull(date)}) bude zrušeno se '
-          'zprávou „změna rozvrhu". Pokračovat?',
+      message: '$hit rezervací (${dayFull(date)}) bude zrušeno se '
+          'zprávou „$note". Pokračovat?',
       confirmLabel: 'Pokračovat',
     );
   }
@@ -130,12 +136,16 @@ class _BlockDialogState extends State<BlockDialog> {
   Future<void> _removeForDay() async {
     final existing = widget.existing!;
     final date = widget.dayContext!;
-    final ok = await _confirmDayCancellations(date, existing.id);
-    if (!ok || !mounted) return;
     final ids = [
       for (final id in widget.dayBaseIds!)
         if (id != existing.id) id,
     ];
+    setState(() => _saving = true);
+    final ok = await _confirmDayCancellations(date, ids.toSet());
+    if (!ok || !mounted) {
+      if (mounted) setState(() => _saving = false);
+      return;
+    }
     final done = await tryAction(
       context,
       () => Api.setDayOverride(
@@ -147,7 +157,12 @@ class _BlockDialogState extends State<BlockDialog> {
       success: 'Blok odebrán (jen tento den).',
       errorText: friendlyDbError,
     );
-    if (done && mounted) Navigator.of(context).pop();
+    if (!mounted) return;
+    if (done) {
+      Navigator.of(context).pop();
+    } else {
+      setState(() => _saving = false);
+    }
   }
 
   Future<void> _deactivateGlobal() async {
@@ -174,6 +189,25 @@ class _BlockDialogState extends State<BlockDialog> {
       snack(context, 'Konec musí být po začátku.');
       return;
     }
+    final existing = widget.existing;
+    // Day-mode no-op: unchanged times on a block the day already uses must
+    // not fork the day into an override (and cancel its reservations for a
+    // pixel-identical schedule) — just close.
+    if (_dayMode &&
+        existing != null &&
+        start == existing.startsAt &&
+        end == existing.endsAt &&
+        widget.dayBaseIds!.contains(existing.id)) {
+      Navigator.of(context).pop();
+      return;
+    }
+    setState(() => _saving = true);
+    // Everything below awaits — the flag above keeps both action buttons
+    // disabled for the whole flight (confirms included).
+    void bail() {
+      if (mounted) setState(() => _saving = false);
+    }
+
     // Overlap warning: in day mode against the day's rendered blocks (a
     // block cancelled by a match isn't a visible conflict); in global mode
     // against every active weekly block — that one would silently overlap
@@ -186,7 +220,7 @@ class _BlockDialogState extends State<BlockDialog> {
           ];
     final overlapping = [
       for (final b in warnPool)
-        if (b.id != widget.existing?.id &&
+        if (b.id != existing?.id &&
             timesOverlap(start, end, b.startsAt, b.endsAt))
           b,
     ];
@@ -203,17 +237,55 @@ class _BlockDialogState extends State<BlockDialog> {
                 'kalendář (podržení bloku v daném dni). Opravdu uložit?',
         confirmLabel: 'Uložit i tak',
       );
-      if (!proceed || !mounted) return;
+      if (!proceed || !mounted) {
+        bail();
+        return;
+      }
     }
 
-    if (_dayMode && widget.existing != null) {
-      final ok =
-          await _confirmDayCancellations(widget.dayContext!, widget.existing!.id);
-      if (!ok || !mounted) return;
+    if (_dayMode) {
+      // A hidden BASE block (match-cancelled today, so not rendered) that
+      // overlaps the new times resurfaces the moment the match is deleted —
+      // warn so the admin doesn't build tomorrow's double-booking.
+      final renderedIds = {for (final b in widget.dayRenderedBlocks!) b.id};
+      final hiddenOverlaps = [
+        for (final id in widget.dayBaseIds!)
+          if (!renderedIds.contains(id) && id != existing?.id)
+            for (final b in widget.blocks)
+              if (b.id == id && timesOverlap(start, end, b.startsAt, b.endsAt))
+                b,
+      ];
+      if (hiddenOverlaps.isNotEmpty) {
+        final proceed = await confirmDialog(
+          context,
+          title: 'Pozor — skrytý blok',
+          message: 'V tomto čase je blok '
+              '${hiddenOverlaps.map((b) => b.label).join(', ')}, teď skrytý '
+              'prioritním slotem. Až slot zmizí, bloky se budou překrývat. '
+              'Opravdu uložit?',
+          confirmLabel: 'Uložit i tak',
+        );
+        if (!proceed || !mounted) {
+        bail();
+        return;
+      }
+      }
+
+      // Confirm using the RPC's exact cancellation predicate: everything on
+      // the date OUTSIDE the kept ids goes (the new special has no
+      // reservations, so it needn't be in the set). Runs for the add path
+      // too — adding a block still sweeps stranded reservations.
+      final keptIds = {
+        for (final id in widget.dayBaseIds!)
+          if (id != existing?.id) id,
+      };
+      final ok = await _confirmDayCancellations(widget.dayContext!, keptIds);
+      if (!ok || !mounted) {
+        bail();
+        return;
+      }
     }
 
-    setState(() => _saving = true);
-    final existing = widget.existing;
     final ok = await tryAction(
       context,
       () async {
@@ -226,17 +298,21 @@ class _BlockDialogState extends State<BlockDialog> {
           return;
         }
         // Day-scoped: find-or-create the special block, swap it into the
-        // day's override.
+        // day's override. The reuse pool is ONLY sentinel specials
+        // (position < 0) — a deactivated template block sharing the times
+        // must never get re-coupled to a day override.
         TimeBlock? special;
         for (final b in widget.blocks) {
-          if (!b.active && b.startsAt == start && b.endsAt == end) {
+          if (!b.active &&
+              b.position < 0 &&
+              b.startsAt == start &&
+              b.endsAt == end) {
             special = b;
             break;
           }
         }
-        final specialId = special?.id ??
-            await Api.addSpecialBlock(
-                start, end, existing?.position ?? _nextPosition);
+        final specialId =
+            special?.id ?? await Api.addSpecialBlock(start, end);
         final base = widget.dayBaseIds!;
         final ids = existing == null
             ? [...base, specialId]

@@ -395,6 +395,9 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
 
     // The day's PRE-cancellation block ids (existing override selection or
     // the active weekly template) — what the new override is composed from.
+    // A day that renders CLOSED (override or non-training weekday) starts
+    // from an empty base: adding a block there opens the day with exactly
+    // that block, never with the whole weekly template in tow.
     List<String> dayBaseIds(Day date) {
       final o = overrideByDate[date];
       if (o != null && !o.closed && o.blockIds != null) {
@@ -403,7 +406,7 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
             if (blockById.containsKey(id)) id,
         ];
       }
-      if (o != null && o.closed) return const [];
+      if (week.days[date.weekday - 1] is ClosedDay) return const [];
       return [
         for (final b in dbBlocks)
           if (b.active) b.id,
@@ -417,8 +420,18 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
       return day is OpenDay && day.date == date ? day.blocks : const [];
     }
 
+    // Past days are history: set_day_override would cancel their (already
+    // played) reservations and corrupt attendance — the gestures refuse.
+    bool guardPast(Day date) {
+      if (!date.isBefore(todayDay)) return false;
+      snack(context, 'Minulé dny nelze upravovat.');
+      return true;
+    }
+
     final onLongPressBlock = canEditBlocks
-        ? (Day date, TimeBlock block) => showDialog<void>(
+        ? (Day date, TimeBlock block) {
+            if (guardPast(date)) return;
+            showDialog<void>(
               context: context,
               builder: (_) => BlockDialog(
                 existing: block,
@@ -428,10 +441,30 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
                 dayRenderedBlocks: dayRendered(date),
                 dayReason: overrideByDate[date]?.reason ?? '',
               ),
-            )
+            );
+          }
         : null;
     final onAddBlockInGap = canEditBlocks
-        ? (Day date, HourMinute start, HourMinute end) => showDialog<void>(
+        ? (Day date, HourMinute start, HourMinute end) async {
+            if (guardPast(date)) return;
+            // Adding a block into a CLOSED day reopens it — that's a bigger
+            // decision than the dialog title suggests, so say it out loud.
+            if (week.days[date.weekday - 1] is ClosedDay) {
+              final reason = overrideByDate[date]?.reason ?? '';
+              final proceed = await confirmDialog(
+                context,
+                title: 'Den je zavřený',
+                message: reason.isEmpty
+                    ? '${dayFull(date)} je zavřeno. Přidáním bloku den '
+                        'otevřeš. Pokračovat?'
+                    : '${dayFull(date)} je zavřeno („$reason"). Přidáním '
+                        'bloku den otevřeš. Pokračovat?',
+                confirmLabel: 'Otevřít den',
+              );
+              if (!proceed || !context.mounted) return;
+            }
+            if (!context.mounted) return;
+            await showDialog<void>(
               context: context,
               builder: (_) => BlockDialog(
                 existing: null,
@@ -443,7 +476,8 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
                 dayRenderedBlocks: dayRendered(date),
                 dayReason: overrideByDate[date]?.reason ?? '',
               ),
-            )
+            );
+          }
         : null;
 
     return Column(
