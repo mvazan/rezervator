@@ -126,24 +126,25 @@ void main() {
     expect(find.text('Dráha 1 — Olga Malá'), findsOneWidget);
     expect(find.text('Dráha 2 — volná'), findsOneWidget);
 
+    // The chips are LongPressDraggable (scroll-safe on touch): hold, then
+    // move.
+    Future<void> longPressDrag(Finder from, Finder to) async {
+      final gesture = await tester.startGesture(tester.getCenter(from));
+      await tester.pump(const Duration(milliseconds: 250)); // > delay
+      await gesture.moveTo(tester.getCenter(to));
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+    }
+
     // A drop onto the OCCUPIED lane 1 is refused — nothing stages.
     final chip = find.text('Péťa · D1');
-    await tester.drag(
-      chip,
-      tester.getCenter(find.text('Dráha 1 — Olga Malá')) -
-          tester.getCenter(chip),
-    );
-    await tester.pumpAndSettle();
+    await longPressDrag(chip, find.text('Dráha 1 — Olga Malá'));
     expect(find.textContaining('(přesun)'), findsNothing);
     expect(find.text('Vše přesunuto.'), findsNothing);
 
     // Drag Péťa's chip onto the free lane 2.
-    final freeLane = find.text('Dráha 2 — volná');
-    await tester.drag(
-      chip,
-      tester.getCenter(freeLane) - tester.getCenter(chip),
-    );
-    await tester.pumpAndSettle();
+    await longPressDrag(chip, find.text('Dráha 2 — volná'));
     expect(find.textContaining('Péťa (přesun)'), findsOneWidget);
     expect(find.text('Vše přesunuto.'), findsOneWidget);
 
