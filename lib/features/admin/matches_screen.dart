@@ -75,7 +75,7 @@ class MatchesScreen extends ConsumerWidget {
                             icon: const Icon(Icons.edit_outlined),
                             onPressed: () => showDialog<void>(
                               context: context,
-                              builder: (_) => _SlotDialog(
+                              builder: (_) => MatchDialog(
                                   existing: slot, types: types),
                             ),
                           ),
@@ -92,7 +92,7 @@ class MatchesScreen extends ConsumerWidget {
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => showDialog<void>(
           context: context,
-          builder: (_) => _SlotDialog(types: types),
+          builder: (_) => MatchDialog(types: types),
         ),
         icon: const Icon(Icons.add),
         label: const Text('Přidat zápas'),
@@ -108,17 +108,17 @@ const _prepPresets = [0, 30, 60];
 /// Add/edit dialog for a MATCH: date + two time pickers (end defaults to
 /// start + 3h), teams, and the úklid duration (the server maintains the
 /// linked child slot from it).
-class _SlotDialog extends StatefulWidget {
-  const _SlotDialog({this.existing, required this.types});
+class MatchDialog extends StatefulWidget {
+  const MatchDialog({super.key, this.existing, required this.types});
 
   final PrioritySlot? existing;
   final List<PrioritySlotType> types;
 
   @override
-  State<_SlotDialog> createState() => _SlotDialogState();
+  State<MatchDialog> createState() => _MatchDialogState();
 }
 
-class _SlotDialogState extends State<_SlotDialog> {
+class _MatchDialogState extends State<MatchDialog> {
   Day? _date;
   HourMinute? _start;
   HourMinute? _end;

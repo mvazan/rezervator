@@ -15,18 +15,25 @@ import 'widgets/admin_body.dart';
 class OverridesScreen extends ConsumerWidget {
   const OverridesScreen({super.key});
 
-  Future<void> _delete(BuildContext context, DayOverride override) async {
+  Future<void> _deleteRun(
+      BuildContext context, List<DayOverride> run) async {
     final confirmed = await confirmDialog(
       context,
       title: 'Smazat výjimku?',
-      message: 'Den se vrátí k týdennímu pravidlu.',
+      message: run.length == 1
+          ? 'Den se vrátí k týdennímu pravidlu.'
+          : '${run.length} dní se vrátí k týdennímu pravidlu.',
     );
     if (!confirmed) return;
     if (!context.mounted) return;
 
     await tryAction(
       context,
-      () => Api.deleteDayOverride(override.date),
+      () async {
+        for (final o in run) {
+          await Api.deleteDayOverride(o.date);
+        }
+      },
       errorText: friendlyDbError,
     );
   }
@@ -142,12 +149,32 @@ class OverridesScreen extends ConsumerWidget {
     final past = closures.where((o) => o.date.isBefore(now)).toList()
       ..sort((a, b) => b.date.compareTo(a.date));
 
-    Widget tile(DayOverride override) => ListTile(
-          title: Text(dayFull(override.date)),
-          subtitle: Text('Zavřeno — ${override.reason}'),
+    // Consecutive same-reason closures (e.g. a week of dovolená) fold into
+    // one range tile; deleting it removes every day of the run.
+    List<List<DayOverride>> runsOf(List<DayOverride> list) {
+      final sorted = [...list]..sort((a, b) => a.date.compareTo(b.date));
+      final runs = <List<DayOverride>>[];
+      for (final o in sorted) {
+        if (runs.isNotEmpty &&
+            runs.last.last.date.addDays(1) == o.date &&
+            runs.last.last.reason == o.reason) {
+          runs.last.add(o);
+        } else {
+          runs.add([o]);
+        }
+      }
+      return runs;
+    }
+
+    Widget tile(List<DayOverride> run) => ListTile(
+          title: Text(run.length == 1
+              ? dayFull(run.first.date)
+              : '${dayFull(run.first.date)} – ${dayFull(run.last.date)}'),
+          subtitle: Text('Zavřeno — ${run.first.reason}'
+              '${run.length > 1 ? ' (${run.length} dní)' : ''}'),
           trailing: IconButton(
             icon: const Icon(Icons.delete_outline),
-            onPressed: () => _delete(context, override),
+            onPressed: () => _deleteRun(context, run),
           ),
         );
 
@@ -232,11 +259,11 @@ class OverridesScreen extends ConsumerWidget {
                       child: Text('Žádné nadcházející výjimky.'),
                     )
                   else
-                    for (final override in upcoming) tile(override),
+                    for (final run in runsOf(upcoming)) tile(run),
                   if (past.isNotEmpty)
                     ExpansionTile(
                       title: Text('Minulé (${past.length})'),
-                      children: [for (final override in past) tile(override)],
+                      children: [for (final run in runsOf(past)) tile(run)],
                     ),
                   if (forks.isNotEmpty) ...[
                     const Padding(
@@ -325,6 +352,7 @@ class _OverrideDialog extends ConsumerStatefulWidget {
 
 class _OverrideDialogState extends ConsumerState<_OverrideDialog> {
   Day? _date;
+  Day? _dateTo;
   final _reason = TextEditingController();
   bool _saving = false;
 
@@ -357,8 +385,23 @@ class _OverrideDialogState extends ConsumerState<_OverrideDialog> {
         .firstOrNull;
     setState(() {
       _date = date;
+      if (_dateTo != null && _dateTo!.isBefore(date)) _dateTo = null;
       _reason.text = existing?.reason ?? '';
     });
+  }
+
+  Future<void> _pickDateTo() async {
+    final from = _date ?? today();
+    final initial = _dateTo ?? from;
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime(initial.year, initial.month, initial.day),
+      firstDate: DateTime(from.year, from.month, from.day),
+      lastDate: DateTime(from.year, from.month, from.day)
+          .add(const Duration(days: 365)),
+      locale: const Locale('cs'),
+    );
+    if (picked != null) setState(() => _dateTo = Day.fromDateTime(picked));
   }
 
   Future<void> _save() async {
@@ -371,16 +414,32 @@ class _OverrideDialogState extends ConsumerState<_OverrideDialog> {
       snack(context, 'Vyplň důvod.');
       return;
     }
+    final to = _dateTo ?? date;
+    final span = to.differenceInDays(date);
+    if (span < 0) {
+      snack(context, '„Do" musí být po datu začátku.');
+      return;
+    }
+    if (span > 92) {
+      snack(context, 'Nejvýše 3 měsíce najednou.');
+      return;
+    }
 
     setState(() => _saving = true);
     final ok = await tryAction(
       context,
-      () => Api.setDayOverride(
-        date: date,
-        closed: true,
-        reason: _reason.text.trim(),
-        blockIds: null,
-      ),
+      () async {
+        // One override row per day — the list groups consecutive runs back
+        // into a single range tile.
+        for (var i = 0; i <= span; i++) {
+          await Api.setDayOverride(
+            date: date.addDays(i),
+            closed: true,
+            reason: _reason.text.trim(),
+            blockIds: null,
+          );
+        }
+      },
       success: 'Výjimka uložena. Kolidující rezervace byly zrušeny.',
       errorText: friendlyDbError,
     );
@@ -405,6 +464,27 @@ class _OverrideDialogState extends ConsumerState<_OverrideDialog> {
             title: const Text('Datum'),
             trailing: Text(_date == null ? 'Vybrat' : dayFull(_date!)),
             onTap: _pickDate,
+          ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Do (volitelně)'),
+            subtitle: _dateTo == null
+                ? const Text('Nevyplněno = jen jeden den',
+                    style: TextStyle(fontSize: 12))
+                : null,
+            trailing: _dateTo == null
+                ? const Text('Vybrat')
+                : Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(dayFull(_dateTo!)),
+                      IconButton(
+                        icon: const Icon(Icons.clear, size: 18),
+                        onPressed: () => setState(() => _dateTo = null),
+                      ),
+                    ],
+                  ),
+            onTap: _pickDateTo,
           ),
           TextField(
             controller: _reason,

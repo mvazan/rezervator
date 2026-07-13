@@ -6,7 +6,10 @@ import '../../core/ui.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
 import '../../domain/schedule.dart';
+import '../../domain/calendar_layout.dart' show hourMinuteAt;
+import '../admin/matches_screen.dart' show MatchDialog;
 import '../admin/widgets/block_dialog.dart';
+import '../admin/widgets/blockage_dialog.dart';
 import 'day_pager_view.dart';
 import 'week_calendar_view.dart';
 
@@ -430,7 +433,7 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
       return true;
     }
 
-    final onLongPressBlock = canEditBlocks
+    final onEditBlock = canEditBlocks
         ? (Day date, TimeBlock block) {
             if (guardPast(date)) return;
             showDialog<void>(
@@ -450,42 +453,148 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
             );
           }
         : null;
+    Future<void> openAdd(Day date,
+        {HourMinute? start, HourMinute? end}) async {
+      if (guardPast(date)) return;
+      // Adding a block into a CLOSED day reopens it — that's a bigger
+      // decision than the dialog title suggests, so say it out loud.
+      if (week.days[date.weekday - 1] is ClosedDay) {
+        final reason = overrideByDate[date]?.reason ?? '';
+        final proceed = await confirmDialog(
+          context,
+          title: 'Den je zavřený',
+          message: reason.isEmpty
+              ? '${dayFull(date)} je zavřeno. Přidáním bloku den '
+                  'otevřeš. Pokračovat?'
+              : '${dayFull(date)} je zavřeno („$reason"). Přidáním '
+                  'bloku den otevřeš. Pokračovat?',
+          confirmLabel: 'Otevřít den',
+        );
+        if (!proceed || !context.mounted) return;
+      }
+      if (!context.mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (_) => BlockDialog(
+          existing: null,
+          blocks: dbBlocks,
+          initialStart: start,
+          initialEnd: end,
+          dayContext: date,
+          dayBaseIds: dayBaseIds(date),
+          dayRenderedIds: dayRenderedIds(date),
+          dayHasOverride: overrideByDate[date] != null,
+          dayIsTraining: settings.trainingWeekdays.contains(date.weekday),
+          dayPriority: week.days[date.weekday - 1].priority,
+          dayReason: overrideByDate[date]?.reason ?? '',
+        ),
+      );
+    }
+
     final onAddBlockInGap = canEditBlocks
-        ? (Day date, HourMinute start, HourMinute end) async {
-            if (guardPast(date)) return;
-            // Adding a block into a CLOSED day reopens it — that's a bigger
-            // decision than the dialog title suggests, so say it out loud.
-            if (week.days[date.weekday - 1] is ClosedDay) {
-              final reason = overrideByDate[date]?.reason ?? '';
-              final proceed = await confirmDialog(
-                context,
-                title: 'Den je zavřený',
-                message: reason.isEmpty
-                    ? '${dayFull(date)} je zavřeno. Přidáním bloku den '
-                        'otevřeš. Pokračovat?'
-                    : '${dayFull(date)} je zavřeno („$reason"). Přidáním '
-                        'bloku den otevřeš. Pokračovat?',
-                confirmLabel: 'Otevřít den',
-              );
-              if (!proceed || !context.mounted) return;
+        ? (Day date, HourMinute start, HourMinute end) =>
+            openAdd(date, start: start, end: end)
+        : null;
+
+    // Header ＋: add a slot to a day whose column has no empty space left
+    // to tap — same dialog, times picked in the dialog.
+    final onAddForDay =
+        canEditBlocks ? (Day date) => openAdd(date) : null;
+
+    // Click on a blocking band = edit. An úklid child opens its parent
+    // match (it is auto-managed); matches open the match dialog, other
+    // blockages the blockage dialog.
+    final slotTypes = ref.watch(slotTypesProvider).value ?? const [];
+    final onEditPrioritySlot = canEditBlocks
+        ? (Day date, PrioritySlot slot) {
+            var target = slot;
+            if (slot.parentId != null) {
+              final parent =
+                  priority.where((m) => m.id == slot.parentId).firstOrNull;
+              if (parent == null) return;
+              target = parent;
             }
-            if (!context.mounted) return;
-            await showDialog<void>(
+            showDialog<void>(
               context: context,
-              builder: (_) => BlockDialog(
-                existing: null,
-                blocks: dbBlocks,
-                initialStart: start,
-                initialEnd: end,
-                dayContext: date,
-                dayBaseIds: dayBaseIds(date),
-                dayRenderedIds: dayRenderedIds(date),
-                dayHasOverride: overrideByDate[date] != null,
-                dayIsTraining:
-                    settings.trainingWeekdays.contains(date.weekday),
-                dayPriority: week.days[date.weekday - 1].priority,
-                dayReason: overrideByDate[date]?.reason ?? '',
+              builder: (_) => target.type.isMatch
+                  ? MatchDialog(existing: target, types: slotTypes)
+                  : BlockageDialog(existing: target, types: slotTypes),
+            );
+          }
+        : null;
+
+    // HOLD-drag moves. A training block moves day-scoped (its sign-ups
+    // travel along); a blocking slot just gets new times (the server drags
+    // a match's úklid child with it).
+    final onMoveBlock = canEditBlocks
+        ? (Day date, TimeBlock block, HourMinute newStart) async {
+            if (guardPast(date)) return;
+            final endMinutes =
+                newStart.minutesFromMidnight + block.durationMinutes;
+            if (endMinutes > 24 * 60 - 1) {
+              snack(context, 'Blok se nevejde do dne.');
+              return;
+            }
+            final newEnd = hourMinuteAt(endMinutes);
+            await tryAction(
+              context,
+              () async {
+                // Same day-scoped composition BlockDialog uses: sentinel
+                // special (reuse or insert), sign-ups travel, override swap.
+                TimeBlock? special;
+                for (final b in dbBlocks) {
+                  if (!b.active &&
+                      b.position < 0 &&
+                      b.startsAt == newStart &&
+                      b.endsAt == newEnd) {
+                    special = b;
+                    break;
+                  }
+                }
+                final specialId =
+                    special?.id ?? await Api.addSpecialBlock(newStart, newEnd);
+                await Api.moveDayReservations(date, block.id, specialId);
+                final base = dayBaseIds(date);
+                final ids = base.contains(block.id)
+                    ? [for (final id in base) id == block.id ? specialId : id]
+                    : [...base, specialId];
+                await Api.setDayOverride(
+                  date: date,
+                  closed: false,
+                  reason: overrideByDate[date]?.reason ?? '',
+                  blockIds: ids,
+                );
+              },
+              success: 'Přesunuto (jen tento den).',
+              errorText: friendlyDbError,
+            );
+          }
+        : null;
+    final onMovePrioritySlot = canEditBlocks
+        ? (Day date, PrioritySlot slot, HourMinute newStart) async {
+            if (guardPast(date)) return;
+            final dur = slot.endsAt.minutesFromMidnight -
+                slot.startsAt.minutesFromMidnight;
+            final endMinutes = newStart.minutesFromMidnight + dur;
+            if (endMinutes > 24 * 60 - 1) {
+              snack(context, 'Slot se nevejde do dne.');
+              return;
+            }
+            await tryAction(
+              context,
+              () => Api.savePrioritySlot(
+                id: slot.id,
+                date: date,
+                startsAt: newStart,
+                endsAt: hourMinuteAt(endMinutes),
+                typeId: slot.type.id,
+                homeTeam: slot.homeTeam,
+                awayTeam: slot.awayTeam,
+                prepMinutes: slot.prepMinutes,
+                description: slot.description,
               ),
+              success: 'Přesunuto.',
+              errorText: friendlyDbError,
             );
           }
         : null;
@@ -508,8 +617,12 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
                   fitWidth: fitWidth,
                   onBook: onBook,
                   onCancel: onCancel,
-                  onLongPressBlock: onLongPressBlock,
+                  onEditBlock: onEditBlock,
                   onAddBlockInGap: onAddBlockInGap,
+                  onAddForDay: onAddForDay,
+                  onEditPrioritySlot: onEditPrioritySlot,
+                  onMoveBlock: onMoveBlock,
+                  onMovePrioritySlot: onMovePrioritySlot,
                 )
               : DayPagerView(
                   week: week,
