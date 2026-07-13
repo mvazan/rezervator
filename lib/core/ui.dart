@@ -80,6 +80,7 @@ String friendlyDbError(Object error) {
     'date_past': 'Tenhle termín už je v minulosti.',
     'day_closed': 'V tento den je zavřeno.',
     'blocked_by_match': 'V tomhle čase se hraje zápas.',
+    'blocked_by_priority': 'V tomhle čase je dráha blokovaná.',
     'blocked_by_rental': 'Dráha je v tomhle čase pronajatá.',
     'too_late': 'Trénink už začal — rezervaci může zrušit jen správce.',
     'unknown_block': 'Tenhle blok už neplatí — mrkni na aktuální rozvrh.',
@@ -93,8 +94,15 @@ String friendlyDbError(Object error) {
   for (final entry in messages.entries) {
     if (raw.contains(entry.key)) return entry.value;
   }
-  // Email OTP verification failures (wrong/expired code from the e-mail).
+  // Offline / unreachable backend.
   final lower = raw.toLowerCase();
+  if (lower.contains('socketexception') ||
+      lower.contains('failed host lookup') ||
+      lower.contains('clientexception') ||
+      lower.contains('connection refused')) {
+    return 'Jsi offline — zkus to znovu po připojení.';
+  }
+  // Email OTP verification failures (wrong/expired code from the e-mail).
   if (lower.contains('otp') ||
       lower.contains('token has expired') ||
       lower.contains('invalid') && lower.contains('token')) {

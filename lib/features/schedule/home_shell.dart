@@ -12,6 +12,7 @@ class HomeShell extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final profile = ref.watch(myProfileProvider).value;
+    final offline = ref.watch(offlineProvider).value ?? false;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Rezervátor'),
@@ -33,7 +34,17 @@ class HomeShell extends ConsumerWidget {
           ),
         ],
       ),
-      body: const WeekScreen(),
+      body: Column(
+        children: [
+          if (offline)
+            MaterialBanner(
+              content: const Text('Offline — poslední známý stav'),
+              leading: const Icon(Icons.cloud_off_outlined),
+              actions: const [SizedBox.shrink()],
+            ),
+          const Expanded(child: WeekScreen()),
+        ],
+      ),
     );
   }
 }

@@ -60,7 +60,7 @@ class SlotTile extends StatelessWidget {
     final minHeight = _compact ? 44.0 : 56.0;
 
     switch (state) {
-      case MatchSlot(:final isPrep) when isPrep:
+      case PrioritySlotState(:final isPrep) when isPrep:
         // Cells covered only by the match's prep-time extension (not the
         // real match window) show the muted "lanes being prepped" banner
         // instead of the match banner — guests see the actual start time on
@@ -84,7 +84,7 @@ class SlotTile extends StatelessWidget {
             ),
           ),
         );
-      case MatchSlot():
+      case PrioritySlotState():
         return _shell(
           minHeight: minHeight,
           decoration: BoxDecoration(
@@ -267,7 +267,7 @@ Widget slotTileFor({
 }) {
   final state = day.slot(block.id, lane);
   switch (state) {
-    case MatchSlot():
+    case PrioritySlotState():
     case RentedSlot():
       return SlotTile(state: state, size: size);
     case ReservedSlot(:final reservation):

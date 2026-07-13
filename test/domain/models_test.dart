@@ -129,13 +129,14 @@ void main() {
   });
 
   group('Match', () {
-    Match match({
+    PrioritySlot match({
       String homeTeam = '',
       String awayTeam = 'KK Slavoj',
       int prepMinutes = 0,
       HourMinute startsAt = const HourMinute(16, 30),
     }) =>
-        Match(
+        PrioritySlot(
+          type: PrioritySlot.fallbackMatchType,
           id: 'm1',
           date: Day(2026, 7, 8),
           startsAt: startsAt,
@@ -173,7 +174,7 @@ void main() {
     });
 
     test('fromJson reads home_team/away_team/prep_minutes round-trip', () {
-      final m = Match.fromJson({
+      final m = PrioritySlot.fromJson(const {
         'id': 'm2',
         'date': '2026-07-08',
         'starts_at': '16:30:00',
@@ -182,7 +183,7 @@ void main() {
         'away_team': 'KK Slavoj',
         'prep_minutes': 30,
         'description': 'Liga',
-      });
+      }, const {});
       expect(m.homeTeam, 'Sokol Brno');
       expect(m.awayTeam, 'KK Slavoj');
       expect(m.prepMinutes, 30);
@@ -191,7 +192,7 @@ void main() {
     });
 
     test('fromJson defaults prep_minutes to 0 when absent', () {
-      final m = Match.fromJson({
+      final m = PrioritySlot.fromJson(const {
         'id': 'm3',
         'date': '2026-07-08',
         'starts_at': '16:30:00',
@@ -199,7 +200,7 @@ void main() {
         'home_team': '',
         'away_team': 'KK Slavoj',
         'description': '',
-      });
+      }, const {});
       expect(m.prepMinutes, 0);
     });
   });

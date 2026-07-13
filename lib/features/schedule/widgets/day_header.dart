@@ -12,13 +12,13 @@ class DayHeader extends StatelessWidget {
   const DayHeader({
     super.key,
     required this.date,
-    required this.matches,
+    required this.priority,
     this.chipLabel,
     this.closedReason,
   });
 
   final Day date;
-  final List<Match> matches;
+  final List<PrioritySlot> priority;
 
   /// Preformatted trailing chip text (e.g. 'N volných'); omitted when the
   /// day is closed and [closedReason] is used instead.
@@ -64,11 +64,11 @@ class DayHeader extends StatelessWidget {
               ),
           ],
         ),
-        for (final m in matches)
+        for (final m in priority)
           Padding(
             padding: const EdgeInsets.only(top: 6, left: 52),
             child: Text(
-              '🏆 ${m.title} · ${m.startsAt.display()}–${m.endsAt.display()}',
+              '${m.type.isMatch ? '🏆' : '⛔'} ${m.title} · ${m.startsAt.display()}–${m.endsAt.display()}',
               style: TextStyle(color: scheme.primary, fontSize: 13),
             ),
           ),

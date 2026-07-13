@@ -13,6 +13,7 @@ import '../../domain/models.dart';
 import '../../domain/schedule.dart';
 import 'widgets/day_chip_strip.dart';
 import 'widgets/day_header.dart';
+import 'widgets/gap_rows.dart';
 import 'widgets/slot_tile.dart';
 
 /// Real pages are indices 1..7 (Monday..Sunday of [week]); index 0 and 8 are
@@ -34,7 +35,7 @@ class DayPagerView extends StatefulWidget {
     required this.settings,
     required this.blocks,
     required this.overrides,
-    required this.matches,
+    required this.priority,
     required this.rentals,
     required this.me,
     required this.myCount,
@@ -45,6 +46,8 @@ class DayPagerView extends StatefulWidget {
     required this.fitWidth,
     required this.onBook,
     required this.onCancel,
+    this.onLongPressBlock,
+    this.onAddBlockInGap,
     required this.onSelectDay,
     required this.onShiftWeek,
   });
@@ -74,7 +77,7 @@ class DayPagerView extends StatefulWidget {
   /// completes and the shell's real [week] for the new offset arrives.
   final List<TimeBlock> blocks;
   final List<DayOverride> overrides;
-  final List<Match> matches;
+  final List<PrioritySlot> priority;
   final List<Rental> rentals;
 
   final Profile? me;
@@ -91,6 +94,11 @@ class DayPagerView extends StatefulWidget {
   /// share the full width (names ellipsis-clipped); see [_DayPage].
   final bool fitWidth;
   final void Function(Day, TimeBlock, int lane) onBook;
+
+  /// Admin-only (null otherwise): long-press a block label to edit it; tap
+  /// an empty gap to add a block prefilled with the gap's range.
+  final void Function(TimeBlock)? onLongPressBlock;
+  final void Function(HourMinute start, HourMinute end)? onAddBlockInGap;
   final void Function(Day, TimeBlock, Reservation, {required bool ownFuture})
   onCancel;
 
@@ -254,6 +262,8 @@ class _DayPagerViewState extends State<DayPagerView> {
               fitWidth: widget.fitWidth,
               onBook: widget.onBook,
               onCancel: widget.onCancel,
+              onLongPressBlock: widget.onLongPressBlock,
+              onAddBlockInGap: widget.onAddBlockInGap,
             ),
           ),
         ),
@@ -280,7 +290,7 @@ class _DayPagerViewState extends State<DayPagerView> {
       settings: widget.settings,
       blocks: widget.blocks,
       overrides: widget.overrides,
-      matches: widget.matches,
+      priority: widget.priority,
       rentals: widget.rentals,
       reservations: const [],
     );
@@ -303,6 +313,8 @@ class _DayPage extends StatelessWidget {
     required this.fitWidth,
     required this.onBook,
     required this.onCancel,
+    this.onLongPressBlock,
+    this.onAddBlockInGap,
   });
 
   final DaySchedule day;
@@ -317,6 +329,8 @@ class _DayPage extends StatelessWidget {
   /// See [DayPagerView.fitWidth].
   final bool fitWidth;
   final void Function(Day, TimeBlock, int lane) onBook;
+  final void Function(TimeBlock)? onLongPressBlock;
+  final void Function(HourMinute start, HourMinute end)? onAddBlockInGap;
   final void Function(Day, TimeBlock, Reservation, {required bool ownFuture})
   onCancel;
 
@@ -331,7 +345,7 @@ class _DayPage extends StatelessWidget {
               padding: const EdgeInsets.all(16),
               child: DayHeader(
                 date: day.date,
-                matches: day.matches,
+                priority: day.priority,
                 closedReason: reason,
               ),
             ),
@@ -368,7 +382,7 @@ class _DayPage extends StatelessWidget {
           children: [
             DayHeader(
               date: day.date,
-              matches: day.matches,
+              priority: day.priority,
               chipLabel: '$freeCount volných',
             ),
             const SizedBox(height: 12),
@@ -386,22 +400,24 @@ class _DayPage extends StatelessWidget {
             // with more lanes than fit scrolls all rows together.
             if (fitWidth)
               Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   _laneHeaderRow(day),
-                  for (final block in day.blocks) _laneRow(context, day, block),
+                  ..._dayRows(context, day),
                 ],
               )
             else
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _laneHeaderRow(day),
-                    for (final block in day.blocks)
-                      _laneRow(context, day, block),
-                  ],
+                child: SizedBox(
+                  width: _rowWidth(day.laneCount),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _laneHeaderRow(day),
+                      ..._dayRows(context, day),
+                    ],
+                  ),
                 ),
               ),
           ],
@@ -413,6 +429,58 @@ class _DayPage extends StatelessWidget {
   static const _laneLabelWidth = 64.0;
   static const _laneTileWidth = 96.0;
   static const _laneTileSpacing = 8.0;
+
+  /// Fixed row width in the horizontally-scrolling mode, so full-width gap
+  /// rows can match the lane grid exactly.
+  double _rowWidth(int laneCount) =>
+      _laneLabelWidth +
+      laneCount * _laneTileWidth +
+      (laneCount - 1) * _laneTileSpacing;
+
+  /// The block's time label; for admins it long-presses into the block
+  /// editor (a small edit glyph hints at the gesture).
+  Widget _blockLabel(BuildContext context, TimeBlock block) {
+    final label = Text(
+      block.label,
+      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+    );
+    if (onLongPressBlock == null) return label;
+    return InkWell(
+      onLongPress: () => onLongPressBlock!(block),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Flexible(child: label),
+          const SizedBox(width: 2),
+          Icon(
+            Icons.edit_outlined,
+            size: 12,
+            color: Theme.of(context)
+                .colorScheme
+                .onSurfaceVariant
+                .withValues(alpha: 0.4),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Block rows interleaved with off-block event banners and empty-gap rows,
+  /// in time order (see [dayGridItems]).
+  List<Widget> _dayRows(BuildContext context, OpenDay day) => [
+        for (final item in dayGridItems(day))
+          switch (item) {
+            BlockItem(:final block) => _laneRow(context, day, block),
+            EventItem(:final event) =>
+              GapEventBanner(event: event, compact: false),
+            final EmptyGapItem gap => EmptyGapRow(
+                item: gap,
+                onAdd: onAddBlockInGap == null
+                    ? null
+                    : () => onAddBlockInGap!(gap.start, gap.end),
+              ),
+          },
+      ];
 
   /// Wraps a lane cell so it either flexes to share the row's width
   /// (fit-width) or keeps its fixed 96px column plus inter-lane spacing.
@@ -473,13 +541,7 @@ class _DayPage extends StatelessWidget {
             width: _laneLabelWidth,
             child: Padding(
               padding: const EdgeInsets.only(top: 14),
-              child: Text(
-                block.label,
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
+              child: _blockLabel(context, block),
             ),
           ),
           for (var lane = 1; lane <= day.laneCount; lane++)

@@ -1,22 +1,25 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/ui.dart';
 import '../../core/widgets/auth_background.dart';
 import '../../data/providers.dart';
+import '../../domain/models.dart';
 
-/// First sign-in: pick a display name (and optionally a club). The very
-/// first user becomes an auto-approved admin; everyone else waits for
-/// admin approval.
-class RegisterScreen extends StatefulWidget {
+/// First sign-in: pick the alley (kuželna), a display name and optionally a
+/// club. The alley's first approved-less registrant becomes its admin;
+/// everyone else waits for that admin's approval.
+class RegisterScreen extends ConsumerStatefulWidget {
   const RegisterScreen({super.key});
 
   @override
-  State<RegisterScreen> createState() => _RegisterScreenState();
+  ConsumerState<RegisterScreen> createState() => _RegisterScreenState();
 }
 
-class _RegisterScreenState extends State<RegisterScreen> {
+class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   final _name = TextEditingController();
   final _club = TextEditingController();
+  String? _tenantId;
   bool _saving = false;
 
   @override
@@ -32,10 +35,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
       snack(context, 'Vyplň své jméno.');
       return;
     }
+    final tenantId = _tenantId;
+    if (tenantId == null) {
+      snack(context, 'Vyber kuželnu.');
+      return;
+    }
     setState(() => _saving = true);
     await tryAction(
       context,
-      () => Api.registerProfile(name, _club.text.trim()),
+      () => Api.registerProfile(name, _club.text.trim(), tenantId),
     );
     // AuthGate re-routes automatically via the profile stream.
     if (mounted) setState(() => _saving = false);
@@ -43,6 +51,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final tenants = ref.watch(tenantsProvider).value ?? const <Tenant>[];
+    // With exactly one alley (the common case) preselect it silently.
+    if (_tenantId == null && tenants.length == 1) {
+      _tenantId = tenants.single.id;
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Vítej v Rezervátoru'),
@@ -62,6 +76,20 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 style: Theme.of(context).textTheme.bodyLarge,
               ),
               const SizedBox(height: 24),
+              DropdownButtonFormField<String>(
+                initialValue: _tenantId,
+                decoration: const InputDecoration(
+                  labelText: 'Kuželna',
+                  border: OutlineInputBorder(),
+                ),
+                items: [
+                  for (final tenant in tenants)
+                    DropdownMenuItem(
+                        value: tenant.id, child: Text(tenant.name)),
+                ],
+                onChanged: (id) => setState(() => _tenantId = id),
+              ),
+              const SizedBox(height: 16),
               TextField(
                 controller: _name,
                 textCapitalization: TextCapitalization.words,

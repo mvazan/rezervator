@@ -8,6 +8,8 @@ library;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'cache.dart';
+
 import '../domain/models.dart';
 
 SupabaseClient get _db => Supabase.instance.client;
@@ -38,40 +40,62 @@ final _authUidProvider = Provider<String?>((ref) {
 final myProfileProvider = StreamProvider<Profile?>((ref) {
   final uid = ref.watch(_authUidProvider);
   if (uid == null) return Stream.value(null);
-  return _db
-      .from('profiles')
-      .stream(primaryKey: ['id'])
-      .eq('id', uid)
+  // cachedRows unblocks AuthGate offline: without it this stream never
+  // emits without a connection and the app hangs on the splash forever.
+  return cachedRows(uid, 'profile',
+          () => _db.from('profiles').stream(primaryKey: ['id']).eq('id', uid))
       .map((rows) => rows.isEmpty ? null : Profile.fromJson(rows.first));
 });
 
 /// All profile rows the caller may see. Admins receive everyone (drives the
 /// approval screen); regular players only receive their own row under RLS.
 final profilesProvider = StreamProvider<List<Profile>>((ref) {
-  if (ref.watch(_authUidProvider) == null) return Stream.value(const []);
-  return _db.from('profiles').stream(primaryKey: ['id']).map(
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return Stream.value(const []);
+  return cachedRows(uid, 'profiles',
+          () => _db.from('profiles').stream(primaryKey: ['id']))
+      .map(
       (rows) => rows.map(Profile.fromJson).toList()
         ..sort((a, b) => a.displayName.compareTo(b.displayName)));
 });
 
 /// Alley configuration singleton (null until the backend is seeded).
+/// Alleys offered at registration (id + name; RLS exposes nothing more).
+/// Session-gated, not profile-gated — the register screen runs pre-profile.
+final tenantsProvider = FutureProvider<List<Tenant>>((ref) async {
+  if (ref.watch(_authUidProvider) == null) return const [];
+  final rows = await _db.from('tenants').select('id, name');
+  return [for (final row in rows) Tenant.fromJson(row)]
+    ..sort((a, b) => a.name.compareTo(b.name));
+});
+
 final settingsProvider = StreamProvider<ScheduleSettings?>((ref) {
-  if (ref.watch(_authUidProvider) == null) return Stream.value(null);
-  return _db.from('schedule_settings').stream(primaryKey: ['id']).map(
-      (rows) => rows.isEmpty ? null : ScheduleSettings.fromJson(rows.first));
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return Stream.value(null);
+  // primaryKey mirrors the 0005 PK (tenant_id): realtime DELETE events carry
+  // only PK columns and bypass RLS, so the key must be tenant-scoped.
+  return cachedRows(uid, 'settings',
+          () => _db.from('schedule_settings').stream(primaryKey: ['tenant_id']))
+      .map((rows) => rows.isEmpty ? null : ScheduleSettings.fromJson(rows.first));
 });
 
 /// Club roster (name + palette color), sorted by name.
 final clubsProvider = StreamProvider<List<Club>>((ref) {
-  if (ref.watch(_authUidProvider) == null) return Stream.value(const []);
-  return _db.from('clubs').stream(primaryKey: ['id']).map((rows) =>
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return Stream.value(const []);
+  return cachedRows(
+          uid, 'clubs', () => _db.from('clubs').stream(primaryKey: ['id']))
+      .map((rows) =>
       rows.map(Club.fromJson).toList()
         ..sort((a, b) => a.name.compareTo(b.name)));
 });
 
 final timeBlocksProvider = StreamProvider<List<TimeBlock>>((ref) {
-  if (ref.watch(_authUidProvider) == null) return Stream.value(const []);
-  return _db.from('time_blocks').stream(primaryKey: ['id']).map(
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return Stream.value(const []);
+  return cachedRows(uid, 'time_blocks',
+          () => _db.from('time_blocks').stream(primaryKey: ['id']))
+      .map(
       (rows) => rows.map(TimeBlock.fromJson).toList()
         ..sort((a, b) {
           final byStart = a.startsAt.minutesFromMidnight
@@ -80,12 +104,36 @@ final timeBlocksProvider = StreamProvider<List<TimeBlock>>((ref) {
         }));
 });
 
+/// True while the realtime socket is down — drives the "Offline" banner.
+/// Polled (no extra dependency): the socket state flips within seconds of
+/// losing/regaining the network, and a 3s poll is plenty for a banner.
+final offlineProvider = StreamProvider<bool>((ref) async* {
+  yield false;
+  // Stream.periodic (not a delayed loop): its timer is cancelled the moment
+  // the provider is disposed, so widget tests never leak a pending timer.
+  yield* Stream.periodic(
+      const Duration(seconds: 3), (_) => !_db.realtime.isConnected);
+});
+
 /// Approved player names from the `players` view. Views cannot stream —
 /// re-read on screen entry (and on kiosk idle reset in Phase 4).
 final playersProvider = FutureProvider<List<PlayerName>>((ref) async {
-  if (ref.watch(_authUidProvider) == null) return const [];
-  final rows = await _db.from('players').select();
-  return (rows as List)
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return const [];
+  final List<dynamic> rows;
+  try {
+    rows = await _db.from('players').select();
+    RowCache.write(uid, 'players', [
+      for (final row in rows) (row as Map).cast<String, dynamic>(),
+    ]);
+  } catch (_) {
+    // Offline: replay the cached roster (or none) instead of erroring.
+    final cached = await RowCache.read(uid, 'players');
+    if (cached == null) rethrow;
+    return [for (final row in cached) PlayerName.fromJson(row)]
+      ..sort((a, b) => a.displayName.compareTo(b.displayName));
+  }
+  return rows
       .map((r) => PlayerName.fromJson(r as Map<String, dynamic>))
       .toList()
     ..sort((a, b) => a.displayName.compareTo(b.displayName));
@@ -108,12 +156,18 @@ class Api {
   static Future<void> signInWithPassword(String email, String password) =>
       _db.auth.signInWithPassword(email: email, password: password);
 
-  static Future<void> signOut() => _db.auth.signOut();
+  static Future<void> signOut() async {
+    final uid = currentUserId;
+    await _db.auth.signOut();
+    if (uid != null) await RowCache.clear(uid);
+  }
 
-  static Future<void> registerProfile(String displayName, String club) =>
+  static Future<void> registerProfile(
+          String displayName, String club, String tenantId) =>
       _db.rpc('register_profile', params: {
         'p_display_name': displayName,
         'p_club': club,
+        'p_tenant_id': tenantId,
       });
 
   static Future<void> approvePlayer(String userId) =>
@@ -164,6 +218,7 @@ class Api {
 
   // --- admin: settings & blocks ---
   static Future<void> updateSettings({
+    required String tenantId,
     required int laneCount,
     required Set<int> trainingWeekdays,
     required int bookingHorizonDays,
@@ -174,12 +229,13 @@ class Api {
         'training_weekdays': trainingWeekdays.toList()..sort(),
         'booking_horizon_days': bookingHorizonDays,
         'max_active_reservations': maxActiveReservations,
-      }).eq('id', true);
+      }).eq('tenant_id', tenantId);
 
   /// Toggles the kiosk board's dark/light theme (spec §4).
-  static Future<void> setKioskDark(bool kioskDark) => _db
-      .from('schedule_settings')
-      .update({'kiosk_dark': kioskDark}).eq('id', true);
+  static Future<void> setKioskDark(bool kioskDark, {required String tenantId}) =>
+      _db
+          .from('schedule_settings')
+          .update({'kiosk_dark': kioskDark}).eq('tenant_id', tenantId);
 
   static Future<void> addTimeBlock(HourMinute startsAt, HourMinute endsAt, int position) =>
       _db.from('time_blocks').insert({
@@ -219,14 +275,15 @@ class Api {
   static Future<void> deleteDayOverride(Day date) =>
       _db.from('day_overrides').delete().eq('date', date.toSql());
 
-  // --- admin: matches ---
-  static Future<void> saveMatch({
+  // --- admin: priority slots (matches & other blockages) ---
+  static Future<void> savePrioritySlot({
     String? id,
     required Day date,
     required HourMinute startsAt,
     required HourMinute endsAt,
+    required String typeId,
     String homeTeam = '',
-    required String awayTeam,
+    String awayTeam = '',
     int prepMinutes = 0,
     String description = '',
   }) async {
@@ -234,6 +291,7 @@ class Api {
       'date': date.toSql(),
       'starts_at': startsAt.toSql(),
       'ends_at': endsAt.toSql(),
+      'type_id': typeId,
       'home_team': homeTeam,
       'away_team': awayTeam,
       'prep_minutes': prepMinutes,
@@ -241,14 +299,33 @@ class Api {
       if (id == null) 'created_by': currentUserId!,
     };
     if (id == null) {
-      await _db.from('matches').insert(row);
+      await _db.from('priority_slots').insert(row);
     } else {
-      await _db.from('matches').update(row).eq('id', id);
+      await _db.from('priority_slots').update(row).eq('id', id);
     }
   }
 
-  static Future<void> deleteMatch(String id) =>
-      _db.from('matches').delete().eq('id', id);
+  static Future<void> deletePrioritySlot(String id) =>
+      _db.from('priority_slots').delete().eq('id', id);
+
+  /// Upserts a priority-slot type. Only name/color/lanes are client-writable
+  /// (column grants guard is_match/builtin server-side).
+  static Future<void> upsertSlotType({
+    String? id,
+    required String name,
+    required int colorIndex,
+    required List<int>? lanes,
+  }) async {
+    final row = {'name': name, 'color': colorIndex, 'lanes': lanes};
+    if (id == null) {
+      await _db.from('priority_slot_types').insert(row);
+    } else {
+      await _db.from('priority_slot_types').update(row).eq('id', id);
+    }
+  }
+
+  static Future<void> deleteSlotType(String id) =>
+      _db.from('priority_slot_types').delete().eq('id', id);
 
   // --- admin: rentals ---
   static Future<void> saveRental({
@@ -360,12 +437,16 @@ class StrandableReservation {
 /// channel; autoDispose closes channels for weeks no longer on screen.
 final weekReservationsProvider =
     StreamProvider.autoDispose.family<List<Reservation>, Day>((ref, monday) {
-  if (ref.watch(_authUidProvider) == null) return Stream.value(const []);
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return Stream.value(const []);
   final sunday = monday.addDays(6);
-  return _db
-      .from('reservations')
-      .stream(primaryKey: ['id'])
-      .gte('date', monday.toSql())
+  return cachedRows(
+          uid,
+          'res.${monday.toSql()}',
+          () => _db
+              .from('reservations')
+              .stream(primaryKey: ['id'])
+              .gte('date', monday.toSql()))
       .map((rows) => rows
           .map(Reservation.fromJson)
           .where((r) => r.isLive && !r.date.isAfter(sunday))
@@ -373,20 +454,47 @@ final weekReservationsProvider =
 });
 
 final dayOverridesProvider = StreamProvider<List<DayOverride>>((ref) {
-  if (ref.watch(_authUidProvider) == null) return Stream.value(const []);
-  return _db.from('day_overrides').stream(primaryKey: ['date']).map(
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return Stream.value(const []);
+  return cachedRows(uid, 'day_overrides',
+          () => _db.from('day_overrides').stream(primaryKey: ['tenant_id', 'date']))
+      .map(
       (rows) => rows.map(DayOverride.fromJson).toList());
 });
 
-final matchesProvider = StreamProvider<List<Match>>((ref) {
-  if (ref.watch(_authUidProvider) == null) return Stream.value(const []);
-  return _db.from('matches').stream(primaryKey: ['id']).map(
-      (rows) => rows.map(Match.fromJson).toList());
+final slotTypesProvider = StreamProvider<List<PrioritySlotType>>((ref) {
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return Stream.value(const []);
+  return cachedRows(uid, 'slot_types',
+          () => _db.from('priority_slot_types').stream(primaryKey: ['id']))
+      .map(
+      (rows) => rows.map(PrioritySlotType.fromJson).toList());
+});
+
+/// Raw priority_slots rows joined with the types stream into resolved
+/// [PrioritySlot]s. Plain Provider (not Stream): recomputes whenever either
+/// stream emits; use sites read the list directly.
+final prioritySlotsProvider = Provider<List<PrioritySlot>>((ref) {
+  final types = ref.watch(slotTypesProvider).value ?? const [];
+  final typeById = {for (final t in types) t.id: t};
+  final rows = ref.watch(_prioritySlotRowsProvider).value ?? const [];
+  return [for (final row in rows) PrioritySlot.fromJson(row, typeById)];
+});
+
+final _prioritySlotRowsProvider =
+    StreamProvider<List<Map<String, dynamic>>>((ref) {
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return Stream.value(const []);
+  return cachedRows(uid, 'priority_slots',
+      () => _db.from('priority_slots').stream(primaryKey: ['id']));
 });
 
 final rentalsProvider = StreamProvider<List<Rental>>((ref) {
-  if (ref.watch(_authUidProvider) == null) return Stream.value(const []);
-  return _db.from('rentals').stream(primaryKey: ['id']).map(
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return Stream.value(const []);
+  return cachedRows(uid, 'rentals',
+          () => _db.from('rentals').stream(primaryKey: ['id']))
+      .map(
       (rows) => rows.map(Rental.fromJson).toList());
 });
 
@@ -396,9 +504,12 @@ final myActiveReservationsProvider =
     StreamProvider<List<Reservation>>((ref) {
   final uid = ref.watch(_authUidProvider);
   if (uid == null) return Stream.value(const []);
-  return _db
-      .from('reservations')
-      .stream(primaryKey: ['id'])
-      .eq('player_id', uid)
+  return cachedRows(
+          uid,
+          'res.mine',
+          () => _db
+              .from('reservations')
+              .stream(primaryKey: ['id'])
+              .eq('player_id', uid))
       .map((rows) => rows.map(Reservation.fromJson).toList());
 });

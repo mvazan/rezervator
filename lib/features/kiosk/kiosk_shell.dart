@@ -137,8 +137,8 @@ class _StatusBar extends ConsumerWidget {
   final VoidCallback onClearSelection;
 
   String _infoLine(WidgetRef ref, Day todayDay) {
-    final matches = ref.watch(matchesProvider).value ?? const [];
-    final todaysMatches = matches.where((m) => m.date == todayDay).toList()
+    final priority = ref.watch(prioritySlotsProvider);
+    final todaysMatches = priority.where((m) => m.date == todayDay).toList()
       ..sort((a, b) => a.startsAt.compareTo(b.startsAt));
     if (todaysMatches.isNotEmpty) {
       return todaysMatches

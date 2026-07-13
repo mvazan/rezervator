@@ -242,10 +242,13 @@ async function handle(payload: WebhookPayload) {
   switch (payload.table) {
     case "profiles": {
       if (payload.type !== "INSERT" || record.status !== "pending") return;
+      // Tenant-scoped fan-out (0005): only the new player's own alley's
+      // admins are notified; to_jsonb(new) carries tenant_id automatically.
       const { data: admins } = await supabase.from("profiles")
         .select("id, email, fcm_token")
         .eq("role", "admin")
-        .eq("status", "approved");
+        .eq("status", "approved")
+        .eq("tenant_id", record.tenant_id);
       const name = escapeHtml(String(record.display_name ?? "?"));
       await Promise.all((admins ?? []).map((admin) =>
         notifyRecipient(

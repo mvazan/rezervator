@@ -5,6 +5,8 @@ import 'package:rezervator/core/theme.dart';
 import 'package:rezervator/core/ui.dart' show today;
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
+import 'package:rezervator/features/kiosk/board_layout.dart'
+    show emptyGapHeight;
 import 'package:rezervator/features/kiosk/kiosk_board_view.dart';
 import 'package:rezervator/features/kiosk/kiosk_shell.dart';
 
@@ -65,7 +67,7 @@ void main() {
   /// `theme: buildTheme(Brightness.light)`) for tests that care whether the
   /// kiosk correctly stays dark regardless of the ambient app theme.
   Widget kioskApp({
-    List<Match> matches = const [],
+    List<PrioritySlot> matches = const [],
     List<Reservation> reservations = const [],
     List<PlayerName>? roster,
     ThemeData? theme,
@@ -84,7 +86,7 @@ void main() {
         settingsProvider.overrideWith((ref) => Stream.value(effSettings)),
         timeBlocksProvider.overrideWith((ref) => Stream.value(const [b1])),
         dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
-        matchesProvider.overrideWith((ref) => Stream.value(matches)),
+        prioritySlotsProvider.overrideWithValue(matches),
         rentalsProvider.overrideWith((ref) => Stream.value(const [])),
         weekReservationsProvider.overrideWith(
           (ref, monday) => Stream.value(reservations),
@@ -394,7 +396,8 @@ void main() {
         position: 1,
         active: true,
       );
-      final match = Match(
+      final match = PrioritySlot(
+        type: PrioritySlot.fallbackMatchType,
         id: 'm1',
         date: t,
         startsAt: const HourMinute(21, 0),
@@ -412,7 +415,7 @@ void main() {
             timeBlocksProvider
                 .overrideWith((ref) => Stream.value(const [bPrep, bMatch])),
             dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
-            matchesProvider.overrideWith((ref) => Stream.value([match])),
+            prioritySlotsProvider.overrideWithValue([match]),
             rentalsProvider.overrideWith((ref) => Stream.value(const [])),
             weekReservationsProvider.overrideWith(
               (ref, monday) => Stream.value(const []),
@@ -446,7 +449,8 @@ void main() {
     'j: a fully closed day renders the dimmed ✕ zavřeno column and still '
     'shows that day\'s match cell',
     (tester) async {
-      final match = Match(
+      final match = PrioritySlot(
+        type: PrioritySlot.fallbackMatchType,
         id: 'm2',
         date: t,
         startsAt: const HourMinute(23, 0),
@@ -487,7 +491,7 @@ void main() {
                 [DayOverride(date: t, closed: true, reason: '')],
               ),
             ),
-            matchesProvider.overrideWith((ref) => Stream.value([match])),
+            prioritySlotsProvider.overrideWithValue([match]),
             rentalsProvider.overrideWith((ref) => Stream.value(const [])),
             weekReservationsProvider.overrideWith(
               (ref, monday) => Stream.value(const []),
@@ -542,7 +546,7 @@ void main() {
             timeBlocksProvider
                 .overrideWith((ref) => Stream.value(const [bMorning, bEvening])),
             dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
-            matchesProvider.overrideWith((ref) => Stream.value(const [])),
+            prioritySlotsProvider.overrideWithValue(const []),
             rentalsProvider.overrideWith((ref) => Stream.value(const [])),
             weekReservationsProvider.overrideWith(
               (ref, monday) => Stream.value(const []),
@@ -610,7 +614,7 @@ void main() {
             timeBlocksProvider
                 .overrideWith((ref) => Stream.value(const [bShort, bLong])),
             dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
-            matchesProvider.overrideWith((ref) => Stream.value(const [])),
+            prioritySlotsProvider.overrideWithValue(const []),
             rentalsProvider.overrideWith((ref) => Stream.value(const [])),
             weekReservationsProvider.overrideWith(
               (ref, monday) => Stream.value(const []),
@@ -665,10 +669,77 @@ void main() {
                 .first,
           )
           .dy;
-      // The gap between the two rail labels equals the first (short) block's
-      // row-group height — so the second block sits proportionally lower than
-      // it would under equal-height rows.
-      expect(railLongTop - railShortTop, closeTo(shortSize.height, 0.5));
+      // The distance between the two rail labels equals the first (short)
+      // block's row-group height plus the fixed empty-gap sliver for the
+      // 8:30–9:00 hole between them — so the second block sits
+      // proportionally lower than under equal-height rows, and the gap is
+      // honestly (but compactly) represented.
+      expect(railLongTop - railShortTop,
+          closeTo(shortSize.height + emptyGapHeight, 0.5));
+
+      await finish(tester);
+    },
+  );
+
+  testWidgets(
+    'm: an off-block rental renders as a band in an occupied gap with its '
+    'real times, and the rail labels the gap range',
+    (tester) async {
+      const bShort = TimeBlock(
+        id: 'bShort',
+        startsAt: HourMinute(8, 0),
+        endsAt: HourMinute(8, 30),
+        position: 0,
+        active: true,
+      );
+      const bLong = TimeBlock(
+        id: 'bLong',
+        startsAt: HourMinute(10, 0),
+        endsAt: HourMinute(11, 0),
+        position: 1,
+        active: true,
+      );
+      // Rental 8:45–9:30 today: overlaps no block → occupied gap band.
+      final rental = Rental(
+        id: 'n1',
+        renterName: 'Firma X',
+        lanes: const [1],
+        date: today(),
+        weekday: null,
+        startsAt: const HourMinute(8, 45),
+        endsAt: const HourMinute(9, 30),
+        validFrom: null,
+        validUntil: null,
+        note: '',
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            settingsProvider.overrideWith((ref) => Stream.value(settings)),
+            timeBlocksProvider
+                .overrideWith((ref) => Stream.value(const [bShort, bLong])),
+            dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
+            prioritySlotsProvider.overrideWithValue(const []),
+            rentalsProvider.overrideWith((ref) => Stream.value([rental])),
+            weekReservationsProvider.overrideWith(
+              (ref, monday) => Stream.value(const []),
+            ),
+            playersProvider.overrideWith((ref) async => players),
+          ],
+          child: const MaterialApp(home: KioskShell()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // The band shows the renter with real times inside the gap; the rail
+      // labels the occupied gap's range. Both appear exactly once (the
+      // rental is one-time, so only today's column has the band).
+      expect(find.text('🔒 Firma X\n8:45–9:30'), findsOneWidget);
+      expect(find.text('8:45–9:30'), findsOneWidget);
+
+      // The blocks themselves stay in place around the gap.
+      expect(find.text(bShort.label), findsOneWidget);
+      expect(find.text(bLong.label), findsOneWidget);
 
       await finish(tester);
     },
