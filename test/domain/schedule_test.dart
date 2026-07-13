@@ -274,6 +274,71 @@ void main() {
       expect(day.blocks.map((b) => b.id), ['b1', 'b2']);
     });
 
+    test('two whole-alley slots on one day: EVERY slot cancels (not just '
+        'the first)', () {
+      // m1 touches only b1, m2 only b2 — both must go.
+      final day = build(matches: [
+        match(
+            startsAt: const HourMinute(16, 30),
+            endsAt: const HourMinute(17, 0)),
+        PrioritySlot(
+          type: PrioritySlot.fallbackMatchType,
+          id: 'm2',
+          date: tuesday,
+          startsAt: const HourMinute(17, 30),
+          endsAt: const HourMinute(18, 0),
+          homeTeam: '',
+          awayTeam: 'KK Vracov',
+          prepMinutes: 0,
+          description: '',
+        ),
+      ]).days[1] as OpenDay;
+      expect(day.blocks, isEmpty);
+    });
+
+    test('cancellation applies to override-selected blocks too, and such a '
+        'day stays open', () {
+      // Wednesday (non-training) opened via override with the inactive
+      // special b3 (10:00–12:00); a match overlapping it cancels it.
+      final day = build(
+        overrides: [
+          DayOverride(
+              date: wednesday,
+              closed: false,
+              reason: '',
+              blockIds: const ['b3']),
+        ],
+        matches: [
+          match(
+              date: wednesday,
+              startsAt: const HourMinute(10, 0),
+              endsAt: const HourMinute(11, 0)),
+        ],
+      ).days[2];
+      expect(day, isA<OpenDay>());
+      expect((day as OpenDay).blocks, isEmpty);
+      expect(day.priority, hasLength(1));
+    });
+
+    test('an UNRESOLVED type (types stream not joined yet) never cancels', () {
+      final day = build(matches: [
+        PrioritySlot(
+          type: PrioritySlot.unresolvedType,
+          id: 'm1',
+          date: tuesday,
+          startsAt: const HourMinute(16, 30),
+          endsAt: const HourMinute(17, 30),
+          homeTeam: '',
+          awayTeam: 'KK Slavoj',
+          prepMinutes: 0,
+          description: '',
+        ),
+      ]).days[1] as OpenDay;
+      // Blocks survive; the slot still blocks lanes via slot states.
+      expect(day.blocks.map((b) => b.id), ['b1', 'b2']);
+      expect(day.slot('b1', 1), isA<PrioritySlotState>());
+    });
+
     test('a cancelled-block match renders off-block at its real window', () {
       final day = build(matches: [match()]).days[1] as OpenDay;
       final events = offBlockEvents(
@@ -535,8 +600,8 @@ void main() {
       expect(tue.rentals, [oneTime]);
     });
 
-    test('offBlockEvents keeps only events overlapping no active block', () {
-      // Blocks cover 16:00–18:00 (b1+b2); b3 (10:00–12:00) is inactive.
+    test('offBlockEvents keeps only events overlapping no block of the '
+        'RENDERED set — inactive override-specials in the list count too', () {
       final insideMatch = match(); // 16:30–17:30 → overlaps b1/b2
       final morningMatch = match(
           startsAt: const HourMinute(10, 0), endsAt: const HourMinute(11, 0));
@@ -552,7 +617,7 @@ void main() {
       final events = offBlockEvents(
         priority: [insideMatch, morningMatch],
         rentals: [lateRental, spillRental],
-        blocks: const [b1, b2, b3],
+        blocks: const [b1, b2],
       );
 
       expect(events, hasLength(2));
@@ -560,6 +625,36 @@ void main() {
       expect(events[0].start, const HourMinute(10, 0));
       expect(events[1], isA<OffBlockRental>());
       expect(events[1].start, const HourMinute(20, 0));
+
+      // An override day may RENDER an inactive special block (b3,
+      // 10:00–12:00): an event inside it must resolve via slot states, not
+      // double-render as a banner too.
+      final withSpecial = offBlockEvents(
+        priority: [morningMatch],
+        rentals: const [],
+        blocks: const [b1, b2, b3],
+      );
+      expect(withSpecial, isEmpty);
+    });
+
+    test('a rental overlapping a cancelled block resurfaces as an off-block '
+        'band instead of vanishing', () {
+      // Match 16:30–17:30 cancels b1+b2; the 17:30–18:00 rental previously
+      // rendered as RentedSlot rows inside b2 — its only remaining surface
+      // is the off-block path.
+      final day = build(
+        matches: [match()],
+        rentals: [
+          rental(
+              date: tuesday,
+              startsAt: const HourMinute(17, 30),
+              endsAt: const HourMinute(18, 0)),
+        ],
+      ).days[1] as OpenDay;
+      final events = offBlockEvents(
+          priority: day.priority, rentals: day.rentals, blocks: day.blocks);
+      expect(events.whereType<OffBlockRental>().single.start,
+          const HourMinute(17, 30));
     });
 
     test('offBlockEvents uses the real match window, not prep-extended', () {

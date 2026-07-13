@@ -218,6 +218,7 @@ class ScheduleSettings {
     required this.bookingHorizonDays,
     required this.maxActiveReservations,
     this.kioskDark = true,
+    this.kioskFitDay = true,
     this.tenantId = '',
   });
 
@@ -230,6 +231,11 @@ class ScheduleSettings {
 
   /// Whether the kiosk board renders in the dark theme (spec §4).
   final bool kioskDark;
+
+  /// Kiosk display mode: true stretches the whole day onto the screen (no
+  /// scrolling); false uses a fixed comfortable scale (lane rows sized like
+  /// the app's week view) and lets the board scroll vertically.
+  final bool kioskFitDay;
 
   /// The settings row's tenant — the update key since 0005 (one row per
   /// tenant instead of the old singleton).
@@ -251,6 +257,7 @@ class ScheduleSettings {
         bookingHorizonDays: json['booking_horizon_days'] as int,
         maxActiveReservations: json['max_active_reservations'] as int,
         kioskDark: json['kiosk_dark'] as bool? ?? true,
+        kioskFitDay: json['kiosk_fit_day'] as bool? ?? true,
         tenantId: json['tenant_id'] as String? ?? '',
       );
 }
@@ -334,6 +341,7 @@ class PrioritySlotType {
     this.lanes,
     this.isMatch = false,
     this.builtin = false,
+    this.unresolved = false,
   });
 
   final String id;
@@ -346,6 +354,14 @@ class PrioritySlotType {
   final List<int>? lanes;
   final bool isMatch;
   final bool builtin;
+
+  /// True only for the placeholder used while the slot's real type row
+  /// hasn't streamed in yet. An unresolved type renders like a whole-alley
+  /// match but carries NO block-cancelling power — the two streams
+  /// (slots/types) race on realtime delivery, and a lane-scoped slot must
+  /// not transiently wipe blocks off every board just because its type row
+  /// arrived a beat later.
+  final bool unresolved;
 
   bool coversLane(int lane) => lanes == null || lanes!.contains(lane);
 
@@ -419,20 +435,40 @@ class PrioritySlot {
         date: Day.parse(json['date'] as String),
         startsAt: HourMinute.parse(json['starts_at'] as String),
         endsAt: HourMinute.parse(json['ends_at'] as String),
-        type: typeById[json['type_id'] as String?] ?? fallbackMatchType,
+        type: typeById[json['type_id'] as String?] ?? unresolvedType,
         homeTeam: json['home_team'] as String? ?? '',
         awayTeam: json['away_team'] as String? ?? '',
         prepMinutes: json['prep_minutes'] as int? ?? 0,
         description: json['description'] as String? ?? '',
       );
 
-  /// Placeholder while the types stream hasn't delivered the real row yet.
+  /// A fully-powered stand-in match type for tests and previews.
   static const fallbackMatchType = PrioritySlotType(
     id: 'fallback-match',
     name: 'Zápas',
     isMatch: true,
     builtin: true,
   );
+
+  /// Placeholder while the types stream hasn't delivered the real row yet —
+  /// renders like [fallbackMatchType] but never cancels blocks (see
+  /// [PrioritySlotType.unresolved]).
+  static const unresolvedType = PrioritySlotType(
+    id: 'unresolved',
+    name: 'Zápas',
+    isMatch: true,
+    builtin: true,
+    unresolved: true,
+  );
+
+  /// The earliest time this slot occupies a calendar surface: whole-alley
+  /// slots paint a prep band from [blockingStart]; lane-scoped slots render
+  /// only their real window off-block (their prep resolves per lane inside
+  /// surviving blocks). Windows and tap-gap occupancy must use THIS, not a
+  /// blanket [blockingStart], or the calendar reserves space nothing draws
+  /// in.
+  HourMinute get calendarStart =>
+      type.lanes == null ? blockingStart : startsAt;
 }
 
 class Rental {

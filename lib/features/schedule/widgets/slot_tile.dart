@@ -84,19 +84,28 @@ class SlotTile extends StatelessWidget {
             ),
           ),
         );
-      case PrioritySlotState():
+      case PrioritySlotState(:final slot):
+        // Lane-scoped slots are the only PrioritySlotState producers in
+        // rendered blocks (whole-alley ones cancel the block outright), so
+        // the cell must carry the TYPE's name and colour — 'Sanitární den'
+        // must not read as a match. Mirrors the kiosk's lane row.
+        final club = ClubColors.of(slot.type.colorIndex, scheme.brightness);
         return _shell(
           minHeight: minHeight,
           decoration: BoxDecoration(
-            color: scheme.errorContainer.withValues(alpha: 0.6),
+            color: club?.$1 ?? scheme.errorContainer.withValues(alpha: 0.6),
             borderRadius: BorderRadius.circular(_compact ? 8 : 12),
           ),
+          padding: const EdgeInsets.symmetric(horizontal: 4),
           child: Text(
-            'Zápas',
+            '${slot.type.isMatch ? '🏆' : '⛔'} ${slot.title}',
+            maxLines: _compact ? 1 : 2,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
             style: TextStyle(
-              fontSize: _compact ? 11 : 13,
+              fontSize: _compact ? 10 : 12,
               fontWeight: FontWeight.w600,
-              color: scheme.onErrorContainer,
+              color: club?.$2 ?? scheme.onErrorContainer,
             ),
           ),
         );

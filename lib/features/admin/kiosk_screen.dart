@@ -42,6 +42,24 @@ class KioskSettingsScreen extends ConsumerWidget {
                       errorText: friendlyDbError,
                     ),
             ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Kiosk: celý den na obrazovku'),
+              subtitle: const Text(
+                'Zapnuto = celý rozvrh dne se vejde na obrazovku bez '
+                'posouvání. Vypnuto = sloty mají pohodlnou velikost a tabule '
+                'se posouvá (po nečinnosti se sama vrátí na aktuální čas).',
+              ),
+              value: settings?.kioskFitDay ?? true,
+              onChanged: settings == null
+                  ? null
+                  : (value) => tryAction(
+                      context,
+                      () => Api.setKioskFitDay(value,
+                          tenantId: settings.tenantId),
+                      errorText: friendlyDbError,
+                    ),
+            ),
           ],
         ),
       ),

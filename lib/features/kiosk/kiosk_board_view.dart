@@ -309,8 +309,9 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
     ];
     final eventWindows = <(HourMinute, HourMinute)>[
       for (final day in days) ...[
-        // blockingStart: the prep band renders too, so it must fit the window.
-        for (final m in day.priority) (m.blockingStart, m.endsAt),
+        // calendarStart = what actually paints: whole-alley slots include
+        // their prep band, lane-scoped ones only their real window.
+        for (final m in day.priority) (m.calendarStart, m.endsAt),
         if (day is OpenDay)
           for (final r in day.rentals) (r.startsAt, r.endsAt),
       ],
@@ -324,14 +325,21 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final columnWidth = boardColumnWidth(constraints.maxWidth);
-        // Fit-height: the whole window stretches to the viewport, floored at
-        // the legibility scale (then the board scrolls vertically instead).
+        // Two admin-selectable modes (settings.kioskFitDay):
+        // - fit-height: the whole window stretches to the viewport, floored
+        //   at the legibility scale (then the board scrolls anyway);
+        // - comfortable scroll: the same fixed scale as the app's week view
+        //   (a 60-min block = laneCount × 40 px), scrolling vertically; the
+        //   idle reset brings the board back to "now".
         final fitScale = (constraints.maxHeight -
                 calendarHeaderHeight -
                 _bottomLabelPad) /
             window.minutes;
         final minScale = _minPxPerMinute(windowBlocks, settings.laneCount);
-        final pxPerMinute = fitScale < minScale ? minScale : fitScale;
+        final comfortableScale = settings.laneCount * 40.0 / 60;
+        final pxPerMinute = settings.kioskFitDay
+            ? (fitScale < minScale ? minScale : fitScale)
+            : comfortableScale;
         final totalHeight = calendarHeaderHeight +
             window.minutes * pxPerMinute +
             _bottomLabelPad;
@@ -484,15 +492,21 @@ class _DayColumn extends StatelessWidget {
     }
 
     // Off-block pieces of matches/rentals: the part of an event window not
-    // covered by this day's own blocks renders as a positioned band (the
-    // in-block part renders via slot states inside the block card). Matches
-    // band on closed days too; rentals only exist on open days.
+    // covered by this day's own blocks — nor by an earlier band — renders as
+    // a positioned band (the in-block part renders via slot states inside
+    // the block card). Matches band on closed days too; rentals only exist
+    // on open days. `covered` grows with every emitted band, so overlaps
+    // resolve first-wins in emission order: priority slots (start-sorted)
+    // before rentals — a renter band can never paint over a match.
+    final covered = <(int, int)>[...blockUnion];
     void addBands(
         HourMinute start, HourMinute end, Widget Function() bandBuilder) {
       for (final (s, e) in subtractInterval(
-          (start.minutesFromMidnight, end.minutesFromMidnight), blockUnion)) {
+          (start.minutesFromMidnight, end.minutesFromMidnight),
+          mergeIntervals(covered))) {
         entries.add(CalendarEntry(
             start: hourMinuteAt(s), end: hourMinuteAt(e), child: bandBuilder()));
+        covered.add((s, e));
       }
     }
 

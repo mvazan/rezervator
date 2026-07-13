@@ -255,6 +255,12 @@ class Api {
       }).eq('tenant_id', tenantId);
 
   /// Toggles the kiosk board's dark/light theme (spec §4).
+  static Future<void> setKioskFitDay(bool kioskFitDay,
+          {required String tenantId}) =>
+      _db
+          .from('schedule_settings')
+          .update({'kiosk_fit_day': kioskFitDay}).eq('tenant_id', tenantId);
+
   static Future<void> setKioskDark(bool kioskDark, {required String tenantId}) =>
       _db
           .from('schedule_settings')

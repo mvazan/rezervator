@@ -129,15 +129,18 @@ class OffBlockRental extends OffBlockEvent {
 /// overlapping any block keep rendering via slot states instead. Matches use
 /// their real window (not prep-extended — prep only matters where it blocks
 /// reservations, and off-block time has none).
+///
+/// [blocks] must be EXACTLY the day's rendered block set ([OpenDay.blocks]) —
+/// no extra active-filtering here, because an override day may legitimately
+/// render inactive "special" blocks, and an event inside one must keep
+/// resolving via slot states rather than double-render as a banner too.
 List<OffBlockEvent> offBlockEvents({
   required List<PrioritySlot> priority,
   required List<Rental> rentals,
   required List<TimeBlock> blocks,
 }) {
-  bool outside(HourMinute start, HourMinute end) => !blocks.any(
-      (b) => b.active && timesOverlap(start, end, b.startsAt, b.endsAt));
-  // Callers pass a day's own block set (already active-filtered) or the
-  // global list; treat inactive blocks as absent either way.
+  bool outside(HourMinute start, HourMinute end) =>
+      !blocks.any((b) => timesOverlap(start, end, b.startsAt, b.endsAt));
   return <OffBlockEvent>[
     for (final m in priority)
       if (outside(m.startsAt, m.endsAt)) OffBlockPriority(m),
@@ -245,8 +248,13 @@ WeekSchedule buildWeekSchedule({
     // resolve per lane below. Checked AFTER the emptiness fallback above so a
     // day whose every block is cancelled stays an OpenDay (it hosts a match,
     // it is not "zavřeno").
-    final wholeAlley =
-        dayPriority.where((m) => m.type.lanes == null).toList();
+    // `unresolved` types (the type row hasn't streamed in yet) render like a
+    // whole-alley match but must NOT cancel: a lane-scoped slot whose type
+    // arrives a beat later would otherwise transiently wipe blocks (and
+    // their reservations) off every board.
+    final wholeAlley = dayPriority
+        .where((m) => m.type.lanes == null && !m.type.unresolved)
+        .toList();
     dayBlocks = [
       for (final b in dayBlocks)
         if (!wholeAlley.any((m) =>

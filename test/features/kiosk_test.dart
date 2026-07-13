@@ -70,6 +70,7 @@ void main() {
     List<PlayerName>? roster,
     ThemeData? theme,
     bool kioskDark = true,
+    bool kioskFitDay = true,
   }) {
     final effectiveRoster = roster ?? players;
     final effSettings = ScheduleSettings(
@@ -78,6 +79,7 @@ void main() {
       bookingHorizonDays: settings.bookingHorizonDays,
       maxActiveReservations: settings.maxActiveReservations,
       kioskDark: kioskDark,
+      kioskFitDay: kioskFitDay,
     );
     return ProviderScope(
       overrides: [
@@ -716,6 +718,206 @@ void main() {
 
       // The blocks themselves stay in place around the event.
       expect(find.byKey(const ValueKey('cal-block-bLong')), findsWidgets);
+
+      await finish(tester);
+    },
+  );
+
+  testWidgets(
+    'n: a whole-alley match prep window widens the shared calendar window '
+    '(ruler labels the prep hour, the band renders at its true time)',
+    (tester) async {
+      const b = TimeBlock(
+        id: 'b',
+        startsAt: HourMinute(20, 0),
+        endsAt: HourMinute(22, 0),
+        position: 0,
+        active: true,
+      );
+      final match = PrioritySlot(
+        type: PrioritySlot.fallbackMatchType,
+        id: 'm1',
+        date: t,
+        startsAt: const HourMinute(20, 0),
+        endsAt: const HourMinute(21, 0),
+        homeTeam: '',
+        awayTeam: 'KK Slavoj',
+        prepMinutes: 60, // blockingStart 19:00 — earliest content anywhere
+        description: '',
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            settingsProvider.overrideWith((ref) => Stream.value(settings)),
+            timeBlocksProvider.overrideWith((ref) => Stream.value(const [b])),
+            dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
+            prioritySlotsProvider.overrideWithValue([match]),
+            rentalsProvider.overrideWith((ref) => Stream.value(const [])),
+            weekReservationsProvider.overrideWith(
+              (ref, monday) => Stream.value(const []),
+            ),
+            playersProvider.overrideWith((ref) async => players),
+          ],
+          child: const MaterialApp(home: KioskShell()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // The window must reach 19:00 or the prep band would render above it.
+      expect(find.text('19:00'), findsOneWidget);
+      expect(find.text('🛠 Příprava drah\n19:00–20:00'), findsOneWidget);
+
+      await finish(tester);
+    },
+  );
+
+  testWidgets(
+    'o: a LANE-scoped slot with prep does NOT widen the window — only its '
+    'real window paints, so only that reserves space',
+    (tester) async {
+      const laneType = PrioritySlotType(
+        id: 't-lane',
+        name: 'Údržba',
+        colorIndex: 3,
+        lanes: [1],
+      );
+      const b = TimeBlock(
+        id: 'b',
+        startsAt: HourMinute(20, 0),
+        endsAt: HourMinute(22, 0),
+        position: 0,
+        active: true,
+      );
+      final laneSlot = PrioritySlot(
+        type: laneType,
+        id: 's1',
+        date: t,
+        startsAt: const HourMinute(8, 0),
+        endsAt: const HourMinute(9, 0),
+        prepMinutes: 60, // blockingStart 7:00 — must NOT reserve 7:00-8:00
+        description: '',
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            settingsProvider.overrideWith((ref) => Stream.value(settings)),
+            timeBlocksProvider.overrideWith((ref) => Stream.value(const [b])),
+            dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
+            prioritySlotsProvider.overrideWithValue([laneSlot]),
+            rentalsProvider.overrideWith((ref) => Stream.value(const [])),
+            weekReservationsProvider.overrideWith(
+              (ref, monday) => Stream.value(const []),
+            ),
+            playersProvider.overrideWith((ref) async => players),
+          ],
+          child: const MaterialApp(home: KioskShell()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('08:00'), findsOneWidget);
+      expect(find.text('07:00'), findsNothing);
+      // And no prep band renders for a lane-scoped slot (its prep resolves
+      // per lane inside surviving blocks).
+      expect(find.textContaining('🛠'), findsNothing);
+
+      await finish(tester);
+    },
+  );
+
+  testWidgets(
+    'p: a rental inside a whole-alley match window never paints over the '
+    'match band; only its outside piece renders',
+    (tester) async {
+      const b = TimeBlock(
+        id: 'b',
+        startsAt: HourMinute(20, 0),
+        endsAt: HourMinute(22, 0),
+        position: 0,
+        active: true,
+      );
+      final match = PrioritySlot(
+        type: PrioritySlot.fallbackMatchType,
+        id: 'm1',
+        date: t,
+        startsAt: const HourMinute(20, 0),
+        endsAt: const HourMinute(22, 0),
+        homeTeam: '',
+        awayTeam: 'KK Slavoj',
+        prepMinutes: 0,
+        description: '',
+      );
+      final insideRental = Rental(
+        id: 'n1',
+        renterName: 'Firma X',
+        lanes: const [1],
+        date: t,
+        weekday: null,
+        startsAt: const HourMinute(20, 30),
+        endsAt: const HourMinute(21, 0),
+        validFrom: null,
+        validUntil: null,
+        note: '',
+      );
+      final spillRental = Rental(
+        id: 'n2',
+        renterName: 'Firma Y',
+        lanes: const [1],
+        date: t,
+        weekday: null,
+        startsAt: const HourMinute(21, 30),
+        endsAt: const HourMinute(22, 30),
+        validFrom: null,
+        validUntil: null,
+        note: '',
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            settingsProvider.overrideWith((ref) => Stream.value(settings)),
+            timeBlocksProvider.overrideWith((ref) => Stream.value(const [b])),
+            dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
+            prioritySlotsProvider.overrideWithValue([match]),
+            rentalsProvider.overrideWith(
+                (ref) => Stream.value([insideRental, spillRental])),
+            weekReservationsProvider.overrideWith(
+              (ref, monday) => Stream.value(const []),
+            ),
+            playersProvider.overrideWith((ref) async => players),
+          ],
+          child: const MaterialApp(home: KioskShell()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // The match band renders; the fully-covered rental does not (priority
+      // wins, first-emitted band keeps the space)…
+      expect(
+        find.text('🏆 ${match.title}\n20:00–22:00'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('Firma X'), findsNothing);
+      // …and the spilling rental shows only via its outside piece.
+      expect(find.textContaining('Firma Y'), findsOneWidget);
+
+      await finish(tester);
+    },
+  );
+
+  testWidgets(
+    'q: kiosk_fit_day=false switches to the comfortable fixed scale '
+    '(60 min = laneCount × 40 px) instead of fit-to-screen',
+    (tester) async {
+      await tester.pumpWidget(kioskApp(kioskFitDay: false));
+      await tester.pumpAndSettle();
+
+      // b1 is 61 minutes; at laneCount(2) × 40 / 60 px per minute the card
+      // is 61 × 1.333… ≈ 81.3px tall — independent of the viewport height.
+      final card = find.byKey(const ValueKey('cal-block-b1')).first;
+      expect(
+        tester.getSize(card).height,
+        closeTo(61 * settings.laneCount * 40.0 / 60, 0.7),
+      );
 
       await finish(tester);
     },

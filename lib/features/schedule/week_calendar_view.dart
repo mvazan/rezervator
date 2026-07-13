@@ -74,8 +74,9 @@ class WeekCalendarView extends StatelessWidget {
       ],
       eventWindows: [
         for (final day in week.days) ...[
-          // blockingStart: the prep band renders too, so it must fit.
-          for (final m in day.priority) (m.blockingStart, m.endsAt),
+          // calendarStart = what actually paints: whole-alley slots
+          // include their prep band, lane-scoped ones their real window.
+          for (final m in day.priority) (m.calendarStart, m.endsAt),
           if (day is OpenDay)
             for (final r in day.rentals) (r.startsAt, r.endsAt),
         ],
@@ -214,7 +215,7 @@ class _DayColumn extends StatelessWidget {
         for (final b in openDay.blocks)
           (b.startsAt.minutesFromMidnight, b.endsAt.minutesFromMidnight),
       for (final m in day.priority)
-        (m.blockingStart.minutesFromMidnight, m.endsAt.minutesFromMidnight),
+        (m.calendarStart.minutesFromMidnight, m.endsAt.minutesFromMidnight),
       if (openDay != null)
         for (final r in openDay.rentals)
           (r.startsAt.minutesFromMidnight, r.endsAt.minutesFromMidnight),
@@ -285,12 +286,18 @@ class _DayColumn extends StatelessWidget {
     }
 
     final scheme = Theme.of(context).colorScheme;
+    // `covered` grows with every emitted band, so overlaps resolve
+    // first-wins in emission order: priority slots (start-sorted) before
+    // rentals — a renter band can never paint over a match.
+    final covered = <(int, int)>[...blockUnion];
     void addBands(
         HourMinute start, HourMinute end, Widget Function() bandBuilder) {
       for (final (s, e) in subtractInterval(
-          (start.minutesFromMidnight, end.minutesFromMidnight), blockUnion)) {
+          (start.minutesFromMidnight, end.minutesFromMidnight),
+          mergeIntervals(covered))) {
         entries.add(CalendarEntry(
             start: hourMinuteAt(s), end: hourMinuteAt(e), child: bandBuilder()));
+        covered.add((s, e));
       }
     }
 
