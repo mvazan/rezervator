@@ -10,6 +10,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollDirection;
 
 import '../../domain/calendar_layout.dart';
 import '../../domain/models.dart';
@@ -112,21 +113,23 @@ class _WeekCalendarViewState extends State<WeekCalendarView> {
   /// match arriving late stretches the window upward), so a one-shot jump
   /// would fire before there is anything to scroll past and then leave the
   /// board parked at the morning event.
+  ///
+  /// Takeover detection is GESTURE-based (see the UserScrollNotification
+  /// listener in build), never offset-based: spurious scroll notifications
+  /// (scrollbar attach, dimension changes) fire between the build that
+  /// computes a new anchor and its post-frame jump, and an offset
+  /// comparison there latched a false "user scrolled" that blocked the
+  /// jump forever. [_appliedAnchor] is committed only AFTER a successful
+  /// jump so an aborted callback retries on the next build.
   double _anchorOffset = 0;
   double? _appliedAnchor;
   bool _userScrolled = false;
-  bool _jumping = false;
 
   @override
   void initState() {
     super.initState();
     _vScroll.addListener(() {
       if (!_vScroll.hasClients) return;
-      // Any movement not caused by our own anchor jump counts as the user
-      // taking over — stop re-anchoring under their fingers.
-      if (!_jumping && (_vScroll.offset - (_appliedAnchor ?? 0)).abs() > 1) {
-        _userScrolled = true;
-      }
       // Hysteresis relative to the default anchor: collapse a bit past it,
       // expand when back near (or above) it — no flapping around one magic
       // offset, and no auto-collapse just for opening at the anchor.
@@ -227,12 +230,12 @@ class _WeekCalendarViewState extends State<WeekCalendarView> {
             .clamp(0.0, double.infinity);
     if (!_userScrolled && _appliedAnchor != _anchorOffset) {
       final target = _anchorOffset;
-      _appliedAnchor = target;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || _userScrolled || !_vScroll.hasClients) return;
-        _jumping = true;
         _vScroll.jumpTo(target.clamp(0.0, _vScroll.position.maxScrollExtent));
-        _jumping = false;
+        // Committed only now: an aborted callback (not mounted yet, no
+        // clients) leaves the anchor unapplied so the next build retries.
+        _appliedAnchor = target;
       });
     }
 
@@ -292,20 +295,31 @@ class _WeekCalendarViewState extends State<WeekCalendarView> {
       children: [
         headerStrip,
         Expanded(
-          child: SingleChildScrollView(
-            controller: _vScroll,
-            child: SizedBox(
-              height: bodyHeight,
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  HourRuler(
-                    window: window,
-                    pxPerMinute: pxPerMinute,
-                    halfHourMarks: halfHourMarks,
-                  ),
-                  for (final column in columns) Expanded(child: column),
-                ],
+          // A REAL scroll gesture (drag or wheel — both flip the user
+          // scroll direction; our own jumpTo only emits idle) hands the
+          // vertical position over to the user: no more re-anchoring.
+          child: NotificationListener<UserScrollNotification>(
+            onNotification: (notification) {
+              if (notification.direction != ScrollDirection.idle) {
+                _userScrolled = true;
+              }
+              return false;
+            },
+            child: SingleChildScrollView(
+              controller: _vScroll,
+              child: SizedBox(
+                height: bodyHeight,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    HourRuler(
+                      window: window,
+                      pxPerMinute: pxPerMinute,
+                      halfHourMarks: halfHourMarks,
+                    ),
+                    for (final column in columns) Expanded(child: column),
+                  ],
+                ),
               ),
             ),
           ),
