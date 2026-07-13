@@ -413,6 +413,15 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
       ];
     }
 
+    // What the day actually renders — a match-cancelled block hides
+    // silently (nothing visible changes), only visible/reserved ones warn.
+    Set<String> dayRenderedIds(Day date) {
+      final day = week.days[date.weekday - 1];
+      return day is OpenDay && day.date == date
+          ? {for (final b in day.blocks) b.id}
+          : const {};
+    }
+
     // Past days are history: set_day_override would cancel their (already
     // played) reservations and corrupt attendance — the gestures refuse.
     bool guardPast(Day date) {
@@ -431,6 +440,7 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
                 blocks: dbBlocks,
                 dayContext: date,
                 dayBaseIds: dayBaseIds(date),
+                dayRenderedIds: dayRenderedIds(date),
                 dayHasOverride: overrideByDate[date] != null,
                 dayIsTraining:
                     settings.trainingWeekdays.contains(date.weekday),
@@ -469,6 +479,7 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
                 initialEnd: end,
                 dayContext: date,
                 dayBaseIds: dayBaseIds(date),
+                dayRenderedIds: dayRenderedIds(date),
                 dayHasOverride: overrideByDate[date] != null,
                 dayIsTraining:
                     settings.trainingWeekdays.contains(date.weekday),

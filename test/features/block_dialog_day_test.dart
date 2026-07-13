@@ -391,4 +391,61 @@ void main() {
       isFalse,
     );
   });
+
+  testWidgets('overlapping a block a match ALREADY cancelled (not rendered, '
+      'no live rows) saves silently — no "Blok bude skryt"', (tester) async {
+    await tester.pumpWidget(app(BlockDialog(
+      existing: null,
+      blocks: const [b1, b2],
+      initialStart: const HourMinute(17, 0),
+      initialEnd: const HourMinute(18, 0),
+      dayContext: thursday,
+      dayBaseIds: const ['b1', 'b2'],
+      // b2 is match-cancelled: it does not render.
+      dayRenderedIds: const {'b1'},
+    )));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Uložit'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Blok bude skryt'), findsNothing);
+    expect(
+      requests.any((r) => r.url.path.contains('set_day_override')),
+      isTrue,
+    );
+    expect(
+      requests.any(
+          (r) => r.url.path.contains('cancel_block_day_reservations')),
+      isFalse,
+    );
+  });
+
+  testWidgets('…but a match-cancelled block with LIVE rows still warns and '
+      'sweeps them', (tester) async {
+    reservationsBody =
+        '[{"date":"${thursday.toSql()}","lane":1,"block_id":"b2"}]';
+    await tester.pumpWidget(app(BlockDialog(
+      existing: null,
+      blocks: const [b1, b2],
+      initialStart: const HourMinute(17, 0),
+      initialEnd: const HourMinute(18, 0),
+      dayContext: thursday,
+      dayBaseIds: const ['b1', 'b2'],
+      dayRenderedIds: const {'b1'},
+    )));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Uložit'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Blok bude skryt'), findsOneWidget);
+    await tester.tap(find.text('Pokračovat'));
+    await tester.pumpAndSettle();
+    expect(
+      requests.any(
+          (r) => r.url.path.contains('cancel_block_day_reservations')),
+      isTrue,
+    );
+  });
 }

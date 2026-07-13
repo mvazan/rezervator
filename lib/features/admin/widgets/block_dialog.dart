@@ -48,6 +48,7 @@ class BlockDialog extends StatefulWidget {
     this.initialEnd,
     this.dayContext,
     this.dayBaseIds,
+    this.dayRenderedIds,
     this.dayHasOverride = false,
     this.dayIsTraining = true,
     this.dayPriority = const <PrioritySlot>[],
@@ -70,6 +71,12 @@ class BlockDialog extends StatefulWidget {
   /// override is composed from, so a block hidden by a priority slot isn't
   /// permanently lost.
   final List<String>? dayBaseIds;
+
+  /// Day-scoped mode: ids of the blocks the day currently RENDERS. Hiding
+  /// a block nobody can see (a match already cancelled it) needs no
+  /// warning — unless it still holds live reservations. Null = warn for
+  /// everything (conservative default).
+  final Set<String>? dayRenderedIds;
 
   /// Day-scoped mode: whether the day already has an override row — shows
   /// the "Obnovit týdenní rozvrh" escape hatch.
@@ -429,16 +436,28 @@ class _BlockDialogState extends State<BlockDialog> {
         bail();
         return;
       }
-      if (hidden.isNotEmpty) {
-        final hiddenIds = {for (final b in hidden) b.id};
+      // Only blocks the admin can SEE (or that still hold live rows) are
+      // worth a dialog — one already cancelled by a match hides silently:
+      // nothing visible changes and its reservations went with the match.
+      bool hasRows(TimeBlock b) =>
+          reservations.any((r) => r.date == date && r.blockId == b.id);
+      final noteworthy = [
+        for (final b in hidden)
+          if (widget.dayRenderedIds == null ||
+              widget.dayRenderedIds!.contains(b.id) ||
+              hasRows(b))
+            b,
+      ];
+      if (noteworthy.isNotEmpty) {
+        final noteworthyIds = {for (final b in noteworthy) b.id};
         final hiddenRows = reservations
-            .where((r) => r.date == date && hiddenIds.contains(r.blockId))
+            .where((r) => r.date == date && noteworthyIds.contains(r.blockId))
             .length;
         final proceed = await confirmDialog(
           context,
           title: 'Blok bude skryt',
           message: 'Upravený blok v tomto dni skryje '
-              '${hidden.map((b) => b.label).join(', ')}. Zobrazí se zase, '
+              '${noteworthy.map((b) => b.label).join(', ')}. Zobrazí se zase, '
               'když úpravu zrušíš nebo zkrátíš.'
               '${hiddenRows > 0 ? ' $hiddenRows rezervací na skrytých blocích bude zrušeno.' : ''}'
               ' Pokračovat?',
@@ -448,13 +467,11 @@ class _BlockDialogState extends State<BlockDialog> {
           bail();
           return;
         }
-        hiddenToCancel = [
-          for (final b in hidden)
-            if (reservations
-                .any((r) => r.date == date && r.blockId == b.id))
-              b,
-        ];
       }
+      hiddenToCancel = [
+        for (final b in hidden)
+          if (hasRows(b)) b,
+      ];
 
       // Dissolving into a twin that still holds live rows (legacy forks,
       // pre-cancel-on-hide): sweep them first or the 1:1 move collides.
