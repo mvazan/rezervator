@@ -563,10 +563,12 @@ void main() {
       await tester.pumpAndSettle();
 
       // Hour gridlines are Dividers positioned by the shared window; the
-      // ruler labels whole hours of the 8:00–12:00 window.
+      // ruler labels whole hours of the 8:00–12:00 window. findsWidgets:
+      // the status-bar clock can legitimately show the same text when the
+      // suite runs at exactly that wall-clock minute.
       expect(find.byType(Divider), findsWidgets);
-      expect(find.text('08:00'), findsOneWidget);
-      expect(find.text('12:00'), findsOneWidget);
+      expect(find.text('08:00'), findsWidgets);
+      expect(find.text('12:00'), findsWidgets);
 
       // resetToToday (imperative idle-reset entry point the shell calls)
       // must not throw even mid-animation, and settles cleanly.
