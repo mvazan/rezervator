@@ -1,9 +1,11 @@
+import 'package:flutter/foundation.dart' show setEquals;
 import 'package:flutter/material.dart';
 
 import '../../../core/ui.dart';
 import '../../../data/providers.dart';
 import '../../../domain/models.dart';
 import '../../../domain/schedule.dart' show timesOverlap;
+import 'move_reservations_dialog.dart';
 
 /// If deactivating [blockId] would strand future live reservations
 /// (invisible, uncancellable from the grid), asks the admin to confirm.
@@ -133,6 +135,9 @@ class _BlockDialogState extends State<BlockDialog> {
   }
 
   /// Day-scoped removal: the block disappears from [widget.dayContext] only.
+  /// When it still has sign-ups and the blocks it was covering resurface,
+  /// the move dialog lets the admin drag each reservation to a new home
+  /// first; anything left unmoved is cancelled (confirmed inside).
   Future<void> _removeForDay() async {
     final existing = widget.existing!;
     final date = widget.dayContext!;
@@ -141,10 +146,42 @@ class _BlockDialogState extends State<BlockDialog> {
         if (id != existing.id) id,
     ];
     setState(() => _saving = true);
-    final ok = await _confirmDayCancellations(date, ids.toSet());
-    if (!ok || !mounted) {
-      if (mounted) setState(() => _saving = false);
-      return;
+    final reservations = await Api.futureLiveReservations(today());
+    if (!mounted) return;
+    final signUps = reservations
+        .where((r) => r.date == date && r.blockId == existing.id)
+        .length;
+    final blockById = {for (final b in widget.blocks) b.id: b};
+    final targets = [
+      for (final id in ids)
+        if (blockById[id] != null &&
+            timesOverlap(existing.startsAt, existing.endsAt,
+                blockById[id]!.startsAt, blockById[id]!.endsAt))
+          blockById[id]!,
+    ];
+    if (signUps > 0 && targets.isNotEmpty) {
+      final moved = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => MoveReservationsDialog(
+          date: date,
+          fromBlock: existing,
+          targets: targets,
+          cancelNote: widget.dayReason.trim().isEmpty
+              ? 'změna rozvrhu'
+              : widget.dayReason,
+        ),
+      );
+      if (moved != true || !mounted) {
+        if (mounted) setState(() => _saving = false);
+        return;
+      }
+    } else {
+      final ok = await _confirmDayCancellations(date, ids.toSet());
+      if (!ok || !mounted) {
+        if (mounted) setState(() => _saving = false);
+        return;
+      }
     }
     final done = await tryAction(
       context,
@@ -242,19 +279,37 @@ class _BlockDialogState extends State<BlockDialog> {
       if (mounted) setState(() => _saving = false);
     }
 
+    // Dissolve: editing a day-special so it EXACTLY copies an active
+    // template block hands the day back to that block — its reservations
+    // move over silently and the special vanishes from the override.
+    TimeBlock? dissolveTwin;
+    if (_dayMode && existing != null && existing.position < 0) {
+      for (final b in widget.blocks) {
+        if (b.active &&
+            b.position >= 0 &&
+            b.startsAt == start &&
+            b.endsAt == end) {
+          dissolveTwin = b;
+          break;
+        }
+      }
+    }
+
     if (_dayMode) {
       // The day-scoped block beats the weekly template like a priority
       // slot: template blocks the new times touch are HIDDEN for this day
       // (and reappear as soon as the edit shrinks or goes away) — say so.
+      // Irrelevant when dissolving: the result IS a template block.
       final blockById = {for (final b in widget.blocks) b.id: b};
       final hidden = [
-        for (final id in widget.dayBaseIds!)
-          if (id != existing?.id &&
-              blockById[id] != null &&
-              blockById[id]!.position >= 0 &&
-              timesOverlap(
-                  start, end, blockById[id]!.startsAt, blockById[id]!.endsAt))
-            blockById[id]!,
+        if (dissolveTwin == null)
+          for (final id in widget.dayBaseIds!)
+            if (id != existing?.id &&
+                blockById[id] != null &&
+                blockById[id]!.position >= 0 &&
+                timesOverlap(
+                    start, end, blockById[id]!.startsAt, blockById[id]!.endsAt))
+              blockById[id]!,
       ];
       if (hidden.isNotEmpty) {
         final proceed = await confirmDialog(
@@ -274,10 +329,13 @@ class _BlockDialogState extends State<BlockDialog> {
       // Confirm using the RPC's exact cancellation predicate: everything on
       // the date OUTSIDE the kept ids goes (the new special has no
       // reservations, so it needn't be in the set). Runs for the add path
-      // too — adding a block still sweeps stranded reservations.
+      // too — adding a block still sweeps stranded reservations. When
+      // dissolving, the edited special's reservations MOVE (not cancel), so
+      // it counts as kept.
       final keptIds = {
         for (final id in widget.dayBaseIds!)
-          if (id != existing?.id) id,
+          if (id != existing?.id || dissolveTwin != null) id,
+        if (dissolveTwin != null) dissolveTwin.id,
       };
       final ok = await _confirmDayCancellations(widget.dayContext!, keptIds);
       if (!ok || !mounted) {
@@ -319,6 +377,40 @@ class _BlockDialogState extends State<BlockDialog> {
             await Api.addTimeBlock(start, end, _nextPosition);
           } else {
             await Api.updateTimeBlock(existing.id, startsAt: start, endsAt: end);
+          }
+          return;
+        }
+        if (dissolveTwin != null) {
+          // Hand the day back to the template block: move the special's
+          // sign-ups over (lanes 1:1 — the twin was hidden, so its slots
+          // are free), restore the twin's id in the override, and drop the
+          // override row entirely when nothing day-specific remains.
+          await Api.moveDayReservations(
+              widget.dayContext!, existing!.id, dissolveTwin.id);
+          final seen = <String>{};
+          final ids = [
+            for (final id in widget.dayBaseIds!)
+              if (seen.add(id == existing.id ? dissolveTwin.id : id))
+                id == existing.id ? dissolveTwin.id : id,
+          ];
+          final templateIds = {
+            for (final b in widget.blocks)
+              if (b.active && b.position >= 0) b.id,
+          };
+          if (setEquals(ids.toSet(), templateIds)) {
+            await Api.setDayOverride(
+                date: widget.dayContext!,
+                closed: false,
+                reason: '',
+                blockIds: templateIds.toList());
+            await Api.deleteDayOverride(widget.dayContext!);
+          } else {
+            await Api.setDayOverride(
+              date: widget.dayContext!,
+              closed: false,
+              reason: widget.dayReason,
+              blockIds: ids,
+            );
           }
           return;
         }

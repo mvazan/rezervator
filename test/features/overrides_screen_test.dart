@@ -17,12 +17,15 @@ void main() {
     status: ProfileStatus.approved,
   );
 
-  Widget app({List<DayOverride> overrides = const []}) {
+  Widget app({
+    List<DayOverride> overrides = const [],
+    List<TimeBlock> blocks = const [],
+  }) {
     return ProviderScope(
       overrides: [
         myProfileProvider.overrideWith((ref) => Stream.value(admin)),
         dayOverridesProvider.overrideWith((ref) => Stream.value(overrides)),
-        timeBlocksProvider.overrideWith((ref) => Stream.value(const [])),
+        timeBlocksProvider.overrideWith((ref) => Stream.value(blocks)),
       ],
       child: const MaterialApp(
         localizationsDelegates: GlobalMaterialLocalizations.delegates,
@@ -89,5 +92,42 @@ void main() {
     expect(find.text('Vyplň důvod.'), findsOneWidget);
     // Dialog stays open — never reached Api.setDayOverride.
     expect(find.byType(AlertDialog), findsOneWidget);
+  });
+
+  testWidgets('day-scoped schedule forks list under Jednodenní změny with '
+      'block labels, specials marked, and an undo affordance', (tester) async {
+    const template = TimeBlock(
+      id: 'b1',
+      startsAt: HourMinute(16, 0),
+      endsAt: HourMinute(17, 0),
+      position: 0,
+      active: true,
+    );
+    const special = TimeBlock(
+      id: 'sp1',
+      startsAt: HourMinute(17, 30),
+      endsAt: HourMinute(18, 30),
+      position: -1,
+      active: false,
+    );
+    final future = today().addDays(2);
+    await tester.pumpWidget(app(
+      blocks: const [template, special],
+      overrides: [
+        DayOverride(
+            date: future,
+            closed: false,
+            reason: '',
+            blockIds: const ['b1', 'sp1']),
+      ],
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Jednodenní změny rozvrhu'), findsOneWidget);
+    expect(
+      find.textContaining('(jen tento den)'),
+      findsOneWidget,
+    );
+    expect(find.byTooltip('Vrátit den k týdennímu rozvrhu'), findsOneWidget);
   });
 }

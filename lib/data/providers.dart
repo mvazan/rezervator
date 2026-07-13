@@ -310,6 +310,27 @@ class Api {
     return row['id'] as String;
   }
 
+  /// Moves one live reservation to another block/lane (admin; the move
+  /// dialog when removing a day block with sign-ups).
+  static Future<void> moveReservation(
+          String reservationId, String toBlockId, int lane) =>
+      _db.rpc('move_reservation', params: {
+        'p_reservation': reservationId,
+        'p_to_block': toBlockId,
+        'p_lane': lane,
+      });
+
+  /// Moves ALL of a date's live reservations from one block to another,
+  /// lanes carried 1:1 (admin; a dissolving day-special hands its sign-ups
+  /// back to the template block it copied).
+  static Future<void> moveDayReservations(
+          Day date, String fromBlockId, String toBlockId) =>
+      _db.rpc('move_day_reservations', params: {
+        'p_date': date.toSql(),
+        'p_from_block': fromBlockId,
+        'p_to_block': toBlockId,
+      });
+
   // --- admin: day overrides (RPC — cascades reservation cancellations) ---
   static Future<void> setDayOverride({
     required Day date,

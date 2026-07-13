@@ -95,6 +95,7 @@ String friendlyDbError(Object error) {
     'unknown_club': 'Tenhle oddíl už neexistuje — vyber jiný.',
     'empty_tenant_name': 'Napiš název nové kuželny.',
     'empty_display_name': 'Vyplň své jméno.',
+    'unknown_reservation': 'Tahle rezervace už neexistuje.',
   };
   for (final entry in messages.entries) {
     if (raw.contains(entry.key)) return entry.value;

@@ -250,4 +250,58 @@ void main() {
     expect(rpcBody['p_block_ids'], ['b1']);
     expect(rpcBody['p_closed'], false);
   });
+
+  testWidgets('editing a special to EXACTLY copy a template block dissolves '
+      'the fork: reservations move, override restores, row is deleted', (
+    tester,
+  ) async {
+    const special = TimeBlock(
+      id: 'sp1',
+      startsAt: HourMinute(17, 30),
+      endsAt: HourMinute(18, 30),
+      position: -1,
+      active: false,
+    );
+    await tester.pumpWidget(app(BlockDialog(
+      existing: special,
+      blocks: const [b1, b2, special],
+      // Edited back to b2's exact times.
+      initialStart: const HourMinute(17, 0),
+      initialEnd: const HourMinute(18, 0),
+      dayContext: thursday,
+      dayBaseIds: const ['b1', 'sp1'],
+      dayHasOverride: true,
+    )));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Uložit'));
+    await tester.pumpAndSettle();
+
+    // 1) The special's sign-ups move to the template twin…
+    final move = requests.firstWhere(
+      (r) =>
+          r.method == 'POST' && r.url.path.contains('move_day_reservations'),
+    );
+    final moveBody = jsonDecode(move.body) as Map<String, dynamic>;
+    expect(moveBody['p_from_block'], 'sp1');
+    expect(moveBody['p_to_block'], 'b2');
+
+    // 2) …the ids match the template exactly, so the fork fully unwinds:
+    //    template override write (cancels strays via RPC) + row delete.
+    final rpc = requests.firstWhere(
+      (r) => r.method == 'POST' && r.url.path.contains('set_day_override'),
+    );
+    expect((jsonDecode(rpc.body) as Map)['p_block_ids'], ['b1', 'b2']);
+    expect(
+      requests.any((r) =>
+          r.method == 'DELETE' && r.url.path.contains('day_overrides')),
+      isTrue,
+    );
+    // 3) No new special was inserted.
+    expect(
+      requests.any(
+          (r) => r.method == 'POST' && r.url.path.contains('time_blocks')),
+      isFalse,
+    );
+  });
 }
