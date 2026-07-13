@@ -242,7 +242,11 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
           : Row(
               children: [
                 // | Rezervátor      < datum – datum >      admin profil |
-                if (width >= 700) Flexible(child: title),
+                // The title must NOT be a flex child: Flexible would claim
+                // an equal flex share as the Expanded nav, and its unused
+                // allocation becomes dead space at the row's end — pushing
+                // the icons to the middle instead of the right edge.
+                if (width >= 700) title,
                 Expanded(
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
