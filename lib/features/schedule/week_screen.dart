@@ -184,52 +184,72 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
     final me = ref.watch(myProfileProvider).value;
     final mine = ref.watch(myActiveReservationsProvider).value ?? const [];
 
-    // The top row IS the app bar: title (when the width can afford it),
-    // week navigation and the shell's action icons on one line. Landscape
-    // phones (< 700px wide) drop the title — every pixel of height and
-    // width there belongs to the calendar.
-    final showTitle = MediaQuery.sizeOf(context).width >= 700 ||
+    // The top strip IS the app bar. A narrow portrait phone can't fit
+    // title + week navigation + icons on one line, so it stacks them
+    // (title/icons row, week selector under it); everything wider —
+    // landscape phones and the web — keeps ONE line: title (where the
+    // width allows), the week navigation next to it, action icons pinned
+    // to the RIGHT edge.
+    final width = MediaQuery.sizeOf(context).width;
+    final portrait =
         MediaQuery.orientationOf(context) == Orientation.portrait;
+    final stacked = portrait && width < 700;
+    final title = Padding(
+      padding: const EdgeInsets.only(left: 8, right: 4),
+      child: Text(
+        'Rezervátor',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: Theme.of(context).textTheme.titleLarge,
+      ),
+    );
+    final navPrev = IconButton(
+      icon: const Icon(Icons.chevron_left),
+      visualDensity: VisualDensity.compact,
+      onPressed: () => _go(-1),
+    );
+    final navNext = IconButton(
+      icon: const Icon(Icons.chevron_right),
+      visualDensity: VisualDensity.compact,
+      onPressed: () => _go(1),
+    );
+    final range = Text(
+      rangeLabel(monday, monday.addDays(6)),
+      textAlign: TextAlign.center,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: Theme.of(context).textTheme.titleMedium,
+    );
+    final todayButton = _weekOffset == 0
+        ? null
+        : TextButton(onPressed: () => _go(0), child: const Text('dnes'));
     final header = Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8),
-      child: Row(
-        children: [
-          if (showTitle)
-            Flexible(
-              child: Padding(
-                padding: const EdgeInsets.only(left: 8, right: 4),
-                child: Text(
-                  'Rezervátor',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleLarge,
+      child: stacked
+          ? Column(
+              children: [
+                Row(children: [title, const Spacer(), ...widget.trailing]),
+                Row(
+                  children: [
+                    navPrev,
+                    Expanded(child: range),
+                    ?todayButton,
+                    navNext,
+                  ],
                 ),
-              ),
+              ],
+            )
+          : Row(
+              children: [
+                if (width >= 700) Flexible(child: title),
+                navPrev,
+                range,
+                ?todayButton,
+                navNext,
+                const Spacer(),
+                ...widget.trailing,
+              ],
             ),
-          IconButton(
-            icon: const Icon(Icons.chevron_left),
-            visualDensity: VisualDensity.compact,
-            onPressed: () => _go(-1),
-          ),
-          Expanded(
-            child: Text(
-              rangeLabel(monday, monday.addDays(6)),
-              textAlign: TextAlign.center,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-          ),
-          if (_weekOffset != 0)
-            TextButton(onPressed: () => _go(0), child: const Text('dnes')),
-          IconButton(
-            icon: const Icon(Icons.chevron_right),
-            visualDensity: VisualDensity.compact,
-            onPressed: () => _go(1),
-          ),
-          ...widget.trailing,
-        ],
-      ),
     );
 
     if (timeBlocks.isLoading) {

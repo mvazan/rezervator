@@ -28,9 +28,10 @@ const double calendarHeaderHeight = 56.0;
 double boardHeaderHeight(int maxEvents) =>
     calendarHeaderHeight + (maxEvents <= 2 ? 0 : (maxEvents - 2) * 13.0);
 
-/// Height of the collapsed (scrolled-down) header strip: just the day+date
-/// line — events hide until the board scrolls back to the top.
-const double collapsedHeaderHeight = 24.0;
+/// Height of the collapsed (scrolled-down) header strip: exactly the
+/// day+date line (2px padding + one 16px line + 2px) — a taller strip
+/// would leave a sliver of the first event line peeking through the clip.
+const double collapsedHeaderHeight = 20.0;
 
 /// Equal day-column width: `clamp(160, (width−ruler)/7, 220)` so a typical
 /// tablet shows exactly 7 days without horizontal scroll.
@@ -396,7 +397,7 @@ class BoardColumnHeader extends StatelessWidget {
       duration: const Duration(milliseconds: 200),
       curve: Curves.easeOutCubic,
       height: collapsed ? collapsedHeaderHeight : height,
-      padding: EdgeInsets.symmetric(horizontal: 6, vertical: collapsed ? 3 : 4),
+      padding: EdgeInsets.symmetric(horizontal: 6, vertical: collapsed ? 2 : 4),
       clipBehavior: Clip.hardEdge,
       decoration: BoxDecoration(
         gradient:
