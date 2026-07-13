@@ -393,6 +393,7 @@ class PrioritySlot {
     this.prepMinutes = 0,
     this.description = '',
     this.parentId,
+    this.isAway = false,
   });
 
   final String id;
@@ -413,6 +414,10 @@ class PrioritySlot {
   /// Set on an auto-managed "Úklid před zápasem" child — links it to its
   /// match (cascade-deleted with it, hidden from admin lists).
   final String? parentId;
+
+  /// Venkovní zápas — played elsewhere. Listed in the day header but blocks
+  /// nothing at the alley (no cancellations, no úklid child, no collisions).
+  final bool isAway;
 
   /// Match kind: `'{home} – {away}'` (or just `away`); other kinds show the
   /// type's name.
@@ -440,6 +445,7 @@ class PrioritySlot {
         prepMinutes: json['prep_minutes'] as int? ?? 0,
         description: json['description'] as String? ?? '',
         parentId: json['parent_id'] as String?,
+        isAway: json['is_away'] as bool? ?? false,
       );
 
   /// A fully-powered stand-in match type for tests and previews.

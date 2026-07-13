@@ -345,7 +345,7 @@ class _DayPage extends StatelessWidget {
               padding: const EdgeInsets.all(16),
               child: DayHeader(
                 date: day.date,
-                priority: day.priority,
+                priority: headerEvents(day),
                 closedReason: reason,
               ),
             ),
@@ -382,7 +382,7 @@ class _DayPage extends StatelessWidget {
           children: [
             DayHeader(
               date: day.date,
-              priority: day.priority,
+              priority: headerEvents(day),
               chipLabel: '$freeCount volných',
             ),
             const SizedBox(height: 12),

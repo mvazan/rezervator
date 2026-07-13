@@ -295,9 +295,10 @@ class CalendarEventBand extends StatelessWidget {
 }
 
 /// One board column's header: the day label (today gets the "DNES · …"
-/// gradient treatment) plus a priority-slot strip, or a quiet [subtitle]
-/// when there are no priority slots. Typed on [date] so widget tests can
-/// enumerate visible days.
+/// gradient treatment) plus the day's events stacked one per line (pass
+/// [headerEvents]' output — away matches marked "(venku)", úklid children
+/// already filtered out), or a quiet [subtitle] when there are none. Typed
+/// on [date] so widget tests can enumerate visible days.
 class BoardColumnHeader extends StatelessWidget {
   const BoardColumnHeader({
     super.key,
@@ -315,8 +316,8 @@ class BoardColumnHeader extends StatelessWidget {
   /// Quiet second line shown when [priority] is empty (e.g. "3 volné").
   final String? subtitle;
 
-  /// Admin-only (week view): a small ＋ opening the add-slot dialog for
-  /// this day — a packed column may have no empty space left to tap.
+  /// Admin-only (week view): tapping the header opens the add-slot dialog
+  /// for this day — a packed column may have no empty space left to tap.
   final VoidCallback? onAdd;
 
   static const _gradientColors = [Color(0xFF6366F1), Color(0xFF22D3EE)];
@@ -350,13 +351,15 @@ class BoardColumnHeader extends StatelessWidget {
           if (priority.isNotEmpty)
             Text(
               priority
-                  .map((m) => '${m.type.isMatch ? '🏆' : '⛔'} ${m.title}')
-                  .join(' · '),
+                  .map((m) => '${m.type.isMatch ? '🏆' : '⛔'} ${m.title}'
+                      '${m.isAway ? ' (venku)' : ''}')
+                  .join('\n'),
               textAlign: TextAlign.center,
-              maxLines: 1,
+              maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: 10,
+                height: 1.25,
                 color: isToday
                     ? Colors.white.withValues(alpha: 0.9)
                     : scheme.primary,
@@ -379,25 +382,7 @@ class BoardColumnHeader extends StatelessWidget {
       ),
     );
     if (onAdd == null) return body;
-    // passthrough: the column's stretch must reach the header Container, or
-    // it shrink-wraps its text and the header floats as a narrow box.
-    return Stack(
-      fit: StackFit.passthrough,
-      children: [
-        body,
-        Positioned(
-          top: 0,
-          right: 0,
-          child: IconButton(
-            icon: const Icon(Icons.add_circle_outline, size: 16),
-            visualDensity: VisualDensity.compact,
-            tooltip: 'Přidat slot',
-            color: isToday ? Colors.white : scheme.onSurfaceVariant,
-            onPressed: onAdd,
-          ),
-        ),
-      ],
-    );
+    return InkWell(onTap: onAdd, child: body);
   }
 }
 

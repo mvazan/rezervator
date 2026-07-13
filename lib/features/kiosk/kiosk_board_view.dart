@@ -469,7 +469,7 @@ class _DayColumn extends StatelessWidget {
           BoardColumnHeader(
             date: day.date,
             isToday: isToday,
-            priority: day.priority,
+            priority: headerEvents(day),
           ),
           CalendarColumn(
             window: window,

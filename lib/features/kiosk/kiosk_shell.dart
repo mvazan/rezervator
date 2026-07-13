@@ -138,13 +138,17 @@ class _StatusBar extends ConsumerWidget {
 
   String _infoLine(WidgetRef ref, Day todayDay) {
     final priority = ref.watch(prioritySlotsProvider);
-    final todaysMatches = priority.where((m) => m.date == todayDay).toList()
+    // Úklid children are plumbing (their match already announces); away
+    // matches announce with a "(venku)" marker.
+    final todaysMatches = priority
+        .where((m) => m.date == todayDay && m.parentId == null)
+        .toList()
       ..sort((a, b) => a.startsAt.compareTo(b.startsAt));
     if (todaysMatches.isNotEmpty) {
       return todaysMatches
           .map(
-            (m) =>
-                '🏆 ${m.title} ${m.startsAt.display()}–${m.endsAt.display()}',
+            (m) => '🏆 ${m.title}${m.isAway ? ' (venku)' : ''} '
+                '${m.startsAt.display()}–${m.endsAt.display()}',
           )
           .join(' · ');
     }

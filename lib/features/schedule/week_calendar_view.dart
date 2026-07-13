@@ -350,7 +350,7 @@ class _DayColumn extends StatelessWidget {
         BoardColumnHeader(
           date: day.date,
           isToday: isToday,
-          priority: day.priority,
+          priority: headerEvents(day),
           subtitle: openDay == null ? null : _freeLabel(openDay),
           onAdd:
               onAddForDay == null ? null : () => onAddForDay!(day.date),
@@ -506,18 +506,21 @@ class _DayColumn extends StatelessWidget {
   Widget _blockCard(BuildContext context, OpenDay openDay, TimeBlock block) {
     final scheme = Theme.of(context).colorScheme;
 
+    // Same ground as the card — the header is typography, not a bar: quiet
+    // spaced small-caps-like digits that read as a label, not a stripe.
     final headerText = Text(
       block.label,
       textAlign: TextAlign.center,
       style: TextStyle(
         fontSize: 9,
-        fontWeight: FontWeight.w700,
-        color: scheme.onSurfaceVariant.withValues(alpha: 0.8),
+        fontWeight: FontWeight.w800,
+        letterSpacing: 0.8,
+        fontFeatures: const [FontFeature.tabularFigures()],
+        color: scheme.onSurfaceVariant.withValues(alpha: 0.55),
       ),
     );
     final header = Container(
       height: 14,
-      color: scheme.surfaceContainerHigh.withValues(alpha: 0.7),
       alignment: Alignment.center,
       child: onEditBlock == null
           ? headerText
@@ -531,7 +534,7 @@ class _DayColumn extends StatelessWidget {
                   Icon(
                     Icons.edit_outlined,
                     size: 9,
-                    color: scheme.onSurfaceVariant.withValues(alpha: 0.6),
+                    color: scheme.onSurfaceVariant.withValues(alpha: 0.45),
                   ),
                 ],
               ),

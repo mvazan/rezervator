@@ -41,13 +41,21 @@ class PrioritySlotState extends SlotState {
 
 sealed class DaySchedule {
   const DaySchedule(
-      {required this.date, required this.priority, this.rentals = const []});
+      {required this.date,
+      required this.priority,
+      this.away = const [],
+      this.rentals = const []});
 
   final Day date;
 
   /// Priority slots (matches & co.) are shown even on closed days —
-  /// spectators want to see who plays.
+  /// spectators want to see who plays. Away matches live in [away] instead:
+  /// they occupy no alley time.
   final List<PrioritySlot> priority;
+
+  /// Venkovní zápasy — header-only announcements; they block nothing and
+  /// never render in the time grid.
+  final List<PrioritySlot> away;
 
   /// The day's rentals (weekly occurrences resolved), so renderers can place
   /// ones lying outside every block at their true time.
@@ -58,6 +66,7 @@ class ClosedDay extends DaySchedule {
   const ClosedDay(
       {required super.date,
       required super.priority,
+      super.away,
       super.rentals,
       this.reason = ''});
 
@@ -68,6 +77,7 @@ class OpenDay extends DaySchedule {
   OpenDay({
     required super.date,
     required super.priority,
+    super.away,
     super.rentals,
     required this.blocks,
     required this.laneCount,
@@ -143,6 +153,15 @@ List<OffBlockEvent> offBlockEvents({
   ]..sort((a, b) => a.start.compareTo(b.start));
 }
 
+/// What a day-column header announces: away matches first, then the day's
+/// blocking slots — WITHOUT úklid children (an úklid is plumbing, not news).
+/// Sorted by start.
+List<PrioritySlot> headerEvents(DaySchedule day) => [
+      ...day.away,
+      for (final m in day.priority)
+        if (m.parentId == null) m,
+    ]..sort((a, b) => a.startsAt.compareTo(b.startsAt));
+
 T? _firstWhereOrNull<T>(Iterable<T> items, bool Function(T) test) {
   for (final item in items) {
     if (test(item)) return item;
@@ -191,8 +210,18 @@ WeekSchedule buildWeekSchedule({
   final days = <DaySchedule>[];
   for (var i = 0; i < 7; i++) {
     final date = monday.addDays(i);
-    final dayPriority = priority.where((m) => m.date == date).toList()
+    // Away matches announce, never block — they get their own list and stay
+    // out of every collision/cancel/render path below.
+    final datePriority = priority.where((m) => m.date == date).toList()
       ..sort((a, b) => a.startsAt.compareTo(b.startsAt));
+    final dayAway = [
+      for (final m in datePriority)
+        if (m.isAway) m,
+    ];
+    final dayPriority = [
+      for (final m in datePriority)
+        if (!m.isAway) m,
+    ];
     final dayRentals = rentals.where((r) => r.occursOn(date)).toList();
 
     final override = overrideByDate[date];
@@ -200,6 +229,7 @@ WeekSchedule buildWeekSchedule({
       days.add(ClosedDay(
           date: date,
           priority: dayPriority,
+          away: dayAway,
           rentals: dayRentals,
           reason: override.reason));
       continue;
@@ -218,7 +248,11 @@ WeekSchedule buildWeekSchedule({
         ]..sort(_byStartThenPosition);
       }
     } else if (!settings.trainingWeekdays.contains(date.weekday)) {
-      days.add(ClosedDay(date: date, priority: dayPriority, rentals: dayRentals));
+      days.add(ClosedDay(
+          date: date,
+          priority: dayPriority,
+          away: dayAway,
+          rentals: dayRentals));
       continue;
     } else {
       dayBlocks = activeBlocks;
@@ -226,7 +260,11 @@ WeekSchedule buildWeekSchedule({
 
     if (dayBlocks.isEmpty) {
       days.add(ClosedDay(
-          date: date, priority: dayPriority, rentals: dayRentals, reason: reason));
+          date: date,
+          priority: dayPriority,
+          away: dayAway,
+          rentals: dayRentals,
+          reason: reason));
       continue;
     }
 
@@ -313,6 +351,7 @@ WeekSchedule buildWeekSchedule({
     days.add(OpenDay(
       date: date,
       priority: dayPriority,
+      away: dayAway,
       rentals: dayRentals,
       blocks: dayBlocks,
       laneCount: settings.laneCount,
