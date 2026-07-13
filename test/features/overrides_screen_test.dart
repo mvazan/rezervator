@@ -41,8 +41,9 @@ void main() {
   Future<void> openDialogWithDate(WidgetTester tester) async {
     await tester.tap(find.text('Přidat výjimku'));
     await tester.pumpAndSettle();
-    // Date picker opens pre-selected on today; OK confirms it.
-    await tester.tap(find.text('Vybrat'));
+    // Date picker opens pre-selected on today; OK confirms it. Two
+    // 'Vybrat' trailings exist now (Datum + optional Do) — take the first.
+    await tester.tap(find.text('Vybrat').first);
     await tester.pumpAndSettle();
     await tester.tap(find.text('OK'));
     await tester.pumpAndSettle();

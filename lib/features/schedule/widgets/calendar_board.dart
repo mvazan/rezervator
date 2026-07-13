@@ -102,7 +102,7 @@ class HourRuler extends StatelessWidget {
 /// uncovered space reported as the minute under the finger. Entries sit
 /// above the tap target, so a tap only counts as "free" if no entry consumed
 /// it AND the caller's own gap check agrees.
-class CalendarColumn extends StatelessWidget {
+class CalendarColumn extends StatefulWidget {
   const CalendarColumn({
     super.key,
     required this.window,
@@ -111,6 +111,7 @@ class CalendarColumn extends StatelessWidget {
     this.background,
     this.nowMinute,
     this.onTapFreeAt,
+    this.onDropAt,
     this.halfHourMarks = false,
   });
 
@@ -129,6 +130,30 @@ class CalendarColumn extends StatelessWidget {
   /// Admin-only: called with the minute-from-midnight under a tap that
   /// landed on empty (entry-free) space.
   final void Function(int minute)? onTapFreeAt;
+
+  /// Drag&drop landing: called with the dragged payload and the minute the
+  /// FEEDBACK'S TOP EDGE landed on (the ghost's top is what the admin
+  /// aligns) — the caller snaps/validates/commits.
+  final void Function(Object data, int minute)? onDropAt;
+
+  @override
+  State<CalendarColumn> createState() => _CalendarColumnState();
+}
+
+class _CalendarColumnState extends State<CalendarColumn> {
+  /// The DragTarget builder's context — the drop handler resolves the
+  /// column's RenderBox through it (a GlobalKey here trips DragTarget's
+  /// child-identity assert when the subtree rebuilds mid-drag).
+  BuildContext? _targetContext;
+
+  CalendarWindow get window => widget.window;
+  double get pxPerMinute => widget.pxPerMinute;
+  List<CalendarEntry> get entries => widget.entries;
+  Widget? get background => widget.background;
+  int? get nowMinute => widget.nowMinute;
+  void Function(int minute)? get onTapFreeAt => widget.onTapFreeAt;
+  void Function(Object data, int minute)? get onDropAt => widget.onDropAt;
+  bool get halfHourMarks => widget.halfHourMarks;
 
   @override
   Widget build(BuildContext context) {
@@ -204,6 +229,25 @@ class CalendarColumn extends StatelessWidget {
         child: base,
       );
     }
+    if (onDropAt != null) {
+      // NOTE: capture into a `final` FIRST — Dart closures capture the
+      // VARIABLE, so `return base;` after the reassignment below would
+      // return the DragTarget itself and recurse forever.
+      final inner = base;
+      base = DragTarget<Object>(
+        onWillAcceptWithDetails: (_) => true,
+        onAcceptWithDetails: (details) {
+          final box = _targetContext?.findRenderObject() as RenderBox?;
+          if (box == null || !box.attached) return;
+          final local = box.globalToLocal(details.offset);
+          onDropAt!(details.data, window.minuteAt(local.dy, pxPerMinute));
+        },
+        builder: (context, candidates, rejected) {
+          _targetContext = context;
+          return inner;
+        },
+      );
+    }
     return SizedBox(height: window.minutes * pxPerMinute, child: base);
   }
 }
@@ -261,6 +305,7 @@ class BoardColumnHeader extends StatelessWidget {
     required this.isToday,
     required this.priority,
     this.subtitle,
+    this.onAdd,
   });
 
   final Day date;
@@ -270,12 +315,16 @@ class BoardColumnHeader extends StatelessWidget {
   /// Quiet second line shown when [priority] is empty (e.g. "3 volné").
   final String? subtitle;
 
+  /// Admin-only (week view): a small ＋ opening the add-slot dialog for
+  /// this day — a packed column may have no empty space left to tap.
+  final VoidCallback? onAdd;
+
   static const _gradientColors = [Color(0xFF6366F1), Color(0xFF22D3EE)];
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Container(
+    final body = Container(
       height: calendarHeaderHeight,
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
       decoration: BoxDecoration(
@@ -328,6 +377,23 @@ class BoardColumnHeader extends StatelessWidget {
             ),
         ],
       ),
+    );
+    if (onAdd == null) return body;
+    return Stack(
+      children: [
+        body,
+        Positioned(
+          top: 0,
+          right: 0,
+          child: IconButton(
+            icon: const Icon(Icons.add_circle_outline, size: 16),
+            visualDensity: VisualDensity.compact,
+            tooltip: 'Přidat slot',
+            color: isToday ? Colors.white : scheme.onSurfaceVariant,
+            onPressed: onAdd,
+          ),
+        ),
+      ],
     );
   }
 }

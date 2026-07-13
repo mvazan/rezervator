@@ -442,16 +442,20 @@ void main() {
     active: true,
   );
 
-  testWidgets('admin long-presses a block card into the edit dialog', (
+  testWidgets('admin clicks the card time header into the edit dialog', (
     tester,
   ) async {
     wideSurface(tester);
     await tester.pumpWidget(app(profile: admin));
     await tester.pumpAndSettle();
 
-    // The admin affordance is hinted by the edit glyph on every block card.
+    // Every card carries a clickable time header with an edit glyph.
     expect(find.byIcon(Icons.edit_outlined), findsWidgets);
-    await tester.longPress(find.byKey(const ValueKey('cal-block-b1')).first);
+    final header = find.descendant(
+      of: find.byKey(const ValueKey('cal-block-b1')).first,
+      matching: find.text(b1.label),
+    );
+    await tester.tap(header);
     await tester.pumpAndSettle();
 
     expect(find.textContaining('Upravit blok — jen'), findsOneWidget);
@@ -678,12 +682,15 @@ void main() {
     );
     final columnTop = tester.getTopLeft(column);
 
-    // Tap inside the úklid band (20:45) — occupied, silent no-op.
+    // Tap inside the úklid band (20:45) — a click on a blocking band EDITS
+    // it; the auto-managed úklid opens its parent match.
     await tester.tapAt(
       columnTop + Offset(40, (20.75 - 20) * 60 * pxPerMinute),
     );
     await tester.pumpAndSettle();
-    expect(find.textContaining('Nový blok'), findsNothing);
+    expect(find.textContaining('Upravit zápas'), findsOneWidget);
+    await tester.tap(find.text('Zrušit'));
+    await tester.pumpAndSettle();
 
     // Tap the freed 20:00–20:30 stripe (20:15) — prefilled gap dialog.
     await tester.tapAt(
@@ -772,7 +779,10 @@ void main() {
     await tester.tap(find.byIcon(Icons.chevron_left));
     await tester.pumpAndSettle();
 
-    await tester.longPress(find.byKey(const ValueKey('cal-block-b1')).first);
+    await tester.tap(find.descendant(
+      of: find.byKey(const ValueKey('cal-block-b1')).first,
+      matching: find.text(b1.label),
+    ));
     await tester.pumpAndSettle();
 
     expect(find.text('Minulé dny nelze upravovat.'), findsOneWidget);
@@ -806,5 +816,61 @@ void main() {
     await tester.tap(find.text('Zrušit'));
     await tester.pumpAndSettle();
     expect(find.textContaining('Nový blok'), findsNothing);
+  });
+
+  testWidgets('header ＋ opens the add dialog for that day without prefilled '
+      'times', (tester) async {
+    wideSurface(tester);
+    await tester.pumpWidget(app(profile: admin));
+    await tester.pumpAndSettle();
+
+    final addInTomorrow = find.descendant(
+      of: find.byKey(ValueKey(tomorrow)),
+      matching: find.byIcon(Icons.add_circle_outline),
+    );
+    expect(addInTomorrow, findsOneWidget);
+    await tester.tap(addInTomorrow);
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Nový blok — jen'), findsOneWidget);
+    expect(find.text('--:--'), findsNWidgets(2)); // times picked in dialog
+  });
+
+  testWidgets('HOLD-drag moves a block onto empty space (handler fires); a '
+      'drop onto occupied space is refused', (tester) async {
+    wideSurface(tester);
+    await tester.pumpWidget(app(blocks: const [bEarly, b1], profile: admin));
+    await tester.pumpAndSettle();
+
+    const pxPerMinute = 2 * 40.0 / 60;
+    final card = find
+        .descendant(
+          of: find.byKey(ValueKey(tomorrow)),
+          matching: find.byKey(const ValueKey('cal-block-bEarly')),
+        )
+        .first;
+
+    Future<void> holdDragBy(Offset delta) async {
+      final gesture = await tester.startGesture(tester.getCenter(card));
+      await tester.pump(const Duration(milliseconds: 300)); // > delay
+      await gesture.moveBy(delta);
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+    }
+
+    // Drop overlapping b1 (feedback top lands at 22:58): refused.
+    await holdDragBy(Offset(0, (22.97 - 20.5) * 60 * pxPerMinute));
+    expect(find.text('Tady není volné místo.'), findsOneWidget);
+    // Let the refusal snack expire before the next drop's assertions.
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+
+    // Drop onto empty 21:30: accepted — the move handler fires (and dies
+    // on the missing backend in this harness, which surfaces as an error
+    // snack — proof the commit path ran).
+    await holdDragBy(Offset(0, (21.5 + 0.5 - 20.5) * 60 * pxPerMinute));
+    expect(find.text('Tady není volné místo.'), findsNothing);
+    expect(find.byType(SnackBar), findsOneWidget);
   });
 }

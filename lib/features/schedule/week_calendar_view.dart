@@ -18,6 +18,18 @@ import '../../domain/schedule.dart';
 import 'widgets/calendar_board.dart';
 import 'widgets/slot_tile.dart';
 
+/// Drag&drop payloads: what a held card/band carries to the drop target.
+class BlockDragData {
+  const BlockDragData(this.date, this.block);
+  final Day date;
+  final TimeBlock block;
+}
+
+class SlotDragData {
+  const SlotDragData(this.slot);
+  final PrioritySlot slot;
+}
+
 /// Vertical scale: a 60-minute block is as tall as [_refLaneRowHeight] per
 /// lane — the same room the old week grid gave its rows.
 const double _refLaneRowHeight = 40.0;
@@ -37,8 +49,12 @@ class WeekCalendarView extends StatelessWidget {
     required this.fitWidth,
     required this.onBook,
     required this.onCancel,
-    this.onLongPressBlock,
+    this.onEditBlock,
     this.onAddBlockInGap,
+    this.onAddForDay,
+    this.onEditPrioritySlot,
+    this.onMoveBlock,
+    this.onMovePrioritySlot,
   });
 
   final WeekSchedule week;
@@ -59,12 +75,19 @@ class WeekCalendarView extends StatelessWidget {
   final void Function(Day, TimeBlock, Reservation, {required bool ownFuture})
       onCancel;
 
-  /// Admin-only (null otherwise): long-press a block card to edit it FOR
-  /// THAT DAY; tap an empty stretch of a day column to add a day-scoped
-  /// block prefilled with the free gap around the tapped time.
-  final void Function(Day date, TimeBlock block)? onLongPressBlock;
+  /// Admin-only (null otherwise). Click the card's time header (or a
+  /// blocking band) to edit FOR THAT DAY; tap empty column space or the
+  /// header ＋ to add; HOLD a card/band and drag it onto empty space to
+  /// move it within the day (snap 15 min).
+  final void Function(Day date, TimeBlock block)? onEditBlock;
   final void Function(Day date, HourMinute start, HourMinute end)?
       onAddBlockInGap;
+  final void Function(Day date)? onAddForDay;
+  final void Function(Day date, PrioritySlot slot)? onEditPrioritySlot;
+  final void Function(Day date, TimeBlock block, HourMinute newStart)?
+      onMoveBlock;
+  final void Function(Day date, PrioritySlot slot, HourMinute newStart)?
+      onMovePrioritySlot;
 
   @override
   Widget build(BuildContext context) {
@@ -120,8 +143,12 @@ class WeekCalendarView extends StatelessWidget {
               interactive: interactive,
               onBook: onBook,
               onCancel: onCancel,
-              onLongPressBlock: onLongPressBlock,
+              onEditBlock: onEditBlock,
               onAddBlockInGap: onAddBlockInGap,
+              onAddForDay: onAddForDay,
+              onEditPrioritySlot: onEditPrioritySlot,
+              onMoveBlock: onMoveBlock,
+              onMovePrioritySlot: onMovePrioritySlot,
             ),
         ];
         final columnWidth = boardColumnWidth(constraints.maxWidth);
@@ -191,8 +218,12 @@ class _DayColumn extends StatelessWidget {
     required this.interactive,
     required this.onBook,
     required this.onCancel,
-    this.onLongPressBlock,
+    this.onEditBlock,
     this.onAddBlockInGap,
+    this.onAddForDay,
+    this.onEditPrioritySlot,
+    this.onMoveBlock,
+    this.onMovePrioritySlot,
   });
 
   final DaySchedule day;
@@ -210,9 +241,15 @@ class _DayColumn extends StatelessWidget {
   final void Function(Day, TimeBlock, int lane) onBook;
   final void Function(Day, TimeBlock, Reservation, {required bool ownFuture})
       onCancel;
-  final void Function(Day date, TimeBlock block)? onLongPressBlock;
+  final void Function(Day date, TimeBlock block)? onEditBlock;
   final void Function(Day date, HourMinute start, HourMinute end)?
       onAddBlockInGap;
+  final void Function(Day date)? onAddForDay;
+  final void Function(Day date, PrioritySlot slot)? onEditPrioritySlot;
+  final void Function(Day date, TimeBlock block, HourMinute newStart)?
+      onMoveBlock;
+  final void Function(Day date, PrioritySlot slot, HourMinute newStart)?
+      onMovePrioritySlot;
 
   @override
   Widget build(BuildContext context) {
@@ -243,6 +280,70 @@ class _DayColumn extends StatelessWidget {
                 day.date, hourMinuteAt(gap.$1), hourMinuteAt(gap.$2));
           };
 
+    // Drag&drop landing: snap the ghost's top edge to 15 minutes and only
+    // accept when the whole slot (a match brings its úklid child along)
+    // fits into free space of THIS day.
+    void handleDrop(Object data, int minute) {
+      final snapped = ((minute + 7) ~/ 15) * 15;
+      (int, int)? candidate;
+      void Function()? commit;
+      List<(int, int)> self = const [];
+      if (data is BlockDragData && data.date == day.date) {
+        final dur = data.block.durationMinutes;
+        candidate = (snapped, snapped + dur);
+        self = [
+          (
+            data.block.startsAt.minutesFromMidnight,
+            data.block.endsAt.minutesFromMidnight
+          )
+        ];
+        commit = () =>
+            onMoveBlock?.call(day.date, data.block, hourMinuteAt(snapped));
+      } else if (data is SlotDragData && data.slot.date == day.date) {
+        final s = data.slot;
+        final dur = s.endsAt.minutesFromMidnight - s.startsAt.minutesFromMidnight;
+        final child = day.priority
+            .where((m) => m.parentId == s.id)
+            .firstOrNull;
+        final childDur = child == null
+            ? 0
+            : child.endsAt.minutesFromMidnight -
+                child.startsAt.minutesFromMidnight;
+        candidate = (snapped - childDur, snapped + dur);
+        self = [
+          (s.startsAt.minutesFromMidnight, s.endsAt.minutesFromMidnight),
+          if (child != null)
+            (
+              child.startsAt.minutesFromMidnight,
+              child.endsAt.minutesFromMidnight
+            ),
+        ];
+        commit = () =>
+            onMovePrioritySlot?.call(day.date, s, hourMinuteAt(snapped));
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Přesun jde jen v rámci stejného dne.')));
+        return;
+      }
+      final (cs, ce) = candidate;
+      final selfUnion = mergeIntervals(self);
+      final occupiedMinusSelf = mergeIntervals([
+        for (final (s0, e0) in occupied)
+          ...subtractInterval((s0, e0), selfUnion),
+      ]);
+      final fits = cs >= window.startMinute &&
+          ce <= window.endMinute &&
+          !occupiedMinusSelf.any((iv) => iv.$1 < ce && iv.$2 > cs);
+      if (!fits) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Tady není volné místo.')));
+        return;
+      }
+      commit();
+    }
+
+    final canMove = onMoveBlock != null || onMovePrioritySlot != null;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -251,6 +352,8 @@ class _DayColumn extends StatelessWidget {
           isToday: isToday,
           priority: day.priority,
           subtitle: openDay == null ? null : _freeLabel(openDay),
+          onAdd:
+              onAddForDay == null ? null : () => onAddForDay!(day.date),
         ),
         CalendarColumn(
           window: window,
@@ -262,6 +365,7 @@ class _DayColumn extends StatelessWidget {
               : null,
           nowMinute: nowMinute,
           onTapFreeAt: onTapFree,
+          onDropAt: canMove ? handleDrop : null,
         ),
       ],
     );
@@ -318,17 +422,38 @@ class _DayColumn extends StatelessWidget {
 
     for (final m in day.priority) {
       final club = ClubColors.of(m.type.colorIndex, scheme.brightness);
-      addBands(
-        m.startsAt,
-        m.endsAt,
-        () => CalendarEventBand(
+      Widget band() {
+        Widget w = CalendarEventBand(
           background: club?.$1 ?? scheme.errorContainer.withValues(alpha: 0.6),
           foreground: club?.$2 ?? scheme.onErrorContainer,
           text: '${m.type.isMatch ? '🏆' : '⛔'} ${m.title}\n'
               '${m.startsAt.display()}–${m.endsAt.display()}',
           bold: true,
-        ),
-      );
+        );
+        // Click = edit (a click has nothing else to do on a blocking band);
+        // an úklid child edits its parent match.
+        if (onEditPrioritySlot != null) {
+          w = InkWell(
+            onTap: () => onEditPrioritySlot!(day.date, m),
+            child: w,
+          );
+        }
+        // HOLD = move. Úklid children follow their match, they don't move
+        // on their own.
+        if (onMovePrioritySlot != null && m.parentId == null) {
+          w = _draggable(
+            context,
+            data: SlotDragData(m),
+            label: m.title,
+            heightMinutes: m.endsAt.minutesFromMidnight -
+                m.startsAt.minutesFromMidnight,
+            child: w,
+          );
+        }
+        return w;
+      }
+
+      addBands(m.startsAt, m.endsAt, band);
     }
     if (openDay != null) {
       for (final r in openDay.rentals) {
@@ -372,24 +497,50 @@ class _DayColumn extends StatelessWidget {
     );
   }
 
-  /// One block's calendar card: one bookable [SlotTile] row per lane.
-  /// Whole-alley priority slots never reach a rendered block (they cancel
-  /// overlapping blocks in buildWeekSchedule and render as true-time bands);
-  /// lane-scoped slots resolve per lane row. Admins long-press anywhere on
-  /// the card to edit the block (a small edit glyph in the corner hints it).
+  /// One block's calendar card: a thin time header ('17:30–18:30' — for
+  /// admins a click-to-edit target) over one bookable [SlotTile] row per
+  /// lane. Whole-alley priority slots never reach a rendered block (they
+  /// cancel overlapping blocks in buildWeekSchedule and render as
+  /// true-time bands); lane-scoped slots resolve per lane row. Admins HOLD
+  /// the card to drag it onto empty space (same-day move).
   Widget _blockCard(BuildContext context, OpenDay openDay, TimeBlock block) {
     final scheme = Theme.of(context).colorScheme;
 
-    final content = Column(
-      children: [
-        for (var lane = 1; lane <= openDay.laneCount; lane++)
-          Expanded(child: _laneRow(context, openDay, block, lane)),
-      ],
+    final headerText = Text(
+      block.label,
+      textAlign: TextAlign.center,
+      style: TextStyle(
+        fontSize: 9,
+        fontWeight: FontWeight.w700,
+        color: scheme.onSurfaceVariant.withValues(alpha: 0.8),
+      ),
+    );
+    final header = Container(
+      height: 14,
+      color: scheme.surfaceContainerHigh.withValues(alpha: 0.7),
+      alignment: Alignment.center,
+      child: onEditBlock == null
+          ? headerText
+          : InkWell(
+              onTap: () => onEditBlock!(openDay.date, block),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  headerText,
+                  const SizedBox(width: 3),
+                  Icon(
+                    Icons.edit_outlined,
+                    size: 9,
+                    color: scheme.onSurfaceVariant.withValues(alpha: 0.6),
+                  ),
+                ],
+              ),
+            ),
     );
 
     final card = Container(
       // Stable per-block key (unique among one column's entries) so tests
-      // can measure card geometry and target long-presses.
+      // can measure card geometry and target gestures.
       key: ValueKey('cal-block-${block.id}'),
       margin: const EdgeInsets.symmetric(horizontal: 1),
       clipBehavior: Clip.antiAlias,
@@ -398,29 +549,68 @@ class _DayColumn extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.4)),
       ),
-      child: onLongPressBlock == null
-          ? content
-          : Stack(
+      child: Column(
+        children: [
+          header,
+          Expanded(
+            child: Column(
               children: [
-                Positioned.fill(child: content),
-                Positioned(
-                  top: 2,
-                  right: 3,
-                  child: IgnorePointer(
-                    child: Icon(
-                      Icons.edit_outlined,
-                      size: 12,
-                      color: scheme.onSurfaceVariant.withValues(alpha: 0.4),
-                    ),
-                  ),
-                ),
+                for (var lane = 1; lane <= openDay.laneCount; lane++)
+                  Expanded(child: _laneRow(context, openDay, block, lane)),
               ],
             ),
+          ),
+        ],
+      ),
     );
-    if (onLongPressBlock == null) return card;
-    return GestureDetector(
-      onLongPress: () => onLongPressBlock!(openDay.date, block),
+    if (onMoveBlock == null) return card;
+    return _draggable(
+      context,
+      data: BlockDragData(openDay.date, block),
+      label: block.label,
+      heightMinutes: block.durationMinutes,
       child: card,
+    );
+  }
+
+  /// HOLD-to-drag wrapper shared by cards and bands: the ghost is a simple
+  /// tinted box of the slot's true size so the admin can align its top
+  /// edge with the target time.
+  Widget _draggable(
+    BuildContext context, {
+    required Object data,
+    required String label,
+    required int heightMinutes,
+    required Widget child,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+    return LayoutBuilder(
+      builder: (context, constraints) => LongPressDraggable<Object>(
+        data: data,
+        delay: const Duration(milliseconds: 200),
+        feedback: Material(
+          color: Colors.transparent,
+          child: Container(
+            width: constraints.maxWidth,
+            height: heightMinutes * pxPerMinute,
+            decoration: BoxDecoration(
+              color: scheme.primaryContainer.withValues(alpha: 0.75),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: scheme.primary),
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              label,
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                color: scheme.onPrimaryContainer,
+              ),
+            ),
+          ),
+        ),
+        childWhenDragging: Opacity(opacity: 0.35, child: child),
+        child: child,
+      ),
     );
   }
 
