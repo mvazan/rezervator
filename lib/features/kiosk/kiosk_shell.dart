@@ -15,6 +15,7 @@ import '../../core/ui.dart';
 import '../../core/widgets/gradient_button.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
+import '../../domain/schedule.dart' show headerEventLabel;
 import 'kiosk_board_view.dart';
 import 'name_picker.dart';
 
@@ -138,19 +139,14 @@ class _StatusBar extends ConsumerWidget {
 
   String _infoLine(WidgetRef ref, Day todayDay) {
     final priority = ref.watch(prioritySlotsProvider);
-    // Úklid children are plumbing (their match already announces); away
-    // matches announce with a "(venku)" marker.
+    // Úklid children are plumbing (their match already announces); the
+    // shared label gives home matches the 🏠, away matches no icon.
     final todaysMatches = priority
         .where((m) => m.date == todayDay && m.parentId == null)
         .toList()
       ..sort((a, b) => a.startsAt.compareTo(b.startsAt));
     if (todaysMatches.isNotEmpty) {
-      return todaysMatches
-          .map(
-            (m) => '🏆 ${m.title}${m.isAway ? ' (venku)' : ''} '
-                '${m.startsAt.display()}–${m.endsAt.display()}',
-          )
-          .join(' · ');
+      return todaysMatches.map(headerEventLabel).join('  ·  ');
     }
 
     final settings =

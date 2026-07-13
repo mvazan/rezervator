@@ -162,6 +162,15 @@ List<PrioritySlot> headerEvents(DaySchedule day) => [
         if (m.parentId == null) m,
     ]..sort((a, b) => a.startsAt.compareTo(b.startsAt));
 
+/// One header line for a priority slot: home matches get the house icon,
+/// away matches no icon at all (that IS the away marker), blockages keep ⛔ —
+/// always with the od–do times.
+String headerEventLabel(PrioritySlot m) {
+  final prefix = !m.type.isMatch ? '⛔ ' : (m.isAway ? '' : '🏠 ');
+  return '$prefix${m.title} · '
+      '${m.startsAt.display()}–${m.endsAt.display()}';
+}
+
 T? _firstWhereOrNull<T>(Iterable<T> items, bool Function(T) test) {
   for (final item in items) {
     if (test(item)) return item;

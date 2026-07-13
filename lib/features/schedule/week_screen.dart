@@ -25,7 +25,11 @@ enum ScheduleView { day, week }
 /// landscape the week calendar — and both always fit the screen width, so
 /// there are no toggle buttons to explain.
 class WeekScreen extends ConsumerStatefulWidget {
-  const WeekScreen({super.key});
+  const WeekScreen({super.key, this.trailing = const []});
+
+  /// Extra actions appended to the week-navigation row — in landscape the
+  /// shell has no AppBar and parks its icons here (one shared top line).
+  final List<Widget> trailing;
 
   @override
   ConsumerState<WeekScreen> createState() => _WeekScreenState();
@@ -194,6 +198,7 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
             icon: const Icon(Icons.chevron_right),
             onPressed: () => _go(1),
           ),
+          ...widget.trailing,
         ],
       ),
     );
@@ -501,7 +506,6 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
                   nameById: nameById,
                   clubColorById: clubColorById,
                   interactive: interactive,
-                  fitWidth: fitWidth,
                   onBook: onBook,
                   onCancel: onCancel,
                   onEditBlock: onEditBlock,

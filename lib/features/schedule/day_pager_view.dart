@@ -337,12 +337,12 @@ class _DayPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 16),
       children: [
         switch (day) {
           ClosedDay(:final reason) => Card(
             child: Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(12),
               child: DayHeader(
                 date: day.date,
                 priority: headerEvents(day),
@@ -376,7 +376,7 @@ class _DayPage extends StatelessWidget {
 
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -385,7 +385,7 @@ class _DayPage extends StatelessWidget {
               priority: headerEvents(day),
               chipLabel: '$freeCount volných',
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             // Lane header + block rows always stay column-aligned: every lane
             // cell is the same width in a given mode, and the header row and
             // block rows are built the same way, so column N of the header
@@ -538,7 +538,7 @@ class _DayPage extends StatelessWidget {
 
   Widget _laneRow(BuildContext context, OpenDay day, TimeBlock block) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.only(bottom: 8),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

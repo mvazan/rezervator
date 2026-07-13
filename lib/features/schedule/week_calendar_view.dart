@@ -41,7 +41,7 @@ int _snapMinute(int minute) => ((minute + 2) ~/ 5) * 5;
 /// lane — the same room the old week grid gave its rows.
 const double _refLaneRowHeight = 40.0;
 
-class WeekCalendarView extends StatelessWidget {
+class WeekCalendarView extends StatefulWidget {
   const WeekCalendarView({
     super.key,
     required this.week,
@@ -53,7 +53,6 @@ class WeekCalendarView extends StatelessWidget {
     required this.nameById,
     required this.clubColorById,
     required this.interactive,
-    required this.fitWidth,
     required this.onBook,
     required this.onCancel,
     this.onEditBlock,
@@ -73,11 +72,6 @@ class WeekCalendarView extends StatelessWidget {
   final Map<String, String> nameById;
   final Map<String, int> clubColorById;
   final bool interactive;
-
-  /// When true all 7 columns share the available width (no horizontal
-  /// scroll); otherwise columns keep a fixed readable width inside a
-  /// column-snapping horizontal scroller.
-  final bool fitWidth;
   final void Function(Day, TimeBlock, int lane) onBook;
   final void Function(Day, TimeBlock, Reservation, {required bool ownFuture})
       onCancel;
@@ -97,7 +91,52 @@ class WeekCalendarView extends StatelessWidget {
       onMovePrioritySlot;
 
   @override
+  State<WeekCalendarView> createState() => _WeekCalendarViewState();
+}
+
+class _WeekCalendarViewState extends State<WeekCalendarView> {
+  final _vScroll = ScrollController();
+
+  /// Scrolled away from the top: the sticky header strip collapses to the
+  /// thin day+date band (events reappear when scrolled back up).
+  bool _collapsed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _vScroll.addListener(() {
+      final collapsed = _vScroll.hasClients && _vScroll.offset > 8;
+      if (collapsed != _collapsed) setState(() => _collapsed = collapsed);
+    });
+  }
+
+  @override
+  void dispose() {
+    _vScroll.dispose();
+    super.dispose();
+  }
+
+  /// Bookable-slot count for the header's quiet subtitle.
+  String? _freeLabel(DaySchedule day) {
+    if (day is! OpenDay) return null;
+    final isAdmin = widget.me?.isAdmin ?? false;
+    final freeCount = day.blocks
+        .expand((block) =>
+            [for (var lane = 1; lane <= day.laneCount; lane++) (block, lane)])
+        .where((entry) => canBook(
+              state: day.slot(entry.$1.id, entry.$2),
+              myActiveCount: widget.myCount,
+              settings: widget.settings,
+              isAdmin: isAdmin,
+            ))
+        .length;
+    return '$freeCount volných';
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final week = widget.week;
+    final settings = widget.settings;
     final window = calendarWindowFor(
       blocks: [
         for (final day in week.days)
@@ -116,7 +155,7 @@ class WeekCalendarView extends StatelessWidget {
     }
     final pxPerMinute = settings.laneCount * _refLaneRowHeight / 60;
     // Shared header height: the busiest visible day dictates it for every
-    // column AND the ruler offset, so all event lines fit without clipping.
+    // column, so all event lines fit without clipping.
     var maxHeaderEvents = 0;
     for (final day in week.days) {
       final count = headerEvents(day).length;
@@ -131,88 +170,83 @@ class WeekCalendarView extends StatelessWidget {
     ].any((b) => b.startsAt.minute == 30 || b.endsAt.minute == 30);
     // +8: slack so the bottom hour label (centered on its line) isn't
     // half-clipped when scrolled fully down.
-    final totalHeight = headerHeight + window.minutes * pxPerMinute + 8;
+    final bodyHeight = window.minutes * pxPerMinute + 8;
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final columns = [
-          for (final day in week.days)
-            _DayColumn(
-              // Keyed by date so tests can target one day's column.
-              key: ValueKey(day.date),
-              day: day,
-              isToday: day.date == today,
-              window: window,
-              pxPerMinute: pxPerMinute,
-              headerHeight: headerHeight,
-              halfHourMarks: halfHourMarks,
-              nowMinute: day.date == today &&
-                      now.minutesFromMidnight >= window.startMinute &&
-                      now.minutesFromMidnight < window.endMinute
-                  ? now.minutesFromMidnight
-                  : null,
-              me: me,
-              myCount: myCount,
-              settings: settings,
-              nameById: nameById,
-              clubColorById: clubColorById,
-              interactive: interactive,
-              onBook: onBook,
-              onCancel: onCancel,
-              onEditBlock: onEditBlock,
-              onAddBlockInGap: onAddBlockInGap,
-              onAddForDay: onAddForDay,
-              onEditPrioritySlot: onEditPrioritySlot,
-              onMoveBlock: onMoveBlock,
-              onMovePrioritySlot: onMovePrioritySlot,
-            ),
-        ];
-        final columnWidth = boardColumnWidth(constraints.maxWidth);
+    final columns = [
+      for (final day in week.days)
+        _DayColumn(
+          // Keyed by date so tests can target one day's column.
+          key: ValueKey(day.date),
+          day: day,
+          window: window,
+          pxPerMinute: pxPerMinute,
+          halfHourMarks: halfHourMarks,
+          nowMinute: day.date == widget.today &&
+                  widget.now.minutesFromMidnight >= window.startMinute &&
+                  widget.now.minutesFromMidnight < window.endMinute
+              ? widget.now.minutesFromMidnight
+              : null,
+          me: widget.me,
+          myCount: widget.myCount,
+          settings: settings,
+          nameById: widget.nameById,
+          clubColorById: widget.clubColorById,
+          interactive: widget.interactive,
+          onBook: widget.onBook,
+          onCancel: widget.onCancel,
+          onEditBlock: widget.onEditBlock,
+          onAddBlockInGap: widget.onAddBlockInGap,
+          onEditPrioritySlot: widget.onEditPrioritySlot,
+          onMoveBlock: widget.onMoveBlock,
+          onMovePrioritySlot: widget.onMovePrioritySlot,
+        ),
+    ];
 
-        return SingleChildScrollView(
-          child: SizedBox(
-            height: totalHeight,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Column(
-                  children: [
-                    SizedBox(height: headerHeight),
-                    HourRuler(
-                      window: window,
-                      pxPerMinute: pxPerMinute,
-                      halfHourMarks: halfHourMarks,
-                    ),
-                  ],
-                ),
-                Expanded(
-                  child: fitWidth
-                      ? Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            for (final column in columns)
-                              Expanded(child: column),
-                          ],
-                        )
-                      : SizedBox(
-                          height: totalHeight,
-                          child: ListView.builder(
-                            scrollDirection: Axis.horizontal,
-                            physics:
-                                ColumnSnapPhysics(columnWidth: columnWidth),
-                            itemCount: columns.length,
-                            itemBuilder: (context, index) => SizedBox(
-                              width: columnWidth,
-                              child: columns[index],
-                            ),
-                          ),
-                        ),
-                ),
-              ],
+    // Sticky header strip: stays pinned while the calendar scrolls
+    // vertically, collapsing to a thin day+date band away from the top.
+    final headerStrip = Row(
+      children: [
+        const SizedBox(width: calendarRulerWidth),
+        for (final day in week.days)
+          Expanded(
+            child: BoardColumnHeader(
+              date: day.date,
+              isToday: day.date == widget.today,
+              priority: headerEvents(day),
+              height: headerHeight,
+              collapsed: _collapsed,
+              subtitle: _freeLabel(day),
+              onAdd: widget.onAddForDay == null
+                  ? null
+                  : () => widget.onAddForDay!(day.date),
             ),
           ),
-        );
-      },
+      ],
+    );
+
+    return Column(
+      children: [
+        headerStrip,
+        Expanded(
+          child: SingleChildScrollView(
+            controller: _vScroll,
+            child: SizedBox(
+              height: bodyHeight,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  HourRuler(
+                    window: window,
+                    pxPerMinute: pxPerMinute,
+                    halfHourMarks: halfHourMarks,
+                  ),
+                  for (final column in columns) Expanded(child: column),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -221,10 +255,8 @@ class _DayColumn extends StatelessWidget {
   const _DayColumn({
     super.key,
     required this.day,
-    required this.isToday,
     required this.window,
     required this.pxPerMinute,
-    required this.headerHeight,
     required this.halfHourMarks,
     required this.nowMinute,
     required this.me,
@@ -237,17 +269,14 @@ class _DayColumn extends StatelessWidget {
     required this.onCancel,
     this.onEditBlock,
     this.onAddBlockInGap,
-    this.onAddForDay,
     this.onEditPrioritySlot,
     this.onMoveBlock,
     this.onMovePrioritySlot,
   });
 
   final DaySchedule day;
-  final bool isToday;
   final CalendarWindow window;
   final double pxPerMinute;
-  final double headerHeight;
   final bool halfHourMarks;
   final int? nowMinute;
   final Profile? me;
@@ -262,7 +291,6 @@ class _DayColumn extends StatelessWidget {
   final void Function(Day date, TimeBlock block)? onEditBlock;
   final void Function(Day date, HourMinute start, HourMinute end)?
       onAddBlockInGap;
-  final void Function(Day date)? onAddForDay;
   final void Function(Day date, PrioritySlot slot)? onEditPrioritySlot;
   final void Function(Day date, TimeBlock block, HourMinute newStart)?
       onMoveBlock;
@@ -374,49 +402,18 @@ class _DayColumn extends StatelessWidget {
         hoverOf(data)?.value = _snapMinute(minute);
     void handleDragExit(Object data) => hoverOf(data)?.value = null;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        BoardColumnHeader(
-          date: day.date,
-          isToday: isToday,
-          priority: headerEvents(day),
-          height: headerHeight,
-          subtitle: openDay == null ? null : _freeLabel(openDay),
-          onAdd:
-              onAddForDay == null ? null : () => onAddForDay!(day.date),
-        ),
-        CalendarColumn(
-          window: window,
-          pxPerMinute: pxPerMinute,
-          halfHourMarks: halfHourMarks,
-          entries: _entries(context, openDay),
-          background: openDay == null
-              ? _closedBackground(context, scheme)
-              : null,
-          nowMinute: nowMinute,
-          onTapFreeAt: onTapFree,
-          onDropAt: canMove ? handleDrop : null,
-          onDragAt: canMove ? handleDragAt : null,
-          onDragExit: canMove ? handleDragExit : null,
-        ),
-      ],
+    return CalendarColumn(
+      window: window,
+      pxPerMinute: pxPerMinute,
+      halfHourMarks: halfHourMarks,
+      entries: _entries(context, openDay),
+      background: openDay == null ? _closedBackground(context, scheme) : null,
+      nowMinute: nowMinute,
+      onTapFreeAt: onTapFree,
+      onDropAt: canMove ? handleDrop : null,
+      onDragAt: canMove ? handleDragAt : null,
+      onDragExit: canMove ? handleDragExit : null,
     );
-  }
-
-  String? _freeLabel(OpenDay day) {
-    final isAdmin = me?.isAdmin ?? false;
-    final freeCount = day.blocks
-        .expand((block) =>
-            [for (var lane = 1; lane <= day.laneCount; lane++) (block, lane)])
-        .where((entry) => canBook(
-              state: day.slot(entry.$1.id, entry.$2),
-              myActiveCount: myCount,
-              settings: settings,
-              isAdmin: isAdmin,
-            ))
-        .length;
-    return '$freeCount volných';
   }
 
   List<CalendarEntry> _entries(BuildContext context, OpenDay? openDay) {

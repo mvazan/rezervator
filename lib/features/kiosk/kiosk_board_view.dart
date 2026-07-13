@@ -24,6 +24,7 @@ import '../schedule/widgets/calendar_board.dart';
 export '../schedule/widgets/calendar_board.dart'
     show
         BoardColumnHeader,
+        ColumnSnapPhysics,
         boardColumnWidth,
         boardHeaderHeight,
         calendarHeaderHeight;
@@ -139,13 +140,30 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
   final _hScroll = ScrollController();
   final _vScroll = ScrollController();
 
+  /// The sticky header strip's horizontal position — driven by [_hScroll]
+  /// (never scrolled directly), so headers stay glued over their columns.
+  final _hHeader = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    _hScroll.addListener(_syncHeader);
+  }
+
+  void _syncHeader() {
+    if (_hHeader.hasClients &&
+        _hScroll.hasClients &&
+        _hHeader.offset != _hScroll.offset) {
+      _hHeader.jumpTo(_hScroll.offset);
+    }
+  }
+
   // Snapshot of the most recent build's geometry, kept so resetToNow can
   // locate "now" without threading a HourMinute through the shell's
   // imperative reset call — the shell only holds a GlobalKey to this state,
   // no board-shaped data of its own to pass.
   CalendarWindow? _window;
   double _pxPerMinute = 0;
-  double _headerHeight = calendarHeaderHeight;
 
   /// Today's block spans in minutes-from-midnight — the idle reset anchors
   /// on the START of the block containing "now" (the board doesn't creep
@@ -156,6 +174,7 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
   void dispose() {
     _hScroll.dispose();
     _vScroll.dispose();
+    _hHeader.dispose();
     super.dispose();
   }
 
@@ -181,8 +200,9 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
           break;
         }
       }
-      final target = _headerHeight +
-          window.topFor(hourMinuteAt(anchorMin), _pxPerMinute) -
+      // The header strip is sticky (outside the scroll), so the target is
+      // pure body geometry.
+      final target = window.topFor(hourMinuteAt(anchorMin), _pxPerMinute) -
           40; // a little context above the line
       _vScroll.animateTo(
         target.clamp(0.0, _vScroll.position.maxScrollExtent),
@@ -378,99 +398,126 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
             // must not squash its lane rows below reach in scroll mode
             // either.
             : (comfortableScale < minScale ? minScale : comfortableScale);
-        final totalHeight =
-            headerHeight + window.minutes * pxPerMinute + _bottomLabelPad;
+        final bodyHeight = window.minutes * pxPerMinute + _bottomLabelPad;
         // Snapshot for resetToNow's imperative scroll-target math (see field
         // docs above) — assignment only, no setState, so it can't trigger a
         // rebuild loop.
         _window = window;
         _pxPerMinute = pxPerMinute;
-        _headerHeight = headerHeight;
         _todayBlockSpans = [
           if (days.first case OpenDay(:final blocks))
             for (final b in blocks)
               (b.startsAt.minutesFromMidnight, b.endsAt.minutesFromMidnight),
         ];
 
-        return SingleChildScrollView(
-          controller: _vScroll,
-          child: SizedBox(
-            height: totalHeight,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Column(
-                  children: [
-                    SizedBox(height: headerHeight),
-                    HourRuler(
-                      window: window,
-                      pxPerMinute: pxPerMinute,
-                      halfHourMarks: halfHourMarks,
-                    ),
-                  ],
-                ),
-                Expanded(
-                  child: SizedBox(
-                    height: totalHeight,
+        // Sticky header strip: pinned above the vertically scrolling body,
+        // horizontally driven by the body's own scroll (see _syncHeader).
+        return Column(
+          children: [
+            SizedBox(
+              height: headerHeight,
+              child: Row(
+                children: [
+                  const SizedBox(width: calendarRulerWidth),
+                  Expanded(
                     child: ListView.builder(
                       scrollDirection: Axis.horizontal,
-                      controller: _hScroll,
-                      physics: ColumnSnapPhysics(columnWidth: columnWidth),
+                      controller: _hHeader,
+                      physics: const NeverScrollableScrollPhysics(),
                       itemCount: days.length,
                       itemBuilder: (context, index) => SizedBox(
                         width: columnWidth,
-                        child: _DayColumn(
-                          day: days[index],
-                          isToday: index == 0,
-                          window: window,
-                          pxPerMinute: pxPerMinute,
-                          headerHeight: headerHeight,
-                          halfHourMarks: halfHourMarks,
-                          nowMinute: index == 0 &&
-                                  now.minutesFromMidnight >=
-                                      window.startMinute &&
-                                  now.minutesFromMidnight < window.endMinute
-                              ? now.minutesFromMidnight
-                              : null,
-                          laneCount: settings.laneCount,
-                          nameById: nameById,
-                          clubColorById: clubColorById,
-                          interactive: interactive,
-                          selected: widget.selected,
-                          onBook: (date, block, lane) => _book(
-                            context,
-                            ref,
-                            date,
-                            block,
-                            lane,
-                            widget.selected!,
+                        child: Container(
+                          margin: const EdgeInsets.symmetric(horizontal: 2),
+                          child: BoardColumnHeader(
+                            date: days[index].date,
+                            isToday: index == 0,
+                            priority: headerEvents(days[index]),
+                            height: headerHeight,
                           ),
                         ),
                       ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
+            Expanded(
+              child: SingleChildScrollView(
+                controller: _vScroll,
+                child: SizedBox(
+                  height: bodyHeight,
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      HourRuler(
+                        window: window,
+                        pxPerMinute: pxPerMinute,
+                        halfHourMarks: halfHourMarks,
+                      ),
+                      Expanded(
+                        child: SizedBox(
+                          height: bodyHeight,
+                          child: ListView.builder(
+                            scrollDirection: Axis.horizontal,
+                            controller: _hScroll,
+                            physics:
+                                ColumnSnapPhysics(columnWidth: columnWidth),
+                            itemCount: days.length,
+                            itemBuilder: (context, index) => SizedBox(
+                              width: columnWidth,
+                              child: _DayColumn(
+                                day: days[index],
+                                window: window,
+                                pxPerMinute: pxPerMinute,
+                                halfHourMarks: halfHourMarks,
+                                nowMinute: index == 0 &&
+                                        now.minutesFromMidnight >=
+                                            window.startMinute &&
+                                        now.minutesFromMidnight <
+                                            window.endMinute
+                                    ? now.minutesFromMidnight
+                                    : null,
+                                laneCount: settings.laneCount,
+                                nameById: nameById,
+                                clubColorById: clubColorById,
+                                interactive: interactive,
+                                selected: widget.selected,
+                                onBook: (date, block, lane) => _book(
+                                  context,
+                                  ref,
+                                  date,
+                                  block,
+                                  lane,
+                                  widget.selected!,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
         );
       },
     );
   }
 }
 
-/// One board column: DNES-gradient (today) or plain header, then the day's
-/// calendar area — blocks and off-block events positioned at their true
-/// time. A closed day dims the whole column behind a vertical "✕ zavřeno[ —
-/// reason]"; matches still render on top (spectators want to see who plays
-/// even on a closed day).
+/// One board column's calendar area — blocks and off-block events positioned
+/// at their true time (the day header lives in the sticky strip above). A
+/// closed day dims the whole column behind a vertical "✕ zavřeno[ — reason]";
+/// matches still render on top (spectators want to see who plays even on a
+/// closed day).
 class _DayColumn extends StatelessWidget {
   const _DayColumn({
     required this.day,
-    required this.isToday,
     required this.window,
     required this.pxPerMinute,
-    required this.headerHeight,
     required this.halfHourMarks,
     required this.nowMinute,
     required this.laneCount,
@@ -482,10 +529,8 @@ class _DayColumn extends StatelessWidget {
   });
 
   final DaySchedule day;
-  final bool isToday;
   final CalendarWindow window;
   final double pxPerMinute;
-  final double headerHeight;
   final bool halfHourMarks;
   final int? nowMinute;
   final int laneCount;
@@ -504,24 +549,13 @@ class _DayColumn extends StatelessWidget {
       margin: const EdgeInsets.symmetric(horizontal: 2),
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(borderRadius: BorderRadius.circular(10)),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          BoardColumnHeader(
-            date: day.date,
-            isToday: isToday,
-            priority: headerEvents(day),
-            height: headerHeight,
-          ),
-          CalendarColumn(
-            window: window,
-            pxPerMinute: pxPerMinute,
-            halfHourMarks: halfHourMarks,
-            entries: _entries(context),
-            background: closed ? _closedBackground(context, scheme) : null,
-            nowMinute: nowMinute,
-          ),
-        ],
+      child: CalendarColumn(
+        window: window,
+        pxPerMinute: pxPerMinute,
+        halfHourMarks: halfHourMarks,
+        entries: _entries(context),
+        background: closed ? _closedBackground(context, scheme) : null,
+        nowMinute: nowMinute,
       ),
     );
   }
