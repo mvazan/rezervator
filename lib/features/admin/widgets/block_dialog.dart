@@ -195,7 +195,7 @@ class _BlockDialogState extends State<BlockDialog> {
             m.type.lanes == null &&
             !m.type.unresolved &&
             timesOverlap(b.startsAt, b.endsAt, m.blockingStart, m.endsAt));
-    final targets = [
+    var targets = [
       for (final id in ids)
         if (blockById[id] != null &&
             timesOverlap(existing.startsAt, existing.endsAt,
@@ -203,6 +203,15 @@ class _BlockDialogState extends State<BlockDialog> {
             willRender(blockById[id]!))
           blockById[id]!,
     ];
+    if (targets.isEmpty) {
+      // Nothing overlaps — offer every block that still renders that day
+      // rather than forcing a cancellation.
+      targets = [
+        for (final id in ids)
+          if (blockById[id] != null && willRender(blockById[id]!))
+            blockById[id]!,
+      ];
+    }
     if (signUps > 0 && targets.isNotEmpty) {
       final moved = await showDialog<bool>(
         context: context,
@@ -471,14 +480,13 @@ class _BlockDialogState extends State<BlockDialog> {
       }
 
       // Confirm using the RPC's exact cancellation predicate: everything on
-      // the date OUTSIDE the kept ids goes (the new special has no
-      // reservations, so it needn't be in the set). Runs for the add path
-      // too — adding a block still sweeps stranded reservations. When
-      // dissolving, the edited special's reservations MOVE (not cancel), so
-      // it counts as kept.
+      // the date OUTSIDE the kept ids goes. The EDITED block counts as kept
+      // — its reservations MOVE with it to the new times (or the dissolve
+      // twin), they never cancel. Runs for the add path too — adding a
+      // block still sweeps stranded reservations.
       final keptIds = {
-        for (final id in widget.dayBaseIds!)
-          if (id != existing?.id || dissolveTwin != null) id,
+        ...widget.dayBaseIds!,
+        if (existing != null) existing.id,
         if (dissolveTwin != null) dissolveTwin.id,
       };
       final ok = await _confirmDayCancellations(widget.dayContext!, keptIds);
@@ -592,6 +600,13 @@ class _BlockDialogState extends State<BlockDialog> {
         }
         final specialId =
             special?.id ?? await Api.addSpecialBlock(start, end);
+        if (existing != null) {
+          // The block's sign-ups travel with it to the new times (lanes
+          // 1:1 — the fresh special has no rows). Editing a training's
+          // time must not throw its players away.
+          await Api.moveDayReservations(
+              widget.dayContext!, existing.id, specialId);
+        }
         final base = widget.dayBaseIds!;
         final ids = existing == null
             ? [...base, specialId]

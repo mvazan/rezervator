@@ -97,7 +97,16 @@ void main() {
     expect(insertBody['starts_at'], '17:30:00');
     expect(insertBody['ends_at'], '18:30:00');
 
-    // 2) The override RPC: b2 replaced by the special block, b1 kept.
+    // 2) The edited block's sign-ups MOVE to the special (never cancel).
+    final move = requests.firstWhere(
+      (r) =>
+          r.method == 'POST' && r.url.path.contains('move_day_reservations'),
+    );
+    final moveBody = jsonDecode(move.body) as Map<String, dynamic>;
+    expect(moveBody['p_from_block'], 'b2');
+    expect(moveBody['p_to_block'], 'sb1');
+
+    // 3) The override RPC: b2 replaced by the special block, b1 kept.
     final rpc = requests.firstWhere(
       (r) => r.method == 'POST' && r.url.path.contains('set_day_override'),
     );
@@ -106,7 +115,7 @@ void main() {
     expect(rpcBody['p_closed'], false);
     expect(rpcBody['p_block_ids'], ['b1', 'sb1']);
 
-    // 3) No PATCH ever hits the weekly time_blocks row.
+    // 4) No PATCH ever hits the weekly time_blocks row.
     expect(
       requests.any(
           (r) => r.method == 'PATCH' && r.url.path.contains('time_blocks')),
@@ -348,6 +357,38 @@ void main() {
     expect(
       requests.any((r) => r.url.path.contains('set_day_override')),
       isTrue,
+    );
+  });
+
+  testWidgets('editing a block that has a reservation does NOT threaten a '
+      'cancellation — the sign-up moves with the block', (tester) async {
+    reservationsBody =
+        '[{"date":"${thursday.toSql()}","lane":1,"block_id":"b2"}]';
+    await tester.pumpWidget(app(BlockDialog(
+      existing: b2,
+      blocks: const [b1, b2],
+      initialStart: const HourMinute(19, 0),
+      initialEnd: const HourMinute(20, 0),
+      dayContext: thursday,
+      dayBaseIds: const ['b1', 'b2'],
+    )));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Uložit'));
+    await tester.pumpAndSettle();
+
+    // No 'Pozor — rezervace budou zrušeny' — the reservation is kept and
+    // moved onto the new special instead.
+    expect(find.text('Pozor — rezervace budou zrušeny'), findsNothing);
+    final move = requests.firstWhere(
+      (r) =>
+          r.method == 'POST' && r.url.path.contains('move_day_reservations'),
+    );
+    expect((jsonDecode(move.body) as Map)['p_from_block'], 'b2');
+    expect(
+      requests.any(
+          (r) => r.url.path.contains('cancel_block_day_reservations')),
+      isFalse,
     );
   });
 }
