@@ -79,6 +79,17 @@ void main() {
     });
   });
 
+  group('hourMinuteAt', () {
+    test('maps ordinary minutes and clamps midnight to 23:59', () {
+      expect(hourMinuteAt(17 * 60 + 30), const HourMinute(17, 30));
+      // The 24:00 window/gap end must become the app-wide latest end 23:59
+      // — a naive hour clamp would yield 23:00, an hour short (would
+      // prefill an inverted add-block range).
+      expect(hourMinuteAt(24 * 60), const HourMinute(23, 59));
+      expect(hourMinuteAt(-5), const HourMinute(0, 0));
+    });
+  });
+
   group('mergeIntervals', () {
     test('merges overlaps and touching intervals, drops empties', () {
       expect(

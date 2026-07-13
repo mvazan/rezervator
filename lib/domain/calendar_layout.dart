@@ -59,6 +59,15 @@ CalendarWindow? calendarWindowFor({
   return CalendarWindow(min! ~/ 60 * 60, ((max! + 59) ~/ 60 * 60).clamp(0, 24 * 60));
 }
 
+/// Minutes-from-midnight → [HourMinute], clamped to 23:59 ([HourMinute] has
+/// no 24:00; a window/gap end of 1440 becomes the app-wide "latest end").
+/// Clamping the MINUTE COUNT (not the hour alone) is the point: a naive
+/// `hour.clamp(0, 23)` would turn 1440 into 23:00 — an hour short.
+HourMinute hourMinuteAt(int minutes) {
+  final m = minutes.clamp(0, 24 * 60 - 1);
+  return HourMinute(m ~/ 60, m % 60);
+}
+
 /// Merges half-open `(startMinute, endMinute)` intervals into a sorted
 /// non-overlapping union (zero/negative-length inputs are dropped).
 List<(int, int)> mergeIntervals(Iterable<(int, int)> intervals) {

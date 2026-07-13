@@ -84,7 +84,9 @@ class WeekCalendarView extends StatelessWidget {
       return const Center(child: Text('Tenhle týden se nehraje.'));
     }
     final pxPerMinute = settings.laneCount * _refLaneRowHeight / 60;
-    final totalHeight = calendarHeaderHeight + window.minutes * pxPerMinute;
+    // +8: slack so the bottom hour label (centered on its line) isn't
+    // half-clipped when scrolled fully down.
+    final totalHeight = calendarHeaderHeight + window.minutes * pxPerMinute + 8;
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -217,15 +219,12 @@ class _DayColumn extends StatelessWidget {
           (r.startsAt.minutesFromMidnight, r.endsAt.minutesFromMidnight),
     ]);
 
-    HourMinute at(int minutes) =>
-        HourMinute((minutes ~/ 60).clamp(0, 23), minutes % 60);
-
     final onTapFree = onAddBlockInGap == null
         ? null
         : (int minute) {
             final gap = freeGapAt(minute, occupied, window);
             if (gap == null) return;
-            onAddBlockInGap!(at(gap.$1), at(gap.$2));
+            onAddBlockInGap!(hourMinuteAt(gap.$1), hourMinuteAt(gap.$2));
           };
 
     return Column(
@@ -267,8 +266,6 @@ class _DayColumn extends StatelessWidget {
   }
 
   List<CalendarEntry> _entries(BuildContext context, OpenDay? openDay) {
-    HourMinute at(int minutes) =>
-        HourMinute((minutes ~/ 60).clamp(0, 23), minutes % 60);
     final entries = <CalendarEntry>[];
     final blockUnion = mergeIntervals([
       if (openDay != null)
@@ -291,8 +288,8 @@ class _DayColumn extends StatelessWidget {
         HourMinute start, HourMinute end, Widget Function() bandBuilder) {
       for (final (s, e) in subtractInterval(
           (start.minutesFromMidnight, end.minutesFromMidnight), blockUnion)) {
-        entries.add(
-            CalendarEntry(start: at(s), end: at(e), child: bandBuilder()));
+        entries.add(CalendarEntry(
+            start: hourMinuteAt(s), end: hourMinuteAt(e), child: bandBuilder()));
       }
     }
 

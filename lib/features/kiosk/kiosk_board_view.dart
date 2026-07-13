@@ -83,11 +83,28 @@ Day? nextTrainingDay({
   return null;
 }
 
-/// Below this scale lane rows stop being legible; the board then grows past
-/// the viewport and scrolls vertically instead of squashing further (rare —
-/// only when an early-morning event stretches the window way beyond the
-/// usual training hours).
-const double _minPxPerMinute = 0.9;
+/// Slack under the columns so the bottom hour label (centered on its line)
+/// isn't half-clipped by the viewport in fit-height mode.
+const double _bottomLabelPad = 8.0;
+
+/// Scale floor keeping every lane row tappable: the shortest visible block,
+/// divided across [laneCount] rows, must stay at least [_minLaneRowHeight]
+/// tall (the deleted segment board guaranteed the same 22px). Below the
+/// resulting scale the board grows past the viewport and scrolls vertically
+/// instead of squashing further (rare — only when an early-morning event
+/// stretches the window way beyond the usual training hours).
+const double _minLaneRowHeight = 22.0;
+
+double _minPxPerMinute(Iterable<TimeBlock> blocks, int laneCount) {
+  int? shortest;
+  for (final b in blocks) {
+    final d = b.durationMinutes;
+    if (d > 0 && (shortest == null || d < shortest)) shortest = d;
+  }
+  if (shortest == null) return 0.9;
+  final floor = _minLaneRowHeight * laneCount / shortest;
+  return floor < 0.9 ? 0.9 : floor;
+}
 
 class KioskBoardView extends ConsumerStatefulWidget {
   const KioskBoardView({
@@ -308,12 +325,15 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
         final columnWidth = boardColumnWidth(constraints.maxWidth);
         // Fit-height: the whole window stretches to the viewport, floored at
         // the legibility scale (then the board scrolls vertically instead).
-        final fitScale =
-            (constraints.maxHeight - calendarHeaderHeight) / window.minutes;
-        final pxPerMinute =
-            fitScale < _minPxPerMinute ? _minPxPerMinute : fitScale;
-        final totalHeight =
-            calendarHeaderHeight + window.minutes * pxPerMinute;
+        final fitScale = (constraints.maxHeight -
+                calendarHeaderHeight -
+                _bottomLabelPad) /
+            window.minutes;
+        final minScale = _minPxPerMinute(windowBlocks, settings.laneCount);
+        final pxPerMinute = fitScale < minScale ? minScale : fitScale;
+        final totalHeight = calendarHeaderHeight +
+            window.minutes * pxPerMinute +
+            _bottomLabelPad;
         // Snapshot for resetToNow's imperative scroll-target math (see field
         // docs above) — assignment only, no setState, so it can't trigger a
         // rebuild loop.
@@ -348,8 +368,12 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
                           isToday: index == 0,
                           window: window,
                           pxPerMinute: pxPerMinute,
-                          nowMinute:
-                              index == 0 ? now.minutesFromMidnight : null,
+                          nowMinute: index == 0 &&
+                                  now.minutesFromMidnight >=
+                                      window.startMinute &&
+                                  now.minutesFromMidnight < window.endMinute
+                              ? now.minutesFromMidnight
+                              : null,
                           laneCount: settings.laneCount,
                           nameById: nameById,
                           clubColorById: clubColorById,
@@ -439,8 +463,6 @@ class _DayColumn extends StatelessWidget {
   }
 
   List<CalendarEntry> _entries(BuildContext context) {
-    HourMinute at(int minutes) =>
-        HourMinute((minutes ~/ 60).clamp(0, 23), minutes % 60);
     final entries = <CalendarEntry>[];
 
     final openDay = day is OpenDay ? day as OpenDay : null;
@@ -468,8 +490,8 @@ class _DayColumn extends StatelessWidget {
         HourMinute start, HourMinute end, Widget Function() bandBuilder) {
       for (final (s, e) in subtractInterval(
           (start.minutesFromMidnight, end.minutesFromMidnight), blockUnion)) {
-        entries.add(
-            CalendarEntry(start: at(s), end: at(e), child: bandBuilder()));
+        entries.add(CalendarEntry(
+            start: hourMinuteAt(s), end: hourMinuteAt(e), child: bandBuilder()));
       }
     }
 
