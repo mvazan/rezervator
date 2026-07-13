@@ -406,38 +406,48 @@ class BoardColumnHeader extends StatelessWidget {
       ),
       child: Column(
         // Top-anchored: the day+date line sits on ONE height across all
-        // columns; events stack under it (and clip first when collapsing).
+        // columns; events stack under it. When collapsed they also FADE —
+        // the clip alone can leave a pixel-high sliver of the first event
+        // line visible under the day label.
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           dayText,
-          if (priority.isNotEmpty)
-            for (final m in priority)
-              Text(
-                headerEventLabel(m),
-                textAlign: TextAlign.center,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 10,
-                  height: 1.25,
-                  color: isToday
-                      ? Colors.white.withValues(alpha: 0.9)
-                      : scheme.primary,
-                ),
-              )
-          else if (subtitle != null)
-            Text(
-              subtitle!,
-              textAlign: TextAlign.center,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 10,
-                color: isToday
-                    ? Colors.white.withValues(alpha: 0.85)
-                    : scheme.onSurfaceVariant.withValues(alpha: 0.7),
-              ),
+          AnimatedOpacity(
+            duration: const Duration(milliseconds: 150),
+            opacity: collapsed ? 0 : 1,
+            child: Column(
+              children: [
+                if (priority.isNotEmpty)
+                  for (final m in priority)
+                    Text(
+                      headerEventLabel(m),
+                      textAlign: TextAlign.center,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 10,
+                        height: 1.25,
+                        color: isToday
+                            ? Colors.white.withValues(alpha: 0.9)
+                            : scheme.primary,
+                      ),
+                    )
+                else if (subtitle != null)
+                  Text(
+                    subtitle!,
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: isToday
+                          ? Colors.white.withValues(alpha: 0.85)
+                          : scheme.onSurfaceVariant.withValues(alpha: 0.7),
+                    ),
+                  ),
+              ],
             ),
+          ),
         ],
       ),
     );
