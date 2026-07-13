@@ -104,6 +104,7 @@ void main() {
     List<Reservation> reservations = const [],
     List<TimeBlock> blocks = const [b1],
     List<Rental> rentals = const [],
+    Stream<List<Rental>>? rentalsStream,
     Profile profile = me,
     List<Widget> trailing = const [],
   }) {
@@ -113,7 +114,8 @@ void main() {
         timeBlocksProvider.overrideWith((ref) => Stream.value(blocks)),
         dayOverridesProvider.overrideWith((ref) => Stream.value(overrides)),
         prioritySlotsProvider.overrideWithValue(matches),
-        rentalsProvider.overrideWith((ref) => Stream.value(rentals)),
+        rentalsProvider.overrideWith(
+            (ref) => rentalsStream ?? Stream.value(rentals)),
         weekReservationsProvider.overrideWith(
           (ref, monday) => Stream.value(reservations),
         ),
@@ -363,6 +365,42 @@ void main() {
         .toList();
     expect(scrollable, isNotEmpty);
     expect(scrollable.first.offset, greaterThan(100));
+  });
+
+  testWidgets('a morning event arriving AFTER the first frame re-anchors '
+      'the initial scroll onto the training blocks', (tester) async {
+    wideSurface(tester);
+    final rentalsCtrl = StreamController<List<Rental>>();
+    addTearDown(rentalsCtrl.close);
+    await tester.pumpWidget(app(rentalsStream: rentalsCtrl.stream));
+    await tester.pumpAndSettle();
+
+    // Streams settle one by one in production: the morning rental lands
+    // AFTER the board already rendered (and consumed a zero anchor).
+    rentalsCtrl.add([
+      Rental(
+        id: 'n1',
+        renterName: 'Firma X',
+        lanes: const [1],
+        date: tomorrow,
+        weekday: null,
+        startsAt: const HourMinute(9, 0),
+        endsAt: const HourMinute(11, 0),
+        validFrom: null,
+        validUntil: null,
+        note: '',
+      ),
+    ]);
+    await tester.pumpAndSettle();
+
+    final vertical = tester
+        .widgetList<Scrollable>(find.byType(Scrollable))
+        .map((s) => s.controller)
+        .whereType<ScrollController>()
+        .where((c) => c.hasClients && c.position.axis == Axis.vertical)
+        .toList();
+    expect(vertical, isNotEmpty);
+    expect(vertical.first.offset, greaterThan(100));
   });
 
   testWidgets('the view follows orientation: landscape shows the week '

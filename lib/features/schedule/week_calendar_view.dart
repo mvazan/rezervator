@@ -104,17 +104,29 @@ class _WeekCalendarViewState extends State<WeekCalendarView> {
   /// The default vertical position: the first TRAINING block's top. Morning
   /// matches/úklid may stretch the window well above the training hours —
   /// they stay reachable by scrolling up, but the board opens on what the
-  /// player came for. Applied once per mount; also the baseline the header
-  /// collapse measures from (sitting at the default anchor keeps the
-  /// events visible).
+  /// player came for. Also the baseline the header collapse measures from
+  /// (sitting at the default anchor keeps the events visible).
+  ///
+  /// Re-applied whenever the computed anchor CHANGES until the user scrolls
+  /// by hand: streams settle one by one after the first frame (a morning
+  /// match arriving late stretches the window upward), so a one-shot jump
+  /// would fire before there is anything to scroll past and then leave the
+  /// board parked at the morning event.
   double _anchorOffset = 0;
-  bool _didInitialScroll = false;
+  double? _appliedAnchor;
+  bool _userScrolled = false;
+  bool _jumping = false;
 
   @override
   void initState() {
     super.initState();
     _vScroll.addListener(() {
       if (!_vScroll.hasClients) return;
+      // Any movement not caused by our own anchor jump counts as the user
+      // taking over — stop re-anchoring under their fingers.
+      if (!_jumping && (_vScroll.offset - (_appliedAnchor ?? 0)).abs() > 1) {
+        _userScrolled = true;
+      }
       // Hysteresis relative to the default anchor: collapse a bit past it,
       // expand when back near (or above) it — no flapping around one magic
       // offset, and no auto-collapse just for opening at the anchor.
@@ -122,6 +134,16 @@ class _WeekCalendarViewState extends State<WeekCalendarView> {
       final collapsed = _collapsed ? offset > 8 : offset > 32;
       if (collapsed != _collapsed) setState(() => _collapsed = collapsed);
     });
+  }
+
+  @override
+  void didUpdateWidget(WeekCalendarView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // A different week starts fresh: anchor to its training blocks again.
+    if (oldWidget.week.days.first.date != widget.week.days.first.date) {
+      _userScrolled = false;
+      _appliedAnchor = null;
+    }
   }
 
   @override
@@ -203,12 +225,14 @@ class _WeekCalendarViewState extends State<WeekCalendarView> {
         ? 0
         : ((firstBlockMinute - window.startMinute) * pxPerMinute - 8)
             .clamp(0.0, double.infinity);
-    if (!_didInitialScroll) {
-      _didInitialScroll = true;
+    if (!_userScrolled && _appliedAnchor != _anchorOffset) {
       final target = _anchorOffset;
+      _appliedAnchor = target;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || !_vScroll.hasClients || target <= 0) return;
+        if (!mounted || _userScrolled || !_vScroll.hasClients) return;
+        _jumping = true;
         _vScroll.jumpTo(target.clamp(0.0, _vScroll.position.maxScrollExtent));
+        _jumping = false;
       });
     }
 
