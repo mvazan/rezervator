@@ -5,8 +5,6 @@ import 'package:rezervator/core/theme.dart';
 import 'package:rezervator/core/ui.dart' show today;
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
-import 'package:rezervator/features/kiosk/board_layout.dart'
-    show emptyGapHeight;
 import 'package:rezervator/features/kiosk/kiosk_board_view.dart';
 import 'package:rezervator/features/kiosk/kiosk_shell.dart';
 
@@ -521,10 +519,10 @@ void main() {
 
   testWidgets(
     'k: idle reset scrolls to today and now without throwing, and the board '
-    'renders faint time-slot gridlines between row-groups',
+    'renders faint hour gridlines plus the hour ruler labels',
     (tester) async {
-      // Two rail blocks (unlike kioskApp()'s single b1) so at least one
-      // non-last row-group boundary exists for a gridline to sit on.
+      // Two blocks so the window spans several hours and at least one
+      // interior hour line exists.
       const bMorning = TimeBlock(
         id: 'bMorning',
         startsAt: HourMinute(8, 0),
@@ -534,8 +532,8 @@ void main() {
       );
       const bEvening = TimeBlock(
         id: 'bEvening',
-        startsAt: HourMinute(20, 0),
-        endsAt: HourMinute(21, 0),
+        startsAt: HourMinute(11, 0),
+        endsAt: HourMinute(12, 0),
         position: 1,
         active: true,
       );
@@ -558,19 +556,11 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      final scheme =
-          Theme.of(tester.element(find.byType(KioskBoardView))).colorScheme;
-      final gridlineContainers = tester
-          .widgetList<Container>(find.byType(Container))
-          .where((c) {
-            final decoration = c.decoration;
-            if (decoration is! BoxDecoration) return false;
-            final border = decoration.border;
-            if (border is! Border) return false;
-            return border.bottom.color ==
-                scheme.outlineVariant.withValues(alpha: 0.25);
-          });
-      expect(gridlineContainers, isNotEmpty);
+      // Hour gridlines are Dividers positioned by the shared window; the
+      // ruler labels whole hours of the 8:00–12:00 window.
+      expect(find.byType(Divider), findsWidgets);
+      expect(find.text('08:00'), findsOneWidget);
+      expect(find.text('12:00'), findsOneWidget);
 
       // resetToToday (imperative idle-reset entry point the shell calls)
       // must not throw even mid-animation, and settles cleanly.
@@ -585,14 +575,12 @@ void main() {
   );
 
   testWidgets(
-    'l: uneven-duration blocks render proportional row heights, and rail '
-    'labels stay aligned with column cells',
+    'l: block cards are duration-proportional, positioned at their true '
+    'time, and vertically aligned across day columns',
     (tester) async {
-      // A 30-min block followed by a 60-min block. Task 2: each row-group's
-      // height scales with the block's duration (via blockGroupHeight), so
-      // the 30-min block's row-group is strictly shorter than the 60-min
-      // one, yet the rail label and the column cell for a given block still
-      // share the exact same vertical offset (one grid across rail + columns).
+      // A 30-min block, a 30-min hole, then a 60-min block: the calendar
+      // maps y = time, so the long card is exactly twice the short card's
+      // height and starts exactly one short-card-plus-hole below it.
       const bShort = TimeBlock(
         id: 'bShort',
         startsAt: HourMinute(8, 0),
@@ -626,56 +614,28 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // The rail renders one label Container per block, each sized to that
-      // block's row-group height; the innermost Container ancestor of each
-      // label Text is exactly that height-sized cell.
-      Size railCellFor(String label) {
-        final container = find
-            .ancestor(
-              of: find.text(label),
-              matching: find.byType(Container),
-            )
-            .first;
-        return tester.getSize(container);
-      }
+      final shortCards = find.byKey(const ValueKey('cal-block-bShort'));
+      final longCards = find.byKey(const ValueKey('cal-block-bLong'));
+      expect(shortCards, findsWidgets);
 
-      final shortSize = railCellFor(bShort.label);
-      final longSize = railCellFor(bLong.label);
+      final shortSize = tester.getSize(shortCards.first);
+      final longSize = tester.getSize(longCards.first);
+      // Duration-proportional: 60 min renders exactly twice 30 min.
+      expect(longSize.height, closeTo(shortSize.height * 2, 0.5));
 
-      // Proportional: the 30-min block's row-group is strictly shorter than
-      // the 60-min block's (half the per-lane height, same lane count).
-      expect(shortSize.height, lessThan(longSize.height));
+      // True-time placement: the 8:30–9:00 hole between the cards is as
+      // tall as the 30-min block itself (same px/min scale).
+      final shortTop = tester.getTopLeft(shortCards.first).dy;
+      final longTop = tester.getTopLeft(longCards.first).dy;
+      expect(longTop - shortTop, closeTo(shortSize.height * 2, 0.5));
 
-      // Rail vs column alignment: the today column (index 0) is on screen —
-      // its first block cell must start at the same y as the rail's first
-      // label cell, and both blocks' cell tops must line up rail-to-column.
-      final railShortTop = tester
-          .getTopLeft(
-            find
-                .ancestor(
-                  of: find.text(bShort.label),
-                  matching: find.byType(Container),
-                )
-                .first,
-          )
-          .dy;
-      final railLongTop = tester
-          .getTopLeft(
-            find
-                .ancestor(
-                  of: find.text(bLong.label),
-                  matching: find.byType(Container),
-                )
-                .first,
-          )
-          .dy;
-      // The distance between the two rail labels equals the first (short)
-      // block's row-group height plus the fixed empty-gap sliver for the
-      // 8:30–9:00 hole between them — so the second block sits
-      // proportionally lower than under equal-height rows, and the gap is
-      // honestly (but compactly) represented.
-      expect(railLongTop - railShortTop,
-          closeTo(shortSize.height + emptyGapHeight, 0.5));
+      // Cross-column alignment (the PR #12–14 invariant): every visible
+      // day's card for the same block sits at the same y.
+      final shortTops = [
+        for (var i = 0; i < shortCards.evaluate().length; i++)
+          tester.getTopLeft(shortCards.at(i)).dy,
+      ];
+      expect(shortTops.toSet().length, 1);
 
       await finish(tester);
     },
@@ -731,15 +691,27 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // The band shows the renter with real times inside the gap; the rail
-      // labels the occupied gap's range. Both appear exactly once (the
-      // rental is one-time, so only today's column has the band).
+      // The band shows the renter with its real times, exactly once (the
+      // rental is one-time, so only today's column has it).
       expect(find.text('🔒 Firma X\n8:45–9:30'), findsOneWidget);
-      expect(find.text('8:45–9:30'), findsOneWidget);
 
-      // The blocks themselves stay in place around the gap.
-      expect(find.text(bShort.label), findsOneWidget);
-      expect(find.text(bLong.label), findsOneWidget);
+      // And it sits at its true time: band top-to-block top distance equals
+      // 45 minutes at the shared px/min scale (block card = 30 min).
+      final shortCard = find.byKey(const ValueKey('cal-block-bShort')).first;
+      final band = find.text('🔒 Firma X\n8:45–9:30');
+      final pxPerMinute = tester.getSize(shortCard).height / 30;
+      final bandTop = tester
+          .getTopLeft(find
+              .ancestor(of: band, matching: find.byType(Container))
+              .first)
+          .dy;
+      expect(
+        bandTop - tester.getTopLeft(shortCard).dy,
+        closeTo(45 * pxPerMinute, 4), // band carries a small margin
+      );
+
+      // The blocks themselves stay in place around the event.
+      expect(find.byKey(const ValueKey('cal-block-bLong')), findsWidgets);
 
       await finish(tester);
     },

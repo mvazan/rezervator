@@ -3,29 +3,29 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:rezervator/core/ui.dart' show today, dayFull;
+import 'package:rezervator/core/ui.dart' show today;
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
+import 'package:rezervator/features/schedule/week_calendar_view.dart';
 import 'package:rezervator/features/schedule/week_screen.dart';
+import 'package:rezervator/features/schedule/widgets/calendar_board.dart';
 import 'package:rezervator/features/schedule/widgets/day_chip_strip.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
-  // WeekScreen now reads the schedule_view preference on its first frame
+  // WeekScreen reads the schedule_view preference on its first frame
   // (see _resolveInitialView) — every test needs a mock handler for the
   // platform channel behind SharedPreferences.getInstance(), or the read
   // hangs forever and pumpAndSettle times out. No stored value means every
-  // pre-existing test keeps hitting the width-based default, which is
-  // `week` (width ≥ 700) — i.e. unchanged behavior.
+  // test hits the width-based default, which is `week` (width ≥ 700).
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  // Make the surface TALL (800×2400) so all 7 stacked day cards build and lay
-  // out without lazy-list clipping — otherwise a test asserting on e.g.
-  // Friday's card (the 5th) flakes depending on which weekday the suite runs,
-  // since `tomorrow` moves through the week. Width stays 800 (≥700 → `week`).
-  // Auto-reset is registered via addTearDown, so no separate tearDown needed.
-  void tallSurface(WidgetTester tester) {
-    tester.view.physicalSize = const Size(800, 2400);
+  // Make the surface WIDE (1600×1200): the calendar's day columns clamp to
+  // 220px, so 7 columns + the hour ruler (1586px) all build without
+  // horizontal scrolling — a test asserting on e.g. Sunday's column would
+  // otherwise flake depending on which weekday the suite runs.
+  void wideSurface(WidgetTester tester) {
+    tester.view.physicalSize = const Size(1600, 1200);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -114,8 +114,10 @@ void main() {
     );
   }
 
-  testWidgets('closed override renders reason', (tester) async {
-    tallSurface(tester);
+  testWidgets('closed override renders the dimmed column with the reason', (
+    tester,
+  ) async {
+    wideSurface(tester);
     await tester.pumpWidget(
       app(
         overrides: [
@@ -124,13 +126,13 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.textContaining('Zavřeno — Malování'), findsOneWidget);
+    expect(find.textContaining('✕ zavřeno — Malování'), findsOneWidget);
   });
 
   testWidgets('reserved cell shows player nick when set, never full name', (
     tester,
   ) async {
-    tallSurface(tester);
+    wideSurface(tester);
     await tester.pumpWidget(app(reservations: [res('r2', 'p2', tomorrow)]));
     await tester.pumpAndSettle();
     expect(find.text('Péťa'), findsOneWidget);
@@ -138,13 +140,9 @@ void main() {
   });
 
   testWidgets('tap on own reservation opens cancel dialog', (tester) async {
-    tallSurface(tester);
+    wideSurface(tester);
     await tester.pumpWidget(app(reservations: [res('r1', 'me', tomorrow)]));
     await tester.pumpAndSettle();
-    // `tomorrow`'s day card can sit past the default 800x600 test surface
-    // depending on its weekday (e.g. Thu = 4th of 7 stacked cards), so the
-    // cell must be scrolled into view before tapping — ensureVisible finds
-    // the nearest Scrollable (the week ListView) and brings it on-screen.
     await tester.ensureVisible(find.text('Já Hráč').first);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Já Hráč').first);
@@ -153,17 +151,14 @@ void main() {
   });
 
   testWidgets('free bookable cell opens booking dialog', (tester) async {
-    tallSurface(tester);
+    wideSurface(tester);
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
-    // Book in `tomorrow`'s section, never in today's — the harness block
+    // Book in `tomorrow`'s column, never in today's — the harness block
     // (22:58–23:59) makes today's slot `inPast` (so not bookable) once the
     // suite runs after 22:58, which would flake a `.first` (Monday) tap.
     final addInTomorrow = find.descendant(
-      of: find.ancestor(
-        of: find.text(dayFull(tomorrow)),
-        matching: find.byType(Card),
-      ),
+      of: find.byKey(ValueKey(tomorrow)),
       matching: find.byIcon(Icons.add),
     );
     await tester.ensureVisible(addInTomorrow.first);
@@ -176,7 +171,7 @@ void main() {
   testWidgets('admin booking dialog shows a player-picker dropdown', (
     tester,
   ) async {
-    tallSurface(tester);
+    wideSurface(tester);
     await tester.pumpWidget(app(profile: admin));
     await tester.pumpAndSettle();
     await tester.tap(find.byIcon(Icons.add).first);
@@ -188,7 +183,7 @@ void main() {
   testWidgets('admin tap on foreign reservation opens the note prompt', (
     tester,
   ) async {
-    tallSurface(tester);
+    wideSurface(tester);
     await tester.pumpWidget(
       app(profile: admin, reservations: [res('r2', 'p2', tomorrow)]),
     );
@@ -203,7 +198,7 @@ void main() {
   testWidgets('non-admin tap on foreign reservation stays inert', (
     tester,
   ) async {
-    tallSurface(tester);
+    wideSurface(tester);
     await tester.pumpWidget(app(reservations: [res('r2', 'p2', tomorrow)]));
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('Péťa').first);
@@ -213,8 +208,10 @@ void main() {
     expect(find.byType(AlertDialog), findsNothing);
   });
 
-  testWidgets('match renders banner and Zápas cells', (tester) async {
-    tallSurface(tester);
+  testWidgets('whole-alley match claims the block card and the day header', (
+    tester,
+  ) async {
+    wideSurface(tester);
     await tester.pumpWidget(
       app(
         matches: [
@@ -222,7 +219,7 @@ void main() {
             type: PrioritySlot.fallbackMatchType,
             id: 'm1',
             date: tomorrow,
-            startsAt: const HourMinute(22, 0),
+            startsAt: const HourMinute(22, 58),
             endsAt: const HourMinute(23, 59),
             homeTeam: '',
             awayTeam: 'KK Slavoj',
@@ -233,26 +230,32 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.textContaining('KK Slavoj'), findsOneWidget);
-    expect(find.text('Zápas'), findsNWidgets(2)); // 2 lanes × 1 block
+    // Once in the day header strip, once as the block card's banner — and
+    // no bookable lane rows survive inside that card.
+    expect(find.textContaining('KK Slavoj'), findsNWidgets(2));
+    final addInTomorrow = find.descendant(
+      of: find.byKey(ValueKey(tomorrow)),
+      matching: find.byIcon(Icons.add),
+    );
+    expect(addInTomorrow, findsNothing);
   });
 
   testWidgets('AppBar toggle switches day/week view and persists the choice', (
     tester,
   ) async {
-    tallSurface(tester);
+    wideSurface(tester);
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
-    // Default at the test surface's 800×600 width (>= 700) is week view:
-    // the compact grid (Table) is showing, no day chip strip yet.
-    expect(find.byType(Table), findsWidgets);
+    // Default at the test surface's 1600px width (>= 700) is week view:
+    // the calendar is showing, no day chip strip yet.
+    expect(find.byType(WeekCalendarView), findsOneWidget);
     expect(find.byType(DayChipStrip), findsNothing);
 
     await tester.tap(find.byTooltip('Den'));
     await tester.pumpAndSettle();
 
     expect(find.byType(DayChipStrip), findsOneWidget);
-    expect(find.byType(Table), findsNothing);
+    expect(find.byType(WeekCalendarView), findsNothing);
 
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getString('schedule_view'), 'day');
@@ -261,7 +264,7 @@ void main() {
     await tester.tap(find.byTooltip('Týden'));
     await tester.pumpAndSettle();
 
-    expect(find.byType(Table), findsWidgets);
+    expect(find.byType(WeekCalendarView), findsOneWidget);
     expect(find.byType(DayChipStrip), findsNothing);
     expect(
       (await SharedPreferences.getInstance()).getString('schedule_view'),
@@ -272,11 +275,11 @@ void main() {
   testWidgets(
     'fit-width AppBar toggle flips the icon and persists the choice',
     (tester) async {
-      tallSurface(tester);
+      wideSurface(tester);
       await tester.pumpWidget(app());
       await tester.pumpAndSettle();
 
-      // At 800px width the fit-width default is false, so the toggle offers
+      // At 1600px width the fit-width default is false, so the toggle offers
       // to switch it ON ("Roztáhnout na šířku").
       expect(find.byTooltip('Roztáhnout na šířku'), findsOneWidget);
       expect(find.byTooltip('Zpět na posuvnou mřížku'), findsNothing);
@@ -301,16 +304,15 @@ void main() {
   );
 
   testWidgets(
-    'fit-width week grid has no horizontal Scrollable in the day card',
+    'fit-width calendar has no horizontal Scrollable — columns share the '
+    'width',
     (tester) async {
       SharedPreferences.setMockInitialValues({'fit_width': true});
-      tallSurface(tester);
+      wideSurface(tester);
       await tester.pumpWidget(app(reservations: [res('r2', 'p2', tomorrow)]));
       await tester.pumpAndSettle();
 
-      // The week grid still renders (Table present) but, in fit-width mode,
-      // no horizontal scroller wraps it — lanes flex to fill the width.
-      expect(find.byType(Table), findsWidgets);
+      expect(find.byType(WeekCalendarView), findsOneWidget);
       final horizontalScrollables = find
           .byType(Scrollable)
           .evaluate()
@@ -318,6 +320,8 @@ void main() {
           .where((s) => s.axisDirection == AxisDirection.right)
           .toList();
       expect(horizontalScrollables, isEmpty);
+      // All 7 day columns are present at once.
+      expect(find.byType(BoardColumnHeader), findsNWidgets(7));
     },
   );
 
@@ -325,7 +329,7 @@ void main() {
     tester,
   ) async {
     SharedPreferences.setMockInitialValues({'schedule_view': 'day'});
-    tallSurface(tester);
+    wideSurface(tester);
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
     expect(find.byType(DayChipStrip), findsOneWidget);
@@ -356,10 +360,10 @@ void main() {
     expect(find.text('Rezervovat termín?'), findsOneWidget);
   });
 
-  testWidgets('off-block rental renders as a gap banner with real times', (
+  testWidgets('off-block rental renders as a band with real times', (
     tester,
   ) async {
-    tallSurface(tester);
+    wideSurface(tester);
     final rental = Rental(
       id: 'n1',
       renterName: 'Firma X',
@@ -374,7 +378,7 @@ void main() {
     );
     await tester.pumpWidget(app(rentals: [rental]));
     await tester.pumpAndSettle();
-    expect(find.text('🔒 Firma X · 12:00–14:00'), findsOneWidget);
+    expect(find.text('🔒 Firma X\n12:00–14:00'), findsOneWidget);
   });
 
   const bEarly = TimeBlock(
@@ -385,14 +389,16 @@ void main() {
     active: true,
   );
 
-  testWidgets('admin long-presses a block label into the edit dialog', (
+  testWidgets('admin long-presses a block card into the edit dialog', (
     tester,
   ) async {
-    tallSurface(tester);
+    wideSurface(tester);
     await tester.pumpWidget(app(profile: admin));
     await tester.pumpAndSettle();
 
-    await tester.longPress(find.text(b1.label).first);
+    // The admin affordance is hinted by the edit glyph on every block card.
+    expect(find.byIcon(Icons.edit_outlined), findsWidgets);
+    await tester.longPress(find.byKey(const ValueKey('cal-block-b1')).first);
     await tester.pumpAndSettle();
 
     expect(find.text('Upravit blok'), findsOneWidget);
@@ -400,17 +406,26 @@ void main() {
   });
 
   testWidgets(
-    'admin taps an empty gap into a prefilled Nový blok dialog; non-admin '
-    'gets no affordance',
+    'admin taps empty calendar space into a Nový blok dialog prefilled with '
+    'the free gap',
     (tester) async {
-      tallSurface(tester);
-      // Blocks 20:00–21:00 and 22:58–23:59 leave an event-free hole between.
+      wideSurface(tester);
+      // Blocks 20:00–21:00 and 22:58–23:59 leave an event-free hole between;
+      // the window is 20:00–24:00.
       await tester.pumpWidget(app(blocks: const [bEarly, b1], profile: admin));
       await tester.pumpAndSettle();
 
-      final gapChip = find.text('＋ 21:00–22:58');
-      expect(gapChip, findsWidgets); // one per open day
-      await tester.tap(gapChip.first);
+      // Tap tomorrow's column at ~21:30 — inside the 21:00–22:58 gap. The
+      // px/min scale is laneCount(2) * 40 / 60.
+      const pxPerMinute = 2 * 40.0 / 60;
+      final column = find.descendant(
+        of: find.byKey(ValueKey(tomorrow)),
+        matching: find.byType(CalendarColumn),
+      );
+      final columnTop = tester.getTopLeft(column);
+      await tester.tapAt(
+        columnTop + Offset(40, (21.5 - 20) * 60 * pxPerMinute),
+      );
       await tester.pumpAndSettle();
 
       expect(find.text('Nový blok'), findsOneWidget);
@@ -420,16 +435,28 @@ void main() {
     },
   );
 
-  testWidgets('non-admin gets no gap affordance and no long-press dialog', (
-    tester,
-  ) async {
-    tallSurface(tester);
+  testWidgets('non-admin gets no edit glyph, no long-press dialog and no '
+      'add-block tap', (tester) async {
+    wideSurface(tester);
     await tester.pumpWidget(app(blocks: const [bEarly, b1]));
     await tester.pumpAndSettle();
-    expect(find.text('＋ 21:00–22:58'), findsNothing);
-    await tester.longPress(find.text(b1.label).first);
+
+    expect(find.byIcon(Icons.edit_outlined), findsNothing);
+    await tester.longPress(find.byKey(const ValueKey('cal-block-b1')).first);
     await tester.pumpAndSettle();
     expect(find.text('Upravit blok'), findsNothing);
+
+    const pxPerMinute = 2 * 40.0 / 60;
+    final column = find.descendant(
+      of: find.byKey(ValueKey(tomorrow)),
+      matching: find.byType(CalendarColumn),
+    );
+    final columnTop = tester.getTopLeft(column);
+    await tester.tapAt(
+      columnTop + Offset(40, (21.5 - 20) * 60 * pxPerMinute),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Nový blok'), findsNothing);
   });
 
   testWidgets(
@@ -437,7 +464,7 @@ void main() {
     'shifts the week with no exceptions',
     (tester) async {
       SharedPreferences.setMockInitialValues({'schedule_view': 'day'});
-      tallSurface(tester);
+      wideSurface(tester);
       await tester.pumpWidget(app());
       await tester.pumpAndSettle();
       expect(find.byType(DayChipStrip), findsOneWidget);
@@ -488,7 +515,7 @@ void main() {
   ) async {
     // Everything else has data, but this week's reservation stream is stuck
     // loading forever — no cell may be bookable while that's true.
-    tallSurface(tester);
+    wideSurface(tester);
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
