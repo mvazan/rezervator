@@ -379,7 +379,10 @@ class BoardColumnHeader extends StatelessWidget {
       ),
     );
     if (onAdd == null) return body;
+    // passthrough: the column's stretch must reach the header Container, or
+    // it shrink-wraps its text and the header floats as a narrow box.
     return Stack(
+      fit: StackFit.passthrough,
       children: [
         body,
         Positioned(
