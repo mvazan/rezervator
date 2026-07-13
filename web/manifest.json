@@ -4,7 +4,7 @@
     "start_url": ".",
     "display": "standalone",
     "background_color": "#ffffff",
-    "theme_color": "#6366F1",
+    "theme_color": "#00695C",
     "description": "Rezervace tréninků na kuželně.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,

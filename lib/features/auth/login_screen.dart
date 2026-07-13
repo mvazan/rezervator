@@ -4,7 +4,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../config.dart';
 import '../../core/ui.dart';
-import '../../core/widgets/auth_background.dart';
 import '../../data/providers.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
@@ -56,24 +55,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     return 'Přihlášení selhalo: $raw';
   }
 
-  /// Fallback when the mail app drops the code from the magic link
-  /// (e.g. Seznam's in-app browser): the e-mail also shows a numeric code.
-  /// On success the auth stream fires and AuthGate navigates away.
-  Future<void> _enterCode() async {
-    final email = _email.text.trim();
-    final code = await promptText(
-      context,
-      title: 'Kód z e-mailu',
-      hint: 'např. 123456',
-      confirmLabel: 'Přihlásit',
-      keyboardType: TextInputType.number,
-    );
-    if (code == null || code.trim().isEmpty || !mounted) return;
-    await tryAction(context, () => Api.verifyEmailOtp(email, code),
-        errorText: friendlyDbError);
-    // AuthGate re-routes via the (now-refreshing) auth stream on success.
-  }
-
   Future<void> _send() async {
     final email = _email.text.trim();
     if (email.isEmpty || !email.contains('@')) {
@@ -85,9 +66,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       _authError = null;
     });
     final ok = await tryAction(
-      context,
-      () => Api.sendMagicLink(email, AppConfig.authRedirectUrl),
-    );
+        context, () => Api.sendMagicLink(email, AppConfig.authRedirectUrl));
     if (!mounted) return;
     setState(() {
       _sending = false;
@@ -110,105 +89,99 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
     return Scaffold(
       body: SafeArea(
-        child: AuthBackground(
-          child: AuthCard(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const Center(child: AuthLogo()),
-                const SizedBox(height: 12),
-                Text(
-                  'Rezervátor',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.headlineMedium,
-                ),
-                Text(
-                  'Kuželna na klik.',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-                const SizedBox(height: 32),
-                if (_authError != null) ...[
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.errorContainer,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Icon(
-                          Icons.error_outline,
-                          color: Theme.of(context).colorScheme.onErrorContainer,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            _authError!,
-                            style: TextStyle(
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.onErrorContainer,
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 400),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text('🎳', textAlign: TextAlign.center, style: TextStyle(fontSize: 96)),
+                  const SizedBox(height: 12),
+                  Text('Rezervátor',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.headlineMedium),
+                  Text('Kuželna na klik.',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodyMedium),
+                  const SizedBox(height: 32),
+                  if (_authError != null) ...[
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.errorContainer,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(Icons.error_outline,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onErrorContainer),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _authError!,
+                              style: TextStyle(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onErrorContainer,
+                              ),
                             ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 16),
+                    const SizedBox(height: 16),
+                  ],
+                  if (_sent) ...[
+                    const Icon(Icons.mark_email_read_outlined, size: 48),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Hotovo! Poslali jsme ti e-mail.\n'
+                      'Otevři odkaz na tomhle zařízení — ve stejném prohlížeči,\n'
+                      'ze kterého sis o něj řekl(a).\n'
+                      'Odkaz platí hodinu a funguje jen ten z nejnovějšího '
+                      'e-mailu.',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodyLarge,
+                    ),
+                    const SizedBox(height: 16),
+                    TextButton(
+                      onPressed: () => setState(() => _sent = false),
+                      child: const Text('Poslat znovu / jiný e-mail'),
+                    ),
+                  ] else ...[
+                    TextField(
+                      controller: _email,
+                      keyboardType: TextInputType.emailAddress,
+                      autocorrect: false,
+                      decoration: const InputDecoration(
+                        labelText: 'Tvůj e-mail',
+                        border: OutlineInputBorder(),
+                      ),
+                      onSubmitted: (_) => _send(),
+                    ),
+                    const SizedBox(height: 16),
+                    FilledButton(
+                      onPressed: _sending ? null : _send,
+                      child: Text(_sending
+                          ? 'Odesílám…'
+                          : 'Poslat přihlašovací odkaz'),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Žádné heslo. Přijde ti e-mail s odkazem, '
+                      'kliknutím se přihlásíš.',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
                 ],
-                if (_sent) ...[
-                  const Icon(Icons.mark_email_read_outlined, size: 48),
-                  const SizedBox(height: 12),
-                  Text(
-                    'Hotovo! Poslali jsme ti e-mail.\n'
-                    'Otevři odkaz na tomhle zařízení — ve stejném prohlížeči,\n'
-                    'ze kterého sis o něj řekl(a).\n'
-                    'Odkaz platí hodinu a funguje jen ten z nejnovějšího '
-                    'e-mailu.\n'
-                    'Pokud odkaz neotevře appku (u některých e-mailů), '
-                    'opiš 6místný kód z e-mailu.',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.bodyLarge,
-                  ),
-                  const SizedBox(height: 16),
-                  TextButton(
-                    onPressed: _sending ? null : _enterCode,
-                    child: const Text('Zadat kód z e-mailu'),
-                  ),
-                  TextButton(
-                    onPressed: () => setState(() => _sent = false),
-                    child: const Text('Poslat znovu / jiný e-mail'),
-                  ),
-                ] else ...[
-                  TextField(
-                    controller: _email,
-                    keyboardType: TextInputType.emailAddress,
-                    autocorrect: false,
-                    decoration: const InputDecoration(
-                      labelText: 'Tvůj e-mail',
-                      border: OutlineInputBorder(),
-                    ),
-                    onSubmitted: (_) => _send(),
-                  ),
-                  const SizedBox(height: 16),
-                  FilledButton(
-                    onPressed: _sending ? null : _send,
-                    child: Text(
-                      _sending ? 'Odesílám…' : 'Poslat přihlašovací odkaz',
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Žádné heslo. Přijde ti e-mail s odkazem, '
-                    'kliknutím se přihlásíš.',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ],
-              ],
+              ),
             ),
           ),
         ),

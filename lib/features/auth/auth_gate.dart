@@ -2,10 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../../core/widgets/auth_background.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
-import '../kiosk/kiosk_shell.dart';
 import '../schedule/home_shell.dart';
 import 'login_screen.dart';
 import 'register_screen.dart';
@@ -13,7 +11,7 @@ import 'waiting_screen.dart';
 
 /// Routes by auth/profile state:
 /// no session -> login, no profile -> register, pending -> waiting,
-/// kiosk role -> kiosk shell, else -> the app.
+/// kiosk role -> kiosk shell (Phase 4 placeholder), else -> the app.
 /// All transitions are live (streams).
 class AuthGate extends ConsumerWidget {
   const AuthGate({super.key});
@@ -37,10 +35,22 @@ class AuthGate extends ConsumerWidget {
       error: (e, _) => _ErrorScreen(error: '$e'),
       data: (p) {
         if (p == null) return const RegisterScreen();
-        if (p.role == Role.kiosk) return const KioskShell();
+        if (p.role == Role.kiosk) return const _KioskPlaceholder();
         if (p.status == ProfileStatus.pending) return const WaitingScreen();
         return const HomeShell();
       },
+    );
+  }
+}
+
+/// Replaced by the real KioskShell in Phase 4.
+class _KioskPlaceholder extends StatelessWidget {
+  const _KioskPlaceholder();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      body: Center(child: Text('Kiosk režim přijde ve Fázi 4. 🎳')),
     );
   }
 }
@@ -51,7 +61,7 @@ class _Splash extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const Scaffold(
-      body: Center(child: AuthLogo(size: 96)),
+      body: Center(child: Text('🎳', style: TextStyle(fontSize: 64))),
     );
   }
 }
