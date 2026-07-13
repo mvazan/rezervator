@@ -119,6 +119,12 @@ flutter:
 flutter_launcher_icons:
   image_path: "assets/images/logo.png"
   android: true
+  # Adaptive icon: without it Android 12+ wraps the legacy icon in a WHITE
+  # circle on the system splash screen (the "white ring"). The foreground is
+  # the logo padded into the 66% safe zone; the background is the app's dark
+  # slate so the splash icon reads as the brand mark on its own ground.
+  adaptive_icon_background: "#0F172A"
+  adaptive_icon_foreground: "assets/images/logo_adaptive_fg.png"
   web:
     generate: true
     image_path: "assets/images/logo.png"
