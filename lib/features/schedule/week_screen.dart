@@ -241,12 +241,19 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
             )
           : Row(
               children: [
+                // | Rezervátor      < datum – datum >      admin profil |
                 if (width >= 700) Flexible(child: title),
-                navPrev,
-                range,
-                ?todayButton,
-                navNext,
-                const Spacer(),
+                Expanded(
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      navPrev,
+                      range,
+                      ?todayButton,
+                      navNext,
+                    ],
+                  ),
+                ),
                 ...widget.trailing,
               ],
             ),
