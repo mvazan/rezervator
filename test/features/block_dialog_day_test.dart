@@ -30,6 +30,7 @@ void main() {
   final thursday = Day(2026, 7, 16);
 
   late List<http.Request> requests;
+  var reservationsBody = '[]';
 
   setUpAll(() async {
     TestWidgetsFlutterBinding.ensureInitialized();
@@ -38,7 +39,7 @@ void main() {
       requests.add(request);
       String body = '{}';
       if (request.method == 'GET' && request.url.path.contains('reservations')) {
-        body = '[]';
+        body = reservationsBody;
       } else if (request.method == 'POST' &&
           request.url.path.contains('time_blocks')) {
         body = '{"id":"sb1"}';
@@ -58,7 +59,10 @@ void main() {
     );
   });
 
-  setUp(() => requests = []);
+  setUp(() {
+    requests = [];
+    reservationsBody = '[]';
+  });
 
   Widget app(BlockDialog dialog) =>
       MaterialApp(home: Scaffold(body: dialog));
@@ -76,7 +80,6 @@ void main() {
       initialEnd: const HourMinute(18, 30),
       dayContext: thursday,
       dayBaseIds: const ['b1', 'b2'],
-      dayRenderedBlocks: const [b1, b2],
     )));
     await tester.pumpAndSettle();
     expect(find.textContaining('Upravit blok — jen'), findsOneWidget);
@@ -139,7 +142,6 @@ void main() {
       initialEnd: const HourMinute(19, 0),
       dayContext: thursday,
       dayBaseIds: const ['b1', 'b2'],
-      dayRenderedBlocks: const [b1, b2],
     )));
     await tester.pumpAndSettle();
 
@@ -165,7 +167,6 @@ void main() {
       blocks: const [b1, b2],
       dayContext: thursday,
       dayBaseIds: const ['b1', 'b2'],
-      dayRenderedBlocks: const [b1, b2],
     )));
     await tester.pumpAndSettle();
 
@@ -176,10 +177,10 @@ void main() {
     expect(find.byType(BlockDialog), findsNothing); // popped
   });
 
-  testWidgets('a hidden BASE block overlapping the new times triggers the '
-      'skrytý blok warning', (tester) async {
-    // b2 is in the base but NOT rendered (a match cancelled it); the new
-    // block 17:00-18:00 collides with it once the match disappears.
+  testWidgets('a base block overlapped by the new times gets the '
+      'informative "Blok bude skryt" confirm; confirming proceeds', (
+    tester,
+  ) async {
     await tester.pumpWidget(app(BlockDialog(
       existing: null,
       blocks: const [b1, b2],
@@ -187,20 +188,48 @@ void main() {
       initialEnd: const HourMinute(18, 0),
       dayContext: thursday,
       dayBaseIds: const ['b1', 'b2'],
-      dayRenderedBlocks: const [b1],
     )));
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Uložit'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Pozor — skrytý blok'), findsOneWidget);
-    // Decline: nothing was written.
-    await tester.tap(find.text('Zrušit').last);
+    // The suppression is reversible, so the confirm explains rather than
+    // alarms — and the base list keeps the hidden block's id.
+    expect(find.text('Blok bude skryt'), findsOneWidget);
+    expect(find.textContaining('Zobrazí se zase'), findsOneWidget);
+    await tester.tap(find.text('Pokračovat'));
     await tester.pumpAndSettle();
+
+    final rpc = requests.firstWhere(
+      (r) => r.method == 'POST' && r.url.path.contains('set_day_override'),
+    );
     expect(
-      requests.any((r) => r.url.path.contains('set_day_override')),
-      isFalse,
+        (jsonDecode(rpc.body) as Map)['p_block_ids'], ['b1', 'b2', 'sb1']);
+  });
+
+  testWidgets('Obnovit týdenní rozvrh composes the template ids and deletes '
+      'the override row', (tester) async {
+    await tester.pumpWidget(app(BlockDialog(
+      existing: b2,
+      blocks: const [b1, b2],
+      dayContext: thursday,
+      dayBaseIds: const ['b1'],
+      dayHasOverride: true,
+    )));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Obnovit týdenní rozvrh'));
+    await tester.pumpAndSettle();
+
+    final rpc = requests.firstWhere(
+      (r) => r.method == 'POST' && r.url.path.contains('set_day_override'),
+    );
+    expect((jsonDecode(rpc.body) as Map)['p_block_ids'], ['b1', 'b2']);
+    expect(
+      requests.any((r) =>
+          r.method == 'DELETE' && r.url.path.contains('day_overrides')),
+      isTrue,
     );
   });
 
@@ -212,7 +241,6 @@ void main() {
       blocks: const [b1, b2],
       dayContext: thursday,
       dayBaseIds: const ['b1', 'b2'],
-      dayRenderedBlocks: const [b1, b2],
     )));
     await tester.pumpAndSettle();
 
@@ -225,5 +253,101 @@ void main() {
     final rpcBody = jsonDecode(rpc.body) as Map<String, dynamic>;
     expect(rpcBody['p_block_ids'], ['b1']);
     expect(rpcBody['p_closed'], false);
+  });
+
+  testWidgets('editing a special to EXACTLY copy a template block dissolves '
+      'the fork: reservations move, override restores, row is deleted', (
+    tester,
+  ) async {
+    const special = TimeBlock(
+      id: 'sp1',
+      startsAt: HourMinute(17, 30),
+      endsAt: HourMinute(18, 30),
+      position: -1,
+      active: false,
+    );
+    await tester.pumpWidget(app(BlockDialog(
+      existing: special,
+      blocks: const [b1, b2, special],
+      // Edited back to b2's exact times.
+      initialStart: const HourMinute(17, 0),
+      initialEnd: const HourMinute(18, 0),
+      dayContext: thursday,
+      dayBaseIds: const ['b1', 'sp1'],
+      dayHasOverride: true,
+    )));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Uložit'));
+    await tester.pumpAndSettle();
+
+    // 1) The special's sign-ups move to the template twin…
+    final move = requests.firstWhere(
+      (r) =>
+          r.method == 'POST' && r.url.path.contains('move_day_reservations'),
+    );
+    final moveBody = jsonDecode(move.body) as Map<String, dynamic>;
+    expect(moveBody['p_from_block'], 'sp1');
+    expect(moveBody['p_to_block'], 'b2');
+
+    // 2) …the ids match the template exactly, so the fork fully unwinds:
+    //    template override write (cancels strays via RPC) + row delete.
+    final rpc = requests.firstWhere(
+      (r) => r.method == 'POST' && r.url.path.contains('set_day_override'),
+    );
+    expect((jsonDecode(rpc.body) as Map)['p_block_ids'], ['b1', 'b2']);
+    expect(
+      requests.any((r) =>
+          r.method == 'DELETE' && r.url.path.contains('day_overrides')),
+      isTrue,
+    );
+    // 3) No new special was inserted.
+    expect(
+      requests.any(
+          (r) => r.method == 'POST' && r.url.path.contains('time_blocks')),
+      isFalse,
+    );
+  });
+
+  testWidgets('hiding a template block WITH live sign-ups counts them in the '
+      'confirm and cancels them via RPC before the override write', (
+    tester,
+  ) async {
+    reservationsBody =
+        '[{"date":"${thursday.toSql()}","lane":1,"block_id":"b2"}]';
+    await tester.pumpWidget(app(BlockDialog(
+      existing: null,
+      blocks: const [b1, b2],
+      initialStart: const HourMinute(17, 0),
+      initialEnd: const HourMinute(18, 0),
+      dayContext: thursday,
+      dayBaseIds: const ['b1', 'b2'],
+    )));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Uložit'));
+    await tester.pumpAndSettle();
+
+    // The confirm is honest about the cancellations…
+    expect(find.text('Blok bude skryt'), findsOneWidget);
+    expect(
+      find.textContaining('1 rezervací na skrytých blocích bude zrušeno'),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('Pokračovat'));
+    await tester.pumpAndSettle();
+
+    // …and the hidden block's rows are swept via the dedicated RPC before
+    // the override write — no invisible live reservations survive a hide.
+    final cancel = requests.firstWhere(
+      (r) =>
+          r.method == 'POST' &&
+          r.url.path.contains('cancel_block_day_reservations'),
+    );
+    expect((jsonDecode(cancel.body) as Map)['p_block'], 'b2');
+    expect(
+      requests.any((r) => r.url.path.contains('set_day_override')),
+      isTrue,
+    );
   });
 }
