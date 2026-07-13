@@ -74,7 +74,8 @@ class WeekCalendarView extends StatelessWidget {
       ],
       eventWindows: [
         for (final day in week.days) ...[
-          for (final m in day.priority) (m.startsAt, m.endsAt),
+          // blockingStart: the prep band renders too, so it must fit.
+          for (final m in day.priority) (m.blockingStart, m.endsAt),
           if (day is OpenDay)
             for (final r in day.rentals) (r.startsAt, r.endsAt),
         ],
@@ -213,7 +214,7 @@ class _DayColumn extends StatelessWidget {
         for (final b in openDay.blocks)
           (b.startsAt.minutesFromMidnight, b.endsAt.minutesFromMidnight),
       for (final m in day.priority)
-        (m.startsAt.minutesFromMidnight, m.endsAt.minutesFromMidnight),
+        (m.blockingStart.minutesFromMidnight, m.endsAt.minutesFromMidnight),
       if (openDay != null)
         for (final r in openDay.rentals)
           (r.startsAt.minutesFromMidnight, r.endsAt.minutesFromMidnight),
@@ -295,6 +296,20 @@ class _DayColumn extends StatelessWidget {
 
     for (final m in day.priority) {
       final club = ClubColors.of(m.type.colorIndex, scheme.brightness);
+      // Whole-alley slots with prep get an honest muted band over the prep
+      // window — the lanes are being prepped there, at that real time.
+      if (m.type.lanes == null && m.blockingStart != m.startsAt) {
+        addBands(
+          m.blockingStart,
+          m.startsAt,
+          () => CalendarEventBand(
+            background: scheme.errorContainer.withValues(alpha: 0.25),
+            foreground: scheme.onSurfaceVariant,
+            text: '🛠 Příprava drah\n'
+                '${m.blockingStart.display()}\u2013${m.startsAt.display()}',
+          ),
+        );
+      }
       addBands(
         m.startsAt,
         m.endsAt,
@@ -349,53 +364,20 @@ class _DayColumn extends StatelessWidget {
     );
   }
 
-  /// One block's calendar card: a whole-alley priority banner, or one
-  /// bookable [SlotTile] row per lane. Admins long-press anywhere on the
-  /// card to edit the block (a small edit glyph in the corner hints at it).
+  /// One block's calendar card: one bookable [SlotTile] row per lane.
+  /// Whole-alley priority slots never reach a rendered block (they cancel
+  /// overlapping blocks in buildWeekSchedule and render as true-time bands);
+  /// lane-scoped slots resolve per lane row. Admins long-press anywhere on
+  /// the card to edit the block (a small edit glyph in the corner hints it).
   Widget _blockCard(BuildContext context, OpenDay openDay, TimeBlock block) {
     final scheme = Theme.of(context).colorScheme;
-    final (wholeAlley, wholeIsPrep) =
-        wholeAlleyPriorityFor(block, openDay.priority);
 
-    Widget content;
-    if (wholeAlley != null) {
-      final club = ClubColors.of(wholeAlley.type.colorIndex, scheme.brightness);
-      content = Container(
-        margin: const EdgeInsets.all(2),
-        clipBehavior: Clip.antiAlias,
-        decoration: BoxDecoration(
-          color: wholeIsPrep
-              ? scheme.errorContainer.withValues(alpha: 0.25)
-              : club?.$1 ?? scheme.errorContainer.withValues(alpha: 0.6),
-          borderRadius: BorderRadius.circular(6),
-        ),
-        alignment: Alignment.center,
-        padding: const EdgeInsets.symmetric(horizontal: 4),
-        child: Text(
-          wholeIsPrep
-              ? '🛠 Příprava drah'
-              : '${wholeAlley.type.isMatch ? '🏆 ' : ''}${wholeAlley.title}\n'
-                  '${wholeAlley.startsAt.display()}–${wholeAlley.endsAt.display()}',
-          textAlign: TextAlign.center,
-          maxLines: 3,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w700,
-            color: wholeIsPrep
-                ? scheme.onSurfaceVariant
-                : club?.$2 ?? scheme.onErrorContainer,
-          ),
-        ),
-      );
-    } else {
-      content = Column(
-        children: [
-          for (var lane = 1; lane <= openDay.laneCount; lane++)
-            Expanded(child: _laneRow(context, openDay, block, lane)),
-        ],
-      );
-    }
+    final content = Column(
+      children: [
+        for (var lane = 1; lane <= openDay.laneCount; lane++)
+          Expanded(child: _laneRow(context, openDay, block, lane)),
+      ],
+    );
 
     final card = Container(
       // Stable per-block key (unique among one column's entries) so tests

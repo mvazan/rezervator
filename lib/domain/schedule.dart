@@ -161,28 +161,11 @@ int _byStartThenPosition(TimeBlock a, TimeBlock b) {
   return byStart != 0 ? byStart : a.position.compareTo(b.position);
 }
 
-/// The first (start-sorted) WHOLE-ALLEY priority slot whose prep-extended
-/// window `[blockingStart, endsAt)` overlaps [block], plus whether that
-/// overlap is prep-only — or `(null, false)`. Shared by [buildWeekSchedule]
-/// and the kiosk's closed-day column (single source of truth so open and
-/// closed columns can never disagree on a boundary case). Lane-scoped slots
-/// never claim a whole block; they resolve per lane via [priorityStateFor].
-(PrioritySlot?, bool) wholeAlleyPriorityFor(
-    TimeBlock block, List<PrioritySlot> slots) {
-  final hit = _firstWhereOrNull(
-      slots,
-      (PrioritySlot m) =>
-          m.type.lanes == null &&
-          timesOverlap(block.startsAt, block.endsAt, m.blockingStart, m.endsAt));
-  if (hit == null) return (null, false);
-  final isPrep = !timesOverlap(
-      block.startsAt, block.endsAt, hit.startsAt, hit.endsAt);
-  return (hit, isPrep);
-}
-
-/// Per-lane resolution: the first priority slot (whole-alley or covering
-/// [lane]) whose prep-extended window overlaps [block], plus the prep-only
-/// flag — or `(null, false)`.
+/// Per-lane resolution: the first priority slot covering [lane] whose
+/// prep-extended window overlaps [block], plus the prep-only flag — or
+/// `(null, false)`. In practice only LANE-SCOPED slots reach a rendered
+/// block: whole-alley slots cancel every block their blocking window touches
+/// (see [buildWeekSchedule]), so no surviving block can overlap one.
 (PrioritySlot?, bool) priorityStateFor(
     TimeBlock block, int lane, List<PrioritySlot> slots) {
   final hit = _firstWhereOrNull(
@@ -253,6 +236,23 @@ WeekSchedule buildWeekSchedule({
           date: date, priority: dayPriority, rentals: dayRentals, reason: reason));
       continue;
     }
+
+    // A WHOLE-ALLEY priority slot CANCELS every training block its blocking
+    // window (prep included) touches: the block disappears from that day and
+    // the slot renders at its true time instead, leaving the freed space
+    // visibly empty for the admin to restructure (extend/shift a neighboring
+    // block or add a shorter one). Lane-scoped slots keep the block and
+    // resolve per lane below. Checked AFTER the emptiness fallback above so a
+    // day whose every block is cancelled stays an OpenDay (it hosts a match,
+    // it is not "zavřeno").
+    final wholeAlley =
+        dayPriority.where((m) => m.type.lanes == null).toList();
+    dayBlocks = [
+      for (final b in dayBlocks)
+        if (!wholeAlley.any((m) =>
+            timesOverlap(b.startsAt, b.endsAt, m.blockingStart, m.endsAt)))
+          b,
+    ];
 
     final beyondHorizon =
         date.differenceInDays(today) > settings.bookingHorizonDays;

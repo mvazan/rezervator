@@ -208,9 +208,8 @@ void main() {
     expect(find.byType(AlertDialog), findsNothing);
   });
 
-  testWidgets('whole-alley match claims the block card and the day header', (
-    tester,
-  ) async {
+  testWidgets('whole-alley match cancels the touched block for its day and '
+      'renders as a true-time band', (tester) async {
     wideSurface(tester);
     await tester.pumpWidget(
       app(
@@ -230,14 +229,52 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    // Once in the day header strip, once as the block card's banner — and
-    // no bookable lane rows survive inside that card.
+    // Once in the day header strip, once as the true-time band.
     expect(find.textContaining('KK Slavoj'), findsNWidgets(2));
+    // Tomorrow's block card is CANCELLED (gone), and with it every bookable
+    // lane row; the other six days keep the block.
+    final cardInTomorrow = find.descendant(
+      of: find.byKey(ValueKey(tomorrow)),
+      matching: find.byKey(const ValueKey('cal-block-b1')),
+    );
+    expect(cardInTomorrow, findsNothing);
+    expect(find.byKey(const ValueKey('cal-block-b1')), findsNWidgets(6));
     final addInTomorrow = find.descendant(
       of: find.byKey(ValueKey(tomorrow)),
       matching: find.byIcon(Icons.add),
     );
     expect(addInTomorrow, findsNothing);
+  });
+
+  testWidgets('a match with prep shows the muted prep band at its real time', (
+    tester,
+  ) async {
+    wideSurface(tester);
+    await tester.pumpWidget(
+      app(
+        matches: [
+          PrioritySlot(
+            type: PrioritySlot.fallbackMatchType,
+            id: 'm2',
+            date: tomorrow,
+            startsAt: const HourMinute(23, 30),
+            endsAt: const HourMinute(23, 59),
+            homeTeam: '',
+            awayTeam: 'KK Slavoj',
+            prepMinutes: 32, // blockingStart 22:58 — cancels b1 via prep only
+            description: '',
+          ),
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('🛠 Příprava drah\n22:58–23:30'), findsOneWidget);
+    // The prep-touched block is cancelled for that day too.
+    final cardInTomorrow = find.descendant(
+      of: find.byKey(ValueKey(tomorrow)),
+      matching: find.byKey(const ValueKey('cal-block-b1')),
+    );
+    expect(cardInTomorrow, findsNothing);
   });
 
   testWidgets('AppBar toggle switches day/week view and persists the choice', (

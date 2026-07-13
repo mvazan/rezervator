@@ -372,14 +372,13 @@ void main() {
   );
 
   testWidgets(
-    'i: a block overlapping only the prep window shows the 🛠 cell; the '
-    'block overlapping the real match window shows the 🏆 cell with the '
-    'match title',
+    'i: a whole-alley match cancels the blocks it touches (prep included) '
+    'and renders as true-time bands: 🛠 prep band + 🏆 match band',
     (tester) async {
       // Two adjacent blocks: bPrep (20:00-21:00) and bMatch (21:00-22:00).
-      // A match starting at 21:00 with 60 min prep blocks [20:00,22:00):
-      // bPrep overlaps only the prep window (isPrep=true → 🛠), bMatch
-      // overlaps the real [21:00,22:00) match window (isPrep=false → 🏆).
+      // A match 21:00-22:00 with 60 min prep blocks [20:00,22:00): BOTH
+      // blocks are cancelled for the day; the board shows a muted prep band
+      // over 20:00-21:00 and the match band over 21:00-22:00 instead.
       const bPrep = TimeBlock(
         id: 'bPrep',
         startsAt: HourMinute(20, 0),
@@ -425,12 +424,8 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('🛠 Příprava drah'), findsOneWidget);
-      // The match-cell body text is specifically
-      // '🏆 {title}\n{start}–{end}' (_matchCell) — distinct from the header
-      // banner's '🏆 {title}' (BoardColumnHeader, joined with ' · ' and no
-      // times), so matching on the newline-joined form isolates the block
-      // cell instead of also catching the header.
+      // Both bands render at their real windows, once (match is today only).
+      expect(find.text('🛠 Příprava drah\n20:00–21:00'), findsOneWidget);
       expect(
         find.text(
           '🏆 ${match.title}\n'
@@ -438,6 +433,15 @@ void main() {
         ),
         findsOneWidget,
       );
+
+      // Today's cancelled blocks render no cards — tomorrow's still do, so
+      // exactly one fewer card than visible columns exists per block id.
+      final visibleDays =
+          tester.widgetList(find.byType(BoardColumnHeader)).length;
+      expect(find.byKey(const ValueKey('cal-block-bPrep')),
+          findsNWidgets(visibleDays - 1));
+      expect(find.byKey(const ValueKey('cal-block-bMatch')),
+          findsNWidgets(visibleDays - 1));
 
       await finish(tester);
     },

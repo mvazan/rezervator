@@ -309,7 +309,8 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
     ];
     final eventWindows = <(HourMinute, HourMinute)>[
       for (final day in days) ...[
-        for (final m in day.priority) (m.startsAt, m.endsAt),
+        // blockingStart: the prep band renders too, so it must fit the window.
+        for (final m in day.priority) (m.blockingStart, m.endsAt),
         if (day is OpenDay)
           for (final r in day.rentals) (r.startsAt, r.endsAt),
       ],
@@ -498,6 +499,20 @@ class _DayColumn extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     for (final m in day.priority) {
       final club = ClubColors.of(m.type.colorIndex, scheme.brightness);
+      // Whole-alley slots with prep get an honest muted band over the prep
+      // window — the lanes are being prepped there, at that real time.
+      if (m.type.lanes == null && m.blockingStart != m.startsAt) {
+        addBands(
+          m.blockingStart,
+          m.startsAt,
+          () => CalendarEventBand(
+            background: scheme.errorContainer.withValues(alpha: 0.25),
+            foreground: scheme.onSurfaceVariant,
+            text: '🛠 Příprava drah\n'
+                '${m.blockingStart.display()}–${m.startsAt.display()}',
+          ),
+        );
+      }
       addBands(
         m.startsAt,
         m.endsAt,
@@ -553,13 +568,12 @@ class _DayColumn extends StatelessWidget {
     );
   }
 
-  /// One block's calendar card. A WHOLE-ALLEY priority slot claims the
-  /// entire card (banner over all lanes); lane-scoped slots fall through to
-  /// per-lane rows so the remaining lanes stay bookable.
+  /// One block's calendar card: one row per lane. Whole-alley priority
+  /// slots never reach a rendered block (they cancel overlapping blocks in
+  /// buildWeekSchedule and render as true-time bands instead); lane-scoped
+  /// slots resolve per lane row.
   Widget _blockCard(BuildContext context, OpenDay openDay, TimeBlock block) {
     final scheme = Theme.of(context).colorScheme;
-    final (wholeAlley, wholeIsPrep) =
-        wholeAlleyPriorityFor(block, openDay.priority);
 
     return Container(
       // Stable per-block key (unique among one column's entries; other
@@ -574,68 +588,11 @@ class _DayColumn extends StatelessWidget {
           color: scheme.outlineVariant.withValues(alpha: 0.4),
         ),
       ),
-      child: wholeAlley != null
-          ? _priorityCell(context, wholeAlley, isPrep: wholeIsPrep)
-          : Column(
-              children: [
-                for (var lane = 1; lane <= laneCount; lane++)
-                  Expanded(
-                      child: _laneRow(context, openDay, block, lane)),
-              ],
-            ),
-    );
-  }
-
-  /// Whole-alley priority cell spans the whole block (all lanes):
-  /// `{emoji} {title}\n{start}–{end}` tinted by the type's color (default
-  /// rose), or the muted prep banner.
-  Widget _priorityCell(BuildContext context, PrioritySlot slot,
-      {required bool isPrep}) {
-    final scheme = Theme.of(context).colorScheme;
-    if (isPrep) {
-      return Container(
-        margin: const EdgeInsets.symmetric(horizontal: 3, vertical: 1.5),
-        clipBehavior: Clip.antiAlias,
-        decoration: BoxDecoration(
-          color: scheme.errorContainer.withValues(alpha: 0.25),
-          borderRadius: BorderRadius.circular(6),
-        ),
-        alignment: Alignment.center,
-        padding: const EdgeInsets.symmetric(horizontal: 4),
-        child: Text(
-          '🛠 Příprava drah',
-          textAlign: TextAlign.center,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-            color: scheme.onSurfaceVariant,
-          ),
-        ),
-      );
-    }
-    final club = ClubColors.of(slot.type.colorIndex, scheme.brightness);
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 3, vertical: 1.5),
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        color: club?.$1 ?? scheme.errorContainer.withValues(alpha: 0.6),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      alignment: Alignment.center,
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: Text(
-        '${slot.type.isMatch ? '🏆 ' : ''}${slot.title}\n'
-        '${slot.startsAt.display()}–${slot.endsAt.display()}',
-        textAlign: TextAlign.center,
-        maxLines: 3,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-          color: club?.$2 ?? scheme.onErrorContainer,
-        ),
+      child: Column(
+        children: [
+          for (var lane = 1; lane <= laneCount; lane++)
+            Expanded(child: _laneRow(context, openDay, block, lane)),
+        ],
       ),
     );
   }
