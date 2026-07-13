@@ -9,6 +9,7 @@ import '../../domain/calendar_layout.dart' show hourMinuteAt;
 import '../admin/matches_screen.dart' show MatchDialog;
 import '../admin/widgets/block_dialog.dart';
 import '../admin/widgets/blockage_dialog.dart';
+import '../admin/widgets/notify_choice_dialog.dart';
 import 'day_pager_view.dart';
 import 'week_calendar_view.dart';
 
@@ -111,16 +112,22 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
       );
       return;
     }
-    final note = await promptText(
+    // Phase 3: cancelling someone else's reservation asks whether to ping
+    // the player; the note doubles as the notification's reason (and stays
+    // stored for the attendance audit even when silent).
+    final choice = await showNotifyChoiceDialog(
       context,
-      title: 'Zrušit rezervaci — poznámka',
-      hint: 'nepřišel',
-      confirmLabel: 'Zrušit rezervaci',
+      title: 'Zrušit rezervaci',
+      summary: '${dayFull(date)} · ${block.label} · Dráha ${r.lane}',
+      messageLabel: 'Poznámka / důvod (nepovinné)',
+      sendLabel: 'Zrušit a poslat zprávu',
+      silentLabel: 'Zrušit bez zprávy',
     );
-    if (note == null || !mounted) return;
+    if (choice == null || !mounted) return;
     await tryAction(
       context,
-      () => Api.cancelReservation(r.id, note: note),
+      () => Api.cancelReservation(r.id,
+          note: choice.message ?? '', notify: choice.notify),
       success: 'Rezervace zrušena.',
       errorText: friendlyDbError,
     );
@@ -450,6 +457,25 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
               return;
             }
             final newEnd = hourMinuteAt(endMinutes);
+            // Phase 3: the block's sign-ups travel to the new time — the
+            // admin picks whether (and how) to tell them.
+            NotifyChoice? moveNotify;
+            final movingRows = reservations
+                .where((r) =>
+                    r.date == date && r.blockId == block.id && r.isLive)
+                .length;
+            if (movingRows > 0) {
+              moveNotify = await showNotifyChoiceDialog(
+                context,
+                title: 'Upozornit na přesun?',
+                summary: movingRows == 1
+                    ? 'Hráč dostane zprávu o novém čase '
+                        '${newStart.display()}–${newEnd.display()}.'
+                    : '$movingRows hráčů dostane zprávu o novém čase '
+                        '${newStart.display()}–${newEnd.display()}.',
+              );
+              if (moveNotify == null || !context.mounted) return;
+            }
             await tryAction(
               context,
               () async {
@@ -467,7 +493,9 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
                 }
                 final specialId =
                     special?.id ?? await Api.addSpecialBlock(newStart, newEnd);
-                await Api.moveDayReservations(date, block.id, specialId);
+                await Api.moveDayReservations(date, block.id, specialId,
+                    notify: moveNotify?.notify ?? true,
+                    message: moveNotify?.message);
                 final base = dayBaseIds(date);
                 final ids = base.contains(block.id)
                     ? [for (final id in base) id == block.id ? specialId : id]

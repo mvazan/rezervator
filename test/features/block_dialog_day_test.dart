@@ -378,13 +378,20 @@ void main() {
     await tester.pumpAndSettle();
 
     // No 'Pozor — rezervace budou zrušeny' — the reservation is kept and
-    // moved onto the new special instead.
+    // moved onto the new special instead; phase 3 asks about notifying
+    // the moved player (choose silent here).
     expect(find.text('Pozor — rezervace budou zrušeny'), findsNothing);
+    expect(find.text('Upozornit na přesun?'), findsOneWidget);
+    await tester.tap(find.text('Neposílat'));
+    await tester.pumpAndSettle();
+
     final move = requests.firstWhere(
       (r) =>
           r.method == 'POST' && r.url.path.contains('move_day_reservations'),
     );
-    expect((jsonDecode(move.body) as Map)['p_from_block'], 'b2');
+    final moveBody = jsonDecode(move.body) as Map;
+    expect(moveBody['p_from_block'], 'b2');
+    expect(moveBody['p_notify'], false);
     expect(
       requests.any(
           (r) => r.url.path.contains('cancel_block_day_reservations')),

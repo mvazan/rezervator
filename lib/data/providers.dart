@@ -236,8 +236,10 @@ class Api {
         'p_lane': lane,
       });
 
-  static Future<void> cancelReservation(String id, {String note = ''}) =>
-      _db.rpc('cancel_reservation', params: {'p_id': id, 'p_note': note});
+  static Future<void> cancelReservation(String id,
+          {String note = '', bool notify = true}) =>
+      _db.rpc('cancel_reservation',
+          params: {'p_id': id, 'p_note': note, 'p_notify': notify});
 
   // --- admin: settings & blocks ---
   static Future<void> updateSettings({
@@ -322,24 +324,31 @@ class Api {
       });
 
   /// Moves one live reservation to another block/lane (admin; the move
-  /// dialog when removing a day block with sign-ups).
+  /// dialog when removing a day block with sign-ups). [notify]/[message]
+  /// carry the admin's notification choice to the notify EF.
   static Future<void> moveReservation(
-          String reservationId, String toBlockId, int lane) =>
+          String reservationId, String toBlockId, int lane,
+          {bool notify = true, String? message}) =>
       _db.rpc('move_reservation', params: {
         'p_reservation': reservationId,
         'p_to_block': toBlockId,
         'p_lane': lane,
+        'p_notify': notify,
+        'p_message': ?message,
       });
 
   /// Moves ALL of a date's live reservations from one block to another,
   /// lanes carried 1:1 (admin; a dissolving day-special hands its sign-ups
   /// back to the template block it copied).
   static Future<void> moveDayReservations(
-          Day date, String fromBlockId, String toBlockId) =>
+          Day date, String fromBlockId, String toBlockId,
+          {bool notify = true, String? message}) =>
       _db.rpc('move_day_reservations', params: {
         'p_date': date.toSql(),
         'p_from_block': fromBlockId,
         'p_to_block': toBlockId,
+        'p_notify': notify,
+        'p_message': ?message,
       });
 
   // --- admin: day overrides (RPC — cascades reservation cancellations) ---

@@ -4,7 +4,10 @@
 //   INSERT profiles      -> "new player waiting for approval" (to admins)
 //   INSERT reservations  -> kiosk booking confirmation (to the player;
 //                           the e-mail variant carries a one-click cancel link)
-//   UPDATE reservations  -> admin cancelled an upcoming reservation
+//   UPDATE reservations  -> admin cancelled an upcoming reservation, or an
+//                           admin MOVED it ("termín přesunut z X na Y") —
+//                           both honour the per-change notify_player flag +
+//                           optional notify_message the RPCs stamp (0011)
 //
 // Channel per recipient: FCM push when profiles.fcm_token is set AND
 // FIREBASE_SERVICE_ACCOUNT is configured; otherwise e-mail via Resend.
@@ -236,6 +239,17 @@ async function reservationContext(record: Record<string, unknown>) {
   return { player: player as Recipient & { display_name: string }, block, when };
 }
 
+/// 'po 13.7. 17:30–18:30, dráha 2' for the OLD side of a move — the block
+/// row still exists (moves only retarget block_id), so a plain lookup works.
+async function whenLabel(record: Record<string, unknown>): Promise<string | null> {
+  const { data: block } = await supabase.from("time_blocks")
+    .select("starts_at, ends_at").eq("id", record.block_id).single();
+  if (!block) return null;
+  return `${dayLabel(record.date as string)} ` +
+    `${timeLabel(block.starts_at)}–${timeLabel(block.ends_at)}, ` +
+    `dráha ${record.lane}`;
+}
+
 async function handle(payload: WebhookPayload) {
   const record = payload.record ?? {};
 
@@ -301,25 +315,64 @@ async function handle(payload: WebhookPayload) {
       }
 
       if (payload.type === "UPDATE") {
-        const wasLive = payload.old_record?.cancelled_at == null;
-        const isCancelled = record.cancelled_at != null;
-        if (!wasLive || !isCancelled) return;
-        if (record.cancelled_via !== "admin") return;
-        // Retro no-show cancels (past dates) stay silent.
-        if ((record.date as string) < pragueToday()) return;
-        const ctx = await reservationContext(record);
+        const old = payload.old_record ?? {};
+        const wasLive = old.cancelled_at == null;
+        if (!wasLive) return;
+        // The admin's per-change choice (0011): a silent move/cancel sets
+        // notify_player=false on the same UPDATE.
+        const wantsNotify = record.notify_player !== false;
+
+        // ADMIN CANCEL of an upcoming reservation.
+        if (record.cancelled_at != null) {
+          if (record.cancelled_via !== "admin") return;
+          if (!wantsNotify) return;
+          // Retro no-show cancels (past dates) stay silent.
+          if ((record.date as string) < pragueToday()) return;
+          const ctx = await reservationContext(record);
+          if (!ctx) return;
+          const note = String(record.cancel_note ?? "").trim();
+          const reason = note.length > 0 ? note : "zrušeno správcem";
+          await notifyRecipient(
+            ctx.player,
+            "Trénink zrušen",
+            `${ctx.when} — ${reason}.`,
+            {
+              data: { kind: "admin_cancelled" },
+              html: `<p>Tvoje rezervace byla zrušena:</p>` +
+                `<p><b>${escapeHtml(ctx.when)}</b></p>` +
+                `<p>Důvod: ${escapeHtml(reason)}.</p>`,
+            },
+          );
+          return;
+        }
+
+        // ADMIN MOVE of a live reservation (block/lane/date changed).
+        const moved = old.block_id !== record.block_id ||
+          old.lane !== record.lane ||
+          old.date !== record.date;
+        if (!moved || !wantsNotify) return;
+        const [ctx, oldWhen] = await Promise.all([
+          reservationContext(record),
+          whenLabel(old),
+        ]);
         if (!ctx) return;
-        const note = String(record.cancel_note ?? "").trim();
-        const reason = note.length > 0 ? note : "zrušeno správcem";
+        const custom = String(record.notify_message ?? "").trim();
+        const standard = oldWhen == null
+          ? `Nový termín: ${ctx.when}.`
+          : `Z ${oldWhen} na ${ctx.when}.`;
+        const body = custom.length > 0 ? `${custom} (${ctx.when})` : standard;
         await notifyRecipient(
           ctx.player,
-          "Trénink zrušen",
-          `${ctx.when} — ${reason}.`,
+          "Termín přesunut",
+          body,
           {
-            data: { kind: "admin_cancelled" },
-            html: `<p>Tvoje rezervace byla zrušena:</p>` +
-              `<p><b>${escapeHtml(ctx.when)}</b></p>` +
-              `<p>Důvod: ${escapeHtml(reason)}.</p>`,
+            data: { kind: "reservation_moved" },
+            html: `<p>Tvoje rezervace byla přesunuta:</p>` +
+              (oldWhen == null
+                ? ""
+                : `<p>Původně: ${escapeHtml(oldWhen)}</p>`) +
+              `<p>Nově: <b>${escapeHtml(ctx.when)}</b></p>` +
+              (custom.length > 0 ? `<p>${escapeHtml(custom)}</p>` : ""),
           },
         );
         return;

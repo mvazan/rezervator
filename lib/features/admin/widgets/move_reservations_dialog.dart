@@ -5,6 +5,7 @@ import '../../../core/ui.dart';
 import '../../../data/providers.dart';
 import '../../../domain/models.dart';
 import '../../../domain/schedule.dart' show timesOverlap;
+import 'notify_choice_dialog.dart';
 
 /// Removing a day block that still has sign-ups: the admin drags each
 /// reservation from the removed block (left) onto a lane of one of the
@@ -311,6 +312,18 @@ class _MoveReservationsDialogState
       );
       if (!proceed || !mounted) return;
     }
+    // Phase 3: one notification choice covers the whole batch.
+    NotifyChoice? choice;
+    if (_staged.isNotEmpty) {
+      choice = await showNotifyChoiceDialog(
+        context,
+        title: 'Upozornit na přesun?',
+        summary: _staged.length == 1
+            ? 'Hráč dostane zprávu o novém termínu.'
+            : '${_staged.length} hráčů dostane zprávu o novém termínu.',
+      );
+      if (choice == null || !mounted) return;
+    }
     setState(() => _committing = true);
     final ok = await tryAction(
       context,
@@ -321,7 +334,12 @@ class _MoveReservationsDialogState
         // pending, only the failed/rest remain to re-stage or cancel.
         for (final entry in [..._staged.entries]) {
           await Api.moveReservation(
-              entry.key, entry.value.$1.id, entry.value.$2);
+            entry.key,
+            entry.value.$1.id,
+            entry.value.$2,
+            notify: choice?.notify ?? true,
+            message: choice?.message,
+          );
           if (mounted) setState(() => _staged.remove(entry.key));
         }
       },

@@ -151,6 +151,14 @@ void main() {
     await tester.tap(find.text('Pokračovat'));
     await tester.pumpAndSettle();
 
+    // Phase 3: the notify choice covers the batch — send a custom message.
+    expect(find.text('Upozornit na přesun?'), findsOneWidget);
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Vlastní zpráva (nepovinná)'),
+        'Hala se maluje');
+    await tester.tap(find.text('Odeslat'));
+    await tester.pumpAndSettle();
+
     final rpc = requests.firstWhere(
       (r) => r.method == 'POST' && r.url.path.contains('move_reservation'),
     );
@@ -158,6 +166,8 @@ void main() {
     expect(body['p_reservation'], 'r1');
     expect(body['p_to_block'], 'b2');
     expect(body['p_lane'], 2);
+    expect(body['p_notify'], true);
+    expect(body['p_message'], 'Hala se maluje');
     expect(result, isTrue);
   });
 
