@@ -61,7 +61,8 @@ class MatchesScreen extends ConsumerWidget {
                         '${slot.title}',
                       ),
                       subtitle: switch ([
-                        if (slot.prepMinutes > 0)
+                        if (slot.isAway) 'venku — neblokuje kuželnu',
+                        if (!slot.isAway && slot.prepMinutes > 0)
                           'úklid ${slot.prepMinutes} min před',
                         if (slot.description.isNotEmpty) slot.description,
                       ].join(' · ')) {
@@ -127,6 +128,7 @@ class _MatchDialogState extends State<MatchDialog> {
   final _awayTeam = TextEditingController();
   final _description = TextEditingController();
   int _prepMinutes = 0;
+  bool _isAway = false;
   bool _saving = false;
 
   PrioritySlotType? get _type =>
@@ -145,6 +147,7 @@ class _MatchDialogState extends State<MatchDialog> {
     _awayTeam.text = existing?.awayTeam ?? '';
     _description.text = existing?.description ?? '';
     _prepMinutes = existing?.prepMinutes ?? 0;
+    _isAway = existing?.isAway ?? false;
   }
 
   @override
@@ -246,10 +249,13 @@ class _MatchDialogState extends State<MatchDialog> {
         typeId: type.id,
         homeTeam: type.isMatch ? _homeTeam.text.trim() : '',
         awayTeam: type.isMatch ? awayTeam : '',
-        prepMinutes: type.isMatch ? _prepMinutes : 0,
+        prepMinutes: type.isMatch && !_isAway ? _prepMinutes : 0,
         description: _description.text.trim(),
+        isAway: _isAway,
       ),
-      success: 'Uloženo. Kolidující rezervace byly zrušeny.',
+      success: _isAway
+          ? 'Uloženo.'
+          : 'Uloženo. Kolidující rezervace byly zrušeny.',
       errorText: friendlyDbError,
     );
     if (!mounted) return;
@@ -304,7 +310,15 @@ class _MatchDialogState extends State<MatchDialog> {
               controller: _description,
               decoration: const InputDecoration(labelText: 'Popis'),
             ),
-            if (isMatch) ...[
+            if (isMatch)
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Venkovní zápas'),
+                subtitle: const Text('Hraje se jinde — neblokuje kuželnu.'),
+                value: _isAway,
+                onChanged: (value) => setState(() => _isAway = value),
+              ),
+            if (isMatch && !_isAway) ...[
               const SizedBox(height: 12),
               Align(
                 alignment: Alignment.centerLeft,

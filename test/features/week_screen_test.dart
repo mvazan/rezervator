@@ -818,22 +818,115 @@ void main() {
     expect(find.textContaining('Nový blok'), findsNothing);
   });
 
-  testWidgets('header ＋ opens the add dialog for that day without prefilled '
-      'times', (tester) async {
+  testWidgets('admin tap on the day header opens the add dialog for that day '
+      'without prefilled times; non-admin header is inert', (tester) async {
     wideSurface(tester);
     await tester.pumpWidget(app(profile: admin));
     await tester.pumpAndSettle();
 
-    final addInTomorrow = find.descendant(
+    final headerInTomorrow = find.descendant(
       of: find.byKey(ValueKey(tomorrow)),
-      matching: find.byIcon(Icons.add_circle_outline),
+      matching: find.byType(BoardColumnHeader),
     );
-    expect(addInTomorrow, findsOneWidget);
-    await tester.tap(addInTomorrow);
+    expect(headerInTomorrow, findsOneWidget);
+    await tester.tap(headerInTomorrow);
     await tester.pumpAndSettle();
 
     expect(find.textContaining('Nový blok — jen'), findsOneWidget);
     expect(find.text('--:--'), findsNWidgets(2)); // times picked in dialog
+  });
+
+  testWidgets('non-admin day header is inert — no add dialog', (tester) async {
+    wideSurface(tester);
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find
+        .descendant(
+          of: find.byKey(ValueKey(tomorrow)),
+          matching: find.byType(BoardColumnHeader),
+        )
+        .first);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Nový blok'), findsNothing);
+  });
+
+  testWidgets('an away match shows "(venku)" in the day header only: no band, '
+      'no cancelled block, lanes stay bookable', (tester) async {
+    wideSurface(tester);
+    await tester.pumpWidget(
+      app(
+        matches: [
+          PrioritySlot(
+            type: PrioritySlot.fallbackMatchType,
+            id: 'm-away',
+            date: tomorrow,
+            startsAt: const HourMinute(22, 58),
+            endsAt: const HourMinute(23, 59),
+            homeTeam: '',
+            awayTeam: 'KK Slavoj',
+            isAway: true,
+          ),
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Header line (with the venku marker) — and NOTHING else: the block
+    // card survives with all lanes free instead of a match band.
+    expect(find.textContaining('KK Slavoj (venku)'), findsOneWidget);
+    final cardInTomorrow = find.descendant(
+      of: find.byKey(ValueKey(tomorrow)),
+      matching: find.byKey(const ValueKey('cal-block-b1')),
+    );
+    expect(cardInTomorrow, findsOneWidget);
+  });
+
+  testWidgets('the day header lists the match but never its úklid child',
+      (tester) async {
+    wideSurface(tester);
+    await tester.pumpWidget(
+      app(
+        matches: [
+          PrioritySlot(
+            type: PrioritySlot.fallbackMatchType,
+            id: 'm-hdr',
+            date: tomorrow,
+            startsAt: const HourMinute(23, 30),
+            endsAt: const HourMinute(23, 59),
+            homeTeam: '',
+            awayTeam: 'KK Slavoj',
+          ),
+          PrioritySlot(
+            type: uklidType,
+            id: 'u-hdr',
+            date: tomorrow,
+            startsAt: const HourMinute(22, 58),
+            endsAt: const HourMinute(23, 30),
+            parentId: 'm-hdr',
+          ),
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final header = find.descendant(
+      of: find.byKey(ValueKey(tomorrow)),
+      matching: find.byType(BoardColumnHeader),
+    );
+    expect(
+      find.descendant(of: header, matching: find.textContaining('KK Slavoj')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: header, matching: find.textContaining('Úklid')),
+      findsNothing,
+    );
+    // The úklid still renders as its true-time band in the column below.
+    expect(
+      find.text('⛔ Úklid před zápasem\n22:58–23:30'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('HOLD-drag moves a block onto empty space (handler fires); a '

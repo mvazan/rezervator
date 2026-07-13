@@ -68,7 +68,9 @@ class DayHeader extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(top: 6, left: 52),
             child: Text(
-              '${m.type.isMatch ? '🏆' : '⛔'} ${m.title} · ${m.startsAt.display()}–${m.endsAt.display()}',
+              '${m.type.isMatch ? '🏆' : '⛔'} ${m.title}'
+              '${m.isAway ? ' (venku)' : ''}'
+              ' · ${m.startsAt.display()}–${m.endsAt.display()}',
               style: TextStyle(color: scheme.primary, fontSize: 13),
             ),
           ),

@@ -370,6 +370,7 @@ class Api {
     String awayTeam = '',
     int prepMinutes = 0,
     String description = '',
+    bool isAway = false,
   }) async {
     final row = {
       'date': date.toSql(),
@@ -380,6 +381,7 @@ class Api {
       'away_team': awayTeam,
       'prep_minutes': prepMinutes,
       'description': description,
+      'is_away': isAway,
       if (id == null) 'created_by': currentUserId!,
     };
     if (id == null) {

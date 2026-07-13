@@ -688,4 +688,63 @@ void main() {
       expect(events.single, isA<OffBlockPriority>());
     });
   });
+
+  group('away matches (venkovní zápas)', () {
+    PrioritySlot awayMatch({
+      HourMinute startsAt = const HourMinute(16, 30),
+      HourMinute endsAt = const HourMinute(17, 30),
+    }) =>
+        PrioritySlot(
+          type: PrioritySlot.fallbackMatchType,
+          id: 'm-away',
+          date: tuesday,
+          startsAt: startsAt,
+          endsAt: endsAt,
+          homeTeam: '',
+          awayTeam: 'KK Slavoj',
+          isAway: true,
+        );
+
+    test('an away match cancels nothing and blocks no lane', () {
+      // Same window as the cancelling match test — but away: both training
+      // blocks survive with every lane free.
+      final day = build(matches: [awayMatch()]).days[1] as OpenDay;
+      expect(day.blocks.map((b) => b.id), ['b1', 'b2']);
+      expect(day.slot('b1', 1), isA<FreeSlot>());
+      expect(day.slot('b2', 1), isA<FreeSlot>());
+    });
+
+    test('away lives in day.away, never in day.priority — open or closed day',
+        () {
+      final week = build(matches: [awayMatch()]);
+      final tue = week.days[1] as OpenDay;
+      expect(tue.priority, isEmpty);
+      expect(tue.away.single.id, 'm-away');
+
+      final closedWeek = build(
+        matches: [awayMatch()],
+        overrides: [DayOverride(date: tuesday, closed: true, reason: '')],
+      );
+      final closedTue = closedWeek.days[1] as ClosedDay;
+      expect(closedTue.priority, isEmpty);
+      expect(closedTue.away.single.id, 'm-away');
+    });
+
+    test('headerEvents: away first by start, blocking matches included, '
+        'úklid children filtered out', () {
+      final day = build(matches: [
+        match(
+            startsAt: const HourMinute(20, 0),
+            endsAt: const HourMinute(22, 0)),
+        uklid(
+            startsAt: const HourMinute(19, 30),
+            endsAt: const HourMinute(20, 0)),
+        awayMatch(
+            startsAt: const HourMinute(10, 0),
+            endsAt: const HourMinute(12, 0)),
+      ]).days[1] as OpenDay;
+      final events = headerEvents(day);
+      expect(events.map((m) => m.id), ['m-away', 'm1']);
+    });
+  });
 }
