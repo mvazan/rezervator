@@ -86,4 +86,47 @@ void main() {
     expect(find.widgetWithText(FilledButton, 'Odhlásit se'), findsOneWidget);
     expect(find.widgetWithText(TextButton, 'Zrušit'), findsOneWidget);
   });
+
+  testWidgets('confirmed logout pops the screen back to the root route '
+      '(the pushed screen must not linger above the login gate)',
+      (tester) async {
+    var signedOut = false;
+
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        myProfileProvider.overrideWith((ref) => Stream.value(me)),
+      ],
+      child: MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: Center(
+              child: TextButton(
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => ProfileScreen(
+                      signOut: () async => signedOut = true,
+                    ),
+                  ),
+                ),
+                child: const Text('Otevřít profil'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ));
+    await tester.tap(find.text('Otevřít profil'));
+    await tester.pumpAndSettle();
+    expect(find.text('Můj profil'), findsOneWidget);
+
+    await tester.tap(find.text('Odhlásit se'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Odhlásit se'));
+    await tester.pumpAndSettle();
+
+    expect(signedOut, isTrue);
+    // Back on the root route — no stranded profile screen with a spinner.
+    expect(find.text('Můj profil'), findsNothing);
+    expect(find.text('Otevřít profil'), findsOneWidget);
+  });
 }

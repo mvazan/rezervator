@@ -8,7 +8,10 @@ import '../../data/providers.dart';
 /// name/club (set at registration by an admin) and edit their own board
 /// nick. Structured so future editable fields slot in as more list tiles.
 class ProfileScreen extends ConsumerWidget {
-  const ProfileScreen({super.key});
+  const ProfileScreen({super.key, this.signOut = Api.signOut});
+
+  /// Injectable for widget tests (Api.signOut needs a live Supabase client).
+  final Future<void> Function() signOut;
 
   Future<void> _editNick(BuildContext context, String currentNick) async {
     final input = await promptText(
@@ -35,7 +38,13 @@ class ProfileScreen extends ConsumerWidget {
       confirmLabel: 'Odhlásit se',
     );
     if (!ok || !context.mounted) return;
-    await Api.signOut();
+    final done = await tryAction(context, signOut, errorText: friendlyDbError);
+    // This screen sits pushed above AuthGate; the gate swaps its own route to
+    // the login screen, but a pushed route would stay on top showing an
+    // eternal spinner (profile is null once the session is gone).
+    if (done && context.mounted) {
+      Navigator.of(context).popUntil((route) => route.isFirst);
+    }
   }
 
   @override
