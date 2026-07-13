@@ -39,7 +39,7 @@ void main() {
 
     final live = StreamController<List<Map<String, dynamic>>>();
     final emissions = <List<Map<String, dynamic>>>[];
-    final sub = cachedRows('u1', 'clubs', live.stream).listen(emissions.add);
+    final sub = cachedRows('u1', 'clubs', () => live.stream).listen(emissions.add);
 
     await Future<void>.delayed(Duration.zero);
     expect(emissions, [cached]); // cache unblocks the UI immediately
@@ -57,11 +57,55 @@ void main() {
     await live.close();
   });
 
+  test('cachedRows keeps the cached data when the live stream errors '
+      '(offline: no error surfaces, a retry is scheduled)', () async {
+    const cached = [
+      {'id': 'old'},
+    ];
+    RowCache.write('u1', 'blocks', cached);
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+
+    var subscriptions = 0;
+    Stream<List<Map<String, dynamic>>> failingLive() async* {
+      subscriptions++;
+      throw Exception('offline: initial fetch failed');
+    }
+
+    final emissions = <List<Map<String, dynamic>>>[];
+    Object? error;
+    final sub = cachedRows('u1', 'blocks', failingLive)
+        .listen(emissions.add, onError: (Object e) => error = e);
+
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    // The cached rows came through and the error was swallowed — the UI
+    // keeps its last-known state instead of flipping to an error screen.
+    expect(emissions, [cached]);
+    expect(error, isNull);
+    expect(subscriptions, 1); // first attempt made; retry waits on backoff
+
+    // Not awaited: the generator only honors cancellation at its next yield
+    // point, which sits behind the 5s retry backoff.
+    unawaited(sub.cancel());
+  });
+
+  test('cachedRows with no cache rethrows the first live error', () async {
+    Stream<List<Map<String, dynamic>>> failingLive() async* {
+      throw Exception('offline');
+    }
+
+    Object? error;
+    final sub = cachedRows('u9', 'blocks', failingLive)
+        .listen((_) {}, onError: (Object e) => error = e);
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(error, isNotNull);
+    unawaited(sub.cancel());
+  });
+
   test('cachedRows with an empty cache and a silent stream emits nothing '
       '(no crash, no phantom rows)', () async {
     final live = StreamController<List<Map<String, dynamic>>>();
     final emissions = <List<Map<String, dynamic>>>[];
-    final sub = cachedRows('u1', 'nothing', live.stream).listen(emissions.add);
+    final sub = cachedRows('u1', 'nothing', () => live.stream).listen(emissions.add);
     await Future<void>.delayed(Duration.zero);
     expect(emissions, isEmpty);
     await sub.cancel();

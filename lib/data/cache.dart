@@ -56,18 +56,47 @@ class RowCache {
 }
 
 /// Replays the cached rows for [name] first (when any), then follows the
-/// [live] supabase stream, persisting each emission. The cached first
-/// emission is what unblocks the UI offline — supabase's `.stream()` never
-/// emits without a connection.
+/// [live] supabase stream, persisting each emission.
+///
+/// [live] is a FACTORY because supabase's `.stream()` addErrors AND CLOSES
+/// when its initial PostgREST fetch fails (i.e. within ~100ms offline) — a
+/// closed stream would otherwise leave the provider stale until restart.
+/// Error policy: once ANYTHING was emitted (cache or live), errors are
+/// swallowed and the subscription retries with 5/10/30s backoff, so the UI
+/// keeps showing the last known state and self-heals when the network
+/// returns; with nothing emitted yet the first error rethrows, so the
+/// existing error screens (with their retry buttons) still work for
+/// cache-less users.
 Stream<List<Map<String, dynamic>>> cachedRows(
   String uid,
   String name,
-  Stream<List<Map<String, dynamic>>> live,
+  Stream<List<Map<String, dynamic>>> Function() live,
 ) async* {
   final cached = await RowCache.read(uid, name);
+  var emitted = cached != null;
   if (cached != null) yield cached;
-  yield* live.map((rows) {
-    RowCache.write(uid, name, rows);
-    return rows;
-  });
+
+  var attempt = 0;
+  while (true) {
+    var errored = false;
+    // yield* (not `await for`): consumer cancellation only terminates an
+    // async* generator at a yield point, so an await-for loop would leave
+    // the generator (and its supabase channel) alive after dispose.
+    yield* live().map((rows) {
+      attempt = 0;
+      emitted = true;
+      RowCache.write(uid, name, rows);
+      return rows;
+    }).handleError((Object e) {
+      // Swallowing keeps the last-known state on screen; the throw path
+      // forwards the error to cache-less consumers (their error screens
+      // still need it).
+      if (!emitted) throw e;
+      errored = true;
+    });
+    if (!errored) return; // closed cleanly (or after a forwarded error)
+    attempt++;
+    final delay = switch (attempt) { 1 => 5, 2 => 10, _ => 30 };
+    await Future<void>.delayed(Duration(seconds: delay));
+  }
 }

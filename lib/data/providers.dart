@@ -42,8 +42,8 @@ final myProfileProvider = StreamProvider<Profile?>((ref) {
   if (uid == null) return Stream.value(null);
   // cachedRows unblocks AuthGate offline: without it this stream never
   // emits without a connection and the app hangs on the splash forever.
-  final live = _db.from('profiles').stream(primaryKey: ['id']).eq('id', uid);
-  return cachedRows(uid, 'profile', live)
+  return cachedRows(uid, 'profile',
+          () => _db.from('profiles').stream(primaryKey: ['id']).eq('id', uid))
       .map((rows) => rows.isEmpty ? null : Profile.fromJson(rows.first));
 });
 
@@ -53,7 +53,7 @@ final profilesProvider = StreamProvider<List<Profile>>((ref) {
   final uid = ref.watch(_authUidProvider);
   if (uid == null) return Stream.value(const []);
   return cachedRows(uid, 'profiles',
-          _db.from('profiles').stream(primaryKey: ['id']))
+          () => _db.from('profiles').stream(primaryKey: ['id']))
       .map(
       (rows) => rows.map(Profile.fromJson).toList()
         ..sort((a, b) => a.displayName.compareTo(b.displayName)));
@@ -75,7 +75,7 @@ final settingsProvider = StreamProvider<ScheduleSettings?>((ref) {
   // primaryKey mirrors the 0005 PK (tenant_id): realtime DELETE events carry
   // only PK columns and bypass RLS, so the key must be tenant-scoped.
   return cachedRows(uid, 'settings',
-          _db.from('schedule_settings').stream(primaryKey: ['tenant_id']))
+          () => _db.from('schedule_settings').stream(primaryKey: ['tenant_id']))
       .map((rows) => rows.isEmpty ? null : ScheduleSettings.fromJson(rows.first));
 });
 
@@ -83,7 +83,8 @@ final settingsProvider = StreamProvider<ScheduleSettings?>((ref) {
 final clubsProvider = StreamProvider<List<Club>>((ref) {
   final uid = ref.watch(_authUidProvider);
   if (uid == null) return Stream.value(const []);
-  return cachedRows(uid, 'clubs', _db.from('clubs').stream(primaryKey: ['id']))
+  return cachedRows(
+          uid, 'clubs', () => _db.from('clubs').stream(primaryKey: ['id']))
       .map((rows) =>
       rows.map(Club.fromJson).toList()
         ..sort((a, b) => a.name.compareTo(b.name)));
@@ -93,7 +94,7 @@ final timeBlocksProvider = StreamProvider<List<TimeBlock>>((ref) {
   final uid = ref.watch(_authUidProvider);
   if (uid == null) return Stream.value(const []);
   return cachedRows(uid, 'time_blocks',
-          _db.from('time_blocks').stream(primaryKey: ['id']))
+          () => _db.from('time_blocks').stream(primaryKey: ['id']))
       .map(
       (rows) => rows.map(TimeBlock.fromJson).toList()
         ..sort((a, b) {
@@ -439,11 +440,13 @@ final weekReservationsProvider =
   final uid = ref.watch(_authUidProvider);
   if (uid == null) return Stream.value(const []);
   final sunday = monday.addDays(6);
-  final live = _db
-      .from('reservations')
-      .stream(primaryKey: ['id'])
-      .gte('date', monday.toSql());
-  return cachedRows(uid, 'res.${monday.toSql()}', live)
+  return cachedRows(
+          uid,
+          'res.${monday.toSql()}',
+          () => _db
+              .from('reservations')
+              .stream(primaryKey: ['id'])
+              .gte('date', monday.toSql()))
       .map((rows) => rows
           .map(Reservation.fromJson)
           .where((r) => r.isLive && !r.date.isAfter(sunday))
@@ -454,7 +457,7 @@ final dayOverridesProvider = StreamProvider<List<DayOverride>>((ref) {
   final uid = ref.watch(_authUidProvider);
   if (uid == null) return Stream.value(const []);
   return cachedRows(uid, 'day_overrides',
-          _db.from('day_overrides').stream(primaryKey: ['tenant_id', 'date']))
+          () => _db.from('day_overrides').stream(primaryKey: ['tenant_id', 'date']))
       .map(
       (rows) => rows.map(DayOverride.fromJson).toList());
 });
@@ -463,7 +466,7 @@ final slotTypesProvider = StreamProvider<List<PrioritySlotType>>((ref) {
   final uid = ref.watch(_authUidProvider);
   if (uid == null) return Stream.value(const []);
   return cachedRows(uid, 'slot_types',
-          _db.from('priority_slot_types').stream(primaryKey: ['id']))
+          () => _db.from('priority_slot_types').stream(primaryKey: ['id']))
       .map(
       (rows) => rows.map(PrioritySlotType.fromJson).toList());
 });
@@ -482,15 +485,15 @@ final _prioritySlotRowsProvider =
     StreamProvider<List<Map<String, dynamic>>>((ref) {
   final uid = ref.watch(_authUidProvider);
   if (uid == null) return Stream.value(const []);
-  return cachedRows(
-      uid, 'priority_slots', _db.from('priority_slots').stream(primaryKey: ['id']));
+  return cachedRows(uid, 'priority_slots',
+      () => _db.from('priority_slots').stream(primaryKey: ['id']));
 });
 
 final rentalsProvider = StreamProvider<List<Rental>>((ref) {
   final uid = ref.watch(_authUidProvider);
   if (uid == null) return Stream.value(const []);
   return cachedRows(uid, 'rentals',
-          _db.from('rentals').stream(primaryKey: ['id']))
+          () => _db.from('rentals').stream(primaryKey: ['id']))
       .map(
       (rows) => rows.map(Rental.fromJson).toList());
 });
@@ -501,10 +504,12 @@ final myActiveReservationsProvider =
     StreamProvider<List<Reservation>>((ref) {
   final uid = ref.watch(_authUidProvider);
   if (uid == null) return Stream.value(const []);
-  final live = _db
-      .from('reservations')
-      .stream(primaryKey: ['id'])
-      .eq('player_id', uid);
-  return cachedRows(uid, 'res.mine', live)
+  return cachedRows(
+          uid,
+          'res.mine',
+          () => _db
+              .from('reservations')
+              .stream(primaryKey: ['id'])
+              .eq('player_id', uid))
       .map((rows) => rows.map(Reservation.fromJson).toList());
 });

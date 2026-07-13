@@ -87,10 +87,14 @@ class _ScheduleAdminScreenState extends ConsumerState<ScheduleAdminScreen> {
     }
 
     final current = ref.read(settingsProvider).value;
-    final shrinksGrid =
-        current != null &&
-        (laneCount < current.laneCount ||
-            !_trainingWeekdays.containsAll(current.trainingWeekdays));
+    if (current == null) {
+      // The settings row hasn't loaded (or errored): tenant_id — the update
+      // key — is unknown, so saving now could not target the right row.
+      snack(context, 'Nastavení se ještě načítá — zkus to za chvíli.');
+      return;
+    }
+    final shrinksGrid = laneCount < current.laneCount ||
+        !_trainingWeekdays.containsAll(current.trainingWeekdays);
     if (shrinksGrid) {
       final stranded = await _countStranded(laneCount, _trainingWeekdays);
       if (stranded > 0) {
@@ -111,7 +115,7 @@ class _ScheduleAdminScreenState extends ConsumerState<ScheduleAdminScreen> {
     await tryAction(
       context,
       () => Api.updateSettings(
-        tenantId: current?.tenantId ?? '',
+        tenantId: current.tenantId,
         laneCount: laneCount,
         trainingWeekdays: _trainingWeekdays,
         bookingHorizonDays: horizonDays,
