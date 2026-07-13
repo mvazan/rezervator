@@ -492,27 +492,25 @@ class _DayPage extends StatelessWidget {
       ];
 
   /// Wraps a lane cell so it either flexes to share the row's width
-  /// (fit-width) or keeps its fixed 96px column plus inter-lane spacing.
-  Widget _laneCell({
-    required int lane,
+  /// (fit-width) or keeps its fixed 96px column. Inter-lane spacing lives in
+  /// [_laneCells]' spacers — NOT in per-cell padding, which under Expanded
+  /// would eat into every lane but the last and render lane N visibly wider
+  /// than the others.
+  Widget _laneCell({required Widget child}) => fitWidth
+      ? Expanded(child: child)
+      : SizedBox(width: _laneTileWidth, child: child);
+
+  /// One equal-width cell per lane with fixed spacers between them.
+  List<Widget> _laneCells({
     required int laneCount,
-    required Widget child,
-  }) {
-    if (fitWidth) {
-      return Expanded(
-        child: Padding(
-          padding: EdgeInsets.only(
-            right: lane == laneCount ? 0 : _laneTileSpacing,
-          ),
-          child: child,
-        ),
-      );
-    }
-    return Padding(
-      padding: EdgeInsets.only(right: lane == laneCount ? 0 : _laneTileSpacing),
-      child: SizedBox(width: _laneTileWidth, child: child),
-    );
-  }
+    required Widget Function(int lane) build,
+  }) =>
+      [
+        for (var lane = 1; lane <= laneCount; lane++) ...[
+          if (lane > 1) const SizedBox(width: _laneTileSpacing),
+          _laneCell(child: build(lane)),
+        ],
+      ];
 
   Widget _laneHeaderRow(OpenDay day) {
     return Padding(
@@ -521,20 +519,18 @@ class _DayPage extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const SizedBox(width: _laneLabelWidth),
-          for (var lane = 1; lane <= day.laneCount; lane++)
-            _laneCell(
-              lane: lane,
-              laneCount: day.laneCount,
-              child: Text(
-                'Dráha $lane',
-                textAlign: TextAlign.center,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                ),
+          ..._laneCells(
+            laneCount: day.laneCount,
+            build: (lane) => Text(
+              'Dráha $lane',
+              textAlign: TextAlign.center,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
               ),
             ),
+          ),
         ],
       ),
     );
@@ -553,25 +549,23 @@ class _DayPage extends StatelessWidget {
               child: _blockLabel(context, block),
             ),
           ),
-          for (var lane = 1; lane <= day.laneCount; lane++)
-            _laneCell(
+          ..._laneCells(
+            laneCount: day.laneCount,
+            build: (lane) => slotTileFor(
+              day: day,
+              block: block,
               lane: lane,
-              laneCount: day.laneCount,
-              child: slotTileFor(
-                day: day,
-                block: block,
-                lane: lane,
-                size: SlotTileSize.large,
-                me: me,
-                myCount: myCount,
-                settings: settings,
-                nameById: nameById,
-                clubColorById: clubColorById,
-                interactive: interactive,
-                onBook: onBook,
-                onCancel: onCancel,
-              ),
+              size: SlotTileSize.large,
+              me: me,
+              myCount: myCount,
+              settings: settings,
+              nameById: nameById,
+              clubColorById: clubColorById,
+              interactive: interactive,
+              onBook: onBook,
+              onCancel: onCancel,
             ),
+          ),
         ],
       ),
     );

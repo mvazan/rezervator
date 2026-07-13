@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/ui.dart';
 import '../../data/providers.dart';
@@ -17,20 +16,14 @@ import 'week_calendar_view.dart';
 /// [scheduleViewPrefKey].
 enum ScheduleView { day, week }
 
-/// shared_preferences key storing the chosen [ScheduleView] ('day'/'week').
-const scheduleViewPrefKey = 'schedule_view';
-
-/// shared_preferences key storing the per-device "fit width" boolean: when
-/// true both schedule views drop horizontal scrolling and let lanes share the
-/// full screen width (names ellipsis-clipped). Defaults to true on narrow
-/// (< 700px) devices where the whole day rarely fits otherwise.
-const scheduleFitWidthPrefKey = 'fit_width';
-
 /// Live week view: grid computed by buildWeekSchedule, booking via RPCs.
-/// Acts as the "shell": owns navigation (week offset, view toggle) and all
-/// provider wiring; delegates rendering to [WeekCalendarView] or
-/// [DayPagerView], which both receive the same pre-computed [WeekSchedule]
-/// and handlers.
+/// Acts as the "shell": owns navigation (week offset) and all provider
+/// wiring; delegates rendering to [WeekCalendarView] or [DayPagerView],
+/// which both receive the same pre-computed [WeekSchedule] and handlers.
+///
+/// The view follows the device orientation — portrait shows the day pager,
+/// landscape the week calendar — and both always fit the screen width, so
+/// there are no toggle buttons to explain.
 class WeekScreen extends ConsumerStatefulWidget {
   const WeekScreen({super.key});
 
@@ -42,92 +35,12 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
   int _weekOffset = 0;
   int _dayIndex = 0;
 
-  /// Null until the stored preference (or the width-based default) has been
-  /// resolved on the first frame — see [_resolveInitialView].
-  ScheduleView? _view;
-
-  /// Null until the stored `fit_width` preference (or the width-based default)
-  /// has been resolved on the first frame — see [_resolveInitialView].
-  bool? _fitWidth;
-
   Day _monday(Day today) => today.addDays(1 - today.weekday + 7 * _weekOffset);
 
   @override
   void initState() {
     super.initState();
     _dayIndex = Day.fromDateTime(DateTime.now()).weekday - 1;
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    // Only the very first call (before the pref lookup resolves _view) needs
-    // the current width — captured here (safe: no async gap yet) so
-    // _resolveInitialView never has to read `context` after an `await`.
-    if (_view == null) {
-      final narrow = MediaQuery.sizeOf(context).width < 700;
-      _resolveInitialView(
-        narrow ? ScheduleView.day : ScheduleView.week,
-        // Fit-width is most useful on phones, so it defaults on when narrow.
-        fitWidthDefault: narrow,
-      );
-    }
-  }
-
-  /// Reads the stored `schedule_view` preference; if absent, uses
-  /// [widthDefault] (`day` under 700px width, `week` otherwise — spec §3).
-  /// Falls back to [widthDefault] if reading the preference throws (e.g.
-  /// platform channel unavailable) so the screen never gets stuck without a
-  /// view.
-  Future<void> _resolveInitialView(
-    ScheduleView widthDefault, {
-    required bool fitWidthDefault,
-  }) async {
-    ScheduleView resolved;
-    bool fitWidth;
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      resolved = switch (prefs.getString(scheduleViewPrefKey)) {
-        'day' => ScheduleView.day,
-        'week' => ScheduleView.week,
-        _ => widthDefault,
-      };
-      fitWidth = prefs.getBool(scheduleFitWidthPrefKey) ?? fitWidthDefault;
-    } catch (_) {
-      resolved = widthDefault;
-      fitWidth = fitWidthDefault;
-    }
-    if (mounted) {
-      setState(() {
-        _view = resolved;
-        _fitWidth = fitWidth;
-      });
-    }
-  }
-
-  Future<void> _setFitWidth(bool fitWidth) async {
-    setState(() => _fitWidth = fitWidth);
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool(scheduleFitWidthPrefKey, fitWidth);
-    } catch (_) {
-      // Persistence is a per-device nicety; a failed write just means the
-      // next launch falls back to the width-based default.
-    }
-  }
-
-  Future<void> _setView(ScheduleView view) async {
-    setState(() => _view = view);
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(
-        scheduleViewPrefKey,
-        view == ScheduleView.day ? 'day' : 'week',
-      );
-    } catch (_) {
-      // Persistence is a per-device nicety; a failed write just means the
-      // next launch falls back to the width-based default.
-    }
   }
 
   Future<void> _book(
@@ -242,8 +155,12 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
     final todayDay = Day.fromDateTime(nowDt);
     final now = HourMinute(nowDt.hour, nowDt.minute);
     final monday = _monday(todayDay);
-    final view = _view;
-    final fitWidth = _fitWidth ?? false;
+    // Orientation IS the view switch: portrait reads day-by-day, landscape
+    // shows the whole week. Both always stretch to the full width.
+    final view = MediaQuery.orientationOf(context) == Orientation.portrait
+        ? ScheduleView.day
+        : ScheduleView.week;
+    const fitWidth = true;
 
     final settings =
         ref.watch(settingsProvider).value ?? ScheduleSettings.defaults;
@@ -277,41 +194,11 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
             icon: const Icon(Icons.chevron_right),
             onPressed: () => _go(1),
           ),
-          if (view != null)
-            SegmentedButton<ScheduleView>(
-              segments: const [
-                ButtonSegment(
-                  value: ScheduleView.day,
-                  icon: Icon(Icons.calendar_view_day_outlined),
-                  tooltip: 'Den',
-                ),
-                ButtonSegment(
-                  value: ScheduleView.week,
-                  icon: Icon(Icons.calendar_view_week_outlined),
-                  tooltip: 'Týden',
-                ),
-              ],
-              selected: {view},
-              onSelectionChanged: (s) => _setView(s.single),
-              showSelectedIcon: false,
-              style: const ButtonStyle(
-                visualDensity: VisualDensity.compact,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-            ),
-          if (_fitWidth != null)
-            IconButton(
-              icon: const Icon(Icons.fit_screen_outlined),
-              isSelected: fitWidth,
-              tooltip:
-                  fitWidth ? 'Zpět na posuvnou mřížku' : 'Roztáhnout na šířku',
-              onPressed: () => _setFitWidth(!fitWidth),
-            ),
         ],
       ),
     );
 
-    if (view == null || _fitWidth == null || timeBlocks.isLoading) {
+    if (timeBlocks.isLoading) {
       return Column(
         children: [
           header,
