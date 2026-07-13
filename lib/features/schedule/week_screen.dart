@@ -8,9 +8,7 @@ import '../../domain/models.dart';
 import '../../domain/schedule.dart';
 import '../admin/widgets/block_dialog.dart';
 import 'day_pager_view.dart';
-import 'widgets/day_header.dart';
-import 'widgets/gap_rows.dart';
-import 'widgets/slot_tile.dart';
+import 'week_calendar_view.dart';
 
 /// The two schedule layouts a device can be set to; persisted per-device via
 /// [scheduleViewPrefKey].
@@ -27,8 +25,9 @@ const scheduleFitWidthPrefKey = 'fit_width';
 
 /// Live week view: grid computed by buildWeekSchedule, booking via RPCs.
 /// Acts as the "shell": owns navigation (week offset, view toggle) and all
-/// provider wiring; delegates rendering to [WeekListView] or [DayPagerView],
-/// which both receive the same pre-computed [WeekSchedule] and handlers.
+/// provider wiring; delegates rendering to [WeekCalendarView] or
+/// [DayPagerView], which both receive the same pre-computed [WeekSchedule]
+/// and handlers.
 class WeekScreen extends ConsumerStatefulWidget {
   const WeekScreen({super.key});
 
@@ -411,8 +410,10 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
         header,
         Expanded(
           child: view == ScheduleView.week
-              ? WeekListView(
+              ? WeekCalendarView(
                   week: week,
+                  today: todayDay,
+                  now: now,
                   me: me,
                   myCount: myCount,
                   settings: settings,
@@ -450,312 +451,6 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
                 ),
         ),
       ],
-    );
-  }
-}
-
-/// Today's vertical week list: one card per day, each showing a compact
-/// grid of [SlotTile]s. Receives the already-computed [week] and handlers
-/// from the [WeekScreen] shell — no provider access of its own.
-class WeekListView extends StatelessWidget {
-  const WeekListView({
-    super.key,
-    required this.week,
-    required this.me,
-    required this.myCount,
-    required this.settings,
-    required this.nameById,
-    required this.clubColorById,
-    required this.interactive,
-    required this.fitWidth,
-    required this.onBook,
-    required this.onCancel,
-    this.onLongPressBlock,
-    this.onAddBlockInGap,
-  });
-
-  final WeekSchedule week;
-  final Profile? me;
-  final int myCount;
-  final ScheduleSettings settings;
-  final Map<String, String> nameById;
-  final Map<String, int> clubColorById;
-  final bool interactive;
-
-  /// When true the compact grid drops its horizontal scroller and lets lanes
-  /// share the full width (names ellipsis-clipped); see [_DaySection._grid].
-  final bool fitWidth;
-  final void Function(Day, TimeBlock, int lane) onBook;
-  final void Function(Day, TimeBlock, Reservation, {required bool ownFuture})
-  onCancel;
-
-  /// Admin-only (null otherwise): long-press a block's time label to edit
-  /// it; tap an empty gap to add a block prefilled with the gap's range.
-  final void Function(TimeBlock)? onLongPressBlock;
-  final void Function(HourMinute start, HourMinute end)? onAddBlockInGap;
-
-  @override
-  Widget build(BuildContext context) {
-    // Portrait phones get tighter list gutters so more of each day fits.
-    final narrow = MediaQuery.sizeOf(context).width < 700;
-    return ListView(
-      padding: narrow
-          ? const EdgeInsets.fromLTRB(6, 0, 6, 16)
-          : const EdgeInsets.fromLTRB(12, 0, 12, 24),
-      children: [
-        for (final day in week.days)
-          _DaySection(
-            day: day,
-            me: me,
-            myCount: myCount,
-            settings: settings,
-            nameById: nameById,
-            clubColorById: clubColorById,
-            interactive: interactive,
-            fitWidth: fitWidth,
-            onBook: onBook,
-            onCancel: onCancel,
-            onLongPressBlock: onLongPressBlock,
-            onAddBlockInGap: onAddBlockInGap,
-          ),
-      ],
-    );
-  }
-}
-
-class _DaySection extends StatelessWidget {
-  const _DaySection({
-    required this.day,
-    required this.me,
-    required this.myCount,
-    required this.settings,
-    required this.nameById,
-    required this.clubColorById,
-    required this.interactive,
-    required this.fitWidth,
-    required this.onBook,
-    required this.onCancel,
-    this.onLongPressBlock,
-    this.onAddBlockInGap,
-  });
-
-  final DaySchedule day;
-  final Profile? me;
-  final int myCount;
-  final ScheduleSettings settings;
-  final Map<String, String> nameById;
-  final Map<String, int> clubColorById;
-
-  /// False while blocks are the placeholder grid or this week's reservation
-  /// stream isn't loaded yet — see the doc comment in build() for why.
-  final bool interactive;
-
-  /// See [WeekListView.fitWidth].
-  final bool fitWidth;
-  final void Function(Day, TimeBlock, int lane) onBook;
-  final void Function(Day, TimeBlock, Reservation, {required bool ownFuture})
-  onCancel;
-
-  /// See [WeekListView.onLongPressBlock]/[WeekListView.onAddBlockInGap].
-  final void Function(TimeBlock)? onLongPressBlock;
-  final void Function(HourMinute start, HourMinute end)? onAddBlockInGap;
-
-  @override
-  Widget build(BuildContext context) {
-    final narrow = MediaQuery.sizeOf(context).width < 700;
-    return Card(
-      child: Padding(
-        padding: EdgeInsets.all(narrow ? 8 : 12),
-        child: switch (day) {
-          ClosedDay(:final reason) => DayHeader(
-            date: day.date,
-            priority: day.priority,
-            closedReason: reason,
-          ),
-          OpenDay() => _openDay(context, day as OpenDay),
-        },
-      ),
-    );
-  }
-
-  Widget _openDay(BuildContext context, OpenDay day) {
-    final isAdmin = me?.isAdmin ?? false;
-    final freeCount = day.blocks
-        .expand(
-          (block) => [
-            for (var lane = 1; lane <= day.laneCount; lane++) (block, lane),
-          ],
-        )
-        .where(
-          (entry) => canBook(
-            state: day.slot(entry.$1.id, entry.$2),
-            myActiveCount: myCount,
-            settings: settings,
-            isAdmin: isAdmin,
-          ),
-        )
-        .length;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        DayHeader(
-          date: day.date,
-          priority: day.priority,
-          chipLabel: '$freeCount volných',
-        ),
-        const SizedBox(height: 6),
-        _grid(context, day),
-      ],
-    );
-  }
-
-  /// The block's time-label cell; for admins it long-presses into the block
-  /// editor (a small edit glyph hints at the gesture).
-  Widget _labelCell(TimeBlock block, EdgeInsets cellPadding) {
-    final label = Text(
-      block.label,
-      style: TextStyle(fontSize: fitWidth ? 11 : 12),
-    );
-    if (onLongPressBlock == null) {
-      return Padding(padding: cellPadding, child: label);
-    }
-    return InkWell(
-      onLongPress: () => onLongPressBlock!(block),
-      child: Padding(
-        padding: cellPadding,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Flexible(child: label),
-            const SizedBox(width: 2),
-            Builder(
-              builder: (context) => Icon(
-                Icons.edit_outlined,
-                size: 12,
-                color: Theme.of(context)
-                    .colorScheme
-                    .onSurfaceVariant
-                    .withValues(alpha: 0.4),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _grid(BuildContext context, OpenDay day) {
-    final scheme = Theme.of(context).colorScheme;
-    // In fit-width mode the whole day must be visible at once: lanes flex to
-    // share the available width (no horizontal scroll) and cell padding is
-    // tightened so the narrow columns still fit their tiles. Otherwise the
-    // grid keeps its fixed-width columns inside a horizontal scroller.
-    final cellPadding = EdgeInsets.all(fitWidth ? 2 : 4);
-    final labelWidth = fitWidth ? 52.0 : 92.0;
-
-    // The day renders as Table CHUNKS of consecutive block rows interleaved
-    // with full-width gap rows (Table has no colspan). Every chunk shares
-    // identical columnWidths, so lanes stay aligned across chunks.
-    Table buildChunk(List<TimeBlock> blocks, {required bool withHeader}) =>
-        Table(
-          defaultColumnWidth: fitWidth
-              ? const FlexColumnWidth()
-              : const FixedColumnWidth(84),
-          columnWidths: {0: FixedColumnWidth(labelWidth)},
-          border: TableBorder(
-            horizontalInside: BorderSide(
-              color: scheme.outlineVariant.withValues(alpha: 0.35),
-            ),
-          ),
-          defaultVerticalAlignment: TableCellVerticalAlignment.middle,
-          children: [
-            if (withHeader)
-              TableRow(
-                children: [
-                  const SizedBox.shrink(),
-                  for (var lane = 1; lane <= day.laneCount; lane++)
-                    Padding(
-                      padding: cellPadding,
-                      child: Text(
-                        'Dráha $lane',
-                        textAlign: TextAlign.center,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: fitWidth ? 12 : null,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            for (final block in blocks)
-              TableRow(
-                children: [
-                  _labelCell(block, cellPadding),
-                  for (var lane = 1; lane <= day.laneCount; lane++)
-                    Padding(
-                      padding: cellPadding,
-                      child: slotTileFor(
-                        day: day,
-                        block: block,
-                        lane: lane,
-                        size: SlotTileSize.compact,
-                        me: me,
-                        myCount: myCount,
-                        settings: settings,
-                        nameById: nameById,
-                        clubColorById: clubColorById,
-                        interactive: interactive,
-                        onBook: onBook,
-                        onCancel: onCancel,
-                      ),
-                    ),
-                ],
-              ),
-          ],
-        );
-
-    final children = <Widget>[];
-    var headerEmitted = false;
-    var pendingBlocks = <TimeBlock>[];
-    void flush() {
-      if (pendingBlocks.isEmpty && headerEmitted) return;
-      children.add(buildChunk(pendingBlocks, withHeader: !headerEmitted));
-      headerEmitted = true;
-      pendingBlocks = [];
-    }
-
-    for (final item in dayGridItems(day)) {
-      switch (item) {
-        case BlockItem(:final block):
-          pendingBlocks.add(block);
-        case EventItem(:final event):
-          flush();
-          children.add(GapEventBanner(event: event));
-        case final EmptyGapItem gap:
-          flush();
-          children.add(EmptyGapRow(
-            item: gap,
-            onAdd: onAddBlockInGap == null
-                ? null
-                : () => onAddBlockInGap!(gap.start, gap.end),
-          ));
-      }
-    }
-    flush();
-
-    final content = Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: children,
-    );
-    if (fitWidth) return content;
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: SizedBox(
-        width: labelWidth + day.laneCount * 84,
-        child: content,
-      ),
     );
   }
 }
