@@ -105,6 +105,7 @@ void main() {
     List<TimeBlock> blocks = const [b1],
     List<Rental> rentals = const [],
     Profile profile = me,
+    List<Widget> trailing = const [],
   }) {
     return ProviderScope(
       overrides: [
@@ -132,7 +133,7 @@ void main() {
           ],
         ),
       ],
-      child: const MaterialApp(home: Scaffold(body: WeekScreen())),
+      child: MaterialApp(home: Scaffold(body: WeekScreen(trailing: trailing))),
     );
   }
 
@@ -310,6 +311,58 @@ void main() {
       matching: find.byKey(const ValueKey('cal-block-b1')),
     );
     expect(cardInTomorrow, findsNothing);
+  });
+
+  testWidgets('one-line header: action icons hug the right edge, the week '
+      'nav sits in the middle (title takes no flex share)', (tester) async {
+    wideSurface(tester);
+    await tester.pumpWidget(app(trailing: [
+      IconButton(
+        icon: const Icon(Icons.account_circle_outlined),
+        onPressed: () {},
+      ),
+    ]));
+    await tester.pumpAndSettle();
+
+    final icon = tester.getCenter(find.byIcon(Icons.account_circle_outlined));
+    expect(icon.dx, greaterThan(1600 - 80)); // pinned right
+    final nav = tester.getCenter(find.byIcon(Icons.chevron_left));
+    // Nav group centered in the middle region — a regression to the
+    // Flexible-title bug parked it (and the icons) around 1/3 of the width.
+    expect(nav.dx, greaterThan(500));
+    expect(find.text('Rezervátor'), findsOneWidget);
+  });
+
+  testWidgets('the week calendar opens scrolled to the first TRAINING '
+      'block, not to a morning match stretching the window', (tester) async {
+    wideSurface(tester);
+    await tester.pumpWidget(
+      app(
+        matches: [
+          PrioritySlot(
+            type: PrioritySlot.fallbackMatchType,
+            id: 'm-morning',
+            date: tomorrow,
+            startsAt: const HourMinute(9, 0),
+            endsAt: const HourMinute(11, 0),
+            homeTeam: '',
+            awayTeam: 'KK Ranní',
+          ),
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // The window starts at the 9:00 match, but the initial scroll anchors
+    // at the 22:58 block — the vertical offset is well past zero.
+    final scrollable = tester
+        .widgetList<Scrollable>(find.byType(Scrollable))
+        .map((s) => s.controller)
+        .whereType<ScrollController>()
+        .where((c) => c.hasClients && c.position.axis == Axis.vertical)
+        .toList();
+    expect(scrollable, isNotEmpty);
+    expect(scrollable.first.offset, greaterThan(100));
   });
 
   testWidgets('the view follows orientation: landscape shows the week '

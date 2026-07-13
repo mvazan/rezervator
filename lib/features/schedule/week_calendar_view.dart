@@ -101,14 +101,24 @@ class _WeekCalendarViewState extends State<WeekCalendarView> {
   /// thin day+date band (events reappear when scrolled back up).
   bool _collapsed = false;
 
+  /// The default vertical position: the first TRAINING block's top. Morning
+  /// matches/úklid may stretch the window well above the training hours —
+  /// they stay reachable by scrolling up, but the board opens on what the
+  /// player came for. Applied once per mount; also the baseline the header
+  /// collapse measures from (sitting at the default anchor keeps the
+  /// events visible).
+  double _anchorOffset = 0;
+  bool _didInitialScroll = false;
+
   @override
   void initState() {
     super.initState();
     _vScroll.addListener(() {
       if (!_vScroll.hasClients) return;
-      // Hysteresis: collapse a bit into the scroll, expand only near the
-      // very top — no flapping around one magic offset.
-      final offset = _vScroll.offset;
+      // Hysteresis relative to the default anchor: collapse a bit past it,
+      // expand when back near (or above) it — no flapping around one magic
+      // offset, and no auto-collapse just for opening at the anchor.
+      final offset = _vScroll.offset - _anchorOffset;
       final collapsed = _collapsed ? offset > 8 : offset > 32;
       if (collapsed != _collapsed) setState(() => _collapsed = collapsed);
     });
@@ -175,6 +185,32 @@ class _WeekCalendarViewState extends State<WeekCalendarView> {
     // +8: slack so the bottom hour label (centered on its line) isn't
     // half-clipped when scrolled fully down.
     final bodyHeight = window.minutes * pxPerMinute + 8;
+
+    // Default anchor: the earliest TRAINING block of the week. When morning
+    // events stretch the window above the training hours, the board still
+    // opens on the blocks (scroll up for the matches).
+    int? firstBlockMinute;
+    for (final day in week.days) {
+      if (day is! OpenDay) continue;
+      for (final b in day.blocks) {
+        final m = b.startsAt.minutesFromMidnight;
+        if (firstBlockMinute == null || m < firstBlockMinute) {
+          firstBlockMinute = m;
+        }
+      }
+    }
+    _anchorOffset = firstBlockMinute == null
+        ? 0
+        : ((firstBlockMinute - window.startMinute) * pxPerMinute - 8)
+            .clamp(0.0, double.infinity);
+    if (!_didInitialScroll) {
+      _didInitialScroll = true;
+      final target = _anchorOffset;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_vScroll.hasClients || target <= 0) return;
+        _vScroll.jumpTo(target.clamp(0.0, _vScroll.position.maxScrollExtent));
+      });
+    }
 
     final columns = [
       for (final day in week.days)
