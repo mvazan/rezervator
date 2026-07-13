@@ -4,19 +4,19 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/ui.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
-import 'slot_types_screen.dart';
 import 'widgets/admin_body.dart';
 
-/// Admin: manage priority slots — matches and other typed blockages (block
-/// reservations; spectators see them even on closed days). The types
-/// themselves (šablóny) are managed in [SlotTypesScreen].
-class PrioritySlotsScreen extends ConsumerWidget {
-  const PrioritySlotsScreen({super.key});
+/// Admin: manage MATCHES. A match blocks the whole alley for its window;
+/// its lane prep is the linked "Úklid před zápasem" child slot the server
+/// maintains from the dialog's prep field (hidden here — it lives and dies
+/// with the match). Other blockages moved to Výjimky dnů.
+class MatchesScreen extends ConsumerWidget {
+  const MatchesScreen({super.key});
 
   Future<void> _delete(BuildContext context, PrioritySlot slot) async {
     final confirmed = await confirmDialog(
       context,
-      title: 'Smazat blokaci?',
+      title: 'Smazat zápas?',
       message: 'Opravdu smazat „${slot.title}" (${dayLabel(slot.date)})?',
     );
     if (!confirmed) return;
@@ -34,31 +34,23 @@ class PrioritySlotsScreen extends ConsumerWidget {
     final profile = ref.watch(myProfileProvider).value;
     if (profile?.isAdmin != true) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Zápasy a blokace')),
+        appBar: AppBar(title: const Text('Zápasy')),
         body: const Center(child: Text('Jen pro správce.')),
       );
     }
 
     final slots = ref.watch(prioritySlotsProvider);
-    final sorted = [...slots]..sort((a, b) => b.date.compareTo(a.date));
+    final sorted = [
+      for (final s in slots)
+        if (s.type.isMatch && s.parentId == null) s,
+    ]..sort((a, b) => b.date.compareTo(a.date));
     final types = ref.watch(slotTypesProvider).value ?? const [];
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Zápasy a blokace'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.tune),
-            tooltip: 'Typy blokací',
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const SlotTypesScreen()),
-            ),
-          ),
-        ],
-      ),
+      appBar: AppBar(title: const Text('Zápasy')),
       body: AdminBody(
         child: sorted.isEmpty
-            ? const Center(child: Text('Zatím žádné zápasy ani blokace.'))
+            ? const Center(child: Text('Zatím žádné zápasy.'))
             : ListView(
                 children: [
                   for (final slot in sorted)
@@ -69,8 +61,8 @@ class PrioritySlotsScreen extends ConsumerWidget {
                         '${slot.title}',
                       ),
                       subtitle: switch ([
-                        if (slot.type.lanes != null)
-                          'dráhy ${slot.type.lanes!.join(', ')}',
+                        if (slot.prepMinutes > 0)
+                          'úklid ${slot.prepMinutes} min před',
                         if (slot.description.isNotEmpty) slot.description,
                       ].join(' · ')) {
                         '' => null,
@@ -103,7 +95,7 @@ class PrioritySlotsScreen extends ConsumerWidget {
           builder: (_) => _SlotDialog(types: types),
         ),
         icon: const Icon(Icons.add),
-        label: const Text('Přidat'),
+        label: const Text('Přidat zápas'),
       ),
     );
   }
@@ -113,9 +105,9 @@ class PrioritySlotsScreen extends ConsumerWidget {
 /// selects the "Jiná…" (custom) segment.
 const _prepPresets = [0, 30, 60];
 
-/// Add/edit dialog: type picker + date + two time pickers (end defaults to
-/// start + 3h); the match-specific fields (teams, prep window) only render
-/// for a match-kind type.
+/// Add/edit dialog for a MATCH: date + two time pickers (end defaults to
+/// start + 3h), teams, and the úklid duration (the server maintains the
+/// linked child slot from it).
 class _SlotDialog extends StatefulWidget {
   const _SlotDialog({this.existing, required this.types});
 
@@ -148,8 +140,7 @@ class _SlotDialogState extends State<_SlotDialog> {
     _start = existing?.startsAt;
     _end = existing?.endsAt;
     _typeId = existing?.type.id ??
-        widget.types.where((t) => t.isMatch && t.builtin).firstOrNull?.id ??
-        widget.types.firstOrNull?.id;
+        widget.types.where((t) => t.isMatch && t.builtin).firstOrNull?.id;
     _homeTeam.text = existing?.homeTeam ?? '';
     _awayTeam.text = existing?.awayTeam ?? '';
     _description.text = existing?.description ?? '';
@@ -206,7 +197,7 @@ class _SlotDialogState extends State<_SlotDialog> {
   Future<void> _pickCustomPrep() async {
     final input = await promptText(
       context,
-      title: 'Příprava drah',
+      title: 'Úklid před zápasem',
       hint: '0–240',
       initial: _prepMinutes.toString(),
       keyboardType: TextInputType.number,
@@ -227,7 +218,7 @@ class _SlotDialogState extends State<_SlotDialog> {
     final end = _end;
     final type = _type;
     if (type == null) {
-      snack(context, 'Vyber typ.');
+      snack(context, 'Typ Zápas se ještě načítá — zkus to za chvíli.');
       return;
     }
     if (date == null || start == null || end == null) {
@@ -271,30 +262,13 @@ class _SlotDialogState extends State<_SlotDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final type = _type;
-    final isMatch = type?.isMatch ?? false;
+    const isMatch = true;
     return AlertDialog(
-      title: Text(widget.existing == null ? 'Přidat' : 'Upravit'),
+      title: Text(widget.existing == null ? 'Přidat zápas' : 'Upravit zápas'),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            DropdownButtonFormField<String>(
-              initialValue: _typeId,
-              decoration: const InputDecoration(labelText: 'Typ'),
-              items: [
-                for (final t in widget.types)
-                  DropdownMenuItem(
-                    value: t.id,
-                    child: Text(
-                      t.lanes == null
-                          ? t.name
-                          : '${t.name} (dráhy ${t.lanes!.join(', ')})',
-                    ),
-                  ),
-              ],
-              onChanged: (id) => setState(() => _typeId = id),
-            ),
             ListTile(
               contentPadding: EdgeInsets.zero,
               title: const Text('Datum'),
@@ -335,7 +309,7 @@ class _SlotDialogState extends State<_SlotDialog> {
               Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  'Příprava drah',
+                  'Úklid před zápasem',
                   style: Theme.of(context).textTheme.labelLarge,
                 ),
               ),

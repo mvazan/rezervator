@@ -75,9 +75,7 @@ class WeekCalendarView extends StatelessWidget {
       ],
       eventWindows: [
         for (final day in week.days) ...[
-          // calendarStart = what actually paints: whole-alley slots
-          // include their prep band, lane-scoped ones their real window.
-          for (final m in day.priority) (m.calendarStart, m.endsAt),
+          for (final m in day.priority) (m.startsAt, m.endsAt),
           if (day is OpenDay)
             for (final r in day.rentals) (r.startsAt, r.endsAt),
         ],
@@ -230,7 +228,7 @@ class _DayColumn extends StatelessWidget {
         for (final b in openDay.blocks)
           (b.startsAt.minutesFromMidnight, b.endsAt.minutesFromMidnight),
       for (final m in day.priority)
-        (m.calendarStart.minutesFromMidnight, m.endsAt.minutesFromMidnight),
+        (m.startsAt.minutesFromMidnight, m.endsAt.minutesFromMidnight),
       if (openDay != null)
         for (final r in openDay.rentals)
           (r.startsAt.minutesFromMidnight, r.endsAt.minutesFromMidnight),
@@ -320,20 +318,6 @@ class _DayColumn extends StatelessWidget {
 
     for (final m in day.priority) {
       final club = ClubColors.of(m.type.colorIndex, scheme.brightness);
-      // Whole-alley slots with prep get an honest muted band over the prep
-      // window — the lanes are being prepped there, at that real time.
-      if (m.type.lanes == null && m.blockingStart != m.startsAt) {
-        addBands(
-          m.blockingStart,
-          m.startsAt,
-          () => CalendarEventBand(
-            background: scheme.errorContainer.withValues(alpha: 0.25),
-            foreground: scheme.onSurfaceVariant,
-            text: '🛠 Příprava drah\n'
-                '${m.blockingStart.display()}\u2013${m.startsAt.display()}',
-          ),
-        );
-      }
       addBands(
         m.startsAt,
         m.endsAt,

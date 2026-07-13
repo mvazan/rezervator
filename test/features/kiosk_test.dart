@@ -23,6 +23,12 @@ void main() {
     active: true,
   );
 
+  const uklidType = PrioritySlotType(
+    id: 't-uklid',
+    name: 'Úklid před zápasem',
+    builtin: true,
+  );
+
   final t = today();
   final tomorrow = t.addDays(1);
 
@@ -374,13 +380,13 @@ void main() {
   );
 
   testWidgets(
-    'i: a whole-alley match cancels the blocks it touches (prep included) '
-    'and renders as true-time bands: 🛠 prep band + 🏆 match band',
+    'i: a whole-alley match and its úklid child cancel the blocks they '
+    'touch and render as true-time bands',
     (tester) async {
       // Two adjacent blocks: bPrep (20:00-21:00) and bMatch (21:00-22:00).
-      // A match 21:00-22:00 with 60 min prep blocks [20:00,22:00): BOTH
-      // blocks are cancelled for the day; the board shows a muted prep band
-      // over 20:00-21:00 and the match band over 21:00-22:00 instead.
+      // Match 21:00-22:00 + linked úklid 20:00-21:00: BOTH blocks are
+      // cancelled for the day; the board shows the úklid band over
+      // 20:00-21:00 and the match band over 21:00-22:00 instead.
       const bPrep = TimeBlock(
         id: 'bPrep',
         startsAt: HourMinute(20, 0),
@@ -403,7 +409,15 @@ void main() {
         endsAt: const HourMinute(22, 0),
         homeTeam: '',
         awayTeam: 'KK Slavoj',
-        prepMinutes: 60,
+        description: '',
+      );
+      final uklid = PrioritySlot(
+        type: uklidType,
+        id: 'u1',
+        date: t,
+        startsAt: const HourMinute(20, 0),
+        endsAt: const HourMinute(21, 0),
+        parentId: 'm1',
         description: '',
       );
 
@@ -414,7 +428,7 @@ void main() {
             timeBlocksProvider
                 .overrideWith((ref) => Stream.value(const [bPrep, bMatch])),
             dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
-            prioritySlotsProvider.overrideWithValue([match]),
+            prioritySlotsProvider.overrideWithValue([match, uklid]),
             rentalsProvider.overrideWith((ref) => Stream.value(const [])),
             weekReservationsProvider.overrideWith(
               (ref, monday) => Stream.value(const []),
@@ -426,8 +440,11 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // Both bands render at their real windows, once (match is today only).
-      expect(find.text('🛠 Příprava drah\n20:00–21:00'), findsOneWidget);
+      // Both bands render at their real windows, once (slots are today only).
+      expect(
+        find.text('⛔ Úklid před zápasem\n20:00–21:00'),
+        findsOneWidget,
+      );
       expect(
         find.text(
           '🏆 ${match.title}\n'
@@ -726,8 +743,8 @@ void main() {
   );
 
   testWidgets(
-    'n: a whole-alley match prep window widens the shared calendar window '
-    '(ruler labels the prep hour, the band renders at its true time)',
+    'n: the úklid child widens the shared calendar window (ruler labels '
+    'its hour, the band renders at its true time)',
     (tester) async {
       const b = TimeBlock(
         id: 'b',
@@ -744,7 +761,15 @@ void main() {
         endsAt: const HourMinute(21, 0),
         homeTeam: '',
         awayTeam: 'KK Slavoj',
-        prepMinutes: 60, // blockingStart 19:00 — earliest content anywhere
+        description: '',
+      );
+      final uklid = PrioritySlot(
+        type: uklidType,
+        id: 'u1',
+        date: t,
+        startsAt: const HourMinute(19, 0), // earliest content anywhere
+        endsAt: const HourMinute(20, 0),
+        parentId: 'm1',
         description: '',
       );
       await tester.pumpWidget(
@@ -753,7 +778,7 @@ void main() {
             settingsProvider.overrideWith((ref) => Stream.value(settings)),
             timeBlocksProvider.overrideWith((ref) => Stream.value(const [b])),
             dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
-            prioritySlotsProvider.overrideWithValue([match]),
+            prioritySlotsProvider.overrideWithValue([match, uklid]),
             rentalsProvider.overrideWith((ref) => Stream.value(const [])),
             weekReservationsProvider.overrideWith(
               (ref, monday) => Stream.value(const []),
@@ -765,9 +790,12 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // The window must reach 19:00 or the prep band would render above it.
-      expect(find.text('19:00'), findsOneWidget);
-      expect(find.text('🛠 Příprava drah\n19:00–20:00'), findsOneWidget);
+      // The window must reach 19:00 or the band would render above it.
+      expect(find.text('19:00'), findsWidgets);
+      expect(
+        find.text('⛔ Úklid před zápasem\n19:00–20:00'),
+        findsOneWidget,
+      );
 
       await finish(tester);
     },

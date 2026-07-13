@@ -4,7 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/providers.dart';
 import 'clubs_screen.dart';
 import 'kiosk_screen.dart';
-import 'priority_slots_screen.dart';
+import 'matches_screen.dart';
 import 'overrides_screen.dart';
 import 'players_screen.dart';
 import 'rentals_screen.dart';
@@ -48,9 +48,9 @@ class AdminScreen extends ConsumerWidget {
       screen: () => const OverridesScreen(),
     ),
     (
-      label: 'Zápasy a blokace',
+      label: 'Zápasy',
       icon: Icons.emoji_events_outlined,
-      screen: () => const PrioritySlotsScreen(),
+      screen: () => const MatchesScreen(),
     ),
     (
       label: 'Pronájmy',
