@@ -66,6 +66,12 @@ void main() {
     status: ProfileStatus.approved,
   );
 
+  const uklidType = PrioritySlotType(
+    id: 't-uklid',
+    name: 'Úklid před zápasem',
+    builtin: true,
+  );
+
   Reservation res(String id, String playerId, Day date) => Reservation(
     id: id,
     playerId: playerId,
@@ -246,9 +252,8 @@ void main() {
     expect(addInTomorrow, findsNothing);
   });
 
-  testWidgets('a match with prep shows the muted prep band at its real time', (
-    tester,
-  ) async {
+  testWidgets('the úklid child renders as its own band at its real time and '
+      'cancels the block it covers', (tester) async {
     wideSurface(tester);
     await tester.pumpWidget(
       app(
@@ -261,15 +266,26 @@ void main() {
             endsAt: const HourMinute(23, 59),
             homeTeam: '',
             awayTeam: 'KK Slavoj',
-            prepMinutes: 32, // blockingStart 22:58 — cancels b1 via prep only
+            description: '',
+          ),
+          PrioritySlot(
+            type: uklidType,
+            id: 'u2',
+            date: tomorrow,
+            startsAt: const HourMinute(22, 58),
+            endsAt: const HourMinute(23, 30),
+            parentId: 'm2',
             description: '',
           ),
         ],
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('🛠 Příprava drah\n22:58–23:30'), findsOneWidget);
-    // The prep-touched block is cancelled for that day too.
+    expect(
+      find.text('⛔ Úklid před zápasem\n22:58–23:30'),
+      findsOneWidget,
+    );
+    // The úklid (whole-alley) cancelled b1 for that day.
     final cardInTomorrow = find.descendant(
       of: find.byKey(ValueKey(tomorrow)),
       matching: find.byKey(const ValueKey('cal-block-b1')),
@@ -622,12 +638,12 @@ void main() {
 
   testWidgets(
       'tap in space freed by a cancelled block prefills the gap ending at '
-      'the prep band; a tap inside the prep band is a no-op; saving over a '
-      'weekly block warns about the overlap', (tester) async {
+      'the úklid band; a tap inside the band is a no-op; the day-scoped '
+      'save proceeds without the weekly-overlap warning', (tester) async {
     wideSurface(tester);
     // bEarly 20:00–21:00 + b1 22:58–23:59; match tomorrow 21:00–22:00 with
-    // 30 min prep (blockingStart 20:30) cancels bEarly on tomorrow only:
-    // 20:00–20:30 is freed, 20:30–21:00 is the prep band.
+    // its úklid child 20:30–21:00: both cancel bEarly on tomorrow only —
+    // 20:00–20:30 is freed, 20:30–21:00 is the úklid band.
     await tester.pumpWidget(app(
       blocks: const [bEarly, b1],
       profile: admin,
@@ -640,7 +656,15 @@ void main() {
           endsAt: const HourMinute(22, 0),
           homeTeam: '',
           awayTeam: 'KK Slavoj',
-          prepMinutes: 30,
+          description: '',
+        ),
+        PrioritySlot(
+          type: uklidType,
+          id: 'u1',
+          date: tomorrow,
+          startsAt: const HourMinute(20, 30),
+          endsAt: const HourMinute(21, 0),
+          parentId: 'm1',
           description: '',
         ),
       ],
@@ -654,7 +678,7 @@ void main() {
     );
     final columnTop = tester.getTopLeft(column);
 
-    // Tap inside the prep band (20:45) — occupied, silent no-op.
+    // Tap inside the úklid band (20:45) — occupied, silent no-op.
     await tester.tapAt(
       columnTop + Offset(40, (20.75 - 20) * 60 * pxPerMinute),
     );
@@ -670,18 +694,19 @@ void main() {
     expect(find.text('20:00'), findsWidgets);
     expect(find.text('20:30'), findsWidgets);
 
-    // The edit is DAY-SCOPED and bEarly is cancelled on this day, so no
-    // overlap warning fires — the save goes straight to the day-override
-    // path (which fails in this harness without a backend; the dialog
-    // stays open with an error snack, which is all we assert here — the
-    // request composition is pinned by block_dialog_day_test.dart).
+    // bEarly is cancelled on this day (not rendered, no live rows in this
+    // harness), so the save proceeds with no overlap warning; the backend
+    // is absent here, so the dialog stays open with an error snack — the
+    // request composition is pinned by block_dialog_day_test.dart.
     await tester.tap(find.text('Uložit'));
     await tester.pumpAndSettle();
     expect(find.text('Pozor — překryv bloků'), findsNothing);
   });
 
   testWidgets('day pager: a match day with every block cancelled shows the '
-      'true-time banner with the prep suffix and no lane grid', (tester) async {
+      'match and úklid banners at their real times and no lane grid', (
+    tester,
+  ) async {
     SharedPreferences.setMockInitialValues({'schedule_view': 'day'});
     wideSurface(tester);
     await tester.pumpWidget(app(
@@ -694,7 +719,15 @@ void main() {
           endsAt: const HourMinute(23, 59),
           homeTeam: '',
           awayTeam: 'KK Slavoj',
-          prepMinutes: 32, // blockingStart 22:58 — cancels b1 via prep
+          description: '',
+        ),
+        PrioritySlot(
+          type: uklidType,
+          id: 'u1',
+          date: tomorrow,
+          startsAt: const HourMinute(22, 58),
+          endsAt: const HourMinute(23, 30),
+          parentId: 'm1',
           description: '',
         ),
       ],
@@ -717,58 +750,16 @@ void main() {
     }
     await tester.pumpAndSettle();
 
-    // The banner shows real times plus the honest prep suffix; the day is a
-    // normal open card with no bookable rows and no lane header.
+    expect(find.textContaining('· 23:30–23:59'), findsWidgets);
+    // Once in the day-header strip, once as the gap banner.
     expect(
-      find.textContaining('· 23:30–23:59 · 🛠 od 22:58'),
-      findsOneWidget,
+      find.textContaining('⛔ Úklid před zápasem · 22:58–23:30'),
+      findsWidgets,
     );
     expect(find.textContaining('Zavřeno'), findsNothing);
     expect(find.text('0 volných'), findsOneWidget);
     expect(find.text('Dráha 1'), findsNothing);
     expect(find.byIcon(Icons.add), findsNothing);
-  });
-
-  testWidgets('day pager: a zero-prep match banner has no 🛠 suffix', (
-    tester,
-  ) async {
-    SharedPreferences.setMockInitialValues({'schedule_view': 'day'});
-    wideSurface(tester);
-    await tester.pumpWidget(app(
-      matches: [
-        PrioritySlot(
-          type: PrioritySlot.fallbackMatchType,
-          id: 'm1',
-          date: tomorrow,
-          startsAt: const HourMinute(23, 30),
-          endsAt: const HourMinute(23, 59),
-          homeTeam: '',
-          awayTeam: 'KK Slavoj',
-          prepMinutes: 0,
-          description: '',
-        ),
-      ],
-    ));
-    await tester.pumpAndSettle();
-
-    final chips = find.descendant(
-      of: find.byType(DayChipStrip),
-      matching: find.byType(InkWell),
-    );
-    final t = today();
-    if (t.weekday < DateTime.sunday) {
-      await tester.tap(chips.at(t.weekday));
-    } else {
-      await tester.tap(find.byIcon(Icons.chevron_right));
-      await tester.pumpAndSettle();
-      await tester.tap(chips.at(0));
-    }
-    await tester.pumpAndSettle();
-
-    // Times render in the day-header strip AND the banner — but neither
-    // may carry a bogus prep suffix for a zero-prep match.
-    expect(find.textContaining('· 23:30–23:59'), findsWidgets);
-    expect(find.textContaining('🛠 od'), findsNothing);
   });
 
   testWidgets('past days refuse calendar edits — long-press shows a snack, '

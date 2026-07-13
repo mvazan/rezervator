@@ -158,21 +158,6 @@ void main() {
       );
     });
 
-    test('blockingStart subtracts prepMinutes from startsAt', () {
-      final m = match(startsAt: const HourMinute(16, 30), prepMinutes: 30);
-      expect(m.blockingStart, const HourMinute(16, 0));
-    });
-
-    test('blockingStart is startsAt when prepMinutes is 0', () {
-      final m = match(startsAt: const HourMinute(16, 30), prepMinutes: 0);
-      expect(m.blockingStart, const HourMinute(16, 30));
-    });
-
-    test('blockingStart clamps to 00:00 instead of wrapping past midnight', () {
-      final m = match(startsAt: const HourMinute(0, 15), prepMinutes: 30);
-      expect(m.blockingStart, const HourMinute(0, 0));
-    });
-
     test('fromJson reads home_team/away_team/prep_minutes round-trip', () {
       final m = PrioritySlot.fromJson(const {
         'id': 'm2',
@@ -188,7 +173,6 @@ void main() {
       expect(m.awayTeam, 'KK Slavoj');
       expect(m.prepMinutes, 30);
       expect(m.title, 'Sokol Brno – KK Slavoj');
-      expect(m.blockingStart, const HourMinute(16, 0));
     });
 
     test('fromJson defaults prep_minutes to 0 when absent', () {

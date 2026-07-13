@@ -34,15 +34,9 @@ class RentedSlot extends SlotState {
 
 class PrioritySlotState extends SlotState {
   const PrioritySlotState(this.slot,
-      {required super.inPast, required super.beyondHorizon, this.isPrep = false});
+      {required super.inPast, required super.beyondHorizon});
 
   final PrioritySlot slot;
-
-  /// True when this cell is covered only by the slot's prep-time extension
-  /// ([PrioritySlot.blockingStart]..[PrioritySlot.startsAt]) and does NOT
-  /// overlap the real `[startsAt, endsAt)` window — UI shows
-  /// "🛠 Příprava drah" instead of the banner.
-  final bool isPrep;
 }
 
 sealed class DaySchedule {
@@ -164,23 +158,18 @@ int _byStartThenPosition(TimeBlock a, TimeBlock b) {
   return byStart != 0 ? byStart : a.position.compareTo(b.position);
 }
 
-/// Per-lane resolution: the first priority slot covering [lane] whose
-/// prep-extended window overlaps [block], plus the prep-only flag — or
-/// `(null, false)`. In practice LANE-SCOPED slots (and, transiently,
-/// unresolved-type ones — see [PrioritySlotType.unresolved]) reach a
-/// rendered block: resolved whole-alley slots cancel every block their
-/// blocking window touches (see [buildWeekSchedule]).
-(PrioritySlot?, bool) priorityStateFor(
+/// Per-lane resolution: the first priority slot covering [lane] that
+/// overlaps [block] — or null. In practice LANE-SCOPED slots (and,
+/// transiently, unresolved-type ones — see [PrioritySlotType.unresolved])
+/// reach a rendered block: resolved whole-alley slots cancel every block
+/// they touch (see [buildWeekSchedule]).
+PrioritySlot? priorityStateFor(
     TimeBlock block, int lane, List<PrioritySlot> slots) {
-  final hit = _firstWhereOrNull(
+  return _firstWhereOrNull(
       slots,
       (PrioritySlot m) =>
           m.coversLane(lane) &&
-          timesOverlap(block.startsAt, block.endsAt, m.blockingStart, m.endsAt));
-  if (hit == null) return (null, false);
-  final isPrep = !timesOverlap(
-      block.startsAt, block.endsAt, hit.startsAt, hit.endsAt);
-  return (hit, isPrep);
+          timesOverlap(block.startsAt, block.endsAt, m.startsAt, m.endsAt));
 }
 
 WeekSchedule buildWeekSchedule({
@@ -261,8 +250,8 @@ WeekSchedule buildWeekSchedule({
       ];
     }
 
-    // A WHOLE-ALLEY priority slot CANCELS every training block its blocking
-    // window (prep included) touches: the block disappears from that day and
+    // A WHOLE-ALLEY priority slot CANCELS every training block it touches:
+    // the block disappears from that day and
     // the slot renders at its true time instead, leaving the freed space
     // visibly empty for the admin to restructure (extend/shift a neighboring
     // block or add a shorter one). Lane-scoped slots keep the block and
@@ -279,7 +268,7 @@ WeekSchedule buildWeekSchedule({
     dayBlocks = [
       for (final b in dayBlocks)
         if (!wholeAlley.any((m) =>
-            timesOverlap(b.startsAt, b.endsAt, m.blockingStart, m.endsAt)))
+            timesOverlap(b.startsAt, b.endsAt, m.startsAt, m.endsAt)))
           b,
     ];
 
@@ -294,11 +283,11 @@ WeekSchedule buildWeekSchedule({
           (date == today &&
               block.startsAt.minutesFromMidnight <= now.minutesFromMidnight);
       for (var lane = 1; lane <= settings.laneCount; lane++) {
-        final (laneSlot, isPrep) = priorityStateFor(block, lane, dayPriority);
+        final laneSlot = priorityStateFor(block, lane, dayPriority);
         final SlotState state;
         if (laneSlot != null) {
           state = PrioritySlotState(laneSlot,
-              inPast: inPast, beyondHorizon: beyondHorizon, isPrep: isPrep);
+              inPast: inPast, beyondHorizon: beyondHorizon);
         } else {
           final laneRental = _firstWhereOrNull(
               dayRentals,

@@ -20,12 +20,15 @@ void main() {
   Widget app({
     List<DayOverride> overrides = const [],
     List<TimeBlock> blocks = const [],
+    List<PrioritySlot> slots = const [],
   }) {
     return ProviderScope(
       overrides: [
         myProfileProvider.overrideWith((ref) => Stream.value(admin)),
         dayOverridesProvider.overrideWith((ref) => Stream.value(overrides)),
         timeBlocksProvider.overrideWith((ref) => Stream.value(blocks)),
+        prioritySlotsProvider.overrideWithValue(slots),
+        slotTypesProvider.overrideWith((ref) => Stream.value(const [])),
       ],
       child: const MaterialApp(
         localizationsDelegates: GlobalMaterialLocalizations.delegates,
@@ -129,5 +132,54 @@ void main() {
       findsOneWidget,
     );
     expect(find.byTooltip('Vrátit den k týdennímu rozvrhu'), findsOneWidget);
+  });
+
+  testWidgets('Blokace section lists manual non-match slots but hides the '
+      'auto-managed úklid children of matches', (tester) async {
+    const uklidType = PrioritySlotType(
+      id: 't-uklid',
+      name: 'Úklid před zápasem',
+      builtin: true,
+    );
+    final future = today().addDays(3);
+    await tester.pumpWidget(app(slots: [
+      // Manual blockage — listed.
+      PrioritySlot(
+        id: 's1',
+        date: future,
+        startsAt: const HourMinute(10, 0),
+        endsAt: const HourMinute(12, 0),
+        type: uklidType,
+        description: '',
+      ),
+      // Match — belongs to the Zápasy screen, not here.
+      PrioritySlot(
+        id: 'm1',
+        date: future,
+        startsAt: const HourMinute(18, 0),
+        endsAt: const HourMinute(20, 0),
+        type: PrioritySlot.fallbackMatchType,
+        awayTeam: 'KK Slavoj',
+        description: '',
+      ),
+      // The match's úklid child — auto-managed, hidden.
+      PrioritySlot(
+        id: 'u1',
+        date: future,
+        startsAt: const HourMinute(17, 0),
+        endsAt: const HourMinute(18, 0),
+        type: uklidType,
+        parentId: 'm1',
+        description: '',
+      ),
+    ]));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Blokace'), findsOneWidget);
+    expect(find.textContaining('10:00–12:00'), findsOneWidget);
+    expect(find.textContaining('17:00–18:00'), findsNothing); // child hidden
+    expect(find.textContaining('KK Slavoj'), findsNothing); // match not here
+    expect(find.byTooltip('Typy blokací'), findsOneWidget);
+    expect(find.byTooltip('Přidat blokaci'), findsOneWidget);
   });
 }

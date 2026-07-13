@@ -85,7 +85,7 @@ class _MoveReservationsDialogState
             m.date == widget.date &&
             m.type.coversLane(lane) &&
             timesOverlap(
-                block.startsAt, block.endsAt, m.blockingStart, m.endsAt));
+                block.startsAt, block.endsAt, m.startsAt, m.endsAt));
 
     bool laneTaken(TimeBlock block, int lane) =>
         laneBlocked(block, lane) ||

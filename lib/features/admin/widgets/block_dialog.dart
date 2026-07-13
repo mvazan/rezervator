@@ -201,7 +201,7 @@ class _BlockDialogState extends State<BlockDialog> {
         !widget.dayPriority.any((m) =>
             m.type.lanes == null &&
             !m.type.unresolved &&
-            timesOverlap(b.startsAt, b.endsAt, m.blockingStart, m.endsAt));
+            timesOverlap(b.startsAt, b.endsAt, m.startsAt, m.endsAt));
     var targets = [
       for (final id in ids)
         if (blockById[id] != null &&

@@ -309,9 +309,7 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
     ];
     final eventWindows = <(HourMinute, HourMinute)>[
       for (final day in days) ...[
-        // calendarStart = what actually paints: whole-alley slots include
-        // their prep band, lane-scoped ones only their real window.
-        for (final m in day.priority) (m.calendarStart, m.endsAt),
+        for (final m in day.priority) (m.startsAt, m.endsAt),
         if (day is OpenDay)
           for (final r in day.rentals) (r.startsAt, r.endsAt),
       ],
@@ -528,20 +526,6 @@ class _DayColumn extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     for (final m in day.priority) {
       final club = ClubColors.of(m.type.colorIndex, scheme.brightness);
-      // Whole-alley slots with prep get an honest muted band over the prep
-      // window — the lanes are being prepped there, at that real time.
-      if (m.type.lanes == null && m.blockingStart != m.startsAt) {
-        addBands(
-          m.blockingStart,
-          m.startsAt,
-          () => CalendarEventBand(
-            background: scheme.errorContainer.withValues(alpha: 0.25),
-            foreground: scheme.onSurfaceVariant,
-            text: '🛠 Příprava drah\n'
-                '${m.blockingStart.display()}–${m.startsAt.display()}',
-          ),
-        );
-      }
       addBands(
         m.startsAt,
         m.endsAt,
@@ -706,29 +690,23 @@ class _DayColumn extends StatelessWidget {
                 )
               : null,
         );
-      case PrioritySlotState(:final slot, :final isPrep):
+      case PrioritySlotState(:final slot):
         // A LANE-SCOPED priority slot blocking just this row — or, briefly,
         // an unresolved-type slot (renders like a match but doesn't cancel
         // blocks until its type row streams in).
         final club = ClubColors.of(slot.type.colorIndex, scheme.brightness);
         return _rowShell(
           context,
-          background: isPrep
-              ? scheme.errorContainer.withValues(alpha: 0.25)
-              : club?.$1 ?? scheme.errorContainer.withValues(alpha: 0.6),
+          background: club?.$1 ?? scheme.errorContainer.withValues(alpha: 0.6),
           lane: lane,
           child: Text(
-            isPrep
-                ? '🛠 Příprava drah'
-                : '${slot.type.isMatch ? '🏆' : '⛔'} ${slot.title}',
+            '${slot.type.isMatch ? '🏆' : '⛔'} ${slot.title}',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
               fontSize: 11,
               fontWeight: FontWeight.w600,
-              color: isPrep
-                  ? scheme.onSurfaceVariant
-                  : club?.$2 ?? scheme.onErrorContainer,
+              color: club?.$2 ?? scheme.onErrorContainer,
             ),
           ),
         );

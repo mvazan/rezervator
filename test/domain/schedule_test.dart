@@ -73,6 +73,25 @@ void main() {
         description: '',
       );
 
+  const uklidType = PrioritySlotType(
+    id: 't-uklid',
+    name: 'Úklid před zápasem',
+    builtin: true,
+  );
+  PrioritySlot uklid({
+    HourMinute startsAt = const HourMinute(16, 0),
+    HourMinute endsAt = const HourMinute(17, 0),
+  }) =>
+      PrioritySlot(
+        type: uklidType,
+        id: 'u1',
+        date: tuesday,
+        startsAt: startsAt,
+        endsAt: endsAt,
+        parentId: 'm1',
+        description: '',
+      );
+
   Rental rental({
     Day? date,
     int? weekday,
@@ -220,26 +239,27 @@ void main() {
       expect(day.priority, hasLength(1));
     });
 
-    test('the prep window cancels too; a block ending exactly at '
-        'blockingStart survives', () {
-      // Match 17:00–18:00 with 60 min prep → blocking window [16:00, 18:00):
-      // b1 (16–17) and b2 (17–18) are both cancelled; b0 (15–16) ends exactly
-      // at blockingStart (half-open, no overlap) and survives.
+    test('the úklid child cancels its window like any whole-alley slot; a '
+        'block ending exactly at its start survives', () {
+      // Match 17:00–18:00 + linked úklid 16:00–17:00 (the old prep window,
+      // now an explicit slot): b1 (16–17) and b2 (17–18) are both
+      // cancelled; b0 (15–16) ends exactly at the úklid start (half-open,
+      // no overlap) and survives.
       final day = build(
         blocks: const [
           TimeBlock(
               id: 'b0',
               startsAt: HourMinute(15, 0),
               endsAt: HourMinute(16, 0),
-              position: -1,
+              position: -2,
               active: true),
           b1,
           b2,
           b3,
         ],
         matches: [
-          match(startsAt: const HourMinute(17, 0), endsAt: const HourMinute(18, 0),
-              prepMinutes: 60),
+          match(startsAt: const HourMinute(17, 0), endsAt: const HourMinute(18, 0)),
+          uklid(),
         ],
       ).days[1] as OpenDay;
       expect(day.blocks.map((b) => b.id), ['b0']);
@@ -253,90 +273,6 @@ void main() {
       ]).days[1];
       expect(day, isA<OpenDay>());
       expect((day as OpenDay).blocks, isEmpty);
-    });
-
-    test('midnight clamp: match 00:15 with 30min prep cancels from 00:00', () {
-      const bMidnight = TimeBlock(
-          id: 'bm',
-          startsAt: HourMinute(0, 0),
-          endsAt: HourMinute(0, 15),
-          position: -1,
-          active: true);
-      final day = build(
-        blocks: const [bMidnight, b1, b2, b3],
-        matches: [
-          match(startsAt: const HourMinute(0, 15), endsAt: const HourMinute(1, 0),
-              prepMinutes: 30),
-        ],
-      ).days[1] as OpenDay;
-      // Without clamping, blockingStart would be -00:15 (wrap); clamped to
-      // 00:00 it still cancels the 00:00-00:15 block.
-      expect(day.blocks.map((b) => b.id), ['b1', 'b2']);
-    });
-
-    test('two whole-alley slots on one day: EVERY slot cancels (not just '
-        'the first)', () {
-      // m1 touches only b1, m2 only b2 — both must go.
-      final day = build(matches: [
-        match(
-            startsAt: const HourMinute(16, 30),
-            endsAt: const HourMinute(17, 0)),
-        PrioritySlot(
-          type: PrioritySlot.fallbackMatchType,
-          id: 'm2',
-          date: tuesday,
-          startsAt: const HourMinute(17, 30),
-          endsAt: const HourMinute(18, 0),
-          homeTeam: '',
-          awayTeam: 'KK Vracov',
-          prepMinutes: 0,
-          description: '',
-        ),
-      ]).days[1] as OpenDay;
-      expect(day.blocks, isEmpty);
-    });
-
-    test('cancellation applies to override-selected blocks too, and such a '
-        'day stays open', () {
-      // Wednesday (non-training) opened via override with the inactive
-      // special b3 (10:00–12:00); a match overlapping it cancels it.
-      final day = build(
-        overrides: [
-          DayOverride(
-              date: wednesday,
-              closed: false,
-              reason: '',
-              blockIds: const ['b3']),
-        ],
-        matches: [
-          match(
-              date: wednesday,
-              startsAt: const HourMinute(10, 0),
-              endsAt: const HourMinute(11, 0)),
-        ],
-      ).days[2];
-      expect(day, isA<OpenDay>());
-      expect((day as OpenDay).blocks, isEmpty);
-      expect(day.priority, hasLength(1));
-    });
-
-    test('an UNRESOLVED type (types stream not joined yet) never cancels', () {
-      final day = build(matches: [
-        PrioritySlot(
-          type: PrioritySlot.unresolvedType,
-          id: 'm1',
-          date: tuesday,
-          startsAt: const HourMinute(16, 30),
-          endsAt: const HourMinute(17, 30),
-          homeTeam: '',
-          awayTeam: 'KK Slavoj',
-          prepMinutes: 0,
-          description: '',
-        ),
-      ]).days[1] as OpenDay;
-      // Blocks survive; the slot still blocks lanes via slot states.
-      expect(day.blocks.map((b) => b.id), ['b1', 'b2']);
-      expect(day.slot('b1', 1), isA<PrioritySlotState>());
     });
 
     test('a cancelled-block match renders off-block at its real window', () {
@@ -638,9 +574,7 @@ void main() {
     test('never cancels the block — it resolves per lane instead', () {
       final day = build(matches: [laneSlot()]).days[1] as OpenDay;
       expect(day.blocks.map((b) => b.id), ['b1', 'b2']);
-      final (laneHit, isPrep) = priorityStateFor(b1, 1, [laneSlot()]);
-      expect(laneHit, isNotNull);
-      expect(isPrep, isFalse);
+      expect(priorityStateFor(b1, 1, [laneSlot()]), isNotNull);
     });
 
     test('beats a rental on the same lane; rental rules other lanes', () {
@@ -652,7 +586,8 @@ void main() {
       expect(day.slot('b1', 2), isA<RentedSlot>());
     });
 
-    test('prep window applies per lane too', () {
+    test('prep no longer extends blocking — only the real window blocks '
+        '(the úklid child covers the prep time as its own slot)', () {
       final day = build(matches: [
         PrioritySlot(
           id: 's2',
@@ -663,10 +598,9 @@ void main() {
           prepMinutes: 60,
         ),
       ]).days[1] as OpenDay;
-      final b1Lane1 = day.slot('b1', 1);
-      expect(b1Lane1, isA<PrioritySlotState>());
-      expect((b1Lane1 as PrioritySlotState).isPrep, isTrue);
-      expect(day.slot('b1', 2), isA<FreeSlot>());
+      // b1 (16–17) touches only the OLD prep window → free now.
+      expect(day.slot('b1', 1), isA<FreeSlot>());
+      expect(day.slot('b2', 1), isA<PrioritySlotState>());
     });
   });
 

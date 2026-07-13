@@ -377,8 +377,10 @@ class PrioritySlotType {
 }
 
 /// One dated priority slot (a match or any other typed blockage). Blocks
-/// reservations on its type's lanes for `[blockingStart, endsAt)` and is
-/// shown to spectators even on closed days.
+/// reservations on its type's lanes for exactly `[startsAt, endsAt)` and is
+/// shown to spectators even on closed days. A match's lane prep is its own
+/// linked "Úklid před zápasem" child slot ([parentId], server-maintained
+/// from [prepMinutes]).
 class PrioritySlot {
   const PrioritySlot({
     required this.id,
@@ -390,6 +392,7 @@ class PrioritySlot {
     this.awayTeam = '',
     this.prepMinutes = 0,
     this.description = '',
+    this.parentId,
   });
 
   final String id;
@@ -407,6 +410,10 @@ class PrioritySlot {
   final int prepMinutes;
   final String description;
 
+  /// Set on an auto-managed "Úklid před zápasem" child — links it to its
+  /// match (cascade-deleted with it, hidden from admin lists).
+  final String? parentId;
+
   /// Match kind: `'{home} – {away}'` (or just `away`); other kinds show the
   /// type's name.
   String get title => type.isMatch
@@ -414,14 +421,6 @@ class PrioritySlot {
       : type.name;
 
   bool coversLane(int lane) => type.coversLane(lane);
-
-  /// [startsAt] minus [prepMinutes], clamped to 00:00 (never wraps past
-  /// midnight into the previous day).
-  HourMinute get blockingStart {
-    final minutes = startsAt.minutesFromMidnight - prepMinutes;
-    if (minutes <= 0) return const HourMinute(0, 0);
-    return HourMinute(minutes ~/ 60, minutes % 60);
-  }
 
   /// [type] is resolved by the caller (the provider joins the types stream);
   /// an unknown type_id falls back to a built-in-match placeholder so a
@@ -440,6 +439,7 @@ class PrioritySlot {
         awayTeam: json['away_team'] as String? ?? '',
         prepMinutes: json['prep_minutes'] as int? ?? 0,
         description: json['description'] as String? ?? '',
+        parentId: json['parent_id'] as String?,
       );
 
   /// A fully-powered stand-in match type for tests and previews.
@@ -461,14 +461,6 @@ class PrioritySlot {
     unresolved: true,
   );
 
-  /// The earliest time this slot occupies a calendar surface: whole-alley
-  /// slots paint a prep band from [blockingStart]; lane-scoped slots render
-  /// only their real window off-block (their prep resolves per lane inside
-  /// surviving blocks). Windows and tap-gap occupancy must use THIS, not a
-  /// blanket [blockingStart], or the calendar reserves space nothing draws
-  /// in.
-  HourMinute get calendarStart =>
-      type.lanes == null ? blockingStart : startsAt;
 }
 
 class Rental {

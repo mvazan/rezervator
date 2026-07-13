@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/ui.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
+import 'slot_types_screen.dart';
+import 'widgets/blockage_dialog.dart';
 import 'widgets/admin_body.dart';
 
 /// Admin: manage per-day closures that take precedence over the weekly
@@ -25,6 +27,20 @@ class OverridesScreen extends ConsumerWidget {
     await tryAction(
       context,
       () => Api.deleteDayOverride(override.date),
+      errorText: friendlyDbError,
+    );
+  }
+
+  Future<void> _deleteBlockage(BuildContext context, PrioritySlot slot) async {
+    final confirmed = await confirmDialog(
+      context,
+      title: 'Smazat blokaci?',
+      message: 'Opravdu smazat „${slot.title}" (${dayLabel(slot.date)})?',
+    );
+    if (!confirmed || !context.mounted) return;
+    await tryAction(
+      context,
+      () => Api.deletePrioritySlot(slot.id),
       errorText: friendlyDbError,
     );
   }
@@ -103,6 +119,14 @@ class OverridesScreen extends ConsumerWidget {
       for (final o in overrides)
         if (o.closed) o,
     ];
+    final slots = ref.watch(prioritySlotsProvider);
+    final types = ref.watch(slotTypesProvider).value ?? const [];
+    // Blokace: every non-match priority slot the admin manages by hand —
+    // úklid children (parentId set) live and die with their match.
+    final blockages = [
+      for (final s in slots)
+        if (!s.type.isMatch && s.parentId == null) s,
+    ];
     // Day-scoped schedule changes made from the calendar (open overrides
     // with a block selection) — listed so the admin has one tidy place to
     // see and undo every one-day fork.
@@ -156,10 +180,49 @@ class OverridesScreen extends ConsumerWidget {
     final pastForks = forks.where((o) => o.date.isBefore(now)).toList()
       ..sort((a, b) => b.date.compareTo(a.date));
 
+    Widget blockageTile(PrioritySlot slot) => ListTile(
+          title: Text(
+            '${dayLabel(slot.date)} · '
+            '${slot.startsAt.display()}–${slot.endsAt.display()} · '
+            '${slot.title}',
+          ),
+          subtitle: switch ([
+            if (slot.type.lanes != null)
+              'dráhy ${slot.type.lanes!.join(', ')}',
+            if (slot.description.isNotEmpty) slot.description,
+          ].join(' · ')) {
+            '' => null,
+            final sub => Text(sub),
+          },
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.edit_outlined),
+                onPressed: () => showDialog<void>(
+                  context: context,
+                  builder: (_) =>
+                      BlockageDialog(existing: slot, types: types),
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.delete_outline),
+                onPressed: () => _deleteBlockage(context, slot),
+              ),
+            ],
+          ),
+        );
+
+    final upcomingBlockages =
+        blockages.where((s) => !s.date.isBefore(now)).toList()
+          ..sort((a, b) => a.date.compareTo(b.date));
+    final pastBlockages = blockages.where((s) => s.date.isBefore(now)).toList()
+      ..sort((a, b) => b.date.compareTo(a.date));
+
     return Scaffold(
       appBar: AppBar(title: const Text('Výjimky dnů')),
       body: AdminBody(
-        child: closures.isEmpty && forks.isEmpty
+        child: closures.isEmpty && forks.isEmpty && blockages.isEmpty
             ? const Center(child: Text('Zatím žádné výjimky.'))
             : ListView(
                 children: [
@@ -189,6 +252,50 @@ class OverridesScreen extends ConsumerWidget {
                         title: Text('Minulé změny (${pastForks.length})'),
                         children: [
                           for (final override in pastForks) forkTile(override),
+                        ],
+                      ),
+                  ],
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 20, 4, 0),
+                    child: Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            'Blokace',
+                            style: TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.tune),
+                          tooltip: 'Typy blokací',
+                          onPressed: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                                builder: (_) => const SlotTypesScreen()),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.add),
+                          tooltip: 'Přidat blokaci',
+                          onPressed: () => showDialog<void>(
+                            context: context,
+                            builder: (_) => BlockageDialog(types: types),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (blockages.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.all(16),
+                      child: Text('Zatím žádné blokace.'),
+                    )
+                  else ...[
+                    for (final slot in upcomingBlockages) blockageTile(slot),
+                    if (pastBlockages.isNotEmpty)
+                      ExpansionTile(
+                        title: Text('Minulé blokace (${pastBlockages.length})'),
+                        children: [
+                          for (final slot in pastBlockages) blockageTile(slot),
                         ],
                       ),
                   ],

@@ -60,30 +60,6 @@ class SlotTile extends StatelessWidget {
     final minHeight = _compact ? 44.0 : 56.0;
 
     switch (state) {
-      case PrioritySlotState(:final isPrep) when isPrep:
-        // Cells covered only by the match's prep-time extension (not the
-        // real match window) show the muted "lanes being prepped" banner
-        // instead of the match banner — guests see the actual start time on
-        // the match cell itself.
-        return _shell(
-          minHeight: minHeight,
-          decoration: BoxDecoration(
-            color: scheme.errorContainer.withValues(alpha: 0.25),
-            borderRadius: BorderRadius.circular(_compact ? 8 : 12),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: Text(
-            _compact ? '🛠 Příprava' : '🛠 Příprava drah',
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: _compact ? 10 : 12,
-              fontWeight: FontWeight.w600,
-              color: scheme.onSurfaceVariant,
-            ),
-          ),
-        );
       case PrioritySlotState(:final slot):
         // Lane-scoped slots are the only PrioritySlotState producers in
         // rendered blocks (whole-alley ones cancel the block outright), so
