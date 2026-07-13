@@ -19,16 +19,23 @@ import 'widgets/calendar_board.dart';
 import 'widgets/slot_tile.dart';
 
 /// Drag&drop payloads: what a held card/band carries to the drop target.
+/// [hoverMinute] is the live-preview channel: the hovered column publishes
+/// the snapped would-be start minute, the drag ghost renders it as od–do.
 class BlockDragData {
-  const BlockDragData(this.date, this.block);
+  BlockDragData(this.date, this.block);
   final Day date;
   final TimeBlock block;
+  final ValueNotifier<int?> hoverMinute = ValueNotifier(null);
 }
 
 class SlotDragData {
-  const SlotDragData(this.slot);
+  SlotDragData(this.slot);
   final PrioritySlot slot;
+  final ValueNotifier<int?> hoverMinute = ValueNotifier(null);
 }
+
+/// D&D snap grid: 5 minutes.
+int _snapMinute(int minute) => ((minute + 2) ~/ 5) * 5;
 
 /// Vertical scale: a 60-minute block is as tall as [_refLaneRowHeight] per
 /// lane — the same room the old week grid gave its rows.
@@ -108,6 +115,14 @@ class WeekCalendarView extends StatelessWidget {
       return const Center(child: Text('Tenhle týden se nehraje.'));
     }
     final pxPerMinute = settings.laneCount * _refLaneRowHeight / 60;
+    // Shared header height: the busiest visible day dictates it for every
+    // column AND the ruler offset, so all event lines fit without clipping.
+    var maxHeaderEvents = 0;
+    for (final day in week.days) {
+      final count = headerEvents(day).length;
+      if (count > maxHeaderEvents) maxHeaderEvents = count;
+    }
+    final headerHeight = boardHeaderHeight(maxHeaderEvents);
     // Half-hour ruler labels/gridlines only when the alley actually uses
     // half-hour block boundaries.
     final halfHourMarks = [
@@ -116,7 +131,7 @@ class WeekCalendarView extends StatelessWidget {
     ].any((b) => b.startsAt.minute == 30 || b.endsAt.minute == 30);
     // +8: slack so the bottom hour label (centered on its line) isn't
     // half-clipped when scrolled fully down.
-    final totalHeight = calendarHeaderHeight + window.minutes * pxPerMinute + 8;
+    final totalHeight = headerHeight + window.minutes * pxPerMinute + 8;
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -129,6 +144,7 @@ class WeekCalendarView extends StatelessWidget {
               isToday: day.date == today,
               window: window,
               pxPerMinute: pxPerMinute,
+              headerHeight: headerHeight,
               halfHourMarks: halfHourMarks,
               nowMinute: day.date == today &&
                       now.minutesFromMidnight >= window.startMinute &&
@@ -161,7 +177,7 @@ class WeekCalendarView extends StatelessWidget {
               children: [
                 Column(
                   children: [
-                    const SizedBox(height: calendarHeaderHeight),
+                    SizedBox(height: headerHeight),
                     HourRuler(
                       window: window,
                       pxPerMinute: pxPerMinute,
@@ -208,6 +224,7 @@ class _DayColumn extends StatelessWidget {
     required this.isToday,
     required this.window,
     required this.pxPerMinute,
+    required this.headerHeight,
     required this.halfHourMarks,
     required this.nowMinute,
     required this.me,
@@ -230,6 +247,7 @@ class _DayColumn extends StatelessWidget {
   final bool isToday;
   final CalendarWindow window;
   final double pxPerMinute;
+  final double headerHeight;
   final bool halfHourMarks;
   final int? nowMinute;
   final Profile? me;
@@ -280,11 +298,11 @@ class _DayColumn extends StatelessWidget {
                 day.date, hourMinuteAt(gap.$1), hourMinuteAt(gap.$2));
           };
 
-    // Drag&drop landing: snap the ghost's top edge to 15 minutes and only
+    // Drag&drop landing: snap the ghost's top edge to 5 minutes and only
     // accept when the whole slot (a match brings its úklid child along)
     // fits into free space of THIS day.
     void handleDrop(Object data, int minute) {
-      final snapped = ((minute + 7) ~/ 15) * 15;
+      final snapped = _snapMinute(minute);
       (int, int)? candidate;
       void Function()? commit;
       List<(int, int)> self = const [];
@@ -344,6 +362,18 @@ class _DayColumn extends StatelessWidget {
 
     final canMove = onMoveBlock != null || onMovePrioritySlot != null;
 
+    // Live drop-time preview: publish the snapped minute to the payload's
+    // notifier while its ghost hovers over THIS day's column (a foreign
+    // day would refuse the drop, so it previews nothing).
+    ValueNotifier<int?>? hoverOf(Object data) => switch (data) {
+          BlockDragData d when d.date == day.date => d.hoverMinute,
+          SlotDragData d when d.slot.date == day.date => d.hoverMinute,
+          _ => null,
+        };
+    void handleDragAt(Object data, int minute) =>
+        hoverOf(data)?.value = _snapMinute(minute);
+    void handleDragExit(Object data) => hoverOf(data)?.value = null;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -351,6 +381,7 @@ class _DayColumn extends StatelessWidget {
           date: day.date,
           isToday: isToday,
           priority: headerEvents(day),
+          height: headerHeight,
           subtitle: openDay == null ? null : _freeLabel(openDay),
           onAdd:
               onAddForDay == null ? null : () => onAddForDay!(day.date),
@@ -366,6 +397,8 @@ class _DayColumn extends StatelessWidget {
           nowMinute: nowMinute,
           onTapFreeAt: onTapFree,
           onDropAt: canMove ? handleDrop : null,
+          onDragAt: canMove ? handleDragAt : null,
+          onDragExit: canMove ? handleDragExit : null,
         ),
       ],
     );
@@ -441,9 +474,11 @@ class _DayColumn extends StatelessWidget {
         // HOLD = move. Úklid children follow their match, they don't move
         // on their own.
         if (onMovePrioritySlot != null && m.parentId == null) {
+          final data = SlotDragData(m);
           w = _draggable(
             context,
-            data: SlotDragData(m),
+            data: data,
+            hoverMinute: data.hoverMinute,
             label: m.title,
             heightMinutes: m.endsAt.minutesFromMidnight -
                 m.startsAt.minutesFromMidnight,
@@ -545,7 +580,9 @@ class _DayColumn extends StatelessWidget {
       // Stable per-block key (unique among one column's entries) so tests
       // can measure card geometry and target gestures.
       key: ValueKey('cal-block-${block.id}'),
-      margin: const EdgeInsets.symmetric(horizontal: 1),
+      // The 1.5px vertical inset matches CalendarEventBand's, so a band and
+      // a touching block card keep a visible seam between them.
+      margin: const EdgeInsets.symmetric(horizontal: 1, vertical: 1.5),
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: scheme.surfaceContainerLow.withValues(alpha: 0.4),
@@ -567,9 +604,11 @@ class _DayColumn extends StatelessWidget {
       ),
     );
     if (onMoveBlock == null) return card;
+    final data = BlockDragData(openDay.date, block);
     return _draggable(
       context,
-      data: BlockDragData(openDay.date, block),
+      data: data,
+      hoverMinute: data.hoverMinute,
       label: block.label,
       heightMinutes: block.durationMinutes,
       child: card,
@@ -578,10 +617,12 @@ class _DayColumn extends StatelessWidget {
 
   /// HOLD-to-drag wrapper shared by cards and bands: the ghost is a simple
   /// tinted box of the slot's true size so the admin can align its top
-  /// edge with the target time.
+  /// edge with the target time — which it live-previews as 'od–do' from
+  /// [hoverMinute] (published by the hovered column, see handleDragAt).
   Widget _draggable(
     BuildContext context, {
     required Object data,
+    required ValueNotifier<int?> hoverMinute,
     required String label,
     required int heightMinutes,
     required Widget child,
@@ -602,11 +643,19 @@ class _DayColumn extends StatelessWidget {
               border: Border.all(color: scheme.primary),
             ),
             alignment: Alignment.center,
-            child: Text(
-              label,
-              style: TextStyle(
-                fontWeight: FontWeight.w700,
-                color: scheme.onPrimaryContainer,
+            child: ValueListenableBuilder<int?>(
+              valueListenable: hoverMinute,
+              builder: (context, minute, _) => Text(
+                minute == null
+                    ? label
+                    : '${hourMinuteAt(minute).display()}–'
+                        '${hourMinuteAt(minute + heightMinutes).display()}',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                  color: scheme.onPrimaryContainer,
+                ),
               ),
             ),
           ),

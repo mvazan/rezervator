@@ -20,12 +20,22 @@ void main() {
   // test hits the width-based default, which is `week` (width ≥ 700).
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  // Make the surface WIDE (1600×1200): the calendar's day columns clamp to
-  // 220px, so 7 columns + the hour ruler (1586px) all build without
-  // horizontal scrolling — a test asserting on e.g. Sunday's column would
-  // otherwise flake depending on which weekday the suite runs.
+  // Make the surface WIDE (1600×1200, landscape → week calendar): the
+  // calendar's day columns clamp to 220px, so 7 columns + the hour ruler
+  // (1586px) all build without horizontal scrolling — a test asserting on
+  // e.g. Sunday's column would otherwise flake depending on which weekday
+  // the suite runs.
   void wideSurface(WidgetTester tester) {
     tester.view.physicalSize = const Size(1600, 1200);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+  }
+
+  // PORTRAIT surface → the day pager (the view follows orientation since
+  // the toggle buttons were dropped).
+  void portraitSurface(WidgetTester tester) {
+    tester.view.physicalSize = const Size(900, 1600);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -293,68 +303,24 @@ void main() {
     expect(cardInTomorrow, findsNothing);
   });
 
-  testWidgets('AppBar toggle switches day/week view and persists the choice', (
+  testWidgets('the view follows orientation: landscape shows the week '
+      'calendar, portrait the day pager — no toggle buttons', (
     tester,
   ) async {
     wideSurface(tester);
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
-    // Default at the test surface's 1600px width (>= 700) is week view:
-    // the calendar is showing, no day chip strip yet.
     expect(find.byType(WeekCalendarView), findsOneWidget);
     expect(find.byType(DayChipStrip), findsNothing);
+    expect(find.byType(SegmentedButton<ScheduleView>), findsNothing);
+    expect(find.byIcon(Icons.fit_screen_outlined), findsNothing);
 
-    await tester.tap(find.byTooltip('Den'));
+    // Rotate to portrait: the day pager takes over.
+    tester.view.physicalSize = const Size(900, 1600);
     await tester.pumpAndSettle();
-
     expect(find.byType(DayChipStrip), findsOneWidget);
     expect(find.byType(WeekCalendarView), findsNothing);
-
-    final prefs = await SharedPreferences.getInstance();
-    expect(prefs.getString('schedule_view'), 'day');
-
-    // Toggling back switches the view again and updates the stored value.
-    await tester.tap(find.byTooltip('Týden'));
-    await tester.pumpAndSettle();
-
-    expect(find.byType(WeekCalendarView), findsOneWidget);
-    expect(find.byType(DayChipStrip), findsNothing);
-    expect(
-      (await SharedPreferences.getInstance()).getString('schedule_view'),
-      'week',
-    );
   });
-
-  testWidgets(
-    'fit-width AppBar toggle flips the icon and persists the choice',
-    (tester) async {
-      wideSurface(tester);
-      await tester.pumpWidget(app());
-      await tester.pumpAndSettle();
-
-      // At 1600px width the fit-width default is false, so the toggle offers
-      // to switch it ON ("Roztáhnout na šířku").
-      expect(find.byTooltip('Roztáhnout na šířku'), findsOneWidget);
-      expect(find.byTooltip('Zpět na posuvnou mřížku'), findsNothing);
-
-      await tester.tap(find.byTooltip('Roztáhnout na šířku'));
-      await tester.pumpAndSettle();
-
-      // Now the button reads as selected; the pref is persisted as true.
-      expect(find.byTooltip('Zpět na posuvnou mřížku'), findsOneWidget);
-      final prefs = await SharedPreferences.getInstance();
-      expect(prefs.getBool('fit_width'), true);
-
-      // Toggling back flips it and updates the stored value.
-      await tester.tap(find.byTooltip('Zpět na posuvnou mřížku'));
-      await tester.pumpAndSettle();
-      expect(find.byTooltip('Roztáhnout na šířku'), findsOneWidget);
-      expect(
-        (await SharedPreferences.getInstance()).getBool('fit_width'),
-        false,
-      );
-    },
-  );
 
   testWidgets(
     'fit-width calendar has no horizontal Scrollable — columns share the '
@@ -381,8 +347,7 @@ void main() {
   testWidgets('booking dialog opens from a large free tile in day view', (
     tester,
   ) async {
-    SharedPreferences.setMockInitialValues({'schedule_view': 'day'});
-    wideSurface(tester);
+    portraitSurface(tester);
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
     expect(find.byType(DayChipStrip), findsOneWidget);
@@ -521,8 +486,7 @@ void main() {
     'day view: selecting the last day and swiping past the week boundary '
     'shifts the week with no exceptions',
     (tester) async {
-      SharedPreferences.setMockInitialValues({'schedule_view': 'day'});
-      wideSurface(tester);
+      portraitSurface(tester);
       await tester.pumpWidget(app());
       await tester.pumpAndSettle();
       expect(find.byType(DayChipStrip), findsOneWidget);
@@ -714,8 +678,7 @@ void main() {
       'match and úklid banners at their real times and no lane grid', (
     tester,
   ) async {
-    SharedPreferences.setMockInitialValues({'schedule_view': 'day'});
-    wideSurface(tester);
+    portraitSurface(tester);
     await tester.pumpWidget(app(
       matches: [
         PrioritySlot(
@@ -880,6 +843,45 @@ void main() {
       matching: find.byKey(const ValueKey('cal-block-b1')),
     );
     expect(cardInTomorrow, findsOneWidget);
+  });
+
+  testWidgets('three matches on one day all fit the header — the header '
+      'grows instead of clipping', (tester) async {
+    wideSurface(tester);
+    PrioritySlot awayAt(String id, String team, int hour) => PrioritySlot(
+          type: PrioritySlot.fallbackMatchType,
+          id: id,
+          date: tomorrow,
+          startsAt: HourMinute(hour, 0),
+          endsAt: HourMinute(hour + 2, 0),
+          homeTeam: '',
+          awayTeam: team,
+          isAway: true,
+        );
+    await tester.pumpWidget(
+      app(
+        matches: [
+          awayAt('m-a', 'KK Slavoj', 8),
+          awayAt('m-b', 'TJ Sokol', 11),
+          awayAt('m-c', 'KK Vracov', 14),
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final header = find.descendant(
+      of: find.byKey(ValueKey(tomorrow)),
+      matching: find.byType(BoardColumnHeader),
+    );
+    for (final team in ['KK Slavoj', 'TJ Sokol', 'KK Vracov']) {
+      expect(
+        find.descendant(of: header, matching: find.textContaining(team)),
+        findsOneWidget,
+      );
+    }
+    // The busiest day dictates a taller header for EVERY column (shared
+    // geometry with the ruler): base 56 + one extra 13px line.
+    expect(tester.getSize(header).height, 56.0 + 13.0);
   });
 
   testWidgets('the day header lists the match but never its úklid child',

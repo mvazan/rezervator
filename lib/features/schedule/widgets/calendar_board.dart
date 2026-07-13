@@ -20,6 +20,13 @@ const double calendarRulerWidth = 46.0;
 /// headers starts on one line).
 const double calendarHeaderHeight = 56.0;
 
+/// The base header comfortably fits the day label + two event lines; every
+/// event beyond that adds one 10px/1.25 line. ALL columns of a board share
+/// the height of the busiest day (the ruler offset must match too), so a
+/// third match on Thursday never gets clipped away.
+double boardHeaderHeight(int maxEvents) =>
+    calendarHeaderHeight + (maxEvents <= 2 ? 0 : (maxEvents - 2) * 13.0);
+
 /// Equal day-column width: `clamp(160, (width−ruler)/7, 220)` so a typical
 /// tablet shows exactly 7 days without horizontal scroll.
 double boardColumnWidth(double availableWidth) =>
@@ -112,6 +119,8 @@ class CalendarColumn extends StatefulWidget {
     this.nowMinute,
     this.onTapFreeAt,
     this.onDropAt,
+    this.onDragAt,
+    this.onDragExit,
     this.halfHourMarks = false,
   });
 
@@ -136,6 +145,13 @@ class CalendarColumn extends StatefulWidget {
   /// aligns) — the caller snaps/validates/commits.
   final void Function(Object data, int minute)? onDropAt;
 
+  /// Fires continuously while a drag hovers over this column, with the same
+  /// top-edge minute as [onDropAt] — callers use it to live-preview the
+  /// would-be drop time on the ghost. [onDragExit] fires when the ghost
+  /// leaves the column so the preview can reset.
+  final void Function(Object data, int minute)? onDragAt;
+  final void Function(Object data)? onDragExit;
+
   @override
   State<CalendarColumn> createState() => _CalendarColumnState();
 }
@@ -154,6 +170,15 @@ class _CalendarColumnState extends State<CalendarColumn> {
   void Function(int minute)? get onTapFreeAt => widget.onTapFreeAt;
   void Function(Object data, int minute)? get onDropAt => widget.onDropAt;
   bool get halfHourMarks => widget.halfHourMarks;
+
+  /// Top-edge minute for a drag event, or null when the column's RenderBox
+  /// isn't resolvable (mid-rebuild).
+  int? _dragMinute(Offset globalOffset) {
+    final box = _targetContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.attached) return null;
+    final local = box.globalToLocal(globalOffset);
+    return window.minuteAt(local.dy, pxPerMinute);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -237,11 +262,20 @@ class _CalendarColumnState extends State<CalendarColumn> {
       base = DragTarget<Object>(
         onWillAcceptWithDetails: (_) => true,
         onAcceptWithDetails: (details) {
-          final box = _targetContext?.findRenderObject() as RenderBox?;
-          if (box == null || !box.attached) return;
-          final local = box.globalToLocal(details.offset);
-          onDropAt!(details.data, window.minuteAt(local.dy, pxPerMinute));
+          final minute = _dragMinute(details.offset);
+          if (minute != null) onDropAt!(details.data, minute);
         },
+        onMove: widget.onDragAt == null
+            ? null
+            : (details) {
+                final minute = _dragMinute(details.offset);
+                if (minute != null) widget.onDragAt!(details.data, minute);
+              },
+        onLeave: widget.onDragExit == null
+            ? null
+            : (data) {
+                if (data != null) widget.onDragExit!(data);
+              },
         builder: (context, candidates, rejected) {
           _targetContext = context;
           return inner;
@@ -305,6 +339,7 @@ class BoardColumnHeader extends StatelessWidget {
     required this.date,
     required this.isToday,
     required this.priority,
+    this.height = calendarHeaderHeight,
     this.subtitle,
     this.onAdd,
   });
@@ -312,6 +347,10 @@ class BoardColumnHeader extends StatelessWidget {
   final Day date;
   final bool isToday;
   final List<PrioritySlot> priority;
+
+  /// Shared per-board header height — [boardHeaderHeight] of the busiest
+  /// visible day, so every event line fits without clipping.
+  final double height;
 
   /// Quiet second line shown when [priority] is empty (e.g. "3 volné").
   final String? subtitle;
@@ -326,7 +365,7 @@ class BoardColumnHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final body = Container(
-      height: calendarHeaderHeight,
+      height: height,
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
       decoration: BoxDecoration(
         gradient:
@@ -355,7 +394,6 @@ class BoardColumnHeader extends StatelessWidget {
                       '${m.isAway ? ' (venku)' : ''}')
                   .join('\n'),
               textAlign: TextAlign.center,
-              maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: 10,

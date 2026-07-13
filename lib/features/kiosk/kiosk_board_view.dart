@@ -22,7 +22,11 @@ import '../../domain/schedule.dart';
 import '../schedule/widgets/calendar_board.dart';
 
 export '../schedule/widgets/calendar_board.dart'
-    show BoardColumnHeader, boardColumnWidth, calendarHeaderHeight;
+    show
+        BoardColumnHeader,
+        boardColumnWidth,
+        boardHeaderHeight,
+        calendarHeaderHeight;
 
 /// True when [date] resolves as an [OpenDay] under exactly the resolution the
 /// board renders with (buildWeekSchedule): closed overrides and non-training
@@ -88,12 +92,16 @@ Day? nextTrainingDay({
 const double _bottomLabelPad = 8.0;
 
 /// Scale floor keeping every lane row tappable: the shortest visible block,
-/// divided across [laneCount] rows, must stay at least [_minLaneRowHeight]
-/// tall (the deleted segment board guaranteed the same 22px). Below the
-/// resulting scale the board grows past the viewport and scrolls vertically
-/// instead of squashing further (rare — only when an early-morning event
-/// stretches the window way beyond the usual training hours).
+/// divided across [laneCount] rows (plus its od–do time header), must stay
+/// at least [_minLaneRowHeight] tall per row (the deleted segment board
+/// guaranteed the same 22px). Below the resulting scale the board grows past
+/// the viewport and scrolls vertically instead of squashing further (rare —
+/// only when an early-morning event stretches the window way beyond the
+/// usual training hours).
 const double _minLaneRowHeight = 22.0;
+
+/// Height of the block card's od–do time header row.
+const double _blockHeaderHeight = 14.0;
 
 double _minPxPerMinute(Iterable<TimeBlock> blocks, int laneCount) {
   int? shortest;
@@ -102,7 +110,8 @@ double _minPxPerMinute(Iterable<TimeBlock> blocks, int laneCount) {
     if (d > 0 && (shortest == null || d < shortest)) shortest = d;
   }
   if (shortest == null) return 0.9;
-  final floor = _minLaneRowHeight * laneCount / shortest;
+  final floor =
+      (_minLaneRowHeight * laneCount + _blockHeaderHeight) / shortest;
   return floor < 0.9 ? 0.9 : floor;
 }
 
@@ -136,6 +145,12 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
   // no board-shaped data of its own to pass.
   CalendarWindow? _window;
   double _pxPerMinute = 0;
+  double _headerHeight = calendarHeaderHeight;
+
+  /// Today's block spans in minutes-from-midnight — the idle reset anchors
+  /// on the START of the block containing "now" (the board doesn't creep
+  /// down mid-block; it advances when the block ends).
+  List<(int, int)> _todayBlockSpans = const [];
 
   @override
   void dispose() {
@@ -150,14 +165,24 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
   /// Scrolls the board back to today (leftmost column) and vertically toward
   /// "now" — called by the shell on idle reset. With the usual fit-height
   /// scale the vertical extent is zero and only the horizontal reset moves.
+  /// While a block is running, the anchor is that block's START (the whole
+  /// block stays in view until it ends — no mid-block creep).
   void resetToNow(HourMinute now) {
     if (_hScroll.hasClients) {
       _hScroll.animateTo(0, duration: _scrollDuration, curve: _scrollCurve);
     }
     final window = _window;
     if (_vScroll.hasClients && window != null) {
-      final target = calendarHeaderHeight +
-          window.topFor(now, _pxPerMinute) -
+      final nowMin = now.minutesFromMidnight;
+      var anchorMin = nowMin;
+      for (final (start, end) in _todayBlockSpans) {
+        if (start <= nowMin && nowMin < end) {
+          anchorMin = start;
+          break;
+        }
+      }
+      final target = _headerHeight +
+          window.topFor(hourMinuteAt(anchorMin), _pxPerMinute) -
           40; // a little context above the line
       _vScroll.animateTo(
         target.clamp(0.0, _vScroll.position.maxScrollExtent),
@@ -324,6 +349,15 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
     final halfHourMarks = windowBlocks
         .any((b) => b.startsAt.minute == 30 || b.endsAt.minute == 30);
 
+    // Shared header height: the busiest visible day dictates it for every
+    // column AND the ruler offset, so all event lines fit without clipping.
+    var maxHeaderEvents = 0;
+    for (final day in days) {
+      final count = headerEvents(day).length;
+      if (count > maxHeaderEvents) maxHeaderEvents = count;
+    }
+    final headerHeight = boardHeaderHeight(maxHeaderEvents);
+
     return LayoutBuilder(
       builder: (context, constraints) {
         final columnWidth = boardColumnWidth(constraints.maxWidth);
@@ -333,10 +367,9 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
         // - comfortable scroll: the same fixed scale as the app's week view
         //   (a 60-min block = laneCount × 40 px), scrolling vertically; the
         //   idle reset brings the board back to "now".
-        final fitScale = (constraints.maxHeight -
-                calendarHeaderHeight -
-                _bottomLabelPad) /
-            window.minutes;
+        final fitScale =
+            (constraints.maxHeight - headerHeight - _bottomLabelPad) /
+                window.minutes;
         final minScale = _minPxPerMinute(windowBlocks, settings.laneCount);
         final comfortableScale = settings.laneCount * 40.0 / 60;
         final pxPerMinute = settings.kioskFitDay
@@ -345,14 +378,19 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
             // must not squash its lane rows below reach in scroll mode
             // either.
             : (comfortableScale < minScale ? minScale : comfortableScale);
-        final totalHeight = calendarHeaderHeight +
-            window.minutes * pxPerMinute +
-            _bottomLabelPad;
+        final totalHeight =
+            headerHeight + window.minutes * pxPerMinute + _bottomLabelPad;
         // Snapshot for resetToNow's imperative scroll-target math (see field
         // docs above) — assignment only, no setState, so it can't trigger a
         // rebuild loop.
         _window = window;
         _pxPerMinute = pxPerMinute;
+        _headerHeight = headerHeight;
+        _todayBlockSpans = [
+          if (days.first case OpenDay(:final blocks))
+            for (final b in blocks)
+              (b.startsAt.minutesFromMidnight, b.endsAt.minutesFromMidnight),
+        ];
 
         return SingleChildScrollView(
           controller: _vScroll,
@@ -363,7 +401,7 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
               children: [
                 Column(
                   children: [
-                    const SizedBox(height: calendarHeaderHeight),
+                    SizedBox(height: headerHeight),
                     HourRuler(
                       window: window,
                       pxPerMinute: pxPerMinute,
@@ -386,6 +424,7 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
                           isToday: index == 0,
                           window: window,
                           pxPerMinute: pxPerMinute,
+                          headerHeight: headerHeight,
                           halfHourMarks: halfHourMarks,
                           nowMinute: index == 0 &&
                                   now.minutesFromMidnight >=
@@ -431,6 +470,7 @@ class _DayColumn extends StatelessWidget {
     required this.isToday,
     required this.window,
     required this.pxPerMinute,
+    required this.headerHeight,
     required this.halfHourMarks,
     required this.nowMinute,
     required this.laneCount,
@@ -445,6 +485,7 @@ class _DayColumn extends StatelessWidget {
   final bool isToday;
   final CalendarWindow window;
   final double pxPerMinute;
+  final double headerHeight;
   final bool halfHourMarks;
   final int? nowMinute;
   final int laneCount;
@@ -470,6 +511,7 @@ class _DayColumn extends StatelessWidget {
             date: day.date,
             isToday: isToday,
             priority: headerEvents(day),
+            height: headerHeight,
           ),
           CalendarColumn(
             window: window,
@@ -592,7 +634,9 @@ class _DayColumn extends StatelessWidget {
       // Stable per-block key (unique among one column's entries; other
       // columns have their own parents) so tests can measure card geometry.
       key: ValueKey('cal-block-${block.id}'),
-      margin: const EdgeInsets.symmetric(horizontal: 1),
+      // The 1.5px vertical inset matches CalendarEventBand's, so a band and
+      // a touching block card keep a visible seam between them.
+      margin: const EdgeInsets.symmetric(horizontal: 1, vertical: 1.5),
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: scheme.surfaceContainerLow.withValues(alpha: 0.4),
@@ -603,6 +647,23 @@ class _DayColumn extends StatelessWidget {
       ),
       child: Column(
         children: [
+          // Quiet od–do label, same treatment as the app's week view.
+          SizedBox(
+            height: _blockHeaderHeight,
+            child: Center(
+              child: Text(
+                block.label,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 9,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.8,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                  color: scheme.onSurfaceVariant.withValues(alpha: 0.55),
+                ),
+              ),
+            ),
+          ),
           for (var lane = 1; lane <= laneCount; lane++)
             Expanded(child: _laneRow(context, openDay, block, lane)),
         ],
