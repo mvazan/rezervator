@@ -33,11 +33,24 @@ void main() {
       expect(s.trainingWeekdays, {1, 3});
       expect(s.bookingHorizonDays, 7);
       expect(s.maxActiveReservations, 2);
+      expect(s.kioskDark, isTrue); // absent → default true
+    });
+
+    test('fromJson reads kiosk_dark when present', () {
+      final s = ScheduleSettings.fromJson({
+        'lane_count': 6,
+        'training_weekdays': [1, 3],
+        'booking_horizon_days': 7,
+        'max_active_reservations': 2,
+        'kiosk_dark': false,
+      });
+      expect(s.kioskDark, isFalse);
     });
 
     test('defaults', () {
       expect(ScheduleSettings.defaults.laneCount, 4);
       expect(ScheduleSettings.defaults.trainingWeekdays, {1, 2, 4});
+      expect(ScheduleSettings.defaults.kioskDark, isTrue);
     });
   });
 
@@ -51,10 +64,144 @@ void main() {
         'role': 'admin',
         'status': 'approved',
         'fcm_token': null,
+        'club_id': 'club-1',
       });
       expect(p.role, Role.admin);
       expect(p.isAdmin, isTrue);
       expect(p.isApproved, isTrue);
+      expect(p.clubId, 'club-1');
+    });
+
+    test('fromJson defaults club_id to null for pre-migration rows', () {
+      final p = Profile.fromJson({
+        'id': 'u2',
+        'display_name': 'Eva',
+        'role': 'player',
+        'status': 'pending',
+      });
+      expect(p.clubId, isNull);
+    });
+  });
+
+  group('PlayerName', () {
+    test('fromJson reads nick, club_id and club_color', () {
+      final withNick = PlayerName.fromJson({
+        'id': 'p1',
+        'display_name': 'Ján',
+        'club': 'KK Praha',
+        'nick': 'Jenda',
+        'club_id': 'club-1',
+        'club_color': 3,
+      });
+      expect(withNick.nick, 'Jenda');
+      expect(withNick.clubId, 'club-1');
+      expect(withNick.clubColor, 3);
+    });
+
+    test('fromJson defaults nick, club_id and club_color for old rows', () {
+      final withoutNick = PlayerName.fromJson({
+        'id': 'p2',
+        'display_name': 'Eva',
+        'club': '',
+      });
+      expect(withoutNick.nick, '');
+      expect(withoutNick.clubId, isNull);
+      expect(withoutNick.clubColor, -1);
+    });
+  });
+
+  group('Club', () {
+    test('fromJson reads id, name and color index', () {
+      final c = Club.fromJson({
+        'id': 'club-1',
+        'name': 'KK Praha',
+        'color': 5,
+      });
+      expect(c.id, 'club-1');
+      expect(c.name, 'KK Praha');
+      expect(c.colorIndex, 5);
+    });
+
+    test('fromJson defaults color to -1 when absent', () {
+      final c = Club.fromJson({'id': 'club-2', 'name': 'KK Brno'});
+      expect(c.colorIndex, -1);
+    });
+  });
+
+  group('Match', () {
+    PrioritySlot match({
+      String homeTeam = '',
+      String awayTeam = 'KK Slavoj',
+      int prepMinutes = 0,
+      HourMinute startsAt = const HourMinute(16, 30),
+    }) =>
+        PrioritySlot(
+          type: PrioritySlot.fallbackMatchType,
+          id: 'm1',
+          date: Day(2026, 7, 8),
+          startsAt: startsAt,
+          endsAt: const HourMinute(18, 0),
+          homeTeam: homeTeam,
+          awayTeam: awayTeam,
+          prepMinutes: prepMinutes,
+          description: '',
+        );
+
+    test('title falls back to awayTeam alone when homeTeam is empty', () {
+      expect(match(homeTeam: '', awayTeam: 'KK Slavoj').title, 'KK Slavoj');
+    });
+
+    test('title combines home – away when homeTeam is set', () {
+      expect(
+        match(homeTeam: 'Sokol Brno', awayTeam: 'KK Slavoj').title,
+        'Sokol Brno – KK Slavoj',
+      );
+    });
+
+    test('blockingStart subtracts prepMinutes from startsAt', () {
+      final m = match(startsAt: const HourMinute(16, 30), prepMinutes: 30);
+      expect(m.blockingStart, const HourMinute(16, 0));
+    });
+
+    test('blockingStart is startsAt when prepMinutes is 0', () {
+      final m = match(startsAt: const HourMinute(16, 30), prepMinutes: 0);
+      expect(m.blockingStart, const HourMinute(16, 30));
+    });
+
+    test('blockingStart clamps to 00:00 instead of wrapping past midnight', () {
+      final m = match(startsAt: const HourMinute(0, 15), prepMinutes: 30);
+      expect(m.blockingStart, const HourMinute(0, 0));
+    });
+
+    test('fromJson reads home_team/away_team/prep_minutes round-trip', () {
+      final m = PrioritySlot.fromJson(const {
+        'id': 'm2',
+        'date': '2026-07-08',
+        'starts_at': '16:30:00',
+        'ends_at': '18:00:00',
+        'home_team': 'Sokol Brno',
+        'away_team': 'KK Slavoj',
+        'prep_minutes': 30,
+        'description': 'Liga',
+      }, const {});
+      expect(m.homeTeam, 'Sokol Brno');
+      expect(m.awayTeam, 'KK Slavoj');
+      expect(m.prepMinutes, 30);
+      expect(m.title, 'Sokol Brno – KK Slavoj');
+      expect(m.blockingStart, const HourMinute(16, 0));
+    });
+
+    test('fromJson defaults prep_minutes to 0 when absent', () {
+      final m = PrioritySlot.fromJson(const {
+        'id': 'm3',
+        'date': '2026-07-08',
+        'starts_at': '16:30:00',
+        'ends_at': '18:00:00',
+        'home_team': '',
+        'away_team': 'KK Slavoj',
+        'description': '',
+      }, const {});
+      expect(m.prepMinutes, 0);
     });
   });
 
@@ -89,12 +236,33 @@ void main() {
       expect(r.occursOn(Day(2026, 7, 22)), isFalse);
     });
 
+    test('fromJson reads color, defaulting to -2 for old rows', () {
+      const base = {
+        'id': 'r3',
+        'renter_name': 'Firma',
+        'lanes': [1],
+        'weekday': 3,
+        'starts_at': '18:00:00',
+        'ends_at': '20:00:00',
+      };
+      expect(Rental.fromJson({...base, 'color': 4}).color, 4);
+      expect(Rental.fromJson(base).color, -2);
+    });
+
     test('weekly matches weekday inside validity window', () {
       final r = weekly(from: Day(2026, 7, 1), until: Day(2026, 7, 31));
       expect(r.occursOn(Day(2026, 7, 15)), isTrue); // Wednesday
       expect(r.occursOn(Day(2026, 7, 16)), isFalse); // Thursday
       expect(r.occursOn(Day(2026, 8, 5)), isFalse); // Wed after window
       expect(weekly().occursOn(Day(2026, 8, 5)), isTrue); // open-ended
+    });
+
+    test('weekly matches exactly on validity boundaries', () {
+      final r = weekly(from: Day(2026, 7, 1), until: Day(2026, 7, 15));
+      expect(r.occursOn(Day(2026, 7, 1)), isTrue);  // == validFrom (Wednesday)
+      expect(r.occursOn(Day(2026, 7, 15)), isTrue); // == validUntil (Wednesday)
+      expect(r.occursOn(Day(2026, 6, 24)), isFalse); // Wednesday before window
+      expect(r.occursOn(Day(2026, 7, 22)), isFalse); // Wednesday after window
     });
   });
 
@@ -124,6 +292,30 @@ void main() {
     });
   });
 
+  group('TimeBlock.durationMinutes', () {
+    test('18:30-19:30 is 60 minutes', () {
+      final b = TimeBlock(
+        id: 'b1',
+        startsAt: const HourMinute(18, 30),
+        endsAt: const HourMinute(19, 30),
+        position: 0,
+        active: true,
+      );
+      expect(b.durationMinutes, 60);
+    });
+
+    test('18:00-18:30 is 30 minutes', () {
+      final b = TimeBlock(
+        id: 'b2',
+        startsAt: const HourMinute(18, 0),
+        endsAt: const HourMinute(18, 30),
+        position: 0,
+        active: true,
+      );
+      expect(b.durationMinutes, 30);
+    });
+  });
+
   group('defaultTimeBlocks', () {
     test('six hourly blocks 16–22', () {
       final blocks = defaultTimeBlocks();
@@ -131,6 +323,15 @@ void main() {
       expect(blocks.first.startsAt, const HourMinute(16, 0));
       expect(blocks.last.endsAt, const HourMinute(22, 0));
       expect(blocks.first.label, '16:00–17:00');
+    });
+  });
+
+  group('AttendanceRow', () {
+    test('parses rpc row', () {
+      final row = AttendanceRow.fromJson(
+          {'player_id': 'p1', 'display_name': 'Ján', 'club': 'KK', 'attended': 3});
+      expect(row.attended, 3);
+      expect(row.club, 'KK');
     });
   });
 }

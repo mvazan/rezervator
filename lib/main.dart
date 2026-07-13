@@ -5,7 +5,10 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'config.dart';
+import 'core/theme.dart';
 import 'features/auth/auth_gate.dart';
+import 'features/kiosk/kiosk_login_screen.dart';
+import 'push/push.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -15,6 +18,7 @@ Future<void> main() async {
       url: AppConfig.supabaseUrl,
       publishableKey: AppConfig.supabaseAnonKey,
     );
+    await Push.init();
   }
 
   runApp(const ProviderScope(child: RezervatorApp()));
@@ -26,6 +30,12 @@ final _router = GoRouter(
       path: '/',
       builder: (_, _) =>
           AppConfig.hasSupabase ? const AuthGate() : const _NotConfigured(),
+    ),
+    GoRoute(
+      path: '/kiosk-login',
+      builder: (_, _) => AppConfig.hasSupabase
+          ? const KioskLoginScreen()
+          : const _NotConfigured(),
     ),
   ],
 );
@@ -41,71 +51,9 @@ class RezervatorApp extends StatelessWidget {
       locale: const Locale('cs'),
       supportedLocales: const [Locale('cs')],
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
-      theme: _theme(Brightness.light),
-      darkTheme: _theme(Brightness.dark),
+      theme: buildTheme(Brightness.light),
+      darkTheme: buildTheme(Brightness.dark),
       routerConfig: _router,
-    );
-  }
-
-  ThemeData _theme(Brightness brightness) {
-    // Copied from terminator/lib/main.dart _theme() verbatim except seedColor.
-    final scheme = ColorScheme.fromSeed(
-      seedColor: const Color(0xFF00695C), // rezervátor teal
-      brightness: brightness,
-    );
-    return ThemeData(
-      colorScheme: scheme,
-      useMaterial3: true,
-      scaffoldBackgroundColor: scheme.surfaceContainerLowest,
-      appBarTheme: AppBarTheme(
-        backgroundColor: scheme.surfaceContainerLowest,
-        scrolledUnderElevation: 0,
-        titleTextStyle: TextStyle(
-          color: scheme.onSurface,
-          fontSize: 22,
-          fontWeight: FontWeight.w700,
-        ),
-      ),
-      cardTheme: CardThemeData(
-        elevation: 0,
-        color: scheme.surfaceContainer,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        margin: const EdgeInsets.symmetric(vertical: 6),
-      ),
-      inputDecorationTheme: InputDecorationTheme(
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-        filled: true,
-        fillColor: scheme.surfaceContainer,
-      ),
-      filledButtonTheme: FilledButtonThemeData(
-        style: FilledButton.styleFrom(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          textStyle: const TextStyle(fontWeight: FontWeight.w600),
-        ),
-      ),
-      outlinedButtonTheme: OutlinedButtonThemeData(
-        style: OutlinedButton.styleFrom(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        ),
-      ),
-      chipTheme: ChipThemeData(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        side: BorderSide(color: scheme.outlineVariant),
-      ),
-      navigationBarTheme: NavigationBarThemeData(
-        backgroundColor: scheme.surfaceContainerLowest,
-        indicatorColor: scheme.primaryContainer,
-      ),
-      snackBarTheme: const SnackBarThemeData(
-        behavior: SnackBarBehavior.floating,
-      ),
-      dividerTheme: DividerThemeData(
-        color: scheme.outlineVariant.withValues(alpha: 0.4),
-      ),
     );
   }
 }

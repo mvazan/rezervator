@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/widgets/auth_background.dart';
 import '../../data/providers.dart';
 
 /// Shown while the profile is pending. Any approved member's one tap flips
@@ -10,16 +11,17 @@ class WaitingScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
+      body: AuthBackground(
+        child: AuthCard(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               const Text('🕰️', style: TextStyle(fontSize: 48)),
               const SizedBox(height: 16),
-              Text('Čekáš na schválení',
-                  style: Theme.of(context).textTheme.headlineSmall),
+              Text(
+                'Čekáš na schválení',
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
               const SizedBox(height: 8),
               const Text(
                 'Správci přišlo upozornění, že ses zaregistroval(a).\n'

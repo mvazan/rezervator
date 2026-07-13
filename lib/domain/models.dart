@@ -108,6 +108,8 @@ class Profile {
     required this.role,
     required this.status,
     this.fcmToken,
+    this.nick = '',
+    this.clubId,
   });
 
   final String id;
@@ -117,6 +119,12 @@ class Profile {
   final Role role;
   final ProfileStatus status;
   final String? fcmToken;
+
+  /// Short board name (<=14 chars); empty means "use displayName".
+  final String nick;
+
+  /// FK into `clubs`; null when the player has no assigned club.
+  final String? clubId;
 
   bool get isApproved => status == ProfileStatus.approved;
   bool get isAdmin => role == Role.admin && isApproved;
@@ -131,6 +139,29 @@ class Profile {
             ? ProfileStatus.approved
             : ProfileStatus.pending,
         fcmToken: json['fcm_token'] as String?,
+        nick: json['nick'] as String? ?? '',
+        clubId: json['club_id'] as String?,
+      );
+}
+
+/// A club (spec §2): a named group of players sharing a palette color.
+class Club {
+  const Club({
+    required this.id,
+    required this.name,
+    this.colorIndex = -1,
+  });
+
+  final String id;
+  final String name;
+
+  /// Palette index 0–11, or -1 for "no color assigned".
+  final int colorIndex;
+
+  factory Club.fromJson(Map<String, dynamic> json) => Club(
+        id: json['id'] as String,
+        name: json['name'] as String,
+        colorIndex: json['color'] as int? ?? -1,
       );
 }
 
@@ -140,17 +171,44 @@ class PlayerName {
     required this.id,
     required this.displayName,
     required this.club,
+    this.nick = '',
+    this.clubId,
+    this.clubColor = -1,
   });
 
   final String id;
   final String displayName;
   final String club;
 
+  /// Short board name (<=14 chars); empty means "use displayName".
+  final String nick;
+
+  /// FK into `clubs`; null when the player has no assigned club.
+  final String? clubId;
+
+  /// Palette index 0–11 of the player's club, or -1 for "no color".
+  final int clubColor;
+
   factory PlayerName.fromJson(Map<String, dynamic> json) => PlayerName(
         id: json['id'] as String,
         displayName: json['display_name'] as String,
         club: json['club'] as String? ?? '',
+        nick: json['nick'] as String? ?? '',
+        clubId: json['club_id'] as String?,
+        clubColor: json['club_color'] as int? ?? -1,
       );
+}
+
+/// One alley (kuželna): fully isolated tenant. Players pick theirs at
+/// registration; everything else scopes server-side by the profile's tenant.
+class Tenant {
+  const Tenant({required this.id, required this.name});
+
+  final String id;
+  final String name;
+
+  factory Tenant.fromJson(Map<String, dynamic> json) =>
+      Tenant(id: json['id'] as String, name: json['name'] as String);
 }
 
 class ScheduleSettings {
@@ -159,6 +217,8 @@ class ScheduleSettings {
     required this.trainingWeekdays,
     required this.bookingHorizonDays,
     required this.maxActiveReservations,
+    this.kioskDark = true,
+    this.tenantId = '',
   });
 
   final int laneCount;
@@ -167,6 +227,13 @@ class ScheduleSettings {
   final Set<int> trainingWeekdays;
   final int bookingHorizonDays;
   final int maxActiveReservations;
+
+  /// Whether the kiosk board renders in the dark theme (spec §4).
+  final bool kioskDark;
+
+  /// The settings row's tenant — the update key since 0005 (one row per
+  /// tenant instead of the old singleton).
+  final String tenantId;
 
   static const defaults = ScheduleSettings(
     laneCount: 4,
@@ -183,6 +250,8 @@ class ScheduleSettings {
         },
         bookingHorizonDays: json['booking_horizon_days'] as int,
         maxActiveReservations: json['max_active_reservations'] as int,
+        kioskDark: json['kiosk_dark'] as bool? ?? true,
+        tenantId: json['tenant_id'] as String? ?? '',
       );
 }
 
@@ -203,6 +272,9 @@ class TimeBlock {
 
   /// "16:00–17:00"
   String get label => '${_pad(startsAt)}–${_pad(endsAt)}';
+
+  int get durationMinutes =>
+      endsAt.minutesFromMidnight - startsAt.minutesFromMidnight;
 
   static String _pad(HourMinute t) =>
       '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
@@ -251,31 +323,116 @@ class DayOverride {
       );
 }
 
-class Match {
-  const Match({
+/// A priority-slot šablóna: label, palette color and lane scope. 'Zápas' is
+/// the seeded built-in kind ([isMatch]) that additionally carries teams and
+/// a prep window on its slots.
+class PrioritySlotType {
+  const PrioritySlotType({
+    required this.id,
+    required this.name,
+    this.colorIndex = -1,
+    this.lanes,
+    this.isMatch = false,
+    this.builtin = false,
+  });
+
+  final String id;
+  final String name;
+
+  /// Palette index (0–11); -1 = the default rose (match) tint.
+  final int colorIndex;
+
+  /// Lanes this type blocks; null = the whole alley.
+  final List<int>? lanes;
+  final bool isMatch;
+  final bool builtin;
+
+  bool coversLane(int lane) => lanes == null || lanes!.contains(lane);
+
+  factory PrioritySlotType.fromJson(Map<String, dynamic> json) =>
+      PrioritySlotType(
+        id: json['id'] as String,
+        name: json['name'] as String,
+        colorIndex: json['color'] as int? ?? -1,
+        lanes: (json['lanes'] as List?)?.cast<int>(),
+        isMatch: json['is_match'] as bool? ?? false,
+        builtin: json['builtin'] as bool? ?? false,
+      );
+}
+
+/// One dated priority slot (a match or any other typed blockage). Blocks
+/// reservations on its type's lanes for `[blockingStart, endsAt)` and is
+/// shown to spectators even on closed days.
+class PrioritySlot {
+  const PrioritySlot({
     required this.id,
     required this.date,
     required this.startsAt,
     required this.endsAt,
-    required this.opponent,
-    required this.description,
+    required this.type,
+    this.homeTeam = '',
+    this.awayTeam = '',
+    this.prepMinutes = 0,
+    this.description = '',
   });
 
   final String id;
   final Day date;
   final HourMinute startsAt;
   final HourMinute endsAt;
-  final String opponent;
+  final PrioritySlotType type;
+
+  /// Team fields are only meaningful when [type.isMatch].
+  final String homeTeam;
+  final String awayTeam;
+
+  /// Minutes of lane prep required before [startsAt]; reservations that
+  /// overlap this window (as well as the slot itself) are blocked.
+  final int prepMinutes;
   final String description;
 
-  factory Match.fromJson(Map<String, dynamic> json) => Match(
+  /// Match kind: `'{home} – {away}'` (or just `away`); other kinds show the
+  /// type's name.
+  String get title => type.isMatch
+      ? (homeTeam.isEmpty ? awayTeam : '$homeTeam – $awayTeam')
+      : type.name;
+
+  bool coversLane(int lane) => type.coversLane(lane);
+
+  /// [startsAt] minus [prepMinutes], clamped to 00:00 (never wraps past
+  /// midnight into the previous day).
+  HourMinute get blockingStart {
+    final minutes = startsAt.minutesFromMidnight - prepMinutes;
+    if (minutes <= 0) return const HourMinute(0, 0);
+    return HourMinute(minutes ~/ 60, minutes % 60);
+  }
+
+  /// [type] is resolved by the caller (the provider joins the types stream);
+  /// an unknown type_id falls back to a built-in-match placeholder so a
+  /// mid-stream row never crashes the board.
+  factory PrioritySlot.fromJson(
+    Map<String, dynamic> json,
+    Map<String, PrioritySlotType> typeById,
+  ) =>
+      PrioritySlot(
         id: json['id'] as String,
         date: Day.parse(json['date'] as String),
         startsAt: HourMinute.parse(json['starts_at'] as String),
         endsAt: HourMinute.parse(json['ends_at'] as String),
-        opponent: json['opponent'] as String,
+        type: typeById[json['type_id'] as String?] ?? fallbackMatchType,
+        homeTeam: json['home_team'] as String? ?? '',
+        awayTeam: json['away_team'] as String? ?? '',
+        prepMinutes: json['prep_minutes'] as int? ?? 0,
         description: json['description'] as String? ?? '',
       );
+
+  /// Placeholder while the types stream hasn't delivered the real row yet.
+  static const fallbackMatchType = PrioritySlotType(
+    id: 'fallback-match',
+    name: 'Zápas',
+    isMatch: true,
+    builtin: true,
+  );
 }
 
 class Rental {
@@ -290,11 +447,15 @@ class Rental {
     required this.validFrom,
     required this.validUntil,
     required this.note,
+    this.color = -2,
   });
 
   final String id;
   final String renterName;
   final List<int> lanes;
+
+  /// Palette index 0–11, or -2 for "use the default rental tint".
+  final int color;
 
   /// Exactly one of [date] (one-time) and [weekday] (weekly, ISO) is set —
   /// enforced by a DB check constraint.
@@ -329,6 +490,7 @@ class Rental {
             ? null
             : Day.parse(json['valid_until'] as String),
         note: json['note'] as String? ?? '',
+        color: json['color'] as int? ?? -2,
       );
 }
 
@@ -372,5 +534,27 @@ class Reservation {
             : DateTime.parse(json['cancelled_at'] as String),
         cancelledVia: json['cancelled_via'] as String?,
         cancelNote: json['cancel_note'] as String? ?? '',
+      );
+}
+
+/// One row of the monthly_attendance RPC result.
+class AttendanceRow {
+  const AttendanceRow({
+    required this.playerId,
+    required this.displayName,
+    required this.club,
+    required this.attended,
+  });
+
+  final String playerId;
+  final String displayName;
+  final String club;
+  final int attended;
+
+  factory AttendanceRow.fromJson(Map<String, dynamic> json) => AttendanceRow(
+        playerId: json['player_id'] as String,
+        displayName: json['display_name'] as String,
+        club: json['club'] as String? ?? '',
+        attended: json['attended'] as int,
       );
 }

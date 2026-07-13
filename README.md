@@ -1,16 +1,29 @@
-# rezervator
+# Rezervátor
 
-A new Flutter project.
+Rezervační systém tréninků na kuželně: hráči si přes appku nebo web
+rezervují dráhu na volný časový blok, správce vidí kdo přijde, kdo
+nepřišel, a měsíční docházku si stáhne jako CSV.
 
-## Getting Started
+## Dva režimy
 
-This project is a starting point for a Flutter application.
+- **App/web** — každý hráč se přihlásí vlastním účtem (magic-link
+  e-mail), vidí týdenní rozvrh, rezervuje si a ruší svoje tréninky a
+  dostává e-mail (volitelně i push) o schválení, zrušení nebo potvrzení
+  rezervace.
+- **Kiosek** — sdílený dotykový tablet zavěšený přímo na kuželně: kdokoliv
+  schválený si najde svoje jméno a rezervuje bez přihlašování vlastním
+  účtem. Kiosek nikdy nic neruší a nikomu jinému nic neukazuje — jen
+  vlastní rozvrh a tlačítko „Rezervovat".
 
-A few resources to get you started if this is your first Flutter project:
+## Stack
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+[Flutter](https://flutter.dev) (Android, iOS, web) + [Supabase](https://supabase.com)
+(Postgres, Auth, Realtime, Edge Functions) na straně backendu. E-maily přes
+[Resend](https://resend.com), volitelný push přes Firebase Cloud Messaging.
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## Setup a dokumentace
+
+- [`SETUP.md`](SETUP.md) — jednorázové nastavení vlastního backendu
+  (~15 minut klikání v Supabase) a nasazení webu na GitHub Pages.
+- [`docs/superpowers/specs/2026-07-07-rezervator-design.md`](docs/superpowers/specs/2026-07-07-rezervator-design.md) —
+  návrh appky (funkce, datový model, fáze vývoje).
