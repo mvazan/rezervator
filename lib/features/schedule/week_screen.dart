@@ -386,21 +386,62 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
     }) => _cancel(date, block, r, ownFuture: ownFuture);
     // Admin block gestures (long-press edit, tap-a-gap add) only exist for
     // admins on the real DB block set — never on the placeholder grid.
+    // Calendar edits are DAY-SCOPED: they compose a day override around an
+    // inactive "special" block instead of touching the weekly template
+    // (that lives in Admin → Rozvrh).
     final canEditBlocks = (me?.isAdmin ?? false) && blocksFromDb;
+    final overrideByDate = {for (final o in overrides) o.date: o};
+    final blockById = {for (final b in dbBlocks) b.id: b};
+
+    // The day's PRE-cancellation block ids (existing override selection or
+    // the active weekly template) — what the new override is composed from.
+    List<String> dayBaseIds(Day date) {
+      final o = overrideByDate[date];
+      if (o != null && !o.closed && o.blockIds != null) {
+        return [
+          for (final id in o.blockIds!)
+            if (blockById.containsKey(id)) id,
+        ];
+      }
+      if (o != null && o.closed) return const [];
+      return [
+        for (final b in dbBlocks)
+          if (b.active) b.id,
+      ];
+    }
+
+    // The day's RENDERED blocks (post-cancellation) — the overlap warning's
+    // reference: a block a match already cancelled isn't a visible conflict.
+    List<TimeBlock> dayRendered(Day date) {
+      final day = week.days[date.weekday - 1];
+      return day is OpenDay && day.date == date ? day.blocks : const [];
+    }
+
     final onLongPressBlock = canEditBlocks
-        ? (TimeBlock block) => showDialog<void>(
+        ? (Day date, TimeBlock block) => showDialog<void>(
               context: context,
-              builder: (_) => BlockDialog(existing: block, blocks: dbBlocks),
+              builder: (_) => BlockDialog(
+                existing: block,
+                blocks: dbBlocks,
+                dayContext: date,
+                dayBaseIds: dayBaseIds(date),
+                dayRenderedBlocks: dayRendered(date),
+                dayReason: overrideByDate[date]?.reason ?? '',
+              ),
             )
         : null;
     final onAddBlockInGap = canEditBlocks
-        ? (HourMinute start, HourMinute end) => showDialog<void>(
+        ? (Day date, HourMinute start, HourMinute end) => showDialog<void>(
               context: context,
               builder: (_) => BlockDialog(
                 existing: null,
                 blocks: dbBlocks,
                 initialStart: start,
                 initialEnd: end,
+                dayContext: date,
+                dayBaseIds: dayBaseIds(date),
+                dayRenderedBlocks: dayRendered(date),
+                dayReason: overrideByDate[date]?.reason ?? '',
               ),
             )
         : null;

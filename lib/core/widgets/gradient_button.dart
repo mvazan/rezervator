@@ -25,10 +25,15 @@ class GradientButton extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final enabled = onPressed != null;
     final radius = BorderRadius.circular(12);
+    // White reads fine on the gradient's indigo end but drowns on the cyan
+    // end in a light theme — there the label flips to deep indigo.
+    final foreground = scheme.brightness == Brightness.dark
+        ? Colors.white
+        : const Color(0xFF1E1B4B);
 
     final label = DefaultTextStyle.merge(
-      style: const TextStyle(
-        color: Colors.white,
+      style: TextStyle(
+        color: foreground,
         fontWeight: FontWeight.w700,
       ),
       child: child,
@@ -41,7 +46,7 @@ class GradientButton extends StatelessWidget {
           Icon(
             icon,
             color: enabled
-                ? Colors.white
+                ? foreground
                 : scheme.onSurface.withValues(alpha: 0.38),
           ),
           const SizedBox(width: 8),

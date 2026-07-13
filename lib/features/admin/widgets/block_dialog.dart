@@ -25,7 +25,18 @@ Future<bool> confirmIfBlockStrands(BuildContext context, String blockId) async {
 
 /// Add/edit dialog for a time block: two time pickers for start/end.
 /// [initialStart]/[initialEnd] prefill a NEW block (e.g. from a schedule
-/// gap); an [existing] block also gets a destructive "Deaktivovat" action.
+/// gap); an [existing] block also gets a destructive action.
+///
+/// Two modes:
+/// - GLOBAL (default, [dayContext] null): edits the weekly template — the
+///   change applies to every training day. Used by the admin Rozvrh screen.
+/// - DAY-SCOPED ([dayContext] set): the change applies ONLY to that day.
+///   Saving finds-or-creates an inactive "special" block with the picked
+///   times and points the day's override at it (replacing the edited block
+///   in [dayBaseIds], or appending for a new one); the weekly template stays
+///   untouched. That day's reservations on a replaced/removed block are
+///   cancelled by the set_day_override RPC ('změna rozvrhu'). Used by the
+///   calendar's long-press/tap-gap gestures.
 class BlockDialog extends StatefulWidget {
   const BlockDialog({
     super.key,
@@ -33,12 +44,35 @@ class BlockDialog extends StatefulWidget {
     required this.blocks,
     this.initialStart,
     this.initialEnd,
+    this.dayContext,
+    this.dayBaseIds,
+    this.dayRenderedBlocks,
+    this.dayReason = '',
   });
 
   final TimeBlock? existing;
+
+  /// ALL blocks (active + special) — overlap warning in global mode and the
+  /// find-or-create pool for specials in day mode.
   final List<TimeBlock> blocks;
   final HourMinute? initialStart;
   final HourMinute? initialEnd;
+
+  /// Day-scoped mode: the date the edit applies to.
+  final Day? dayContext;
+
+  /// Day-scoped mode: the day's PRE-cancellation block ids (existing
+  /// override selection, or the active weekly template) — the base the new
+  /// override is composed from, so a block hidden by a priority slot isn't
+  /// permanently lost.
+  final List<String>? dayBaseIds;
+
+  /// Day-scoped mode: the day's RENDERED blocks — what the overlap warning
+  /// checks against (a block cancelled by a match isn't a visible conflict).
+  final List<TimeBlock>? dayRenderedBlocks;
+
+  /// Day-scoped mode: the day's existing override reason, preserved on save.
+  final String dayReason;
 
   @override
   State<BlockDialog> createState() => _BlockDialogState();
@@ -48,6 +82,8 @@ class _BlockDialogState extends State<BlockDialog> {
   HourMinute? _start;
   HourMinute? _end;
   bool _saving = false;
+
+  bool get _dayMode => widget.dayContext != null;
 
   @override
   void initState() {
@@ -66,7 +102,55 @@ class _BlockDialogState extends State<BlockDialog> {
     if (picked != null) setState(() => _end = picked);
   }
 
-  Future<void> _deactivate() async {
+  int get _nextPosition => widget.blocks.isEmpty
+      ? 0
+      : widget.blocks.map((b) => b.position).reduce((a, b) => a > b ? a : b) +
+          1;
+
+  /// Day-scoped: reservations on [blockId] on exactly [date] get cancelled
+  /// by the override RPC — confirm when any exist.
+  Future<bool> _confirmDayCancellations(Day date, String blockId) async {
+    final reservations = await Api.futureLiveReservations(today());
+    final hit = reservations
+        .where((r) => r.date == date && r.blockId == blockId)
+        .length;
+    if (hit == 0) return true;
+    if (!mounted) return false;
+    return confirmDialog(
+      context,
+      title: 'Pozor — rezervace budou zrušeny',
+      message:
+          '$hit rezervací na tomto bloku (${dayFull(date)}) bude zrušeno se '
+          'zprávou „změna rozvrhu". Pokračovat?',
+      confirmLabel: 'Pokračovat',
+    );
+  }
+
+  /// Day-scoped removal: the block disappears from [widget.dayContext] only.
+  Future<void> _removeForDay() async {
+    final existing = widget.existing!;
+    final date = widget.dayContext!;
+    final ok = await _confirmDayCancellations(date, existing.id);
+    if (!ok || !mounted) return;
+    final ids = [
+      for (final id in widget.dayBaseIds!)
+        if (id != existing.id) id,
+    ];
+    final done = await tryAction(
+      context,
+      () => Api.setDayOverride(
+        date: date,
+        closed: false,
+        reason: widget.dayReason,
+        blockIds: ids,
+      ),
+      success: 'Blok odebrán (jen tento den).',
+      errorText: friendlyDbError,
+    );
+    if (done && mounted) Navigator.of(context).pop();
+  }
+
+  Future<void> _deactivateGlobal() async {
     final existing = widget.existing!;
     final ok = await confirmIfBlockStrands(context, existing.id);
     if (!ok || !mounted) return;
@@ -90,14 +174,19 @@ class _BlockDialogState extends State<BlockDialog> {
       snack(context, 'Konec musí být po začátku.');
       return;
     }
-    // Blocks are WEEKLY: one created from a gap that exists only because a
-    // priority slot cancelled a block for one day would silently overlap
-    // that block on every other training day (double-bookable lanes, cards
-    // painted over each other) — warn before saving.
+    // Overlap warning: in day mode against the day's rendered blocks (a
+    // block cancelled by a match isn't a visible conflict); in global mode
+    // against every active weekly block — that one would silently overlap
+    // on every other training day.
+    final warnPool = _dayMode
+        ? widget.dayRenderedBlocks!
+        : [
+            for (final b in widget.blocks)
+              if (b.active) b,
+          ];
     final overlapping = [
-      for (final b in widget.blocks)
-        if (b.active &&
-            b.id != widget.existing?.id &&
+      for (final b in warnPool)
+        if (b.id != widget.existing?.id &&
             timesOverlap(start, end, b.startsAt, b.endsAt))
           b,
     ];
@@ -105,32 +194,61 @@ class _BlockDialogState extends State<BlockDialog> {
       final proceed = await confirmDialog(
         context,
         title: 'Pozor — překryv bloků',
-        message:
-            'Blok se překrývá s ${overlapping.map((b) => b.label).join(', ')}. '
-            'Bloky platí pro každý tréninkový den — pro jednorázovou změnu '
-            'použij Výjimky dnů. Opravdu uložit?',
+        message: _dayMode
+            ? 'Blok se v tomto dni překrývá s '
+                '${overlapping.map((b) => b.label).join(', ')}. Opravdu uložit?'
+            : 'Blok se překrývá s '
+                '${overlapping.map((b) => b.label).join(', ')}. Bloky platí '
+                'pro každý tréninkový den — pro jednorázovou změnu použij '
+                'kalendář (podržení bloku v daném dni). Opravdu uložit?',
         confirmLabel: 'Uložit i tak',
       );
       if (!proceed || !mounted) return;
+    }
+
+    if (_dayMode && widget.existing != null) {
+      final ok =
+          await _confirmDayCancellations(widget.dayContext!, widget.existing!.id);
+      if (!ok || !mounted) return;
     }
 
     setState(() => _saving = true);
     final existing = widget.existing;
     final ok = await tryAction(
       context,
-      () => existing == null
-          ? Api.addTimeBlock(
-              start,
-              end,
-              widget.blocks.isEmpty
-                  ? 0
-                  : widget.blocks
-                            .map((b) => b.position)
-                            .reduce((a, b) => a > b ? a : b) +
-                        1,
-            )
-          : Api.updateTimeBlock(existing.id, startsAt: start, endsAt: end),
-      success: 'Uloženo.',
+      () async {
+        if (!_dayMode) {
+          if (existing == null) {
+            await Api.addTimeBlock(start, end, _nextPosition);
+          } else {
+            await Api.updateTimeBlock(existing.id, startsAt: start, endsAt: end);
+          }
+          return;
+        }
+        // Day-scoped: find-or-create the special block, swap it into the
+        // day's override.
+        TimeBlock? special;
+        for (final b in widget.blocks) {
+          if (!b.active && b.startsAt == start && b.endsAt == end) {
+            special = b;
+            break;
+          }
+        }
+        final specialId = special?.id ??
+            await Api.addSpecialBlock(
+                start, end, existing?.position ?? _nextPosition);
+        final base = widget.dayBaseIds!;
+        final ids = existing == null
+            ? [...base, specialId]
+            : [for (final id in base) id == existing.id ? specialId : id];
+        await Api.setDayOverride(
+          date: widget.dayContext!,
+          closed: false,
+          reason: widget.dayReason,
+          blockIds: ids,
+        );
+      },
+      success: _dayMode ? 'Uloženo (jen tento den).' : 'Uloženo.',
       errorText: friendlyDbError,
     );
     if (!mounted) return;
@@ -143,8 +261,12 @@ class _BlockDialogState extends State<BlockDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final dayLabelSuffix =
+        _dayMode ? ' — jen ${dayLabel(widget.dayContext!)}' : '';
     return AlertDialog(
-      title: Text(widget.existing == null ? 'Nový blok' : 'Upravit blok'),
+      title: Text(widget.existing == null
+          ? 'Nový blok$dayLabelSuffix'
+          : 'Upravit blok$dayLabelSuffix'),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -161,9 +283,17 @@ class _BlockDialogState extends State<BlockDialog> {
         ],
       ),
       actions: [
-        if (widget.existing != null && widget.existing!.active)
+        if (widget.existing != null && _dayMode)
           TextButton(
-            onPressed: _saving ? null : _deactivate,
+            onPressed: _saving ? null : _removeForDay,
+            child: Text(
+              'Odebrat v tento den',
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          )
+        else if (widget.existing != null && widget.existing!.active)
+          TextButton(
+            onPressed: _saving ? null : _deactivateGlobal,
             child: Text(
               'Deaktivovat',
               style: TextStyle(color: Theme.of(context).colorScheme.error),

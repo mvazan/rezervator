@@ -922,4 +922,44 @@ void main() {
       await finish(tester);
     },
   );
+
+  testWidgets(
+    'r: half-hour block boundaries get half-hour ruler labels and the '
+    'window starts on the half hour',
+    (tester) async {
+      const bHalf = TimeBlock(
+        id: 'bHalf',
+        startsAt: HourMinute(15, 30),
+        endsAt: HourMinute(16, 30),
+        position: 0,
+        active: true,
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            settingsProvider.overrideWith((ref) => Stream.value(settings)),
+            timeBlocksProvider
+                .overrideWith((ref) => Stream.value(const [bHalf])),
+            dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
+            prioritySlotsProvider.overrideWithValue(const []),
+            rentalsProvider.overrideWith((ref) => Stream.value(const [])),
+            weekReservationsProvider.overrideWith(
+              (ref, monday) => Stream.value(const []),
+            ),
+            playersProvider.overrideWith((ref) async => players),
+          ],
+          child: const MaterialApp(home: KioskShell()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Window starts AT 15:30 (no padded 15:00 label) and the half hours
+      // are labeled because the alley actually uses them.
+      expect(find.text('15:30'), findsOneWidget);
+      expect(find.text('16:30'), findsOneWidget);
+      expect(find.text('15:00'), findsNothing);
+
+      await finish(tester);
+    },
+  );
 }
