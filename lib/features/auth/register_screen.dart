@@ -6,9 +6,13 @@ import '../../core/widgets/auth_background.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
 
-/// First sign-in: pick the alley (kuželna), a display name and optionally a
-/// club. The alley's first approved-less registrant becomes its admin;
-/// everyone else waits for that admin's approval.
+/// Sentinel dropdown value for "found a brand-new alley".
+const _newTenant = '+new';
+
+/// First sign-in: pick an existing alley (kuželna) — or found a new one —
+/// plus a display name, optional board nick and, for an existing alley, a
+/// club from its actual club list. A new alley's founder becomes its admin
+/// right away; everyone else waits for the admin's approval.
 class RegisterScreen extends ConsumerStatefulWidget {
   const RegisterScreen({super.key});
 
@@ -17,15 +21,18 @@ class RegisterScreen extends ConsumerStatefulWidget {
 }
 
 class _RegisterScreenState extends ConsumerState<RegisterScreen> {
+  final _tenantName = TextEditingController();
   final _name = TextEditingController();
-  final _club = TextEditingController();
+  final _nick = TextEditingController();
   String? _tenantId;
+  String? _clubId;
   bool _saving = false;
 
   @override
   void dispose() {
+    _tenantName.dispose();
     _name.dispose();
-    _club.dispose();
+    _nick.dispose();
     super.dispose();
   }
 
@@ -40,10 +47,19 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       snack(context, 'Vyber kuželnu.');
       return;
     }
+    if (tenantId == _newTenant && _tenantName.text.trim().isEmpty) {
+      snack(context, 'Napiš název nové kuželny.');
+      return;
+    }
     setState(() => _saving = true);
     await tryAction(
       context,
-      () => Api.registerProfile(name, _club.text.trim(), tenantId),
+      () => tenantId == _newTenant
+          ? Api.createTenantAndRegister(_tenantName.text.trim(), name,
+              nick: _nick.text.trim())
+          : Api.registerProfile(name, tenantId,
+              clubId: _clubId, nick: _nick.text.trim()),
+      errorText: friendlyDbError,
     );
     // AuthGate re-routes automatically via the profile stream.
     if (mounted) setState(() => _saving = false);
@@ -56,6 +72,11 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     if (_tenantId == null && tenants.length == 1) {
       _tenantId = tenants.single.id;
     }
+    final foundingNew = _tenantId == _newTenant;
+    final clubs = !foundingNew && _tenantId != null
+        ? ref.watch(registrationClubsProvider(_tenantId!)).value ??
+            const <Club>[]
+        : const <Club>[];
 
     return Scaffold(
       appBar: AppBar(
@@ -78,6 +99,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
               const SizedBox(height: 24),
               DropdownButtonFormField<String>(
                 initialValue: _tenantId,
+                isExpanded: true,
                 decoration: const InputDecoration(
                   labelText: 'Kuželna',
                   border: OutlineInputBorder(),
@@ -86,9 +108,26 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   for (final tenant in tenants)
                     DropdownMenuItem(
                         value: tenant.id, child: Text(tenant.name)),
+                  const DropdownMenuItem(
+                      value: _newTenant, child: Text('➕ Založit novou kuželnu')),
                 ],
-                onChanged: (id) => setState(() => _tenantId = id),
+                onChanged: (id) => setState(() {
+                  _tenantId = id;
+                  _clubId = null; // clubs belong to the picked alley
+                }),
               ),
+              if (foundingNew) ...[
+                const SizedBox(height: 16),
+                TextField(
+                  controller: _tenantName,
+                  textCapitalization: TextCapitalization.sentences,
+                  decoration: const InputDecoration(
+                    labelText: 'Název nové kuželny',
+                    helperText: 'Staneš se jejím správcem.',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
               const SizedBox(height: 16),
               TextField(
                 controller: _name,
@@ -100,14 +139,33 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
               ),
               const SizedBox(height: 16),
               TextField(
-                controller: _club,
-                textCapitalization: TextCapitalization.words,
+                controller: _nick,
+                maxLength: 14,
                 decoration: const InputDecoration(
-                  labelText: 'Oddíl / klub (nepovinné)',
+                  labelText: 'Přezdívka na tabuli (nepovinné)',
                   border: OutlineInputBorder(),
+                  counterText: '',
                 ),
-                onSubmitted: (_) => _register(),
               ),
+              if (clubs.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                DropdownButtonFormField<String?>(
+                  initialValue: _clubId,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Oddíl / klub',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: [
+                    const DropdownMenuItem(
+                        value: null, child: Text('Bez oddílu')),
+                    for (final club in clubs)
+                      DropdownMenuItem(
+                          value: club.id, child: Text(club.name)),
+                  ],
+                  onChanged: (id) => setState(() => _clubId = id),
+                ),
+              ],
               const SizedBox(height: 24),
               FilledButton(
                 onPressed: _saving ? null : _register,

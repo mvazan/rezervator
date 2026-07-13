@@ -69,6 +69,19 @@ final tenantsProvider = FutureProvider<List<Tenant>>((ref) async {
     ..sort((a, b) => a.name.compareTo(b.name));
 });
 
+/// Clubs of one alley for the register screen's club picker. Goes through a
+/// security-definer RPC — the caller has no profile yet, so plain RLS reads
+/// would come back empty.
+final registrationClubsProvider =
+    FutureProvider.family<List<Club>, String>((ref, tenantId) async {
+  if (ref.watch(_authUidProvider) == null) return const [];
+  final List<dynamic> rows = await _db
+      .rpc('registration_clubs', params: {'p_tenant_id': tenantId});
+  return [
+    for (final row in rows) Club.fromJson((row as Map).cast<String, dynamic>())
+  ];
+});
+
 final settingsProvider = StreamProvider<ScheduleSettings?>((ref) {
   final uid = ref.watch(_authUidProvider);
   if (uid == null) return Stream.value(null);
@@ -162,12 +175,22 @@ class Api {
     if (uid != null) await RowCache.clear(uid);
   }
 
-  static Future<void> registerProfile(
-          String displayName, String club, String tenantId) =>
+  static Future<void> registerProfile(String displayName, String tenantId,
+          {String? clubId, String nick = ''}) =>
       _db.rpc('register_profile', params: {
         'p_display_name': displayName,
-        'p_club': club,
         'p_tenant_id': tenantId,
+        'p_club_id': clubId,
+        'p_nick': nick,
+      });
+
+  /// Founds a brand-new alley and registers the caller as its admin.
+  static Future<void> createTenantAndRegister(
+          String tenantName, String displayName, {String nick = ''}) =>
+      _db.rpc('create_tenant_and_register', params: {
+        'p_tenant_name': tenantName,
+        'p_display_name': displayName,
+        'p_nick': nick,
       });
 
   static Future<void> approvePlayer(String userId) =>

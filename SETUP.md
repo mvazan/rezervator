@@ -335,21 +335,21 @@ magic linky, e-mailové i (volitelně) push notifikace, kiosek na
 tabletu, měsíční docházka s CSV exportem a keep-alive, co drží
 Supabase projekt vzhůru. Appka je připravená k běžnému provozu.
 
-## Nová kuželna (multitenancia, od migrace 0005)
+## Nová kuželna (multitenancia, od migrace 0005; self-service od 0006)
 
-Kuželny zakládá jen správce projektu (SQL v Supabase SQL editoru):
+Novou kuželnu založí provozovatel sám přímo v registraci: přihlásí se
+magic linkem a v poli „Kuželna" vybere „➕ Založit novou kuželnu". Stane se
+jejím správcem (RPC `create_tenant_and_register` nastaví `founder_email` na
+jeho e-mail a rovnou ho schválí). Řádek `schedule_settings` a vestavěný typ
+„Zápas" se založí automaticky (trigger `tenant_seed_defaults`).
+
+Ruční SQL cesta (Supabase SQL editor) dál funguje, hodí se pro založení
+předem — pak se provozovatel registruje běžně výběrem své kuželny:
 
 ```sql
 insert into tenants (name, founder_email)
 values ('Kuželna Vracov', 'provozovatel@example.com');
 ```
-
-- `founder_email` doporučeně vyplň: první registrovaný uživatel s tímto
-  e-mailem se stane adminem kuželny (bez něj platí „první registrovaný
-  vyhrává"). Řádek `schedule_settings` a vestavěný typ „Zápas" se založí
-  automaticky (trigger `tenant_seed_defaults`).
-- Provozovatel se pak normálně zaregistruje v appce (vybere svou kuželnu
-  v dropdownu) a je rovnou schválený admin.
 - Kiosk pro novou kuželnu: založ auth účet s heslem, přihlas tablet přes
   `/kiosk-login`, účet se zaregistruje do své kuželny a admin mu dá roli
   kiosk (Hráči → Nastavit jako kiosk).

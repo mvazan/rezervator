@@ -90,6 +90,11 @@ String friendlyDbError(Object error) {
     'not_allowed': 'Na tohle nemáš oprávnění.',
     'cannot_demote_self': 'Sám sebe správcovství nezbavíš.',
     'nick_too_long': 'Zkratka je moc dlouhá (max 14 znaků).',
+    'tenant_exists': 'Kuželna s tímto názvem už existuje.',
+    'unknown_tenant': 'Tahle kuželna už neexistuje.',
+    'unknown_club': 'Tenhle oddíl už neexistuje — vyber jiný.',
+    'empty_tenant_name': 'Napiš název nové kuželny.',
+    'empty_display_name': 'Vyplň své jméno.',
   };
   for (final entry in messages.entries) {
     if (raw.contains(entry.key)) return entry.value;
