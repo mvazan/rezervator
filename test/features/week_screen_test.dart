@@ -438,8 +438,9 @@ void main() {
     await tester.longPress(find.byKey(const ValueKey('cal-block-b1')).first);
     await tester.pumpAndSettle();
 
-    expect(find.text('Upravit blok'), findsOneWidget);
-    expect(find.text('Deaktivovat'), findsOneWidget);
+    expect(find.textContaining('Upravit blok — jen'), findsOneWidget);
+    expect(find.text('Odebrat v tento den'), findsOneWidget);
+    expect(find.text('Deaktivovat'), findsNothing); // global action lives in Rozvrh
   });
 
   testWidgets(
@@ -465,7 +466,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('Nový blok'), findsOneWidget);
+      expect(find.textContaining('Nový blok — jen'), findsOneWidget);
       // Prefilled with the gap's exact range.
       expect(find.text('21:00'), findsWidgets);
       expect(find.text('22:58'), findsWidgets);
@@ -481,7 +482,7 @@ void main() {
     expect(find.byIcon(Icons.edit_outlined), findsNothing);
     await tester.longPress(find.byKey(const ValueKey('cal-block-b1')).first);
     await tester.pumpAndSettle();
-    expect(find.text('Upravit blok'), findsNothing);
+    expect(find.textContaining('Upravit blok'), findsNothing);
 
     const pxPerMinute = 2 * 40.0 / 60;
     final column = find.descendant(
@@ -493,7 +494,7 @@ void main() {
       columnTop + Offset(40, (21.5 - 20) * 60 * pxPerMinute),
     );
     await tester.pumpAndSettle();
-    expect(find.text('Nový blok'), findsNothing);
+    expect(find.textContaining('Nový blok'), findsNothing);
   });
 
   testWidgets(
@@ -658,26 +659,25 @@ void main() {
       columnTop + Offset(40, (20.75 - 20) * 60 * pxPerMinute),
     );
     await tester.pumpAndSettle();
-    expect(find.text('Nový blok'), findsNothing);
+    expect(find.textContaining('Nový blok'), findsNothing);
 
     // Tap the freed 20:00–20:30 stripe (20:15) — prefilled gap dialog.
     await tester.tapAt(
       columnTop + Offset(40, (20.25 - 20) * 60 * pxPerMinute),
     );
     await tester.pumpAndSettle();
-    expect(find.text('Nový blok'), findsOneWidget);
+    expect(find.textContaining('Nový blok — jen'), findsOneWidget);
     expect(find.text('20:00'), findsWidgets);
     expect(find.text('20:30'), findsWidgets);
 
-    // Saving would create a WEEKLY block overlapping bEarly on every other
-    // day — the dialog warns first.
+    // The edit is DAY-SCOPED and bEarly is cancelled on this day, so no
+    // overlap warning fires — the save goes straight to the day-override
+    // path (which fails in this harness without a backend; the dialog
+    // stays open with an error snack, which is all we assert here — the
+    // request composition is pinned by block_dialog_day_test.dart).
     await tester.tap(find.text('Uložit'));
     await tester.pumpAndSettle();
-    expect(find.text('Pozor — překryv bloků'), findsOneWidget);
-    // Two dialogs are stacked (BlockDialog below, the warning on top) and
-    // both have a 'Zrušit' — dismiss the topmost.
-    await tester.tap(find.text('Zrušit').last);
-    await tester.pumpAndSettle();
+    expect(find.text('Pozor — překryv bloků'), findsNothing);
   });
 
   testWidgets('day pager: a match day with every block cancelled shows the '
@@ -769,5 +769,51 @@ void main() {
     // may carry a bogus prep suffix for a zero-prep match.
     expect(find.textContaining('· 23:30–23:59'), findsWidgets);
     expect(find.textContaining('🛠 od'), findsNothing);
+  });
+
+  testWidgets('past days refuse calendar edits — long-press shows a snack, '
+      'no dialog (history must not be rewritten)', (tester) async {
+    wideSurface(tester);
+    await tester.pumpWidget(app(profile: admin));
+    await tester.pumpAndSettle();
+
+    // Go one week back: every visible day is strictly before today.
+    await tester.tap(find.byIcon(Icons.chevron_left));
+    await tester.pumpAndSettle();
+
+    await tester.longPress(find.byKey(const ValueKey('cal-block-b1')).first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Minulé dny nelze upravovat.'), findsOneWidget);
+    expect(find.textContaining('Upravit blok'), findsNothing);
+  });
+
+  testWidgets('tapping a closed day asks before REOPENING it; declining '
+      'opens nothing', (tester) async {
+    wideSurface(tester);
+    await tester.pumpWidget(app(
+      profile: admin,
+      overrides: [
+        DayOverride(date: tomorrow, closed: true, reason: 'dovolená'),
+      ],
+    ));
+    await tester.pumpAndSettle();
+
+    const pxPerMinute = 2 * 40.0 / 60;
+    final column = find.descendant(
+      of: find.byKey(ValueKey(tomorrow)),
+      matching: find.byType(CalendarColumn),
+    );
+    // The closed column is empty everywhere — tap mid-window.
+    await tester.tapAt(
+      tester.getTopLeft(column) + Offset(40, 30 * pxPerMinute),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Den je zavřený'), findsOneWidget);
+    expect(find.textContaining('dovolená'), findsWidgets);
+    await tester.tap(find.text('Zrušit'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Nový blok'), findsNothing);
   });
 }

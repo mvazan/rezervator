@@ -8,13 +8,14 @@ TimeBlock block(String id, HourMinute start, HourMinute end, {int pos = 0}) =>
 
 void main() {
   group('calendarWindowFor', () {
-    test('spans blocks, aligned outward to whole hours', () {
+    test('spans blocks, aligned outward to half hours — a 15:30 start is '
+        'NOT padded down to 15:00', () {
       final w = calendarWindowFor(blocks: [
         block('a', const HourMinute(16, 30), const HourMinute(17, 30)),
         block('b', const HourMinute(18, 0), const HourMinute(19, 15)),
       ])!;
-      expect(w.startMinute, 16 * 60);
-      expect(w.endMinute, 20 * 60);
+      expect(w.startMinute, 16 * 60 + 30);
+      expect(w.endMinute, 19 * 60 + 30);
     });
 
     test('off-block events extend the window', () {
@@ -26,7 +27,7 @@ void main() {
         ],
       )!;
       expect(w.startMinute, 12 * 60);
-      expect(w.endMinute, 22 * 60);
+      expect(w.endMinute, 21 * 60 + 30);
     });
 
     test('no content -> null; end never exceeds midnight', () {

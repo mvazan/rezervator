@@ -321,6 +321,10 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
     if (window == null) {
       return const Center(child: Text('Rozvrh je prázdný.'));
     }
+    // Half-hour ruler labels/gridlines only when the alley actually uses
+    // half-hour block boundaries.
+    final halfHourMarks = windowBlocks
+        .any((b) => b.startsAt.minute == 30 || b.endsAt.minute == 30);
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -362,7 +366,11 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
                 Column(
                   children: [
                     const SizedBox(height: calendarHeaderHeight),
-                    HourRuler(window: window, pxPerMinute: pxPerMinute),
+                    HourRuler(
+                      window: window,
+                      pxPerMinute: pxPerMinute,
+                      halfHourMarks: halfHourMarks,
+                    ),
                   ],
                 ),
                 Expanded(
@@ -380,6 +388,7 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
                           isToday: index == 0,
                           window: window,
                           pxPerMinute: pxPerMinute,
+                          halfHourMarks: halfHourMarks,
                           nowMinute: index == 0 &&
                                   now.minutesFromMidnight >=
                                       window.startMinute &&
@@ -424,6 +433,7 @@ class _DayColumn extends StatelessWidget {
     required this.isToday,
     required this.window,
     required this.pxPerMinute,
+    required this.halfHourMarks,
     required this.nowMinute,
     required this.laneCount,
     required this.nameById,
@@ -437,6 +447,7 @@ class _DayColumn extends StatelessWidget {
   final bool isToday;
   final CalendarWindow window;
   final double pxPerMinute;
+  final bool halfHourMarks;
   final int? nowMinute;
   final int laneCount;
   final Map<String, String> nameById;
@@ -465,6 +476,7 @@ class _DayColumn extends StatelessWidget {
           CalendarColumn(
             window: window,
             pxPerMinute: pxPerMinute,
+            halfHourMarks: halfHourMarks,
             entries: _entries(context),
             background: closed ? _closedBackground(context, scheme) : null,
             nowMinute: nowMinute,

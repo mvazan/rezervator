@@ -59,11 +59,12 @@ class WeekCalendarView extends StatelessWidget {
   final void Function(Day, TimeBlock, Reservation, {required bool ownFuture})
       onCancel;
 
-  /// Admin-only (null otherwise): long-press a block card to edit it; tap
-  /// an empty stretch of a day column to add a block prefilled with the
-  /// free gap around the tapped time.
-  final void Function(TimeBlock)? onLongPressBlock;
-  final void Function(HourMinute start, HourMinute end)? onAddBlockInGap;
+  /// Admin-only (null otherwise): long-press a block card to edit it FOR
+  /// THAT DAY; tap an empty stretch of a day column to add a day-scoped
+  /// block prefilled with the free gap around the tapped time.
+  final void Function(Day date, TimeBlock block)? onLongPressBlock;
+  final void Function(Day date, HourMinute start, HourMinute end)?
+      onAddBlockInGap;
 
   @override
   Widget build(BuildContext context) {
@@ -86,6 +87,12 @@ class WeekCalendarView extends StatelessWidget {
       return const Center(child: Text('Tenhle týden se nehraje.'));
     }
     final pxPerMinute = settings.laneCount * _refLaneRowHeight / 60;
+    // Half-hour ruler labels/gridlines only when the alley actually uses
+    // half-hour block boundaries.
+    final halfHourMarks = [
+      for (final day in week.days)
+        if (day is OpenDay) ...day.blocks,
+    ].any((b) => b.startsAt.minute == 30 || b.endsAt.minute == 30);
     // +8: slack so the bottom hour label (centered on its line) isn't
     // half-clipped when scrolled fully down.
     final totalHeight = calendarHeaderHeight + window.minutes * pxPerMinute + 8;
@@ -101,6 +108,7 @@ class WeekCalendarView extends StatelessWidget {
               isToday: day.date == today,
               window: window,
               pxPerMinute: pxPerMinute,
+              halfHourMarks: halfHourMarks,
               nowMinute: day.date == today &&
                       now.minutesFromMidnight >= window.startMinute &&
                       now.minutesFromMidnight < window.endMinute
@@ -129,7 +137,11 @@ class WeekCalendarView extends StatelessWidget {
                 Column(
                   children: [
                     const SizedBox(height: calendarHeaderHeight),
-                    HourRuler(window: window, pxPerMinute: pxPerMinute),
+                    HourRuler(
+                      window: window,
+                      pxPerMinute: pxPerMinute,
+                      halfHourMarks: halfHourMarks,
+                    ),
                   ],
                 ),
                 Expanded(
@@ -171,6 +183,7 @@ class _DayColumn extends StatelessWidget {
     required this.isToday,
     required this.window,
     required this.pxPerMinute,
+    required this.halfHourMarks,
     required this.nowMinute,
     required this.me,
     required this.myCount,
@@ -188,6 +201,7 @@ class _DayColumn extends StatelessWidget {
   final bool isToday;
   final CalendarWindow window;
   final double pxPerMinute;
+  final bool halfHourMarks;
   final int? nowMinute;
   final Profile? me;
   final int myCount;
@@ -198,8 +212,9 @@ class _DayColumn extends StatelessWidget {
   final void Function(Day, TimeBlock, int lane) onBook;
   final void Function(Day, TimeBlock, Reservation, {required bool ownFuture})
       onCancel;
-  final void Function(TimeBlock)? onLongPressBlock;
-  final void Function(HourMinute start, HourMinute end)? onAddBlockInGap;
+  final void Function(Day date, TimeBlock block)? onLongPressBlock;
+  final void Function(Day date, HourMinute start, HourMinute end)?
+      onAddBlockInGap;
 
   @override
   Widget build(BuildContext context) {
@@ -226,7 +241,8 @@ class _DayColumn extends StatelessWidget {
         : (int minute) {
             final gap = freeGapAt(minute, occupied, window);
             if (gap == null) return;
-            onAddBlockInGap!(hourMinuteAt(gap.$1), hourMinuteAt(gap.$2));
+            onAddBlockInGap!(
+                day.date, hourMinuteAt(gap.$1), hourMinuteAt(gap.$2));
           };
 
     return Column(
@@ -241,6 +257,7 @@ class _DayColumn extends StatelessWidget {
         CalendarColumn(
           window: window,
           pxPerMinute: pxPerMinute,
+          halfHourMarks: halfHourMarks,
           entries: _entries(context, openDay),
           background: openDay == null
               ? _closedBackground(context, scheme)
@@ -418,7 +435,7 @@ class _DayColumn extends StatelessWidget {
     );
     if (onLongPressBlock == null) return card;
     return GestureDetector(
-      onLongPress: () => onLongPressBlock!(block),
+      onLongPress: () => onLongPressBlock!(openDay.date, block),
       child: card,
     );
   }

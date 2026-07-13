@@ -386,23 +386,98 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
     }) => _cancel(date, block, r, ownFuture: ownFuture);
     // Admin block gestures (long-press edit, tap-a-gap add) only exist for
     // admins on the real DB block set — never on the placeholder grid.
+    // Calendar edits are DAY-SCOPED: they compose a day override around an
+    // inactive "special" block instead of touching the weekly template
+    // (that lives in Admin → Rozvrh).
     final canEditBlocks = (me?.isAdmin ?? false) && blocksFromDb;
+    final overrideByDate = {for (final o in overrides) o.date: o};
+    final blockById = {for (final b in dbBlocks) b.id: b};
+
+    // The day's PRE-cancellation block ids (existing override selection or
+    // the active weekly template) — what the new override is composed from.
+    // A day that renders CLOSED (override or non-training weekday) starts
+    // from an empty base: adding a block there opens the day with exactly
+    // that block, never with the whole weekly template in tow.
+    List<String> dayBaseIds(Day date) {
+      final o = overrideByDate[date];
+      if (o != null && !o.closed && o.blockIds != null) {
+        return [
+          for (final id in o.blockIds!)
+            if (blockById.containsKey(id)) id,
+        ];
+      }
+      if (week.days[date.weekday - 1] is ClosedDay) return const [];
+      return [
+        for (final b in dbBlocks)
+          if (b.active) b.id,
+      ];
+    }
+
+    // The day's RENDERED blocks (post-cancellation) — the overlap warning's
+    // reference: a block a match already cancelled isn't a visible conflict.
+    List<TimeBlock> dayRendered(Day date) {
+      final day = week.days[date.weekday - 1];
+      return day is OpenDay && day.date == date ? day.blocks : const [];
+    }
+
+    // Past days are history: set_day_override would cancel their (already
+    // played) reservations and corrupt attendance — the gestures refuse.
+    bool guardPast(Day date) {
+      if (!date.isBefore(todayDay)) return false;
+      snack(context, 'Minulé dny nelze upravovat.');
+      return true;
+    }
+
     final onLongPressBlock = canEditBlocks
-        ? (TimeBlock block) => showDialog<void>(
+        ? (Day date, TimeBlock block) {
+            if (guardPast(date)) return;
+            showDialog<void>(
               context: context,
-              builder: (_) => BlockDialog(existing: block, blocks: dbBlocks),
-            )
+              builder: (_) => BlockDialog(
+                existing: block,
+                blocks: dbBlocks,
+                dayContext: date,
+                dayBaseIds: dayBaseIds(date),
+                dayRenderedBlocks: dayRendered(date),
+                dayReason: overrideByDate[date]?.reason ?? '',
+              ),
+            );
+          }
         : null;
     final onAddBlockInGap = canEditBlocks
-        ? (HourMinute start, HourMinute end) => showDialog<void>(
+        ? (Day date, HourMinute start, HourMinute end) async {
+            if (guardPast(date)) return;
+            // Adding a block into a CLOSED day reopens it — that's a bigger
+            // decision than the dialog title suggests, so say it out loud.
+            if (week.days[date.weekday - 1] is ClosedDay) {
+              final reason = overrideByDate[date]?.reason ?? '';
+              final proceed = await confirmDialog(
+                context,
+                title: 'Den je zavřený',
+                message: reason.isEmpty
+                    ? '${dayFull(date)} je zavřeno. Přidáním bloku den '
+                        'otevřeš. Pokračovat?'
+                    : '${dayFull(date)} je zavřeno („$reason"). Přidáním '
+                        'bloku den otevřeš. Pokračovat?',
+                confirmLabel: 'Otevřít den',
+              );
+              if (!proceed || !context.mounted) return;
+            }
+            if (!context.mounted) return;
+            await showDialog<void>(
               context: context,
               builder: (_) => BlockDialog(
                 existing: null,
                 blocks: dbBlocks,
                 initialStart: start,
                 initialEnd: end,
+                dayContext: date,
+                dayBaseIds: dayBaseIds(date),
+                dayRenderedBlocks: dayRendered(date),
+                dayReason: overrideByDate[date]?.reason ?? '',
               ),
-            )
+            );
+          }
         : null;
 
     return Column(

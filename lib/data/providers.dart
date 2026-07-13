@@ -289,6 +289,27 @@ class Api {
   static Future<void> deleteTimeBlock(String id) =>
       _db.from('time_blocks').delete().eq('id', id);
 
+  /// Inserts an INACTIVE "special" block and returns its id — day-scoped
+  /// calendar edits point a day override at it while the weekly template
+  /// ignores it. `active=false` keeps it out of the weekly schedule;
+  /// `position=-1` is the SPECIAL sentinel: the Rozvrh list hides such rows
+  /// and the find-or-create reuse pool only matches them (never a
+  /// deactivated template block that happens to share the times).
+  static Future<String> addSpecialBlock(
+      HourMinute startsAt, HourMinute endsAt) async {
+    final row = await _db
+        .from('time_blocks')
+        .insert({
+          'starts_at': startsAt.toSql(),
+          'ends_at': endsAt.toSql(),
+          'position': -1,
+          'active': false,
+        })
+        .select('id')
+        .single();
+    return row['id'] as String;
+  }
+
   // --- admin: day overrides (RPC — cascades reservation cancellations) ---
   static Future<void> setDayOverride({
     required Day date,

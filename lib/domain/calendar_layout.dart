@@ -9,15 +9,16 @@ library;
 import 'models.dart';
 
 /// The vertical time span a calendar view renders, in minutes from midnight,
-/// aligned outward to whole hours (the ruler labels whole hours).
+/// aligned outward to half hours — a day whose first block starts 15:30
+/// starts AT 15:30, not at a padded 15:00.
 class CalendarWindow {
   const CalendarWindow(this.startMinute, this.endMinute)
       : assert(endMinute > startMinute);
 
-  /// Inclusive start, multiple of 60.
+  /// Inclusive start, multiple of 30.
   final int startMinute;
 
-  /// Exclusive end, multiple of 60 (capped at 24:00).
+  /// Exclusive end, multiple of 30 (capped at 24:00).
   final int endMinute;
 
   int get minutes => endMinute - startMinute;
@@ -37,7 +38,7 @@ class CalendarWindow {
 
 /// Window spanning all [blocks] plus [eventWindows] (off-block priority
 /// slots/rentals — they must extend the window or they'd render clipped),
-/// floored/ceiled to whole hours. Null when there is no content at all.
+/// floored/ceiled to half hours. Null when there is no content at all.
 CalendarWindow? calendarWindowFor({
   required Iterable<TimeBlock> blocks,
   Iterable<(HourMinute, HourMinute)> eventWindows = const [],
@@ -56,7 +57,8 @@ CalendarWindow? calendarWindowFor({
     cover(s.minutesFromMidnight, e.minutesFromMidnight);
   }
   if (min == null) return null;
-  return CalendarWindow(min! ~/ 60 * 60, ((max! + 59) ~/ 60 * 60).clamp(0, 24 * 60));
+  return CalendarWindow(
+      min! ~/ 30 * 30, ((max! + 29) ~/ 30 * 30).clamp(0, 24 * 60));
 }
 
 /// Minutes-from-midnight → [HourMinute], clamped to 23:59 ([HourMinute] has

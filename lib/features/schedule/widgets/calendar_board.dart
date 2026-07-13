@@ -38,47 +38,60 @@ class CalendarEntry {
   final Widget child;
 }
 
-/// The hour ruler: right-aligned `HH:00` labels on the shared hour lines.
-/// Labels thin out automatically when the scale gets too tight for one per
-/// hour.
+/// The hour ruler: right-aligned `HH:00` labels on the shared hour lines,
+/// plus quieter `HH:30` labels when [halfHourMarks] is set (the alley
+/// actually uses half-hour block boundaries). Labels thin out automatically
+/// when the scale gets too tight.
 class HourRuler extends StatelessWidget {
   const HourRuler({
     super.key,
     required this.window,
     required this.pxPerMinute,
+    this.halfHourMarks = false,
   });
 
   final CalendarWindow window;
   final double pxPerMinute;
+
+  /// Also label (and let columns line) the half hours — only worth the ink
+  /// when some visible block starts/ends on one.
+  final bool halfHourMarks;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final hourPx = pxPerMinute * 60;
     final step = hourPx >= 26 ? 1 : (hourPx >= 13 ? 2 : 3);
-    final firstHour = window.startMinute ~/ 60;
-    final lastHour = window.endMinute ~/ 60;
+    final showHalves = halfHourMarks && step == 1 && hourPx >= 28;
+    final firstHour = (window.startMinute + 59) ~/ 60;
+    final labels = <Widget>[];
+    for (var m = window.startMinute; m <= window.endMinute; m += 30) {
+      final isHour = m % 60 == 0;
+      // Step is anchored to the window's first full hour so the top of the
+      // window always gets a label even when thinning.
+      if (isHour && (m ~/ 60 - firstHour) % step != 0) continue;
+      // A window starting on :30 labels its top edge even without the
+      // half-hour marks (an event can stretch the window to :30 while every
+      // block stays hour-aligned).
+      if (!isHour && !showHalves && m != window.startMinute) continue;
+      labels.add(Positioned(
+        top: (m - window.startMinute) * pxPerMinute - 6,
+        right: 6,
+        child: Text(
+          '${'${m ~/ 60}'.padLeft(2, '0')}:${'${m % 60}'.padLeft(2, '0')}',
+          style: TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+            color: scheme.onSurfaceVariant
+                .withValues(alpha: isHour ? 0.7 : 0.45),
+          ),
+        ),
+      ));
+    }
     return SizedBox(
       width: calendarRulerWidth,
       height: window.minutes * pxPerMinute,
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          for (var h = firstHour; h <= lastHour; h += step)
-            Positioned(
-              top: (h * 60 - window.startMinute) * pxPerMinute - 6,
-              right: 6,
-              child: Text(
-                '${'$h'.padLeft(2, '0')}:00',
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600,
-                  color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
-                ),
-              ),
-            ),
-        ],
-      ),
+      child: Stack(clipBehavior: Clip.none, children: labels),
     );
   }
 }
@@ -98,12 +111,16 @@ class CalendarColumn extends StatelessWidget {
     this.background,
     this.nowMinute,
     this.onTapFreeAt,
+    this.halfHourMarks = false,
   });
 
   final CalendarWindow window;
   final double pxPerMinute;
   final List<CalendarEntry> entries;
   final Widget? background;
+
+  /// Draw fainter half-hour gridlines too (see [HourRuler.halfHourMarks]).
+  final bool halfHourMarks;
 
   /// Minutes from midnight to draw the current-time line at (today's column
   /// only), already known to lie inside the window.
@@ -133,6 +150,21 @@ class CalendarColumn extends StatelessWidget {
               color: scheme.outlineVariant.withValues(alpha: 0.25),
             ),
           ),
+        if (halfHourMarks)
+          for (var m = window.startMinute - window.startMinute % 60 + 30;
+              m < window.endMinute;
+              m += 60)
+            if (m > window.startMinute)
+              Positioned(
+                top: (m - window.startMinute) * pxPerMinute,
+                left: 0,
+                right: 0,
+                child: Divider(
+                  height: 1,
+                  thickness: 1,
+                  color: scheme.outlineVariant.withValues(alpha: 0.12),
+                ),
+              ),
         for (final entry in entries)
           Positioned(
             top: window.topFor(entry.start, pxPerMinute),
