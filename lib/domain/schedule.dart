@@ -166,9 +166,10 @@ int _byStartThenPosition(TimeBlock a, TimeBlock b) {
 
 /// Per-lane resolution: the first priority slot covering [lane] whose
 /// prep-extended window overlaps [block], plus the prep-only flag — or
-/// `(null, false)`. In practice only LANE-SCOPED slots reach a rendered
-/// block: whole-alley slots cancel every block their blocking window touches
-/// (see [buildWeekSchedule]), so no surviving block can overlap one.
+/// `(null, false)`. In practice LANE-SCOPED slots (and, transiently,
+/// unresolved-type ones — see [PrioritySlotType.unresolved]) reach a
+/// rendered block: resolved whole-alley slots cancel every block their
+/// blocking window touches (see [buildWeekSchedule]).
 (PrioritySlot?, bool) priorityStateFor(
     TimeBlock block, int lane, List<PrioritySlot> slots) {
   final hit = _firstWhereOrNull(

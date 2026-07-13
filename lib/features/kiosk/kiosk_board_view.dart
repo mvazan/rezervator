@@ -339,7 +339,10 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
         final comfortableScale = settings.laneCount * 40.0 / 60;
         final pxPerMinute = settings.kioskFitDay
             ? (fitScale < minScale ? minScale : fitScale)
-            : comfortableScale;
+            // The tappability floor applies here too: a very short block
+            // must not squash its lane rows below reach in scroll mode
+            // either.
+            : (comfortableScale < minScale ? minScale : comfortableScale);
         final totalHeight = calendarHeaderHeight +
             window.minutes * pxPerMinute +
             _bottomLabelPad;
@@ -692,8 +695,9 @@ class _DayColumn extends StatelessWidget {
               : null,
         );
       case PrioritySlotState(:final slot, :final isPrep):
-        // Whole-alley slots never reach here (_blockCard renders the banner
-        // first); this is a LANE-SCOPED priority slot blocking just this row.
+        // A LANE-SCOPED priority slot blocking just this row — or, briefly,
+        // an unresolved-type slot (renders like a match but doesn't cancel
+        // blocks until its type row streams in).
         final club = ClubColors.of(slot.type.colorIndex, scheme.brightness);
         return _rowShell(
           context,
@@ -702,7 +706,9 @@ class _DayColumn extends StatelessWidget {
               : club?.$1 ?? scheme.errorContainer.withValues(alpha: 0.6),
           lane: lane,
           child: Text(
-            isPrep ? '🛠 Příprava drah' : '⛔ ${slot.title}',
+            isPrep
+                ? '🛠 Příprava drah'
+                : '${slot.type.isMatch ? '🏆' : '⛔'} ${slot.title}',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
