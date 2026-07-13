@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:rezervator/core/ui.dart' show dayFull;
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/admin/widgets/move_reservations_dialog.dart';
@@ -125,8 +126,18 @@ void main() {
     expect(find.text('Dráha 1 — Olga Malá'), findsOneWidget);
     expect(find.text('Dráha 2 — volná'), findsOneWidget);
 
-    // Drag Péťa's chip onto the free lane 2.
+    // A drop onto the OCCUPIED lane 1 is refused — nothing stages.
     final chip = find.text('Péťa · D1');
+    await tester.drag(
+      chip,
+      tester.getCenter(find.text('Dráha 1 — Olga Malá')) -
+          tester.getCenter(chip),
+    );
+    await tester.pumpAndSettle();
+    expect(find.textContaining('(přesun)'), findsNothing);
+    expect(find.text('Vše přesunuto.'), findsNothing);
+
+    // Drag Péťa's chip onto the free lane 2.
     final freeLane = find.text('Dráha 2 — volná');
     await tester.drag(
       chip,
@@ -187,5 +198,15 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Nepřesunuté rezervace'), findsOneWidget);
     expect(find.textContaining('změna rozvrhu'), findsOneWidget);
+
+    // Declining keeps the dialog open and fires NO RPC.
+    await tester.tap(find.text('Zrušit').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Přesun rezervací — '
+            '${dayFull(thursday)}'), findsOneWidget);
+    expect(
+      requests.any((r) => r.url.path.contains('move_reservation')),
+      isFalse,
+    );
   });
 }

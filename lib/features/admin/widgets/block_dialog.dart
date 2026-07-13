@@ -49,6 +49,8 @@ class BlockDialog extends StatefulWidget {
     this.dayContext,
     this.dayBaseIds,
     this.dayHasOverride = false,
+    this.dayIsTraining = true,
+    this.dayPriority = const <PrioritySlot>[],
     this.dayReason = '',
   });
 
@@ -72,6 +74,15 @@ class BlockDialog extends StatefulWidget {
   /// Day-scoped mode: whether the day already has an override row — shows
   /// the "Obnovit týdenní rozvrh" escape hatch.
   final bool dayHasOverride;
+
+  /// Day-scoped mode: whether the WEEKDAY rule opens this day. Returning a
+  /// non-training day to the template means CLOSING it again (all its
+  /// reservations cancel), not opening it with the weekly blocks.
+  final bool dayIsTraining;
+
+  /// Day-scoped mode: the day's priority slots — a removal's move targets
+  /// must actually render after the removal (not sit under a match).
+  final List<PrioritySlot> dayPriority;
 
   /// Day-scoped mode: the day's existing override reason, preserved on save.
   final String dayReason;
@@ -115,16 +126,24 @@ class _BlockDialogState extends State<BlockDialog> {
   /// whose block is NOT in the new id list — mirror exactly that predicate
   /// (not just the edited block: a stranded reservation on a long-
   /// deactivated block gets swept too) and confirm when any would go.
-  Future<bool> _confirmDayCancellations(Day date, Set<String> keptIds) async {
-    final reservations = await Api.futureLiveReservations(today());
+  Future<bool> _confirmDayCancellations(Day date, Set<String> keptIds,
+      {String? noteOverride}) async {
+    final List<StrandableReservation> reservations;
+    try {
+      reservations = await Api.futureLiveReservations(today());
+    } catch (e) {
+      if (mounted) snack(context, friendlyDbError(e));
+      return false;
+    }
     final hit = reservations
         .where((r) => r.date == date && !keptIds.contains(r.blockId))
         .length;
     if (hit == 0) return true;
     if (!mounted) return false;
-    // The RPC uses the override reason as the cancel note when present.
-    final note =
-        widget.dayReason.trim().isEmpty ? 'změna rozvrhu' : widget.dayReason;
+    // Quote the note the write will ACTUALLY use (the RPC falls back to
+    // 'změna rozvrhu' when the passed reason is empty).
+    final note = noteOverride ??
+        (widget.dayReason.trim().isEmpty ? 'změna rozvrhu' : widget.dayReason);
     return confirmDialog(
       context,
       title: 'Pozor — rezervace budou zrušeny',
@@ -146,17 +165,42 @@ class _BlockDialogState extends State<BlockDialog> {
         if (id != existing.id) id,
     ];
     setState(() => _saving = true);
-    final reservations = await Api.futureLiveReservations(today());
+    final List<StrandableReservation> reservations;
+    try {
+      reservations = await Api.futureLiveReservations(today());
+    } catch (e) {
+      if (mounted) {
+        snack(context, friendlyDbError(e));
+        setState(() => _saving = false);
+      }
+      return;
+    }
     if (!mounted) return;
     final signUps = reservations
         .where((r) => r.date == date && r.blockId == existing.id)
         .length;
     final blockById = {for (final b in widget.blocks) b.id: b};
+    // A move target must actually RENDER once the removal lands: not hidden
+    // by a special that stays in the override, nor cancelled by a
+    // whole-alley priority slot — else the moved reservations vanish.
+    final remainingSpecials = [
+      for (final id in ids)
+        if (blockById[id] != null && blockById[id]!.position < 0)
+          blockById[id]!,
+    ];
+    bool willRender(TimeBlock b) =>
+        !remainingSpecials.any((s) =>
+            timesOverlap(b.startsAt, b.endsAt, s.startsAt, s.endsAt)) &&
+        !widget.dayPriority.any((m) =>
+            m.type.lanes == null &&
+            !m.type.unresolved &&
+            timesOverlap(b.startsAt, b.endsAt, m.blockingStart, m.endsAt));
     final targets = [
       for (final id in ids)
         if (blockById[id] != null &&
             timesOverlap(existing.startsAt, existing.endsAt,
-                blockById[id]!.startsAt, blockById[id]!.endsAt))
+                blockById[id]!.startsAt, blockById[id]!.endsAt) &&
+            willRender(blockById[id]!))
           blockById[id]!,
     ];
     if (signUps > 0 && targets.isNotEmpty) {
@@ -173,6 +217,14 @@ class _BlockDialogState extends State<BlockDialog> {
         ),
       );
       if (moved != true || !mounted) {
+        if (mounted) setState(() => _saving = false);
+        return;
+      }
+      // The dialog covered the removed block's sign-ups; stranded rows on
+      // OTHER non-kept blocks still deserve the standard sweep confirm.
+      final ok = await _confirmDayCancellations(
+          date, {...ids, existing.id});
+      if (!ok || !mounted) {
         if (mounted) setState(() => _saving = false);
         return;
       }
@@ -203,9 +255,11 @@ class _BlockDialogState extends State<BlockDialog> {
   }
 
   /// One-tap escape hatch: drop the day's fork and return to the weekly
-  /// template (reservations on day-only specials get cancelled by the RPC
-  /// first; deleting the row afterwards restores full weekday rules —
-  /// including closing a non-training day again).
+  /// rules. A training day goes back to the template blocks (reservations
+  /// on day-only specials cancel via the RPC); a NON-training day closes
+  /// again — every reservation that date cancels, and the closed write
+  /// lands FIRST so a failure between the two calls can't leave the day
+  /// wide open.
   Future<void> _restoreTemplate() async {
     final date = widget.dayContext!;
     final templateIds = [
@@ -213,7 +267,9 @@ class _BlockDialogState extends State<BlockDialog> {
         if (b.active && b.position >= 0) b.id,
     ];
     setState(() => _saving = true);
-    final ok = await _confirmDayCancellations(date, templateIds.toSet());
+    final kept = widget.dayIsTraining ? templateIds.toSet() : <String>{};
+    final ok = await _confirmDayCancellations(date, kept,
+        noteOverride: 'změna rozvrhu');
     if (!ok || !mounted) {
       if (mounted) setState(() => _saving = false);
       return;
@@ -221,8 +277,12 @@ class _BlockDialogState extends State<BlockDialog> {
     final done = await tryAction(
       context,
       () async {
-        await Api.setDayOverride(
-            date: date, closed: false, reason: '', blockIds: templateIds);
+        if (widget.dayIsTraining) {
+          await Api.setDayOverride(
+              date: date, closed: false, reason: '', blockIds: templateIds);
+        } else {
+          await Api.setDayOverride(date: date, closed: true, reason: '');
+        }
         await Api.deleteDayOverride(date);
       },
       success: 'Den vrácen k týdennímu rozvrhu.',
@@ -295,34 +355,118 @@ class _BlockDialogState extends State<BlockDialog> {
       }
     }
 
+    // Hidden template blocks whose live sign-ups must cancel with the save
+    // (computed in the confirm phase, executed in the action).
+    var hiddenToCancel = const <TimeBlock>[];
+    // Twin's leftover live rows (legacy forks) that must cancel before the
+    // dissolve move, or the 1:1 lane move would hit slot_taken.
+    var twinNeedsSweep = false;
+
     if (_dayMode) {
+      final date = widget.dayContext!;
+      final blockById = {for (final b in widget.blocks) b.id: b};
+      final baseBlocks = [
+        for (final id in widget.dayBaseIds!)
+          if (id != existing?.id && blockById[id] != null) blockById[id]!,
+      ];
+
+      // Overlapping ANOTHER day-special: specials don't hide each other, so
+      // this is a real visual/booking overlap — warn like the old check.
+      final specialOverlaps = [
+        if (dissolveTwin == null)
+          for (final b in baseBlocks)
+            if (b.position < 0 && timesOverlap(start, end, b.startsAt, b.endsAt))
+              b,
+      ];
+      if (specialOverlaps.isNotEmpty) {
+        final proceed = await confirmDialog(
+          context,
+          title: 'Pozor — překryv bloků',
+          message: 'Blok se překrývá s jinou jednodenní změnou '
+              '(${specialOverlaps.map((b) => b.label).join(', ')}) — budou se '
+              'zobrazovat přes sebe. Opravdu uložit?',
+          confirmLabel: 'Uložit i tak',
+        );
+        if (!proceed || !mounted) {
+          bail();
+          return;
+        }
+      }
+
       // The day-scoped block beats the weekly template like a priority
       // slot: template blocks the new times touch are HIDDEN for this day
-      // (and reappear as soon as the edit shrinks or goes away) — say so.
+      // (they reappear when the edit shrinks or goes away) — and just like
+      // a priority slot, their live sign-ups for the day CANCEL, or they'd
+      // survive invisibly and double-book the physical lanes.
       // Irrelevant when dissolving: the result IS a template block.
-      final blockById = {for (final b in widget.blocks) b.id: b};
       final hidden = [
         if (dissolveTwin == null)
-          for (final id in widget.dayBaseIds!)
-            if (id != existing?.id &&
-                blockById[id] != null &&
-                blockById[id]!.position >= 0 &&
-                timesOverlap(
-                    start, end, blockById[id]!.startsAt, blockById[id]!.endsAt))
-              blockById[id]!,
+          for (final b in baseBlocks)
+            if (b.position >= 0 &&
+                timesOverlap(start, end, b.startsAt, b.endsAt))
+              b,
       ];
+      // Fail-safe: without the reservation picture we can't promise what a
+      // hide/dissolve would cancel — abort rather than guess.
+      final List<StrandableReservation> reservations;
+      try {
+        reservations = await Api.futureLiveReservations(today());
+      } catch (e) {
+        if (mounted) snack(context, friendlyDbError(e));
+        bail();
+        return;
+      }
+      if (!mounted) {
+        bail();
+        return;
+      }
       if (hidden.isNotEmpty) {
+        final hiddenIds = {for (final b in hidden) b.id};
+        final hiddenRows = reservations
+            .where((r) => r.date == date && hiddenIds.contains(r.blockId))
+            .length;
         final proceed = await confirmDialog(
           context,
           title: 'Blok bude skryt',
           message: 'Upravený blok v tomto dni skryje '
               '${hidden.map((b) => b.label).join(', ')}. Zobrazí se zase, '
-              'když úpravu zrušíš nebo zkrátíš. Pokračovat?',
+              'když úpravu zrušíš nebo zkrátíš.'
+              '${hiddenRows > 0 ? ' $hiddenRows rezervací na skrytých blocích bude zrušeno.' : ''}'
+              ' Pokračovat?',
           confirmLabel: 'Pokračovat',
         );
         if (!proceed || !mounted) {
           bail();
           return;
+        }
+        hiddenToCancel = [
+          for (final b in hidden)
+            if (reservations
+                .any((r) => r.date == date && r.blockId == b.id))
+              b,
+        ];
+      }
+
+      // Dissolving into a twin that still holds live rows (legacy forks,
+      // pre-cancel-on-hide): sweep them first or the 1:1 move collides.
+      if (dissolveTwin != null) {
+        final twinRows = reservations
+            .where((r) => r.date == date && r.blockId == dissolveTwin!.id)
+            .length;
+        if (twinRows > 0) {
+          final proceed = await confirmDialog(
+            context,
+            title: 'Pozor — rezervace budou zrušeny',
+            message: 'Na původním bloku zůstalo $twinRows rezervací — budou '
+                'zrušeny, aby se přihlášení z upraveného bloku mohli '
+                'přesunout. Pokračovat?',
+            confirmLabel: 'Pokračovat',
+          );
+          if (!proceed || !mounted) {
+            bail();
+            return;
+          }
+          twinNeedsSweep = true;
         }
       }
 
@@ -381,10 +525,17 @@ class _BlockDialogState extends State<BlockDialog> {
           return;
         }
         if (dissolveTwin != null) {
-          // Hand the day back to the template block: move the special's
-          // sign-ups over (lanes 1:1 — the twin was hidden, so its slots
-          // are free), restore the twin's id in the override, and drop the
-          // override row entirely when nothing day-specific remains.
+          // Hand the day back to the template block: sweep the twin's
+          // leftover rows first (legacy forks), move the special's
+          // sign-ups over (lanes 1:1 — the twin's slots are free now),
+          // restore the twin's id in the override, and unwind the row
+          // entirely when nothing day-specific remains — but only on a
+          // TRAINING day (a non-training day would close again and
+          // strand the just-moved reservations).
+          if (twinNeedsSweep) {
+            await Api.cancelBlockDayReservations(
+                widget.dayContext!, dissolveTwin.id);
+          }
           await Api.moveDayReservations(
               widget.dayContext!, existing!.id, dissolveTwin.id);
           final seen = <String>{};
@@ -397,7 +548,7 @@ class _BlockDialogState extends State<BlockDialog> {
             for (final b in widget.blocks)
               if (b.active && b.position >= 0) b.id,
           };
-          if (setEquals(ids.toSet(), templateIds)) {
+          if (widget.dayIsTraining && setEquals(ids.toSet(), templateIds)) {
             await Api.setDayOverride(
                 date: widget.dayContext!,
                 closed: false,
@@ -413,6 +564,17 @@ class _BlockDialogState extends State<BlockDialog> {
             );
           }
           return;
+        }
+        // Cancel the hidden blocks' live sign-ups (confirmed above) BEFORE
+        // the override write — no invisible live rows may survive a hide.
+        for (final b in hiddenToCancel) {
+          await Api.cancelBlockDayReservations(
+            widget.dayContext!,
+            b.id,
+            note: widget.dayReason.trim().isEmpty
+                ? 'změna rozvrhu'
+                : widget.dayReason,
+          );
         }
         // Day-scoped: find-or-create the special block, swap it into the
         // day's override. The reuse pool is ONLY sentinel specials

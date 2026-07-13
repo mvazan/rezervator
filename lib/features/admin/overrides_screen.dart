@@ -29,10 +29,14 @@ class OverridesScreen extends ConsumerWidget {
     );
   }
 
-  /// Returns a schedule-fork day to the weekly template: the RPC-composed
-  /// write cancels reservations that lose their block, then the row goes.
+  /// Returns a schedule-fork day to the weekly rules. A training day goes
+  /// back to the template blocks; a NON-training day closes again (every
+  /// reservation that date cancels, closed write FIRST so a failure between
+  /// the two calls can't leave the day wide open).
   Future<void> _restore(BuildContext context, DayOverride override,
-      List<TimeBlock> blocks) async {
+      List<TimeBlock> blocks, ScheduleSettings settings) async {
+    final isTraining =
+        settings.trainingWeekdays.contains(override.date.weekday);
     final templateIds = [
       for (final b in blocks)
         if (b.active && b.position >= 0) b.id,
@@ -41,26 +45,37 @@ class OverridesScreen extends ConsumerWidget {
     if (!context.mounted) return;
     final losing = reservations
         .where((r) =>
-            r.date == override.date && !templateIds.contains(r.blockId))
+            r.date == override.date &&
+            (!isTraining || !templateIds.contains(r.blockId)))
         .length;
     final confirmed = await confirmDialog(
       context,
       title: 'Vrátit den k týdennímu rozvrhu?',
       message: losing == 0
-          ? 'Jednodenní změna rozvrhu se zruší.'
-          : 'Jednodenní změna rozvrhu se zruší a $losing rezervací mimo '
-              'týdenní bloky bude zrušeno.',
+          ? (isTraining
+              ? 'Jednodenní změna rozvrhu se zruší.'
+              : 'Jednodenní změna se zruší a den bude zase zavřený.')
+          : (isTraining
+              ? 'Jednodenní změna se zruší a $losing rezervací mimo týdenní '
+                  'bloky bude zrušeno („změna rozvrhu").'
+              : 'Den bude zase zavřený a všech $losing rezervací bude '
+                  'zrušeno („změna rozvrhu").'),
       confirmLabel: 'Vrátit',
     );
     if (!confirmed || !context.mounted) return;
     await tryAction(
       context,
       () async {
-        await Api.setDayOverride(
-            date: override.date,
-            closed: false,
-            reason: '',
-            blockIds: templateIds);
+        if (isTraining) {
+          await Api.setDayOverride(
+              date: override.date,
+              closed: false,
+              reason: '',
+              blockIds: templateIds);
+        } else {
+          await Api.setDayOverride(
+              date: override.date, closed: true, reason: '');
+        }
         await Api.deleteDayOverride(override.date);
       },
       success: 'Den vrácen k týdennímu rozvrhu.',
@@ -80,6 +95,8 @@ class OverridesScreen extends ConsumerWidget {
 
     final overrides =
         ref.watch(dayOverridesProvider).value ?? const <DayOverride>[];
+    final settings =
+        ref.watch(settingsProvider).value ?? ScheduleSettings.defaults;
     final blocks = ref.watch(timeBlocksProvider).value ?? const <TimeBlock>[];
     final blockById = {for (final b in blocks) b.id: b};
     final closures = [
@@ -128,7 +145,8 @@ class OverridesScreen extends ConsumerWidget {
             : IconButton(
                 icon: const Icon(Icons.undo),
                 tooltip: 'Vrátit den k týdennímu rozvrhu',
-                onPressed: () => _restore(context, override, blocks),
+                onPressed: () => _restore(
+                    context, override, blocks, settings),
               ),
       );
     }

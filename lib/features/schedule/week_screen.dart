@@ -432,6 +432,9 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
                 dayContext: date,
                 dayBaseIds: dayBaseIds(date),
                 dayHasOverride: overrideByDate[date] != null,
+                dayIsTraining:
+                    settings.trainingWeekdays.contains(date.weekday),
+                dayPriority: week.days[date.weekday - 1].priority,
                 dayReason: overrideByDate[date]?.reason ?? '',
               ),
             );
@@ -467,6 +470,9 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
                 dayContext: date,
                 dayBaseIds: dayBaseIds(date),
                 dayHasOverride: overrideByDate[date] != null,
+                dayIsTraining:
+                    settings.trainingWeekdays.contains(date.weekday),
+                dayPriority: week.days[date.weekday - 1].priority,
                 dayReason: overrideByDate[date]?.reason ?? '',
               ),
             );

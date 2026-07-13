@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/ui.dart';
 import '../../../data/providers.dart';
 import '../../../domain/models.dart';
+import '../../../domain/schedule.dart' show timesOverlap;
 
 /// Removing a day block that still has sign-ups: the admin drags each
 /// reservation from the removed block (left) onto a lane of one of the
@@ -68,7 +69,26 @@ class _MoveReservationsDialogState
         if (!_staged.containsKey(r.id)) r,
     ];
 
+    final rentals = ref.watch(rentalsProvider).value ?? const <Rental>[];
+    final priority = ref.watch(prioritySlotsProvider);
+
+    // The server's move_reservation refuses rented/priority-covered lanes
+    // (like create_reservation) — mirror that here so the admin can't drop
+    // onto a lane the RPC would bounce.
+    bool laneBlocked(TimeBlock block, int lane) =>
+        rentals.any((r) =>
+            r.occursOn(widget.date) &&
+            r.lanes.contains(lane) &&
+            timesOverlap(
+                block.startsAt, block.endsAt, r.startsAt, r.endsAt)) ||
+        priority.any((m) =>
+            m.date == widget.date &&
+            m.type.coversLane(lane) &&
+            timesOverlap(
+                block.startsAt, block.endsAt, m.blockingStart, m.endsAt));
+
     bool laneTaken(TimeBlock block, int lane) =>
+        laneBlocked(block, lane) ||
         reservations.any((r) =>
             r.isLive &&
             r.date == widget.date &&
@@ -211,7 +231,7 @@ class _MoveReservationsDialogState
               r.blockId == block.id &&
               r.lane == lane)
           .toList();
-      occupant = r.isEmpty ? '?' : (nameById[r.first.playerId] ?? '?');
+      occupant = r.isEmpty ? 'blokováno' : (nameById[r.first.playerId] ?? '?');
     }
 
     return DragTarget<Reservation>(
@@ -279,9 +299,14 @@ class _MoveReservationsDialogState
     final ok = await tryAction(
       context,
       () async {
-        for (final entry in _staged.entries) {
+        // Entries leave _staged as they land, so a mid-sequence failure
+        // (slot_taken, unknown_reservation) keeps the dialog open with an
+        // HONEST picture: already-moved reservations no longer show as
+        // pending, only the failed/rest remain to re-stage or cancel.
+        for (final entry in [..._staged.entries]) {
           await Api.moveReservation(
               entry.key, entry.value.$1.id, entry.value.$2);
+          if (mounted) setState(() => _staged.remove(entry.key));
         }
       },
       errorText: friendlyDbError,

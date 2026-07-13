@@ -30,6 +30,7 @@ void main() {
   final thursday = Day(2026, 7, 16);
 
   late List<http.Request> requests;
+  var reservationsBody = '[]';
 
   setUpAll(() async {
     TestWidgetsFlutterBinding.ensureInitialized();
@@ -38,7 +39,7 @@ void main() {
       requests.add(request);
       String body = '{}';
       if (request.method == 'GET' && request.url.path.contains('reservations')) {
-        body = '[]';
+        body = reservationsBody;
       } else if (request.method == 'POST' &&
           request.url.path.contains('time_blocks')) {
         body = '{"id":"sb1"}';
@@ -58,7 +59,10 @@ void main() {
     );
   });
 
-  setUp(() => requests = []);
+  setUp(() {
+    requests = [];
+    reservationsBody = '[]';
+  });
 
   Widget app(BlockDialog dialog) =>
       MaterialApp(home: Scaffold(body: dialog));
@@ -302,6 +306,48 @@ void main() {
       requests.any(
           (r) => r.method == 'POST' && r.url.path.contains('time_blocks')),
       isFalse,
+    );
+  });
+
+  testWidgets('hiding a template block WITH live sign-ups counts them in the '
+      'confirm and cancels them via RPC before the override write', (
+    tester,
+  ) async {
+    reservationsBody =
+        '[{"date":"${thursday.toSql()}","lane":1,"block_id":"b2"}]';
+    await tester.pumpWidget(app(BlockDialog(
+      existing: null,
+      blocks: const [b1, b2],
+      initialStart: const HourMinute(17, 0),
+      initialEnd: const HourMinute(18, 0),
+      dayContext: thursday,
+      dayBaseIds: const ['b1', 'b2'],
+    )));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Uložit'));
+    await tester.pumpAndSettle();
+
+    // The confirm is honest about the cancellations…
+    expect(find.text('Blok bude skryt'), findsOneWidget);
+    expect(
+      find.textContaining('1 rezervací na skrytých blocích bude zrušeno'),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('Pokračovat'));
+    await tester.pumpAndSettle();
+
+    // …and the hidden block's rows are swept via the dedicated RPC before
+    // the override write — no invisible live reservations survive a hide.
+    final cancel = requests.firstWhere(
+      (r) =>
+          r.method == 'POST' &&
+          r.url.path.contains('cancel_block_day_reservations'),
+    );
+    expect((jsonDecode(cancel.body) as Map)['p_block'], 'b2');
+    expect(
+      requests.any((r) => r.url.path.contains('set_day_override')),
+      isTrue,
     );
   });
 }
