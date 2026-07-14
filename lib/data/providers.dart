@@ -10,6 +10,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'cache.dart';
 
+import '../config.dart';
 import '../domain/models.dart';
 
 SupabaseClient get _db => Supabase.instance.client;
@@ -168,6 +169,11 @@ class Api {
 
   static Future<void> signInWithPassword(String email, String password) =>
       _db.auth.signInWithPassword(email: email, password: password);
+
+  /// Demo-account sign-in for Google Play review: password login (no e-mail),
+  /// used only for [AppConfig.demoEmail]. See AppConfig for why this exists.
+  static Future<void> signInDemo() => _db.auth.signInWithPassword(
+      email: AppConfig.demoEmail, password: AppConfig.demoPassword);
 
   static Future<void> signOut() async {
     final uid = currentUserId;

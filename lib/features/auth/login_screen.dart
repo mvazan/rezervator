@@ -74,10 +74,37 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     // AuthGate re-routes via the (now-refreshing) auth stream on success.
   }
 
+  /// Google Play review demo account: no e-mail is sent. The reviewer enters
+  /// the demo e-mail, we ask for the fixed access code, then sign in with a
+  /// password baked in at build time. See AppConfig for the rationale.
+  Future<void> _demoLogin() async {
+    final code = await promptText(
+      context,
+      title: 'Přístupový kód',
+      hint: 'kód pro recenzi',
+      confirmLabel: 'Přihlásit',
+      keyboardType: TextInputType.number,
+    );
+    if (code == null || !mounted) return;
+    if (code.trim() != AppConfig.demoAccessCode) {
+      snack(context, 'Neplatný kód.');
+      return;
+    }
+    setState(() => _sending = true);
+    await tryAction(context, Api.signInDemo, errorText: friendlyDbError);
+    // AuthGate re-routes via the (now-refreshing) auth stream on success.
+    if (!mounted) return;
+    setState(() => _sending = false);
+  }
+
   Future<void> _send() async {
     final email = _email.text.trim();
     if (email.isEmpty || !email.contains('@')) {
       snack(context, 'Zadej platný e-mail.');
+      return;
+    }
+    if (AppConfig.isDemoLogin(email)) {
+      await _demoLogin();
       return;
     }
     setState(() {
