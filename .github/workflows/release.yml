@@ -6,10 +6,10 @@ name: Release
 # internal testing track as a draft. Bump `version:` in pubspec.yaml before
 # tagging so the versionCode grows and Android/Play accept the update.
 #
-# The Play "what's new" text comes from the annotated tag's message body
-# (everything after the first line). Tag with:
-#   git tag -a v1.1.0 -m "v1.1.0" -m "- Oprava X\n- Nová funkce Y"
-# A lightweight tag (no -m body) falls back to a generic note.
+# The Play "what's new" text and GitHub Release notes come from the in-app
+# changelog (lib/features/profile/changelog_data.dart) via tool/whatsnew.dart,
+# keyed by the bare version — so the store text always matches what users see
+# in Můj profil. Add the matching changelog entry before tagging.
 on:
   push:
     tags: ['v*']
@@ -63,18 +63,15 @@ jobs:
           cp build/app/outputs/bundle/release/app-release.aab \
              rezervator-${{ github.ref_name }}.aab
 
-      # "What's new" for Play, from the annotated tag's message body (the
-      # part after the subject line). No body -> a generic Czech note so the
-      # upload never fails on a missing file.
-      - name: Generate Play release notes from the tag
+      # "What's new" for Play, generated from the in-app changelog so the
+      # store text always matches what users see in Můj profil. The tag is
+      # v1.0.1; the changelog keys by bare version (1.0.1). Missing entry ->
+      # fail loudly (--out keeps dart-run noise out of the file).
+      - name: Generate Play release notes from changelog
         run: |
           mkdir -p whatsnew
-          BODY="$(git tag -l --format='%(contents:body)' "${GITHUB_REF_NAME}")"
-          if [ -z "${BODY//[[:space:]]/}" ]; then
-            BODY="Vylepšení a opravy chyb."
-          fi
-          # Play caps release notes at 500 chars.
-          printf '%s\n' "$BODY" | head -c 500 > whatsnew/whatsnew-cs-CZ.txt
+          VERSION="${GITHUB_REF_NAME#v}"
+          dart run tool/whatsnew.dart "$VERSION" --out=whatsnew/whatsnew-cs-CZ.txt
           echo "----- whatsnew-cs-CZ.txt -----"
           cat whatsnew/whatsnew-cs-CZ.txt
 

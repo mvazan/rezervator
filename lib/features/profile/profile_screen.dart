@@ -1,8 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../core/ui.dart';
 import '../../data/providers.dart';
+import 'changelog.dart';
+
+/// App version/build, read once from the platform — drives the version line
+/// at the bottom of the profile screen.
+final _packageInfoProvider =
+    FutureProvider((_) => PackageInfo.fromPlatform());
 
 /// Self-service profile screen: every signed-in user can see their display
 /// name/club (set at registration by an admin) and edit their own board
@@ -116,6 +123,25 @@ class ProfileScreen extends ConsumerWidget {
                     onTap: () => _logout(context),
                   ),
                 ),
+                const SizedBox(height: 24),
+                if (ref.watch(_packageInfoProvider).value case final info?)
+                  Center(
+                    child: InkWell(
+                      onTap: () => showChangelog(context),
+                      borderRadius: BorderRadius.circular(8),
+                      child: Padding(
+                        padding: const EdgeInsets.all(8),
+                        child: Text(
+                          'verze ${info.version} (build ${info.buildNumber})'
+                          ' · co je nového?',
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: Theme.of(context).colorScheme.outline,
+                              ),
+                        ),
+                      ),
+                    ),
+                  ),
               ],
             ),
     );
