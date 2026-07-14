@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zásady ochrany osobních údajů — Rezervátor</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+         max-width: 720px; margin: 2rem auto; padding: 0 1rem;
+         line-height: 1.6; color: #1a1a1a; }
+  h1 { color: #6366F1; }
+  h2 { margin-top: 1.8rem; }
+  ul { padding-left: 1.2rem; }
+  li { margin-bottom: 0.4rem; }
+  a { color: #6366F1; }
+</style>
+</head>
+<body>
+<h1>Zásady ochrany osobních údajů — Rezervátor</h1>
+
+<p><em>Poslední aktualizace: 14. 7. 2026</em></p>
+
+<p>Rezervátor je aplikace pro rezervaci tréninkových termínů na kuželně.
+Slouží jednotlivým kuželnám ke správě rozvrhu a rezervací jejich hráčů.
+Přístup je pouze pro schválené členy dané kuželny (přihlašovací odkaz
+zaslaný e-mailem a schválení správcem). Tento dokument popisuje, jaké údaje
+aplikace zpracovává a proč.</p>
+
+<h2>Jaké údaje zpracováváme</h2>
+<ul>
+  <li><strong>E-mailová adresa</strong> — slouží výhradně k přihlášení
+    (přihlašovací odkaz nebo kód zaslaný e-mailem). Nepoužívá se k marketingu.</li>
+  <li><strong>Zobrazované jméno a přezdívka</strong> — jak tě vidí ostatní
+    v rozvrhu; zadáváš je při registraci.</li>
+  <li><strong>Oddíl (klub)</strong> — nepovinné zařazení hráče k oddílu
+    pro přehlednost rozvrhu.</li>
+  <li><strong>Rezervace a docházka</strong> — kdy a na které dráze máš
+    rezervovaný trénink; tyto údaje vidí jen schválení členové a správci
+    téže kuželny.</li>
+  <li><strong>Token pro push notifikace</strong> — pokud jsou upozornění
+    zapnutá, technický identifikátor zařízení, aby aplikace mohla poslat
+    upozornění (např. o přesunutí či zrušení rezervace). Neváže se na žádné
+    reklamní profily.</li>
+</ul>
+
+<h2>K čemu údaje slouží</h2>
+<p>Výhradně k fungování aplikace: přihlášení, zobrazení rozvrhu a rezervací
+schváleným členům kuželny a zasílání upozornění o změnách rezervací.
+Údaje neslouží k reklamě ani profilování.</p>
+
+<h2>Kioskový režim</h2>
+<p>Na kuželně může běžet sdílený tablet (kiosek), kde si hráč vybere své jméno
+a vytvoří rezervaci bez přihlašování. Pro kontrolu se o takové rezervaci
+odešle e-mail dotčenému hráči s možností ji jedním kliknutím zrušit.</p>
+
+<h2>Kde jsou údaje uloženy</h2>
+<p>Data jsou uložena ve službě <strong>Supabase</strong> (PostgreSQL, region
+EU — Frankfurt). Přenos je šifrovaný (HTTPS). E-maily s přihlašovacím
+odkazem a upozorněními odesílá poskytovatel SMTP, případně služba Resend.
+Push notifikace, pokud jsou zapnuté, odesílá <strong>Firebase Cloud
+Messaging</strong> (Google).</p>
+
+<h2>Sdílení údajů</h2>
+<p>Údaje <strong>nesdílíme ani neprodáváme</strong> třetím stranám. Jsou
+přístupné pouze schváleným členům a správcům téže kuželny v rámci aplikace
+a výše uvedeným technickým poskytovatelům (Supabase, Google/Firebase),
+nezbytným pro provoz. Data jedné kuželny nejsou přístupná jiné kuželně.</p>
+
+<h2>Uchování a smazání</h2>
+<p>Data se uchovávají po dobu, kdy kuželna aplikaci používá. O smazání svého
+účtu a souvisejících dat můžeš požádat na kontaktu níže; správce kuželny
+může člena také skrýt nebo odebrat přímo v aplikaci.</p>
+
+<h2>Kontakt</h2>
+<p>Dotazy k ochraně údajů: <a href="mailto:milos.vazan@gmail.com">milos.vazan@gmail.com</a></p>
+</body>
+</html>
