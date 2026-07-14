@@ -1,0 +1,33 @@
+name: Deploy backend (Supabase)
+
+# Whenever anything under supabase/ lands on main, apply migrations and
+# redeploy the Edge Functions. Firebase needs no deploy step — its service
+# account (if used) lives as a Supabase secret, set once.
+on:
+  push:
+    branches: [main]
+    paths: ['supabase/**']
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Link project
+        run: supabase link --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
+      - name: Apply migrations
+        run: supabase db push
+      # --no-verify-jwt: both functions are called without a Supabase JWT —
+      # notify by DB webhooks (gated on the x-webhook-secret header), cancel
+      # by the one-click e-mail link (gated on the signed HMAC token).
+      - name: Deploy notify function
+        run: supabase functions deploy notify --no-verify-jwt
+      - name: Deploy cancel function
+        run: supabase functions deploy cancel --no-verify-jwt
