@@ -67,13 +67,16 @@ jobs:
       # store text always matches what users see in Můj profil. The tag is
       # v1.0.1; the changelog keys by bare version (1.0.1). Missing entry ->
       # fail loudly (--out keeps dart-run noise out of the file).
+      # r0adkll/upload-google-play derives the locale from the filename after
+      # the `whatsnew-` prefix — so the file must be `whatsnew-cs-CZ` WITHOUT
+      # a .txt extension, or Play rejects the locale as "cs-CZ.txt".
       - name: Generate Play release notes from changelog
         run: |
           mkdir -p whatsnew
           VERSION="${GITHUB_REF_NAME#v}"
-          dart run tool/whatsnew.dart "$VERSION" --out=whatsnew/whatsnew-cs-CZ.txt
-          echo "----- whatsnew-cs-CZ.txt -----"
-          cat whatsnew/whatsnew-cs-CZ.txt
+          dart run tool/whatsnew.dart "$VERSION" --out=whatsnew/whatsnew-cs-CZ
+          echo "----- whatsnew-cs-CZ -----"
+          cat whatsnew/whatsnew-cs-CZ
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
