@@ -41,6 +41,10 @@ aplikace zpracovává a proč.</p>
     zapnutá, technický identifikátor zařízení, aby aplikace mohla poslat
     upozornění (např. o přesunutí či zrušení rezervace). Neváže se na žádné
     reklamní profily.</li>
+  <li><strong>Diagnostická data o pádech</strong> — když aplikace narazí na
+    chybu, odešle se technický záznam (typ chyby, model zařízení, verze
+    systému a aplikace), aby šlo chybu najít a opravit. Neobsahuje obsah tvých
+    dat ani přihlašovací údaje a neslouží k marketingu.</li>
 </ul>
 
 <h2>K čemu údaje slouží</h2>
@@ -58,13 +62,16 @@ odešle e-mail dotčenému hráči s možností ji jedním kliknutím zrušit.</
 EU — Frankfurt). Přenos je šifrovaný (HTTPS). E-maily s přihlašovacím
 odkazem a upozorněními odesílá poskytovatel SMTP, případně služba Resend.
 Push notifikace, pokud jsou zapnuté, odesílá <strong>Firebase Cloud
-Messaging</strong> (Google).</p>
+Messaging</strong> (Google). Diagnostická data o pádech aplikace zpracovává
+služba <strong>Sentry</strong> (Functional Software, Inc.) výhradně pro
+hlášení a opravu chyb.</p>
 
 <h2>Sdílení údajů</h2>
 <p>Údaje <strong>nesdílíme ani neprodáváme</strong> třetím stranám. Jsou
 přístupné pouze schváleným členům a správcům téže kuželny v rámci aplikace
-a výše uvedeným technickým poskytovatelům (Supabase, Google/Firebase),
-nezbytným pro provoz. Data jedné kuželny nejsou přístupná jiné kuželně.</p>
+a výše uvedeným technickým poskytovatelům (Supabase, Google/Firebase,
+Sentry), nezbytným pro provoz a pro hlášení chyb. Data jedné kuželny nejsou
+přístupná jiné kuželně.</p>
 
 <h2>Uchování a smazání</h2>
 <p>Data se uchovávají po dobu, kdy kuželna aplikaci používá. O smazání svého
