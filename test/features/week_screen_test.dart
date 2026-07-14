@@ -514,10 +514,15 @@ void main() {
     await tester.pumpWidget(app(profile: admin));
     await tester.pumpAndSettle();
 
-    // Every card carries a clickable time header with an edit glyph.
+    // Every card carries a clickable time header with an edit glyph. Target
+    // `tomorrow`'s column, never `.first` (Monday) — editing a past day is
+    // guarded off, so `.first` only works when the suite runs on a Monday.
     expect(find.byIcon(Icons.edit_outlined), findsWidgets);
     final header = find.descendant(
-      of: find.byKey(const ValueKey('cal-block-b1')).first,
+      of: find.descendant(
+        of: find.byKey(ValueKey(tomorrow)),
+        matching: find.byKey(const ValueKey('cal-block-b1')),
+      ),
       matching: find.text(b1.label),
     );
     await tester.tap(header);

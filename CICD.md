@@ -37,6 +37,7 @@ Add the rest:
 | `ANDROID_KEY_ALIAS` | release | `rezervator` |
 | `ANDROID_KEY_PASSWORD` | release | key password (= store password) |
 | `PLAY_SERVICE_ACCOUNT_JSON` | release | play-uploader service-account JSON |
+| `DEMO_PASSWORD` | release | password for the Play-review demo account (see PLAY.md) |
 
 ### 2. Migration history must match prod
 

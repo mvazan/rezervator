@@ -99,6 +99,34 @@ Za pár minut je na stránce **Releases** podepsané `rezervator-v1.1.0.apk`
 (sdílej odkaz) a v Play na internal tracku čeká **koncept** — v Play Console
 ho zkontroluj a vydej testerům.
 
-> Google Play recenze / demo přístup: viz interní poznámky (u Termínátoru
-> běží přes vyhrazený demo účet + `DEMO_PASSWORD`). Pokud bude Rezervátor
-> potřebovat totéž, doplníme demo bypass a `DEMO_PASSWORD` secret zvlášť.
+## Demo přístup pro recenzenty Google Play
+
+Aplikace se přihlašuje jen e-mailovým odkazem (magic link), takže recenzent
+Googlu by se nedostal dovnitř. Proto má vestavěný **demo obchvat** (viz
+`lib/config.dart` + `lib/features/auth/login_screen.dart`): když se na
+přihlašovací obrazovce zadá demo e-mail, aplikace se zeptá na přístupový kód a
+pak se přihlásí heslem místo odeslání e-mailu. Heslo není v kódu — přichází z
+`--dart-define=DEMO_PASSWORD` (GitHub secret), takže obchvat je bez secretu
+neaktivní. Běžných uživatelů se to netýká.
+
+Přihlašovací údaje pro Play (App content → **App access** → přidat instrukce):
+
+- **E-mail:** `playreview@vvrky.cz`
+- **Přístupový kód:** `271828`  (veřejný, jen otevře heslovou cestu)
+- Postup: zadej e-mail → „Poslat" → zadej kód → jsi v demo kuželně „Demo".
+
+### Jednorázové zprovoznění dema
+
+1. **Nastav secret** `DEMO_PASSWORD` (GitHub → Actions secrets) na libovolné
+   silné heslo. Použij ho i pro lokální build:
+   `flutter build ... --dart-define=DEMO_PASSWORD=<heslo>`.
+2. **Vytvoř auth uživatele** v Supabase dashboardu (Authentication → Users →
+   Add user) s e-mailem `playreview@vvrky.cz` a **stejným heslem** jako v
+   secretu. Zaškrtni „Auto confirm".
+3. **Připoj ho k demo kuželně** — migrace `0012_demo_seed.sql` založí tenant
+   „Demo" s rozvrhem; pak jednou spusť v SQL editoru:
+   ```sql
+   select seed_demo_member('playreview@vvrky.cz');
+   ```
+   (přidá schválený admin profil do tenantu „Demo").
+4. Znovu sestav a nahraj build s baked-in `DEMO_PASSWORD` a otestuj přihlášení.
