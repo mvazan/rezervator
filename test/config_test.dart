@@ -13,7 +13,7 @@ void main() {
     });
 
     test('demo access code is the fixed review gate', () {
-      expect(AppConfig.demoAccessCode, '271828');
+      expect(AppConfig.demoAccessCode, '126533');
       expect(AppConfig.demoEmail, 'playreview@vvrky.cz');
     });
   });

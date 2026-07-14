@@ -44,7 +44,7 @@ class AppConfig {
 
   /// The code the reviewer types (public, not a secret — it only gates the
   /// password path; the password itself is what actually authenticates).
-  static const demoAccessCode = '271828';
+  static const demoAccessCode = '126533';
 
   /// Demo login is available only when a password was baked in (release builds
   /// carrying the secret) and the entered e-mail matches the demo account.

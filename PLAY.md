@@ -112,7 +112,7 @@ neaktivní. Běžných uživatelů se to netýká.
 Přihlašovací údaje pro Play (App content → **App access** → přidat instrukce):
 
 - **E-mail:** `playreview@vvrky.cz`
-- **Přístupový kód:** `271828`  (veřejný, jen otevře heslovou cestu)
+- **Přístupový kód:** `126533`  (veřejný, jen otevře heslovou cestu)
 - Postup: zadej e-mail → „Poslat" → zadej kód → jsi v demo kuželně „Demo".
 
 ### Jednorázové zprovoznění dema
