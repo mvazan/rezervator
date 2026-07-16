@@ -98,4 +98,41 @@ void main() {
     expect(find.text('Sokol Dlouhá Lhota'), findsOneWidget);
     expect(find.text('Veverky'), findsOneWidget);
   });
+
+  testWidgets('a visiting superadmin is hidden; at home they are listed',
+      (tester) async {
+    const visiting = Profile(
+      id: 'sv',
+      displayName: 'Miloš (na návštěvě)',
+      club: '',
+      email: 'milos.vazan@gmail.com',
+      role: Role.admin,
+      status: ProfileStatus.approved,
+      superadmin: true,
+      tenantId: 't-foreign',
+      homeTenantId: 't-home',
+    );
+    const atHome = Profile(
+      id: 'sh',
+      displayName: 'Miloš (doma)',
+      club: '',
+      email: 'milos.vazan@gmail.com',
+      role: Role.admin,
+      status: ProfileStatus.approved,
+      superadmin: true,
+      tenantId: 't-home',
+      homeTenantId: 't-home',
+    );
+    await tester.pumpWidget(app([
+      admin,
+      player('p1', 'Zdeněk'),
+      visiting,
+      atHome,
+    ]));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Miloš (na návštěvě)'), findsNothing);
+    expect(find.text('Miloš (doma)'), findsOneWidget);
+    expect(find.text('Zdeněk'), findsOneWidget);
+  });
 }

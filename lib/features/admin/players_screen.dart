@@ -148,7 +148,12 @@ class PlayersScreen extends ConsumerWidget {
       );
     }
 
-    final profiles = ref.watch(profilesProvider).value ?? const <Profile>[];
+    // A visiting superadmin (switched into this kuželna, 0015) is
+    // inspecting, not playing — keep them out of the member lists.
+    final profiles = [
+      for (final p in ref.watch(profilesProvider).value ?? const <Profile>[])
+        if (!p.isVisiting) p,
+    ];
     final clubs = ref.watch(clubsProvider).value ?? const <Club>[];
     final pending = profiles
         .where((p) => p.status == ProfileStatus.pending)
