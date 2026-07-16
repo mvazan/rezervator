@@ -63,11 +63,45 @@ final profilesProvider = StreamProvider<List<Profile>>((ref) {
 /// Alley configuration singleton (null until the backend is seeded).
 /// Alleys offered at registration (id + name; RLS exposes nothing more).
 /// Session-gated, not profile-gated — the register screen runs pre-profile.
+/// Pending kuželny (0014) stay out of the dropdown until approved.
 final tenantsProvider = FutureProvider<List<Tenant>>((ref) async {
   if (ref.watch(_authUidProvider) == null) return const [];
-  final rows = await _db.from('tenants').select('id, name');
+  final rows = await _db
+      .from('tenants')
+      .select('id, name')
+      .eq('status', 'approved');
   return [for (final row in rows) Tenant.fromJson(row)]
     ..sort((a, b) => a.name.compareTo(b.name));
+});
+
+/// The caller's own kuželna's approval status ('pending'/'approved') — the
+/// AuthGate parks founders of not-yet-approved kuželny on the waiting
+/// screen. Errors surface as null and the gate FAILS OPEN (an offline
+/// regular member must never get locked out by this check).
+final myTenantStatusProvider =
+    FutureProvider.family<String?, String>((ref, tenantId) async {
+  if (tenantId.isEmpty) return null;
+  try {
+    final row = await _db
+        .from('tenants')
+        .select('status')
+        .eq('id', tenantId)
+        .maybeSingle();
+    return row?['status'] as String?;
+  } catch (_) {
+    return null;
+  }
+});
+
+/// Superadmin's kuželny overview (guarded RPC — regular admins get an
+/// error, so only watch it when the profile says superadmin).
+final adminTenantsProvider =
+    FutureProvider.autoDispose<List<AdminTenant>>((ref) async {
+  final List<dynamic> rows = await _db.rpc('admin_list_tenants');
+  return [
+    for (final row in rows)
+      AdminTenant.fromJson((row as Map).cast<String, dynamic>()),
+  ];
 });
 
 /// Clubs of one alley for the register screen's club picker. Goes through a
@@ -174,6 +208,24 @@ class Api {
   /// used only for [AppConfig.demoEmail]. See AppConfig for why this exists.
   static Future<void> signInDemo() => _db.auth.signInWithPassword(
       email: AppConfig.demoEmail, password: AppConfig.demoPassword);
+
+  // --- superadmin: tenant approval + switching (0014) ---
+  static Future<void> approveTenant(String tenantId) =>
+      _db.rpc('approve_tenant', params: {'p_tenant_id': tenantId});
+
+  static Future<void> rejectTenant(String tenantId) =>
+      _db.rpc('reject_tenant', params: {'p_tenant_id': tenantId});
+
+  /// Moves the superadmin's own membership into [tenantId]. Call
+  /// [resetTenantScopedProviders] (and pop to the root) afterwards — every
+  /// stream fetched its rows under the OLD tenant's RLS scope.
+  static Future<void> switchTenant(String tenantId) async {
+    await _db.rpc('switch_tenant', params: {'p_tenant_id': tenantId});
+    final uid = currentUserId;
+    // The per-user row cache holds the old kuželna's tables; a stale seed
+    // would flash foreign data after the switch.
+    if (uid != null) await RowCache.clear(uid);
+  }
 
   static Future<void> signOut() async {
     final uid = currentUserId;
@@ -614,3 +666,25 @@ final myActiveReservationsProvider =
               .eq('player_id', uid))
       .map((rows) => rows.map(Reservation.fromJson).toList());
 });
+
+/// After a superadmin tenant switch (Api.switchTenant): every tenant-scoped
+/// stream fetched its rows under the OLD kuželna's RLS scope, so re-create
+/// them all — the fresh subscriptions read as the new kuželna.
+/// (myProfileProvider would flip tenant_id by itself, but a clean slate
+/// keeps every consumer consistent in one frame.)
+void resetTenantScopedProviders(WidgetRef ref) {
+  ref.invalidate(myProfileProvider);
+  ref.invalidate(profilesProvider);
+  ref.invalidate(settingsProvider);
+  ref.invalidate(clubsProvider);
+  ref.invalidate(timeBlocksProvider);
+  ref.invalidate(dayOverridesProvider);
+  ref.invalidate(slotTypesProvider);
+  ref.invalidate(_prioritySlotRowsProvider);
+  ref.invalidate(rentalsProvider);
+  ref.invalidate(weekReservationsProvider);
+  ref.invalidate(myActiveReservationsProvider);
+  ref.invalidate(playersProvider);
+  ref.invalidate(tenantsProvider);
+  ref.invalidate(myTenantStatusProvider);
+}

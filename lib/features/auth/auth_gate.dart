@@ -39,6 +39,14 @@ class AuthGate extends ConsumerWidget {
         if (p == null) return const RegisterScreen();
         if (p.role == Role.kiosk) return const KioskShell();
         if (p.status == ProfileStatus.pending) return const WaitingScreen();
+        // A founder of a not-yet-approved kuželna waits for the superadmin
+        // (0014). Known-pending gates; loading/error FAIL OPEN so an
+        // offline member of an approved kuželna is never locked out.
+        final tenantStatus =
+            ref.watch(myTenantStatusProvider(p.tenantId)).value;
+        if (tenantStatus == 'pending') {
+          return const WaitingScreen(reason: WaitingReason.tenantApproval);
+        }
         return const HomeShell();
       },
     );
