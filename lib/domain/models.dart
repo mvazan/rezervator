@@ -112,6 +112,7 @@ class Profile {
     this.clubId,
     this.tenantId = '',
     this.superadmin = false,
+    this.homeTenantId = '',
   });
 
   final String id;
@@ -134,9 +135,18 @@ class Profile {
   /// App owner (0014): approves new kuželny and can switch tenants.
   final bool superadmin;
 
+  /// Where the superadmin actually plays (0015) — switch_tenant moves
+  /// [tenantId] but never this.
+  final String homeTenantId;
+
   bool get isApproved => status == ProfileStatus.approved;
   bool get isAdmin => role == Role.admin && isApproved;
   bool get isSuperadmin => superadmin && isApproved;
+
+  /// A superadmin switched into a foreign kuželna — hidden from its player
+  /// lists and attendance (they are inspecting, not playing).
+  bool get isVisiting =>
+      superadmin && homeTenantId.isNotEmpty && homeTenantId != tenantId;
 
   factory Profile.fromJson(Map<String, dynamic> json) => Profile(
         id: json['id'] as String,
@@ -152,6 +162,7 @@ class Profile {
         clubId: json['club_id'] as String?,
         tenantId: json['tenant_id'] as String? ?? '',
         superadmin: json['superadmin'] as bool? ?? false,
+        homeTenantId: json['home_tenant_id'] as String? ?? '',
       );
 }
 

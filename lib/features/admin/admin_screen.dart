@@ -79,16 +79,18 @@ class AdminScreen extends ConsumerWidget {
       );
     }
 
-    // The kuželny approval/switching hub is superadmin-only (0014).
-    final entries = [
-      ..._entries,
-      if (profile?.isSuperadmin == true)
-        (
-          label: 'Kuželny',
-          icon: Icons.apartment_outlined,
-          screen: () => const TenantsScreen(),
-        ),
-    ];
+    // The kuželny approval/switching hub is superadmin-only (0014) and
+    // renders as its OWN visually distinct section — tinted tile under a
+    // "Správce aplikace" divider, never mixed among the kuželna admin
+    // tiles.
+    const superEntry = (
+      label: 'Kuželny',
+      icon: Icons.apartment_outlined,
+    );
+    final isSuperadmin = profile?.isSuperadmin == true;
+    final scheme = Theme.of(context).colorScheme;
+    void openTenants() => Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => const TenantsScreen()));
 
     return Scaffold(
       appBar: AppBar(title: const Text('Správa kuželny')),
@@ -97,12 +99,31 @@ class AdminScreen extends ConsumerWidget {
           if (constraints.maxWidth < _wideBreakpoint) {
             return ListView(
               children: [
-                for (final entry in entries)
+                for (final entry in _entries)
                   ListTile(
                     leading: _AdminIcon(entry.icon),
                     title: Text(entry.label),
                     onTap: () => _open(context, entry),
                   ),
+                if (isSuperadmin) ...[
+                  const Divider(),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                    child: Text(
+                      'Správce aplikace',
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                            color: scheme.tertiary,
+                          ),
+                    ),
+                  ),
+                  ListTile(
+                    tileColor: scheme.tertiaryContainer.withValues(alpha: 0.35),
+                    leading: _AdminIcon(superEntry.icon, tinted: true),
+                    title: Text(superEntry.label),
+                    subtitle: const Text('schvalování a přepínání kuželen'),
+                    onTap: openTenants,
+                  ),
+                ],
               ],
             );
           }
@@ -118,7 +139,7 @@ class AdminScreen extends ConsumerWidget {
                   mainAxisSpacing: 16,
                 ),
                 children: [
-                  for (final entry in entries)
+                  for (final entry in _entries)
                     Card(
                       clipBehavior: Clip.antiAlias,
                       child: InkWell(
@@ -142,6 +163,45 @@ class AdminScreen extends ConsumerWidget {
                         ),
                       ),
                     ),
+                  if (isSuperadmin)
+                    Card(
+                      clipBehavior: Clip.antiAlias,
+                      color: scheme.tertiaryContainer.withValues(alpha: 0.4),
+                      child: InkWell(
+                        onTap: openTenants,
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Row(
+                            children: [
+                              _AdminIcon(superEntry.icon, tinted: true),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      superEntry.label,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .titleMedium,
+                                    ),
+                                    Text(
+                                      'správce aplikace',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .labelSmall
+                                          ?.copyWith(color: scheme.tertiary),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -154,9 +214,13 @@ class AdminScreen extends ConsumerWidget {
 
 /// Admin hub leading icon: tonal 40×40 rounded square around the glyph.
 class _AdminIcon extends StatelessWidget {
-  const _AdminIcon(this.icon);
+  const _AdminIcon(this.icon, {this.tinted = false});
 
   final IconData icon;
+
+  /// Tertiary treatment for the superadmin section — visually apart from
+  /// the regular (primary-tinted) kuželna admin tiles.
+  final bool tinted;
 
   @override
   Widget build(BuildContext context) {
@@ -166,10 +230,14 @@ class _AdminIcon extends StatelessWidget {
       height: 40,
       alignment: Alignment.center,
       decoration: BoxDecoration(
-        color: scheme.primaryContainer,
+        color: tinted ? scheme.tertiary : scheme.primaryContainer,
         borderRadius: BorderRadius.circular(12),
       ),
-      child: Icon(icon, color: scheme.onPrimaryContainer, size: 22),
+      child: Icon(
+        icon,
+        color: tinted ? scheme.onTertiary : scheme.onPrimaryContainer,
+        size: 22,
+      ),
     );
   }
 }

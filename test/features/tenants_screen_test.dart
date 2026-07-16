@@ -91,10 +91,13 @@ void main() {
         child: const MaterialApp(home: TenantsScreen()),
       );
 
-  testWidgets('the superadmin sees the Kuželny hub tile', (tester) async {
+  testWidgets('the superadmin sees the Kuželny hub tile in its own '
+      '"Správce aplikace" section', (tester) async {
     await tester.pumpWidget(hub(superadmin));
     await tester.pumpAndSettle();
     expect(find.text('Kuželny'), findsOneWidget);
+    expect(find.text('Správce aplikace'), findsOneWidget);
+    expect(find.text('schvalování a přepínání kuželen'), findsOneWidget);
   });
 
   testWidgets('a regular admin gets no Kuželny hub tile', (tester) async {
