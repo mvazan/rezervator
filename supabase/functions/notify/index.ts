@@ -8,6 +8,8 @@
 //                           admin MOVED it ("termín přesunut z X na Y") —
 //                           both honour the per-change notify_player flag +
 //                           optional notify_message the RPCs stamp (0011)
+//   INSERT tenants       -> "new kuželna waiting for approval" (to the
+//                           superadmins — trigger added in 0014)
 //
 // Channel per recipient: FCM push when profiles.fcm_token is set AND
 // FIREBASE_SERVICE_ACCOUNT is configured; otherwise e-mail via Resend.
@@ -254,6 +256,32 @@ async function handle(payload: WebhookPayload) {
   const record = payload.record ?? {};
 
   switch (payload.table) {
+    case "tenants": {
+      // A new kuželna waits for the superadmin's approval (0014). Existing
+      // tenants only ever UPDATE (approval), which stays silent.
+      if (payload.type !== "INSERT" || record.status !== "pending") return;
+      const { data: superadmins } = await supabase.from("profiles")
+        .select("id, email, fcm_token")
+        .eq("superadmin", true);
+      const name = escapeHtml(String(record.name ?? "?"));
+      const founder = escapeHtml(String(record.founder_email ?? "?"));
+      await Promise.all((superadmins ?? []).map((admin) =>
+        notifyRecipient(
+          admin as Recipient,
+          "Nová kuželna čeká na schválení",
+          `„${record.name}" (${record.founder_email ?? "?"}). ` +
+            `Schval ji v aplikaci: Správa → Kuželny.`,
+          {
+            data: { kind: "pending_tenant" },
+            html: `<p>Někdo založil novou kuželnu <b>${name}</b> ` +
+              `(zakladatel: ${founder}).</p>` +
+              `<p>Schval ji v aplikaci: Správa kuželny → Kuželny.</p>`,
+          },
+        )
+      ));
+      return;
+    }
+
     case "profiles": {
       if (payload.type !== "INSERT" || record.status !== "pending") return;
       // Tenant-scoped fan-out (0005): only the new player's own alley's

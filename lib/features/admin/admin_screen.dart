@@ -10,6 +10,7 @@ import 'players_screen.dart';
 import 'rentals_screen.dart';
 import 'report_screen.dart';
 import 'schedule_screen.dart';
+import 'tenants_screen.dart';
 
 /// One admin hub entry: label + icon + target screen.
 typedef _Entry = ({String label, IconData icon, Widget Function() screen});
@@ -78,6 +79,17 @@ class AdminScreen extends ConsumerWidget {
       );
     }
 
+    // The kuželny approval/switching hub is superadmin-only (0014).
+    final entries = [
+      ..._entries,
+      if (profile?.isSuperadmin == true)
+        (
+          label: 'Kuželny',
+          icon: Icons.apartment_outlined,
+          screen: () => const TenantsScreen(),
+        ),
+    ];
+
     return Scaffold(
       appBar: AppBar(title: const Text('Správa kuželny')),
       body: LayoutBuilder(
@@ -85,7 +97,7 @@ class AdminScreen extends ConsumerWidget {
           if (constraints.maxWidth < _wideBreakpoint) {
             return ListView(
               children: [
-                for (final entry in _entries)
+                for (final entry in entries)
                   ListTile(
                     leading: _AdminIcon(entry.icon),
                     title: Text(entry.label),
@@ -106,7 +118,7 @@ class AdminScreen extends ConsumerWidget {
                   mainAxisSpacing: 16,
                 ),
                 children: [
-                  for (final entry in _entries)
+                  for (final entry in entries)
                     Card(
                       clipBehavior: Clip.antiAlias,
                       child: InkWell(

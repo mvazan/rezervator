@@ -110,6 +110,8 @@ class Profile {
     this.fcmToken,
     this.nick = '',
     this.clubId,
+    this.tenantId = '',
+    this.superadmin = false,
   });
 
   final String id;
@@ -126,8 +128,15 @@ class Profile {
   /// FK into `clubs`; null when the player has no assigned club.
   final String? clubId;
 
+  /// The kuželna this profile belongs to.
+  final String tenantId;
+
+  /// App owner (0014): approves new kuželny and can switch tenants.
+  final bool superadmin;
+
   bool get isApproved => status == ProfileStatus.approved;
   bool get isAdmin => role == Role.admin && isApproved;
+  bool get isSuperadmin => superadmin && isApproved;
 
   factory Profile.fromJson(Map<String, dynamic> json) => Profile(
         id: json['id'] as String,
@@ -141,6 +150,8 @@ class Profile {
         fcmToken: json['fcm_token'] as String?,
         nick: json['nick'] as String? ?? '',
         clubId: json['club_id'] as String?,
+        tenantId: json['tenant_id'] as String? ?? '',
+        superadmin: json['superadmin'] as bool? ?? false,
       );
 }
 
@@ -209,6 +220,34 @@ class Tenant {
 
   factory Tenant.fromJson(Map<String, dynamic> json) =>
       Tenant(id: json['id'] as String, name: json['name'] as String);
+}
+
+/// One row of the superadmin's kuželny overview (admin_list_tenants RPC) —
+/// includes the founder e-mail, which regular clients can never read.
+class AdminTenant {
+  const AdminTenant({
+    required this.id,
+    required this.name,
+    required this.status,
+    this.founderEmail = '',
+    this.memberCount = 0,
+  });
+
+  final String id;
+  final String name;
+  final String status;
+  final String founderEmail;
+  final int memberCount;
+
+  bool get pending => status == 'pending';
+
+  factory AdminTenant.fromJson(Map<String, dynamic> json) => AdminTenant(
+        id: json['id'] as String,
+        name: json['name'] as String,
+        status: json['status'] as String? ?? 'approved',
+        founderEmail: json['founder_email'] as String? ?? '',
+        memberCount: (json['member_count'] as num?)?.toInt() ?? 0,
+      );
 }
 
 class ScheduleSettings {
