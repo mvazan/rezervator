@@ -111,7 +111,11 @@ class AdminScreen extends ConsumerWidget {
       Navigator.of(context).popUntil((route) => route.isFirst);
     }
 
-    final homeLabel = homeName == null ? 'Zpět domů' : 'Zpět do $homeName';
+    // The kuželna name is an apposition after the declined common noun
+    // ('do kuželny X'), never inside the preposition itself — 'Zpět do
+    // Zkouska' would be broken Czech for most names.
+    final homeSubtitle =
+        homeName == null ? 'teď prohlížíš cizí kuželnu' : 'do kuželny $homeName';
 
     return Scaffold(
       appBar: AppBar(title: const Text('Správa kuželny')),
@@ -152,8 +156,8 @@ class AdminScreen extends ConsumerWidget {
                         Icons.home_outlined,
                         tinted: true,
                       ),
-                      title: Text(homeLabel),
-                      subtitle: const Text('teď prohlížíš cizí kuželnu'),
+                      title: const Text('Zpět domů'),
+                      subtitle: Text(homeSubtitle),
                       onTap: goHome,
                     ),
                 ],
@@ -257,13 +261,15 @@ class AdminScreen extends ConsumerWidget {
                                       CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      homeLabel,
+                                      'Zpět domů',
                                       style: Theme.of(context)
                                           .textTheme
                                           .titleMedium,
                                     ),
                                     Text(
-                                      'teď prohlížíš cizí kuželnu',
+                                      homeSubtitle,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
                                       style: Theme.of(context)
                                           .textTheme
                                           .labelSmall

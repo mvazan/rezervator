@@ -101,7 +101,7 @@ void main() {
   Widget hub(Profile me) => ProviderScope(
         overrides: [
           myProfileProvider.overrideWith((ref) => Stream.value(me)),
-          tenantNameProvider.overrideWith((ref, id) async => 'Veveří'),
+          tenantNameProvider.overrideWith((ref, id) async => 'TJ Sokol Brno IV'),
         ],
         child: const MaterialApp(home: AdminScreen()),
       );
@@ -137,7 +137,6 @@ void main() {
     tallSurface(tester);
     await tester.pumpWidget(hub(superadmin));
     await tester.pumpAndSettle();
-    expect(find.textContaining('Zpět do'), findsNothing);
     expect(find.text('Zpět domů'), findsNothing);
   });
 
@@ -147,12 +146,13 @@ void main() {
     await tester.pumpWidget(hub(visitingSuperadmin));
     await tester.pumpAndSettle();
 
-    // Both tiles live in the superadmin section.
+    // Both tiles live in the superadmin section. The home kuželna is named
+    // as an apposition ('do kuželny X'), never declined into the preposition.
     expect(find.text('Kuželny'), findsOneWidget);
-    expect(find.text('Zpět do Veveří'), findsOneWidget);
-    expect(find.text('teď prohlížíš cizí kuželnu'), findsOneWidget);
+    expect(find.text('Zpět domů'), findsOneWidget);
+    expect(find.text('do kuželny TJ Sokol Brno IV'), findsOneWidget);
 
-    await tester.tap(find.text('Zpět do Veveří'));
+    await tester.tap(find.text('Zpět domů'));
     await tester.pumpAndSettle();
 
     final rpc = requests.firstWhere(
