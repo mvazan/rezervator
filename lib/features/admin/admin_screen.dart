@@ -89,7 +89,13 @@ class AdminScreen extends ConsumerWidget {
       icon: Icons.apartment_outlined,
     );
     final isSuperadmin = profile?.isSuperadmin == true;
+    // Visiting a foreign kuželna (0015) adds a second tile straight back
+    // home — the same action the HomeShell banner offers, for when you are
+    // already deep in Správa.
     final isVisiting = profile?.isVisiting == true;
+    final homeName = isVisiting
+        ? ref.watch(tenantNameProvider(profile!.homeTenantId)).value
+        : null;
     final scheme = Theme.of(context).colorScheme;
     void openTenants() => Navigator.of(context)
         .push(MaterialPageRoute(builder: (_) => const TenantsScreen()));
@@ -102,7 +108,10 @@ class AdminScreen extends ConsumerWidget {
       );
       if (!ok || !context.mounted) return;
       resetTenantScopedProviders(ref);
+      Navigator.of(context).popUntil((route) => route.isFirst);
     }
+
+    final homeLabel = homeName == null ? 'Zpět domů' : 'Zpět do $homeName';
 
     return Scaffold(
       appBar: AppBar(title: const Text('Správa kuželny')),
@@ -133,16 +142,20 @@ class AdminScreen extends ConsumerWidget {
                     leading: _AdminIcon(superEntry.icon, tinted: true),
                     title: Text(superEntry.label),
                     subtitle: const Text('schvalování a přepínání kuželen'),
-                    trailing: isVisiting
-                        ? IconButton(
-                            icon: const Icon(Icons.arrow_back),
-                            tooltip: 'Zpět domů',
-                            color: scheme.tertiary,
-                            onPressed: goHome,
-                          )
-                        : null,
                     onTap: openTenants,
                   ),
+                  if (isVisiting)
+                    ListTile(
+                      tileColor:
+                          scheme.tertiaryContainer.withValues(alpha: 0.35),
+                      leading: const _AdminIcon(
+                        Icons.home_outlined,
+                        tinted: true,
+                      ),
+                      title: Text(homeLabel),
+                      subtitle: const Text('teď prohlížíš cizí kuželnu'),
+                      onTap: goHome,
+                    ),
                 ],
               ],
             );
@@ -217,13 +230,48 @@ class AdminScreen extends ConsumerWidget {
                                   ],
                                 ),
                               ),
-                              if (isVisiting)
-                                IconButton(
-                                  icon: const Icon(Icons.arrow_back),
-                                  tooltip: 'Zpět domů',
-                                  color: scheme.tertiary,
-                                  onPressed: goHome,
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  if (isVisiting)
+                    Card(
+                      clipBehavior: Clip.antiAlias,
+                      color: scheme.tertiaryContainer.withValues(alpha: 0.4),
+                      child: InkWell(
+                        onTap: goHome,
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Row(
+                            children: [
+                              const _AdminIcon(
+                                Icons.home_outlined,
+                                tinted: true,
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      homeLabel,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .titleMedium,
+                                    ),
+                                    Text(
+                                      'teď prohlížíš cizí kuželnu',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .labelSmall
+                                          ?.copyWith(color: scheme.tertiary),
+                                    ),
+                                  ],
                                 ),
+                              ),
                             ],
                           ),
                         ),
