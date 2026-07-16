@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/ui.dart';
 import '../../data/providers.dart';
 import 'clubs_screen.dart';
 import 'kiosk_screen.dart';
@@ -88,9 +89,20 @@ class AdminScreen extends ConsumerWidget {
       icon: Icons.apartment_outlined,
     );
     final isSuperadmin = profile?.isSuperadmin == true;
+    final isVisiting = profile?.isVisiting == true;
     final scheme = Theme.of(context).colorScheme;
     void openTenants() => Navigator.of(context)
         .push(MaterialPageRoute(builder: (_) => const TenantsScreen()));
+    Future<void> goHome() async {
+      final ok = await tryAction(
+        context,
+        () => Api.switchTenant(profile!.homeTenantId),
+        success: 'Přepnuto zpět domů.',
+        errorText: friendlyDbError,
+      );
+      if (!ok || !context.mounted) return;
+      resetTenantScopedProviders(ref);
+    }
 
     return Scaffold(
       appBar: AppBar(title: const Text('Správa kuželny')),
@@ -121,6 +133,14 @@ class AdminScreen extends ConsumerWidget {
                     leading: _AdminIcon(superEntry.icon, tinted: true),
                     title: Text(superEntry.label),
                     subtitle: const Text('schvalování a přepínání kuželen'),
+                    trailing: isVisiting
+                        ? IconButton(
+                            icon: const Icon(Icons.arrow_back),
+                            tooltip: 'Zpět domů',
+                            color: scheme.tertiary,
+                            onPressed: goHome,
+                          )
+                        : null,
                     onTap: openTenants,
                   ),
                 ],
@@ -197,6 +217,13 @@ class AdminScreen extends ConsumerWidget {
                                   ],
                                 ),
                               ),
+                              if (isVisiting)
+                                IconButton(
+                                  icon: const Icon(Icons.arrow_back),
+                                  tooltip: 'Zpět domů',
+                                  color: scheme.tertiary,
+                                  onPressed: goHome,
+                                ),
                             ],
                           ),
                         ),

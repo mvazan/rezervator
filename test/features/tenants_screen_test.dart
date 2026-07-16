@@ -34,6 +34,19 @@ void main() {
     role: Role.admin,
     status: ProfileStatus.approved,
     tenantId: 't-home',
+    homeTenantId: 't-home',
+    superadmin: true,
+  );
+
+  const visitingSuperadmin = Profile(
+    id: 's1',
+    displayName: 'Miloš',
+    club: '',
+    email: 'milos.vazan@gmail.com',
+    role: Role.admin,
+    status: ProfileStatus.approved,
+    tenantId: 't-other',
+    homeTenantId: 't-home',
     superadmin: true,
   );
 
@@ -105,6 +118,28 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Kuželny'), findsNothing);
     expect(find.text('Hráči'), findsOneWidget); // regular hub still renders
+  });
+
+  testWidgets('at home the Kuželny tile has no back button', (tester) async {
+    await tester.pumpWidget(hub(superadmin));
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.arrow_back), findsNothing);
+  });
+
+  testWidgets('while visiting, the Kuželny tile shows a back button that '
+      'fires switch_tenant to the home kuželna', (tester) async {
+    await tester.pumpWidget(hub(visitingSuperadmin));
+    await tester.pumpAndSettle();
+
+    final back = find.byIcon(Icons.arrow_back);
+    expect(back, findsOneWidget);
+    await tester.tap(back);
+    await tester.pumpAndSettle();
+
+    final rpc = requests.firstWhere(
+      (r) => r.method == 'POST' && r.url.path.contains('switch_tenant'),
+    );
+    expect(jsonDecode(rpc.body), {'p_tenant_id': 't-home'});
   });
 
   testWidgets('pending kuželna offers approve/reject; approving fires the '
