@@ -93,6 +93,25 @@ final myTenantStatusProvider =
   }
 });
 
+/// One kuželna's name, whatever its status — drives the "prohlížíš cizí
+/// kuželnu" banner. Deliberately NOT tenantsProvider: that one lists only
+/// approved kuželny, and a superadmin may be visiting a pending one.
+/// (`grant select (id, name) on tenants` makes this readable to any member.)
+final tenantNameProvider =
+    FutureProvider.family<String?, String>((ref, tenantId) async {
+  if (tenantId.isEmpty) return null;
+  try {
+    final row = await _db
+        .from('tenants')
+        .select('name')
+        .eq('id', tenantId)
+        .maybeSingle();
+    return row?['name'] as String?;
+  } catch (_) {
+    return null;
+  }
+});
+
 /// Superadmin's kuželny overview (guarded RPC — regular admins get an
 /// error, so only watch it when the profile says superadmin).
 final adminTenantsProvider =
@@ -687,4 +706,5 @@ void resetTenantScopedProviders(WidgetRef ref) {
   ref.invalidate(playersProvider);
   ref.invalidate(tenantsProvider);
   ref.invalidate(myTenantStatusProvider);
+  ref.invalidate(tenantNameProvider);
 }

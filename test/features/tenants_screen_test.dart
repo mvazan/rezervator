@@ -34,6 +34,20 @@ void main() {
     role: Role.admin,
     status: ProfileStatus.approved,
     tenantId: 't-home',
+    homeTenantId: 't-home',
+    superadmin: true,
+  );
+
+  /// The same superadmin, switched into someone else's kuželna (0015).
+  const visitingSuperadmin = Profile(
+    id: 's1',
+    displayName: 'Miloš',
+    club: '',
+    email: 'milos.vazan@gmail.com',
+    role: Role.admin,
+    status: ProfileStatus.approved,
+    tenantId: 't-demo',
+    homeTenantId: 't-home',
     superadmin: true,
   );
 
@@ -75,9 +89,19 @@ void main() {
 
   setUp(() => requests = []);
 
+  /// The hub is a lazy ListView — its superadmin section sits below the 8
+  /// regular tiles, so a default 600px-tall surface never mounts it.
+  void tallSurface(WidgetTester tester) {
+    tester.view.physicalSize = const Size(800, 1600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+  }
+
   Widget hub(Profile me) => ProviderScope(
         overrides: [
           myProfileProvider.overrideWith((ref) => Stream.value(me)),
+          tenantNameProvider.overrideWith((ref, id) async => 'TJ Sokol Brno IV'),
         ],
         child: const MaterialApp(home: AdminScreen()),
       );
@@ -93,6 +117,7 @@ void main() {
 
   testWidgets('the superadmin sees the Kuželny hub tile in its own '
       '"Správce aplikace" section', (tester) async {
+    tallSurface(tester);
     await tester.pumpWidget(hub(superadmin));
     await tester.pumpAndSettle();
     expect(find.text('Kuželny'), findsOneWidget);
@@ -101,10 +126,39 @@ void main() {
   });
 
   testWidgets('a regular admin gets no Kuželny hub tile', (tester) async {
+    tallSurface(tester);
     await tester.pumpWidget(hub(admin));
     await tester.pumpAndSettle();
     expect(find.text('Kuželny'), findsNothing);
     expect(find.text('Hráči'), findsOneWidget); // regular hub still renders
+  });
+
+  testWidgets('at home there is no "back home" tile', (tester) async {
+    tallSurface(tester);
+    await tester.pumpWidget(hub(superadmin));
+    await tester.pumpAndSettle();
+    expect(find.text('Zpět domů'), findsNothing);
+  });
+
+  testWidgets('while visiting, a second tile names the home kuželna and '
+      'switches back to it', (tester) async {
+    tallSurface(tester);
+    await tester.pumpWidget(hub(visitingSuperadmin));
+    await tester.pumpAndSettle();
+
+    // Both tiles live in the superadmin section. The home kuželna is named
+    // as an apposition ('do kuželny X'), never declined into the preposition.
+    expect(find.text('Kuželny'), findsOneWidget);
+    expect(find.text('Zpět domů'), findsOneWidget);
+    expect(find.text('do kuželny TJ Sokol Brno IV'), findsOneWidget);
+
+    await tester.tap(find.text('Zpět domů'));
+    await tester.pumpAndSettle();
+
+    final rpc = requests.firstWhere(
+      (r) => r.method == 'POST' && r.url.path.contains('switch_tenant'),
+    );
+    expect(jsonDecode(rpc.body), {'p_tenant_id': 't-home'});
   });
 
   testWidgets('pending kuželna offers approve/reject; approving fires the '

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/ui.dart';
 import '../../data/providers.dart';
 import 'clubs_screen.dart';
 import 'kiosk_screen.dart';
@@ -88,9 +89,33 @@ class AdminScreen extends ConsumerWidget {
       icon: Icons.apartment_outlined,
     );
     final isSuperadmin = profile?.isSuperadmin == true;
+    // Visiting a foreign kuželna (0015) adds a second tile straight back
+    // home — the same action the HomeShell banner offers, for when you are
+    // already deep in Správa.
+    final isVisiting = profile?.isVisiting == true;
+    final homeName = isVisiting
+        ? ref.watch(tenantNameProvider(profile!.homeTenantId)).value
+        : null;
     final scheme = Theme.of(context).colorScheme;
     void openTenants() => Navigator.of(context)
         .push(MaterialPageRoute(builder: (_) => const TenantsScreen()));
+    Future<void> goHome() async {
+      final ok = await tryAction(
+        context,
+        () => Api.switchTenant(profile!.homeTenantId),
+        success: 'Přepnuto zpět domů.',
+        errorText: friendlyDbError,
+      );
+      if (!ok || !context.mounted) return;
+      resetTenantScopedProviders(ref);
+      Navigator.of(context).popUntil((route) => route.isFirst);
+    }
+
+    // The kuželna name is an apposition after the declined common noun
+    // ('do kuželny X'), never inside the preposition itself — 'Zpět do
+    // Zkouska' would be broken Czech for most names.
+    final homeSubtitle =
+        homeName == null ? 'teď prohlížíš cizí kuželnu' : 'do kuželny $homeName';
 
     return Scaffold(
       appBar: AppBar(title: const Text('Správa kuželny')),
@@ -123,6 +148,18 @@ class AdminScreen extends ConsumerWidget {
                     subtitle: const Text('schvalování a přepínání kuželen'),
                     onTap: openTenants,
                   ),
+                  if (isVisiting)
+                    ListTile(
+                      tileColor:
+                          scheme.tertiaryContainer.withValues(alpha: 0.35),
+                      leading: const _AdminIcon(
+                        Icons.home_outlined,
+                        tinted: true,
+                      ),
+                      title: const Text('Zpět domů'),
+                      subtitle: Text(homeSubtitle),
+                      onTap: goHome,
+                    ),
                 ],
               ],
             );
@@ -189,6 +226,50 @@ class AdminScreen extends ConsumerWidget {
                                     ),
                                     Text(
                                       'správce aplikace',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .labelSmall
+                                          ?.copyWith(color: scheme.tertiary),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  if (isVisiting)
+                    Card(
+                      clipBehavior: Clip.antiAlias,
+                      color: scheme.tertiaryContainer.withValues(alpha: 0.4),
+                      child: InkWell(
+                        onTap: goHome,
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Row(
+                            children: [
+                              const _AdminIcon(
+                                Icons.home_outlined,
+                                tinted: true,
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Zpět domů',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .titleMedium,
+                                    ),
+                                    Text(
+                                      homeSubtitle,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
                                       style: Theme.of(context)
                                           .textTheme
                                           .labelSmall
