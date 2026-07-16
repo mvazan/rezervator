@@ -14,6 +14,10 @@ class Release {
 }
 
 const appChangelog = <Release>[
+  Release('1.1.0', '15. 7. 2026', [
+    'Nové kuželny nyní čekají na schválení správcem aplikace, než se '
+        'mohou začít používat.',
+  ]),
   Release('1.0.1', '14. 7. 2026', [
     'V Můj profil přibyl přehled verzí a novinek — klepni na číslo verze dole.',
     'Drobná vylepšení stability a hlášení chyb pro rychlejší opravy.',
