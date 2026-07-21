@@ -7,6 +7,7 @@ import 'package:sentry_flutter/sentry_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'config.dart';
+import 'core/error_reporting.dart';
 import 'core/theme.dart';
 import 'features/auth/auth_gate.dart';
 import 'features/kiosk/kiosk_login_screen.dart';
@@ -25,6 +26,10 @@ Future<void> main() async {
         options.dsn = AppConfig.sentryDsn;
         options.environment = kIsWeb ? 'web' : 'app';
         options.sendDefaultPii = false; // no IP/user data beyond the error
+        // Drop transient connectivity errors — the app handles offline
+        // gracefully, so these are false alarms, not bugs.
+        options.beforeSend = (event, hint) =>
+            isTransientNetworkError(event.throwable) ? null : event;
       },
       appRunner: _bootstrap,
     );
