@@ -16,6 +16,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/ui.dart';
 import '../../data/providers.dart';
 import '../../domain/calendar_layout.dart';
+import '../../domain/labels.dart';
 import '../../domain/models.dart';
 import '../../domain/palette.dart';
 import '../../domain/schedule.dart';
@@ -547,14 +548,16 @@ class _DayColumn extends StatelessWidget {
 
     final scheme = Theme.of(context).colorScheme;
     for (final m in day.priority) {
-      final club = ClubColors.of(m.type.colorIndex, scheme.brightness);
+      final (bg, fg) = clubTint(m.type.colorIndex, scheme.brightness,
+          fallbackBg: scheme.errorContainer.withValues(alpha: 0.6),
+          fallbackFg: scheme.onErrorContainer);
       addBands(
         m.startsAt,
         m.endsAt,
         () => CalendarEventBand(
-          background: club?.$1 ?? scheme.errorContainer.withValues(alpha: 0.6),
-          foreground: club?.$2 ?? scheme.onErrorContainer,
-          text: '${m.type.isMatch ? '🏆' : '⛔'} ${m.title}\n'
+          background: bg,
+          foreground: fg,
+          text: '${slotEventLabel(m)}\n'
               '${m.startsAt.display()}–${m.endsAt.display()}',
           bold: true,
         ),
@@ -562,15 +565,16 @@ class _DayColumn extends StatelessWidget {
     }
     if (openDay != null) {
       for (final r in openDay.rentals) {
-        final club = ClubColors.of(r.color, scheme.brightness);
+        final (bg, fg) = clubTint(r.color, scheme.brightness,
+            fallbackBg: scheme.tertiaryContainer.withValues(alpha: 0.5),
+            fallbackFg: scheme.onTertiaryContainer);
         addBands(
           r.startsAt,
           r.endsAt,
           () => CalendarEventBand(
-            background:
-                club?.$1 ?? scheme.tertiaryContainer.withValues(alpha: 0.5),
-            foreground: club?.$2 ?? scheme.onTertiaryContainer,
-            text: '🔒 ${r.renterName}\n'
+            background: bg,
+            foreground: fg,
+            text: '${rentalLabel(r)}\n'
                 '${r.startsAt.display()}–${r.endsAt.display()}',
           ),
         );
@@ -661,22 +665,19 @@ class _DayColumn extends StatelessWidget {
     switch (state) {
       case RentedSlot(:final rental):
         // Rental colour (spec §3): a 0–11 index paints the row with that
-        // palette colour; the default (-2, ClubColors.of → null) keeps the
-        // amber tertiary tint.
-        final rentalClub = ClubColors.of(rental.color, scheme.brightness);
+        // palette colour; the default (-2) keeps the amber tertiary tint.
+        final (bg, fg) = clubTint(rental.color, scheme.brightness,
+            fallbackBg: scheme.tertiaryContainer.withValues(alpha: 0.5),
+            fallbackFg: scheme.onTertiaryContainer);
         return _rowShell(
           context,
-          background:
-              rentalClub?.$1 ?? scheme.tertiaryContainer.withValues(alpha: 0.5),
+          background: bg,
           lane: lane,
           child: Text(
-            '🔒 ${rental.renterName}',
+            rentalLabel(rental),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 11,
-              color: rentalClub?.$2 ?? scheme.onTertiaryContainer,
-            ),
+            style: TextStyle(fontSize: 11, color: fg),
           ),
         );
       case ReservedSlot(:final reservation):
@@ -686,16 +687,13 @@ class _DayColumn extends StatelessWidget {
         // spectators tell clubs apart at a glance; "mine" is never club-tinted
         // — it keeps the indigo primaryContainer highlight so the selected
         // player's own bookings stay unmistakable over any club background.
-        final club = isMine
-            ? null
-            : ClubColors.of(
-                clubColorById[reservation.playerId] ?? -1, scheme.brightness);
+        final (clubBg, clubFg) = clubTint(
+            clubColorById[reservation.playerId] ?? -1, scheme.brightness,
+            fallbackBg: scheme.surfaceContainerHighest.withValues(alpha: 0.6),
+            fallbackFg: scheme.onSurfaceVariant);
         return _rowShell(
           context,
-          background: isMine
-              ? scheme.primaryContainer
-              : club?.$1 ??
-                  scheme.surfaceContainerHighest.withValues(alpha: 0.6),
+          background: isMine ? scheme.primaryContainer : clubBg,
           lane: lane,
           child: Text(
             name,
@@ -704,9 +702,7 @@ class _DayColumn extends StatelessWidget {
             style: TextStyle(
               fontSize: 11,
               fontWeight: isMine ? FontWeight.w700 : FontWeight.w500,
-              color: isMine
-                  ? scheme.onPrimaryContainer
-                  : club?.$2 ?? scheme.onSurfaceVariant,
+              color: isMine ? scheme.onPrimaryContainer : clubFg,
             ),
           ),
         );
@@ -742,20 +738,19 @@ class _DayColumn extends StatelessWidget {
         // A LANE-SCOPED priority slot blocking just this row — or, briefly,
         // an unresolved-type slot (renders like a match but doesn't cancel
         // blocks until its type row streams in).
-        final club = ClubColors.of(slot.type.colorIndex, scheme.brightness);
+        final (bg, fg) = clubTint(slot.type.colorIndex, scheme.brightness,
+            fallbackBg: scheme.errorContainer.withValues(alpha: 0.6),
+            fallbackFg: scheme.onErrorContainer);
         return _rowShell(
           context,
-          background: club?.$1 ?? scheme.errorContainer.withValues(alpha: 0.6),
+          background: bg,
           lane: lane,
           child: Text(
-            '${slot.type.isMatch ? '🏆' : '⛔'} ${slot.title}',
+            slotEventLabel(slot),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: club?.$2 ?? scheme.onErrorContainer,
-            ),
+                fontSize: 11, fontWeight: FontWeight.w600, color: fg),
           ),
         );
     }

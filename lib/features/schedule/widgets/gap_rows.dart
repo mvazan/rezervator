@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../domain/labels.dart';
 import '../../../domain/models.dart';
 import '../../../domain/palette.dart';
 import '../../../domain/schedule.dart';
@@ -89,24 +90,17 @@ class GapEventBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final (background, foreground, text) = switch (event) {
-      OffBlockPriority(:final slot) => (
-          ClubColors.of(slot.type.colorIndex, scheme.brightness)?.$1 ??
-              scheme.errorContainer.withValues(alpha: 0.6),
-          ClubColors.of(slot.type.colorIndex, scheme.brightness)?.$2 ??
-              scheme.onErrorContainer,
-          '${slot.type.isMatch ? '🏆' : '⛔'} ${slot.title} · '
-              '${slot.startsAt.display()}–${slot.endsAt.display()}',
-        ),
-      OffBlockRental(:final rental) => (
-          ClubColors.of(rental.color, scheme.brightness)?.$1 ??
-              scheme.tertiaryContainer.withValues(alpha: 0.5),
-          ClubColors.of(rental.color, scheme.brightness)?.$2 ??
-              scheme.onTertiaryContainer,
-          '🔒 ${rental.renterName} · '
-              '${rental.startsAt.display()}–${rental.endsAt.display()}',
-        ),
+    final (background, foreground) = switch (event) {
+      OffBlockPriority(:final slot) => clubTint(
+          slot.type.colorIndex, scheme.brightness,
+          fallbackBg: scheme.errorContainer.withValues(alpha: 0.6),
+          fallbackFg: scheme.onErrorContainer),
+      OffBlockRental(:final rental) => clubTint(
+          rental.color, scheme.brightness,
+          fallbackBg: scheme.tertiaryContainer.withValues(alpha: 0.5),
+          fallbackFg: scheme.onTertiaryContainer),
     };
+    final text = eventBandLabel(event);
     return Container(
       constraints: const BoxConstraints(minHeight: 36),
       // Bottom matches the lane rows' own 8px bottom padding, so a banner
