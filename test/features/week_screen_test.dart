@@ -412,7 +412,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(WeekCalendarView), findsOneWidget);
     expect(find.byType(DayChipStrip), findsNothing);
-    expect(find.byType(SegmentedButton<ScheduleView>), findsNothing);
+    expect(find.bySubtype<SegmentedButton>(), findsNothing);
     expect(find.byIcon(Icons.fit_screen_outlined), findsNothing);
 
     // Rotate to portrait: the day pager takes over.
