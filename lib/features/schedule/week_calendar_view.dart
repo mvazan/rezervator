@@ -401,7 +401,7 @@ class _DayColumn extends StatelessWidget {
 
     // Drag&drop landing: snap the ghost's top edge to 5 minutes and only
     // accept when the whole slot (a match brings its úklid child along)
-    // fits into free space of THIS day.
+    // fits into free space of THIS day — the landing rule is [dropFits].
     void handleDrop(Object data, int minute) {
       final snapped = _snapMinute(minute);
       (int, int)? candidate;
@@ -444,15 +444,12 @@ class _DayColumn extends StatelessWidget {
             content: Text('Přesun jde jen v rámci stejného dne.')));
         return;
       }
-      final (cs, ce) = candidate;
-      final selfUnion = mergeIntervals(self);
-      final occupiedMinusSelf = mergeIntervals([
-        for (final (s0, e0) in occupied)
-          ...subtractInterval((s0, e0), selfUnion),
-      ]);
-      final fits = cs >= window.startMinute &&
-          ce <= window.endMinute &&
-          !occupiedMinusSelf.any((iv) => iv.$1 < ce && iv.$2 > cs);
+      final fits = dropFits(
+        candidate: candidate,
+        self: self,
+        occupied: occupied,
+        window: window,
+      );
       if (!fits) {
         ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Tady není volné místo.')));
