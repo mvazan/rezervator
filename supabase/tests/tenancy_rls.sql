@@ -104,5 +104,72 @@ begin
   raise notice 'OK: tenant B does not list the visitor';
 end $$;
 
+-- Grid shrink cancels stranded reservations server-side (0018): a lane-2
+-- reservation dies when lane_count drops to 1, deactivating the block kills
+-- the rest; both carry 'změna rozvrhu'.
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+declare
+  v_block uuid;
+  v_far date := (now() at time zone 'Europe/Prague')::date + 7;
+  v_weekdays smallint[];
+begin
+  select training_weekdays into v_weekdays from schedule_settings
+  where tenant_id = current_tenant_id();
+  while not (extract(isodow from v_far)::smallint = any (v_weekdays)) loop
+    v_far := v_far + 1;
+  end loop;
+  select id into v_block from time_blocks limit 1;
+  perform create_reservation('10000000-0000-0000-0000-000000000001',
+                             v_far, v_block, 2::smallint);
+  perform create_reservation('10000000-0000-0000-0000-000000000001',
+                             v_far, v_block, 1::smallint);
+  update schedule_settings set lane_count = 1
+  where tenant_id = current_tenant_id();
+  if exists (select 1 from reservations
+             where lane = 2 and cancelled_at is null) then
+    raise exception 'FAIL: lane-2 reservation survived lane_count = 1';
+  end if;
+  if not exists (select 1 from reservations
+                 where lane = 1 and cancelled_at is null) then
+    raise exception 'FAIL: lane-1 reservation was cancelled by mistake';
+  end if;
+  update time_blocks set active = false where id = v_block;
+  if exists (select 1 from reservations where cancelled_at is null) then
+    raise exception 'FAIL: reservation survived block deactivation';
+  end if;
+  if exists (select 1 from reservations
+             where cancel_note <> 'změna rozvrhu') then
+    raise exception 'FAIL: cascade note is not změna rozvrhu';
+  end if;
+  raise notice 'OK: stranded reservations are cancelled server-side';
+end $$;
+
+-- reject_tenant refuses while the superadmin is inside the tenant (0018).
+reset role;
+insert into tenants (id, name, status) values
+  ('00000000-0000-0000-0000-000000000003', 'Kuželna C', 'pending');
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000004","role":"authenticated"}';
+select switch_tenant('00000000-0000-0000-0000-000000000003');
+do $$
+begin
+  begin
+    perform reject_tenant('00000000-0000-0000-0000-000000000003');
+    raise exception 'FAIL: reject_tenant ran while visiting';
+  exception when others then
+    if sqlerrm <> 'switch_home_first' then raise; end if;
+  end;
+  perform switch_tenant('00000000-0000-0000-0000-000000000001');
+  perform reject_tenant('00000000-0000-0000-0000-000000000003');
+  if exists (select 1 from tenants
+             where id = '00000000-0000-0000-0000-000000000003') then
+    raise exception 'FAIL: reject_tenant did not delete the tenant';
+  end if;
+  raise notice 'OK: reject_tenant guards the visiting superadmin';
+end $$;
+
 reset role;
 rollback;

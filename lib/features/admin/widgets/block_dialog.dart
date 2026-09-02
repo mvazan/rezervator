@@ -8,8 +8,8 @@ import '../../../domain/schedule.dart' show timesOverlap;
 import 'move_reservations_dialog.dart';
 import 'notify_choice_dialog.dart';
 
-/// If deactivating [blockId] would strand future live reservations
-/// (invisible, uncancellable from the grid), asks the admin to confirm.
+/// If deactivating [blockId] would cancel future live reservations (the
+/// server cascades them with 'změna rozvrhu', 0018), asks the admin first.
 /// Returns true when it's safe to proceed (nothing stranded, or the admin
 /// confirmed anyway); false when the admin declined.
 Future<bool> confirmIfBlockStrands(BuildContext context, String blockId) async {
@@ -19,9 +19,9 @@ Future<bool> confirmIfBlockStrands(BuildContext context, String blockId) async {
   if (!context.mounted) return false;
   return confirmDialog(
     context,
-    title: 'Pozor — osiřelé rezervace',
+    title: 'Pozor — rezervace se zruší',
     message:
-        '$stranded budoucích rezervací na tomto bloku zůstane mimo rozvrh. Opravdu deaktivovat?',
+        '$stranded budoucích rezervací na tomto bloku se tímto zruší (hráči dostanou upozornění). Opravdu deaktivovat?',
     confirmLabel: 'Uložit i tak',
   );
 }

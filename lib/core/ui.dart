@@ -92,6 +92,7 @@ String friendlyDbError(Object error) {
     'nick_too_long': 'Zkratka je moc dlouhá (max 14 znaků).',
     'tenant_exists': 'Kuželna s tímto názvem už existuje.',
     'unknown_tenant': 'Tahle kuželna už neexistuje.',
+    'switch_home_first': 'Nejdřív se přepni zpět domů, pak kuželnu zamítni.',
     'unknown_club': 'Tenhle oddíl už neexistuje — vyber jiný.',
     'empty_tenant_name': 'Napiš název nové kuželny.',
     'empty_display_name': 'Vyplň své jméno.',

@@ -86,6 +86,37 @@ $$;
 ALTER FUNCTION "public"."approve_tenant"("p_tenant_id" "uuid") OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."block_day_status"("p_tenant" "uuid", "p_date" "date", "p_block_id" "uuid") RETURNS "text"
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  select case
+    when b.id is null then 'unknown_block'
+    when o.tenant_id is not null and o.closed then 'day_closed'
+    when o.tenant_id is not null then
+      case
+        when o.block_ids is null then
+          case when b.active then 'open' else 'invalid_block' end
+        when p_block_id = any (o.block_ids) then 'open'
+        else 'invalid_block'
+      end
+    when not (extract(isodow from p_date)::smallint
+              = any (s.training_weekdays)) then 'day_closed'
+    when b.active then 'open'
+    else 'invalid_block'
+  end
+  from schedule_settings s
+  left join time_blocks b
+    on b.id = p_block_id and b.tenant_id = s.tenant_id
+  left join day_overrides o
+    on o.tenant_id = s.tenant_id and o.date = p_date
+  where s.tenant_id = p_tenant;
+$$;
+
+
+ALTER FUNCTION "public"."block_day_status"("p_tenant" "uuid", "p_date" "date", "p_block_id" "uuid") OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."cancel_block_day_reservations"("p_date" "date", "p_block" "uuid", "p_note" "text" DEFAULT 'změna rozvrhu'::"text") RETURNS "void"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -315,6 +346,58 @@ $$;
 ALTER FUNCTION "public"."cancel_reservation"("p_id" "uuid", "p_note" "text", "p_notify" boolean) OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."cancel_stranded_reservations"("p_tenant" "uuid", "p_note" "text" DEFAULT 'změna rozvrhu'::"text") RETURNS integer
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_today date := (now() at time zone 'Europe/Prague')::date;
+  v_now time := (now() at time zone 'Europe/Prague')::time;
+  v_count integer;
+begin
+  with stranded as (
+    update reservations r
+    set cancelled_at = now(), cancelled_via = 'admin',
+        cancel_note = coalesce(nullif(trim(p_note), ''), 'změna rozvrhu'),
+        notify_player = true, notify_message = null
+    from time_blocks b, schedule_settings s
+    where b.id = r.block_id
+      and s.tenant_id = r.tenant_id
+      and r.tenant_id = p_tenant
+      and r.cancelled_at is null
+      and (r.date > v_today or (r.date = v_today and b.starts_at > v_now))
+      and (r.lane > s.lane_count
+           or block_day_status(r.tenant_id, r.date, r.block_id) <> 'open')
+    returning 1
+  )
+  select count(*) into v_count from stranded;
+  return v_count;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."cancel_stranded_reservations"("p_tenant" "uuid", "p_note" "text") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."cascade_schedule_change"() RETURNS "trigger"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  -- to_jsonb: plpgsql resolves record fields per table, and only
+  -- day_overrides has a reason column.
+  perform cancel_stranded_reservations(
+    coalesce(new.tenant_id, old.tenant_id),
+    case when tg_table_name = 'day_overrides' and tg_op <> 'DELETE'
+         then to_jsonb(new)->>'reason' else 'změna rozvrhu' end);
+  return coalesce(new, old);
+end;
+$$;
+
+
+ALTER FUNCTION "public"."cascade_schedule_change"() OWNER TO "postgres";
+
+
 CREATE TABLE IF NOT EXISTS "public"."reservations" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "player_id" "uuid" NOT NULL,
@@ -348,12 +431,11 @@ declare
   v_caller profiles;
   v_settings schedule_settings;
   v_block time_blocks;
-  v_override day_overrides;
+  v_status text;
   v_via text;
   v_today date := (now() at time zone 'Europe/Prague')::date;
   v_now time := (now() at time zone 'Europe/Prague')::time;
   v_active_count int;
-  v_block_ok boolean;
   v_res reservations;
 begin
   if v_uid is null then
@@ -393,24 +475,9 @@ begin
     raise exception 'invalid_lane';
   end if;
 
-  select * into v_override from day_overrides
-  where tenant_id = v_caller.tenant_id and date = p_date;
-  if found then
-    if v_override.closed then
-      raise exception 'day_closed';
-    end if;
-    v_block_ok := case
-      when v_override.block_ids is null then v_block.active
-      else p_block_id = any (v_override.block_ids)
-    end;
-  else
-    if not (extract(isodow from p_date)::smallint = any (v_settings.training_weekdays)) then
-      raise exception 'day_closed';
-    end if;
-    v_block_ok := v_block.active;
-  end if;
-  if not v_block_ok then
-    raise exception 'invalid_block';
+  v_status := block_day_status(v_caller.tenant_id, p_date, p_block_id);
+  if v_status is distinct from 'open' then
+    raise exception '%', coalesce(v_status, 'unknown_block');
   end if;
 
   if v_caller.role <> 'admin' then
@@ -922,6 +989,11 @@ begin
   if not is_superadmin() then
     raise exception 'not_allowed';
   end if;
+  if exists (
+    select 1 from profiles where id = auth.uid() and tenant_id = p_tenant_id
+  ) then
+    raise exception 'switch_home_first';
+  end if;
   select status into v_status from tenants where id = p_tenant_id;
   if not found then
     raise exception 'unknown_tenant';
@@ -1410,6 +1482,10 @@ CREATE UNIQUE INDEX "reservations_slot_live_idx" ON "public"."reservations" USIN
 
 
 
+CREATE OR REPLACE TRIGGER "block_deactivated" AFTER UPDATE OF "active" ON "public"."time_blocks" FOR EACH ROW WHEN (("old"."active" AND (NOT "new"."active"))) EXECUTE FUNCTION "public"."cascade_schedule_change"();
+
+
+
 CREATE OR REPLACE TRIGGER "match_uklid_sync" AFTER INSERT OR UPDATE ON "public"."priority_slots" FOR EACH ROW EXECUTE FUNCTION "public"."sync_uklid_for_match"();
 
 
@@ -1426,11 +1502,19 @@ CREATE OR REPLACE TRIGGER "notify_tenants" AFTER INSERT ON "public"."tenants" FO
 
 
 
+CREATE OR REPLACE TRIGGER "override_changed" AFTER INSERT OR DELETE OR UPDATE ON "public"."day_overrides" FOR EACH ROW EXECUTE FUNCTION "public"."cascade_schedule_change"();
+
+
+
 CREATE OR REPLACE TRIGGER "priority_conflicts" AFTER INSERT OR UPDATE ON "public"."priority_slots" FOR EACH ROW EXECUTE FUNCTION "public"."cancel_res_for_priority"();
 
 
 
 CREATE OR REPLACE TRIGGER "rental_conflicts" AFTER INSERT OR UPDATE ON "public"."rentals" FOR EACH ROW EXECUTE FUNCTION "public"."cancel_res_for_rental"();
+
+
+
+CREATE OR REPLACE TRIGGER "settings_shrink" AFTER UPDATE OF "lane_count", "training_weekdays" ON "public"."schedule_settings" FOR EACH ROW EXECUTE FUNCTION "public"."cascade_schedule_change"();
 
 
 
@@ -1708,8 +1792,24 @@ GRANT ALL ON FUNCTION "public"."approve_tenant"("p_tenant_id" "uuid") TO "servic
 
 
 
+REVOKE ALL ON FUNCTION "public"."block_day_status"("p_tenant" "uuid", "p_date" "date", "p_block_id" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."block_day_status"("p_tenant" "uuid", "p_date" "date", "p_block_id" "uuid") TO "service_role";
+
+
+
 GRANT ALL ON TABLE "public"."priority_slots" TO "authenticated";
 GRANT ALL ON TABLE "public"."priority_slots" TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."cancel_stranded_reservations"("p_tenant" "uuid", "p_note" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."cancel_stranded_reservations"("p_tenant" "uuid", "p_note" "text") TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."cascade_schedule_change"() TO "anon";
+GRANT ALL ON FUNCTION "public"."cascade_schedule_change"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."cascade_schedule_change"() TO "service_role";
 
 
 
