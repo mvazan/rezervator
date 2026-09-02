@@ -22,6 +22,7 @@ class AdminScaffold extends ConsumerWidget {
     this.floatingActionButton,
     this.actions = const [],
     this.superadminOnly = false,
+    this.constrainBody = true,
   });
 
   final String title;
@@ -31,6 +32,10 @@ class AdminScaffold extends ConsumerWidget {
 
   /// Superadmin-only screens (kuželny approval) refuse regular admins too.
   final bool superadminOnly;
+
+  /// False for the one screen that lays itself out on the full width (the
+  /// hub's card grid); everything else sits in the 720 px [AdminBody].
+  final bool constrainBody;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -49,7 +54,7 @@ class AdminScaffold extends ConsumerWidget {
     }
     return Scaffold(
       appBar: AppBar(title: Text(title), actions: actions),
-      body: AdminBody(child: body),
+      body: constrainBody ? AdminBody(child: body) : body,
       floatingActionButton: floatingActionButton,
     );
   }
