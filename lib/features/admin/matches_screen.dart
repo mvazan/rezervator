@@ -3,9 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/ui.dart';
 import '../../data/providers.dart';
-import '../../domain/limits.dart';
 import '../../domain/models.dart';
-import 'widgets/admin_body.dart';
+import 'widgets/admin_scaffold.dart';
+import 'widgets/match_dialog.dart';
 
 /// Admin: manage MATCHES. A match blocks the whole alley for its window;
 /// its lane prep is the linked "Úklid před zápasem" child slot the server
@@ -14,43 +14,31 @@ import 'widgets/admin_body.dart';
 class MatchesScreen extends ConsumerWidget {
   const MatchesScreen({super.key});
 
-  Future<void> _delete(BuildContext context, PrioritySlot slot) async {
-    final confirmed = await confirmDialog(
-      context,
-      title: 'Smazat zápas?',
-      message: 'Opravdu smazat „${slot.title}" (${dayLabel(slot.date)})?',
-    );
-    if (!confirmed) return;
-    if (!context.mounted) return;
-
-    await tryAction(
-      context,
-      () => Api.deletePrioritySlot(slot.id),
-      errorText: friendlyDbError,
-    );
-  }
+  Future<void> _delete(BuildContext context, PrioritySlot slot) =>
+      confirmDelete(
+        context,
+        title: 'Smazat zápas?',
+        message: 'Opravdu smazat „${slot.title}" (${dayLabel(slot.date)})?',
+        action: () => Api.deletePrioritySlot(slot.id),
+      );
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final profile = ref.watch(myProfileProvider).value;
-    if (profile?.isAdmin != true) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('Zápasy')),
-        body: const Center(child: Text('Jen pro správce.')),
-      );
-    }
-
     final slots = ref.watch(prioritySlotsProvider);
     final sorted = [
       for (final s in slots)
         if (s.type.isMatch && s.parentId == null) s,
     ]..sort((a, b) => b.date.compareTo(a.date));
-    final types = ref.watch(slotTypesProvider).value ?? const [];
+    // The slots themselves are a plain derived list; the types stream is
+    // what can still be loading (or failing) — the dialog needs it too.
+    final typesValue = ref.watch(slotTypesProvider);
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Zápasy')),
-      body: AdminBody(
-        child: sorted.isEmpty
+    return AdminScaffold(
+      title: 'Zápasy',
+      body: AsyncBody(
+        value: typesValue,
+        onRetry: () => ref.invalidate(slotTypesProvider),
+        builder: (types) => sorted.isEmpty
             ? const Center(child: Text('Zatím žádné zápasy.'))
             : ListView(
                 children: [
@@ -77,8 +65,8 @@ class MatchesScreen extends ConsumerWidget {
                             icon: const Icon(Icons.edit_outlined),
                             onPressed: () => showDialog<void>(
                               context: context,
-                              builder: (_) => MatchDialog(
-                                  existing: slot, types: types),
+                              builder: (_) =>
+                                  MatchDialog(existing: slot, types: types),
                             ),
                           ),
                           IconButton(
@@ -94,278 +82,11 @@ class MatchesScreen extends ConsumerWidget {
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => showDialog<void>(
           context: context,
-          builder: (_) => MatchDialog(types: types),
+          builder: (_) => MatchDialog(types: typesValue.value ?? const []),
         ),
         icon: const Icon(Icons.add),
         label: const Text('Přidat zápas'),
       ),
-    );
-  }
-}
-
-/// Prep-minute presets shown as SegmentedButton segments; anything else
-/// selects the "Jiná…" (custom) segment.
-const _prepPresets = [0, 30, 60];
-
-/// Add/edit dialog for a MATCH: date + two time pickers (end defaults to
-/// start + 3h), teams, and the úklid duration (the server maintains the
-/// linked child slot from it).
-class MatchDialog extends StatefulWidget {
-  const MatchDialog({super.key, this.existing, required this.types});
-
-  final PrioritySlot? existing;
-  final List<PrioritySlotType> types;
-
-  @override
-  State<MatchDialog> createState() => _MatchDialogState();
-}
-
-class _MatchDialogState extends State<MatchDialog> {
-  Day? _date;
-  HourMinute? _start;
-  HourMinute? _end;
-  String? _typeId;
-  final _homeTeam = TextEditingController();
-  final _awayTeam = TextEditingController();
-  final _description = TextEditingController();
-  int _prepMinutes = 0;
-  bool _isAway = false;
-  bool _saving = false;
-
-  PrioritySlotType? get _type =>
-      widget.types.where((t) => t.id == _typeId).firstOrNull;
-
-  @override
-  void initState() {
-    super.initState();
-    final existing = widget.existing;
-    _date = existing?.date;
-    _start = existing?.startsAt;
-    _end = existing?.endsAt;
-    _typeId = existing?.type.id ??
-        widget.types.where((t) => t.isMatch && t.builtin).firstOrNull?.id;
-    _homeTeam.text = existing?.homeTeam ?? '';
-    _awayTeam.text = existing?.awayTeam ?? '';
-    _description.text = existing?.description ?? '';
-    _prepMinutes = existing?.prepMinutes ?? 0;
-    _isAway = existing?.isAway ?? false;
-  }
-
-  @override
-  void dispose() {
-    _homeTeam.dispose();
-    _awayTeam.dispose();
-    _description.dispose();
-    super.dispose();
-  }
-
-  Future<void> _pickDate() async {
-    final now = today();
-    final initial = _date ?? now;
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: DateTime(initial.year, initial.month, initial.day),
-      firstDate: DateTime(
-        now.year,
-        now.month,
-        now.day,
-      ).subtract(const Duration(days: 365)),
-      lastDate: DateTime(
-        now.year,
-        now.month,
-        now.day,
-      ).add(const Duration(days: 365)),
-      locale: const Locale('cs'),
-    );
-    if (picked != null) setState(() => _date = Day.fromDateTime(picked));
-  }
-
-  Future<void> _pickStart() async {
-    final picked = await pickTime(context, initial: _start);
-    if (picked == null) return;
-    setState(() {
-      _start = picked;
-      // Default a 3h span the first time a start is picked.
-      if (_end == null) {
-        final endMinutes = picked.minutesFromMidnight + 180;
-        _end = HourMinute((endMinutes ~/ 60) % 24, endMinutes % 60);
-      }
-    });
-  }
-
-  Future<void> _pickEnd() async {
-    final picked = await pickTime(context, initial: _end);
-    if (picked != null) setState(() => _end = picked);
-  }
-
-  Future<void> _pickCustomPrep() async {
-    final input = await promptText(
-      context,
-      title: 'Úklid před zápasem',
-      hint: '${Limits.prepMinutes.min}–${Limits.prepMinutes.max}',
-      initial: _prepMinutes.toString(),
-      keyboardType: TextInputType.number,
-      suffixText: 'min',
-    );
-    if (input == null) return;
-    // Unparsable input fails the range check like an out-of-range number.
-    final minutes = int.tryParse(input) ?? -1;
-    final error = validatePrepMinutes(minutes);
-    if (error != null) {
-      if (mounted) snack(context, error);
-      return;
-    }
-    setState(() => _prepMinutes = minutes);
-  }
-
-  Future<void> _save() async {
-    final date = _date;
-    final start = _start;
-    final end = _end;
-    final type = _type;
-    if (type == null) {
-      snack(context, 'Typ Zápas se ještě načítá — zkus to za chvíli.');
-      return;
-    }
-    if (date == null || start == null || end == null) {
-      snack(context, 'Vyber datum a čas.');
-      return;
-    }
-    if (end.compareTo(start) <= 0) {
-      snack(context, 'Konec musí být po začátku.');
-      return;
-    }
-    final awayTeam = _awayTeam.text.trim();
-    if (awayTeam.isEmpty) {
-      snack(context, 'Vyplň hosty.');
-      return;
-    }
-
-    setState(() => _saving = true);
-    final ok = await tryAction(
-      context,
-      () => Api.savePrioritySlot(
-        id: widget.existing?.id,
-        date: date,
-        startsAt: start,
-        endsAt: end,
-        typeId: type.id,
-        homeTeam: _homeTeam.text.trim(),
-        awayTeam: awayTeam,
-        prepMinutes: _isAway ? 0 : _prepMinutes,
-        description: _description.text.trim(),
-        isAway: _isAway,
-      ),
-      success: _isAway
-          ? 'Uloženo.'
-          : 'Uloženo. Kolidující rezervace byly zrušeny.',
-      errorText: friendlyDbError,
-    );
-    if (!mounted) return;
-    if (ok) {
-      Navigator.of(context).pop();
-    } else {
-      setState(() => _saving = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(widget.existing == null ? 'Přidat zápas' : 'Upravit zápas'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Datum'),
-              trailing: Text(_date == null ? 'Vybrat' : dayFull(_date!)),
-              onTap: _pickDate,
-            ),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Začátek'),
-              trailing: Text(_start?.display() ?? '--:--'),
-              onTap: _pickStart,
-            ),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Konec'),
-              trailing: Text(_end?.display() ?? '--:--'),
-              onTap: _pickEnd,
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _homeTeam,
-              decoration: const InputDecoration(labelText: 'Domácí'),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _awayTeam,
-              decoration: const InputDecoration(labelText: 'Hosté'),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _description,
-              decoration: const InputDecoration(labelText: 'Popis'),
-            ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Venkovní zápas'),
-              subtitle: const Text('Hraje se jinde — neblokuje kuželnu.'),
-              value: _isAway,
-              onChanged: (value) => setState(() => _isAway = value),
-            ),
-            if (!_isAway) ...[
-              const SizedBox(height: 12),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  'Úklid před zápasem',
-                  style: Theme.of(context).textTheme.labelLarge,
-                ),
-              ),
-              const SizedBox(height: 4),
-              SegmentedButton<int>(
-                segments: [
-                  for (final preset in _prepPresets)
-                    ButtonSegment(value: preset, label: Text('$preset min')),
-                  ButtonSegment(
-                    value: -1,
-                    label: Text(
-                      _prepPresets.contains(_prepMinutes)
-                          ? 'Jiná…'
-                          : '$_prepMinutes min',
-                    ),
-                  ),
-                ],
-                selected: {
-                  _prepPresets.contains(_prepMinutes) ? _prepMinutes : -1,
-                },
-                onSelectionChanged: (selected) {
-                  final value = selected.first;
-                  if (value == -1) {
-                    _pickCustomPrep();
-                  } else {
-                    setState(() => _prepMinutes = value);
-                  }
-                },
-              ),
-            ],
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Zrušit'),
-        ),
-        FilledButton(
-          onPressed: _saving ? null : _save,
-          child: Text(_saving ? 'Ukládám…' : 'Uložit'),
-        ),
-      ],
     );
   }
 }

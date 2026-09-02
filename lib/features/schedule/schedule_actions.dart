@@ -6,9 +6,9 @@ import '../../data/providers.dart';
 import '../../domain/calendar_layout.dart' show hourMinuteAt;
 import '../../domain/models.dart';
 import '../../domain/schedule.dart';
-import '../admin/matches_screen.dart' show MatchDialog;
 import '../admin/widgets/block_dialog.dart';
 import '../admin/widgets/blockage_dialog.dart';
+import '../admin/widgets/match_dialog.dart';
 import '../admin/widgets/notify_choice_dialog.dart';
 import 'schedule_callbacks.dart';
 
