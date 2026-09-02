@@ -25,7 +25,7 @@ class EventItem extends DayGridItem {
 }
 
 /// An event-free hole between two consecutive blocks — renders as a thin
-/// seam, or (admin) an add-block affordance prefilled with the hole's range.
+/// seam.
 class EmptyGapItem extends DayGridItem {
   const EmptyGapItem(this.start, this.end);
 
@@ -133,54 +133,23 @@ class GapEventBanner extends StatelessWidget {
   }
 }
 
-/// An event-free hole between blocks. Non-admin: a 10px faint seam keeping
-/// the calendar time-honest. Admin ([onAdd] non-null): a 20px tappable strip
-/// with a faint ＋ that opens the add-block flow prefilled with the range.
+/// An event-free hole between blocks: a 10px faint seam keeping the day
+/// pager time-honest. (The week calendar offers admins add-in-gap on tap;
+/// the pager is read-only for layout edits.)
 class EmptyGapRow extends StatelessWidget {
-  const EmptyGapRow({super.key, required this.item, this.onAdd});
+  const EmptyGapRow({super.key, required this.item});
 
   final EmptyGapItem item;
-  final VoidCallback? onAdd;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    if (onAdd == null) {
-      return Container(
-        height: 10,
-        margin: const EdgeInsets.symmetric(vertical: 1),
-        decoration: BoxDecoration(
-          color: scheme.surfaceContainerLow.withValues(alpha: 0.5),
-          borderRadius: BorderRadius.circular(4),
-        ),
-      );
-    }
-    return Semantics(
-      button: true,
-      label: 'Přidat blok',
-      child: InkWell(
-        onTap: onAdd,
+    return Container(
+      height: 10,
+      margin: const EdgeInsets.symmetric(vertical: 1),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerLow.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(4),
-        child: Container(
-          height: 20,
-          margin: const EdgeInsets.symmetric(vertical: 1),
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: scheme.surfaceContainerLow.withValues(alpha: 0.5),
-            borderRadius: BorderRadius.circular(4),
-            border: Border.all(
-              color: scheme.outlineVariant.withValues(alpha: 0.4),
-            ),
-          ),
-          child: Text(
-            '＋ ${item.start.display()}–${item.end.display()}',
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-              color: scheme.onSurfaceVariant.withValues(alpha: 0.6),
-            ),
-          ),
-        ),
       ),
     );
   }

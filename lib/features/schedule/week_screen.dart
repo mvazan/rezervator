@@ -13,10 +13,6 @@ import '../admin/widgets/notify_choice_dialog.dart';
 import 'day_pager_view.dart';
 import 'week_calendar_view.dart';
 
-/// The two schedule layouts a device can be set to; persisted per-device via
-/// [scheduleViewPrefKey].
-enum ScheduleView { day, week }
-
 /// Live week view: grid computed by buildWeekSchedule, booking via RPCs.
 /// Acts as the "shell": owns navigation (week offset) and all provider
 /// wiring; delegates rendering to [WeekCalendarView] or [DayPagerView],
@@ -168,10 +164,8 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
     final monday = _monday(todayDay);
     // Orientation IS the view switch: portrait reads day-by-day, landscape
     // shows the whole week. Both always stretch to the full width.
-    final view = MediaQuery.orientationOf(context) == Orientation.portrait
-        ? ScheduleView.day
-        : ScheduleView.week;
-    const fitWidth = true;
+    final landscape =
+        MediaQuery.orientationOf(context) == Orientation.landscape;
 
     final settings =
         ref.watch(settingsProvider).value ?? ScheduleSettings.defaults;
@@ -576,7 +570,7 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
       children: [
         header,
         Expanded(
-          child: view == ScheduleView.week
+          child: landscape
               ? WeekCalendarView(
                   week: week,
                   today: todayDay,
@@ -598,7 +592,6 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
                 )
               : DayPagerView(
                   week: week,
-                  fitWidth: fitWidth,
                   weekOffset: _weekOffset,
                   dayIndex: _dayIndex,
                   today: todayDay,

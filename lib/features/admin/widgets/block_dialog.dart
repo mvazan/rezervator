@@ -578,7 +578,11 @@ class _BlockDialogState extends State<BlockDialog> {
           }
           return;
         }
-        if (dissolveTwin != null) {
+        // A fresh, never-reassigned local so the null check promotes inside
+        // this closure on every Dart version (3.11 stopped promoting the
+        // captured outer `dissolveTwin` here).
+        final twin = dissolveTwin;
+        if (twin != null) {
           // Hand the day back to the template block: sweep the twin's
           // leftover rows first (legacy forks), move the special's
           // sign-ups over (lanes 1:1 — the twin's slots are free now),
@@ -588,17 +592,17 @@ class _BlockDialogState extends State<BlockDialog> {
           // strand the just-moved reservations).
           if (twinNeedsSweep) {
             await Api.cancelBlockDayReservations(
-                widget.dayContext!, dissolveTwin.id);
+                widget.dayContext!, twin.id);
           }
           await Api.moveDayReservations(
-              widget.dayContext!, existing!.id, dissolveTwin.id,
+              widget.dayContext!, existing!.id, twin.id,
               notify: moveNotify?.notify ?? true,
               message: moveNotify?.message);
           final seen = <String>{};
           final ids = [
             for (final id in widget.dayBaseIds!)
-              if (seen.add(id == existing.id ? dissolveTwin.id : id))
-                id == existing.id ? dissolveTwin.id : id,
+              if (seen.add(id == existing.id ? twin.id : id))
+                id == existing.id ? twin.id : id,
           ];
           final templateIds = {
             for (final b in widget.blocks)

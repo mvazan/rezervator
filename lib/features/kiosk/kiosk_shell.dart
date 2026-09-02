@@ -113,7 +113,6 @@ class _KioskShellState extends ConsumerState<KioskShell> {
                 child: KioskBoardView(
                   key: _boardKey,
                   selected: _selected,
-                  onBooked: () {}, // selection persists — no-op by design.
                 ),
               ),
             ],

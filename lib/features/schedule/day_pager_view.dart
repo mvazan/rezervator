@@ -43,11 +43,8 @@ class DayPagerView extends StatefulWidget {
     required this.nameById,
     required this.clubColorById,
     required this.interactive,
-    required this.fitWidth,
     required this.onBook,
     required this.onCancel,
-    this.onLongPressBlock,
-    this.onAddBlockInGap,
     required this.onSelectDay,
     required this.onShiftWeek,
   });
@@ -89,16 +86,7 @@ class DayPagerView extends StatefulWidget {
   final Map<String, String> nameById;
   final Map<String, int> clubColorById;
   final bool interactive;
-
-  /// When true the lane grid drops its horizontal scroller and lets lanes
-  /// share the full width (names ellipsis-clipped); see [_DayPage].
-  final bool fitWidth;
   final void Function(Day, TimeBlock, int lane) onBook;
-
-  /// Admin-only (null otherwise): long-press a block label to edit it; tap
-  /// an empty gap to add a block prefilled with the gap's range.
-  final void Function(TimeBlock)? onLongPressBlock;
-  final void Function(HourMinute start, HourMinute end)? onAddBlockInGap;
   final void Function(Day, TimeBlock, Reservation, {required bool ownFuture})
   onCancel;
 
@@ -259,11 +247,8 @@ class _DayPagerViewState extends State<DayPagerView> {
               interactive: page >= _firstRealPage && page <= _lastRealPage
                   ? widget.interactive
                   : false,
-              fitWidth: widget.fitWidth,
               onBook: widget.onBook,
               onCancel: widget.onCancel,
-              onLongPressBlock: widget.onLongPressBlock,
-              onAddBlockInGap: widget.onAddBlockInGap,
             ),
           ),
         ),
@@ -310,11 +295,8 @@ class _DayPage extends StatelessWidget {
     required this.nameById,
     required this.clubColorById,
     required this.interactive,
-    required this.fitWidth,
     required this.onBook,
     required this.onCancel,
-    this.onLongPressBlock,
-    this.onAddBlockInGap,
   });
 
   final DaySchedule day;
@@ -325,12 +307,7 @@ class _DayPage extends StatelessWidget {
   final Map<String, String> nameById;
   final Map<String, int> clubColorById;
   final bool interactive;
-
-  /// See [DayPagerView.fitWidth].
-  final bool fitWidth;
   final void Function(Day, TimeBlock, int lane) onBook;
-  final void Function(TimeBlock)? onLongPressBlock;
-  final void Function(HourMinute start, HourMinute end)? onAddBlockInGap;
   final void Function(Day, TimeBlock, Reservation, {required bool ownFuture})
   onCancel;
 
@@ -388,49 +365,20 @@ class _DayPage extends StatelessWidget {
               chipLabel: '$freeCount volných',
             ),
             const SizedBox(height: 10),
-            // Lane header + block rows always stay column-aligned: every lane
-            // cell is the same width in a given mode, and the header row and
+            // Lane header + block rows always stay column-aligned: lanes flex
+            // to share the full width (Expanded), and the header row and
             // block rows are built the same way, so column N of the header
             // always sits over column N of every row.
-            //
-            // In fit-width mode lanes flex to share the full width (Expanded)
-            // and there is no horizontal scroller — the whole day is visible,
-            // names ellipsis-clip. Otherwise lanes are fixed-width (96px) and
-            // the header + every row share ONE horizontal scroller (not a
-            // Wrap, which could reflow lanes onto a second line and leave the
-            // header's columns no longer over the tiles they label), so a day
-            // with more lanes than fit scrolls all rows together.
             // A day whose every block a priority slot cancelled has no lane
             // grid — a 'Dráha 1..N' header would label rows that don't
-            // exist, so it (and the horizontal scroller) only renders when
-            // blocks do.
-            if (day.blocks.isEmpty)
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: _dayRows(context, day),
-              )
-            else if (fitWidth)
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _laneHeaderRow(day),
-                  ..._dayRows(context, day),
-                ],
-              )
-            else
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: SizedBox(
-                  width: _rowWidth(day.laneCount),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      _laneHeaderRow(day),
-                      ..._dayRows(context, day),
-                    ],
-                  ),
-                ),
-              ),
+            // exist, so it only renders when blocks do.
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (day.blocks.isNotEmpty) _laneHeaderRow(day),
+                ..._dayRows(context, day),
+              ],
+            ),
           ],
         ),
       ),
@@ -438,43 +386,13 @@ class _DayPage extends StatelessWidget {
   }
 
   static const _laneLabelWidth = 56.0;
-  static const _laneTileWidth = 96.0;
   static const _laneTileSpacing = 6.0;
 
-  /// Fixed row width in the horizontally-scrolling mode, so full-width gap
-  /// rows can match the lane grid exactly.
-  double _rowWidth(int laneCount) =>
-      _laneLabelWidth +
-      laneCount * _laneTileWidth +
-      (laneCount - 1) * _laneTileSpacing;
-
-  /// The block's time label; for admins it long-presses into the block
-  /// editor (a small edit glyph hints at the gesture).
-  Widget _blockLabel(BuildContext context, TimeBlock block) {
-    final label = Text(
-      block.label,
-      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-    );
-    if (onLongPressBlock == null) return label;
-    return InkWell(
-      onLongPress: () => onLongPressBlock!(block),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Flexible(child: label),
-          const SizedBox(width: 2),
-          Icon(
-            Icons.edit_outlined,
-            size: 12,
-            color: Theme.of(context)
-                .colorScheme
-                .onSurfaceVariant
-                .withValues(alpha: 0.4),
-          ),
-        ],
-      ),
-    );
-  }
+  /// The block's time label.
+  Widget _blockLabel(TimeBlock block) => Text(
+        block.label,
+        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+      );
 
   /// Block rows interleaved with off-block event banners and empty-gap rows,
   /// in time order (see [dayGridItems]).
@@ -484,23 +402,15 @@ class _DayPage extends StatelessWidget {
             BlockItem(:final block) => _laneRow(context, day, block),
             EventItem(:final event) =>
               GapEventBanner(event: event, compact: false),
-            final EmptyGapItem gap => EmptyGapRow(
-                item: gap,
-                onAdd: onAddBlockInGap == null
-                    ? null
-                    : () => onAddBlockInGap!(gap.start, gap.end),
-              ),
+            final EmptyGapItem gap => EmptyGapRow(item: gap),
           },
       ];
 
-  /// Wraps a lane cell so it either flexes to share the row's width
-  /// (fit-width) or keeps its fixed 96px column. Inter-lane spacing lives in
+  /// Every lane flexes to share the row's width. Inter-lane spacing lives in
   /// [_laneCells]' spacers — NOT in per-cell padding, which under Expanded
   /// would eat into every lane but the last and render lane N visibly wider
   /// than the others.
-  Widget _laneCell({required Widget child}) => fitWidth
-      ? Expanded(child: child)
-      : SizedBox(width: _laneTileWidth, child: child);
+  Widget _laneCell({required Widget child}) => Expanded(child: child);
 
   /// One equal-width cell per lane with fixed spacers between them.
   List<Widget> _laneCells({
@@ -548,7 +458,7 @@ class _DayPage extends StatelessWidget {
             width: _laneLabelWidth,
             child: Padding(
               padding: const EdgeInsets.only(top: 14),
-              child: _blockLabel(context, block),
+              child: _blockLabel(block),
             ),
           ),
           ..._laneCells(

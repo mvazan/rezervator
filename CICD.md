@@ -41,20 +41,25 @@ Add the rest:
 
 ### 2. Migration history must match prod
 
-Migrations `0001`–`0011` are already applied on prod (some by hand, later ones
-via `supabase db push`). The CI runner links fresh each run, so as long as the
-prod `supabase_migrations` table reflects everything applied, the next
-`db push` is a no-op until a new migration is added. If a `db push` ever tries
-to re-run an applied file, repair once:
+Every file in `supabase/migrations/` is applied on prod (`0001`–`0011` partly
+by hand, everything later via `supabase db push`). The CI runner links fresh
+each run, so as long as the prod `supabase_migrations` table reflects
+everything applied, the next `db push` is a no-op until a new migration is
+added. If a `db push` ever tries to re-run an applied file, repair once:
 
 ```bash
 supabase link --project-ref wgwijvcnslkesyqgaeul
-supabase migration repair --status applied 0001 0002 0003 0004 0005 0006 0007 0008 0009 0010 0011
+supabase migration repair --status applied $(ls supabase/migrations | cut -d_ -f1)
 ```
 
-From then on, **new migrations go through git**: add
-`supabase/migrations/0012_whatever.sql`, merge to main, and deploy-backend
-applies it automatically.
+**New migrations go through git**: add `supabase/migrations/00NN_whatever.sql`,
+merge to main, and deploy-backend applies it automatically.
+
+**0016 needs two Vault secrets on prod before it lands** (SQL editor):
+`notify_url` = `https://wgwijvcnslkesyqgaeul.supabase.co/functions/v1/notify`,
+`webhook_secret` = the value already set as the notify function's
+`WEBHOOK_SECRET`. Without them `notify_webhook` logs a warning and skips the
+POST (writes are unaffected).
 
 ### 3. Google Play
 

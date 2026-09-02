@@ -316,10 +316,15 @@ async function handle(payload: WebhookPayload) {
           record.date as string,
           ctx.block.starts_at as string,
         );
+        // Fail closed: signing with an empty key would mint links anyone
+        // could forge. A missing secret is a deployment bug — surface it
+        // as a 500 in the function logs instead.
+        const cancelSecret = Deno.env.get("CANCEL_TOKEN_SECRET");
+        if (!cancelSecret) throw new Error("CANCEL_TOKEN_SECRET is not set");
         const token = await signCancelToken(
           record.id as string,
           exp,
-          Deno.env.get("CANCEL_TOKEN_SECRET") ?? "",
+          cancelSecret,
         );
         const cancelUrl =
           `${Deno.env.get("SUPABASE_URL")}/functions/v1/cancel?token=${token}`;

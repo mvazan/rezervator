@@ -233,7 +233,7 @@ class _MatchDialogState extends State<MatchDialog> {
       return;
     }
     final awayTeam = _awayTeam.text.trim();
-    if (type.isMatch && awayTeam.isEmpty) {
+    if (awayTeam.isEmpty) {
       snack(context, 'Vyplň hosty.');
       return;
     }
@@ -247,9 +247,9 @@ class _MatchDialogState extends State<MatchDialog> {
         startsAt: start,
         endsAt: end,
         typeId: type.id,
-        homeTeam: type.isMatch ? _homeTeam.text.trim() : '',
-        awayTeam: type.isMatch ? awayTeam : '',
-        prepMinutes: type.isMatch && !_isAway ? _prepMinutes : 0,
+        homeTeam: _homeTeam.text.trim(),
+        awayTeam: awayTeam,
+        prepMinutes: _isAway ? 0 : _prepMinutes,
         description: _description.text.trim(),
         isAway: _isAway,
       ),
@@ -268,7 +268,6 @@ class _MatchDialogState extends State<MatchDialog> {
 
   @override
   Widget build(BuildContext context) {
-    const isMatch = true;
     return AlertDialog(
       title: Text(widget.existing == null ? 'Přidat zápas' : 'Upravit zápas'),
       content: SingleChildScrollView(
@@ -293,32 +292,29 @@ class _MatchDialogState extends State<MatchDialog> {
               trailing: Text(_end?.display() ?? '--:--'),
               onTap: _pickEnd,
             ),
-            if (isMatch) ...[
-              const SizedBox(height: 8),
-              TextField(
-                controller: _homeTeam,
-                decoration: const InputDecoration(labelText: 'Domácí'),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _awayTeam,
-                decoration: const InputDecoration(labelText: 'Hosté'),
-              ),
-            ],
+            const SizedBox(height: 8),
+            TextField(
+              controller: _homeTeam,
+              decoration: const InputDecoration(labelText: 'Domácí'),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _awayTeam,
+              decoration: const InputDecoration(labelText: 'Hosté'),
+            ),
             const SizedBox(height: 8),
             TextField(
               controller: _description,
               decoration: const InputDecoration(labelText: 'Popis'),
             ),
-            if (isMatch)
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Venkovní zápas'),
-                subtitle: const Text('Hraje se jinde — neblokuje kuželnu.'),
-                value: _isAway,
-                onChanged: (value) => setState(() => _isAway = value),
-              ),
-            if (isMatch && !_isAway) ...[
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Venkovní zápas'),
+              subtitle: const Text('Hraje se jinde — neblokuje kuželnu.'),
+              value: _isAway,
+              onChanged: (value) => setState(() => _isAway = value),
+            ),
+            if (!_isAway) ...[
               const SizedBox(height: 12),
               Align(
                 alignment: Alignment.centerLeft,

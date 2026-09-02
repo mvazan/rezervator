@@ -21,14 +21,6 @@ import '../../domain/palette.dart';
 import '../../domain/schedule.dart';
 import '../schedule/widgets/calendar_board.dart';
 
-export '../schedule/widgets/calendar_board.dart'
-    show
-        BoardColumnHeader,
-        ColumnSnapPhysics,
-        boardColumnWidth,
-        boardHeaderHeight,
-        calendarHeaderHeight;
-
 /// True when [date] resolves as an [OpenDay] under exactly the resolution the
 /// board renders with (buildWeekSchedule): closed overrides and non-training
 /// weekdays are closed, and an override's blockIds are filtered against the
@@ -117,20 +109,10 @@ double _minPxPerMinute(Iterable<TimeBlock> blocks, int laneCount) {
 }
 
 class KioskBoardView extends ConsumerStatefulWidget {
-  const KioskBoardView({
-    super.key,
-    required this.selected,
-    required this.onBooked,
-  });
+  const KioskBoardView({super.key, required this.selected});
 
   /// The currently selected player, or null when the board is display-only.
   final PlayerName? selected;
-
-  /// Called after a booking attempt completes (success or failure) so the
-  /// shell can decide whether to keep the selection (it always does — kiosk
-  /// supports multi-booking per player before the ✕ or idle timeout clears
-  /// the selection).
-  final VoidCallback onBooked;
 
   @override
   ConsumerState<KioskBoardView> createState() => KioskBoardViewState();
@@ -212,10 +194,12 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
     }
   }
 
-  /// Same as [resetToNow], reading the current time itself — kept as the
-  /// name the shell already calls (`_boardKey.currentState?.resetToToday()`).
-  void resetToToday() =>
-      resetToNow(HourMinute(DateTime.now().hour, DateTime.now().minute));
+  /// Same as [resetToNow], reading the current time itself — the shell's
+  /// idle-reset entry point.
+  void resetToToday() {
+    final now = DateTime.now();
+    resetToNow(HourMinute(now.hour, now.minute));
+  }
 
   Future<void> _book(
     BuildContext context,
@@ -245,7 +229,6 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
       success: 'Zarezervováno.',
       errorText: friendlyDbError,
     );
-    widget.onBooked();
   }
 
   @override

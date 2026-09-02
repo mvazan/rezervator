@@ -187,6 +187,18 @@ class Club {
       );
 }
 
+/// Display name of [clubId] from the live club roster; '' when the profile
+/// has no club or the club was deleted. Never read `profiles.club`: that
+/// text is a copy taken at registration and goes stale the moment an admin
+/// reassigns the club (set_player_club only moves club_id).
+String clubNameOf(String? clubId, Iterable<Club> clubs) {
+  if (clubId == null) return '';
+  for (final club in clubs) {
+    if (club.id == clubId) return club.name;
+  }
+  return '';
+}
+
 /// A row of the `players` view — the only profile data the kiosk sees.
 class PlayerName {
   const PlayerName({

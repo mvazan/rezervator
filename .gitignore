@@ -40,3 +40,6 @@ app.*.map.json
 app.*.symbols
 migrate_working_dir/
 supabase/.temp/
+
+# Local stack metadata written by `supabase start` / `db reset`
+supabase/.branches/
