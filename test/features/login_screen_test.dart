@@ -32,6 +32,7 @@ void main() {
       // In-memory session storage — avoids the shared_preferences plugin,
       // which has no implementation under flutter_test.
       authOptions: const FlutterAuthClientOptions(
+        detectSessionInUri: false,
         localStorage: EmptyLocalStorage(),
       ),
     );
