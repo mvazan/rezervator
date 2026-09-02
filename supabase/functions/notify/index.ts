@@ -21,6 +21,7 @@
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { pragueEpoch, pragueToday, signCancelToken } from "../_shared/cancel_token.ts";
+import { dayLabel, escapeHtml, timeLabel } from "../_shared/format.ts";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -189,29 +190,6 @@ async function notifyRecipient(
       options.html ?? `<p>${escapeHtml(body)}</p>`,
     );
   }
-}
-
-// ---------------------------------------------------------------------------
-// Formatting helpers
-// ---------------------------------------------------------------------------
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-}
-
-function dayLabel(sqlDate: string): string {
-  const names = ["ne", "po", "út", "st", "čt", "pá", "so"];
-  const d = new Date(`${sqlDate}T00:00:00Z`);
-  return `${names[d.getUTCDay()]} ${d.getUTCDate()}.${d.getUTCMonth() + 1}.`;
-}
-
-function timeLabel(sqlTime: string): string {
-  const [h, m] = sqlTime.split(":");
-  return `${Number(h)}:${m}`;
 }
 
 // ---------------------------------------------------------------------------
