@@ -67,7 +67,6 @@ void main() {
   const me = Profile(
     id: 'me',
     displayName: 'Já Hráč',
-    club: '',
     email: 'me@example.com',
     role: Role.player,
     status: ProfileStatus.approved,
@@ -76,7 +75,6 @@ void main() {
   const admin = Profile(
     id: 'me',
     displayName: 'Já Hráč',
-    club: '',
     email: 'me@example.com',
     role: Role.admin,
     status: ProfileStatus.approved,
@@ -125,11 +123,10 @@ void main() {
         myProfileProvider.overrideWith((ref) => Stream.value(profile)),
         playersProvider.overrideWith(
           (ref) async => const [
-            PlayerName(id: 'me', displayName: 'Já Hráč', club: ''),
+            PlayerName(id: 'me', displayName: 'Já Hráč'),
             PlayerName(
               id: 'p2',
               displayName: 'Petr Novák',
-              club: '',
               nick: 'Péťa',
             ),
           ],
@@ -660,7 +657,7 @@ void main() {
           myProfileProvider.overrideWith((ref) => Stream.value(me)),
           playersProvider.overrideWith(
             (ref) async => const [
-              PlayerName(id: 'me', displayName: 'Já Hráč', club: ''),
+              PlayerName(id: 'me', displayName: 'Já Hráč'),
             ],
           ),
         ],

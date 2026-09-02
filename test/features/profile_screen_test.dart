@@ -9,7 +9,6 @@ void main() {
   const me = Profile(
     id: 'me',
     displayName: 'Já Hráč',
-    club: '',
     clubId: 'c1',
     email: 'me@example.com',
     role: Role.player,
@@ -45,7 +44,6 @@ void main() {
     await tester.pumpWidget(app(const Profile(
       id: 'me',
       displayName: 'Já Hráč',
-      club: '',
       email: 'me@example.com',
       role: Role.player,
       status: ProfileStatus.approved,

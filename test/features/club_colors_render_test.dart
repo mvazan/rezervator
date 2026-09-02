@@ -91,7 +91,6 @@ void main() {
       const other = PlayerName(
         id: 'other',
         displayName: 'Petr Novák',
-        club: 'Modří',
         clubColor: 0, // Modrá
       );
       await tester.pumpWidget(
@@ -117,7 +116,6 @@ void main() {
       const other = PlayerName(
         id: 'other',
         displayName: 'Petr Novák',
-        club: 'Zelení',
         clubColor: 1, // Zelená
       );
       await tester.pumpWidget(
@@ -147,7 +145,6 @@ void main() {
       const other = PlayerName(
         id: 'other',
         displayName: 'Petr Novák',
-        club: '',
       ); // clubColor defaults to -1
       await tester.pumpWidget(
         kioskApp(roster: [other], reservations: [res('r1', other.id)]),
@@ -188,7 +185,6 @@ void main() {
     const me = Profile(
       id: 'me',
       displayName: 'Já Hráč',
-      club: '',
       email: 'me@example.com',
       role: Role.player,
       status: ProfileStatus.approved,
@@ -229,7 +225,6 @@ void main() {
       const other = PlayerName(
         id: 'p2',
         displayName: 'Petr Novák',
-        club: 'Červení',
         clubColor: 2, // Červená
       );
       await tester.pumpWidget(

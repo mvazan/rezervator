@@ -550,7 +550,6 @@ ALTER FUNCTION "public"."create_reservation"("p_player_id" "uuid", "p_date" "dat
 CREATE TABLE IF NOT EXISTS "public"."profiles" (
     "id" "uuid" NOT NULL,
     "display_name" "text" NOT NULL,
-    "club" "text" DEFAULT ''::"text" NOT NULL,
     "email" "text" DEFAULT ''::"text" NOT NULL,
     "role" "text" DEFAULT 'player'::"text" NOT NULL,
     "status" "text" DEFAULT 'pending'::"text" NOT NULL,
@@ -702,9 +701,7 @@ begin
   end if;
 
   return query
-  select p.id, p.display_name,
-         coalesce(c.name, nullif(p.club, ''), ''),
-         count(r.id)
+  select p.id, p.display_name, coalesce(c.name, ''), count(r.id)
   from profiles p
   left join clubs c on c.id = p.club_id
   join reservations r on r.player_id = p.id
@@ -716,7 +713,7 @@ begin
     and extract(year from r.date)::int = p_year
     and extract(month from r.date)::int = p_month
     and r.date <= (now() at time zone 'Europe/Prague')::date
-  group by p.id, p.display_name, coalesce(c.name, nullif(p.club, ''), '')
+  group by p.id, p.display_name, coalesce(c.name, '')
   order by count(r.id) desc, p.display_name;
 end;
 $$;
@@ -895,7 +892,6 @@ declare
   v_uid uuid := auth.uid();
   v_profile profiles;
   v_tenant tenants;
-  v_club clubs;
   v_first boolean;
 begin
   if v_uid is null then
@@ -919,12 +915,10 @@ begin
     raise exception 'unknown_tenant';
   end if;
 
-  if p_club_id is not null then
-    select * into v_club from clubs
-    where id = p_club_id and tenant_id = p_tenant_id;
-    if not found then
-      raise exception 'unknown_club';
-    end if;
+  if p_club_id is not null and not exists (
+    select 1 from clubs where id = p_club_id and tenant_id = p_tenant_id
+  ) then
+    raise exception 'unknown_club';
   end if;
 
   -- Serialize concurrent registrations into the same tenant so exactly one
@@ -942,13 +936,12 @@ begin
   end if;
 
   insert into profiles
-    (id, tenant_id, display_name, club, club_id, nick, email,
+    (id, tenant_id, display_name, club_id, nick, email,
      role, status, approved_at)
   values (
     v_uid,
     p_tenant_id,
     trim(p_display_name),
-    coalesce(v_club.name, ''),
     p_club_id,
     trim(coalesce(p_nick, '')),
     coalesce(auth.email(), ''),
@@ -1289,7 +1282,6 @@ ALTER TABLE "public"."day_overrides" OWNER TO "postgres";
 CREATE OR REPLACE VIEW "public"."players" AS
  SELECT "p"."id",
     "p"."display_name",
-    "p"."club",
     "p"."nick",
     "p"."club_id",
     COALESCE(("c"."color")::integer, '-1'::integer) AS "club_color"
@@ -1827,10 +1819,6 @@ GRANT UPDATE("display_name") ON TABLE "public"."profiles" TO "authenticated";
 
 
 
-GRANT UPDATE("club") ON TABLE "public"."profiles" TO "authenticated";
-
-
-
 GRANT UPDATE("fcm_token") ON TABLE "public"."profiles" TO "authenticated";
 
 
@@ -1867,7 +1855,7 @@ GRANT ALL ON TABLE "public"."day_overrides" TO "service_role";
 
 
 
-GRANT SELECT ON TABLE "public"."players" TO "authenticated";
+GRANT ALL ON TABLE "public"."players" TO "authenticated";
 GRANT ALL ON TABLE "public"."players" TO "service_role";
 
 

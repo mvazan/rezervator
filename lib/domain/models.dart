@@ -103,7 +103,6 @@ class Profile {
   const Profile({
     required this.id,
     required this.displayName,
-    required this.club,
     required this.email,
     required this.role,
     required this.status,
@@ -117,7 +116,6 @@ class Profile {
 
   final String id;
   final String displayName;
-  final String club;
   final String email;
   final Role role;
   final ProfileStatus status;
@@ -151,7 +149,6 @@ class Profile {
   factory Profile.fromJson(Map<String, dynamic> json) => Profile(
         id: json['id'] as String,
         displayName: json['display_name'] as String,
-        club: json['club'] as String? ?? '',
         email: json['email'] as String? ?? '',
         role: Role.values.asNameMap()[json['role']] ?? Role.player,
         status: json['status'] == 'approved'
@@ -188,9 +185,8 @@ class Club {
 }
 
 /// Display name of [clubId] from the live club roster; '' when the profile
-/// has no club or the club was deleted. Never read `profiles.club`: that
-/// text is a copy taken at registration and goes stale the moment an admin
-/// reassigns the club (set_player_club only moves club_id).
+/// has no club or the club was deleted. (The old `profiles.club` text was a
+/// registration-time copy that went stale on reassignment; dropped in 0019.)
 String clubNameOf(String? clubId, Iterable<Club> clubs) {
   if (clubId == null) return '';
   for (final club in clubs) {
@@ -204,7 +200,6 @@ class PlayerName {
   const PlayerName({
     required this.id,
     required this.displayName,
-    required this.club,
     this.nick = '',
     this.clubId,
     this.clubColor = -1,
@@ -212,7 +207,6 @@ class PlayerName {
 
   final String id;
   final String displayName;
-  final String club;
 
   /// Short board name (<=14 chars); empty means "use displayName".
   final String nick;
@@ -226,7 +220,6 @@ class PlayerName {
   factory PlayerName.fromJson(Map<String, dynamic> json) => PlayerName(
         id: json['id'] as String,
         displayName: json['display_name'] as String,
-        club: json['club'] as String? ?? '',
         nick: json['nick'] as String? ?? '',
         clubId: json['club_id'] as String?,
         clubColor: json['club_color'] as int? ?? -1,

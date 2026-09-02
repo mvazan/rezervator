@@ -3,7 +3,7 @@ import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/domain/name_index.dart';
 
 void main() {
-  PlayerName p(String name) => PlayerName(id: name, displayName: name, club: '');
+  PlayerName p(String name) => PlayerName(id: name, displayName: name);
 
   final players = [
     p('Novák Jan'), p('Novotná Eva'), p('Nguyen Bao'),

@@ -128,8 +128,7 @@ class PlayersScreen extends ConsumerWidget {
     ];
   }
 
-  /// Club name for rows outside the club sections (pending, kiosk) — from
-  /// the roster, never the stale `profiles.club` text.
+  /// Club name for rows outside the club sections (pending, kiosk).
   Widget? _clubSubtitle(Profile p, List<Club> clubs) {
     final name = clubNameOf(p.clubId, clubs);
     return name.isEmpty ? null : Text(name);

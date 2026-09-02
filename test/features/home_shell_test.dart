@@ -52,7 +52,6 @@ void main() {
   const me = Profile(
     id: 'me',
     displayName: 'Já Hráč',
-    club: '',
     email: 'me@example.com',
     role: Role.player,
     status: ProfileStatus.approved,
@@ -62,7 +61,6 @@ void main() {
   const visiting = Profile(
     id: 'me',
     displayName: 'Miloš',
-    club: '',
     email: 'milos.vazan@gmail.com',
     role: Role.admin,
     status: ProfileStatus.approved,
