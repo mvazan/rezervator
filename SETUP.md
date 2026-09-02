@@ -73,6 +73,15 @@ uživatele = tvůj Gmail, heslo = app password, jméno odesílatele
 S vlastním SMTP aktivním si můžeš zároveň počeštit šablony e-mailů
 (**Authentication → Email Templates**).
 
+Tohle všechno (Site URL, redirect URLs, SMTP i česká šablona magic-link
+e-mailu ze `supabase/templates/`) je zapsané v `supabase/config.toml` —
+místo klikání to lze nahrát jedním příkazem; heslo k SMTP se bere
+z prostředí a do repa nepatří:
+
+```bash
+SMTP_PASS=<app-password> supabase config push
+```
+
 ## 4. První spuštění
 
 ```bash
@@ -81,16 +90,28 @@ flutter run \
   --dart-define=SUPABASE_ANON_KEY=eyJ...
 ```
 
-**První člověk, který se přihlásí, se automaticky stane administrátorem** —
-žádný pozvánkový kód není potřeba (na rozdíl od Termínátoru). Všichni další
-uživatelé se zaregistrují jako hráči se stavem „čeká na schválení" a čekají
-na schválení od administrátora — ten je schvaluje přímo v appce (ikona
-skupiny → Hráči → Schválit).
+Registrace funguje po kuželnách: nový hráč si v registračním formuláři
+vybere svou kuželnu ze seznamu **schválených** kuželen (a případně oddíl),
+nebo založí **novou kuželnu** — stane se jejím správcem, používat ji ale jde
+až po schválení správcem aplikace (viz níže). Všichni další členové kuželny
+se registrují jako hráči se stavem „čeká na schválení" a schvaluje je
+správce kuželny přímo v appce (ikona skupiny → Hráči → Schválit).
 
-Aplikace zatím používá i proměnné `FIREBASE_API_KEY`, `FIREBASE_APP_ID`,
-`FIREBASE_SENDER_ID` a `FIREBASE_PROJECT_ID` v `lib/config.dart` — ty jsou
-**zatím nepotřebné** (týkají se push notifikací, které přijdou až ve
-Fázi 5). Klidně je teď ignoruj, appka běží i bez nich.
+**Správce aplikace (superadmin)** schvaluje nové kuželny a může se do
+kterékoli přepnout (Správa → Kuželny). Na čerstvém backendu vznikne úplně
+první kuželna takhle: zaregistruj se, v registraci zvol **novou kuželnu**
+(appka tě pak drží na čekací obrazovce) a v SQL Editoru jednorázově nastav
+sebe jako správce aplikace a tu první kuželnu schval:
+
+```sql
+update profiles set superadmin = true where email = '<tvůj-e-mail>';
+update tenants set status = 'approved', approved_at = now()
+where status = 'pending';
+```
+
+Každou další kuželnu už schválíš v appce. Proměnné `FIREBASE_*` v
+`lib/config.dart` jsou volitelné (push notifikace, krok 8.2) a `SENTRY_DSN`
+také (hlášení chyb, krok 9) — bez nich appka běží normálně.
 
 ## 5. Web na GitHub Pages
 
@@ -100,10 +121,12 @@ Fázi 5). Klidně je teď ignoruj, appka běží i bez nich.
    git remote add origin https://github.com/<tvůj-github-username>/rezervator.git
    git push -u origin main
    ```
-2. V repozitáři **Settings → Secrets and variables → Actions** přidej dva
+2. V repozitáři **Settings → Secrets and variables → Actions** přidej
    repository secrets:
    - `SUPABASE_URL`
    - `SUPABASE_ANON_KEY`
+   - volitelně `SENTRY_DSN` (krok 9) a `FIREBASE_*` (krok 8.2); prázdné
+     hodnoty jsou v pořádku — příslušná funkce zůstane vypnutá.
 3. **Settings → Pages → Source** přepni na **GitHub Actions**.
 4. Přiložený workflow [`.github/workflows/deploy-web.yml`](.github/workflows/deploy-web.yml)
    se spustí automaticky při každém pushi do `main` (i ručně přes
@@ -288,17 +311,9 @@ a serverovou (`FIREBASE_SERVICE_ACCOUNT`):
    předává do web buildu automaticky. Necháš-li je nevyplněné, web build
    proběhne úplně stejně jako dřív, jen bez push (na webu push stejně
    nefunguje — týká se jen Android/iOS buildů).
-3b. **Nutné pro Android push:** ve Firebase u té Android app stáhni
-   **`google-services.json`** a ulož ho do `android/app/google-services.json`
-   (soubor je v `.gitignore`, protože obsahuje klíče — vzor viz
-   `android/app/google-services.json.example`). Bez něj se **nativní**
-   `FirebaseApp[DEFAULT]` na Androidu neinicializuje (v logu
-   „Default FirebaseApp failed to initialize because no default options were
-   found") a `firebase_messaging` nikdy nevydá token — samotné
-   `--dart-define` hodnoty z bodu 2 na to nestačí, protože jde o
-   Dart-side inicializaci. Gradle plugin `com.google.gms.google-services`
-   je už v projektu zapojený, takže stačí ten soubor doplnit a APK
-   přestavět.
+   Žádný `google-services.json` není potřeba — Firebase se na Androidu
+   inicializuje z těchhle čtyř hodnot v Dartu (`lib/push/push.dart`),
+   Gradle plugin `google-services` projekt nepoužívá.
 4. Server-side: nastav Supabase secret `FIREBASE_SERVICE_ACCOUNT` (JSON
    service-account klíč z **Firebase → Project settings → Service accounts
    → Generate new private key**, vlož **celý obsah** staženého souboru jako
@@ -324,6 +339,35 @@ dál zapínat, GitHub Actions ho spustí sám podle rozvrhu (`cron`) hned po
 pushnutí do `main`. Chceš-li ho vyzkoušet hned teď, běž do **Actions →
 Supabase keep-alive → Run workflow** (ruční spuštění přes
 `workflow_dispatch`).
+
+## 9. Sentry (volitelné hlášení chyb)
+
+Založ projekt na <https://sentry.io> (platforma Flutter), zkopíruj jeho
+**DSN** a předej ho jako `--dart-define=SENTRY_DSN=…` (lokálně) a jako
+repository secret `SENTRY_DSN` (web i release build ho zapečou). Bez DSN je
+Sentry vypnuté. Jeden projekt stačí pro web i Android — rozlišuje je tag
+`environment` (`web` / `app`); přechodné síťové chyby se nehlásí.
+
+## 10. Lokální vývoj, testy a schéma
+
+- `flutter analyze && flutter test` — analyzér + unit/widget testy; CI je
+  spouští na každý push i PR (`.github/workflows/ci.yml`).
+- `supabase start` postaví celý backend lokálně v Dockeru (migrace se
+  aplikují samy, `supabase db reset` ho postaví znovu od nuly). Smoke-test
+  izolace kuželen:
+  ```bash
+  psql postgresql://postgres:postgres@127.0.0.1:54322/postgres \
+    -v ON_ERROR_STOP=1 -f supabase/tests/tenancy_rls.sql
+  ```
+- Po přidání migrace spusť `tool/schema_snapshot.sh` (obnoví
+  `supabase/schema.sql`, CI ho porovnává s čerstvou stavbou) a doplň
+  [`docs/SCHEMA.md`](docs/SCHEMA.md).
+- Edge funkce: `deno test supabase/functions` a `deno check --import-map
+  supabase/functions/import_map.json supabase/functions/notify/index.ts
+  supabase/functions/cancel/index.ts`; bez lokálního Dena přes Docker:
+  `docker run --rm -v "$PWD/supabase/functions:/w" -w /w denoland/deno:latest test`.
+- Vydání do Google Play (verze, changelog, recenzní účet) popisuje
+  [`PLAY.md`](PLAY.md); CI/CD a nasazení backendu [`CICD.md`](CICD.md).
 
 ## Hotovo
 

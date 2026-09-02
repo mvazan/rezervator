@@ -257,4 +257,9 @@ framework, zmena histórie migrácií (len snapshot vedľa nej).
   `SlotTile` row variant, `WeekHeader` + `ScheduleActions` z `WeekScreen`,
   `SlotCallbacks`/`CalendarAdminHooks`, zdieľané konštanty. 272 testov bez
   zmeny. Vynechané: anchor `jumpTo` z build, kiosk `_window` snapshot.
+- **Plán 7 (dokumentácia)** — hotový 2026-09-02 na vetve `cleanup-7-docs`
+  (paralelne s plánom 6): SETUP.md (registrácia po kuželniach + superadmin
+  bootstrap, `config push`, Sentry, lokálny vývoj, preč s neexistujúcim
+  google-services.json.example), CICD.md a PLAY.md (release notes z
+  `changelog_data.dart`, `SENTRY_DSN`), `test/changelog_test.dart`.
 
