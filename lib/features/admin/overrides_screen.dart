@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/ui.dart';
 import '../../data/providers.dart';
+import '../../domain/limits.dart';
 import '../../domain/models.dart';
 import 'slot_types_screen.dart';
 import 'widgets/blockage_dialog.dart';
@@ -420,7 +421,7 @@ class _OverrideDialogState extends ConsumerState<_OverrideDialog> {
       snack(context, '„Do" musí být po datu začátku.');
       return;
     }
-    if (span > 92) {
+    if (span > Limits.closureSpanDays) {
       snack(context, 'Nejvýše 3 měsíce najednou.');
       return;
     }

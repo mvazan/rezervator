@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/ui.dart';
 import '../../data/providers.dart';
+import '../../domain/limits.dart';
 import '../../domain/models.dart';
 import 'widgets/admin_body.dart';
 
@@ -201,15 +202,17 @@ class _MatchDialogState extends State<MatchDialog> {
     final input = await promptText(
       context,
       title: 'Úklid před zápasem',
-      hint: '0–240',
+      hint: '${Limits.prepMinutes.min}–${Limits.prepMinutes.max}',
       initial: _prepMinutes.toString(),
       keyboardType: TextInputType.number,
       suffixText: 'min',
     );
     if (input == null) return;
-    final minutes = int.tryParse(input);
-    if (minutes == null || minutes < 0 || minutes > 240) {
-      if (mounted) snack(context, 'Zadej 0–240 minut.');
+    // Unparsable input fails the range check like an out-of-range number.
+    final minutes = int.tryParse(input) ?? -1;
+    final error = validatePrepMinutes(minutes);
+    if (error != null) {
+      if (mounted) snack(context, error);
       return;
     }
     setState(() => _prepMinutes = minutes);
