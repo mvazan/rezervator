@@ -8,7 +8,7 @@
 // (see _shared/cancel_token.ts) is the sole authorization: one reservation,
 // valid until the block starts.
 
-import { createClient } from "jsr:@supabase/supabase-js@2";
+import { createClient } from "@supabase/supabase-js";
 import { verifyCancelToken } from "../_shared/cancel_token.ts";
 import { dayLabel, escapeHtml, timeLabel } from "../_shared/format.ts";
 

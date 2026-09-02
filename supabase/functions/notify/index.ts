@@ -19,7 +19,7 @@
 // Deploy with --no-verify-jwt (DB triggers can't mint JWTs; the
 // x-webhook-secret header is the gate).
 
-import { createClient } from "jsr:@supabase/supabase-js@2";
+import { createClient } from "@supabase/supabase-js";
 import { pragueEpoch, pragueToday, signCancelToken } from "../_shared/cancel_token.ts";
 import { firebaseConfigured, sendPush } from "../_shared/fcm.ts";
 import { dayLabel, escapeHtml, timeLabel } from "../_shared/format.ts";

@@ -6,7 +6,7 @@
 // or malformed secret means "no push" (notify falls back to e-mail) instead of
 // a crash at module load that would take every notification down with it.
 
-import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { base64urlEncode } from "./cancel_token.ts";
 
 type ServiceAccount = {
