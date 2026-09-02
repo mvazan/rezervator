@@ -49,9 +49,12 @@ only.
 `authenticated` has select/insert/update/delete on the app tables (policies
 decide rows), the column-restricted exceptions above, SELECT on `players`
 and `tenants(id, name, status)`. `anon` has nothing. `service_role`
-(edge functions) has everything. Default privileges are pinned so new
-tables get the same shape on hosted and local stacks. Internal helper
-functions have EXECUTE revoked from the app roles (see below).
+(edge functions) has everything. Default privileges are pinned (0017,
+0020) so new tables get exactly that shape on hosted and local stacks —
+note that a `drop … create` of a view re-applies the defaults, so a
+recreated read-only view must revoke again (that is what 0020 fixes for
+`players`). Internal helper functions have EXECUTE revoked from the app
+roles (see below).
 
 ## RPCs
 
