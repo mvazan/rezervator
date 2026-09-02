@@ -1,8 +1,9 @@
-/// Shared schedule cell: one widget renders every slot in both the app's
-/// week list and the kiosk's week view. Purely presentational — all booking
-/// policy (canBook/canCancel/isAdmin gating) stays with the caller, which
-/// resolves a display name and a single [onTap] callback (or null to render
-/// inert) before constructing the tile.
+/// Shared schedule cell: one widget renders every slot in the app's week
+/// calendar (compact) and day pager (large). The kiosk board draws its own
+/// lane rows (kiosk_board_view.dart) — unifying them is cleanup plan 5.
+/// Purely presentational — all booking policy (canBook/canCancel/isAdmin
+/// gating) stays with the caller, which resolves a display name and a single
+/// [onTap] callback (or null to render inert) before constructing the tile.
 library;
 
 import 'package:flutter/material.dart';
@@ -233,7 +234,7 @@ class SlotTile extends StatelessWidget {
 /// computed (canBook/canCancel, admin exemptions, name lookup) into the slim
 /// [SlotTile] contract: a display name, isMine/quiet flags, and a single
 /// resolved tap handler (or null to render the cell inert). Shared by the
-/// week list view (compact tiles) and the day pager view (large tiles) so
+/// week calendar view (compact tiles) and the day pager view (large tiles) so
 /// the policy has exactly one implementation regardless of layout.
 Widget slotTileFor({
   required OpenDay day,

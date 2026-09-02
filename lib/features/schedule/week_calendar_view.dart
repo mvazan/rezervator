@@ -80,7 +80,7 @@ class WeekCalendarView extends StatefulWidget {
   /// Admin-only (null otherwise). Click the card's time header (or a
   /// blocking band) to edit FOR THAT DAY; tap empty column space or the
   /// header ＋ to add; HOLD a card/band and drag it onto empty space to
-  /// move it within the day (snap 15 min).
+  /// move it within the day (snap 5 min, see [_snapMinute]).
   final void Function(Day date, TimeBlock block)? onEditBlock;
   final void Function(Day date, HourMinute start, HourMinute end)?
       onAddBlockInGap;
