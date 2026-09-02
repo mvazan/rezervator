@@ -193,7 +193,7 @@ class _MoveReservationsDialogState
                     const SizedBox(height: 4),
                     for (var lane = 1; lane <= laneCount; lane++)
                       _laneTarget(context, scheme, target, lane,
-                          laneTaken(target, lane), nameById),
+                          laneTaken(target, lane), nameById, reservations),
                     const SizedBox(height: 12),
                   ],
                 ],
@@ -218,6 +218,8 @@ class _MoveReservationsDialogState
     );
   }
 
+  /// One drop target: lane [lane] of [block]. [reservations] is the week
+  /// list build already watches — the occupant is looked up there.
   Widget _laneTarget(
     BuildContext context,
     ColorScheme scheme,
@@ -225,6 +227,7 @@ class _MoveReservationsDialogState
     int lane,
     bool taken,
     Map<String, String> nameById,
+    List<Reservation> reservations,
   ) {
     // The occupant label: a live reservation already there, or a staged one.
     String? occupant;
@@ -232,15 +235,11 @@ class _MoveReservationsDialogState
         .where((e) => e.value.$1.id == block.id && e.value.$2 == lane)
         .toList();
     if (stagedEntry.isNotEmpty) {
-      final reservations =
-          ref.read(weekReservationsProvider(_monday)).value ?? const [];
       final r = reservations
           .where((r) => r.id == stagedEntry.first.key)
           .toList();
       occupant = r.isEmpty ? '?' : (nameById[r.first.playerId] ?? '?');
     } else if (taken) {
-      final reservations =
-          ref.read(weekReservationsProvider(_monday)).value ?? const [];
       final r = reservations
           .where((r) =>
               r.isLive &&

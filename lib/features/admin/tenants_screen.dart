@@ -4,14 +4,30 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/ui.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
-import 'widgets/admin_body.dart';
+import 'widgets/admin_scaffold.dart';
 
 /// SUPERADMIN only (0014): the kuželny hub. Pending kuželny get approved
 /// (or rejected — deleted whole) here, and the superadmin can switch their
 /// own membership into any kuželna to inspect its data and boards with full
 /// admin rights; switching back works the same way.
-class TenantsScreen extends ConsumerWidget {
+class TenantsScreen extends StatelessWidget {
   const TenantsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const AdminScaffold(
+      title: 'Kuželny',
+      superadminOnly: true,
+      body: _TenantsBody(),
+    );
+  }
+}
+
+/// The list itself — its own widget so the guarded admin_list_tenants RPC
+/// is only watched once the gate has let a superadmin through (a regular
+/// admin's call would just error).
+class _TenantsBody extends ConsumerWidget {
+  const _TenantsBody();
 
   Future<void> _approve(
       BuildContext context, WidgetRef ref, AdminTenant t) async {
@@ -64,48 +80,35 @@ class TenantsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final me = ref.watch(myProfileProvider).value;
-    if (me?.isSuperadmin != true) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('Kuželny')),
-        body: const Center(child: Text('Jen pro správce aplikace.')),
-      );
-    }
-
-    final tenants = ref.watch(adminTenantsProvider);
-    return Scaffold(
-      appBar: AppBar(title: const Text('Kuželny')),
-      body: AdminBody(
-        child: tenants.when(
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (e, _) => Center(child: Text(friendlyDbError(e))),
-          data: (rows) {
-            final pending = [for (final t in rows) if (t.pending) t];
-            final approved = [for (final t in rows) if (!t.pending) t];
-            return ListView(
-              children: [
-                if (pending.isNotEmpty) ...[
-                  const _SectionLabel('Čekají na schválení'),
-                  for (final t in pending)
-                    _TenantTile(
-                      tenant: t,
-                      isCurrent: t.id == me!.tenantId,
-                      onApprove: () => _approve(context, ref, t),
-                      onReject: () => _reject(context, ref, t),
-                      onSwitch: () => _switch(context, ref, t),
-                    ),
-                ],
-                _SectionLabel('Aktivní (${approved.length})'),
-                for (final t in approved)
-                  _TenantTile(
-                    tenant: t,
-                    isCurrent: t.id == me!.tenantId,
-                    onSwitch: () => _switch(context, ref, t),
-                  ),
-              ],
-            );
-          },
-        ),
-      ),
+    return AsyncBody(
+      value: ref.watch(adminTenantsProvider),
+      onRetry: () => ref.invalidate(adminTenantsProvider),
+      builder: (rows) {
+        final pending = [for (final t in rows) if (t.pending) t];
+        final approved = [for (final t in rows) if (!t.pending) t];
+        return ListView(
+          children: [
+            if (pending.isNotEmpty) ...[
+              const _SectionLabel('Čekají na schválení'),
+              for (final t in pending)
+                _TenantTile(
+                  tenant: t,
+                  isCurrent: t.id == me?.tenantId,
+                  onApprove: () => _approve(context, ref, t),
+                  onReject: () => _reject(context, ref, t),
+                  onSwitch: () => _switch(context, ref, t),
+                ),
+            ],
+            _SectionLabel('Aktivní (${approved.length})'),
+            for (final t in approved)
+              _TenantTile(
+                tenant: t,
+                isCurrent: t.id == me?.tenantId,
+                onSwitch: () => _switch(context, ref, t),
+              ),
+          ],
+        );
+      },
     );
   }
 }

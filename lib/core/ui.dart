@@ -208,6 +208,43 @@ Future<String?> promptText(
   }
 }
 
+/// The platform date picker in Czech, on [Day]s. [initial] (default today)
+/// is clamped into [first]..[last] — showDatePicker asserts on an
+/// out-of-range initial date.
+Future<Day?> pickDay(
+  BuildContext context, {
+  Day? initial,
+  required Day first,
+  required Day last,
+}) async {
+  DateTime dt(Day d) => DateTime(d.year, d.month, d.day);
+  var base = initial ?? today();
+  if (base.isBefore(first)) base = first;
+  if (base.isAfter(last)) base = last;
+  final picked = await showDatePicker(
+    context: context,
+    initialDate: dt(base),
+    firstDate: dt(first),
+    lastDate: dt(last),
+    locale: const Locale('cs'),
+  );
+  return picked == null ? null : Day.fromDateTime(picked);
+}
+
+/// Confirm → run → snack: the delete flow every admin list repeats.
+/// Returns true when the action ran and succeeded.
+Future<bool> confirmDelete(
+  BuildContext context, {
+  required String title,
+  required String message,
+  required Future<void> Function() action,
+  String? success,
+}) async {
+  final confirmed = await confirmDialog(context, title: title, message: message);
+  if (!confirmed || !context.mounted) return false;
+  return tryAction(context, action, success: success, errorText: friendlyDbError);
+}
+
 /// Shows the platform time picker forced to 24h display, returning a
 /// [HourMinute] (or null on cancel).
 Future<HourMinute?> pickTime(

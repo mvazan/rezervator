@@ -12,6 +12,7 @@ import 'rentals_screen.dart';
 import 'report_screen.dart';
 import 'schedule_screen.dart';
 import 'tenants_screen.dart';
+import 'widgets/admin_scaffold.dart';
 
 /// One admin hub entry: label + icon + target screen.
 typedef _Entry = ({String label, IconData icon, Widget Function() screen});
@@ -72,13 +73,9 @@ class AdminScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // AdminScaffold gates non-admins; the profile is still needed here for
+    // the superadmin / visiting sections.
     final profile = ref.watch(myProfileProvider).value;
-    if (profile?.isAdmin != true) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('Správa kuželny')),
-        body: const Center(child: Text('Jen pro správce.')),
-      );
-    }
 
     // The kuželny approval/switching hub is superadmin-only (0014) and
     // renders as its OWN visually distinct section — tinted tile under a
@@ -117,8 +114,9 @@ class AdminScreen extends ConsumerWidget {
     final homeSubtitle =
         homeName == null ? 'teď prohlížíš cizí kuželnu' : 'do kuželny $homeName';
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Správa kuželny')),
+    return AdminScaffold(
+      title: 'Správa kuželny',
+      constrainBody: false,
       body: LayoutBuilder(
         builder: (context, constraints) {
           if (constraints.maxWidth < _wideBreakpoint) {

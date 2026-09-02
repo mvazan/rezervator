@@ -3,10 +3,12 @@ import 'package:flutter/material.dart';
 import '../../../core/ui.dart';
 import '../../../data/providers.dart';
 import '../../../domain/models.dart';
+import 'form_dialog.dart';
+import 'form_fields.dart';
 
 /// Add/edit dialog for a BLOCKAGE (any non-match priority slot): type
 /// picker (šablóny — name, color, lane scope), date and two time pickers.
-/// Matches have their own dialog in the Zápasy screen.
+/// Matches have their own dialog ([MatchDialog] in match_dialog.dart).
 class BlockageDialog extends StatefulWidget {
   const BlockageDialog({super.key, this.existing, required this.types});
 
@@ -23,7 +25,6 @@ class _BlockageDialogState extends State<BlockageDialog> {
   HourMinute? _end;
   String? _typeId;
   final _description = TextEditingController();
-  bool _saving = false;
 
   List<PrioritySlotType> get _types =>
       [for (final t in widget.types) if (!t.isMatch) t];
@@ -49,18 +50,15 @@ class _BlockageDialogState extends State<BlockageDialog> {
   }
 
   Future<void> _pickDate() async {
+    // Blockages allow retro entries: a year back, a year ahead.
     final now = today();
-    final initial = _date ?? now;
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: DateTime(initial.year, initial.month, initial.day),
-      firstDate: DateTime(now.year, now.month, now.day)
-          .subtract(const Duration(days: 365)),
-      lastDate:
-          DateTime(now.year, now.month, now.day).add(const Duration(days: 365)),
-      locale: const Locale('cs'),
+    final picked = await pickDay(
+      context,
+      initial: _date,
+      first: now.addDays(-365),
+      last: now.addDays(365),
     );
-    if (picked != null) setState(() => _date = Day.fromDateTime(picked));
+    if (picked != null) setState(() => _date = picked);
   }
 
   Future<void> _pickStart() async {
@@ -80,25 +78,25 @@ class _BlockageDialogState extends State<BlockageDialog> {
     if (picked != null) setState(() => _end = picked);
   }
 
-  Future<void> _save() async {
+  /// Validates and saves; null keeps the dialog open (the snack said why).
+  Future<bool?> _save() async {
     final date = _date;
     final start = _start;
     final end = _end;
     final type = _type;
     if (type == null) {
       snack(context, 'Vyber typ.');
-      return;
+      return null;
     }
     if (date == null || start == null || end == null) {
       snack(context, 'Vyber datum a čas.');
-      return;
+      return null;
     }
     if (end.compareTo(start) <= 0) {
       snack(context, 'Konec musí být po začátku.');
-      return;
+      return null;
     }
 
-    setState(() => _saving = true);
     final ok = await tryAction(
       context,
       () => Api.savePrioritySlot(
@@ -112,74 +110,51 @@ class _BlockageDialogState extends State<BlockageDialog> {
       success: 'Uloženo. Kolidující rezervace byly zrušeny.',
       errorText: friendlyDbError,
     );
-    if (!mounted) return;
-    if (ok) {
-      Navigator.of(context).pop();
-    } else {
-      setState(() => _saving = false);
-    }
+    return ok ? true : null;
   }
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title:
-          Text(widget.existing == null ? 'Přidat blokaci' : 'Upravit blokaci'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            DropdownButtonFormField<String>(
-              initialValue: _typeId,
-              isExpanded: true,
-              decoration: const InputDecoration(labelText: 'Typ'),
-              items: [
-                for (final t in _types)
-                  DropdownMenuItem(
-                    value: t.id,
-                    child: Text(
-                      t.lanes == null
-                          ? t.name
-                          : '${t.name} (dráhy ${t.lanes!.join(', ')})',
-                    ),
-                  ),
-              ],
-              onChanged: (id) => setState(() => _typeId = id),
-            ),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Datum'),
-              trailing: Text(_date == null ? 'Vybrat' : dayFull(_date!)),
-              onTap: _pickDate,
-            ),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Začátek'),
-              trailing: Text(_start?.display() ?? '--:--'),
-              onTap: _pickStart,
-            ),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Konec'),
-              trailing: Text(_end?.display() ?? '--:--'),
-              onTap: _pickEnd,
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _description,
-              decoration: const InputDecoration(labelText: 'Popis'),
-            ),
+    return FormDialog<bool>(
+      title: widget.existing == null ? 'Přidat blokaci' : 'Upravit blokaci',
+      onSave: _save,
+      children: [
+        DropdownButtonFormField<String>(
+          initialValue: _typeId,
+          isExpanded: true,
+          decoration: const InputDecoration(labelText: 'Typ'),
+          items: [
+            for (final t in _types)
+              DropdownMenuItem(
+                value: t.id,
+                child: Text(
+                  t.lanes == null
+                      ? t.name
+                      : '${t.name} (dráhy ${t.lanes!.join(', ')})',
+                ),
+              ),
           ],
+          onChanged: (id) => setState(() => _typeId = id),
         ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Zrušit'),
+        PickerTile(
+          label: 'Datum',
+          value: _date == null ? 'Vybrat' : dayFull(_date!),
+          onTap: _pickDate,
         ),
-        FilledButton(
-          onPressed: _saving ? null : _save,
-          child: Text(_saving ? 'Ukládám…' : 'Uložit'),
+        PickerTile(
+          label: 'Začátek',
+          value: _start?.display() ?? '--:--',
+          onTap: _pickStart,
+        ),
+        PickerTile(
+          label: 'Konec',
+          value: _end?.display() ?? '--:--',
+          onTap: _pickEnd,
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _description,
+          decoration: const InputDecoration(labelText: 'Popis'),
         ),
       ],
     );

@@ -3,12 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/ui.dart';
 import '../../data/providers.dart';
-import '../../domain/block_generator.dart';
 import '../../domain/day_edit.dart';
 import '../../domain/limits.dart';
 import '../../domain/models.dart';
-import 'widgets/admin_body.dart';
+import 'widgets/admin_scaffold.dart';
 import 'widgets/block_dialog.dart';
+import 'widgets/generator_dialog.dart';
 
 /// Admin: one screen for the whole schedule shape — the `schedule_settings`
 /// singleton (lane count, training days, horizon, per-player cap) on top and
@@ -27,7 +27,21 @@ class _ScheduleAdminScreenState extends ConsumerState<ScheduleAdminScreen> {
   final _maxReservations = TextEditingController();
   Set<int> _trainingWeekdays = {};
   bool _saving = false;
-  bool _initialized = false;
+
+  /// True once the admin has edited a field: the live settings stream then
+  /// leaves the form alone (a change from another device would otherwise
+  /// wipe the edit). Cleared by a successful save.
+  bool _dirty = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Settings loaded before this screen opened: the stream only reports
+    // changes, so seed from the current value once. ref.listen in build
+    // covers data arriving later — and every later change.
+    final settings = ref.read(settingsProvider).value;
+    if (settings != null) _initFrom(settings);
+  }
 
   @override
   void dispose() {
@@ -42,8 +56,9 @@ class _ScheduleAdminScreenState extends ConsumerState<ScheduleAdminScreen> {
     _horizonDays.text = '${settings.bookingHorizonDays}';
     _maxReservations.text = '${settings.maxActiveReservations}';
     _trainingWeekdays = {...settings.trainingWeekdays};
-    _initialized = true;
   }
+
+  void _markDirty(String _) => _dirty = true;
 
   /// Future live reservations the new grid would cancel (server cascade,
   /// 0018) — the pre-flight warning before the save.
@@ -98,7 +113,7 @@ class _ScheduleAdminScreenState extends ConsumerState<ScheduleAdminScreen> {
 
     if (!mounted) return;
     setState(() => _saving = true);
-    await tryAction(
+    final ok = await tryAction(
       context,
       () => Api.updateSettings(
         tenantId: current.tenantId,
@@ -110,7 +125,12 @@ class _ScheduleAdminScreenState extends ConsumerState<ScheduleAdminScreen> {
       success: 'Uloženo.',
       errorText: friendlyDbError,
     );
-    if (mounted) setState(() => _saving = false);
+    if (mounted) {
+      setState(() {
+        _saving = false;
+        if (ok) _dirty = false;
+      });
+    }
   }
 
   // --- blocks section -------------------------------------------------------
@@ -129,28 +149,21 @@ class _ScheduleAdminScreenState extends ConsumerState<ScheduleAdminScreen> {
   }
 
   Future<void> _deleteBlock(TimeBlock block) async {
-    final confirmed = await confirmDialog(
+    var deleted = false;
+    final ok = await confirmDelete(
       context,
       title: 'Smazat blok?',
       message: 'Opravdu smazat blok ${block.label}?',
+      action: () async => deleted = await Api.deleteTimeBlock(block.id),
     );
-    if (!confirmed || !mounted) return;
-
-    final bool deleted;
-    try {
-      deleted = await Api.deleteTimeBlock(block.id);
-    } catch (e) {
-      if (mounted) snack(context, friendlyDbError(e));
-      return;
-    }
+    if (!ok || !mounted) return;
     if (deleted) {
-      if (mounted) snack(context, 'Blok smazán.');
+      snack(context, 'Blok smazán.');
       return;
     }
     // Block already has reservations — deactivate instead.
-    if (!mounted) return;
-    final ok = await confirmIfBlockStrands(context, block.id);
-    if (!ok || !mounted) return;
+    final proceed = await confirmIfBlockStrands(context, block.id);
+    if (!proceed || !mounted) return;
     await tryAction(
       context,
       () => Api.updateTimeBlock(block.id, active: false),
@@ -161,14 +174,13 @@ class _ScheduleAdminScreenState extends ConsumerState<ScheduleAdminScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final profile = ref.watch(myProfileProvider).value;
-    if (profile?.isAdmin != true) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('Rozvrh')),
-        body: const Center(child: Text('Jen pro správce.')),
-      );
-    }
-
+    // Settings arriving (or changed on another device) re-seed the untouched
+    // form. No setState: the ref.watch below rebuilds the chips for the very
+    // same change, and the controllers repaint their fields themselves.
+    ref.listen(settingsProvider, (_, next) {
+      final settings = next.value;
+      if (settings != null && !_dirty) _initFrom(settings);
+    });
     final settingsAsync = ref.watch(settingsProvider);
     // position < 0 marks day-scoped "special" blocks (calendar edits) —
     // they belong to day overrides, not the weekly template, so the Rozvrh
@@ -180,317 +192,149 @@ class _ScheduleAdminScreenState extends ConsumerState<ScheduleAdminScreen> {
         if (b.position >= 0) b,
     ];
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Rozvrh')),
-      body: settingsAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text(friendlyDbError(e))),
-        data: (settings) {
+    return AdminScaffold(
+      title: 'Rozvrh',
+      body: AsyncBody<ScheduleSettings?>(
+        value: settingsAsync,
+        onRetry: () => ref.invalidate(settingsProvider),
+        builder: (settings) {
           if (settings == null) {
             return const Center(
               child: Text('Nastavení zatím není k dispozici.'),
             );
           }
-          if (!_initialized) _initFrom(settings);
 
-          return AdminBody(
-            child: ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                TextField(
-                  controller: _laneCount,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: 'Počet drah',
-                    border: OutlineInputBorder(),
-                  ),
+          return ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              TextField(
+                controller: _laneCount,
+                keyboardType: TextInputType.number,
+                onChanged: _markDirty,
+                decoration: const InputDecoration(
+                  labelText: 'Počet drah',
+                  border: OutlineInputBorder(),
                 ),
-                const SizedBox(height: 24),
-                Text(
-                  'Tréninkové dny',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  children: [
-                    for (var i = 0; i < 7; i++)
-                      FilterChip(
-                        label: Text(weekdaysShort[i]),
-                        selected: _trainingWeekdays.contains(i + 1),
-                        onSelected: (selected) => setState(() {
-                          if (selected) {
-                            _trainingWeekdays.add(i + 1);
-                          } else {
-                            _trainingWeekdays.remove(i + 1);
-                          }
-                        }),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 24),
-                TextField(
-                  controller: _horizonDays,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: 'Rezervace dopředu (dní)',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: _maxReservations,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: 'Max. aktivních rezervací na hráče',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 24),
-                FilledButton(
-                  onPressed: _saving ? null : _save,
-                  child: Text(_saving ? 'Ukládám…' : 'Uložit'),
-                ),
-                const SizedBox(height: 24),
-                const Divider(),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      'Tréninkové bloky',
-                      style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 24),
+              Text(
+                'Tréninkové dny',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                children: [
+                  for (var i = 0; i < 7; i++)
+                    FilterChip(
+                      label: Text(weekdaysShort[i]),
+                      selected: _trainingWeekdays.contains(i + 1),
+                      onSelected: (selected) => setState(() {
+                        _dirty = true;
+                        if (selected) {
+                          _trainingWeekdays.add(i + 1);
+                        } else {
+                          _trainingWeekdays.remove(i + 1);
+                        }
+                      }),
                     ),
-                    Row(
+                ],
+              ),
+              const SizedBox(height: 24),
+              TextField(
+                controller: _horizonDays,
+                keyboardType: TextInputType.number,
+                onChanged: _markDirty,
+                decoration: const InputDecoration(
+                  labelText: 'Rezervace dopředu (dní)',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _maxReservations,
+                keyboardType: TextInputType.number,
+                onChanged: _markDirty,
+                decoration: const InputDecoration(
+                  labelText: 'Max. aktivních rezervací na hráče',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 24),
+              FilledButton(
+                onPressed: _saving ? null : _save,
+                child: Text(_saving ? 'Ukládám…' : 'Uložit'),
+              ),
+              const SizedBox(height: 24),
+              const Divider(),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Tréninkové bloky',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.auto_awesome_motion_outlined),
+                        tooltip: 'Vygenerovat bloky',
+                        onPressed: () => showDialog<void>(
+                          context: context,
+                          builder: (_) => GeneratorDialog(blocks: blocks),
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.add),
+                        tooltip: 'Přidat blok',
+                        onPressed: () => showDialog<void>(
+                          context: context,
+                          builder: (_) =>
+                              BlockDialog(existing: null, blocks: blocks),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              if (blocks.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 8),
+                  child: Text('Zatím žádné bloky.'),
+                )
+              else
+                for (final block in blocks)
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(block.label),
+                    subtitle: Text('Pozice ${block.position}'),
+                    leading: Switch(
+                      value: block.active,
+                      onChanged: (active) => _setBlockActive(block, active),
+                    ),
+                    trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         IconButton(
-                          icon: const Icon(Icons.auto_awesome_motion_outlined),
-                          tooltip: 'Vygenerovat bloky',
-                          onPressed: () => showDialog<void>(
-                            context: context,
-                            builder: (_) => _GeneratorDialog(blocks: blocks),
-                          ),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.add),
-                          tooltip: 'Přidat blok',
+                          icon: const Icon(Icons.edit_outlined),
                           onPressed: () => showDialog<void>(
                             context: context,
                             builder: (_) =>
-                                BlockDialog(existing: null, blocks: blocks),
+                                BlockDialog(existing: block, blocks: blocks),
                           ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline),
+                          onPressed: () => _deleteBlock(block),
                         ),
                       ],
                     ),
-                  ],
-                ),
-                if (blocks.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 8),
-                    child: Text('Zatím žádné bloky.'),
-                  )
-                else
-                  for (final block in blocks)
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(block.label),
-                      subtitle: Text('Pozice ${block.position}'),
-                      leading: Switch(
-                        value: block.active,
-                        onChanged: (active) => _setBlockActive(block, active),
-                      ),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                            icon: const Icon(Icons.edit_outlined),
-                            onPressed: () => showDialog<void>(
-                              context: context,
-                              builder: (_) =>
-                                  BlockDialog(existing: block, blocks: blocks),
-                            ),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.delete_outline),
-                            onPressed: () => _deleteBlock(block),
-                          ),
-                        ],
-                      ),
-                    ),
-              ],
-            ),
+                  ),
+            ],
           );
         },
       ),
-    );
-  }
-}
-
-/// "Vygenerovat bloky": start + délka + pauza + počet with a live preview of
-/// the resulting series; saving appends the blocks (positions continue after
-/// the current maximum). Overlaps with existing ACTIVE blocks disable save.
-class _GeneratorDialog extends ConsumerStatefulWidget {
-  const _GeneratorDialog({required this.blocks});
-
-  final List<TimeBlock> blocks;
-
-  @override
-  ConsumerState<_GeneratorDialog> createState() => _GeneratorDialogState();
-}
-
-class _GeneratorDialogState extends ConsumerState<_GeneratorDialog> {
-  HourMinute? _start;
-  int _duration = 60;
-  int _pause = 0;
-  int _count = 4;
-  bool _saving = false;
-
-  List<(HourMinute, HourMinute)>? get _times => _start == null
-      ? null
-      : generateBlockTimes(
-          start: _start!,
-          durationMinutes: _duration,
-          pauseMinutes: _pause,
-          count: _count,
-        );
-
-  List<String> get _conflicts =>
-      _times == null ? const [] : generatorConflicts(_times!, widget.blocks);
-
-  Future<void> _pickStart() async {
-    final picked = await pickTime(context, initial: _start);
-    if (picked != null) setState(() => _start = picked);
-  }
-
-  Future<void> _save() async {
-    final times = _times;
-    if (times == null) {
-      snack(context, 'Vyber začátek.');
-      return;
-    }
-    setState(() => _saving = true);
-    var position = nextBlockPosition(widget.blocks);
-    final ok = await tryAction(
-      context,
-      () async {
-        for (final (start, end) in times) {
-          await Api.addTimeBlock(start, end, position++);
-        }
-      },
-      success: 'Vytvořeno ${times.length} bloků.',
-      errorText: friendlyDbError,
-    );
-    if (!mounted) return;
-    if (ok) {
-      Navigator.of(context).pop();
-    } else {
-      setState(() => _saving = false);
-    }
-  }
-
-  Widget _stepperRow(
-    String label,
-    int value,
-    ValueChanged<int> onChanged, {
-    required int min,
-    required int max,
-    int step = 1,
-  }) {
-    return Row(
-      children: [
-        Expanded(child: Text(label)),
-        IconButton(
-          icon: const Icon(Icons.remove),
-          onPressed: value - step >= min ? () => onChanged(value - step) : null,
-        ),
-        SizedBox(width: 40, child: Text('$value', textAlign: TextAlign.center)),
-        IconButton(
-          icon: const Icon(Icons.add),
-          onPressed: value + step <= max ? () => onChanged(value + step) : null,
-        ),
-      ],
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final times = _times;
-    final conflicts = _conflicts;
-    final scheme = Theme.of(context).colorScheme;
-
-    return AlertDialog(
-      title: const Text('Vygenerovat bloky'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Začátek'),
-              trailing: Text(_start?.display() ?? '--:--'),
-              onTap: _pickStart,
-            ),
-            _stepperRow(
-              'Délka (min)',
-              _duration,
-              (v) => setState(() => _duration = v),
-              min: 15,
-              max: 240,
-              step: 15,
-            ),
-            _stepperRow(
-              'Pauza (min)',
-              _pause,
-              (v) => setState(() => _pause = v),
-              min: 0,
-              max: 60,
-              step: 5,
-            ),
-            _stepperRow(
-              'Počet bloků',
-              _count,
-              (v) => setState(() => _count = v),
-              min: 1,
-              max: 12,
-            ),
-            const SizedBox(height: 12),
-            if (_start != null && times == null)
-              Text(
-                'Série přesahuje půlnoc — zkrať ji.',
-                style: TextStyle(color: scheme.error),
-              )
-            else if (times != null) ...[
-              Text(
-                [
-                  for (final (s, e) in times) '${s.display()}–${e.display()}',
-                ].join(', '),
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-              if (conflicts.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text(
-                    'Koliduje s existujícími bloky: ${conflicts.join(', ')}',
-                    style: TextStyle(color: scheme.error),
-                  ),
-                ),
-            ],
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Zrušit'),
-        ),
-        FilledButton(
-          onPressed: _saving || times == null || conflicts.isNotEmpty
-              ? null
-              : _save,
-          child: Text(_saving ? 'Ukládám…' : 'Vytvořit'),
-        ),
-      ],
     );
   }
 }
