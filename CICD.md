@@ -38,6 +38,18 @@ Add the rest:
 | `ANDROID_KEY_PASSWORD` | release | key password (= store password) |
 | `PLAY_SERVICE_ACCOUNT_JSON` | release | play-uploader service-account JSON |
 | `DEMO_PASSWORD` | release | password for the Play-review demo account (see PLAY.md) |
+| `SENTRY_DSN` | deploy-web, release | Sentry DSN (optional — empty keeps Sentry off) |
+| `FIREBASE_*` (4) | deploy-web, release | optional; empty keeps push off |
+
+### Auth + SMTP config lives in git too
+
+`supabase/config.toml` holds the auth URLs, SMTP settings and the Czech
+magic-link template. It is NOT applied by any workflow — push it by hand when
+it changes, with the SMTP password from the environment:
+
+```bash
+SMTP_PASS=<app-password> supabase config push
+```
 
 ### 2. Migration history must match prod
 
@@ -92,13 +104,16 @@ One-time Play Console / signing-key / service-account setup lives in
 - **Ship to the team / Play**:
 
   ```bash
-  # 1. bump version in pubspec.yaml, e.g. 1.1.0+2  (versionCode must grow)
-  git commit -am "Bump version to 1.1.0"
+  # 1. add the release to lib/features/profile/changelog_data.dart (newest
+  #    first) — that text becomes Play's "what's new", the GitHub Release
+  #    notes and the in-app Novinky; test/changelog_test.dart fails when
+  #    pubspec and the changelog disagree
+  # 2. bump version in pubspec.yaml, e.g. 1.1.1+4  (versionCode must grow)
+  git commit -am "chore: release 1.1.1"
 
-  # 2. annotated tag; the message body becomes Play's "what's new"
-  git tag -a v1.1.0 -m "v1.1.0" -m "- Oprava X
-  - Nová funkce Y"
-  git push origin main v1.1.0
+  # 3. tag + push (the tag message is not used for release notes)
+  git tag -a v1.1.1 -m "v1.1.1"
+  git push origin main v1.1.1
   ```
 
   A few minutes later the signed `rezervator-v1.1.0.apk` is on the **Releases**
