@@ -14,6 +14,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/ui.dart';
+import '../../data/clock.dart';
 import '../../data/providers.dart';
 import '../../domain/calendar_layout.dart';
 import '../../domain/labels.dart';
@@ -175,7 +176,7 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
 
   @override
   Widget build(BuildContext context) {
-    final nowDt = DateTime.now();
+    final nowDt = ref.watch(nowProvider).value ?? DateTime.now();
     final todayDay = Day.fromDateTime(nowDt);
     final now = HourMinute(nowDt.hour, nowDt.minute);
     final thisMonday = todayDay.addDays(1 - todayDay.weekday);

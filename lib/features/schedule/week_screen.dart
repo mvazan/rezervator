@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/ui.dart';
+import '../../data/clock.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
 import '../../domain/schedule.dart';
@@ -158,7 +159,7 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final nowDt = DateTime.now();
+    final nowDt = ref.watch(nowProvider).value ?? DateTime.now();
     final todayDay = Day.fromDateTime(nowDt);
     final now = HourMinute(nowDt.hour, nowDt.minute);
     final monday = _monday(todayDay);
