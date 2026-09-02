@@ -21,65 +21,6 @@ import '../../domain/palette.dart';
 import '../../domain/schedule.dart';
 import '../schedule/widgets/calendar_board.dart';
 
-/// True when [date] resolves as an [OpenDay] under exactly the resolution the
-/// board renders with (buildWeekSchedule): closed overrides and non-training
-/// weekdays are closed, and an override's blockIds are filtered against the
-/// real block set — an override whose ids no longer resolve to any existing
-/// block is a ClosedDay, not open. Matches/rentals/reservations never affect
-/// open-vs-closed status (only which slots within an open day are free), so
-/// they're passed empty.
-///
-/// This is the ONLY day-type probe outside the grid itself — the status bar
-/// and [nextTrainingDay] both go through it, so they can never disagree with
-/// what the board shows.
-bool isDayOpen({
-  required Day date,
-  required Day today,
-  required ScheduleSettings settings,
-  required List<TimeBlock> blocks,
-  required List<DayOverride> overrides,
-}) {
-  final week = buildWeekSchedule(
-    monday: date.addDays(1 - date.weekday),
-    today: today,
-    now: const HourMinute(0, 0),
-    settings: settings,
-    blocks: blocks,
-    overrides: overrides,
-    priority: const [],
-    rentals: const [],
-    reservations: const [],
-  );
-  // WeekSchedule.days is contractually Monday..Sunday, so [weekday - 1] is
-  // exactly [date]'s entry.
-  return week.days[date.weekday - 1] is OpenDay;
-}
-
-/// Scans forward from [today] (exclusive) up to [horizonDays] and returns the
-/// first date that resolves open per [isDayOpen] — the "Další trénink" the
-/// kiosk status bar shows on days without training.
-Day? nextTrainingDay({
-  required Day today,
-  required ScheduleSettings settings,
-  required List<TimeBlock> blocks,
-  required List<DayOverride> overrides,
-  required int horizonDays,
-}) {
-  for (var offset = 1; offset <= horizonDays; offset++) {
-    final date = today.addDays(offset);
-    if (isDayOpen(
-      date: date,
-      today: today,
-      settings: settings,
-      blocks: blocks,
-      overrides: overrides,
-    )) {
-      return date;
-    }
-  }
-  return null;
-}
-
 /// Slack under the columns so the bottom hour label (centered on its line)
 /// isn't half-clipped by the viewport in fit-height mode.
 const double _bottomLabelPad = 8.0;
@@ -296,6 +237,22 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
     final interactive = blocksFromDb &&
         weekReservationsByMonday.values.every((r) => r.hasValue);
 
+    // The selected player's live reservations across every watched week —
+    // the count create_reservation checks against max_active_reservations,
+    // so ＋ is only offered where the RPC would accept it (no limit_reached
+    // bounce). Weeks are disjoint Monday..Sunday spans: nothing double-counts.
+    final selected = widget.selected;
+    final selectedCount = selected == null
+        ? 0
+        : activeReservationCount(
+            [
+              for (final week in weekReservationsByMonday.values)
+                ...week.value ?? const <Reservation>[],
+            ],
+            selected.id,
+            todayDay,
+          );
+
     // Keyed by date (not position) so slicing today..horizon can't
     // misalign even if a Monday's week ever produced anything but exactly 7
     // entries.
@@ -461,11 +418,12 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
                                             window.endMinute
                                     ? now.minutesFromMidnight
                                     : null,
-                                laneCount: settings.laneCount,
+                                settings: settings,
                                 nameById: nameById,
                                 clubColorById: clubColorById,
                                 interactive: interactive,
                                 selected: widget.selected,
+                                selectedCount: selectedCount,
                                 onBook: (date, block, lane) => _book(
                                   context,
                                   ref,
@@ -503,11 +461,12 @@ class _DayColumn extends StatelessWidget {
     required this.pxPerMinute,
     required this.halfHourMarks,
     required this.nowMinute,
-    required this.laneCount,
+    required this.settings,
     required this.nameById,
     required this.clubColorById,
     required this.interactive,
     required this.selected,
+    required this.selectedCount,
     required this.onBook,
   });
 
@@ -516,11 +475,15 @@ class _DayColumn extends StatelessWidget {
   final double pxPerMinute;
   final bool halfHourMarks;
   final int? nowMinute;
-  final int laneCount;
+  final ScheduleSettings settings;
   final Map<String, String> nameById;
   final Map<String, int> clubColorById;
   final bool interactive;
   final PlayerName? selected;
+
+  /// [selected]'s live reservations from today on — canBook's
+  /// myActiveCount (0 while no player is selected).
+  final int selectedCount;
   final void Function(Day date, TimeBlock block, int lane) onBook;
 
   @override
@@ -681,7 +644,7 @@ class _DayColumn extends StatelessWidget {
               ),
             ),
           ),
-          for (var lane = 1; lane <= laneCount; lane++)
+          for (var lane = 1; lane <= settings.laneCount; lane++)
             Expanded(child: _laneRow(context, openDay, block, lane)),
         ],
       ),
@@ -747,9 +710,16 @@ class _DayColumn extends StatelessWidget {
             ),
           ),
         );
-      case FreeSlot(:final inPast, :final beyondHorizon):
-        final bookable =
-            interactive && selected != null && !inPast && !beyondHorizon;
+      case FreeSlot():
+        // The same client-side mirror of create_reservation the app uses:
+        // not started, inside the horizon AND under the player's limit.
+        final bookable = interactive &&
+            selected != null &&
+            canBook(
+              state: state,
+              myActiveCount: selectedCount,
+              settings: settings,
+            );
         return _rowShell(
           context,
           lane: lane,

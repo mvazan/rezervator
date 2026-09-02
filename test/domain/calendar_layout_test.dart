@@ -91,6 +91,87 @@ void main() {
     });
   });
 
+  group('dropFits', () {
+    const w = CalendarWindow(16 * 60, 22 * 60);
+    // A block 17–18 and a rental band 19–20 already sit in the column.
+    final occupied = mergeIntervals(const [
+      (17 * 60, 18 * 60),
+      (19 * 60, 20 * 60),
+    ]);
+
+    test('fits in free space', () {
+      expect(
+          dropFits(
+              candidate: (18 * 60, 19 * 60),
+              self: const [],
+              occupied: occupied,
+              window: w),
+          isTrue);
+    });
+
+    test('refused over a foreign interval', () {
+      expect(
+          dropFits(
+              candidate: (17 * 60 + 30, 18 * 60 + 30),
+              self: const [],
+              occupied: occupied,
+              window: w),
+          isFalse);
+    });
+
+    test('allowed over its own old interval', () {
+      // The 17–18 block nudged 30 min later overlaps only itself.
+      expect(
+          dropFits(
+              candidate: (17 * 60 + 30, 18 * 60 + 30),
+              self: const [(17 * 60, 18 * 60)],
+              occupied: occupied,
+              window: w),
+          isTrue);
+      // A match dragged with its úklid child: both old pieces are "self".
+      expect(
+          dropFits(
+              candidate: (17 * 60 + 15, 18 * 60 + 15),
+              self: const [(17 * 60, 17 * 60 + 30), (17 * 60 + 30, 18 * 60)],
+              occupied: occupied,
+              window: w),
+          isTrue);
+      // Subtracting self never frees someone else's space.
+      expect(
+          dropFits(
+              candidate: (18 * 60 + 30, 19 * 60 + 30),
+              self: const [(17 * 60, 18 * 60)],
+              occupied: occupied,
+              window: w),
+          isFalse);
+    });
+
+    test('refused when it pokes outside the window', () {
+      expect(
+          dropFits(
+              candidate: (15 * 60 + 30, 16 * 60 + 30),
+              self: const [],
+              occupied: occupied,
+              window: w),
+          isFalse);
+      expect(
+          dropFits(
+              candidate: (21 * 60 + 30, 22 * 60 + 30),
+              self: const [],
+              occupied: occupied,
+              window: w),
+          isFalse);
+      // Touching the window edges is fine (half-open).
+      expect(
+          dropFits(
+              candidate: (21 * 60, 22 * 60),
+              self: const [],
+              occupied: occupied,
+              window: w),
+          isTrue);
+    });
+  });
+
   group('mergeIntervals', () {
     test('merges overlaps and touching intervals, drops empties', () {
       expect(

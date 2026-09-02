@@ -15,7 +15,8 @@ import '../../core/ui.dart';
 import '../../core/widgets/gradient_button.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
-import '../../domain/schedule.dart' show headerEventLabel;
+import '../../domain/schedule.dart'
+    show headerEventLabel, isDayOpen, nextTrainingDay;
 import 'kiosk_board_view.dart';
 import 'name_picker.dart';
 
