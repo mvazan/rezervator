@@ -30,12 +30,28 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   bool _saving = false;
 
   @override
+  void initState() {
+    super.initState();
+    // Alleys loaded before this screen opened: the future won't report
+    // again, so preselect from the current value; ref.listen in build
+    // covers the list arriving later.
+    _tenantId = _lonePreselect(ref.read(tenantsProvider).value);
+  }
+
+  @override
   void dispose() {
     _tenantName.dispose();
     _name.dispose();
     _nick.dispose();
     super.dispose();
   }
+
+  /// With exactly one alley (the common case) preselect it silently: its id
+  /// — or null when there isn't exactly one, or the user has picked already.
+  String? _lonePreselect(List<Tenant>? tenants) =>
+      _tenantId == null && tenants != null && tenants.length == 1
+          ? tenants.single.id
+          : null;
 
   Future<void> _register() async {
     final name = _name.text.trim();
@@ -68,11 +84,11 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen(tenantsProvider, (_, next) {
+      final id = _lonePreselect(next.value);
+      if (id != null) setState(() => _tenantId = id);
+    });
     final tenants = ref.watch(tenantsProvider).value ?? const <Tenant>[];
-    // With exactly one alley (the common case) preselect it silently.
-    if (_tenantId == null && tenants.length == 1) {
-      _tenantId = tenants.single.id;
-    }
     final foundingNew = _tenantId == _newTenant;
     final clubs = !foundingNew && _tenantId != null
         ? ref.watch(registrationClubsProvider(_tenantId!)).value ??
