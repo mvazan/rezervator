@@ -20,14 +20,18 @@ void main() {
     List<DayOverride> overrides = const [],
     List<TimeBlock> blocks = const [],
     List<PrioritySlot> slots = const [],
+    List<Rental> rentals = const [],
   }) {
     return ProviderScope(
       overrides: [
         myProfileProvider.overrideWith((ref) => Stream.value(admin)),
+        settingsProvider
+            .overrideWith((ref) => Stream.value(ScheduleSettings.defaults)),
         dayOverridesProvider.overrideWith((ref) => Stream.value(overrides)),
         timeBlocksProvider.overrideWith((ref) => Stream.value(blocks)),
         prioritySlotsProvider.overrideWithValue(slots),
         slotTypesProvider.overrideWith((ref) => Stream.value(const [])),
+        rentalsProvider.overrideWith((ref) => Stream.value(rentals)),
       ],
       child: const MaterialApp(
         localizationsDelegates: GlobalMaterialLocalizations.delegates,
@@ -181,5 +185,107 @@ void main() {
     expect(find.textContaining('KK Slavoj'), findsNothing); // match not here
     expect(find.byTooltip('Typy blokací'), findsOneWidget);
     expect(find.byTooltip('Přidat blokaci'), findsOneWidget);
+  });
+
+  group('Pronájmy section', () {
+    final now = today();
+    final upcomingDate = now.addDays(3);
+    final pastDate = now.addDays(-3);
+
+    // A weekly rental with two exception rows: the upcoming occurrence is
+    // skipped, the past one ran on one lane only.
+    final series = Rental(
+      id: 'r1',
+      renterName: 'Firma Kolo',
+      lanes: const [1, 2],
+      date: null,
+      weekday: upcomingDate.weekday,
+      startsAt: const HourMinute(17, 0),
+      endsAt: const HourMinute(19, 0),
+      validFrom: null,
+      validUntil: null,
+      note: '',
+    );
+    final skippedUpcoming = Rental(
+      id: 'e1',
+      renterName: 'Firma Kolo',
+      lanes: const [1, 2],
+      date: upcomingDate,
+      weekday: null,
+      startsAt: const HourMinute(17, 0),
+      endsAt: const HourMinute(19, 0),
+      validFrom: null,
+      validUntil: null,
+      note: '',
+      parentId: 'r1',
+      skipped: true,
+    );
+    final oneLanePast = Rental(
+      id: 'e2',
+      renterName: 'Firma Kolo',
+      lanes: const [1],
+      date: pastDate,
+      weekday: null,
+      startsAt: const HourMinute(17, 0),
+      endsAt: const HourMinute(19, 0),
+      validFrom: null,
+      validUntil: null,
+      note: '',
+      parentId: 'r1',
+    );
+
+    testWidgets(
+        'lists upcoming rental exceptions with their summary and collapses '
+        'past ones behind Minulé výjimky pronájmů', (tester) async {
+      await tester
+          .pumpWidget(app(rentals: [series, skippedUpcoming, oneLanePast]));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Pronájmy'), findsOneWidget);
+      // Only the upcoming tile is listed directly …
+      expect(find.textContaining('· Firma Kolo'), findsOneWidget);
+      expect(find.text('vynecháno'), findsOneWidget);
+      // … the past one waits behind the collapsed tile.
+      expect(find.text('Minulé výjimky pronájmů (1)'), findsOneWidget);
+      expect(find.text('dráhy 1'), findsNothing);
+
+      await tester.tap(find.text('Minulé výjimky pronájmů (1)'));
+      await tester.pumpAndSettle();
+      expect(find.text('dráhy 1'), findsOneWidget);
+    });
+
+    testWidgets('tapping an upcoming rental exception opens its dialog',
+        (tester) async {
+      await tester.pumpWidget(app(rentals: [series, skippedUpcoming]));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.textContaining('· Firma Kolo'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Výjimka pronájmu'), findsOneWidget);
+    });
+
+    testWidgets('a series without exceptions gets no Pronájmy header',
+        (tester) async {
+      await tester.pumpWidget(app(
+        rentals: [series],
+        overrides: [
+          DayOverride(date: upcomingDate, closed: true, reason: 'Revize'),
+        ],
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Zavřeno — Revize'), findsOneWidget);
+      expect(find.text('Pronájmy'), findsNothing);
+    });
+
+    testWidgets('rental exceptions alone are not the empty state',
+        (tester) async {
+      await tester.pumpWidget(app(rentals: [series, skippedUpcoming]));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Zatím žádné výjimky.'), findsNothing);
+      expect(find.text('Pronájmy'), findsOneWidget);
+    });
   });
 }
