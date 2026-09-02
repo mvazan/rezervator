@@ -34,4 +34,34 @@ void main() {
       }
     });
   });
+
+  group('clubTint', () {
+    const fallbackBg = Color(0xFF101010);
+    const fallbackFg = Color(0xFFEFEFEF);
+
+    test('in-range index resolves to the palette entry', () {
+      expect(
+        clubTint(0, Brightness.dark,
+            fallbackBg: fallbackBg, fallbackFg: fallbackFg),
+        ClubColors.of(0, Brightness.dark),
+      );
+      expect(
+        clubTint(11, Brightness.light,
+            fallbackBg: fallbackBg, fallbackFg: fallbackFg),
+        ClubColors.of(11, Brightness.light),
+      );
+    });
+
+    test("out-of-range index yields the caller's fallback pair", () {
+      for (final b in Brightness.values) {
+        for (final index in [-1, -2, 12]) {
+          expect(
+            clubTint(index, b, fallbackBg: fallbackBg, fallbackFg: fallbackFg),
+            (fallbackBg, fallbackFg),
+            reason: 'index $index, $b',
+          );
+        }
+      }
+    });
+  });
 }

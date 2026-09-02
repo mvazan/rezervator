@@ -45,3 +45,13 @@ class ClubColors {
         : (Color(e[2]), Color(e[3]));
   }
 }
+
+/// Background + foreground for a palette index, or the caller's neutral
+/// fallback when the index is out of 0–11 (−1 "no club", −2 rental default…).
+(Color bg, Color fg) clubTint(
+  int index,
+  Brightness brightness, {
+  required Color fallbackBg,
+  required Color fallbackFg,
+}) =>
+    ClubColors.of(index, brightness) ?? (fallbackBg, fallbackFg);
