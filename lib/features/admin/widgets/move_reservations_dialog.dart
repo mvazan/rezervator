@@ -4,7 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/ui.dart';
 import '../../../data/providers.dart';
 import '../../../domain/models.dart';
-import '../../../domain/schedule.dart' show timesOverlap;
+import '../../../domain/schedule.dart' show rentalsOn, timesOverlap;
 import 'notify_choice_dialog.dart';
 
 /// Removing a day block that still has sign-ups: the admin drags each
@@ -76,9 +76,9 @@ class _MoveReservationsDialogState
     // The server's move_reservation refuses rented/priority-covered lanes
     // (like create_reservation) — mirror that here so the admin can't drop
     // onto a lane the RPC would bounce.
+    final dayRentals = rentalsOn(widget.date, rentals);
     bool laneBlocked(TimeBlock block, int lane) =>
-        rentals.any((r) =>
-            r.occursOn(widget.date) &&
+        dayRentals.any((r) =>
             r.lanes.contains(lane) &&
             timesOverlap(
                 block.startsAt, block.endsAt, r.startsAt, r.endsAt)) ||

@@ -398,6 +398,95 @@ void main() {
     });
   });
 
+  group('rental exceptions', () {
+    Rental child({
+      String id = 'c1',
+      String parentId = 'n1',
+      required Day date,
+      List<int> lanes = const [1],
+      HourMinute startsAt = const HourMinute(16, 0),
+      HourMinute endsAt = const HourMinute(18, 0),
+      bool skipped = false,
+    }) =>
+        Rental(
+          id: id,
+          renterName: 'Firma X',
+          lanes: lanes,
+          date: date,
+          weekday: null,
+          startsAt: startsAt,
+          endsAt: endsAt,
+          validFrom: null,
+          validUntil: null,
+          note: '',
+          parentId: parentId,
+          skipped: skipped,
+        );
+    final series = rental(weekday: 2, lanes: [1, 2]);
+
+    test('a skipped child removes the occurrence', () {
+      final rows = [series, child(date: tuesday, skipped: true)];
+      expect(rentalsOn(tuesday, rows), isEmpty);
+      final day = build(rentals: rows).days[1] as OpenDay;
+      expect(day.slot('b1', 1), isA<FreeSlot>());
+      expect(day.rentals, isEmpty);
+    });
+
+    test('a lanes override frees the other lanes and marks the copy', () {
+      final rows = [series, child(date: tuesday, lanes: [1])];
+      final day = build(rentals: rows).days[1] as OpenDay;
+      expect(day.slot('b1', 2), isA<FreeSlot>());
+      final slot = day.slot('b1', 1);
+      expect(slot, isA<RentedSlot>());
+      final r = (slot as RentedSlot).rental;
+      expect(r.id, 'n1'); // the series' id — the calendar opens the series
+      expect(r.overrideId, 'c1');
+      expect(r.isOverridden, isTrue);
+      expect(r.lanes, [1]);
+      expect(day.rentals.single.isOverridden, isTrue);
+    });
+
+    test('a time override frees the second block', () {
+      final rows = [
+        series,
+        child(date: tuesday, lanes: [1, 2], endsAt: const HourMinute(17, 0)),
+      ];
+      final day = build(rentals: rows).days[1] as OpenDay;
+      expect(day.slot('b1', 1), isA<RentedSlot>());
+      expect(day.slot('b2', 1), isA<FreeSlot>());
+    });
+
+    test('a child dated where the series does not occur is ignored — '
+        'no phantom one-time rental', () {
+      final rows = [series, child(date: wednesday, lanes: [1])];
+      expect(rentalsOn(wednesday, rows), isEmpty);
+      expect(rentalsOn(tuesday, rows).single.isOverridden, isFalse);
+      expect(build(rentals: rows).days[2].rentals, isEmpty);
+    });
+
+    test('one-time rentals pass through untouched', () {
+      final once = rental(date: tuesday);
+      expect(rentalsOn(tuesday, [once]).single, same(once));
+      expect(rentalsOn(wednesday, [once]), isEmpty);
+    });
+
+    test('upcomingSeriesDates walks the weekday inside the validity window',
+        () {
+      // Wednesdays from the fixture Monday: 8., 15., 22. 7.
+      final s = rental(weekday: 3, validUntil: Day(2026, 7, 22));
+      expect(upcomingSeriesDates(s, from: monday),
+          [Day(2026, 7, 8), Day(2026, 7, 15), Day(2026, 7, 22)]);
+      final later = rental(weekday: 3, validFrom: Day(2026, 7, 14));
+      expect(upcomingSeriesDates(later, from: monday, weeks: 2),
+          [Day(2026, 7, 15), Day(2026, 7, 22)]);
+      // [from] itself counts when it is the weekday.
+      expect(upcomingSeriesDates(rental(weekday: 1), from: monday).first,
+          monday);
+      expect(upcomingSeriesDates(rental(weekday: 1), from: monday).length, 26);
+      expect(upcomingSeriesDates(rental(date: tuesday), from: monday), isEmpty);
+    });
+  });
+
   group('reservations', () {
     test('live reservation occupies its cell; cancelled is ignored', () {
       final day = build(reservations: [
