@@ -14,6 +14,7 @@ import '../admin/widgets/blockage_dialog.dart';
 import '../admin/widgets/notify_choice_dialog.dart';
 import 'day_pager_view.dart';
 import 'week_calendar_view.dart';
+import 'widgets/week_header.dart';
 
 /// Live week view: grid computed by buildWeekSchedule, booking via RPCs.
 /// Acts as the "shell": owns navigation (week offset) and all provider
@@ -175,83 +176,11 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
     final me = ref.watch(myProfileProvider).value;
     final mine = ref.watch(myActiveReservationsProvider).value ?? const [];
 
-    // The top strip IS the app bar. A narrow portrait phone can't fit
-    // title + week navigation + icons on one line, so it stacks them
-    // (title/icons row, week selector under it); everything wider —
-    // landscape phones and the web — keeps ONE line: title (where the
-    // width allows), the week navigation next to it, action icons pinned
-    // to the RIGHT edge.
-    final width = MediaQuery.sizeOf(context).width;
-    final portrait =
-        MediaQuery.orientationOf(context) == Orientation.portrait;
-    final stacked = portrait && width < 700;
-    final title = Padding(
-      padding: const EdgeInsets.only(left: 8, right: 4),
-      child: Text(
-        'Rezervátor',
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: Theme.of(context).textTheme.titleLarge,
-      ),
-    );
-    final navPrev = IconButton(
-      icon: const Icon(Icons.chevron_left),
-      visualDensity: VisualDensity.compact,
-      onPressed: () => _go(-1),
-    );
-    final navNext = IconButton(
-      icon: const Icon(Icons.chevron_right),
-      visualDensity: VisualDensity.compact,
-      onPressed: () => _go(1),
-    );
-    final range = Text(
-      rangeLabel(monday, monday.addDays(6)),
-      textAlign: TextAlign.center,
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      style: Theme.of(context).textTheme.titleMedium,
-    );
-    final todayButton = _weekOffset == 0
-        ? null
-        : TextButton(onPressed: () => _go(0), child: const Text('dnes'));
-    final header = Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      child: stacked
-          ? Column(
-              children: [
-                Row(children: [title, const Spacer(), ...widget.trailing]),
-                Row(
-                  children: [
-                    navPrev,
-                    Expanded(child: range),
-                    ?todayButton,
-                    navNext,
-                  ],
-                ),
-              ],
-            )
-          : Row(
-              children: [
-                // | Rezervátor      < datum – datum >      admin profil |
-                // The title must NOT be a flex child: Flexible would claim
-                // an equal flex share as the Expanded nav, and its unused
-                // allocation becomes dead space at the row's end — pushing
-                // the icons to the middle instead of the right edge.
-                if (width >= 700) title,
-                Expanded(
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      navPrev,
-                      range,
-                      ?todayButton,
-                      navNext,
-                    ],
-                  ),
-                ),
-                ...widget.trailing,
-              ],
-            ),
+    final header = WeekHeader(
+      monday: monday,
+      weekOffset: _weekOffset,
+      onGo: _go,
+      trailing: widget.trailing,
     );
 
     if (view.isLoading) {
