@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/ui.dart';
 import '../../data/providers.dart';
+import '../../domain/grouping.dart';
 import '../../domain/models.dart';
 import 'widgets/admin_body.dart';
 
@@ -105,29 +106,6 @@ class PlayersScreen extends ConsumerWidget {
     if (picked.$1 != current) await _setClub(context, p, picked.$1);
   }
 
-  /// Approved players grouped into club sections: clubs sorted by name,
-  /// players name-sorted within each, "Bez oddílu" (null header) last.
-  List<(String?, List<Profile>)> _byClub(
-    List<Profile> approved,
-    List<Club> clubs,
-  ) {
-    final sortedClubs = [...clubs]..sort((a, b) => a.name.compareTo(b.name));
-    List<Profile> membersOf(String? clubId) =>
-        approved
-            .where(
-              (p) => clubId == null
-                  ? !clubs.any((c) => c.id == p.clubId)
-                  : p.clubId == clubId,
-            )
-            .toList()
-          ..sort((a, b) => a.displayName.compareTo(b.displayName));
-    return [
-      for (final club in sortedClubs)
-        if (membersOf(club.id).isNotEmpty) (club.name, membersOf(club.id)),
-      if (membersOf(null).isNotEmpty) (null, membersOf(null)),
-    ];
-  }
-
   /// Club name for rows outside the club sections (pending, kiosk).
   Widget? _clubSubtitle(Profile p, List<Club> clubs) {
     final name = clubNameOf(p.clubId, clubs);
@@ -170,6 +148,7 @@ class PlayersScreen extends ConsumerWidget {
         )
         .toList();
     final kiosks = profiles.where((p) => p.role == Role.kiosk).toList();
+    final sections = playersByClub(approved, clubs);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Hráči')),
@@ -203,7 +182,7 @@ class PlayersScreen extends ConsumerWidget {
               'Hráči (${approved.length})',
               style: Theme.of(context).textTheme.titleMedium,
             ),
-            for (final (club, members) in _byClub(approved, clubs)) ...[
+            for (final (club, members) in sections) ...[
               Padding(
                 padding: const EdgeInsets.only(top: 12, bottom: 2),
                 child: Text(
