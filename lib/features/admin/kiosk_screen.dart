@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/ui.dart';
 import '../../data/providers.dart';
-import 'widgets/admin_body.dart';
+import 'widgets/admin_scaffold.dart';
 
 /// Admin: kiosk-specific settings (today just the board theme; future kiosk
 /// options land here rather than in the schedule settings).
@@ -12,20 +12,14 @@ class KioskSettingsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final profile = ref.watch(myProfileProvider).value;
-    if (profile?.isAdmin != true) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('Kiosk')),
-        body: const Center(child: Text('Jen pro správce.')),
-      );
-    }
-
-    final settings = ref.watch(settingsProvider).value;
-
-    return Scaffold(
-      appBar: AppBar(title: const Text('Kiosk')),
-      body: AdminBody(
-        child: ListView(
+    return AdminScaffold(
+      title: 'Kiosk',
+      body: AsyncBody(
+        value: ref.watch(settingsProvider),
+        onRetry: () => ref.invalidate(settingsProvider),
+        // The settings row is null until the backend is seeded — the
+        // switches then show the defaults, disabled.
+        builder: (settings) => ListView(
           padding: const EdgeInsets.all(16),
           children: [
             SwitchListTile(
