@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/ui.dart';
 import '../../core/widgets/auth_background.dart';
 import '../../data/providers.dart';
+import '../../domain/limits.dart';
 import '../../domain/models.dart';
 
 /// Sentinel dropdown value for "found a brand-new alley".
@@ -140,7 +141,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
               const SizedBox(height: 16),
               TextField(
                 controller: _nick,
-                maxLength: 14,
+                maxLength: Limits.nickLength,
                 decoration: const InputDecoration(
                   labelText: 'Přezdívka na tabuli (nepovinné)',
                   border: OutlineInputBorder(),
