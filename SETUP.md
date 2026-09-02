@@ -19,31 +19,27 @@ skládačky.
 
 ## 2. Databázové schéma
 
-1. Otevři [`supabase/migrations/0001_schema.sql`](supabase/migrations/0001_schema.sql)
-   a **než ho spustíš**, uprav dvě placeholder hodnoty úplně na konci
-   souboru (funkce `notify_webhook`):
-   - `<PROJECT_REF>` → nahraď svým project ref (viz krok 1) — použije se pro
-     URL Edge Function `notify`, i když tu funkci nasadíme až ve Fázi 3.
-   - `<WEBHOOK_SECRET>` → nahraď náhodným řetězcem, který si vygeneruješ:
-     ```bash
-     openssl rand -hex 24
-     ```
-     **Tento secret si někam poznamenej** — bude potřeba znovu ve
-     Fázi 3, až se bude nasazovat notifikační Edge Function a bude se
-     nastavovat jako `WEBHOOK_SECRET` přes `supabase secrets set`. Bez shody
-     obou hodnot notifikace v budoucnu nebudou fungovat (ale na Fázi 0 to
-     nemá žádný vliv).
-2. Dashboard → **SQL Editor** → vlož **celý** upravený obsah souboru a
-   **Run**. Založí to všechny tabulky, RPC funkce, triggery i RLS politiky.
-3. Nasej výchozí časové bloky tréninků. Uprav si časy podle reálného
-   rozvrhu kuželny a spusť v SQL Editoru:
-   ```sql
-   insert into time_blocks (starts_at, ends_at, position) values
-     ('16:00', '17:00', 0), ('17:00', '18:00', 1), ('18:00', '19:00', 2),
-     ('19:00', '20:00', 3), ('20:00', '21:00', 4), ('21:00', '22:00', 5);
+1. Propoj lokální Supabase CLI s projektem a aplikuj všechny migrace:
+   ```bash
+   supabase link --project-ref <tvůj-project-ref>
+   supabase db push
    ```
-   (Blok můžeš kdykoliv později deaktivovat nebo přidat další — administrace
-   rozvrhu přijde v jedné z dalších fází, zatím jde jen o počáteční data.)
+   Založí to všechny tabulky, RPC funkce, triggery i RLS politiky. Nic
+   v `supabase/migrations/` se needituje — konfigurace projektu jde do
+   Vaultu (další krok).
+2. Dashboard → **SQL Editor** → vlož a spusť (obě hodnoty si poznamenej,
+   `webhook_secret` bude potřeba znovu v kroku 6):
+   ```sql
+   select vault.create_secret(
+     'https://<tvůj-project-ref>.supabase.co/functions/v1/notify',
+     'notify_url');
+   select vault.create_secret('<openssl rand -hex 24>', 'webhook_secret');
+   ```
+   Databázový trigger `notify_webhook` si obě hodnoty čte odtud; bez nich
+   zápisy fungují, jen se neposílají notifikace (a v Postgres logu je
+   warning).
+3. Časové bloky, počet drah a tréninkové dny nastavíš po prvním přihlášení
+   přímo v appce (Správa → Rozvrh).
 
 ## 3. Auth (magic linky)
 
@@ -135,8 +131,8 @@ Fázi 4). Push notifikace zatím spí, viz poznámka na konci.
    ```bash
    supabase link --project-ref <tvůj-project-ref>
    ```
-   (`<tvůj-project-ref>` je stejná hodnota, kterou jsi použil/a v kroku 2 za
-   `<PROJECT_REF>`.)
+   (`<tvůj-project-ref>` je stejná hodnota jako v kroku 2 — pokud už je
+   projekt propojený, tenhle krok přeskoč.)
 3. Nastav secrets pro Edge Functions:
    ```bash
    supabase secrets set \
@@ -144,12 +140,13 @@ Fázi 4). Push notifikace zatím spí, viz poznámka na konci.
      RESEND_API_KEY=<klíč-z-Resend> \
      CANCEL_TOKEN_SECRET=$(openssl rand -hex 24)
    ```
-   **`WEBHOOK_SECRET` musí být přesně stejná hodnota**, kterou jsi vložil/a
-   za `<WEBHOOK_SECRET>` do `0001_schema.sql` v kroku 2 (Databázové schéma) —
-   jinak databázový trigger (`notify_webhook`) bude volat funkci `notify` se
+   **`WEBHOOK_SECRET` musí být přesně stejná hodnota**, kterou jsi uložil/a
+   do Vaultu jako `webhook_secret` v kroku 2 (Databázové schéma) — jinak
+   databázový trigger (`notify_webhook`) bude volat funkci `notify` se
    špatným hlavičkovým tokenem a ta ho odmítne (401). `CANCEL_TOKEN_SECRET` je
    nový, nezávislý řetězec — používá se jen k podepisování odkazů na zrušení
-   rezervace v e-mailech.
+   rezervace v e-mailech (bez něj funkce `cancel` odpovídá 500 a `notify`
+   neposílá kioskové e-maily).
 4. Nasaď obě funkce:
    ```bash
    supabase functions deploy notify --no-verify-jwt
