@@ -21,128 +21,13 @@
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { pragueEpoch, pragueToday, signCancelToken } from "../_shared/cancel_token.ts";
+import { firebaseConfigured, sendPush } from "../_shared/fcm.ts";
 import { dayLabel, escapeHtml, timeLabel } from "../_shared/format.ts";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL")!,
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
 );
-
-// ---------------------------------------------------------------------------
-// FCM HTTP v1 (lifted from Termínátor; dormant until FIREBASE_SERVICE_ACCOUNT
-// is set).
-// ---------------------------------------------------------------------------
-
-type ServiceAccount = {
-  project_id: string;
-  client_email: string;
-  private_key: string;
-};
-
-const serviceAccount: ServiceAccount = JSON.parse(
-  Deno.env.get("FIREBASE_SERVICE_ACCOUNT") ?? "{}",
-);
-
-const hasFirebase = Boolean(serviceAccount.client_email);
-
-let cachedToken: { token: string; expiresAt: number } | null = null;
-
-function base64url(data: Uint8Array | string): string {
-  const bytes = typeof data === "string"
-    ? new TextEncoder().encode(data)
-    : data;
-  let binary = "";
-  for (const b of bytes) binary += String.fromCharCode(b);
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-async function importPrivateKey(pem: string): Promise<CryptoKey> {
-  const body = pem
-    .replace("-----BEGIN PRIVATE KEY-----", "")
-    .replace("-----END PRIVATE KEY-----", "")
-    .replace(/\s/g, "");
-  const der = Uint8Array.from(atob(body), (c) => c.charCodeAt(0));
-  return await crypto.subtle.importKey(
-    "pkcs8",
-    der,
-    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-}
-
-async function getAccessToken(): Promise<string> {
-  const now = Math.floor(Date.now() / 1000);
-  if (cachedToken && cachedToken.expiresAt > now + 60) {
-    return cachedToken.token;
-  }
-
-  const header = base64url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
-  const claims = base64url(JSON.stringify({
-    iss: serviceAccount.client_email,
-    scope: "https://www.googleapis.com/auth/firebase.messaging",
-    aud: "https://oauth2.googleapis.com/token",
-    iat: now,
-    exp: now + 3600,
-  }));
-  const key = await importPrivateKey(serviceAccount.private_key);
-  const signature = new Uint8Array(await crypto.subtle.sign(
-    "RSASSA-PKCS1-v1_5",
-    key,
-    new TextEncoder().encode(`${header}.${claims}`),
-  ));
-  const jwt = `${header}.${claims}.${base64url(signature)}`;
-
-  const response = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
-      assertion: jwt,
-    }),
-  });
-  if (!response.ok) {
-    throw new Error(`OAuth token failed: ${await response.text()}`);
-  }
-  const json = await response.json();
-  cachedToken = { token: json.access_token, expiresAt: now + 3500 };
-  return json.access_token;
-}
-
-async function sendPush(
-  userId: string,
-  token: string,
-  title: string,
-  body: string,
-  data: Record<string, string> = {},
-) {
-  const accessToken = await getAccessToken();
-  const url =
-    `https://fcm.googleapis.com/v1/projects/${serviceAccount.project_id}/messages:send`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      message: {
-        token,
-        notification: { title, body },
-        data,
-        android: { priority: "HIGH" },
-      },
-    }),
-  });
-  if (!response.ok) {
-    const text = await response.text();
-    console.error(`FCM send failed for ${userId}: ${text}`);
-    if (text.includes("UNREGISTERED") || text.includes("INVALID_ARGUMENT")) {
-      await supabase.from("profiles").update({ fcm_token: null })
-        .eq("id", userId);
-    }
-  }
-}
 
 // ---------------------------------------------------------------------------
 // E-mail via Resend
@@ -181,8 +66,15 @@ async function notifyRecipient(
   body: string,
   options: { data?: Record<string, string>; html?: string } = {},
 ) {
-  if (hasFirebase && recipient.fcm_token) {
-    await sendPush(recipient.id, recipient.fcm_token, title, body, options.data);
+  if (firebaseConfigured() && recipient.fcm_token) {
+    await sendPush(
+      supabase,
+      recipient.id,
+      recipient.fcm_token,
+      title,
+      body,
+      options.data,
+    );
   } else {
     await sendEmail(
       recipient.email,
