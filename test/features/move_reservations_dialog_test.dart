@@ -91,8 +91,8 @@ void main() {
         ),
         playersProvider.overrideWith(
           (ref) async => const [
-            PlayerName(id: 'p1', displayName: 'Petr Novák', club: '', nick: 'Péťa'),
-            PlayerName(id: 'p9', displayName: 'Olga Malá', club: ''),
+            PlayerName(id: 'p1', displayName: 'Petr Novák', nick: 'Péťa'),
+            PlayerName(id: 'p9', displayName: 'Olga Malá'),
           ],
         ),
       ],
@@ -187,7 +187,7 @@ void main() {
         ),
         playersProvider.overrideWith(
           (ref) async => const [
-            PlayerName(id: 'p1', displayName: 'Petr Novák', club: ''),
+            PlayerName(id: 'p1', displayName: 'Petr Novák'),
           ],
         ),
       ],

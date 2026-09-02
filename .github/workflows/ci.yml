@@ -18,3 +18,32 @@ jobs:
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
+
+  # Backend: rebuild the database from the migrations alone, prove the
+  # committed schema snapshot matches it, run the tenancy smoke-test and
+  # type-check + test the Deno edge functions.
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Pinned: supabase/schema.sql is a pg_dump and must come from the same
+      # CLI (and bundled Postgres image) that tool/schema_snapshot.sh uses.
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.109.0
+      - name: Build the database from migrations
+        run: supabase start -x studio,imgproxy,inbucket,analytics,vector,edge-runtime,storage,realtime,meta
+      - name: Schema snapshot is current
+        run: |
+          supabase db dump --local --schema public -f /tmp/schema.sql
+          diff -u supabase/schema.sql /tmp/schema.sql
+      - name: Tenancy RLS smoke-test
+        run: psql postgresql://postgres:postgres@127.0.0.1:54322/postgres -X -v ON_ERROR_STOP=1 -f supabase/tests/tenancy_rls.sql
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Edge functions type-check + tests
+        run: |
+          deno check --import-map supabase/functions/import_map.json supabase/functions/notify/index.ts supabase/functions/cancel/index.ts
+          deno test supabase/functions
+

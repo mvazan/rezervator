@@ -9,7 +9,6 @@ void main() {
   const admin = Profile(
     id: 'admin1',
     displayName: 'Správce',
-    club: '',
     email: 'admin@example.com',
     role: Role.admin,
     status: ProfileStatus.approved,
@@ -19,7 +18,6 @@ void main() {
       Profile(
         id: id,
         displayName: name,
-        club: '',
         email: '$id@example.com',
         role: role ?? Role.player,
         status: ProfileStatus.approved,
@@ -104,7 +102,6 @@ void main() {
     const visiting = Profile(
       id: 'sv',
       displayName: 'Miloš (na návštěvě)',
-      club: '',
       email: 'milos.vazan@gmail.com',
       role: Role.admin,
       status: ProfileStatus.approved,
@@ -115,7 +112,6 @@ void main() {
     const atHome = Profile(
       id: 'sh',
       displayName: 'Miloš (doma)',
-      club: '',
       email: 'milos.vazan@gmail.com',
       role: Role.admin,
       status: ProfileStatus.approved,
@@ -141,7 +137,6 @@ void main() {
     const pending = Profile(
       id: 'pend',
       displayName: 'Nováček',
-      club: 'Staré jméno',
       email: 'pend@example.com',
       role: Role.player,
       status: ProfileStatus.pending,

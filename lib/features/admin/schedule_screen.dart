@@ -101,9 +101,9 @@ class _ScheduleAdminScreenState extends ConsumerState<ScheduleAdminScreen> {
         if (!mounted) return;
         final confirmed = await confirmDialog(
           context,
-          title: 'Pozor — osiřelé rezervace',
+          title: 'Pozor — rezervace se zruší',
           message:
-              '$stranded budoucích rezervací zůstane mimo rozvrh (nezobrazí se a nepůjdou zrušit z mřížky). Opravdu uložit?',
+              '$stranded budoucích rezervací se tímto zruší (hráči dostanou upozornění). Opravdu uložit?',
           confirmLabel: 'Uložit i tak',
         );
         if (!confirmed) return;

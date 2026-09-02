@@ -19,7 +19,6 @@ void main() {
   const admin = Profile(
     id: 'a1',
     displayName: 'Správce',
-    club: '',
     email: 'admin@example.com',
     role: Role.admin,
     status: ProfileStatus.approved,
@@ -29,7 +28,6 @@ void main() {
   const superadmin = Profile(
     id: 's1',
     displayName: 'Miloš',
-    club: '',
     email: 'milos.vazan@gmail.com',
     role: Role.admin,
     status: ProfileStatus.approved,
@@ -42,7 +40,6 @@ void main() {
   const visitingSuperadmin = Profile(
     id: 's1',
     displayName: 'Miloš',
-    club: '',
     email: 'milos.vazan@gmail.com',
     role: Role.admin,
     status: ProfileStatus.approved,

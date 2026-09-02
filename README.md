@@ -25,5 +25,9 @@ nepřišel, a měsíční docházku si stáhne jako CSV.
 
 - [`SETUP.md`](SETUP.md) — jednorázové nastavení vlastního backendu
   (~15 minut klikání v Supabase) a nasazení webu na GitHub Pages.
+- [`docs/SCHEMA.md`](docs/SCHEMA.md) — efektivní schéma databáze: tabulky,
+  RLS, RPC, kaskády, edge funkce (aktualizuje se s každou migrací).
+- [`CICD.md`](CICD.md) — CI, nasazení backendu a webu, migrace;
+  [`PLAY.md`](PLAY.md) — vydání na Google Play.
 - [`docs/superpowers/specs/2026-07-07-rezervator-design.md`](docs/superpowers/specs/2026-07-07-rezervator-design.md) —
   návrh appky (funkce, datový model, fáze vývoje).

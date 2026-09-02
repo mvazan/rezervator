@@ -45,7 +45,6 @@ void main() {
         id: 'p$i',
         displayName:
             '${String.fromCharCode(65 + i)}${String.fromCharCode(65 + i)} Hráč',
-        club: '',
       ),
   ];
   // The single player this test suite drills into and books for.
@@ -345,13 +344,11 @@ void main() {
       const withNick = PlayerName(
         id: 'nick1',
         displayName: 'Zdeněk Procházka',
-        club: '',
         nick: 'Zdenda',
       );
       const withoutNick = PlayerName(
         id: 'nonick1',
         displayName: 'Bořivoj Novotný',
-        club: '',
       );
       await tester.pumpWidget(
         kioskApp(

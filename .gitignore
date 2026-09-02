@@ -43,3 +43,6 @@ supabase/.temp/
 
 # Local stack metadata written by `supabase start` / `db reset`
 supabase/.branches/
+
+# Agent worktrees created by Claude Code
+.claude/worktrees/

@@ -61,6 +61,22 @@ merge to main, and deploy-backend applies it automatically.
 `WEBHOOK_SECRET`. Without them `notify_webhook` logs a warning and skips the
 POST (writes are unaffected).
 
+### Backend checks (CI job `backend`)
+
+Every push/PR also rebuilds the database from `supabase/migrations/` on a
+local Supabase stack (CLI pinned to 2.109.0) and then:
+
+1. dumps the public schema and diffs it against `supabase/schema.sql` —
+   **after adding a migration run `tool/schema_snapshot.sh` and commit the
+   regenerated file**, otherwise the job fails;
+2. runs `supabase/tests/tenancy_rls.sql` (cross-tenant isolation, superadmin
+   visiting, the reservation cascade, the reject guard);
+3. `deno check` + `deno test` over `supabase/functions` (helpers in
+   `_shared/` have unit tests; `import_map.json` pins supabase-js).
+
+`docs/SCHEMA.md` is the human summary of the effective schema — update it
+with the migration.
+
 ### 3. Google Play
 
 One-time Play Console / signing-key / service-account setup lives in

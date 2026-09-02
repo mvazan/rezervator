@@ -9,7 +9,7 @@ export function base64urlEncode(data: Uint8Array | string): string {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-export function base64urlDecode(value: string): Uint8Array {
+export function base64urlDecode(value: string): Uint8Array<ArrayBuffer> {
   const padded = value.replace(/-/g, "+").replace(/_/g, "/") +
     "=".repeat((4 - value.length % 4) % 4);
   return Uint8Array.from(atob(padded), (c) => c.charCodeAt(0));

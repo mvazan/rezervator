@@ -224,3 +224,19 @@ a zruší column grant `update (club)`.
 
 Mimo rozsahu (vedome): prepis state managementu, generický CRUD
 framework, zmena histórie migrácií (len snapshot vedľa nej).
+
+## Stav
+
+- **Plán 1 (quick wins)** — merged 2026-09-02 (PR #50), 0016 na prode.
+- **Plán 2 (backend hygiena)** — hotový 2026-09-02 na vetve
+  `cleanup-2-backend`: migrácie 0017 (granty ako kód), 0018 (kaskáda
+  osirelých rezervácií + `block_day_status` + guard v `reject_tenant`),
+  0019 (drop `profiles.club`); `supabase/schema.sql` snapshot +
+  `tool/schema_snapshot.sh`; `docs/SCHEMA.md`; CI job `backend`
+  (snapshot diff, `tenancy_rls.sql`, deno check/test); edge funkcie:
+  `_shared/format.ts` + `fcm.ts` (lazy parse), unit testy, supabase-js
+  pinnutý cez import mapu. Vedome vynechané: zjednotenie
+  `v_caller.tenant_id` vs `current_tenant_id()` (kozmetika, obe sú
+  ekvivalentné) a prepis `cancel` EF na RPC (RPC vyžaduje `auth.uid()`).
+  Nasadenie nepotrebuje žiadny ručný krok na prode.
+

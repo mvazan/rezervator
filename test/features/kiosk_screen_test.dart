@@ -19,7 +19,6 @@ void main() {
   const admin = Profile(
     id: 'admin1',
     displayName: 'Správce',
-    club: '',
     email: 'admin@example.com',
     role: Role.admin,
     status: ProfileStatus.approved,
