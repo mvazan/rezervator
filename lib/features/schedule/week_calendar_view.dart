@@ -13,35 +13,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollDirection;
 
 import '../../domain/calendar_layout.dart';
-import '../../domain/labels.dart';
 import '../../domain/models.dart';
-import '../../domain/palette.dart';
 import '../../domain/schedule.dart';
 import 'widgets/calendar_board.dart';
+import 'widgets/schedule_day_column.dart';
 import 'widgets/slot_tile.dart';
-
-/// Drag&drop payloads: what a held card/band carries to the drop target.
-/// [hoverMinute] is the live-preview channel: the hovered column publishes
-/// the snapped would-be start minute, the drag ghost renders it as od–do.
-class BlockDragData {
-  BlockDragData(this.date, this.block);
-  final Day date;
-  final TimeBlock block;
-  final ValueNotifier<int?> hoverMinute = ValueNotifier(null);
-}
-
-class SlotDragData {
-  SlotDragData(this.slot);
-  final PrioritySlot slot;
-  final ValueNotifier<int?> hoverMinute = ValueNotifier(null);
-}
-
-/// D&D snap grid: 5 minutes.
-int _snapMinute(int minute) => ((minute + 2) ~/ 5) * 5;
-
-/// Vertical scale: a 60-minute block is as tall as [_refLaneRowHeight] per
-/// lane — the same room the old week grid gave its rows.
-const double _refLaneRowHeight = 40.0;
 
 class WeekCalendarView extends StatefulWidget {
   const WeekCalendarView({
@@ -81,7 +57,7 @@ class WeekCalendarView extends StatefulWidget {
   /// Admin-only (null otherwise). Click the card's time header (or a
   /// blocking band) to edit FOR THAT DAY; tap empty column space or the
   /// header ＋ to add; HOLD a card/band and drag it onto empty space to
-  /// move it within the day (snap 5 min, see [_snapMinute]).
+  /// move it within the day (snap 5 min) — see [ScheduleDayColumn].
   final void Function(Day date, TimeBlock block)? onEditBlock;
   final void Function(Day date, HourMinute start, HourMinute end)?
       onAddBlockInGap;
@@ -188,7 +164,7 @@ class _WeekCalendarViewState extends State<WeekCalendarView> {
     if (window == null) {
       return const Center(child: Text('Tenhle týden se nehraje.'));
     }
-    final pxPerMinute = settings.laneCount * _refLaneRowHeight / 60;
+    final pxPerMinute = settings.laneCount * laneRowRefHeight / 60;
     // Shared header height: the busiest visible day dictates it for every
     // column, so all event lines fit without clipping.
     var maxHeaderEvents = 0;
@@ -237,7 +213,7 @@ class _WeekCalendarViewState extends State<WeekCalendarView> {
 
     final columns = [
       for (final day in week.days)
-        _DayColumn(
+        ScheduleDayColumn(
           // Keyed by date so tests can target one day's column.
           key: ValueKey(day.date),
           day: day,
@@ -249,14 +225,7 @@ class _WeekCalendarViewState extends State<WeekCalendarView> {
                   widget.now.minutesFromMidnight < window.endMinute
               ? widget.now.minutesFromMidnight
               : null,
-          me: widget.me,
-          myCount: widget.myCount,
-          settings: settings,
-          nameById: widget.nameById,
-          clubColorById: widget.clubColorById,
-          interactive: widget.interactive,
-          onBook: widget.onBook,
-          onCancel: widget.onCancel,
+          laneRow: _laneRow,
           onEditBlock: widget.onEditBlock,
           onAddBlockInGap: widget.onAddBlockInGap,
           onEditPrioritySlot: widget.onEditPrioritySlot,
@@ -323,420 +292,9 @@ class _WeekCalendarViewState extends State<WeekCalendarView> {
       ],
     );
   }
-}
 
-class _DayColumn extends StatelessWidget {
-  const _DayColumn({
-    super.key,
-    required this.day,
-    required this.window,
-    required this.pxPerMinute,
-    required this.halfHourMarks,
-    required this.nowMinute,
-    required this.me,
-    required this.myCount,
-    required this.settings,
-    required this.nameById,
-    required this.clubColorById,
-    required this.interactive,
-    required this.onBook,
-    required this.onCancel,
-    this.onEditBlock,
-    this.onAddBlockInGap,
-    this.onEditPrioritySlot,
-    this.onMoveBlock,
-    this.onMovePrioritySlot,
-  });
-
-  final DaySchedule day;
-  final CalendarWindow window;
-  final double pxPerMinute;
-  final bool halfHourMarks;
-  final int? nowMinute;
-  final Profile? me;
-  final int myCount;
-  final ScheduleSettings settings;
-  final Map<String, String> nameById;
-  final Map<String, int> clubColorById;
-  final bool interactive;
-  final void Function(Day, TimeBlock, int lane) onBook;
-  final void Function(Day, TimeBlock, Reservation, {required bool ownFuture})
-      onCancel;
-  final void Function(Day date, TimeBlock block)? onEditBlock;
-  final void Function(Day date, HourMinute start, HourMinute end)?
-      onAddBlockInGap;
-  final void Function(Day date, PrioritySlot slot)? onEditPrioritySlot;
-  final void Function(Day date, TimeBlock block, HourMinute newStart)?
-      onMoveBlock;
-  final void Function(Day date, PrioritySlot slot, HourMinute newStart)?
-      onMovePrioritySlot;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final openDay = day is OpenDay ? day as OpenDay : null;
-
-    // Everything this day already shows — blocks AND event bands. Taps on
-    // free space prefill the add-block dialog with the surrounding gap, so
-    // "occupied" must include event bands or the prefill would overlap a
-    // visible rental/match.
-    final occupied = mergeIntervals([
-      if (openDay != null)
-        for (final b in openDay.blocks)
-          (b.startsAt.minutesFromMidnight, b.endsAt.minutesFromMidnight),
-      for (final m in day.priority)
-        (m.startsAt.minutesFromMidnight, m.endsAt.minutesFromMidnight),
-      if (openDay != null)
-        for (final r in openDay.rentals)
-          (r.startsAt.minutesFromMidnight, r.endsAt.minutesFromMidnight),
-    ]);
-
-    final onTapFree = onAddBlockInGap == null
-        ? null
-        : (int minute) {
-            final gap = freeGapAt(minute, occupied, window);
-            if (gap == null) return;
-            onAddBlockInGap!(
-                day.date, hourMinuteAt(gap.$1), hourMinuteAt(gap.$2));
-          };
-
-    // Drag&drop landing: snap the ghost's top edge to 5 minutes and only
-    // accept when the whole slot (a match brings its úklid child along)
-    // fits into free space of THIS day — the landing rule is [dropFits].
-    void handleDrop(Object data, int minute) {
-      final snapped = _snapMinute(minute);
-      (int, int)? candidate;
-      void Function()? commit;
-      List<(int, int)> self = const [];
-      if (data is BlockDragData && data.date == day.date) {
-        final dur = data.block.durationMinutes;
-        candidate = (snapped, snapped + dur);
-        self = [
-          (
-            data.block.startsAt.minutesFromMidnight,
-            data.block.endsAt.minutesFromMidnight
-          )
-        ];
-        commit = () =>
-            onMoveBlock?.call(day.date, data.block, hourMinuteAt(snapped));
-      } else if (data is SlotDragData && data.slot.date == day.date) {
-        final s = data.slot;
-        final dur = s.endsAt.minutesFromMidnight - s.startsAt.minutesFromMidnight;
-        final child = day.priority
-            .where((m) => m.parentId == s.id)
-            .firstOrNull;
-        final childDur = child == null
-            ? 0
-            : child.endsAt.minutesFromMidnight -
-                child.startsAt.minutesFromMidnight;
-        candidate = (snapped - childDur, snapped + dur);
-        self = [
-          (s.startsAt.minutesFromMidnight, s.endsAt.minutesFromMidnight),
-          if (child != null)
-            (
-              child.startsAt.minutesFromMidnight,
-              child.endsAt.minutesFromMidnight
-            ),
-        ];
-        commit = () =>
-            onMovePrioritySlot?.call(day.date, s, hourMinuteAt(snapped));
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Přesun jde jen v rámci stejného dne.')));
-        return;
-      }
-      final fits = dropFits(
-        candidate: candidate,
-        self: self,
-        occupied: occupied,
-        window: window,
-      );
-      if (!fits) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Tady není volné místo.')));
-        return;
-      }
-      commit();
-    }
-
-    final canMove = onMoveBlock != null || onMovePrioritySlot != null;
-
-    // Live drop-time preview: publish the snapped minute to the payload's
-    // notifier while its ghost hovers over THIS day's column (a foreign
-    // day would refuse the drop, so it previews nothing).
-    ValueNotifier<int?>? hoverOf(Object data) => switch (data) {
-          BlockDragData d when d.date == day.date => d.hoverMinute,
-          SlotDragData d when d.slot.date == day.date => d.hoverMinute,
-          _ => null,
-        };
-    void handleDragAt(Object data, int minute) =>
-        hoverOf(data)?.value = _snapMinute(minute);
-    void handleDragExit(Object data) => hoverOf(data)?.value = null;
-
-    return CalendarColumn(
-      window: window,
-      pxPerMinute: pxPerMinute,
-      halfHourMarks: halfHourMarks,
-      entries: _entries(context, openDay),
-      background: openDay == null ? _closedBackground(context, scheme) : null,
-      nowMinute: nowMinute,
-      onTapFreeAt: onTapFree,
-      onDropAt: canMove ? handleDrop : null,
-      onDragAt: canMove ? handleDragAt : null,
-      onDragExit: canMove ? handleDragExit : null,
-    );
-  }
-
-  List<CalendarEntry> _entries(BuildContext context, OpenDay? openDay) {
-    final entries = <CalendarEntry>[];
-    final blockUnion = mergeIntervals([
-      if (openDay != null)
-        for (final b in openDay.blocks)
-          (b.startsAt.minutesFromMidnight, b.endsAt.minutesFromMidnight),
-    ]);
-
-    if (openDay != null) {
-      for (final block in openDay.blocks) {
-        entries.add(CalendarEntry(
-          start: block.startsAt,
-          end: block.endsAt,
-          child: _blockCard(context, openDay, block),
-        ));
-      }
-    }
-
-    final scheme = Theme.of(context).colorScheme;
-    // `covered` grows with every emitted band, so overlaps resolve
-    // first-wins in emission order: priority slots (start-sorted) before
-    // rentals — a renter band can never paint over a match.
-    final covered = <(int, int)>[...blockUnion];
-    void addBands(
-        HourMinute start, HourMinute end, Widget Function() bandBuilder) {
-      for (final (s, e) in subtractInterval(
-          (start.minutesFromMidnight, end.minutesFromMidnight),
-          mergeIntervals(covered))) {
-        entries.add(CalendarEntry(
-            start: hourMinuteAt(s), end: hourMinuteAt(e), child: bandBuilder()));
-        covered.add((s, e));
-      }
-    }
-
-    for (final m in day.priority) {
-      final (bg, fg) = clubTint(m.type.colorIndex, scheme.brightness,
-          fallbackBg: scheme.errorContainer.withValues(alpha: 0.6),
-          fallbackFg: scheme.onErrorContainer);
-      Widget band() {
-        Widget w = CalendarEventBand(
-          background: bg,
-          foreground: fg,
-          text: '${slotEventLabel(m)}\n'
-              '${m.startsAt.display()}–${m.endsAt.display()}',
-          bold: true,
-        );
-        // Click = edit (a click has nothing else to do on a blocking band);
-        // an úklid child edits its parent match.
-        if (onEditPrioritySlot != null) {
-          w = InkWell(
-            onTap: () => onEditPrioritySlot!(day.date, m),
-            child: w,
-          );
-        }
-        // HOLD = move. Úklid children follow their match, they don't move
-        // on their own.
-        if (onMovePrioritySlot != null && m.parentId == null) {
-          final data = SlotDragData(m);
-          w = _draggable(
-            context,
-            data: data,
-            hoverMinute: data.hoverMinute,
-            label: m.title,
-            heightMinutes: m.endsAt.minutesFromMidnight -
-                m.startsAt.minutesFromMidnight,
-            child: w,
-          );
-        }
-        return w;
-      }
-
-      addBands(m.startsAt, m.endsAt, band);
-    }
-    if (openDay != null) {
-      for (final r in openDay.rentals) {
-        final (bg, fg) = clubTint(r.color, scheme.brightness,
-            fallbackBg: scheme.tertiaryContainer.withValues(alpha: 0.5),
-            fallbackFg: scheme.onTertiaryContainer);
-        addBands(
-          r.startsAt,
-          r.endsAt,
-          () => CalendarEventBand(
-            background: bg,
-            foreground: fg,
-            text: '${rentalLabel(r)}\n'
-                '${r.startsAt.display()}–${r.endsAt.display()}',
-          ),
-        );
-      }
-    }
-    return entries;
-  }
-
-  Widget _closedBackground(BuildContext context, ColorScheme scheme) {
-    final closedDay = day as ClosedDay;
-    return Container(
-      color: scheme.surfaceContainerLowest.withValues(alpha: 0.5),
-      alignment: Alignment.center,
-      child: RotatedBox(
-        quarterTurns: 3,
-        child: Text(
-          closedDay.reason.isEmpty
-              ? '✕ zavřeno'
-              : '✕ zavřeno — ${closedDay.reason}',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// One block's calendar card: a thin time header ('17:30–18:30' — for
-  /// admins a click-to-edit target) over one bookable [SlotTile] row per
-  /// lane. Whole-alley priority slots never reach a rendered block (they
-  /// cancel overlapping blocks in buildWeekSchedule and render as
-  /// true-time bands); lane-scoped slots resolve per lane row. Admins HOLD
-  /// the card to drag it onto empty space (same-day move).
-  Widget _blockCard(BuildContext context, OpenDay openDay, TimeBlock block) {
-    final scheme = Theme.of(context).colorScheme;
-
-    // Same ground as the card — the header is typography, not a bar: quiet
-    // spaced small-caps-like digits that read as a label, not a stripe.
-    final headerText = Text(
-      block.label,
-      textAlign: TextAlign.center,
-      style: TextStyle(
-        fontSize: 9,
-        fontWeight: FontWeight.w800,
-        letterSpacing: 0.8,
-        fontFeatures: const [FontFeature.tabularFigures()],
-        color: scheme.onSurfaceVariant.withValues(alpha: 0.55),
-      ),
-    );
-    final header = Container(
-      height: 14,
-      alignment: Alignment.center,
-      child: onEditBlock == null
-          ? headerText
-          : InkWell(
-              onTap: () => onEditBlock!(openDay.date, block),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  headerText,
-                  const SizedBox(width: 3),
-                  Icon(
-                    Icons.edit_outlined,
-                    size: 9,
-                    color: scheme.onSurfaceVariant.withValues(alpha: 0.45),
-                  ),
-                ],
-              ),
-            ),
-    );
-
-    final card = Container(
-      // Stable per-block key (unique among one column's entries) so tests
-      // can measure card geometry and target gestures.
-      key: ValueKey('cal-block-${block.id}'),
-      // The 1.5px vertical inset matches CalendarEventBand's, so a band and
-      // a touching block card keep a visible seam between them.
-      margin: const EdgeInsets.symmetric(horizontal: 1, vertical: 1.5),
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerLow.withValues(alpha: 0.4),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.4)),
-      ),
-      child: Column(
-        children: [
-          header,
-          Expanded(
-            child: Column(
-              children: [
-                for (var lane = 1; lane <= openDay.laneCount; lane++)
-                  Expanded(child: _laneRow(context, openDay, block, lane)),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-    if (onMoveBlock == null) return card;
-    final data = BlockDragData(openDay.date, block);
-    return _draggable(
-      context,
-      data: data,
-      hoverMinute: data.hoverMinute,
-      label: block.label,
-      heightMinutes: block.durationMinutes,
-      child: card,
-    );
-  }
-
-  /// HOLD-to-drag wrapper shared by cards and bands: the ghost is a simple
-  /// tinted box of the slot's true size so the admin can align its top
-  /// edge with the target time — which it live-previews as 'od–do' from
-  /// [hoverMinute] (published by the hovered column, see handleDragAt).
-  Widget _draggable(
-    BuildContext context, {
-    required Object data,
-    required ValueNotifier<int?> hoverMinute,
-    required String label,
-    required int heightMinutes,
-    required Widget child,
-  }) {
-    final scheme = Theme.of(context).colorScheme;
-    return LayoutBuilder(
-      builder: (context, constraints) => LongPressDraggable<Object>(
-        data: data,
-        delay: const Duration(milliseconds: 200),
-        feedback: Material(
-          color: Colors.transparent,
-          child: Container(
-            width: constraints.maxWidth,
-            height: heightMinutes * pxPerMinute,
-            decoration: BoxDecoration(
-              color: scheme.primaryContainer.withValues(alpha: 0.75),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: scheme.primary),
-            ),
-            alignment: Alignment.center,
-            child: ValueListenableBuilder<int?>(
-              valueListenable: hoverMinute,
-              builder: (context, minute, _) => Text(
-                minute == null
-                    ? label
-                    : '${hourMinuteAt(minute).display()}–'
-                        '${hourMinuteAt(minute + heightMinutes).display()}',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontFeatures: const [FontFeature.tabularFigures()],
-                  color: scheme.onPrimaryContainer,
-                ),
-              ),
-            ),
-          ),
-        ),
-        childWhenDragging: Opacity(opacity: 0.35, child: child),
-        child: child,
-      ),
-    );
-  }
-
+  /// One lane row of a block card: the lane digit beside a compact
+  /// [SlotTile] carrying the app's booking/cancel policy ([slotTileFor]).
   Widget _laneRow(
       BuildContext context, OpenDay openDay, TimeBlock block, int lane) {
     final scheme = Theme.of(context).colorScheme;
@@ -762,14 +320,14 @@ class _DayColumn extends StatelessWidget {
               block: block,
               lane: lane,
               size: SlotTileSize.compact,
-              me: me,
-              myCount: myCount,
-              settings: settings,
-              nameById: nameById,
-              clubColorById: clubColorById,
-              interactive: interactive,
-              onBook: onBook,
-              onCancel: onCancel,
+              me: widget.me,
+              myCount: widget.myCount,
+              settings: widget.settings,
+              nameById: widget.nameById,
+              clubColorById: widget.clubColorById,
+              interactive: widget.interactive,
+              onBook: widget.onBook,
+              onCancel: widget.onCancel,
             ),
           ),
         ],

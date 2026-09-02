@@ -18,11 +18,11 @@ import '../../data/clock.dart';
 import '../../data/providers.dart';
 import '../../data/week_schedule.dart';
 import '../../domain/calendar_layout.dart';
-import '../../domain/labels.dart';
 import '../../domain/models.dart';
-import '../../domain/palette.dart';
 import '../../domain/schedule.dart';
 import '../schedule/widgets/calendar_board.dart';
+import '../schedule/widgets/schedule_day_column.dart';
+import '../schedule/widgets/slot_tile.dart';
 
 /// Slack under the columns so the bottom hour label (centered on its line)
 /// isn't half-clipped by the viewport in fit-height mode.
@@ -37,9 +37,6 @@ const double _bottomLabelPad = 8.0;
 /// usual training hours).
 const double _minLaneRowHeight = 22.0;
 
-/// Height of the block card's od–do time header row.
-const double _blockHeaderHeight = 14.0;
-
 double _minPxPerMinute(Iterable<TimeBlock> blocks, int laneCount) {
   int? shortest;
   for (final b in blocks) {
@@ -48,7 +45,7 @@ double _minPxPerMinute(Iterable<TimeBlock> blocks, int laneCount) {
   }
   if (shortest == null) return 0.9;
   final floor =
-      (_minLaneRowHeight * laneCount + _blockHeaderHeight) / shortest;
+      (_minLaneRowHeight * laneCount + blockCardHeaderHeight) / shortest;
   return floor < 0.9 ? 0.9 : floor;
 }
 
@@ -306,7 +303,7 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
             (constraints.maxHeight - headerHeight - _bottomLabelPad) /
                 window.minutes;
         final minScale = _minPxPerMinute(windowBlocks, settings.laneCount);
-        final comfortableScale = settings.laneCount * 40.0 / 60;
+        final comfortableScale = settings.laneCount * laneRowRefHeight / 60;
         final pxPerMinute = settings.kioskFitDay
             ? (fitScale < minScale ? minScale : fitScale)
             // The tappability floor applies here too: a very short block
@@ -381,31 +378,37 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
                             itemCount: days.length,
                             itemBuilder: (context, index) => SizedBox(
                               width: columnWidth,
-                              child: _DayColumn(
-                                day: days[index],
-                                window: window,
-                                pxPerMinute: pxPerMinute,
-                                halfHourMarks: halfHourMarks,
-                                nowMinute: index == 0 &&
-                                        now.minutesFromMidnight >=
-                                            window.startMinute &&
-                                        now.minutesFromMidnight <
-                                            window.endMinute
-                                    ? now.minutesFromMidnight
-                                    : null,
-                                settings: settings,
-                                nameById: nameById,
-                                clubColorById: clubColorById,
-                                interactive: interactive,
-                                selected: widget.selected,
-                                selectedCount: selectedCount,
-                                onBook: (date, block, lane) => _book(
-                                  context,
-                                  ref,
-                                  date,
-                                  block,
-                                  lane,
-                                  widget.selected!,
+                              // The kiosk column is read-only: no admin
+                              // hooks, rows resolved by _laneRow.
+                              child: Container(
+                                margin:
+                                    const EdgeInsets.symmetric(horizontal: 2),
+                                clipBehavior: Clip.antiAlias,
+                                decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(10)),
+                                child: ScheduleDayColumn(
+                                  day: days[index],
+                                  window: window,
+                                  pxPerMinute: pxPerMinute,
+                                  halfHourMarks: halfHourMarks,
+                                  nowMinute: index == 0 &&
+                                          now.minutesFromMidnight >=
+                                              window.startMinute &&
+                                          now.minutesFromMidnight <
+                                              window.endMinute
+                                      ? now.minutesFromMidnight
+                                      : null,
+                                  laneRow: (context, day, block, lane) =>
+                                      _laneRow(
+                                    day,
+                                    block,
+                                    lane,
+                                    settings: settings,
+                                    nameById: nameById,
+                                    clubColorById: clubColorById,
+                                    interactive: interactive,
+                                    selectedCount: selectedCount,
+                                  ),
                                 ),
                               ),
                             ),
@@ -422,267 +425,37 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
       },
     );
   }
-}
 
-/// One board column's calendar area — blocks and off-block events positioned
-/// at their true time (the day header lives in the sticky strip above). A
-/// closed day dims the whole column behind a vertical "✕ zavřeno[ — reason]";
-/// matches still render on top (spectators want to see who plays even on a
-/// closed day).
-class _DayColumn extends StatelessWidget {
-  const _DayColumn({
-    required this.day,
-    required this.window,
-    required this.pxPerMinute,
-    required this.halfHourMarks,
-    required this.nowMinute,
-    required this.settings,
-    required this.nameById,
-    required this.clubColorById,
-    required this.interactive,
-    required this.selected,
-    required this.selectedCount,
-    required this.onBook,
-  });
-
-  final DaySchedule day;
-  final CalendarWindow window;
-  final double pxPerMinute;
-  final bool halfHourMarks;
-  final int? nowMinute;
-  final ScheduleSettings settings;
-  final Map<String, String> nameById;
-  final Map<String, int> clubColorById;
-  final bool interactive;
-  final PlayerName? selected;
-
-  /// [selected]'s live reservations from today on — canBook's
-  /// myActiveCount (0 while no player is selected).
-  final int selectedCount;
-  final void Function(Day date, TimeBlock block, int lane) onBook;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final closed = day is ClosedDay;
-
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 2),
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(borderRadius: BorderRadius.circular(10)),
-      child: CalendarColumn(
-        window: window,
-        pxPerMinute: pxPerMinute,
-        halfHourMarks: halfHourMarks,
-        entries: _entries(context),
-        background: closed ? _closedBackground(context, scheme) : null,
-        nowMinute: nowMinute,
-      ),
-    );
-  }
-
-  List<CalendarEntry> _entries(BuildContext context) {
-    final entries = <CalendarEntry>[];
-
-    final openDay = day is OpenDay ? day as OpenDay : null;
-    final blockUnion = mergeIntervals([
-      if (openDay != null)
-        for (final b in openDay.blocks)
-          (b.startsAt.minutesFromMidnight, b.endsAt.minutesFromMidnight),
-    ]);
-
-    if (openDay != null) {
-      for (final block in openDay.blocks) {
-        entries.add(CalendarEntry(
-          start: block.startsAt,
-          end: block.endsAt,
-          child: _blockCard(context, openDay, block),
-        ));
-      }
-    }
-
-    // Off-block pieces of matches/rentals: the part of an event window not
-    // covered by this day's own blocks — nor by an earlier band — renders as
-    // a positioned band (the in-block part renders via slot states inside
-    // the block card). Matches band on closed days too; rentals only exist
-    // on open days. `covered` grows with every emitted band, so overlaps
-    // resolve first-wins in emission order: priority slots (start-sorted)
-    // before rentals — a renter band can never paint over a match.
-    final covered = <(int, int)>[...blockUnion];
-    void addBands(
-        HourMinute start, HourMinute end, Widget Function() bandBuilder) {
-      for (final (s, e) in subtractInterval(
-          (start.minutesFromMidnight, end.minutesFromMidnight),
-          mergeIntervals(covered))) {
-        entries.add(CalendarEntry(
-            start: hourMinuteAt(s), end: hourMinuteAt(e), child: bandBuilder()));
-        covered.add((s, e));
-      }
-    }
-
-    final scheme = Theme.of(context).colorScheme;
-    for (final m in day.priority) {
-      final (bg, fg) = clubTint(m.type.colorIndex, scheme.brightness,
-          fallbackBg: scheme.errorContainer.withValues(alpha: 0.6),
-          fallbackFg: scheme.onErrorContainer);
-      addBands(
-        m.startsAt,
-        m.endsAt,
-        () => CalendarEventBand(
-          background: bg,
-          foreground: fg,
-          text: '${slotEventLabel(m)}\n'
-              '${m.startsAt.display()}–${m.endsAt.display()}',
-          bold: true,
-        ),
-      );
-    }
-    if (openDay != null) {
-      for (final r in openDay.rentals) {
-        final (bg, fg) = clubTint(r.color, scheme.brightness,
-            fallbackBg: scheme.tertiaryContainer.withValues(alpha: 0.5),
-            fallbackFg: scheme.onTertiaryContainer);
-        addBands(
-          r.startsAt,
-          r.endsAt,
-          () => CalendarEventBand(
-            background: bg,
-            foreground: fg,
-            text: '${rentalLabel(r)}\n'
-                '${r.startsAt.display()}–${r.endsAt.display()}',
-          ),
-        );
-      }
-    }
-
-    return entries;
-  }
-
-  Widget _closedBackground(BuildContext context, ColorScheme scheme) {
-    final closedDay = day as ClosedDay;
-    return Container(
-      color: scheme.surfaceContainerLowest.withValues(alpha: 0.5),
-      alignment: Alignment.center,
-      child: RotatedBox(
-        quarterTurns: 3,
-        child: Text(
-          closedDay.reason.isEmpty
-              ? '✕ zavřeno'
-              : '✕ zavřeno — ${closedDay.reason}',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// One block's calendar card: one row per lane. Whole-alley priority
-  /// slots never reach a rendered block (they cancel overlapping blocks in
-  /// buildWeekSchedule and render as true-time bands instead); lane-scoped
-  /// slots resolve per lane row.
-  Widget _blockCard(BuildContext context, OpenDay openDay, TimeBlock block) {
-    final scheme = Theme.of(context).colorScheme;
-
-    return Container(
-      // Stable per-block key (unique among one column's entries; other
-      // columns have their own parents) so tests can measure card geometry.
-      key: ValueKey('cal-block-${block.id}'),
-      // The 1.5px vertical inset matches CalendarEventBand's, so a band and
-      // a touching block card keep a visible seam between them.
-      margin: const EdgeInsets.symmetric(horizontal: 1, vertical: 1.5),
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerLow.withValues(alpha: 0.4),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: scheme.outlineVariant.withValues(alpha: 0.4),
-        ),
-      ),
-      child: Column(
-        children: [
-          // Quiet od–do label, same treatment as the app's week view.
-          SizedBox(
-            height: _blockHeaderHeight,
-            child: Center(
-              child: Text(
-                block.label,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 9,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.8,
-                  fontFeatures: const [FontFeature.tabularFigures()],
-                  color: scheme.onSurfaceVariant.withValues(alpha: 0.55),
-                ),
-              ),
-            ),
-          ),
-          for (var lane = 1; lane <= settings.laneCount; lane++)
-            Expanded(child: _laneRow(context, openDay, block, lane)),
-        ],
-      ),
-    );
-  }
-
-  /// One lane row within an open block card: digit + name/nick (mine =
-  /// indigo), free = cyan-outlined ＋, rental = 🔒 + renter name (amber).
+  /// The kiosk's slot policy resolved into a row tile: exactly one action
+  /// (book a free slot for the selected player, under the same
+  /// create_reservation mirror the app uses), never cancel. "Mine" is the
+  /// selected player.
   Widget _laneRow(
-      BuildContext context, OpenDay day, TimeBlock block, int lane) {
-    final scheme = Theme.of(context).colorScheme;
+    OpenDay day,
+    TimeBlock block,
+    int lane, {
+    required ScheduleSettings settings,
+    required Map<String, String> nameById,
+    required Map<String, int> clubColorById,
+    required bool interactive,
+    required int selectedCount,
+  }) {
+    final selected = widget.selected;
     final state = day.slot(block.id, lane);
-
     switch (state) {
-      case RentedSlot(:final rental):
-        // Rental colour (spec §3): a 0–11 index paints the row with that
-        // palette colour; the default (-2) keeps the amber tertiary tint.
-        final (bg, fg) = clubTint(rental.color, scheme.brightness,
-            fallbackBg: scheme.tertiaryContainer.withValues(alpha: 0.5),
-            fallbackFg: scheme.onTertiaryContainer);
-        return _rowShell(
-          context,
-          background: bg,
-          lane: lane,
-          child: Text(
-            rentalLabel(rental),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: 11, color: fg),
-          ),
-        );
+      case RentedSlot():
+      case PrioritySlotState():
+        return SlotTile(state: state, size: SlotTileSize.row, laneDigit: lane);
       case ReservedSlot(:final reservation):
-        final isMine = selected != null && reservation.playerId == selected!.id;
-        final name = nameById[reservation.playerId] ?? '?';
-        // Foreign reservations carry the player's club colour (spec §5) so
-        // spectators tell clubs apart at a glance; "mine" is never club-tinted
-        // — it keeps the indigo primaryContainer highlight so the selected
-        // player's own bookings stay unmistakable over any club background.
-        final (clubBg, clubFg) = clubTint(
-            clubColorById[reservation.playerId] ?? -1, scheme.brightness,
-            fallbackBg: scheme.surfaceContainerHighest.withValues(alpha: 0.6),
-            fallbackFg: scheme.onSurfaceVariant);
-        return _rowShell(
-          context,
-          background: isMine ? scheme.primaryContainer : clubBg,
-          lane: lane,
-          child: Text(
-            name,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: isMine ? FontWeight.w700 : FontWeight.w500,
-              color: isMine ? scheme.onPrimaryContainer : clubFg,
-            ),
-          ),
+        return SlotTile(
+          state: state,
+          size: SlotTileSize.row,
+          laneDigit: lane,
+          playerName: nameById[reservation.playerId] ?? '?',
+          isMine: selected != null && reservation.playerId == selected.id,
+          clubColorIndex: clubColorById[reservation.playerId] ?? -1,
         );
       case FreeSlot():
-        // The same client-side mirror of create_reservation the app uses:
-        // not started, inside the horizon AND under the player's limit.
         final bookable = interactive &&
             selected != null &&
             canBook(
@@ -690,87 +463,14 @@ class _DayColumn extends StatelessWidget {
               myActiveCount: selectedCount,
               settings: settings,
             );
-        return _rowShell(
-          context,
-          lane: lane,
-          onTap: bookable ? () => onBook(day.date, block, lane) : null,
-          border: bookable
-              ? Border.all(color: scheme.secondary.withValues(alpha: 0.5))
+        return SlotTile(
+          state: state,
+          size: SlotTileSize.row,
+          laneDigit: lane,
+          onTap: bookable
+              ? () => _book(context, ref, day.date, block, lane, selected)
               : null,
-          child: bookable
-              ? Text(
-                  '＋',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: scheme.secondary,
-                  ),
-                )
-              : null,
-        );
-      case PrioritySlotState(:final slot):
-        // A LANE-SCOPED priority slot blocking just this row — or, briefly,
-        // an unresolved-type slot (renders like a match but doesn't cancel
-        // blocks until its type row streams in).
-        final (bg, fg) = clubTint(slot.type.colorIndex, scheme.brightness,
-            fallbackBg: scheme.errorContainer.withValues(alpha: 0.6),
-            fallbackFg: scheme.onErrorContainer);
-        return _rowShell(
-          context,
-          background: bg,
-          lane: lane,
-          child: Text(
-            slotEventLabel(slot),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-                fontSize: 11, fontWeight: FontWeight.w600, color: fg),
-          ),
         );
     }
-  }
-
-  /// Every lane slot renders as its own bounded rounded cell (margin +
-  /// radius) inside the block card; a free non-bookable slot stays a quiet
-  /// outline-less fill so the card reads as one unit at a distance.
-  Widget _rowShell(
-    BuildContext context, {
-    required int lane,
-    Color? background,
-    BoxBorder? border,
-    VoidCallback? onTap,
-    Widget? child,
-  }) {
-    final scheme = Theme.of(context).colorScheme;
-    final radius = BorderRadius.circular(6);
-    final body = Container(
-      margin: const EdgeInsets.symmetric(horizontal: 3, vertical: 1.5),
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        color: background ?? scheme.surfaceContainerLow.withValues(alpha: 0.35),
-        border: border,
-        borderRadius: radius,
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 14,
-            child: Text(
-              '$lane',
-              style: TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.w700,
-                color: scheme.onSurfaceVariant.withValues(alpha: 0.5),
-              ),
-            ),
-          ),
-          const SizedBox(width: 4),
-          if (child != null) Expanded(child: child),
-        ],
-      ),
-    );
-    if (onTap == null) return body;
-    return InkWell(onTap: onTap, borderRadius: radius, child: body);
   }
 }
