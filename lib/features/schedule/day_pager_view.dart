@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 
 import '../../domain/models.dart';
 import '../../domain/schedule.dart';
+import 'schedule_callbacks.dart';
 import 'widgets/day_chip_strip.dart';
 import 'widgets/day_header.dart';
 import 'widgets/gap_rows.dart';
@@ -43,8 +44,7 @@ class DayPagerView extends StatefulWidget {
     required this.nameById,
     required this.clubColorById,
     required this.interactive,
-    required this.onBook,
-    required this.onCancel,
+    required this.slot,
     required this.onSelectDay,
     required this.onShiftWeek,
   });
@@ -86,9 +86,7 @@ class DayPagerView extends StatefulWidget {
   final Map<String, String> nameById;
   final Map<String, int> clubColorById;
   final bool interactive;
-  final void Function(Day, TimeBlock, int lane) onBook;
-  final void Function(Day, TimeBlock, Reservation, {required bool ownFuture})
-  onCancel;
+  final SlotCallbacks slot;
 
   /// Chip tapped directly (no week change).
   final ValueChanged<int> onSelectDay;
@@ -247,8 +245,7 @@ class _DayPagerViewState extends State<DayPagerView> {
               interactive: page >= _firstRealPage && page <= _lastRealPage
                   ? widget.interactive
                   : false,
-              onBook: widget.onBook,
-              onCancel: widget.onCancel,
+              slot: widget.slot,
             ),
           ),
         ),
@@ -295,8 +292,7 @@ class _DayPage extends StatelessWidget {
     required this.nameById,
     required this.clubColorById,
     required this.interactive,
-    required this.onBook,
-    required this.onCancel,
+    required this.slot,
   });
 
   final DaySchedule day;
@@ -307,9 +303,7 @@ class _DayPage extends StatelessWidget {
   final Map<String, String> nameById;
   final Map<String, int> clubColorById;
   final bool interactive;
-  final void Function(Day, TimeBlock, int lane) onBook;
-  final void Function(Day, TimeBlock, Reservation, {required bool ownFuture})
-  onCancel;
+  final SlotCallbacks slot;
 
   @override
   Widget build(BuildContext context) {
@@ -464,8 +458,7 @@ class _DayPage extends StatelessWidget {
               nameById: nameById,
               clubColorById: clubColorById,
               interactive: interactive,
-              onBook: onBook,
-              onCancel: onCancel,
+              slot: slot,
             ),
           ),
         ],

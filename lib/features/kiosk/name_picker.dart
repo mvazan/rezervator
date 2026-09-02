@@ -253,7 +253,6 @@ class _Tile extends StatelessWidget {
   /// name tiles — the actual pick.
   final bool gradient;
 
-  static const _gradientColors = [Color(0xFF6366F1), Color(0xFF22D3EE)];
 
   @override
   Widget build(BuildContext context) {
@@ -263,7 +262,7 @@ class _Tile extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: radius,
         gradient: gradient
-            ? const LinearGradient(colors: _gradientColors)
+            ? const LinearGradient(colors: brandGradientColors)
             : null,
         color: gradient ? null : scheme.surfaceContainerHigh,
         border: outlineColor != null

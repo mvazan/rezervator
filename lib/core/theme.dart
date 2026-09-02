@@ -5,6 +5,10 @@ library;
 
 import 'package:flutter/material.dart';
 
+/// The brand gradient (indigo → cyan) used for "today" headers, the selected
+/// day chip, the primary kiosk button and the name picker's back tile.
+const brandGradientColors = [Color(0xFF6366F1), Color(0xFF22D3EE)];
+
 /// Builds the light or dark [ThemeData] for [brightness].
 ThemeData buildTheme(Brightness brightness) {
   final isDark = brightness == Brightness.dark;

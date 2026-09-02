@@ -1,24 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/ui.dart';
 import '../../data/clock.dart';
 import '../../data/providers.dart';
 import '../../data/week_schedule.dart';
 import '../../domain/models.dart';
 import '../../domain/schedule.dart';
-import '../../domain/calendar_layout.dart' show hourMinuteAt;
-import '../admin/matches_screen.dart' show MatchDialog;
-import '../admin/widgets/block_dialog.dart';
-import '../admin/widgets/blockage_dialog.dart';
-import '../admin/widgets/notify_choice_dialog.dart';
 import 'day_pager_view.dart';
+import 'schedule_actions.dart';
 import 'week_calendar_view.dart';
+import 'widgets/week_header.dart';
 
 /// Live week view: grid computed by buildWeekSchedule, booking via RPCs.
 /// Acts as the "shell": owns navigation (week offset) and all provider
 /// wiring; delegates rendering to [WeekCalendarView] or [DayPagerView],
-/// which both receive the same pre-computed [WeekSchedule] and handlers.
+/// which both receive the same pre-computed [WeekSchedule] and the handlers
+/// a [ScheduleActions] builds from it; the top strip is a [WeekHeader].
 ///
 /// The view follows the device orientation — portrait shows the day pager,
 /// landscape the week calendar — and both always fit the screen width, so
@@ -44,91 +41,6 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
   void initState() {
     super.initState();
     _dayIndex = Day.fromDateTime(DateTime.now()).weekday - 1;
-  }
-
-  Future<void> _book(
-    Day date,
-    TimeBlock block,
-    int lane,
-    Profile me,
-    bool isAdmin,
-  ) async {
-    final message = '${dayFull(date)} · ${block.label} · Dráha $lane';
-    String? playerId;
-    if (isAdmin) {
-      playerId = await showDialog<String>(
-        context: context,
-        builder: (dialogContext) => _BookingDialog(
-          message: message,
-          me: me,
-          players: ref.read(playersProvider).value ?? const [],
-        ),
-      );
-    } else {
-      final confirmed = await confirmDialog(
-        context,
-        title: 'Rezervovat termín?',
-        message: message,
-        confirmLabel: 'Rezervovat',
-      );
-      playerId = confirmed ? me.id : null;
-    }
-    if (playerId == null || !mounted) return;
-    await tryAction(
-      context,
-      () => Api.createReservation(
-        playerId: playerId!,
-        date: date,
-        blockId: block.id,
-        lane: lane,
-      ),
-      success: 'Zarezervováno.',
-      errorText: friendlyDbError,
-    );
-  }
-
-  Future<void> _cancel(
-    Day date,
-    TimeBlock block,
-    Reservation r, {
-    required bool ownFuture,
-  }) async {
-    if (ownFuture) {
-      final ok = await confirmDialog(
-        context,
-        title: 'Zrušit rezervaci?',
-        message: '${dayFull(date)} · ${block.label} · Dráha ${r.lane}',
-        confirmLabel: 'Zrušit rezervaci',
-        cancelLabel: 'Zpět',
-      );
-      if (!ok || !mounted) return;
-      await tryAction(
-        context,
-        () => Api.cancelReservation(r.id),
-        success: 'Rezervace zrušena.',
-        errorText: friendlyDbError,
-      );
-      return;
-    }
-    // Phase 3: cancelling someone else's reservation asks whether to ping
-    // the player; the note doubles as the notification's reason (and stays
-    // stored for the attendance audit even when silent).
-    final choice = await showNotifyChoiceDialog(
-      context,
-      title: 'Zrušit rezervaci',
-      summary: '${dayFull(date)} · ${block.label} · Dráha ${r.lane}',
-      messageLabel: 'Poznámka / důvod (nepovinné)',
-      sendLabel: 'Zrušit a poslat zprávu',
-      silentLabel: 'Zrušit bez zprávy',
-    );
-    if (choice == null || !mounted) return;
-    await tryAction(
-      context,
-      () => Api.cancelReservation(r.id,
-          note: choice.message ?? '', notify: choice.notify),
-      success: 'Rezervace zrušena.',
-      errorText: friendlyDbError,
-    );
   }
 
   void _go(int delta) {
@@ -175,83 +87,11 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
     final me = ref.watch(myProfileProvider).value;
     final mine = ref.watch(myActiveReservationsProvider).value ?? const [];
 
-    // The top strip IS the app bar. A narrow portrait phone can't fit
-    // title + week navigation + icons on one line, so it stacks them
-    // (title/icons row, week selector under it); everything wider —
-    // landscape phones and the web — keeps ONE line: title (where the
-    // width allows), the week navigation next to it, action icons pinned
-    // to the RIGHT edge.
-    final width = MediaQuery.sizeOf(context).width;
-    final portrait =
-        MediaQuery.orientationOf(context) == Orientation.portrait;
-    final stacked = portrait && width < 700;
-    final title = Padding(
-      padding: const EdgeInsets.only(left: 8, right: 4),
-      child: Text(
-        'Rezervátor',
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: Theme.of(context).textTheme.titleLarge,
-      ),
-    );
-    final navPrev = IconButton(
-      icon: const Icon(Icons.chevron_left),
-      visualDensity: VisualDensity.compact,
-      onPressed: () => _go(-1),
-    );
-    final navNext = IconButton(
-      icon: const Icon(Icons.chevron_right),
-      visualDensity: VisualDensity.compact,
-      onPressed: () => _go(1),
-    );
-    final range = Text(
-      rangeLabel(monday, monday.addDays(6)),
-      textAlign: TextAlign.center,
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      style: Theme.of(context).textTheme.titleMedium,
-    );
-    final todayButton = _weekOffset == 0
-        ? null
-        : TextButton(onPressed: () => _go(0), child: const Text('dnes'));
-    final header = Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      child: stacked
-          ? Column(
-              children: [
-                Row(children: [title, const Spacer(), ...widget.trailing]),
-                Row(
-                  children: [
-                    navPrev,
-                    Expanded(child: range),
-                    ?todayButton,
-                    navNext,
-                  ],
-                ),
-              ],
-            )
-          : Row(
-              children: [
-                // | Rezervátor      < datum – datum >      admin profil |
-                // The title must NOT be a flex child: Flexible would claim
-                // an equal flex share as the Expanded nav, and its unused
-                // allocation becomes dead space at the row's end — pushing
-                // the icons to the middle instead of the right edge.
-                if (width >= 700) title,
-                Expanded(
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      navPrev,
-                      range,
-                      ?todayButton,
-                      navNext,
-                    ],
-                  ),
-                ),
-                ...widget.trailing,
-              ],
-            ),
+    final header = WeekHeader(
+      monday: monday,
+      weekOffset: _weekOffset,
+      onGo: _go,
+      trailing: widget.trailing,
     );
 
     if (view.isLoading) {
@@ -306,246 +146,24 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
         _myLiveCountOn(mine, me?.id, monday.addDays(i)),
     ];
 
-    void onBook(Day date, TimeBlock block, int lane) =>
-        _book(date, block, lane, me!, me.isAdmin);
-    void onCancel(
-      Day date,
-      TimeBlock block,
-      Reservation r, {
-      required bool ownFuture,
-    }) => _cancel(date, block, r, ownFuture: ownFuture);
     // Admin block gestures (long-press edit, tap-a-gap add) only exist for
     // admins on the real DB block set — never on the placeholder grid.
-    // Calendar edits are DAY-SCOPED: they compose a day override around an
-    // inactive "special" block instead of touching the weekly template
-    // (that lives in Admin → Rozvrh).
     final canEditBlocks = (me?.isAdmin ?? false) && blocksFromDb;
-    final overrideByDate = {for (final o in overrides) o.date: o};
-    final blockById = {for (final b in dbBlocks) b.id: b};
-
-    // The day's PRE-cancellation block ids (existing override selection or
-    // the active weekly template) — what the new override is composed from.
-    // A day that renders CLOSED (override or non-training weekday) starts
-    // from an empty base: adding a block there opens the day with exactly
-    // that block, never with the whole weekly template in tow.
-    List<String> dayBaseIds(Day date) {
-      final o = overrideByDate[date];
-      if (o != null && !o.closed && o.blockIds != null) {
-        return [
-          for (final id in o.blockIds!)
-            if (blockById.containsKey(id)) id,
-        ];
-      }
-      if (week.days[date.weekday - 1] is ClosedDay) return const [];
-      return [
-        for (final b in dbBlocks)
-          if (b.active) b.id,
-      ];
-    }
-
-    // What the day actually renders — a match-cancelled block hides
-    // silently (nothing visible changes), only visible/reserved ones warn.
-    Set<String> dayRenderedIds(Day date) {
-      final day = week.days[date.weekday - 1];
-      return day is OpenDay && day.date == date
-          ? {for (final b in day.blocks) b.id}
-          : const {};
-    }
-
-    // Past days are history: set_day_override would cancel their (already
-    // played) reservations and corrupt attendance — the gestures refuse.
-    bool guardPast(Day date) {
-      if (!date.isBefore(todayDay)) return false;
-      snack(context, 'Minulé dny nelze upravovat.');
-      return true;
-    }
-
-    final onEditBlock = canEditBlocks
-        ? (Day date, TimeBlock block) {
-            if (guardPast(date)) return;
-            showDialog<void>(
-              context: context,
-              builder: (_) => BlockDialog(
-                existing: block,
-                blocks: dbBlocks,
-                dayContext: date,
-                dayBaseIds: dayBaseIds(date),
-                dayRenderedIds: dayRenderedIds(date),
-                dayHasOverride: overrideByDate[date] != null,
-                dayIsTraining:
-                    settings.trainingWeekdays.contains(date.weekday),
-                dayPriority: week.days[date.weekday - 1].priority,
-                dayReason: overrideByDate[date]?.reason ?? '',
-              ),
-            );
-          }
-        : null;
-    Future<void> openAdd(Day date,
-        {HourMinute? start, HourMinute? end}) async {
-      if (guardPast(date)) return;
-      // Adding a block into a CLOSED day reopens it — that's a bigger
-      // decision than the dialog title suggests, so say it out loud.
-      if (week.days[date.weekday - 1] is ClosedDay) {
-        final reason = overrideByDate[date]?.reason ?? '';
-        final proceed = await confirmDialog(
-          context,
-          title: 'Den je zavřený',
-          message: reason.isEmpty
-              ? '${dayFull(date)} je zavřeno. Přidáním bloku den '
-                  'otevřeš. Pokračovat?'
-              : '${dayFull(date)} je zavřeno („$reason"). Přidáním '
-                  'bloku den otevřeš. Pokračovat?',
-          confirmLabel: 'Otevřít den',
-        );
-        if (!proceed || !context.mounted) return;
-      }
-      if (!context.mounted) return;
-      await showDialog<void>(
-        context: context,
-        builder: (_) => BlockDialog(
-          existing: null,
-          blocks: dbBlocks,
-          initialStart: start,
-          initialEnd: end,
-          dayContext: date,
-          dayBaseIds: dayBaseIds(date),
-          dayRenderedIds: dayRenderedIds(date),
-          dayHasOverride: overrideByDate[date] != null,
-          dayIsTraining: settings.trainingWeekdays.contains(date.weekday),
-          dayPriority: week.days[date.weekday - 1].priority,
-          dayReason: overrideByDate[date]?.reason ?? '',
-        ),
-      );
-    }
-
-    final onAddBlockInGap = canEditBlocks
-        ? (Day date, HourMinute start, HourMinute end) =>
-            openAdd(date, start: start, end: end)
-        : null;
-
-    // Header ＋: add a slot to a day whose column has no empty space left
-    // to tap — same dialog, times picked in the dialog.
-    final onAddForDay =
-        canEditBlocks ? (Day date) => openAdd(date) : null;
-
-    // Click on a blocking band = edit. An úklid child opens its parent
-    // match (it is auto-managed); matches open the match dialog, other
-    // blockages the blockage dialog.
     final slotTypes = ref.watch(slotTypesProvider).value ?? const [];
-    final onEditPrioritySlot = canEditBlocks
-        ? (Day date, PrioritySlot slot) {
-            var target = slot;
-            if (slot.parentId != null) {
-              final parent =
-                  priority.where((m) => m.id == slot.parentId).firstOrNull;
-              if (parent == null) return;
-              target = parent;
-            }
-            showDialog<void>(
-              context: context,
-              builder: (_) => target.type.isMatch
-                  ? MatchDialog(existing: target, types: slotTypes)
-                  : BlockageDialog(existing: target, types: slotTypes),
-            );
-          }
-        : null;
-
-    // HOLD-drag moves. A training block moves day-scoped (its sign-ups
-    // travel along); a blocking slot just gets new times (the server drags
-    // a match's úklid child with it).
-    final onMoveBlock = canEditBlocks
-        ? (Day date, TimeBlock block, HourMinute newStart) async {
-            if (guardPast(date)) return;
-            final endMinutes =
-                newStart.minutesFromMidnight + block.durationMinutes;
-            if (endMinutes > 24 * 60 - 1) {
-              snack(context, 'Blok se nevejde do dne.');
-              return;
-            }
-            final newEnd = hourMinuteAt(endMinutes);
-            // Phase 3: the block's sign-ups travel to the new time — the
-            // admin picks whether (and how) to tell them.
-            NotifyChoice? moveNotify;
-            final movingRows = reservations
-                .where((r) =>
-                    r.date == date && r.blockId == block.id && r.isLive)
-                .length;
-            if (movingRows > 0) {
-              moveNotify = await showNotifyChoiceDialog(
-                context,
-                title: 'Upozornit na přesun?',
-                summary: movingRows == 1
-                    ? 'Hráč dostane zprávu o novém čase '
-                        '${newStart.display()}–${newEnd.display()}.'
-                    : '$movingRows hráčů dostane zprávu o novém čase '
-                        '${newStart.display()}–${newEnd.display()}.',
-              );
-              if (moveNotify == null || !context.mounted) return;
-            }
-            await tryAction(
-              context,
-              () async {
-                // Same day-scoped composition BlockDialog uses: sentinel
-                // special (reuse or insert), sign-ups travel, override swap.
-                TimeBlock? special;
-                for (final b in dbBlocks) {
-                  if (!b.active &&
-                      b.position < 0 &&
-                      b.startsAt == newStart &&
-                      b.endsAt == newEnd) {
-                    special = b;
-                    break;
-                  }
-                }
-                final specialId =
-                    special?.id ?? await Api.addSpecialBlock(newStart, newEnd);
-                await Api.moveDayReservations(date, block.id, specialId,
-                    notify: moveNotify?.notify ?? true,
-                    message: moveNotify?.message);
-                final base = dayBaseIds(date);
-                final ids = base.contains(block.id)
-                    ? [for (final id in base) id == block.id ? specialId : id]
-                    : [...base, specialId];
-                await Api.setDayOverride(
-                  date: date,
-                  closed: false,
-                  reason: overrideByDate[date]?.reason ?? '',
-                  blockIds: ids,
-                );
-              },
-              success: 'Přesunuto (jen tento den).',
-              errorText: friendlyDbError,
-            );
-          }
-        : null;
-    final onMovePrioritySlot = canEditBlocks
-        ? (Day date, PrioritySlot slot, HourMinute newStart) async {
-            if (guardPast(date)) return;
-            final dur = slot.endsAt.minutesFromMidnight -
-                slot.startsAt.minutesFromMidnight;
-            final endMinutes = newStart.minutesFromMidnight + dur;
-            if (endMinutes > 24 * 60 - 1) {
-              snack(context, 'Slot se nevejde do dne.');
-              return;
-            }
-            await tryAction(
-              context,
-              () => Api.savePrioritySlot(
-                id: slot.id,
-                date: date,
-                startsAt: newStart,
-                endsAt: hourMinuteAt(endMinutes),
-                typeId: slot.type.id,
-                homeTeam: slot.homeTeam,
-                awayTeam: slot.awayTeam,
-                prepMinutes: slot.prepMinutes,
-                description: slot.description,
-              ),
-              success: 'Přesunuto.',
-              errorText: friendlyDbError,
-            );
-          }
-        : null;
+    final actions = ScheduleActions(
+      context: context,
+      ref: ref,
+      week: week,
+      dbBlocks: dbBlocks,
+      overrides: overrides,
+      priority: priority,
+      slotTypes: slotTypes,
+      settings: settings,
+      today: todayDay,
+      reservations: reservations,
+      me: me,
+      canEditBlocks: canEditBlocks,
+    );
 
     return Column(
       children: [
@@ -562,14 +180,8 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
                   nameById: nameById,
                   clubColorById: clubColorById,
                   interactive: interactive,
-                  onBook: onBook,
-                  onCancel: onCancel,
-                  onEditBlock: onEditBlock,
-                  onAddBlockInGap: onAddBlockInGap,
-                  onAddForDay: onAddForDay,
-                  onEditPrioritySlot: onEditPrioritySlot,
-                  onMoveBlock: onMoveBlock,
-                  onMovePrioritySlot: onMovePrioritySlot,
+                  slot: actions.slot,
+                  admin: actions.admin,
                 )
               : DayPagerView(
                   week: week,
@@ -588,8 +200,7 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
                   nameById: nameById,
                   clubColorById: clubColorById,
                   interactive: interactive,
-                  onBook: onBook,
-                  onCancel: onCancel,
+                  slot: actions.slot,
                   onSelectDay: _selectDay,
                   onShiftWeek: _shiftWeek,
                 ),
@@ -608,62 +219,4 @@ int _myLiveCountOn(List<Reservation> mine, String? playerId, Day date) {
   return mine
       .where((r) => r.playerId == playerId && r.isLive && r.date == date)
       .length;
-}
-
-/// Admin-only booking dialog: same confirmation as the plain player flow,
-/// plus a player picker (defaults to the admin themself, labelled 'já').
-/// Pops the chosen player's id, or null on cancel.
-class _BookingDialog extends StatefulWidget {
-  const _BookingDialog({
-    required this.message,
-    required this.me,
-    required this.players,
-  });
-
-  final String message;
-  final Profile me;
-  final List<PlayerName> players;
-
-  @override
-  State<_BookingDialog> createState() => _BookingDialogState();
-}
-
-class _BookingDialogState extends State<_BookingDialog> {
-  late String _playerId = widget.me.id;
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Rezervovat termín?'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(widget.message),
-          const SizedBox(height: 12),
-          DropdownButtonFormField<String>(
-            initialValue: _playerId,
-            decoration: const InputDecoration(labelText: 'Rezervovat pro'),
-            items: [
-              DropdownMenuItem(value: widget.me.id, child: const Text('já')),
-              for (final p in widget.players)
-                if (p.id != widget.me.id)
-                  DropdownMenuItem(value: p.id, child: Text(p.displayName)),
-            ],
-            onChanged: (v) => setState(() => _playerId = v!),
-          ),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Zrušit'),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.pop(context, _playerId),
-          child: const Text('Rezervovat'),
-        ),
-      ],
-    );
-  }
 }

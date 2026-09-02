@@ -1,9 +1,10 @@
-/// Shared schedule cell: one widget renders every slot in the app's week
-/// calendar (compact) and day pager (large). The kiosk board draws its own
-/// lane rows (kiosk_board_view.dart) — unifying them is cleanup plan 5.
-/// Purely presentational — all booking policy (canBook/canCancel/isAdmin
-/// gating) stays with the caller, which resolves a display name and a single
-/// [onTap] callback (or null to render inert) before constructing the tile.
+/// Shared schedule cell: one widget renders every slot — the app's week
+/// calendar ([SlotTileSize.compact]), its day pager ([SlotTileSize.large])
+/// and the kiosk board's lane rows ([SlotTileSize.row], digit inside the
+/// cell). Purely presentational — all booking policy (canBook/canCancel/
+/// isAdmin gating) stays with the caller, which resolves a display name and
+/// a single [onTap] callback (or null to render inert) before constructing
+/// the tile.
 library;
 
 import 'package:flutter/material.dart';
@@ -13,8 +14,19 @@ import '../../../domain/labels.dart';
 import '../../../domain/models.dart';
 import '../../../domain/palette.dart';
 import '../../../domain/schedule.dart';
+import '../schedule_callbacks.dart';
 
-enum SlotTileSize { compact, large }
+enum SlotTileSize {
+  /// Week calendar: one clipped line, lane digit drawn beside the tile.
+  compact,
+
+  /// Day pager: two lines / avatar, roomier.
+  large,
+
+  /// Kiosk board: a single rounded cell with the lane digit inside, 11px
+  /// text, a literal '＋' when bookable.
+  row,
+}
 
 class SlotTile extends StatelessWidget {
   const SlotTile({
@@ -26,6 +38,7 @@ class SlotTile extends StatelessWidget {
     this.clubColorIndex = -1,
     this.quiet = false,
     this.onTap,
+    this.laneDigit,
   });
 
   final SlotState state;
@@ -54,10 +67,14 @@ class SlotTile extends StatelessWidget {
   /// Tap handler; null renders the cell inert (no InkWell/ink response).
   final VoidCallback? onTap;
 
+  /// [SlotTileSize.row] only: the lane number drawn inside the cell.
+  final int? laneDigit;
+
   bool get _compact => size == SlotTileSize.compact;
 
   @override
   Widget build(BuildContext context) {
+    if (size == SlotTileSize.row) return _buildRow(context);
     final scheme = Theme.of(context).colorScheme;
     final minHeight = _compact ? 44.0 : 56.0;
 
@@ -231,6 +248,133 @@ class SlotTile extends StatelessWidget {
       child: body,
     );
   }
+
+  /// The kiosk lane row: every slot is its own bounded rounded cell (margin
+  /// + radius) inside the block card; a free non-bookable slot stays a quiet
+  /// fill so the card reads as one unit at a distance.
+  Widget _buildRow(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    switch (state) {
+      case RentedSlot(:final rental):
+        // Rental colour (spec §3): a 0–11 index paints the row with that
+        // palette colour; the default (-2) keeps the amber tertiary tint.
+        final (bg, fg) = clubTint(rental.color, scheme.brightness,
+            fallbackBg: scheme.tertiaryContainer.withValues(alpha: 0.5),
+            fallbackFg: scheme.onTertiaryContainer);
+        return _rowShell(
+          context,
+          background: bg,
+          child: Text(
+            rentalLabel(rental),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 11, color: fg),
+          ),
+        );
+      case ReservedSlot():
+        // Foreign reservations carry the player's club colour (spec §5) so
+        // spectators tell clubs apart at a glance; "mine" is never
+        // club-tinted — it keeps the indigo primaryContainer highlight so
+        // the selected player's own bookings stay unmistakable over any
+        // club background.
+        final (clubBg, clubFg) = clubTint(clubColorIndex, scheme.brightness,
+            fallbackBg: scheme.surfaceContainerHighest.withValues(alpha: 0.6),
+            fallbackFg: scheme.onSurfaceVariant);
+        return _rowShell(
+          context,
+          background: isMine ? scheme.primaryContainer : clubBg,
+          onTap: onTap,
+          child: Text(
+            playerName ?? '?',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: isMine ? FontWeight.w700 : FontWeight.w500,
+              color: isMine ? scheme.onPrimaryContainer : clubFg,
+            ),
+          ),
+        );
+      case FreeSlot():
+        final bookable = onTap != null;
+        return _rowShell(
+          context,
+          onTap: onTap,
+          border: bookable
+              ? Border.all(color: scheme.secondary.withValues(alpha: 0.5))
+              : null,
+          child: bookable
+              ? Text(
+                  '＋',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: scheme.secondary,
+                  ),
+                )
+              : null,
+        );
+      case PrioritySlotState(:final slot):
+        // A LANE-SCOPED priority slot blocking just this row — or, briefly,
+        // an unresolved-type slot (renders like a match but doesn't cancel
+        // blocks until its type row streams in).
+        final (bg, fg) = clubTint(slot.type.colorIndex, scheme.brightness,
+            fallbackBg: scheme.errorContainer.withValues(alpha: 0.6),
+            fallbackFg: scheme.onErrorContainer);
+        return _rowShell(
+          context,
+          background: bg,
+          child: Text(
+            slotEventLabel(slot),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+                fontSize: 11, fontWeight: FontWeight.w600, color: fg),
+          ),
+        );
+    }
+  }
+
+  Widget _rowShell(
+    BuildContext context, {
+    Color? background,
+    BoxBorder? border,
+    VoidCallback? onTap,
+    Widget? child,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+    final radius = BorderRadius.circular(6);
+    final body = Container(
+      margin: const EdgeInsets.symmetric(horizontal: 3, vertical: 1.5),
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: background ?? scheme.surfaceContainerLow.withValues(alpha: 0.35),
+        border: border,
+        borderRadius: radius,
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 14,
+            child: Text(
+              '${laneDigit ?? ''}',
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+                color: scheme.onSurfaceVariant.withValues(alpha: 0.5),
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
+          if (child != null) Expanded(child: child),
+        ],
+      ),
+    );
+    if (onTap == null) return body;
+    return InkWell(onTap: onTap, borderRadius: radius, child: body);
+  }
+
 }
 
 /// Resolves the same booking/cancel policy the original inline `_SlotCell`
@@ -250,9 +394,7 @@ Widget slotTileFor({
   required Map<String, String> nameById,
   required Map<String, int> clubColorById,
   required bool interactive,
-  required void Function(Day, TimeBlock, int lane) onBook,
-  required void Function(Day, TimeBlock, Reservation, {required bool ownFuture})
-  onCancel,
+  required SlotCallbacks slot,
 }) {
   final state = day.slot(block.id, lane);
   switch (state) {
@@ -278,7 +420,8 @@ Widget slotTileFor({
         isMine: isMine,
         clubColorIndex: clubColorById[reservation.playerId] ?? -1,
         onTap: cancellable
-            ? () => onCancel(day.date, block, reservation, ownFuture: ownFuture)
+            ? () =>
+                slot.onCancel(day.date, block, reservation, ownFuture: ownFuture)
             : null,
       );
     case FreeSlot():
@@ -306,7 +449,7 @@ Widget slotTileFor({
         state: state,
         size: size,
         quiet: !normallyBookable,
-        onTap: bookable ? () => onBook(day.date, block, lane) : null,
+        onTap: bookable ? () => slot.onBook(day.date, block, lane) : null,
       );
   }
 }
