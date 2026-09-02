@@ -576,28 +576,6 @@ class Api {
   }
 }
 
-/// Light projection of a future live reservation — just enough to detect
-/// whether it would fall outside the grid after a config change. See
-/// [Api.futureLiveReservations].
-class StrandableReservation {
-  const StrandableReservation({
-    required this.date,
-    required this.lane,
-    required this.blockId,
-  });
-
-  final Day date;
-  final int lane;
-  final String blockId;
-
-  factory StrandableReservation.fromJson(Map<String, dynamic> json) =>
-      StrandableReservation(
-        date: Day.parse(json['date'] as String),
-        lane: json['lane'] as int,
-        blockId: json['block_id'] as String,
-      );
-}
-
 // ---------------------------------------------------------------------------
 // Reservation data streams (Phase 1)
 // ---------------------------------------------------------------------------

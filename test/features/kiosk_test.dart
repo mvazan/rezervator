@@ -7,6 +7,7 @@ import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/kiosk/kiosk_board_view.dart';
 import 'package:rezervator/features/kiosk/kiosk_shell.dart';
+import 'package:rezervator/features/kiosk/name_picker.dart';
 import 'package:rezervator/features/schedule/widgets/calendar_board.dart';
 
 void main() {
@@ -77,13 +78,15 @@ void main() {
     ThemeData? theme,
     bool kioskDark = true,
     bool kioskFitDay = true,
+    int? maxActiveReservations,
   }) {
     final effectiveRoster = roster ?? players;
     final effSettings = ScheduleSettings(
       laneCount: settings.laneCount,
       trainingWeekdays: settings.trainingWeekdays,
       bookingHorizonDays: settings.bookingHorizonDays,
-      maxActiveReservations: settings.maxActiveReservations,
+      maxActiveReservations:
+          maxActiveReservations ?? settings.maxActiveReservations,
       kioskDark: kioskDark,
       kioskFitDay: kioskFitDay,
     );
@@ -94,8 +97,15 @@ void main() {
         dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
         prioritySlotsProvider.overrideWithValue(matches),
         rentalsProvider.overrideWith((ref) => Stream.value(const [])),
+        // Week-scoped like the real provider (Monday..Sunday), so no
+        // reservation reaches two weeks' streams — the board sums them.
         weekReservationsProvider.overrideWith(
-          (ref, monday) => Stream.value(reservations),
+          (ref, monday) => Stream.value([
+            for (final r in reservations)
+              if (!r.date.isBefore(monday) &&
+                  r.date.differenceInDays(monday) < 7)
+                r,
+          ]),
         ),
         playersProvider.overrideWith((ref) async => effectiveRoster),
       ],
@@ -197,6 +207,51 @@ void main() {
 
     await finish(tester);
   });
+
+  testWidgets(
+    'd2: a selected player at the reservation limit gets no ＋; under the '
+    'limit free slots offer it',
+    (tester) async {
+      Future<void> selectAnna() async {
+        await tester.tap(find.text('Rezervovat'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('A'));
+        await tester.pumpAndSettle();
+        // Scoped to the picker: with her reservation on the board, Anna's
+        // name is also a reserved cell behind the dialog.
+        await tester.tap(find.descendant(
+          of: find.byType(NamePicker),
+          matching: find.text(anna.displayName),
+        ));
+        await tester.pumpAndSettle();
+        expect(
+          find.textContaining('Rezervuje: ${anna.displayName}'),
+          findsOneWidget,
+        );
+      }
+
+      // Anna already holds one live future reservation and the limit is
+      // one: the board must not offer ＋ anywhere — create_reservation
+      // would only bounce it with limit_reached.
+      await tester.pumpWidget(
+        kioskApp(
+          maxActiveReservations: 1,
+          reservations: [res('r1', anna.id, tomorrow)],
+        ),
+      );
+      await tester.pumpAndSettle();
+      await selectAnna();
+      expect(find.text('＋'), findsNothing);
+      await finish(tester);
+
+      // Same limit, nothing booked yet: free slots offer ＋.
+      await tester.pumpWidget(kioskApp(maxActiveReservations: 1));
+      await tester.pumpAndSettle();
+      await selectAnna();
+      expect(find.text('＋'), findsWidgets);
+      await finish(tester);
+    },
+  );
 
   testWidgets('e: reserved cells have no cancel affordance (tap → no dialog)', (
     tester,

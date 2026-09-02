@@ -16,69 +16,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/ui.dart';
 import '../../data/providers.dart';
 import '../../domain/calendar_layout.dart';
+import '../../domain/labels.dart';
 import '../../domain/models.dart';
 import '../../domain/palette.dart';
 import '../../domain/schedule.dart';
 import '../schedule/widgets/calendar_board.dart';
-
-/// True when [date] resolves as an [OpenDay] under exactly the resolution the
-/// board renders with (buildWeekSchedule): closed overrides and non-training
-/// weekdays are closed, and an override's blockIds are filtered against the
-/// real block set — an override whose ids no longer resolve to any existing
-/// block is a ClosedDay, not open. Matches/rentals/reservations never affect
-/// open-vs-closed status (only which slots within an open day are free), so
-/// they're passed empty.
-///
-/// This is the ONLY day-type probe outside the grid itself — the status bar
-/// and [nextTrainingDay] both go through it, so they can never disagree with
-/// what the board shows.
-bool isDayOpen({
-  required Day date,
-  required Day today,
-  required ScheduleSettings settings,
-  required List<TimeBlock> blocks,
-  required List<DayOverride> overrides,
-}) {
-  final week = buildWeekSchedule(
-    monday: date.addDays(1 - date.weekday),
-    today: today,
-    now: const HourMinute(0, 0),
-    settings: settings,
-    blocks: blocks,
-    overrides: overrides,
-    priority: const [],
-    rentals: const [],
-    reservations: const [],
-  );
-  // WeekSchedule.days is contractually Monday..Sunday, so [weekday - 1] is
-  // exactly [date]'s entry.
-  return week.days[date.weekday - 1] is OpenDay;
-}
-
-/// Scans forward from [today] (exclusive) up to [horizonDays] and returns the
-/// first date that resolves open per [isDayOpen] — the "Další trénink" the
-/// kiosk status bar shows on days without training.
-Day? nextTrainingDay({
-  required Day today,
-  required ScheduleSettings settings,
-  required List<TimeBlock> blocks,
-  required List<DayOverride> overrides,
-  required int horizonDays,
-}) {
-  for (var offset = 1; offset <= horizonDays; offset++) {
-    final date = today.addDays(offset);
-    if (isDayOpen(
-      date: date,
-      today: today,
-      settings: settings,
-      blocks: blocks,
-      overrides: overrides,
-    )) {
-      return date;
-    }
-  }
-  return null;
-}
 
 /// Slack under the columns so the bottom hour label (centered on its line)
 /// isn't half-clipped by the viewport in fit-height mode.
@@ -296,6 +238,22 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
     final interactive = blocksFromDb &&
         weekReservationsByMonday.values.every((r) => r.hasValue);
 
+    // The selected player's live reservations across every watched week —
+    // the count create_reservation checks against max_active_reservations,
+    // so ＋ is only offered where the RPC would accept it (no limit_reached
+    // bounce). Weeks are disjoint Monday..Sunday spans: nothing double-counts.
+    final selected = widget.selected;
+    final selectedCount = selected == null
+        ? 0
+        : activeReservationCount(
+            [
+              for (final week in weekReservationsByMonday.values)
+                ...week.value ?? const <Reservation>[],
+            ],
+            selected.id,
+            todayDay,
+          );
+
     // Keyed by date (not position) so slicing today..horizon can't
     // misalign even if a Monday's week ever produced anything but exactly 7
     // entries.
@@ -461,11 +419,12 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
                                             window.endMinute
                                     ? now.minutesFromMidnight
                                     : null,
-                                laneCount: settings.laneCount,
+                                settings: settings,
                                 nameById: nameById,
                                 clubColorById: clubColorById,
                                 interactive: interactive,
                                 selected: widget.selected,
+                                selectedCount: selectedCount,
                                 onBook: (date, block, lane) => _book(
                                   context,
                                   ref,
@@ -503,11 +462,12 @@ class _DayColumn extends StatelessWidget {
     required this.pxPerMinute,
     required this.halfHourMarks,
     required this.nowMinute,
-    required this.laneCount,
+    required this.settings,
     required this.nameById,
     required this.clubColorById,
     required this.interactive,
     required this.selected,
+    required this.selectedCount,
     required this.onBook,
   });
 
@@ -516,11 +476,15 @@ class _DayColumn extends StatelessWidget {
   final double pxPerMinute;
   final bool halfHourMarks;
   final int? nowMinute;
-  final int laneCount;
+  final ScheduleSettings settings;
   final Map<String, String> nameById;
   final Map<String, int> clubColorById;
   final bool interactive;
   final PlayerName? selected;
+
+  /// [selected]'s live reservations from today on — canBook's
+  /// myActiveCount (0 while no player is selected).
+  final int selectedCount;
   final void Function(Day date, TimeBlock block, int lane) onBook;
 
   @override
@@ -584,14 +548,16 @@ class _DayColumn extends StatelessWidget {
 
     final scheme = Theme.of(context).colorScheme;
     for (final m in day.priority) {
-      final club = ClubColors.of(m.type.colorIndex, scheme.brightness);
+      final (bg, fg) = clubTint(m.type.colorIndex, scheme.brightness,
+          fallbackBg: scheme.errorContainer.withValues(alpha: 0.6),
+          fallbackFg: scheme.onErrorContainer);
       addBands(
         m.startsAt,
         m.endsAt,
         () => CalendarEventBand(
-          background: club?.$1 ?? scheme.errorContainer.withValues(alpha: 0.6),
-          foreground: club?.$2 ?? scheme.onErrorContainer,
-          text: '${m.type.isMatch ? '🏆' : '⛔'} ${m.title}\n'
+          background: bg,
+          foreground: fg,
+          text: '${slotEventLabel(m)}\n'
               '${m.startsAt.display()}–${m.endsAt.display()}',
           bold: true,
         ),
@@ -599,15 +565,16 @@ class _DayColumn extends StatelessWidget {
     }
     if (openDay != null) {
       for (final r in openDay.rentals) {
-        final club = ClubColors.of(r.color, scheme.brightness);
+        final (bg, fg) = clubTint(r.color, scheme.brightness,
+            fallbackBg: scheme.tertiaryContainer.withValues(alpha: 0.5),
+            fallbackFg: scheme.onTertiaryContainer);
         addBands(
           r.startsAt,
           r.endsAt,
           () => CalendarEventBand(
-            background:
-                club?.$1 ?? scheme.tertiaryContainer.withValues(alpha: 0.5),
-            foreground: club?.$2 ?? scheme.onTertiaryContainer,
-            text: '🔒 ${r.renterName}\n'
+            background: bg,
+            foreground: fg,
+            text: '${rentalLabel(r)}\n'
                 '${r.startsAt.display()}–${r.endsAt.display()}',
           ),
         );
@@ -681,7 +648,7 @@ class _DayColumn extends StatelessWidget {
               ),
             ),
           ),
-          for (var lane = 1; lane <= laneCount; lane++)
+          for (var lane = 1; lane <= settings.laneCount; lane++)
             Expanded(child: _laneRow(context, openDay, block, lane)),
         ],
       ),
@@ -698,22 +665,19 @@ class _DayColumn extends StatelessWidget {
     switch (state) {
       case RentedSlot(:final rental):
         // Rental colour (spec §3): a 0–11 index paints the row with that
-        // palette colour; the default (-2, ClubColors.of → null) keeps the
-        // amber tertiary tint.
-        final rentalClub = ClubColors.of(rental.color, scheme.brightness);
+        // palette colour; the default (-2) keeps the amber tertiary tint.
+        final (bg, fg) = clubTint(rental.color, scheme.brightness,
+            fallbackBg: scheme.tertiaryContainer.withValues(alpha: 0.5),
+            fallbackFg: scheme.onTertiaryContainer);
         return _rowShell(
           context,
-          background:
-              rentalClub?.$1 ?? scheme.tertiaryContainer.withValues(alpha: 0.5),
+          background: bg,
           lane: lane,
           child: Text(
-            '🔒 ${rental.renterName}',
+            rentalLabel(rental),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 11,
-              color: rentalClub?.$2 ?? scheme.onTertiaryContainer,
-            ),
+            style: TextStyle(fontSize: 11, color: fg),
           ),
         );
       case ReservedSlot(:final reservation):
@@ -723,16 +687,13 @@ class _DayColumn extends StatelessWidget {
         // spectators tell clubs apart at a glance; "mine" is never club-tinted
         // — it keeps the indigo primaryContainer highlight so the selected
         // player's own bookings stay unmistakable over any club background.
-        final club = isMine
-            ? null
-            : ClubColors.of(
-                clubColorById[reservation.playerId] ?? -1, scheme.brightness);
+        final (clubBg, clubFg) = clubTint(
+            clubColorById[reservation.playerId] ?? -1, scheme.brightness,
+            fallbackBg: scheme.surfaceContainerHighest.withValues(alpha: 0.6),
+            fallbackFg: scheme.onSurfaceVariant);
         return _rowShell(
           context,
-          background: isMine
-              ? scheme.primaryContainer
-              : club?.$1 ??
-                  scheme.surfaceContainerHighest.withValues(alpha: 0.6),
+          background: isMine ? scheme.primaryContainer : clubBg,
           lane: lane,
           child: Text(
             name,
@@ -741,15 +702,20 @@ class _DayColumn extends StatelessWidget {
             style: TextStyle(
               fontSize: 11,
               fontWeight: isMine ? FontWeight.w700 : FontWeight.w500,
-              color: isMine
-                  ? scheme.onPrimaryContainer
-                  : club?.$2 ?? scheme.onSurfaceVariant,
+              color: isMine ? scheme.onPrimaryContainer : clubFg,
             ),
           ),
         );
-      case FreeSlot(:final inPast, :final beyondHorizon):
-        final bookable =
-            interactive && selected != null && !inPast && !beyondHorizon;
+      case FreeSlot():
+        // The same client-side mirror of create_reservation the app uses:
+        // not started, inside the horizon AND under the player's limit.
+        final bookable = interactive &&
+            selected != null &&
+            canBook(
+              state: state,
+              myActiveCount: selectedCount,
+              settings: settings,
+            );
         return _rowShell(
           context,
           lane: lane,
@@ -772,20 +738,19 @@ class _DayColumn extends StatelessWidget {
         // A LANE-SCOPED priority slot blocking just this row — or, briefly,
         // an unresolved-type slot (renders like a match but doesn't cancel
         // blocks until its type row streams in).
-        final club = ClubColors.of(slot.type.colorIndex, scheme.brightness);
+        final (bg, fg) = clubTint(slot.type.colorIndex, scheme.brightness,
+            fallbackBg: scheme.errorContainer.withValues(alpha: 0.6),
+            fallbackFg: scheme.onErrorContainer);
         return _rowShell(
           context,
-          background: club?.$1 ?? scheme.errorContainer.withValues(alpha: 0.6),
+          background: bg,
           lane: lane,
           child: Text(
-            '${slot.type.isMatch ? '🏆' : '⛔'} ${slot.title}',
+            slotEventLabel(slot),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: club?.$2 ?? scheme.onErrorContainer,
-            ),
+                fontSize: 11, fontWeight: FontWeight.w600, color: fg),
           ),
         );
     }

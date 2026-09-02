@@ -335,22 +335,12 @@ class _DayPage extends StatelessWidget {
   }
 
   Widget _openDay(BuildContext context, OpenDay day) {
-    final isAdmin = me?.isAdmin ?? false;
-    final freeCount = day.blocks
-        .expand(
-          (block) => [
-            for (var lane = 1; lane <= day.laneCount; lane++) (block, lane),
-          ],
-        )
-        .where(
-          (entry) => canBook(
-            state: day.slot(entry.$1.id, entry.$2),
-            myActiveCount: myCount,
-            settings: settings,
-            isAdmin: isAdmin,
-          ),
-        )
-        .length;
+    final freeCount = bookableSlotCount(
+      day,
+      myActiveCount: myCount,
+      settings: settings,
+      isAdmin: me?.isAdmin ?? false,
+    );
 
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 4),

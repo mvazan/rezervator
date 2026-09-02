@@ -9,6 +9,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../../../core/ui.dart';
+import '../../../domain/labels.dart';
 import '../../../domain/models.dart';
 import '../../../domain/palette.dart';
 import '../../../domain/schedule.dart';
@@ -66,35 +67,39 @@ class SlotTile extends StatelessWidget {
         // rendered blocks (whole-alley ones cancel the block outright), so
         // the cell must carry the TYPE's name and colour — 'Sanitární den'
         // must not read as a match. Mirrors the kiosk's lane row.
-        final club = ClubColors.of(slot.type.colorIndex, scheme.brightness);
+        final (bg, fg) = clubTint(slot.type.colorIndex, scheme.brightness,
+            fallbackBg: scheme.errorContainer.withValues(alpha: 0.6),
+            fallbackFg: scheme.onErrorContainer);
         return _shell(
           minHeight: minHeight,
           decoration: BoxDecoration(
-            color: club?.$1 ?? scheme.errorContainer.withValues(alpha: 0.6),
+            color: bg,
             borderRadius: BorderRadius.circular(_compact ? 8 : 12),
           ),
           padding: const EdgeInsets.symmetric(horizontal: 4),
           child: Text(
-            '${slot.type.isMatch ? '🏆' : '⛔'} ${slot.title}',
+            slotEventLabel(slot),
             maxLines: _compact ? 1 : 2,
             overflow: TextOverflow.ellipsis,
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: _compact ? 10 : 12,
               fontWeight: FontWeight.w600,
-              color: club?.$2 ?? scheme.onErrorContainer,
+              color: fg,
             ),
           ),
         );
       case RentedSlot(:final rental):
         // Rental colour (spec §3): a 0–11 palette index paints the cell with
         // that club colour; the default (-2) keeps today's amber tertiary
-        // tint. ClubColors.of returns null for -2, which selects that branch.
-        final club = ClubColors.of(rental.color, scheme.brightness);
+        // tint.
+        final (bg, fg) = clubTint(rental.color, scheme.brightness,
+            fallbackBg: scheme.tertiaryContainer.withValues(alpha: 0.7),
+            fallbackFg: scheme.onTertiaryContainer);
         return _shell(
           minHeight: minHeight,
           decoration: BoxDecoration(
-            color: club?.$1 ?? scheme.tertiaryContainer.withValues(alpha: 0.7),
+            color: bg,
             borderRadius: BorderRadius.circular(_compact ? 8 : 12),
           ),
           padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -103,10 +108,7 @@ class SlotTile extends StatelessWidget {
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: _compact ? 10 : 12,
-              color: club?.$2 ?? scheme.onTertiaryContainer,
-            ),
+            style: TextStyle(fontSize: _compact ? 10 : 12, color: fg),
           ),
         );
       case ReservedSlot():
@@ -115,11 +117,12 @@ class SlotTile extends StatelessWidget {
         // §5) so spectators can tell clubs apart at a glance; "mine" is never
         // club-tinted — it keeps primaryContainer so the caller's own
         // bookings stay unmistakable regardless of which club they're in.
-        final club = isMine
-            ? null
-            : ClubColors.of(clubColorIndex, scheme.brightness);
-        final foreignBg = club?.$1 ?? scheme.surfaceContainerHighest;
-        final foreignFg = club?.$2 ?? scheme.onSurfaceVariant;
+        final (foreignBg, foreignFg) = clubTint(
+            clubColorIndex, scheme.brightness,
+            fallbackBg: scheme.surfaceContainerHighest,
+            fallbackFg: scheme.onSurfaceVariant);
+        final hasClubTint =
+            !isMine && clubColorIndex >= 0 && clubColorIndex < ClubColors.count;
         final nameStyle = TextStyle(
           fontSize: _compact ? 10 : 12,
           fontWeight: isMine ? FontWeight.w700 : FontWeight.w500,
@@ -146,9 +149,9 @@ class SlotTile extends StatelessWidget {
                     // translucent wash of the club's own foreground colour
                     // keeps the initials legible in either palette; falls back
                     // to the neutral surface tint when there's no club.
-                    backgroundColor: club == null
-                        ? scheme.surfaceContainerHighest
-                        : foreignFg.withValues(alpha: 0.2),
+                    backgroundColor: hasClubTint
+                        ? foreignFg.withValues(alpha: 0.2)
+                        : scheme.surfaceContainerHighest,
                     child: Text(
                       initialsOf(name),
                       style: TextStyle(
@@ -265,8 +268,9 @@ Widget slotTileFor({
       final ownFuture = isMine && canCancel(state: state, myPlayerId: me.id);
       // Admins may cancel any reservation (own/foreign, past/future); a
       // non-admin may only cancel their own not-yet-started one.
-      final cancellable =
-          interactive && me != null && (me.isAdmin || ownFuture);
+      final cancellable = interactive &&
+          me != null &&
+          canCancel(state: state, myPlayerId: me.id, isAdmin: me.isAdmin);
       return SlotTile(
         state: state,
         size: size,

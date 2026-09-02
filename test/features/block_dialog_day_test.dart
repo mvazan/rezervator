@@ -54,6 +54,7 @@ void main() {
       publishableKey: 'test-anon-key',
       httpClient: mock,
       authOptions: const FlutterAuthClientOptions(
+        detectSessionInUri: false,
         localStorage: EmptyLocalStorage(),
       ),
     );

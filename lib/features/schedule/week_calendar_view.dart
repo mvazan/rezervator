@@ -13,6 +13,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollDirection;
 
 import '../../domain/calendar_layout.dart';
+import '../../domain/labels.dart';
 import '../../domain/models.dart';
 import '../../domain/palette.dart';
 import '../../domain/schedule.dart';
@@ -158,17 +159,12 @@ class _WeekCalendarViewState extends State<WeekCalendarView> {
   /// Bookable-slot count for the header's quiet subtitle.
   String? _freeLabel(DaySchedule day) {
     if (day is! OpenDay) return null;
-    final isAdmin = widget.me?.isAdmin ?? false;
-    final freeCount = day.blocks
-        .expand((block) =>
-            [for (var lane = 1; lane <= day.laneCount; lane++) (block, lane)])
-        .where((entry) => canBook(
-              state: day.slot(entry.$1.id, entry.$2),
-              myActiveCount: widget.myCount,
-              settings: widget.settings,
-              isAdmin: isAdmin,
-            ))
-        .length;
+    final freeCount = bookableSlotCount(
+      day,
+      myActiveCount: widget.myCount,
+      settings: widget.settings,
+      isAdmin: widget.me?.isAdmin ?? false,
+    );
     return '$freeCount volných';
   }
 
@@ -406,7 +402,7 @@ class _DayColumn extends StatelessWidget {
 
     // Drag&drop landing: snap the ghost's top edge to 5 minutes and only
     // accept when the whole slot (a match brings its úklid child along)
-    // fits into free space of THIS day.
+    // fits into free space of THIS day — the landing rule is [dropFits].
     void handleDrop(Object data, int minute) {
       final snapped = _snapMinute(minute);
       (int, int)? candidate;
@@ -449,15 +445,12 @@ class _DayColumn extends StatelessWidget {
             content: Text('Přesun jde jen v rámci stejného dne.')));
         return;
       }
-      final (cs, ce) = candidate;
-      final selfUnion = mergeIntervals(self);
-      final occupiedMinusSelf = mergeIntervals([
-        for (final (s0, e0) in occupied)
-          ...subtractInterval((s0, e0), selfUnion),
-      ]);
-      final fits = cs >= window.startMinute &&
-          ce <= window.endMinute &&
-          !occupiedMinusSelf.any((iv) => iv.$1 < ce && iv.$2 > cs);
+      final fits = dropFits(
+        candidate: candidate,
+        self: self,
+        occupied: occupied,
+        window: window,
+      );
       if (!fits) {
         ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Tady není volné místo.')));
@@ -529,12 +522,14 @@ class _DayColumn extends StatelessWidget {
     }
 
     for (final m in day.priority) {
-      final club = ClubColors.of(m.type.colorIndex, scheme.brightness);
+      final (bg, fg) = clubTint(m.type.colorIndex, scheme.brightness,
+          fallbackBg: scheme.errorContainer.withValues(alpha: 0.6),
+          fallbackFg: scheme.onErrorContainer);
       Widget band() {
         Widget w = CalendarEventBand(
-          background: club?.$1 ?? scheme.errorContainer.withValues(alpha: 0.6),
-          foreground: club?.$2 ?? scheme.onErrorContainer,
-          text: '${m.type.isMatch ? '🏆' : '⛔'} ${m.title}\n'
+          background: bg,
+          foreground: fg,
+          text: '${slotEventLabel(m)}\n'
               '${m.startsAt.display()}–${m.endsAt.display()}',
           bold: true,
         );
@@ -567,15 +562,16 @@ class _DayColumn extends StatelessWidget {
     }
     if (openDay != null) {
       for (final r in openDay.rentals) {
-        final club = ClubColors.of(r.color, scheme.brightness);
+        final (bg, fg) = clubTint(r.color, scheme.brightness,
+            fallbackBg: scheme.tertiaryContainer.withValues(alpha: 0.5),
+            fallbackFg: scheme.onTertiaryContainer);
         addBands(
           r.startsAt,
           r.endsAt,
           () => CalendarEventBand(
-            background:
-                club?.$1 ?? scheme.tertiaryContainer.withValues(alpha: 0.5),
-            foreground: club?.$2 ?? scheme.onTertiaryContainer,
-            text: '🔒 ${r.renterName}\n'
+            background: bg,
+            foreground: fg,
+            text: '${rentalLabel(r)}\n'
                 '${r.startsAt.display()}–${r.endsAt.display()}',
           ),
         );

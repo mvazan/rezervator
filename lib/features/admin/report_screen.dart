@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/ui.dart';
 import '../../data/providers.dart';
 import '../../domain/csv.dart';
+import '../../domain/grouping.dart';
 import '../../domain/models.dart';
 import 'widgets/admin_body.dart';
 
@@ -71,26 +72,6 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
   /// Czech pluralization for players: 1 hráč, 2–4 hráči, 5+ hráčů.
   static String _players(int n) =>
       n == 1 ? '1 hráč' : (n >= 2 && n <= 4 ? '$n hráči' : '$n hráčů');
-
-  /// Rows grouped into club sections ordered by club total (desc), players
-  /// by attended (desc) within — "Bez oddílu" always last. Each entry is
-  /// (header, members).
-  static List<(String, List<AttendanceRow>)> byClub(List<AttendanceRow> rows) {
-    final groups = <String, List<AttendanceRow>>{};
-    for (final r in rows) {
-      groups.putIfAbsent(r.club, () => []).add(r);
-    }
-    int total(List<AttendanceRow> members) =>
-        members.fold(0, (sum, r) => sum + r.attended);
-    final named = [
-      for (final entry in groups.entries)
-        if (entry.key.isNotEmpty) entry,
-    ]..sort((a, b) => total(b.value).compareTo(total(a.value)));
-    return [
-      for (final entry in named) (entry.key, entry.value),
-      if (groups[''] case final unaffiliated?) ('Bez oddílu', unaffiliated),
-    ];
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -162,7 +143,7 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
                   final scheme = Theme.of(context).colorScheme;
                   return ListView(
                     children: [
-                      for (final (club, members) in byClub(rows)) ...[
+                      for (final (club, members) in attendanceByClub(rows)) ...[
                         Padding(
                           padding: const EdgeInsets.fromLTRB(16, 12, 16, 2),
                           child: Text(

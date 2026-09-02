@@ -626,6 +626,28 @@ class Reservation {
       );
 }
 
+/// Light projection of a future live reservation — just enough to detect
+/// whether it would fall outside the grid after a schedule change (see
+/// `Api.futureLiveReservations` and `domain/day_edit.dart`).
+class StrandableReservation {
+  const StrandableReservation({
+    required this.date,
+    required this.lane,
+    required this.blockId,
+  });
+
+  final Day date;
+  final int lane;
+  final String blockId;
+
+  factory StrandableReservation.fromJson(Map<String, dynamic> json) =>
+      StrandableReservation(
+        date: Day.parse(json['date'] as String),
+        lane: json['lane'] as int,
+        blockId: json['block_id'] as String,
+      );
+}
+
 /// One row of the monthly_attendance RPC result.
 class AttendanceRow {
   const AttendanceRow({

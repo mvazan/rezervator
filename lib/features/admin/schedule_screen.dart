@@ -5,6 +5,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/ui.dart';
 import '../../data/providers.dart';
 import '../../domain/block_generator.dart';
+import '../../domain/day_edit.dart';
+import '../../domain/limits.dart';
 import '../../domain/models.dart';
 import 'widgets/admin_body.dart';
 import 'widgets/block_dialog.dart';
@@ -44,33 +46,14 @@ class _ScheduleAdminScreenState extends ConsumerState<ScheduleAdminScreen> {
     _initialized = true;
   }
 
-  /// Returns an error message on failure, or null when valid.
-  String? _validate(int laneCount, int horizonDays, int maxReservations) {
-    if (laneCount < 1 || laneCount > 12) {
-      return 'Počet drah musí být 1–12.';
-    }
-    if (horizonDays < 1 || horizonDays > 90) {
-      return 'Rezervace dopředu musí být 1–90 dní.';
-    }
-    if (maxReservations < 1 || maxReservations > 50) {
-      return 'Max. aktivních rezervací musí být 1–50.';
-    }
-    return null;
-  }
-
-  /// Fetches future live reservations and counts those that would fall
-  /// outside the grid under [newLaneCount]/[newWeekdays]. This is a
-  /// conservative upper bound: a day override with custom blocks may keep
-  /// some of these visible even off the regular weekday set, but the admin
-  /// still gets warned rather than silently orphaning anyone.
-  Future<int> _countStranded(int newLaneCount, Set<int> newWeekdays) async {
-    final reservations = await Api.futureLiveReservations(today());
-    return reservations
-        .where(
-          (r) => r.lane > newLaneCount || !newWeekdays.contains(r.date.weekday),
-        )
-        .length;
-  }
+  /// Future live reservations the new grid would cancel (server cascade,
+  /// 0018) — the pre-flight warning before the save.
+  Future<int> _countStranded(int newLaneCount, Set<int> newWeekdays) async =>
+      strandedByGrid(
+        await Api.futureLiveReservations(today()),
+        laneCount: newLaneCount,
+        trainingWeekdays: newWeekdays,
+      );
 
   Future<void> _save() async {
     final laneCount = int.tryParse(_laneCount.text);
@@ -80,7 +63,11 @@ class _ScheduleAdminScreenState extends ConsumerState<ScheduleAdminScreen> {
       snack(context, 'Zkontroluj vyplněná čísla.');
       return;
     }
-    final error = _validate(laneCount, horizonDays, maxReservations);
+    final error = validateScheduleSettings(
+      laneCount: laneCount,
+      horizonDays: horizonDays,
+      maxReservations: maxReservations,
+    );
     if (error != null) {
       snack(context, error);
       return;
@@ -383,10 +370,7 @@ class _GeneratorDialogState extends ConsumerState<_GeneratorDialog> {
       return;
     }
     setState(() => _saving = true);
-    var position = widget.blocks.isEmpty
-        ? 0
-        : widget.blocks.map((b) => b.position).reduce((a, b) => a > b ? a : b) +
-              1;
+    var position = nextBlockPosition(widget.blocks);
     final ok = await tryAction(
       context,
       () async {

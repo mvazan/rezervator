@@ -3,6 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/ui.dart';
 import '../../data/providers.dart';
+import '../../domain/day_edit.dart';
+import '../../domain/grouping.dart';
+import '../../domain/limits.dart';
 import '../../domain/models.dart';
 import 'slot_types_screen.dart';
 import 'widgets/blockage_dialog.dart';
@@ -60,17 +63,15 @@ class OverridesScreen extends ConsumerWidget {
       List<TimeBlock> blocks, ScheduleSettings settings) async {
     final isTraining =
         settings.trainingWeekdays.contains(override.date.weekday);
-    final templateIds = [
-      for (final b in blocks)
-        if (b.active && b.position >= 0) b.id,
-    ];
-    final reservations = await Api.futureLiveReservations(today());
+    final plan = planRestoreTemplate(
+      date: override.date,
+      isTraining: isTraining,
+      blocks: blocks,
+      rows: await Api.futureLiveReservations(today()),
+    );
     if (!context.mounted) return;
-    final losing = reservations
-        .where((r) =>
-            r.date == override.date &&
-            (!isTraining || !templateIds.contains(r.blockId)))
-        .length;
+    final templateIds = plan.templateIds;
+    final losing = plan.cancellations;
     final confirmed = await confirmDialog(
       context,
       title: 'Vrátit den k týdennímu rozvrhu?',
@@ -149,23 +150,7 @@ class OverridesScreen extends ConsumerWidget {
     final past = closures.where((o) => o.date.isBefore(now)).toList()
       ..sort((a, b) => b.date.compareTo(a.date));
 
-    // Consecutive same-reason closures (e.g. a week of dovolená) fold into
-    // one range tile; deleting it removes every day of the run.
-    List<List<DayOverride>> runsOf(List<DayOverride> list) {
-      final sorted = [...list]..sort((a, b) => a.date.compareTo(b.date));
-      final runs = <List<DayOverride>>[];
-      for (final o in sorted) {
-        if (runs.isNotEmpty &&
-            runs.last.last.date.addDays(1) == o.date &&
-            runs.last.last.reason == o.reason) {
-          runs.last.add(o);
-        } else {
-          runs.add([o]);
-        }
-      }
-      return runs;
-    }
-
+    // One range tile per closure run; deleting it removes every day of it.
     Widget tile(List<DayOverride> run) => ListTile(
           title: Text(run.length == 1
               ? dayFull(run.first.date)
@@ -259,11 +244,13 @@ class OverridesScreen extends ConsumerWidget {
                       child: Text('Žádné nadcházející výjimky.'),
                     )
                   else
-                    for (final run in runsOf(upcoming)) tile(run),
+                    for (final run in closureRuns(upcoming)) tile(run),
                   if (past.isNotEmpty)
                     ExpansionTile(
                       title: Text('Minulé (${past.length})'),
-                      children: [for (final run in runsOf(past)) tile(run)],
+                      children: [
+                        for (final run in closureRuns(past)) tile(run),
+                      ],
                     ),
                   if (forks.isNotEmpty) ...[
                     const Padding(
@@ -420,7 +407,7 @@ class _OverrideDialogState extends ConsumerState<_OverrideDialog> {
       snack(context, '„Do" musí být po datu začátku.');
       return;
     }
-    if (span > 92) {
+    if (span > Limits.closureSpanDays) {
       snack(context, 'Nejvýše 3 měsíce najednou.');
       return;
     }

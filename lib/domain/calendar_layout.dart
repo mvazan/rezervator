@@ -130,3 +130,23 @@ List<(int, int)> subtractInterval((int, int) interval, List<(int, int)> holes) {
   }
   return (start, window.endMinute);
 }
+
+/// Whether [candidate] (half-open minutes) lies inside [window] and overlaps
+/// nothing in [occupied] once the dragged item's own [self] intervals are
+/// subtracted (an item may land on the space it currently occupies). The
+/// drag-and-drop landing rule: [occupied] is the same block + event union
+/// [freeGapAt] takes; [self] is the dragged block's span — or a match's span
+/// plus its úklid child's, which travels with it.
+bool dropFits({
+  required (int, int) candidate,
+  required List<(int, int)> self,
+  required List<(int, int)> occupied,
+  required CalendarWindow window,
+}) {
+  final (cs, ce) = candidate;
+  if (cs < window.startMinute || ce > window.endMinute) return false;
+  final selfUnion = mergeIntervals(self);
+  return !occupied
+      .expand((iv) => subtractInterval(iv, selfUnion))
+      .any((iv) => iv.$1 < ce && iv.$2 > cs);
+}
