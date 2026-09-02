@@ -263,4 +263,9 @@ framework, zmena histórie migrácií (len snapshot vedľa nej).
   `confirmDelete`, `attendanceProvider`; dialógy v `admin/widgets/`;
   `ref.listen` namiesto init v build. 301 testov (+19 smoke testov
   obrazoviek). Tým je roadmap auditu kompletná.
+- **Plán 7 (dokumentácia)** — hotový 2026-09-02 na vetve `cleanup-7-docs`
+  (paralelne s plánom 6): SETUP.md (registrácia po kuželniach + superadmin
+  bootstrap, `config push`, Sentry, lokálny vývoj, preč s neexistujúcim
+  google-services.json.example), CICD.md a PLAY.md (release notes z
+  `changelog_data.dart`, `SENTRY_DSN`), `test/changelog_test.dart`.
 

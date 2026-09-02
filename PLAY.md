@@ -86,13 +86,16 @@ zůstává jen uploadovací; to je doporučený režim). Přidej testery
 ## Každé další vydání
 
 ```bash
-# 1. zvyš verzi v pubspec.yaml, např. 1.1.0+2  (číslo za + = versionCode MUSÍ růst)
-git commit -am "Bump version to 1.1.0"
+# 1. přidej záznam do lib/features/profile/changelog_data.dart (nejnovější
+#    první) — z něj se bere text „Co je nového" pro Play, poznámky k vydání
+#    na GitHubu i Novinky v appce; test/changelog_test.dart hlídá shodu
+#    s verzí v pubspec.yaml
+# 2. zvyš verzi v pubspec.yaml, např. 1.1.1+4  (číslo za + = versionCode MUSÍ růst)
+git commit -am "chore: release 1.1.1"
 
-# 2. anotovaný tag; tělo zprávy = text „Co je nového" pro Play
-git tag -a v1.1.0 -m "v1.1.0" -m "- Oprava přesunů rezervací
-- Rychlejší kalendář"
-git push origin main v1.1.0
+# 3. anotovaný tag + push (text tagu se nikde nepoužívá)
+git tag -a v1.1.1 -m "v1.1.1"
+git push origin main v1.1.1
 ```
 
 Za pár minut je na stránce **Releases** podepsané `rezervator-v1.1.0.apk`
