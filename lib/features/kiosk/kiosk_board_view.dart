@@ -237,6 +237,22 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
     final interactive = blocksFromDb &&
         weekReservationsByMonday.values.every((r) => r.hasValue);
 
+    // The selected player's live reservations across every watched week —
+    // the count create_reservation checks against max_active_reservations,
+    // so ＋ is only offered where the RPC would accept it (no limit_reached
+    // bounce). Weeks are disjoint Monday..Sunday spans: nothing double-counts.
+    final selected = widget.selected;
+    final selectedCount = selected == null
+        ? 0
+        : activeReservationCount(
+            [
+              for (final week in weekReservationsByMonday.values)
+                ...week.value ?? const <Reservation>[],
+            ],
+            selected.id,
+            todayDay,
+          );
+
     // Keyed by date (not position) so slicing today..horizon can't
     // misalign even if a Monday's week ever produced anything but exactly 7
     // entries.
@@ -402,11 +418,12 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
                                             window.endMinute
                                     ? now.minutesFromMidnight
                                     : null,
-                                laneCount: settings.laneCount,
+                                settings: settings,
                                 nameById: nameById,
                                 clubColorById: clubColorById,
                                 interactive: interactive,
                                 selected: widget.selected,
+                                selectedCount: selectedCount,
                                 onBook: (date, block, lane) => _book(
                                   context,
                                   ref,
@@ -444,11 +461,12 @@ class _DayColumn extends StatelessWidget {
     required this.pxPerMinute,
     required this.halfHourMarks,
     required this.nowMinute,
-    required this.laneCount,
+    required this.settings,
     required this.nameById,
     required this.clubColorById,
     required this.interactive,
     required this.selected,
+    required this.selectedCount,
     required this.onBook,
   });
 
@@ -457,11 +475,15 @@ class _DayColumn extends StatelessWidget {
   final double pxPerMinute;
   final bool halfHourMarks;
   final int? nowMinute;
-  final int laneCount;
+  final ScheduleSettings settings;
   final Map<String, String> nameById;
   final Map<String, int> clubColorById;
   final bool interactive;
   final PlayerName? selected;
+
+  /// [selected]'s live reservations from today on — canBook's
+  /// myActiveCount (0 while no player is selected).
+  final int selectedCount;
   final void Function(Day date, TimeBlock block, int lane) onBook;
 
   @override
@@ -622,7 +644,7 @@ class _DayColumn extends StatelessWidget {
               ),
             ),
           ),
-          for (var lane = 1; lane <= laneCount; lane++)
+          for (var lane = 1; lane <= settings.laneCount; lane++)
             Expanded(child: _laneRow(context, openDay, block, lane)),
         ],
       ),
@@ -688,9 +710,16 @@ class _DayColumn extends StatelessWidget {
             ),
           ),
         );
-      case FreeSlot(:final inPast, :final beyondHorizon):
-        final bookable =
-            interactive && selected != null && !inPast && !beyondHorizon;
+      case FreeSlot():
+        // The same client-side mirror of create_reservation the app uses:
+        // not started, inside the horizon AND under the player's limit.
+        final bookable = interactive &&
+            selected != null &&
+            canBook(
+              state: state,
+              myActiveCount: selectedCount,
+              settings: settings,
+            );
         return _rowShell(
           context,
           lane: lane,
