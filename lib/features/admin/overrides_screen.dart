@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/ui.dart';
 import '../../data/providers.dart';
+import '../../domain/day_edit.dart';
 import '../../domain/grouping.dart';
 import '../../domain/limits.dart';
 import '../../domain/models.dart';
@@ -62,17 +63,15 @@ class OverridesScreen extends ConsumerWidget {
       List<TimeBlock> blocks, ScheduleSettings settings) async {
     final isTraining =
         settings.trainingWeekdays.contains(override.date.weekday);
-    final templateIds = [
-      for (final b in blocks)
-        if (b.active && b.position >= 0) b.id,
-    ];
-    final reservations = await Api.futureLiveReservations(today());
+    final plan = planRestoreTemplate(
+      date: override.date,
+      isTraining: isTraining,
+      blocks: blocks,
+      rows: await Api.futureLiveReservations(today()),
+    );
     if (!context.mounted) return;
-    final losing = reservations
-        .where((r) =>
-            r.date == override.date &&
-            (!isTraining || !templateIds.contains(r.blockId)))
-        .length;
+    final templateIds = plan.templateIds;
+    final losing = plan.cancellations;
     final confirmed = await confirmDialog(
       context,
       title: 'Vrátit den k týdennímu rozvrhu?',
