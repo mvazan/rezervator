@@ -10,12 +10,15 @@ import '../admin/widgets/block_dialog.dart';
 import '../admin/widgets/blockage_dialog.dart';
 import '../admin/widgets/match_dialog.dart';
 import '../admin/widgets/notify_choice_dialog.dart';
+import '../admin/widgets/rental_dialog.dart';
+import '../admin/widgets/rental_occurrence_dialog.dart';
 import 'schedule_callbacks.dart';
 
 /// Every user action the schedule views can trigger, built once per
 /// WeekScreen build from the current data. The callbacks keep exactly the
 /// signatures the views already take; admin ones are null for non-admins
-/// or while the placeholder grid shows (canEditBlocks false).
+/// or while the placeholder grid shows (canEditBlocks false) — except the
+/// rental edit, which never touches blocks and only needs an admin.
 ///
 /// Calendar edits are DAY-SCOPED: they compose a day override around an
 /// inactive "special" block instead of touching the weekly template (that
@@ -32,6 +35,7 @@ class ScheduleActions {
     required this.settings,
     required this.today,
     required this.reservations,
+    required this.rentals,
     required this.me,
     required this.canEditBlocks,
   })  : _overrideByDate = {for (final o in overrides) o.date: o},
@@ -58,6 +62,11 @@ class ScheduleActions {
   /// This week's live reservations.
   final List<Reservation> reservations;
 
+  /// Every rental row as stored (series, one-time AND exception rows): a
+  /// tapped calendar occurrence is a resolved copy, so the rental edit looks
+  /// its raw series and same-date exception up here.
+  final List<Rental> rentals;
+
   /// The signed-in profile; the views only fire [onBook] with one present.
   final Profile? me;
 
@@ -69,12 +78,17 @@ class ScheduleActions {
   final Map<String, TimeBlock> _blockById;
 
   /// The two bundles the views take (see schedule_callbacks.dart).
-  SlotCallbacks get slot => SlotCallbacks(onBook: onBook, onCancel: onCancel);
+  SlotCallbacks get slot => SlotCallbacks(
+        onBook: onBook,
+        onCancel: onCancel,
+        onRental: onEditRental,
+      );
   CalendarAdminHooks get admin => CalendarAdminHooks(
         onEditBlock: onEditBlock,
         onAddBlockInGap: onAddBlockInGap,
         onAddForDay: onAddForDay,
         onEditPrioritySlot: onEditPrioritySlot,
+        onEditRental: onEditRental,
         onMoveBlock: onMoveBlock,
         onMovePrioritySlot: onMovePrioritySlot,
       );
@@ -105,6 +119,12 @@ class ScheduleActions {
   /// blockages the blockage dialog.
   void Function(Day, PrioritySlot)? get onEditPrioritySlot =>
       canEditBlocks ? _editPrioritySlot : null;
+
+  /// Tap on a rented cell / click on a rental band = edit that day's
+  /// rental. Admin-only, but NOT gated on [canEditBlocks]: exceptions never
+  /// touch blocks, so the placeholder grid is no reason to hide it.
+  void Function(Day, Rental)? get onEditRental =>
+      (me?.isAdmin ?? false) ? _editRental : null;
 
   /// HOLD-drag moves. A training block moves day-scoped (its sign-ups
   /// travel along); a blocking slot just gets new times (the server drags
@@ -306,6 +326,38 @@ class ScheduleActions {
       builder: (_) => target.type.isMatch
           ? MatchDialog(existing: target, types: slotTypes)
           : BlockageDialog(existing: target, types: slotTypes),
+    );
+  }
+
+  /// Tap on a rented cell / click on a rental band: a one-time rental opens
+  /// its plain dialog, a weekly one the "jen tento den" dialog for that
+  /// date (prefilled with the existing exception row when there is one).
+  /// No past-date guard — rentals allow retro entries.
+  void _editRental(Day date, Rental rental) {
+    if (rental.weekday == null) {
+      showDialog<void>(
+        context: context,
+        builder: (_) =>
+            RentalDialog(existing: rental, laneCount: settings.laneCount),
+      );
+      return;
+    }
+    // Resolved copies carry the series' id; find the raw series row and
+    // its exception for the date.
+    Rental? series;
+    Rental? child;
+    for (final r in rentals) {
+      if (r.id == rental.id) series = r;
+      if (r.parentId == rental.id && r.date == date) child = r;
+    }
+    showDialog<void>(
+      context: context,
+      builder: (_) => RentalOccurrenceDialog(
+        parent: series ?? rental,
+        date: date,
+        existing: child,
+        laneCount: settings.laneCount,
+      ),
     );
   }
 

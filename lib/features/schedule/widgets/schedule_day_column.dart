@@ -87,6 +87,8 @@ class ScheduleDayColumn extends StatelessWidget {
       get onAddBlockInGap => admin.onAddBlockInGap;
   void Function(Day date, PrioritySlot slot)? get onEditPrioritySlot =>
       admin.onEditPrioritySlot;
+  void Function(Day date, Rental rental)? get onEditRental =>
+      admin.onEditRental;
   void Function(Day date, TimeBlock block, HourMinute newStart)?
       get onMoveBlock => admin.onMoveBlock;
   void Function(Day date, PrioritySlot slot, HourMinute newStart)?
@@ -286,20 +288,28 @@ class ScheduleDayColumn extends StatelessWidget {
       addBands(m.startsAt, m.endsAt, band);
     }
     if (openDay != null) {
+      // Copied to a local: a getter never promotes on the null check.
+      final edit = onEditRental;
       for (final r in openDay.rentals) {
         final (bg, fg) = clubTint(r.color, scheme.brightness,
             fallbackBg: scheme.tertiaryContainer.withValues(alpha: 0.5),
             fallbackFg: scheme.onTertiaryContainer);
-        addBands(
-          r.startsAt,
-          r.endsAt,
-          () => CalendarEventBand(
+        Widget band() {
+          Widget w = CalendarEventBand(
             background: bg,
             foreground: fg,
             text: '${rentalLabel(r)}\n'
                 '${r.startsAt.display()}–${r.endsAt.display()}',
-          ),
-        );
+          );
+          // Click = edit that day's occurrence (a weekly rental's "jen
+          // tento den" exception, a one-time rental's plain dialog).
+          if (edit != null) {
+            w = InkWell(onTap: () => edit(day.date, r), child: w);
+          }
+          return w;
+        }
+
+        addBands(r.startsAt, r.endsAt, band);
       }
     }
     return entries;

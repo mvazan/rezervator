@@ -161,6 +161,7 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
       settings: settings,
       today: todayDay,
       reservations: reservations,
+      rentals: rentals,
       me: me,
       canEditBlocks: canEditBlocks,
     );
