@@ -583,7 +583,7 @@ class Api {
   static Future<void> setNick(String userId, String nick) =>
       _db.rpc('set_nick', params: {'p_user_id': userId, 'p_nick': nick});
 
-  // --- admin: reports ---
+  // --- admin: reports (see attendanceProvider) ---
   static Future<List<AttendanceRow>> monthlyAttendance(
       int year, int month) async {
     final rows = await _db.rpc('monthly_attendance', params: {
@@ -702,6 +702,14 @@ final myActiveReservationsProvider =
               .eq('player_id', uid))
       .map((rows) => rows.map(Reservation.fromJson).toList());
 });
+
+/// Monthly attendance rows (admin), keyed by (year, month) — the report
+/// screen watches this instead of holding a Future in its state, so a
+/// retry is an invalidate and the month switch is a different key.
+final attendanceProvider =
+    FutureProvider.autoDispose.family<List<AttendanceRow>, (int, int)>(
+  (ref, ym) => Api.monthlyAttendance(ym.$1, ym.$2),
+);
 
 /// After a superadmin tenant switch (Api.switchTenant): every tenant-scoped
 /// stream fetched its rows under the OLD kuželna's RLS scope, so re-create
