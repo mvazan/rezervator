@@ -60,7 +60,13 @@ function page(title: string, bodyHtml: string, formHtml = ""): Response {
 Deno.serve(async (request) => {
   const url = new URL(request.url);
   const token = url.searchParams.get("token") ?? "";
-  const secret = Deno.env.get("CANCEL_TOKEN_SECRET") ?? "";
+  // Fail closed (mirrors notify's WEBHOOK_SECRET guard): with no secret the
+  // HMAC check would pass for tokens signed with an empty key.
+  const secret = Deno.env.get("CANCEL_TOKEN_SECRET");
+  if (!secret) {
+    console.error("CANCEL_TOKEN_SECRET is not set");
+    return new Response("misconfigured", { status: 500 });
+  }
 
   const verdict = await verifyCancelToken(token, secret);
   if ("error" in verdict) {
