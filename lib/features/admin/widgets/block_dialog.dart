@@ -253,15 +253,8 @@ class _BlockDialogState extends State<BlockDialog> {
     }
     final done = await tryAction(
       context,
-      () async {
-        if (widget.dayIsTraining) {
-          await Api.setDayOverride(
-              date: date, closed: false, reason: '', blockIds: plan.templateIds);
-        } else {
-          await Api.setDayOverride(date: date, closed: true, reason: '');
-        }
-        await Api.deleteDayOverride(date);
-      },
+      () => Api.restoreDayToTemplate(date,
+          isTraining: widget.dayIsTraining, templateIds: plan.templateIds),
       success: 'Den vrácen k týdennímu rozvrhu.',
       errorText: friendlyDbError,
     );
@@ -479,12 +472,8 @@ class _BlockDialogState extends State<BlockDialog> {
               notify: moveNotify?.notify ?? true,
               message: moveNotify?.message);
           if (plan.unwindsOverride) {
-            await Api.setDayOverride(
-                date: date,
-                closed: false,
-                reason: '',
-                blockIds: plan.templateIds);
-            await Api.deleteDayOverride(date);
+            await Api.restoreDayToTemplate(date,
+                isTraining: true, templateIds: plan.templateIds);
           } else {
             await Api.setDayOverride(
               date: date,

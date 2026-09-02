@@ -182,11 +182,23 @@ final offlineProvider = StreamProvider<bool>((ref) async* {
       const Duration(seconds: 3), (_) => !_db.realtime.isConnected);
 });
 
-/// Approved player names from the `players` view. Views cannot stream —
-/// re-read on screen entry (and on kiosk idle reset in Phase 4).
+/// Ticks every five minutes (after an immediate first value) so the roster
+/// below re-reads itself; Stream.periodic dies with the provider.
+final _rosterTickProvider = StreamProvider<int>((ref) async* {
+  yield 0;
+  yield* Stream.periodic(const Duration(minutes: 5), (i) => i + 1);
+});
+
+/// Approved player names from the `players` view. Views cannot stream, so
+/// the roster re-reads itself: whenever the clubs stream emits (a colour or
+/// name change) and every five minutes (someone approved since the last
+/// read). The name picker additionally refreshes on open — the one moment
+/// a stale roster would show.
 final playersProvider = FutureProvider<List<PlayerName>>((ref) async {
   final uid = ref.watch(_authUidProvider);
   if (uid == null) return const [];
+  ref.watch(clubsProvider);
+  ref.watch(_rosterTickProvider);
   final List<dynamic> rows;
   try {
     rows = await _db.from('players').select();
@@ -363,10 +375,18 @@ class Api {
         'active': ?active,
       }).eq('id', id);
 
-  /// Delete only works for never-referenced blocks (FK restrict) — callers
-  /// fall back to deactivation on failure.
-  static Future<void> deleteTimeBlock(String id) =>
-      _db.from('time_blocks').delete().eq('id', id);
+  /// Deletes a never-referenced block. Returns false when reservations still
+  /// point at it (FK restrict, Postgres 23503) — the caller deactivates
+  /// instead; any other failure throws.
+  static Future<bool> deleteTimeBlock(String id) async {
+    try {
+      await _db.from('time_blocks').delete().eq('id', id);
+      return true;
+    } on PostgrestException catch (e) {
+      if (e.code == '23503') return false;
+      rethrow;
+    }
+  }
 
   /// Inserts an INACTIVE "special" block and returns its id — day-scoped
   /// calendar edits point a day override at it while the weekly template
@@ -444,6 +464,25 @@ class Api {
 
   static Future<void> deleteDayOverride(Day date) =>
       _db.from('day_overrides').delete().eq('date', date.toSql());
+
+  /// Returns [date] to the weekly rules. A training day gets the template
+  /// block ids written first (cancelling anything off-template); a
+  /// non-training day is closed first; then the override row is deleted.
+  /// The closed/template write lands BEFORE the delete so a failure between
+  /// the two calls can't leave the day wide open.
+  static Future<void> restoreDayToTemplate(
+    Day date, {
+    required bool isTraining,
+    required List<String> templateIds,
+  }) async {
+    if (isTraining) {
+      await setDayOverride(
+          date: date, closed: false, reason: '', blockIds: templateIds);
+    } else {
+      await setDayOverride(date: date, closed: true, reason: '');
+    }
+    await deleteDayOverride(date);
+  }
 
   // --- admin: priority slots (matches & other blockages) ---
   static Future<void> savePrioritySlot({

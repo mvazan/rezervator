@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/ui.dart';
 import '../../data/providers.dart';
@@ -137,18 +136,18 @@ class _ScheduleAdminScreenState extends ConsumerState<ScheduleAdminScreen> {
     );
     if (!confirmed || !mounted) return;
 
+    final bool deleted;
     try {
-      await Api.deleteTimeBlock(block.id);
+      deleted = await Api.deleteTimeBlock(block.id);
+    } catch (e) {
+      if (mounted) snack(context, friendlyDbError(e));
+      return;
+    }
+    if (deleted) {
       if (mounted) snack(context, 'Blok smazán.');
       return;
-    } on PostgrestException catch (e) {
-      if (e.code != '23503') {
-        if (mounted) snack(context, friendlyDbError(e));
-        return;
-      }
-      // FK restrict: block already has reservations — deactivate instead.
     }
-
+    // Block already has reservations — deactivate instead.
     if (!mounted) return;
     final ok = await confirmIfBlockStrands(context, block.id);
     if (!ok || !mounted) return;

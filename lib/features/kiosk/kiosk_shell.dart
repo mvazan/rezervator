@@ -64,7 +64,6 @@ class _KioskShellState extends ConsumerState<KioskShell> {
     // because the board owns its own PageController; there's no offset
     // field on this shell to reset via rebuild the way _weekOffset used to.
     _boardKey.currentState?.resetToToday();
-    ref.invalidate(playersProvider);
   }
 
   Future<void> _openPicker() async {
