@@ -16,6 +16,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/ui.dart';
 import '../../data/clock.dart';
 import '../../data/providers.dart';
+import '../../data/week_schedule.dart';
 import '../../domain/calendar_layout.dart';
 import '../../domain/labels.dart';
 import '../../domain/models.dart';
@@ -183,11 +184,6 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
 
     final settings =
         ref.watch(settingsProvider).value ?? ScheduleSettings.defaults;
-    final timeBlocks = ref.watch(timeBlocksProvider);
-    final overrides = ref.watch(dayOverridesProvider).value ?? const [];
-    final priority = ref.watch(prioritySlotsProvider);
-    final rentals = ref.watch(rentalsProvider).value ?? const [];
-    final players = ref.watch(playersProvider).value ?? const [];
 
     // The board shows today..today+horizonDays inclusive (horizonDays+1
     // days total — matches buildWeekSchedule's own beyondHorizon predicate:
@@ -203,16 +199,16 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
     final mondays = [
       for (var w = 0; w < mondayCount; w++) thisMonday.addDays(7 * w),
     ];
-    final weekReservationsByMonday = {
+    final viewByMonday = {
       for (final monday in mondays)
-        monday: ref.watch(weekReservationsProvider(monday)),
+        monday: ref.watch(weekScheduleProvider(monday)),
     };
 
-    if (timeBlocks.isLoading) {
+    if (viewByMonday.values.any((v) => v.isLoading)) {
       return const Center(child: CircularProgressIndicator());
     }
 
-    if (timeBlocks.hasError) {
+    if (viewByMonday.values.any((v) => v.hasError)) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -228,16 +224,10 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
       );
     }
 
-    final dbBlocks = timeBlocks.value ?? const [];
-    final blocksFromDb = dbBlocks.isNotEmpty;
-    final blocks = blocksFromDb ? dbBlocks : defaultTimeBlocks();
-    // Same reasoning as the app's week view: cells stay inert while the
-    // placeholder grid is shown or any covered week's reservation stream
-    // hasn't loaded yet — a booking attempt against either would either hit
-    // unmapped placeholder ids or race the RPC's own authoritative
-    // slot-taken check.
-    final interactive = blocksFromDb &&
-        weekReservationsByMonday.values.every((r) => r.hasValue);
+    final views = [for (final v in viewByMonday.values) v.value!];
+    // Every covered week must be bookable (real blocks, its reservation
+    // stream loaded — see WeekView.interactive) before any cell reacts.
+    final interactive = views.every((v) => v.interactive);
 
     // The selected player's live reservations across every watched week —
     // the count create_reservation checks against max_active_reservations,
@@ -247,10 +237,7 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
     final selectedCount = selected == null
         ? 0
         : activeReservationCount(
-            [
-              for (final week in weekReservationsByMonday.values)
-                ...week.value ?? const <Reservation>[],
-            ],
+            [for (final v in views) ...v.reservations],
             selected.id,
             todayDay,
           );
@@ -259,19 +246,8 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
     // misalign even if a Monday's week ever produced anything but exactly 7
     // entries.
     final dayByDate = <Day, DaySchedule>{};
-    for (final monday in mondays) {
-      final week = buildWeekSchedule(
-        monday: monday,
-        today: todayDay,
-        now: now,
-        settings: settings,
-        blocks: blocks,
-        overrides: overrides,
-        priority: priority,
-        rentals: rentals,
-        reservations: weekReservationsByMonday[monday]!.value ?? const [],
-      );
-      for (final day in week.days) {
+    for (final v in views) {
+      for (final day in v.week.days) {
         dayByDate[day.date] = day;
       }
     }
@@ -280,11 +256,8 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
         dayByDate[todayDay.addDays(offset)]!,
     ];
 
-    final nameById = {
-      for (final p in players)
-        p.id: p.nick.isNotEmpty ? p.nick : p.displayName,
-    };
-    final clubColorById = {for (final p in players) p.id: p.clubColor};
+    final nameById = views.first.nameById;
+    final clubColorById = views.first.clubColorById;
 
     // The shared time window: every visible day's blocks plus every
     // off-block match/rental window (matches count on closed days too —
