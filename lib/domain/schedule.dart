@@ -370,6 +370,65 @@ WeekSchedule buildWeekSchedule({
   return WeekSchedule(days);
 }
 
+/// True when [date] resolves as an [OpenDay] under exactly the resolution the
+/// board renders with (buildWeekSchedule): closed overrides and non-training
+/// weekdays are closed, and an override's blockIds are filtered against the
+/// real block set — an override whose ids no longer resolve to any existing
+/// block is a ClosedDay, not open. Matches/rentals/reservations never affect
+/// open-vs-closed status (only which slots within an open day are free), so
+/// they're passed empty.
+///
+/// This is the ONLY day-type probe outside the grid itself — the status bar
+/// and [nextTrainingDay] both go through it, so they can never disagree with
+/// what the board shows.
+bool isDayOpen({
+  required Day date,
+  required Day today,
+  required ScheduleSettings settings,
+  required List<TimeBlock> blocks,
+  required List<DayOverride> overrides,
+}) {
+  final week = buildWeekSchedule(
+    monday: date.addDays(1 - date.weekday),
+    today: today,
+    now: const HourMinute(0, 0),
+    settings: settings,
+    blocks: blocks,
+    overrides: overrides,
+    priority: const [],
+    rentals: const [],
+    reservations: const [],
+  );
+  // WeekSchedule.days is contractually Monday..Sunday, so [weekday - 1] is
+  // exactly [date]'s entry.
+  return week.days[date.weekday - 1] is OpenDay;
+}
+
+/// Scans forward from [today] (exclusive) up to [horizonDays] and returns the
+/// first date that resolves open per [isDayOpen] — the "Další trénink" the
+/// kiosk status bar shows on days without training.
+Day? nextTrainingDay({
+  required Day today,
+  required ScheduleSettings settings,
+  required List<TimeBlock> blocks,
+  required List<DayOverride> overrides,
+  required int horizonDays,
+}) {
+  for (var offset = 1; offset <= horizonDays; offset++) {
+    final date = today.addDays(offset);
+    if (isDayOpen(
+      date: date,
+      today: today,
+      settings: settings,
+      blocks: blocks,
+      overrides: overrides,
+    )) {
+      return date;
+    }
+  }
+  return null;
+}
+
 /// Live reservations counting toward the per-player limit (today or later).
 int activeReservationCount(
         Iterable<Reservation> reservations, String playerId, Day today) =>

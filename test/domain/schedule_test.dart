@@ -605,6 +605,62 @@ void main() {
     });
   });
 
+  group('day-open probe (kiosk status bar)', () {
+    bool open(Day date, {List<DayOverride> overrides = const []}) => isDayOpen(
+          date: date,
+          today: today,
+          settings: settings,
+          blocks: const [b1, b2, b3],
+          overrides: overrides,
+        );
+
+    test('a training weekday is open', () {
+      expect(open(thursday), isTrue);
+    });
+
+    test('a day closed by an override is not', () {
+      expect(
+          open(thursday, overrides: [
+            DayOverride(date: thursday, closed: true, reason: 'Malování'),
+          ]),
+          isFalse);
+      // Same resolution as the grid: an open override whose block ids no
+      // longer exist renders as a ClosedDay, so it probes closed too.
+      expect(
+          open(wednesday, overrides: [
+            DayOverride(
+                date: wednesday, closed: false, reason: '', blockIds: ['zz']),
+          ]),
+          isFalse);
+    });
+
+    test('a non-training weekday is not', () {
+      expect(open(wednesday), isFalse);
+    });
+
+    test('nextTrainingDay skips a closed override; null when nothing opens '
+        'within the horizon', () {
+      Day? next({List<DayOverride> overrides = const [], int horizonDays = 14}) =>
+          nextTrainingDay(
+            today: today,
+            settings: settings,
+            blocks: const [b1, b2, b3],
+            overrides: overrides,
+            horizonDays: horizonDays,
+          );
+      // Today is Tuesday: Wednesday is no training day, Thursday is closed
+      // by the override → next Monday.
+      expect(
+          next(overrides: [
+            DayOverride(date: thursday, closed: true, reason: ''),
+          ]),
+          Day(2026, 7, 13));
+      expect(next(), thursday);
+      // A one-day horizon reaches only Wednesday — nothing opens.
+      expect(next(horizonDays: 1), isNull);
+    });
+  });
+
   group('lane-scoped priority types', () {
     const laneOneType = PrioritySlotType(
       id: 't-lane1',
