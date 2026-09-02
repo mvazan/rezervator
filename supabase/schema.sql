@@ -238,29 +238,46 @@ CREATE OR REPLACE FUNCTION "public"."cancel_res_for_rental"() RETURNS "trigger"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
     AS $$
+declare
+  v_row rentals;
+  v_old_date date;
+  v_today date := (now() at time zone 'Europe/Prague')::date;
 begin
+  if tg_op = 'DELETE' then
+    if old.parent_id is null then
+      return old;
+    end if;
+    v_row := old;
+  else
+    v_row := new;
+    if tg_op = 'UPDATE' then
+      v_old_date := old.date;
+    end if;
+  end if;
+
   update reservations r
   set cancelled_at = now(), cancelled_via = 'admin',
-      cancel_note = 'pronájem: ' || new.renter_name,
+      cancel_note = 'pronájem: ' || x.renter_name,
       notify_player = true,
       notify_message = null
-  from time_blocks b
-  where r.block_id = b.id
-    and r.tenant_id = new.tenant_id
-    and r.cancelled_at is null
-    and r.date >= (now() at time zone 'Europe/Prague')::date
-    and r.lane = any (new.lanes)
-    and b.starts_at < new.ends_at and b.ends_at > new.starts_at
-    and (
-      (new.date is not null and r.date = new.date)
-      or (
-        new.weekday is not null
-        and extract(isodow from r.date)::smallint = new.weekday
-        and (new.valid_from is null or r.date >= new.valid_from)
-        and (new.valid_until is null or r.date <= new.valid_until)
-      )
-    );
-  return new;
+  from (
+    select r2.id, o.renter_name
+    from reservations r2
+    join time_blocks b on b.id = r2.block_id
+    cross join lateral rental_occurrences(v_row.tenant_id, r2.date) o
+    where r2.tenant_id = v_row.tenant_id
+      and r2.cancelled_at is null
+      and r2.date >= v_today
+      and (v_row.parent_id is null            -- series: every date from today on
+           or r2.date = v_row.date             -- exception: its date
+           or r2.date = v_old_date)            -- …and the date it left
+      and o.rental_id = coalesce(v_row.parent_id, v_row.id)
+      and r2.lane = any (o.lanes)
+      and b.starts_at < o.ends_at and b.ends_at > o.starts_at
+  ) x
+  where r.id = x.id;
+
+  return coalesce(new, old);
 end;
 $$;
 
@@ -512,19 +529,9 @@ begin
   end if;
 
   if exists (
-    select 1 from rentals r
-    where r.tenant_id = v_caller.tenant_id
-      and (
-        (r.date is not null and r.date = p_date)
-        or (
-          r.weekday is not null
-          and r.weekday = extract(isodow from p_date)::smallint
-          and (r.valid_from is null or p_date >= r.valid_from)
-          and (r.valid_until is null or p_date <= r.valid_until)
-        )
-      )
-      and p_lane = any (r.lanes)
-      and r.starts_at < v_block.ends_at and r.ends_at > v_block.starts_at
+    select 1 from rental_occurrences(v_caller.tenant_id, p_date) o
+    where p_lane = any (o.lanes)
+      and o.starts_at < v_block.ends_at and o.ends_at > v_block.starts_at
   ) then
     raise exception 'blocked_by_rental';
   end if;
@@ -803,19 +810,9 @@ begin
   end if;
 
   if exists (
-    select 1 from rentals r
-    where r.tenant_id = current_tenant_id()
-      and (
-        (r.date is not null and r.date = v_res.date)
-        or (
-          r.weekday is not null
-          and r.weekday = extract(isodow from v_res.date)::smallint
-          and (r.valid_from is null or v_res.date >= r.valid_from)
-          and (r.valid_until is null or v_res.date <= r.valid_until)
-        )
-      )
-      and p_lane = any (r.lanes)
-      and r.starts_at < v_block.ends_at and r.ends_at > v_block.starts_at
+    select 1 from rental_occurrences(current_tenant_id(), v_res.date) o
+    where p_lane = any (o.lanes)
+      and o.starts_at < v_block.ends_at and o.ends_at > v_block.starts_at
   ) then
     raise exception 'blocked_by_rental';
   end if;
@@ -1010,6 +1007,130 @@ $$;
 
 
 ALTER FUNCTION "public"."reject_tenant"("p_tenant_id" "uuid") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."rental_exception_guard"() RETURNS "trigger"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_parent rentals;
+begin
+  select * into v_parent from rentals where id = new.parent_id;
+  if not found
+     or new.parent_id = new.id
+     or v_parent.tenant_id <> new.tenant_id
+     or v_parent.parent_id is not null      -- no exception of an exception
+     or v_parent.weekday is null            -- one-time rentals have no series
+     or new.date is null
+     or not rental_occurs(v_parent, new.date)
+     or exists (select 1 from rentals where parent_id = new.id) then
+    raise exception 'rental_exception_invalid';
+  end if;
+  new.renter_name := v_parent.renter_name;
+  new.color := v_parent.color;
+  return new;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."rental_exception_guard"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."rental_occurrences"("p_tenant" "uuid", "p_date" "date") RETURNS TABLE("rental_id" "uuid", "override_id" "uuid", "renter_name" "text", "lanes" smallint[], "starts_at" time without time zone, "ends_at" time without time zone)
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  select p.id, c.id, p.renter_name,
+         coalesce(c.lanes, p.lanes),
+         coalesce(c.starts_at, p.starts_at),
+         coalesce(c.ends_at, p.ends_at)
+  from rentals p
+  left join rentals c
+    on c.parent_id = p.id and c.tenant_id = p.tenant_id and c.date = p_date
+  where p.tenant_id = p_tenant
+    and p.parent_id is null
+    and rental_occurs(p, p_date)
+    and not coalesce(c.skipped, false);
+$$;
+
+
+ALTER FUNCTION "public"."rental_occurrences"("p_tenant" "uuid", "p_date" "date") OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."rentals" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "renter_name" "text" NOT NULL,
+    "lanes" smallint[] NOT NULL,
+    "date" "date",
+    "weekday" smallint,
+    "starts_at" time without time zone NOT NULL,
+    "ends_at" time without time zone NOT NULL,
+    "valid_from" "date",
+    "valid_until" "date",
+    "note" "text" DEFAULT ''::"text" NOT NULL,
+    "created_by" "uuid" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "color" smallint DEFAULT '-2'::integer NOT NULL,
+    "tenant_id" "uuid" DEFAULT "public"."current_tenant_id"() NOT NULL,
+    "parent_id" "uuid",
+    "skipped" boolean DEFAULT false NOT NULL,
+    CONSTRAINT "rentals_check" CHECK (("ends_at" > "starts_at")),
+    CONSTRAINT "rentals_check1" CHECK ((("date" IS NULL) <> ("weekday" IS NULL))),
+    CONSTRAINT "rentals_color_check" CHECK ((("color" >= '-2'::integer) AND ("color" <= 11))),
+    CONSTRAINT "rentals_exception_shape_check" CHECK ((("parent_id" IS NULL) OR (("date" IS NOT NULL) AND ("weekday" IS NULL) AND ("valid_from" IS NULL) AND ("valid_until" IS NULL)))),
+    CONSTRAINT "rentals_lanes_check" CHECK (("cardinality"("lanes") > 0)),
+    CONSTRAINT "rentals_skipped_check" CHECK (((NOT "skipped") OR ("parent_id" IS NOT NULL))),
+    CONSTRAINT "rentals_weekday_check" CHECK ((("weekday" >= 1) AND ("weekday" <= 7)))
+);
+
+
+ALTER TABLE "public"."rentals" OWNER TO "postgres";
+
+
+COMMENT ON COLUMN "public"."rentals"."parent_id" IS 'Exception row: overrides the series for `date`; skipped = the occurrence does not happen.';
+
+
+
+CREATE OR REPLACE FUNCTION "public"."rental_occurs"("r" "public"."rentals", "p_date" "date") RETURNS boolean
+    LANGUAGE "sql" IMMUTABLE
+    AS $$
+  select case
+    when r.date is not null then r.date = p_date
+    else r.weekday = extract(isodow from p_date)::smallint
+         and (r.valid_from is null or p_date >= r.valid_from)
+         and (r.valid_until is null or p_date <= r.valid_until)
+  end;
+$$;
+
+
+ALTER FUNCTION "public"."rental_occurs"("r" "public"."rentals", "p_date" "date") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."rental_series_changed"() RETURNS "trigger"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  if new.weekday is null then
+    delete from rentals where parent_id = new.id;
+  elsif old.weekday is distinct from new.weekday
+     or old.valid_from is distinct from new.valid_from
+     or old.valid_until is distinct from new.valid_until then
+    delete from rentals c
+    where c.parent_id = new.id and not rental_occurs(new, c.date);
+  end if;
+  if old.renter_name is distinct from new.renter_name
+     or old.color is distinct from new.color then
+    update rentals set renter_name = new.renter_name, color = new.color
+    where parent_id = new.id;
+  end if;
+  return new;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."rental_series_changed"() OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."seed_demo_member"("p_email" "text") RETURNS "void"
@@ -1310,32 +1431,6 @@ CREATE TABLE IF NOT EXISTS "public"."priority_slot_types" (
 ALTER TABLE "public"."priority_slot_types" OWNER TO "postgres";
 
 
-CREATE TABLE IF NOT EXISTS "public"."rentals" (
-    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
-    "renter_name" "text" NOT NULL,
-    "lanes" smallint[] NOT NULL,
-    "date" "date",
-    "weekday" smallint,
-    "starts_at" time without time zone NOT NULL,
-    "ends_at" time without time zone NOT NULL,
-    "valid_from" "date",
-    "valid_until" "date",
-    "note" "text" DEFAULT ''::"text" NOT NULL,
-    "created_by" "uuid" NOT NULL,
-    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
-    "color" smallint DEFAULT '-2'::integer NOT NULL,
-    "tenant_id" "uuid" DEFAULT "public"."current_tenant_id"() NOT NULL,
-    CONSTRAINT "rentals_check" CHECK (("ends_at" > "starts_at")),
-    CONSTRAINT "rentals_check1" CHECK ((("date" IS NULL) <> ("weekday" IS NULL))),
-    CONSTRAINT "rentals_color_check" CHECK ((("color" >= '-2'::integer) AND ("color" <= 11))),
-    CONSTRAINT "rentals_lanes_check" CHECK (("cardinality"("lanes") > 0)),
-    CONSTRAINT "rentals_weekday_check" CHECK ((("weekday" >= 1) AND ("weekday" <= 7)))
-);
-
-
-ALTER TABLE "public"."rentals" OWNER TO "postgres";
-
-
 CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     "lane_count" smallint DEFAULT 4 NOT NULL,
     "training_weekdays" smallint[] DEFAULT '{1,2,4}'::smallint[] NOT NULL,
@@ -1462,6 +1557,10 @@ CREATE INDEX "profiles_tenant_idx" ON "public"."profiles" USING "btree" ("tenant
 
 
 
+CREATE UNIQUE INDEX "rentals_parent_date_idx" ON "public"."rentals" USING "btree" ("parent_id", "date") WHERE ("parent_id" IS NOT NULL);
+
+
+
 CREATE INDEX "reservations_date_idx" ON "public"."reservations" USING "btree" ("date");
 
 
@@ -1502,7 +1601,15 @@ CREATE OR REPLACE TRIGGER "priority_conflicts" AFTER INSERT OR UPDATE ON "public
 
 
 
-CREATE OR REPLACE TRIGGER "rental_conflicts" AFTER INSERT OR UPDATE ON "public"."rentals" FOR EACH ROW EXECUTE FUNCTION "public"."cancel_res_for_rental"();
+CREATE OR REPLACE TRIGGER "rental_conflicts" AFTER INSERT OR DELETE OR UPDATE ON "public"."rentals" FOR EACH ROW EXECUTE FUNCTION "public"."cancel_res_for_rental"();
+
+
+
+CREATE OR REPLACE TRIGGER "rental_exception_guard" BEFORE INSERT OR UPDATE ON "public"."rentals" FOR EACH ROW WHEN (("new"."parent_id" IS NOT NULL)) EXECUTE FUNCTION "public"."rental_exception_guard"();
+
+
+
+CREATE OR REPLACE TRIGGER "rental_series_changed" AFTER UPDATE ON "public"."rentals" FOR EACH ROW WHEN (("old"."parent_id" IS NULL)) EXECUTE FUNCTION "public"."rental_series_changed"();
 
 
 
@@ -1585,6 +1692,11 @@ ALTER TABLE ONLY "public"."profiles"
 
 ALTER TABLE ONLY "public"."rentals"
     ADD CONSTRAINT "rentals_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "public"."profiles"("id");
+
+
+
+ALTER TABLE ONLY "public"."rentals"
+    ADD CONSTRAINT "rentals_parent_id_fkey" FOREIGN KEY ("parent_id") REFERENCES "public"."rentals"("id") ON DELETE CASCADE;
 
 
 
@@ -1834,6 +1946,33 @@ GRANT ALL ON FUNCTION "public"."reject_tenant"("p_tenant_id" "uuid") TO "service
 
 
 
+GRANT ALL ON FUNCTION "public"."rental_exception_guard"() TO "anon";
+GRANT ALL ON FUNCTION "public"."rental_exception_guard"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."rental_exception_guard"() TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."rental_occurrences"("p_tenant" "uuid", "p_date" "date") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."rental_occurrences"("p_tenant" "uuid", "p_date" "date") TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."rentals" TO "authenticated";
+GRANT ALL ON TABLE "public"."rentals" TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."rental_occurs"("r" "public"."rentals", "p_date" "date") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."rental_occurs"("r" "public"."rentals", "p_date" "date") TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."rental_series_changed"() TO "anon";
+GRANT ALL ON FUNCTION "public"."rental_series_changed"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."rental_series_changed"() TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."seed_demo_member"("p_email" "text") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."seed_demo_member"("p_email" "text") TO "service_role";
 
@@ -1874,11 +2013,6 @@ GRANT INSERT("color"),UPDATE("color") ON TABLE "public"."priority_slot_types" TO
 
 
 GRANT INSERT("lanes"),UPDATE("lanes") ON TABLE "public"."priority_slot_types" TO "authenticated";
-
-
-
-GRANT ALL ON TABLE "public"."rentals" TO "authenticated";
-GRANT ALL ON TABLE "public"."rentals" TO "service_role";
 
 
 

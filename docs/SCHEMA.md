@@ -34,7 +34,7 @@ and what cascades — and is updated with every migration.
 | `day_overrides` | PK (`tenant_id`, `date`); `closed`, `reason`, `block_ids uuid[]` (`null` = the default active set) | select approved/kiosk; write admin. Normally written through `set_day_override`. |
 | `priority_slot_types` | `name` unique per tenant, `color`, `lanes smallint[]` (`null` = whole alley), `is_match`, `builtin` ('Zápas', 'Úklid před zápasem' seeded per tenant) | select approved/kiosk; insert/update admin (**column grants: `name, color, lanes` only**); delete admin ∧ `not builtin`. |
 | `priority_slots` | `date`, `starts_at`, `ends_at`, `type_id`, `home_team`, `away_team`, `prep_minutes` 0–240, `description`, `parent_id` (the auto-managed úklid child), `is_away` (announced, blocks nothing), `import_key` (reserved) | select approved/kiosk; write admin. |
-| `rentals` | `renter_name`, `lanes`, exactly one of `date` / `weekday`, `starts_at`, `ends_at`, `valid_from/until`, `note`, `color` (−2 = default tint) | select approved/kiosk; write admin. |
+| `rentals` | `renter_name`, `lanes`, exactly one of `date` / `weekday`, `starts_at`, `ends_at`, `valid_from/until`, `note`, `color` (−2 = default tint). **Exception rows** (0021): `parent_id → rentals` (cascade delete) + `date` = the one occurrence of that weekly series they override, with their own `lanes`, `starts_at`, `ends_at`, `note`; `skipped` = the occurrence does not happen. One per (`parent_id`, `date`). `renter_name`/`color` are copied from the series by `rental_exception_guard`, which also rejects an off-series date, a one-time or child parent and a foreign tenant (`rental_exception_invalid`); `rental_series_changed` prunes children a series edit orphans and re-copies name/colour. | select approved/kiosk; write admin. |
 | `reservations` | `player_id`, `date`, `block_id`, `lane`, `created_via` app\|kiosk\|admin, `cancelled_at/via` app\|one_click\|admin, `cancel_note`, `notify_player`, `notify_message` (per-change intent for the notify function) | **select only** (approved/kiosk). Every write is an RPC, a trigger, or the `cancel` edge function. Live slots are unique: `(date, block_id, lane) where cancelled_at is null`. |
 | `clubs` | `name` unique per tenant, `color` 0–11 (−1 = none) | select approved/kiosk; all admin. |
 
@@ -65,24 +65,33 @@ roles (see below).
 | `registration_clubs(tenant_id)` | signed-in, pre-profile | Club list for the register screen. |
 | `approve_player(user_id)`, `set_role(user_id, role)`, `set_player_club(user_id, club_id)`, `upsert_club(...)`, `delete_club(id)` | admin | Member and club administration. `cannot_demote_self`, `unknown_club`. |
 | `set_nick(user_id, nick)` | self or admin | `nick_too_long`. |
-| `create_reservation(player_id, date, block_id, lane)` | player for self, kiosk for any approved member, admin for anyone | Admin skips past/horizon/limit. Raises `player_not_approved`, `unknown_block`, `invalid_lane`, `day_closed` / `invalid_block` (via `block_day_status`), `date_past`, `beyond_horizon`, `limit_reached`, `blocked_by_priority`, `blocked_by_rental`, `slot_taken`. |
+| `create_reservation(player_id, date, block_id, lane)` | player for self, kiosk for any approved member, admin for anyone | Admin skips past/horizon/limit. Raises `player_not_approved`, `unknown_block`, `invalid_lane`, `day_closed` / `invalid_block` (via `block_day_status`), `date_past`, `beyond_horizon`, `limit_reached`, `blocked_by_priority`, `blocked_by_rental` (via `rental_occurrences`), `slot_taken`. |
 | `cancel_reservation(id, note?, notify?)` | owner before the block starts, admin anytime | `too_late`, `not_allowed`; sets `cancelled_via` app / admin. |
-| `move_reservation(...)`, `move_day_reservations(...)` | admin | Re-seat one / all reservations of a day; same collision rules as create. `slot_taken`, `blocked_by_*`. |
+| `move_reservation(...)`, `move_day_reservations(...)` | admin | Re-seat one / all reservations of a day; same collision rules as create (rentals resolved by `rental_occurrences`). `slot_taken`, `blocked_by_*`. |
 | `cancel_block_day_reservations(date, block, note?)` | admin | Bulk cancel before hiding a template block for one day. |
 | `set_day_override(date, closed, reason?, block_ids?)` | admin | Upsert the override and cancel the reservations it displaces. |
 | `monthly_attendance(year, month)` | admin | Rows (player, club name, attended) — uncancelled reservation = attendance. |
 | `admin_list_tenants()`, `approve_tenant(id)`, `reject_tenant(id)`, `switch_tenant(id)` | superadmin (`not_allowed` otherwise) | `reject_tenant`: pending only (`not_pending`), refuses while the caller is switched into it (`switch_home_first`), deletes the whole tenant. |
 
 Internal, no EXECUTE for app roles: `current_tenant_id`, `is_*`,
-`block_day_status`, `cancel_stranded_reservations`,
-`cancel_res_for_priority_slot`, `notify_webhook_config`, `seed_demo_member`
-(service_role only — Play-review demo account).
+`block_day_status`, `cancel_stranded_reservations`, `rental_occurs`,
+`rental_occurrences`, `cancel_res_for_priority_slot`,
+`notify_webhook_config`, `seed_demo_member` (service_role only —
+Play-review demo account).
 
 `block_day_status(tenant, date, block)` → `open` | `day_closed` |
 `invalid_block` | `unknown_block` is the one definition of "this block is
 bookable on this date" (override wins over the weekly template; an inactive
 block counts only when an override lists it). `create_reservation` and the
 cascade below both use it.
+
+`rental_occurrences(tenant, date)` → (`rental_id`, `override_id`,
+`renter_name`, `lanes`, `starts_at`, `ends_at`) is the one definition of
+"which rentals block this date": every top-level row that occurs on it
+(`rental_occurs` — one-time date, or weekday inside the validity window),
+with the date's exception row overriding lanes/times and a `skipped` one
+removing the occurrence. `create_reservation`, `move_reservation` and the
+rental cascade all use it; the client mirrors it in `rentalsOn`.
 
 ## Cascades — what cancels reservations
 
@@ -92,7 +101,7 @@ the notify function mails "Trénink zrušen" with the note as the reason
 
 | Event | Mechanism | Which reservations | Note |
 |---|---|---|---|
-| rental insert/update | trigger `rental_conflicts` | its lanes, overlapping time, date ≥ today | `pronájem: <renter>` |
+| rental insert/update; exception insert/update/delete | trigger `rental_conflicts` | series: every date ≥ today it occurs on, as resolved by `rental_occurrences` (exceptions applied); exception: its date (and the date it left) — enlarging, un-skipping or deleting an exception cancels what was booked in the freed slots, a shrinking one only frees them | `pronájem: <renter>` |
 | priority slot insert/update | trigger `priority_conflicts` → `cancel_res_for_priority_slot` | type's lanes, overlapping time, same date, not away | `zápas: <away>` or the type name |
 | slot type update (lanes) | trigger `slot_type_conflicts` | re-runs the above for the type's slots | as above |
 | `set_day_override` | inside the RPC | that date: all when closed, else blocks not in `block_ids` | reason or `změna rozvrhu` |
@@ -101,7 +110,9 @@ the notify function mails "Trénink zrušen" with the note as the reason
 
 Other triggers: `tenant_seed_defaults` (settings row + builtin types for a
 new tenant), `match_uklid_sync` (keeps a match's úklid child in step with
-`prep_minutes`), `notify_profiles` / `notify_reservations` /
+`prep_minutes`), `rental_exception_guard` (before insert/update of a rental
+exception: validation + name/colour copy), `rental_series_changed` (after
+update of a weekly rental: prune orphaned exceptions, propagate name/colour), `notify_profiles` / `notify_reservations` /
 `notify_tenants` (`notify_webhook` → the notify function).
 
 ## Edge functions
