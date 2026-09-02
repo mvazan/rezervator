@@ -7,6 +7,7 @@ import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/kiosk/kiosk_board_view.dart';
 import 'package:rezervator/features/kiosk/kiosk_shell.dart';
+import 'package:rezervator/features/schedule/widgets/calendar_board.dart';
 
 void main() {
   const settings = ScheduleSettings(
