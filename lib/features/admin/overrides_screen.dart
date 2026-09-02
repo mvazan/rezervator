@@ -89,19 +89,8 @@ class OverridesScreen extends ConsumerWidget {
     if (!confirmed || !context.mounted) return;
     await tryAction(
       context,
-      () async {
-        if (isTraining) {
-          await Api.setDayOverride(
-              date: override.date,
-              closed: false,
-              reason: '',
-              blockIds: templateIds);
-        } else {
-          await Api.setDayOverride(
-              date: override.date, closed: true, reason: '');
-        }
-        await Api.deleteDayOverride(override.date);
-      },
+      () => Api.restoreDayToTemplate(override.date,
+          isTraining: isTraining, templateIds: templateIds),
       success: 'Den vrácen k týdennímu rozvrhu.',
       errorText: friendlyDbError,
     );

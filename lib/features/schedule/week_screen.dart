@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/ui.dart';
+import '../../data/clock.dart';
 import '../../data/providers.dart';
+import '../../data/week_schedule.dart';
 import '../../domain/models.dart';
 import '../../domain/schedule.dart';
 import '../../domain/calendar_layout.dart' show hourMinuteAt;
@@ -136,10 +138,6 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
         _dayIndex = Day.fromDateTime(DateTime.now()).weekday - 1;
       }
     });
-    // Views cannot stream (see playersProvider doc), so an explicit refresh
-    // on navigation is the only way approved-after-start players stop
-    // rendering as '?' without a full app restart.
-    ref.invalidate(playersProvider);
   }
 
   /// Called by [DayPagerView] when a swipe crosses the Monday/Sunday edge:
@@ -151,14 +149,13 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
       _weekOffset += weekDelta;
       _dayIndex = landingDayIndex;
     });
-    ref.invalidate(playersProvider);
   }
 
   void _selectDay(int dayIndex) => setState(() => _dayIndex = dayIndex);
 
   @override
   Widget build(BuildContext context) {
-    final nowDt = DateTime.now();
+    final nowDt = ref.watch(nowProvider).value ?? DateTime.now();
     final todayDay = Day.fromDateTime(nowDt);
     final now = HourMinute(nowDt.hour, nowDt.minute);
     final monday = _monday(todayDay);
@@ -169,12 +166,12 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
 
     final settings =
         ref.watch(settingsProvider).value ?? ScheduleSettings.defaults;
-    final timeBlocks = ref.watch(timeBlocksProvider);
+    final view = ref.watch(weekScheduleProvider(monday));
+    // Still watched here for the admin edit closures and the pager's
+    // sentinel weeks; the grid itself arrives composed from the provider.
     final overrides = ref.watch(dayOverridesProvider).value ?? const [];
     final priority = ref.watch(prioritySlotsProvider);
     final rentals = ref.watch(rentalsProvider).value ?? const [];
-    final weekReservations = ref.watch(weekReservationsProvider(monday));
-    final players = ref.watch(playersProvider).value ?? const [];
     final me = ref.watch(myProfileProvider).value;
     final mine = ref.watch(myActiveReservationsProvider).value ?? const [];
 
@@ -257,7 +254,7 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
             ),
     );
 
-    if (timeBlocks.isLoading) {
+    if (view.isLoading) {
       return Column(
         children: [
           header,
@@ -266,7 +263,7 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
       );
     }
 
-    if (timeBlocks.hasError) {
+    if (view.hasError) {
       return Column(
         children: [
           header,
@@ -289,37 +286,21 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
       );
     }
 
-    final dbBlocks = timeBlocks.value ?? const [];
-    final blocksFromDb = dbBlocks.isNotEmpty;
-    final blocks = blocksFromDb ? dbBlocks : defaultTimeBlocks();
-    final reservations = weekReservations.value ?? const [];
-    // Cells stay inert while the placeholder grid is shown (placeholder ids
-    // like 'default-N' are not UUIDs — the RPC would reject them with an
-    // unmapped error; the placeholder only shows the shape of the schedule
-    // before the backend is seeded) and while this week's reservations are
-    // still loading/erroring (booking against a stale/absent view of who
-    // already holds the slot would race the RPC's own authoritative check).
-    final interactive = blocksFromDb && weekReservations.hasValue && me != null;
-
-    final week = buildWeekSchedule(
-      monday: monday,
-      today: todayDay,
-      now: now,
-      settings: settings,
-      blocks: blocks,
-      overrides: overrides,
-      priority: priority,
-      rentals: rentals,
-      reservations: reservations,
-    );
+    final wv = view.value!;
+    final blocks = wv.blocks;
+    final blocksFromDb = wv.blocksFromDb;
+    final dbBlocks = blocksFromDb ? blocks : const <TimeBlock>[];
+    final reservations = wv.reservations;
+    // The view already withholds interactivity on the placeholder grid and
+    // while this week's reservations are loading; a signed-in profile is
+    // the app's own extra condition.
+    final interactive = wv.interactive && me != null;
+    final week = wv.week;
     final myCount = me == null
         ? 0
         : activeReservationCount(mine, me.id, todayDay);
-    // Prefer the board nick when set, matching the kiosk board.
-    final nameById = {
-      for (final p in players) p.id: p.nick.isNotEmpty ? p.nick : p.displayName,
-    };
-    final clubColorById = {for (final p in players) p.id: p.clubColor};
+    final nameById = wv.nameById;
+    final clubColorById = wv.clubColorById;
     final myCountByIndex = [
       for (var i = 0; i < 7; i++)
         _myLiveCountOn(mine, me?.id, monday.addDays(i)),

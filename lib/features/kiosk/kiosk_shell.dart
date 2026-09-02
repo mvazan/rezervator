@@ -13,6 +13,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
 import '../../core/widgets/gradient_button.dart';
+import '../../data/clock.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
 import '../../domain/schedule.dart'
@@ -21,7 +22,6 @@ import 'kiosk_board_view.dart';
 import 'name_picker.dart';
 
 const _idleTimeout = Duration(seconds: 60);
-const _clockInterval = Duration(seconds: 20);
 
 class KioskShell extends ConsumerStatefulWidget {
   const KioskShell({super.key});
@@ -32,8 +32,6 @@ class KioskShell extends ConsumerStatefulWidget {
 
 class _KioskShellState extends ConsumerState<KioskShell> {
   Timer? _idleTimer;
-  Timer? _clockTimer;
-  DateTime _now = DateTime.now();
   PlayerName? _selected;
   final _boardKey = GlobalKey<KioskBoardViewState>();
 
@@ -41,15 +39,11 @@ class _KioskShellState extends ConsumerState<KioskShell> {
   void initState() {
     super.initState();
     _touch();
-    _clockTimer = Timer.periodic(_clockInterval, (_) {
-      if (mounted) setState(() => _now = DateTime.now());
-    });
   }
 
   @override
   void dispose() {
     _idleTimer?.cancel();
-    _clockTimer?.cancel();
     super.dispose();
   }
 
@@ -70,7 +64,6 @@ class _KioskShellState extends ConsumerState<KioskShell> {
     // because the board owns its own PageController; there's no offset
     // field on this shell to reset via rebuild the way _weekOffset used to.
     _boardKey.currentState?.resetToToday();
-    ref.invalidate(playersProvider);
   }
 
   Future<void> _openPicker() async {
@@ -105,7 +98,6 @@ class _KioskShellState extends ConsumerState<KioskShell> {
           body: Column(
             children: [
               _StatusBar(
-                now: _now,
                 selected: _selected,
                 onReserve: _openPicker,
                 onClearSelection: _clearSelection,
@@ -124,15 +116,15 @@ class _KioskShellState extends ConsumerState<KioskShell> {
   }
 }
 
+/// Clock + today's headline. Watches [nowProvider] itself, so a minute tick
+/// repaints this strip only — never the shell or the board beneath it.
 class _StatusBar extends ConsumerWidget {
   const _StatusBar({
-    required this.now,
     required this.selected,
     required this.onReserve,
     required this.onClearSelection,
   });
 
-  final DateTime now;
   final PlayerName? selected;
   final VoidCallback onReserve;
   final VoidCallback onClearSelection;
@@ -188,6 +180,7 @@ class _StatusBar extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
+    final now = ref.watch(nowProvider).value ?? DateTime.now();
     final todayDay = Day.fromDateTime(now);
     final clock =
         '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';

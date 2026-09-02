@@ -246,4 +246,10 @@ framework, zmena histórie migrácií (len snapshot vedľa nej).
   v doméne, `dropFits`, `clubTint`; kiosk rešpektuje limit rezervácií.
   266 testov. Vynechané: swatche v clubs/slot_types/color_picker,
   `move_reservations_dialog` lane pravidlá.
+- **Plán 4 (dátová vrstva)** — hotový 2026-09-02 na vetve `cleanup-4-data`:
+  `nowProvider` (jedny hodiny, kiosk timer preč), `weekScheduleProvider`
+  (`WeekView` pre week screen aj kiosk), `playersProvider` sa obnovuje sám,
+  `Api.deleteTimeBlock → bool`, `Api.restoreDayToTemplate`. 272 testov.
+  Vynechané: side effecty v build (anchor `jumpTo`, kiosk `_window`),
+  `move_reservations_dialog` `ref.read` v build.
 
