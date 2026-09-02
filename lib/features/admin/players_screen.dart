@@ -128,6 +128,13 @@ class PlayersScreen extends ConsumerWidget {
     ];
   }
 
+  /// Club name for rows outside the club sections (pending, kiosk) — from
+  /// the roster, never the stale `profiles.club` text.
+  Widget? _clubSubtitle(Profile p, List<Club> clubs) {
+    final name = clubNameOf(p.clubId, clubs);
+    return name.isEmpty ? null : Text(name);
+  }
+
   /// "správce · „nick“" (either half may be absent). The club is shown by
   /// the section header, so it stays out of the row.
   String? _subtitle(Profile p) {
@@ -180,7 +187,7 @@ class PlayersScreen extends ConsumerWidget {
                 Card(
                   child: ListTile(
                     title: Text(p.displayName),
-                    subtitle: p.club.isEmpty ? null : Text(p.club),
+                    subtitle: _clubSubtitle(p, clubs),
                     trailing: FilledButton(
                       onPressed: () => tryAction(
                         context,
@@ -256,7 +263,7 @@ class PlayersScreen extends ConsumerWidget {
               for (final p in kiosks)
                 ListTile(
                   title: Text(p.displayName),
-                  subtitle: p.club.isEmpty ? null : Text(p.club),
+                  subtitle: _clubSubtitle(p, clubs),
                   trailing: TextButton(
                     onPressed: () => _returnToPlayer(context, p),
                     child: const Text('Vrátit mezi hráče'),

@@ -9,7 +9,8 @@ void main() {
   const me = Profile(
     id: 'me',
     displayName: 'Já Hráč',
-    club: 'TJ Sokol',
+    club: '',
+    clubId: 'c1',
     email: 'me@example.com',
     role: Role.player,
     status: ProfileStatus.approved,
@@ -20,6 +21,9 @@ void main() {
     return ProviderScope(
       overrides: [
         myProfileProvider.overrideWith((ref) => Stream.value(profile)),
+        clubsProvider.overrideWith(
+          (ref) => Stream.value(const [Club(id: 'c1', name: 'TJ Sokol')]),
+        ),
       ],
       child: const MaterialApp(home: ProfileScreen()),
     );

@@ -318,4 +318,20 @@ void main() {
       expect(row.club, 'KK');
     });
   });
+
+  group('clubNameOf', () {
+    const clubs = [
+      Club(id: 'c1', name: 'Sokol', colorIndex: 1),
+      Club(id: 'c2', name: 'Veverky', colorIndex: 2),
+    ];
+
+    test('resolves a known club id to its current name', () {
+      expect(clubNameOf('c2', clubs), 'Veverky');
+    });
+
+    test('is empty for no club and for a deleted club', () {
+      expect(clubNameOf(null, clubs), '');
+      expect(clubNameOf('gone', clubs), '');
+    });
+  });
 }

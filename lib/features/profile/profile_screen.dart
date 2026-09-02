@@ -4,6 +4,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../core/ui.dart';
 import '../../data/providers.dart';
+import '../../domain/models.dart';
 import 'changelog.dart';
 
 /// App version/build, read once from the platform — drives the version line
@@ -57,6 +58,7 @@ class ProfileScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final profile = ref.watch(myProfileProvider).value;
+    final clubs = ref.watch(clubsProvider).value ?? const <Club>[];
 
     return Scaffold(
       appBar: AppBar(title: const Text('Můj profil')),
@@ -75,7 +77,9 @@ class ProfileScreen extends ConsumerWidget {
                       ListTile(
                         title: const Text('Oddíl'),
                         subtitle: Text(
-                          profile.club.isEmpty ? '—' : profile.club,
+                          clubNameOf(profile.clubId, clubs).isEmpty
+                              ? '—'
+                              : clubNameOf(profile.clubId, clubs),
                         ),
                       ),
                       const Padding(

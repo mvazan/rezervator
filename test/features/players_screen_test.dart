@@ -135,4 +135,22 @@ void main() {
     expect(find.text('Miloš (doma)'), findsOneWidget);
     expect(find.text('Zdeněk'), findsOneWidget);
   });
+
+  testWidgets('pending and kiosk rows show the club from the roster, not the '
+      'stale legacy text', (tester) async {
+    const pending = Profile(
+      id: 'pend',
+      displayName: 'Nováček',
+      club: 'Staré jméno',
+      email: 'pend@example.com',
+      role: Role.player,
+      status: ProfileStatus.pending,
+      clubId: 'c2',
+    );
+    await tester.pumpWidget(app([admin, pending]));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Veverky'), findsOneWidget);
+    expect(find.text('Staré jméno'), findsNothing);
+  });
 }
