@@ -37,6 +37,23 @@ update profiles set superadmin = true,
   home_tenant_id = '00000000-0000-0000-0000-000000000001'
 where id = '10000000-0000-0000-0000-000000000004';
 
+-- Privileges as code (0017/0020): anon has nothing, the players view is
+-- read-only, app tables carry plain DML for authenticated.
+do $$
+begin
+  if has_table_privilege('anon', 'public.reservations', 'select') then
+    raise exception 'FAIL: anon may read reservations';
+  end if;
+  if has_table_privilege('authenticated', 'public.players', 'insert')
+     or has_table_privilege('authenticated', 'public.players', 'update') then
+    raise exception 'FAIL: players view is writable for authenticated';
+  end if;
+  if not has_table_privilege('authenticated', 'public.time_blocks', 'insert') then
+    raise exception 'FAIL: authenticated lacks DML on time_blocks';
+  end if;
+  raise notice 'OK: privileges match 0017/0020';
+end $$;
+
 -- Tenant A creates a block; tenant B must not see it.
 set local role authenticated;
 set local request.jwt.claims =
