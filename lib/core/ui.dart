@@ -82,6 +82,8 @@ String friendlyDbError(Object error) {
     'blocked_by_match': 'V tomhle čase se hraje zápas.',
     'blocked_by_priority': 'V tomhle čase je dráha blokovaná.',
     'blocked_by_rental': 'Dráha je v tomhle čase pronajatá.',
+    'rental_exception_invalid':
+        'Výjimku lze zadat jen na den pravidelného pronájmu.',
     'too_late': 'Trénink už začal — rezervaci může zrušit jen správce.',
     'unknown_block': 'Tenhle blok už neplatí — mrkni na aktuální rozvrh.',
     'invalid_block': 'Tenhle blok už neplatí — mrkni na aktuální rozvrh.',
