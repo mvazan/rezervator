@@ -239,4 +239,11 @@ framework, zmena histórie migrácií (len snapshot vedľa nej).
   `v_caller.tenant_id` vs `current_tenant_id()` (kozmetika, obe sú
   ekvivalentné) a prepis `cancel` EF na RPC (RPC vyžaduje `auth.uid()`).
   Nasadenie nepotrebuje žiadny ručný krok na prode.
+- **Plán 3 (doména nasáva pravidlá)** — hotový 2026-09-02 na vetve
+  `cleanup-3-domain`: `domain/day_edit.dart` (plánovač úprav dňa z
+  `block_dialog`), `labels.dart`, `limits.dart`, `grouping.dart`,
+  `canCancel(isAdmin:)`, `bookableSlotCount`, `isDayOpen`/`nextTrainingDay`
+  v doméne, `dropFits`, `clubTint`; kiosk rešpektuje limit rezervácií.
+  266 testov. Vynechané: swatche v clubs/slot_types/color_picker,
+  `move_reservations_dialog` lane pravidlá.
 
