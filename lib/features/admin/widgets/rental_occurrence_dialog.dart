@@ -106,13 +106,18 @@ class _RentalOccurrenceDialogState extends State<RentalOccurrenceDialog> {
         _note.text.trim() == parent.note;
   }
 
-  /// Any lane outside the series', or a longer window: the server will
-  /// cancel colliding reservations, and the snack should say so.
+  /// Does the new shape cover anything the date does not block right now?
+  /// The baseline is what is in force today — the exception row being
+  /// edited (a skipped one blocks nothing), else the series. Any new lane or
+  /// a longer window makes the server cancel colliding reservations, and
+  /// the snack should say so.
   bool _enlarges(List<int> lanes, HourMinute start, HourMinute end) {
-    final parent = widget.parent;
-    return lanes.any((l) => !parent.lanes.contains(l)) ||
-        start.compareTo(parent.startsAt) < 0 ||
-        end.compareTo(parent.endsAt) > 0;
+    final existing = widget.existing;
+    if (existing != null && existing.skipped) return true;
+    final base = existing ?? widget.parent;
+    return lanes.any((l) => !base.lanes.contains(l)) ||
+        start.compareTo(base.startsAt) < 0 ||
+        end.compareTo(base.endsAt) > 0;
   }
 
   /// Validates and saves; null keeps the dialog open (the snack said why).
@@ -138,7 +143,14 @@ class _RentalOccurrenceDialogState extends State<RentalOccurrenceDialog> {
     }
     final lanes = _lanes.toList()..sort();
     if (_sameAsSeries(lanes, start, end)) {
-      snack(context, 'Shoduje se s pravidelným pronájmem.');
+      // An exception that says the same as the series is no exception —
+      // the way back to the series is Zrušit výjimku.
+      snack(
+        context,
+        widget.existing == null
+            ? 'Shoduje se s pravidelným pronájmem.'
+            : 'Shoduje se s pravidelným pronájmem — místo toho zruš výjimku.',
+      );
       return null;
     }
     final enlarges = _enlarges(lanes, start, end);

@@ -126,18 +126,28 @@ void main() {
     expect(requests, isEmpty);
   });
 
-  testWidgets('editing an exception PATCHes the full effective row; a '
-      'change inside the series does not mention cancellations', (
-    tester,
-  ) async {
+  testWidgets('editing an exception PATCHes the full effective row; '
+      'shrinking it does not mention cancellations', (tester) async {
+    final twoLanes = Rental(
+      id: 'c1',
+      renterName: 'Firma X',
+      lanes: const [1, 2],
+      date: thursday,
+      weekday: null,
+      startsAt: const HourMinute(18, 0),
+      endsAt: const HourMinute(20, 0),
+      validFrom: null,
+      validUntil: null,
+      note: '',
+      color: 3,
+      parentId: 'n1',
+    );
     await open(
         tester,
         RentalOccurrenceDialog(
-            parent: parent, date: thursday, existing: child, laneCount: 3));
-    // c1 blocks lane 1 only; move the exception to lane 2.
+            parent: parent, date: thursday, existing: twoLanes, laneCount: 3));
+    // c1 blocks lanes 1 and 2; keep lane 2 only.
     await tester.tap(find.text('Dráha 1'));
-    await tester.pump();
-    await tester.tap(find.text('Dráha 2'));
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Uložit'));
@@ -157,22 +167,61 @@ void main() {
     expect(find.text('Výjimka pronájmu'), findsNothing);
   });
 
-  testWidgets('a lane outside the series says colliding reservations were '
-      'cancelled', (tester) async {
+  testWidgets('a lane the current exception did not block — even one inside '
+      'the series — says colliding reservations were cancelled', (
+    tester,
+  ) async {
+    // A three-lane series, so lanes [1, 2] are inside it yet not the whole
+    // of it (the whole series would be refused as "no exception").
+    final wide = Rental(
+      id: 'n1',
+      renterName: 'Firma X',
+      lanes: const [1, 2, 3],
+      date: null,
+      weekday: DateTime.thursday,
+      startsAt: const HourMinute(18, 0),
+      endsAt: const HourMinute(20, 0),
+      validFrom: null,
+      validUntil: null,
+      note: '',
+      color: 3,
+    );
     await open(
         tester,
         RentalOccurrenceDialog(
-            parent: parent, date: thursday, existing: child, laneCount: 3));
-    await tester.tap(find.text('Dráha 3'));
+            parent: wide, date: thursday, existing: child, laneCount: 3));
+    // c1 blocks lane 1 only; lane 2 was bookable during the exception.
+    await tester.tap(find.text('Dráha 2'));
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Uložit'));
     await tester.pumpAndSettle();
 
     final body = jsonDecode(patchOf('c1').body) as Map<String, dynamic>;
-    expect(body['lanes'], [1, 3]);
+    expect(body['lanes'], [1, 2]);
     expect(find.text('Výjimka uložena. Kolidující rezervace byly zrušeny.'),
         findsOneWidget);
+  });
+
+  testWidgets('values equal to the series on an existing exception are '
+      'refused and point at Zrušit výjimku', (tester) async {
+    await open(
+        tester,
+        RentalOccurrenceDialog(
+            parent: parent, date: thursday, existing: child, laneCount: 3));
+    // c1 blocks lane 1; with lane 2 back the row says the same as the series.
+    await tester.tap(find.text('Dráha 2'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Uložit'));
+    await tester.pumpAndSettle();
+
+    expect(
+        find.text(
+            'Shoduje se s pravidelným pronájmem — místo toho zruš výjimku.'),
+        findsOneWidget);
+    expect(requests, isEmpty);
+    expect(find.text('Výjimka pronájmu'), findsOneWidget);
   });
 
   testWidgets("Vynechat tento den saves skipped with the series' lanes and "
