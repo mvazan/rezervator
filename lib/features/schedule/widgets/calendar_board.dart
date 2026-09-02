@@ -9,6 +9,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../../../core/theme.dart';
 import '../../../core/ui.dart';
 import '../../../domain/calendar_layout.dart';
 import '../../../domain/models.dart';
@@ -373,8 +374,6 @@ class BoardColumnHeader extends StatelessWidget {
   /// for this day — a packed column may have no empty space left to tap.
   final VoidCallback? onAdd;
 
-  static const _gradientColors = [Color(0xFF6366F1), Color(0xFF22D3EE)];
-
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -401,7 +400,7 @@ class BoardColumnHeader extends StatelessWidget {
       clipBehavior: Clip.hardEdge,
       decoration: BoxDecoration(
         gradient:
-            isToday ? const LinearGradient(colors: _gradientColors) : null,
+            isToday ? const LinearGradient(colors: brandGradientColors) : null,
         color: isToday ? null : scheme.surfaceContainerHigh,
       ),
       child: Column(

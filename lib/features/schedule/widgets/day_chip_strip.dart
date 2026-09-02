@@ -7,6 +7,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../../../core/theme.dart';
 import '../../../core/ui.dart';
 import '../../../domain/schedule.dart';
 
@@ -58,7 +59,7 @@ class DayChipStrip extends StatelessWidget {
     final decoration = BoxDecoration(
       borderRadius: BorderRadius.circular(14),
       gradient: selected
-          ? const LinearGradient(colors: [Color(0xFF6366F1), Color(0xFF22D3EE)])
+          ? const LinearGradient(colors: brandGradientColors)
           : null,
       color: selected ? null : scheme.surfaceContainerHigh,
     );

@@ -4,6 +4,8 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../theme.dart';
+
 class GradientButton extends StatelessWidget {
   const GradientButton({
     super.key,
@@ -18,7 +20,6 @@ class GradientButton extends StatelessWidget {
   final IconData? icon;
   final double minHeight;
 
-  static const _gradientColors = [Color(0xFF6366F1), Color(0xFF22D3EE)];
 
   @override
   Widget build(BuildContext context) {
@@ -59,7 +60,7 @@ class GradientButton extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: radius,
         gradient: enabled
-            ? const LinearGradient(colors: _gradientColors)
+            ? const LinearGradient(colors: brandGradientColors)
             : null,
         color: enabled ? null : scheme.onSurface.withValues(alpha: 0.12),
       ),
