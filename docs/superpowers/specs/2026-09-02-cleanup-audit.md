@@ -252,4 +252,9 @@ framework, zmena histórie migrácií (len snapshot vedľa nej).
   `Api.deleteTimeBlock → bool`, `Api.restoreDayToTemplate`. 272 testov.
   Vynechané: side effecty v build (anchor `jumpTo`, kiosk `_window`),
   `move_reservations_dialog` `ref.read` v build.
+- **Plán 5 (UI dedup rozvrhu)** — hotový 2026-09-02 na vetve `cleanup-5-ui`:
+  jeden `ScheduleDayColumn` (týždenný kalendár + kiosk), kiosk lane rows ako
+  `SlotTile` row variant, `WeekHeader` + `ScheduleActions` z `WeekScreen`,
+  `SlotCallbacks`/`CalendarAdminHooks`, zdieľané konštanty. 272 testov bez
+  zmeny. Vynechané: anchor `jumpTo` z build, kiosk `_window` snapshot.
 
