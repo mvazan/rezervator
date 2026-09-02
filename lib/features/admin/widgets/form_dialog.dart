@@ -18,6 +18,7 @@ class FormDialog<T> extends StatefulWidget {
     this.cancelLabel = 'Zrušit',
     this.crossAxisAlignment = CrossAxisAlignment.start,
     this.leadingActions = const [],
+    this.saveEnabled = true,
   });
 
   final String title;
@@ -38,6 +39,11 @@ class FormDialog<T> extends StatefulWidget {
 
   /// Extra actions rendered before Zrušit (e.g. a destructive button).
   final List<Widget> leadingActions;
+
+  /// False disables Uložit up front (a form whose current input can never
+  /// save — no start picked, a series past midnight); validation that
+  /// needs a message stays inside [onSave].
+  final bool saveEnabled;
 
   @override
   State<FormDialog<T>> createState() => _FormDialogState<T>();
@@ -75,7 +81,7 @@ class _FormDialogState<T> extends State<FormDialog<T>> {
           child: Text(widget.cancelLabel),
         ),
         FilledButton(
-          onPressed: _saving ? null : _save,
+          onPressed: _saving || !widget.saveEnabled ? null : _save,
           child: Text(_saving ? widget.savingLabel : widget.saveLabel),
         ),
       ],

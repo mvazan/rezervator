@@ -135,6 +135,32 @@ void main() {
     });
   });
 
+  group('FormDialog saveEnabled', () {
+    testWidgets('false disables Uložit without touching onSave',
+        (tester) async {
+      var saves = 0;
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: FormDialog<bool>(
+            title: 'Generátor',
+            saveEnabled: false,
+            onSave: () async {
+              saves++;
+              return true;
+            },
+            children: const [Text('POLE')],
+          ),
+        ),
+      ));
+      final button = tester.widget<FilledButton>(
+          find.widgetWithText(FilledButton, 'Uložit'));
+      expect(button.onPressed, isNull);
+      await tester.tap(find.text('Uložit'), warnIfMissed: false);
+      await tester.pump();
+      expect(saves, 0);
+    });
+  });
+
   group('form fields', () {
     testWidgets('LaneChips reports the toggled selection', (tester) async {
       Set<int>? got;

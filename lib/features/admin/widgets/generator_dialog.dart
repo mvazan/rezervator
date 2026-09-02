@@ -83,6 +83,9 @@ class _GeneratorDialogState extends State<GeneratorDialog> {
     return FormDialog<bool>(
       title: 'Vygenerovat bloky',
       saveLabel: 'Vytvořit',
+      // Disabled up front while the series cannot be created (no start, past
+      // midnight, colliding) — the conflict text below says why.
+      saveEnabled: times != null && conflicts.isEmpty,
       onSave: _save,
       children: [
         PickerTile(
