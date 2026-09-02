@@ -21,6 +21,7 @@ import '../../../domain/labels.dart';
 import '../../../domain/models.dart';
 import '../../../domain/palette.dart';
 import '../../../domain/schedule.dart';
+import '../schedule_callbacks.dart';
 import 'calendar_board.dart';
 
 /// A 60-minute block gets this much height per lane at the comfortable
@@ -63,11 +64,7 @@ class ScheduleDayColumn extends StatelessWidget {
     required this.halfHourMarks,
     required this.nowMinute,
     required this.laneRow,
-    this.onEditBlock,
-    this.onAddBlockInGap,
-    this.onEditPrioritySlot,
-    this.onMoveBlock,
-    this.onMovePrioritySlot,
+    this.admin = CalendarAdminHooks.none,
   });
 
   final DaySchedule day;
@@ -80,15 +77,20 @@ class ScheduleDayColumn extends StatelessWidget {
   final int? nowMinute;
   final LaneRowBuilder laneRow;
 
-  /// Admin-only hooks (null = read-only column).
-  final void Function(Day date, TimeBlock block)? onEditBlock;
-  final void Function(Day date, HourMinute start, HourMinute end)?
-      onAddBlockInGap;
-  final void Function(Day date, PrioritySlot slot)? onEditPrioritySlot;
-  final void Function(Day date, TimeBlock block, HourMinute newStart)?
-      onMoveBlock;
-  final void Function(Day date, PrioritySlot slot, HourMinute newStart)?
-      onMovePrioritySlot;
+  /// Admin gestures ([CalendarAdminHooks.none] = read-only column; the
+  /// header-level onAddForDay is the board's business, not the column's).
+  final CalendarAdminHooks admin;
+
+  void Function(Day date, TimeBlock block)? get onEditBlock =>
+      admin.onEditBlock;
+  void Function(Day date, HourMinute start, HourMinute end)?
+      get onAddBlockInGap => admin.onAddBlockInGap;
+  void Function(Day date, PrioritySlot slot)? get onEditPrioritySlot =>
+      admin.onEditPrioritySlot;
+  void Function(Day date, TimeBlock block, HourMinute newStart)?
+      get onMoveBlock => admin.onMoveBlock;
+  void Function(Day date, PrioritySlot slot, HourMinute newStart)?
+      get onMovePrioritySlot => admin.onMovePrioritySlot;
 
   @override
   Widget build(BuildContext context) {

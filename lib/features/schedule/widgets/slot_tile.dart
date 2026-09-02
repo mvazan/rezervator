@@ -14,6 +14,7 @@ import '../../../domain/labels.dart';
 import '../../../domain/models.dart';
 import '../../../domain/palette.dart';
 import '../../../domain/schedule.dart';
+import '../schedule_callbacks.dart';
 
 enum SlotTileSize {
   /// Week calendar: one clipped line, lane digit drawn beside the tile.
@@ -393,9 +394,7 @@ Widget slotTileFor({
   required Map<String, String> nameById,
   required Map<String, int> clubColorById,
   required bool interactive,
-  required void Function(Day, TimeBlock, int lane) onBook,
-  required void Function(Day, TimeBlock, Reservation, {required bool ownFuture})
-  onCancel,
+  required SlotCallbacks slot,
 }) {
   final state = day.slot(block.id, lane);
   switch (state) {
@@ -421,7 +420,8 @@ Widget slotTileFor({
         isMine: isMine,
         clubColorIndex: clubColorById[reservation.playerId] ?? -1,
         onTap: cancellable
-            ? () => onCancel(day.date, block, reservation, ownFuture: ownFuture)
+            ? () =>
+                slot.onCancel(day.date, block, reservation, ownFuture: ownFuture)
             : null,
       );
     case FreeSlot():
@@ -449,7 +449,7 @@ Widget slotTileFor({
         state: state,
         size: size,
         quiet: !normallyBookable,
-        onTap: bookable ? () => onBook(day.date, block, lane) : null,
+        onTap: bookable ? () => slot.onBook(day.date, block, lane) : null,
       );
   }
 }

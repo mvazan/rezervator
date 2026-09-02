@@ -10,6 +10,7 @@ import '../admin/matches_screen.dart' show MatchDialog;
 import '../admin/widgets/block_dialog.dart';
 import '../admin/widgets/blockage_dialog.dart';
 import '../admin/widgets/notify_choice_dialog.dart';
+import 'schedule_callbacks.dart';
 
 /// Every user action the schedule views can trigger, built once per
 /// WeekScreen build from the current data. The callbacks keep exactly the
@@ -66,6 +67,17 @@ class ScheduleActions {
 
   final Map<Day, DayOverride> _overrideByDate;
   final Map<String, TimeBlock> _blockById;
+
+  /// The two bundles the views take (see schedule_callbacks.dart).
+  SlotCallbacks get slot => SlotCallbacks(onBook: onBook, onCancel: onCancel);
+  CalendarAdminHooks get admin => CalendarAdminHooks(
+        onEditBlock: onEditBlock,
+        onAddBlockInGap: onAddBlockInGap,
+        onAddForDay: onAddForDay,
+        onEditPrioritySlot: onEditPrioritySlot,
+        onMoveBlock: onMoveBlock,
+        onMovePrioritySlot: onMovePrioritySlot,
+      );
 
   void Function(Day, TimeBlock, int lane) get onBook =>
       (Day date, TimeBlock block, int lane) =>

@@ -15,6 +15,7 @@ import 'package:flutter/rendering.dart' show ScrollDirection;
 import '../../domain/calendar_layout.dart';
 import '../../domain/models.dart';
 import '../../domain/schedule.dart';
+import 'schedule_callbacks.dart';
 import 'widgets/calendar_board.dart';
 import 'widgets/schedule_day_column.dart';
 import 'widgets/slot_tile.dart';
@@ -31,14 +32,8 @@ class WeekCalendarView extends StatefulWidget {
     required this.nameById,
     required this.clubColorById,
     required this.interactive,
-    required this.onBook,
-    required this.onCancel,
-    this.onEditBlock,
-    this.onAddBlockInGap,
-    this.onAddForDay,
-    this.onEditPrioritySlot,
-    this.onMoveBlock,
-    this.onMovePrioritySlot,
+    required this.slot,
+    this.admin = CalendarAdminHooks.none,
   });
 
   final WeekSchedule week;
@@ -50,23 +45,13 @@ class WeekCalendarView extends StatefulWidget {
   final Map<String, String> nameById;
   final Map<String, int> clubColorById;
   final bool interactive;
-  final void Function(Day, TimeBlock, int lane) onBook;
-  final void Function(Day, TimeBlock, Reservation, {required bool ownFuture})
-      onCancel;
+  final SlotCallbacks slot;
 
-  /// Admin-only (null otherwise). Click the card's time header (or a
-  /// blocking band) to edit FOR THAT DAY; tap empty column space or the
-  /// header ＋ to add; HOLD a card/band and drag it onto empty space to
+  /// Admin gestures (none for non-admins). Click the card's time header (or
+  /// a blocking band) to edit FOR THAT DAY; tap empty column space or the
+  /// day header to add; HOLD a card/band and drag it onto empty space to
   /// move it within the day (snap 5 min) — see [ScheduleDayColumn].
-  final void Function(Day date, TimeBlock block)? onEditBlock;
-  final void Function(Day date, HourMinute start, HourMinute end)?
-      onAddBlockInGap;
-  final void Function(Day date)? onAddForDay;
-  final void Function(Day date, PrioritySlot slot)? onEditPrioritySlot;
-  final void Function(Day date, TimeBlock block, HourMinute newStart)?
-      onMoveBlock;
-  final void Function(Day date, PrioritySlot slot, HourMinute newStart)?
-      onMovePrioritySlot;
+  final CalendarAdminHooks admin;
 
   @override
   State<WeekCalendarView> createState() => _WeekCalendarViewState();
@@ -226,11 +211,7 @@ class _WeekCalendarViewState extends State<WeekCalendarView> {
               ? widget.now.minutesFromMidnight
               : null,
           laneRow: _laneRow,
-          onEditBlock: widget.onEditBlock,
-          onAddBlockInGap: widget.onAddBlockInGap,
-          onEditPrioritySlot: widget.onEditPrioritySlot,
-          onMoveBlock: widget.onMoveBlock,
-          onMovePrioritySlot: widget.onMovePrioritySlot,
+          admin: widget.admin,
         ),
     ];
 
@@ -248,9 +229,9 @@ class _WeekCalendarViewState extends State<WeekCalendarView> {
               height: headerHeight,
               collapsed: _collapsed,
               subtitle: _freeLabel(day),
-              onAdd: widget.onAddForDay == null
+              onAdd: widget.admin.onAddForDay == null
                   ? null
-                  : () => widget.onAddForDay!(day.date),
+                  : () => widget.admin.onAddForDay!(day.date),
             ),
           ),
       ],
@@ -326,8 +307,7 @@ class _WeekCalendarViewState extends State<WeekCalendarView> {
               nameById: widget.nameById,
               clubColorById: widget.clubColorById,
               interactive: widget.interactive,
-              onBook: widget.onBook,
-              onCancel: widget.onCancel,
+              slot: widget.slot,
             ),
           ),
         ],
