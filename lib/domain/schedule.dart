@@ -393,12 +393,40 @@ bool canBook({
       myActiveCount < settings.maxActiveReservations;
 }
 
-/// Own reservation whose block has not started yet may be cancelled in-app.
-/// (Admin cancel-anything is a Phase 2 admin affordance.)
+/// Own reservation whose block has not started yet may be cancelled in-app;
+/// an admin may cancel ANY reservation (own or foreign, past or future).
+/// Client-side mirror of the cancel RPC's rules — honest UI only, the RPC
+/// remains the authority.
 bool canCancel({
   required SlotState state,
   required String myPlayerId,
-}) =>
-    state is ReservedSlot &&
-    !state.inPast &&
-    state.reservation.playerId == myPlayerId;
+  bool isAdmin = false,
+}) {
+  if (state is! ReservedSlot) return false;
+  if (isAdmin) return true;
+  return !state.inPast && state.reservation.playerId == myPlayerId;
+}
+
+/// Slots of [day] the caller could book right now — [canBook] over every
+/// block × lane. The "N volných" figure in day headers.
+int bookableSlotCount(
+  OpenDay day, {
+  required int myActiveCount,
+  required ScheduleSettings settings,
+  bool isAdmin = false,
+}) {
+  var count = 0;
+  for (final block in day.blocks) {
+    for (var lane = 1; lane <= day.laneCount; lane++) {
+      if (canBook(
+        state: day.slot(block.id, lane),
+        myActiveCount: myActiveCount,
+        settings: settings,
+        isAdmin: isAdmin,
+      )) {
+        count++;
+      }
+    }
+  }
+  return count;
+}

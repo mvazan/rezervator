@@ -158,17 +158,12 @@ class _WeekCalendarViewState extends State<WeekCalendarView> {
   /// Bookable-slot count for the header's quiet subtitle.
   String? _freeLabel(DaySchedule day) {
     if (day is! OpenDay) return null;
-    final isAdmin = widget.me?.isAdmin ?? false;
-    final freeCount = day.blocks
-        .expand((block) =>
-            [for (var lane = 1; lane <= day.laneCount; lane++) (block, lane)])
-        .where((entry) => canBook(
-              state: day.slot(entry.$1.id, entry.$2),
-              myActiveCount: widget.myCount,
-              settings: widget.settings,
-              isAdmin: isAdmin,
-            ))
-        .length;
+    final freeCount = bookableSlotCount(
+      day,
+      myActiveCount: widget.myCount,
+      settings: widget.settings,
+      isAdmin: widget.me?.isAdmin ?? false,
+    );
     return '$freeCount volných';
   }
 

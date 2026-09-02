@@ -531,6 +531,64 @@ void main() {
           isFalse);
     });
 
+    test('admin may cancel a foreign and a past reservation; a player may not',
+        () {
+      final started = ReservedSlot(res(date: monday, blockId: 'b1', lane: 1),
+          inPast: true, beyondHorizon: false);
+      final foreign = ReservedSlot(
+          res(playerId: 'p2', date: thursday, blockId: 'b1', lane: 1),
+          inPast: false,
+          beyondHorizon: false);
+      expect(canCancel(state: started, myPlayerId: 'p1', isAdmin: true), isTrue);
+      expect(canCancel(state: foreign, myPlayerId: 'p1', isAdmin: true), isTrue);
+      expect(canCancel(state: started, myPlayerId: 'p1'), isFalse);
+      expect(canCancel(state: foreign, myPlayerId: 'p1'), isFalse);
+      // There is nothing to cancel in an empty cell — admin or not.
+      expect(
+          canCancel(
+              state: const FreeSlot(inPast: false, beyondHorizon: false),
+              myPlayerId: 'p1',
+              isAdmin: true),
+          isFalse);
+    });
+
+    test('bookableSlotCount counts free future slots, respects the limit and '
+        'the admin exemption', () {
+      // Today (Tuesday) at 16:00: b1 (16–17) has started, b2 (17–18) has
+      // not; b2 lane 2 is taken by someone else → one bookable slot.
+      final day = build(
+        now: const HourMinute(16, 0),
+        reservations: [
+          res(playerId: 'p2', date: tuesday, blockId: 'b2', lane: 2),
+        ],
+      ).days[1] as OpenDay;
+      expect(bookableSlotCount(day, myActiveCount: 0, settings: settings), 1);
+      // At the limit nothing is bookable…
+      expect(
+          bookableSlotCount(day,
+              myActiveCount: settings.maxActiveReservations,
+              settings: settings),
+          0);
+      // …unless you're an admin, who also gets the started block's lanes.
+      expect(
+          bookableSlotCount(day,
+              myActiveCount: 99, settings: settings, isAdmin: true),
+          3);
+      // Beyond the horizon: nothing for a player, everything for an admin.
+      const tight = ScheduleSettings(
+        laneCount: 2,
+        trainingWeekdays: {1, 2, 4, 7},
+        bookingHorizonDays: 3,
+        maxActiveReservations: 2,
+      );
+      final sunday = build(s: tight).days[6] as OpenDay; // 5 days out
+      expect(bookableSlotCount(sunday, myActiveCount: 0, settings: tight), 0);
+      expect(
+          bookableSlotCount(sunday,
+              myActiveCount: 0, settings: tight, isAdmin: true),
+          4);
+    });
+
     test('admin may book past/beyond-horizon free slots and ignores limit', () {
       const past = FreeSlot(inPast: true, beyondHorizon: false);
       const far = FreeSlot(inPast: false, beyondHorizon: true);

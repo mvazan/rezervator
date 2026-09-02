@@ -265,8 +265,9 @@ Widget slotTileFor({
       final ownFuture = isMine && canCancel(state: state, myPlayerId: me.id);
       // Admins may cancel any reservation (own/foreign, past/future); a
       // non-admin may only cancel their own not-yet-started one.
-      final cancellable =
-          interactive && me != null && (me.isAdmin || ownFuture);
+      final cancellable = interactive &&
+          me != null &&
+          canCancel(state: state, myPlayerId: me.id, isAdmin: me.isAdmin);
       return SlotTile(
         state: state,
         size: size,
