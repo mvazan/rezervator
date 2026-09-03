@@ -14,6 +14,16 @@ class Release {
 }
 
 const appChangelog = <Release>[
+  Release('1.2.0', '3. 9. 2026', [
+    'Hráči bez e-mailu: správce je přidá a rezervuje jim, na kiosku si '
+        'vyberou své jméno. Účet jde později sloučit.',
+    'Propojení s Google Kalendářem — rezervace se zapisují samy, '
+        'i s připomínkami.',
+    'Rezervace mají barvu oddílu, vlastní si vybereš v profilu.',
+    'Pronájmy zvládnou jednorázové výjimky v týdenní sérii.',
+    'Zápasy chronologicky, odehrané schované dole.',
+    'Rezervace za jiného hráče: hledání podle jména i přezdívky.',
+  ]),
   Release('1.1.0', '15. 7. 2026', [
     'Nové kuželny nyní čekají na schválení správcem aplikace, než se '
         'mohou začít používat.',
