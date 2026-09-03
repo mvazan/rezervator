@@ -18,7 +18,7 @@
 <body>
 <h1>Zásady ochrany osobních údajů — Rezervátor</h1>
 
-<p><em>Poslední aktualizace: 14. 7. 2026</em></p>
+<p><em>Poslední aktualizace: 3. 9. 2026</em></p>
 
 <p>Rezervátor je aplikace pro rezervaci tréninkových termínů na kuželně.
 Slouží jednotlivým kuželnám ke správě rozvrhu a rezervací jejich hráčů.
@@ -56,6 +56,17 @@ schváleným členům kuželny a zasílání upozornění o změnách rezervací
 <p>Na kuželně může běžet sdílený tablet (kiosek), kde si hráč vybere své jméno
 a vytvoří rezervaci bez přihlašování. Pro kontrolu se o takové rezervaci
 odešle e-mail dotčenému hráči s možností ji jedním kliknutím zrušit.</p>
+
+<h2>Google kalendář (volitelné propojení)</h2>
+<p>Hráč si může v profilu propojit svůj Google účet. Aplikace si k tomu
+vyžádá jen oprávnění <code>calendar.app.created</code>: smí založit a
+spravovat <strong>jeden vlastní kalendář „Rezervátor“</strong> a zapisovat do
+něj hráčovy rezervace tréninků; ostatní kalendáře ani události nečte ani
+nemění. Na serveru je k tomu uložen přístupový (refresh) token Google účtu,
+e-mail Google účtu a identifikátor založeného kalendáře; token nikdy
+neopouští server a aplikace v telefonu ho nevidí. Po <strong>odpojení</strong>
+aplikace kalendář „Rezervátor“ v Googlu smaže, token zneplatní a ze serveru
+odstraní. Propojení lze kdykoli obnovit.</p>
 
 <h2>Kde jsou údaje uloženy</h2>
 <p>Data jsou uložena ve službě <strong>Supabase</strong> (PostgreSQL, region

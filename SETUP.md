@@ -340,6 +340,79 @@ pushnutí do `main`. Chceš-li ho vyzkoušet hned teď, běž do **Actions →
 Supabase keep-alive → Run workflow** (ruční spuštění přes
 `workflow_dispatch`).
 
+### 8.4 Google kalendář (volitelné — tréninky hráče v jeho kalendáři)
+
+Hráč si v **Můj profil → Google kalendář** jednou propojí svůj Google účet a
+appka mu založí vlastní kalendář „Rezervátor“, do kterého sama zapisuje jeho
+rezervace (rezervace = událost; přesun ji přeplánuje, zrušení ji smaže).
+Používá úzký scope `calendar.app.created` — appka smí sahat jen na kalendář,
+který sama vytvořila, nikdy na ostatní kalendáře ani události. Bez
+následujícího nastavení appka kartu prostě neukáže; nic jiného se nemění.
+
+Vše se kliká ve **stejném Google Cloud projektu jako Firebase**
+(`rezervator-mvazan` — Firebase projekt *je* GCP projekt, vyber ho v přepínači
+projektů v konzoli).
+
+1. **APIs & Services → Library** → zapni **Google Calendar API**.
+
+2. **OAuth consent screen** — stránka „Rezervátor chce přístup k tvému
+   kalendáři, povolit?“, kterou hráč uvidí po klepnutí na *Propojit s Google
+   kalendářem*. Bez ní Google přihlášení odmítne. Jednorázově, zdarma. Najdeš
+   ji pod **APIs & Services → OAuth consent screen** (novější konzole říká
+   **Google Auth Platform** a dělí ji na *Branding*, *Audience* a *Data
+   access*).
+
+   - **User type: External** (*Internal* je jen pro Google Workspace domény;
+     hráči mají soukromé Gmaily).
+   - **Branding**: název `Rezervátor`; support e-mail i developer contact
+     může být tvoje adresa.
+   - **Privacy policy link**: veřejná adresa
+     `https://mvazan.github.io/rezervator/privacy.html` (sekce o kalendáři
+     je tam už napsaná).
+   - **Scopes** (*Data access*) → *Add or remove scopes* → zaškrtni `openid`
+     a `email`, pak do pole **manually add scopes** vlož
+     `https://www.googleapis.com/auth/calendar.app.created` (v seznamu
+     obvykle chybí). Zdůvodnění, kdyby se ptali: *aplikace zakládá a spravuje
+     jeden vlastní vedlejší kalendář se zrcadlem uživatelových rezervací
+     tréninků; nikdy nečte ani nemění kalendáře či události, které
+     nevytvořila.*
+   - **Test users**: dokud je consent screen v režimu *Testing*, mohou se
+     přihlásit jen zde vyjmenované adresy (max 100). Přidej **Google účty**
+     hráčů (nemusí být totožné s e-mailem, kterým se hlásí do Rezervátoru) a
+     svůj vlastní.
+
+3. **APIs & Services → Credentials → Create credentials → OAuth client ID →
+   Web application.** Authorized redirect URI (byte po bytu):
+   `https://wgwijvcnslkesyqgaeul.supabase.co/functions/v1/calendar-oauth-callback`
+   Zkopíruj **client ID** a **client secret**.
+
+4. Předej klienta oběma stranám:
+   ```bash
+   supabase secrets set GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=...
+   ```
+   Funkce `calendar-oauth-callback` a `calendar-manage` nasazuje
+   `deploy-backend.yml` při merge (ručně: `supabase functions deploy
+   calendar-oauth-callback --no-verify-jwt` a `supabase functions deploy
+   calendar-manage`). Do appky jde jen **client ID** — GitHub secret
+   `GOOGLE_CLIENT_ID` (čtou ho `release.yml` i `deploy-web.yml`) a u lokálních
+   buildů `--dart-define=GOOGLE_CLIENT_ID=...`. **Client secret nikdy nesmí
+   do appky.**
+
+5. Migrace 0023 zapíná rozšíření `pg_cron` (minutový tik, který spouští
+   synchronizaci). Kdyby `create extension pg_cron` na hostovaném projektu
+   selhalo, zapni ho v dashboardu (**Database → Extensions → pg_cron**) a
+   migraci pusť znovu.
+
+> **Na stavu publikování záleží.** Dokud je consent screen v režimu
+> *Testing*, Google zahazuje refresh tokeny po **7 dnech** — synchronizace by
+> potichu umřela každý týden a všichni by se museli propojit znovu (appka to
+> pozná: karta přejde do stavu „odpojil se“ a hráč dostane push/e-mail).
+> Jakmile je funkce ověřená v praxi, přepni consent screen na **In
+> production** tlačítkem *Publish app* (jen v Cloud Console; s Play tracky to
+> nesouvisí a appku to nikde nezveřejňuje). `calendar.app.created` je úzký
+> scope a plné ověření se u něj často promíjí; kdyby Google review přece
+> chtěl a nestálo to za to, zůstane Testing a týdenní re-link.
+
 ## 9. Sentry (volitelné hlášení chyb)
 
 Založ projekt na <https://sentry.io> (platforma Flutter), zkopíruj jeho
