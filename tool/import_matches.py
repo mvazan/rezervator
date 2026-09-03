@@ -16,16 +16,14 @@ entered in the app). In every other row a match is taken only when one of
 OUR teams (--teams) plays in it, and it is imported as "venkovní zápas" —
 listed in the day header, blocks nothing.
 
-Match length differs per competition (and so per team string: Veverky B
-and C play a shorter format than Veverky A) and the sheet has no end
-times, so it is read off the double-match cells: when two matches share a
-cell, the gap between their start times is how long the first one lasts.
-Every such gap is an observation for the first match's competition and
-for both of its team strings, over every alley in the sheet. A match of
-ours takes the most common gap observed for its own team string(s), else
-for its competition, else --duration; gaps longer than --max-gap are idle
-time (a morning and an evening match), not a duration. `--length
-"KP1 Sever=240"` pins a competition by hand.
+Match length differs per competition (KP2 is the shortest, KP1 medium,
+divize and the leagues the longest) and the sheet has no end times, so
+it is read off the double-match cells: when two matches share a cell, the
+gap between their start times is how long the first one lasts. The most
+common gap per competition over every alley in the sheet is used; gaps
+longer than --max-gap are idle time (a morning and an evening match), not
+a duration, and a competition with no usable observation gets --duration.
+`--length "KP1 Sever=240"` pins a competition by hand.
 
 The output is a SQL file that runs as the alley's admin (RLS, triggers and
 cancellations as in the app). Re-running is safe: every row carries an
@@ -117,7 +115,6 @@ class Match:
         self.away = away
         self.is_away = False        # set by classify()
         self.duration = 0           # minutes, set by assign_durations()
-        self.duration_source = ''   # 'tým' | 'soutěž' | 'ručně' | 'výchozí'
         self.warnings: List[str] = []
 
     @property
@@ -140,11 +137,9 @@ def minutes(hhmm: str) -> int:
 
 
 def parse_calendar(cells, season: int, warnings: List[str],
-                   gaps: Dict[str, List[int]],
-                   team_gaps: Dict[str, List[int]]) -> List[Match]:
-    """Matches of every alley; [gaps] (per competition) and [team_gaps] (per
-    team string, both teams) collect how long a match lasted when another
-    one followed it in the same cell."""
+                   gaps: Dict[str, List[int]]) -> List[Match]:
+    """Matches of every alley; [gaps] collects, per competition, how long a
+    match lasted when another one followed it in the same cell."""
     rows: Dict[int, Dict[int, str]] = {}
     for (r, c), v in cells.items():
         rows.setdefault(r, {})[c] = v
@@ -182,8 +177,6 @@ def parse_calendar(cells, season: int, warnings: List[str],
                         gap = minutes(time) - minutes(last_match.time)
                         if gap > 0:
                             gaps.setdefault(last_match.competition, []).append(gap)
-                            for team in (last_match.home, last_match.away):
-                                team_gaps.setdefault(team, []).append(gap)
                     continue
                 teams = TEAMS_LINE.match(line)
                 if teams:
@@ -251,25 +244,18 @@ def mode_gap(seen: List[int], max_gap: int) -> Optional[Tuple[int, int]]:
 
 
 def assign_durations(matches: List[Match], gaps: Dict[str, List[int]],
-                     team_gaps: Dict[str, List[int]], teams: List[str],
-                     fallback: int, max_gap: int, overrides: Dict[str, int]) -> None:
-    """Team string(s) of ours in the match → competition → default; a
-    --length override for the competition beats all of them."""
+                     fallback: int, max_gap: int,
+                     overrides: Dict[str, int]) -> Dict[str, int]:
+    """--length override → most common observed gap of the competition →
+    default; returns {competition: minutes} for the report."""
+    chosen: Dict[str, int] = {}
     for m in matches:
-        if m.competition in overrides:
-            m.duration, m.duration_source = overrides[m.competition], 'ručně'
-            continue
-        own = [t for t in (m.home, m.away) if ours(t, teams)]
-        seen = [g for t in own for g in team_gaps.get(t, [])]
-        by_team = mode_gap(seen, max_gap)
-        if by_team:
-            m.duration, m.duration_source = by_team[0], 'tým'
-            continue
-        by_comp = mode_gap(gaps.get(m.competition, []), max_gap)
-        if by_comp:
-            m.duration, m.duration_source = by_comp[0], 'soutěž'
-            continue
-        m.duration, m.duration_source = fallback, 'výchozí'
+        if m.competition not in chosen:
+            observed = mode_gap(gaps.get(m.competition, []), max_gap)
+            chosen[m.competition] = overrides.get(
+                m.competition, observed[0] if observed else fallback)
+        m.duration = chosen[m.competition]
+    return chosen
 
 
 def histogram(seen: List[int], max_gap: int) -> Tuple[str, str]:
@@ -380,14 +366,13 @@ def main() -> int:
 
     warnings: List[str] = []
     gaps: Dict[str, List[int]] = {}
-    team_gaps: Dict[str, List[int]] = {}
-    all_matches = parse_calendar(sheets[calendar], season, warnings, gaps, team_gaps)
+    all_matches = parse_calendar(sheets[calendar], season, warnings, gaps)
     if not any(m.alley == args.alley for m in all_matches):
         print('alley %r not found in %s; rows: %s' % (
             args.alley, calendar, ', '.join(sorted({m.alley for m in all_matches}))), file=sys.stderr)
         return 2
     matches = classify(all_matches, args.alley, args.teams)
-    assign_durations(matches, gaps, team_gaps, args.teams, args.duration, args.max_gap, overrides)
+    durations = assign_durations(matches, gaps, args.duration, args.max_gap, overrides)
 
     # Cross-check with the hidden flat list, laid out independently.
     if 'Utkání – vše' in sheets:
@@ -411,28 +396,15 @@ def main() -> int:
     print('%d matches: %d home at %s, %d away' % (
         len(matches), sum(1 for m in matches if not m.is_away), args.alley,
         sum(1 for m in matches if m.is_away)))
-    print('match length from double-match cells (gaps over %s count as idle time; default %s)'
+    print('match length per competition from double-match cells (gaps over %s count as idle time; default %s):'
           % (fmt_minutes(args.max_gap), fmt_minutes(args.duration)))
-    print('per competition:')
-    for comp in sorted({m.competition for m in matches}):
+    for comp in sorted(durations):
         used, idle = histogram(gaps.get(comp, []), args.max_gap)
-        best = overrides.get(comp) or (mode_gap(gaps.get(comp, []), args.max_gap) or (args.duration,))[0]
         note = ('pinned by --length' if comp in overrides
                 else ('observed: ' + used) if used else 'no usable observation → default')
         if idle:
             note += '; ignored as idle time: ' + idle
-        print('  %-18s %s  (%s)' % (comp, fmt_minutes(best), note))
-    print('per team string of ours (what the import uses; team → competition → default):')
-    own_teams = sorted({t for m in matches for t in (m.home, m.away) if ours(t, args.teams)})
-    for team in own_teams:
-        used, idle = histogram(team_gaps.get(team, []), args.max_gap)
-        sample = next(m for m in matches if team in (m.home, m.away))
-        comps = sorted({m.competition for m in matches if team in (m.home, m.away)})
-        note = ('observed: ' + used) if used else 'no double-cell observation'
-        if idle:
-            note += '; idle: ' + idle
-        print('  %-18s %s  %-8s %s  (%s)' % (team, fmt_minutes(sample.duration), sample.duration_source,
-                                            '/'.join(comps), note))
+        print('  %-14s %s  (%s)' % (comp, fmt_minutes(durations[comp]), note))
     print()
     for m in matches:
         end, clamped = add_minutes(m.time, m.duration)
