@@ -6,8 +6,13 @@ import '../../data/providers.dart';
 import '../../domain/grouping.dart';
 import '../../domain/models.dart';
 import 'widgets/admin_scaffold.dart';
+import 'widgets/merge_players_dialog.dart';
+import 'widgets/no_account_player_dialog.dart';
+import 'widgets/profile_picker_sheet.dart';
 
-/// Admin: approve pending registrations, see the member list, manage roles.
+/// Admin: approve pending registrations, see the member list, manage roles,
+/// and keep the hand-made "hráči bez účtu" (0022) — add or edit them, merge
+/// one into the account its owner eventually registers, or delete it.
 class PlayersScreen extends ConsumerWidget {
   const PlayersScreen({super.key});
 
@@ -106,21 +111,147 @@ class PlayersScreen extends ConsumerWidget {
     if (picked.$1 != current) await _setClub(context, p, picked.$1);
   }
 
+  /// Add (no [existing]) or edit a hráč bez účtu. The kiosk roster is a
+  /// view that cannot stream, so it re-reads itself after a save.
+  Future<void> _addOrEditPlaceholder(
+    BuildContext context,
+    WidgetRef ref,
+    List<Club> clubs, {
+    Profile? existing,
+  }) async {
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (_) => NoAccountPlayerDialog(existing: existing, clubs: clubs),
+    );
+    if (saved == true && context.mounted) ref.invalidate(playersProvider);
+  }
+
+  Future<void> _deletePlaceholder(
+    BuildContext context,
+    WidgetRef ref,
+    Profile p,
+  ) async {
+    final ok = await confirmDelete(
+      context,
+      title: 'Smazat hráče?',
+      message: 'Opravdu smazat hráče bez účtu „${p.displayName}“?',
+      action: () => Api.deletePlaceholderPlayer(p.id),
+      success: 'Smazáno.',
+    );
+    if (ok && context.mounted) ref.invalidate(playersProvider);
+  }
+
+  /// [placeholder]'s reservations move into [target] (a pending registrant
+  /// or an approved member) — see [MergePlayersDialog].
+  Future<void> _merge(
+    BuildContext context,
+    WidgetRef ref, {
+    required Profile placeholder,
+    required Profile target,
+    required List<Club> clubs,
+  }) async {
+    final merged = await showDialog<bool>(
+      context: context,
+      builder: (_) => MergePlayersDialog(
+        placeholder: placeholder,
+        target: target,
+        clubs: clubs,
+      ),
+    );
+    if (merged == true && context.mounted) ref.invalidate(playersProvider);
+  }
+
+  /// Pending card: which hand-made row is this registrant?
+  Future<void> _mergePendingWithPlaceholder(
+    BuildContext context,
+    WidgetRef ref,
+    Profile pending,
+    List<Profile> profiles,
+    List<Club> clubs,
+  ) async {
+    final placeholders = profiles.where((p) => !p.hasAccount).toList();
+    if (placeholders.isEmpty) {
+      snack(context, 'Žádný hráč bez účtu k sloučení.');
+      return;
+    }
+    final picked = await showProfilePicker(
+      context,
+      title: 'Sloučit s hráčem bez účtu — ${pending.displayName}',
+      candidates: placeholders,
+      clubs: clubs,
+    );
+    if (picked == null || !context.mounted) return;
+    await _merge(context, ref,
+        placeholder: picked, target: pending, clubs: clubs);
+  }
+
+  /// Placeholder row: whose account is this? Approved members and pending
+  /// registrants alike; a kiosk account is never a person.
+  Future<void> _mergePlaceholderIntoAccount(
+    BuildContext context,
+    WidgetRef ref,
+    Profile placeholder,
+    List<Profile> profiles,
+    List<Club> clubs,
+  ) async {
+    final accounts =
+        profiles.where((p) => p.hasAccount && p.role != Role.kiosk).toList();
+    final picked = await showProfilePicker(
+      context,
+      title: 'Sloučit do účtu — ${placeholder.displayName}',
+      candidates: accounts,
+      clubs: clubs,
+    );
+    if (picked == null || !context.mounted) return;
+    await _merge(context, ref,
+        placeholder: placeholder, target: picked, clubs: clubs);
+  }
+
   /// Club name for rows outside the club sections (pending, kiosk).
   Widget? _clubSubtitle(Profile p, List<Club> clubs) {
     final name = clubNameOf(p.clubId, clubs);
     return name.isEmpty ? null : Text(name);
   }
 
-  /// "správce · „nick“" (either half may be absent). The club is shown by
-  /// the section header, so it stays out of the row.
+  /// "bez účtu · správce · „nick“" (any part may be absent). The club is
+  /// shown by the section header, so it stays out of the row.
   String? _subtitle(Profile p) {
     final parts = [
+      if (!p.hasAccount) 'bez účtu',
       if (p.role == Role.admin) 'správce',
       if (p.nick.isNotEmpty) '„${p.nick}“',
     ];
     return parts.isEmpty ? null : parts.join(' · ');
   }
+
+  /// The member menu: roles, kiosk, club, nick.
+  List<PopupMenuEntry<String>> _memberMenu(Profile p) => [
+        const PopupMenuItem(value: 'club', child: Text('Oddíl…')),
+        PopupMenuItem(
+          value: p.role == Role.admin ? 'remove_admin' : 'make_admin',
+          child: Text(
+            p.role == Role.admin ? 'Odebrat správce' : 'Udělat správcem',
+          ),
+        ),
+        const PopupMenuItem(
+          value: 'make_kiosk',
+          child: Text('Nastavit jako kiosk'),
+        ),
+        const PopupMenuItem(
+          value: 'edit_nick',
+          child: Text('Zkratka na tabuli…'),
+        ),
+      ];
+
+  /// A hráč bez účtu is never an admin or a kiosk; instead it is edited
+  /// whole, merged into an account, or deleted.
+  List<PopupMenuEntry<String>> _placeholderMenu() => const [
+        PopupMenuItem(value: 'edit', child: Text('Upravit…')),
+        PopupMenuItem(value: 'club', child: Text('Oddíl…')),
+        PopupMenuItem(value: 'edit_nick', child: Text('Zkratka na tabuli…')),
+        PopupMenuItem(value: 'merge', child: Text('Sloučit do účtu…')),
+        PopupMenuItem(value: 'delete', child: Text('Smazat')),
+      ];
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -153,7 +284,8 @@ class PlayersScreen extends ConsumerWidget {
           final sections = playersByClub(approved, clubs);
 
           return ListView(
-            padding: const EdgeInsets.all(12),
+            // Room under the last row for the extended FAB.
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 88),
             children: [
               if (pending.isNotEmpty) ...[
                 Text(
@@ -165,13 +297,33 @@ class PlayersScreen extends ConsumerWidget {
                     child: ListTile(
                       title: Text(p.displayName),
                       subtitle: _clubSubtitle(p, clubs),
-                      trailing: FilledButton(
-                        onPressed: () => tryAction(
-                          context,
-                          () => Api.approvePlayer(p.id),
-                          success: 'Schváleno.',
-                        ),
-                        child: const Text('Schválit'),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          FilledButton(
+                            onPressed: () => tryAction(
+                              context,
+                              () => Api.approvePlayer(p.id),
+                              success: 'Schváleno.',
+                            ),
+                            child: const Text('Schválit'),
+                          ),
+                          PopupMenuButton<String>(
+                            onSelected: (_) => _mergePendingWithPlaceholder(
+                              context,
+                              ref,
+                              p,
+                              profiles,
+                              clubs,
+                            ),
+                            itemBuilder: (context) => const [
+                              PopupMenuItem(
+                                value: 'merge',
+                                child: Text('Sloučit s hráčem bez účtu…'),
+                              ),
+                            ],
+                          ),
+                        ],
                       ),
                     ),
                   ),
@@ -199,6 +351,9 @@ class PlayersScreen extends ConsumerWidget {
                     trailing: PopupMenuButton<String>(
                       onSelected: (action) {
                         switch (action) {
+                          case 'edit':
+                            _addOrEditPlaceholder(context, ref, clubs,
+                                existing: p);
                           case 'club':
                             _pickClub(context, p, clubs);
                           case 'make_admin':
@@ -209,30 +364,15 @@ class PlayersScreen extends ConsumerWidget {
                             _makeKiosk(context, p);
                           case 'edit_nick':
                             _editNick(context, p);
+                          case 'merge':
+                            _mergePlaceholderIntoAccount(
+                                context, ref, p, profiles, clubs);
+                          case 'delete':
+                            _deletePlaceholder(context, ref, p);
                         }
                       },
-                      itemBuilder: (context) => [
-                        const PopupMenuItem(
-                            value: 'club', child: Text('Oddíl…')),
-                        PopupMenuItem(
-                          value: p.role == Role.admin
-                              ? 'remove_admin'
-                              : 'make_admin',
-                          child: Text(
-                            p.role == Role.admin
-                                ? 'Odebrat správce'
-                                : 'Udělat správcem',
-                          ),
-                        ),
-                        const PopupMenuItem(
-                          value: 'make_kiosk',
-                          child: Text('Nastavit jako kiosk'),
-                        ),
-                        const PopupMenuItem(
-                          value: 'edit_nick',
-                          child: Text('Zkratka na tabuli…'),
-                        ),
-                      ],
+                      itemBuilder: (context) =>
+                          p.hasAccount ? _memberMenu(p) : _placeholderMenu(),
                     ),
                   ),
               ],
@@ -252,6 +392,11 @@ class PlayersScreen extends ConsumerWidget {
             ],
           );
         },
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _addOrEditPlaceholder(context, ref, clubs),
+        icon: const Icon(Icons.person_add_alt_1_outlined),
+        label: const Text('Přidat hráče bez účtu'),
       ),
     );
   }
