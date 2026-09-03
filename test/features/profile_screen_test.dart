@@ -1,9 +1,20 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/profile/profile_screen.dart';
+import 'package:rezervator/features/profile/widgets/calendar_link_card.dart';
+
+/// Stubs for the card's injected backend calls: a test that reaches one it
+/// did not expect fails on its own assertions (the card swallows the throw
+/// into an error snack).
+Future<Uri> noConsent() async => throw StateError('unexpected consent');
+Future<bool> noDisconnect() async => throw StateError('unexpected disconnect');
+Future<void> noReminders(List<int> _) async =>
+    throw StateError('unexpected reminders');
 
 void main() {
   const me = Profile(
@@ -16,13 +27,20 @@ void main() {
     nick: 'Já H.',
   );
 
-  Widget app(Profile profile) {
+  // One ProviderScope per test: a second pumpWidget does not swap overrides.
+  Widget app(
+    Profile profile, {
+    bool calendarAvailable = false,
+    CalendarLink link = CalendarLink.none,
+  }) {
     return ProviderScope(
       overrides: [
         myProfileProvider.overrideWith((ref) => Stream.value(profile)),
         clubsProvider.overrideWith(
           (ref) => Stream.value(const [Club(id: 'c1', name: 'TJ Sokol')]),
         ),
+        calendarAvailableProvider.overrideWithValue(calendarAvailable),
+        myCalendarLinkProvider.overrideWith((ref) => Stream.value(link)),
       ],
       child: const MaterialApp(home: ProfileScreen()),
     );
@@ -130,5 +148,441 @@ void main() {
     // Back on the root route — no stranded profile screen with a spinner.
     expect(find.text('Můj profil'), findsNothing);
     expect(find.text('Otevřít profil'), findsOneWidget);
+  });
+
+  // -------------------------------------------------------------------------
+  // Google kalendář card (0023)
+  // -------------------------------------------------------------------------
+
+  const connectLabel = 'Propojit s Google kalendářem';
+  const notLinkedCopy = 'Tvoje tréninky se budou samy přidávat do kalendáře '
+      '„Rezervátor" ve tvém Google účtu.';
+  const linked = CalendarLink(
+    status: CalendarLinkStatus.linked,
+    googleEmail: 'hrac@gmail.com',
+    reminderMinutes: [1440, 120],
+  );
+
+  group('Google kalendář card on Můj profil', () {
+    testWidgets('is hidden without a Google client ID in the build',
+        (tester) async {
+      await tester.pumpWidget(app(me, link: linked));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Google kalendář'), findsNothing);
+      expect(find.text(connectLabel), findsNothing);
+      expect(find.text('Odpojit'), findsNothing);
+    });
+
+    testWidgets('is hidden for the Play-review demo account even when '
+        'available (a shared account has no calendar to link)',
+        (tester) async {
+      await tester.pumpWidget(app(
+        const Profile(
+          id: 'demo',
+          displayName: 'Play Review',
+          email: 'PlayReview@vvrky.cz',
+          role: Role.player,
+          status: ProfileStatus.approved,
+        ),
+        calendarAvailable: true,
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Google kalendář'), findsNothing);
+      expect(find.text(connectLabel), findsNothing);
+    });
+
+    testWidgets('sits between the nick card and the sign-out card',
+        (tester) async {
+      await tester.pumpWidget(app(me, calendarAvailable: true));
+      await tester.pumpAndSettle();
+
+      final nick = tester.getTopLeft(find.text('Přezdívka na tabuli')).dy;
+      final calendar = tester.getTopLeft(find.text('Google kalendář')).dy;
+      final logout = tester.getTopLeft(find.text('Odhlásit se')).dy;
+      expect(nick, lessThan(calendar));
+      expect(calendar, lessThan(logout));
+    });
+
+    testWidgets('not linked: explains the calendar and offers to connect',
+        (tester) async {
+      await tester.pumpWidget(app(me, calendarAvailable: true));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Google kalendář'), findsOneWidget);
+      expect(find.text(notLinkedCopy), findsOneWidget);
+      expect(find.text(connectLabel), findsOneWidget);
+      expect(find.text('Odpojit'), findsNothing);
+      expect(find.text('Připomínky…'), findsNothing);
+    });
+
+    testWidgets('pending: shows progress; a retry stays available in case '
+        'the backend never finishes', (tester) async {
+      await tester.pumpWidget(app(
+        me,
+        calendarAvailable: true,
+        link: const CalendarLink(
+          status: CalendarLinkStatus.pending,
+          googleEmail: 'hrac@gmail.com',
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Google kalendář'), findsOneWidget);
+      expect(find.text('Propojuji…'), findsOneWidget);
+      expect(find.text('Zkusit znovu'), findsOneWidget);
+      expect(find.text(connectLabel), findsNothing);
+      expect(find.text('Odpojit'), findsNothing);
+    });
+
+    testWidgets('pending with a failure: shows the reason and a retry',
+        (tester) async {
+      await tester.pumpWidget(app(
+        me,
+        calendarAvailable: true,
+        link: const CalendarLink(
+          status: CalendarLinkStatus.pending,
+          lastError: 'Kalendář se nepodařilo založit.',
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Kalendář se nepodařilo založit.'), findsOneWidget);
+      expect(find.text('Propojuji…'), findsNothing);
+      expect(find.text('Zkusit znovu'), findsOneWidget);
+    });
+
+    testWidgets('linked: shows the Google account, the reminders summary '
+        'and Odpojit', (tester) async {
+      await tester.pumpWidget(app(me, calendarAvailable: true, link: linked));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Google kalendář'), findsOneWidget);
+      expect(find.text('Propojeno jako hrac@gmail.com.'), findsOneWidget);
+      expect(find.text('Připomínky…'), findsOneWidget);
+      expect(find.text('1 den předem · 2 h předem'), findsOneWidget);
+      expect(find.text('Odpojit'), findsOneWidget);
+      expect(find.text(connectLabel), findsNothing);
+    });
+
+    testWidgets('linked without reminders reads "Žádné"', (tester) async {
+      await tester.pumpWidget(app(
+        me,
+        calendarAvailable: true,
+        link: const CalendarLink(status: CalendarLinkStatus.linked),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Propojeno — tréninky se přidávají samy.'),
+          findsOneWidget);
+      expect(find.text('Žádné'), findsOneWidget);
+    });
+
+    testWidgets('broken: shows the reason, asks for a re-link and offers '
+        'the connect button', (tester) async {
+      await tester.pumpWidget(app(
+        me,
+        calendarAvailable: true,
+        link: const CalendarLink(
+          status: CalendarLinkStatus.broken,
+          lastError: 'Google odvolal přístup.',
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Google kalendář'), findsOneWidget);
+      expect(find.text('Google odvolal přístup. Propoj ho prosím znovu.'),
+          findsOneWidget);
+      expect(find.text(connectLabel), findsOneWidget);
+      expect(find.text('Odpojit'), findsNothing);
+    });
+
+    testWidgets('Odpojit asks for confirmation with the delete warning; '
+        'Zrušit keeps the link', (tester) async {
+      await tester.pumpWidget(app(me, calendarAvailable: true, link: linked));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Odpojit'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Odpojit kalendář?'), findsOneWidget);
+      expect(
+        find.text('Kalendář „Rezervátor" se z Googlu smaže i s tréninky. '
+            'Propojení jde kdykoli obnovit.'),
+        findsOneWidget,
+      );
+      expect(
+          find.widgetWithText(FilledButton, 'Odpojit a smazat'), findsOneWidget);
+
+      await tester.tap(find.widgetWithText(TextButton, 'Zrušit'));
+      await tester.pumpAndSettle();
+      expect(find.text('Odpojit kalendář?'), findsNothing);
+      expect(find.text('Propojeno jako hrac@gmail.com.'), findsOneWidget);
+    });
+  });
+
+  // The card on its own, with the backend calls injected — the ProviderScope
+  // above has no Supabase client behind it.
+  group('CalendarLinkCard actions', () {
+    Widget card(
+      Stream<CalendarLink> link, {
+      Future<Uri> Function() consentUrl = noConsent,
+      void Function(String url)? openUrl,
+      Future<bool> Function() disconnect = noDisconnect,
+      Future<void> Function(List<int> minutes) setReminders = noReminders,
+    }) {
+      return ProviderScope(
+        overrides: [
+          calendarAvailableProvider.overrideWithValue(true),
+          myCalendarLinkProvider.overrideWith((ref) => link),
+        ],
+        child: MaterialApp(
+          home: Scaffold(
+            body: CalendarLinkCard(
+              consentUrl: consentUrl,
+              openUrl: openUrl ?? (_) => fail('unexpected openUrl'),
+              disconnect: disconnect,
+              setReminders: setReminders,
+            ),
+          ),
+        ),
+      );
+    }
+
+    testWidgets('connect opens the consent page in the browser and asks to '
+        'come back', (tester) async {
+      String? opened;
+      await tester.pumpWidget(card(
+        Stream.value(CalendarLink.none),
+        consentUrl: () async =>
+            Uri.parse('https://accounts.google.com/o/oauth2/v2/auth?state=n1'),
+        openUrl: (url) => opened = url,
+      ));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text(connectLabel));
+      await tester.pumpAndSettle();
+
+      expect(opened, 'https://accounts.google.com/o/oauth2/v2/auth?state=n1');
+      expect(find.text('Dokonči propojení v prohlížeči a vrať se sem.'),
+          findsOneWidget);
+    });
+
+    testWidgets('a failed consent start is reported, nothing opens',
+        (tester) async {
+      var opened = false;
+      await tester.pumpWidget(card(
+        Stream.value(CalendarLink.none),
+        consentUrl: () async => throw Exception('not_allowed'),
+        openUrl: (_) => opened = true,
+      ));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text(connectLabel));
+      await tester.pumpAndSettle();
+
+      expect(opened, isFalse);
+      expect(find.textContaining('Propojení se nepovedlo'), findsOneWidget);
+    });
+
+    testWidgets('confirmed disconnect calls the backend and reports the '
+        'deleted calendar', (tester) async {
+      var calls = 0;
+      await tester.pumpWidget(card(
+        Stream.value(linked),
+        disconnect: () async {
+          calls++;
+          return false;
+        },
+      ));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Odpojit'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Odpojit a smazat'));
+      await tester.pumpAndSettle();
+
+      expect(calls, 1);
+      expect(find.text('Kalendář odpojen a smazán.'), findsOneWidget);
+    });
+
+    testWidgets('an orphaned calendar is reported so the user deletes it '
+        'in Google', (tester) async {
+      await tester.pumpWidget(card(
+        Stream.value(linked),
+        disconnect: () async => true,
+      ));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Odpojit'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Odpojit a smazat'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Odpojeno. Přístup byl odvolaný už dřív, takže kalendář '
+            '„Rezervátor" v Googlu zůstal — smaž si ho tam sám(a).'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('a failed disconnect says nothing changed', (tester) async {
+      await tester.pumpWidget(card(
+        Stream.value(linked),
+        disconnect: () async => throw Exception('google_unavailable'),
+      ));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Odpojit'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Odpojit a smazat'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Odpojení se nepovedlo, nic se nezměnilo. '
+            'Zkus to prosím znovu.'),
+        findsOneWidget,
+      );
+      // Still linked — the backend promised it changed nothing.
+      expect(find.text('Odpojit'), findsOneWidget);
+    });
+
+    /// Opens the add dialog from the sheet and submits [amount] of [unit].
+    Future<void> addReminder(
+        WidgetTester tester, String amount, String unit) async {
+      await tester.tap(find.text('Přidat připomínku'));
+      await tester.pumpAndSettle();
+      expect(find.text('Připomínka předem'), findsOneWidget);
+      await tester.enterText(find.byType(TextField), amount);
+      await tester.tap(find.text(unit));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Přidat'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('the reminders sheet composes [1440, 120] from "1 den" + '
+        '"2 h", saving after each step', (tester) async {
+      // The backend round trip: every save lands as a new link row on the
+      // stream, which is what the sheet and the card redraw from.
+      final rows = StreamController<CalendarLink>();
+      addTearDown(rows.close);
+      rows.add(const CalendarLink(status: CalendarLinkStatus.linked));
+      final saved = <List<int>>[];
+
+      await tester.pumpWidget(card(
+        rows.stream,
+        setReminders: (minutes) async {
+          saved.add(minutes);
+          rows.add(CalendarLink(
+            status: CalendarLinkStatus.linked,
+            reminderMinutes: [...minutes]..sort((a, b) => b.compareTo(a)),
+          ));
+        },
+      ));
+      await tester.pumpAndSettle();
+      expect(find.text('Žádné'), findsOneWidget);
+
+      await tester.tap(find.text('Připomínky…'));
+      await tester.pumpAndSettle();
+      expect(find.text('Připomínky tréninků v kalendáři'), findsOneWidget);
+      expect(find.text('Žádné připomínky'), findsOneWidget);
+
+      // The card behind the sheet shows the same labels in its summary, so
+      // the entries are looked up inside the sheet only.
+      Finder inSheet(String text) => find.descendant(
+          of: find.byType(BottomSheet), matching: find.text(text));
+
+      await addReminder(tester, '1', 'dny');
+      expect(saved, [
+        [1440]
+      ]);
+      expect(inSheet('Žádné připomínky'), findsNothing);
+      expect(inSheet('1 den předem'), findsOneWidget);
+
+      await addReminder(tester, '2', 'hodiny');
+      expect(saved.last, [1440, 120]);
+      expect(inSheet('1 den předem'), findsOneWidget);
+      expect(inSheet('2 h předem'), findsOneWidget);
+
+      // Close the sheet: the card's summary follows the stream.
+      await tester.tapAt(const Offset(400, 20));
+      await tester.pumpAndSettle();
+      expect(find.byType(BottomSheet), findsNothing);
+      expect(find.text('1 den předem · 2 h předem'), findsOneWidget);
+    });
+
+    testWidgets('a reminder beyond four weeks is refused before saving',
+        (tester) async {
+      var saves = 0;
+      await tester.pumpWidget(card(
+        Stream.value(const CalendarLink(status: CalendarLinkStatus.linked)),
+        setReminders: (_) async => saves++,
+      ));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Připomínky…'));
+      await tester.pumpAndSettle();
+      await addReminder(tester, '29', 'dny');
+
+      expect(saves, 0);
+      expect(find.text('Nejdál to jde 4 týdny (28 dní) předem.'),
+          findsOneWidget);
+    });
+
+    testWidgets('an empty or zero amount does not submit', (tester) async {
+      var saves = 0;
+      await tester.pumpWidget(card(
+        Stream.value(const CalendarLink(status: CalendarLinkStatus.linked)),
+        setReminders: (_) async => saves++,
+      ));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Připomínky…'));
+      await tester.pumpAndSettle();
+      await addReminder(tester, '0', 'hodiny');
+
+      expect(saves, 0);
+      // The dialog stays open, waiting for a real number.
+      expect(find.text('Připomínka předem'), findsOneWidget);
+    });
+
+    testWidgets('removing a reminder saves the rest', (tester) async {
+      final saved = <List<int>>[];
+      await tester.pumpWidget(card(
+        Stream.value(linked),
+        setReminders: (minutes) async => saved.add(minutes),
+      ));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Připomínky…'));
+      await tester.pumpAndSettle();
+      expect(find.text('1 den předem'), findsOneWidget);
+      expect(find.text('2 h předem'), findsOneWidget);
+
+      await tester.tap(find.descendant(
+        of: find.widgetWithText(ListTile, '2 h předem'),
+        matching: find.byIcon(Icons.close),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(saved, [
+        [1440]
+      ]);
+    });
+
+    testWidgets('with five reminders the add row disappears', (tester) async {
+      await tester.pumpWidget(card(Stream.value(const CalendarLink(
+        status: CalendarLinkStatus.linked,
+        reminderMinutes: [10080, 2880, 1440, 120, 60],
+      ))));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Připomínky…'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('7 dní předem'), findsOneWidget);
+      expect(find.text('Přidat připomínku'), findsNothing);
+    });
   });
 }

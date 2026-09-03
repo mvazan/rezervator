@@ -732,3 +732,99 @@ class AttendanceRow {
         attended: json['attended'] as int,
       );
 }
+
+// ---------------------------------------------------------------------------
+// Google Calendar link (0023)
+// ---------------------------------------------------------------------------
+
+/// Where the user's Google Calendar link stands. No row at all means
+/// [notLinked] — the app never writes this table, the backend does.
+enum CalendarLinkStatus {
+  /// No row, or a cleanly disconnected one (`unlinked` keeps the reminder
+  /// preference for the next link).
+  notLinked,
+
+  /// Google said yes, but the "Rezervátor" calendar isn't created yet.
+  pending,
+  linked,
+
+  /// Access revoked, or the calendar was deleted in Google — offer a re-link.
+  broken;
+
+  /// Anything this build has never heard of reads as [notLinked] rather
+  /// than blowing up the profile card.
+  static CalendarLinkStatus parse(String? value) => switch (value) {
+        'pending' => CalendarLinkStatus.pending,
+        'linked' => CalendarLinkStatus.linked,
+        'broken' => CalendarLinkStatus.broken,
+        _ => CalendarLinkStatus.notLinked,
+      };
+}
+
+/// Google caps calendar reminders at 5 per event, each at most 4 weeks
+/// (40320 minutes) before it. The UI and the RPC both enforce this.
+const maxCalendarReminders = 5;
+const maxReminderMinutes = 40320;
+
+/// "za kolik předem" → human text: prefers the largest clean unit
+/// (3 dny / 5 h / 45 min), zero means "at the start of the training".
+String reminderOffsetLabel(int minutes) {
+  if (minutes <= 0) return 'V čase začátku';
+  if (minutes % 1440 == 0) {
+    final d = minutes ~/ 1440;
+    final unit = d == 1 ? 'den' : (d <= 4 ? 'dny' : 'dní');
+    return '$d $unit předem';
+  }
+  if (minutes % 60 == 0) return '${minutes ~/ 60} h předem';
+  return '$minutes min předem';
+}
+
+/// Profile-card summary of a reminder set: "Žádné" or the offsets from the
+/// farthest ("1 den předem · 2 h předem").
+String remindersSummary(List<int> minutes) {
+  if (minutes.isEmpty) return 'Žádné';
+  final sorted = [...minutes]..sort((a, b) => b.compareTo(a));
+  return sorted.map(reminderOffsetLabel).join(' · ');
+}
+
+/// One row of `google_calendar_links` (the client-visible half of the link;
+/// tokens live in a server-only table).
+class CalendarLink {
+  const CalendarLink({
+    required this.status,
+    this.googleEmail,
+    this.lastError,
+    this.updatedAt,
+    this.reminderMinutes = const [],
+  });
+
+  static const none = CalendarLink(status: CalendarLinkStatus.notLinked);
+
+  final CalendarLinkStatus status;
+
+  /// The linked Google account, for the profile card. Never used for auth.
+  final String? googleEmail;
+
+  /// Why the link is pending/broken, in user-facing Czech, set by the backend.
+  final String? lastError;
+  final DateTime? updatedAt;
+
+  /// Reminder offsets in minutes before a training, farthest first. Applied
+  /// server-side to every upcoming event when changed.
+  final List<int> reminderMinutes;
+
+  bool get isLinked => status == CalendarLinkStatus.linked;
+
+  factory CalendarLink.fromJson(Map<String, dynamic> json) => CalendarLink(
+        status: CalendarLinkStatus.parse(json['status'] as String?),
+        googleEmail: json['google_email'] as String?,
+        lastError: json['last_error'] as String?,
+        updatedAt: json['updated_at'] == null
+            ? null
+            : DateTime.parse(json['updated_at'] as String),
+        reminderMinutes: [
+          for (final m in json['reminder_minutes'] as List? ?? const [])
+            (m as num).toInt(),
+        ]..sort((a, b) => b.compareTo(a)),
+      );
+}
