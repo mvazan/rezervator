@@ -31,3 +31,9 @@ nepřišel, a měsíční docházku si stáhne jako CSV.
   [`PLAY.md`](PLAY.md) — vydání na Google Play.
 - [`docs/superpowers/specs/2026-07-07-rezervator-design.md`](docs/superpowers/specs/2026-07-07-rezervator-design.md) —
   návrh appky (funkce, datový model, fáze vývoje).
+- `tool/import_matches.py` — jednorázový import zápasů z krajského sešitu
+  „Obsazenost kuželen“ (xlsx): domácí zápasy z řádku naší kuželny, venkovní
+  zápasy našich týmů z ostatních řádků. Vypíše přehled a vygeneruje SQL, které
+  běží jako správce kuželny (úklid i zrušené rezervace jako v appce); opakované
+  spuštění nic neduplikuje. `python3 tool/import_matches.py soubor.xlsx`, pak
+  `--apply`.
