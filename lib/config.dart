@@ -70,6 +70,9 @@ class AppConfig {
   /// profile screen hides the Google Calendar card for it.
   static bool isDemoAccount(String email) =>
       email.trim().toLowerCase() == demoEmail.toLowerCase();
+  /// The Play-review alley seeded by 0012: never offered in registration
+  /// (its only member is the demo account).
+  static const demoTenantId = '00000000-0000-0000-0000-0000000000de';
 
   /// Demo login is available only when a password was baked in (release builds
   /// carrying the secret) and the entered e-mail matches the demo account.
