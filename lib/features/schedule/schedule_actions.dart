@@ -551,10 +551,11 @@ class _BookingDialogState extends State<_BookingDialog> {
     final candidates = _candidates();
     return AlertDialog(
       title: const Text('Rezervovat termín?'),
-      // Full width on a phone, capped on a desktop browser — the list
-      // inside needs a bounded width either way.
-      content: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 400),
+      // A fixed width: the dialog sizes its content by intrinsic width,
+      // which a ListView cannot report, and the phone clamps 400 to the
+      // screen anyway; a desktop browser stops stretching the dialog.
+      content: SizedBox(
+        width: 400,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
