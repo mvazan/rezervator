@@ -9,7 +9,6 @@ library;
 
 import 'package:flutter/material.dart';
 
-import '../../../core/ui.dart';
 import '../../../domain/labels.dart';
 import '../../../domain/models.dart';
 import '../../../domain/palette.dart';
@@ -146,56 +145,23 @@ class SlotTile extends StatelessWidget {
             fallbackFg: isMine
                 ? scheme.onPrimaryContainer
                 : scheme.onSurfaceVariant);
-        final hasClubTint =
-            clubColorIndex >= 0 && clubColorIndex < ClubColors.count;
         final nameStyle = TextStyle(
           fontSize: _compact ? 10 : 12,
           fontWeight: isMine ? FontWeight.w700 : FontWeight.w500,
           color: cellFg,
         );
-        final content = isMine || _compact
-            ? Text(
-                name,
-                // Compact cells (the fit-width week grid) get a single clipped
-                // line so a long name never overflows the narrow flexed
-                // column; the roomier large "mine" tile keeps its two lines.
-                maxLines: _compact ? 1 : 2,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: nameStyle,
-              )
-            : Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  CircleAvatar(
-                    radius: 12,
-                    // Over a club-tinted cell the avatar can't reuse the old
-                    // surface tint (it would clash with the club bg) — a
-                    // translucent wash of the club's own foreground colour
-                    // keeps the initials legible in either palette; falls back
-                    // to the neutral surface tint when there's no club.
-                    backgroundColor: hasClubTint
-                        ? cellFg.withValues(alpha: 0.2)
-                        : scheme.surfaceContainerHighest,
-                    child: Text(
-                      initialsOf(name),
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        color: cellFg,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.center,
-                    style: nameStyle,
-                  ),
-                ],
-              );
+        // The name alone. Compact cells (the fit-width week grid) get a
+        // single clipped line so a long name never overflows the narrow
+        // flexed column; the roomier large "mine" tile keeps two lines. Other
+        // players' large tiles used to stack an initials avatar over the
+        // name, which on a portrait phone read as two rows ("FE" / "FERI").
+        final content = Text(
+          name,
+          maxLines: !_compact && isMine ? 2 : 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
+          style: nameStyle,
+        );
         return _shell(
           minHeight: minHeight,
           onTap: onTap,
