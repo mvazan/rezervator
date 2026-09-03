@@ -3,8 +3,9 @@
 --   psql postgresql://postgres:postgres@127.0.0.1:54322/postgres \
 --     -v ON_ERROR_STOP=1 -f supabase/tests/tenancy_rls.sql
 -- CI runs it in the `backend` job. Simulates two tenants and a superadmin
--- and asserts zero cross-tenant visibility, the schedule/rental cascades
--- and the 0022 placeholder (hráč bez účtu) lifecycle.
+-- and asserts zero cross-tenant visibility, the schedule/rental cascades,
+-- the 0022 placeholder (hráč bez účtu) lifecycle and the 0023 Google
+-- Calendar plumbing (nonces, server-only tables, job producers, cron).
 begin;
 
 -- Fixtures: second tenant + one profile in each (auth.users stubs).
@@ -512,6 +513,390 @@ begin
     raise exception 'FAIL: a placeholder counted as the founding member';
   end if;
   raise notice 'OK: placeholders never found a tenant';
+end $$;
+
+-- Google Calendar (0023): the OAuth nonce is one-shot and short-lived, the
+-- token/nonce/job tables are server-only, a linked player's booking, cancel
+-- and a re-timed block each leave exactly one reconcile job, and the
+-- service-role RPCs feed the edge functions.
+reset role;
+insert into profiles (id, tenant_id, display_name, email, role, status)
+values ('10000000-0000-0000-0000-000000000006',
+        '00000000-0000-0000-0000-000000000001', 'Kiosk A', 'k@example.com',
+        'kiosk', 'approved');
+do $$
+begin
+  if has_table_privilege('authenticated', 'public.google_calendar_tokens', 'select')
+     or has_table_privilege('authenticated', 'public.oauth_nonces', 'select')
+     or has_table_privilege('authenticated', 'public.notification_jobs', 'select')
+     or has_table_privilege('anon', 'public.google_calendar_links', 'select') then
+    raise exception 'FAIL: a server-only calendar table is readable by an app role';
+  end if;
+  if not has_table_privilege('authenticated', 'public.google_calendar_links', 'select')
+     or has_table_privilege('authenticated', 'public.google_calendar_links', 'insert')
+     or has_table_privilege('authenticated', 'public.google_calendar_links', 'update')
+     or has_table_privilege('authenticated', 'public.google_calendar_links', 'delete') then
+    raise exception 'FAIL: google_calendar_links is not select-only for authenticated';
+  end if;
+  if not has_table_privilege('service_role', 'public.google_calendar_tokens', 'insert')
+     or not has_table_privilege('service_role', 'public.notification_jobs', 'delete') then
+    raise exception 'FAIL: service_role lacks a calendar table privilege';
+  end if;
+  if has_sequence_privilege('authenticated', 'public.notification_jobs_id_seq', 'update')
+     or has_sequence_privilege('anon', 'public.notification_jobs_id_seq', 'usage') then
+    raise exception 'FAIL: app roles may touch the notification_jobs id sequence';
+  end if;
+  if not has_function_privilege('authenticated',
+       'public.start_calendar_link()', 'execute') then
+    raise exception 'FAIL: start_calendar_link is not callable by the app';
+  end if;
+  if has_function_privilege('authenticated',
+       'public.consume_calendar_nonce(text)', 'execute')
+     or has_function_privilege('authenticated',
+          'public.backfill_calendar_jobs(uuid)', 'execute')
+     or has_function_privilege('authenticated',
+          'public.set_calendar_reminders_for(uuid, int[])', 'execute')
+     or has_function_privilege('authenticated',
+          'public.my_future_reservations(uuid)', 'execute')
+     or has_function_privilege('authenticated',
+          'public.enqueue_notification(text, text, jsonb, interval)', 'execute')
+     or has_function_privilege('authenticated',
+          'public.enqueue_calendar_sync(uuid, uuid)', 'execute')
+     or has_function_privilege('authenticated',
+          'public.trigger_notification_jobs()', 'execute') then
+    raise exception 'FAIL: a calendar helper is callable by app roles';
+  end if;
+  if not has_function_privilege('service_role',
+       'public.consume_calendar_nonce(text)', 'execute')
+     or not has_function_privilege('service_role',
+          'public.backfill_calendar_jobs(uuid)', 'execute')
+     or not has_function_privilege('service_role',
+          'public.set_calendar_reminders_for(uuid, int[])', 'execute')
+     or not has_function_privilege('service_role',
+          'public.my_future_reservations(uuid)', 'execute') then
+    raise exception 'FAIL: service_role lacks a calendar RPC';
+  end if;
+  raise notice 'OK: calendar tables and RPCs are server-only except the own links row';
+end $$;
+
+-- Nonce lifecycle, app side: 48 hex chars, a retry replaces the pending one.
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+declare
+  v_first text;
+  v_second text;
+begin
+  v_first := start_calendar_link();
+  if v_first !~ '^[0-9a-f]{48}$' then
+    raise exception 'FAIL: nonce is not 48 hex chars: %', v_first;
+  end if;
+  v_second := start_calendar_link();
+  if v_second = v_first then
+    raise exception 'FAIL: second start_calendar_link reused the nonce';
+  end if;
+  perform set_config('rez.test_nonce1', v_first, true);
+  perform set_config('rez.test_nonce2', v_second, true);
+  if exists (select 1 from google_calendar_links) then
+    raise exception 'FAIL: unlinked player sees a links row';
+  end if;
+  raise notice 'OK: start_calendar_link issues a fresh 48-hex nonce';
+end $$;
+
+-- The kiosk is a shared device: no calendar.
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000006","role":"authenticated"}';
+do $$
+begin
+  begin
+    perform start_calendar_link();
+    raise exception 'FAIL: the kiosk received a calendar nonce';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  raise notice 'OK: the kiosk cannot start a calendar link';
+end $$;
+
+-- Nonce lifecycle, server side (what the callback function does), then the
+-- rows it writes once Google answered: A's admin is linked.
+reset role;
+do $$
+declare
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+  v_first text := current_setting('rez.test_nonce1');
+  v_second text := current_setting('rez.test_nonce2');
+  v_stale text;
+begin
+  if exists (select 1 from oauth_nonces where nonce = v_first) then
+    raise exception 'FAIL: the replaced nonce survived';
+  end if;
+  if (select count(*) from oauth_nonces
+      where user_id = v_uid and consumed_at is null) <> 1 then
+    raise exception 'FAIL: not exactly one unconsumed nonce per player';
+  end if;
+  if consume_calendar_nonce(v_second) is distinct from v_uid then
+    raise exception 'FAIL: nonce did not resolve to its player';
+  end if;
+  if consume_calendar_nonce(v_second) is not null then
+    raise exception 'FAIL: nonce consumed twice';
+  end if;
+  if consume_calendar_nonce('no-such-nonce') is not null then
+    raise exception 'FAIL: unknown nonce accepted';
+  end if;
+  insert into oauth_nonces (user_id, created_at)
+  values (v_uid, now() - interval '11 minutes') returning nonce into v_stale;
+  if consume_calendar_nonce(v_stale) is not null then
+    raise exception 'FAIL: 11-minute-old nonce accepted';
+  end if;
+  raise notice 'OK: calendar nonces are one-shot and expire after 10 minutes';
+  insert into google_calendar_links (user_id, status, google_email)
+  values (v_uid, 'linked', 'a@gmail.com');
+  insert into google_calendar_tokens (user_id, refresh_token, google_calendar_id)
+  values (v_uid, 'refresh-token', 'cal-id@group.calendar.google.com');
+end $$;
+
+-- A linked player (A's admin) and an unlinked one (C) book the same block on
+-- a date ≥ today+28, clear of every earlier block's fixtures.
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+declare
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+  v_c constant uuid := '10000000-0000-0000-0000-000000000003';
+  v_blk uuid;
+  v_d date := (now() at time zone 'Europe/Prague')::date + 28;
+  v_weekdays smallint[];
+  v_res uuid;
+begin
+  if not exists (select 1 from google_calendar_links
+                 where user_id = v_uid and status = 'linked'
+                   and google_email = 'a@gmail.com') then
+    raise exception 'FAIL: linked player cannot read their own links row';
+  end if;
+  -- a block of its own: the 0021 series (lanes 1–2, 17:00) never touches it
+  insert into time_blocks (starts_at, ends_at, position)
+  values ('18:00', '19:00', 2) returning id into v_blk;
+  select training_weekdays into v_weekdays from schedule_settings
+  where tenant_id = current_tenant_id();
+  while not (extract(isodow from v_d)::smallint = any (v_weekdays)) loop
+    v_d := v_d + 1;
+  end loop;
+  select id into v_res from create_reservation(v_uid, v_d, v_blk, 1::smallint);
+  perform create_reservation(v_c, v_d, v_blk, 2::smallint);
+  perform set_config('rez.test_cal_blk', v_blk::text, true);
+  perform set_config('rez.test_cal_d', v_d::text, true);
+  perform set_config('rez.test_cal_res', v_res::text, true);
+  raise notice 'OK: a linked player reads their own links row';
+end $$;
+
+reset role;
+do $$
+declare
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+  v_res uuid := current_setting('rez.test_cal_res')::uuid;
+  v_job notification_jobs;
+begin
+  if (select count(*) from notification_jobs) <> 1 then
+    raise exception 'FAIL: expected exactly one calendar job, found %',
+      (select count(*) from notification_jobs);
+  end if;
+  select * into v_job from notification_jobs;
+  if v_job.kind <> 'calendar_sync'
+     or v_job.dedupe_key <> 'calendar:' || v_uid || ':' || v_res
+     or v_job.payload->>'user_id' <> v_uid::text
+     or v_job.payload->>'reservation_id' <> v_res::text
+     or v_job.attempts <> 0
+     or v_job.run_at <> now() + interval '3 minutes' then
+    raise exception 'FAIL: calendar job has the wrong shape: %', to_jsonb(v_job);
+  end if;
+  -- age it so the cancel below provably re-arms it
+  update notification_jobs set run_at = now() - interval '1 hour';
+  raise notice 'OK: a linked player''s booking enqueues one calendar_sync job, an unlinked one none';
+end $$;
+
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+select cancel_reservation(current_setting('rez.test_cal_res')::uuid);
+
+reset role;
+do $$
+declare
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+  v_res uuid := current_setting('rez.test_cal_res')::uuid;
+begin
+  if (select count(*) from notification_jobs) <> 1 then
+    raise exception 'FAIL: the cancel added a job instead of re-arming the pending one';
+  end if;
+  if not exists (select 1 from notification_jobs
+                 where dedupe_key = 'calendar:' || v_uid || ':' || v_res
+                   and run_at = now() + interval '3 minutes') then
+    raise exception 'FAIL: the cancel did not re-arm the pending job';
+  end if;
+  raise notice 'OK: book-then-cancel collapses into one re-armed job';
+  delete from notification_jobs;
+end $$;
+
+-- A second live booking of the linked player; then the block is re-timed:
+-- only live future reservations of linked players get a job — the cancelled
+-- one and C's do not — and a save that keeps the times enqueues nothing.
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+declare
+  v_res2 uuid;
+begin
+  select id into v_res2 from create_reservation(
+    '10000000-0000-0000-0000-000000000001',
+    current_setting('rez.test_cal_d')::date,
+    current_setting('rez.test_cal_blk')::uuid, 3::smallint);
+  perform set_config('rez.test_cal_res2', v_res2::text, true);
+end $$;
+
+reset role;
+do $$
+declare
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+  v_blk uuid := current_setting('rez.test_cal_blk')::uuid;
+  v_res2 uuid := current_setting('rez.test_cal_res2')::uuid;
+begin
+  delete from notification_jobs;
+  update time_blocks set starts_at = starts_at + interval '5 minutes'
+  where id = v_blk;
+  if (select count(*) from notification_jobs) <> 1
+     or not exists (select 1 from notification_jobs
+                    where dedupe_key = 'calendar:' || v_uid || ':' || v_res2
+                      and payload->>'reservation_id' = v_res2::text) then
+    raise exception 'FAIL: re-timed block did not enqueue exactly the live linked reservation';
+  end if;
+  delete from notification_jobs;
+  update time_blocks set starts_at = starts_at, ends_at = ends_at
+  where id = v_blk;
+  if exists (select 1 from notification_jobs) then
+    raise exception 'FAIL: an unchanged block save enqueued a job';
+  end if;
+  raise notice 'OK: a re-timed block enqueues its live reservations of linked players';
+end $$;
+
+-- Service-role RPCs: backfill, reminders, the events'' raw material.
+do $$
+declare
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+  v_b constant uuid := '10000000-0000-0000-0000-000000000002';
+  v_res uuid := current_setting('rez.test_cal_res')::uuid;
+  v_res2 uuid := current_setting('rez.test_cal_res2')::uuid;
+  v_d date := current_setting('rez.test_cal_d')::date;
+  v_live int;
+  v_count int;
+  v_minutes int[];
+  v_row record;
+begin
+  select count(*) into v_live from reservations
+  where player_id = v_uid and cancelled_at is null
+    and date >= (now() at time zone 'Europe/Prague')::date;
+  v_count := backfill_calendar_jobs(v_uid);
+  if v_count < 1 or v_count <> v_live then
+    raise exception 'FAIL: backfill returned % for % live reservations', v_count, v_live;
+  end if;
+  if (select count(*) from notification_jobs
+      where kind = 'calendar_sync' and run_at <= now()
+        and payload->>'user_id' = v_uid::text) <> v_live
+     or not exists (select 1 from notification_jobs
+                    where dedupe_key = 'calendar:' || v_uid || ':' || v_res2)
+     or exists (select 1 from notification_jobs
+                where dedupe_key = 'calendar:' || v_uid || ':' || v_res) then
+    raise exception 'FAIL: backfill jobs are not the live set, due now';
+  end if;
+  raise notice 'OK: backfill_calendar_jobs enqueues every live future reservation, due now';
+
+  v_minutes := set_calendar_reminders_for(v_uid, '{120,1440,120}');
+  if v_minutes <> '{1440,120}'::int[]
+     or (select reminder_minutes from google_calendar_links
+         where user_id = v_uid) <> '{1440,120}'::int[] then
+    raise exception 'FAIL: reminders not normalised to {1440,120}: %', v_minutes;
+  end if;
+  begin
+    perform set_calendar_reminders_for(v_uid, '{1,2,3,4,5,6}');
+    raise exception 'FAIL: six reminders accepted';
+  exception when others then
+    if sqlerrm <> 'bad_reminders' then raise; end if;
+  end;
+  begin
+    perform set_calendar_reminders_for(v_uid, '{99999}');
+    raise exception 'FAIL: a reminder beyond 4 weeks accepted';
+  exception when others then
+    if sqlerrm <> 'bad_reminders' then raise; end if;
+  end;
+  begin
+    perform set_calendar_reminders_for(v_uid, '{-1}');
+    raise exception 'FAIL: a negative reminder accepted';
+  exception when others then
+    if sqlerrm <> 'bad_reminders' then raise; end if;
+  end;
+  begin
+    perform set_calendar_reminders_for(v_b, '{60}');
+    raise exception 'FAIL: reminders stored for a player without a link';
+  exception when others then
+    if sqlerrm <> 'unknown_link' then raise; end if;
+  end;
+  if set_calendar_reminders_for(v_uid, null) <> '{}'::int[] then
+    raise exception 'FAIL: null reminders are not the empty array';
+  end if;
+  raise notice 'OK: set_calendar_reminders_for normalises and validates';
+
+  select * into v_row from my_future_reservations(v_uid)
+  where reservation_id = v_res2;
+  if not found
+     or v_row.date <> v_d
+     or v_row.starts_at <> '18:05'::time or v_row.ends_at <> '19:00'::time
+     or v_row.lane <> 3 or v_row.alley_name <> 'Kuželna č. 1' then
+    raise exception 'FAIL: my_future_reservations row has the wrong shape: %',
+      to_jsonb(v_row);
+  end if;
+  if (select count(*) from my_future_reservations(v_uid)) <> v_live
+     or exists (select 1 from my_future_reservations(v_uid)
+                where reservation_id = v_res) then
+    raise exception 'FAIL: my_future_reservations is not the live set';
+  end if;
+  if (select array_agg(date order by date, starts_at)
+      from my_future_reservations(v_uid))
+     <> (select array_agg(date) from my_future_reservations(v_uid)) then
+    raise exception 'FAIL: my_future_reservations is not ordered by date, starts_at';
+  end if;
+  raise notice 'OK: my_future_reservations lists the live set with block times and the alley name';
+end $$;
+
+-- Another player (tenant B's admin) sees no link at all.
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000002","role":"authenticated"}';
+do $$
+begin
+  if exists (select 1 from google_calendar_links) then
+    raise exception 'FAIL: tenant B sees a foreign calendar link';
+  end if;
+  raise notice 'OK: calendar links are visible to their owner only';
+end $$;
+
+-- The dispatcher: jobs are due (backfill), the local Vault holds no
+-- webhook secrets → the warning path, no error. And the minute tick exists.
+reset role;
+do $$
+begin
+  if not exists (select 1 from notification_jobs where run_at <= now()) then
+    raise exception 'FAIL: no due job left for the dispatcher probe';
+  end if;
+  perform trigger_notification_jobs();
+  if not exists (select 1 from cron.job
+                 where jobname = 'notification-jobs'
+                   and schedule = '* * * * *'
+                   and command ~ 'trigger_notification_jobs') then
+    raise exception 'FAIL: cron tick notification-jobs is not scheduled';
+  end if;
+  raise notice 'OK: trigger_notification_jobs tolerates an unset Vault and the minute tick is scheduled';
 end $$;
 
 reset role;
