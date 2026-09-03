@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/ui.dart';
 import '../../data/providers.dart';
+import '../../domain/collation.dart';
 import '../../domain/models.dart';
 import 'widgets/admin_scaffold.dart';
 
@@ -84,8 +85,10 @@ class _TenantsBody extends ConsumerWidget {
       value: ref.watch(adminTenantsProvider),
       onRetry: () => ref.invalidate(adminTenantsProvider),
       builder: (rows) {
-        final pending = [for (final t in rows) if (t.pending) t];
-        final approved = [for (final t in rows) if (!t.pending) t];
+        final pending = [for (final t in rows) if (t.pending) t]
+          ..sort((a, b) => compareCzech(a.name, b.name));
+        final approved = [for (final t in rows) if (!t.pending) t]
+          ..sort((a, b) => compareCzech(a.name, b.name));
         return ListView(
           children: [
             if (pending.isNotEmpty) ...[

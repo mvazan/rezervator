@@ -103,9 +103,10 @@ class OverridesScreen extends ConsumerWidget {
     // first), so the default view is only what still matters.
     final upcomingBlockages =
         blockages.where((s) => !s.date.isBefore(now)).toList()
-          ..sort((a, b) => a.date.compareTo(b.date));
+          ..sort((a, b) =>
+              compareDayTime(a.date, a.startsAt, b.date, b.startsAt));
     final pastBlockages = blockages.where((s) => s.date.isBefore(now)).toList()
-      ..sort((a, b) => b.date.compareTo(a.date));
+      ..sort((a, b) => compareDayTime(b.date, b.startsAt, a.date, a.startsAt));
     // Pronájmy: exception rows of weekly rentals (one occurrence skipped or
     // on other lanes/times) — orphans whose series is gone are not listed.
     final rentals = ref.watch(rentalsProvider).value ?? const <Rental>[];
@@ -122,10 +123,12 @@ class OverridesScreen extends ConsumerWidget {
     ];
     final upcomingRentalExceptions =
         rentalExceptions.where((r) => !r.date!.isBefore(now)).toList()
-          ..sort((a, b) => a.date!.compareTo(b.date!));
+          ..sort((a, b) =>
+              compareDayTime(a.date!, a.startsAt, b.date!, b.startsAt));
     final pastRentalExceptions =
         rentalExceptions.where((r) => r.date!.isBefore(now)).toList()
-          ..sort((a, b) => b.date!.compareTo(a.date!));
+          ..sort((a, b) =>
+              compareDayTime(b.date!, b.startsAt, a.date!, a.startsAt));
 
     return AdminScaffold(
       title: 'Výjimky dnů',
