@@ -17,14 +17,11 @@ otherwise). In every other row a match is taken only when one of
 OUR teams (--teams) plays in it, and it is imported as "venkovní zápas" —
 listed in the day header, blocks nothing.
 
-Match length differs per competition (KP2 is the shortest, KP1 medium,
-divize and the leagues the longest) and the sheet has no end times, so
-it is read off the double-match cells: when two matches share a cell, the
-gap between their start times is how long the first one lasts. The most
-common gap per competition over every alley in the sheet is used; gaps
-longer than --max-gap are idle time (a morning and an evening match), not
-a duration, and a competition with no usable observation gets --duration.
-`--length "KP1 Sever=240"` pins a competition by hand.
+Match length is fixed per competition tier (the sheet has no end times,
+and double-match gaps in the cells turned out to include warm-up/idle
+time, not the real match length): KP2 = 90 min, KP1 = 150 min, everything
+else (divize, the leagues) = --duration (180 min). `--length
+"KP1 Sever=240"` overrides one competition by its exact name.
 
 The output is a SQL file that runs as the alley's admin (RLS, triggers and
 cancellations as in the app). Re-running is safe: every row carries an
@@ -137,15 +134,8 @@ def season_date(dd: int, mm: int, season: int) -> dt.date:
     return dt.date(season if mm >= 7 else season + 1, mm, dd)
 
 
-def minutes(hhmm: str) -> int:
-    h, mi = map(int, hhmm.split(':'))
-    return h * 60 + mi
-
-
-def parse_calendar(cells, season: int, warnings: List[str],
-                   gaps: Dict[str, List[int]]) -> List[Match]:
-    """Matches of every alley; [gaps] collects, per competition, how long a
-    match lasted when another one followed it in the same cell."""
+def parse_calendar(cells, season: int, warnings: List[str]) -> List[Match]:
+    """Matches of every alley, in sheet order."""
     rows: Dict[int, Dict[int, str]] = {}
     for (r, c), v in cells.items():
         rows.setdefault(r, {})[c] = v
@@ -169,7 +159,6 @@ def parse_calendar(cells, season: int, warnings: List[str],
                 warnings.append('%s %s: sheet says %s but %s is a %s — wrong --season?'
                                 % (alley, date, label, date, WEEKDAYS[date.weekday()]))
             header: Optional[Tuple[Optional[str], str]] = None
-            last_match: Optional[Match] = None
             for line in text.splitlines():
                 if not line.strip():
                     continue
@@ -179,19 +168,14 @@ def parse_calendar(cells, season: int, warnings: List[str],
                         warnings.append('%s %s: header without teams: %r' % (alley, date, header))
                     time = None if tm.group(1).startswith('?') else tm.group(1).zfill(5)
                     header = (time, tm.group(2).strip())
-                    if last_match is not None and last_match.time and time:
-                        gap = minutes(time) - minutes(last_match.time)
-                        if gap > 0:
-                            gaps.setdefault(last_match.competition, []).append(gap)
                     continue
                 teams = TEAMS_LINE.match(line)
                 if teams:
                     if header is None:
                         warnings.append('%s %s: teams without a time line: %r' % (alley, date, line))
                         header = (None, '')
-                    last_match = Match(alley, date, label, header[0], header[1],
-                                       teams.group(1).strip(), teams.group(2).strip())
-                    matches.append(last_match)
+                    matches.append(Match(alley, date, label, header[0], header[1],
+                                         teams.group(1).strip(), teams.group(2).strip()))
                     header = None
                     continue
                 warnings.append('%s %s: unrecognised line %r' % (alley, date, line))
@@ -239,36 +223,27 @@ def classify(matches: List[Match], alley: str, teams: List[str]) -> List[Match]:
     return picked
 
 
-def mode_gap(seen: List[int], max_gap: int) -> Optional[Tuple[int, int]]:
-    """(most common gap up to max_gap — ties go to the longer one, usable
-    observations) or None."""
-    usable = [g for g in seen if g <= max_gap]
-    if not usable:
-        return None
-    best = max(Counter(usable).items(), key=lambda kv: (kv[1], kv[0]))
-    return best[0], len(usable)
+# Fixed by competition tier — the observed double-match gaps in the sheet
+# turned out to include warm-up/idle time rather than the true match
+# length, so this replaced that inference (2026/27 season, told by hand).
+TIER_DURATIONS = [('KP2', 90), ('KP1', 150)]
 
 
-def assign_durations(matches: List[Match], gaps: Dict[str, List[int]],
-                     fallback: int, max_gap: int,
+def assign_durations(matches: List[Match], fallback: int,
                      overrides: Dict[str, int]) -> Dict[str, int]:
-    """--length override → most common observed gap of the competition →
-    default; returns {competition: minutes} for the report."""
+    """--length override → competition tier (KP2/KP1) → fallback (divize,
+    the leagues); returns {competition: minutes} for the report."""
     chosen: Dict[str, int] = {}
     for m in matches:
         if m.competition not in chosen:
-            observed = mode_gap(gaps.get(m.competition, []), max_gap)
-            chosen[m.competition] = overrides.get(
-                m.competition, observed[0] if observed else fallback)
+            if m.competition in overrides:
+                chosen[m.competition] = overrides[m.competition]
+            else:
+                chosen[m.competition] = next(
+                    (mins for prefix, mins in TIER_DURATIONS
+                     if prefix in m.competition), fallback)
         m.duration = chosen[m.competition]
     return chosen
-
-
-def histogram(seen: List[int], max_gap: int) -> Tuple[str, str]:
-    counts = Counter(seen)
-    used = ', '.join('%d×%s' % (c, fmt_minutes(g)) for g, c in sorted(counts.items()) if g <= max_gap)
-    idle = ', '.join('%d×%s' % (c, fmt_minutes(g)) for g, c in sorted(counts.items()) if g > max_gap)
-    return used, idle
 
 
 # --- output ---------------------------------------------------------------
@@ -327,7 +302,7 @@ def preflight_sql(tenant: str, tenant_id: Optional[str],
 
 
 def build_sql(matches: List[Match], tenant: str, tenant_id: Optional[str],
-              prep: int, source: str) -> str:
+              prep: int, source: str, replace: bool) -> str:
     values = []
     for m in matches:
         end, clamped = add_minutes(m.time, m.duration)
@@ -337,11 +312,17 @@ def build_sql(matches: List[Match], tenant: str, tenant_id: Optional[str],
             sql_str(m.competition), 'true' if m.is_away else 'false',
             sql_str(m.import_key)))
     home = sum(1 for m in matches if not m.is_away)
+    replace_note = (
+        "-- --replace: deletes this alley's previously imported matches "
+        "(import_key like 'xlsx:%') first, same transaction."
+        if replace else
+        "-- Safe to re-run: rows are keyed by import_key and never inserted twice."
+    )
     return '\n'.join([
         '-- Generated by tool/import_matches.py from %s on %s: %d home + %d away matches.'
         % (source, dt.date.today().isoformat(), home, len(matches) - home),
         "-- Runs as the alley's admin (RLS and cancelled reservations as in the app).",
-        '-- Safe to re-run: rows are keyed by import_key and never inserted twice.',
+        replace_note,
         'begin;',
         "select set_config('import.tenant', coalesce(%s, ''), true);"
         % tenant_lookup(tenant, tenant_id)[0],
@@ -356,6 +337,10 @@ def build_sql(matches: List[Match], tenant: str, tenant_id: Optional[str],
         '-- From here on exactly what the app does when the admin saves a match.',
         'set local role authenticated;',
         "select set_config('request.jwt.claims', json_build_object('sub', current_setting('import.admin'), 'role', 'authenticated')::text, true);",
+    ] + ([
+        "delete from priority_slots where tenant_id = current_setting('import.tenant')::uuid"
+        "  and import_key like 'xlsx:%';",
+    ] if replace else []) + [
         'insert into priority_slots',
         '  (date, starts_at, ends_at, type_id, home_team, away_team, prep_minutes, description, is_away, created_by, import_key)',
         "select v.date::date, v.starts_at::time, v.ends_at::time, current_setting('import.type')::uuid,",
@@ -381,9 +366,7 @@ def main() -> int:
                     help='substrings identifying our teams')
     ap.add_argument('--season', type=int, help='autumn year of the season (default: from the file name)')
     ap.add_argument('--duration', type=int, default=180,
-                    help='match length in minutes for competitions without a usable double-match observation')
-    ap.add_argument('--max-gap', type=int, default=270,
-                    help='longest plausible match in minutes; a bigger gap between two matches in a cell is idle time')
+                    help="match length in minutes for competitions outside the KP1/KP2 tiers (divize, the leagues)")
     ap.add_argument('--length', action='append', default=[], metavar='SOUTĚŽ=MIN',
                     help='pin a competition\'s match length by hand, e.g. --length "KP1 Sever=240" (repeatable)')
     ap.add_argument('--prep', type=int, default=0,
@@ -391,6 +374,8 @@ def main() -> int:
     ap.add_argument('--out', default='build/import_matches.sql')
     ap.add_argument('--apply', action='store_true', help='run the SQL — against PROD unless --local')
     ap.add_argument('--yes', action='store_true', help='with --apply: skip the confirmation question')
+    ap.add_argument('--replace', action='store_true',
+                    help='delete this alley\'s previously imported matches (import_key like xlsx:%%) before writing — same transaction')
     ap.add_argument('--local', action='store_true', help='with --apply: the local stack (psql) instead of prod')
     args = ap.parse_args()
 
@@ -414,14 +399,13 @@ def main() -> int:
         overrides[name.strip()] = int(mins)
 
     warnings: List[str] = []
-    gaps: Dict[str, List[int]] = {}
-    all_matches = parse_calendar(sheets[calendar], season, warnings, gaps)
+    all_matches = parse_calendar(sheets[calendar], season, warnings)
     if not any(m.alley == args.alley for m in all_matches):
         print('alley %r not found in %s; rows: %s' % (
             args.alley, calendar, ', '.join(sorted({m.alley for m in all_matches}))), file=sys.stderr)
         return 2
     matches = classify(all_matches, args.alley, args.teams)
-    durations = assign_durations(matches, gaps, args.duration, args.max_gap, overrides)
+    durations = assign_durations(matches, args.duration, overrides)
 
     # Cross-check with the hidden flat list, laid out independently.
     if 'Utkání – vše' in sheets:
@@ -445,14 +429,12 @@ def main() -> int:
     print('%d matches: %d home at %s, %d away' % (
         len(matches), sum(1 for m in matches if not m.is_away), args.alley,
         sum(1 for m in matches if m.is_away)))
-    print('match length per competition from double-match cells (gaps over %s count as idle time; default %s):'
-          % (fmt_minutes(args.max_gap), fmt_minutes(args.duration)))
+    print('match length per competition (fallback for divize/ligy %s):'
+          % fmt_minutes(args.duration))
     for comp in sorted(durations):
-        used, idle = histogram(gaps.get(comp, []), args.max_gap)
         note = ('pinned by --length' if comp in overrides
-                else ('observed: ' + used) if used else 'no usable observation → default')
-        if idle:
-            note += '; ignored as idle time: ' + idle
+                else 'KP2/KP1 tier' if any(p in comp for p, _ in TIER_DURATIONS)
+                else 'fallback (divize/liga)')
         print('  %-14s %s  (%s)' % (comp, fmt_minutes(durations[comp]), note))
     print()
     for m in matches:
@@ -472,7 +454,7 @@ def main() -> int:
             print('  ' + w)
 
     sql = build_sql(matches, args.tenant, args.tenant_id, args.prep,
-                    args.workbook.split('/')[-1])
+                    args.workbook.split('/')[-1], args.replace)
     import os
     os.makedirs(os.path.dirname(args.out) or '.', exist_ok=True)
     with open(args.out, 'w', encoding='utf-8') as f:

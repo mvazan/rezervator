@@ -47,4 +47,9 @@ nepřišel, a měsíční docházku si stáhne jako CSV.
   do které kuželny a pod kterým správcem se zapíše, kolik zápasů už tam je a
   kolik živých rezervací může zrušit, a čeká na napsané „ano“ (`--yes` to
   přeskočí, `--local` míří na lokální stack). Kuželnu vybereš `--tenant`
-  jménem nebo `--tenant-id` uuid, délku zápasu doladíš `--length "KP1 Sever=210"`.
+  jménem nebo `--tenant-id` uuid. Délka zápasu je pevná podle soutěže
+  (KP2 90 min, KP1 150 min, jinak — divize a ligy — `--duration`, výchozí
+  180 min); `--length "KP1 Sever=210"` přebije jednu soutěž ručně. Oprava
+  už naimportovaného kola (jiná délka, jiná data) jde přes `--replace`: ve
+  stejné transakci smaže všechny dřív naimportované zápasy té kuželny
+  (`import_key like 'xlsx:%'`) a zapíše je znovu.
