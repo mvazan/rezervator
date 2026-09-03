@@ -96,6 +96,17 @@ void main() {
     createdAt: DateTime.utc(2026, 1, 1),
   );
 
+  // The roster behind `playersProvider` unless a test passes its own: the
+  // signed-in player plus one ordinary teammate with a nick.
+  const players = [
+    PlayerName(id: 'me', displayName: 'Já Hráč'),
+    PlayerName(
+      id: 'p2',
+      displayName: 'Petr Novák',
+      nick: 'Péťa',
+    ),
+  ];
+
   Widget app({
     List<DayOverride> overrides = const [],
     List<PrioritySlot> matches = const [],
@@ -105,6 +116,7 @@ void main() {
     Stream<List<Rental>>? rentalsStream,
     Profile profile = me,
     List<Widget> trailing = const [],
+    List<PlayerName> roster = players,
   }) {
     return ProviderScope(
       overrides: [
@@ -121,16 +133,7 @@ void main() {
           (ref) => Stream.value(reservations),
         ),
         myProfileProvider.overrideWith((ref) => Stream.value(profile)),
-        playersProvider.overrideWith(
-          (ref) async => const [
-            PlayerName(id: 'me', displayName: 'Já Hráč'),
-            PlayerName(
-              id: 'p2',
-              displayName: 'Petr Novák',
-              nick: 'Péťa',
-            ),
-          ],
-        ),
+        playersProvider.overrideWith((ref) async => roster),
       ],
       child: MaterialApp(home: Scaffold(body: WeekScreen(trailing: trailing))),
     );
@@ -200,6 +203,35 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Rezervovat termín?'), findsOneWidget);
     expect(find.byType(DropdownButtonFormField<String>), findsOneWidget);
+  });
+
+  testWidgets('admin booking dialog marks players without an account', (
+    tester,
+  ) async {
+    wideSurface(tester);
+    await tester.pumpWidget(app(
+      profile: admin,
+      roster: [
+        ...players,
+        const PlayerName(
+          id: 'p3',
+          displayName: 'Bohumil Kroupa',
+          hasAccount: false,
+        ),
+      ],
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.add).first);
+    await tester.pumpAndSettle();
+    expect(find.text('Rezervovat termín?'), findsOneWidget);
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.pumpAndSettle();
+    // A hand-made "hráč bez účtu" is flagged in the picker — the booking
+    // will never reach an inbox, so the admin should know whom they pick…
+    expect(find.text('Bohumil Kroupa · bez účtu'), findsWidgets);
+    // …while an ordinary teammate keeps a bare name.
+    expect(find.text('Petr Novák'), findsWidgets);
+    expect(find.text('Petr Novák · bez účtu'), findsNothing);
   });
 
   testWidgets('admin tap on foreign reservation opens the cancel dialog with '

@@ -454,8 +454,10 @@ class ScheduleActions {
 }
 
 /// Admin-only booking dialog: same confirmation as the plain player flow,
-/// plus a player picker (defaults to the admin themself, labelled 'já').
-/// Pops the chosen player's id, or null on cancel.
+/// plus a player picker (defaults to the admin themself, labelled 'já';
+/// a "hráč bez účtu" is suffixed '· bez účtu' so the admin knows the
+/// booking will never reach an inbox). Pops the chosen player's id, or
+/// null on cancel.
 class _BookingDialog extends StatefulWidget {
   const _BookingDialog({
     required this.message,
@@ -491,7 +493,14 @@ class _BookingDialogState extends State<_BookingDialog> {
               DropdownMenuItem(value: widget.me.id, child: const Text('já')),
               for (final p in widget.players)
                 if (p.id != widget.me.id)
-                  DropdownMenuItem(value: p.id, child: Text(p.displayName)),
+                  DropdownMenuItem(
+                    value: p.id,
+                    child: Text(
+                      p.hasAccount
+                          ? p.displayName
+                          : '${p.displayName} · bez účtu',
+                    ),
+                  ),
             ],
             onChanged: (v) => setState(() => _playerId = v!),
           ),
