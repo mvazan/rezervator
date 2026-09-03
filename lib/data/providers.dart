@@ -6,6 +6,7 @@
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'cache.dart';
@@ -194,6 +195,41 @@ final offlineProvider = StreamProvider<bool>((ref) async* {
 final _rosterTickProvider = StreamProvider<int>((ref) async* {
   yield 0;
   yield* Stream.periodic(const Duration(minutes: 5), (i) => i + 1);
+});
+
+/// Oldest app build the backend still supports (`app_config.min_build`,
+/// 0025) — LIVE: a Realtime stream of the single row, so a bump lands in a
+/// running app within seconds instead of on the next cold start;
+/// re-subscribed on every roster tick (a dropped socket cannot leave an old
+/// build running blindly) and by the auth gate on resume. Null while
+/// unknown (signed out, offline, older backend) — never lock anyone out on
+/// a doubt.
+final minBuildProvider = StreamProvider<int?>((ref) {
+  if (ref.watch(_authUidProvider) == null) return Stream.value(null);
+  ref.watch(_rosterTickProvider);
+  return _db
+      .from('app_config')
+      .stream(primaryKey: ['id'])
+      .map((rows) => rows.isEmpty ? null : rows.first['min_build'] as int?);
+});
+
+/// This build's number (the part after `+` in pubspec.yaml); null where
+/// package info is unavailable (tests, an unsupported platform).
+final appBuildProvider = FutureProvider<int?>((ref) async {
+  try {
+    return int.tryParse((await PackageInfo.fromPlatform()).buildNumber);
+  } catch (_) {
+    return null;
+  }
+});
+
+/// True when BOTH numbers are known and this build is older than the
+/// backend allows — the auth gate then shows the update screen and the app
+/// stops talking to the server (no half-broken RPCs, no Sentry noise).
+final updateRequiredProvider = Provider<bool>((ref) {
+  final minBuild = ref.watch(minBuildProvider).value;
+  final build = ref.watch(appBuildProvider).value;
+  return minBuild != null && build != null && build < minBuild;
 });
 
 /// Approved player names from the `players` view. Views cannot stream, so
