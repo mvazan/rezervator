@@ -8,6 +8,15 @@ and what cascades — and is updated with every migration.
 
 ## Tenancy model
 
+- The Demo kuželna (Google Play review) holds the memorable id
+  `00000000-0000-0000-0000-000000000001` — the only tenant id any code knows
+  (`AppConfig.demoTenantId` hides it in the registration picker). 0026 moved
+  it there from `…0000de` and gave the pre-multitenancy bootstrap kuželna a
+  random uuid, so every other tenant id is random. 0026 renumbers a primary
+  key: it repoints children dynamically over the foreign keys onto `tenants`
+  with `session_replication_role = replica`, checks for orphans, and is a
+  no-op once done. `supabase/tests/tenancy_rls.sql` owns its own two tenants
+  (`…00000a`, `…000002`) and never borrows the bootstrap one.
 - One row of `tenants` = one kuželna. Every other table carries `tenant_id`;
   `current_tenant_id()` (security definer, reads `profiles.tenant_id` of
   `auth.uid()`) scopes every policy, so a client only ever sees its own
