@@ -8,8 +8,11 @@
 -- Calendar plumbing (nonces, server-only tables, job producers, cron).
 begin;
 
--- Fixtures: second tenant + one profile in each (auth.users stubs).
+-- Fixtures: both tenants + one profile in each (auth.users stubs). The
+-- suite owns its tenants; it deliberately does not borrow the bootstrap
+-- kuželna, whose id went to Demo in 0026 (and became random).
 insert into tenants (id, name) values
+  ('00000000-0000-0000-0000-00000000000a', 'Kuželna A'),
   ('00000000-0000-0000-0000-000000000002', 'Kuželna B');
 
 insert into auth.users (id, email) values
@@ -22,21 +25,21 @@ on conflict do nothing;
 insert into profiles (id, tenant_id, display_name, email, role, status)
 values
   ('10000000-0000-0000-0000-000000000001',
-   '00000000-0000-0000-0000-000000000001', 'Hráč A', 'a@example.com',
+   '00000000-0000-0000-0000-00000000000a', 'Hráč A', 'a@example.com',
    'admin', 'approved'),
   ('10000000-0000-0000-0000-000000000002',
    '00000000-0000-0000-0000-000000000002', 'Hráč B', 'b@example.com',
    'admin', 'approved'),
   -- pending player in tenant A: the cross-tenant approve target
   ('10000000-0000-0000-0000-000000000003',
-   '00000000-0000-0000-0000-000000000001', 'Čekající C', 'c@example.com',
+   '00000000-0000-0000-0000-00000000000a', 'Čekající C', 'c@example.com',
    'player', 'pending'),
   -- superadmin at home in tenant A (0014/0015)
   ('10000000-0000-0000-0000-000000000004',
-   '00000000-0000-0000-0000-000000000001', 'Super S', 's@example.com',
+   '00000000-0000-0000-0000-00000000000a', 'Super S', 's@example.com',
    'admin', 'approved');
 update profiles set superadmin = true,
-  home_tenant_id = '00000000-0000-0000-0000-000000000001'
+  home_tenant_id = '00000000-0000-0000-0000-00000000000a'
 where id = '10000000-0000-0000-0000-000000000004';
 
 -- Privileges as code (0017/0020): anon has nothing, the players view is
@@ -336,7 +339,7 @@ begin
   exception when others then
     if sqlerrm <> 'switch_home_first' then raise; end if;
   end;
-  perform switch_tenant('00000000-0000-0000-0000-000000000001');
+  perform switch_tenant('00000000-0000-0000-0000-00000000000a');
   perform reject_tenant('00000000-0000-0000-0000-000000000003');
   if exists (select 1 from tenants
              where id = '00000000-0000-0000-0000-000000000003') then
@@ -522,7 +525,7 @@ end $$;
 reset role;
 insert into profiles (id, tenant_id, display_name, email, role, status)
 values ('10000000-0000-0000-0000-000000000006',
-        '00000000-0000-0000-0000-000000000001', 'Kiosk A', 'k@example.com',
+        '00000000-0000-0000-0000-00000000000a', 'Kiosk A', 'k@example.com',
         'kiosk', 'approved');
 do $$
 begin
@@ -852,7 +855,7 @@ begin
   if not found
      or v_row.date <> v_d
      or v_row.starts_at <> '18:05'::time or v_row.ends_at <> '19:00'::time
-     or v_row.lane <> 3 or v_row.alley_name <> 'Kuželna č. 1' then
+     or v_row.lane <> 3 or v_row.alley_name <> 'Kuželna A' then
     raise exception 'FAIL: my_future_reservations row has the wrong shape: %',
       to_jsonb(v_row);
   end if;
