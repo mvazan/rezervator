@@ -3,7 +3,8 @@
 --   psql postgresql://postgres:postgres@127.0.0.1:54322/postgres \
 --     -v ON_ERROR_STOP=1 -f supabase/tests/tenancy_rls.sql
 -- CI runs it in the `backend` job. Simulates two tenants and a superadmin
--- and asserts zero cross-tenant visibility.
+-- and asserts zero cross-tenant visibility, the schedule/rental cascades
+-- and the 0022 placeholder (hráč bez účtu) lifecycle.
 begin;
 
 -- Fixtures: second tenant + one profile in each (auth.users stubs).
@@ -341,6 +342,176 @@ begin
     raise exception 'FAIL: reject_tenant did not delete the tenant';
   end if;
   raise notice 'OK: reject_tenant guards the visiting superadmin';
+end $$;
+
+-- Players without an account (0022): a hand-made profile is an approved,
+-- bookable player that can hold no role, never founds a tenant and merges
+-- into the account the person later registers.
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+declare
+  v_admin constant uuid := '10000000-0000-0000-0000-000000000001';
+  v_c constant uuid := '10000000-0000-0000-0000-000000000003';
+  v_ph profiles;
+  v_tmp profiles;
+  v_blk uuid;
+  v_d date := (now() at time zone 'Europe/Prague')::date + 21;
+  v_weekdays smallint[];
+  v_res uuid;
+begin
+  select * into v_ph
+  from save_placeholder_player(null, ' Důchodce D ', 'Důcha', null);
+  if v_ph.tenant_id <> current_tenant_id() or not v_ph.placeholder
+     or v_ph.status <> 'approved' or v_ph.role <> 'player'
+     or v_ph.email <> '' or v_ph.display_name <> 'Důchodce D'
+     or v_ph.approved_by is distinct from v_admin
+     or v_ph.approved_at is null then
+    raise exception 'FAIL: placeholder row has the wrong shape';
+  end if;
+  if not exists (select 1 from players where id = v_ph.id and placeholder) then
+    raise exception 'FAIL: placeholder missing from players or flag not exposed';
+  end if;
+  perform set_config('rez.test_ph', v_ph.id::text, true);
+  select * into v_ph
+  from save_placeholder_player(v_ph.id, 'Důchodce D', 'Děda', null);
+  if v_ph.nick <> 'Děda' then
+    raise exception 'FAIL: placeholder edit did not stick';
+  end if;
+  begin
+    perform save_placeholder_player(null, '  ', '', null);
+    raise exception 'FAIL: empty display_name accepted';
+  exception when others then
+    if sqlerrm <> 'empty_display_name' then raise; end if;
+  end;
+  begin
+    perform save_placeholder_player(v_c, 'X', '', null);
+    raise exception 'FAIL: save_placeholder_player edited a real profile';
+  exception when others then
+    if sqlerrm <> 'unknown_player' then raise; end if;
+  end;
+  begin
+    perform set_role(v_ph.id, 'admin');
+    raise exception 'FAIL: placeholder became admin';
+  exception when others then
+    if sqlerrm <> 'placeholder_no_account' then raise; end if;
+  end;
+  -- bookable: the admin books for it (the kiosk goes through the same gate)
+  select training_weekdays into v_weekdays from schedule_settings
+  where tenant_id = current_tenant_id();
+  while not (extract(isodow from v_d)::smallint = any (v_weekdays)) loop
+    v_d := v_d + 1;
+  end loop;
+  select id into v_blk from time_blocks where active limit 1;
+  select id into v_res from create_reservation(v_ph.id, v_d, v_blk, 3::smallint);
+  perform set_config('rez.test_res', v_res::text, true);
+  perform set_config('rez.test_d', v_d::text, true);
+  perform set_config('rez.test_blk', v_blk::text, true);
+  begin
+    perform delete_placeholder_player(v_ph.id);
+    raise exception 'FAIL: placeholder with history was deleted';
+  exception when others then
+    if sqlerrm <> 'player_has_history' then raise; end if;
+  end;
+  select * into v_tmp from save_placeholder_player(null, 'Omylem', '', null);
+  perform delete_placeholder_player(v_tmp.id);
+  if exists (select 1 from profiles where id = v_tmp.id) then
+    raise exception 'FAIL: delete_placeholder_player left the row';
+  end if;
+  raise notice 'OK: placeholders are approved, bookable and roleless';
+end $$;
+
+-- Tenant B neither sees nor edits tenant A's placeholder.
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000002","role":"authenticated"}';
+do $$
+begin
+  if exists (select 1 from players where placeholder) then
+    raise exception 'FAIL: tenant B sees tenant A placeholders';
+  end if;
+  begin
+    perform save_placeholder_player(current_setting('rez.test_ph')::uuid,
+                                    'Únos', '', null);
+    raise exception 'FAIL: tenant B edited a tenant A placeholder';
+  exception when others then
+    if sqlerrm <> 'unknown_player' then raise; end if;
+  end;
+  raise notice 'OK: placeholders are tenant-scoped';
+end $$;
+
+-- Merge: pending C takes the history and the chosen fields and is approved;
+-- a real profile is never a source; an approved target works too.
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+declare
+  v_admin constant uuid := '10000000-0000-0000-0000-000000000001';
+  v_c constant uuid := '10000000-0000-0000-0000-000000000003';
+  v_ph uuid := current_setting('rez.test_ph')::uuid;
+  v_res uuid := current_setting('rez.test_res')::uuid;
+  v_d date := current_setting('rez.test_d')::date;
+  v_blk uuid := current_setting('rez.test_blk')::uuid;
+  v_tmp profiles;
+begin
+  begin
+    perform merge_placeholder_player(v_c, v_admin, 'X', '', null);
+    raise exception 'FAIL: merged a real profile as the source';
+  exception when others then
+    if sqlerrm <> 'invalid_merge' then raise; end if;
+  end;
+  perform merge_placeholder_player(v_ph, v_c, 'Cyril C', 'Děda', null);
+  if exists (select 1 from profiles where id = v_ph) then
+    raise exception 'FAIL: placeholder survived the merge';
+  end if;
+  if (select player_id from reservations where id = v_res) <> v_c then
+    raise exception 'FAIL: reservation did not move to the account';
+  end if;
+  if not exists (select 1 from profiles
+                 where id = v_c and status = 'approved'
+                   and display_name = 'Cyril C' and nick = 'Děda'
+                   and approved_by = v_admin and approved_at is not null) then
+    raise exception 'FAIL: merge target not approved with the chosen fields';
+  end if;
+  if not exists (select 1 from players
+                 where id = v_c and nick = 'Děda' and not placeholder) then
+    raise exception 'FAIL: merged account missing from players';
+  end if;
+  select * into v_tmp
+  from save_placeholder_player(null, 'Ještě jeden', '', null);
+  perform create_reservation(v_tmp.id, v_d, v_blk, 4::smallint);
+  perform merge_placeholder_player(v_tmp.id, v_c, 'Cyril C', 'Děda', null);
+  if (select count(*) from reservations
+      where player_id = v_c and date = v_d) <> 2 then
+    raise exception 'FAIL: merge into an approved account did not move history';
+  end if;
+  if has_table_privilege('authenticated', 'public.players', 'insert') then
+    raise exception 'FAIL: players view became writable after 0022';
+  end if;
+  raise notice 'OK: placeholders merge into pending and approved accounts';
+end $$;
+
+-- A placeholder never founds a tenant: the first real registrant into a
+-- kuželna that only has hand-made rows is still its approved admin.
+-- No auth.users stub is needed any more (profiles_id_fkey is gone).
+reset role;
+insert into tenants (id, name, status) values
+  ('00000000-0000-0000-0000-000000000004', 'Kuželna D', 'approved');
+insert into profiles (id, tenant_id, display_name, role, status, placeholder)
+values (gen_random_uuid(), '00000000-0000-0000-0000-000000000004',
+        'Důchodce bez účtu', 'player', 'approved', true);
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000005","role":"authenticated"}';
+do $$
+declare
+  v_p profiles;
+begin
+  select * into v_p from register_profile(
+    'Zakladatel D', '00000000-0000-0000-0000-000000000004');
+  if v_p.role <> 'admin' or v_p.status <> 'approved' then
+    raise exception 'FAIL: a placeholder counted as the founding member';
+  end if;
+  raise notice 'OK: placeholders never found a tenant';
 end $$;
 
 reset role;

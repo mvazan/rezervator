@@ -22,13 +22,23 @@ and what cascades — and is updated with every migration.
   from `monthly_attendance`.
 - New kuželny start `pending`; the registration dropdown lists approved ones
   only and the founder waits on the waiting screen until approval.
+- Players without an account (`profiles.placeholder`, 0022): the admin
+  creates the profile by hand (`save_placeholder_player`); it has no
+  `auth.users` row — `profiles.id` no longer references `auth.users`, and
+  deleting an auth user no longer cascades to its profile. Always an approved
+  plain player (`profiles_placeholder_check`): bookable from the calendar and
+  the kiosk, never admin/kiosk (`placeholder_no_account`), never a founding
+  member. When the person registers, `merge_placeholder_player` moves the
+  reservation history onto the account (`profiles.id = auth.uid()` is the
+  identity, so the account row is the one that survives), writes the
+  admin-chosen name/nick/club, approves it and deletes the placeholder.
 
 ## Tables
 
 | Table | Purpose / key columns | RLS (all `tenant_id = current_tenant_id()` unless noted) |
 |---|---|---|
 | `tenants` | `name` unique, `founder_email` (only the founder can become the first admin), `status`, `approved_at` | select for `authenticated` `using (true)` **but column grants expose only `id, name, status`** — `founder_email` never leaves the server. Writes: RPC only. |
-| `profiles` | `id → auth.users`, `display_name`, `nick` ≤ 14, `email`, `role`, `status`, `club_id → clubs`, `fcm_token`, `superadmin`, `home_tenant_id`, `approved_by/at` | select: own row, or admin of the same tenant. update: own row, columns `display_name`, `fcm_token` only. insert/delete: RPC only. |
+| `profiles` | `id` (= `auth.uid()` for real accounts; no FK to `auth.users` since 0022), `display_name`, `nick` ≤ 14, `email` ('' for placeholders), `role`, `status`, `club_id → clubs`, `fcm_token`, `superadmin`, `home_tenant_id`, `approved_by/at`, `placeholder` (hand-made row: player ∧ approved ∧ not superadmin) | select: own row, or admin of the same tenant. update: own row, columns `display_name`, `fcm_token` only. insert/delete: RPC only. |
 | `schedule_settings` | PK `tenant_id`; `lane_count` 1–12, `training_weekdays smallint[]` (ISO 1–7), `booking_horizon_days` 1–90, `max_active_reservations` 1–50, `kiosk_dark`, `kiosk_fit_day` | select approved/kiosk; update admin. |
 | `time_blocks` | `starts_at`, `ends_at`, `position`, `active`. `position = -1` marks a day-special block: inactive, reachable only through `day_overrides.block_ids` | select approved/kiosk; insert/update/delete admin. FK from `reservations` is RESTRICT — only never-used blocks can be deleted. |
 | `day_overrides` | PK (`tenant_id`, `date`); `closed`, `reason`, `block_ids uuid[]` (`null` = the default active set) | select approved/kiosk; write admin. Normally written through `set_day_override`. |
@@ -40,9 +50,10 @@ and what cascades — and is updated with every migration.
 
 View `players` (owned by postgres → bypasses `profiles` RLS on purpose):
 approved, non-kiosk members of the caller's tenant minus visiting
-superadmins — `id, display_name, nick, club_id, club_color`. This is the
-only profile data the kiosk account can read. SELECT for `authenticated`
-only.
+superadmins — `id, display_name, nick, club_id, club_color, placeholder`
+(0022 appended `placeholder` with `create or replace`, which keeps the
+ACL). This is the only profile data the kiosk account can read. SELECT for
+`authenticated` only.
 
 ## Privileges (0017)
 
@@ -60,10 +71,11 @@ roles (see below).
 
 | Function | Who | Effect / raises |
 |---|---|---|
-| `register_profile(display_name, tenant_id, club_id?, nick?)` | signed-in user without a profile | First approved member of a tenant (or the `founder_email` match) becomes approved admin, everyone else pending. `empty_display_name`, `nick_too_long`, `unknown_tenant`, `unknown_club`. |
+| `register_profile(display_name, tenant_id, club_id?, nick?)` | signed-in user without a profile | First approved member of a tenant (or the `founder_email` match) becomes approved admin, everyone else pending; placeholders never count as the first member. `empty_display_name`, `nick_too_long`, `unknown_tenant`, `unknown_club`. |
 | `create_tenant_and_register(tenant_name, display_name, nick?)` | signed-in user | Creates a pending tenant with the caller as founder, then registers. `empty_tenant_name`, `tenant_exists`. |
 | `registration_clubs(tenant_id)` | signed-in, pre-profile | Club list for the register screen. |
-| `approve_player(user_id)`, `set_role(user_id, role)`, `set_player_club(user_id, club_id)`, `upsert_club(...)`, `delete_club(id)` | admin | Member and club administration. `cannot_demote_self`, `unknown_club`. |
+| `approve_player(user_id)`, `set_role(user_id, role)`, `set_player_club(user_id, club_id)`, `upsert_club(...)`, `delete_club(id)` | admin | Member and club administration. `cannot_demote_self`, `placeholder_no_account` (a hand-made profile stays a player), `unknown_club`. |
+| `save_placeholder_player(id?, display_name, nick, club_id)`, `delete_placeholder_player(id)`, `merge_placeholder_player(placeholder_id, target_id, display_name, nick, club_id)` | admin | Players without an account. Save: `id = null` inserts an approved placeholder of the caller's tenant, otherwise edits one (`unknown_player`); `empty_display_name`, `nick_too_long`, `unknown_club`. Delete: `player_has_history` when any reservation references it. Merge: the source must be a placeholder, the target any non-placeholder non-kiosk profile of the tenant (`invalid_merge`); repoints the reservations, writes the chosen fields, approves a pending target, deletes the source. |
 | `set_nick(user_id, nick)` | self or admin | `nick_too_long`. |
 | `create_reservation(player_id, date, block_id, lane)` | player for self, kiosk for any approved member, admin for anyone | Admin skips past/horizon/limit. Raises `player_not_approved`, `unknown_block`, `invalid_lane`, `day_closed` / `invalid_block` (via `block_day_status`), `date_past`, `beyond_horizon`, `limit_reached`, `blocked_by_priority`, `blocked_by_rental` (via `rental_occurrences`), `slot_taken`. |
 | `cancel_reservation(id, note?, notify?)` | owner before the block starts, admin anytime | `too_late`, `not_allowed`; sets `cancelled_via` app / admin. |
@@ -119,7 +131,8 @@ update of a weekly rental: prune orphaned exceptions, propagate name/colour), `n
 
 - **notify** — called by `notify_webhook()` (pg_net POST; URL and
   `x-webhook-secret` come from Vault `notify_url` / `webhook_secret`,
-  SETUP.md §2). Events: profile insert (pending) → tenant admins; kiosk
+  SETUP.md §2). Events: profile insert (pending) → tenant admins
+  (placeholders are inserted approved, so none); kiosk
   reservation insert → the player, with a one-click cancel link (HMAC
   token signed with `CANCEL_TOKEN_SECRET`, valid until the block starts);
   reservation update: admin cancel of an upcoming date → the player
@@ -148,5 +161,6 @@ update of a weekly rental: prune orphaned exceptions, propagate name/colour), `n
 - `tool/schema_snapshot.sh` regenerates `supabase/schema.sql` after a new
   migration (local stack only).
 - `supabase/tests/tenancy_rls.sql` — cross-tenant isolation, superadmin
-  visiting, the 0018 cascade and the `reject_tenant` guard; run with
+  visiting, the 0018 cascade, the 0021 rental exceptions, the
+  `reject_tenant` guard and the 0022 placeholder lifecycle; run with
   `psql … -v ON_ERROR_STOP=1 -f` against the local stack (CI does).

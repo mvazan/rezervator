@@ -569,13 +569,19 @@ CREATE TABLE IF NOT EXISTS "public"."profiles" (
     "tenant_id" "uuid" NOT NULL,
     "superadmin" boolean DEFAULT false NOT NULL,
     "home_tenant_id" "uuid",
+    "placeholder" boolean DEFAULT false NOT NULL,
     CONSTRAINT "profiles_nick_check" CHECK (("char_length"("nick") <= 14)),
+    CONSTRAINT "profiles_placeholder_check" CHECK (((NOT "placeholder") OR (("role" = 'player'::"text") AND ("status" = 'approved'::"text") AND (NOT "superadmin")))),
     CONSTRAINT "profiles_role_check" CHECK (("role" = ANY (ARRAY['player'::"text", 'admin'::"text", 'kiosk'::"text"]))),
     CONSTRAINT "profiles_status_check" CHECK (("status" = ANY (ARRAY['pending'::"text", 'approved'::"text"])))
 );
 
 
 ALTER TABLE "public"."profiles" OWNER TO "postgres";
+
+
+COMMENT ON COLUMN "public"."profiles"."placeholder" IS 'Hand-made profile without an auth user (hráč bez účtu): approved player, bookable, never signs in; merge_placeholder_player folds it into a real account.';
+
 
 
 CREATE OR REPLACE FUNCTION "public"."create_tenant_and_register"("p_tenant_name" "text", "p_display_name" "text", "p_nick" "text" DEFAULT ''::"text") RETURNS "public"."profiles"
@@ -630,6 +636,31 @@ end; $$;
 
 
 ALTER FUNCTION "public"."delete_club"("p_id" "uuid") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."delete_placeholder_player"("p_id" "uuid") RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  if not is_admin() then
+    raise exception 'not_allowed';
+  end if;
+  if not exists (
+    select 1 from profiles
+    where id = p_id and tenant_id = current_tenant_id() and placeholder
+  ) then
+    raise exception 'unknown_player';
+  end if;
+  if exists (select 1 from reservations where player_id = p_id) then
+    raise exception 'player_has_history';
+  end if;
+  delete from profiles where id = p_id;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."delete_placeholder_player"("p_id" "uuid") OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."is_admin"() RETURNS boolean
@@ -696,6 +727,68 @@ $$;
 
 
 ALTER FUNCTION "public"."is_superadmin"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."merge_placeholder_player"("p_placeholder_id" "uuid", "p_target_id" "uuid", "p_display_name" "text", "p_nick" "text", "p_club_id" "uuid") RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_tenant uuid := current_tenant_id();
+begin
+  if not is_admin() then
+    raise exception 'not_allowed';
+  end if;
+  -- Lock both rows: a concurrent create_reservation for the placeholder
+  -- waits here instead of slipping in between the repoint and the delete.
+  perform 1 from profiles
+  where id = p_placeholder_id and tenant_id = v_tenant and placeholder
+  for update;
+  if not found then
+    raise exception 'invalid_merge';
+  end if;
+  perform 1 from profiles
+  where id = p_target_id and tenant_id = v_tenant
+    and not placeholder and role <> 'kiosk'
+  for update;
+  if not found then
+    raise exception 'invalid_merge';
+  end if;
+  if trim(coalesce(p_display_name, '')) = '' then
+    raise exception 'empty_display_name';
+  end if;
+  if char_length(trim(coalesce(p_nick, ''))) > 14 then
+    raise exception 'nick_too_long';
+  end if;
+  if p_club_id is not null and not exists (
+    select 1 from clubs where id = p_club_id and tenant_id = v_tenant
+  ) then
+    raise exception 'unknown_club';
+  end if;
+
+  -- History moves to the account. player_id is the only column that can
+  -- reference a placeholder: created_by / approved_by are written from
+  -- auth.uid(), which a placeholder never is (profiles_placeholder_check
+  -- keeps it a plain player). Anything else pointing at the row makes the
+  -- NO ACTION FKs abort the delete below.
+  update reservations set player_id = p_target_id
+  where player_id = p_placeholder_id;
+
+  update profiles
+  set display_name = trim(p_display_name),
+      nick = trim(coalesce(p_nick, '')),
+      club_id = p_club_id,
+      status = 'approved',
+      approved_by = coalesce(approved_by, auth.uid()),
+      approved_at = coalesce(approved_at, now())
+  where id = p_target_id;
+
+  delete from profiles where id = p_placeholder_id;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."merge_placeholder_player"("p_placeholder_id" "uuid", "p_target_id" "uuid", "p_display_name" "text", "p_nick" "text", "p_club_id" "uuid") OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."monthly_attendance"("p_year" integer, "p_month" integer) RETURNS TABLE("player_id" "uuid", "display_name" "text", "club" "text", "attended" bigint)
@@ -926,6 +1019,7 @@ begin
   select not exists (
     select 1 from profiles
     where tenant_id = p_tenant_id and status = 'approved'
+      and not placeholder
   ) into v_first;
   if v_tenant.founder_email is not null then
     v_first := v_first
@@ -1133,6 +1227,57 @@ $$;
 ALTER FUNCTION "public"."rental_series_changed"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."save_placeholder_player"("p_id" "uuid", "p_display_name" "text", "p_nick" "text", "p_club_id" "uuid") RETURNS "public"."profiles"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_tenant uuid := current_tenant_id();
+  v_profile profiles;
+begin
+  if not is_admin() then
+    raise exception 'not_allowed';
+  end if;
+  if trim(coalesce(p_display_name, '')) = '' then
+    raise exception 'empty_display_name';
+  end if;
+  if char_length(trim(coalesce(p_nick, ''))) > 14 then
+    raise exception 'nick_too_long';
+  end if;
+  if p_club_id is not null and not exists (
+    select 1 from clubs where id = p_club_id and tenant_id = v_tenant
+  ) then
+    raise exception 'unknown_club';
+  end if;
+
+  if p_id is null then
+    insert into profiles
+      (id, tenant_id, display_name, email, role, status, nick, club_id,
+       placeholder, approved_by, approved_at)
+    values
+      (gen_random_uuid(), v_tenant, trim(p_display_name), '', 'player',
+       'approved', trim(coalesce(p_nick, '')), p_club_id, true,
+       auth.uid(), now())
+    returning * into v_profile;
+  else
+    update profiles
+    set display_name = trim(p_display_name),
+        nick = trim(coalesce(p_nick, '')),
+        club_id = p_club_id
+    where id = p_id and tenant_id = v_tenant and placeholder
+    returning * into v_profile;
+    if not found then
+      raise exception 'unknown_player';
+    end if;
+  end if;
+  return v_profile;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."save_placeholder_player"("p_id" "uuid", "p_display_name" "text", "p_nick" "text", "p_club_id" "uuid") OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."seed_demo_member"("p_email" "text") RETURNS "void"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -1268,6 +1413,12 @@ begin
   end if;
   if p_user_id = auth.uid() and p_role <> 'admin' then
     raise exception 'cannot_demote_self';
+  end if;
+  if exists (
+    select 1 from profiles
+    where id = p_user_id and tenant_id = current_tenant_id() and placeholder
+  ) then
+    raise exception 'placeholder_no_account';
   end if;
 
   update profiles
@@ -1405,7 +1556,8 @@ CREATE OR REPLACE VIEW "public"."players" AS
     "p"."display_name",
     "p"."nick",
     "p"."club_id",
-    COALESCE(("c"."color")::integer, '-1'::integer) AS "club_color"
+    COALESCE(("c"."color")::integer, '-1'::integer) AS "club_color",
+    "p"."placeholder"
    FROM ("public"."profiles" "p"
      LEFT JOIN "public"."clubs" "c" ON (("c"."id" = "p"."club_id")))
   WHERE (("p"."status" = 'approved'::"text") AND ("p"."role" <> 'kiosk'::"text") AND ("p"."tenant_id" = "public"."current_tenant_id"()) AND (NOT ("p"."superadmin" AND ("p"."home_tenant_id" IS NOT NULL) AND ("p"."tenant_id" <> "p"."home_tenant_id"))));
@@ -1681,11 +1833,6 @@ ALTER TABLE ONLY "public"."profiles"
 
 
 ALTER TABLE ONLY "public"."profiles"
-    ADD CONSTRAINT "profiles_id_fkey" FOREIGN KEY ("id") REFERENCES "auth"."users"("id") ON DELETE CASCADE;
-
-
-
-ALTER TABLE ONLY "public"."profiles"
     ADD CONSTRAINT "profiles_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
 
 
@@ -1935,6 +2082,18 @@ GRANT UPDATE("fcm_token") ON TABLE "public"."profiles" TO "authenticated";
 
 
 
+GRANT ALL ON FUNCTION "public"."delete_placeholder_player"("p_id" "uuid") TO "anon";
+GRANT ALL ON FUNCTION "public"."delete_placeholder_player"("p_id" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."delete_placeholder_player"("p_id" "uuid") TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."merge_placeholder_player"("p_placeholder_id" "uuid", "p_target_id" "uuid", "p_display_name" "text", "p_nick" "text", "p_club_id" "uuid") TO "anon";
+GRANT ALL ON FUNCTION "public"."merge_placeholder_player"("p_placeholder_id" "uuid", "p_target_id" "uuid", "p_display_name" "text", "p_nick" "text", "p_club_id" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."merge_placeholder_player"("p_placeholder_id" "uuid", "p_target_id" "uuid", "p_display_name" "text", "p_nick" "text", "p_club_id" "uuid") TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."notify_webhook_config"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."notify_webhook_config"() TO "service_role";
 
@@ -1970,6 +2129,12 @@ GRANT ALL ON FUNCTION "public"."rental_occurs"("r" "public"."rentals", "p_date" 
 GRANT ALL ON FUNCTION "public"."rental_series_changed"() TO "anon";
 GRANT ALL ON FUNCTION "public"."rental_series_changed"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."rental_series_changed"() TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."save_placeholder_player"("p_id" "uuid", "p_display_name" "text", "p_nick" "text", "p_club_id" "uuid") TO "anon";
+GRANT ALL ON FUNCTION "public"."save_placeholder_player"("p_id" "uuid", "p_display_name" "text", "p_nick" "text", "p_club_id" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."save_placeholder_player"("p_id" "uuid", "p_display_name" "text", "p_nick" "text", "p_club_id" "uuid") TO "service_role";
 
 
 
