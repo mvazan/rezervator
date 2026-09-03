@@ -35,7 +35,7 @@ void main() {
 
   // One fixture per test: a second pumpWidget does not swap ProviderScope
   // overrides.
-  testWidgets('lists matches newest first with their prep and away notes; '
+  testWidgets('lists matches chronologically with their prep and away notes; '
       'úklid children and other blockages belong elsewhere', (tester) async {
     final soon = today().addDays(3);
     final later = today().addDays(10);
@@ -91,10 +91,46 @@ void main() {
     expect(find.textContaining('17:30–18:00'), findsNothing);
     expect(find.textContaining('10:00–12:00'), findsNothing);
 
-    // Newest first.
+    // Soonest first.
     final laterY = tester.getTopLeft(find.textContaining('Sokol Lhota')).dy;
     final soonY = tester.getTopLeft(find.textContaining('KK Slavoj')).dy;
-    expect(laterY, lessThan(soonY));
+    expect(soonY, lessThan(laterY));
+  });
+
+  testWidgets('played matches sit collapsed under Odehrané, most recent first',
+      (tester) async {
+    PrioritySlot match(String id, Day date, String away, HourMinute start) =>
+        PrioritySlot(
+          id: id,
+          date: date,
+          startsAt: start,
+          endsAt: HourMinute(start.hour + 2, start.minute),
+          type: PrioritySlot.fallbackMatchType,
+          homeTeam: 'KK Veverky',
+          awayTeam: away,
+        );
+    await tester.pumpWidget(app(slots: [
+      match('p2', today().addDays(-2), 'Předloni', const HourMinute(18, 0)),
+      match('u1', today().addDays(1), 'Zítra', const HourMinute(18, 0)),
+      match('t2', today(), 'Dnes večer', const HourMinute(19, 0)),
+      match('t1', today(), 'Dnes odpoledne', const HourMinute(15, 0)),
+      match('p1', today().addDays(-1), 'Včera', const HourMinute(18, 0)),
+    ]));
+    await tester.pumpAndSettle();
+
+    // Upcoming: today's two by start time, then tomorrow.
+    double y(String away) =>
+        tester.getTopLeft(find.textContaining(away)).dy;
+    expect(y('Dnes odpoledne'), lessThan(y('Dnes večer')));
+    expect(y('Dnes večer'), lessThan(y('Zítra')));
+    // Past ones are hidden until the section is expanded.
+    expect(find.text('Odehrané (2)'), findsOneWidget);
+    expect(find.textContaining('Včera'), findsNothing);
+
+    await tester.tap(find.text('Odehrané (2)'));
+    await tester.pumpAndSettle();
+    expect(y('Zítra'), lessThan(y('Včera')));
+    expect(y('Včera'), lessThan(y('Předloni')));
   });
 
   testWidgets('empty state', (tester) async {
