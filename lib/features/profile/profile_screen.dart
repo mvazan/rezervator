@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
+import '../../config.dart';
 import '../../core/ui.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
 import 'changelog.dart';
+import 'widgets/calendar_link_card.dart';
 
 /// App version/build, read once from the platform — drives the version line
 /// at the bottom of the profile screen.
@@ -112,6 +114,14 @@ class ProfileScreen extends ConsumerWidget {
                   ),
                 ),
                 const SizedBox(height: 16),
+                // Hidden without a Google client ID baked in, and for the
+                // Play-review demo account (a shared account has no calendar
+                // of its own to link).
+                if (ref.watch(calendarAvailableProvider) &&
+                    !AppConfig.isDemoAccount(profile.email)) ...[
+                  const CalendarLinkCard(),
+                  const SizedBox(height: 16),
+                ],
                 Card(
                   child: ListTile(
                     leading: Icon(
