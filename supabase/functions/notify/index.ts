@@ -10,11 +10,17 @@
 //                           optional notify_message the RPCs stamp (0011)
 //   INSERT tenants       -> "new kuželna waiting for approval" (to the
 //                           superadmins — trigger added in 0014)
+//   CRON notification_jobs -> deferred jobs (0023): Google Calendar sync —
+//                           the one branch that talks to the Calendar API
+//                           instead of FCM/Resend. Posted by the minutely
+//                           pg_cron tick through the same Vault-configured
+//                           webhook (URL + x-webhook-secret).
 //
 // Channel per recipient: FCM push when profiles.fcm_token is set AND
 // FIREBASE_SERVICE_ACCOUNT is configured; otherwise e-mail via Resend.
 // Secrets: WEBHOOK_SECRET, RESEND_API_KEY, CANCEL_TOKEN_SECRET,
-// optional FIREBASE_SERVICE_ACCOUNT, optional RESEND_FROM.
+// GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET (the OAuth client for the
+// Calendar sync), optional FIREBASE_SERVICE_ACCOUNT, optional RESEND_FROM.
 // SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are injected automatically.
 // Deploy with --no-verify-jwt (DB triggers can't mint JWTs; the
 // x-webhook-secret header is the gate).
@@ -23,6 +29,14 @@ import { createClient } from "@supabase/supabase-js";
 import { pragueEpoch, pragueToday, signCancelToken } from "../_shared/cancel_token.ts";
 import { firebaseConfigured, sendPush } from "../_shared/fcm.ts";
 import { dayLabel, escapeHtml, timeLabel } from "../_shared/format.ts";
+import {
+  deleteEvent,
+  eventIdFor,
+  GoogleAuthError,
+  refreshAccessToken,
+  reservationEventBody,
+  upsertEvent,
+} from "../_shared/google_calendar.ts";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -85,11 +99,214 @@ async function notifyRecipient(
 }
 
 // ---------------------------------------------------------------------------
+// Google Calendar sync (0023)
+// ---------------------------------------------------------------------------
+
+/** Link + token of one player, or null (not linked / broken / the calendar
+ * was never created) — then nothing is synced, silently. */
+async function calendarLink(
+  userId: string,
+): Promise<{ refreshToken: string; calendarId: string } | null> {
+  const { data: link } = await supabase.from("google_calendar_links")
+    .select("status").eq("user_id", userId).maybeSingle();
+  if (link?.status !== "linked") return null;
+  const { data: token } = await supabase.from("google_calendar_tokens")
+    .select("refresh_token, google_calendar_id")
+    .eq("user_id", userId).maybeSingle();
+  if (!token?.refresh_token || !token.google_calendar_id) return null;
+  return {
+    refreshToken: token.refresh_token as string,
+    calendarId: token.google_calendar_id as string,
+  };
+}
+
+/** The link is dead (revoked consent, deleted calendar, expired token) —
+ * Můj profil offers to link again, and the player hears about it once
+ * (push when they have a token, e-mail otherwise), so they don't find out a
+ * month later when a training was missing from the calendar.
+ *
+ * The `status = linked` condition does two things at once: the notice goes
+ * out only on the TRANSITION to broken (further failing jobs of the same
+ * player send nothing; a race is settled by the row lock — the second
+ * UPDATE sees broken after waiting and returns no row), and a disconnect
+ * that finished while the job was talking to Google is not overwritten
+ * from the fresh 'unlinked' back to 'broken'. It is a service message about
+ * a feature the player switched on themselves, so no preference gates it. */
+async function markCalendarBroken(userId: string, reason: string) {
+  console.error(`calendar link broken for ${userId}: ${reason}`);
+  const { data: flipped } = await supabase.from("google_calendar_links")
+    .update({
+      status: "broken",
+      last_error: reason,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("user_id", userId)
+    .eq("status", "linked")
+    .select("user_id");
+  if (!flipped?.length) return;
+
+  const { data: profile } = await supabase.from("profiles")
+    .select("id, email, fcm_token").eq("id", userId).maybeSingle();
+  if (!profile) return;
+  await notifyRecipient(
+    profile as Recipient,
+    "Google kalendář se odpojil",
+    "Tréninky se přestaly synchronizovat. Propoj kalendář znovu v Můj profil.",
+    { data: { kind: "calendar_broken" } },
+  );
+}
+
+/** How many minutes ahead this player wants a training reminder. */
+async function reminderMinutesOf(userId: string): Promise<number[]> {
+  const { data } = await supabase.from("google_calendar_links")
+    .select("reminder_minutes").eq("user_id", userId).maybeSingle();
+  return (data?.reminder_minutes as number[] | null) ?? [];
+}
+
+/** What the calendar should show for this reservation — or null when it is
+ * (no longer) this player's live future training: deleted, re-assigned to
+ * someone else, cancelled, or already past (backfill and
+ * my_future_reservations draw the same line at Prague-today). Revalidation:
+ * the truth is the DB at run time, not the job payload. */
+async function reservationEvent(userId: string, reservationId: string) {
+  const { data: reservation } = await supabase.from("reservations")
+    .select("player_id, date, block_id, lane, cancelled_at, tenant_id")
+    .eq("id", reservationId).maybeSingle();
+  if (!reservation) return null;
+  if (reservation.player_id !== userId) return null;
+  if (reservation.cancelled_at !== null) return null;
+  if ((reservation.date as string) < pragueToday()) return null;
+
+  const [{ data: block }, { data: tenant }] = await Promise.all([
+    supabase.from("time_blocks").select("starts_at, ends_at")
+      .eq("id", reservation.block_id).maybeSingle(),
+    supabase.from("tenants").select("name")
+      .eq("id", reservation.tenant_id).maybeSingle(),
+  ]);
+  if (!block || !tenant) return null;
+
+  return reservationEventBody(
+    {
+      date: reservation.date as string,
+      starts_at: block.starts_at as string,
+      ends_at: block.ends_at as string,
+      lane: reservation.lane as number,
+      alley_name: tenant.name as string,
+    },
+    await reminderMinutesOf(userId),
+  );
+}
+
+/** Reconciles one (player, reservation): reality decides whether the event
+ * is written or deleted. Returns false = try again later. */
+async function jobCalendarSync(
+  payload: Record<string, unknown>,
+): Promise<boolean> {
+  const userId = payload.user_id as string;
+  const reservationId = payload.reservation_id as string;
+  if (!userId || !reservationId) return true;
+
+  const link = await calendarLink(userId);
+  if (!link) return true; // not linked — the sync is a personal, optional thing
+
+  let accessToken: string;
+  try {
+    accessToken = await refreshAccessToken(link.refreshToken);
+  } catch (error) {
+    if (error instanceof GoogleAuthError && error.code === "invalid_grant") {
+      await markCalendarBroken(userId, "Google odvolal přístup.");
+      return true; // terminal — until the player links again there is nothing to retry
+    }
+    console.error(`token refresh failed for ${userId}:`, error);
+    return false;
+  }
+
+  const eventId = await eventIdFor(userId, reservationId);
+  const event = await reservationEvent(userId, reservationId);
+  const result = event
+    ? await upsertEvent(accessToken, link.calendarId, eventId, event)
+    : await deleteEvent(accessToken, link.calendarId, eventId);
+
+  switch (result) {
+    case "ok":
+      return true;
+    case "auth":
+      await markCalendarBroken(userId, "Chybí oprávnění ke kalendáři.");
+      return true;
+    case "gone":
+      // A delete never returns "gone" (there it counts as success) — this
+      // is only a write into a calendar the player deleted in Google.
+      await markCalendarBroken(userId, "Kalendář Rezervátor už v Googlu není.");
+      return true;
+    case "retry":
+      return false;
+  }
+}
+
+const CALENDAR_KINDS = new Set(["calendar_sync"]);
+const CALENDAR_MAX_ATTEMPTS = 5;
+/** How many calendar jobs run at once. Each touches Google twice, so 100
+ * jobs in series would easily outgrow the function's time limit. */
+const CALENDAR_CONCURRENCY = 5;
+
+/** Cron entry: run every due job once, then drop it. Calendar jobs are the
+ * exception: a Google API outage is worth a few retries (an event that was
+ * not created does not appear by itself), so their run_at is pushed back
+ * with exponential backoff and they are dropped after CALENDAR_MAX_ATTEMPTS.
+ * Any other kind is unknown to this build — logged and dropped, so a stray
+ * row can never wedge the queue. */
+async function processJobs() {
+  const { data: jobs } = await supabase.from("notification_jobs")
+    .select("id, kind, payload, attempts")
+    .lte("run_at", new Date().toISOString())
+    .limit(100);
+
+  const calendarJobs = (jobs ?? []).filter((job) =>
+    CALENDAR_KINDS.has(job.kind as string)
+  );
+  const otherJobs = (jobs ?? []).filter((job) =>
+    !CALENDAR_KINDS.has(job.kind as string)
+  );
+
+  for (const job of otherJobs) {
+    console.error(`unknown job kind: ${job.kind}`);
+    await supabase.from("notification_jobs").delete().eq("id", job.id);
+  }
+
+  for (let i = 0; i < calendarJobs.length; i += CALENDAR_CONCURRENCY) {
+    await Promise.all(
+      calendarJobs.slice(i, i + CALENDAR_CONCURRENCY).map(async (job) => {
+        const attempts = (job.attempts as number) ?? 0;
+        let done = true;
+        try {
+          done = await jobCalendarSync(job.payload as Record<string, unknown>);
+        } catch (error) {
+          // An unexpected error (a bug) — don't loop on it, drop the job.
+          console.error(`job ${job.kind}/${job.id} failed:`, error);
+        }
+        if (!done && attempts < CALENDAR_MAX_ATTEMPTS) {
+          const backoffMinutes = 2 ** attempts; // 1, 2, 4, 8, 16
+          await supabase.from("notification_jobs")
+            .update({
+              attempts: attempts + 1,
+              run_at: new Date(Date.now() + backoffMinutes * 60_000)
+                .toISOString(),
+            })
+            .eq("id", job.id);
+          return;
+        }
+        await supabase.from("notification_jobs").delete().eq("id", job.id);
+      }),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Event handlers
 // ---------------------------------------------------------------------------
 
 type WebhookPayload = {
-  type: "INSERT" | "UPDATE" | "DELETE";
+  type: "INSERT" | "UPDATE" | "DELETE" | "CRON";
   table: string;
   record: Record<string, unknown> | null;
   old_record: Record<string, unknown> | null;
@@ -123,6 +340,13 @@ async function whenLabel(record: Record<string, unknown>): Promise<string | null
 }
 
 async function handle(payload: WebhookPayload) {
+  if (payload.type === "CRON" && payload.table === "notification_jobs") {
+    // The minutely pg_cron tick (0023): process everything that's due. Its
+    // record is null, so it must never reach the row handlers below.
+    await processJobs();
+    return;
+  }
+
   const record = payload.record ?? {};
 
   switch (payload.table) {

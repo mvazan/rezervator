@@ -24,10 +24,21 @@ jobs:
         run: supabase link --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
       - name: Apply migrations
         run: supabase db push
-      # --no-verify-jwt: both functions are called without a Supabase JWT —
-      # notify by DB webhooks (gated on the x-webhook-secret header), cancel
-      # by the one-click e-mail link (gated on the signed HMAC token).
+      # --no-verify-jwt: these functions are called without a Supabase JWT —
+      # notify by DB webhooks and the minutely job cron (gated on the
+      # x-webhook-secret header), cancel by the one-click e-mail link (gated
+      # on the signed HMAC token).
       - name: Deploy notify function
         run: supabase functions deploy notify --no-verify-jwt
       - name: Deploy cancel function
         run: supabase functions deploy cancel --no-verify-jwt
+      - name: Deploy calendar-oauth-callback function
+        # --no-verify-jwt: Google's OAuth redirect is a plain browser GET and
+        # can't carry a JWT; the function trusts the one-time `state` nonce
+        # from start_calendar_link() instead (0023).
+        run: supabase functions deploy calendar-oauth-callback --no-verify-jwt
+      - name: Deploy calendar-manage function
+        # Deliberately WITHOUT --no-verify-jwt: this one is called from the
+        # app by a signed-in player (functions.invoke attaches their JWT), so
+        # the platform verifies it before the function even runs.
+        run: supabase functions deploy calendar-manage

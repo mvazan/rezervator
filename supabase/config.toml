@@ -25,14 +25,27 @@ sender_name = "Rezervátor"
 subject = "Přihlášení do Rezervátoru"
 content_path = "./supabase/templates/magic_link.html"
 
-# Edge funkce. Obě se volají bez Supabase JWT — notify z Database Webhooks
-# (bránou je hlavička x-webhook-secret), cancel podepsaným HMAC odkazem
-# z e-mailu — proto verify_jwt = false. Import mapa pinuje supabase-js,
-# aby každý deploy sbalil stejnou verzi (reprodukovatelné nasazení).
+# Edge funkce. notify a cancel se volají bez Supabase JWT — notify z Database
+# Webhooks a z minutového cronu (bránou je hlavička x-webhook-secret), cancel
+# podepsaným HMAC odkazem z e-mailu — proto verify_jwt = false. Import mapa
+# pinuje supabase-js, aby každý deploy sbalil stejnou verzi (reprodukovatelné
+# nasazení).
 [functions.notify]
 verify_jwt = false
 import_map = "./functions/import_map.json"
 
 [functions.cancel]
 verify_jwt = false
+import_map = "./functions/import_map.json"
+
+# Google kalendář (0023). calendar-oauth-callback je cíl přesměrování z Google
+# OAuth — prohlížeč k němu JWT přiložit neumí, důvěru nese jednorázový nonce
+# ve `state` (start_calendar_link). calendar-manage volá přihlášený hráč přes
+# functions.invoke, takže JWT ověřuje platforma ještě před spuštěním.
+[functions.calendar-oauth-callback]
+verify_jwt = false
+import_map = "./functions/import_map.json"
+
+[functions.calendar-manage]
+verify_jwt = true
 import_map = "./functions/import_map.json"

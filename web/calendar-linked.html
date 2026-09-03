@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Google kalendář — Rezervátor</title>
+<link rel="icon" type="image/png" href="favicon.png">
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+         max-width: 26rem; margin: 0 auto; min-height: 100svh;
+         display: flex; flex-direction: column; justify-content: center;
+         padding: 2rem 1.25rem; text-align: center; line-height: 1.55;
+         color: #1a1a1a; background: #fff; }
+  .mark { font-size: 3.25rem; line-height: 1; margin-bottom: .75rem; }
+  h1 { color: #6366F1; font-size: 1.4rem; margin: 0 0 .6rem; }
+  p { margin: 0 0 .75rem; }
+  .hint { color: #666; font-size: .95rem; }
+  .fail h1 { color: #B91C1C; }
+  @media (prefers-color-scheme: dark) {
+    body { color: #f2f2f2; background: #161616; }
+    h1 { color: #A5B4FC; }
+    .fail h1 { color: #FCA5A5; }
+    .hint { color: #a5a5a5; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Without a parameter (or ?stav=ok) this is the success page; the
+     calendar-oauth-callback edge function redirects here with ?stav=...
+     according to how the linking went (it cannot serve HTML itself — the
+     edge runtime rewrites the Content-Type to text/plain). The script below
+     swaps the texts, so there is one page instead of six copies. -->
+<div class="mark" id="mark">✅</div>
+<h1 id="nadpis">Kalendář propojen</h1>
+<p id="popis">Tvoje budoucí tréninky se do pár minut objeví v kalendáři
+  <strong>Rezervátor</strong>.</p>
+<p class="hint">Tuhle záložku můžeš zavřít a vrátit se do appky.</p>
+
+<script>
+  var stavy = {
+    ok: ["✅", "Kalendář propojen",
+      "Tvoje budoucí tréninky se do pár minut objeví v kalendáři <strong>Rezervátor</strong>."],
+    zruseno: ["🚫", "Propojení zrušeno",
+      "V Googlu jsi souhlas nedal(a), takže se nic nepropojilo. Zkusit to můžeš kdykoli znovu v sekci Můj profil."],
+    odkaz: ["⌛", "Odkaz už neplatí",
+      "Odkaz vypršel nebo byl použitý. Otevři propojení znovu ze sekce Můj profil v appce."],
+    google: ["⚠️", "Google neodpověděl",
+      "Komunikace s Googlem se nepovedla. Zkus propojení za chvíli znovu."],
+    kalendar: ["⚠️", "Kalendář se nezaložil",
+      "Účet je propojený, ale kalendář se nepodařilo vytvořit. Zkus to prosím za chvíli znovu ze sekce Můj profil."],
+    chyba: ["⚠️", "Něco se pokazilo",
+      "Zkus propojení za chvíli znovu ze sekce Můj profil v appce."]
+  };
+  var klic = new URLSearchParams(location.search).get("stav") || "ok";
+  var s = stavy[klic] || stavy.chyba;
+  document.getElementById("mark").textContent = s[0];
+  document.getElementById("nadpis").textContent = s[1];
+  document.getElementById("popis").innerHTML = s[2];
+  if (klic !== "ok") document.body.classList.add("fail");
+  document.title = s[1] + " — Rezervátor";
+</script>
+
+</body>
+</html>
