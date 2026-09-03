@@ -91,6 +91,10 @@ zůstává jen uploadovací; to je doporučený režim). Přidej testery
 #    na GitHubu i Novinky v appce; test/changelog_test.dart hlídá shodu
 #    s verzí v pubspec.yaml
 # 2. zvyš verzi v pubspec.yaml, např. 1.1.1+4  (číslo za + = versionCode MUSÍ růst)
+# 2b. vyžaduje-li vydání nový backend (starší appka by se rozbila), přidej
+#     migraci supabase/migrations/00NN_min_build_<build>.sql s
+#     `update app_config set min_build = 4;` (číslo za +) — starší buildy
+#     dostanou obrazovku „Je potřeba aktualizace“ i za běhu (0025)
 git commit -am "chore: release 1.1.1"
 
 # 3. anotovaný tag + push (text tagu se nikde nepoužívá)

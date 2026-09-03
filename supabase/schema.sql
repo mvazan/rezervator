@@ -1757,6 +1757,22 @@ end; $$;
 ALTER FUNCTION "public"."upsert_club"("p_id" "uuid", "p_name" "text", "p_color" smallint) OWNER TO "postgres";
 
 
+CREATE TABLE IF NOT EXISTS "public"."app_config" (
+    "id" boolean DEFAULT true NOT NULL,
+    "min_build" integer DEFAULT 1 NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "app_config_id_check" CHECK ("id"),
+    CONSTRAINT "app_config_min_build_check" CHECK (("min_build" >= 1))
+);
+
+
+ALTER TABLE "public"."app_config" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."app_config" IS 'Single row. min_build = the oldest app build the backend still supports; older builds block on the update screen.';
+
+
+
 CREATE TABLE IF NOT EXISTS "public"."day_overrides" (
     "date" "date" NOT NULL,
     "closed" boolean DEFAULT false NOT NULL,
@@ -1917,6 +1933,11 @@ CREATE TABLE IF NOT EXISTS "public"."time_blocks" (
 
 
 ALTER TABLE "public"."time_blocks" OWNER TO "postgres";
+
+
+ALTER TABLE ONLY "public"."app_config"
+    ADD CONSTRAINT "app_config_pkey" PRIMARY KEY ("id");
+
 
 
 ALTER TABLE ONLY "public"."clubs"
@@ -2222,6 +2243,13 @@ ALTER TABLE ONLY "public"."schedule_settings"
 
 ALTER TABLE ONLY "public"."time_blocks"
     ADD CONSTRAINT "time_blocks_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
+
+
+
+ALTER TABLE "public"."app_config" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "app_config_select" ON "public"."app_config" FOR SELECT USING (true);
 
 
 
@@ -2567,6 +2595,11 @@ GRANT ALL ON FUNCTION "public"."trigger_notification_jobs"() TO "service_role";
 
 GRANT ALL ON TABLE "public"."clubs" TO "authenticated";
 GRANT ALL ON TABLE "public"."clubs" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."app_config" TO "service_role";
+GRANT SELECT ON TABLE "public"."app_config" TO "authenticated";
 
 
 
