@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/ui.dart';
 import '../../data/providers.dart';
 import '../../domain/calendar_layout.dart' show hourMinuteAt;
+import '../../domain/collation.dart';
 import '../../domain/models.dart';
 import '../../domain/schedule.dart';
 import '../admin/widgets/block_dialog.dart';
@@ -488,8 +489,10 @@ class ScheduleActions {
 /// Admin-only booking dialog: same confirmation as the plain player flow,
 /// plus a player picker (defaults to the admin themself, labelled 'já';
 /// a "hráč bez účtu" is suffixed '· bez účtu' so the admin knows the
-/// booking will never reach an inbox). Pops the chosen player's id, or
-/// null on cancel.
+/// booking will never reach an inbox). A roster has dozens of names, so
+/// the picker is a search field — focused on open, so the phone keyboard
+/// is up at once — matching the name or the board nick, over a short list
+/// to tap. Pops the chosen player's id, or null on cancel.
 class _BookingDialog extends StatefulWidget {
   const _BookingDialog({
     required this.message,
@@ -507,36 +510,96 @@ class _BookingDialog extends StatefulWidget {
 
 class _BookingDialogState extends State<_BookingDialog> {
   late String _playerId = widget.me.id;
+  final _query = TextEditingController();
+
+  @override
+  void dispose() {
+    _query.dispose();
+    super.dispose();
+  }
+
+  static String _fold(String s) => foldDiacritics(s).toLowerCase();
+
+  /// 'já' first, then every other player whose name or board nick contains
+  /// the query (case- and diacritics-insensitive); empty query lists all.
+  List<({String id, String title, String nick})> _candidates() {
+    final q = _fold(_query.text.trim());
+    bool hit(String s) => q.isEmpty || _fold(s).contains(q);
+    return [
+      if (hit('já') || hit(widget.me.displayName))
+        (id: widget.me.id, title: 'já', nick: ''),
+      for (final p in widget.players)
+        if (p.id != widget.me.id && (hit(p.displayName) || hit(p.nick)))
+          (
+            id: p.id,
+            title: p.hasAccount ? p.displayName : '${p.displayName} · bez účtu',
+            nick: p.nick,
+          ),
+    ];
+  }
+
+  String get _selectedName => _playerId == widget.me.id
+      ? 'já'
+      : widget.players
+              .where((p) => p.id == _playerId)
+              .firstOrNull
+              ?.displayName ??
+          '';
 
   @override
   Widget build(BuildContext context) {
+    final candidates = _candidates();
     return AlertDialog(
       title: const Text('Rezervovat termín?'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(widget.message),
-          const SizedBox(height: 12),
-          DropdownButtonFormField<String>(
-            initialValue: _playerId,
-            decoration: const InputDecoration(labelText: 'Rezervovat pro'),
-            items: [
-              DropdownMenuItem(value: widget.me.id, child: const Text('já')),
-              for (final p in widget.players)
-                if (p.id != widget.me.id)
-                  DropdownMenuItem(
-                    value: p.id,
-                    child: Text(
-                      p.hasAccount
-                          ? p.displayName
-                          : '${p.displayName} · bez účtu',
+      content: SizedBox(
+        width: double.maxFinite,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(widget.message),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _query,
+              // The keyboard is up the moment the dialog opens.
+              autofocus: true,
+              decoration: InputDecoration(
+                labelText: 'Rezervovat pro',
+                hintText: 'jméno nebo přezdívka',
+                prefixIcon: const Icon(Icons.search),
+                helperText: 'Vybráno: $_selectedName',
+              ),
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 8),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 220),
+              child: candidates.isEmpty
+                  ? const Padding(
+                      padding: EdgeInsets.all(12),
+                      child: Text('Nikdo neodpovídá hledání.'),
+                    )
+                  : ListView(
+                      shrinkWrap: true,
+                      children: [
+                        for (final c in candidates)
+                          ListTile(
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            title: Text(c.title),
+                            subtitle:
+                                c.nick.isEmpty ? null : Text('„${c.nick}“'),
+                            selected: c.id == _playerId,
+                            trailing: c.id == _playerId
+                                ? const Icon(Icons.check)
+                                : null,
+                            onTap: () => setState(() => _playerId = c.id),
+                          ),
+                      ],
                     ),
-                  ),
-            ],
-            onChanged: (v) => setState(() => _playerId = v!),
-          ),
-        ],
+            ),
+          ],
+        ),
       ),
       actions: [
         TextButton(

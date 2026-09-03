@@ -193,16 +193,59 @@ void main() {
     expect(find.text('Rezervovat termín?'), findsOneWidget);
   });
 
-  testWidgets('admin booking dialog shows a player-picker dropdown', (
-    tester,
-  ) async {
+  testWidgets('admin booking dialog opens with a focused player search, '
+      'já preselected', (tester) async {
     wideSurface(tester);
     await tester.pumpWidget(app(profile: admin));
     await tester.pumpAndSettle();
     await tester.tap(find.byIcon(Icons.add).first);
     await tester.pumpAndSettle();
     expect(find.text('Rezervovat termín?'), findsOneWidget);
-    expect(find.byType(DropdownButtonFormField<String>), findsOneWidget);
+    final field = find.byType(TextField);
+    expect(field, findsOneWidget);
+    // Focused on open — the phone keyboard is up at once.
+    expect(tester.widget<TextField>(field).autofocus, isTrue);
+    expect(find.text('Vybráno: já'), findsOneWidget);
+    expect(find.widgetWithText(ListTile, 'já'), findsOneWidget);
+  });
+
+  testWidgets('player search matches the name or the board nick, '
+      'tapping picks the player', (tester) async {
+    wideSurface(tester);
+    await tester.pumpWidget(app(
+      profile: admin,
+      roster: const [
+        PlayerName(id: 'p2', displayName: 'Petr Novák', nick: 'Péťa'),
+        PlayerName(id: 'p3', displayName: 'Bohumil Kroupa', nick: 'Bob'),
+        PlayerName(id: 'p4', displayName: 'Šimon Řezáč'),
+      ],
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.add).first);
+    await tester.pumpAndSettle();
+
+    // Nick, case- and diacritics-insensitive.
+    await tester.enterText(find.byType(TextField), 'peta');
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(ListTile, 'Petr Novák'), findsOneWidget);
+    expect(find.widgetWithText(ListTile, 'já'), findsNothing);
+    expect(find.text('Bohumil Kroupa'), findsNothing);
+
+    // Surname fragment with diacritics folded.
+    await tester.enterText(find.byType(TextField), 'rezac');
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(ListTile, 'Šimon Řezáč'), findsOneWidget);
+    expect(find.widgetWithText(ListTile, 'Petr Novák'), findsNothing);
+
+    await tester.tap(find.widgetWithText(ListTile, 'Šimon Řezáč'));
+    await tester.pumpAndSettle();
+    expect(find.text('Vybráno: Šimon Řezáč'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField), 'xyz');
+    await tester.pumpAndSettle();
+    expect(find.text('Nikdo neodpovídá hledání.'), findsOneWidget);
+    // The pick survives a search that hides it.
+    expect(find.text('Vybráno: Šimon Řezáč'), findsOneWidget);
   });
 
   testWidgets('admin booking dialog marks players without an account', (
@@ -224,13 +267,12 @@ void main() {
     await tester.tap(find.byIcon(Icons.add).first);
     await tester.pumpAndSettle();
     expect(find.text('Rezervovat termín?'), findsOneWidget);
-    await tester.tap(find.byType(DropdownButtonFormField<String>));
-    await tester.pumpAndSettle();
     // A hand-made "hráč bez účtu" is flagged in the picker — the booking
     // will never reach an inbox, so the admin should know whom they pick…
-    expect(find.text('Bohumil Kroupa · bez účtu'), findsWidgets);
+    expect(find.widgetWithText(ListTile, 'Bohumil Kroupa · bez účtu'),
+        findsOneWidget);
     // …while an ordinary teammate keeps a bare name.
-    expect(find.text('Petr Novák'), findsWidgets);
+    expect(find.widgetWithText(ListTile, 'Petr Novák'), findsOneWidget);
     expect(find.text('Petr Novák · bez účtu'), findsNothing);
   });
 
