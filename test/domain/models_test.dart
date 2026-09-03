@@ -426,4 +426,27 @@ void main() {
       expect(clubNameOf('gone', clubs), '');
     });
   });
+  group('players without an account (0022)', () {
+    const base = {
+      'id': 'u1',
+      'display_name': 'Bohumil Kroupa',
+      'email': '',
+      'role': 'player',
+      'status': 'approved',
+    };
+
+    test('Profile.fromJson maps placeholder onto hasAccount', () {
+      expect(Profile.fromJson({...base, 'placeholder': true}).hasAccount, isFalse);
+      expect(Profile.fromJson({...base, 'placeholder': false}).hasAccount, isTrue);
+      // Rows from before 0022 (or a client ahead of the backend).
+      expect(Profile.fromJson(base).hasAccount, isTrue);
+    });
+
+    test('PlayerName.fromJson maps placeholder onto hasAccount', () {
+      const row = {'id': 'u1', 'display_name': 'Bohumil Kroupa'};
+      expect(PlayerName.fromJson({...row, 'placeholder': true}).hasAccount,
+          isFalse);
+      expect(PlayerName.fromJson(row).hasAccount, isTrue);
+    });
+  });
 }

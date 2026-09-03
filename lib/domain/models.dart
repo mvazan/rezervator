@@ -112,6 +112,7 @@ class Profile {
     this.tenantId = '',
     this.superadmin = false,
     this.homeTenantId = '',
+    this.hasAccount = true,
   });
 
   final String id;
@@ -120,6 +121,11 @@ class Profile {
   final Role role;
   final ProfileStatus status;
   final String? fcmToken;
+
+  /// False for a hand-made "hráč bez účtu" (0022, `placeholder` in the
+  /// DB): no auth user, never signs in; the admin books them and they pick
+  /// themselves on the kiosk. Always an approved plain player.
+  final bool hasAccount;
 
   /// Short board name (<=14 chars); empty means "use displayName".
   final String nick;
@@ -160,6 +166,7 @@ class Profile {
         tenantId: json['tenant_id'] as String? ?? '',
         superadmin: json['superadmin'] as bool? ?? false,
         homeTenantId: json['home_tenant_id'] as String? ?? '',
+        hasAccount: !(json['placeholder'] as bool? ?? false),
       );
 }
 
@@ -203,6 +210,7 @@ class PlayerName {
     this.nick = '',
     this.clubId,
     this.clubColor = -1,
+    this.hasAccount = true,
   });
 
   final String id;
@@ -217,12 +225,16 @@ class PlayerName {
   /// Palette index 0–11 of the player's club, or -1 for "no color".
   final int clubColor;
 
+  /// False for a hand-made "hráč bez účtu" (see [Profile.hasAccount]).
+  final bool hasAccount;
+
   factory PlayerName.fromJson(Map<String, dynamic> json) => PlayerName(
         id: json['id'] as String,
         displayName: json['display_name'] as String,
         nick: json['nick'] as String? ?? '',
         clubId: json['club_id'] as String?,
         clubColor: json['club_color'] as int? ?? -1,
+        hasAccount: !(json['placeholder'] as bool? ?? false),
       );
 }
 

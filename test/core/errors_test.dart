@@ -13,6 +13,14 @@ void main() {
         'Nejdřív se přepni zpět domů, pak kuželnu zamítni.');
     expect(friendlyDbError(Exception('rental_exception_invalid')),
         'Výjimku lze zadat jen na den pravidelného pronájmu.');
+    expect(friendlyDbError(Exception('player_has_history')),
+        'Hráč už má rezervace — sluč ho s účtem, nebo ho nech být.');
+    expect(friendlyDbError(Exception('invalid_merge')),
+        'Tyhle dva profily nejde sloučit.');
+    expect(friendlyDbError(Exception('placeholder_no_account')),
+        'Hráč bez účtu nemůže být správce ani kiosk.');
+    expect(friendlyDbError(Exception('unknown_player')),
+        'Tenhle hráč už neexistuje.');
     expect(friendlyDbError(Exception('something else')),
         startsWith('Něco se nepovedlo.'));
   });

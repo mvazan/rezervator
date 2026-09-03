@@ -253,6 +253,51 @@ void main() {
     },
   );
 
+  testWidgets(
+    'd3: a player without an account gets a name tile in the picker and '
+    'books through the same confirm dialog as everyone else',
+    (tester) async {
+      // A hand-made "hráč bez účtu" never signs in — the admin books for
+      // them, or they pick themself right here. Appended to the 26-player
+      // roster the root keeps its letter tiles and the 'B' prefix lists
+      // him next to 'BB Hráč'.
+      const ghost = PlayerName(
+        id: 'ghost',
+        displayName: 'Bohumil Kroupa',
+        hasAccount: false,
+      );
+      await tester.pumpWidget(kioskApp(roster: [...players, ghost]));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Rezervovat'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('B'));
+      await tester.pumpAndSettle();
+      expect(find.text(ghost.displayName), findsOneWidget);
+      await tester.tap(find.text(ghost.displayName));
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('Rezervuje: ${ghost.displayName}'),
+        findsOneWidget,
+      );
+
+      // Same steps as test d: today's column is always built, free lanes
+      // render as a literal '＋'.
+      final addCell = find.text('＋').first;
+      await tester.ensureVisible(addCell);
+      await tester.pumpAndSettle();
+      await tester.tap(addCell);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Rezervovat termín?'), findsOneWidget);
+      expect(find.textContaining(ghost.displayName), findsWidgets);
+      // The kiosk never mentions accounts or e-mail — no admin-style hint.
+      expect(find.textContaining('bez účtu'), findsNothing);
+
+      await finish(tester);
+    },
+  );
+
   testWidgets('e: reserved cells have no cancel affordance (tap → no dialog)', (
     tester,
   ) async {
