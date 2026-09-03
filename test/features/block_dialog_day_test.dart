@@ -361,6 +361,32 @@ void main() {
     );
   });
 
+  testWidgets("a moved block whose only sign-up is a hráč bez účtu skips the "
+      'notify choice and moves silently', (tester) async {
+    reservationsBody = '[{"date":"${thursday.toSql()}","lane":1,'
+        '"block_id":"b2","player_id":"ph1"}]';
+    await tester.pumpWidget(app(BlockDialog(
+      existing: b2,
+      blocks: const [b1, b2],
+      initialStart: const HourMinute(19, 0),
+      initialEnd: const HourMinute(20, 0),
+      dayContext: thursday,
+      dayBaseIds: const ['b1', 'b2'],
+      noAccountIds: const {'ph1'},
+    )));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Uložit'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Upozornit na přesun?'), findsNothing);
+    final move = requests.firstWhere(
+      (r) =>
+          r.method == 'POST' && r.url.path.contains('move_day_reservations'),
+    );
+    expect((jsonDecode(move.body) as Map)['p_notify'], false);
+  });
+
   testWidgets('editing a block that has a reservation does NOT threaten a '
       'cancellation — the sign-up moves with the block', (tester) async {
     reservationsBody =

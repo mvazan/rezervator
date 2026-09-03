@@ -172,6 +172,83 @@ void main() {
     expect(result, isTrue);
   });
 
+  testWidgets('moving only hráči bez účtu skips the notify choice and moves '
+      'silently', (tester) async {
+    tester.view.physicalSize = const Size(1000, 800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    bool? result;
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        settingsProvider.overrideWith((ref) => Stream.value(settings)),
+        weekReservationsProvider.overrideWith(
+          (ref, monday) => Stream.value([res('r1', 'ph1', 1, removed.id)]),
+        ),
+        playersProvider.overrideWith(
+          (ref) async => const [
+            PlayerName(
+              id: 'ph1',
+              displayName: 'Bohumil Kroupa',
+              nick: 'Bohouš',
+              hasAccount: false,
+            ),
+          ],
+        ),
+      ],
+      child: MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => Center(
+              child: TextButton(
+                onPressed: () async {
+                  result = await showDialog<bool>(
+                    context: context,
+                    builder: (_) => MoveReservationsDialog(
+                      date: thursday,
+                      fromBlock: removed,
+                      targets: const [target],
+                      cancelNote: 'změna rozvrhu',
+                    ),
+                  );
+                },
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ));
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+
+    Future<void> longPressDrag(Finder from, Finder to) async {
+      final gesture = await tester.startGesture(tester.getCenter(from));
+      await tester.pump(const Duration(milliseconds: 250));
+      await gesture.moveTo(tester.getCenter(to));
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+    }
+
+    await longPressDrag(find.text('Bohouš · D1'), find.text('Dráha 1 — volná'));
+    expect(find.textContaining('Bohouš (přesun)'), findsOneWidget);
+
+    await tester.tap(find.text('Pokračovat'));
+    await tester.pumpAndSettle();
+
+    // No inbox to reach: the choice is skipped, the move is silent.
+    expect(find.text('Upozornit na přesun?'), findsNothing);
+    final rpc = requests.firstWhere(
+      (r) => r.method == 'POST' && r.url.path.contains('move_reservation'),
+    );
+    final body = jsonDecode(rpc.body) as Map<String, dynamic>;
+    expect(body['p_reservation'], 'r1');
+    expect(body['p_notify'], false);
+    expect(result, isTrue);
+  });
+
   testWidgets('a rental exception reshapes the blocked lanes: the series '
       'blocks lane 1, its child for the day blocks lane 2 instead', (
     tester,

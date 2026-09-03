@@ -38,6 +38,7 @@ class ScheduleActions {
     required this.rentals,
     required this.me,
     required this.canEditBlocks,
+    this.noAccountIds = const {},
   })  : _overrideByDate = {for (final o in overrides) o.date: o},
         _blockById = {for (final b in dbBlocks) b.id: b};
 
@@ -73,6 +74,10 @@ class ScheduleActions {
   /// Admin block gestures (long-press edit, tap-a-gap add) only exist for
   /// admins on the real DB block set — never on the placeholder grid.
   final bool canEditBlocks;
+
+  /// Hand-made "hráči bez účtu" (0022): no e-mail, no app, so a cancel or
+  /// a move never offers to message them.
+  final Set<String> noAccountIds;
 
   final Map<Day, DayOverride> _overrideByDate;
   final Map<String, TimeBlock> _blockById;
@@ -199,6 +204,25 @@ class ScheduleActions {
       );
       return;
     }
+    if (noAccountIds.contains(r.playerId)) {
+      // A hráč bez účtu has no inbox: plain confirm, no note, no ping.
+      final ok = await confirmDialog(
+        context,
+        title: 'Zrušit rezervaci?',
+        message: '${dayFull(date)} · ${block.label} · Dráha ${r.lane}\n'
+            'Hráč bez účtu se o zrušení nedozví.',
+        confirmLabel: 'Zrušit rezervaci',
+        cancelLabel: 'Zpět',
+      );
+      if (!ok || !context.mounted) return;
+      await tryAction(
+        context,
+        () => Api.cancelReservation(r.id, note: '', notify: false),
+        success: 'Rezervace zrušena.',
+        errorText: friendlyDbError,
+      );
+      return;
+    }
     // Phase 3: cancelling someone else's reservation asks whether to ping
     // the player; the note doubles as the notification's reason (and stays
     // stored for the attendance audit even when silent).
@@ -262,6 +286,7 @@ class ScheduleActions {
     showDialog<void>(
       context: context,
       builder: (_) => BlockDialog(
+        noAccountIds: noAccountIds,
         existing: block,
         blocks: dbBlocks,
         dayContext: date,
@@ -298,6 +323,7 @@ class ScheduleActions {
     await showDialog<void>(
       context: context,
       builder: (_) => BlockDialog(
+        noAccountIds: noAccountIds,
         existing: null,
         blocks: dbBlocks,
         initialStart: start,
@@ -371,19 +397,25 @@ class ScheduleActions {
     }
     final newEnd = hourMinuteAt(endMinutes);
     // Phase 3: the block's sign-ups travel to the new time — the
-    // admin picks whether (and how) to tell them.
+    // admin picks whether (and how) to tell them. Hráči bez účtu have no
+    // inbox: they move silently, and when nobody else moves there is no
+    // choice to make.
     NotifyChoice? moveNotify;
-    final movingRows = reservations
+    final moving = reservations
         .where((r) => r.date == date && r.blockId == block.id && r.isLive)
-        .length;
-    if (movingRows > 0) {
+        .toList();
+    final notifiable =
+        moving.where((r) => !noAccountIds.contains(r.playerId)).length;
+    if (moving.isNotEmpty && notifiable == 0) {
+      moveNotify = const NotifyChoice(notify: false);
+    } else if (notifiable > 0) {
       moveNotify = await showNotifyChoiceDialog(
         context,
         title: 'Upozornit na přesun?',
-        summary: movingRows == 1
+        summary: notifiable == 1
             ? 'Hráč dostane zprávu o novém čase '
                 '${newStart.display()}–${newEnd.display()}.'
-            : '$movingRows hráčů dostane zprávu o novém čase '
+            : '$notifiable hráčů dostane zprávu o novém čase '
                 '${newStart.display()}–${newEnd.display()}.',
       );
       if (moveNotify == null || !context.mounted) return;
