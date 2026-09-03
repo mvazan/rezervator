@@ -50,6 +50,10 @@ class AppConfig {
   /// password path; the password itself is what actually authenticates).
   static const demoAccessCode = '126533';
 
+  /// The Play-review alley seeded by 0012: never offered in registration
+  /// (its only member is the demo account).
+  static const demoTenantId = '00000000-0000-0000-0000-0000000000de';
+
   /// Demo login is available only when a password was baked in (release builds
   /// carrying the secret) and the entered e-mail matches the demo account.
   static bool isDemoLogin(String email) =>
