@@ -899,5 +899,32 @@ begin
   raise notice 'OK: trigger_notification_jobs tolerates an unset Vault and the minute tick is scheduled';
 end $$;
 
+-- Own colour (0024): a player edits only their own row, inside the palette.
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+begin
+  update profiles set own_color = 4
+  where id = '10000000-0000-0000-0000-000000000001';
+  if (select own_color from profiles
+      where id = '10000000-0000-0000-0000-000000000001') <> 4 then
+    raise exception 'FAIL: own_color did not stick on the own row';
+  end if;
+  update profiles set own_color = 4
+  where id = '10000000-0000-0000-0000-000000000003';
+  if (select own_color from profiles
+      where id = '10000000-0000-0000-0000-000000000003') <> -1 then
+    raise exception 'FAIL: own_color changed on a foreign row';
+  end if;
+  begin
+    update profiles set own_color = 12
+    where id = '10000000-0000-0000-0000-000000000001';
+    raise exception 'FAIL: own_color outside the palette accepted';
+  exception when check_violation then null;
+  end;
+  raise notice 'OK: own_color is editable on the own row only, inside the palette';
+end $$;
+
 reset role;
 rollback;

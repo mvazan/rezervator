@@ -618,7 +618,9 @@ CREATE TABLE IF NOT EXISTS "public"."profiles" (
     "superadmin" boolean DEFAULT false NOT NULL,
     "home_tenant_id" "uuid",
     "placeholder" boolean DEFAULT false NOT NULL,
+    "own_color" smallint DEFAULT '-1'::integer NOT NULL,
     CONSTRAINT "profiles_nick_check" CHECK (("char_length"("nick") <= 14)),
+    CONSTRAINT "profiles_own_color_check" CHECK ((("own_color" >= '-1'::integer) AND ("own_color" <= 11))),
     CONSTRAINT "profiles_placeholder_check" CHECK (((NOT "placeholder") OR (("role" = 'player'::"text") AND ("status" = 'approved'::"text") AND (NOT "superadmin")))),
     CONSTRAINT "profiles_role_check" CHECK (("role" = ANY (ARRAY['player'::"text", 'admin'::"text", 'kiosk'::"text"]))),
     CONSTRAINT "profiles_status_check" CHECK (("status" = ANY (ARRAY['pending'::"text", 'approved'::"text"])))
@@ -629,6 +631,10 @@ ALTER TABLE "public"."profiles" OWNER TO "postgres";
 
 
 COMMENT ON COLUMN "public"."profiles"."placeholder" IS 'Hand-made profile without an auth user (hráč bez účtu): approved player, bookable, never signs in; merge_placeholder_player folds it into a real account.';
+
+
+
+COMMENT ON COLUMN "public"."profiles"."own_color" IS 'Palette index 0–11 the player chose for their own reservations in their own view; -1 = the club colour.';
 
 
 
@@ -2442,6 +2448,10 @@ GRANT UPDATE("display_name") ON TABLE "public"."profiles" TO "authenticated";
 
 
 GRANT UPDATE("fcm_token") ON TABLE "public"."profiles" TO "authenticated";
+
+
+
+GRANT UPDATE("own_color") ON TABLE "public"."profiles" TO "authenticated";
 
 
 
