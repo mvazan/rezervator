@@ -48,14 +48,15 @@ class SlotTile extends StatelessWidget {
   final String? playerName;
 
   /// Whether a [ReservedSlot] belongs to the caller — bolds the name and
-  /// tints the cell with the primary container instead of the neutral one.
+  /// draws a primary outline; without a club the cell also falls back to
+  /// the primary container instead of the neutral tint.
   final bool isMine;
 
-  /// Club palette index (spec §5) of a foreign [ReservedSlot]'s player: 0–11
-  /// tints the cell with that club's colour, anything else (-1 = no club)
-  /// keeps the neutral surface tint. Ignored for "mine" cells, which stay
-  /// primaryContainer so the caller's own bookings never blend into a club's
-  /// colour.
+  /// Club palette index (spec §5) of a [ReservedSlot]'s player — the
+  /// caller's own included: 0–11 tints the cell with that club's colour,
+  /// anything else (-1 = no club) keeps the neutral surface tint (primary
+  /// for "mine"). The board is read by club colour, so an own booking must
+  /// not break the pattern.
   final int clubColorIndex;
 
   /// For a bookable [FreeSlot]: true when the cell is only bookable through
@@ -133,20 +134,24 @@ class SlotTile extends StatelessWidget {
         );
       case ReservedSlot():
         final name = playerName ?? '?';
-        // Foreign reservations are tinted by the player's club colour (spec
-        // §5) so spectators can tell clubs apart at a glance; "mine" is never
-        // club-tinted — it keeps primaryContainer so the caller's own
-        // bookings stay unmistakable regardless of which club they're in.
-        final (foreignBg, foreignFg) = clubTint(
+        // Every reservation is tinted by the player's club colour (spec §5),
+        // the caller's own included — the board is read by club. "Mine"
+        // keeps its own cue on top (bold name, primary outline) and only
+        // falls back to primaryContainer when the player has no club.
+        final (cellBg, cellFg) = clubTint(
             clubColorIndex, scheme.brightness,
-            fallbackBg: scheme.surfaceContainerHighest,
-            fallbackFg: scheme.onSurfaceVariant);
+            fallbackBg: isMine
+                ? scheme.primaryContainer
+                : scheme.surfaceContainerHighest,
+            fallbackFg: isMine
+                ? scheme.onPrimaryContainer
+                : scheme.onSurfaceVariant);
         final hasClubTint =
-            !isMine && clubColorIndex >= 0 && clubColorIndex < ClubColors.count;
+            clubColorIndex >= 0 && clubColorIndex < ClubColors.count;
         final nameStyle = TextStyle(
           fontSize: _compact ? 10 : 12,
           fontWeight: isMine ? FontWeight.w700 : FontWeight.w500,
-          color: isMine ? scheme.onPrimaryContainer : foreignFg,
+          color: cellFg,
         );
         final content = isMine || _compact
             ? Text(
@@ -170,14 +175,14 @@ class SlotTile extends StatelessWidget {
                     // keeps the initials legible in either palette; falls back
                     // to the neutral surface tint when there's no club.
                     backgroundColor: hasClubTint
-                        ? foreignFg.withValues(alpha: 0.2)
+                        ? cellFg.withValues(alpha: 0.2)
                         : scheme.surfaceContainerHighest,
                     child: Text(
                       initialsOf(name),
                       style: TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.w700,
-                        color: foreignFg,
+                        color: cellFg,
                       ),
                     ),
                   ),
@@ -195,8 +200,11 @@ class SlotTile extends StatelessWidget {
           minHeight: minHeight,
           onTap: onTap,
           decoration: BoxDecoration(
-            color: isMine ? scheme.primaryContainer : foreignBg,
+            color: cellBg,
             borderRadius: BorderRadius.circular(_compact ? 8 : 12),
+            border: isMine
+                ? Border.all(color: scheme.primary, width: 1.5)
+                : null,
           ),
           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
           child: content,
@@ -275,17 +283,23 @@ class SlotTile extends StatelessWidget {
           ),
         );
       case ReservedSlot():
-        // Foreign reservations carry the player's club colour (spec §5) so
-        // spectators tell clubs apart at a glance; "mine" is never
-        // club-tinted — it keeps the indigo primaryContainer highlight so
-        // the selected player's own bookings stay unmistakable over any
-        // club background.
-        final (clubBg, clubFg) = clubTint(clubColorIndex, scheme.brightness,
-            fallbackBg: scheme.surfaceContainerHighest.withValues(alpha: 0.6),
-            fallbackFg: scheme.onSurfaceVariant);
+        // Every reservation carries the player's club colour (spec §5), the
+        // selected player's own included — the board is read by club. "Mine"
+        // keeps a bold name and a primary outline; only a club-less player
+        // falls back to the primaryContainer highlight.
+        final (cellBg, cellFg) = clubTint(clubColorIndex, scheme.brightness,
+            fallbackBg: isMine
+                ? scheme.primaryContainer
+                : scheme.surfaceContainerHighest.withValues(alpha: 0.6),
+            fallbackFg: isMine
+                ? scheme.onPrimaryContainer
+                : scheme.onSurfaceVariant);
         return _rowShell(
           context,
-          background: isMine ? scheme.primaryContainer : clubBg,
+          background: cellBg,
+          border: isMine
+              ? Border.all(color: scheme.primary, width: 1.5)
+              : null,
           onTap: onTap,
           child: Text(
             playerName ?? '?',
@@ -294,7 +308,7 @@ class SlotTile extends StatelessWidget {
             style: TextStyle(
               fontSize: 11,
               fontWeight: isMine ? FontWeight.w700 : FontWeight.w500,
-              color: isMine ? scheme.onPrimaryContainer : clubFg,
+              color: cellFg,
             ),
           ),
         );
@@ -420,6 +434,12 @@ Widget slotTileFor({
     case ReservedSlot(:final reservation):
       final isMine = me != null && reservation.playerId == me.id;
       final name = nameById[reservation.playerId] ?? '?';
+      // The caller's own pick (Můj profil) wins over the club colour, but
+      // only in their own view: everyone else keeps seeing the club.
+      final ownColor = me?.ownColor ?? -1;
+      final tint = isMine && ownColor >= 0
+          ? ownColor
+          : clubColorById[reservation.playerId] ?? -1;
       // Pozn.: RPC dovoluje rezervovat i dnešní už začatý blok (kontroluje
       // jen p_date < today); klient ho schovává jako inPast. Kiosk může
       // chtít tuto benevolenci využít.
@@ -434,7 +454,7 @@ Widget slotTileFor({
         size: size,
         playerName: name,
         isMine: isMine,
-        clubColorIndex: clubColorById[reservation.playerId] ?? -1,
+        clubColorIndex: tint,
         onTap: cancellable
             ? () =>
                 slot.onCancel(day.date, block, reservation, ownFuture: ownFuture)

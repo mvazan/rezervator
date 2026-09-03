@@ -649,6 +649,12 @@ class Api {
   static Future<void> setNick(String userId, String nick) =>
       _db.rpc('set_nick', params: {'p_user_id': userId, 'p_nick': nick});
 
+  /// The caller's own colour for their own reservations (0024); -1 = club.
+  static Future<void> setOwnColor(int color) => _db
+      .from('profiles')
+      .update({'own_color': color})
+      .eq('id', currentUserId!);
+
   // --- admin: players without an account (0022, `placeholder` rows) ---
 
   /// Creates ([id] null) or edits a hand-made profile.

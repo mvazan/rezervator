@@ -457,4 +457,18 @@ void main() {
       expect(StrandableReservation.fromJson(base).playerId, isNull);
     });
   });
+  group('own colour (0024)', () {
+    const base = {
+      'id': 'u1',
+      'display_name': 'Já Hráč',
+      'email': 'me@example.com',
+      'role': 'player',
+      'status': 'approved',
+    };
+
+    test('Profile.fromJson reads own_color, -1 (club colour) when absent', () {
+      expect(Profile.fromJson({...base, 'own_color': 7}).ownColor, 7);
+      expect(Profile.fromJson(base).ownColor, -1);
+    });
+  });
 }

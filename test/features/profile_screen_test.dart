@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/profile/profile_screen.dart';
+import 'package:rezervator/features/admin/widgets/color_picker.dart';
 import 'package:rezervator/features/profile/widgets/calendar_link_card.dart';
 
 /// Stubs for the card's injected backend calls: a test that reaches one it
@@ -32,6 +33,7 @@ void main() {
     Profile profile, {
     bool calendarAvailable = false,
     CalendarLink link = CalendarLink.none,
+    Future<void> Function(int color)? setOwnColor,
   }) {
     return ProviderScope(
       overrides: [
@@ -42,7 +44,11 @@ void main() {
         calendarAvailableProvider.overrideWithValue(calendarAvailable),
         myCalendarLinkProvider.overrideWith((ref) => Stream.value(link)),
       ],
-      child: const MaterialApp(home: ProfileScreen()),
+      child: MaterialApp(
+        home: ProfileScreen(
+          setOwnColor: setOwnColor ?? (_) async => throw StateError('unexpected'),
+        ),
+      ),
     );
   }
 
@@ -193,15 +199,22 @@ void main() {
       expect(find.text(connectLabel), findsNothing);
     });
 
-    testWidgets('sits between the nick card and the sign-out card',
+    testWidgets('sits between the own-colour card and the sign-out card',
         (tester) async {
+      // Tall enough for every card to be built (the ListView is lazy).
+      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
       await tester.pumpWidget(app(me, calendarAvailable: true));
       await tester.pumpAndSettle();
 
       final nick = tester.getTopLeft(find.text('Přezdívka na tabuli')).dy;
+      final colour = tester.getTopLeft(find.text('Barva mých rezervací')).dy;
       final calendar = tester.getTopLeft(find.text('Google kalendář')).dy;
       final logout = tester.getTopLeft(find.text('Odhlásit se')).dy;
-      expect(nick, lessThan(calendar));
+      expect(nick, lessThan(colour));
+      expect(colour, lessThan(calendar));
       expect(calendar, lessThan(logout));
     });
 
@@ -583,6 +596,36 @@ void main() {
 
       expect(find.text('7 dní předem'), findsOneWidget);
       expect(find.text('Přidat připomínku'), findsNothing);
+    });
+  });
+  group('own colour card', () {
+    Finder swatches() => find.descendant(
+        of: find.byType(ColorPickerGrid), matching: find.byType(InkWell));
+
+    testWidgets('shows the picker with "Podle oddílu" selected by default',
+        (tester) async {
+      await tester.pumpWidget(app(me));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Barva mých rezervací'), findsOneWidget);
+      expect(find.byTooltip('Podle oddílu'), findsOneWidget);
+      expect(find.byType(ColorPickerGrid), findsOneWidget);
+    });
+
+    testWidgets('tapping a swatch saves its palette index, the none option '
+        'saves -1', (tester) async {
+      final saved = <int>[];
+      await tester.pumpWidget(
+          app(me, setOwnColor: (c) async => saved.add(c)));
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(find.byType(ColorPickerGrid));
+      await tester.tap(swatches().at(3)); // index 0 is the none option
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.block));
+      await tester.pumpAndSettle();
+
+      expect(saved, [2, -1]);
     });
   });
 }

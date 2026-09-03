@@ -7,6 +7,7 @@ import '../../core/ui.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
 import 'changelog.dart';
+import '../admin/widgets/color_picker.dart';
 import 'widgets/calendar_link_card.dart';
 
 /// App version/build, read once from the platform — drives the version line
@@ -18,10 +19,15 @@ final _packageInfoProvider =
 /// name/club (set at registration by an admin) and edit their own board
 /// nick. Structured so future editable fields slot in as more list tiles.
 class ProfileScreen extends ConsumerWidget {
-  const ProfileScreen({super.key, this.signOut = Api.signOut});
+  const ProfileScreen({
+    super.key,
+    this.signOut = Api.signOut,
+    this.setOwnColor = Api.setOwnColor,
+  });
 
-  /// Injectable for widget tests (Api.signOut needs a live Supabase client).
+  /// Injectable for widget tests (the Api ones need a live Supabase client).
   final Future<void> Function() signOut;
+  final Future<void> Function(int color) setOwnColor;
 
   Future<void> _editNick(BuildContext context, String currentNick) async {
     final input = await promptText(
@@ -111,6 +117,36 @@ class ProfileScreen extends ConsumerWidget {
                       onPressed: () => _editNick(context, profile.nick),
                       child: const Text('Upravit'),
                     ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                // Own colour for own reservations (0024): the board is read
+                // by club colour, this lets the player's own cells stand out
+                // in their own view; everyone else keeps seeing the club.
+                Card(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const ListTile(
+                        title: Text('Barva mých rezervací'),
+                        subtitle: Text(
+                          'Jen pro tebe — ostatní vidí barvu oddílu.',
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                        child: ColorPickerGrid(
+                          selected: profile.ownColor,
+                          noneValue: -1,
+                          noneLabel: 'Podle oddílu',
+                          onChanged: (color) => tryAction(
+                            context,
+                            () => setOwnColor(color),
+                            errorText: friendlyDbError,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
                 const SizedBox(height: 16),
