@@ -567,8 +567,8 @@ void main() {
   );
 
   testWidgets(
-    'j: a fully closed day renders the dimmed ✕ zavřeno column and still '
-    'shows that day\'s match cell',
+    'j: a fully closed day hosting a match shows the match band and no '
+    '✕ zavřeno label — the band speaks for the day',
     (tester) async {
       final match = PrioritySlot(
         type: PrioritySlot.fallbackMatchType,
@@ -581,13 +581,9 @@ void main() {
         prepMinutes: 0,
         description: '',
       );
-      // A second rail block the match never touches — b1 (22:58-23:59) fully
-      // covers the match window, so its row-group renders the 🏆 cell;
-      // bOther (08:00-09:00) has no overlap at all, so its row-group falls
-      // through to the plain dimmed "✕ zavřeno" filler. A closed day with
-      // only one rail block that happens to be entirely covered by a match
-      // would never show the filler text at all (see _closedCell), so this
-      // asserts both cells actually coexist on the one closed column.
+      // A second rail block the match never touches keeps the rest of the
+      // column plainly closed; the label still stays away — a single band
+      // is enough to explain the whole day.
       const bOther = TimeBlock(
         id: 'bOther',
         startsAt: HourMinute(8, 0),
@@ -624,10 +620,10 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('✕ zavřeno'), findsOneWidget);
-      // Same disambiguation as test i: the closed-column match cell renders
-      // '🏆 {title}\n{start}–{end}' (_matchCell via _closedCell), distinct
-      // from the header banner's plain '🏆 {title}'.
+      expect(find.textContaining('✕ zavřeno'), findsNothing);
+      // Same disambiguation as test i: the closed-column match band renders
+      // '🏆 {title}\n{start}–{end}', distinct from the header banner's
+      // plain '🏆 {title}'.
       expect(
         find.text(
           '🏆 ${match.title}\n'

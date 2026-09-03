@@ -4,8 +4,9 @@
 /// [ScheduleDayColumn.laneRow] — the app resolves its booking/cancel policy
 /// into compact [SlotTile]s, the kiosk into row tiles); off-block
 /// matches/rentals render as bands at their true time; a closed day dims
-/// the whole column behind a vertical "✕ zavřeno[ — reason]" (matches still
-/// render on top — spectators want to see who plays).
+/// the whole column behind a vertical "✕ zavřeno[ — reason]" — unless it
+/// hosts a match or another band, which then speaks for the day (matches
+/// render on closed days too — spectators want to see who plays).
 ///
 /// Admin gestures are optional hooks: tap empty space to add (prefilled
 /// with the free gap), click a card header or a band to edit, HOLD a card
@@ -317,6 +318,14 @@ class ScheduleDayColumn extends StatelessWidget {
 
   Widget _closedBackground(BuildContext context, ColorScheme scheme) {
     final closedDay = day as ClosedDay;
+    // A closed day that hosts a match (or another band) is explained by the
+    // band itself; the vertical "zavřeno" would only cross it out. The
+    // dimmed ground stays so the day still reads as no-training.
+    if (day.priority.isNotEmpty) {
+      return Container(
+        color: scheme.surfaceContainerLowest.withValues(alpha: 0.5),
+      );
+    }
     return Container(
       color: scheme.surfaceContainerLowest.withValues(alpha: 0.5),
       alignment: Alignment.center,
