@@ -926,5 +926,26 @@ begin
   raise notice 'OK: own_color is editable on the own row only, inside the palette';
 end $$;
 
+-- app_config (0025): readable by every signed-in client, writable by nobody
+-- in the app, invisible to anon.
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000003","role":"authenticated"}';
+do $$
+begin
+  if (select min_build from app_config) is null then
+    raise exception 'FAIL: a signed-in player cannot read app_config';
+  end if;
+  begin
+    update app_config set min_build = 99;
+    raise exception 'FAIL: app_config is writable by a player';
+  exception when insufficient_privilege then null;
+  end;
+  if has_table_privilege('anon', 'public.app_config', 'select') then
+    raise exception 'FAIL: anon may read app_config';
+  end if;
+  raise notice 'OK: app_config is read-only for the app and hidden from anon';
+end $$;
+
 reset role;
 rollback;

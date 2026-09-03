@@ -9,17 +9,35 @@ import '../kiosk/kiosk_shell.dart';
 import '../schedule/home_shell.dart';
 import 'login_screen.dart';
 import 'register_screen.dart';
+import 'update_screen.dart';
 import 'waiting_screen.dart';
 
 /// Routes by auth/profile state:
-/// no session -> login, no profile -> register, pending -> waiting,
-/// kiosk role -> kiosk shell, else -> the app.
+/// no session -> login, too-old build -> update, no profile -> register,
+/// pending -> waiting, kiosk role -> kiosk shell, else -> the app.
 /// All transitions are live (streams).
-class AuthGate extends ConsumerWidget {
+class AuthGate extends ConsumerStatefulWidget {
   const AuthGate({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<AuthGate> createState() => _AuthGateState();
+}
+
+class _AuthGateState extends ConsumerState<AuthGate> {
+  /// Coming back to the foreground re-reads min_build: the Realtime stream
+  /// is the fast path, this is the belt for a socket that died meanwhile.
+  late final AppLifecycleListener _lifecycle = AppLifecycleListener(
+    onResume: () => ref.invalidate(minBuildProvider),
+  );
+
+  @override
+  void dispose() {
+    _lifecycle.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final auth = ref.watch(authStateProvider);
     final session =
         auth.value?.session ?? Supabase.instance.client.auth.currentSession;
@@ -29,6 +47,11 @@ class AuthGate extends ConsumerWidget {
     }
     if (session == null) {
       return const LoginScreen();
+    }
+    // A build the backend no longer supports stops here — before any
+    // profile or schedule query — so nothing half-broken runs or reports.
+    if (ref.watch(updateRequiredProvider)) {
+      return const UpdateScreen();
     }
 
     final profile = ref.watch(myProfileProvider);
