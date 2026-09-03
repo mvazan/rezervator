@@ -78,7 +78,7 @@ final tenantsProvider = FutureProvider<List<Tenant>>((ref) async {
       .select('id, name')
       .eq('status', 'approved');
   return registrableTenants(
-      [for (final row in rows) Tenant.fromJson(row as Map<String, dynamic>)]);
+      [for (final row in rows) Tenant.fromJson(row)]);
 });
 
 /// The caller's own kuželna's approval status ('pending'/'approved') — the
