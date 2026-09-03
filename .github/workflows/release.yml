@@ -52,6 +52,7 @@ jobs:
             --dart-define=FIREBASE_PROJECT_ID=${{ secrets.FIREBASE_PROJECT_ID }}
             --dart-define=SENTRY_DSN=${{ secrets.SENTRY_DSN }}
             --dart-define=DEMO_PASSWORD=${{ secrets.DEMO_PASSWORD }}
+            --dart-define=GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
         run: |
           flutter build apk --release $DEFINES         # direct install / sharing
           flutter build appbundle --release $DEFINES   # Google Play
