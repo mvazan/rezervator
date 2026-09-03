@@ -252,6 +252,33 @@ void main() {
     expect(find.text('Zrušit bez zprávy'), findsOneWidget);
   });
 
+  testWidgets("admin cancel of a hráč bez účtu's reservation asks plainly — "
+      'nobody to message', (tester) async {
+    wideSurface(tester);
+    await tester.pumpWidget(app(
+      profile: admin,
+      roster: const [
+        ...players,
+        PlayerName(id: 'p3', displayName: 'Bohumil Kroupa', hasAccount: false),
+      ],
+      reservations: [res('r3', 'p3', tomorrow)],
+    ));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Bohumil Kroupa').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Bohumil Kroupa').first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Zrušit rezervaci?'), findsOneWidget);
+    expect(find.textContaining('Hráč bez účtu se o zrušení nedozví.'),
+        findsOneWidget);
+    expect(find.text('Zrušit a poslat zprávu'), findsNothing);
+    expect(find.text('Zrušit bez zprávy'), findsNothing);
+    expect(find.byType(TextField), findsNothing);
+    expect(find.text('Zpět'), findsOneWidget);
+    expect(find.text('Zrušit rezervaci'), findsOneWidget);
+  });
+
   testWidgets('non-admin tap on foreign reservation stays inert', (
     tester,
   ) async {

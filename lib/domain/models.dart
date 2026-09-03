@@ -691,17 +691,23 @@ class StrandableReservation {
     required this.date,
     required this.lane,
     required this.blockId,
+    this.playerId,
   });
 
   final Day date;
   final int lane;
   final String blockId;
 
+  /// Who holds the slot — lets a move tell players with an inbox apart from
+  /// hand-made "hráči bez účtu" (null when the query did not select it).
+  final String? playerId;
+
   factory StrandableReservation.fromJson(Map<String, dynamic> json) =>
       StrandableReservation(
         date: Day.parse(json['date'] as String),
         lane: json['lane'] as int,
         blockId: json['block_id'] as String,
+        playerId: json['player_id'] as String?,
       );
 }
 

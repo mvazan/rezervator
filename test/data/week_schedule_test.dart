@@ -26,7 +26,7 @@ void main() {
   );
   const players = [
     PlayerName(id: 'p1', displayName: 'Petr Novák', nick: 'Péťa', clubColor: 4),
-    PlayerName(id: 'p2', displayName: 'Olga Malá'),
+    PlayerName(id: 'p2', displayName: 'Olga Malá', hasAccount: false),
   ];
   final reservation = Reservation(
     id: 'r1',
@@ -97,6 +97,8 @@ void main() {
     expect(view.now, const HourMinute(16, 0));
     expect(view.nameById, {'p1': 'Péťa', 'p2': 'Olga Malá'});
     expect(view.clubColorById, {'p1': 4, 'p2': -1});
+    // Hráči bez účtu (0022) — the admin flows skip the notify choice.
+    expect(view.noAccountIds, {'p2'});
     final day = view.week.days[2] as OpenDay; // Wednesday
     expect(day.slot('b1', 1), isA<ReservedSlot>());
     expect(day.slot('b1', 2), isA<FreeSlot>());

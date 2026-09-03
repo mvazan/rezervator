@@ -24,6 +24,7 @@ class WeekView {
     required this.clubColorById,
     required this.today,
     required this.now,
+    this.noAccountIds = const {},
   });
 
   final WeekSchedule week;
@@ -49,6 +50,10 @@ class WeekView {
 
   /// Palette index per player id (−1 = no club).
   final Map<String, int> clubColorById;
+
+  /// Ids of the hand-made "hráči bez účtu" (0022): no inbox, so the admin
+  /// flows that would message a player skip the choice for them.
+  final Set<String> noAccountIds;
 
   final Day today;
   final HourMinute now;
@@ -107,6 +112,10 @@ final weekScheduleProvider =
         p.id: p.nick.isNotEmpty ? p.nick : p.displayName,
     },
     clubColorById: {for (final p in players) p.id: p.clubColor},
+    noAccountIds: {
+      for (final p in players)
+        if (!p.hasAccount) p.id,
+    },
     today: today,
     now: now,
   ));

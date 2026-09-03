@@ -211,7 +211,14 @@ class _MoveReservationsDialogState
         FilledButton(
           onPressed: _committing
               ? null
-              : () => _commit(unmovedCount: unmoved.length),
+              : () => _commit(
+                    unmovedCount: unmoved.length,
+                    reservations: reservations,
+                    noAccountIds: {
+                      for (final p in players)
+                        if (!p.hasAccount) p.id,
+                    },
+                  ),
           child: Text(_committing ? 'Přesouvám…' : 'Pokračovat'),
         ),
       ],
@@ -300,7 +307,11 @@ class _MoveReservationsDialogState
     );
   }
 
-  Future<void> _commit({required int unmovedCount}) async {
+  Future<void> _commit({
+    required int unmovedCount,
+    required List<Reservation> reservations,
+    required Set<String> noAccountIds,
+  }) async {
     if (unmovedCount > 0) {
       final proceed = await confirmDialog(
         context,
@@ -311,15 +322,25 @@ class _MoveReservationsDialogState
       );
       if (!proceed || !mounted) return;
     }
-    // Phase 3: one notification choice covers the whole batch.
+    // Phase 3: one notification choice covers the whole batch. Hráči bez
+    // účtu have no inbox — they move silently, and when nobody else moves
+    // there is no choice to make.
     NotifyChoice? choice;
-    if (_staged.isNotEmpty) {
+    final silentIds = {
+      for (final r in reservations)
+        if (noAccountIds.contains(r.playerId)) r.id,
+    };
+    final notifiable =
+        _staged.keys.where((id) => !silentIds.contains(id)).length;
+    if (_staged.isNotEmpty && notifiable == 0) {
+      choice = const NotifyChoice(notify: false);
+    } else if (notifiable > 0) {
       choice = await showNotifyChoiceDialog(
         context,
         title: 'Upozornit na přesun?',
-        summary: _staged.length == 1
+        summary: notifiable == 1
             ? 'Hráč dostane zprávu o novém termínu.'
-            : '${_staged.length} hráčů dostane zprávu o novém termínu.',
+            : '$notifiable hráčů dostane zprávu o novém termínu.',
       );
       if (choice == null || !mounted) return;
     }
