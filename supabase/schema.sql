@@ -86,6 +86,33 @@ $$;
 ALTER FUNCTION "public"."approve_tenant"("p_tenant_id" "uuid") OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."backfill_calendar_jobs"("p_user" "uuid") RETURNS integer
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_count int;
+begin
+  insert into notification_jobs (kind, dedupe_key, payload, run_at)
+  select 'calendar_sync',
+         'calendar:' || p_user || ':' || r.id,
+         jsonb_build_object('user_id', p_user, 'reservation_id', r.id),
+         now()
+    from reservations r
+    where r.player_id = p_user
+      and r.cancelled_at is null
+      and r.date >= (now() at time zone 'Europe/Prague')::date
+  on conflict (dedupe_key)
+    do update set run_at = excluded.run_at, payload = excluded.payload;
+  get diagnostics v_count = row_count;
+  return v_count;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."backfill_calendar_jobs"("p_user" "uuid") OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."block_day_status"("p_tenant" "uuid", "p_date" "date", "p_block_id" "uuid") RETURNS "text"
     LANGUAGE "sql" STABLE SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -415,6 +442,27 @@ $$;
 ALTER FUNCTION "public"."cascade_schedule_change"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."consume_calendar_nonce"("p_nonce" "text") RETURNS "uuid"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_user uuid;
+begin
+  update oauth_nonces
+    set consumed_at = now()
+    where nonce = p_nonce
+      and consumed_at is null
+      and created_at > now() - interval '10 minutes'
+    returning user_id into v_user;
+  return v_user;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."consume_calendar_nonce"("p_nonce" "text") OWNER TO "postgres";
+
+
 CREATE TABLE IF NOT EXISTS "public"."reservations" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "player_id" "uuid" NOT NULL,
@@ -661,6 +709,36 @@ $$;
 
 
 ALTER FUNCTION "public"."delete_placeholder_player"("p_id" "uuid") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."enqueue_calendar_sync"("p_user" "uuid", "p_reservation" "uuid") RETURNS "void"
+    LANGUAGE "sql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  select enqueue_notification('calendar_sync',
+    'calendar:' || p_user || ':' || p_reservation,
+    jsonb_build_object('user_id', p_user, 'reservation_id', p_reservation))
+  where exists (
+    select 1 from google_calendar_links
+    where user_id = p_user and status = 'linked');
+$$;
+
+
+ALTER FUNCTION "public"."enqueue_calendar_sync"("p_user" "uuid", "p_reservation" "uuid") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."enqueue_notification"("p_kind" "text", "p_dedupe_key" "text", "p_payload" "jsonb", "p_delay" interval DEFAULT '00:03:00'::interval) RETURNS "void"
+    LANGUAGE "sql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  insert into notification_jobs (kind, dedupe_key, payload, run_at)
+  values (p_kind, p_dedupe_key, p_payload, now() + p_delay)
+  on conflict (dedupe_key)
+    do update set run_at = excluded.run_at, payload = excluded.payload;
+$$;
+
+
+ALTER FUNCTION "public"."enqueue_notification"("p_kind" "text", "p_dedupe_key" "text", "p_payload" "jsonb", "p_delay" interval) OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."is_admin"() RETURNS boolean
@@ -922,6 +1000,24 @@ $$;
 
 
 ALTER FUNCTION "public"."move_reservation"("p_reservation" "uuid", "p_to_block" "uuid", "p_lane" integer, "p_notify" boolean, "p_message" "text") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."my_future_reservations"("p_user" "uuid") RETURNS TABLE("reservation_id" "uuid", "date" "date", "starts_at" time without time zone, "ends_at" time without time zone, "lane" smallint, "alley_name" "text")
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  select r.id, r.date, b.starts_at, b.ends_at, r.lane, t.name
+    from reservations r
+    join time_blocks b on b.id = r.block_id
+    join tenants t on t.id = r.tenant_id
+    where r.player_id = p_user
+      and r.cancelled_at is null
+      and r.date >= (now() at time zone 'Europe/Prague')::date
+    order by r.date, b.starts_at;
+$$;
+
+
+ALTER FUNCTION "public"."my_future_reservations"("p_user" "uuid") OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."notify_webhook"() RETURNS "trigger"
@@ -1227,6 +1323,23 @@ $$;
 ALTER FUNCTION "public"."rental_series_changed"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."reservations_enqueue_calendar"() RETURNS "trigger"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  if tg_op = 'UPDATE' and old.player_id <> new.player_id then
+    perform enqueue_calendar_sync(old.player_id, new.id);
+  end if;
+  perform enqueue_calendar_sync(new.player_id, new.id);
+  return new;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."reservations_enqueue_calendar"() OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."save_placeholder_player"("p_id" "uuid", "p_display_name" "text", "p_nick" "text", "p_club_id" "uuid") RETURNS "public"."profiles"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -1318,6 +1431,35 @@ $$;
 
 
 ALTER FUNCTION "public"."seed_tenant_defaults"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."set_calendar_reminders_for"("p_user" "uuid", "p_minutes" integer[]) RETURNS integer[]
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_minutes int[];
+begin
+  select coalesce(array_agg(distinct m order by m desc), '{}'::int[])
+    into v_minutes
+    from unnest(coalesce(p_minutes, '{}'::int[])) as m
+    where m is not null;
+  if array_length(v_minutes, 1) > 5
+     or exists (select 1 from unnest(v_minutes) m where m < 0 or m > 40320) then
+    raise exception 'bad_reminders';
+  end if;
+  update google_calendar_links
+    set reminder_minutes = v_minutes, updated_at = now()
+    where user_id = p_user;
+  if not found then
+    raise exception 'unknown_link';
+  end if;
+  return v_minutes;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."set_calendar_reminders_for"("p_user" "uuid", "p_minutes" integer[]) OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."set_day_override"("p_date" "date", "p_closed" boolean, "p_reason" "text" DEFAULT ''::"text", "p_block_ids" "uuid"[] DEFAULT NULL::"uuid"[]) RETURNS "void"
@@ -1432,6 +1574,29 @@ $$;
 ALTER FUNCTION "public"."set_role"("p_user_id" "uuid", "p_role" "text") OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."start_calendar_link"() RETURNS "text"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_nonce text;
+begin
+  if not is_approved() or is_kiosk() then
+    raise exception 'not_allowed';
+  end if;
+  -- Closing the consent screen and trying again must not pile up rows.
+  delete from oauth_nonces
+    where user_id = auth.uid() and consumed_at is null;
+  insert into oauth_nonces (user_id) values (auth.uid())
+    returning nonce into v_nonce;
+  return v_nonce;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."start_calendar_link"() OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."switch_tenant"("p_tenant_id" "uuid") RETURNS "void"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -1502,6 +1667,55 @@ $$;
 ALTER FUNCTION "public"."sync_uklid_for_match"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."time_blocks_enqueue_calendar"() RETURNS "trigger"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  perform enqueue_calendar_sync(r.player_id, r.id)
+    from reservations r
+    where r.block_id = new.id
+      and r.cancelled_at is null
+      and r.date >= (now() at time zone 'Europe/Prague')::date;
+  return new;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."time_blocks_enqueue_calendar"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."trigger_notification_jobs"() RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_url text;
+  v_secret text;
+begin
+  if not exists (select 1 from notification_jobs where run_at <= now()) then
+    return;
+  end if;
+  select c.url, c.secret into v_url, v_secret from notify_webhook_config() c;
+  if v_url is null or v_secret is null then
+    raise warning 'trigger_notification_jobs: vault secrets notify_url / webhook_secret missing, due jobs not dispatched';
+    return;
+  end if;
+  perform net.http_post(
+    url := v_url,
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'x-webhook-secret', v_secret
+    ),
+    body := '{"type":"CRON","table":"notification_jobs","record":null,"old_record":null}'::jsonb
+  );
+end;
+$$;
+
+
+ALTER FUNCTION "public"."trigger_notification_jobs"() OWNER TO "postgres";
+
+
 CREATE TABLE IF NOT EXISTS "public"."clubs" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "name" "text" NOT NULL,
@@ -1549,6 +1763,77 @@ CREATE TABLE IF NOT EXISTS "public"."day_overrides" (
 
 
 ALTER TABLE "public"."day_overrides" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."google_calendar_links" (
+    "user_id" "uuid" NOT NULL,
+    "status" "text" DEFAULT 'pending'::"text" NOT NULL,
+    "google_email" "text",
+    "last_error" "text",
+    "reminder_minutes" integer[] DEFAULT '{}'::integer[] NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "google_calendar_links_reminder_minutes_check" CHECK (((COALESCE("array_length"("reminder_minutes", 1), 0) <= 5) AND (0 <= ALL ("reminder_minutes")) AND (40320 >= ALL ("reminder_minutes")))),
+    CONSTRAINT "google_calendar_links_status_check" CHECK (("status" = ANY (ARRAY['pending'::"text", 'linked'::"text", 'broken'::"text", 'unlinked'::"text"])))
+);
+
+
+ALTER TABLE "public"."google_calendar_links" OWNER TO "postgres";
+
+
+COMMENT ON COLUMN "public"."google_calendar_links"."status" IS 'pending (token stored, calendar not yet created) | linked | broken (token revoked / calendar gone) | unlinked (disconnected)';
+
+
+
+CREATE TABLE IF NOT EXISTS "public"."google_calendar_tokens" (
+    "user_id" "uuid" NOT NULL,
+    "refresh_token" "text" NOT NULL,
+    "google_calendar_id" "text",
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."google_calendar_tokens" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."notification_jobs" (
+    "id" bigint NOT NULL,
+    "kind" "text" NOT NULL,
+    "dedupe_key" "text" NOT NULL,
+    "payload" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL,
+    "run_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "attempts" integer DEFAULT 0 NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."notification_jobs" OWNER TO "postgres";
+
+
+COMMENT ON COLUMN "public"."notification_jobs"."dedupe_key" IS 'One pending job per key: a repeat re-arms run_at instead of adding a row.';
+
+
+
+ALTER TABLE "public"."notification_jobs" ALTER COLUMN "id" ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME "public"."notification_jobs_id_seq"
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+
+
+CREATE TABLE IF NOT EXISTS "public"."oauth_nonces" (
+    "nonce" "text" DEFAULT "encode"("extensions"."gen_random_bytes"(24), 'hex'::"text") NOT NULL,
+    "user_id" "uuid" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "consumed_at" timestamp with time zone
+);
+
+
+ALTER TABLE "public"."oauth_nonces" OWNER TO "postgres";
 
 
 CREATE OR REPLACE VIEW "public"."players" AS
@@ -1643,8 +1928,33 @@ ALTER TABLE ONLY "public"."day_overrides"
 
 
 
+ALTER TABLE ONLY "public"."google_calendar_links"
+    ADD CONSTRAINT "google_calendar_links_pkey" PRIMARY KEY ("user_id");
+
+
+
+ALTER TABLE ONLY "public"."google_calendar_tokens"
+    ADD CONSTRAINT "google_calendar_tokens_pkey" PRIMARY KEY ("user_id");
+
+
+
 ALTER TABLE ONLY "public"."priority_slots"
     ADD CONSTRAINT "matches_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."notification_jobs"
+    ADD CONSTRAINT "notification_jobs_dedupe_key_key" UNIQUE ("dedupe_key");
+
+
+
+ALTER TABLE ONLY "public"."notification_jobs"
+    ADD CONSTRAINT "notification_jobs_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."oauth_nonces"
+    ADD CONSTRAINT "oauth_nonces_pkey" PRIMARY KEY ("nonce");
 
 
 
@@ -1694,6 +2004,10 @@ ALTER TABLE ONLY "public"."time_blocks"
 
 
 CREATE INDEX "matches_date_idx" ON "public"."priority_slots" USING "btree" ("date");
+
+
+
+CREATE INDEX "notification_jobs_due_idx" ON "public"."notification_jobs" USING "btree" ("run_at");
 
 
 
@@ -1765,6 +2079,10 @@ CREATE OR REPLACE TRIGGER "rental_series_changed" AFTER UPDATE ON "public"."rent
 
 
 
+CREATE OR REPLACE TRIGGER "reservations_enqueue_calendar" AFTER INSERT OR UPDATE ON "public"."reservations" FOR EACH ROW EXECUTE FUNCTION "public"."reservations_enqueue_calendar"();
+
+
+
 CREATE OR REPLACE TRIGGER "settings_shrink" AFTER UPDATE OF "lane_count", "training_weekdays" ON "public"."schedule_settings" FOR EACH ROW EXECUTE FUNCTION "public"."cascade_schedule_change"();
 
 
@@ -1774,6 +2092,10 @@ CREATE OR REPLACE TRIGGER "slot_type_conflicts" AFTER UPDATE ON "public"."priori
 
 
 CREATE OR REPLACE TRIGGER "tenant_seed_defaults" AFTER INSERT ON "public"."tenants" FOR EACH ROW EXECUTE FUNCTION "public"."seed_tenant_defaults"();
+
+
+
+CREATE OR REPLACE TRIGGER "time_blocks_enqueue_calendar" AFTER UPDATE OF "starts_at", "ends_at" ON "public"."time_blocks" FOR EACH ROW WHEN ((("old"."starts_at" IS DISTINCT FROM "new"."starts_at") OR ("old"."ends_at" IS DISTINCT FROM "new"."ends_at"))) EXECUTE FUNCTION "public"."time_blocks_enqueue_calendar"();
 
 
 
@@ -1792,8 +2114,23 @@ ALTER TABLE ONLY "public"."day_overrides"
 
 
 
+ALTER TABLE ONLY "public"."google_calendar_links"
+    ADD CONSTRAINT "google_calendar_links_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "public"."profiles"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."google_calendar_tokens"
+    ADD CONSTRAINT "google_calendar_tokens_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "public"."profiles"("id") ON DELETE CASCADE;
+
+
+
 ALTER TABLE ONLY "public"."priority_slots"
     ADD CONSTRAINT "matches_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "public"."profiles"("id");
+
+
+
+ALTER TABLE ONLY "public"."oauth_nonces"
+    ADD CONSTRAINT "oauth_nonces_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "public"."profiles"("id") ON DELETE CASCADE;
 
 
 
@@ -1910,6 +2247,22 @@ CREATE POLICY "clubs_write" ON "public"."clubs" USING ((("tenant_id" = "public".
 
 
 ALTER TABLE "public"."day_overrides" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."google_calendar_links" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "google_calendar_links_select_own" ON "public"."google_calendar_links" FOR SELECT TO "authenticated" USING (("user_id" = "auth"."uid"()));
+
+
+
+ALTER TABLE "public"."google_calendar_tokens" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."notification_jobs" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."oauth_nonces" ENABLE ROW LEVEL SECURITY;
 
 
 CREATE POLICY "overrides_delete" ON "public"."day_overrides" FOR DELETE USING ((("tenant_id" = "public"."current_tenant_id"()) AND "public"."is_admin"()));
@@ -2043,6 +2396,11 @@ GRANT ALL ON FUNCTION "public"."approve_tenant"("p_tenant_id" "uuid") TO "servic
 
 
 
+REVOKE ALL ON FUNCTION "public"."backfill_calendar_jobs"("p_user" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."backfill_calendar_jobs"("p_user" "uuid") TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."block_day_status"("p_tenant" "uuid", "p_date" "date", "p_block_id" "uuid") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."block_day_status"("p_tenant" "uuid", "p_date" "date", "p_block_id" "uuid") TO "service_role";
 
@@ -2061,6 +2419,11 @@ GRANT ALL ON FUNCTION "public"."cancel_stranded_reservations"("p_tenant" "uuid",
 GRANT ALL ON FUNCTION "public"."cascade_schedule_change"() TO "anon";
 GRANT ALL ON FUNCTION "public"."cascade_schedule_change"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."cascade_schedule_change"() TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."consume_calendar_nonce"("p_nonce" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."consume_calendar_nonce"("p_nonce" "text") TO "service_role";
 
 
 
@@ -2088,9 +2451,24 @@ GRANT ALL ON FUNCTION "public"."delete_placeholder_player"("p_id" "uuid") TO "se
 
 
 
+REVOKE ALL ON FUNCTION "public"."enqueue_calendar_sync"("p_user" "uuid", "p_reservation" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."enqueue_calendar_sync"("p_user" "uuid", "p_reservation" "uuid") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."enqueue_notification"("p_kind" "text", "p_dedupe_key" "text", "p_payload" "jsonb", "p_delay" interval) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."enqueue_notification"("p_kind" "text", "p_dedupe_key" "text", "p_payload" "jsonb", "p_delay" interval) TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."merge_placeholder_player"("p_placeholder_id" "uuid", "p_target_id" "uuid", "p_display_name" "text", "p_nick" "text", "p_club_id" "uuid") TO "anon";
 GRANT ALL ON FUNCTION "public"."merge_placeholder_player"("p_placeholder_id" "uuid", "p_target_id" "uuid", "p_display_name" "text", "p_nick" "text", "p_club_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."merge_placeholder_player"("p_placeholder_id" "uuid", "p_target_id" "uuid", "p_display_name" "text", "p_nick" "text", "p_club_id" "uuid") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."my_future_reservations"("p_user" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."my_future_reservations"("p_user" "uuid") TO "service_role";
 
 
 
@@ -2132,6 +2510,12 @@ GRANT ALL ON FUNCTION "public"."rental_series_changed"() TO "service_role";
 
 
 
+GRANT ALL ON FUNCTION "public"."reservations_enqueue_calendar"() TO "anon";
+GRANT ALL ON FUNCTION "public"."reservations_enqueue_calendar"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."reservations_enqueue_calendar"() TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."save_placeholder_player"("p_id" "uuid", "p_display_name" "text", "p_nick" "text", "p_club_id" "uuid") TO "anon";
 GRANT ALL ON FUNCTION "public"."save_placeholder_player"("p_id" "uuid", "p_display_name" "text", "p_nick" "text", "p_club_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."save_placeholder_player"("p_id" "uuid", "p_display_name" "text", "p_nick" "text", "p_club_id" "uuid") TO "service_role";
@@ -2143,9 +2527,31 @@ GRANT ALL ON FUNCTION "public"."seed_demo_member"("p_email" "text") TO "service_
 
 
 
+REVOKE ALL ON FUNCTION "public"."set_calendar_reminders_for"("p_user" "uuid", "p_minutes" integer[]) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."set_calendar_reminders_for"("p_user" "uuid", "p_minutes" integer[]) TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."start_calendar_link"() TO "anon";
+GRANT ALL ON FUNCTION "public"."start_calendar_link"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."start_calendar_link"() TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."switch_tenant"("p_tenant_id" "uuid") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."switch_tenant"("p_tenant_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."switch_tenant"("p_tenant_id" "uuid") TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."time_blocks_enqueue_calendar"() TO "anon";
+GRANT ALL ON FUNCTION "public"."time_blocks_enqueue_calendar"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."time_blocks_enqueue_calendar"() TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."trigger_notification_jobs"() FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."trigger_notification_jobs"() TO "service_role";
 
 
 
@@ -2156,6 +2562,27 @@ GRANT ALL ON TABLE "public"."clubs" TO "service_role";
 
 GRANT ALL ON TABLE "public"."day_overrides" TO "authenticated";
 GRANT ALL ON TABLE "public"."day_overrides" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."google_calendar_links" TO "service_role";
+GRANT SELECT ON TABLE "public"."google_calendar_links" TO "authenticated";
+
+
+
+GRANT ALL ON TABLE "public"."google_calendar_tokens" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."notification_jobs" TO "service_role";
+
+
+
+GRANT UPDATE ON SEQUENCE "public"."notification_jobs_id_seq" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."oauth_nonces" TO "service_role";
 
 
 

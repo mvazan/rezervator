@@ -225,6 +225,29 @@ final playersProvider = FutureProvider<List<PlayerName>>((ref) async {
     ..sort((a, b) => a.displayName.compareTo(b.displayName));
 });
 
+/// Whether this build carries a Google client ID (see AppConfig). A provider
+/// rather than a direct AppConfig read so widget tests can flip it on.
+final calendarAvailableProvider =
+    Provider<bool>((_) => AppConfig.hasGoogleCalendar);
+
+/// The caller's Google Calendar link. No row = [CalendarLink.none]. Written
+/// only by the backend (the OAuth callback and the sync jobs), so the card on
+/// Můj profil flips on its own the moment linking finishes in the browser —
+/// no deep link back into the app needed.
+final myCalendarLinkProvider = StreamProvider<CalendarLink>((ref) {
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return Stream.value(CalendarLink.none);
+  return cachedRows(
+          uid,
+          'calendar_link',
+          () => _db
+              .from('google_calendar_links')
+              .stream(primaryKey: ['user_id'])
+              .eq('user_id', uid))
+      .map((rows) =>
+          rows.isEmpty ? CalendarLink.none : CalendarLink.fromJson(rows.first));
+});
+
 // ---------------------------------------------------------------------------
 // Actions (writes)
 // ---------------------------------------------------------------------------
@@ -695,7 +718,63 @@ class Api {
         .map((r) => StrandableReservation.fromJson(r as Map<String, dynamic>))
         .toList();
   }
+
+  // --- Google Calendar link (0023) ---
+
+  /// Starts the Google Calendar link: mints a one-time nonce bound to this
+  /// user and returns the consent URL to open in the browser. The nonce comes
+  /// back as OAuth's `state`, which is how the callback function knows whose
+  /// calendar it is — the app itself never sees a Google token.
+  static Future<Uri> calendarConsentUrl() async {
+    final nonce = await _db.rpc('start_calendar_link') as String;
+    return calendarConsentUri(nonce: nonce);
+  }
+
+  /// Disconnects, and waits for it: the server deletes the "Rezervátor"
+  /// calendar in Google (the last moment it can — after the revoke the app
+  /// never reaches it again), revokes the token and forgets the link. Runs
+  /// synchronously on purpose, so the card can't offer "Propojit" while the
+  /// old calendar is still being cleaned up (that race leaves orphans).
+  ///
+  /// Returns true when the calendar had to be left behind — access was
+  /// already revoked outside the app, so only the user can delete it now.
+  /// Throws on a retryable failure (503), having changed nothing.
+  static Future<bool> disconnectCalendar() async {
+    final response = await _db.functions.invoke(
+      'calendar-manage',
+      body: {'action': 'disconnect'},
+    );
+    final data = response.data;
+    return data is Map && data['orphaned'] == true;
+  }
+
+  /// Stores the reminder offsets (minutes before a training, max 5, max
+  /// 4 weeks) and rewrites every upcoming event with them right away —
+  /// reminders live on the events themselves, so "change the reminder" means
+  /// "rewrite the events". The card redraws from the links stream.
+  static Future<void> setCalendarReminders(List<int> minutes) =>
+      _db.functions.invoke(
+        'calendar-manage',
+        body: {'action': 'reminders', 'minutes': minutes},
+      );
 }
+
+/// Google's consent page for the calendar link, pure and unit-testable:
+/// the code flow (the client secret stays in the edge function), the
+/// narrow app-created-calendar scope, and [nonce] travelling as `state`.
+Uri calendarConsentUri({required String nonce}) =>
+    Uri.https('accounts.google.com', '/o/oauth2/v2/auth', {
+      'client_id': AppConfig.googleClientId,
+      'redirect_uri': AppConfig.calendarRedirectUri,
+      'response_type': 'code',
+      'scope': 'openid email '
+          'https://www.googleapis.com/auth/calendar.app.created',
+      // offline + consent: without both, Google skips the refresh token on a
+      // repeat consent and the backend would have nothing to sync with later.
+      'access_type': 'offline',
+      'prompt': 'consent',
+      'state': nonce,
+    });
 
 // ---------------------------------------------------------------------------
 // Reservation data streams (Phase 1)
@@ -810,6 +889,7 @@ void resetTenantScopedProviders(WidgetRef ref) {
   ref.invalidate(rentalsProvider);
   ref.invalidate(weekReservationsProvider);
   ref.invalidate(myActiveReservationsProvider);
+  ref.invalidate(myCalendarLinkProvider);
   ref.invalidate(playersProvider);
   ref.invalidate(tenantsProvider);
   ref.invalidate(myTenantStatusProvider);

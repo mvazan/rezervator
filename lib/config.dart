@@ -9,7 +9,8 @@
 ///     --dart-define=FIREBASE_PROJECT_ID=...
 ///
 /// Supabase values are required; Firebase values are optional — without them
-/// the app runs fine, just without push notifications.
+/// the app runs fine, just without push notifications. GOOGLE_CLIENT_ID is
+/// optional too — without it the Google Calendar card stays hidden.
 library;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -35,6 +36,20 @@ class AppConfig {
       ? Uri.base.origin + Uri.base.path
       : 'cz.kuzelky.rezervator://login-callback';
 
+  /// Google OAuth client ID (web client) for the calendar integration. Public
+  /// by design — the client SECRET lives only in the edge function's secrets,
+  /// and no token ever reaches the app. Empty in builds without it, which
+  /// simply hides the calendar card (see [hasGoogleCalendar]).
+  static const googleClientId = String.fromEnvironment('GOOGLE_CLIENT_ID');
+
+  static bool get hasGoogleCalendar =>
+      googleClientId.isNotEmpty && supabaseUrl.isNotEmpty;
+
+  /// Where Google sends the user back after consent: the callback edge
+  /// function. Must match Console's authorized redirect URI byte for byte.
+  static String get calendarRedirectUri =>
+      '$supabaseUrl/functions/v1/calendar-oauth-callback';
+
   /// Demo account for the Google Play review team. The app has no password
   /// login (e-mail magic link only), so a reviewer can't receive a code. When
   /// this exact e-mail is entered on the login screen, the app asks for the
@@ -50,6 +65,11 @@ class AppConfig {
   /// password path; the password itself is what actually authenticates).
   static const demoAccessCode = '126533';
 
+  /// Whether [email] is the shared Play-review account — regardless of the
+  /// build: a shared account has no calendar of "its own" to link, so the
+  /// profile screen hides the Google Calendar card for it.
+  static bool isDemoAccount(String email) =>
+      email.trim().toLowerCase() == demoEmail.toLowerCase();
   /// The Play-review alley seeded by 0012: never offered in registration
   /// (its only member is the demo account).
   static const demoTenantId = '00000000-0000-0000-0000-0000000000de';
@@ -57,8 +77,7 @@ class AppConfig {
   /// Demo login is available only when a password was baked in (release builds
   /// carrying the secret) and the entered e-mail matches the demo account.
   static bool isDemoLogin(String email) =>
-      demoPassword.isNotEmpty &&
-      email.trim().toLowerCase() == demoEmail.toLowerCase();
+      demoPassword.isNotEmpty && isDemoAccount(email);
 
   static bool get hasSupabase =>
       supabaseUrl.isNotEmpty && supabaseAnonKey.isNotEmpty;

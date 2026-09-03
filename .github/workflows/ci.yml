@@ -44,6 +44,6 @@ jobs:
           deno-version: v2.x
       - name: Edge functions type-check + tests
         run: |
-          deno check --import-map supabase/functions/import_map.json supabase/functions/notify/index.ts supabase/functions/cancel/index.ts
+          deno check --import-map supabase/functions/import_map.json supabase/functions/notify/index.ts supabase/functions/cancel/index.ts supabase/functions/calendar-oauth-callback/index.ts supabase/functions/calendar-manage/index.ts
           deno test supabase/functions
 
