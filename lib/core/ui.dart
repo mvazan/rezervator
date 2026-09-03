@@ -84,6 +84,11 @@ String friendlyDbError(Object error) {
     'blocked_by_rental': 'Dráha je v tomhle čase pronajatá.',
     'rental_exception_invalid':
         'Výjimku lze zadat jen na den pravidelného pronájmu.',
+    'player_has_history':
+        'Hráč už má rezervace — sluč ho s účtem, nebo ho nech být.',
+    'invalid_merge': 'Tyhle dva profily nejde sloučit.',
+    'placeholder_no_account': 'Hráč bez účtu nemůže být správce ani kiosk.',
+    'unknown_player': 'Tenhle hráč už neexistuje.',
     'too_late': 'Trénink už začal — rezervaci může zrušit jen správce.',
     'unknown_block': 'Tenhle blok už neplatí — mrkni na aktuální rozvrh.',
     'invalid_block': 'Tenhle blok už neplatí — mrkni na aktuální rozvrh.',

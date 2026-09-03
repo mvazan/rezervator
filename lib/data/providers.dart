@@ -619,6 +619,45 @@ class Api {
   static Future<void> setNick(String userId, String nick) =>
       _db.rpc('set_nick', params: {'p_user_id': userId, 'p_nick': nick});
 
+  // --- admin: players without an account (0022, `placeholder` rows) ---
+
+  /// Creates ([id] null) or edits a hand-made profile.
+  static Future<void> savePlaceholderPlayer({
+    String? id,
+    required String displayName,
+    String nick = '',
+    String? clubId,
+  }) =>
+      _db.rpc('save_placeholder_player', params: {
+        'p_id': id,
+        'p_display_name': displayName,
+        'p_nick': nick,
+        'p_club_id': clubId,
+      });
+
+  /// Refused by the server (`player_has_history`) once the player has any
+  /// reservation — merge them into an account instead.
+  static Future<void> deletePlaceholderPlayer(String id) =>
+      _db.rpc('delete_placeholder_player', params: {'p_id': id});
+
+  /// The person behind [placeholderId] registered as [targetId]: their
+  /// reservations move to the account, which takes the chosen fields, is
+  /// approved, and the hand-made row is deleted.
+  static Future<void> mergePlaceholderPlayer({
+    required String placeholderId,
+    required String targetId,
+    required String displayName,
+    required String nick,
+    String? clubId,
+  }) =>
+      _db.rpc('merge_placeholder_player', params: {
+        'p_placeholder_id': placeholderId,
+        'p_target_id': targetId,
+        'p_display_name': displayName,
+        'p_nick': nick,
+        'p_club_id': clubId,
+      });
+
   // --- admin: reports (see attendanceProvider) ---
   static Future<List<AttendanceRow>> monthlyAttendance(
       int year, int month) async {
