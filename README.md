@@ -31,3 +31,20 @@ nepřišel, a měsíční docházku si stáhne jako CSV.
   [`PLAY.md`](PLAY.md) — vydání na Google Play.
 - [`docs/superpowers/specs/2026-07-07-rezervator-design.md`](docs/superpowers/specs/2026-07-07-rezervator-design.md) —
   návrh appky (funkce, datový model, fáze vývoje).
+- `tool/import_matches.py` — jednorázový import zápasů z krajského sešitu
+  „Obsazenost kuželen“ (xlsx): domácí zápasy z řádku naší kuželny, venkovní
+  zápasy našich týmů z ostatních řádků. Vypíše přehled a vygeneruje SQL, které
+  běží jako správce kuželny (zrušené rezervace jako v appce; úklid před zápasem
+  nechává na správci); opakované spuštění nic neduplikuje.
+
+  ```bash
+  python3 tool/import_matches.py ~/Downloads/Obsazenost-kuzelen-2026-27.xlsx
+  python3 tool/import_matches.py ~/Downloads/Obsazenost-kuzelen-2026-27.xlsx --apply
+  ```
+
+  První příkaz jen vypíše, co by se naimportovalo, a uloží SQL do
+  `build/import_matches.sql`. Druhý zapisuje do **produkce**: nejdřív ukáže,
+  do které kuželny a pod kterým správcem se zapíše, kolik zápasů už tam je a
+  kolik živých rezervací může zrušit, a čeká na napsané „ano“ (`--yes` to
+  přeskočí, `--local` míří na lokální stack). Kuželnu vybereš `--tenant`
+  jménem nebo `--tenant-id` uuid, délku zápasu doladíš `--length "KP1 Sever=210"`.
