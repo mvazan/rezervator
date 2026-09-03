@@ -449,4 +449,12 @@ void main() {
       expect(PlayerName.fromJson(row).hasAccount, isTrue);
     });
   });
+  group('StrandableReservation', () {
+    test('fromJson carries player_id when the query selects it', () {
+      const base = {'date': '2026-07-16', 'lane': 1, 'block_id': 'b2'};
+      expect(StrandableReservation.fromJson({...base, 'player_id': 'p1'})
+          .playerId, 'p1');
+      expect(StrandableReservation.fromJson(base).playerId, isNull);
+    });
+  });
 }

@@ -58,6 +58,7 @@ class BlockDialog extends StatefulWidget {
     this.dayIsTraining = true,
     this.dayPriority = const <PrioritySlot>[],
     this.dayReason = '',
+    this.noAccountIds = const <String>{},
   });
 
   final TimeBlock? existing;
@@ -70,6 +71,10 @@ class BlockDialog extends StatefulWidget {
 
   /// Day-scoped mode: the date the edit applies to.
   final Day? dayContext;
+
+  /// Hand-made "hráči bez účtu" (0022): a move never offers to message
+  /// them, and when only they move the notify choice is skipped.
+  final Set<String> noAccountIds;
 
   /// Day-scoped mode: the day's PRE-cancellation block ids (existing
   /// override selection, or the active weekly template) — the base the new
@@ -323,7 +328,15 @@ class _BlockDialogState extends State<BlockDialog> {
         blocks: widget.blocks,
         day: _day,
         rows: rows) as DayEditDay;
-    await _saveDay(plan);
+    final notifiable = existing == null
+        ? 0
+        : rows
+            .where((r) =>
+                r.date == _day.date &&
+                r.blockId == existing.id &&
+                !widget.noAccountIds.contains(r.playerId))
+            .length;
+    await _saveDay(plan, notifiableRows: notifiable);
   }
 
   /// Global mode: a weekly block overlapping another would silently stack
@@ -367,7 +380,8 @@ class _BlockDialogState extends State<BlockDialog> {
 
   /// Day mode: the confirms in the plan's order, then the writes it
   /// prescribes.
-  Future<void> _saveDay(DayEditDay plan) async {
+  /// [notifiableRows]: how many of the moving sign-ups have an inbox.
+  Future<void> _saveDay(DayEditDay plan, {required int notifiableRows}) async {
     final date = plan.date;
     final existing = plan.existing;
 
@@ -439,14 +453,17 @@ class _BlockDialogState extends State<BlockDialog> {
     // Phase 3: the edited block's own sign-ups MOVE to the new times — the
     // admin chooses whether (and with what wording) to ping them.
     NotifyChoice? moveNotify;
-    if (plan.movingRows > 0) {
+    if (plan.movingRows > 0 && notifiableRows == 0) {
+      // Only hráči bez účtu move — nobody to message.
+      moveNotify = const NotifyChoice(notify: false);
+    } else if (notifiableRows > 0) {
       moveNotify = await showNotifyChoiceDialog(
         context,
         title: 'Upozornit na přesun?',
-        summary: plan.movingRows == 1
+        summary: notifiableRows == 1
             ? 'Hráč dostane zprávu o novém čase '
                 '${plan.start.display()}–${plan.end.display()}.'
-            : '${plan.movingRows} hráčů dostane zprávu o novém čase '
+            : '$notifiableRows hráčů dostane zprávu o novém čase '
                 '${plan.start.display()}–${plan.end.display()}.',
       );
       if (moveNotify == null || !mounted) {

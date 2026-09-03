@@ -681,7 +681,7 @@ class Api {
       Day today) async {
     final rows = await _db
         .from('reservations')
-        .select('date, lane, block_id')
+        .select('date, lane, block_id, player_id')
         .gte('date', today.toSql())
         .isFilter('cancelled_at', null);
     return (rows as List)

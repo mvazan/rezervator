@@ -164,6 +164,7 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
       rentals: rentals,
       me: me,
       canEditBlocks: canEditBlocks,
+      noAccountIds: wv.noAccountIds,
     );
 
     return Column(
