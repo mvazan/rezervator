@@ -64,14 +64,21 @@ final profilesProvider = StreamProvider<List<Profile>>((ref) {
 /// Alleys offered at registration (id + name; RLS exposes nothing more).
 /// Session-gated, not profile-gated — the register screen runs pre-profile.
 /// Pending kuželny (0014) stay out of the dropdown until approved.
+/// The alleys a newcomer may register into: approved ones minus the
+/// Play-review Demo alley, sorted by name.
+List<Tenant> registrableTenants(Iterable<Tenant> approved) => [
+      for (final t in approved)
+        if (t.id != AppConfig.demoTenantId) t,
+    ]..sort((a, b) => a.name.compareTo(b.name));
+
 final tenantsProvider = FutureProvider<List<Tenant>>((ref) async {
   if (ref.watch(_authUidProvider) == null) return const [];
   final rows = await _db
       .from('tenants')
       .select('id, name')
       .eq('status', 'approved');
-  return [for (final row in rows) Tenant.fromJson(row)]
-    ..sort((a, b) => a.name.compareTo(b.name));
+  return registrableTenants(
+      [for (final row in rows) Tenant.fromJson(row as Map<String, dynamic>)]);
 });
 
 /// The caller's own kuželna's approval status ('pending'/'approved') — the
