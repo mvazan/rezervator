@@ -196,6 +196,7 @@ void main() {
       required List<PlayerName> roster,
       List<Reservation> reservations = const [],
       List<Rental> rentals = const [],
+      Profile profile = me,
     }) {
       return ProviderScope(
         overrides: [
@@ -210,7 +211,7 @@ void main() {
           myActiveReservationsProvider.overrideWith(
             (ref) => Stream.value(reservations),
           ),
-          myProfileProvider.overrideWith((ref) => Stream.value(me)),
+          myProfileProvider.overrideWith((ref) => Stream.value(profile)),
           playersProvider.overrideWith((ref) async => roster),
         ],
         // Pin light so the expected ClubColors brightness is deterministic.
@@ -260,6 +261,33 @@ void main() {
         bgOf(tester, find.text('Já Hráč').first),
         ClubColors.of(3, Brightness.light)!.$1,
       );
+    });
+
+    testWidgets("the caller's own colour (own_color) beats the club colour "
+        'in their own view; foreign cells keep the club colour', (tester) async {
+      const mine = PlayerName(id: 'me', displayName: 'Já Hráč', clubColor: 3);
+      const other = PlayerName(id: 'p2', displayName: 'Petr Novák', clubColor: 3);
+      const coloured = Profile(
+        id: 'me',
+        displayName: 'Já Hráč',
+        email: 'me@example.com',
+        role: Role.player,
+        status: ProfileStatus.approved,
+        ownColor: 7,
+      );
+      await tester.pumpWidget(app(
+        roster: [mine, other],
+        reservations: [res('r1', 'me'), res('r2', 'p2', lane: 2)],
+        profile: coloured,
+      ));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Já Hráč').first);
+      await tester.pumpAndSettle();
+
+      expect(bgOf(tester, find.text('Já Hráč').first),
+          ClubColors.of(7, Brightness.light)!.$1);
+      expect(bgOf(tester, find.text('Petr Novák').first),
+          ClubColors.of(3, Brightness.light)!.$1);
     });
 
     testWidgets('a rental cell uses its own palette colour', (tester) async {

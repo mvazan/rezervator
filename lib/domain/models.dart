@@ -113,6 +113,7 @@ class Profile {
     this.superadmin = false,
     this.homeTenantId = '',
     this.hasAccount = true,
+    this.ownColor = -1,
   });
 
   final String id;
@@ -126,6 +127,10 @@ class Profile {
   /// DB): no auth user, never signs in; the admin books them and they pick
   /// themselves on the kiosk. Always an approved plain player.
   final bool hasAccount;
+
+  /// Palette index 0–11 the player picked for their own reservations in
+  /// their own view (0024); -1 = the club colour. Nobody else sees it.
+  final int ownColor;
 
   /// Short board name (<=14 chars); empty means "use displayName".
   final String nick;
@@ -167,6 +172,7 @@ class Profile {
         superadmin: json['superadmin'] as bool? ?? false,
         homeTenantId: json['home_tenant_id'] as String? ?? '',
         hasAccount: !(json['placeholder'] as bool? ?? false),
+        ownColor: json['own_color'] as int? ?? -1,
       );
 }
 

@@ -434,6 +434,12 @@ Widget slotTileFor({
     case ReservedSlot(:final reservation):
       final isMine = me != null && reservation.playerId == me.id;
       final name = nameById[reservation.playerId] ?? '?';
+      // The caller's own pick (Můj profil) wins over the club colour, but
+      // only in their own view: everyone else keeps seeing the club.
+      final ownColor = me?.ownColor ?? -1;
+      final tint = isMine && ownColor >= 0
+          ? ownColor
+          : clubColorById[reservation.playerId] ?? -1;
       // Pozn.: RPC dovoluje rezervovat i dnešní už začatý blok (kontroluje
       // jen p_date < today); klient ho schovává jako inPast. Kiosk může
       // chtít tuto benevolenci využít.
@@ -448,7 +454,7 @@ Widget slotTileFor({
         size: size,
         playerName: name,
         isMine: isMine,
-        clubColorIndex: clubColorById[reservation.playerId] ?? -1,
+        clubColorIndex: tint,
         onTap: cancellable
             ? () =>
                 slot.onCancel(day.date, block, reservation, ownFuture: ownFuture)
