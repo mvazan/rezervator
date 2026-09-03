@@ -47,6 +47,10 @@ and what cascades — and is updated with every migration.
 | `rentals` | `renter_name`, `lanes`, exactly one of `date` / `weekday`, `starts_at`, `ends_at`, `valid_from/until`, `note`, `color` (−2 = default tint). **Exception rows** (0021): `parent_id → rentals` (cascade delete) + `date` = the one occurrence of that weekly series they override, with their own `lanes`, `starts_at`, `ends_at`, `note`; `skipped` = the occurrence does not happen. One per (`parent_id`, `date`). `renter_name`/`color` are copied from the series by `rental_exception_guard`, which also rejects an off-series date, a one-time or child parent and a foreign tenant (`rental_exception_invalid`); `rental_series_changed` prunes children a series edit orphans and re-copies name/colour. | select approved/kiosk; write admin. |
 | `reservations` | `player_id`, `date`, `block_id`, `lane`, `created_via` app\|kiosk\|admin, `cancelled_at/via` app\|one_click\|admin, `cancel_note`, `notify_player`, `notify_message` (per-change intent for the notify function) | **select only** (approved/kiosk). Every write is an RPC, a trigger, or the `cancel` edge function. Live slots are unique: `(date, block_id, lane) where cancelled_at is null`. |
 | `clubs` | `name` unique per tenant, `color` 0–11 (−1 = none) | select approved/kiosk; all admin. |
+| `notification_jobs` | Deferred-job queue (0023): `kind` (only `calendar_sync` so far), `dedupe_key` unique (`calendar:<user_id>:<reservation_id>` — a repeat re-arms `run_at` instead of adding a row), `payload` jsonb, `run_at`, `attempts` (the handler backs off 2^attempts minutes and drops the job at 5), `created_at`. Index on `run_at`. | **server-only**: RLS on, no policy; `service_role` all, `anon`/`authenticated` nothing. Written by the security-definer producers (§Google kalendář) and `backfill_calendar_jobs`, consumed by the notify function on the cron tick. |
+| `google_calendar_links` | One row per *person* (not per tenant; `user_id → profiles`, cascade): `status` pending \| linked \| broken \| unlinked, `google_email`, `last_error`, `reminder_minutes int[]` (Calendar API shape — ≤ 5 entries, each 0–40320, CHECK-enforced, stored sorted descending), `created_at`, `updated_at`. Holds no secret: it is in the Realtime publication and the profile card streams it. | select own row only (`user_id = auth.uid()`); `authenticated` has SELECT and nothing else — every write is the server's (`service_role`). |
+| `google_calendar_tokens` | `user_id → profiles` (cascade), `refresh_token`, `google_calendar_id` (the app-created "Rezervátor" calendar), `updated_at`. A separate table on purpose: a streamed table must never carry the token. | **server-only**: RLS on, zero policies; `service_role` only. |
+| `oauth_nonces` | The OAuth `state`: `nonce` (48 hex chars from `gen_random_bytes(24)`), `user_id → profiles` (cascade), `created_at`, `consumed_at`. One-shot with a 10-minute TTL — the callback function runs without a JWT, so this is what binds Google's redirect to a signed-in player. | **server-only** like the tokens. |
 
 View `players` (owned by postgres → bypasses `profiles` RLS on purpose):
 approved, non-kiosk members of the caller's tenant minus visiting
@@ -64,8 +68,11 @@ and `tenants(id, name, status)`. `anon` has nothing. `service_role`
 0020) so new tables get exactly that shape on hosted and local stacks —
 note that a `drop … create` of a view re-applies the defaults, so a
 recreated read-only view must revoke again (that is what 0020 fixes for
-`players`). Internal helper functions have EXECUTE revoked from the app
-roles (see below).
+`players`). The 0023 calendar tables opt out of those defaults explicitly:
+`notification_jobs`, `google_calendar_tokens` and `oauth_nonces` revoke
+everything from `anon`/`authenticated` (RLS on, no policy — server-only),
+`google_calendar_links` keeps SELECT only. Internal helper functions have
+EXECUTE revoked from the app roles (see below).
 
 ## RPCs
 
@@ -84,12 +91,18 @@ roles (see below).
 | `set_day_override(date, closed, reason?, block_ids?)` | admin | Upsert the override and cancel the reservations it displaces. |
 | `monthly_attendance(year, month)` | admin | Rows (player, club name, attended) — uncancelled reservation = attendance. |
 | `admin_list_tenants()`, `approve_tenant(id)`, `reject_tenant(id)`, `switch_tenant(id)` | superadmin (`not_allowed` otherwise) | `reject_tenant`: pending only (`not_pending`), refuses while the caller is switched into it (`switch_home_first`), deletes the whole tenant. |
+| `start_calendar_link()` | approved member, not the kiosk (`not_allowed`) | Issues the OAuth `state` nonce (48 hex) and returns it; the caller's earlier unconsumed nonce is replaced. The app opens Google's consent URL with it. |
+| `consume_calendar_nonce(nonce)` | service_role only (calendar-oauth-callback) | One shot: returns the bound `user_id` for an unconsumed nonce younger than 10 minutes and stamps `consumed_at`; null otherwise. |
+| `backfill_calendar_jobs(user)` | service_role only (callback, right after `status = 'linked'`) | One `calendar_sync` job per live reservation of the player from Prague-today on, due now (a pending job is re-armed); returns the count. |
+| `set_calendar_reminders_for(user, minutes int[])` | service_role only (calendar-manage) | Normalises (distinct, sorted descending, nulls dropped), stores on the links row and returns the stored array. `bad_reminders` (more than 5, or any outside 0–40320), `unknown_link` (no links row). |
+| `my_future_reservations(user)` | service_role only (callback, calendar-manage) | `(reservation_id, date, starts_at, ends_at, lane, alley_name)` for the player's live reservations from Prague-today on — block times, tenant name — ordered by date, starts_at. The raw material of the calendar events. |
 
 Internal, no EXECUTE for app roles: `current_tenant_id`, `is_*`,
 `block_day_status`, `cancel_stranded_reservations`, `rental_occurs`,
 `rental_occurrences`, `cancel_res_for_priority_slot`,
-`notify_webhook_config`, `seed_demo_member` (service_role only —
-Play-review demo account).
+`enqueue_notification`, `enqueue_calendar_sync`,
+`trigger_notification_jobs` (called by cron), `notify_webhook_config`,
+`seed_demo_member` (service_role only — Play-review demo account).
 
 `block_day_status(tenant, date, block)` → `open` | `day_closed` |
 `invalid_block` | `unknown_block` is the one definition of "this block is
@@ -125,7 +138,54 @@ new tenant), `match_uklid_sync` (keeps a match's úklid child in step with
 `prep_minutes`), `rental_exception_guard` (before insert/update of a rental
 exception: validation + name/colour copy), `rental_series_changed` (after
 update of a weekly rental: prune orphaned exceptions, propagate name/colour), `notify_profiles` / `notify_reservations` /
-`notify_tenants` (`notify_webhook` → the notify function).
+`notify_tenants` (`notify_webhook` → the notify function),
+`reservations_enqueue_calendar` / `time_blocks_enqueue_calendar` (the
+calendar job producers, next section).
+
+## Google kalendář — jobs, triggers, cron (0023)
+
+A player links their Google account once (`start_calendar_link` →
+Google consent → the calendar-oauth-callback function consumes the nonce,
+stores the refresh token in `google_calendar_tokens`, creates the
+app-owned calendar "Rezervátor" and flips `google_calendar_links.status`
+to `linked`, then `backfill_calendar_jobs`). From then on every live
+reservation of theirs is one event, id `sha256("<user_id>:<reservation_id>")`
+→ base32hex[0..32], so a job never needs to remember whether the event
+exists.
+
+Changes made by someone else (an admin move or cancel, a cascade, a
+re-timed block) reach Google through `notification_jobs`:
+
+- **Producers.** Trigger `reservations_enqueue_calendar` (AFTER INSERT OR
+  UPDATE ON `reservations`) calls `enqueue_calendar_sync(new.player_id,
+  new.id)` — and, when the row changed hands (the 0022 merge re-points
+  `player_id`), for `old.player_id` too, so the previous owner's event
+  goes. Trigger `time_blocks_enqueue_calendar` (AFTER UPDATE OF
+  `starts_at`, `ends_at` ON `time_blocks`, only when the times actually
+  changed) enqueues every live future reservation on the block — the one
+  change that re-times reservations without touching their rows.
+  `enqueue_calendar_sync` is the single gate: it enqueues only when the
+  player's link is `linked`.
+- **Debounce.** `enqueue_notification(kind, dedupe_key, payload, delay =
+  3 min)` upserts on `dedupe_key` (`calendar:<user_id>:<reservation_id>`):
+  a repeat re-arms `run_at` and refreshes the payload. Book, move and
+  cancel share the key — the handler RECONCILES (re-reads the reservation
+  and upserts or deletes the event), so a book-then-cancel inside the
+  window collapses into one job that does the right thing.
+- **Tick.** `cron.job` `notification-jobs` (`* * * * *`) runs
+  `trigger_notification_jobs()`: nothing due → nothing sent; otherwise one
+  `net.http_post` to the Vault `notify_url` with `x-webhook-secret` and
+  body `{"type":"CRON","table":"notification_jobs","record":null,
+  "old_record":null}`. Without the Vault secrets it warns and the jobs
+  wait (the local stack). The notify function's `processJobs` takes ≤ 100
+  due jobs, deletes a job on success, on failure sets `attempts + 1`,
+  `run_at = now() + 2^attempts minutes`, and drops it after 5 attempts;
+  a revoked token or a deleted calendar marks the link `broken` and
+  notifies the player.
+- **Not jobs.** Link, disconnect and reminders are user requests and run
+  synchronously in the edge functions (`consume_calendar_nonce`,
+  `backfill_calendar_jobs`, `set_calendar_reminders_for`,
+  `my_future_reservations` are their service-role RPCs).
 
 ## Edge functions
 
@@ -141,7 +201,19 @@ update of a weekly rental: prune orphaned exceptions, propagate name/colour), `n
   insert (pending) → superadmins. Channel: FCM push when the profile has an
   `fcm_token` and `FIREBASE_SERVICE_ACCOUNT` is set, otherwise Resend
   e-mail. Fails closed on a missing `WEBHOOK_SECRET` (401) or
-  `CANCEL_TOKEN_SECRET` (500).
+  `CANCEL_TOKEN_SECRET` (500). Since 0023 it also takes the cron tick
+  (`type = "CRON"`, `table = "notification_jobs"`) and works the due jobs
+  (§Google kalendář).
+- **calendar-oauth-callback** — Google's redirect target (no JWT; the
+  trust is the nonce): `consume_calendar_nonce`, code exchange, writes
+  `google_calendar_tokens` + `google_calendar_links` with the service
+  role, creates or reuses the "Rezervátor" calendar, `backfill_calendar_jobs`
+  + a synchronous first write of `my_future_reservations`, then redirects
+  to the landing page.
+- **calendar-manage** — JWT-verified user actions: `disconnect` (deletes
+  the Google calendar, revokes the token, forgets the token row, sets
+  `status = 'unlinked'`) and `reminders` (`set_calendar_reminders_for`,
+  then rewrites the events of `my_future_reservations`).
 - **cancel** — GET renders the confirmation page, POST verifies the token
   and updates `reservations` directly with the service role
   (`cancelled_via = 'one_click'`). This is the one reservation write outside
@@ -152,7 +224,12 @@ update of a weekly rental: prune orphaned exceptions, propagate name/colour), `n
 - Prod additionally has Supabase's platform function `rls_auto_enable`
   (event-trigger helper) — not ours, not in migrations.
 - Vault secrets `notify_url` and `webhook_secret` are per-backend
-  configuration, never in migrations.
+  configuration, never in migrations; the 0023 cron tick reads the same
+  two entries through `notify_webhook_config()`.
+- `pg_cron` is enabled by 0023 (`create extension if not exists`); the
+  `cron` schema and the job row `notification-jobs` live outside `public`,
+  so they are not in `supabase/schema.sql` — check with
+  `select jobname from cron.job`.
 - Hosted default privileges grant `anon`/`authenticated` on every new
   object; 0017 pins explicit defaults so a git-built database matches.
 
@@ -162,5 +239,9 @@ update of a weekly rental: prune orphaned exceptions, propagate name/colour), `n
   migration (local stack only).
 - `supabase/tests/tenancy_rls.sql` — cross-tenant isolation, superadmin
   visiting, the 0018 cascade, the 0021 rental exceptions, the
-  `reject_tenant` guard and the 0022 placeholder lifecycle; run with
-  `psql … -v ON_ERROR_STOP=1 -f` against the local stack (CI does).
+  `reject_tenant` guard, the 0022 placeholder lifecycle and the 0023
+  calendar plumbing (nonce lifecycle, server-only privileges, the job
+  producers and their dedupe, backfill, reminders,
+  `my_future_reservations`, the dispatcher without Vault, the cron row);
+  run with `psql … -v ON_ERROR_STOP=1 -f` against the local stack (CI
+  does).
