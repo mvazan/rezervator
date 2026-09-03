@@ -35,8 +35,13 @@ Temporary tool for the 2026/27 workbook — the federation format changes
 later and the import will then be built into the app.
 
     python3 tool/import_matches.py ~/Downloads/Obsazenost-kuzelen-2026-27.xlsx
-    python3 tool/import_matches.py ... --apply          # runs it on prod
+    python3 tool/import_matches.py ... --apply          # writes to PROD
     python3 tool/import_matches.py ... --apply --local  # on the local stack
+
+A prod run first prints a read-only preflight (which alley and admin the
+import resolves to, how many matches are already imported, how many live
+reservations could be cancelled) and asks for confirmation; --yes skips the
+question for an unattended run.
 """
 import argparse
 import datetime as dt
@@ -284,7 +289,45 @@ def sql_str(s: str) -> str:
     return "'" + s.replace("'", "''") + "'"
 
 
-def build_sql(matches: List[Match], tenant: str, prep: int, source: str) -> str:
+def tenant_lookup(tenant: str, tenant_id: Optional[str]) -> Tuple[str, str]:
+    """(SQL selecting the alley's id, human label) — by id when given (the
+    alley can be renamed), else by exact name."""
+    if tenant_id:
+        return ("(select id::text from tenants where id = %s)" % sql_str(tenant_id),
+                'kuželna id %s' % tenant_id)
+    return ("(select id::text from tenants where name = %s)" % sql_str(tenant),
+            'kuželna „%s“' % tenant)
+
+
+def preflight_sql(tenant: str, tenant_id: Optional[str],
+                  import_keys: List[str]) -> str:
+    """Read-only: what the import would write into, and what it may disturb."""
+    lookup, _ = tenant_lookup(tenant, tenant_id)
+    keys = ', '.join(sql_str(k) for k in import_keys)
+    return '\n'.join([
+        "with t as (select %s::uuid as id)" % lookup,
+        "select",
+        "  coalesce((select name from tenants where id = (select id from t)),",
+        "           '!! NENALEZENO !!') as kuzelna,",
+        "  coalesce((select display_name from profiles"
+        "     where tenant_id = (select id from t) and role = 'admin'"
+        "       and status = 'approved' and not placeholder"
+        "     order by created_at limit 1), '!! ŽÁDNÝ SPRÁVCE !!') as zapise_jako,",
+        "  (select count(*) from priority_slot_types"
+        "     where tenant_id = (select id from t) and is_match and builtin)"
+        "     as typ_zapas,",
+        "  (select count(*) from priority_slots"
+        "     where tenant_id = (select id from t) and import_key in (%s))" % keys,
+        "     as jiz_naimportovano,",
+        "  (select count(*) from reservations r"
+        "     where r.tenant_id = (select id from t) and r.cancelled_at is null"
+        "       and r.date >= current_date) as zive_rezervace;",
+        '',
+    ])
+
+
+def build_sql(matches: List[Match], tenant: str, tenant_id: Optional[str],
+              prep: int, source: str) -> str:
     values = []
     for m in matches:
         end, clamped = add_minutes(m.time, m.duration)
@@ -300,11 +343,13 @@ def build_sql(matches: List[Match], tenant: str, prep: int, source: str) -> str:
         "-- Runs as the alley's admin (RLS and cancelled reservations as in the app).",
         '-- Safe to re-run: rows are keyed by import_key and never inserted twice.',
         'begin;',
-        "select set_config('import.tenant', coalesce((select id::text from tenants where name = %s), ''), true);" % sql_str(tenant),
+        "select set_config('import.tenant', coalesce(%s, ''), true);"
+        % tenant_lookup(tenant, tenant_id)[0],
         "select set_config('import.admin', coalesce((select id::text from profiles where tenant_id = nullif(current_setting('import.tenant'), '')::uuid and role = 'admin' and status = 'approved' and not placeholder order by created_at limit 1), ''), true);",
         "select set_config('import.type', coalesce((select id::text from priority_slot_types where tenant_id = nullif(current_setting('import.tenant'), '')::uuid and is_match and builtin), ''), true);",
         'do $$ begin',
-        "  if current_setting('import.tenant') = '' then raise exception 'tenant %s not found', %s; end if;" % ('%', sql_str(tenant)),
+        "  if current_setting('import.tenant') = '' then raise exception 'kuželna %s nenalezena', %s; end if;"
+        % ('%', sql_str(tenant_lookup(tenant, tenant_id)[1])),
         "  if current_setting('import.admin') = '' then raise exception 'no approved admin in the tenant'; end if;",
         "  if current_setting('import.type') = '' then raise exception 'builtin match type missing'; end if;",
         'end $$;',
@@ -330,6 +375,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     ap.add_argument('workbook')
     ap.add_argument('--tenant', default='TJ Sokol Brno IV', help='tenants.name in the database')
+    ap.add_argument('--tenant-id', help="the alley's uuid — beats --tenant (a renamed alley still matches)")
     ap.add_argument('--alley', default='Brno IV Sokol', help="our alley's row label in the sheet")
     ap.add_argument('--teams', nargs='+', default=['Husovice', 'Veverky', 'Devítka', 'Brno IV'],
                     help='substrings identifying our teams')
@@ -343,7 +389,8 @@ def main() -> int:
     ap.add_argument('--prep', type=int, default=0,
                     help='úklid před zápasem in minutes for home matches (default 0: the admin adds it in the app)')
     ap.add_argument('--out', default='build/import_matches.sql')
-    ap.add_argument('--apply', action='store_true', help='run the SQL via `supabase db query`')
+    ap.add_argument('--apply', action='store_true', help='run the SQL — against PROD unless --local')
+    ap.add_argument('--yes', action='store_true', help='with --apply: skip the confirmation question')
     ap.add_argument('--local', action='store_true', help='with --apply: the local stack (psql) instead of prod')
     args = ap.parse_args()
 
@@ -424,20 +471,57 @@ def main() -> int:
         for w in warnings:
             print('  ' + w)
 
-    sql = build_sql(matches, args.tenant, args.prep, args.workbook.split('/')[-1])
+    sql = build_sql(matches, args.tenant, args.tenant_id, args.prep,
+                    args.workbook.split('/')[-1])
     import os
     os.makedirs(os.path.dirname(args.out) or '.', exist_ok=True)
     with open(args.out, 'w', encoding='utf-8') as f:
         f.write(sql)
     print('\nSQL written to %s' % args.out)
     if not args.apply:
-        print('apply with:  supabase db query --linked -f %s' % args.out)
-        print('   locally:  psql %s -X -v ON_ERROR_STOP=1 -f %s' % (LOCAL_DB_URL, args.out))
+        print('do PRODUKCE:  python3 %s <sešit> --apply' % sys.argv[0])
+        print('   nebo SQL:  supabase db query --linked -f %s' % args.out)
+        print('   lokálně:  psql %s -X -v ON_ERROR_STOP=1 -f %s' % (LOCAL_DB_URL, args.out))
         return 0
-    # The CLI's --local path sends the file as one prepared statement and
-    # rejects a multi-statement transaction; psql handles it.
-    cmd = (['psql', LOCAL_DB_URL, '-X', '-v', 'ON_ERROR_STOP=1', '-f', args.out] if args.local
-           else ['supabase', 'db', 'query', '--linked', '-f', args.out])
+
+    if args.local:
+        # The CLI's --local path sends the file as one prepared statement and
+        # rejects a multi-statement transaction; psql handles it.
+        cmd = ['psql', LOCAL_DB_URL, '-X', '-v', 'ON_ERROR_STOP=1', '-f', args.out]
+        print('running: ' + ' '.join(cmd))
+        return subprocess.call(cmd)
+
+    # PROD. Say out loud what the import resolves to before writing: a wrong
+    # alley name or a missing admin would otherwise only show up as an
+    # exception mid-transaction, and cancelled reservations mail players.
+    import os
+    import tempfile
+    keys = [m.import_key for m in matches]
+    with tempfile.NamedTemporaryFile('w', suffix='.sql', delete=False,
+                                     encoding='utf-8') as f:
+        f.write(preflight_sql(args.tenant, args.tenant_id, keys))
+        probe = f.name
+    try:
+        print('\nPRODUKCE — kontrola cíle:')
+        rc = subprocess.call(['supabase', 'db', 'query', '--linked', '-f', probe])
+    finally:
+        os.unlink(probe)
+    if rc != 0:
+        print('kontrola cíle selhala — nic se nezapisovalo', file=sys.stderr)
+        return rc
+    print('\nZapíše se %d zápasů (%d doma, %d venku). Domácí zápasy ruší '
+          'kolidující rezervace a hráčům odejde upozornění.'
+          % (len(matches), sum(1 for m in matches if not m.is_away),
+             sum(1 for m in matches if m.is_away)))
+    if not args.yes:
+        try:
+            answer = input('Napiš "ano" pro zápis do produkce: ').strip().lower()
+        except EOFError:
+            answer = ''
+        if answer != 'ano':
+            print('nic se nezapisovalo')
+            return 1
+    cmd = ['supabase', 'db', 'query', '--linked', '-f', args.out]
     print('running: ' + ' '.join(cmd))
     return subprocess.call(cmd)
 
