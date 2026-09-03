@@ -9,6 +9,8 @@ import 'package:rezervator/domain/palette.dart';
 import 'package:rezervator/features/kiosk/kiosk_board_view.dart';
 import 'package:rezervator/features/kiosk/kiosk_shell.dart';
 import 'package:rezervator/features/schedule/week_screen.dart';
+import 'package:rezervator/domain/schedule.dart';
+import 'package:rezervator/features/schedule/widgets/slot_tile.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Task 4 — club colours render on the kiosk board and the app grid, and the
@@ -240,6 +242,26 @@ void main() {
       );
     });
 
+    testWidgets("the caller's own reservation cell is tinted by their club "
+        'colour too — never the neutral primary tint', (tester) async {
+      const mine = PlayerName(
+        id: 'me',
+        displayName: 'Já Hráč',
+        clubColor: 3, // the club's palette colour
+      );
+      await tester.pumpWidget(
+        app(roster: [mine], reservations: [res('r1', 'me')]),
+      );
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Já Hráč').first);
+      await tester.pumpAndSettle();
+
+      expect(
+        bgOf(tester, find.text('Já Hráč').first),
+        ClubColors.of(3, Brightness.light)!.$1,
+      );
+    });
+
     testWidgets('a rental cell uses its own palette colour', (tester) async {
       final rental = Rental(
         id: 'rent1',
@@ -263,6 +285,56 @@ void main() {
         bgOf(tester, find.text('Firma s.r.o.').first),
         ClubColors.of(3, Brightness.light)!.$1,
       );
+    });
+  });
+  group('SlotTile own-reservation tint', () {
+    final reservation = Reservation(
+      id: 'r1',
+      playerId: 'me',
+      date: Day(2026, 7, 7),
+      blockId: 'b1',
+      lane: 1,
+      createdVia: 'app',
+      createdAt: DateTime.utc(2026, 1, 1),
+    );
+    final state =
+        ReservedSlot(reservation, inPast: false, beyondHorizon: false);
+
+    Widget tile(SlotTileSize size, {required bool isMine, int club = 5}) =>
+        MaterialApp(
+          theme: buildTheme(Brightness.light),
+          home: Scaffold(
+            body: Center(
+              child: SizedBox(
+                width: 160,
+                child: SlotTile(
+                  state: state,
+                  size: size,
+                  playerName: 'Já Hráč',
+                  isMine: isMine,
+                  clubColorIndex: club,
+                  laneDigit: 1,
+                ),
+              ),
+            ),
+          ),
+        );
+
+    for (final size in SlotTileSize.values) {
+      testWidgets('$size: mine with a club paints the club colour',
+          (tester) async {
+        await tester.pumpWidget(tile(size, isMine: true));
+        await tester.pumpAndSettle();
+        expect(bgOf(tester, find.text('Já Hráč')),
+            ClubColors.of(5, Brightness.light)!.$1);
+      });
+    }
+
+    testWidgets('mine without a club keeps the primary tint', (tester) async {
+      await tester.pumpWidget(tile(SlotTileSize.compact, isMine: true, club: -1));
+      await tester.pumpAndSettle();
+      final scheme = Theme.of(tester.element(find.text('Já Hráč'))).colorScheme;
+      expect(bgOf(tester, find.text('Já Hráč')), scheme.primaryContainer);
     });
   });
 }
