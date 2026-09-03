@@ -60,19 +60,20 @@ void main() {
       attended: attended,
     );
 
-    test('club sections by attended total desc, Bez oddílu last, row order '
-        'kept within a section', () {
+    test('club sections alphabetically (Czech order), Bez oddílu last, '
+        'players alphabetically within a section', () {
       final sections = attendanceByClub([
-        row('Adam', 'Veverky', 3),
-        row('Blanka', 'Sokol', 5),
-        row('Cyril', 'Veverky', 4), // Veverky total 7 > Sokol 6
+        row('Cyril', 'Veverky', 4),
+        row('Blanka', 'Šohaj', 5),
+        row('Adam', 'Veverky', 3), // Veverky total 7 — totals do not order
         row('Dana', '', 9), // unaffiliated: always last despite 9
         row('Eva', 'Sokol', 1),
+        row('Čeněk', 'Sokol', 6),
       ]);
 
       expect(
         [for (final (header, _) in sections) header],
-        ['Veverky', 'Sokol', 'Bez oddílu'],
+        ['Sokol', 'Šohaj', 'Veverky', 'Bez oddílu'],
       );
       expect(
         [
@@ -80,8 +81,9 @@ void main() {
             [for (final r in members) r.displayName],
         ],
         [
+          ['Čeněk', 'Eva'],
+          ['Blanka'],
           ['Adam', 'Cyril'],
-          ['Blanka', 'Eva'],
           ['Dana'],
         ],
       );

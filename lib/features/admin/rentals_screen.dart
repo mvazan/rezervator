@@ -3,21 +3,32 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/ui.dart';
 import '../../data/providers.dart';
+import '../../domain/collation.dart';
 import '../../domain/labels.dart' show rentalExceptionCountLabel;
 import '../../domain/models.dart';
 import 'widgets/admin_scaffold.dart';
 import 'widgets/rental_dialog.dart';
 import 'widgets/rental_exceptions_dialog.dart';
 
-/// One-time rentals first (sorted by date, ascending), then weekly rentals
-/// (sorted by weekday, Monday..Sunday). Exception rows never get here.
+/// One-time rentals first (by date), then weekly rentals (by weekday,
+/// Monday..Sunday); same day → by start time, then renter name. Exception
+/// rows never get here.
 int _compareRentals(Rental a, Rental b) {
   final aDate = a.date;
   final bDate = b.date;
-  if (aDate != null && bDate != null) return aDate.compareTo(bDate);
-  if (aDate != null) return -1;
-  if (bDate != null) return 1;
-  return a.weekday!.compareTo(b.weekday!);
+  if (aDate != null && bDate != null) {
+    final byDate = aDate.compareTo(bDate);
+    if (byDate != 0) return byDate;
+  } else if (aDate != null) {
+    return -1;
+  } else if (bDate != null) {
+    return 1;
+  } else {
+    final byWeekday = a.weekday!.compareTo(b.weekday!);
+    if (byWeekday != 0) return byWeekday;
+  }
+  final byStart = a.startsAt.compareTo(b.startsAt);
+  return byStart != 0 ? byStart : compareCzech(a.renterName, b.renterName);
 }
 
 /// Admin: manage lane rentals (one-time or weekly-recurring) that block

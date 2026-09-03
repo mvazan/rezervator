@@ -11,6 +11,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'cache.dart';
 
 import '../config.dart';
+import '../domain/collation.dart';
 import '../domain/models.dart';
 
 SupabaseClient get _db => Supabase.instance.client;
@@ -57,7 +58,7 @@ final profilesProvider = StreamProvider<List<Profile>>((ref) {
           () => _db.from('profiles').stream(primaryKey: ['id']))
       .map(
       (rows) => rows.map(Profile.fromJson).toList()
-        ..sort((a, b) => a.displayName.compareTo(b.displayName)));
+        ..sort((a, b) => compareCzech(a.displayName, b.displayName)));
 });
 
 /// Alley configuration singleton (null until the backend is seeded).
@@ -69,7 +70,7 @@ final profilesProvider = StreamProvider<List<Profile>>((ref) {
 List<Tenant> registrableTenants(Iterable<Tenant> approved) => [
       for (final t in approved)
         if (t.id != AppConfig.demoTenantId) t,
-    ]..sort((a, b) => a.name.compareTo(b.name));
+    ]..sort((a, b) => compareCzech(a.name, b.name));
 
 final tenantsProvider = FutureProvider<List<Tenant>>((ref) async {
   if (ref.watch(_authUidProvider) == null) return const [];
@@ -161,7 +162,7 @@ final clubsProvider = StreamProvider<List<Club>>((ref) {
           uid, 'clubs', () => _db.from('clubs').stream(primaryKey: ['id']))
       .map((rows) =>
       rows.map(Club.fromJson).toList()
-        ..sort((a, b) => a.name.compareTo(b.name)));
+        ..sort((a, b) => compareCzech(a.name, b.name)));
 });
 
 final timeBlocksProvider = StreamProvider<List<TimeBlock>>((ref) {
@@ -217,12 +218,12 @@ final playersProvider = FutureProvider<List<PlayerName>>((ref) async {
     final cached = await RowCache.read(uid, 'players');
     if (cached == null) rethrow;
     return [for (final row in cached) PlayerName.fromJson(row)]
-      ..sort((a, b) => a.displayName.compareTo(b.displayName));
+      ..sort((a, b) => compareCzech(a.displayName, b.displayName));
   }
   return rows
       .map((r) => PlayerName.fromJson(r as Map<String, dynamic>))
       .toList()
-    ..sort((a, b) => a.displayName.compareTo(b.displayName));
+    ..sort((a, b) => compareCzech(a.displayName, b.displayName));
 });
 
 /// Whether this build carries a Google client ID (see AppConfig). A provider
@@ -824,7 +825,8 @@ final slotTypesProvider = StreamProvider<List<PrioritySlotType>>((ref) {
   return cachedRows(uid, 'slot_types',
           () => _db.from('priority_slot_types').stream(primaryKey: ['id']))
       .map(
-      (rows) => rows.map(PrioritySlotType.fromJson).toList());
+      (rows) => rows.map(PrioritySlotType.fromJson).toList()
+        ..sort((a, b) => compareCzech(a.name, b.name)));
 });
 
 /// Raw priority_slots rows joined with the types stream into resolved

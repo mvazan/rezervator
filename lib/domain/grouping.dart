@@ -2,6 +2,7 @@
 /// runs. Pure Dart — no Flutter imports.
 library;
 
+import 'collation.dart';
 import 'models.dart';
 
 /// Clubs by name, members name-sorted within, (null, …) = "Bez oddílu" last
@@ -12,7 +13,7 @@ List<(String? clubName, List<Profile> members)> playersByClub(
   List<Profile> approved,
   List<Club> clubs,
 ) {
-  final sortedClubs = [...clubs]..sort((a, b) => a.name.compareTo(b.name));
+  final sortedClubs = [...clubs]..sort((a, b) => compareCzech(a.name, b.name));
   List<Profile> membersOf(String? clubId) =>
       approved
           .where(
@@ -21,7 +22,7 @@ List<(String? clubName, List<Profile> members)> playersByClub(
                 : p.clubId == clubId,
           )
           .toList()
-        ..sort((a, b) => a.displayName.compareTo(b.displayName));
+        ..sort((a, b) => compareCzech(a.displayName, b.displayName));
   return [
     for (final club in sortedClubs)
       if (membersOf(club.id) case final members when members.isNotEmpty)
@@ -31,9 +32,9 @@ List<(String? clubName, List<Profile> members)> playersByClub(
   ];
 }
 
-/// Club sections by attended total desc, 'Bez oddílu' last (moved verbatim
-/// from report_screen.byClub). Rows keep the RPC's order within a section
-/// (attended desc, then name).
+/// Club sections alphabetically, 'Bez oddílu' last; players alphabetically
+/// within a section (the count column carries the ranking, the list stays
+/// findable by name like every other list in the app).
 List<(String header, List<AttendanceRow> members)> attendanceByClub(
   List<AttendanceRow> rows,
 ) {
@@ -41,12 +42,13 @@ List<(String header, List<AttendanceRow> members)> attendanceByClub(
   for (final r in rows) {
     groups.putIfAbsent(r.club, () => []).add(r);
   }
-  int total(List<AttendanceRow> members) =>
-      members.fold(0, (sum, r) => sum + r.attended);
+  for (final members in groups.values) {
+    members.sort((a, b) => compareCzech(a.displayName, b.displayName));
+  }
   final named = [
     for (final entry in groups.entries)
       if (entry.key.isNotEmpty) entry,
-  ]..sort((a, b) => total(b.value).compareTo(total(a.value)));
+  ]..sort((a, b) => compareCzech(a.key, b.key));
   return [
     for (final entry in named) (entry.key, entry.value),
     if (groups[''] case final unaffiliated?) ('Bez oddílu', unaffiliated),

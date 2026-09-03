@@ -9,9 +9,11 @@ void main() {
     const demo = Tenant(id: AppConfig.demoTenantId, name: 'Demo');
     const vracov = Tenant(id: 't2', name: 'Kuželna Vracov');
     const first = Tenant(id: 't1', name: 'Kuželna č. 1');
-    // Plain code-point order, as the picker always had ('č' sorts after 'V').
-    expect(registrableTenants([vracov, demo, first]).map((t) => t.id),
-        ['t2', 't1']);
+    const sanov = Tenant(id: 't3', name: 'Šanov');
+    const zlin = Tenant(id: 't4', name: 'Zlín');
+    // Czech alphabetical order: 'č' sorts with 'c', 'Š' with 'S'.
+    expect(registrableTenants([zlin, vracov, demo, sanov, first]).map((t) => t.id),
+        ['t1', 't2', 't3', 't4']);
   });
 
   test('registrableTenants leaves a lone real alley alone — the register '

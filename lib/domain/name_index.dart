@@ -3,6 +3,7 @@
 /// Pure Dart, unit-tested.
 library;
 
+import 'collation.dart';
 import 'models.dart';
 
 String _fold(String value) => value.trim().toUpperCase();
@@ -37,7 +38,7 @@ NameIndexNode nameIndex({
   final candidates = players
       .where((p) => _fold(p.displayName).startsWith(folded))
       .toList()
-    ..sort((a, b) => _fold(a.displayName).compareTo(_fold(b.displayName)));
+    ..sort((a, b) => compareCzech(a.displayName, b.displayName));
   if (candidates.length <= capacity) {
     return NamesNode(candidates);
   }
@@ -51,6 +52,6 @@ NameIndexNode nameIndex({
       prefixes.add(name.substring(0, folded.length + 1));
     }
   }
-  final sorted = prefixes.toList()..sort();
+  final sorted = prefixes.toList()..sort(compareCzech);
   return PrefixesNode(sorted, exactMatches);
 }
