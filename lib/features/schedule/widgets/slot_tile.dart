@@ -113,8 +113,11 @@ class SlotTile extends StatelessWidget {
         final (bg, fg) = clubTint(rental.color, scheme.brightness,
             fallbackBg: scheme.tertiaryContainer.withValues(alpha: 0.7),
             fallbackFg: scheme.onTertiaryContainer);
+        // Admins tap a rented cell to edit that day's rental (resolved by
+        // slotTileFor); everyone else gets null and an inert cell.
         return _shell(
           minHeight: minHeight,
+          onTap: onTap,
           decoration: BoxDecoration(
             color: bg,
             borderRadius: BorderRadius.circular(_compact ? 8 : 12),
@@ -378,7 +381,8 @@ class SlotTile extends StatelessWidget {
 }
 
 /// Resolves the same booking/cancel policy the original inline `_SlotCell`
-/// computed (canBook/canCancel, admin exemptions, name lookup) into the slim
+/// computed (canBook/canCancel, admin exemptions, name lookup) — plus the
+/// admin's rental tap ([SlotCallbacks.onRental]) — into the slim
 /// [SlotTile] contract: a display name, isMine/quiet flags, and a single
 /// resolved tap handler (or null to render the cell inert). Shared by the
 /// week calendar view (compact tiles) and the day pager view (large tiles) so
@@ -399,8 +403,20 @@ Widget slotTileFor({
   final state = day.slot(block.id, lane);
   switch (state) {
     case PrioritySlotState():
-    case RentedSlot():
       return SlotTile(state: state, size: size);
+    case RentedSlot(:final rental):
+      // Admins tap a rented cell to edit that day's rental (a weekly one
+      // opens its "jen tento den" exception dialog); for everyone else the
+      // cell stays inert. Copied to a local first — a nullable field never
+      // promotes on the null check.
+      final onRental = slot.onRental;
+      return SlotTile(
+        state: state,
+        size: size,
+        onTap: interactive && onRental != null
+            ? () => onRental(day.date, rental)
+            : null,
+      );
     case ReservedSlot(:final reservation):
       final isMine = me != null && reservation.playerId == me.id;
       final name = nameById[reservation.playerId] ?? '?';

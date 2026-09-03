@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:rezervator/core/ui.dart' show today;
+import 'package:rezervator/core/ui.dart' show dayFull, today;
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/schedule/week_calendar_view.dart';
@@ -494,6 +494,162 @@ void main() {
     await tester.pumpWidget(app(rentals: [rental]));
     await tester.pumpAndSettle();
     expect(find.text('🔒 Firma X\n12:00–14:00'), findsOneWidget);
+  });
+
+  // A weekly 'Firma X' series on lane 1 — by default over the harness block
+  // b1, so its resolved occurrence lands in tomorrow's column as a rented
+  // lane row (no off-block part, hence no band).
+  Rental weeklyFirmaX({
+    HourMinute startsAt = const HourMinute(22, 58),
+    HourMinute endsAt = const HourMinute(23, 59),
+  }) =>
+      Rental(
+        id: 'n1',
+        renterName: 'Firma X',
+        lanes: const [1],
+        date: null,
+        weekday: tomorrow.weekday,
+        startsAt: startsAt,
+        endsAt: endsAt,
+        validFrom: null,
+        validUntil: null,
+        note: '',
+      );
+
+  // The rented lane-1 cell in tomorrow's block card. A band would carry a
+  // different text ('🔒 Firma X\n…'), the header strip lists matches only.
+  Finder rentedCellInTomorrow() => find.descendant(
+        of: find.byKey(ValueKey(tomorrow)),
+        matching: find.text('Firma X'),
+      );
+
+  testWidgets('admin taps a rented cell of a weekly rental into the '
+      '"jen tento den" exception dialog for that date', (tester) async {
+    wideSurface(tester);
+    await tester.pumpWidget(app(profile: admin, rentals: [weeklyFirmaX()]));
+    await tester.pumpAndSettle();
+
+    final cell = rentedCellInTomorrow();
+    expect(cell, findsOneWidget);
+    await tester.ensureVisible(cell);
+    await tester.pumpAndSettle();
+    await tester.tap(cell);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Výjimka pronájmu'), findsOneWidget);
+    expect(find.textContaining('jen ${dayFull(tomorrow)}'), findsOneWidget);
+    // No exception row exists yet, so there is nothing to remove.
+    expect(find.text('Zrušit výjimku'), findsNothing);
+  });
+
+  testWidgets('admin clicks an off-block rental band of a weekly rental '
+      'into the same exception dialog', (tester) async {
+    wideSurface(tester);
+    await tester.pumpWidget(app(
+      profile: admin,
+      rentals: [
+        weeklyFirmaX(
+          startsAt: const HourMinute(12, 0),
+          endsAt: const HourMinute(14, 0),
+        ),
+      ],
+    ));
+    await tester.pumpAndSettle();
+
+    final band = find.text('🔒 Firma X\n12:00–14:00');
+    expect(band, findsOneWidget);
+    await tester.ensureVisible(band);
+    await tester.pumpAndSettle();
+    await tester.tap(band);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Výjimka pronájmu'), findsOneWidget);
+    expect(find.textContaining('jen ${dayFull(tomorrow)}'), findsOneWidget);
+  });
+
+  testWidgets('admin taps a ONE-TIME rental cell into the plain edit dialog, '
+      'not the exception one', (tester) async {
+    wideSurface(tester);
+    await tester.pumpWidget(app(
+      profile: admin,
+      rentals: [
+        Rental(
+          id: 'n1',
+          renterName: 'Firma X',
+          lanes: const [1],
+          date: tomorrow,
+          weekday: null,
+          startsAt: const HourMinute(22, 58),
+          endsAt: const HourMinute(23, 59),
+          validFrom: null,
+          validUntil: null,
+          note: '',
+        ),
+      ],
+    ));
+    await tester.pumpAndSettle();
+
+    final cell = rentedCellInTomorrow();
+    await tester.ensureVisible(cell);
+    await tester.pumpAndSettle();
+    await tester.tap(cell);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Upravit pronájem'), findsOneWidget);
+    expect(find.text('Výjimka pronájmu'), findsNothing);
+  });
+
+  testWidgets('a rented cell already shaped by an exception row opens the '
+      'dialog ON that row — Zrušit výjimku is offered', (tester) async {
+    wideSurface(tester);
+    await tester.pumpWidget(app(
+      profile: admin,
+      rentals: [
+        weeklyFirmaX(),
+        // Tomorrow's exception row under the series: same lane and times.
+        Rental(
+          id: 'n1x',
+          parentId: 'n1',
+          renterName: 'Firma X',
+          lanes: const [1],
+          date: tomorrow,
+          weekday: null,
+          startsAt: const HourMinute(22, 58),
+          endsAt: const HourMinute(23, 59),
+          validFrom: null,
+          validUntil: null,
+          note: '',
+        ),
+      ],
+    ));
+    await tester.pumpAndSettle();
+
+    final cell = rentedCellInTomorrow();
+    expect(cell, findsOneWidget);
+    await tester.ensureVisible(cell);
+    await tester.pumpAndSettle();
+    await tester.tap(cell);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Výjimka pronájmu'), findsOneWidget);
+    expect(find.text('Zrušit výjimku'), findsOneWidget);
+  });
+
+  testWidgets('a player tapping a rented cell opens nothing', (tester) async {
+    wideSurface(tester);
+    await tester.pumpWidget(app(rentals: [weeklyFirmaX()]));
+    await tester.pumpAndSettle();
+
+    final cell = rentedCellInTomorrow();
+    expect(cell, findsOneWidget);
+    await tester.ensureVisible(cell);
+    await tester.pumpAndSettle();
+    await tester.tap(cell);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Výjimka pronájmu'), findsNothing);
+    expect(find.text('Upravit pronájem'), findsNothing);
+    expect(find.byType(AlertDialog), findsNothing);
   });
 
   const bEarly = TimeBlock(

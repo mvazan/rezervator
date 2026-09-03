@@ -200,6 +200,48 @@ PrioritySlot? priorityStateFor(
           timesOverlap(block.startsAt, block.endsAt, m.startsAt, m.endsAt));
 }
 
+/// The rentals in force on [day]: every series/one-time row occurring that
+/// day, with its same-date exception row applied — a `skipped` one drops
+/// the occurrence, any other replaces lanes/times/note
+/// ([Rental.overriddenBy]). Exception rows never yield on their own, so one
+/// dated where its series does not occur is simply ignored. Mirrors the
+/// server's `rental_occurrences`.
+List<Rental> rentalsOn(Day day, List<Rental> rentals) {
+  final out = <Rental>[];
+  for (final r in rentals) {
+    if (r.parentId != null || !r.occursOn(day)) continue;
+    final child = _firstWhereOrNull(
+        rentals, (Rental c) => c.parentId == r.id && c.date == day);
+    if (child == null) {
+      out.add(r);
+    } else if (!child.skipped) {
+      out.add(r.overriddenBy(child));
+    }
+  }
+  return out;
+}
+
+/// Upcoming dates of the weekly [series] from [from] (inclusive), at most
+/// [weeks] entries, bounded by its validity window; empty for anything that
+/// is not a series.
+List<Day> upcomingSeriesDates(Rental series,
+    {required Day from, int weeks = 26}) {
+  final weekday = series.weekday;
+  if (!series.isSeries || weekday == null) return const [];
+  var d = from;
+  final validFrom = series.validFrom;
+  if (validFrom != null && d.isBefore(validFrom)) d = validFrom;
+  d = d.addDays((weekday - d.weekday + 7) % 7);
+  final validUntil = series.validUntil;
+  final out = <Day>[];
+  while (out.length < weeks) {
+    if (validUntil != null && d.isAfter(validUntil)) break;
+    out.add(d);
+    d = d.addDays(7);
+  }
+  return out;
+}
+
 WeekSchedule buildWeekSchedule({
   required Day monday,
   required Day today,
@@ -231,7 +273,7 @@ WeekSchedule buildWeekSchedule({
       for (final m in datePriority)
         if (!m.isAway) m,
     ];
-    final dayRentals = rentals.where((r) => r.occursOn(date)).toList();
+    final dayRentals = rentalsOn(date, rentals);
 
     final override = overrideByDate[date];
     if (override != null && override.closed) {

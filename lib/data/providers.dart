@@ -572,6 +572,42 @@ class Api {
     }
   }
 
+  /// Writes an exception row of [parent] for [date] — the full effective
+  /// lanes/times for that one occurrence, or `skipped`. The series' name and
+  /// colour travel along (the server re-copies them anyway). [deleteRental]
+  /// removes it again, which re-applies the series for the date.
+  static Future<void> saveRentalException({
+    String? id,
+    required Rental parent,
+    required Day date,
+    required bool skipped,
+    required List<int> lanes,
+    required HourMinute startsAt,
+    required HourMinute endsAt,
+    String note = '',
+  }) async {
+    final row = {
+      'parent_id': parent.id,
+      'date': date.toSql(),
+      'weekday': null,
+      'valid_from': null,
+      'valid_until': null,
+      'skipped': skipped,
+      'lanes': lanes,
+      'starts_at': startsAt.toSql(),
+      'ends_at': endsAt.toSql(),
+      'note': note,
+      'renter_name': parent.renterName,
+      'color': parent.color,
+      if (id == null) 'created_by': currentUserId!,
+    };
+    if (id == null) {
+      await _db.from('rentals').insert(row);
+    } else {
+      await _db.from('rentals').update(row).eq('id', id);
+    }
+  }
+
   static Future<void> deleteRental(String id) =>
       _db.from('rentals').delete().eq('id', id);
 

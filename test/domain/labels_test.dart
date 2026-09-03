@@ -79,4 +79,69 @@ void main() {
       );
     });
   });
+  group('rental exceptions', () {
+    final series = Rental(
+      id: 'n1',
+      renterName: 'Firma XY',
+      lanes: const [1, 2],
+      date: null,
+      weekday: 2,
+      startsAt: const HourMinute(17, 0),
+      endsAt: const HourMinute(18, 30),
+      validFrom: null,
+      validUntil: null,
+      note: '',
+    );
+    Rental child({
+      List<int> lanes = const [1, 2],
+      HourMinute startsAt = const HourMinute(17, 0),
+      HourMinute endsAt = const HourMinute(18, 30),
+      bool skipped = false,
+    }) =>
+        Rental(
+          id: 'c1',
+          renterName: 'Firma XY',
+          lanes: lanes,
+          date: tuesday,
+          weekday: null,
+          startsAt: startsAt,
+          endsAt: endsAt,
+          validFrom: null,
+          validUntil: null,
+          note: '',
+          parentId: 'n1',
+          skipped: skipped,
+        );
+
+    test('an overridden occurrence gets the výjimka suffix', () {
+      final r = series.overriddenBy(child(lanes: const [1]));
+      expect(rentalLabel(r), '🔒 Firma XY (výjimka)');
+      expect(eventBandLabel(OffBlockRental(r)),
+          '🔒 Firma XY (výjimka) · 17:00–18:30');
+      expect(rentalLabel(series), '🔒 Firma XY');
+    });
+
+    test('rentalExceptionSummary names only what changed', () {
+      expect(rentalExceptionSummary(series, child(skipped: true)), 'vynecháno');
+      expect(rentalExceptionSummary(series, child(lanes: const [1])),
+          'dráhy 1');
+      expect(
+          rentalExceptionSummary(
+              series, child(endsAt: const HourMinute(18, 0))),
+          '17:00–18:00');
+      expect(
+          rentalExceptionSummary(series,
+              child(lanes: const [1], endsAt: const HourMinute(18, 0))),
+          'dráhy 1 · 17:00–18:00');
+      expect(rentalExceptionSummary(series, child()), 'beze změny');
+    });
+
+    test('rentalExceptionCountLabel follows Czech plurals', () {
+      expect(rentalExceptionCountLabel(1), '1 výjimka');
+      expect(rentalExceptionCountLabel(2), '2 výjimky');
+      expect(rentalExceptionCountLabel(4), '4 výjimky');
+      expect(rentalExceptionCountLabel(5), '5 výjimek');
+      expect(rentalExceptionCountLabel(11), '11 výjimek');
+    });
+  });
 }

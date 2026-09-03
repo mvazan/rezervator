@@ -250,6 +250,98 @@ void main() {
     });
   });
 
+  group('Rental exceptions', () {
+    final series = Rental(
+      id: 'n1',
+      renterName: 'Firma X',
+      lanes: const [1, 2],
+      date: null,
+      weekday: 3,
+      startsAt: const HourMinute(18, 0),
+      endsAt: const HourMinute(20, 0),
+      validFrom: Day(2026, 7, 1),
+      validUntil: null,
+      note: 'faktura',
+      color: 4,
+    );
+    final child = Rental(
+      id: 'c1',
+      renterName: 'Firma X',
+      lanes: const [1],
+      date: Day(2026, 7, 15),
+      weekday: null,
+      startsAt: const HourMinute(18, 0),
+      endsAt: const HourMinute(19, 0),
+      validFrom: null,
+      validUntil: null,
+      note: 'jen dráha 1',
+      parentId: 'n1',
+    );
+
+    test('fromJson reads parent_id and skipped, defaulting to null/false', () {
+      const base = {
+        'id': 'r3',
+        'renter_name': 'Firma',
+        'lanes': [1],
+        'weekday': 3,
+        'starts_at': '18:00:00',
+        'ends_at': '20:00:00',
+      };
+      final plain = Rental.fromJson(base);
+      expect(plain.parentId, isNull);
+      expect(plain.skipped, isFalse);
+      expect(plain.isSeries, isTrue);
+      expect(plain.isOverridden, isFalse);
+
+      final c = Rental.fromJson({
+        ...base,
+        'weekday': null,
+        'date': '2026-07-15',
+        'parent_id': 'n1',
+        'skipped': true,
+      });
+      expect(c.parentId, 'n1');
+      expect(c.skipped, isTrue);
+      expect(c.isSeries, isFalse);
+    });
+
+    test("overriddenBy takes the child's lanes, times and note and keeps "
+        'the series identity', () {
+      final r = series.overriddenBy(child);
+      expect(r.id, 'n1');
+      expect(r.renterName, 'Firma X');
+      expect(r.color, 4);
+      expect(r.weekday, 3);
+      expect(r.validFrom, Day(2026, 7, 1));
+      expect(r.lanes, [1]);
+      expect(r.startsAt, const HourMinute(18, 0));
+      expect(r.endsAt, const HourMinute(19, 0));
+      expect(r.note, 'jen dráha 1');
+      expect(r.overrideId, 'c1');
+      expect(r.isOverridden, isTrue);
+      expect(r.parentId, isNull);
+      expect(r.isSeries, isTrue);
+    });
+
+    test('isSeries: weekly yes, one-time no, exception row no', () {
+      expect(series.isSeries, isTrue);
+      expect(child.isSeries, isFalse);
+      final once = Rental(
+        id: 'r2',
+        renterName: 'Oslava',
+        lanes: const [3],
+        date: Day(2026, 7, 15),
+        weekday: null,
+        startsAt: const HourMinute(18, 0),
+        endsAt: const HourMinute(20, 0),
+        validFrom: null,
+        validUntil: null,
+        note: '',
+      );
+      expect(once.isSeries, isFalse);
+    });
+  });
+
   group('Reservation', () {
     test('isLive false when cancelled', () {
       final json = {

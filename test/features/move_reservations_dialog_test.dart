@@ -172,6 +172,84 @@ void main() {
     expect(result, isTrue);
   });
 
+  testWidgets('a rental exception reshapes the blocked lanes: the series '
+      'blocks lane 1, its child for the day blocks lane 2 instead', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1000, 800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final series = Rental(
+      id: 'n1',
+      renterName: 'Firma X',
+      lanes: const [1],
+      date: null,
+      weekday: thursday.weekday,
+      startsAt: const HourMinute(17, 0),
+      endsAt: const HourMinute(18, 0),
+      validFrom: null,
+      validUntil: null,
+      note: '',
+    );
+    final child = Rental(
+      id: 'c1',
+      renterName: 'Firma X',
+      lanes: const [2],
+      date: thursday,
+      weekday: null,
+      startsAt: const HourMinute(17, 0),
+      endsAt: const HourMinute(18, 0),
+      validFrom: null,
+      validUntil: null,
+      note: '',
+      parentId: 'n1',
+    );
+
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        settingsProvider.overrideWith((ref) => Stream.value(settings)),
+        rentalsProvider.overrideWith((ref) => Stream.value([series, child])),
+        weekReservationsProvider.overrideWith(
+          (ref, monday) => Stream.value([res('r1', 'p1', 1, removed.id)]),
+        ),
+        playersProvider.overrideWith(
+          (ref) async => const [
+            PlayerName(id: 'p1', displayName: 'Petr Novák', nick: 'Péťa'),
+          ],
+        ),
+      ],
+      child: MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => Center(
+              child: TextButton(
+                onPressed: () => showDialog<bool>(
+                  context: context,
+                  builder: (_) => MoveReservationsDialog(
+                    date: thursday,
+                    fromBlock: removed,
+                    targets: const [target],
+                    cancelNote: 'změna rozvrhu',
+                  ),
+                ),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ));
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+
+    // Without the exception lane 1 would read "blokováno" and lane 2 "volná";
+    // the child row is applied to its series, not listed as a second rental.
+    expect(find.text('Dráha 1 — volná'), findsOneWidget);
+    expect(find.text('Dráha 2 — blokováno'), findsOneWidget);
+  });
+
   testWidgets('committing with unmoved reservations confirms the '
       'cancellation first', (tester) async {
     tester.view.physicalSize = const Size(1000, 800);

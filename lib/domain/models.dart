@@ -537,6 +537,9 @@ class Rental {
     required this.validUntil,
     required this.note,
     this.color = -2,
+    this.parentId,
+    this.skipped = false,
+    this.overrideId,
   });
 
   final String id;
@@ -545,6 +548,18 @@ class Rental {
 
   /// Palette index 0–11, or -2 for "use the default rental tint".
   final int color;
+
+  /// Exception row: the weekly series this row overrides for [date]
+  /// (null on series and one-time rows). Its lanes/times/note are the
+  /// effective values for that one date; name and colour mirror the series.
+  final String? parentId;
+
+  /// Exception row: the series does not happen on [date] at all.
+  final bool skipped;
+
+  /// Set only on resolved per-day copies (see [overriddenBy] / `rentalsOn`):
+  /// the id of the exception row that shaped this occurrence.
+  final String? overrideId;
 
   /// Exactly one of [date] (one-time) and [weekday] (weekly, ISO) is set —
   /// enforced by a DB check constraint.
@@ -556,6 +571,16 @@ class Rental {
   final Day? validUntil;
   final String note;
 
+  /// A weekly series (exceptions hang under these; one-time rows and
+  /// exception rows are not series).
+  bool get isSeries => parentId == null && weekday != null;
+
+  /// A resolved occurrence shaped by an exception row.
+  bool get isOverridden => overrideId != null;
+
+  /// Does this series/one-time row occur on [day]? Exception rows answer
+  /// for their own date only — resolve through `rentalsOn`, which applies
+  /// them to their series instead of listing them on their own.
   bool occursOn(Day day) {
     if (date != null) return date == day;
     if (weekday != day.weekday) return false;
@@ -563,6 +588,24 @@ class Rental {
     if (validUntil != null && day.isAfter(validUntil!)) return false;
     return true;
   }
+
+  /// This series as [child] shapes it on one date: the child's lanes, times
+  /// and note; everything else (id, renter, colour, weekday, validity) from
+  /// the series, so the calendar still opens the series by [id].
+  Rental overriddenBy(Rental child) => Rental(
+        id: id,
+        renterName: renterName,
+        lanes: child.lanes,
+        date: date,
+        weekday: weekday,
+        startsAt: child.startsAt,
+        endsAt: child.endsAt,
+        validFrom: validFrom,
+        validUntil: validUntil,
+        note: child.note,
+        color: color,
+        overrideId: child.id,
+      );
 
   factory Rental.fromJson(Map<String, dynamic> json) => Rental(
         id: json['id'] as String,
@@ -580,6 +623,8 @@ class Rental {
             : Day.parse(json['valid_until'] as String),
         note: json['note'] as String? ?? '',
         color: json['color'] as int? ?? -2,
+        parentId: json['parent_id'] as String?,
+        skipped: json['skipped'] as bool? ?? false,
       );
 }
 

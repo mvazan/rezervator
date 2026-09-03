@@ -11,6 +11,8 @@ void main() {
         'Trénink už začal — rezervaci může zrušit jen správce.');
     expect(friendlyDbError(Exception('switch_home_first')),
         'Nejdřív se přepni zpět domů, pak kuželnu zamítni.');
+    expect(friendlyDbError(Exception('rental_exception_invalid')),
+        'Výjimku lze zadat jen na den pravidelného pronájmu.');
     expect(friendlyDbError(Exception('something else')),
         startsWith('Něco se nepovedlo.'));
   });

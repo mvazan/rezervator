@@ -5,11 +5,13 @@ import '../../core/ui.dart';
 import '../../data/providers.dart';
 import '../../domain/day_edit.dart';
 import '../../domain/grouping.dart';
+import '../../domain/labels.dart';
 import '../../domain/models.dart';
 import 'slot_types_screen.dart';
 import 'widgets/admin_scaffold.dart';
 import 'widgets/blockage_dialog.dart';
 import 'widgets/override_dialog.dart';
+import 'widgets/rental_occurrence_dialog.dart';
 
 /// Admin: manage per-day closures that take precedence over the weekly
 /// training-day rule. An override closes a day with a reason (e.g. "Malování
@@ -104,6 +106,26 @@ class OverridesScreen extends ConsumerWidget {
           ..sort((a, b) => a.date.compareTo(b.date));
     final pastBlockages = blockages.where((s) => s.date.isBefore(now)).toList()
       ..sort((a, b) => b.date.compareTo(a.date));
+    // Pronájmy: exception rows of weekly rentals (one occurrence skipped or
+    // on other lanes/times) — orphans whose series is gone are not listed.
+    final rentals = ref.watch(rentalsProvider).value ?? const <Rental>[];
+    final seriesById = {
+      for (final r in rentals)
+        if (r.parentId == null) r.id: r,
+    };
+    final rentalExceptions = [
+      for (final r in rentals)
+        if (r.parentId != null &&
+            seriesById.containsKey(r.parentId) &&
+            r.date != null)
+          r,
+    ];
+    final upcomingRentalExceptions =
+        rentalExceptions.where((r) => !r.date!.isBefore(now)).toList()
+          ..sort((a, b) => a.date!.compareTo(b.date!));
+    final pastRentalExceptions =
+        rentalExceptions.where((r) => r.date!.isBefore(now)).toList()
+          ..sort((a, b) => b.date!.compareTo(a.date!));
 
     return AdminScaffold(
       title: 'Výjimky dnů',
@@ -132,7 +154,10 @@ class OverridesScreen extends ConsumerWidget {
           final pastForks = forks.where((o) => o.date.isBefore(now)).toList()
             ..sort((a, b) => b.date.compareTo(a.date));
 
-          if (closures.isEmpty && forks.isEmpty && blockages.isEmpty) {
+          if (closures.isEmpty &&
+              forks.isEmpty &&
+              blockages.isEmpty &&
+              rentalExceptions.isEmpty) {
             return const Center(child: Text('Zatím žádné výjimky.'));
           }
           return ListView(
@@ -179,6 +204,34 @@ class OverridesScreen extends ConsumerWidget {
                           fork: override,
                           blockById: blockById,
                           onRestore: null,
+                        ),
+                    ],
+                  ),
+              ],
+              if (rentalExceptions.isNotEmpty) ...[
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 20, 16, 4),
+                  child: Text(
+                    'Pronájmy',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ),
+                for (final child in upcomingRentalExceptions)
+                  _RentalExceptionTile(
+                    parent: seriesById[child.parentId]!,
+                    child: child,
+                    laneCount: settings.laneCount,
+                  ),
+                if (pastRentalExceptions.isNotEmpty)
+                  ExpansionTile(
+                    title: Text('Minulé výjimky pronájmů '
+                        '(${pastRentalExceptions.length})'),
+                    children: [
+                      for (final child in pastRentalExceptions)
+                        _RentalExceptionTile(
+                          parent: seriesById[child.parentId]!,
+                          child: child,
+                          laneCount: settings.laneCount,
                         ),
                     ],
                   ),
@@ -313,6 +366,46 @@ class _ForkTile extends StatelessWidget {
               tooltip: 'Vrátit den k týdennímu rozvrhu',
               onPressed: onRestore,
             ),
+    );
+  }
+}
+
+/// One exception to a weekly rental: the date and renter, what the day
+/// changes against the series (or 'vynecháno'); tap edits it in the
+/// [RentalOccurrenceDialog], the bin returns the date to the series.
+class _RentalExceptionTile extends StatelessWidget {
+  const _RentalExceptionTile({
+    required this.parent,
+    required this.child,
+    required this.laneCount,
+  });
+
+  /// The weekly series [child] overrides for one date.
+  final Rental parent;
+  final Rental child;
+  final int laneCount;
+
+  @override
+  Widget build(BuildContext context) {
+    final date = child.date!;
+    return ListTile(
+      leading: const Icon(Icons.lock_outline),
+      title: Text('${dayLabel(date)} · ${parent.renterName}'),
+      subtitle: Text(rentalExceptionSummary(parent, child)),
+      onTap: () => showDialog<void>(
+        context: context,
+        builder: (_) => RentalOccurrenceDialog(
+          parent: parent,
+          date: date,
+          existing: child,
+          laneCount: laneCount,
+        ),
+      ),
+      trailing: IconButton(
+        icon: const Icon(Icons.delete_outline),
+        onPressed: () =>
+            confirmDeleteRentalException(context, parent: parent, child: child),
+      ),
     );
   }
 }
