@@ -154,6 +154,33 @@ void main() {
     expect(find.textContaining('✕ zavřeno — Malování'), findsOneWidget);
   });
 
+  testWidgets('a closed day hosting a match shows the band, not the zavřeno '
+      'label', (tester) async {
+    wideSurface(tester);
+    await tester.pumpWidget(
+      app(
+        overrides: [
+          DayOverride(date: tomorrow, closed: true, reason: 'Malování'),
+        ],
+        matches: [
+          PrioritySlot(
+            id: 'm1',
+            date: tomorrow,
+            startsAt: const HourMinute(18, 30),
+            endsAt: const HourMinute(22, 30),
+            type: PrioritySlot.fallbackMatchType,
+            homeTeam: 'Brno IV',
+            awayTeam: 'Dubňany',
+          ),
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+    // The match shows as the day-header line and as the time band.
+    expect(find.textContaining('Brno IV – Dubňany'), findsWidgets);
+    expect(find.textContaining('✕ zavřeno'), findsNothing);
+  });
+
   testWidgets('reserved cell shows player nick when set, never full name', (
     tester,
   ) async {
