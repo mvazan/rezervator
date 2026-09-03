@@ -12,8 +12,14 @@ date, each cell holding one or more matches as
 
 Every match in OUR alley's row (--alley, "Brno IV Sokol") is a home match:
 it blocks the alley (cancelled reservations exactly as when entered in the
-app; the úklid before a match is left to the admin — --prep 0 unless told
-otherwise). In every other row a match is taken only when one of
+app, plus --prep minutes of úklid before it — 30 by default). Team names
+come from the hidden "Utkání – vše" sheet, not the compact calendar grid:
+the grid abbreviates club names inconsistently ("SVeverky" for "SKK
+Veverky", "MS Brno" for "KK MS Brno", "Husovice" for "TJ Sokol Husovice",
+…) to fit the cell, while "Utkání – vše" carries the federation's full
+names. A match missing from that sheet (or ambiguous — two matches at the
+same alley/date/time) keeps the grid's abbreviated name and gets a
+warning. In every other row a match is taken only when one of
 OUR teams (--teams) plays in it, and it is imported as "venkovní zápas" —
 listed in the day header, blocks nothing.
 
@@ -184,21 +190,47 @@ def parse_calendar(cells, season: int, warnings: List[str]) -> List[Match]:
     return matches
 
 
-def parse_flat_list(cells) -> Counter:
-    """(alley, date, time) counter from the hidden 'Utkání – vše' sheet — a
-    second, independently laid-out copy of the calendar to cross-check."""
+FlatKey = Tuple[str, dt.date, Optional[str]]
+
+
+def parse_flat_list(cells) -> Dict[FlatKey, List[Tuple[str, str]]]:
+    """{(alley, date, time): [(home, away), ...]} from the hidden 'Utkání –
+    vše' sheet — a second, independently laid-out copy of the calendar,
+    with the federation's full club names (the compact grid abbreviates
+    them to fit the cell). Used both to cross-check the grid and to swap
+    in real team names; more than one entry at a key means the calendar
+    grid alone can't tell the matches apart there."""
     rows: Dict[int, Dict[int, str]] = {}
     for (r, c), v in cells.items():
         rows.setdefault(r, {})[c] = v
-    counter: Counter = Counter()
+    lookup: Dict[FlatKey, List[Tuple[str, str]]] = {}
     for r, row in rows.items():
         if r < 4 or 8 not in row or not row.get(2, '').isdigit():
             continue
         date = dt.date(1899, 12, 30) + dt.timedelta(days=int(row[2]))
         time = row.get(4, '').strip()
         time = None if time.startswith('?') else time.zfill(5)
-        counter[(row[1].strip(), date, time, row[7].strip(), row[8].strip())] += 1
-    return counter
+        key = (row[1].strip(), date, time)
+        lookup.setdefault(key, []).append((row[7].strip(), row[8].strip()))
+    return lookup
+
+
+def apply_full_names(matches: List[Match],
+                     flat: Dict[FlatKey, List[Tuple[str, str]]],
+                     warnings: List[str]) -> None:
+    """Swaps each match's home/away for the full names at its (alley, date,
+    time) in [flat]; leaves the grid's abbreviated name and warns when the
+    key is missing or ambiguous (>1 match there)."""
+    for m in matches:
+        entries = flat.get((m.alley, m.date, m.time))
+        if not entries:
+            m.warnings.append('plné jméno klubu nenalezeno v "Utkání – vše" — '
+                              'necháno zkrácené')
+        elif len(entries) > 1:
+            m.warnings.append('v "Utkání – vše" je na tomto místě víc zápasů — '
+                              'jméno klubu necháno zkrácené')
+        else:
+            m.home, m.away = entries[0]
 
 
 def ours(name: str, teams: List[str]) -> bool:
@@ -369,8 +401,8 @@ def main() -> int:
                     help="match length in minutes for competitions outside the KP1/KP2 tiers (divize, the leagues)")
     ap.add_argument('--length', action='append', default=[], metavar='SOUTĚŽ=MIN',
                     help='pin a competition\'s match length by hand, e.g. --length "KP1 Sever=240" (repeatable)')
-    ap.add_argument('--prep', type=int, default=0,
-                    help='úklid před zápasem in minutes for home matches (default 0: the admin adds it in the app)')
+    ap.add_argument('--prep', type=int, default=30,
+                    help='úklid před zápasem in minutes for home matches')
     ap.add_argument('--out', default='build/import_matches.sql')
     ap.add_argument('--apply', action='store_true', help='run the SQL — against PROD unless --local')
     ap.add_argument('--yes', action='store_true', help='with --apply: skip the confirmation question')
@@ -407,20 +439,23 @@ def main() -> int:
     matches = classify(all_matches, args.alley, args.teams)
     durations = assign_durations(matches, args.duration, overrides)
 
-    # Cross-check with the hidden flat list, laid out independently.
+    # Cross-check with the hidden flat list (laid out independently), and
+    # pull in its full club names.
     if 'Utkání – vše' in sheets:
         flat = parse_flat_list(sheets['Utkání – vše'])
-        flat_ours = Counter({k: n for k, n in flat.items()
-                             if k[0] == args.alley or ours(k[3], args.teams) or ours(k[4], args.teams)})
+        flat_ours = Counter({
+            k: len(v) for k, v in flat.items()
+            if k[0] == args.alley
+            or any(ours(h, args.teams) or ours(a, args.teams) for h, a in v)})
         grid = Counter((m.alley, m.date, m.time) for m in matches)
-        flat_slots = Counter((k[0], k[1], k[2]) for k, n in flat_ours.items() for _ in range(n))
-        diff = (grid - flat_slots) + (flat_slots - grid)
+        diff = (grid - flat_ours) + (flat_ours - grid)
         if diff:
             for (alley, date, time), n in sorted(diff.items(), key=lambda x: (x[0][1], x[0][0])):
-                where = 'calendar only' if grid[(alley, date, time)] > flat_slots[(alley, date, time)] else 'flat list only'
+                where = 'calendar only' if grid[(alley, date, time)] > flat_ours[(alley, date, time)] else 'flat list only'
                 warnings.append('cross-check: %s %s %s — %s' % (alley, date, time or '??:??', where))
         else:
             print('cross-check with "Utkání – vše": OK (%d matches agree)' % len(matches))
+        apply_full_names(matches, flat, warnings)
 
     unknown = [m for m in matches if m.time is None]
     matches = [m for m in matches if m.time is not None]

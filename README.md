@@ -33,9 +33,11 @@ nepřišel, a měsíční docházku si stáhne jako CSV.
   návrh appky (funkce, datový model, fáze vývoje).
 - `tool/import_matches.py` — jednorázový import zápasů z krajského sešitu
   „Obsazenost kuželen“ (xlsx): domácí zápasy z řádku naší kuželny, venkovní
-  zápasy našich týmů z ostatních řádků. Vypíše přehled a vygeneruje SQL, které
-  běží jako správce kuželny (zrušené rezervace jako v appce; úklid před zápasem
-  nechává na správci); opakované spuštění nic neduplikuje.
+  zápasy našich týmů z ostatních řádků; jména klubů bere ze skrytého listu
+  „Utkání – vše“ (kalendář je pro místo zkracuje: „SVeverky“ místo „SKK
+  Veverky“ apod.). Vypíše přehled a vygeneruje SQL, které běží jako správce
+  kuželny (zrušené rezervace jako v appce, úklid před zápasem 30 min);
+  opakované spuštění nic neduplikuje.
 
   ```bash
   python3 tool/import_matches.py ~/Downloads/Obsazenost-kuzelen-2026-27.xlsx
