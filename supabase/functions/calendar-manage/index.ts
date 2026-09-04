@@ -19,7 +19,7 @@
 // A failure that can be retried (Google 5xx, network) changes NOTHING and
 // returns an error — a half-done disconnect never sticks.
 //
-// CORS: the app also runs as a PWA on mvazan.github.io, where
+// CORS: the app also runs as a PWA on rezervator.online, where
 // functions.invoke is a cross-origin fetch with a preflight — OPTIONS is
 // answered and every reply stamped, otherwise the browser build could never
 // disconnect. The JWT check above is the actual gate; the origin is not.
