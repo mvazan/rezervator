@@ -186,6 +186,30 @@ void main() {
     expect(find.text('Staré jméno'), findsNothing);
   });
 
+  testWidgets('the kiosk account stays collapsed out of the roster, and '
+      'expanding it still offers the way back', (tester) async {
+    const kiosk = Profile(
+      id: 'k1',
+      displayName: 'Kiosk u dráhy',
+      email: 'kiosk@example.com',
+      role: Role.kiosk,
+      status: ProfileStatus.approved,
+    );
+    await tester.pumpWidget(app([admin, kiosk]));
+    await tester.pumpAndSettle();
+
+    // Counted in the header, but neither the account nor its action shows.
+    expect(find.text('Kiosk (1)'), findsOneWidget);
+    expect(find.text('Kiosk u dráhy'), findsNothing);
+    expect(find.text('Vrátit mezi hráče'), findsNothing);
+
+    await tester.tap(find.text('Kiosk (1)'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Kiosk u dráhy'), findsOneWidget);
+    expect(find.text('Vrátit mezi hráče'), findsOneWidget);
+  });
+
   testWidgets('the FAB opens the add dialog for a hráč bez účtu',
       (tester) async {
     await tester.pumpWidget(app([admin]));
