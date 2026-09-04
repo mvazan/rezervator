@@ -1,7 +1,7 @@
 // calendar-manage — actions on the linked calendar that the player asked for
 // and that must finish before the app shows the result.
 //
-// `disconnect` and `reminders`. Deployed WITHOUT --no-verify-jwt (unlike
+// `disconnect`, `reminders` and `match_teams`. Deployed WITHOUT --no-verify-jwt (unlike
 // notify and calendar-oauth-callback): a signed-in player calls it from the
 // app through functions.invoke, which attaches their JWT, and the platform
 // verifies it before the function even runs. Inside we still ask
@@ -27,9 +27,12 @@
 import { createClient } from "@supabase/supabase-js";
 import {
   deleteCalendar,
+  deleteEvent,
   GoogleAuthError,
+  matchEventId,
   refreshAccessToken,
   revokeToken,
+  writeFutureMatches,
   writeFutureReservations,
 } from "../_shared/google_calendar.ts";
 
@@ -160,20 +163,97 @@ async function setReminders(
     return json({ rewritten: 0, saved, deferred: true });
   }
 
-  const written = await writeFutureReservations(
-    admin,
-    userId,
-    accessToken,
-    token.google_calendar_id as string,
-  );
-  const { data: total } = await admin.rpc("my_future_reservations", {
-    p_user: userId,
-  });
-  const failed = written < ((total ?? []) as unknown[]).length;
+  const calendarId = token.google_calendar_id as string;
+  // Reminders live on the events, so both kinds get rewritten.
+  const written = await writeFutureReservations(admin, userId, accessToken, calendarId) +
+    await writeFutureMatches(admin, userId, accessToken, calendarId);
+  const [{ data: reservations }, { data: matches }] = await Promise.all([
+    admin.rpc("my_future_reservations", { p_user: userId }),
+    admin.rpc("my_future_matches", { p_user: userId }),
+  ]);
+  const expected = ((reservations ?? []) as unknown[]).length +
+    ((matches ?? []) as unknown[]).length;
+  const failed = written < expected;
   // Whatever did not go through is caught up by a job — the preference is
   // stored, so nothing is lost.
   if (failed) await admin.rpc("backfill_calendar_jobs", { p_user: userId });
   return json({ rewritten: written, saved, deferred: failed });
+}
+
+/** Stores which teams' matches go to the calendar and settles the events
+ * on the spot: the matches of teams just dropped are deleted, those of the
+ * kept and new teams (re)written — the player is watching. Whatever fails
+ * is caught up by a job. Returns the stored teams. */
+async function setMatchTeams(
+  userId: string,
+  teams: string[],
+): Promise<Response> {
+  const { data: before } = await admin.from("google_calendar_links")
+    .select("match_teams").eq("user_id", userId).maybeSingle();
+  const previous = (before?.match_teams as string[] | null) ?? [];
+
+  // Normalisation and validation live in the RPC (0027).
+  const { data: stored, error } = await admin.rpc(
+    "set_calendar_match_teams_for",
+    { p_user: userId, p_teams: teams },
+  );
+  if (error) {
+    console.error(`set match teams failed for ${userId}:`, error);
+    return json({ error: "bad_teams" }, 400);
+  }
+  const saved = (stored as string[] | null) ?? [];
+
+  const { data: link } = await admin.from("google_calendar_links")
+    .select("status").eq("user_id", userId).maybeSingle();
+  if (link?.status !== "linked") return json({ rewritten: 0, saved });
+
+  const { data: token } = await admin.from("google_calendar_tokens")
+    .select("refresh_token, google_calendar_id")
+    .eq("user_id", userId).maybeSingle();
+  if (!token?.refresh_token || !token.google_calendar_id) {
+    return json({ rewritten: 0, saved });
+  }
+
+  let accessToken: string;
+  try {
+    accessToken = await refreshAccessToken(token.refresh_token as string);
+  } catch (_) {
+    await admin.rpc("backfill_calendar_jobs", { p_user: userId });
+    return json({ rewritten: 0, saved, deferred: true });
+  }
+  const calendarId = token.google_calendar_id as string;
+
+  // Matches of the teams that were dropped: their events go. The list is
+  // read with the OLD choice re-applied through the same "live future
+  // match" rule, so nothing past or foreign is touched.
+  const dropped = previous.filter((t) => !saved.includes(t));
+  let removed = 0;
+  if (dropped.length > 0) {
+    const { data: profile } = await admin.from("profiles")
+      .select("tenant_id").eq("id", userId).maybeSingle();
+    const { data: gone } = await admin.from("priority_slots")
+      .select("id, home_team, away_team")
+      .eq("tenant_id", profile?.tenant_id)
+      .is("parent_id", null)
+      .gte("date", new Date().toISOString().slice(0, 10));
+    for (const row of (gone ?? []) as { id: string; home_team: string; away_team: string }[]) {
+      const stillFollowed = saved.includes(row.home_team) || saved.includes(row.away_team);
+      const wasFollowed = dropped.includes(row.home_team) || dropped.includes(row.away_team);
+      if (stillFollowed || !wasFollowed) continue;
+      const result = await deleteEvent(
+        accessToken,
+        calendarId,
+        await matchEventId(userId, row.id),
+      );
+      if (result === "ok") removed++;
+    }
+  }
+
+  const written = await writeFutureMatches(admin, userId, accessToken, calendarId);
+  const { data: total } = await admin.rpc("my_future_matches", { p_user: userId });
+  const failed = written < ((total ?? []) as unknown[]).length;
+  if (failed) await admin.rpc("backfill_calendar_jobs", { p_user: userId });
+  return json({ rewritten: written, removed, saved, deferred: failed });
 }
 
 Deno.serve(async (request) => {
@@ -202,6 +282,12 @@ Deno.serve(async (request) => {
         ? body.minutes.map((m: unknown) => Number(m)).filter(Number.isFinite)
         : [];
       return await setReminders(user.id, minutes);
+    }
+    if (body?.action === "match_teams") {
+      const teams = Array.isArray(body.teams)
+        ? body.teams.filter((t: unknown) => typeof t === "string")
+        : [];
+      return await setMatchTeams(user.id, teams as string[]);
     }
     return json({ error: "unknown_action" }, 400);
   } catch (error) {

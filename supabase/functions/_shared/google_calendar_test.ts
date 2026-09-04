@@ -3,6 +3,8 @@ import {
   classify,
   eventIdFor,
   localDateTime,
+  matchEventBody,
+  matchEventId,
   remindersFor,
   reservationEventBody,
 } from "./google_calendar.ts";
@@ -106,4 +108,53 @@ Deno.test("reservationEventBody: reminder minutes become popup overrides", () =>
       { method: "popup", minutes: 120 },
     ],
   });
+});
+
+const MATCH = "5c1a2b3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
+
+Deno.test("matchEventId lives in its own namespace next to reservation ids", async () => {
+  assertEquals(await matchEventId(USER, MATCH), await matchEventId(USER, MATCH));
+  assertMatch(await matchEventId(USER, MATCH), /^[0-9a-v]{32}$/);
+  assertNotEquals(await matchEventId(USER, MATCH), await eventIdFor(USER, MATCH));
+});
+
+Deno.test("matchEventBody: a home match is located at the alley", () => {
+  const body = matchEventBody(
+    {
+      date: "2026-09-11",
+      starts_at: "18:30:00",
+      ends_at: "21:30:00",
+      home_team: "TJ Sokol Brno IV",
+      away_team: "SK Kuželky Dubňany",
+      is_away: false,
+      description: "JM divize",
+      alley_name: "TJ Sokol Brno IV",
+    },
+    [120],
+  );
+  assertEquals(body.summary, "Zápas · TJ Sokol Brno IV – SK Kuželky Dubňany");
+  assertEquals(body.location, "TJ Sokol Brno IV");
+  assertEquals(body.start, { dateTime: "2026-09-11T18:30:00", timeZone: "Europe/Prague" });
+  assertEquals(body.end, { dateTime: "2026-09-11T21:30:00", timeZone: "Europe/Prague" });
+  assertEquals(body.reminders, { useDefault: false, overrides: [{ method: "popup", minutes: 120 }] });
+  assertMatch(body.description, /^JM divize · doma\n\n— spravuje appka Rezervátor/);
+});
+
+Deno.test("matchEventBody: an away match has no location and says venku", () => {
+  const body = matchEventBody(
+    {
+      date: "2026-10-22",
+      starts_at: "18:00:00",
+      ends_at: "20:30:00",
+      home_team: "KK Slovan Rosice D",
+      away_team: "KS Devítka Brno B",
+      is_away: true,
+      description: "KP2 Sever A · Rosice",
+      alley_name: "TJ Sokol Brno IV",
+    },
+    [],
+  );
+  assertEquals(body.location, undefined);
+  assertMatch(body.description, /^KP2 Sever A · Rosice · venku\n/);
+  assertEquals(body.reminders, { useDefault: false, overrides: [] });
 });

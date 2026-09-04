@@ -277,6 +277,8 @@ export type EventBody = {
   end: { dateTime: string; timeZone: string };
   status: "confirmed";
   reminders: EventReminders;
+  /** Only matches set it (the alley of a home match). */
+  location?: string;
 };
 
 /** What the calendar should show for one reservation. The alley's name is
@@ -302,6 +304,62 @@ export function reservationEventBody(
     status: "confirmed",
     reminders: remindersFor(reminderMinutes),
   };
+}
+
+/** One live future match of a team the player follows, as RPC
+ * `my_future_matches` (0027) returns it. `description` is the competition,
+ * with the venue appended for an away match ("KP1 Sever · Blansko 1-6" —
+ * the import tool writes it that way). */
+export type MatchRow = {
+  match_id: string;
+  /** "YYYY-MM-DD" */
+  date: string;
+  /** SQL time "HH:MM:SS" — the match itself, not its úklid. */
+  starts_at: string;
+  ends_at: string;
+  home_team: string;
+  away_team: string;
+  /** Venkovní zápas: played elsewhere, blocks nothing at the alley. */
+  is_away: boolean;
+  description: string;
+  /** The tenant's (kuželna's) name — the venue of a home match. */
+  alley_name: string;
+};
+
+export type MatchEventSource = Omit<MatchRow, "match_id">;
+
+/** Deterministic event id for (user, match) — its own namespace next to
+ * the reservations', so a match and a reservation can never share an id. */
+export function matchEventId(userId: string, matchId: string): Promise<string> {
+  return eventIdFor(userId, `match:${matchId}`);
+}
+
+/** What the calendar should show for one match: "Zápas · domácí – hosté",
+ * home matches located at the alley, away ones carry the venue in the
+ * description (the app never stores it structurally). Same reminders and
+ * the same managed-by footer as a training. */
+export function matchEventBody(
+  row: MatchEventSource,
+  reminderMinutes: number[],
+): EventBody {
+  const where = row.is_away ? "venku" : "doma";
+  const body: EventBody = {
+    summary: `Zápas · ${row.home_team} – ${row.away_team}`,
+    description: `${row.description} · ${where}\n\n` +
+      "— spravuje appka Rezervátor, ruční úpravy se přepíšou —",
+    start: {
+      dateTime: localDateTime(row.date, row.starts_at),
+      timeZone: CALENDAR_TIMEZONE,
+    },
+    end: {
+      dateTime: localDateTime(row.date, row.ends_at),
+      timeZone: CALENDAR_TIMEZONE,
+    },
+    status: "confirmed",
+    reminders: remindersFor(reminderMinutes),
+  };
+  if (!row.is_away) body.location = row.alley_name;
+  return body;
 }
 
 export type WriteResult = "ok" | "auth" | "gone" | "retry";
@@ -394,6 +452,43 @@ export async function writeFutureReservations(
           calendarId,
           await eventIdFor(userId, row.reservation_id),
           reservationEventBody(row, reminderMinutes),
+        );
+        if (result === "ok") written++;
+      }),
+    );
+  }
+  return written;
+}
+
+/** Writes every live future match of the teams the player follows —
+ * right away, like writeFutureReservations; RPC `my_future_matches` (0027)
+ * holds the same definition of "live" as backfill_calendar_jobs. */
+export async function writeFutureMatches(
+  // deno-lint-ignore no-explicit-any
+  db: any,
+  userId: string,
+  accessToken: string,
+  calendarId: string,
+): Promise<number> {
+  const { data: prefs } = await db.from("google_calendar_links")
+    .select("reminder_minutes").eq("user_id", userId).maybeSingle();
+  const reminderMinutes = (prefs?.reminder_minutes as number[] | null) ?? [];
+
+  const { data: matches } = await db.rpc("my_future_matches", {
+    p_user: userId,
+  });
+  const rows = (matches ?? []) as MatchRow[];
+
+  let written = 0;
+  const CHUNK = 5;
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    await Promise.all(
+      rows.slice(i, i + CHUNK).map(async (row) => {
+        const result = await upsertEvent(
+          accessToken,
+          calendarId,
+          await matchEventId(userId, row.match_id),
+          matchEventBody(row, reminderMinutes),
         );
         if (result === "ok") written++;
       }),
