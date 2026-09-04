@@ -44,4 +44,52 @@ void main() {
 
     expect(selected, -2);
   });
+
+  testWidgets('the selected swatch is marked with a check and a ring, '
+      'the others with neither', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ColorPickerGrid(selected: 1, onChanged: (_) {}),
+        ),
+      ),
+    );
+
+    // Exactly one check, and it sits in the chosen swatch — not a ring
+    // colour that a blue swatch can swallow.
+    expect(find.byIcon(Icons.check), findsOneWidget);
+    final swatches = find.byType(InkWell);
+    expect(
+      find.descendant(of: swatches.at(2), matching: find.byIcon(Icons.check)),
+      findsOneWidget,
+    );
+    // The "none" option keeps its own icon while something else is chosen.
+    expect(find.byIcon(Icons.block), findsOneWidget);
+  });
+
+  testWidgets('the none option selected shows the check, not the block icon',
+      (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ColorPickerGrid(selected: -1, onChanged: (_) {}),
+        ),
+      ),
+    );
+
+    expect(find.byIcon(Icons.check), findsOneWidget);
+    expect(find.byIcon(Icons.block), findsNothing);
+  });
+
+  testWidgets('nothing selected marks no swatch', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ColorPickerGrid(selected: 99, onChanged: (_) {}),
+        ),
+      ),
+    );
+
+    expect(find.byIcon(Icons.check), findsNothing);
+  });
 }

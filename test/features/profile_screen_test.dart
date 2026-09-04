@@ -754,7 +754,9 @@ void main() {
       await tester.ensureVisible(find.byType(ColorPickerGrid));
       await tester.tap(swatches().at(3)); // index 0 is the none option
       await tester.pumpAndSettle();
-      await tester.tap(find.byIcon(Icons.block));
+      // By position, not by the block icon: "Podle oddílu" is the current
+      // choice here, so it wears the check mark instead.
+      await tester.tap(swatches().first);
       await tester.pumpAndSettle();
 
       expect(saved, [2, -1]);
