@@ -92,6 +92,7 @@ CREATE OR REPLACE FUNCTION "public"."backfill_calendar_jobs"("p_user" "uuid") RE
     AS $$
 declare
   v_count int;
+  v_matches int;
 begin
   insert into notification_jobs (kind, dedupe_key, payload, run_at)
   select 'calendar_sync',
@@ -105,7 +106,18 @@ begin
   on conflict (dedupe_key)
     do update set run_at = excluded.run_at, payload = excluded.payload;
   get diagnostics v_count = row_count;
-  return v_count;
+
+  insert into notification_jobs (kind, dedupe_key, payload, run_at)
+  select 'calendar_sync',
+         'calendar:' || p_user || ':match:' || m.match_id,
+         jsonb_build_object('user_id', p_user, 'match_id', m.match_id),
+         now()
+    from my_future_matches(p_user) m
+  on conflict (dedupe_key)
+    do update set run_at = excluded.run_at, payload = excluded.payload;
+  get diagnostics v_matches = row_count;
+
+  return v_count + v_matches;
 end;
 $$;
 
@@ -733,6 +745,22 @@ $$;
 ALTER FUNCTION "public"."enqueue_calendar_sync"("p_user" "uuid", "p_reservation" "uuid") OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."enqueue_match_calendar_sync"("p_user" "uuid", "p_match" "uuid") RETURNS "void"
+    LANGUAGE "sql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  select enqueue_notification('calendar_sync',
+    'calendar:' || p_user || ':match:' || p_match,
+    jsonb_build_object('user_id', p_user, 'match_id', p_match))
+  where exists (
+    select 1 from google_calendar_links
+    where user_id = p_user and status = 'linked');
+$$;
+
+
+ALTER FUNCTION "public"."enqueue_match_calendar_sync"("p_user" "uuid", "p_match" "uuid") OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."enqueue_notification"("p_kind" "text", "p_dedupe_key" "text", "p_payload" "jsonb", "p_delay" interval DEFAULT '00:03:00'::interval) RETURNS "void"
     LANGUAGE "sql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -811,6 +839,22 @@ $$;
 
 
 ALTER FUNCTION "public"."is_superadmin"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."match_calendar_followers"("p_tenant" "uuid", "p_home" "text", "p_away" "text") RETURNS SETOF "uuid"
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  select l.user_id
+    from google_calendar_links l
+    join profiles p on p.id = l.user_id
+    where p.tenant_id = p_tenant
+      and l.status = 'linked'
+      and l.match_teams && array[p_home, p_away];
+$$;
+
+
+ALTER FUNCTION "public"."match_calendar_followers"("p_tenant" "uuid", "p_home" "text", "p_away" "text") OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."merge_placeholder_player"("p_placeholder_id" "uuid", "p_target_id" "uuid", "p_display_name" "text", "p_nick" "text", "p_club_id" "uuid") RETURNS "void"
@@ -1008,6 +1052,27 @@ $$;
 ALTER FUNCTION "public"."move_reservation"("p_reservation" "uuid", "p_to_block" "uuid", "p_lane" integer, "p_notify" boolean, "p_message" "text") OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."my_future_matches"("p_user" "uuid") RETURNS TABLE("match_id" "uuid", "date" "date", "starts_at" time without time zone, "ends_at" time without time zone, "home_team" "text", "away_team" "text", "is_away" boolean, "description" "text", "alley_name" "text")
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  select s.id, s.date, s.starts_at, s.ends_at,
+         s.home_team, s.away_team, s.is_away, s.description, t.name
+    from priority_slots s
+    join priority_slot_types y on y.id = s.type_id and y.is_match
+    join tenants t on t.id = s.tenant_id
+    join profiles p on p.id = p_user and p.tenant_id = s.tenant_id
+    join google_calendar_links l on l.user_id = p_user
+    where s.parent_id is null
+      and s.date >= (now() at time zone 'Europe/Prague')::date
+      and l.match_teams && array[s.home_team, s.away_team]
+    order by s.date, s.starts_at;
+$$;
+
+
+ALTER FUNCTION "public"."my_future_matches"("p_user" "uuid") OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."my_future_reservations"("p_user" "uuid") RETURNS TABLE("reservation_id" "uuid", "date" "date", "starts_at" time without time zone, "ends_at" time without time zone, "lane" smallint, "alley_name" "text")
     LANGUAGE "sql" STABLE SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -1074,6 +1139,33 @@ $$;
 
 
 ALTER FUNCTION "public"."notify_webhook_config"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."priority_slots_enqueue_calendar"() RETURNS "trigger"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  if tg_op in ('UPDATE', 'DELETE') and old.parent_id is null
+     and exists (select 1 from priority_slot_types
+                 where id = old.type_id and is_match) then
+    perform enqueue_match_calendar_sync(u, old.id)
+      from match_calendar_followers(
+        old.tenant_id, old.home_team, old.away_team) u;
+  end if;
+  if tg_op in ('INSERT', 'UPDATE') and new.parent_id is null
+     and exists (select 1 from priority_slot_types
+                 where id = new.type_id and is_match) then
+    perform enqueue_match_calendar_sync(u, new.id)
+      from match_calendar_followers(
+        new.tenant_id, new.home_team, new.away_team) u;
+  end if;
+  return coalesce(new, old);
+end;
+$$;
+
+
+ALTER FUNCTION "public"."priority_slots_enqueue_calendar"() OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."register_profile"("p_display_name" "text", "p_tenant_id" "uuid", "p_club_id" "uuid" DEFAULT NULL::"uuid", "p_nick" "text" DEFAULT ''::"text") RETURNS "public"."profiles"
@@ -1439,6 +1531,36 @@ $$;
 ALTER FUNCTION "public"."seed_tenant_defaults"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."set_calendar_match_teams_for"("p_user" "uuid", "p_teams" "text"[]) RETURNS "text"[]
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_teams text[];
+begin
+  select coalesce(array_agg(distinct t order by t), '{}'::text[])
+    into v_teams
+    from (select trim(x) as t
+            from unnest(coalesce(p_teams, '{}'::text[])) as x) s
+    where t <> '';
+  if array_length(v_teams, 1) > 20
+     or exists (select 1 from unnest(v_teams) t where length(t) > 80) then
+    raise exception 'bad_teams';
+  end if;
+  update google_calendar_links
+    set match_teams = v_teams, updated_at = now()
+    where user_id = p_user;
+  if not found then
+    raise exception 'unknown_link';
+  end if;
+  return v_teams;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."set_calendar_match_teams_for"("p_user" "uuid", "p_teams" "text"[]) OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."set_calendar_reminders_for"("p_user" "uuid", "p_minutes" integer[]) RETURNS integer[]
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -1795,6 +1917,8 @@ CREATE TABLE IF NOT EXISTS "public"."google_calendar_links" (
     "reminder_minutes" integer[] DEFAULT '{}'::integer[] NOT NULL,
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "match_teams" "text"[] DEFAULT '{}'::"text"[] NOT NULL,
+    CONSTRAINT "google_calendar_links_match_teams_check" CHECK ((COALESCE("array_length"("match_teams", 1), 0) <= 20)),
     CONSTRAINT "google_calendar_links_reminder_minutes_check" CHECK (((COALESCE("array_length"("reminder_minutes", 1), 0) <= 5) AND (0 <= ALL ("reminder_minutes")) AND (40320 >= ALL ("reminder_minutes")))),
     CONSTRAINT "google_calendar_links_status_check" CHECK (("status" = ANY (ARRAY['pending'::"text", 'linked'::"text", 'broken'::"text", 'unlinked'::"text"])))
 );
@@ -1804,6 +1928,10 @@ ALTER TABLE "public"."google_calendar_links" OWNER TO "postgres";
 
 
 COMMENT ON COLUMN "public"."google_calendar_links"."status" IS 'pending (token stored, calendar not yet created) | linked | broken (token revoked / calendar gone) | unlinked (disconnected)';
+
+
+
+COMMENT ON COLUMN "public"."google_calendar_links"."match_teams" IS 'Teams whose matches go to the calendar — home_team/away_team strings of priority_slots; empty = none.';
 
 
 
@@ -2091,6 +2219,10 @@ CREATE OR REPLACE TRIGGER "override_changed" AFTER INSERT OR DELETE OR UPDATE ON
 
 
 CREATE OR REPLACE TRIGGER "priority_conflicts" AFTER INSERT OR UPDATE ON "public"."priority_slots" FOR EACH ROW EXECUTE FUNCTION "public"."cancel_res_for_priority"();
+
+
+
+CREATE OR REPLACE TRIGGER "priority_slots_enqueue_calendar" AFTER INSERT OR DELETE OR UPDATE ON "public"."priority_slots" FOR EACH ROW EXECUTE FUNCTION "public"."priority_slots_enqueue_calendar"();
 
 
 
@@ -2494,14 +2626,29 @@ GRANT ALL ON FUNCTION "public"."enqueue_calendar_sync"("p_user" "uuid", "p_reser
 
 
 
+REVOKE ALL ON FUNCTION "public"."enqueue_match_calendar_sync"("p_user" "uuid", "p_match" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."enqueue_match_calendar_sync"("p_user" "uuid", "p_match" "uuid") TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."enqueue_notification"("p_kind" "text", "p_dedupe_key" "text", "p_payload" "jsonb", "p_delay" interval) FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."enqueue_notification"("p_kind" "text", "p_dedupe_key" "text", "p_payload" "jsonb", "p_delay" interval) TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."match_calendar_followers"("p_tenant" "uuid", "p_home" "text", "p_away" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."match_calendar_followers"("p_tenant" "uuid", "p_home" "text", "p_away" "text") TO "service_role";
 
 
 
 GRANT ALL ON FUNCTION "public"."merge_placeholder_player"("p_placeholder_id" "uuid", "p_target_id" "uuid", "p_display_name" "text", "p_nick" "text", "p_club_id" "uuid") TO "anon";
 GRANT ALL ON FUNCTION "public"."merge_placeholder_player"("p_placeholder_id" "uuid", "p_target_id" "uuid", "p_display_name" "text", "p_nick" "text", "p_club_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."merge_placeholder_player"("p_placeholder_id" "uuid", "p_target_id" "uuid", "p_display_name" "text", "p_nick" "text", "p_club_id" "uuid") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."my_future_matches"("p_user" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."my_future_matches"("p_user" "uuid") TO "service_role";
 
 
 
@@ -2512,6 +2659,12 @@ GRANT ALL ON FUNCTION "public"."my_future_reservations"("p_user" "uuid") TO "ser
 
 REVOKE ALL ON FUNCTION "public"."notify_webhook_config"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."notify_webhook_config"() TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."priority_slots_enqueue_calendar"() TO "anon";
+GRANT ALL ON FUNCTION "public"."priority_slots_enqueue_calendar"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."priority_slots_enqueue_calendar"() TO "service_role";
 
 
 
@@ -2562,6 +2715,11 @@ GRANT ALL ON FUNCTION "public"."save_placeholder_player"("p_id" "uuid", "p_displ
 
 REVOKE ALL ON FUNCTION "public"."seed_demo_member"("p_email" "text") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."seed_demo_member"("p_email" "text") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."set_calendar_match_teams_for"("p_user" "uuid", "p_teams" "text"[]) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."set_calendar_match_teams_for"("p_user" "uuid", "p_teams" "text"[]) TO "service_role";
 
 
 

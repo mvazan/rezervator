@@ -3,10 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/ui.dart';
 import '../../../data/providers.dart';
+import '../../../domain/collation.dart';
 import '../../../domain/models.dart';
 
 /// Google Calendar link on Můj profil: connect (opens Google's consent page
-/// in the browser), show the current state, edit reminders, or disconnect.
+/// in the browser), show the current state, edit reminders, pick the teams
+/// whose matches go to the calendar, or disconnect.
 /// Nothing comes back into the app via a deep link — the backend writes the
 /// result and this card flips on its own through the live stream.
 class CalendarLinkCard extends ConsumerStatefulWidget {
@@ -16,6 +18,7 @@ class CalendarLinkCard extends ConsumerStatefulWidget {
     this.openUrl = launchWeb,
     this.disconnect = Api.disconnectCalendar,
     this.setReminders = Api.setCalendarReminders,
+    this.setMatchTeams = Api.setCalendarMatchTeams,
   });
 
   /// The backend calls and the browser launch, injectable for widget tests
@@ -24,6 +27,7 @@ class CalendarLinkCard extends ConsumerStatefulWidget {
   final void Function(String url) openUrl;
   final Future<bool> Function() disconnect;
   final Future<void> Function(List<int> minutes) setReminders;
+  final Future<void> Function(List<String> teams) setMatchTeams;
 
   @override
   ConsumerState<CalendarLinkCard> createState() => _CalendarLinkCardState();
@@ -152,6 +156,61 @@ class _CalendarLinkCardState extends ConsumerState<CalendarLinkCard> {
         context, () => widget.setReminders([...current, minutes]));
   }
 
+  /// Team picker: every team the schedule knows (home team of a home match,
+  /// away team of an away match) plus whatever is already chosen, so a team
+  /// that vanished from the schedule can still be unticked. Each toggle is
+  /// saved at once — the sheet watches the same stream as the card.
+  Future<void> _editMatchTeams() {
+    return showModalBottomSheet<void>(
+      context: context,
+      builder: (sheetContext) => Consumer(
+        builder: (context, ref, _) {
+          final link =
+              ref.watch(myCalendarLinkProvider).value ?? CalendarLink.none;
+          final chosen = link.matchTeams;
+          final teams = {...ref.watch(ourTeamsProvider), ...chosen}.toList()
+            ..sort(compareCzech);
+          return SafeArea(
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+                  child: Text('Zápasy v kalendáři',
+                      style: Theme.of(context).textTheme.titleMedium),
+                ),
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Text('Vyber svůj tým — jeho domácí i venkovní zápasy '
+                      'se přidají do kalendáře.'),
+                ),
+                if (teams.isEmpty)
+                  const ListTile(
+                    leading: Icon(Icons.sports_outlined),
+                    title: Text('Zatím žádné zápasy v rozvrhu'),
+                  ),
+                for (final team in teams)
+                  CheckboxListTile(
+                    value: chosen.contains(team),
+                    title: Text(team),
+                    onChanged: (on) => tryAction(
+                      context,
+                      () => widget.setMatchTeams([
+                        for (final t in chosen)
+                          if (t != team) t,
+                        if (on == true) team,
+                      ]),
+                    ),
+                  ),
+                const SizedBox(height: 8),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   Widget _connectButton() => Padding(
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
         child: Align(
@@ -190,6 +249,13 @@ class _CalendarLinkCardState extends ConsumerState<CalendarLinkCard> {
             subtitle: Text(remindersSummary(link.reminderMinutes)),
             trailing: const Icon(Icons.chevron_right),
             onTap: _editReminders,
+          ),
+          ListTile(
+            leading: const Icon(Icons.sports_outlined),
+            title: const Text('Zápasy v kalendáři…'),
+            subtitle: Text(matchTeamsSummary(link.matchTeams)),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: _editMatchTeams,
           ),
         ],
       // Google said yes; the backend is creating the calendar. The retry

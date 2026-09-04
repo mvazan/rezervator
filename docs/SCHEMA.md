@@ -197,6 +197,32 @@ re-timed block) reach Google through `notification_jobs`:
   `backfill_calendar_jobs`, `set_calendar_reminders_for`,
   `my_future_reservations` are their service-role RPCs).
 
+### Matches in the calendar (0027)
+
+- `google_calendar_links.match_teams text[]` (≤ 20) — the teams whose
+  matches the player wants in the calendar, as the imported matches name
+  them (`priority_slots.home_team` / `away_team`, the federation's names).
+  Empty = none. The app derives the pick list from `priority_slots`
+  (home team of home matches ∪ away team of away matches), so nothing is
+  maintained by hand.
+- Producers: trigger `priority_slots_enqueue_calendar` (insert / update /
+  delete) fans out one `calendar_sync` job per follower of either team
+  (`match_calendar_followers`; teams before AND after the change), payload
+  `{user_id, match_id}`, dedupe `calendar:<user>:match:<slot>`. Úklid
+  children and other blockages enqueue nothing. `backfill_calendar_jobs`
+  also queues the followed future matches.
+- RPCs (service role): `set_calendar_match_teams_for(user, teams)` —
+  trimmed, distinct, sorted, `bad_teams` / `unknown_link`;
+  `my_future_matches(user)` — live future matches of the followed teams in
+  the player's kuželna with the alley name (an away match's venue travels
+  in `description`, written by `tool/import_matches.py`).
+- Handler (`notify`): a `match_id` payload reads the slot at run time and
+  upserts the event (id = sha256(`user:match:slot`)) or deletes it when the
+  match is gone, past, not a match, or its teams are no longer followed.
+  `calendar-manage` action `match_teams` stores the choice and settles the
+  events on the spot (dropped teams' matches deleted, the rest rewritten);
+  `reminders` rewrites matches as well as trainings.
+
 ## Edge functions
 
 - **notify** — called by `notify_webhook()` (pg_net POST; URL and

@@ -333,6 +333,12 @@ def preflight_sql(tenant: str, tenant_id: Optional[str],
     ])
 
 
+def description_of(m: Match) -> str:
+    """The competition; an away match also names the venue — the app has no
+    column for it, and the calendar event (0027) shows it from here."""
+    return '%s · %s' % (m.competition, m.alley) if m.is_away else m.competition
+
+
 def build_sql(matches: List[Match], tenant: str, tenant_id: Optional[str],
               prep: int, source: str, replace: bool) -> str:
     values = []
@@ -341,7 +347,7 @@ def build_sql(matches: List[Match], tenant: str, tenant_id: Optional[str],
         values.append('  (%s, %s, %s, %s, %s, %d, %s, %s, %s)' % (
             sql_str(m.date.isoformat()), sql_str(m.time), sql_str(end),
             sql_str(m.home), sql_str(m.away), 0 if m.is_away else prep,
-            sql_str(m.competition), 'true' if m.is_away else 'false',
+            sql_str(description_of(m)), 'true' if m.is_away else 'false',
             sql_str(m.import_key)))
     home = sum(1 for m in matches if not m.is_away)
     replace_note = (

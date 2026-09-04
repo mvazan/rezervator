@@ -950,5 +950,163 @@ begin
   raise notice 'OK: app_config is read-only for the app and hidden from anon';
 end $$;
 
+
+-- ---------------------------------------------------------------------------
+-- Matches in the calendar (0027): the team choice, the producers, the RPCs
+-- ---------------------------------------------------------------------------
+reset role;
+do $$
+begin
+  if has_function_privilege('authenticated',
+       'public.set_calendar_match_teams_for(uuid, text[])', 'execute')
+     or has_function_privilege('authenticated',
+          'public.my_future_matches(uuid)', 'execute')
+     or has_function_privilege('authenticated',
+          'public.enqueue_match_calendar_sync(uuid, uuid)', 'execute')
+     or has_function_privilege('authenticated',
+          'public.match_calendar_followers(uuid, text, text)', 'execute') then
+    raise exception 'FAIL: a 0027 calendar helper is callable by app roles';
+  end if;
+  if not has_function_privilege('service_role',
+       'public.set_calendar_match_teams_for(uuid, text[])', 'execute')
+     or not has_function_privilege('service_role',
+          'public.my_future_matches(uuid)', 'execute') then
+    raise exception 'FAIL: service_role lacks a 0027 calendar RPC';
+  end if;
+  raise notice 'OK: 0027 calendar RPCs are server-only';
+end $$;
+
+-- A's admin (linked above) follows SKK Veverky Brno A; a home and an away
+-- match of that team enqueue a job each, a match of another team none.
+do $$
+declare
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+  v_tenant constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_type uuid;
+  v_home uuid;
+  v_away uuid;
+  v_other uuid;
+  v_d date := (now() at time zone 'Europe/Prague')::date + 40;
+  v_stored text[];
+  v_jobs int;
+begin
+  -- normalised: trimmed, distinct, sorted, blanks dropped
+  v_stored := set_calendar_match_teams_for(v_uid,
+    array[' SKK Veverky Brno A ', 'SKK Veverky Brno A', '', 'KS Devítka Brno B']);
+  if v_stored <> array['KS Devítka Brno B', 'SKK Veverky Brno A'] then
+    raise exception 'FAIL: match teams not normalised: %', v_stored;
+  end if;
+  begin
+    perform set_calendar_match_teams_for(v_uid,
+      (select array_agg('T' || g) from generate_series(1, 21) g));
+    raise exception 'FAIL: 21 teams accepted';
+  exception when others then
+    if sqlerrm <> 'bad_teams' then raise; end if;
+  end;
+  begin
+    perform set_calendar_match_teams_for(
+      '10000000-0000-0000-0000-000000000003', array['X']);
+    raise exception 'FAIL: teams stored for a player without a link';
+  exception when others then
+    if sqlerrm <> 'unknown_link' then raise; end if;
+  end;
+
+  select id into v_type from priority_slot_types
+    where tenant_id = v_tenant and is_match and builtin;
+  delete from notification_jobs where dedupe_key like 'calendar:%:match:%';
+
+  insert into priority_slots
+    (tenant_id, date, starts_at, ends_at, type_id, home_team, away_team,
+     prep_minutes, description, is_away, created_by)
+  values
+    (v_tenant, v_d, '18:30', '21:30', v_type,
+     'SKK Veverky Brno A', 'KK MS Brno D', 30, 'KP1 Sever', false, v_uid)
+  returning id into v_home;
+  insert into priority_slots
+    (tenant_id, date, starts_at, ends_at, type_id, home_team, away_team,
+     prep_minutes, description, is_away, created_by)
+  values
+    (v_tenant, v_d + 7, '17:00', '19:30', v_type,
+     'KK Blansko B', 'SKK Veverky Brno A', 0, 'KP1 Sever · Blansko 1-6', true, v_uid)
+  returning id into v_away;
+  insert into priority_slots
+    (tenant_id, date, starts_at, ends_at, type_id, home_team, away_team,
+     prep_minutes, description, is_away, created_by)
+  values
+    (v_tenant, v_d, '16:30', '18:00', v_type,
+     'TJ Sokol Husovice D', 'TJ Sokol Brno IV C', 0, 'KP2 Sever B', false, v_uid)
+  returning id into v_other;
+
+  if not exists (select 1 from notification_jobs
+                 where dedupe_key = 'calendar:' || v_uid || ':match:' || v_home
+                   and payload ->> 'match_id' = v_home::text
+                   and payload ->> 'user_id' = v_uid::text) then
+    raise exception 'FAIL: home match of a followed team enqueued no job';
+  end if;
+  if not exists (select 1 from notification_jobs
+                 where dedupe_key = 'calendar:' || v_uid || ':match:' || v_away) then
+    raise exception 'FAIL: away match of a followed team enqueued no job';
+  end if;
+  if exists (select 1 from notification_jobs
+             where dedupe_key = 'calendar:' || v_uid || ':match:' || v_other) then
+    raise exception 'FAIL: a match of other teams enqueued a job';
+  end if;
+  -- the úklid child the trigger made for the home match is not a match
+  if exists (select 1 from notification_jobs j
+             join priority_slots s on j.dedupe_key = 'calendar:' || v_uid || ':match:' || s.id
+             where s.parent_id is not null) then
+    raise exception 'FAIL: an úklid child enqueued a calendar job';
+  end if;
+
+  -- the raw material for the events: both followed matches, in date order
+  if (select array_agg(match_id order by date) from my_future_matches(v_uid))
+     <> array[v_home, v_away] then
+    raise exception 'FAIL: my_future_matches does not list the followed matches';
+  end if;
+  if (select alley_name from my_future_matches(v_uid) where match_id = v_home)
+     <> 'Kuželna A' then
+    raise exception 'FAIL: my_future_matches lacks the alley name';
+  end if;
+
+  -- backfill re-arms every live reservation job and both match jobs, due now
+  delete from notification_jobs where dedupe_key like 'calendar:' || v_uid || '%';
+  v_jobs := backfill_calendar_jobs(v_uid);
+  if v_jobs <> (select count(*) from reservations
+                where player_id = v_uid and cancelled_at is null
+                  and date >= (now() at time zone 'Europe/Prague')::date) + 2 then
+    raise exception 'FAIL: backfill queued % jobs, expected the live reservations + 2 matches', v_jobs;
+  end if;
+  if (select count(*) from notification_jobs
+      where dedupe_key like 'calendar:' || v_uid || ':match:%' and run_at <= now()) <> 2 then
+    raise exception 'FAIL: backfill did not queue both match jobs due now';
+  end if;
+
+  -- re-timing the match re-arms its job; deleting it enqueues the removal
+  delete from notification_jobs where dedupe_key like 'calendar:%:match:%';
+  update priority_slots set starts_at = '19:00', ends_at = '22:00' where id = v_home;
+  if not exists (select 1 from notification_jobs
+                 where dedupe_key = 'calendar:' || v_uid || ':match:' || v_home) then
+    raise exception 'FAIL: re-timed match enqueued no job';
+  end if;
+  delete from notification_jobs where dedupe_key like 'calendar:%:match:%';
+  delete from priority_slots where id = v_away;
+  if not exists (select 1 from notification_jobs
+                 where dedupe_key = 'calendar:' || v_uid || ':match:' || v_away) then
+    raise exception 'FAIL: deleted match enqueued no removal job';
+  end if;
+
+  -- dropping the team: no more jobs for its matches, my_future_matches empty
+  perform set_calendar_match_teams_for(v_uid, '{}'::text[]);
+  delete from notification_jobs where dedupe_key like 'calendar:%:match:%';
+  update priority_slots set description = 'KP1 Sever (přeloženo)' where id = v_home;
+  if exists (select 1 from notification_jobs where dedupe_key like 'calendar:%:match:%') then
+    raise exception 'FAIL: a match of an unfollowed team enqueued a job';
+  end if;
+  if exists (select 1 from my_future_matches(v_uid)) then
+    raise exception 'FAIL: my_future_matches lists matches of unfollowed teams';
+  end if;
+  raise notice 'OK: matches of followed teams enqueue calendar jobs, others do not';
+end $$;
+
 reset role;
 rollback;
