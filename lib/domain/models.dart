@@ -802,6 +802,7 @@ class CalendarLink {
     this.lastError,
     this.updatedAt,
     this.reminderMinutes = const [],
+    this.matchTeams = const [],
   });
 
   static const none = CalendarLink(status: CalendarLinkStatus.notLinked);
@@ -819,6 +820,11 @@ class CalendarLink {
   /// server-side to every upcoming event when changed.
   final List<int> reminderMinutes;
 
+  /// Teams whose matches go to the calendar (the federation's names as the
+  /// imported matches carry them, e.g. 'SKK Veverky Brno A'); empty = none.
+  /// Stored sorted by the backend (0027).
+  final List<String> matchTeams;
+
   bool get isLinked => status == CalendarLinkStatus.linked;
 
   factory CalendarLink.fromJson(Map<String, dynamic> json) => CalendarLink(
@@ -832,5 +838,14 @@ class CalendarLink {
           for (final m in json['reminder_minutes'] as List? ?? const [])
             (m as num).toInt(),
         ]..sort((a, b) => b.compareTo(a)),
+        matchTeams: [
+          for (final t in json['match_teams'] as List? ?? const []) t as String,
+        ],
       );
 }
+
+/// "Žádný tým" / the teams joined — the profile card's one-line summary.
+/// Not "Žádné": the reminders line right above says that, and the two rows
+/// must read apart at a glance.
+String matchTeamsSummary(List<String> teams) =>
+    teams.isEmpty ? 'Žádný tým' : teams.join(' · ');

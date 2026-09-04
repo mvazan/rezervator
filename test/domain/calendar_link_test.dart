@@ -106,4 +106,19 @@ void main() {
     expect(CalendarLink.fromJson(const {}).status,
         CalendarLinkStatus.notLinked);
   });
+
+  test('fromJson reads the followed teams; absent means none', () {
+    final link = CalendarLink.fromJson({
+      'status': 'linked',
+      'match_teams': ['SKK Veverky Brno A', 'KS Devítka Brno B'],
+    });
+    expect(link.matchTeams, ['SKK Veverky Brno A', 'KS Devítka Brno B']);
+    expect(CalendarLink.fromJson({'status': 'linked'}).matchTeams, isEmpty);
+  });
+
+  test('matchTeamsSummary reads Žádné or the teams joined', () {
+    expect(matchTeamsSummary(const []), 'Žádný tým');
+    expect(matchTeamsSummary(const ['SKK Veverky Brno A', 'SKK Veverky Brno B']),
+        'SKK Veverky Brno A · SKK Veverky Brno B');
+  });
 }

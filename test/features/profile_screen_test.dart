@@ -16,6 +16,27 @@ Future<Uri> noConsent() async => throw StateError('unexpected consent');
 Future<bool> noDisconnect() async => throw StateError('unexpected disconnect');
 Future<void> noReminders(List<int> _) async =>
     throw StateError('unexpected reminders');
+Future<void> noMatchTeams(List<String> _) async =>
+    throw StateError('unexpected match teams');
+
+/// The alley's schedule as the calendar card sees it: a home match of
+/// Veverky A, an away match of Devítka B, and a foreign opponent on each —
+/// only our two teams may be offered.
+PrioritySlot match(String id, String home, String away, {bool away_ = false}) =>
+    PrioritySlot(
+      id: id,
+      date: Day(2026, 10, 1),
+      startsAt: const HourMinute(18, 0),
+      endsAt: const HourMinute(21, 0),
+      type: PrioritySlot.fallbackMatchType,
+      homeTeam: home,
+      awayTeam: away,
+      isAway: away_,
+    );
+final schedule = [
+  match('m1', 'SKK Veverky Brno A', 'KK MS Brno D'),
+  match('m2', 'KK Slovan Rosice D', 'KS Devítka Brno B', away_: true),
+];
 
 void main() {
   const me = Profile(
@@ -34,6 +55,7 @@ void main() {
     bool calendarAvailable = false,
     CalendarLink link = CalendarLink.none,
     Future<void> Function(int color)? setOwnColor,
+    List<PrioritySlot> matches = const [],
   }) {
     return ProviderScope(
       overrides: [
@@ -43,6 +65,7 @@ void main() {
         ),
         calendarAvailableProvider.overrideWithValue(calendarAvailable),
         myCalendarLinkProvider.overrideWith((ref) => Stream.value(link)),
+        prioritySlotsProvider.overrideWithValue(matches),
       ],
       child: MaterialApp(
         home: ProfileScreen(
@@ -228,6 +251,7 @@ void main() {
       expect(find.text(connectLabel), findsOneWidget);
       expect(find.text('Odpojit'), findsNothing);
       expect(find.text('Připomínky…'), findsNothing);
+      expect(find.text('Zápasy v kalendáři…'), findsNothing);
     });
 
     testWidgets('pending: shows progress; a retry stays available in case '
@@ -277,6 +301,25 @@ void main() {
       expect(find.text('1 den předem · 2 h předem'), findsOneWidget);
       expect(find.text('Odpojit'), findsOneWidget);
       expect(find.text(connectLabel), findsNothing);
+      // No team chosen yet — matches stay out of the calendar.
+      expect(find.text('Zápasy v kalendáři…'), findsOneWidget);
+      expect(find.text('Žádný tým'), findsOneWidget);
+    });
+
+    testWidgets('linked with a team chosen names it under Zápasy v kalendáři',
+        (tester) async {
+      await tester.pumpWidget(app(
+        me,
+        calendarAvailable: true,
+        link: const CalendarLink(
+          status: CalendarLinkStatus.linked,
+          matchTeams: ['SKK Veverky Brno A', 'SKK Veverky Brno B'],
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.text('SKK Veverky Brno A · SKK Veverky Brno B'),
+          findsOneWidget);
     });
 
     testWidgets('linked without reminders reads "Žádné"', (tester) async {
@@ -344,11 +387,14 @@ void main() {
       void Function(String url)? openUrl,
       Future<bool> Function() disconnect = noDisconnect,
       Future<void> Function(List<int> minutes) setReminders = noReminders,
+      Future<void> Function(List<String> teams) setMatchTeams = noMatchTeams,
+      List<PrioritySlot> matches = const [],
     }) {
       return ProviderScope(
         overrides: [
           calendarAvailableProvider.overrideWithValue(true),
           myCalendarLinkProvider.overrideWith((ref) => link),
+          prioritySlotsProvider.overrideWithValue(matches),
         ],
         child: MaterialApp(
           home: Scaffold(
@@ -357,11 +403,97 @@ void main() {
               openUrl: openUrl ?? (_) => fail('unexpected openUrl'),
               disconnect: disconnect,
               setReminders: setReminders,
+              setMatchTeams: setMatchTeams,
             ),
           ),
         ),
       );
     }
+
+    testWidgets('Zápasy v kalendáři offers only the alley\'s own teams, '
+        'derived from the schedule, and saves each toggle', (tester) async {
+      final saved = <List<String>>[];
+      final links = StreamController<CalendarLink>.broadcast();
+      addTearDown(links.close);
+      const linkedNoTeams = CalendarLink(status: CalendarLinkStatus.linked);
+      await tester.pumpWidget(card(
+        links.stream,
+        matches: schedule,
+        setMatchTeams: (teams) async => saved.add(teams),
+      ));
+      links.add(linkedNoTeams);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Zápasy v kalendáři…'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Zápasy v kalendáři'), findsOneWidget);
+      // Our teams only: the home team of the home match, the away team of
+      // the away match — never the opponents.
+      expect(find.widgetWithText(CheckboxListTile, 'SKK Veverky Brno A'),
+          findsOneWidget);
+      expect(find.widgetWithText(CheckboxListTile, 'KS Devítka Brno B'),
+          findsOneWidget);
+      expect(find.text('KK MS Brno D'), findsNothing);
+      expect(find.text('KK Slovan Rosice D'), findsNothing);
+      // Devítka sorts before Veverky (Czech order).
+      expect(
+        tester.getTopLeft(find.text('KS Devítka Brno B')).dy,
+        lessThan(tester.getTopLeft(find.text('SKK Veverky Brno A')).dy),
+      );
+
+      await tester
+          .tap(find.widgetWithText(CheckboxListTile, 'SKK Veverky Brno A'));
+      await tester.pumpAndSettle();
+      expect(saved, [
+        ['SKK Veverky Brno A']
+      ]);
+
+      // The backend stored it; the stream brings the row back and the sheet
+      // redraws ticked. Unticking sends the list without it.
+      links.add(const CalendarLink(
+        status: CalendarLinkStatus.linked,
+        matchTeams: ['SKK Veverky Brno A'],
+      ));
+      await tester.pumpAndSettle();
+      final tile = tester.widget<CheckboxListTile>(
+          find.widgetWithText(CheckboxListTile, 'SKK Veverky Brno A'));
+      expect(tile.value, isTrue);
+      await tester
+          .tap(find.widgetWithText(CheckboxListTile, 'SKK Veverky Brno A'));
+      await tester.pumpAndSettle();
+      expect(saved.last, isEmpty);
+    });
+
+    testWidgets('a chosen team that left the schedule stays listed so it can '
+        'be unticked', (tester) async {
+      await tester.pumpWidget(card(
+        Stream.value(const CalendarLink(
+          status: CalendarLinkStatus.linked,
+          matchTeams: ['TJ Sokol Husovice E'],
+        )),
+        matches: schedule,
+      ));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Zápasy v kalendáři…'));
+      await tester.pumpAndSettle();
+
+      expect(find.widgetWithText(CheckboxListTile, 'TJ Sokol Husovice E'),
+          findsOneWidget);
+      expect(find.byType(CheckboxListTile), findsNWidgets(3));
+    });
+
+    testWidgets('an empty schedule says so in the sheet', (tester) async {
+      await tester.pumpWidget(card(
+        Stream.value(const CalendarLink(status: CalendarLinkStatus.linked)),
+      ));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Zápasy v kalendáři…'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Zatím žádné zápasy v rozvrhu'), findsOneWidget);
+      expect(find.byType(CheckboxListTile), findsNothing);
+    });
 
     testWidgets('connect opens the consent page in the browser and asks to '
         'come back', (tester) async {

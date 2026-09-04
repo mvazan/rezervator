@@ -267,6 +267,19 @@ final playersProvider = FutureProvider<List<PlayerName>>((ref) async {
 final calendarAvailableProvider =
     Provider<bool>((_) => AppConfig.hasGoogleCalendar);
 
+/// The alley's own teams, as the imported matches name them: the home team
+/// of every home match and the away team of every away match, Czech-sorted.
+/// The pick list for "which matches go to my calendar" — no admin upkeep,
+/// always exactly the teams that have matches in the schedule.
+final ourTeamsProvider = Provider<List<String>>((ref) {
+  final teams = <String>{
+    for (final s in ref.watch(prioritySlotsProvider))
+      if (s.type.isMatch && s.parentId == null)
+        if (s.isAway) s.awayTeam else s.homeTeam,
+  }..remove('');
+  return teams.toList()..sort(compareCzech);
+});
+
 /// The caller's Google Calendar link. No row = [CalendarLink.none]. Written
 /// only by the backend (the OAuth callback and the sync jobs), so the card on
 /// Můj profil flips on its own the moment linking finishes in the browser —
@@ -799,6 +812,15 @@ class Api {
       _db.functions.invoke(
         'calendar-manage',
         body: {'action': 'reminders', 'minutes': minutes},
+      );
+
+  /// Stores which teams' matches go to the calendar and settles the events
+  /// right away (dropped teams' matches deleted, the rest rewritten). The
+  /// card redraws from the links stream.
+  static Future<void> setCalendarMatchTeams(List<String> teams) =>
+      _db.functions.invoke(
+        'calendar-manage',
+        body: {'action': 'match_teams', 'teams': teams},
       );
 }
 
