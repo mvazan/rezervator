@@ -15,7 +15,7 @@ class UpdateScreen extends StatelessWidget {
       'https://play.google.com/store/apps/details?id=cz.kuzelky.rezervator';
 
   /// The web is deployed automatically; a reload fetches the current build.
-  static const webUrl = 'https://mvazan.github.io/rezervator/';
+  static const webUrl = 'https://rezervator.online/';
 
   @override
   Widget build(BuildContext context) {

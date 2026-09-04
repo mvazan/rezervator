@@ -48,20 +48,19 @@ přidej všechny adresy, ze kterých se bude přihlašovat:
 
 ```
 cz.kuzelky.rezervator://login-callback
-https://<tvůj-github-username>.github.io/rezervator/
+https://rezervator.online/
 http://localhost:**
 ```
 
 - První řádek je deep link pro mobilní appku (Android/iOS).
-- Druhý řádek je produkční web na GitHub Pages (krok 5) — uprav
-  `<tvůj-github-username>` na skutečné jméno účtu/organizace.
+- Druhý řádek je produkční web (krok 5). Bez vlastní domény je to
+  `https://<tvůj-github-username>.github.io/rezervator/`.
 - Třetí řádek je pro lokální vývoj webové verze (`flutter run -d chrome`);
   používáme dvě hvězdičky, protože Supabase glob `*` nepřekračuje lomítko,
   takže by nenašel shodu s koncovým lomítkem, které appka posílá.
 - V **Authentication → URL Configuration** ještě nastav **Site URL** na
-  produkční adresu `https://<tvůj-github-username>.github.io/rezervator/` —
-  je to záložní cíl, kam Supabase přesměruje, pokud odkaz z e-mailu
-  neodpovídá žádnému vzoru výše.
+  produkční adresu `https://rezervator.online/` — je to záložní cíl, kam
+  Supabase přesměruje, pokud odkaz z e-mailu neodpovídá žádnému vzoru výše.
 
 Magic-link e-mail je defaultně zapnutý, ale vestavěné odesílání Supabase je
 silně rate-limitované a jen anglicky. Doporučuje se vlastní **SMTP** (např.
@@ -131,11 +130,21 @@ také (hlášení chyb, krok 9) — bez nich appka běží normálně.
 4. Přiložený workflow [`.github/workflows/deploy-web.yml`](.github/workflows/deploy-web.yml)
    se spustí automaticky při každém pushi do `main` (i ručně přes
    **Actions → Deploy web → Run workflow**), postaví `flutter build web
-   --release` s adresou `/rezervator/` jako base-href a nasadí výsledek na
-   `https://<tvůj-github-username>.github.io/rezervator/`.
+   --release` s base-href `/` a nasadí výsledek na
+   [`https://rezervator.online/`](https://rezervator.online/).
 
-Nezapomeň tuhle finální adresu doplnit do Auth redirect URLs v kroku 3, pokud
-jsi ji tam ještě nezadal/a s reálným uživatelským jménem.
+### Vlastní doména
+
+Web běží na vlastní doméně `rezervator.online`, ne na
+`<uživatel>.github.io/rezervator/`. Proto je base-href `/` (na github.io
+by musel být `/rezervator/`, jinak se nenačte nic). U registrátora domény
+míří na GitHub Pages čtyři A záznamy (`185.199.108.153`, `.109.153`,
+`.110.153`, `.111.153`) na kořen domény a v **Settings → Pages → Custom
+domain** je vyplněná adresa; po vydání certifikátu je zapnuté **Enforce
+HTTPS**. Stará adresa `github.io/rezervator/` se na novou přesměrovává
+sama.
+
+Nezapomeň tuhle finální adresu doplnit do Auth redirect URLs v kroku 3.
 
 ## 6. Notifikace (Fáze 3)
 
@@ -208,7 +217,7 @@ neukazuje seznam hráčů ani rozvrh správy — jen svůj vlastní rozvrh a tla
    (kiosek si ho pamatuje jen v prohlížeči na tabletu, nikdo jiný ho
    nezadává). Zaškrtni **Auto Confirm User**, aby se e-mail nemusel ověřovat
    klikem z pošty, která ani neexistuje.
-2. Na tabletu otevři **`https://<tvůj-github-username>.github.io/rezervator/#/kiosk-login`**
+2. Na tabletu otevři **`https://rezervator.online/#/kiosk-login`**
    — všimni si `#` před `/kiosk-login`: appka běží jako Flutter web bez
    `usePathUrlStrategy()`, takže routing jede přes hash a tahle podoba adresy
    je jediná, která na GitHub Pages (statický hosting bez server-side
@@ -367,8 +376,8 @@ projektů v konzoli).
    - **Branding**: název `Rezervátor`; support e-mail i developer contact
      může být tvoje adresa.
    - **Privacy policy link**: veřejná adresa
-     `https://mvazan.github.io/rezervator/privacy.html` (sekce o kalendáři
-     je tam už napsaná).
+     `https://rezervator.online/privacy.html` (sekce o kalendáři je tam už
+     napsaná).
    - **Scopes** (*Data access*) → *Add or remove scopes* → zaškrtni `openid`
      a `email`, pak do pole **manually add scopes** vlož
      `https://www.googleapis.com/auth/calendar.app.created` (v seznamu

@@ -39,8 +39,8 @@ const REDIRECT_URI = `${
  * No deep link back into the app (there is no router for it; the profile
  * card flips on its own through Realtime as soon as the result is written
  * here). The page ships with the Flutter web build: web/calendar-linked.html
- * lands in the site root under /rezervator/. */
-const RESULT_PAGE = "https://mvazan.github.io/rezervator/calendar-linked.html";
+ * lands in the site root. */
+const RESULT_PAGE = "https://rezervator.online/calendar-linked.html";
 
 type Stav = "ok" | "zruseno" | "odkaz" | "google" | "kalendar" | "chyba";
 
