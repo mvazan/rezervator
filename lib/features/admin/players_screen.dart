@@ -376,18 +376,25 @@ class PlayersScreen extends ConsumerWidget {
                     ),
                   ),
               ],
+              // A kiosk account is the alley's tablet, not a person, so it
+              // stays collapsed out of the roster — but reachable: this is
+              // the only place one can be turned back into a player.
               if (kiosks.isNotEmpty) ...[
                 const SizedBox(height: 16),
-                Text('Kiosk', style: Theme.of(context).textTheme.titleMedium),
-                for (final p in kiosks)
-                  ListTile(
-                    title: Text(p.displayName),
-                    subtitle: _clubSubtitle(p, clubs),
-                    trailing: TextButton(
-                      onPressed: () => _returnToPlayer(context, p),
-                      child: const Text('Vrátit mezi hráče'),
-                    ),
-                  ),
+                ExpansionTile(
+                  title: Text('Kiosk (${kiosks.length})'),
+                  children: [
+                    for (final p in kiosks)
+                      ListTile(
+                        title: Text(p.displayName),
+                        subtitle: _clubSubtitle(p, clubs),
+                        trailing: TextButton(
+                          onPressed: () => _returnToPlayer(context, p),
+                          child: const Text('Vrátit mezi hráče'),
+                        ),
+                      ),
+                  ],
+                ),
               ],
             ],
           );
