@@ -11,7 +11,11 @@ import 'week_screen.dart';
 
 /// The signed-in home: two views — the calendar and Moje tréninky — behind
 /// bottom tabs on a phone and a rail on a wide screen. Which one opens at
-/// launch is the profile's choice; a tap changes it for this run only.
+/// launch is the profile's choice; a tap changes it for this run only. Both
+/// views stay mounted (an IndexedStack, not a switch) so paging the calendar
+/// forward and glancing at the list never loses the week/day position — the
+/// hidden view keeps rebuilding on the minute tick, which is cheap enough to
+/// leave running offstage.
 class HomeShell extends ConsumerStatefulWidget {
   const HomeShell({super.key});
 
@@ -76,13 +80,20 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       ),
     ];
 
-    final content = switch (view) {
-      HomeView.calendar => WeekScreen(trailing: actions),
-      HomeView.trainings => MyTrainingsScreen(
+    // IndexedStack (not a switch swapping widgets in and out): both views
+    // keep their State — WeekScreen's week offset and day index survive a
+    // glance at Moje tréninky and back. children[i]'s index must line up
+    // with HomeView's declaration order (see view.index below).
+    final content = IndexedStack(
+      index: view.index,
+      children: [
+        WeekScreen(trailing: actions),
+        MyTrainingsScreen(
           trailing: actions,
           onOpenCalendar: () => setState(() => _chosen = HomeView.calendar),
         ),
-    };
+      ],
+    );
     final body = Column(
       children: [
         if (offline)
@@ -116,52 +127,63 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     final compact = MediaQuery.sizeOf(context).shortestSide < 600;
     void select(int index) => setState(() => _chosen = HomeView.values[index]);
 
-    return Scaffold(
-      body: SafeArea(
-        child: compact
-            ? body
-            : Row(
-                children: [
-                  NavigationRail(
-                    selectedIndex: view.index,
-                    onDestinationSelected: select,
-                    labelType: NavigationRailLabelType.all,
-                    destinations: const [
-                      NavigationRailDestination(
-                        icon: Icon(Icons.calendar_month_outlined),
-                        selectedIcon: Icon(Icons.calendar_month),
-                        label: Text('Kalendář'),
-                      ),
-                      NavigationRailDestination(
-                        icon: Icon(Icons.event_available_outlined),
-                        selectedIcon: Icon(Icons.event_available),
-                        label: Text('Moje tréninky'),
-                      ),
-                    ],
+    // A back gesture/button away from the calendar returns to it instead of
+    // popping the route (there is nothing to pop to from the home screen
+    // anyway) — the same "back = calendar" behaviour a tab bar's own back
+    // stack would give for free if the two views were separate routes.
+    return PopScope(
+      canPop: view == HomeView.calendar,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        setState(() => _chosen = HomeView.calendar);
+      },
+      child: Scaffold(
+        body: SafeArea(
+          child: compact
+              ? body
+              : Row(
+                  children: [
+                    NavigationRail(
+                      selectedIndex: view.index,
+                      onDestinationSelected: select,
+                      labelType: NavigationRailLabelType.all,
+                      destinations: const [
+                        NavigationRailDestination(
+                          icon: Icon(Icons.calendar_month_outlined),
+                          selectedIcon: Icon(Icons.calendar_month),
+                          label: Text('Kalendář'),
+                        ),
+                        NavigationRailDestination(
+                          icon: Icon(Icons.event_available_outlined),
+                          selectedIcon: Icon(Icons.event_available),
+                          label: Text('Moje tréninky'),
+                        ),
+                      ],
+                    ),
+                    const VerticalDivider(width: 1),
+                    Expanded(child: body),
+                  ],
+                ),
+        ),
+        bottomNavigationBar: compact
+            ? NavigationBar(
+                selectedIndex: view.index,
+                onDestinationSelected: select,
+                destinations: const [
+                  NavigationDestination(
+                    icon: Icon(Icons.calendar_month_outlined),
+                    selectedIcon: Icon(Icons.calendar_month),
+                    label: 'Kalendář',
                   ),
-                  const VerticalDivider(width: 1),
-                  Expanded(child: body),
+                  NavigationDestination(
+                    icon: Icon(Icons.event_available_outlined),
+                    selectedIcon: Icon(Icons.event_available),
+                    label: 'Moje tréninky',
+                  ),
                 ],
-              ),
+              )
+            : null,
       ),
-      bottomNavigationBar: compact
-          ? NavigationBar(
-              selectedIndex: view.index,
-              onDestinationSelected: select,
-              destinations: const [
-                NavigationDestination(
-                  icon: Icon(Icons.calendar_month_outlined),
-                  selectedIcon: Icon(Icons.calendar_month),
-                  label: 'Kalendář',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.event_available_outlined),
-                  selectedIcon: Icon(Icons.event_available),
-                  label: 'Moje tréninky',
-                ),
-              ],
-            )
-          : null,
     );
   }
 }

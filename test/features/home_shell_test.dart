@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:rezervator/data/clock.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/schedule/home_shell.dart';
@@ -52,6 +53,12 @@ void main() {
     maxActiveReservations: 3,
   );
 
+  // Pinned (as in week_screen_test.dart / my_trainings_screen_test.dart) so
+  // the week header's range text is deterministic instead of depending on
+  // whatever day the suite happens to run on.
+  final now = DateTime(2026, 9, 9, 10, 0); // středa dopoledne
+  final today = Day.fromDateTime(now);
+
   const me = Profile(
     id: 'me',
     displayName: 'Já Hráč',
@@ -91,6 +98,7 @@ void main() {
           ),
           playersProvider.overrideWith((ref) async => const []),
           tenantNameProvider.overrideWith((ref, id) async => 'Demo'),
+          nowProvider.overrideWith((ref) => Stream.value(now)),
         ],
         child: const MaterialApp(home: HomeShell()),
       );
@@ -219,6 +227,53 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Prohlížíš kuželnu Demo'), findsOneWidget);
       expect(find.byType(MyTrainingsScreen), findsOneWidget);
+    });
+
+    testWidgets(
+        'switching tabs keeps the calendar\'s paged week (both views stay '
+        'mounted in an IndexedStack)', (tester) async {
+      phone(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+
+      final monday = today.addDays(1 - today.weekday);
+      expect(find.text(rangeLabel(monday, monday.addDays(6))), findsOneWidget);
+
+      // Page the calendar one week ahead.
+      await tester.tap(find.byIcon(Icons.chevron_right));
+      await tester.pumpAndSettle();
+      final paged = monday.addDays(7);
+      expect(find.text(rangeLabel(paged, paged.addDays(6))), findsOneWidget);
+
+      // A glance at Moje tréninky and back must not reset it.
+      await tester.tap(find.text('Moje tréninky'));
+      await tester.pumpAndSettle();
+      expect(find.byType(MyTrainingsScreen), findsOneWidget);
+
+      await tester.tap(find.text('Kalendář'));
+      await tester.pumpAndSettle();
+      expect(find.byType(WeekScreen), findsOneWidget);
+      expect(find.text(rangeLabel(paged, paged.addDays(6))), findsOneWidget);
+    });
+
+    testWidgets(
+        'a back gesture away from Moje tréninky returns to the calendar '
+        'instead of popping the route', (tester) async {
+      phone(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Moje tréninky'));
+      await tester.pumpAndSettle();
+      expect(find.byType(MyTrainingsScreen), findsOneWidget);
+
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+
+      // Back switched the view instead of popping the (only) route away.
+      expect(find.byType(HomeShell), findsOneWidget);
+      expect(find.byType(WeekScreen), findsOneWidget);
+      expect(find.byType(MyTrainingsScreen), findsNothing);
     });
   });
 }
