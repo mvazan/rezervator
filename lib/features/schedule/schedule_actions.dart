@@ -13,6 +13,7 @@ import '../admin/widgets/match_dialog.dart';
 import '../admin/widgets/notify_choice_dialog.dart';
 import '../admin/widgets/rental_dialog.dart';
 import '../admin/widgets/rental_occurrence_dialog.dart';
+import 'cancel_own_reservation.dart';
 import 'schedule_callbacks.dart';
 
 /// Every user action the schedule views can trigger, built once per
@@ -189,19 +190,11 @@ class ScheduleActions {
     required bool ownFuture,
   }) async {
     if (ownFuture) {
-      final ok = await confirmDialog(
+      await confirmCancelOwnReservation(
         context,
-        title: 'Zrušit rezervaci?',
-        message: '${dayFull(date)} · ${block.label} · Dráha ${r.lane}',
-        confirmLabel: 'Zrušit rezervaci',
-        cancelLabel: 'Zpět',
-      );
-      if (!ok || !context.mounted) return;
-      await tryAction(
-        context,
-        () => Api.cancelReservation(r.id),
-        success: 'Rezervace zrušena.',
-        errorText: friendlyDbError,
+        reservation: r,
+        block: block,
+        cancel: (id) => Api.cancelReservation(id),
       );
       return;
     }

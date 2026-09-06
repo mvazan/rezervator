@@ -7,6 +7,7 @@ import '../../data/providers.dart';
 import '../../domain/models.dart';
 import '../../domain/upcoming.dart';
 import '../profile/profile_screen.dart';
+import 'cancel_own_reservation.dart';
 
 /// The second view beside the calendar: what is coming for the player — the
 /// trainings they booked and the matches of the teams they follow, by day.
@@ -32,22 +33,13 @@ class MyTrainingsScreen extends ConsumerWidget {
 
   static Future<void> _cancel(String id) => Api.cancelReservation(id);
 
-  Future<void> _confirmCancel(BuildContext context, UpcomingTraining t) async {
-    final ok = await confirmDialog(
-      context,
-      title: 'Zrušit rezervaci?',
-      message: '${dayFull(t.date)} · ${t.block.label} · Dráha ${t.reservation.lane}',
-      confirmLabel: 'Zrušit rezervaci',
-      cancelLabel: 'Zpět',
-    );
-    if (!ok || !context.mounted) return;
-    await tryAction(
-      context,
-      () => cancelReservation(t.reservation.id),
-      success: 'Rezervace zrušena.',
-      errorText: friendlyDbError,
-    );
-  }
+  Future<void> _confirmCancel(BuildContext context, UpcomingTraining t) =>
+      confirmCancelOwnReservation(
+        context,
+        reservation: t.reservation,
+        block: t.block,
+        cancel: cancelReservation,
+      );
 
   static String _dayLabel(Day date, Day today) {
     if (date == today) return 'Dnes';
@@ -59,15 +51,16 @@ class MyTrainingsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final now = ref.watch(nowProvider).value ?? DateTime.now();
     final today = Day.fromDateTime(now);
+    // Primary data: the timeline is meaningless without it, so a slow or
+    // failed stream must never fall through to the empty state's "Zatím
+    // nic." — that would be a false claim right after sign-in, a tenant
+    // switch, or on a slow network. myProfileProvider stays a silent
+    // fallback (as WeekScreen treats its own secondary providers): missing
+    // followed teams just means the hint line shows instead of matches.
+    final reservationsAsync = ref.watch(myActiveReservationsProvider);
+    final blocksAsync = ref.watch(timeBlocksProvider);
     final profile = ref.watch(myProfileProvider).value;
     final teams = profile?.followedTeams ?? const <String>[];
-    final days = upcomingTimeline(
-      reservations: ref.watch(myActiveReservationsProvider).value ?? const [],
-      blocks: ref.watch(timeBlocksProvider).value ?? const [],
-      slots: ref.watch(prioritySlotsProvider),
-      teams: teams,
-      today: today,
-    );
     final theme = Theme.of(context);
 
     final header = Padding(
@@ -80,6 +73,55 @@ class MyTrainingsScreen extends ConsumerWidget {
           ...trailing,
         ],
       ),
+    );
+
+    final stillLoading =
+        (reservationsAsync.isLoading && !reservationsAsync.hasValue) ||
+            (blocksAsync.isLoading && !blocksAsync.hasValue);
+    if (stillLoading) {
+      return Column(
+        children: [
+          header,
+          const Expanded(child: Center(child: CircularProgressIndicator())),
+        ],
+      );
+    }
+
+    final failedToLoad =
+        (reservationsAsync.hasError && !reservationsAsync.hasValue) ||
+            (blocksAsync.hasError && !blocksAsync.hasValue);
+    if (failedToLoad) {
+      return Column(
+        children: [
+          header,
+          Expanded(
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Tréninky se nepodařilo načíst.'),
+                  const SizedBox(height: 12),
+                  OutlinedButton(
+                    onPressed: () {
+                      ref.invalidate(myActiveReservationsProvider);
+                      ref.invalidate(timeBlocksProvider);
+                    },
+                    child: const Text('Zkusit znovu'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    final days = upcomingTimeline(
+      reservations: reservationsAsync.value ?? const [],
+      blocks: blocksAsync.value ?? const [],
+      slots: ref.watch(prioritySlotsProvider),
+      teams: teams,
+      today: today,
     );
 
     if (days.isEmpty) {

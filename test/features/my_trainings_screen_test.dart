@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rezervator/core/ui.dart' show dayFull;
 import 'package:rezervator/data/clock.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
@@ -55,13 +58,15 @@ void main() {
     Profile profile = me,
     List<Reservation> reservations = const [],
     List<PrioritySlot> slots = const [],
+    Stream<List<Reservation>>? reservationsStream,
     Future<void> Function(String id)? cancel,
     VoidCallback? onOpenCalendar,
   }) {
     return ProviderScope(
       overrides: [
         myProfileProvider.overrideWith((ref) => Stream.value(profile)),
-        myActiveReservationsProvider.overrideWith((ref) => Stream.value(reservations)),
+        myActiveReservationsProvider.overrideWith(
+            (ref) => reservationsStream ?? Stream.value(reservations)),
         timeBlocksProvider.overrideWith((ref) => Stream.value(const [b1])),
         prioritySlotsProvider.overrideWithValue(slots),
         nowProvider.overrideWith((ref) => Stream.value(now)),
@@ -88,6 +93,9 @@ void main() {
     expect(find.text('Moje tréninky'), findsOneWidget);
     expect(find.text('Dnes'), findsOneWidget);
     expect(find.text('Zítra'), findsOneWidget);
+    // A day beyond tomorrow (the match, two days out) is labelled with the
+    // full weekday name, not a relative one.
+    expect(find.text(dayFull(today.addDays(2))), findsOneWidget);
     expect(find.text('18:00–19:00 · Dráha 2'), findsNWidgets(2));
     expect(find.text('SKK Veverky Brno A – KK MS Brno D'), findsOneWidget);
     expect(find.text('18:30–21:30 · doma · KP1 Sever'), findsOneWidget);
@@ -97,6 +105,32 @@ void main() {
       lessThan(tester.getTopLeft(find.text('SKK Veverky Brno A – KK MS Brno D')).dy),
     );
     expect(find.textContaining('Moje týmy'), findsNothing);
+  });
+
+  testWidgets('while reservations have not loaded yet shows a progress '
+      'indicator, never the empty state', (tester) async {
+    final ctrl = StreamController<List<Reservation>>();
+    addTearDown(ctrl.close);
+    // No pumpAndSettle: the indicator's animation never settles on its own,
+    // and a single pumpWidget frame already flushes every OTHER overridden
+    // stream (blocks, profile, now) via their microtask, leaving only the
+    // reservations stream genuinely stuck loading.
+    await tester.pumpWidget(app(reservationsStream: ctrl.stream));
+
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(find.text('Zatím nic.'), findsNothing);
+  });
+
+  testWidgets('when the reservations stream errors, shows the error text '
+      'and a retry button', (tester) async {
+    await tester.pumpWidget(
+      app(reservationsStream: Stream.error(StateError('boom'))),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Tréninky se nepodařilo načíst.'), findsOneWidget);
+    expect(find.text('Zkusit znovu'), findsOneWidget);
+    expect(find.text('Zatím nic.'), findsNothing);
   });
 
   testWidgets('tapping a training asks, then cancels it', (tester) async {
