@@ -631,6 +631,10 @@ CREATE TABLE IF NOT EXISTS "public"."profiles" (
     "home_tenant_id" "uuid",
     "placeholder" boolean DEFAULT false NOT NULL,
     "own_color" smallint DEFAULT '-1'::integer NOT NULL,
+    "followed_teams" "text"[] DEFAULT '{}'::"text"[] NOT NULL,
+    "default_view" "text" DEFAULT 'calendar'::"text" NOT NULL,
+    CONSTRAINT "profiles_default_view_check" CHECK (("default_view" = ANY (ARRAY['calendar'::"text", 'trainings'::"text"]))),
+    CONSTRAINT "profiles_followed_teams_check" CHECK ((COALESCE("array_length"("followed_teams", 1), 0) <= 20)),
     CONSTRAINT "profiles_nick_check" CHECK (("char_length"("nick") <= 14)),
     CONSTRAINT "profiles_own_color_check" CHECK ((("own_color" >= '-1'::integer) AND ("own_color" <= 11))),
     CONSTRAINT "profiles_placeholder_check" CHECK (((NOT "placeholder") OR (("role" = 'player'::"text") AND ("status" = 'approved'::"text") AND (NOT "superadmin")))),
@@ -647,6 +651,14 @@ COMMENT ON COLUMN "public"."profiles"."placeholder" IS 'Hand-made profile withou
 
 
 COMMENT ON COLUMN "public"."profiles"."own_color" IS 'Palette index 0–11 the player chose for their own reservations in their own view; -1 = the club colour.';
+
+
+
+COMMENT ON COLUMN "public"."profiles"."followed_teams" IS 'Teams whose matches the player sees in Moje tréninky (names as in priority_slots.home_team/away_team). Display only; the calendar sync has its own list on google_calendar_links.';
+
+
+
+COMMENT ON COLUMN "public"."profiles"."default_view" IS 'View the app opens at launch: calendar | trainings.';
 
 
 
@@ -2642,6 +2654,14 @@ GRANT UPDATE("fcm_token") ON TABLE "public"."profiles" TO "authenticated";
 
 
 GRANT UPDATE("own_color") ON TABLE "public"."profiles" TO "authenticated";
+
+
+
+GRANT UPDATE("followed_teams") ON TABLE "public"."profiles" TO "authenticated";
+
+
+
+GRANT UPDATE("default_view") ON TABLE "public"."profiles" TO "authenticated";
 
 
 
