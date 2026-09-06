@@ -42,3 +42,8 @@ jobs:
         # app by a signed-in player (functions.invoke attaches their JWT), so
         # the platform verifies it before the function even runs.
         run: supabase functions deploy calendar-manage
+      - name: Deploy kiosk-password function
+        # Also WITHOUT --no-verify-jwt: an admin calls it from the app, so
+        # the platform verifies their JWT before the function runs; who may
+        # reset which kiosk is then decided by kiosk_password_target (0028).
+        run: supabase functions deploy kiosk-password

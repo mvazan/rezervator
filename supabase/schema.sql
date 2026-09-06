@@ -841,6 +841,36 @@ $$;
 ALTER FUNCTION "public"."is_superadmin"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."kiosk_password_target"("p_user_id" "uuid") RETURNS "uuid"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_id uuid;
+begin
+  if not is_admin() then
+    raise exception 'not_allowed';
+  end if;
+  select id into v_id
+  from profiles
+  where id = p_user_id
+    and tenant_id = current_tenant_id()
+    and role = 'kiosk';
+  if v_id is null then
+    raise exception 'unknown_kiosk';
+  end if;
+  return v_id;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."kiosk_password_target"("p_user_id" "uuid") OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."kiosk_password_target"("p_user_id" "uuid") IS 'Kiosk účtu p_user_id smí správce téže kuželny nastavit nové heslo — vrací jeho id, jinak not_allowed/unknown_kiosk. Volá edge funkce kiosk-password jménem volajícího.';
+
+
+
 CREATE OR REPLACE FUNCTION "public"."match_calendar_followers"("p_tenant" "uuid", "p_home" "text", "p_away" "text") RETURNS SETOF "uuid"
     LANGUAGE "sql" STABLE SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -2633,6 +2663,12 @@ GRANT ALL ON FUNCTION "public"."enqueue_match_calendar_sync"("p_user" "uuid", "p
 
 REVOKE ALL ON FUNCTION "public"."enqueue_notification"("p_kind" "text", "p_dedupe_key" "text", "p_payload" "jsonb", "p_delay" interval) FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."enqueue_notification"("p_kind" "text", "p_dedupe_key" "text", "p_payload" "jsonb", "p_delay" interval) TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."kiosk_password_target"("p_user_id" "uuid") TO "anon";
+GRANT ALL ON FUNCTION "public"."kiosk_password_target"("p_user_id" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."kiosk_password_target"("p_user_id" "uuid") TO "service_role";
 
 
 
