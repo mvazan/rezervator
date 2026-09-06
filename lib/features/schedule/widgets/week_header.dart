@@ -27,14 +27,22 @@ class WeekHeader extends StatelessWidget {
   final List<Widget> trailing;
 
   @override
-  Widget build(BuildContext context) {
-    // The top strip IS the app bar. A narrow portrait phone can't fit
-    // title + week navigation + icons on one line, so it stacks them
-    // (title/icons row, week selector under it); everything wider —
-    // landscape phones and the web — keeps ONE line: title (where the
-    // width allows), the week navigation next to it, action icons pinned
-    // to the RIGHT edge.
-    final width = MediaQuery.sizeOf(context).width;
+  Widget build(BuildContext context) => LayoutBuilder(
+        builder: (context, constraints) => _build(context, constraints.maxWidth),
+      );
+
+  // The top strip IS the app bar. A narrow portrait phone can't fit
+  // title + week navigation + icons on one line, so it stacks them
+  // (title/icons row, week selector under it); everything wider —
+  // landscape phones and the web — keeps ONE line: title (where the
+  // width allows), the week navigation next to it, action icons pinned
+  // to the RIGHT edge.
+  //
+  // [width] is what this strip actually got, not what the screen has: on a
+  // wide-enough screen the shell parks a navigation rail to the left, and
+  // measuring the screen would keep the title on a strip too narrow to hold
+  // it — the row then overflows by the few pixels the rail took.
+  Widget _build(BuildContext context, double width) {
     final portrait =
         MediaQuery.orientationOf(context) == Orientation.portrait;
     final stacked = portrait && width < 700;

@@ -152,6 +152,10 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                       selectedIndex: view.index,
                       onDestinationSelected: select,
                       labelType: NavigationRailLabelType.all,
+                      // The two destinations need ~150dp of height. Nothing
+                      // guarantees that once the rail keys off width alone,
+                      // so let them scroll rather than overflow.
+                      scrollable: true,
                       destinations: const [
                         NavigationRailDestination(
                           icon: Icon(Icons.calendar_month_outlined),
