@@ -3,17 +3,34 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/ui.dart';
 import '../../data/providers.dart';
+import '../../domain/models.dart';
 import '../admin/admin_screen.dart';
 import '../profile/profile_screen.dart';
+import 'my_trainings_screen.dart';
 import 'week_screen.dart';
 
-class HomeShell extends ConsumerWidget {
+/// The signed-in home: two views — the calendar and Moje tréninky — behind
+/// bottom tabs on a phone and a rail on a wide screen. Which one opens at
+/// launch is the profile's choice; a tap changes it for this run only.
+class HomeShell extends ConsumerStatefulWidget {
   const HomeShell({super.key});
+
+  @override
+  ConsumerState<HomeShell> createState() => _HomeShellState();
+}
+
+class _HomeShellState extends ConsumerState<HomeShell> {
+  /// Tapped in this run — wins over the profile's launch choice.
+  HomeView? _chosen;
+
+  /// The profile's choice as it stood when the shell first saw a profile.
+  /// Captured once on purpose: changing it in Můj profil must not yank the
+  /// running app to the other view.
+  HomeView? _atLaunch;
 
   /// Superadmin's way back from a foreign kuželna (0015): switch the
   /// membership home and re-create every tenant-scoped stream.
-  Future<void> _goHome(
-      BuildContext context, WidgetRef ref, String homeTenantId) async {
+  Future<void> _goHome(BuildContext context, String homeTenantId) async {
     final ok = await tryAction(
       context,
       () => Api.switchTenant(homeTenantId),
@@ -25,8 +42,10 @@ class HomeShell extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final profile = ref.watch(myProfileProvider).value;
+    _atLaunch ??= profile?.defaultView;
+    final view = _chosen ?? _atLaunch ?? HomeView.calendar;
     final offline = ref.watch(offlineProvider).value ?? false;
     // A superadmin switched into someone else's kuželna sees ONLY foreign
     // data — keep that on screen permanently, with one tap back home.
@@ -56,38 +75,93 @@ class HomeShell extends ConsumerWidget {
         ),
       ),
     ];
+
+    final content = switch (view) {
+      HomeView.calendar => WeekScreen(trailing: actions),
+      HomeView.trainings => MyTrainingsScreen(
+          trailing: actions,
+          onOpenCalendar: () => setState(() => _chosen = HomeView.calendar),
+        ),
+    };
+    final body = Column(
+      children: [
+        if (offline)
+          MaterialBanner(
+            content: const Text('Offline — poslední známý stav'),
+            leading: const Icon(Icons.cloud_off_outlined),
+            actions: const [SizedBox.shrink()],
+          ),
+        if (visiting)
+          MaterialBanner(
+            content: Text(
+              visitingName == null
+                  ? 'Prohlížíš cizí kuželnu'
+                  : 'Prohlížíš kuželnu $visitingName',
+            ),
+            leading: const Icon(Icons.visibility_outlined),
+            backgroundColor: Theme.of(context).colorScheme.tertiaryContainer,
+            actions: [
+              TextButton(
+                onPressed: () => _goHome(context, profile!.homeTenantId),
+                child: const Text('Zpět domů'),
+              ),
+            ],
+          ),
+        Expanded(child: content),
+      ],
+    );
+
+    // A phone in either orientation gets tabs; a tablet or the desktop web
+    // a rail on the left — same two destinations.
+    final compact = MediaQuery.sizeOf(context).shortestSide < 600;
+    void select(int index) => setState(() => _chosen = HomeView.values[index]);
+
     return Scaffold(
       body: SafeArea(
-        child: Column(
-          children: [
-            if (offline)
-              MaterialBanner(
-                content: const Text('Offline — poslední známý stav'),
-                leading: const Icon(Icons.cloud_off_outlined),
-                actions: const [SizedBox.shrink()],
-              ),
-            if (visiting)
-              MaterialBanner(
-                content: Text(
-                  visitingName == null
-                      ? 'Prohlížíš cizí kuželnu'
-                      : 'Prohlížíš kuželnu $visitingName',
-                ),
-                leading: const Icon(Icons.visibility_outlined),
-                backgroundColor:
-                    Theme.of(context).colorScheme.tertiaryContainer,
-                actions: [
-                  TextButton(
-                    onPressed: () =>
-                        _goHome(context, ref, profile!.homeTenantId),
-                    child: const Text('Zpět domů'),
+        child: compact
+            ? body
+            : Row(
+                children: [
+                  NavigationRail(
+                    selectedIndex: view.index,
+                    onDestinationSelected: select,
+                    labelType: NavigationRailLabelType.all,
+                    destinations: const [
+                      NavigationRailDestination(
+                        icon: Icon(Icons.calendar_month_outlined),
+                        selectedIcon: Icon(Icons.calendar_month),
+                        label: Text('Kalendář'),
+                      ),
+                      NavigationRailDestination(
+                        icon: Icon(Icons.event_available_outlined),
+                        selectedIcon: Icon(Icons.event_available),
+                        label: Text('Moje tréninky'),
+                      ),
+                    ],
                   ),
+                  const VerticalDivider(width: 1),
+                  Expanded(child: body),
                 ],
               ),
-            Expanded(child: WeekScreen(trailing: actions)),
-          ],
-        ),
       ),
+      bottomNavigationBar: compact
+          ? NavigationBar(
+              selectedIndex: view.index,
+              onDestinationSelected: select,
+              destinations: const [
+                NavigationDestination(
+                  icon: Icon(Icons.calendar_month_outlined),
+                  selectedIcon: Icon(Icons.calendar_month),
+                  label: 'Kalendář',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.event_available_outlined),
+                  selectedIcon: Icon(Icons.event_available),
+                  label: 'Moje tréninky',
+                ),
+              ],
+            )
+          : null,
     );
   }
 }
