@@ -62,6 +62,7 @@ void main() {
     Future<void> Function(String id)? cancel,
     VoidCallback? onOpenCalendar,
     bool slotsLoading = false,
+    bool slotsFailed = false,
     DateTime? nowOverride,
   }) {
     return ProviderScope(
@@ -75,6 +76,7 @@ void main() {
         // that wants to simulate it still being pending overrides this
         // public signal directly instead.
         prioritySlotsLoadingProvider.overrideWithValue(slotsLoading),
+        prioritySlotsFailedProvider.overrideWithValue(slotsFailed),
         nowProvider.overrideWith((ref) => Stream.value(nowOverride ?? now)),
       ],
       child: MaterialApp(
@@ -144,6 +146,21 @@ void main() {
     await tester.pumpWidget(
       app(reservationsStream: Stream.error(StateError('boom'))),
     );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Tréninky se nepodařilo načíst.'), findsOneWidget);
+    expect(find.text('Zkusit znovu'), findsOneWidget);
+    expect(find.text('Zatím nic.'), findsNothing);
+  });
+
+  testWidgets('when the priority slots failed before their first snapshot, '
+      'shows the error text with a retry, never the empty state',
+      (tester) async {
+    // The cache rethrows only a first-ever error, so a cache-less player
+    // whose priority_slots fetch fails would otherwise see a quiet list
+    // without their teams' matches — indistinguishable from "nothing
+    // scheduled" (see prioritySlotsFailedProvider).
+    await tester.pumpWidget(app(slotsFailed: true));
     await tester.pumpAndSettle();
 
     expect(find.text('Tréninky se nepodařilo načíst.'), findsOneWidget);

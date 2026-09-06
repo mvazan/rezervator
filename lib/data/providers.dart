@@ -937,6 +937,21 @@ final prioritySlotsLoadingProvider = Provider<bool>((ref) {
   return rows.isLoading && !rows.hasValue;
 });
 
+/// True when the rows stream failed before delivering anything — the cache
+/// only rethrows a first-ever error (see cache.dart), so this is the
+/// "nothing to show and nothing coming" case a screen must surface with a
+/// retry instead of an empty list.
+final prioritySlotsFailedProvider = Provider<bool>((ref) {
+  final rows = ref.watch(_prioritySlotRowsProvider);
+  return rows.hasError && !rows.hasValue;
+});
+
+/// Re-subscribes the priority slots rows after [prioritySlotsFailedProvider]
+/// turned true; the rows provider stays private, so screens retry through
+/// this instead of invalidating it themselves.
+void retryPrioritySlots(WidgetRef ref) =>
+    ref.invalidate(_prioritySlotRowsProvider);
+
 final _prioritySlotRowsProvider =
     StreamProvider<List<Map<String, dynamic>>>((ref) {
   final uid = ref.watch(_authUidProvider);

@@ -95,6 +95,7 @@ class MyTrainingsScreen extends ConsumerWidget {
     // round trip.
     final slots = ref.watch(prioritySlotsProvider);
     final slotsLoading = ref.watch(prioritySlotsLoadingProvider);
+    final slotsFailed = ref.watch(prioritySlotsFailedProvider);
     final profile = ref.watch(myProfileProvider).value;
     final teams = profile?.followedTeams ?? const <String>[];
     final theme = Theme.of(context);
@@ -126,7 +127,8 @@ class MyTrainingsScreen extends ConsumerWidget {
 
     final failedToLoad =
         (reservationsAsync.hasError && !reservationsAsync.hasValue) ||
-            (blocksAsync.hasError && !blocksAsync.hasValue);
+            (blocksAsync.hasError && !blocksAsync.hasValue) ||
+            slotsFailed;
     if (failedToLoad) {
       return Column(
         children: [
@@ -142,6 +144,7 @@ class MyTrainingsScreen extends ConsumerWidget {
                     onPressed: () {
                       ref.invalidate(myActiveReservationsProvider);
                       ref.invalidate(timeBlocksProvider);
+                      retryPrioritySlots(ref);
                     },
                     child: const Text('Zkusit znovu'),
                   ),
