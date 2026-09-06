@@ -99,6 +99,15 @@ enum Role { player, admin, kiosk }
 
 enum ProfileStatus { pending, approved }
 
+/// Which view the app opens at launch (0029) — a profile choice; a tap on
+/// a tab changes the view for that run only.
+///
+/// The value names are exactly the values the DB check constraint
+/// `profiles_default_view_check` allows ('calendar', 'trainings'), and
+/// `Api.setDefaultView` sends them verbatim (`view.name`) — renaming a
+/// value here still compiles, but breaks the write at runtime only.
+enum HomeView { calendar, trainings }
+
 class Profile {
   const Profile({
     required this.id,
@@ -114,6 +123,8 @@ class Profile {
     this.homeTenantId = '',
     this.hasAccount = true,
     this.ownColor = -1,
+    this.followedTeams = const [],
+    this.defaultView = HomeView.calendar,
   });
 
   final String id;
@@ -131,6 +142,14 @@ class Profile {
   /// Palette index 0–11 the player picked for their own reservations in
   /// their own view (0024); -1 = the club colour. Nobody else sees it.
   final int ownColor;
+
+  /// Teams whose matches show in Moje tréninky (0029) — names as they stand
+  /// in priority_slots. Display only: the Google Calendar sync has its own
+  /// list on the link, managed separately.
+  final List<String> followedTeams;
+
+  /// The view the app opens at launch (0029).
+  final HomeView defaultView;
 
   /// Short board name (<=14 chars); empty means "use displayName".
   final String nick;
@@ -173,6 +192,12 @@ class Profile {
         homeTenantId: json['home_tenant_id'] as String? ?? '',
         hasAccount: !(json['placeholder'] as bool? ?? false),
         ownColor: json['own_color'] as int? ?? -1,
+        followedTeams: [
+          for (final t in json['followed_teams'] as List? ?? const [])
+            t as String,
+        ],
+        defaultView: HomeView.values.asNameMap()[json['default_view']] ??
+            HomeView.calendar,
       );
 }
 

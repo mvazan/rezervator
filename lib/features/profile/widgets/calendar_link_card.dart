@@ -3,8 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/ui.dart';
 import '../../../data/providers.dart';
-import '../../../domain/collation.dart';
 import '../../../domain/models.dart';
+import 'team_picker_sheet.dart';
 
 /// Google Calendar link on Můj profil: connect (opens Google's consent page
 /// in the browser), show the current state, edit reminders, pick the teams
@@ -156,60 +156,16 @@ class _CalendarLinkCardState extends ConsumerState<CalendarLinkCard> {
         context, () => widget.setReminders([...current, minutes]));
   }
 
-  /// Team picker: every team the schedule knows (home team of a home match,
-  /// away team of an away match) plus whatever is already chosen, so a team
-  /// that vanished from the schedule can still be unticked. Each toggle is
-  /// saved at once — the sheet watches the same stream as the card.
-  Future<void> _editMatchTeams() {
-    return showModalBottomSheet<void>(
-      context: context,
-      builder: (sheetContext) => Consumer(
-        builder: (context, ref, _) {
-          final link =
-              ref.watch(myCalendarLinkProvider).value ?? CalendarLink.none;
-          final chosen = link.matchTeams;
-          final teams = {...ref.watch(ourTeamsProvider), ...chosen}.toList()
-            ..sort(compareCzech);
-          return SafeArea(
-            child: ListView(
-              shrinkWrap: true,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-                  child: Text('Zápasy v kalendáři',
-                      style: Theme.of(context).textTheme.titleMedium),
-                ),
-                const Padding(
-                  padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
-                  child: Text('Vyber svůj tým — jeho domácí i venkovní zápasy '
-                      'se přidají do kalendáře.'),
-                ),
-                if (teams.isEmpty)
-                  const ListTile(
-                    leading: Icon(Icons.sports_outlined),
-                    title: Text('Zatím žádné zápasy v rozvrhu'),
-                  ),
-                for (final team in teams)
-                  CheckboxListTile(
-                    value: chosen.contains(team),
-                    title: Text(team),
-                    onChanged: (on) => tryAction(
-                      context,
-                      () => widget.setMatchTeams([
-                        for (final t in chosen)
-                          if (t != team) t,
-                        if (on == true) team,
-                      ]),
-                    ),
-                  ),
-                const SizedBox(height: 8),
-              ],
-            ),
-          );
-        },
-      ),
-    );
-  }
+  Future<void> _editMatchTeams() => showTeamPickerSheet(
+        context,
+        title: 'Zápasy v kalendáři',
+        hint: 'Vyber svůj tým — jeho domácí i venkovní zápasy se přidají do '
+            'kalendáře.',
+        chosenOf: (ref) =>
+            (ref.watch(myCalendarLinkProvider).value ?? CalendarLink.none)
+                .matchTeams,
+        onChanged: widget.setMatchTeams,
+      );
 
   Widget _connectButton() => Padding(
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),

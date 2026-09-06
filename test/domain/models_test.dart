@@ -81,6 +81,38 @@ void main() {
       });
       expect(p.clubId, isNull);
     });
+
+    test('fromJson reads followed_teams and default_view, with defaults', () {
+      final p = Profile.fromJson({
+        'id': 'u1',
+        'display_name': 'Já',
+        'role': 'player',
+        'status': 'approved',
+        'followed_teams': ['SKK Veverky Brno A', 'TJ Sokol Brno IV'],
+        'default_view': 'trainings',
+      });
+      expect(p.followedTeams, ['SKK Veverky Brno A', 'TJ Sokol Brno IV']);
+      expect(p.defaultView, HomeView.trainings);
+
+      final bare = Profile.fromJson({
+        'id': 'u2',
+        'display_name': 'Ty',
+        'role': 'player',
+        'status': 'approved',
+      });
+      expect(bare.followedTeams, isEmpty);
+      expect(bare.defaultView, HomeView.calendar);
+
+      final odd = Profile.fromJson({
+        'id': 'u3',
+        'display_name': 'On',
+        'role': 'player',
+        'status': 'approved',
+        'default_view': 'week',
+      });
+      expect(odd.defaultView, HomeView.calendar,
+          reason: 'an unknown value falls back to the calendar');
+    });
   });
 
   group('PlayerName', () {

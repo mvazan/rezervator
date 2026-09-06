@@ -9,6 +9,7 @@ import '../../domain/models.dart';
 import 'changelog.dart';
 import '../admin/widgets/color_picker.dart';
 import 'widgets/calendar_link_card.dart';
+import 'widgets/my_teams_card.dart';
 
 /// App version/build, read once from the platform — drives the version line
 /// at the bottom of the profile screen.
@@ -23,11 +24,15 @@ class ProfileScreen extends ConsumerWidget {
     super.key,
     this.signOut = Api.signOut,
     this.setOwnColor = Api.setOwnColor,
+    this.setFollowedTeams = Api.setFollowedTeams,
+    this.setDefaultView = Api.setDefaultView,
   });
 
   /// Injectable for widget tests (the Api ones need a live Supabase client).
   final Future<void> Function() signOut;
   final Future<void> Function(int color) setOwnColor;
+  final Future<void> Function(List<String> teams) setFollowedTeams;
+  final Future<void> Function(HomeView view) setDefaultView;
 
   Future<void> _editNick(BuildContext context, String currentNick) async {
     final input = await promptText(
@@ -142,6 +147,51 @@ class ProfileScreen extends ConsumerWidget {
                           onChanged: (color) => tryAction(
                             context,
                             () => setOwnColor(color),
+                            errorText: friendlyDbError,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                MyTeamsCard(
+                  profile: profile,
+                  setFollowedTeams: setFollowedTeams,
+                ),
+                const SizedBox(height: 16),
+                // What opens at launch (0029). A tab tap changes the view for
+                // one run; this is what the next launch reads.
+                Card(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const ListTile(
+                        title: Text('Po spuštění'),
+                        subtitle: Text(
+                          'Co appka otevře jako první. Přepnutí dole platí '
+                          'do jejího zavření.',
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                        child: SegmentedButton<HomeView>(
+                          segments: const [
+                            ButtonSegment(
+                              value: HomeView.calendar,
+                              label: Text('Kalendář'),
+                              icon: Icon(Icons.calendar_month_outlined),
+                            ),
+                            ButtonSegment(
+                              value: HomeView.trainings,
+                              label: Text('Moje tréninky'),
+                              icon: Icon(Icons.event_available_outlined),
+                            ),
+                          ],
+                          selected: {profile.defaultView},
+                          onSelectionChanged: (chosen) => tryAction(
+                            context,
+                            () => setDefaultView(chosen.first),
                             errorText: friendlyDbError,
                           ),
                         ),

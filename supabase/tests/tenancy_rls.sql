@@ -1157,5 +1157,46 @@ exception when others then
   raise notice 'OK: only an admin may set a kiosk password';
 end $$;
 
+-- Followed teams + launch view (0029): own row only, inside the checks.
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+begin
+  update profiles
+    set followed_teams = array['SKK Veverky Brno A'], default_view = 'trainings'
+  where id = '10000000-0000-0000-0000-000000000001';
+  if (select followed_teams from profiles
+      where id = '10000000-0000-0000-0000-000000000001') <> array['SKK Veverky Brno A']
+     or (select default_view from profiles
+      where id = '10000000-0000-0000-0000-000000000001') <> 'trainings' then
+    raise exception 'FAIL: followed_teams / default_view did not stick on the own row';
+  end if;
+  update profiles set default_view = 'trainings'
+  where id = '10000000-0000-0000-0000-000000000003';
+  if (select default_view from profiles
+      where id = '10000000-0000-0000-0000-000000000003') <> 'calendar' then
+    raise exception 'FAIL: default_view changed on a foreign row';
+  end if;
+  begin
+    update profiles set default_view = 'week'
+    where id = '10000000-0000-0000-0000-000000000001';
+    raise exception 'FAIL: an unknown default_view accepted';
+  exception when check_violation then null;
+  end;
+  begin
+    update profiles
+      set followed_teams = (select array_agg('T' || g) from generate_series(1, 21) g)
+    where id = '10000000-0000-0000-0000-000000000001';
+    raise exception 'FAIL: 21 followed teams accepted';
+  exception when check_violation then null;
+  end;
+  if has_column_privilege('anon', 'public.profiles', 'followed_teams', 'update')
+     or has_column_privilege('anon', 'public.profiles', 'default_view', 'update') then
+    raise exception 'FAIL: anon may update the new profile columns';
+  end if;
+  raise notice 'OK: followed_teams and default_view are editable on the own row only, inside the checks';
+end $$;
+
 reset role;
 rollback;
