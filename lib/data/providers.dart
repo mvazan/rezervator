@@ -705,6 +705,19 @@ class Api {
       .update({'own_color': color})
       .eq('id', currentUserId!);
 
+  /// Which teams' matches the player sees in Moje tréninky (0029). Own row,
+  /// like the colour; the calendar sync's own list is untouched.
+  static Future<void> setFollowedTeams(List<String> teams) => _db
+      .from('profiles')
+      .update({'followed_teams': teams})
+      .eq('id', currentUserId!);
+
+  /// The view the app opens at launch (0029).
+  static Future<void> setDefaultView(HomeView view) => _db
+      .from('profiles')
+      .update({'default_view': view.name})
+      .eq('id', currentUserId!);
+
   // --- admin: players without an account (0022, `placeholder` rows) ---
 
   /// Creates ([id] null) or edits a hand-made profile.
