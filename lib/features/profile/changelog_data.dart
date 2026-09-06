@@ -50,10 +50,12 @@ const appChangelog = <Release>[
     'Kioskový účet se spravuje v Správa → Kiosk, ne mezi hráči — a je u něj '
         'vidět přihlašovací jméno.',
     'Když se heslo kiosku ztratí, jde odtamtud nastavit nové.',
+    'Nový pohled Moje tréninky: co mě čeká — moje rezervace a zápasy mých '
+        'týmů, po dnech. Na telefonu taby dole, na webu lišta vlevo.',
     'Na profilu je nová karta Moje týmy: vyber týmy, jejichž zápasy chceš '
         'vidět. Výběr pro Google kalendář zůstává u propojení kalendáře.',
     'Na profilu si nastavíš, jaký pohled se ti otevře po spuštění (kalendář, '
-        'nebo připravovaný seznam Moje tréninky).',
+        'nebo Moje tréninky).',
   ]),
   Release(null, '4. 9. 2026', [
     'Zápasy vybraných týmů se zapisují do Google Kalendáře — týmy si vybereš '
