@@ -52,7 +52,7 @@ class MyTrainingsScreen extends ConsumerWidget {
   /// close icon, but still listed: the player did train, after all.
   Widget _trainingTile(BuildContext context, UpcomingTraining item, bool started) =>
       ListTile(
-        leading: const Icon(Icons.fitness_center_outlined),
+        leading: const Icon(Icons.title),
         title: Text('${item.block.label} · Dráha ${item.reservation.lane}'),
         trailing: started ? null : const Icon(Icons.close),
         onTap: started ? null : () => _confirmCancel(context, item),
