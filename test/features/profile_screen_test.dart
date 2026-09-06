@@ -55,6 +55,8 @@ void main() {
     bool calendarAvailable = false,
     CalendarLink link = CalendarLink.none,
     Future<void> Function(int color)? setOwnColor,
+    Future<void> Function(List<String> teams)? setFollowedTeams,
+    Future<void> Function(HomeView view)? setDefaultView,
     List<PrioritySlot> matches = const [],
   }) {
     return ProviderScope(
@@ -70,6 +72,10 @@ void main() {
       child: MaterialApp(
         home: ProfileScreen(
           setOwnColor: setOwnColor ?? (_) async => throw StateError('unexpected'),
+          setFollowedTeams:
+              setFollowedTeams ?? (_) async => throw StateError('unexpected'),
+          setDefaultView:
+              setDefaultView ?? (_) async => throw StateError('unexpected'),
         ),
       ),
     );
@@ -114,6 +120,10 @@ void main() {
   });
 
   testWidgets('shows a logout action', (tester) async {
+    tester.view.physicalSize = const Size(800, 1600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(app(me));
     await tester.pumpAndSettle();
 
@@ -124,6 +134,10 @@ void main() {
   testWidgets('tapping logout asks for confirmation before signing out', (
     tester,
   ) async {
+    tester.view.physicalSize = const Size(800, 1600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(app(me));
     await tester.pumpAndSettle();
 
@@ -139,6 +153,10 @@ void main() {
   testWidgets('confirmed logout pops the screen back to the root route '
       '(the pushed screen must not linger above the login gate)',
       (tester) async {
+    tester.view.physicalSize = const Size(800, 1600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     var signedOut = false;
 
     await tester.pumpWidget(ProviderScope(
@@ -243,6 +261,10 @@ void main() {
 
     testWidgets('not linked: explains the calendar and offers to connect',
         (tester) async {
+      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
       await tester.pumpWidget(app(me, calendarAvailable: true));
       await tester.pumpAndSettle();
 
@@ -256,6 +278,10 @@ void main() {
 
     testWidgets('pending: shows progress; a retry stays available in case '
         'the backend never finishes', (tester) async {
+      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
       await tester.pumpWidget(app(
         me,
         calendarAvailable: true,
@@ -275,6 +301,10 @@ void main() {
 
     testWidgets('pending with a failure: shows the reason and a retry',
         (tester) async {
+      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
       await tester.pumpWidget(app(
         me,
         calendarAvailable: true,
@@ -292,6 +322,10 @@ void main() {
 
     testWidgets('linked: shows the Google account, the reminders summary '
         'and Odpojit', (tester) async {
+      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
       await tester.pumpWidget(app(me, calendarAvailable: true, link: linked));
       await tester.pumpAndSettle();
 
@@ -301,13 +335,25 @@ void main() {
       expect(find.text('1 den předem · 2 h předem'), findsOneWidget);
       expect(find.text('Odpojit'), findsOneWidget);
       expect(find.text(connectLabel), findsNothing);
-      // No team chosen yet — matches stay out of the calendar.
+      // No team chosen yet — matches stay out of the calendar (the profile's
+      // own Moje týmy card reads the same "Žádný tým" copy when its own list
+      // is empty, so this one is scoped to the calendar card).
       expect(find.text('Zápasy v kalendáři…'), findsOneWidget);
-      expect(find.text('Žádný tým'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(CalendarLinkCard),
+          matching: find.text('Žádný tým'),
+        ),
+        findsOneWidget,
+      );
     });
 
     testWidgets('linked with a team chosen names it under Zápasy v kalendáři',
         (tester) async {
+      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
       await tester.pumpWidget(app(
         me,
         calendarAvailable: true,
@@ -323,6 +369,10 @@ void main() {
     });
 
     testWidgets('linked without reminders reads "Žádné"', (tester) async {
+      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
       await tester.pumpWidget(app(
         me,
         calendarAvailable: true,
@@ -337,6 +387,10 @@ void main() {
 
     testWidgets('broken: shows the reason, asks for a re-link and offers '
         'the connect button', (tester) async {
+      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
       await tester.pumpWidget(app(
         me,
         calendarAvailable: true,
@@ -356,6 +410,10 @@ void main() {
 
     testWidgets('Odpojit asks for confirmation with the delete warning; '
         'Zrušit keeps the link', (tester) async {
+      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
       await tester.pumpWidget(app(me, calendarAvailable: true, link: linked));
       await tester.pumpAndSettle();
 
@@ -760,6 +818,90 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(saved, [2, -1]);
+    });
+  });
+
+  group('Moje týmy and Po spuštění', () {
+    final match = PrioritySlot(
+      id: 'm1',
+      date: Day(2026, 9, 11),
+      startsAt: const HourMinute(18, 30),
+      endsAt: const HourMinute(21, 30),
+      type: PrioritySlot.fallbackMatchType,
+      homeTeam: 'SKK Veverky Brno A',
+      awayTeam: 'KK MS Brno D',
+    );
+
+    testWidgets('the card sums up the followed teams and the sheet ticks one',
+        (tester) async {
+      tester.view.physicalSize = const Size(800, 1800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final saved = <List<String>>[];
+      await tester.pumpWidget(app(
+        me,
+        matches: [match],
+        setFollowedTeams: (t) async => saved.add(t),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Moje týmy'), findsOneWidget);
+      expect(find.text('Žádný tým'), findsOneWidget);
+
+      await tester.tap(find.text('Vybrat týmy…'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(CheckboxListTile, 'SKK Veverky Brno A'));
+      await tester.pumpAndSettle();
+
+      expect(saved, [
+        ['SKK Veverky Brno A'],
+      ]);
+    });
+
+    testWidgets('a followed team reads in the summary, and unticking drops it',
+        (tester) async {
+      tester.view.physicalSize = const Size(800, 1800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      const follower = Profile(
+        id: 'me',
+        displayName: 'Já Hráč',
+        email: 'me@example.com',
+        role: Role.player,
+        status: ProfileStatus.approved,
+        followedTeams: ['SKK Veverky Brno A'],
+      );
+      final saved = <List<String>>[];
+      await tester.pumpWidget(app(
+        follower,
+        matches: [match],
+        setFollowedTeams: (t) async => saved.add(t),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.text('SKK Veverky Brno A'), findsOneWidget);
+      await tester.tap(find.text('Vybrat týmy…'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(CheckboxListTile, 'SKK Veverky Brno A'));
+      await tester.pumpAndSettle();
+      expect(saved, [<String>[]]);
+    });
+
+    testWidgets('Po spuštění saves the chosen launch view', (tester) async {
+      tester.view.physicalSize = const Size(800, 1800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final saved = <HomeView>[];
+      await tester.pumpWidget(app(me, setDefaultView: (v) async => saved.add(v)));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Po spuštění'), findsOneWidget);
+      await tester.tap(find.text('Moje tréninky'));
+      await tester.pumpAndSettle();
+      expect(saved, [HomeView.trainings]);
     });
   });
 }
