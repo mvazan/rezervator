@@ -67,13 +67,20 @@ class _TeamPickerList extends StatefulWidget {
 class _TeamPickerListState extends State<_TeamPickerList> {
   late Set<String> _ticked = widget.chosen.toSet();
 
+  /// Saves go out one after the other: two quick taps must not become two
+  /// whole-list PATCHes racing over separate connections, where the older
+  /// one can land last and silently drop the newer tick.
+  Future<void> _queue = Future.value();
+  int _pending = 0;
+
   @override
   void didUpdateWidget(_TeamPickerList old) {
     super.didUpdateWidget(old);
-    // Only a genuine change from upstream resyncs the overlay — a rebuild
-    // triggered by something else (e.g. the schedule changing) must not
-    // clobber a tap that is still in flight.
-    if (!_sameTeams(old.chosen, widget.chosen)) {
+    // Only a genuine change from upstream resyncs the overlay, and only while
+    // no save is in flight — a rebuild triggered by something else (e.g. the
+    // schedule changing) or the row of an older save arriving mid-queue must
+    // not clobber a tap that is still on its way.
+    if (_pending == 0 && !_sameTeams(old.chosen, widget.chosen)) {
       _ticked = widget.chosen.toSet();
     }
   }
@@ -81,14 +88,24 @@ class _TeamPickerListState extends State<_TeamPickerList> {
   static bool _sameTeams(List<String> a, List<String> b) =>
       a.length == b.length && a.toSet().containsAll(b);
 
-  Future<void> _toggle(String team, bool on) async {
+  void _toggle(String team, bool on) {
     setState(() => on ? _ticked.add(team) : _ticked.remove(team));
-    final sorted = _ticked.toList()..sort(compareCzech);
+    final snapshot = _ticked.toList()..sort(compareCzech);
+    _pending++;
+    _queue = _queue.then((_) => _save(snapshot, team, on));
+  }
+
+  Future<void> _save(List<String> snapshot, String team, bool on) async {
+    if (!mounted) {
+      _pending--;
+      return;
+    }
     final saved = await tryAction(
       context,
-      () => widget.onChanged(sorted),
+      () => widget.onChanged(snapshot),
       errorText: friendlyDbError,
     );
+    _pending--;
     // A failed save undoes just this tap, so the box never stays ticked
     // next to the snack that says it did not stick.
     if (!saved && mounted) {

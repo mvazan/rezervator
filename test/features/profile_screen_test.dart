@@ -975,6 +975,54 @@ void main() {
       expect(saved.last, ['KS Devítka Brno B', 'SKK Veverky Brno A']);
     });
 
+    testWidgets('quick ticks are saved one after the other, each with the '
+        'full list so far', (tester) async {
+      tester.view.physicalSize = const Size(800, 1800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final saved = <List<String>>[];
+      final gates = <Completer<void>>[];
+      await tester.pumpWidget(app(
+        me,
+        matches: schedule,
+        setFollowedTeams: (t) {
+          saved.add(t);
+          final gate = Completer<void>();
+          gates.add(gate);
+          return gate.future;
+        },
+      ));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Vybrat týmy…'));
+      await tester.pumpAndSettle();
+      await tester
+          .tap(find.widgetWithText(CheckboxListTile, 'SKK Veverky Brno A'));
+      await tester.pump();
+      await tester
+          .tap(find.widgetWithText(CheckboxListTile, 'KS Devítka Brno B'));
+      await tester.pump();
+
+      // Both boxes tick at once, but the second save waits for the first —
+      // two PATCHes in flight could land in either order.
+      expect(
+          tester
+              .widget<CheckboxListTile>(
+                  find.widgetWithText(CheckboxListTile, 'KS Devítka Brno B'))
+              .value,
+          isTrue);
+      expect(saved, [
+        ['SKK Veverky Brno A']
+      ]);
+
+      gates[0].complete();
+      await tester.pumpAndSettle();
+      expect(saved.last, ['KS Devítka Brno B', 'SKK Veverky Brno A']);
+      gates[1].complete();
+      await tester.pumpAndSettle();
+    });
+
     testWidgets('a failing save shows the friendly message, not the raw '
         'exception', (tester) async {
       tester.view.physicalSize = const Size(800, 1800);
