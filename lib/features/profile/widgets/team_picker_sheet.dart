@@ -130,7 +130,7 @@ class _TeamPickerListState extends State<_TeamPickerList> {
           ),
           if (widget.teams.isEmpty)
             const ListTile(
-              leading: Icon(Icons.sports_outlined),
+              leading: Icon(Icons.emoji_events_outlined),
               title: Text('Zatím žádné zápasy v rozvrhu'),
             ),
           for (final team in widget.teams)

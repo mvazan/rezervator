@@ -207,7 +207,7 @@ class _CalendarLinkCardState extends ConsumerState<CalendarLinkCard> {
             onTap: _editReminders,
           ),
           ListTile(
-            leading: const Icon(Icons.sports_outlined),
+            leading: const Icon(Icons.emoji_events_outlined),
             title: const Text('Zápasy v kalendáři…'),
             subtitle: Text(matchTeamsSummary(link.matchTeams)),
             trailing: const Icon(Icons.chevron_right),
