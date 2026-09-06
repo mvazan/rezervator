@@ -47,10 +47,38 @@ class MyTrainingsScreen extends ConsumerWidget {
     return dayFull(date);
   }
 
+  /// [started]: today's block has already begun (mirrors the calendar's own
+  /// `canCancel`/`inPast` check — see `domain/schedule.dart`) — no tap, no
+  /// close icon, but still listed: the player did train, after all.
+  Widget _trainingTile(BuildContext context, UpcomingTraining item, bool started) =>
+      ListTile(
+        leading: const Icon(Icons.sports_outlined),
+        title: Text('${item.block.label} · Dráha ${item.reservation.lane}'),
+        trailing: started ? null : const Icon(Icons.close),
+        onTap: started ? null : () => _confirmCancel(context, item),
+      );
+
+  /// „Zápasy svých týmů…" hint — shown wherever the player follows no teams:
+  /// the list's footer, and the empty state below „Do kalendáře". One widget
+  /// for both spots so the copy and the tap target can't drift apart.
+  static Widget _followTeamsHint(BuildContext context, ThemeData theme) =>
+      ListTile(
+        leading: Icon(Icons.info_outline, color: theme.colorScheme.outline),
+        title: Text(
+          'Zápasy svých týmů tu uvidíš, když si je vybereš v '
+          'Můj profil → Moje týmy.',
+          style: theme.textTheme.bodySmall,
+        ),
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const ProfileScreen()),
+        ),
+      );
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final now = ref.watch(nowProvider).value ?? DateTime.now();
     final today = Day.fromDateTime(now);
+    final nowTime = HourMinute(now.hour, now.minute);
     // Primary data: the timeline is meaningless without it, so a slow or
     // failed stream must never fall through to the empty state's "Zatím
     // nic." — that would be a false claim right after sign-in, a tenant
@@ -150,6 +178,10 @@ class MyTrainingsScreen extends ConsumerWidget {
                     onPressed: onOpenCalendar,
                     child: const Text('Do kalendáře'),
                   ),
+                  if (teams.isEmpty) ...[
+                    const SizedBox(height: 16),
+                    _followTeamsHint(context, theme),
+                  ],
                 ],
               ),
             ),
@@ -175,13 +207,12 @@ class MyTrainingsScreen extends ConsumerWidget {
                 ),
                 for (final item in day.items)
                   switch (item) {
-                    UpcomingTraining() => ListTile(
-                        leading: const Icon(Icons.sports_outlined),
-                        title: Text(
-                          '${item.block.label} · Dráha ${item.reservation.lane}',
-                        ),
-                        trailing: const Icon(Icons.close),
-                        onTap: () => _confirmCancel(context, item),
+                    UpcomingTraining() => _trainingTile(
+                        context,
+                        item,
+                        day.date == today &&
+                            item.block.startsAt.minutesFromMidnight <=
+                                nowTime.minutesFromMidnight,
                       ),
                     UpcomingMatch() => ListTile(
                         leading: const Icon(Icons.emoji_events_outlined),
@@ -196,19 +227,7 @@ class MyTrainingsScreen extends ConsumerWidget {
                       ),
                   },
               ],
-              if (teams.isEmpty)
-                ListTile(
-                  leading: Icon(Icons.info_outline,
-                      color: theme.colorScheme.outline),
-                  title: Text(
-                    'Zápasy svých týmů tu uvidíš, když si je vybereš v '
-                    'Můj profil → Moje týmy.',
-                    style: theme.textTheme.bodySmall,
-                  ),
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const ProfileScreen()),
-                  ),
-                ),
+              if (teams.isEmpty) _followTeamsHint(context, theme),
             ],
           ),
         ),

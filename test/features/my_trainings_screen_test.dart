@@ -169,14 +169,45 @@ void main() {
     expect(find.text('Rezervace zrušena.'), findsOneWidget);
   });
 
+  testWidgets('a training whose block already started today offers no '
+      'cancel, but stays listed', (tester) async {
+    await tester.pumpWidget(app(
+      reservations: [res('r1', today)],
+      // b1 is 18:00–19:00; the calendar refuses cancel once startsAt has
+      // passed (domain/schedule.dart's canCancel) — Moje tréninky must
+      // agree instead of offering a cancel the RPC would reject.
+      nowOverride: DateTime(2026, 9, 9, 18, 30),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('18:00–19:00 · Dráha 2'), findsOneWidget);
+    expect(find.byIcon(Icons.close), findsNothing);
+
+    await tester.tap(find.text('18:00–19:00 · Dráha 2'));
+    await tester.pumpAndSettle();
+    expect(find.text('Zrušit rezervaci?'), findsNothing);
+  });
+
   testWidgets('empty: says so and the button opens the calendar', (tester) async {
     var opened = 0;
     await tester.pumpWidget(app(onOpenCalendar: () => opened++));
     await tester.pumpAndSettle();
 
     expect(find.text('Zatím nic.'), findsOneWidget);
+    // `me` follows a team, just has no upcoming match for it right now —
+    // the hint is for "you follow nobody", so it must stay hidden here.
+    expect(find.textContaining('Moje týmy'), findsNothing);
     await tester.tap(find.text('Do kalendáře'));
     expect(opened, 1);
+  });
+
+  testWidgets('empty and following no teams: the hint shows below "Do '
+      'kalendáře" too', (tester) async {
+    await tester.pumpWidget(app(profile: nobody));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Zatím nic.'), findsOneWidget);
+    expect(find.textContaining('Moje týmy'), findsOneWidget);
   });
 
   testWidgets('without followed teams the list ends with the hint', (tester) async {
