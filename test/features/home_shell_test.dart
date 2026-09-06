@@ -160,6 +160,16 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
   }
 
+  /// A phone turned sideways: plenty of width, a short height — the
+  /// breakpoint must key off the width, not the shorter side, or this looks
+  /// exactly like `phone()` and gets the same cramped bottom tabs.
+  void phoneLandscape(WidgetTester tester) {
+    tester.view.physicalSize = const Size(800, 360);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+  }
+
   group('two views', () {
     testWidgets('opens on the profile\'s launch view: calendar by default',
         (tester) async {
@@ -217,6 +227,15 @@ void main() {
       await tester.tap(find.text('Moje tréninky'));
       await tester.pumpAndSettle();
       expect(find.byType(MyTrainingsScreen), findsOneWidget);
+    });
+
+    testWidgets('…and a phone turned sideways also gets the rail, not a '
+        'bottom bar stretched thin', (tester) async {
+      phoneLandscape(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+      expect(find.byType(NavigationRail), findsOneWidget);
+      expect(find.byType(NavigationBar), findsNothing);
     });
 
     testWidgets('the banners stay above the view on the list too', (tester) async {
