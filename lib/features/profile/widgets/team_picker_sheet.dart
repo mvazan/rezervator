@@ -81,14 +81,19 @@ class _TeamPickerListState extends State<_TeamPickerList> {
   static bool _sameTeams(List<String> a, List<String> b) =>
       a.length == b.length && a.toSet().containsAll(b);
 
-  void _toggle(String team, bool on) {
+  Future<void> _toggle(String team, bool on) async {
     setState(() => on ? _ticked.add(team) : _ticked.remove(team));
     final sorted = _ticked.toList()..sort(compareCzech);
-    tryAction(
+    final saved = await tryAction(
       context,
       () => widget.onChanged(sorted),
       errorText: friendlyDbError,
     );
+    // A failed save undoes just this tap, so the box never stays ticked
+    // next to the snack that says it did not stick.
+    if (!saved && mounted) {
+      setState(() => on ? _ticked.remove(team) : _ticked.add(team));
+    }
   }
 
   @override

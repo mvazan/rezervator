@@ -996,6 +996,11 @@ void main() {
 
       expect(find.text('Na tohle nemáš oprávnění.'), findsOneWidget);
       expect(find.textContaining('Nepovedlo se'), findsNothing);
+      // The optimistic tick is rolled back: the box must not stay ticked
+      // while the snack says the save failed.
+      final tile = tester.widget<CheckboxListTile>(
+          find.widgetWithText(CheckboxListTile, 'SKK Veverky Brno A'));
+      expect(tile.value, isFalse);
     });
   });
 }
