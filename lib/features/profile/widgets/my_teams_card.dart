@@ -7,7 +7,7 @@ import 'team_picker_sheet.dart';
 
 /// Which teams' matches the player sees in Moje tréninky (0029). Its own
 /// list — the calendar card keeps a separate one for the Google sync.
-class MyTeamsCard extends ConsumerWidget {
+class MyTeamsCard extends StatelessWidget {
   const MyTeamsCard({
     super.key,
     required this.profile,
@@ -18,7 +18,7 @@ class MyTeamsCard extends ConsumerWidget {
   final Future<void> Function(List<String> teams) setFollowedTeams;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     return Card(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -39,8 +39,8 @@ class MyTeamsCard extends ConsumerWidget {
                   hint: 'Jejich domácí i venkovní zápasy uvidíš v Moje '
                       'tréninky. Do Google kalendáře jdou zápasy podle '
                       'vlastního výběru u kalendáře.',
-                  chosenOf: (ref) =>
-                      ref.watch(myProfileProvider).value?.followedTeams ??
+                  chosenOf: (WidgetRef sheetRef) =>
+                      sheetRef.watch(myProfileProvider).value?.followedTeams ??
                       const [],
                   onChanged: setFollowedTeams,
                 ),

@@ -101,6 +101,11 @@ enum ProfileStatus { pending, approved }
 
 /// Which view the app opens at launch (0029) — a profile choice; a tap on
 /// a tab changes the view for that run only.
+///
+/// The value names are exactly the values the DB check constraint
+/// `profiles_default_view_check` allows ('calendar', 'trainings'), and
+/// `Api.setDefaultView` sends them verbatim (`view.name`) — renaming a
+/// value here still compiles, but breaks the write at runtime only.
 enum HomeView { calendar, trainings }
 
 class Profile {

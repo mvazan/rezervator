@@ -43,10 +43,17 @@ String changelogHeading(Release r, {required bool web}) {
 }
 
 const appChangelog = <Release>[
+  // Two merges landed on the web this same day — one Release, since
+  // changelogHeading prints web-only entries by date alone and two
+  // entries sharing a date would print the same heading twice.
   Release(null, '6. 9. 2026', [
     'Kioskový účet se spravuje v Správa → Kiosk, ne mezi hráči — a je u něj '
         'vidět přihlašovací jméno.',
     'Když se heslo kiosku ztratí, jde odtamtud nastavit nové.',
+    'Na profilu je nová karta Moje týmy: vyber týmy, jejichž zápasy chceš '
+        'vidět. Výběr pro Google kalendář zůstává u propojení kalendáře.',
+    'Na profilu si nastavíš, jaký pohled se ti otevře po spuštění (kalendář, '
+        'nebo připravovaný seznam Moje tréninky).',
   ]),
   Release(null, '4. 9. 2026', [
     'Zápasy vybraných týmů se zapisují do Google Kalendáře — týmy si vybereš '

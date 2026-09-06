@@ -252,10 +252,14 @@ void main() {
 
       final nick = tester.getTopLeft(find.text('Přezdívka na tabuli')).dy;
       final colour = tester.getTopLeft(find.text('Barva mých rezervací')).dy;
+      final myTeams = tester.getTopLeft(find.text('Moje týmy')).dy;
+      final launchView = tester.getTopLeft(find.text('Po spuštění')).dy;
       final calendar = tester.getTopLeft(find.text('Google kalendář')).dy;
       final logout = tester.getTopLeft(find.text('Odhlásit se')).dy;
       expect(nick, lessThan(colour));
-      expect(colour, lessThan(calendar));
+      expect(colour, lessThan(myTeams));
+      expect(myTeams, lessThan(launchView));
+      expect(launchView, lessThan(calendar));
       expect(calendar, lessThan(logout));
     });
 
@@ -902,6 +906,96 @@ void main() {
       await tester.tap(find.text('Moje tréninky'));
       await tester.pumpAndSettle();
       expect(saved, [HomeView.trainings]);
+    });
+
+    testWidgets('two quick ticks both land — the second save carries both '
+        'teams (the stale-set bug would compute it from the value before '
+        'the first tick and lose it)', (tester) async {
+      tester.view.physicalSize = const Size(800, 1800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final saved = <List<String>>[];
+      // Holds the FIRST save open until after the second tick, standing in
+      // for a realtime round trip that has not returned yet — the profile
+      // is deliberately never re-pushed while it is held.
+      final firstSaveGate = Completer<void>();
+      await tester.pumpWidget(app(
+        me,
+        matches: schedule,
+        setFollowedTeams: (t) async {
+          saved.add(t);
+          if (saved.length == 1) await firstSaveGate.future;
+        },
+      ));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Vybrat týmy…'));
+      await tester.pumpAndSettle();
+
+      await tester
+          .tap(find.widgetWithText(CheckboxListTile, 'KS Devítka Brno B'));
+      await tester.pump();
+      await tester
+          .tap(find.widgetWithText(CheckboxListTile, 'SKK Veverky Brno A'));
+      await tester.pump();
+      firstSaveGate.complete();
+      await tester.pumpAndSettle();
+
+      expect(saved.length, 2);
+      expect(saved.last, ['KS Devítka Brno B', 'SKK Veverky Brno A']);
+    });
+
+    testWidgets('the saved list is Czech-sorted no matter the tick order',
+        (tester) async {
+      tester.view.physicalSize = const Size(800, 1800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final saved = <List<String>>[];
+      await tester.pumpWidget(app(
+        me,
+        matches: schedule,
+        setFollowedTeams: (t) async => saved.add(t),
+      ));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Vybrat týmy…'));
+      await tester.pumpAndSettle();
+
+      // Ticked in reverse Czech order: Veverky (S) before Devítka (K) —
+      // the saved list must still come out Devítka first.
+      await tester
+          .tap(find.widgetWithText(CheckboxListTile, 'SKK Veverky Brno A'));
+      await tester.pumpAndSettle();
+      await tester
+          .tap(find.widgetWithText(CheckboxListTile, 'KS Devítka Brno B'));
+      await tester.pumpAndSettle();
+
+      expect(saved.last, ['KS Devítka Brno B', 'SKK Veverky Brno A']);
+    });
+
+    testWidgets('a failing save shows the friendly message, not the raw '
+        'exception', (tester) async {
+      tester.view.physicalSize = const Size(800, 1800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(app(
+        me,
+        matches: schedule,
+        setFollowedTeams: (_) async => throw Exception('not_allowed'),
+      ));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Vybrat týmy…'));
+      await tester.pumpAndSettle();
+      await tester
+          .tap(find.widgetWithText(CheckboxListTile, 'SKK Veverky Brno A'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Na tohle nemáš oprávnění.'), findsOneWidget);
+      expect(find.textContaining('Nepovedlo se'), findsNothing);
     });
   });
 }
