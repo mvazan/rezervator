@@ -10,12 +10,12 @@ import 'my_trainings_screen.dart';
 import 'week_screen.dart';
 
 /// The signed-in home: two views — the calendar and Moje tréninky — behind
-/// bottom tabs on a phone and a rail on a wide screen. Which one opens at
-/// launch is the profile's choice; a tap changes it for this run only. Both
-/// views stay mounted (an IndexedStack, not a switch) so paging the calendar
-/// forward and glancing at the list never loses the week/day position — the
-/// hidden view keeps rebuilding on the minute tick, which is cheap enough to
-/// leave running offstage.
+/// bottom tabs on a narrow screen and a rail on a wide one. Which one opens
+/// at launch is the profile's choice; a tap changes it for this run only.
+/// Both views stay mounted (an IndexedStack, not a switch) so paging the
+/// calendar forward and glancing at the list never loses the week/day
+/// position — the hidden view keeps rebuilding on the minute tick, which is
+/// cheap enough to leave running offstage.
 class HomeShell extends ConsumerStatefulWidget {
   const HomeShell({super.key});
 
@@ -122,9 +122,14 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       ],
     );
 
-    // A phone in either orientation gets tabs; a tablet or the desktop web
-    // a rail on the left — same two destinations.
-    final compact = MediaQuery.sizeOf(context).shortestSide < 600;
+    // Material's own adaptive-navigation breakpoint: below 600dp of WIDTH,
+    // bottom tabs; at or above it, a rail on the left — same two
+    // destinations either way. Width, not the shorter side, on purpose: a
+    // phone turned to landscape has plenty of width but a short height, and
+    // a bottom bar stretched across that width leaves its two destinations
+    // stranded far apart, which is exactly the case this breakpoint exists
+    // to catch — a rail with the same 2 destinations is the compact fit.
+    final compact = MediaQuery.sizeOf(context).width < 600;
     void select(int index) => setState(() => _chosen = HomeView.values[index]);
 
     // A back gesture/button away from the calendar returns to it instead of
@@ -147,6 +152,10 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                       selectedIndex: view.index,
                       onDestinationSelected: select,
                       labelType: NavigationRailLabelType.all,
+                      // The two destinations need ~150dp of height. Nothing
+                      // guarantees that once the rail keys off width alone,
+                      // so let them scroll rather than overflow.
+                      scrollable: true,
                       destinations: const [
                         NavigationRailDestination(
                           icon: Icon(Icons.calendar_month_outlined),

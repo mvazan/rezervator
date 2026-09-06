@@ -160,6 +160,37 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
   }
 
+  /// A phone turned sideways: plenty of width, a short height — the
+  /// breakpoint must key off the width, not the shorter side, or this looks
+  /// exactly like `phone()` and gets the same cramped bottom tabs.
+  void phoneLandscape(WidgetTester tester) {
+    tester.view.physicalSize = const Size(800, 360);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+  }
+
+  /// The narrowest landscape phone that still gets the rail: the strip left
+  /// for the header is ~80dp narrower than the screen, which is exactly the
+  /// band where measuring the screen instead of the strip overflowed.
+  void narrowLandscape(WidgetTester tester) {
+    tester.view.physicalSize = const Size(640, 360);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+  }
+
+  /// Wide enough for the rail, far too short for it (the two destinations
+  /// need ~150dp): a browser window squashed down to a strip. Unreachable
+  /// while the breakpoint keyed off the shorter side — the rail then implied
+  /// a height of 600 too — so the rail has to survive it on its own now.
+  void shortStrip(WidgetTester tester) {
+    tester.view.physicalSize = const Size(700, 130);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+  }
+
   group('two views', () {
     testWidgets('opens on the profile\'s launch view: calendar by default',
         (tester) async {
@@ -217,6 +248,34 @@ void main() {
       await tester.tap(find.text('Moje tréninky'));
       await tester.pumpAndSettle();
       expect(find.byType(MyTrainingsScreen), findsOneWidget);
+    });
+
+    testWidgets('…and a phone turned sideways also gets the rail, not a '
+        'bottom bar stretched thin', (tester) async {
+      phoneLandscape(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+      expect(find.byType(NavigationRail), findsOneWidget);
+      expect(find.byType(NavigationBar), findsNothing);
+    });
+
+    testWidgets('a narrow landscape phone fits the header beside the rail',
+        (tester) async {
+      narrowLandscape(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+      expect(find.byType(NavigationRail), findsOneWidget);
+      expect(tester.takeException(), isNull,
+          reason: 'the header measures the strip it got, not the screen');
+    });
+
+    testWidgets('the rail survives a window too short to hold it', (tester) async {
+      shortStrip(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+      expect(find.byType(NavigationRail), findsOneWidget);
+      expect(tester.takeException(), isNull,
+          reason: 'the rail scrolls instead of overflowing');
     });
 
     testWidgets('the banners stay above the view on the list too', (tester) async {
