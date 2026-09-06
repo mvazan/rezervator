@@ -24,7 +24,7 @@ class MyTeamsCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           ListTile(
-            leading: const Icon(Icons.sports_outlined),
+            leading: const Icon(Icons.groups_outlined),
             title: const Text('Moje týmy'),
             subtitle: Text(matchTeamsSummary(profile.followedTeams)),
           ),
