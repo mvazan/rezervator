@@ -18,13 +18,14 @@ void main() {
     position: 1,
     active: true,
   );
-  Reservation res(String id, Day date, {String block = 'b1', DateTime? cancelled}) =>
+  Reservation res(String id, Day date,
+          {String block = 'b1', DateTime? cancelled, int lane = 2}) =>
       Reservation(
         id: id,
         playerId: 'me',
         date: date,
         blockId: block,
-        lane: 2,
+        lane: lane,
         createdVia: 'app',
         createdAt: DateTime.utc(2026, 1, 1),
         cancelledAt: cancelled,
@@ -67,6 +68,25 @@ void main() {
     );
   });
 
+  test('two own trainings tied on date and start (same block) break by '
+      'lane, lower first', () {
+    final days = upcomingTimeline(
+      reservations: [
+        res('lane3', today, lane: 3),
+        res('lane1', today, lane: 1),
+      ],
+      blocks: const [b1],
+      slots: const [],
+      teams: const [],
+      today: today,
+    );
+    expect(days, hasLength(1));
+    expect(
+      days.single.items.map((i) => (i as UpcomingTraining).reservation.id),
+      ['lane1', 'lane3'],
+    );
+  });
+
   test('cancelled, past and orphaned reservations are dropped', () {
     final days = upcomingTimeline(
       reservations: [
@@ -104,6 +124,50 @@ void main() {
       [for (final d in days) for (final i in d.items) (i as UpcomingMatch).slot.id],
       ['home', 'away'],
     );
+  });
+
+  test('a match between two followed teams (home and away both followed) '
+      'is included once, not twice', () {
+    final days = upcomingTimeline(
+      reservations: const [],
+      blocks: const [],
+      slots: [
+        match('derby', today, const HourMinute(18, 0),
+            home: 'SKK Veverky Brno A', away: 'SKK Veverky Brno B'),
+      ],
+      teams: const [
+        'SKK Veverky Brno A',
+        'SKK Veverky Brno B',
+        'KK Blansko B',
+      ],
+      today: today,
+    );
+    expect(days, hasLength(1));
+    expect(days.single.items, hasLength(1));
+    expect((days.single.items.single as UpcomingMatch).slot.id, 'derby');
+  });
+
+  test('a non-match priority slot (e.g. a rental) is never listed even when '
+      'its team fields happen to match a followed team', () {
+    const rentalType = PrioritySlotType(id: 't-rental', name: 'Pronájem');
+    final days = upcomingTimeline(
+      reservations: const [],
+      blocks: const [],
+      slots: [
+        PrioritySlot(
+          id: 'r1',
+          date: today,
+          startsAt: const HourMinute(18, 0),
+          endsAt: const HourMinute(19, 0),
+          type: rentalType,
+          homeTeam: 'SKK Veverky Brno A',
+          awayTeam: 'KK MS Brno D',
+        ),
+      ],
+      teams: const ['SKK Veverky Brno A'],
+      today: today,
+    );
+    expect(days, isEmpty);
   });
 
   test('no followed teams means no matches; nothing at all means no days', () {

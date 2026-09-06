@@ -46,7 +46,8 @@ class UpcomingDay {
 
 /// Live reservations from [today] on whose block still exists, plus match
 /// slots (no úklid children) of [teams] from [today] on; days ascending,
-/// within a day by start, a training before a match at the same start.
+/// within a day by start (chronological, `compareDayTime`), a training
+/// before a match at the same start, and two tied trainings by lane.
 List<UpcomingDay> upcomingTimeline({
   required List<Reservation> reservations,
   required List<TimeBlock> blocks,
@@ -66,11 +67,17 @@ List<UpcomingDay> upcomingTimeline({
           UpcomingMatch(s),
   ];
   items.sort((a, b) {
-    final byDate = a.date.compareTo(b.date);
-    if (byDate != 0) return byDate;
-    final byStart = a.startsAt.compareTo(b.startsAt);
-    if (byStart != 0) return byStart;
-    return (a is UpcomingMatch ? 1 : 0) - (b is UpcomingMatch ? 1 : 0);
+    final byDayTime = compareDayTime(a.date, a.startsAt, b.date, b.startsAt);
+    if (byDayTime != 0) return byDayTime;
+    final byKind = (a is UpcomingMatch ? 1 : 0) - (b is UpcomingMatch ? 1 : 0);
+    if (byKind != 0) return byKind;
+    // Two of the player's own trainings tied on date/start (same block):
+    // break by lane so the order is deterministic instead of whatever the
+    // reservations stream happened to deliver.
+    if (a is UpcomingTraining && b is UpcomingTraining) {
+      return a.reservation.lane.compareTo(b.reservation.lane);
+    }
+    return 0;
   });
   final days = <UpcomingDay>[];
   for (final item in items) {
