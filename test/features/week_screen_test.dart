@@ -3,7 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:rezervator/core/ui.dart' show dayFull, today;
+import 'package:rezervator/core/ui.dart' show dayFull;
+import 'package:rezervator/data/clock.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/schedule/week_calendar_view.dart';
@@ -23,8 +24,7 @@ void main() {
   // Make the surface WIDE (1600×1200, landscape → week calendar): the
   // calendar's day columns clamp to 220px, so 7 columns + the hour ruler
   // (1586px) all build without horizontal scrolling — a test asserting on
-  // e.g. Sunday's column would otherwise flake depending on which weekday
-  // the suite runs.
+  // e.g. Sunday's column would otherwise depend on the surface width.
   void wideSurface(WidgetTester tester) {
     tester.view.physicalSize = const Size(1600, 1200);
     tester.view.devicePixelRatio = 1.0;
@@ -61,7 +61,13 @@ void main() {
     active: true,
   );
 
-  final t = today();
+  // The clock is PINNED (see the nowProvider override in `app`) so the week
+  // strip is identical on every run. With the real clock the suite failed
+  // every Sunday — `tomorrow` then falls into the next strip, whose column
+  // the week view does not build — and again after 22:58, when the harness
+  // block b1 turned `inPast` and nothing was bookable.
+  final now = DateTime(2026, 9, 9, 10, 0); // středa dopoledne
+  final t = Day.fromDateTime(now);
   final tomorrow = t.addDays(1);
 
   const me = Profile(
@@ -134,6 +140,7 @@ void main() {
         ),
         myProfileProvider.overrideWith((ref) => Stream.value(profile)),
         playersProvider.overrideWith((ref) async => roster),
+        nowProvider.overrideWith((ref) => Stream.value(now)),
       ],
       child: MaterialApp(home: Scaffold(body: WeekScreen(trailing: trailing))),
     );
@@ -577,25 +584,14 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(DayChipStrip), findsOneWidget);
 
-    // Select a day strictly after today within the shown week, so the visible
-    // day is never `inPast` (today's slot goes past once the suite runs after
-    // the harness block's start). today.weekday (1..7) is the 0-based index of
-    // tomorrow within this Mon..Sun strip; when today is Sunday there is no
-    // later day in-week, so tap the current week's Saturday and shift a week
-    // forward instead — every path lands on a future, bookable day.
+    // Tomorrow, which the pinned clock keeps inside this Mon..Sun strip and
+    // in the future, so the day is bookable. `t.weekday` (1..7) is the
+    // 0-based index of tomorrow in the strip.
     final chips = find.descendant(
       of: find.byType(DayChipStrip),
       matching: find.byType(InkWell),
     );
-    final t = today();
-    if (t.weekday < DateTime.sunday) {
-      await tester.tap(chips.at(t.weekday)); // tomorrow, same week
-    } else {
-      // Sunday: go to next week and land on its Monday.
-      await tester.tap(find.byIcon(Icons.chevron_right));
-      await tester.pumpAndSettle();
-      await tester.tap(chips.at(0));
-    }
+    await tester.tap(chips.at(t.weekday));
     await tester.pumpAndSettle();
 
     await tester.tap(find.byIcon(Icons.add).first);
@@ -880,8 +876,8 @@ void main() {
       // The header's "20.4.–3.5." range label is the same Text shown above
       // both views (see WeekScreen.build's `header`) — capturing it before
       // and after the swipe is a week-offset-agnostic way to assert the
-      // week actually shifted, without this test re-deriving `today()`'s
-      // Monday itself (today() is real wall-clock time, not fixed here).
+      // week actually shifted, without this test re-deriving the pinned
+      // Monday itself.
       String rangeLabelText() => tester
           .widgetList<Text>(find.byType(Text))
           .map((t) => t.data)
@@ -1097,14 +1093,7 @@ void main() {
       of: find.byType(DayChipStrip),
       matching: find.byType(InkWell),
     );
-    final t = today();
-    if (t.weekday < DateTime.sunday) {
-      await tester.tap(chips.at(t.weekday));
-    } else {
-      await tester.tap(find.byIcon(Icons.chevron_right));
-      await tester.pumpAndSettle();
-      await tester.tap(chips.at(0));
-    }
+    await tester.tap(chips.at(t.weekday));
     await tester.pumpAndSettle();
 
     expect(find.textContaining('· 23:30–23:59'), findsWidgets);
