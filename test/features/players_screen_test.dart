@@ -186,8 +186,8 @@ void main() {
     expect(find.text('Staré jméno'), findsNothing);
   });
 
-  testWidgets('the kiosk account stays collapsed out of the roster, and '
-      'expanding it still offers the way back', (tester) async {
+  testWidgets('a kiosk account never shows in the roster — it is the '
+      "alley's tablet and lives on the Kiosk screen", (tester) async {
     const kiosk = Profile(
       id: 'k1',
       displayName: 'Kiosk u dráhy',
@@ -198,16 +198,11 @@ void main() {
     await tester.pumpWidget(app([admin, kiosk]));
     await tester.pumpAndSettle();
 
-    // Counted in the header, but neither the account nor its action shows.
-    expect(find.text('Kiosk (1)'), findsOneWidget);
     expect(find.text('Kiosk u dráhy'), findsNothing);
+    expect(find.textContaining('Kiosk'), findsNothing);
     expect(find.text('Vrátit mezi hráče'), findsNothing);
-
-    await tester.tap(find.text('Kiosk (1)'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Kiosk u dráhy'), findsOneWidget);
-    expect(find.text('Vrátit mezi hráče'), findsOneWidget);
+    // The people are still there.
+    expect(find.text('Správce'), findsOneWidget);
   });
 
   testWidgets('the FAB opens the add dialog for a hráč bez účtu',

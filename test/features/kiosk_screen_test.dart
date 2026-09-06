@@ -55,12 +55,13 @@ void main() {
 
   setUp(() => requests = []);
 
-  Widget app() {
+  Widget app({List<Profile> roster = const [admin]}) {
     return ProviderScope(
       overrides: [
         myProfileProvider.overrideWith((ref) => Stream.value(admin)),
         settingsProvider.overrideWith((ref) => Stream.value(settings)),
         clubsProvider.overrideWith((ref) => Stream.value(const [])),
+        profilesProvider.overrideWith((ref) => Stream.value(roster)),
       ],
       child: const MaterialApp(
         localizationsDelegates: GlobalMaterialLocalizations.delegates,
@@ -111,5 +112,41 @@ void main() {
     final body = jsonDecode(patch.body) as Map<String, dynamic>;
     // Started `true` (fit); toggling flips it to `false` (scroll mode).
     expect(body['kiosk_fit_day'], false);
+  });
+
+  testWidgets('kiosk accounts are administered here, not among Hráči',
+      (tester) async {
+    const kiosk = Profile(
+      id: 'k1',
+      displayName: 'Kiosk u dráhy',
+      email: 'kiosk@veverky.cz',
+      role: Role.kiosk,
+      status: ProfileStatus.approved,
+    );
+    await tester.pumpWidget(app(roster: const [admin, kiosk]));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Kioskové účty'), findsOneWidget);
+    expect(find.text('Kiosk u dráhy'), findsOneWidget);
+    expect(find.text('kiosk@veverky.cz'), findsOneWidget);
+    // Only kiosk accounts — the admin is a person and belongs in Hráči.
+    expect(find.text('Správce'), findsNothing);
+
+    await tester.tap(find.text('Vrátit mezi hráče'));
+    await tester.pumpAndSettle();
+
+    final call = requests.last;
+    expect(call.url.path, endsWith('/rpc/set_role'));
+    expect(jsonDecode(call.body), {'p_user_id': 'k1', 'p_role': 'player'});
+  });
+
+  testWidgets('without a kiosk account the section explains how to make one',
+      (tester) async {
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+
+    expect(find.text('Kioskové účty'), findsOneWidget);
+    expect(find.textContaining('Nastavit jako kiosk'), findsOneWidget);
+    expect(find.text('Vrátit mezi hráče'), findsNothing);
   });
 }
