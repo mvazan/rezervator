@@ -61,6 +61,8 @@ void main() {
     Stream<List<Reservation>>? reservationsStream,
     Future<void> Function(String id)? cancel,
     VoidCallback? onOpenCalendar,
+    bool slotsLoading = false,
+    DateTime? nowOverride,
   }) {
     return ProviderScope(
       overrides: [
@@ -69,7 +71,11 @@ void main() {
             (ref) => reservationsStream ?? Stream.value(reservations)),
         timeBlocksProvider.overrideWith((ref) => Stream.value(const [b1])),
         prioritySlotsProvider.overrideWithValue(slots),
-        nowProvider.overrideWith((ref) => Stream.value(now)),
+        // _prioritySlotRowsProvider is private to providers.dart, so a test
+        // that wants to simulate it still being pending overrides this
+        // public signal directly instead.
+        prioritySlotsLoadingProvider.overrideWithValue(slotsLoading),
+        nowProvider.overrideWith((ref) => Stream.value(nowOverride ?? now)),
       ],
       child: MaterialApp(
         home: Scaffold(
@@ -116,6 +122,18 @@ void main() {
     // stream (blocks, profile, now) via their microtask, leaving only the
     // reservations stream genuinely stuck loading.
     await tester.pumpWidget(app(reservationsStream: ctrl.stream));
+
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(find.text('Zatím nic.'), findsNothing);
+  });
+
+  testWidgets('while priority slots have not delivered their first snapshot '
+      'yet shows a progress indicator, never the empty state', (tester) async {
+    // reservations/blocks resolve normally on the first frame; only the
+    // slots stream is still pending (see prioritySlotsLoadingProvider) — a
+    // player who follows teams but has no reservation must not see "Zatím
+    // nic." while the match slots are still on their way in.
+    await tester.pumpWidget(app(slotsLoading: true));
 
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
     expect(find.text('Zatím nic.'), findsNothing);

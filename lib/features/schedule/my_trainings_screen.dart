@@ -59,6 +59,14 @@ class MyTrainingsScreen extends ConsumerWidget {
     // followed teams just means the hint line shows instead of matches.
     final reservationsAsync = ref.watch(myActiveReservationsProvider);
     final blocksAsync = ref.watch(timeBlocksProvider);
+    // Hoisted up here (not down by the empty-state check) so this stream —
+    // and prioritySlotsLoadingProvider below — starts on the SAME frame as
+    // reservations/blocks; created only after the loading gate, it would
+    // still be pending on the first build past that gate and a player who
+    // follows teams but has no reservation would see "Zatím nic." for one
+    // round trip.
+    final slots = ref.watch(prioritySlotsProvider);
+    final slotsLoading = ref.watch(prioritySlotsLoadingProvider);
     final profile = ref.watch(myProfileProvider).value;
     final teams = profile?.followedTeams ?? const <String>[];
     final theme = Theme.of(context);
@@ -77,7 +85,8 @@ class MyTrainingsScreen extends ConsumerWidget {
 
     final stillLoading =
         (reservationsAsync.isLoading && !reservationsAsync.hasValue) ||
-            (blocksAsync.isLoading && !blocksAsync.hasValue);
+            (blocksAsync.isLoading && !blocksAsync.hasValue) ||
+            slotsLoading;
     if (stillLoading) {
       return Column(
         children: [
@@ -119,7 +128,7 @@ class MyTrainingsScreen extends ConsumerWidget {
     final days = upcomingTimeline(
       reservations: reservationsAsync.value ?? const [],
       blocks: blocksAsync.value ?? const [],
-      slots: ref.watch(prioritySlotsProvider),
+      slots: slots,
       teams: teams,
       today: today,
     );
