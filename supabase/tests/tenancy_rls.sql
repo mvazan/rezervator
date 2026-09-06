@@ -1108,5 +1108,54 @@ begin
   raise notice 'OK: matches of followed teams enqueue calendar jobs, others do not';
 end $$;
 
+-- Kiosk password (0028): only an admin of the kiosk's OWN alley gets the
+-- go-ahead to set it a new one; everyone else is refused before the edge
+-- function ever touches the Auth admin API.
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+declare
+  v_target uuid;
+begin
+  v_target := kiosk_password_target('10000000-0000-0000-0000-000000000006');
+  if v_target <> '10000000-0000-0000-0000-000000000006' then
+    raise exception 'FAIL: kiosk_password_target returned %', v_target;
+  end if;
+
+  -- A profile of the same alley that is not a kiosk.
+  begin
+    perform kiosk_password_target('10000000-0000-0000-0000-000000000003');
+    raise exception 'FAIL: a non-kiosk profile passed as a kiosk';
+  exception when others then
+    if sqlerrm <> 'unknown_kiosk' then raise; end if;
+  end;
+  raise notice 'OK: an admin may set a new password for their own kiosk only';
+end $$;
+
+-- Tenant B's admin must not reach tenant A's kiosk.
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000002","role":"authenticated"}';
+do $$
+begin
+  perform kiosk_password_target('10000000-0000-0000-0000-000000000006');
+  raise exception 'FAIL: a foreign admin reached another alley''s kiosk';
+exception when others then
+  if sqlerrm <> 'unknown_kiosk' then raise; end if;
+  raise notice 'OK: a kiosk password stays inside its own kuželna';
+end $$;
+
+-- A plain player, admin of nothing.
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000003","role":"authenticated"}';
+do $$
+begin
+  perform kiosk_password_target('10000000-0000-0000-0000-000000000006');
+  raise exception 'FAIL: a non-admin set a kiosk password';
+exception when others then
+  if sqlerrm <> 'not_allowed' then raise; end if;
+  raise notice 'OK: only an admin may set a kiosk password';
+end $$;
+
 reset role;
 rollback;

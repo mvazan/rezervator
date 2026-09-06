@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/ui.dart';
@@ -11,7 +12,12 @@ import 'widgets/admin_scaffold.dart';
 /// alley's tablet, not a person, and this is the only place one can be
 /// turned back into a player.
 class KioskSettingsScreen extends ConsumerWidget {
-  const KioskSettingsScreen({super.key});
+  const KioskSettingsScreen({super.key, this.resetPassword = Api.resetKioskPassword});
+
+  /// Injectable so a widget test can drive the dialogs without the edge
+  /// function (functions.invoke encodes its body on an isolate, which a
+  /// pumped test never lets finish).
+  final Future<String> Function(String userId) resetPassword;
 
   Future<void> _returnToPlayer(BuildContext context, Profile p) => tryAction(
         context,
@@ -19,6 +25,68 @@ class KioskSettingsScreen extends ConsumerWidget {
         success: 'Účet vrácen mezi hráče.',
         errorText: friendlyDbError,
       );
+
+  /// Sets a new password and shows it — the current one cannot be read
+  /// back (Supabase keeps only a hash), so this is the way to credentials
+  /// for a tablet. Shown once: leaving the dialog means setting another.
+  Future<void> _newPassword(BuildContext context, Profile p) async {
+    final confirmed = await confirmDialog(
+      context,
+      title: 'Nastavit nové heslo?',
+      message: 'Kiosku „${p.displayName}“ se nastaví nové heslo a to '
+          'dosavadní přestane platit. Už přihlášený tablet běží dál, nové '
+          'heslo bude potřebovat až při dalším přihlášení.',
+      confirmLabel: 'Nastavit',
+    );
+    if (!confirmed || !context.mounted) return;
+
+    String? password;
+    final ok = await tryAction(
+      context,
+      () async => password = await resetPassword(p.id),
+      errorText: friendlyDbError,
+    );
+    if (!ok || password == null || !context.mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Nové heslo kiosku'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Přihlašovací jméno: ${p.email}'),
+            const SizedBox(height: 12),
+            SelectableText(
+              password!,
+              style: Theme.of(dialogContext).textTheme.headlineSmall,
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Zapiš si ho teď — znovu ho appka nezobrazí, jen nastaví '
+              'další nové.',
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: password!));
+              if (dialogContext.mounted) {
+                snack(dialogContext, 'Heslo zkopírováno.');
+              }
+            },
+            child: const Text('Kopírovat'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Hotovo'),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -84,9 +152,20 @@ class KioskSettingsScreen extends ConsumerWidget {
                 leading: const Icon(Icons.tablet_outlined),
                 title: Text(p.displayName),
                 subtitle: Text(p.email),
-                trailing: TextButton(
-                  onPressed: () => _returnToPlayer(context, p),
-                  child: const Text('Vrátit mezi hráče'),
+                trailing: PopupMenuButton<String>(
+                  onSelected: (value) => value == 'password'
+                      ? _newPassword(context, p)
+                      : _returnToPlayer(context, p),
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(
+                      value: 'password',
+                      child: Text('Nastavit nové heslo…'),
+                    ),
+                    PopupMenuItem(
+                      value: 'player',
+                      child: Text('Vrátit mezi hráče'),
+                    ),
+                  ],
                 ),
               ),
           ],

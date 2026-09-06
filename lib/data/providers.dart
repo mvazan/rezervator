@@ -822,6 +822,23 @@ class Api {
         'calendar-manage',
         body: {'action': 'match_teams', 'teams': teams},
       );
+
+  /// Sets a NEW password for a kiosk account and returns it — the old one
+  /// is gone. Reading the current one is impossible (Supabase keeps only a
+  /// hash), so this is how an admin gets credentials for a tablet. Who may
+  /// do it is decided server-side by kiosk_password_target (0028).
+  static Future<String> resetKioskPassword(String userId) async {
+    final response = await _db.functions.invoke(
+      'kiosk-password',
+      body: {'user_id': userId},
+    );
+    final data = response.data;
+    final password = data is Map ? data['password'] : null;
+    if (password is! String || password.isEmpty) {
+      throw StateError('kiosk-password vrátila prázdné heslo');
+    }
+    return password;
+  }
 }
 
 /// Google's consent page for the calendar link, pure and unit-testable:

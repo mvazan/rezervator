@@ -211,6 +211,12 @@ neukazuje seznam hráčů ani rozvrh správy — jen svůj vlastní rozvrh a tla
 
 ### 7.1 Kioskový účet
 
+> Heslo kiosku se nedá přečíst zpátky (Supabase drží jen hash). Když se
+> ztratí, nastav v appce nové: **Správa → Kiosk → Kioskové účty →
+> Nastavit nové heslo…**; appka ho jednou ukáže i s přihlašovacím jménem.
+> Už přihlášený tablet běží dál, nové heslo potřebuje až při dalším
+> přihlášení.
+
 1. Supabase dashboard → **Authentication → Users → Add user** → e-mail ve
    tvaru `kiosk@tvoje-domena.cz` (nemusí být skutečná schránka — kiosek se
    nikdy nesnaží nic odeslat ani přijmout přes e-mail) + silné heslo

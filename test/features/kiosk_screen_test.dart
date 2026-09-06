@@ -55,7 +55,10 @@ void main() {
 
   setUp(() => requests = []);
 
-  Widget app({List<Profile> roster = const [admin]}) {
+  Widget app({
+    List<Profile> roster = const [admin],
+    Future<String> Function(String)? resetPassword,
+  }) {
     return ProviderScope(
       overrides: [
         myProfileProvider.overrideWith((ref) => Stream.value(admin)),
@@ -63,10 +66,13 @@ void main() {
         clubsProvider.overrideWith((ref) => Stream.value(const [])),
         profilesProvider.overrideWith((ref) => Stream.value(roster)),
       ],
-      child: const MaterialApp(
+      child: MaterialApp(
         localizationsDelegates: GlobalMaterialLocalizations.delegates,
-        supportedLocales: [Locale('cs'), Locale('en')],
-        home: KioskSettingsScreen(),
+        supportedLocales: const [Locale('cs'), Locale('en')],
+        home: KioskSettingsScreen(
+          resetPassword:
+              resetPassword ?? (_) async => 'abcd-efgh-jkmn-pqrt',
+        ),
       ),
     );
   }
@@ -132,12 +138,76 @@ void main() {
     // Only kiosk accounts — the admin is a person and belongs in Hráči.
     expect(find.text('Správce'), findsNothing);
 
+    await tester.tap(find.byType(PopupMenuButton<String>));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Vrátit mezi hráče'));
     await tester.pumpAndSettle();
 
     final call = requests.last;
     expect(call.url.path, endsWith('/rpc/set_role'));
     expect(jsonDecode(call.body), {'p_user_id': 'k1', 'p_role': 'player'});
+  });
+
+  testWidgets('a new kiosk password is asked for, then shown once',
+      (tester) async {
+    const kiosk = Profile(
+      id: 'k1',
+      displayName: 'Kiosk u dráhy',
+      email: 'kiosk@veverky.cz',
+      role: Role.kiosk,
+      status: ProfileStatus.approved,
+    );
+    final asked = <String>[];
+    await tester.pumpWidget(app(
+      roster: const [admin, kiosk],
+      resetPassword: (id) async {
+        asked.add(id);
+        return 'abcd-efgh-jkmn-pqrt';
+      },
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byType(PopupMenuButton<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Nastavit nové heslo…'));
+    await tester.pumpAndSettle();
+
+    // Asked first: the current password stops working.
+    expect(find.text('Nastavit nové heslo?'), findsOneWidget);
+    expect(find.textContaining('přestane platit'), findsOneWidget);
+    await tester.tap(find.text('Nastavit'));
+    await tester.pumpAndSettle();
+
+    // The answer is shown once, with the login it belongs to.
+    expect(asked, ['k1']);
+    expect(find.text('Nové heslo kiosku'), findsOneWidget);
+    expect(find.text('abcd-efgh-jkmn-pqrt'), findsOneWidget);
+    expect(find.text('Přihlašovací jméno: kiosk@veverky.cz'), findsOneWidget);
+  });
+
+  testWidgets('a refused reset shows why and no password', (tester) async {
+    const kiosk = Profile(
+      id: 'k1',
+      displayName: 'Kiosk u dráhy',
+      email: 'kiosk@veverky.cz',
+      role: Role.kiosk,
+      status: ProfileStatus.approved,
+    );
+    await tester.pumpWidget(app(
+      roster: const [admin, kiosk],
+      resetPassword: (_) async => throw Exception('not_allowed'),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byType(PopupMenuButton<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Nastavit nové heslo…'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Nastavit'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Nové heslo kiosku'), findsNothing);
+    expect(find.byType(SnackBar), findsOneWidget);
   });
 
   testWidgets('without a kiosk account the section explains how to make one',
