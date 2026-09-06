@@ -3,15 +3,29 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/ui.dart';
 import '../../data/providers.dart';
+import '../../domain/models.dart';
 import 'widgets/admin_scaffold.dart';
 
-/// Admin: kiosk-specific settings (today just the board theme; future kiosk
-/// options land here rather than in the schedule settings).
+/// Admin: kiosk-specific settings (the board theme) and the kiosk accounts
+/// themselves. The accounts live here, not among Hráči: a kiosk is the
+/// alley's tablet, not a person, and this is the only place one can be
+/// turned back into a player.
 class KioskSettingsScreen extends ConsumerWidget {
   const KioskSettingsScreen({super.key});
 
+  Future<void> _returnToPlayer(BuildContext context, Profile p) => tryAction(
+        context,
+        () => Api.setRole(p.id, Role.player),
+        success: 'Účet vrácen mezi hráče.',
+        errorText: friendlyDbError,
+      );
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final kiosks = [
+      for (final p in ref.watch(profilesProvider).value ?? const <Profile>[])
+        if (p.role == Role.kiosk) p,
+    ];
     return AdminScaffold(
       title: 'Kiosk',
       body: AsyncBody(
@@ -54,6 +68,27 @@ class KioskSettingsScreen extends ConsumerWidget {
                       errorText: friendlyDbError,
                     ),
             ),
+            const SizedBox(height: 24),
+            Text('Kioskové účty',
+                style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 4),
+            if (kiosks.isEmpty)
+              const Text(
+                'Zatím žádný. Účet se kioskem stane v Hráčích přes '
+                '„Nastavit jako kiosk“; pak zmizí ze seznamu hráčů a objeví '
+                'se tady.',
+              ),
+            for (final p in kiosks)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.tablet_outlined),
+                title: Text(p.displayName),
+                subtitle: Text(p.email),
+                trailing: TextButton(
+                  onPressed: () => _returnToPlayer(context, p),
+                  child: const Text('Vrátit mezi hráče'),
+                ),
+              ),
           ],
         ),
       ),

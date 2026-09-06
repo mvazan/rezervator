@@ -36,13 +36,6 @@ class PlayersScreen extends ConsumerWidget {
     await _setRole(context, p, Role.kiosk);
   }
 
-  Future<void> _returnToPlayer(BuildContext context, Profile p) => tryAction(
-    context,
-    () => Api.setRole(p.id, Role.player),
-    success: 'Účet vrácen mezi hráče.',
-    errorText: friendlyDbError,
-  );
-
   Future<void> _editNick(BuildContext context, Profile p) async {
     final input = await promptText(
       context,
@@ -280,7 +273,8 @@ class PlayersScreen extends ConsumerWidget {
                     p.status == ProfileStatus.approved && p.role != Role.kiosk,
               )
               .toList();
-          final kiosks = profiles.where((p) => p.role == Role.kiosk).toList();
+          // Kiosk accounts are the alley's tablet, not people: they are
+          // administered on the Kiosk screen and never appear here.
           final sections = playersByClub(approved, clubs);
 
           return ListView(
@@ -375,26 +369,6 @@ class PlayersScreen extends ConsumerWidget {
                           p.hasAccount ? _memberMenu(p) : _placeholderMenu(),
                     ),
                   ),
-              ],
-              // A kiosk account is the alley's tablet, not a person, so it
-              // stays collapsed out of the roster — but reachable: this is
-              // the only place one can be turned back into a player.
-              if (kiosks.isNotEmpty) ...[
-                const SizedBox(height: 16),
-                ExpansionTile(
-                  title: Text('Kiosk (${kiosks.length})'),
-                  children: [
-                    for (final p in kiosks)
-                      ListTile(
-                        title: Text(p.displayName),
-                        subtitle: _clubSubtitle(p, clubs),
-                        trailing: TextButton(
-                          onPressed: () => _returnToPlayer(context, p),
-                          child: const Text('Vrátit mezi hráče'),
-                        ),
-                      ),
-                  ],
-                ),
               ],
             ],
           );
