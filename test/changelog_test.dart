@@ -73,9 +73,14 @@ void main() {
     test('the web lists every batch by date, web-only ones marked', () {
       final shown = changelogFor(web: true);
       expect(shown.length, appChangelog.length);
-      final webOnly = shown.firstWhere((r) => r.version == null);
-      expect(changelogHeading(webOnly, web: true),
-          '${webOnly.date} · zatím jen na webu');
+      // Usually there is a web-only batch; right after a release that folds
+      // in the whole backlog there is none yet — a valid state (PLAY.md).
+      final webOnlyEntries = shown.where((r) => r.version == null);
+      if (webOnlyEntries.isNotEmpty) {
+        final webOnly = webOnlyEntries.first;
+        expect(changelogHeading(webOnly, web: true),
+            '${webOnly.date} · zatím jen na webu');
+      }
       final releasedEntry = shown.firstWhere((r) => r.version != null);
       expect(changelogHeading(releasedEntry, web: true),
           '${releasedEntry.date} · verze ${releasedEntry.version}');
@@ -104,7 +109,12 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    final webOnly = appChangelog.firstWhere((r) => r.version == null);
+    // Usually there IS a batch no build carries yet — the web deploys on
+    // every merge, releases only catch up now and then. Right after a
+    // release that folds the whole backlog in (see PLAY.md), there is
+    // none — a valid state, so these checks skip rather than crash.
+    final pending = appChangelog.where((r) => r.version == null);
+    final webOnly = pending.isEmpty ? null : pending.first;
     final newestRelease = appChangelog.firstWhere((r) => r.version != null);
 
     testWidgets('in the app: versions only, no web talk', (tester) async {
@@ -115,8 +125,10 @@ void main() {
       expect(find.text('verze ${newestRelease.version} · ${newestRelease.date}'),
           findsOneWidget);
       // A batch that no build carries must not be advertised in the app.
-      expect(find.text('${webOnly.date} · zatím jen na webu'), findsNothing);
-      expect(find.text('• ${webOnly.changes.first}'), findsNothing);
+      if (webOnly != null) {
+        expect(find.text('${webOnly.date} · zatím jen na webu'), findsNothing);
+        expect(find.text('• ${webOnly.changes.first}'), findsNothing);
+      }
     });
 
     testWidgets('on the web: dated batches, the newest not in any version yet',
@@ -124,10 +136,12 @@ void main() {
       await open(tester, web: true);
 
       expect(find.textContaining('Web se aktualizuje průběžně'), findsOneWidget);
-      expect(find.text('${webOnly.date} · zatím jen na webu'), findsOneWidget);
-      expect(find.text('• ${webOnly.changes.first}'), findsOneWidget);
       expect(find.text('${newestRelease.date} · verze ${newestRelease.version}'),
           findsOneWidget);
+      if (webOnly != null) {
+        expect(find.text('${webOnly.date} · zatím jen na webu'), findsOneWidget);
+        expect(find.text('• ${webOnly.changes.first}'), findsOneWidget);
+      }
     });
   });
 }
