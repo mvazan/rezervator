@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import 'changelog_data.dart';
@@ -7,8 +8,12 @@ import 'changelog_data.dart';
 // call sites that import this file.
 export 'changelog_data.dart';
 
-/// Bottom sheet with the release history.
-void showChangelog(BuildContext context) {
+/// Bottom sheet with the release history. [web] decides how it reads: the
+/// web is deployed continuously, so it lists batches by the day they went
+/// live (the newest may be in no app version yet), while the app lists
+/// versions, which is what its user actually has installed.
+void showChangelog(BuildContext context, {bool web = kIsWeb}) {
+  final entries = changelogFor(web: web);
   showModalBottomSheet<void>(
     context: context,
     showDragHandle: true,
@@ -22,12 +27,19 @@ void showChangelog(BuildContext context) {
         children: [
           Text('Co je nového',
               style: Theme.of(context).textTheme.titleLarge),
+          if (web) ...[
+            const SizedBox(height: 4),
+            Text(
+              'Web se aktualizuje průběžně, mobilní appka po verzích.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
           const SizedBox(height: 8),
-          for (final release in appChangelog) ...[
+          for (final release in entries) ...[
             Padding(
               padding: const EdgeInsets.only(top: 12, bottom: 4),
               child: Text(
-                'verze ${release.version} · ${release.date}',
+                changelogHeading(release, web: web),
                 style: Theme.of(context).textTheme.titleSmall,
               ),
             ),

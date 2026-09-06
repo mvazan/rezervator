@@ -27,8 +27,12 @@ void main(List<String> args) {
     }
   }
 
+  // Without an argument: the newest entry that a release carries. The top
+  // of the changelog can be web-only batches (version null) — those are not
+  // in any build, so they must never become a store text.
   final release = version == null
-      ? appChangelog.first
+      ? appChangelog.firstWhere((r) => r.version != null,
+          orElse: () => throw 'No released changelog entry')
       : appChangelog.firstWhere((r) => r.version == version,
           orElse: () => throw 'No changelog entry for $version');
 

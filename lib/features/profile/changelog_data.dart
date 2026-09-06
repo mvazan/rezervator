@@ -1,19 +1,60 @@
 // Release-notes data — pure Dart (no Flutter import) so CI tooling
 // (tool/whatsnew.dart) can read it without a Flutter runtime. The UI that
 // renders these lives in changelog.dart.
+//
+// The two platforms ship differently and the notes say so: the WEB is
+// deployed on every merge to main, so a change is live there the same day,
+// while the ANDROID app gets it in the next release. An entry therefore
+// starts life dated but without a version ("už na webu") and is stamped
+// with the version when a release carries it — see PLAY.md.
 
-/// User-facing release notes, newest first — shown by tapping the version
-/// line in Můj profil. Kept by hand: add an entry with every release
-/// (versions match the git tags).
+/// One dated batch of user-facing changes, newest first — shown by tapping
+/// the version line in Můj profil.
 class Release {
   const Release(this.version, this.date, this.changes);
 
-  final String version;
+  /// The app version that carries these changes, or null while they are
+  /// live on the web only. Null entries are the newest ones, so they sit at
+  /// the top; the app hides them (an installed build does not have them).
+  final String? version;
+
+  /// When the change went live: on the web the day it was deployed, for a
+  /// versioned entry the release day.
   final String date;
+
   final List<String> changes;
 }
 
+/// What to show: the web lists everything, the app only what a release
+/// carries.
+List<Release> changelogFor({required bool web}) => [
+      for (final r in appChangelog)
+        if (web || r.version != null) r,
+    ];
+
+/// Heading of one batch. The app leads with the version (that is what its
+/// user has); the web leads with the date, because it has no versions —
+/// only a stream of deploys.
+String changelogHeading(Release r, {required bool web}) {
+  if (!web) return 'verze ${r.version} · ${r.date}';
+  return r.version == null
+      ? '${r.date} · zatím jen na webu'
+      : '${r.date} · verze ${r.version}';
+}
+
 const appChangelog = <Release>[
+  Release(null, '6. 9. 2026', [
+    'Kioskový účet se spravuje v Správa → Kiosk, ne mezi hráči — a je u něj '
+        'vidět přihlašovací jméno.',
+    'Když se heslo kiosku ztratí, jde odtamtud nastavit nové.',
+  ]),
+  Release(null, '4. 9. 2026', [
+    'Zápasy vybraných týmů se zapisují do Google Kalendáře — týmy si vybereš '
+        'v Můj profil u propojení s kalendářem.',
+    'Vybraná barva v paletě je konečně poznat (fajfka místo neviditelného '
+        'kroužku).',
+    'Web má vlastní adresu: rezervator.online.',
+  ]),
   Release('1.2.0', '3. 9. 2026', [
     'Hráči bez e-mailu: správce je přidá a rezervuje jim, na kiosku si '
         'vyberou své jméno. Účet jde později sloučit.',

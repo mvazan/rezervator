@@ -86,10 +86,14 @@ zůstává jen uploadovací; to je doporučený režim). Přidej testery
 ## Každé další vydání
 
 ```bash
-# 1. přidej záznam do lib/features/profile/changelog_data.dart (nejnovější
-#    první) — z něj se bere text „Co je nového" pro Play, poznámky k vydání
-#    na GitHubu i Novinky v appce; test/changelog_test.dart hlídá shodu
-#    s verzí v pubspec.yaml
+# 1. changelog (lib/features/profile/changelog_data.dart): nahoře jsou
+#    záznamy s version null = co už běží na webu, ale v žádném buildu.
+#    Slož je do jednoho záznamu s novou verzí a datem vydání (nebo přidej
+#    nový, pokud žádné čekající nejsou). Z něj se bere text „Co je nového"
+#    pro Play, poznámky k vydání na GitHubu i Novinky v appce;
+#    test/changelog_test.dart hlídá shodu s verzí v pubspec.yaml.
+#    Mezi vydáními se změny přidávají průběžně, jak jdou na web — appka je
+#    neukazuje, dokud je nenese verze.
 # 2. zvyš verzi v pubspec.yaml, např. 1.1.1+4  (číslo za + = versionCode MUSÍ růst)
 # 2b. vyžaduje-li vydání nový backend (starší appka by se rozbila), přidej
 #     migraci supabase/migrations/00NN_min_build_<build>.sql s
