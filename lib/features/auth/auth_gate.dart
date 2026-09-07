@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/widgets/auth_background.dart';
+import '../../data/live_refresh.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
 import '../kiosk/kiosk_shell.dart';
@@ -26,8 +27,14 @@ class AuthGate extends ConsumerStatefulWidget {
 class _AuthGateState extends ConsumerState<AuthGate> {
   /// Coming back to the foreground re-reads min_build: the Realtime stream
   /// is the fast path, this is the belt for a socket that died meanwhile.
+  /// The same moment nudges every live stream to re-subscribe — the socket
+  /// is dropped on purpose while the app sits in the background, so what
+  /// arrived meanwhile is missing from the running streams (LiveRefresh).
   late final AppLifecycleListener _lifecycle = AppLifecycleListener(
-    onResume: () => ref.invalidate(minBuildProvider),
+    onResume: () {
+      ref.invalidate(minBuildProvider);
+      LiveRefresh.request();
+    },
   );
 
   @override
