@@ -927,11 +927,18 @@ class Api {
   /// off. Waits on it like [disconnectCalendar]: turning it off deletes the
   /// calendar in Google and moves its teams back to primary, so the card
   /// must not let the picker offer "Druhý" again before that settles.
-  static Future<void> setSecondaryCalendar(bool enabled) =>
-      _db.functions.invoke(
-        'calendar-manage',
-        body: {'action': 'secondary', 'enabled': enabled},
-      );
+  ///
+  /// Returns true when turning it OFF left "Rezervátor 2" behind in Google
+  /// — same story as [disconnectCalendar]'s orphans, and only the user can
+  /// delete it now. Always false when turning it on.
+  static Future<bool> setSecondaryCalendar(bool enabled) async {
+    final response = await _db.functions.invoke(
+      'calendar-manage',
+      body: {'action': 'secondary', 'enabled': enabled},
+    );
+    final data = response.data;
+    return data is Map && data['orphaned'] == true;
+  }
 
   /// Stores the trainings' own Google event colour (0034) and repaints the
   /// future trainings on the spot — Google event `colorId` 1-11, or null for

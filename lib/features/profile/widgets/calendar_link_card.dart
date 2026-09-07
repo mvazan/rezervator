@@ -57,7 +57,7 @@ class CalendarLinkCard extends ConsumerStatefulWidget {
   /// A followed team's shared colour (0036) — separate from [setMatchTeams]
   /// (which never carries one any more): see `showCalendarTeamsSheet`.
   final Future<void> Function(Map<String, int?> colors) setTeamColors;
-  final Future<void> Function(bool enabled) setSecondaryCalendar;
+  final Future<bool> Function(bool enabled) setSecondaryCalendar;
   final Future<void> Function(int? colorId) setTrainingColor;
 
   @override
@@ -146,11 +146,23 @@ class _CalendarLinkCardState extends ConsumerState<CalendarLinkCard> {
     }
     setState(() => _secondaryBusy = true);
     try {
-      await tryAction(
+      // The backend deletes "Rezervátor 2" before it answers, and tells us
+      // when Google would not let it — exactly like a disconnect. Dropping
+      // that on the floor would leave the player with a calendar they can
+      // no longer reach from the app and no idea it is there.
+      var orphaned = false;
+      final ok = await tryAction(
         context,
-        () => widget.setSecondaryCalendar(enabled),
+        () async => orphaned = await widget.setSecondaryCalendar(enabled),
         errorText: friendlyDbError,
       );
+      if (ok && orphaned && mounted) {
+        snack(
+          context,
+          'Druhý kalendář je vypnutý, ale „Rezervátor 2" v Googlu zůstal '
+          '— smazat se ho nepodařilo, smaž si ho tam prosím sám(a).',
+        );
+      }
     } finally {
       if (mounted) setState(() => _secondaryBusy = false);
     }

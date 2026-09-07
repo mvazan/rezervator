@@ -24,7 +24,7 @@ Future<void> noMatchTeams(List<CalendarTeam> _) async =>
     throw StateError('unexpected match teams');
 Future<void> noTeamColors(Map<String, int?> _) async =>
     throw StateError('unexpected team colors');
-Future<void> noSecondaryCalendar(bool _) async =>
+Future<bool> noSecondaryCalendar(bool _) async =>
     throw StateError('unexpected secondary calendar');
 Future<void> noTrainingColor(int? _) async =>
     throw StateError('unexpected training color');
@@ -614,7 +614,7 @@ void main() {
           noMatchTeams,
       Future<void> Function(Map<String, int?> colors) setTeamColors =
           noTeamColors,
-      Future<void> Function(bool enabled) setSecondaryCalendar =
+      Future<bool> Function(bool enabled) setSecondaryCalendar =
           noSecondaryCalendar,
       Future<void> Function(int? colorId) setTrainingColor = noTrainingColor,
       Stream<List<CalendarTeam>>? teams,
@@ -1070,7 +1070,10 @@ void main() {
       await tester.pumpWidget(
         card(
           Stream.value(const CalendarLink(status: CalendarLinkStatus.linked)),
-          setSecondaryCalendar: (enabled) async => called.add(enabled),
+          setSecondaryCalendar: (enabled) async {
+            called.add(enabled);
+            return false;
+          },
         ),
       );
       await tester.pumpAndSettle();
@@ -1094,7 +1097,10 @@ void main() {
               secondaryEnabled: true,
             ),
           ),
-          setSecondaryCalendar: (_) async => called++,
+          setSecondaryCalendar: (_) async {
+            called++;
+            return false;
+          },
         ),
       );
       await tester.pumpAndSettle();
@@ -1123,7 +1129,10 @@ void main() {
               secondaryEnabled: true,
             ),
           ),
-          setSecondaryCalendar: (enabled) async => called.add(enabled),
+          setSecondaryCalendar: (enabled) async {
+            called.add(enabled);
+            return false;
+          },
         ),
       );
       await tester.pumpAndSettle();
@@ -1134,6 +1143,35 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(called, [false]);
+    });
+
+    testWidgets('turning Druhý kalendář off tells the player when Google '
+        'kept "Rezervátor 2"', (tester) async {
+      await tester.pumpWidget(
+        card(
+          Stream.value(
+            const CalendarLink(
+              status: CalendarLinkStatus.linked,
+              secondaryEnabled: true,
+            ),
+          ),
+          setSecondaryCalendar: (_) async => true,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(SwitchListTile, 'Druhý kalendář'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Vypnout a smazat'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text(
+          'Druhý kalendář je vypnutý, ale „Rezervátor 2" v Googlu zůstal '
+          '— smazat se ho nepodařilo, smaž si ho tam prosím sám(a).',
+        ),
+        findsOneWidget,
+      );
     });
 
     testWidgets('Připomínky hlavního and druhého each save to their own '
