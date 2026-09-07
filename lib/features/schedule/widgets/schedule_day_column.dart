@@ -17,6 +17,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../../../core/theme.dart';
 import '../../../domain/calendar_layout.dart';
 import '../../../domain/labels.dart';
 import '../../../domain/models.dart';
@@ -236,7 +237,24 @@ class ScheduleDayColumn extends StatelessWidget {
     // on open days. `covered` grows with every emitted band, so overlaps
     // resolve first-wins in emission order: priority slots (start-sorted)
     // before rentals — a renter band can never paint over a match.
-    final scheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    // See core/theme.dart: at contrastLevel 1 the alpha washes below would
+    // fight the onXContainer Material already tuned for the FULL container,
+    // dropping the fallback bands' real contrast well under AA.
+    final contrastLevel = theme.extension<ContrastLevel>()?.value ?? 0;
+    final (matchFallbackBg, matchFallbackFg) = containerTint(
+      container: scheme.errorContainer,
+      onContainer: scheme.onErrorContainer,
+      alpha: 0.6,
+      contrastLevel: contrastLevel,
+    );
+    final (rentalFallbackBg, rentalFallbackFg) = containerTint(
+      container: scheme.tertiaryContainer,
+      onContainer: scheme.onTertiaryContainer,
+      alpha: 0.5,
+      contrastLevel: contrastLevel,
+    );
     final covered = <(int, int)>[...blockUnion];
     void addBands(
         HourMinute start, HourMinute end, Widget Function() bandBuilder) {
@@ -251,8 +269,7 @@ class ScheduleDayColumn extends StatelessWidget {
 
     for (final m in day.priority) {
       final (bg, fg) = clubTint(m.type.colorIndex, scheme.brightness,
-          fallbackBg: scheme.errorContainer.withValues(alpha: 0.6),
-          fallbackFg: scheme.onErrorContainer);
+          fallbackBg: matchFallbackBg, fallbackFg: matchFallbackFg);
       Widget band() {
         Widget w = CalendarEventBand(
           background: bg,
@@ -293,8 +310,7 @@ class ScheduleDayColumn extends StatelessWidget {
       final edit = onEditRental;
       for (final r in openDay.rentals) {
         final (bg, fg) = clubTint(r.color, scheme.brightness,
-            fallbackBg: scheme.tertiaryContainer.withValues(alpha: 0.5),
-            fallbackFg: scheme.onTertiaryContainer);
+            fallbackBg: rentalFallbackBg, fallbackFg: rentalFallbackFg);
         Widget band() {
           Widget w = CalendarEventBand(
             background: bg,

@@ -5,6 +5,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../../../core/theme.dart';
 import '../../../core/ui.dart';
 import '../../../domain/models.dart';
 import '../../../domain/schedule.dart' show headerEventLabel;
@@ -31,9 +32,20 @@ class DayHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final textTheme = Theme.of(context).textTheme;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final textTheme = theme.textTheme;
     final reason = closedReason;
+    // See core/theme.dart: at contrastLevel 1 the alpha wash below would
+    // fight the onPrimaryContainer Material already tuned for the FULL
+    // container, dropping the chip's real contrast well under AA.
+    final contrastLevel = theme.extension<ContrastLevel>()?.value ?? 0;
+    final (chipBg, chipFg) = containerTint(
+      container: scheme.primaryContainer,
+      onContainer: scheme.onPrimaryContainer,
+      alpha: 0.5,
+      contrastLevel: contrastLevel,
+    );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -59,8 +71,8 @@ class DayHeader extends StatelessWidget {
             else if (chipLabel != null)
               _pill(
                 text: chipLabel!,
-                background: scheme.primaryContainer.withValues(alpha: 0.5),
-                foreground: scheme.onPrimaryContainer,
+                background: chipBg,
+                foreground: chipFg,
                 bold: true,
               ),
           ],
@@ -77,36 +89,43 @@ class DayHeader extends StatelessWidget {
     );
   }
 
-  Widget _dateBadge(ColorScheme scheme) => Container(
-        width: 34,
-        height: 34,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: scheme.primaryContainer,
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              weekdaysShort[date.weekday - 1],
-              style: TextStyle(
-                fontSize: 9,
-                fontWeight: FontWeight.w600,
-                color: scheme.onPrimaryContainer,
-                height: 1.1,
+  Widget _dateBadge(ColorScheme scheme) => MediaQuery.withNoTextScaling(
+        // Fixed chrome, not scaling body text: a 34×34 badge around a 9pt +
+        // 13pt Column has no slack left once the system scale and the
+        // in-app text-size choice compose (e.g. system "Large" 1.15 ×
+        // "Největší" 1.3 already overflows it) — see
+        // test/features/schedule/widgets/day_header_test.dart.
+        child: Container(
+          width: 34,
+          height: 34,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: scheme.primaryContainer,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                weekdaysShort[date.weekday - 1],
+                style: TextStyle(
+                  fontSize: 9,
+                  fontWeight: FontWeight.w600,
+                  color: scheme.onPrimaryContainer,
+                  height: 1.1,
+                ),
               ),
-            ),
-            Text(
-              '${date.day}',
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w800,
-                color: scheme.onPrimaryContainer,
-                height: 1.1,
+              Text(
+                '${date.day}',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                  color: scheme.onPrimaryContainer,
+                  height: 1.1,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       );
 

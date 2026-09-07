@@ -8,7 +8,10 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'config.dart';
 import 'core/error_reporting.dart';
+import 'core/text_size.dart';
 import 'core/theme.dart';
+import 'core/theme_choice.dart';
+import 'data/local_prefs.dart';
 import 'features/auth/auth_gate.dart';
 import 'features/kiosk/kiosk_login_screen.dart';
 import 'push/push.dart';
@@ -49,7 +52,15 @@ Future<void> _bootstrap() async {
     await Push.init();
   }
 
-  runApp(const ProviderScope(child: RezervatorApp()));
+  // Read the persisted theme/text-size choice before the first frame, so a
+  // dark-theme user never sees a flash of the light default while
+  // ThemeChoiceNotifier/TextSizeNotifier's own async load is still pending
+  // (see data/local_prefs.dart).
+  final appearanceOverrides = await loadPersistedAppearance();
+  runApp(ProviderScope(
+    overrides: appearanceOverrides,
+    child: const RezervatorApp(),
+  ));
 }
 
 final _router = GoRouter(
@@ -68,19 +79,36 @@ final _router = GoRouter(
   ],
 );
 
-class RezervatorApp extends StatelessWidget {
+class RezervatorApp extends ConsumerWidget {
   const RezervatorApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Appearance from Settings: theme/darkTheme/themeMode all come from the
+    // same plan, so the ThemeMode and each ThemeData's contrastLevel never
+    // disagree (see core/theme_choice.dart).
+    final plan = themePlanFor(ref.watch(themeChoiceProvider));
+    final textSize = ref.watch(textSizeProvider);
     return MaterialApp.router(
       title: 'Rezervátor',
       debugShowCheckedModeBanner: false,
+      // Wraps the Router: applies the chosen text size on every screen, on
+      // top of whatever the system scale already is.
+      builder: (context, child) {
+        final mq = MediaQuery.of(context);
+        return MediaQuery(
+          data:
+              mq.copyWith(textScaler: AppTextScaler(mq.textScaler, textSize)),
+          child: child!,
+        );
+      },
       locale: const Locale('cs'),
       supportedLocales: const [Locale('cs')],
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
-      theme: buildTheme(Brightness.light),
-      darkTheme: buildTheme(Brightness.dark),
+      theme: buildTheme(Brightness.light, contrastLevel: plan.contrastLevel),
+      darkTheme:
+          buildTheme(Brightness.dark, contrastLevel: plan.contrastLevel),
+      themeMode: plan.mode,
       routerConfig: _router,
     );
   }

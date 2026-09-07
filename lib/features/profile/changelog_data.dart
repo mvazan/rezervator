@@ -44,6 +44,9 @@ String changelogHeading(Release r, {required bool web}) {
 
 const appChangelog = <Release>[
   Release(null, '7. 9. 2026', [
+    'Vzhled si nastavíš v profilu: světlý, tmavý, nebo podle systému — a '
+        'kontrastní varianty pro čtení na slunci a pro slabší zrak.',
+    'Písmo jde zvětšit na 115 % nebo 130 %, i nad rámec toho, co má telefon.',
     'Moje tréninky se jmenují Můj přehled — jsou v nich i zápasy, ne jen '
         'tréninky.',
     'Barvu týmu vybereš jednou v Můj profil → Moje týmy, z barev, které '

@@ -9,6 +9,7 @@ import 'package:rezervator/features/profile/profile_screen.dart';
 import 'package:rezervator/features/admin/widgets/color_picker.dart';
 import 'package:rezervator/features/profile/widgets/calendar_link_card.dart';
 import 'package:rezervator/features/profile/widgets/event_color_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// Stubs for the card's injected backend calls: a test that reaches one it
 /// did not expect fails on its own assertions (the card swallows the throw
@@ -55,6 +56,14 @@ final schedule = [
 ];
 
 void main() {
+  // The Vzhled card reads themeChoiceProvider/textSizeProvider, which load
+  // from shared_preferences — every test in this file builds ProfileScreen,
+  // so every test needs the plugin mocked or it hangs.
+  setUpAll(() {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    SharedPreferences.setMockInitialValues({});
+  });
+
   const me = Profile(
     id: 'me',
     displayName: 'Já Hráč',
@@ -271,9 +280,9 @@ void main() {
       expect(find.text(connectLabel), findsNothing);
     });
 
-    testWidgets('sits between the own-colour card and the sign-out card', (
-      tester,
-    ) async {
+    testWidgets('Vzhled sits right under the name card and above the '
+        'own-colour card; Google kalendář sits between the own-colour card '
+        'and the sign-out card', (tester) async {
       // Tall enough for every card to be built (the ListView is lazy).
       tester.view.physicalSize = const Size(800, 1600);
       tester.view.devicePixelRatio = 1.0;
@@ -282,12 +291,16 @@ void main() {
       await tester.pumpWidget(app(me, calendarAvailable: true));
       await tester.pumpAndSettle();
 
+      final name = tester.getTopLeft(find.text('Jméno')).dy;
+      final appearance = tester.getTopLeft(find.text('Vzhled')).dy;
       final nick = tester.getTopLeft(find.text('Přezdívka na tabuli')).dy;
       final colour = tester.getTopLeft(find.text('Barva mých rezervací')).dy;
       final myTeams = tester.getTopLeft(find.text('Moje týmy')).dy;
       final launchView = tester.getTopLeft(find.text('Po spuštění')).dy;
       final calendar = tester.getTopLeft(find.text('Google kalendář')).dy;
       final logout = tester.getTopLeft(find.text('Odhlásit se')).dy;
+      expect(name, lessThan(appearance));
+      expect(appearance, lessThan(nick));
       expect(nick, lessThan(colour));
       expect(colour, lessThan(myTeams));
       expect(myTeams, lessThan(launchView));
@@ -1198,6 +1211,13 @@ void main() {
 
     testWidgets('tapping a swatch saves its palette index, the none option '
         'saves -1', (tester) async {
+      // Tall enough that ensureVisible below brings the WHOLE grid on
+      // screen at once — the Vzhled card above it pushes it further down
+      // than the default test viewport allows.
+      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
       final saved = <int>[];
       await tester.pumpWidget(app(me, setOwnColor: (c) async => saved.add(c)));
       await tester.pumpAndSettle();
