@@ -65,6 +65,7 @@ void main() {
     VoidCallback? onOpenCalendar,
     bool slotsLoading = false,
     bool slotsFailed = false,
+    int? trainingColorId,
     DateTime? nowOverride,
   }) {
     return ProviderScope(
@@ -81,6 +82,14 @@ void main() {
         prioritySlotsFailedProvider.overrideWithValue(slotsFailed),
         nowProvider.overrideWith((ref) => Stream.value(nowOverride ?? now)),
         myTeamColorsProvider.overrideWith((ref) => Stream.value(teamColors)),
+        myCalendarLinkProvider.overrideWith((ref) => Stream.value(
+              trainingColorId == null
+                  ? CalendarLink.none
+                  : CalendarLink(
+                      status: CalendarLinkStatus.linked,
+                      trainingColorId: trainingColorId,
+                    ),
+            )),
       ],
       child: MaterialApp(
         home: Scaffold(
@@ -361,6 +370,53 @@ void main() {
       final icon =
           tester.widget<Icon>(find.byIcon(Icons.emoji_events_outlined));
       expect(icon.color, isNull);
+    });
+  });
+
+  group('training colour', () {
+    Color colorNamed(String name) => legibleShadeOf(
+        googleEventColors.firstWhere((c) => c.$2 == name).$3, Brightness.light);
+
+    testWidgets('without a training colour the T stays plain', (tester) async {
+      await tester.pumpWidget(app(reservations: [res('r1', today)]));
+      await tester.pumpAndSettle();
+
+      expect(tester.widget<Icon>(find.byIcon(Icons.title)).color, isNull);
+    });
+
+    testWidgets('the training colour tints the T, in the same derived shade '
+        'the trophy uses', (tester) async {
+      await tester.pumpWidget(app(
+        reservations: [res('r1', today)],
+        trainingColorId: 5,
+      ));
+      await tester.pumpAndSettle();
+
+      expect(
+        tester.widget<Icon>(find.byIcon(Icons.title)).color,
+        colorNamed('Banánová'),
+      );
+    });
+
+    testWidgets('a training and a match each take their own colour', (
+      tester,
+    ) async {
+      await tester.pumpWidget(app(
+        reservations: [res('r1', today)],
+        slots: [match],
+        teamColors: const {'SKK Veverky Brno A': 3},
+        trainingColorId: 5,
+      ));
+      await tester.pumpAndSettle();
+
+      expect(
+        tester.widget<Icon>(find.byIcon(Icons.title)).color,
+        colorNamed('Banánová'),
+      );
+      expect(
+        tester.widget<Icon>(find.byIcon(Icons.emoji_events_outlined)).color,
+        colorNamed('Švestková'),
+      );
     });
   });
 }

@@ -365,4 +365,60 @@ void main() {
       expect(bgOf(tester, find.text('Já Hráč')), scheme.primaryContainer);
     });
   });
+
+  group('a long name on a large tile', () {
+    // „Radek Jandera" cut to „Radek J…" says less than the same name over
+    // two lines, and the large tile has the room. The compact week grid
+    // keeps one clipped line — its columns are too narrow to wrap into.
+    final reservation = Reservation(
+      id: 'r-long',
+      playerId: 'p1',
+      date: Day(2026, 3, 2),
+      blockId: 'b1',
+      lane: 1,
+      createdVia: 'app',
+      createdAt: DateTime.utc(2026, 1, 1),
+    );
+    final state =
+        ReservedSlot(reservation, inPast: false, beyondHorizon: false);
+
+    Widget tile(SlotTileSize size, {required bool isMine}) => MaterialApp(
+          theme: buildTheme(Brightness.light),
+          home: Scaffold(
+            body: Center(
+              child: SizedBox(
+                width: 120,
+                child: SlotTile(
+                  state: state,
+                  size: size,
+                  playerName: 'Radek Jandera',
+                  isMine: isMine,
+                  clubColorIndex: -1,
+                  laneDigit: 1,
+                ),
+              ),
+            ),
+          ),
+        );
+
+    for (final isMine in [true, false]) {
+      testWidgets('large wraps to two lines, mine=$isMine', (tester) async {
+        await tester.pumpWidget(tile(SlotTileSize.large, isMine: isMine));
+        await tester.pumpAndSettle();
+
+        expect(
+          tester.widget<Text>(find.text('Radek Jandera')).maxLines,
+          2,
+          reason: 'a large tile has room for the whole name',
+        );
+      });
+    }
+
+    testWidgets('compact keeps one line', (tester) async {
+      await tester.pumpWidget(tile(SlotTileSize.compact, isMine: false));
+      await tester.pumpAndSettle();
+
+      expect(tester.widget<Text>(find.text('Radek Jandera')).maxLines, 1);
+    });
+  });
 }
