@@ -11,6 +11,11 @@ import 'package:flutter/material.dart';
 
 /// Three steps. The multipliers mirror Android's own system steps (large =
 /// 115%, largest = 130%), so the result feels familiar.
+///
+/// These names are persisted (SharedPreferences, see data/local_prefs.dart)
+/// — do not rename a value, or every user with that choice saved silently
+/// falls back to [TextSizeChoice.normal] via [parseTextSizeChoice]'s
+/// fallback.
 enum TextSizeChoice { normal, large, largest }
 
 double textSizeFactor(TextSizeChoice choice) => switch (choice) {
@@ -43,4 +48,17 @@ class AppTextScaler extends TextScaler {
 
   @override
   double get textScaleFactor => scale(14) / 14;
+
+  // Without these, MediaQuery's textScaler aspect always compares unequal
+  // (TextScaler has no meaningful default ==), so every Text rebuilds on
+  // any MediaQuery change at all — keyboard, rotation, window resize —
+  // not just a real text-size change.
+  @override
+  bool operator ==(Object other) =>
+      other is AppTextScaler &&
+      other.system == system &&
+      other.choice == choice;
+
+  @override
+  int get hashCode => Object.hash(system, choice);
 }

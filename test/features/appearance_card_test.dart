@@ -11,8 +11,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// title/current-choice `ListTile` that opens a `SimpleDialog` of
 /// `RadioListTile`s — see `lib/features/profile/widgets/appearance_card.dart`.
 void main() {
-  setUpAll(() {
-    TestWidgetsFlutterBinding.ensureInitialized();
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUp(() {
     SharedPreferences.setMockInitialValues({});
   });
 

@@ -8,6 +8,10 @@ import 'package:flutter/material.dart';
 /// contrast; [lightContrast]/[darkContrast] force the same brightness at
 /// Material's own maximum contrast level. Contrast is its own axis here —
 /// unlike Termínátor, where light/dark are always high-contrast.
+///
+/// These names are persisted (SharedPreferences, see data/local_prefs.dart)
+/// — do not rename a value, or every user with that choice saved silently
+/// falls back to [ThemeChoice.system] via [parseThemeChoice]'s fallback.
 enum ThemeChoice { system, light, dark, lightContrast, darkContrast }
 
 /// Persisted name → choice; anything unknown falls back to [ThemeChoice.system].

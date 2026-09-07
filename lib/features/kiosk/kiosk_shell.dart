@@ -89,6 +89,12 @@ class _KioskShellState extends ConsumerState<KioskShell> {
     // settings stream resolves.
     final kioskDark =
         ref.watch(settingsProvider).value?.kioskDark ?? true;
+    // Deliberately half-in on appearance Settings: no `contrastLevel`, so
+    // the kiosk opts OUT of the personal theme choice — kioskDark above is
+    // the only brightness knob a shared tablet gets, admin-controlled, and
+    // always Material's normal contrast. It still opts IN to the personal
+    // text-size choice, inherited for free because MediaQuery's textScaler
+    // override in main.dart wraps the whole Router, kiosk screens included.
     return Theme(
       data: buildTheme(kioskDark ? Brightness.dark : Brightness.light),
       child: Listener(
