@@ -79,11 +79,14 @@ class _CalendarTeamsListState extends State<_CalendarTeamsList> {
     for (final t in widget.chosen) t.team: t,
   };
 
-  /// Saves go out one after the other: two quick taps must not become two
-  /// whole-list PATCHes racing over separate connections, where the older
-  /// one can land last and silently drop the newer change.
-  Future<void> _queue = Future.value();
-  int _pending = 0;
+  /// The newest list waiting to go out, and whether one is already on its
+  /// way. Every save carries the WHOLE list, so a change made while another
+  /// save is in the air does not queue up behind it — it replaces what is
+  /// waiting. One save is a slow round trip (the edge function refreshes the
+  /// Google token and rewrites every future match), so ticking three teams
+  /// in a row is one save with three ticks, not three saves.
+  List<CalendarTeam>? _next;
+  bool _sending = false;
 
   @override
   void didUpdateWidget(_CalendarTeamsList old) {
@@ -93,7 +96,7 @@ class _CalendarTeamsListState extends State<_CalendarTeamsList> {
     // (e.g. the schedule changing) or an older save's row arriving mid-queue
     // must not clobber a tap that is still on its way. Same guard as
     // showTeamPickerSheet.
-    if (_pending == 0 && !_sameChosen(old.chosen, widget.chosen)) {
+    if (!_sending && _next == null && !_sameChosen(old.chosen, widget.chosen)) {
       _ticked = {for (final t in widget.chosen) t.team: t};
     }
   }
@@ -115,13 +118,9 @@ class _CalendarTeamsListState extends State<_CalendarTeamsList> {
   List<CalendarTeam> _sortedTicked() =>
       _ticked.values.toList()..sort((a, b) => compareCzech(a.team, b.team));
 
-  /// Replaces [team]'s row with [next] (drops it when null), saves the
-  /// whole list, and — only if the save fails — restores exactly the row
-  /// that was there before, not a fresh default. That is what keeps a
-  /// failed colour or calendar change from silently resetting the team to
-  /// "no colour, hlavní" on retry.
+  /// Replaces [team]'s row with [next] (drops it when null) and sends the
+  /// whole list. The tick shows at once; the save follows.
   void _replace(String team, CalendarTeam? next) {
-    final previous = _ticked[team];
     setState(() {
       if (next == null) {
         _ticked.remove(team);
@@ -129,34 +128,50 @@ class _CalendarTeamsListState extends State<_CalendarTeamsList> {
         _ticked[team] = next;
       }
     });
-    final snapshot = _sortedTicked();
-    _pending++;
-    _queue = _queue.then((_) => _save(snapshot, team, previous));
+    _next = _sortedTicked();
+    _pump();
   }
 
-  Future<void> _save(
-    List<CalendarTeam> snapshot,
-    String team,
-    CalendarTeam? previous,
-  ) async {
-    if (!mounted) {
-      _pending--;
-      return;
+  /// Sends the newest list, then whatever arrived while that was in the air.
+  /// Deliberately outlives the sheet: closing it right after a tick used to
+  /// throw away everything still waiting, so of three teams ticked in a row
+  /// only the first ever reached Google.
+  Future<void> _pump() async {
+    if (_sending) return;
+    _sending = true;
+    final onChanged = widget.onChanged;
+    while (_next != null) {
+      final snapshot = _next!;
+      _next = null;
+      final saved = mounted
+          ? await tryAction(
+              context,
+              () => onChanged(snapshot),
+              errorText: friendlyDbError,
+            )
+          : await _sendDetached(onChanged, snapshot);
+      // One save now covers several changes, so a failure rolls the whole
+      // list back to what the server last confirmed — restoring just one
+      // row would leave the others showing a state nobody saved.
+      if (!saved && mounted && _next == null) {
+        setState(() => _ticked = {for (final t in widget.chosen) t.team: t});
+      }
     }
-    final saved = await tryAction(
-      context,
-      () => widget.onChanged(snapshot),
-      errorText: friendlyDbError,
-    );
-    _pending--;
-    if (!saved && mounted) {
-      setState(() {
-        if (previous == null) {
-          _ticked.remove(team);
-        } else {
-          _ticked[team] = previous;
-        }
-      });
+    _sending = false;
+  }
+
+  /// The sheet is gone, so there is nobody to show a snack to — but the
+  /// change the player made before closing it still deserves to land.
+  Future<bool> _sendDetached(
+    Future<void> Function(List<CalendarTeam>) onChanged,
+    List<CalendarTeam> snapshot,
+  ) async {
+    try {
+      await onChanged(snapshot);
+      return true;
+    } catch (error) {
+      debugPrint('calendar teams save after the sheet closed failed: $error');
+      return false;
     }
   }
 

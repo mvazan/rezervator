@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -401,5 +403,60 @@ void main() {
     expect(tester.widget<SegmentedButton<CalendarSlot>>(segmented).selected, {
       CalendarSlot.secondary,
     });
+  });
+
+  testWidgets('several teams ticked in a row all reach the server, even when '
+      'the sheet closes before the saves finish', (tester) async {
+    // One save is a slow round trip: the edge function refreshes the Google
+    // token and rewrites every future match. Ticking a second team while the
+    // first is still in the air used to queue it behind — and closing the
+    // sheet threw the queue away, so only the first tick ever landed.
+    final saved = <List<CalendarTeam>>[];
+    final gates = <Completer<void>>[];
+    await tester.pumpWidget(harness(
+      matches: schedule,
+      onChanged: (teams) {
+        saved.add(teams);
+        final gate = Completer<void>();
+        gates.add(gate);
+        return gate.future;
+      },
+    ));
+    await open(tester);
+
+    await tester.tap(checkboxOf('KS Devítka Brno B'));
+    await tester.pump();
+    await tester.tap(checkboxOf('SKK Veverky Brno A'));
+    await tester.pump();
+
+    // Both are ticked on screen straight away.
+    expect(
+      tester.widget<Checkbox>(checkboxOf('KS Devítka Brno B')).value,
+      isTrue,
+    );
+    expect(
+      tester.widget<Checkbox>(checkboxOf('SKK Veverky Brno A')).value,
+      isTrue,
+    );
+
+    // The player closes the sheet without waiting — and it is really gone,
+    // disposed, before the first save even answers.
+    Navigator.of(tester.element(find.byType(Checkbox).first)).pop();
+    await tester.pumpAndSettle();
+    expect(find.byType(Checkbox), findsNothing, reason: 'sheet closed');
+
+    for (var i = 0; i < 4 && gates.isNotEmpty; i++) {
+      for (final gate in [...gates]) {
+        if (!gate.isCompleted) gate.complete();
+      }
+      await tester.pumpAndSettle();
+    }
+
+    expect(saved, isNotEmpty);
+    expect(
+      saved.last.map((t) => t.team).toList(),
+      ['KS Devítka Brno B', 'SKK Veverky Brno A'],
+      reason: 'the last save must carry both ticks, not just the first',
+    );
   });
 }

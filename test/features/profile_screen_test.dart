@@ -1371,8 +1371,54 @@ void main() {
       gates[0].complete();
       await tester.pumpAndSettle();
       expect(saved.last, ['KS Devítka Brno B', 'SKK Veverky Brno A']);
-      gates[1].complete();
+      for (final gate in gates.skip(1)) {
+        if (!gate.isCompleted) gate.complete();
+      }
       await tester.pumpAndSettle();
+    });
+
+    testWidgets('a tick still lands when the sheet closes before the save '
+        'answers', (tester) async {
+      tester.view.physicalSize = const Size(800, 1800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final saved = <List<String>>[];
+      final gates = <Completer<void>>[];
+      await tester.pumpWidget(app(
+        me,
+        matches: schedule,
+        setFollowedTeams: (t) {
+          saved.add(t);
+          final gate = Completer<void>();
+          gates.add(gate);
+          return gate.future;
+        },
+      ));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Vybrat týmy…'));
+      await tester.pumpAndSettle();
+      await tester
+          .tap(find.widgetWithText(CheckboxListTile, 'SKK Veverky Brno A'));
+      await tester.pump();
+      await tester
+          .tap(find.widgetWithText(CheckboxListTile, 'KS Devítka Brno B'));
+      await tester.pump();
+
+      // Closed and disposed before the first save answers.
+      Navigator.of(tester.element(find.byType(CheckboxListTile).first)).pop();
+      await tester.pumpAndSettle();
+      expect(find.byType(CheckboxListTile), findsNothing);
+
+      for (var i = 0; i < 4; i++) {
+        for (final gate in [...gates]) {
+          if (!gate.isCompleted) gate.complete();
+        }
+        await tester.pumpAndSettle();
+      }
+      expect(saved.last, ['KS Devítka Brno B', 'SKK Veverky Brno A'],
+          reason: 'the second tick must not die with the sheet');
     });
 
     testWidgets('a failing save shows the friendly message, not the raw '
