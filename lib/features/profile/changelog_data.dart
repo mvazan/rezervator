@@ -44,8 +44,12 @@ String changelogHeading(Release r, {required bool web}) {
 
 const appChangelog = <Release>[
   Release(null, '7. 9. 2026', [
-    'Zápasy v kalendáři mají barvu: u každého týmu si vybereš jednu z barev, '
-        'které Google pro události nabízí. Tréninky mají svou vlastní.',
+    'Moje tréninky se jmenují Můj přehled — jsou v nich i zápasy, ne jen '
+        'tréninky.',
+    'Barvu týmu vybereš jednou v Můj profil → Moje týmy, z barev, které '
+        'Google pro události nabízí, a platí všude: obarví pohár u zápasu '
+        'v přehledu i událost v Google kalendáři. Tréninky mají svou '
+        'vlastní barvu.',
     'Kdo chce, zapne si v profilu druhý kalendář „Rezervátor 2" a u každého '
         'týmu řekne, do kterého kalendáře jeho zápasy patří — třeba svůj tým '
         'do hlavního a zbytek oddílu do druhého, každý s vlastními '

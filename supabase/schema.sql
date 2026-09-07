@@ -1100,19 +1100,20 @@ CREATE OR REPLACE FUNCTION "public"."my_future_matches"("p_user" "uuid") RETURNS
     AS $$
   select s.id, s.date, s.starts_at, s.ends_at,
          s.home_team, s.away_team, s.is_away, s.description, t.name,
-         c.calendar, c.color_id
+         c.calendar, tc.color_id
     from priority_slots s
     join priority_slot_types y on y.id = s.type_id and y.is_match
     join tenants t on t.id = s.tenant_id
     join profiles p on p.id = p_user and p.tenant_id = s.tenant_id
     join google_calendar_links l on l.user_id = p_user
     join lateral (
-      select ct.calendar, ct.color_id
+      select ct.team, ct.calendar
         from calendar_teams ct
         where ct.user_id = p_user and ct.team in (s.home_team, s.away_team)
         order by (ct.team = s.home_team) desc
         limit 1
     ) c on true
+    left join team_colors tc on tc.user_id = p_user and tc.team = c.team
     where s.parent_id is null
       and s.date >= (now() at time zone 'Europe/Prague')::date
     order by s.date, s.starts_at;
@@ -1641,17 +1642,17 @@ begin
   end if;
 
   select coalesce(jsonb_agg(jsonb_build_object(
-           'team', team, 'calendar', calendar, 'color_id', color_id)
+           'team', team, 'calendar', calendar)
            order by team), '[]'::jsonb)
     into v_previous
     from calendar_teams where user_id = p_user;
 
   delete from calendar_teams where user_id = p_user;
-  insert into calendar_teams (user_id, team, calendar, color_id)
-  select p_user, trim(x.team), coalesce(x.calendar, 'primary'), x.color_id
-    from jsonb_to_recordset(v_teams) as x(team text, calendar text, color_id smallint);
+  insert into calendar_teams (user_id, team, calendar)
+  select p_user, trim(x.team), coalesce(x.calendar, 'primary')
+    from jsonb_to_recordset(v_teams) as x(team text, calendar text);
 
-  -- The mirror the older app reads; see the note at the top.
+  -- The mirror the older (1.2.1) app reads; see 0033.
   update google_calendar_links
      set match_teams = coalesce(
            (select array_agg(team order by team)
@@ -1777,6 +1778,61 @@ $$;
 
 
 ALTER FUNCTION "public"."set_role"("p_user_id" "uuid", "p_role" "text") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."set_team_colors_for"("p_user" "uuid", "p_colors" "jsonb") RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_colors jsonb := coalesce(p_colors, '[]'::jsonb);
+  v_previous jsonb;
+begin
+  if jsonb_typeof(v_colors) <> 'array' then
+    raise exception 'bad_colors';
+  end if;
+  if jsonb_array_length(v_colors) > 40 then
+    raise exception 'bad_colors';
+  end if;
+
+  select coalesce(jsonb_agg(jsonb_build_object('team', tc.team, 'color_id', tc.color_id)
+           order by tc.team), '[]'::jsonb)
+    into v_previous
+    from team_colors tc
+    where tc.user_id = p_user
+      and tc.team in (
+        select trim(y.team) from jsonb_to_recordset(v_colors) as y(team text, color_id smallint)
+      );
+
+  delete from team_colors
+    where user_id = p_user
+      and team in (
+        select trim(y.team) from jsonb_to_recordset(v_colors) as y(team text, color_id smallint)
+          where y.color_id is null
+      );
+
+  -- Collapses a repeated team name itself (distinct on, ordered by each
+  -- element's original array position via WITH ORDINALITY) instead of
+  -- trusting the caller — a second occurrence for the same team used to
+  -- make ON CONFLICT raise "cannot affect row a second time".
+  insert into team_colors (user_id, team, color_id)
+  select p_user, x.team, x.color_id
+    from (
+      select distinct on (trim(y.team))
+             trim(y.team) as team, y.color_id
+        from jsonb_array_elements(v_colors) with ordinality as e(elem, ord)
+        cross join lateral jsonb_to_record(e.elem) as y(team text, color_id smallint)
+        order by trim(y.team), e.ord
+    ) x
+    where x.color_id is not null
+  on conflict (user_id, team) do update set color_id = excluded.color_id;
+
+  return v_previous;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."set_team_colors_for"("p_user" "uuid", "p_colors" "jsonb") OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."set_training_color_for"("p_user" "uuid", "p_color" smallint) RETURNS smallint
@@ -2006,24 +2062,18 @@ CREATE TABLE IF NOT EXISTS "public"."calendar_teams" (
     "user_id" "uuid" NOT NULL,
     "team" "text" NOT NULL,
     "calendar" "text" DEFAULT 'primary'::"text" NOT NULL,
-    "color_id" smallint,
-    CONSTRAINT "calendar_teams_calendar_check" CHECK (("calendar" = ANY (ARRAY['primary'::"text", 'secondary'::"text"]))),
-    CONSTRAINT "calendar_teams_color_id_check" CHECK ((("color_id" >= 1) AND ("color_id" <= 11)))
+    CONSTRAINT "calendar_teams_calendar_check" CHECK (("calendar" = ANY (ARRAY['primary'::"text", 'secondary'::"text"])))
 );
 
 
 ALTER TABLE "public"."calendar_teams" OWNER TO "postgres";
 
 
-COMMENT ON TABLE "public"."calendar_teams" IS 'One row per player+followed team (0032, replaces google_calendar_links.match_teams): which of the two calendars its matches go to and which Google event colourId they get. Read-only to the client (0035) — every write goes through calendar-manage (set_calendar_teams_for), which also keeps match_teams mirrored for the 1.2.1 app.';
+COMMENT ON TABLE "public"."calendar_teams" IS 'One row per player+followed team (0032, replaces google_calendar_links.match_teams): which of the two calendars its matches go to. Read-only to the client (0035) — every write goes through calendar-manage (set_calendar_teams_for), which also keeps match_teams mirrored for the 1.2.1 app. Colour moved to team_colors (0036) — independent of this table now.';
 
 
 
 COMMENT ON COLUMN "public"."calendar_teams"."calendar" IS 'Which of the player''s Google calendars this team''s matches go to; secondary only means something once google_calendar_links.secondary_enabled is true.';
-
-
-
-COMMENT ON COLUMN "public"."calendar_teams"."color_id" IS 'Google Calendar event colorId (1-11); null = no colour, the event takes the calendar''s own.';
 
 
 
@@ -2193,6 +2243,25 @@ CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
 ALTER TABLE "public"."schedule_settings" OWNER TO "postgres";
 
 
+CREATE TABLE IF NOT EXISTS "public"."team_colors" (
+    "user_id" "uuid" NOT NULL,
+    "team" "text" NOT NULL,
+    "color_id" smallint NOT NULL,
+    CONSTRAINT "team_colors_color_id_check" CHECK ((("color_id" >= 1) AND ("color_id" <= 11)))
+);
+
+
+ALTER TABLE "public"."team_colors" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."team_colors" IS 'One row per player+team the player has coloured (0036) — independent of both team lists (profiles.followed_teams, calendar_teams): the single colour shown for that team in Můj přehled and in the Google Calendar event alike. No row = no colour; a linked calendar is not required. Read-only to the client (0037) — every write goes through calendar-manage (set_team_colors_for), which also repaints the affected future Google Calendar events in the same request.';
+
+
+
+COMMENT ON COLUMN "public"."team_colors"."color_id" IS 'Google Calendar event colorId (1-11) — the same eleven calendar_teams.color_id used before 0036 moved it here.';
+
+
+
 CREATE TABLE IF NOT EXISTS "public"."tenants" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "name" "text" NOT NULL,
@@ -2303,6 +2372,11 @@ ALTER TABLE ONLY "public"."reservations"
 
 ALTER TABLE ONLY "public"."schedule_settings"
     ADD CONSTRAINT "schedule_settings_pkey" PRIMARY KEY ("tenant_id");
+
+
+
+ALTER TABLE ONLY "public"."team_colors"
+    ADD CONSTRAINT "team_colors_pkey" PRIMARY KEY ("user_id", "team");
 
 
 
@@ -2541,6 +2615,11 @@ ALTER TABLE ONLY "public"."schedule_settings"
 
 
 
+ALTER TABLE ONLY "public"."team_colors"
+    ADD CONSTRAINT "team_colors_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "public"."profiles"("id") ON DELETE CASCADE;
+
+
+
 ALTER TABLE ONLY "public"."time_blocks"
     ADD CONSTRAINT "time_blocks_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
 
@@ -2705,6 +2784,13 @@ CREATE POLICY "slot_types_select" ON "public"."priority_slot_types" FOR SELECT U
 
 
 CREATE POLICY "slot_types_update" ON "public"."priority_slot_types" FOR UPDATE USING ((("tenant_id" = "public"."current_tenant_id"()) AND "public"."is_admin"())) WITH CHECK ((("tenant_id" = "public"."current_tenant_id"()) AND "public"."is_admin"()));
+
+
+
+ALTER TABLE "public"."team_colors" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "team_colors_own" ON "public"."team_colors" FOR SELECT USING (("user_id" = "auth"."uid"()));
 
 
 
@@ -2917,6 +3003,11 @@ GRANT ALL ON FUNCTION "public"."set_calendar_teams_for"("p_user" "uuid", "p_team
 
 
 
+REVOKE ALL ON FUNCTION "public"."set_team_colors_for"("p_user" "uuid", "p_colors" "jsonb") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."set_team_colors_for"("p_user" "uuid", "p_colors" "jsonb") TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."set_training_color_for"("p_user" "uuid", "p_color" smallint) FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."set_training_color_for"("p_user" "uuid", "p_color" smallint) TO "service_role";
 
@@ -3016,6 +3107,11 @@ GRANT INSERT("lanes"),UPDATE("lanes") ON TABLE "public"."priority_slot_types" TO
 
 GRANT ALL ON TABLE "public"."schedule_settings" TO "authenticated";
 GRANT ALL ON TABLE "public"."schedule_settings" TO "service_role";
+
+
+
+GRANT SELECT ON TABLE "public"."team_colors" TO "authenticated";
+GRANT ALL ON TABLE "public"."team_colors" TO "service_role";
 
 
 

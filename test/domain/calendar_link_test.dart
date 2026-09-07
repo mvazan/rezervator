@@ -140,50 +140,46 @@ void main() {
   });
 
   group('CalendarTeam', () {
-    test('fromJson reads team, calendar and colour', () {
+    test('fromJson reads team and calendar', () {
       final team = CalendarTeam.fromJson({
         'team': 'SKK Veverky Brno A',
         'calendar': 'secondary',
-        'color_id': 7,
       });
       expect(team.team, 'SKK Veverky Brno A');
       expect(team.calendar, CalendarSlot.secondary);
-      expect(team.colorId, 7);
     });
 
-    test('a missing calendar defaults to primary, a missing colour to null',
-        () {
+    test('a missing calendar defaults to primary', () {
       final team = CalendarTeam.fromJson({'team': 'SKK Veverky Brno A'});
       expect(team.calendar, CalendarSlot.primary);
-      expect(team.colorId, isNull);
     });
 
-    test('a null color_id stays null (no colour, not zero)', () {
+    // Colour moved off this row entirely (0036, team_colors) — fromJson
+    // must not blow up just because an older payload still carries one.
+    test('an extra color_id in the JSON is simply ignored', () {
       final team = CalendarTeam.fromJson({
         'team': 'SKK Veverky Brno A',
         'calendar': 'primary',
-        'color_id': null,
+        'color_id': 3,
       });
-      expect(team.colorId, isNull);
+      expect(team.team, 'SKK Veverky Brno A');
+      expect(team.calendar, CalendarSlot.primary);
     });
 
     test('toJson matches the calendar-manage teams payload exactly', () {
       const team = CalendarTeam(
         team: 'SKK Veverky Brno A',
         calendar: CalendarSlot.secondary,
-        colorId: 3,
       );
       expect(team.toJson(), {
         'team': 'SKK Veverky Brno A',
         'calendar': 'secondary',
-        'color_id': 3,
       });
     });
 
-    test('the constructor defaults to primary with no colour', () {
+    test('the constructor defaults to primary', () {
       const team = CalendarTeam(team: 'SKK Veverky Brno A');
       expect(team.calendar, CalendarSlot.primary);
-      expect(team.colorId, isNull);
     });
   });
 

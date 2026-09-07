@@ -180,4 +180,80 @@ void main() {
     );
     expect(only, isEmpty);
   });
+
+  // ---------------------------------------------------------------------
+  // matchColorOf (0036): the trophy's colour in Můj přehled.
+  // ---------------------------------------------------------------------
+
+  group('matchColorOf', () {
+    // match()'s defaults: home 'SKK Veverky Brno A', away 'KK MS Brno D'.
+    final m = match('m', today, const HourMinute(18, 0));
+    const bothFollowed = ['SKK Veverky Brno A', 'KK MS Brno D'];
+
+    test('neither team coloured: null, today\'s look', () {
+      expect(matchColorOf(m, bothFollowed, const {}), isNull);
+    });
+
+    test('the followed home team coloured: its colour', () {
+      expect(
+        matchColorOf(m, const ['SKK Veverky Brno A'],
+            const {'SKK Veverky Brno A': 3}),
+        3,
+      );
+    });
+
+    test('the followed away team coloured: its colour', () {
+      expect(
+        matchColorOf(m, const ['KK MS Brno D'], const {'KK MS Brno D': 5}),
+        5,
+      );
+    });
+
+    test('derby — both teams followed and coloured: home wins, same '
+        'tie-break shape my_future_matches uses server-side (over the '
+        'calendar\'s own list, not this one)', () {
+      expect(
+        matchColorOf(m, bothFollowed, const {
+          'SKK Veverky Brno A': 3,
+          'KK MS Brno D': 5,
+        }),
+        3,
+      );
+    });
+
+    test('a colour registered for an unrelated, unfollowed team never '
+        'leaks in', () {
+      expect(
+        matchColorOf(m, bothFollowed, const {'TJ Sokol Husovice E': 7}),
+        isNull,
+      );
+    });
+
+    // -----------------------------------------------------------------
+    // The bug this group exists to pin down: a colour set on a team the
+    // player does NOT follow must never paint a match that is only on
+    // the list because of the OTHER team.
+    // -----------------------------------------------------------------
+
+    test('the trophy never takes a colour belonging to a team the player '
+        'does not follow (the match shows because the OTHER team is '
+        'followed)', () {
+      final derby = match('derby', today, const HourMinute(18, 0),
+          home: 'SKK Veverky Brno A', away: 'KS Devítka Brno B');
+      // Only Devítka is followed; Veverky was once coloured red (11) —
+      // that colour must not leak onto this match just because Veverky
+      // is the home team.
+      expect(
+        matchColorOf(derby, const ['KS Devítka Brno B'],
+            const {'SKK Veverky Brno A': 11}),
+        isNull,
+      );
+    });
+
+    test('no fall-through even within the followed list: home wins the '
+        'team pick regardless of colour, so an uncoloured followed home '
+        'team hides a coloured followed away team', () {
+      expect(matchColorOf(m, bothFollowed, const {'KK MS Brno D': 5}), isNull);
+    });
+  });
 }

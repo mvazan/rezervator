@@ -5,9 +5,32 @@ import '../../core/ui.dart';
 import '../../data/clock.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
+import '../../domain/palette.dart';
 import '../../domain/upcoming.dart';
 import '../profile/profile_screen.dart';
 import 'cancel_own_reservation.dart';
+
+/// The trophy's colour for [slot]: [matchColorOf]'s pick among
+/// [followedTeams] (home wins a derby, no fall-through to a coloured team
+/// the player does not follow) from [teamColors], derived into a shade
+/// legible for [brightness] (`legibleShadeOf`) rather than Google's raw
+/// event RGB — a bare icon glyph needs more contrast than `EventColorDot`'s
+/// filled, bordered circle. Null (today's plain icon) when neither team is
+/// coloured, the picked team has no colour, or the id is somehow none of
+/// the eleven.
+Color? _trophyColorOf(
+  PrioritySlot slot,
+  List<String> followedTeams,
+  Map<String, int> teamColors,
+  Brightness brightness,
+) {
+  final colorId = matchColorOf(slot, followedTeams, teamColors);
+  if (colorId == null) return null;
+  for (final (id, _, color) in googleEventColors) {
+    if (id == colorId) return legibleShadeOf(color, brightness);
+  }
+  return null;
+}
 
 /// The second view beside the calendar: what is coming for the player — the
 /// trainings they booked and the matches of the teams they follow, by day.
@@ -98,6 +121,7 @@ class MyTrainingsScreen extends ConsumerWidget {
     final slotsFailed = ref.watch(prioritySlotsFailedProvider);
     final profile = ref.watch(myProfileProvider).value;
     final teams = profile?.followedTeams ?? const <String>[];
+    final teamColors = ref.watch(myTeamColorsProvider).value ?? const {};
     final theme = Theme.of(context);
 
     final header = Padding(
@@ -105,7 +129,7 @@ class MyTrainingsScreen extends ConsumerWidget {
       child: Row(
         children: [
           Expanded(
-            child: Text('Moje tréninky', style: theme.textTheme.titleLarge),
+            child: Text('Můj přehled', style: theme.textTheme.titleLarge),
           ),
           ...trailing,
         ],
@@ -138,7 +162,7 @@ class MyTrainingsScreen extends ConsumerWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text('Tréninky se nepodařilo načíst.'),
+                  const Text('Přehled se nepodařilo načíst.'),
                   const SizedBox(height: 12),
                   OutlinedButton(
                     onPressed: () {
@@ -218,7 +242,15 @@ class MyTrainingsScreen extends ConsumerWidget {
                                 nowTime.minutesFromMidnight,
                       ),
                     UpcomingMatch() => ListTile(
-                        leading: const Icon(Icons.emoji_events_outlined),
+                        leading: Icon(
+                          Icons.emoji_events_outlined,
+                          color: _trophyColorOf(
+                            item.slot,
+                            teams,
+                            teamColors,
+                            theme.brightness,
+                          ),
+                        ),
                         title: Text(item.slot.title),
                         subtitle: Text([
                           '${item.slot.startsAt.display()}–'

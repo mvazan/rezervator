@@ -9,7 +9,7 @@ import '../profile/profile_screen.dart';
 import 'my_trainings_screen.dart';
 import 'week_screen.dart';
 
-/// The signed-in home: two views — the calendar and Moje tréninky — behind
+/// The signed-in home: two views — the calendar and Můj přehled — behind
 /// bottom tabs on a narrow screen and a rail on a wide one. Which one opens
 /// at launch is the profile's choice; a tap changes it for this run only.
 /// Both views stay mounted (an IndexedStack, not a switch) so paging the
@@ -82,7 +82,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
 
     // IndexedStack (not a switch swapping widgets in and out): both views
     // keep their State — WeekScreen's week offset and day index survive a
-    // glance at Moje tréninky and back. children[i]'s index must line up
+    // glance at Můj přehled and back. children[i]'s index must line up
     // with HomeView's declaration order (see view.index below).
     final content = IndexedStack(
       index: view.index,
@@ -165,7 +165,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                         NavigationRailDestination(
                           icon: Icon(Icons.event_available_outlined),
                           selectedIcon: Icon(Icons.event_available),
-                          label: Text('Moje tréninky'),
+                          label: Text('Můj přehled'),
                         ),
                       ],
                     ),
@@ -187,7 +187,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                   NavigationDestination(
                     icon: Icon(Icons.event_available_outlined),
                     selectedIcon: Icon(Icons.event_available),
-                    label: 'Moje tréninky',
+                    label: 'Můj přehled',
                   ),
                 ],
               )

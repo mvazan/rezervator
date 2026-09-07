@@ -44,6 +44,32 @@ class UpcomingDay {
   final List<UpcomingItem> items;
 }
 
+/// The colour to tint [slot]'s trophy in Můj přehled (0036, `team_colors`):
+/// first pick WHICH of its two teams is [followedTeams]' own — home wins
+/// when both are followed, same as `upcomingTimeline` already did to decide
+/// the match belongs on this list at all — then take THAT team's shared
+/// colour, or null if it has none. No fall-through to the other team's
+/// colour: a colour set on a team the player does not follow must never
+/// paint a match that is only showing because of the OTHER team (e.g. the
+/// player follows only 'KS Devítka Brno B' and once coloured 'SKK Veverky
+/// Brno A' red — their derby must show no colour at all, not Veverky's
+/// red). `my_future_matches` (SQL, 0036) resolves the SAME shape — home
+/// wins, then that team's colour, no fall-through — but over
+/// `calendar_teams`, the calendar's own (deliberately different) team
+/// list: the tie-break shape is shared, the list it runs over is not.
+int? matchColorOf(
+  PrioritySlot slot,
+  List<String> followedTeams,
+  Map<String, int> teamColors,
+) {
+  final team = followedTeams.contains(slot.homeTeam)
+      ? slot.homeTeam
+      : followedTeams.contains(slot.awayTeam)
+          ? slot.awayTeam
+          : null;
+  return team == null ? null : teamColors[team];
+}
+
 /// Live reservations from [today] on whose block still exists, plus match
 /// slots (no úklid children) of [teams] from [today] on; days ascending,
 /// within a day by start (chronological, `compareDayTime`), a training

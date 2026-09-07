@@ -5,17 +5,21 @@ import '../../../data/providers.dart';
 import '../../../domain/models.dart';
 import 'team_picker_sheet.dart';
 
-/// Which teams' matches the player sees in Moje tréninky (0029). Its own
-/// list — the calendar card keeps a separate one for the Google sync.
+/// Which teams' matches the player sees in Můj přehled (0029), and each
+/// one's shared colour (0036, `team_colors`) — the SAME colour shown there
+/// and on the Google Calendar event, wherever it was last set. Its own team
+/// LIST is separate from the calendar card's; the colour registry is not.
 class MyTeamsCard extends StatelessWidget {
   const MyTeamsCard({
     super.key,
     required this.profile,
     required this.setFollowedTeams,
+    required this.setTeamColors,
   });
 
   final Profile profile;
   final Future<void> Function(List<String> teams) setFollowedTeams;
+  final Future<void> Function(Map<String, int?> colors) setTeamColors;
 
   @override
   Widget build(BuildContext context) {
@@ -36,13 +40,16 @@ class MyTeamsCard extends StatelessWidget {
                 onPressed: () => showTeamPickerSheet(
                   context,
                   title: 'Moje týmy',
-                  hint: 'Jejich domácí i venkovní zápasy uvidíš v Moje '
-                      'tréninky. Do Google kalendáře jdou zápasy podle '
+                  hint: 'Jejich domácí i venkovní zápasy uvidíš v Můj '
+                      'přehled. Do Google kalendáře jdou zápasy podle '
                       'vlastního výběru u kalendáře.',
                   chosenOf: (WidgetRef sheetRef) =>
                       sheetRef.watch(myProfileProvider).value?.followedTeams ??
                       const [],
                   onChanged: setFollowedTeams,
+                  colorsOf: (WidgetRef sheetRef) =>
+                      sheetRef.watch(myTeamColorsProvider).value ?? const {},
+                  onColorsChanged: setTeamColors,
                 ),
                 child: const Text('Vybrat týmy…'),
               ),
