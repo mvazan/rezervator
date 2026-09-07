@@ -4,11 +4,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/ui.dart';
 import '../../../data/providers.dart';
 import '../../../domain/models.dart';
-import 'team_picker_sheet.dart';
+import 'calendar_teams_sheet.dart';
+import 'event_color_picker.dart';
 
 /// Google Calendar link on Můj profil: connect (opens Google's consent page
-/// in the browser), show the current state, edit reminders, pick the teams
-/// whose matches go to the calendar, or disconnect.
+/// in the browser), show the current state, edit reminders, turn the second
+/// calendar on/off, pick the teams whose matches go to each calendar (and
+/// their colours), set the trainings' own colour, or disconnect.
 /// Nothing comes back into the app via a deep link — the backend writes the
 /// result and this card flips on its own through the live stream.
 class CalendarLinkCard extends ConsumerStatefulWidget {
@@ -18,7 +20,9 @@ class CalendarLinkCard extends ConsumerStatefulWidget {
     this.openUrl = launchWeb,
     this.disconnect = Api.disconnectCalendar,
     this.setReminders = Api.setCalendarReminders,
-    this.setMatchTeams = Api.setCalendarMatchTeams,
+    this.setMatchTeams = Api.setCalendarTeams,
+    this.setSecondaryCalendar = Api.setSecondaryCalendar,
+    this.setTrainingColor = Api.setTrainingColor,
   });
 
   /// The backend calls and the browser launch, injectable for widget tests
@@ -26,8 +30,11 @@ class CalendarLinkCard extends ConsumerStatefulWidget {
   final Future<Uri> Function() consentUrl;
   final void Function(String url) openUrl;
   final Future<bool> Function() disconnect;
-  final Future<void> Function(List<int> minutes) setReminders;
-  final Future<void> Function(List<String> teams) setMatchTeams;
+  final Future<void> Function(List<int> minutes, {CalendarSlot calendar})
+  setReminders;
+  final Future<void> Function(List<CalendarTeam> teams) setMatchTeams;
+  final Future<void> Function(bool enabled) setSecondaryCalendar;
+  final Future<void> Function(int? colorId) setTrainingColor;
 
   @override
   ConsumerState<CalendarLinkCard> createState() => _CalendarLinkCardState();
@@ -35,6 +42,11 @@ class CalendarLinkCard extends ConsumerStatefulWidget {
 
 class _CalendarLinkCardState extends ConsumerState<CalendarLinkCard> {
   bool _busy = false;
+
+  /// Separate from [_busy]: turning the second calendar on/off must disable
+  /// just the switch while it settles, not swap the header row's own
+  /// Odpojit button for a spinner too.
+  bool _secondaryBusy = false;
 
   Future<void> _connect() async {
     setState(() => _busy = true);
@@ -51,11 +63,15 @@ class _CalendarLinkCardState extends ConsumerState<CalendarLinkCard> {
   }
 
   Future<void> _disconnect() async {
+    final link = ref.read(myCalendarLinkProvider).value ?? CalendarLink.none;
     final ok = await confirmDialog(
       context,
       title: 'Odpojit kalendář?',
-      message: 'Kalendář „Rezervátor" se z Googlu smaže i s tréninky. '
-          'Propojení jde kdykoli obnovit.',
+      message: link.secondaryEnabled
+          ? 'Kalendáře „Rezervátor" i „Rezervátor 2" se z Googlu smažou '
+                'i s tréninky a zápasy. Propojení jde kdykoli obnovit.'
+          : 'Kalendář „Rezervátor" se z Googlu smaže i s tréninky. '
+                'Propojení jde kdykoli obnovit.',
       confirmLabel: 'Odpojit a smazat',
     );
     if (!ok || !mounted) return;
@@ -69,49 +85,96 @@ class _CalendarLinkCardState extends ConsumerState<CalendarLinkCard> {
           context,
           orphaned
               ? 'Odpojeno. Přístup byl odvolaný už dřív, takže kalendář '
-                  '„Rezervátor" v Googlu zůstal — smaž si ho tam sám(a).'
+                    '„Rezervátor" v Googlu zůstal — smaž si ho tam sám(a).'
               : 'Kalendář odpojen a smazán.',
         );
       }
     } catch (_) {
       if (mounted) {
         snack(
-            context,
-            'Odpojení se nepovedlo, nic se nezměnilo. '
-            'Zkus to prosím znovu.');
+          context,
+          'Odpojení se nepovedlo, nic se nezměnilo. '
+          'Zkus to prosím znovu.',
+        );
       }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
-  /// Reminder editor: a live list of "N hodin/dní předem" entries with
-  /// add/remove, mirroring Google Calendar's own model (max 5, max 4 weeks).
-  /// Every change is saved immediately — the sheet watches the same stream
-  /// as the card, so it redraws itself when the row lands.
-  Future<void> _editReminders() {
+  /// Turns the second Google calendar on or off. Off is destructive — it
+  /// deletes "Rezervátor 2" in Google along with its events and moves its
+  /// teams back to primary — so, like disconnect, it asks first. Either way
+  /// this waits for the call: the switch must not offer another tap (and
+  /// the teams sheet must not offer "Druhý" again) before the backend
+  /// settles, the same reasoning `Api.setSecondaryCalendar`'s doc comment
+  /// spells out.
+  Future<void> _setSecondaryCalendar(bool enabled) async {
+    if (!enabled) {
+      final ok = await confirmDialog(
+        context,
+        title: 'Vypnout druhý kalendář?',
+        message:
+            'Kalendář „Rezervátor 2" se z Googlu smaže i se zápasy. '
+            'Týmy, které do něj patřily, se přesunou do hlavního kalendáře.',
+        confirmLabel: 'Vypnout a smazat',
+      );
+      if (!ok || !mounted) return;
+    }
+    setState(() => _secondaryBusy = true);
+    try {
+      await tryAction(
+        context,
+        () => widget.setSecondaryCalendar(enabled),
+        errorText: friendlyDbError,
+      );
+    } finally {
+      if (mounted) setState(() => _secondaryBusy = false);
+    }
+  }
+
+  /// Reminder editor for [calendar]: a live list of "N hodin/dní předem"
+  /// entries with add/remove, mirroring Google Calendar's own model (max 5,
+  /// max 4 weeks). Every change is saved immediately — the sheet watches the
+  /// same stream as the card, so it redraws itself when the row lands.
+  Future<void> _editReminders(CalendarSlot calendar) {
     return showModalBottomSheet<void>(
       context: context,
       builder: (sheetContext) => Consumer(
         builder: (context, ref, _) {
           final link =
               ref.watch(myCalendarLinkProvider).value ?? CalendarLink.none;
-          final minutes = link.reminderMinutes;
+          final minutes = calendar == CalendarSlot.secondary
+              ? link.reminderMinutesSecondary
+              : link.reminderMinutes;
+          // The second calendar never carries trainings (those always stay
+          // on primary, per the design), so its empty state talks about
+          // matches instead — and while there is only one calendar, the
+          // title stays exactly what it always was.
+          final title = !link.secondaryEnabled
+              ? 'Připomínky tréninků v kalendáři'
+              : (calendar == CalendarSlot.secondary
+                    ? 'Připomínky druhého kalendáře'
+                    : 'Připomínky hlavního kalendáře');
+          final emptyCopy = calendar == CalendarSlot.secondary
+              ? 'Zápasy se přidávají tiše, bez upozornění.'
+              : 'Tréninky se přidávají tiše, bez upozornění.';
           return SafeArea(
             child: ListView(
               shrinkWrap: true,
               children: [
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-                  child: Text('Připomínky tréninků v kalendáři',
-                      style: Theme.of(context).textTheme.titleMedium),
+                  child: Text(
+                    title,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
                 ),
                 if (minutes.isEmpty)
-                  const ListTile(
-                    leading: Icon(Icons.notifications_off_outlined),
-                    title: Text('Žádné připomínky'),
-                    subtitle:
-                        Text('Tréninky se přidávají tiše, bez upozornění.'),
+                  ListTile(
+                    leading: const Icon(Icons.notifications_off_outlined),
+                    title: const Text('Žádné připomínky'),
+                    subtitle: Text(emptyCopy),
                   ),
                 for (final m in minutes)
                   ListTile(
@@ -121,16 +184,19 @@ class _CalendarLinkCardState extends ConsumerState<CalendarLinkCard> {
                       tooltip: 'Odebrat',
                       icon: const Icon(Icons.close),
                       onPressed: () => tryAction(
-                          context,
-                          () => widget.setReminders(
-                              [for (final x in minutes) if (x != m) x])),
+                        context,
+                        () => widget.setReminders([
+                          for (final x in minutes)
+                            if (x != m) x,
+                        ], calendar: calendar),
+                      ),
                     ),
                   ),
                 if (minutes.length < maxCalendarReminders)
                   ListTile(
                     leading: const Icon(Icons.add),
                     title: const Text('Přidat připomínku'),
-                    onTap: () => _addReminder(context, minutes),
+                    onTap: () => _addReminder(context, minutes, calendar),
                   ),
                 const SizedBox(height: 8),
               ],
@@ -141,8 +207,12 @@ class _CalendarLinkCardState extends ConsumerState<CalendarLinkCard> {
     );
   }
 
-  /// "Number + unit" dialog; converts to minutes and saves.
-  Future<void> _addReminder(BuildContext context, List<int> current) async {
+  /// "Number + unit" dialog; converts to minutes and saves to [calendar].
+  Future<void> _addReminder(
+    BuildContext context,
+    List<int> current,
+    CalendarSlot calendar,
+  ) async {
     final minutes = await showDialog<int>(
       context: context,
       builder: (_) => const _ReminderDialog(),
@@ -153,103 +223,158 @@ class _CalendarLinkCardState extends ConsumerState<CalendarLinkCard> {
       return;
     }
     await tryAction(
-        context, () => widget.setReminders([...current, minutes]));
+      context,
+      () => widget.setReminders([...current, minutes], calendar: calendar),
+    );
   }
 
-  Future<void> _editMatchTeams() => showTeamPickerSheet(
-        context,
-        title: 'Zápasy v kalendáři',
-        hint: 'Vyber svůj tým — jeho domácí i venkovní zápasy se přidají do '
-            'kalendáře.',
-        chosenOf: (ref) =>
-            (ref.watch(myCalendarLinkProvider).value ?? CalendarLink.none)
-                .matchTeams,
-        onChanged: widget.setMatchTeams,
-      );
+  Future<void> _editMatchTeams() =>
+      showCalendarTeamsSheet(context, onChanged: widget.setMatchTeams);
+
+  Future<void> _editTrainingColor() async {
+    final link = ref.read(myCalendarLinkProvider).value ?? CalendarLink.none;
+    final picked = await pickEventColor(
+      context,
+      current: link.trainingColorId,
+      title: 'Barva tréninků',
+    );
+    if (!mounted || picked == link.trainingColorId) return;
+    await tryAction(
+      context,
+      () => widget.setTrainingColor(picked),
+      errorText: friendlyDbError,
+    );
+  }
 
   Widget _connectButton() => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-        child: Align(
-          alignment: Alignment.centerLeft,
-          child: FilledButton.tonalIcon(
-            onPressed: _busy ? null : _connect,
-            icon: _busy ? const _Spinner() : const Icon(Icons.link),
-            label: const Text('Propojit s Google kalendářem'),
-          ),
-        ),
-      );
+    padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+    child: Align(
+      alignment: Alignment.centerLeft,
+      child: FilledButton.tonalIcon(
+        onPressed: _busy ? null : _connect,
+        icon: _busy ? const _Spinner() : const Icon(Icons.link),
+        label: const Text('Propojit s Google kalendářem'),
+      ),
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
     final link = ref.watch(myCalendarLinkProvider).value ?? CalendarLink.none;
+    final teams = ref.watch(myCalendarTeamsProvider).value ?? const [];
     // Locals, not fields: the switch arms below close over them.
     final email = link.googleEmail;
     final error = link.lastError;
 
     final rows = switch (link.status) {
       CalendarLinkStatus.linked => [
-          ListTile(
-            leading: const Icon(Icons.event_available_outlined),
-            title: const Text('Google kalendář'),
-            subtitle: Text(email == null
+        ListTile(
+          leading: const Icon(Icons.event_available_outlined),
+          title: const Text('Google kalendář'),
+          subtitle: Text(
+            email == null
                 ? 'Propojeno — tréninky se přidávají samy.'
-                : 'Propojeno jako $email.'),
-            trailing: _busy
-                ? const _Spinner()
-                : TextButton(
-                    onPressed: _disconnect, child: const Text('Odpojit')),
+                : 'Propojeno jako $email.',
           ),
+          trailing: _busy
+              ? const _Spinner()
+              : TextButton(
+                  onPressed: _disconnect,
+                  child: const Text('Odpojit'),
+                ),
+        ),
+        SwitchListTile(
+          title: const Text('Druhý kalendář'),
+          subtitle: const Text(
+            'Založí v Googlu kalendář „Rezervátor 2" a u každého týmu '
+            'půjde vybrat, do kterého kalendáře jeho zápasy patří.',
+          ),
+          value: link.secondaryEnabled,
+          onChanged: _secondaryBusy
+              ? null
+              : (enabled) => _setSecondaryCalendar(enabled),
+        ),
+        if (link.secondaryEnabled) ...[
+          ListTile(
+            leading: const Icon(Icons.notifications_none_outlined),
+            title: const Text('Připomínky hlavního kalendáře…'),
+            subtitle: Text(remindersSummary(link.reminderMinutes)),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _editReminders(CalendarSlot.primary),
+          ),
+          ListTile(
+            leading: const Icon(Icons.notifications_none_outlined),
+            title: const Text('Připomínky druhého kalendáře…'),
+            subtitle: Text(remindersSummary(link.reminderMinutesSecondary)),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _editReminders(CalendarSlot.secondary),
+          ),
+        ] else
           ListTile(
             leading: const Icon(Icons.notifications_none_outlined),
             title: const Text('Připomínky…'),
             subtitle: Text(remindersSummary(link.reminderMinutes)),
             trailing: const Icon(Icons.chevron_right),
-            onTap: _editReminders,
+            onTap: () => _editReminders(CalendarSlot.primary),
           ),
-          ListTile(
-            leading: const Icon(Icons.emoji_events_outlined),
-            title: const Text('Zápasy v kalendáři…'),
-            subtitle: Text(matchTeamsSummary(link.matchTeams)),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: _editMatchTeams,
-          ),
-        ],
+        ListTile(
+          leading: const Icon(Icons.emoji_events_outlined),
+          title: const Text('Zápasy v kalendáři…'),
+          subtitle: Text(matchTeamsSummary([for (final t in teams) t.team])),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: _editMatchTeams,
+        ),
+        ListTile(
+          leading: EventColorDot(colorId: link.trainingColorId),
+          title: const Text('Barva tréninků'),
+          subtitle: Text(eventColorName(link.trainingColorId)),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: _editTrainingColor,
+        ),
+      ],
       // Google said yes; the backend is creating the calendar. The retry
       // stays on offer so a callback that died half-way is no dead end.
       CalendarLinkStatus.pending => [
-          ListTile(
-            leading: const Icon(Icons.event_outlined),
-            title: const Text('Google kalendář'),
-            subtitle: Text(error ?? 'Propojuji…'),
-            trailing: _busy
-                ? const _Spinner()
-                : TextButton(
-                    onPressed: _connect, child: const Text('Zkusit znovu')),
-          ),
-        ],
+        ListTile(
+          leading: const Icon(Icons.event_outlined),
+          title: const Text('Google kalendář'),
+          subtitle: Text(error ?? 'Propojuji…'),
+          trailing: _busy
+              ? const _Spinner()
+              : TextButton(
+                  onPressed: _connect,
+                  child: const Text('Zkusit znovu'),
+                ),
+        ),
+      ],
       CalendarLinkStatus.broken => [
-          ListTile(
-            leading: Icon(Icons.event_busy_outlined,
-                color: Theme.of(context).colorScheme.error),
-            title: const Text('Google kalendář'),
-            subtitle: Text(error == null
+        ListTile(
+          leading: Icon(
+            Icons.event_busy_outlined,
+            color: Theme.of(context).colorScheme.error,
+          ),
+          title: const Text('Google kalendář'),
+          subtitle: Text(
+            error == null
                 ? 'Propojení se přerušilo. Propoj ho prosím znovu.'
-                : '$error Propoj ho prosím znovu.'),
-            isThreeLine: true,
+                : '$error Propoj ho prosím znovu.',
           ),
-          _connectButton(),
-        ],
+          isThreeLine: true,
+        ),
+        _connectButton(),
+      ],
       CalendarLinkStatus.notLinked => [
-          const ListTile(
-            leading: Icon(Icons.event_outlined),
-            title: Text('Google kalendář'),
-            subtitle: Text(
-                'Tvoje tréninky se budou samy přidávat do kalendáře '
-                '„Rezervátor" ve tvém Google účtu.'),
-            isThreeLine: true,
+        const ListTile(
+          leading: Icon(Icons.event_outlined),
+          title: Text('Google kalendář'),
+          subtitle: Text(
+            'Tvoje tréninky se budou samy přidávat do kalendáře '
+            '„Rezervátor" ve tvém Google účtu.',
           ),
-          _connectButton(),
-        ],
+          isThreeLine: true,
+        ),
+        _connectButton(),
+      ],
     };
     return Card(child: Column(children: rows));
   }
@@ -308,8 +433,9 @@ class _ReminderDialogState extends State<_ReminderDialog> {
       ),
       actions: [
         TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Zrušit')),
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Zrušit'),
+        ),
         FilledButton(onPressed: _submit, child: const Text('Přidat')),
       ],
     );
@@ -334,8 +460,8 @@ class _Spinner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => const SizedBox(
-        width: 20,
-        height: 20,
-        child: CircularProgressIndicator(strokeWidth: 2),
-      );
+    width: 20,
+    height: 20,
+    child: CircularProgressIndicator(strokeWidth: 2),
+  );
 }

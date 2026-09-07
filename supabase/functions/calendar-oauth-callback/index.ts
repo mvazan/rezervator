@@ -13,6 +13,7 @@
 import { createClient } from "@supabase/supabase-js";
 import {
   calendarExists,
+  clearSecondaryCalendar,
   createSecondaryCalendar,
   emailFromIdToken,
   exchangeCode,
@@ -123,7 +124,12 @@ Deno.serve(async (request) => {
   // fails, the token stays stored (status pending) and linking again works
   // without a fresh consent. Inside a LIVE grant the earlier calendar is
   // reused (repeated "Zkusit znovu" makes no duplicates); across a revoked
-  // consent the app cannot reach it (get 404) and a fresh one is created.
+  // consent the app cannot reach it (get 404) and a fresh one is created —
+  // and so is whatever the SECOND calendar was under that same old consent:
+  // clearSecondaryCalendar drops the now-unreachable id and
+  // secondary_enabled together, rather than leaving a stale pointer that
+  // would route a team's matches into a calendar nothing can ever reach
+  // again (and break the link right back once a sync job tries).
   try {
     const reusable = previousCalendarId &&
       await calendarExists(tokens.accessToken, previousCalendarId);
@@ -133,6 +139,9 @@ Deno.serve(async (request) => {
     await supabase.from("google_calendar_tokens")
       .update({ google_calendar_id: calendarId, updated_at: now })
       .eq("user_id", userId);
+    if (!reusable) {
+      await clearSecondaryCalendar(supabase, userId);
+    }
     await supabase.from("google_calendar_links")
       .update({ status: "linked", updated_at: now })
       .eq("user_id", userId);
@@ -142,14 +151,19 @@ Deno.serve(async (request) => {
     // empty grid and "it shows up in a minute". The reminders ride on the
     // events themselves (calendarList is off limits under this scope), so
     // this restores them as well. Whatever fails is caught up by a job —
-    // that is why they are enqueued regardless.
+    // that is why they are enqueued regardless. training_color_id (0032) is
+    // read fresh rather than carried over from anywhere else — it survives
+    // on the links row across a disconnect/relink same as reminder_minutes.
     const { data: enqueued } = await supabase
       .rpc("backfill_calendar_jobs", { p_user: userId });
+    const { data: prefs } = await supabase.from("google_calendar_links")
+      .select("training_color_id").eq("user_id", userId).maybeSingle();
     const written = await writeFutureReservations(
       supabase,
       userId,
       tokens.accessToken,
       calendarId,
+      (prefs?.training_color_id as number | null) ?? null,
     );
     console.log(
       `calendar linked for ${userId} (${reusable ? "reused" : "created"}), ` +

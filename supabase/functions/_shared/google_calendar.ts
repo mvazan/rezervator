@@ -22,6 +22,11 @@ const tokenEndpoint = () =>
 
 export const CALENDAR_SUMMARY = "Rezervátor";
 export const CALENDAR_DESCRIPTION = "Tvoje tréninky z appky Rezervátor.";
+/** The second calendar ("Rezervátor 2") never holds a training by design —
+ * only matches of the teams routed to it — so it gets its own description
+ * rather than inheriting the primary's, which would be a lie. */
+export const CALENDAR_DESCRIPTION_SECONDARY =
+  "Zápasy sledovaných týmů z appky Rezervátor.";
 export const CALENDAR_TIMEZONE = "Europe/Prague";
 
 /** The user revoked access (or the token expired after 7 days while the
@@ -159,12 +164,54 @@ export async function revokeToken(refreshToken: string): Promise<void> {
   }
 }
 
-/** Creates the secondary calendar and returns its id. No calendar-level
- * reminders — the player sets those in Můj profil and they travel on the
- * events themselves; a fresh calendar from the API has no defaultReminders,
- * which is also the wanted default. */
+/** Clears the player's secondary calendar (id + `secondary_enabled`) without
+ * touching anything else — the one shared fix for two different moments the
+ * SECOND calendar's Google side can go stale while the primary is still
+ * fine:
+ *  - calendar-oauth-callback, relinking under a FRESH consent (the previous
+ *    primary was unreachable, so a new one had to be created): the old
+ *    consent's secondary calendar is gone right along with it, and a stale
+ *    id left behind would route a team into a calendar nothing can ever
+ *    reach again.
+ *  - notify's matchSync, when a write lands on a SECONDARY calendar the
+ *    player deleted by hand in Google (404/410, "gone") while the primary
+ *    is untouched: the fix is to fall back to the primary, not break the
+ *    whole link.
+ *
+ * Deliberately leaves calendar_teams alone: a row still pointed at
+ * 'secondary' just falls back to the primary on its own (matchTarget
+ * treats a null `calendars.secondary` as "route to primary" regardless of
+ * the team's own column), and reappears in the second calendar by itself if
+ * the player turns it back on — exactly the behaviour calendar-manage's
+ * `disconnect`/`secondary` OFF path already relies on. `secondary_enabled`
+ * is reset here for the same reason `forget()` (calendar-manage) resets it
+ * on disconnect: it does not just record a preference, it asserts a second
+ * calendar EXISTS, and it no longer does. */
+export async function clearSecondaryCalendar(
+  // deno-lint-ignore no-explicit-any
+  db: any,
+  userId: string,
+): Promise<void> {
+  const now = new Date().toISOString();
+  await db.from("google_calendar_tokens")
+    .update({ google_calendar_id_secondary: null, updated_at: now })
+    .eq("user_id", userId);
+  await db.from("google_calendar_links")
+    .update({ secondary_enabled: false, updated_at: now })
+    .eq("user_id", userId);
+}
+
+/** Creates a calendar the app owns and returns its id. `summary` defaults to
+ * CALENDAR_SUMMARY ("Rezervátor", the one every player already has); pass
+ * "Rezervátor 2" (and CALENDAR_DESCRIPTION_SECONDARY) to create a player's
+ * optional second calendar instead — its own description, since it never
+ * holds a training. No calendar-level reminders — the player sets those in
+ * Můj profil and they travel on the events themselves; a fresh calendar from
+ * the API has no defaultReminders, which is also the wanted default. */
 export async function createSecondaryCalendar(
   accessToken: string,
+  summary: string = CALENDAR_SUMMARY,
+  description: string = CALENDAR_DESCRIPTION,
 ): Promise<string> {
   const response = await fetch(`${calendarApi()}/calendars`, {
     method: "POST",
@@ -173,8 +220,8 @@ export async function createSecondaryCalendar(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      summary: CALENDAR_SUMMARY,
-      description: CALENDAR_DESCRIPTION,
+      summary,
+      description,
       timeZone: CALENDAR_TIMEZONE,
     }),
   });
@@ -279,17 +326,26 @@ export type EventBody = {
   reminders: EventReminders;
   /** Only matches set it (the alley of a home match). */
   location?: string;
+  /** Google's own event colour, "1".."11" — never a bare RGB, Google
+   * Calendar only accepts its own eleven (see the secondary-calendar design
+   * doc). Absent = the event inherits its calendar's colour, exactly like
+   * every event before this field existed. */
+  colorId?: string;
 };
 
 /** What the calendar should show for one reservation. The alley's name is
  * the tenant's name, the lane goes to the description. No location (the
- * player knows where their own alley is) and no colour. `status: confirmed`
- * also revives an event the user deleted by hand (see upsertEvent). */
+ * player knows where their own alley is). `status: confirmed` also revives
+ * an event the user deleted by hand (see upsertEvent). `colorId` is the
+ * player's own training colour (google_calendar_links.training_color_id,
+ * 0032) — omitted or null means no colour, same as every training before
+ * this field existed. */
 export function reservationEventBody(
   row: ReservationEventSource,
   reminderMinutes: number[],
+  colorId?: number | null,
 ): EventBody {
-  return {
+  const body: EventBody = {
     summary: `Trénink · ${row.alley_name}`,
     description: `Dráha ${row.lane}\n\n` +
       "— spravuje appka Rezervátor, ruční úpravy se přepíšou —",
@@ -304,10 +360,12 @@ export function reservationEventBody(
     status: "confirmed",
     reminders: remindersFor(reminderMinutes),
   };
+  if (colorId != null) body.colorId = String(colorId);
+  return body;
 }
 
 /** One live future match of a team the player follows, as RPC
- * `my_future_matches` (0027) returns it. `description` is the competition,
+ * `my_future_matches` (0032) returns it. `description` is the competition,
  * with the venue appended for an away match ("KP1 Sever · Blansko 1-6" —
  * the import tool writes it that way). */
 export type MatchRow = {
@@ -324,9 +382,27 @@ export type MatchRow = {
   description: string;
   /** The tenant's (kuželna's) name — the venue of a home match. */
   alley_name: string;
+  /** Which of the player's two Google calendars this team's matches go to
+   * (calendar_teams.calendar, 0032); always 'primary' or 'secondary', never
+   * null — the lateral join in my_future_matches only returns a match at
+   * all once a calendar_teams row for one of its teams exists. */
+  calendar: "primary" | "secondary";
+  /** Google event colorId (1-11) for the followed team, or null = no
+   * colour (calendar_teams.color_id, 0032). Not read by matchEventBody
+   * itself — writeFutureMatches passes it on as that function's own
+   * explicit `colorId` argument, same as a training's. */
+  color_id: number | null;
 };
 
-export type MatchEventSource = Omit<MatchRow, "match_id">;
+/** The fields matchEventBody actually builds the event's wording and times
+ * from. `calendar` (routing) and `color_id` (colour) are the CALLER's job —
+ * writeFutureMatches reads them straight off the MatchRow to pick a target
+ * calendar and a colorId argument — so they are deliberately excluded here
+ * rather than duplicated as unused properties on every event source. */
+export type MatchEventSource = Omit<
+  MatchRow,
+  "match_id" | "calendar" | "color_id"
+>;
 
 /** Deterministic event id for (user, match) — its own namespace next to
  * the reservations', so a match and a reservation can never share an id. */
@@ -337,10 +413,13 @@ export function matchEventId(userId: string, matchId: string): Promise<string> {
 /** What the calendar should show for one match: "Zápas · domácí – hosté",
  * home matches located at the alley, away ones carry the venue in the
  * description (the app never stores it structurally). Same reminders and
- * the same managed-by footer as a training. */
+ * the same managed-by footer as a training. `colorId` is the followed
+ * team's own colour (calendar_teams.color_id, 0032) — omitted or null means
+ * no colour, same as every match before this field existed. */
 export function matchEventBody(
   row: MatchEventSource,
   reminderMinutes: number[],
+  colorId?: number | null,
 ): EventBody {
   const where = row.is_away ? "venku" : "doma";
   const body: EventBody = {
@@ -359,6 +438,7 @@ export function matchEventBody(
     reminders: remindersFor(reminderMinutes),
   };
   if (!row.is_away) body.location = row.alley_name;
+  if (colorId != null) body.colorId = String(colorId);
   return body;
 }
 
@@ -425,13 +505,17 @@ export async function upsertEvent(
  *
  * `db` is the caller's service-role client; RPC `my_future_reservations`
  * (0023) holds the same definition of a "live reservation" as
- * backfill_calendar_jobs. */
+ * backfill_calendar_jobs. `colorId` is the player's training colour
+ * (google_calendar_links.training_color_id, 0032) — the caller reads it and
+ * passes it on; omitted or null means no colour, same as before this
+ * parameter existed. */
 export async function writeFutureReservations(
   // deno-lint-ignore no-explicit-any
   db: any,
   userId: string,
   accessToken: string,
   calendarId: string,
+  colorId?: number | null,
 ): Promise<number> {
   const { data: prefs } = await db.from("google_calendar_links")
     .select("reminder_minutes").eq("user_id", userId).maybeSingle();
@@ -451,7 +535,7 @@ export async function writeFutureReservations(
           accessToken,
           calendarId,
           await eventIdFor(userId, row.reservation_id),
-          reservationEventBody(row, reminderMinutes),
+          reservationEventBody(row, reminderMinutes, colorId),
         );
         if (result === "ok") written++;
       }),
@@ -460,19 +544,45 @@ export async function writeFutureReservations(
   return written;
 }
 
-/** Writes every live future match of the teams the player follows —
- * right away, like writeFutureReservations; RPC `my_future_matches` (0027)
- * holds the same definition of "live" as backfill_calendar_jobs. */
+/** Writes every live future match of the teams the player follows into
+ * whichever of their two calendars its team was assigned to
+ * (calendar_teams.calendar, via my_future_matches), right away like
+ * writeFutureReservations — and DELETES the same deterministic event id
+ * from the OTHER calendar. That is the entire "team moved calendar" story:
+ * the next sync writes it into the new one and cleans up the old one, no
+ * separate move path needed (see the design doc). Reminders follow the
+ * calendar an event actually lands in (reminder_minutes vs
+ * reminder_minutes_secondary), the same split the player sets in Můj
+ * profil.
+ *
+ * `calendars.secondary` is null for a player who never turned the second
+ * calendar on (or just turned it off, which resets every calendar_teams row
+ * back to 'primary' — see 0032): every row is then written to primary
+ * regardless of its own `calendar` column, and there is nothing to delete
+ * from — the exact single-calendar behaviour of before this feature, one
+ * Google call per row.
+ *
+ * `db` is the caller's service-role client; RPC `my_future_matches` (0032)
+ * holds the same definition of "live" as backfill_calendar_jobs.
+ *
+ * Returns `written` (how many events went through) AND `sweepFailed`: when a
+ * team moves calendars the delete from the OTHER one IS the move, so a
+ * transient failure there (Google 5xx/429) — not just a failed write — must
+ * still send the caller to a backfill job, or the event stays duplicated in
+ * both calendars with nothing to notice and retry it. */
 export async function writeFutureMatches(
   // deno-lint-ignore no-explicit-any
   db: any,
   userId: string,
   accessToken: string,
-  calendarId: string,
-): Promise<number> {
+  calendars: { primary: string; secondary: string | null },
+): Promise<{ written: number; sweepFailed: boolean }> {
   const { data: prefs } = await db.from("google_calendar_links")
-    .select("reminder_minutes").eq("user_id", userId).maybeSingle();
-  const reminderMinutes = (prefs?.reminder_minutes as number[] | null) ?? [];
+    .select("reminder_minutes, reminder_minutes_secondary")
+    .eq("user_id", userId).maybeSingle();
+  const primaryReminders = (prefs?.reminder_minutes as number[] | null) ?? [];
+  const secondaryReminders =
+    (prefs?.reminder_minutes_secondary as number[] | null) ?? [];
 
   const { data: matches } = await db.rpc("my_future_matches", {
     p_user: userId,
@@ -480,21 +590,178 @@ export async function writeFutureMatches(
   const rows = (matches ?? []) as MatchRow[];
 
   let written = 0;
+  let sweepFailed = false;
   const CHUNK = 5;
   for (let i = 0; i < rows.length; i += CHUNK) {
     await Promise.all(
       rows.slice(i, i + CHUNK).map(async (row) => {
+        const to = matchTarget(row.calendar, calendars);
+        const eventId = await matchEventId(userId, row.match_id);
+
         const result = await upsertEvent(
           accessToken,
-          calendarId,
-          await matchEventId(userId, row.match_id),
-          matchEventBody(row, reminderMinutes),
+          to.calendarId,
+          eventId,
+          matchEventBody(
+            row,
+            to.secondary ? secondaryReminders : primaryReminders,
+            row.color_id,
+          ),
         );
         if (result === "ok") written++;
+
+        // Only once the event is safely in its target calendar. Deleting
+        // first (or regardless) would, on a failed write, leave the match in
+        // NEITHER calendar until the next sync. A failed sweep is reported
+        // (not just logged): the caller enqueues a backfill job so the
+        // duplicate in the OTHER calendar actually gets cleaned up instead
+        // of sitting there forever.
+        if (result === "ok" && to.otherId) {
+          const sweep = await deleteEvent(accessToken, to.otherId, eventId);
+          if (sweep !== "ok") sweepFailed = true;
+        }
       }),
     );
   }
-  return written;
+  return { written, sweepFailed };
+}
+
+/** Which calendar one match belongs in, and which one it must be swept out
+ * of. Pure, because this is the whole of the two-calendar routing: a team
+ * moved from one calendar to the other keeps its event id, so the sweep is
+ * what makes the move happen. A player without a second calendar has
+ * `secondary: null` and everything lands in the primary, with nothing to
+ * sweep — exactly what a one-calendar player had before. */
+export function matchTarget(
+  calendar: MatchRow["calendar"],
+  calendars: { primary: string; secondary: string | null },
+): { calendarId: string; otherId: string | null; secondary: boolean } {
+  const secondary = calendar === "secondary" && calendars.secondary != null;
+  return {
+    calendarId: secondary ? calendars.secondary! : calendars.primary,
+    otherId: secondary ? calendars.primary : calendars.secondary,
+    secondary,
+  };
+}
+
+/** Every calendar id a match's event could currently be sitting in. Its
+ * event id never changes when a followed team moves from one calendar to
+ * the other — only where it gets WRITTEN does (see matchTarget/
+ * writeFutureMatches) — so cleaning up a match that is no longer live at
+ * all (deleted, unfollowed, already played) must be attempted against every
+ * calendar it could have last landed in, not just today's primary. Without
+ * a second calendar there is only ever the one. */
+export function possibleMatchCalendars(
+  calendars: { primary: string; secondary: string | null },
+): string[] {
+  return calendars.secondary
+    ? [calendars.primary, calendars.secondary]
+    : [calendars.primary];
+}
+
+/** Folds the results of the same cleanup attempted against every calendar
+ * (possibleMatchCalendars) into one verdict for the caller's retry switch:
+ * any "retry" wins outright — a transient failure on EITHER calendar must
+ * not be swallowed by an "ok" from the other one, or that calendar's stale
+ * event would never be retried — otherwise the first non-"ok" wins (auth
+ * and gone are both terminal, either is worth reporting), otherwise
+ * everything came back "ok". */
+export function worstResult(results: WriteResult[]): WriteResult {
+  if (results.includes("retry")) return "retry";
+  return results.find((r) => r !== "ok") ?? "ok";
+}
+
+/** One player's choice for one followed team — calendar-manage's `teams`
+ * action payload, once validated. */
+export type TeamChoice = {
+  team: string;
+  calendar: "primary" | "secondary";
+  color_id: number | null;
+};
+
+/** Google takes only its own eleven event colours, as colorId "1".."11";
+ * anything else is a client that made something up. null means "no colour"
+ * and is checked by the caller, not here. The type gate runs BEFORE the
+ * coercion: bare `Number(raw)` alone would accept a boolean too
+ * (`Number(true) === 1`), so `color_id: true` would otherwise pass as
+ * colour 1. */
+export function isEventColorId(raw: unknown): boolean {
+  if (typeof raw !== "number" && typeof raw !== "string") return false;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 1 && n <= 11;
+}
+
+/** Normalises and validates an untrusted `teams` payload before it reaches
+ * set_calendar_teams_for: the 0032 RPC only checks the item COUNT and that
+ * the caller has a links row — per-item shape is the edge function's job,
+ * same as every other action's client input. Trims each team name and
+ * rejects a blank or implausibly long one (mirrors the 80-char limit the
+ * pre-0032 RPC enforced itself, which the table's own CHECK constraints do
+ * not), an unknown `calendar`, or a `color_id` outside Google's 1-11 (both
+ * a missing key and an explicit `null` mean "no colour"). De-duplicates by
+ * team name — first occurrence wins, as if a repeat were just re-ticking
+ * the same checkbox — so a client bug can never trip the table's
+ * (user_id, team) primary key. Returns `null` to reject the WHOLE payload:
+ * not an array, more than 20 entries, or one entry that cannot be made
+ * valid. */
+export function validateTeamChoices(input: unknown): TeamChoice[] | null {
+  if (!Array.isArray(input) || input.length > 20) return null;
+  const seen = new Set<string>();
+  const out: TeamChoice[] = [];
+  for (const item of input) {
+    if (typeof item !== "object" || item === null) return null;
+    const raw = item as Record<string, unknown>;
+
+    const team = typeof raw.team === "string" ? raw.team.trim() : "";
+    if (!team || team.length > 80) return null;
+
+    if (
+      raw.calendar != null && raw.calendar !== "primary" &&
+      raw.calendar !== "secondary"
+    ) {
+      return null;
+    }
+    const calendar = raw.calendar === "secondary" ? "secondary" : "primary";
+
+    let color_id: number | null = null;
+    if (raw.color_id != null) {
+      if (!isEventColorId(raw.color_id)) return null;
+      color_id = Number(raw.color_id);
+    }
+
+    if (seen.has(team)) continue; // first occurrence wins
+    seen.add(team);
+    out.push({ team, calendar, color_id });
+  }
+  return out;
+}
+
+/** Back-compat for the shipped 1.2.1 app (calendar-manage's OLD `match_teams`
+ * action, `Api.setCalendarMatchTeams` there — a bare `string[]`, no calendar
+ * or colour: that screen cannot express either). Maps that flat list onto
+ * the new per-team shape `teams` needs: a name still present keeps whatever
+ * `current` (the player's existing calendar_teams rows) already has for it —
+ * an old app must never silently reset a calendar/colour choice made in a
+ * newer one — a name that is new to `current` defaults to primary/no colour,
+ * same as ticking a team for the first time in the new screen; a name
+ * dropped from the list just does not appear in the result, same "whole
+ * list, not a delta" contract set_calendar_teams_for already has. Trims and
+ * de-dupes (first occurrence wins) like validateTeamChoices, since the old
+ * client never did either. */
+export function mapLegacyMatchTeams(
+  names: string[],
+  current: TeamChoice[],
+): TeamChoice[] {
+  const byName = new Map(current.map((t) => [t.team, t]));
+  const seen = new Set<string>();
+  const out: TeamChoice[] = [];
+  for (const raw of names) {
+    const team = raw.trim();
+    if (!team || seen.has(team)) continue;
+    seen.add(team);
+    out.push(byName.get(team) ?? { team, calendar: "primary", color_id: null });
+  }
+  return out;
 }
 
 /** Deletes the event. Already gone (404/410) is done — deletion is

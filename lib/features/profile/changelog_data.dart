@@ -43,6 +43,18 @@ String changelogHeading(Release r, {required bool web}) {
 }
 
 const appChangelog = <Release>[
+  Release(null, '7. 9. 2026', [
+    'Zápasy v kalendáři mají barvu: u každého týmu si vybereš jednu z barev, '
+        'které Google pro události nabízí. Tréninky mají svou vlastní.',
+    'Kdo chce, zapne si v profilu druhý kalendář „Rezervátor 2" a u každého '
+        'týmu řekne, do kterého kalendáře jeho zápasy patří — třeba svůj tým '
+        'do hlavního a zbytek oddílu do druhého, každý s vlastními '
+        'připomínkami.',
+    'Vlastní barva rezervací: kromě palety si jde odstín vybrat z kolečka.',
+    'Z palety zmizely tři barvy, které vedle sebe nešly rozeznat (oranžová, '
+        'limetková, indigo). Komu některá z nich zůstala nastavená, tomu se '
+        'nic nezměnilo — barvu má dál, jen se z ní stala vlastní.',
+  ]),
   Release('1.2.1', '6. 9. 2026', [
     'Kioskový účet se spravuje v Správa → Kiosk, ne mezi hráči — a je u něj '
         'vidět přihlašovací jméno.',
