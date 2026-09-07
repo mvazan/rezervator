@@ -47,7 +47,7 @@ and what cascades — and is updated with every migration.
 | Table | Purpose / key columns | RLS (all `tenant_id = current_tenant_id()` unless noted) |
 |---|---|---|
 | `tenants` | `name` unique, `founder_email` (only the founder can become the first admin), `status`, `approved_at` | select for `authenticated` `using (true)` **but column grants expose only `id, name, status`** — `founder_email` never leaves the server. Writes: RPC only. |
-| `profiles` | `id` (= `auth.uid()` for real accounts; no FK to `auth.users` since 0022), `display_name`, `nick` ≤ 14, `email` ('' for placeholders), `role`, `status`, `club_id → clubs`, `fcm_token`, `superadmin`, `home_tenant_id`, `approved_by/at`, `placeholder` (hand-made row: player ∧ approved ∧ not superadmin), `own_color` (0024: the colour the player picked for their own reservations in their own view, −1 = club colour), `followed_teams` (≤ 20 names, the Moje tréninky list — separate from the calendar's `calendar_teams`), `default_view` (`calendar` | `trainings`, what the app opens at launch); both own-row updatable (0029) | select: own row, or admin of the same tenant. update: own row, columns `display_name`, `fcm_token`, `own_color`, `followed_teams`, `default_view` only. insert/delete: RPC only. |
+| `profiles` | `id` (= `auth.uid()` for real accounts; no FK to `auth.users` since 0022), `display_name`, `nick` ≤ 14, `email` ('' for placeholders), `role`, `status`, `club_id → clubs`, `fcm_token`, `superadmin`, `home_tenant_id`, `approved_by/at`, `placeholder` (hand-made row: player ∧ approved ∧ not superadmin), `own_color` (0024: the colour the player picked for their own reservations in their own view, −1 = club colour), `followed_teams` (≤ 20 names, the Můj přehled list — separate from the calendar's `calendar_teams`), `default_view` (`calendar` | `trainings`, what the app opens at launch); both own-row updatable (0029) | select: own row, or admin of the same tenant. update: own row, columns `display_name`, `fcm_token`, `own_color`, `followed_teams`, `default_view` only. insert/delete: RPC only. |
 | `schedule_settings` | PK `tenant_id`; `lane_count` 1–12, `training_weekdays smallint[]` (ISO 1–7), `booking_horizon_days` 1–90, `max_active_reservations` 1–50, `kiosk_dark`, `kiosk_fit_day` | select approved/kiosk; update admin. |
 | `time_blocks` | `starts_at`, `ends_at`, `position`, `active`. `position = -1` marks a day-special block: inactive, reachable only through `day_overrides.block_ids` | select approved/kiosk; insert/update/delete admin. FK from `reservations` is RESTRICT — only never-used blocks can be deleted. |
 | `day_overrides` | PK (`tenant_id`, `date`); `closed`, `reason`, `block_ids uuid[]` (`null` = the default active set) | select approved/kiosk; write admin. Normally written through `set_day_override`. |
@@ -63,7 +63,7 @@ Every `color` column above is one `integer` (0030): the negative values are the 
 | `google_calendar_links` | One row per *person* (not per tenant; `user_id → profiles`, cascade): `status` pending \| linked \| broken \| unlinked, `google_email`, `last_error`, `reminder_minutes int[]` (Calendar API shape — ≤ 5 entries, each 0–40320, CHECK-enforced, stored sorted descending), `created_at`, `updated_at`, plus (0032) `secondary_enabled` (the player turned on the second Google calendar "Rezervátor 2"), `reminder_minutes_secondary` (same shape/bounds, for events written there), `training_color_id` (Google event `colorId` 1–11 for trainings, which always go to the primary calendar; `null` = no colour). `match_teams` (0027) is gone (0033) — see `calendar_teams` for what replaced it. Holds no secret: it is in the Realtime publication and the profile card streams it. | select own row only (`user_id = auth.uid()`); `authenticated` has SELECT and nothing else — every write is the server's (`service_role`). |
 | `google_calendar_tokens` | `user_id → profiles` (cascade), `refresh_token`, `google_calendar_id` (the app-created "Rezervátor" calendar), `google_calendar_id_secondary` (0032: the second one, "Rezervátor 2"; `null` until `secondary_enabled`), `updated_at`. A separate table on purpose: a streamed table must never carry the token. | **server-only**: RLS on, zero policies; `service_role` only. |
 | `calendar_teams` | (0032) One row per player **+** followed team — replaces `google_calendar_links.match_teams`, because a team now needs to say more than its name: `user_id → profiles` (cascade), `team` (a `priority_slots.home_team`/`away_team` string), `calendar` (`primary` \| `secondary`, default `primary` — which of the player's two Google calendars this team's matches go to). PK (`user_id`, `team`). In the Realtime publication (0035) — the profile card streams it. Colour (`color_id`) lived here until 0036 moved it to `team_colors` below, independent of this table. | select own rows only (`user_id = auth.uid()`); `authenticated` has SELECT and nothing else (0035) — every write is the server's, through `calendar-manage`/`set_calendar_teams_for`, which also keeps `google_calendar_links.match_teams` mirrored for the 1.2.1 app. |
-| `team_colors` | (0036) One row per player **+** team the player has coloured — `user_id → profiles` (cascade), `team`, `color_id` (Google event `colorId` 1–11, `not null` — no row at all means no colour). PK (`user_id`, `team`). Independent of **both** team lists (`profiles.followed_teams` and `calendar_teams`) and of whether a calendar is even linked: the one colour shown for a team in Můj přehled and in its Google Calendar event alike. In the Realtime publication. | select **and write** own rows only (`user_id = auth.uid()`), full grants — a plain preference the app writes directly, like `profiles.own_color`, not routed through an edge function. `set_team_colors_for` (RPC, server-only) exists alongside for `calendar-manage`, which needs to save a colour and immediately repaint the affected future Google Calendar events in one request. |
+| `team_colors` | (0036) One row per player **+** team the player has coloured — `user_id → profiles` (cascade), `team`, `color_id` (Google event `colorId` 1–11, `not null` — no row at all means no colour). PK (`user_id`, `team`). Independent of **both** team lists (`profiles.followed_teams` and `calendar_teams`) and of whether a calendar is even linked: the one colour shown for a team in Můj přehled and in its Google Calendar event alike. In the Realtime publication. | select own rows only (`user_id = auth.uid()`); `authenticated` has SELECT and nothing else (0037) — every write is the server's, through `calendar-manage`/`set_team_colors_for`, which saves a colour and immediately repaints the affected future Google Calendar events in the same request. |
 | `oauth_nonces` | The OAuth `state`: `nonce` (48 hex chars from `gen_random_bytes(24)`), `user_id → profiles` (cascade), `created_at`, `consumed_at`. One-shot with a 10-minute TTL — the callback function runs without a JWT, so this is what binds Google's redirect to a signed-in player. | **server-only** like the tokens. |
 
 View `players` (owned by postgres → bypasses `profiles` RLS on purpose):
@@ -331,27 +331,34 @@ carries only routing (which calendar), `team_colors` only preference
   row means the match is gone/unfollowed/played, deleted from every calendar
   it could be sitting in (`possibleMatchCalendars`). A `reservation_id`
   payload always targets the primary calendar with `training_color_id`.
-- `calendar-manage` actions (still pre-0036 shape here — Task 2 moves
-  colour off this action onto the new one below): `teams`
-  (`[{team, calendar, color_id}]`, validated by `validateTeamChoices` —
-  trims, rejects a blank/too-long team name or an out-of-range colour,
-  de-duplicates by team name — before `set_calendar_teams_for`; the
-  previous state it returns is diffed to delete the events of teams dropped
-  entirely, then `writeFutureMatches` settles the rest). Since
-  `set_calendar_teams_for` now silently ignores a `color_id` key
-  (`jsonb_to_recordset` drops columns it was not asked for), this action
-  still runs, but no longer actually stores a colour anywhere — the new
-  `team_colors` action (Task 2) is what will; `secondary` (`{enabled}` — ON creates "Rezervátor 2"
-  and rewrites future matches into it, OFF deletes it in Google, which takes
-  its events with it, resets any `calendar_teams` rows pointed at
-  `'secondary'` back to `'primary'`, and rewrites future matches back into
-  the primary); `reminders` (now takes `calendar`, `'primary'` \|
-  `'secondary'`, and rewrites both trainings and matches so every event
-  stays correct regardless of which reminder list just changed); `match_teams`
-  (0035 — the shipped 1.2.1 app's action, a bare team-name `string[]`: maps
-  it onto `teams` via `mapLegacyMatchTeams`, keeping each surviving team's
-  `calendar`/`color_id` and defaulting a newly added one to primary/no
-  colour, then runs the same `setTeams` path).
+- `calendar-manage` actions: `teams` (`Api.setCalendarTeams` →
+  `[{team, calendar}]`, validated by `validateTeamChoices` — trims, rejects
+  a blank/too-long team name or an unknown calendar, de-duplicates by team
+  name (first occurrence wins); a `color_id` key is not read at all any
+  more, however malformed — colour is `team_colors`'s contract now — before
+  `set_calendar_teams_for`; the previous state it returns is diffed to
+  delete the events of teams dropped entirely, then `writeFutureMatches`
+  settles the rest); `team_colors` (0036, `Api.setTeamColors` →
+  `[{team, color_id}]`, validated by `validateTeamColors` — same
+  trim/blank/too-long/de-dupe discipline as `validateTeamChoices`, plus a
+  `color_id` outside Google's 1–11 (a missing key and an explicit `null`
+  both mean "clear this team's colour"); ≤ 40 items — before
+  `set_team_colors_for`. Unlike `teams` this never drops or adds a followed
+  team or changes any routing: it is a PARTIAL upsert of only the named
+  teams' colours, so there is nothing to delete, only `writeFutureMatches`
+  to rewrite every future match right away); `secondary` (`{enabled}` — ON
+  creates "Rezervátor 2" and rewrites future matches into it, OFF deletes
+  it in Google, which takes its events with it, resets any `calendar_teams`
+  rows pointed at `'secondary'` back to `'primary'`, and rewrites future
+  matches back into the primary); `reminders` (takes `calendar`,
+  `'primary'` \| `'secondary'`, and rewrites both trainings and matches so
+  every event stays correct regardless of which reminder list just
+  changed); `match_teams` (0035 — the shipped 1.2.1 app's action, a bare
+  team-name `string[]`, no colour: maps it onto `teams` via
+  `mapLegacyMatchTeams`, keeping each surviving team's `calendar` and
+  defaulting a newly added one to primary, then runs the same `setTeams`
+  path; colour is untouched either way — `team_colors` is a table this
+  legacy path never reads or writes).
 
 ## Edge functions
 
