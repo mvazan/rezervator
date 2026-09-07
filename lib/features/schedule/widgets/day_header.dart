@@ -89,36 +89,43 @@ class DayHeader extends StatelessWidget {
     );
   }
 
-  Widget _dateBadge(ColorScheme scheme) => Container(
-        width: 34,
-        height: 34,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: scheme.primaryContainer,
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              weekdaysShort[date.weekday - 1],
-              style: TextStyle(
-                fontSize: 9,
-                fontWeight: FontWeight.w600,
-                color: scheme.onPrimaryContainer,
-                height: 1.1,
+  Widget _dateBadge(ColorScheme scheme) => MediaQuery.withNoTextScaling(
+        // Fixed chrome, not scaling body text: a 34×34 badge around a 9pt +
+        // 13pt Column has no slack left once the system scale and the
+        // in-app text-size choice compose (e.g. system "Large" 1.15 ×
+        // "Největší" 1.3 already overflows it) — see
+        // test/features/schedule/widgets/day_header_test.dart.
+        child: Container(
+          width: 34,
+          height: 34,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: scheme.primaryContainer,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                weekdaysShort[date.weekday - 1],
+                style: TextStyle(
+                  fontSize: 9,
+                  fontWeight: FontWeight.w600,
+                  color: scheme.onPrimaryContainer,
+                  height: 1.1,
+                ),
               ),
-            ),
-            Text(
-              '${date.day}',
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w800,
-                color: scheme.onPrimaryContainer,
-                height: 1.1,
+              Text(
+                '${date.day}',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                  color: scheme.onPrimaryContainer,
+                  height: 1.1,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       );
 
