@@ -317,6 +317,30 @@ final myCalendarTeamsProvider = StreamProvider<List<CalendarTeam>>((ref) {
         ..sort((a, b) => compareCzech(a.team, b.team)));
 });
 
+/// The caller's own team colours (`team_colors`, 0036) — the single colour
+/// shown for a team in Můj přehled's trophy and in its Google Calendar
+/// event alike, independent of both team lists (`followed_teams`,
+/// `calendar_teams`). No row for a team means no colour. RLS lets the owner
+/// read (and write) these rows directly, same reasoning as
+/// [myCalendarTeamsProvider]'s own doc comment — but a UI change still goes
+/// through [Api.setTeamColors] (calendar-manage's `team_colors`), not a
+/// direct table write, so it repaints Google's future events right away.
+final myTeamColorsProvider = StreamProvider<Map<String, int>>((ref) {
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return Stream.value(const {});
+  return cachedRows(
+          uid,
+          'team_colors',
+          () => _db
+              .from('team_colors')
+              .stream(primaryKey: ['user_id', 'team'])
+              .eq('user_id', uid))
+      .map((rows) => {
+            for (final row in rows)
+              row['team'] as String: row['color_id'] as int,
+          });
+});
+
 // ---------------------------------------------------------------------------
 // Actions (writes)
 // ---------------------------------------------------------------------------
@@ -855,16 +879,37 @@ class Api {
         },
       );
 
-  /// Stores which teams' matches go to which calendar, with which colour
-  /// (`calendar_teams`, 0032), and settles the events right away (dropped
-  /// teams' matches deleted, the rest rewritten/recoloured/recalendared).
-  /// The card redraws from [myCalendarTeamsProvider].
+  /// Stores which teams' matches go to which calendar (`calendar_teams`,
+  /// 0032) and settles the events right away (dropped teams' matches
+  /// deleted, the rest rewritten/recalendared) — each still with whatever
+  /// colour [myTeamColorsProvider] currently holds for it (0036 moved
+  /// colour off this table onto its own; [setTeamColors] is the only way to
+  /// change it now). The card redraws from [myCalendarTeamsProvider].
   static Future<void> setCalendarTeams(List<CalendarTeam> teams) =>
       _db.functions.invoke(
         'calendar-manage',
         body: {
           'action': 'teams',
           'teams': [for (final t in teams) t.toJson()],
+        },
+      );
+
+  /// Stores (or clears, for a null entry) the shared colour of one or more
+  /// teams (`team_colors`, 0036) — the SAME colour Můj přehled's trophy and
+  /// the Google Calendar event both show — and repaints every future match
+  /// right away, same reasoning as [setTrainingColor]. A PARTIAL upsert: a
+  /// team missing from [colors] simply keeps whatever colour it already
+  /// had. Never touches which teams are followed or how they're routed to
+  /// a calendar — [setFollowedTeams] and [setCalendarTeams] own those.
+  static Future<void> setTeamColors(Map<String, int?> colors) =>
+      _db.functions.invoke(
+        'calendar-manage',
+        body: {
+          'action': 'team_colors',
+          'team_colors': [
+            for (final e in colors.entries)
+              {'team': e.key, 'color_id': e.value},
+          ],
         },
       );
 
@@ -1064,6 +1109,7 @@ void resetTenantScopedProviders(WidgetRef ref) {
   ref.invalidate(myActiveReservationsProvider);
   ref.invalidate(myCalendarLinkProvider);
   ref.invalidate(myCalendarTeamsProvider);
+  ref.invalidate(myTeamColorsProvider);
   ref.invalidate(playersProvider);
   ref.invalidate(tenantsProvider);
   ref.invalidate(myTenantStatusProvider);

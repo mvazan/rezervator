@@ -7,6 +7,7 @@ import 'package:rezervator/core/ui.dart' show dayFull;
 import 'package:rezervator/data/clock.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
+import 'package:rezervator/domain/palette.dart';
 import 'package:rezervator/features/schedule/my_trainings_screen.dart';
 
 void main() {
@@ -58,6 +59,7 @@ void main() {
     Profile profile = me,
     List<Reservation> reservations = const [],
     List<PrioritySlot> slots = const [],
+    Map<String, int> teamColors = const <String, int>{},
     Stream<List<Reservation>>? reservationsStream,
     Future<void> Function(String id)? cancel,
     VoidCallback? onOpenCalendar,
@@ -78,6 +80,7 @@ void main() {
         prioritySlotsLoadingProvider.overrideWithValue(slotsLoading),
         prioritySlotsFailedProvider.overrideWithValue(slotsFailed),
         nowProvider.overrideWith((ref) => Stream.value(nowOverride ?? now)),
+        myTeamColorsProvider.overrideWith((ref) => Stream.value(teamColors)),
       ],
       child: MaterialApp(
         home: Scaffold(
@@ -237,5 +240,88 @@ void main() {
 
     expect(find.text('SKK Veverky Brno A – KK MS Brno D'), findsNothing);
     expect(find.textContaining('Moje týmy'), findsOneWidget);
+  });
+
+  // ---------------------------------------------------------------------
+  // Match trophy colour (0036): the SAME registry the profile's team
+  // pickers edit (myTeamColorsProvider).
+  // ---------------------------------------------------------------------
+
+  group('match trophy colour (0036)', () {
+    Color colorNamed(String name) =>
+        googleEventColors.firstWhere((c) => c.$2 == name).$3;
+
+    // match's default teams: home 'SKK Veverky Brno A', away 'KK MS Brno D'.
+    final awayMatch = PrioritySlot(
+      id: 'm2',
+      date: today.addDays(3),
+      startsAt: const HourMinute(18, 0),
+      endsAt: const HourMinute(21, 0),
+      type: PrioritySlot.fallbackMatchType,
+      homeTeam: 'KK Blansko B',
+      awayTeam: 'SKK Veverky Brno A',
+      isAway: true,
+    );
+
+    testWidgets('neither team coloured keeps today\'s plain trophy', (
+      tester,
+    ) async {
+      await tester.pumpWidget(app(slots: [match]));
+      await tester.pumpAndSettle();
+
+      final icon =
+          tester.widget<Icon>(find.byIcon(Icons.emoji_events_outlined));
+      expect(icon.color, isNull);
+    });
+
+    testWidgets('the followed HOME team\'s colour tints the trophy', (
+      tester,
+    ) async {
+      await tester.pumpWidget(app(
+        slots: [match],
+        teamColors: const {'SKK Veverky Brno A': 3},
+      ));
+      await tester.pumpAndSettle();
+
+      final icon =
+          tester.widget<Icon>(find.byIcon(Icons.emoji_events_outlined));
+      expect(icon.color, colorNamed('Švestková'));
+    });
+
+    testWidgets('the followed AWAY team\'s colour tints the trophy too', (
+      tester,
+    ) async {
+      await tester.pumpWidget(app(
+        slots: [awayMatch],
+        teamColors: const {'SKK Veverky Brno A': 6},
+      ));
+      await tester.pumpAndSettle();
+
+      final icon =
+          tester.widget<Icon>(find.byIcon(Icons.emoji_events_outlined));
+      expect(icon.color, colorNamed('Mandarinková'));
+    });
+
+    testWidgets('a derby — both teams coloured — tints with the HOME '
+        'team\'s colour, same tie-break as the Google event', (tester) async {
+      const bothFollower = Profile(
+        id: 'me',
+        displayName: 'Já Hráč',
+        email: 'me@example.com',
+        role: Role.player,
+        status: ProfileStatus.approved,
+        followedTeams: ['SKK Veverky Brno A', 'KK MS Brno D'],
+      );
+      await tester.pumpWidget(app(
+        profile: bothFollower,
+        slots: [match], // home 'SKK Veverky Brno A', away 'KK MS Brno D'
+        teamColors: const {'SKK Veverky Brno A': 4, 'KK MS Brno D': 9},
+      ));
+      await tester.pumpAndSettle();
+
+      final icon =
+          tester.widget<Icon>(find.byIcon(Icons.emoji_events_outlined));
+      expect(icon.color, colorNamed('Lososová'));
+    });
   });
 }

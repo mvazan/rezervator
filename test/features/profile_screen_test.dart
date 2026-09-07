@@ -21,6 +21,8 @@ Future<void> noReminders(
 }) async => throw StateError('unexpected reminders');
 Future<void> noMatchTeams(List<CalendarTeam> _) async =>
     throw StateError('unexpected match teams');
+Future<void> noTeamColors(Map<String, int?> _) async =>
+    throw StateError('unexpected team colors');
 Future<void> noSecondaryCalendar(bool _) async =>
     throw StateError('unexpected secondary calendar');
 Future<void> noTrainingColor(int? _) async =>
@@ -29,9 +31,8 @@ Future<void> noTrainingColor(int? _) async =>
 /// CalendarTeam has no == override (lib/domain/models.dart) — two separate
 /// instances with the same fields are NOT equal. Tests compare its fields
 /// structurally instead of relying on ==.
-(String, CalendarSlot, int?) teamTuple(CalendarTeam t) =>
-    (t.team, t.calendar, t.colorId);
-List<(String, CalendarSlot, int?)> teamTuples(List<CalendarTeam> teams) =>
+(String, CalendarSlot) teamTuple(CalendarTeam t) => (t.team, t.calendar);
+List<(String, CalendarSlot)> teamTuples(List<CalendarTeam> teams) =>
     teams.map(teamTuple).toList();
 
 /// The alley's schedule as the calendar card sees it: a home match of
@@ -70,8 +71,10 @@ void main() {
     bool calendarAvailable = false,
     CalendarLink link = CalendarLink.none,
     List<CalendarTeam> teams = const [],
+    Map<String, int> teamColors = const <String, int>{},
     Future<void> Function(int color)? setOwnColor,
     Future<void> Function(List<String> teams)? setFollowedTeams,
+    Future<void> Function(Map<String, int?> colors)? setTeamColors,
     Future<void> Function(HomeView view)? setDefaultView,
     List<PrioritySlot> matches = const [],
   }) {
@@ -84,6 +87,7 @@ void main() {
         calendarAvailableProvider.overrideWithValue(calendarAvailable),
         myCalendarLinkProvider.overrideWith((ref) => Stream.value(link)),
         myCalendarTeamsProvider.overrideWith((ref) => Stream.value(teams)),
+        myTeamColorsProvider.overrideWith((ref) => Stream.value(teamColors)),
         prioritySlotsProvider.overrideWithValue(matches),
       ],
       child: MaterialApp(
@@ -92,6 +96,8 @@ void main() {
               setOwnColor ?? (_) async => throw StateError('unexpected'),
           setFollowedTeams:
               setFollowedTeams ?? (_) async => throw StateError('unexpected'),
+          setTeamColors:
+              setTeamColors ?? (_) async => throw StateError('unexpected'),
           setDefaultView:
               setDefaultView ?? (_) async => throw StateError('unexpected'),
         ),
@@ -605,10 +611,13 @@ void main() {
           noReminders,
       Future<void> Function(List<CalendarTeam> teams) setMatchTeams =
           noMatchTeams,
+      Future<void> Function(Map<String, int?> colors) setTeamColors =
+          noTeamColors,
       Future<void> Function(bool enabled) setSecondaryCalendar =
           noSecondaryCalendar,
       Future<void> Function(int? colorId) setTrainingColor = noTrainingColor,
       Stream<List<CalendarTeam>>? teams,
+      Map<String, int> colors = const <String, int>{},
       List<PrioritySlot> matches = const [],
     }) {
       return ProviderScope(
@@ -618,6 +627,7 @@ void main() {
           myCalendarTeamsProvider.overrideWith(
             (ref) => teams ?? Stream.value(const <CalendarTeam>[]),
           ),
+          myTeamColorsProvider.overrideWith((ref) => Stream.value(colors)),
           prioritySlotsProvider.overrideWithValue(matches),
         ],
         child: MaterialApp(
@@ -628,6 +638,7 @@ void main() {
               disconnect: disconnect,
               setReminders: setReminders,
               setMatchTeams: setMatchTeams,
+              setTeamColors: setTeamColors,
               setSecondaryCalendar: setSecondaryCalendar,
               setTrainingColor: setTrainingColor,
             ),
@@ -671,7 +682,48 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(saved.map(teamTuples).toList(), [
-        [('SKK Veverky Brno A', CalendarSlot.primary, null)],
+        [('SKK Veverky Brno A', CalendarSlot.primary)],
+      ]);
+    });
+
+    testWidgets('Zápasy v kalendáři\'s colour dot saves through '
+        'setTeamColors, never setMatchTeams (row-level colour behaviour is '
+        'covered in calendar_teams_sheet_test.dart)', (tester) async {
+      final savedColors = <Map<String, int?>>[];
+      await tester.pumpWidget(
+        card(
+          Stream.value(const CalendarLink(status: CalendarLinkStatus.linked)),
+          matches: schedule,
+          teams: Stream.value(const [CalendarTeam(team: 'SKK Veverky Brno A')]),
+          setMatchTeams: (_) async => fail('unexpected team save'),
+          setTeamColors: (c) async => savedColors.add(c),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Zápasy v kalendáři…'));
+      await tester.pumpAndSettle();
+      // Not a bare find.byType(EventColorDot): the card's own "Barva
+      // tréninků" row (underneath the sheet) has one too.
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(const ValueKey('SKK Veverky Brno A')),
+          matching: find.byType(EventColorDot),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.descendant(
+          of: find.byType(EventColorPicker),
+          matching: find.byTooltip('Rajčatová'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      Navigator.of(tester.element(find.text('Zápasy v kalendáři'))).pop();
+      await tester.pumpAndSettle();
+
+      expect(savedColors, [
+        {'SKK Veverky Brno A': 11},
       ]);
     });
 
@@ -1173,6 +1225,14 @@ void main() {
       awayTeam: 'KK MS Brno D',
     );
 
+    // The sheet's rows are plain ListTiles (leading Checkbox, trailing
+    // colour dot once ticked) keyed by team name — see team_picker_sheet.dart.
+    Finder teamRow(String team) => find.byKey(ValueKey(team));
+    Finder teamCheckbox(String team) =>
+        find.descendant(of: teamRow(team), matching: find.byType(Checkbox));
+    Finder teamColorDot(String team) => find.descendant(
+        of: teamRow(team), matching: find.byType(EventColorDot));
+
     testWidgets('the card sums up the followed teams and the sheet ticks one', (
       tester,
     ) async {
@@ -1191,13 +1251,11 @@ void main() {
 
       await tester.tap(find.text('Vybrat týmy…'));
       await tester.pumpAndSettle();
-      await tester.tap(
-        find.widgetWithText(CheckboxListTile, 'SKK Veverky Brno A'),
-      );
+      await tester.tap(teamCheckbox('SKK Veverky Brno A'));
       await tester.pumpAndSettle();
       // Edits are local; the list goes out once, when the sheet closes.
       expect(saved, isEmpty);
-      Navigator.of(tester.element(find.byType(CheckboxListTile).first)).pop();
+      Navigator.of(tester.element(find.byType(Checkbox).first)).pop();
       await tester.pumpAndSettle();
 
       expect(saved, [
@@ -1233,11 +1291,9 @@ void main() {
         expect(find.text('SKK Veverky Brno A'), findsOneWidget);
         await tester.tap(find.text('Vybrat týmy…'));
         await tester.pumpAndSettle();
-        await tester.tap(
-          find.widgetWithText(CheckboxListTile, 'SKK Veverky Brno A'),
-        );
+        await tester.tap(teamCheckbox('SKK Veverky Brno A'));
         await tester.pumpAndSettle();
-        Navigator.of(tester.element(find.byType(CheckboxListTile).first)).pop();
+        Navigator.of(tester.element(find.byType(Checkbox).first)).pop();
         await tester.pumpAndSettle();
         expect(saved, [<String>[]]);
       },
@@ -1276,26 +1332,17 @@ void main() {
 
       await tester.tap(find.text('Vybrat týmy…'));
       await tester.pumpAndSettle();
-      await tester.tap(
-        find.widgetWithText(CheckboxListTile, 'KS Devítka Brno B'),
-      );
+      await tester.tap(teamCheckbox('KS Devítka Brno B'));
       await tester.pump();
-      await tester.tap(
-        find.widgetWithText(CheckboxListTile, 'SKK Veverky Brno A'),
-      );
+      await tester.tap(teamCheckbox('SKK Veverky Brno A'));
       await tester.pumpAndSettle();
 
       // Both boxes tick at once and nothing has gone out yet.
-      expect(
-        tester
-            .widget<CheckboxListTile>(
-                find.widgetWithText(CheckboxListTile, 'SKK Veverky Brno A'))
-            .value,
-        isTrue,
-      );
+      expect(tester.widget<Checkbox>(teamCheckbox('SKK Veverky Brno A')).value,
+          isTrue);
       expect(saved, isEmpty);
 
-      Navigator.of(tester.element(find.byType(CheckboxListTile).first)).pop();
+      Navigator.of(tester.element(find.byType(Checkbox).first)).pop();
       await tester.pumpAndSettle();
       expect(saved.length, 1, reason: 'one call carries the whole list');
       expect(saved.single, ['KS Devítka Brno B', 'SKK Veverky Brno A']);
@@ -1318,11 +1365,9 @@ void main() {
 
       await tester.tap(find.text('Vybrat týmy…'));
       await tester.pumpAndSettle();
-      await tester.tap(
-        find.widgetWithText(CheckboxListTile, 'SKK Veverky Brno A'),
-      );
+      await tester.tap(teamCheckbox('SKK Veverky Brno A'));
       await tester.pumpAndSettle();
-      Navigator.of(tester.element(find.byType(CheckboxListTile).first)).pop();
+      Navigator.of(tester.element(find.byType(Checkbox).first)).pop();
       await tester.pumpAndSettle();
 
       // The sheet is gone when the answer comes back, so the snack belongs
@@ -1331,6 +1376,201 @@ void main() {
       expect(find.text('Na tohle nemáš oprávnění.'), findsOneWidget);
       expect(find.textContaining('Nepovedlo se'), findsNothing);
       expect(find.text('Žádný tým'), findsOneWidget);
+    });
+
+    // -----------------------------------------------------------------------
+    // Team colour (0036): the SAME registry showCalendarTeamsSheet's dot
+    // edits, and Můj přehled's trophy reads.
+    // -----------------------------------------------------------------------
+
+    testWidgets('an unticked team shows no colour dot', (tester) async {
+      tester.view.physicalSize = const Size(800, 1800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(app(me, matches: [match]));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Vybrat týmy…'));
+      await tester.pumpAndSettle();
+
+      expect(teamCheckbox('SKK Veverky Brno A'), findsOneWidget);
+      expect(teamColorDot('SKK Veverky Brno A'), findsNothing);
+    });
+
+    testWidgets('a ticked team shows its shared colour straight away, from '
+        'myTeamColorsProvider — the same registry the calendar sheet uses', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(800, 1800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      const follower = Profile(
+        id: 'me',
+        displayName: 'Já Hráč',
+        email: 'me@example.com',
+        role: Role.player,
+        status: ProfileStatus.approved,
+        followedTeams: ['SKK Veverky Brno A'],
+      );
+      await tester.pumpWidget(app(
+        follower,
+        matches: [match],
+        teamColors: const {'SKK Veverky Brno A': 5},
+      ));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Vybrat týmy…'));
+      await tester.pumpAndSettle();
+
+      expect(
+        tester.widget<EventColorDot>(teamColorDot('SKK Veverky Brno A')).colorId,
+        5,
+      );
+    });
+
+    testWidgets('ticking a team and picking its colour saves BOTH — the '
+        'tick through setFollowedTeams, the colour through setTeamColors — '
+        'once, when the sheet closes', (tester) async {
+      tester.view.physicalSize = const Size(800, 1800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final savedTeams = <List<String>>[];
+      final savedColors = <Map<String, int?>>[];
+      await tester.pumpWidget(app(
+        me,
+        matches: [match],
+        setFollowedTeams: (t) async => savedTeams.add(t),
+        setTeamColors: (c) async => savedColors.add(c),
+      ));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Vybrat týmy…'));
+      await tester.pumpAndSettle();
+      await tester.tap(teamCheckbox('SKK Veverky Brno A'));
+      await tester.pumpAndSettle();
+      await tester.tap(teamColorDot('SKK Veverky Brno A'));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.descendant(
+          of: find.byType(EventColorPicker),
+          matching: find.byTooltip('Šalvějová'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(savedTeams, isEmpty);
+      expect(savedColors, isEmpty);
+
+      Navigator.of(tester.element(find.byType(Checkbox).first)).pop();
+      await tester.pumpAndSettle();
+
+      expect(savedTeams, [
+        ['SKK Veverky Brno A'],
+      ]);
+      expect(savedColors, [
+        {'SKK Veverky Brno A': 2},
+      ]);
+    });
+
+    testWidgets('picking a colour on an already-followed team saves only '
+        'the colour — setFollowedTeams is never called when the team list '
+        'itself never changed', (tester) async {
+      tester.view.physicalSize = const Size(800, 1800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      const follower = Profile(
+        id: 'me',
+        displayName: 'Já Hráč',
+        email: 'me@example.com',
+        role: Role.player,
+        status: ProfileStatus.approved,
+        followedTeams: ['SKK Veverky Brno A'],
+      );
+      final savedColors = <Map<String, int?>>[];
+      await tester.pumpWidget(app(
+        follower,
+        matches: [match],
+        setFollowedTeams: (_) async => fail('unexpected team save'),
+        setTeamColors: (c) async => savedColors.add(c),
+      ));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Vybrat týmy…'));
+      await tester.pumpAndSettle();
+      await tester.tap(teamColorDot('SKK Veverky Brno A'));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.descendant(
+          of: find.byType(EventColorPicker),
+          matching: find.byTooltip('Bazalková'),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      Navigator.of(tester.element(find.byType(Checkbox).first)).pop();
+      await tester.pumpAndSettle();
+
+      expect(savedColors, [
+        {'SKK Veverky Brno A': 10},
+      ]);
+    });
+
+    testWidgets('picking a colour then picking the original one back sends '
+        'nothing, like ticking a team back off does for the team list', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(800, 1800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      const follower = Profile(
+        id: 'me',
+        displayName: 'Já Hráč',
+        email: 'me@example.com',
+        role: Role.player,
+        status: ProfileStatus.approved,
+        followedTeams: ['SKK Veverky Brno A'],
+      );
+      await tester.pumpWidget(app(
+        follower,
+        matches: [match],
+        teamColors: const {'SKK Veverky Brno A': 5},
+        setFollowedTeams: (_) async => fail('unexpected team save'),
+        setTeamColors: (_) async => fail('unexpected colour save'),
+      ));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Vybrat týmy…'));
+      await tester.pumpAndSettle();
+      await tester.tap(teamColorDot('SKK Veverky Brno A'));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.descendant(
+          of: find.byType(EventColorPicker),
+          matching: find.byTooltip('Mandarinková'), // id 6
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(teamColorDot('SKK Veverky Brno A'));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.descendant(
+          of: find.byType(EventColorPicker),
+          matching: find.byTooltip('Banánová'), // id 5, back to the original
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        tester.widget<EventColorDot>(teamColorDot('SKK Veverky Brno A')).colorId,
+        5,
+      );
+      Navigator.of(tester.element(find.byType(Checkbox).first)).pop();
+      await tester.pumpAndSettle();
+      // setFollowedTeams/setTeamColors would have fail()ed had either fired.
     });
   });
 }

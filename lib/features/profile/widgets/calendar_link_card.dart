@@ -21,6 +21,7 @@ class CalendarLinkCard extends ConsumerStatefulWidget {
     this.disconnect = Api.disconnectCalendar,
     this.setReminders = Api.setCalendarReminders,
     this.setMatchTeams = Api.setCalendarTeams,
+    this.setTeamColors = Api.setTeamColors,
     this.setSecondaryCalendar = Api.setSecondaryCalendar,
     this.setTrainingColor = Api.setTrainingColor,
   });
@@ -33,6 +34,10 @@ class CalendarLinkCard extends ConsumerStatefulWidget {
   final Future<void> Function(List<int> minutes, {CalendarSlot calendar})
   setReminders;
   final Future<void> Function(List<CalendarTeam> teams) setMatchTeams;
+
+  /// A followed team's shared colour (0036) — separate from [setMatchTeams]
+  /// (which never carries one any more): see `showCalendarTeamsSheet`.
+  final Future<void> Function(Map<String, int?> colors) setTeamColors;
   final Future<void> Function(bool enabled) setSecondaryCalendar;
   final Future<void> Function(int? colorId) setTrainingColor;
 
@@ -228,8 +233,11 @@ class _CalendarLinkCardState extends ConsumerState<CalendarLinkCard> {
     );
   }
 
-  Future<void> _editMatchTeams() =>
-      showCalendarTeamsSheet(context, onChanged: widget.setMatchTeams);
+  Future<void> _editMatchTeams() => showCalendarTeamsSheet(
+    context,
+    onChanged: widget.setMatchTeams,
+    onColorsChanged: widget.setTeamColors,
+  );
 
   Future<void> _editTrainingColor() async {
     final link = ref.read(myCalendarLinkProvider).value ?? CalendarLink.none;

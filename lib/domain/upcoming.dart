@@ -44,6 +44,13 @@ class UpcomingDay {
   final List<UpcomingItem> items;
 }
 
+/// The colour to tint [slot]'s trophy in Můj přehled (0036, `team_colors`):
+/// whichever of its two teams [teamColors] has an entry for, home preferred
+/// — same tie-break `my_future_matches` uses server-side for the Google
+/// event colour. Null (today's plain icon) when neither team is coloured.
+int? matchColorOf(PrioritySlot slot, Map<String, int> teamColors) =>
+    teamColors[slot.homeTeam] ?? teamColors[slot.awayTeam];
+
 /// Live reservations from [today] on whose block still exists, plus match
 /// slots (no úklid children) of [teams] from [today] on; days ascending,
 /// within a day by start (chronological, `compareDayTime`), a training

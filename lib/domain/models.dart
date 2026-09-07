@@ -833,15 +833,17 @@ String remindersSummary(List<int> minutes) {
 }
 
 /// One followed team's routing (`calendar_teams`, 0032): which of the
-/// player's Google calendars its matches go to and what Google event colour
-/// they get. Own row per player+team — replaces the flat `matchTeams` name
-/// list that used to live on [CalendarLink] (see [matchTeamsSummary] for the
-/// unrelated, still-`List<String>`, "Moje týmy" list).
+/// player's Google calendars its matches go to. Own row per player+team —
+/// replaces the flat `matchTeams` name list that used to live on
+/// [CalendarLink] (see [matchTeamsSummary] for the unrelated, still-
+/// `List<String>`, "Moje týmy" list). Colour used to live here too but
+/// moved to its own per-team registry (0036, `team_colors` —
+/// `myTeamColorsProvider`/`Api.setTeamColors`), independent of which
+/// calendar (if any) a team is routed to.
 class CalendarTeam {
   const CalendarTeam({
     required this.team,
     this.calendar = CalendarSlot.primary,
-    this.colorId,
   });
 
   /// The federation's team name, as the imported matches carry it (e.g.
@@ -849,22 +851,16 @@ class CalendarTeam {
   final String team;
   final CalendarSlot calendar;
 
-  /// Google event colorId 1–11; null = no colour (the event inherits its
-  /// calendar's own).
-  final int? colorId;
-
   factory CalendarTeam.fromJson(Map<String, dynamic> json) => CalendarTeam(
         team: json['team'] as String,
         calendar: CalendarSlot.parse(json['calendar'] as String?),
-        colorId: json['color_id'] as int?,
       );
 
   /// Exactly the shape calendar-manage's `teams` action validates
-  /// (`validateTeamChoices`/`TeamChoice`): `{team, calendar, color_id}`.
+  /// (`validateTeamChoices`/`TeamChoice`): `{team, calendar}`.
   Map<String, dynamic> toJson() => {
         'team': team,
         'calendar': calendar.name,
-        'color_id': colorId,
       };
 }
 

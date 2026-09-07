@@ -9,12 +9,18 @@ import 'package:rezervator/features/profile/widgets/calendar_teams_sheet.dart';
 import 'package:rezervator/features/profile/widgets/event_color_picker.dart';
 
 /// showCalendarTeamsSheet is the richer sibling of showTeamPickerSheet:
-/// every ticked team carries its own colour and, once the second calendar
-/// is on, which of the two calendars it goes to. Task 4 left a shim
+/// every ticked team carries its own calendar and, once the second
+/// calendar is on, which of the two it goes to. Task 4 left a shim
 /// (_setTeamsPrimaryNoColor in calendar_link_card.dart) that saved every
-/// ticked team back to primary with no colour, resetting anything already
-/// chosen — these tests exist to prove the real sheet never does that: an
-/// unrelated tick must leave every OTHER team's calendar/colour untouched.
+/// ticked team back to primary, resetting anything already chosen — these
+/// tests exist to prove the real sheet never does that: an unrelated tick
+/// must leave every OTHER team's calendar untouched.
+///
+/// Colour (0036) lives in a SEPARATE registry (`team_colors`,
+/// myTeamColorsProvider/Api.setTeamColors) shared with showTeamPickerSheet's
+/// own sheet and with Můj přehled's trophy — it is no longer part of
+/// CalendarTeam at all, and saves through its own call (onColorsChanged),
+/// never through onChanged/setMatchTeams.
 PrioritySlot match(String id, String home, String away, {bool away_ = false}) =>
     PrioritySlot(
       id: id,
@@ -37,22 +43,28 @@ final schedule = [
 /// (and const-canonicalization can make an untouched row's original
 /// instance identical to a fresh const literal by accident). Tests compare
 /// its fields structurally instead of relying on ==.
-(String, CalendarSlot, int?) teamTuple(CalendarTeam t) =>
-    (t.team, t.calendar, t.colorId);
-List<(String, CalendarSlot, int?)> teamTuples(List<CalendarTeam> teams) =>
+(String, CalendarSlot) teamTuple(CalendarTeam t) => (t.team, t.calendar);
+List<(String, CalendarSlot)> teamTuples(List<CalendarTeam> teams) =>
     teams.map(teamTuple).toList();
+
+Future<void> _failColors(Map<String, int?> _) async =>
+    fail('unexpected colour save');
 
 void main() {
   Widget harness({
     required Future<void> Function(List<CalendarTeam> teams) onChanged,
+    Future<void> Function(Map<String, int?> colors) onColorsChanged =
+        _failColors,
     List<PrioritySlot> matches = const [],
     List<CalendarTeam> teams = const [],
+    Map<String, int> colors = const {},
     CalendarLink link = CalendarLink.none,
   }) {
     return ProviderScope(
       overrides: [
         prioritySlotsProvider.overrideWithValue(matches),
         myCalendarTeamsProvider.overrideWith((ref) => Stream.value(teams)),
+        myTeamColorsProvider.overrideWith((ref) => Stream.value(colors)),
         myCalendarLinkProvider.overrideWith((ref) => Stream.value(link)),
       ],
       child: MaterialApp(
@@ -60,8 +72,11 @@ void main() {
           builder: (context) => Scaffold(
             body: Center(
               child: TextButton(
-                onPressed: () =>
-                    showCalendarTeamsSheet(context, onChanged: onChanged),
+                onPressed: () => showCalendarTeamsSheet(
+                  context,
+                  onChanged: onChanged,
+                  onColorsChanged: onColorsChanged,
+                ),
                 child: const Text('otevřít'),
               ),
             ),
@@ -151,9 +166,7 @@ void main() {
     expect(find.byType(Checkbox), findsNothing);
   });
 
-  testWidgets('ticking a team saves it to primary with no colour', (
-    tester,
-  ) async {
+  testWidgets('ticking a team saves it to primary', (tester) async {
     final saved = <List<CalendarTeam>>[];
     await tester.pumpWidget(
       harness(matches: schedule, onChanged: (t) async => saved.add(t)),
@@ -174,26 +187,24 @@ void main() {
 
     await close(tester);
     expect(saved.map(teamTuples).toList(), [
-      [('SKK Veverky Brno A', CalendarSlot.primary, null)],
+      [('SKK Veverky Brno A', CalendarSlot.primary)],
     ]);
   });
 
-  testWidgets('unticking one team saves the rest UNCHANGED — colour and '
-      'calendar of every other ticked team survive the save (this is the '
-      'whole point of the richer sheet: Task 4\'s shim would have reset '
-      'them)', (tester) async {
+  testWidgets('unticking one team saves the rest UNCHANGED — the calendar '
+      'of every other ticked team survives the save (this is the whole '
+      'point of the richer sheet: Task 4\'s shim would have reset it), and '
+      'its colour cannot even be touched by this save any more (0036 moved '
+      'it off CalendarTeam entirely)', (tester) async {
     final saved = <List<CalendarTeam>>[];
     await tester.pumpWidget(
       harness(
         matches: schedule,
         teams: const [
           CalendarTeam(team: 'SKK Veverky Brno A'),
-          CalendarTeam(
-            team: 'KS Devítka Brno B',
-            calendar: CalendarSlot.secondary,
-            colorId: 7,
-          ),
+          CalendarTeam(team: 'KS Devítka Brno B', calendar: CalendarSlot.secondary),
         ],
+        colors: const {'KS Devítka Brno B': 7},
         link: const CalendarLink(
           status: CalendarLinkStatus.linked,
           secondaryEnabled: true,
@@ -208,29 +219,27 @@ void main() {
     await close(tester);
 
     expect(saved.map(teamTuples).toList(), [
-      [('KS Devítka Brno B', CalendarSlot.secondary, 7)],
+      [('KS Devítka Brno B', CalendarSlot.secondary)],
     ]);
   });
 
   testWidgets('the colour dot opens the eleven Google colours plus bez '
-      'barvy, and picking one saves it with the calendar preserved', (
-    tester,
-  ) async {
-    final saved = <List<CalendarTeam>>[];
+      'barvy, and picking one saves it through onColorsChanged, leaving '
+      'the calendar routing (onChanged) untouched', (tester) async {
+    final savedTeams = <List<CalendarTeam>>[];
+    final savedColors = <Map<String, int?>>[];
     await tester.pumpWidget(
       harness(
         matches: schedule,
         teams: const [
-          CalendarTeam(
-            team: 'SKK Veverky Brno A',
-            calendar: CalendarSlot.secondary,
-          ),
+          CalendarTeam(team: 'SKK Veverky Brno A', calendar: CalendarSlot.secondary),
         ],
         link: const CalendarLink(
           status: CalendarLinkStatus.linked,
           secondaryEnabled: true,
         ),
-        onChanged: (t) async => saved.add(t),
+        onChanged: (t) async => savedTeams.add(t),
+        onColorsChanged: (c) async => savedColors.add(c),
       ),
     );
     await open(tester);
@@ -269,8 +278,10 @@ void main() {
     await tester.pumpAndSettle();
     await close(tester);
 
-    expect(saved.map(teamTuples).toList(), [
-      [('SKK Veverky Brno A', CalendarSlot.secondary, 2)],
+    expect(savedTeams, isEmpty,
+        reason: 'a pure colour change never touches routing');
+    expect(savedColors, [
+      {'SKK Veverky Brno A': 2},
     ]);
   });
 
@@ -281,7 +292,8 @@ void main() {
     await tester.pumpWidget(
       harness(
         matches: schedule,
-        teams: const [CalendarTeam(team: 'SKK Veverky Brno A', colorId: 3)],
+        teams: const [CalendarTeam(team: 'SKK Veverky Brno A')],
+        colors: const {'SKK Veverky Brno A': 3},
         onChanged: (_) async => saves++,
       ),
     );
@@ -294,6 +306,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(saves, 0);
+    // onColorsChanged defaults to _failColors — reaching this line without
+    // the test failing already proves it was never called either.
   });
 
   testWidgets('the Hlavní/Druhý picker is hidden unless the second calendar '
@@ -314,13 +328,15 @@ void main() {
   });
 
   testWidgets('once the second calendar is on, a ticked team offers Hlavní '
-      '| Druhý, defaulting to Hlavní, and picking Druhý saves it with the '
-      'colour preserved', (tester) async {
+      '| Druhý, defaulting to Hlavní, and picking Druhý saves it — the '
+      'colour is untouched, structurally, since it is not part of '
+      'CalendarTeam any more', (tester) async {
     final saved = <List<CalendarTeam>>[];
     await tester.pumpWidget(
       harness(
         matches: schedule,
-        teams: const [CalendarTeam(team: 'SKK Veverky Brno A', colorId: 9)],
+        teams: const [CalendarTeam(team: 'SKK Veverky Brno A')],
+        colors: const {'SKK Veverky Brno A': 9},
         link: const CalendarLink(
           status: CalendarLinkStatus.linked,
           secondaryEnabled: true,
@@ -338,6 +354,11 @@ void main() {
     expect(tester.widget<SegmentedButton<CalendarSlot>>(segmented).selected, {
       CalendarSlot.primary,
     });
+    // The dot already shows the registry's colour before anything is saved.
+    expect(
+      tester.widget<EventColorDot>(dotOf('SKK Veverky Brno A')).colorId,
+      9,
+    );
 
     await tester.tap(
       find.descendant(
@@ -349,7 +370,7 @@ void main() {
     await close(tester);
 
     expect(saved.map(teamTuples).toList(), [
-      [('SKK Veverky Brno A', CalendarSlot.secondary, 9)],
+      [('SKK Veverky Brno A', CalendarSlot.secondary)],
     ]);
   });
 
@@ -370,28 +391,26 @@ void main() {
     await close(tester);
     expect(saved.length, 1, reason: 'one call carries the whole list');
     expect(teamTuples(saved.single), [
-      ('KS Devítka Brno B', CalendarSlot.primary, null),
-      ('SKK Veverky Brno A', CalendarSlot.primary, null),
+      ('KS Devítka Brno B', CalendarSlot.primary),
+      ('SKK Veverky Brno A', CalendarSlot.primary),
     ]);
   });
 
-  testWidgets('a failed save says so on the screen underneath, and the row '
-      'keeps what the server still holds', (tester) async {
+  testWidgets('a failed colour save says so on the screen underneath, and '
+      'the row keeps the colour the server still holds', (tester) async {
     await tester.pumpWidget(
       harness(
         matches: schedule,
         teams: const [
-          CalendarTeam(
-            team: 'SKK Veverky Brno A',
-            calendar: CalendarSlot.secondary,
-            colorId: 4,
-          ),
+          CalendarTeam(team: 'SKK Veverky Brno A', calendar: CalendarSlot.secondary),
         ],
+        colors: const {'SKK Veverky Brno A': 4},
         link: const CalendarLink(
           status: CalendarLinkStatus.linked,
           secondaryEnabled: true,
         ),
-        onChanged: (_) async => throw Exception('not_allowed'),
+        onChanged: (_) async => fail('unexpected team save'),
+        onColorsChanged: (_) async => throw Exception('not_allowed'),
       ),
     );
     await open(tester);
@@ -412,11 +431,16 @@ void main() {
     expect(find.text('Na tohle nemáš oprávnění.'), findsOneWidget);
 
     // Nothing was saved, so reopening shows the row exactly as the server
-    // still has it: secondary, colour 4 — not a fresh default.
+    // still has it: secondary calendar, colour 4 — not a fresh default or
+    // the picked (but failed) colour.
     await open(tester);
     expect(
       tester.widget<Checkbox>(checkboxOf('SKK Veverky Brno A')).value,
       isTrue,
+    );
+    expect(
+      tester.widget<EventColorDot>(dotOf('SKK Veverky Brno A')).colorId,
+      4,
     );
     final segmented = find.descendant(
       of: rowOf('SKK Veverky Brno A'),
@@ -425,6 +449,46 @@ void main() {
     expect(tester.widget<SegmentedButton<CalendarSlot>>(segmented).selected, {
       CalendarSlot.secondary,
     });
+  });
+
+  testWidgets('picking a colour back to what it already was sends nothing '
+      '— same reasoning as ticking a team back off', (tester) async {
+    await tester.pumpWidget(
+      harness(
+        matches: schedule,
+        teams: const [CalendarTeam(team: 'SKK Veverky Brno A')],
+        colors: const {'SKK Veverky Brno A': 5},
+        onChanged: (_) async => fail('unexpected team save'),
+        // onColorsChanged defaults to _failColors.
+      ),
+    );
+    await open(tester);
+
+    await tester.tap(dotOf('SKK Veverky Brno A'));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(
+        of: find.byType(EventColorPicker),
+        matching: find.byTooltip('Mandarinková'), // id 6
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(dotOf('SKK Veverky Brno A'));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(
+        of: find.byType(EventColorPicker),
+        matching: find.byTooltip('Banánová'), // id 5, back to the original
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      tester.widget<EventColorDot>(dotOf('SKK Veverky Brno A')).colorId,
+      5,
+    );
+    await close(tester);
+    // onColorsChanged would have fail()ed had it been called.
   });
 
   testWidgets('several teams ticked in a row all reach the server, even when '

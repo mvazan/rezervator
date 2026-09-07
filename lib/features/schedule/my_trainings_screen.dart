@@ -5,9 +5,24 @@ import '../../core/ui.dart';
 import '../../data/clock.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
+import '../../domain/palette.dart';
 import '../../domain/upcoming.dart';
 import '../profile/profile_screen.dart';
 import 'cancel_own_reservation.dart';
+
+/// The trophy's colour for [slot]: [matchColorOf]'s pick from [teamColors]
+/// (home wins a derby), rendered as Google's actual event colour — the same
+/// eleven the calendar link card's own colour dots use. Null (today's plain
+/// icon) when neither team is coloured or the id is somehow none of the
+/// eleven.
+Color? _trophyColorOf(PrioritySlot slot, Map<String, int> teamColors) {
+  final colorId = matchColorOf(slot, teamColors);
+  if (colorId == null) return null;
+  for (final (id, _, color) in googleEventColors) {
+    if (id == colorId) return color;
+  }
+  return null;
+}
 
 /// The second view beside the calendar: what is coming for the player — the
 /// trainings they booked and the matches of the teams they follow, by day.
@@ -98,6 +113,7 @@ class MyTrainingsScreen extends ConsumerWidget {
     final slotsFailed = ref.watch(prioritySlotsFailedProvider);
     final profile = ref.watch(myProfileProvider).value;
     final teams = profile?.followedTeams ?? const <String>[];
+    final teamColors = ref.watch(myTeamColorsProvider).value ?? const {};
     final theme = Theme.of(context);
 
     final header = Padding(
@@ -218,7 +234,10 @@ class MyTrainingsScreen extends ConsumerWidget {
                                 nowTime.minutesFromMidnight,
                       ),
                     UpcomingMatch() => ListTile(
-                        leading: const Icon(Icons.emoji_events_outlined),
+                        leading: Icon(
+                          Icons.emoji_events_outlined,
+                          color: _trophyColorOf(item.slot, teamColors),
+                        ),
                         title: Text(item.slot.title),
                         subtitle: Text([
                           '${item.slot.startsAt.display()}–'

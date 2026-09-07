@@ -180,4 +180,40 @@ void main() {
     );
     expect(only, isEmpty);
   });
+
+  // ---------------------------------------------------------------------
+  // matchColorOf (0036): the trophy's colour in Můj přehled.
+  // ---------------------------------------------------------------------
+
+  group('matchColorOf', () {
+    // match()'s defaults: home 'SKK Veverky Brno A', away 'KK MS Brno D'.
+    final m = match('m', today, const HourMinute(18, 0));
+
+    test('neither team coloured: null, today\'s look', () {
+      expect(matchColorOf(m, const {}), isNull);
+    });
+
+    test('only the home team coloured: its colour', () {
+      expect(matchColorOf(m, const {'SKK Veverky Brno A': 3}), 3);
+    });
+
+    test('only the away team coloured: its colour', () {
+      expect(matchColorOf(m, const {'KK MS Brno D': 5}), 5);
+    });
+
+    test('derby — both teams coloured: home wins, same tie-break '
+        'my_future_matches uses server-side', () {
+      expect(
+        matchColorOf(m, const {
+          'SKK Veverky Brno A': 3,
+          'KK MS Brno D': 5,
+        }),
+        3,
+      );
+    });
+
+    test('a colour registered for an unrelated team never leaks in', () {
+      expect(matchColorOf(m, const {'TJ Sokol Husovice E': 7}), isNull);
+    });
+  });
 }
