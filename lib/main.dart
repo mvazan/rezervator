@@ -52,7 +52,15 @@ Future<void> _bootstrap() async {
     await Push.init();
   }
 
-  runApp(const ProviderScope(child: RezervatorApp()));
+  // Read the persisted theme/text-size choice before the first frame, so a
+  // dark-theme user never sees a flash of the light default while
+  // ThemeChoiceNotifier/TextSizeNotifier's own async load is still pending
+  // (see data/local_prefs.dart).
+  final appearanceOverrides = await loadPersistedAppearance();
+  runApp(ProviderScope(
+    overrides: appearanceOverrides,
+    child: const RezervatorApp(),
+  ));
 }
 
 final _router = GoRouter(
