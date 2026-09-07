@@ -1,11 +1,12 @@
 // calendar-manage — actions on the linked calendar that the player asked for
 // and that must finish before the app shows the result.
 //
-// `disconnect`, `reminders`, `teams`, `secondary`, `training_color` and
-// `match_teams` (a thin back-compat wrapper over `teams` for the shipped
-// 1.2.1 app, which only ever sends a bare team-name list — see setTeams'
-// call site below; drop it once a build with the new screen is the oldest
-// one still talking to this backend). Deployed WITHOUT
+// `disconnect`, `reminders`, `teams`, `team_colors`, `secondary`,
+// `training_color` and `match_teams` (a thin back-compat wrapper over
+// `teams` for the shipped 1.2.1 app, which only ever sends a bare
+// team-name list — see setTeams' call site below; drop it once a build
+// with the new screen is the oldest one still talking to this backend).
+// Deployed WITHOUT
 // --no-verify-jwt (unlike notify and calendar-oauth-callback): a signed-in
 // player calls it from the app through functions.invoke, which attaches
 // their JWT, and the platform verifies it before the function even runs.
@@ -43,6 +44,7 @@ import {
   type TeamChoice,
   isEventColorId,
   validateTeamChoices,
+  validateTeamColors,
   writeFutureMatches,
   writeFutureReservations,
 } from "../_shared/google_calendar.ts";
@@ -307,20 +309,22 @@ async function setTrainingColor(
   return json({ rewritten: written, saved: colorId, deferred: failed });
 }
 
-/** Stores which teams' matches go to which calendar, with which colour
- * (calendar_teams, 0032), and settles the events on the spot: the matches
- * of teams dropped ENTIRELY are deleted, everything kept or new is
- * (re)written into its chosen calendar (recolouring and recalendaring both
- * fall out of the same rewrite) — the player is watching. `teams` was
- * already validated by the caller (validateTeamChoices), so this only talks
- * to Postgres and Google. Whatever fails is caught up by a job. Returns the
- * stored teams. */
+/** Stores which teams' matches go to which calendar (calendar_teams, 0036 —
+ * colour moved off this table onto team_colors, see setTeamColors below)
+ * and settles the events on the spot: the matches of teams dropped ENTIRELY
+ * are deleted, everything kept or new is (re)written into its chosen
+ * calendar — the player is watching. Every rewrite still carries whatever
+ * colour team_colors already has for that team (my_future_matches joins it
+ * in), so nothing goes uncoloured; this action just never CHANGES a colour.
+ * `teams` was already validated by the caller (validateTeamChoices), so
+ * this only talks to Postgres and Google. Whatever fails is caught up by a
+ * job. Returns the stored teams. */
 async function setTeams(
   userId: string,
   teams: TeamChoice[],
 ): Promise<Response> {
-  // set_calendar_teams_for (0032) returns the PREVIOUS rows — bounds
-  // (≤ 20 items, calendar/color_id) are enforced by the table's own CHECK
+  // set_calendar_teams_for (0036) returns the PREVIOUS rows — bounds
+  // (≤ 20 items, calendar) are enforced by the table's own CHECK
   // constraints and surface as a generic Postgres error, same as "bad_teams"
   // to the caller; the item shape itself was already validated above.
   const { data: previous, error } = await admin.rpc("set_calendar_teams_for", {
@@ -332,7 +336,7 @@ async function setTeams(
     return json({ error: "bad_teams" }, 400);
   }
   const previousTeams =
-    (previous as { team: string; calendar: string; color_id: number | null }[] | null) ?? [];
+    (previous as { team: string; calendar: string }[] | null) ?? [];
 
   const { data: link } = await admin.from("google_calendar_links")
     .select("status, secondary_enabled").eq("user_id", userId).maybeSingle();
@@ -396,6 +400,75 @@ async function setTeams(
   const failed = written < ((total ?? []) as unknown[]).length || sweepFailed;
   if (failed) await admin.rpc("backfill_calendar_jobs", { p_user: userId });
   return json({ rewritten: written, removed, saved: teams, deferred: failed });
+}
+
+/** Stores the colour of one or more followed teams (team_colors, 0036) and
+ * repaints every future match so it shows at once — same "the player is
+ * watching" reasoning as setTrainingColor, but for MATCHES (trainings have
+ * no team) and for potentially several teams in one call rather than one
+ * scalar. Unlike setTeams this never drops or adds a followed team or
+ * changes any routing — set_team_colors_for is a PARTIAL upsert of only the
+ * named teams' colours — so there is nothing to delete here, only to
+ * rewrite. `colors` was already validated by the caller
+ * (validateTeamColors). Whatever fails is caught up by a job. Returns the
+ * stored colours. */
+async function setTeamColors(
+  userId: string,
+  colors: { team: string; color_id: number | null }[],
+): Promise<Response> {
+  // set_team_colors_for (0036) returns the PREVIOUS state of only the named
+  // teams — bounds (≤ 40 items, colour 1-11) are enforced by the RPC itself
+  // (item count) and the table's own CHECK (colour), surfacing as a generic
+  // Postgres error, same as "bad_colors" to the caller; the item shape
+  // itself was already validated above.
+  const { error } = await admin.rpc("set_team_colors_for", {
+    p_user: userId,
+    p_colors: colors,
+  });
+  if (error) {
+    console.error(`set team colours failed for ${userId}:`, error);
+    return json({ error: "bad_colors" }, 400);
+  }
+
+  const { data: link } = await admin.from("google_calendar_links")
+    .select("status, secondary_enabled").eq("user_id", userId).maybeSingle();
+  if (link?.status !== "linked") return json({ rewritten: 0, saved: colors });
+
+  const { data: token } = await admin.from("google_calendar_tokens")
+    .select("refresh_token, google_calendar_id, google_calendar_id_secondary")
+    .eq("user_id", userId).maybeSingle();
+  if (!token?.refresh_token || !token.google_calendar_id) {
+    return json({ rewritten: 0, saved: colors });
+  }
+
+  let accessToken: string;
+  try {
+    accessToken = await refreshAccessToken(token.refresh_token as string);
+  } catch (_) {
+    // Stored either way; a job repaints the events once Google answers.
+    await admin.rpc("backfill_calendar_jobs", { p_user: userId });
+    return json({ rewritten: 0, saved: colors, deferred: true });
+  }
+  const calendars = {
+    primary: token.google_calendar_id as string,
+    secondary: secondaryCalendarIdOf(
+      link,
+      token as { google_calendar_id_secondary: string | null },
+    ),
+  };
+
+  const { written, sweepFailed } = await writeFutureMatches(
+    admin,
+    userId,
+    accessToken,
+    calendars,
+  );
+  const { data: total } = await admin.rpc("my_future_matches", {
+    p_user: userId,
+  });
+  const failed = written < ((total ?? []) as unknown[]).length || sweepFailed;
+  if (failed) await admin.rpc("backfill_calendar_jobs", { p_user: userId });
+  return json({ rewritten: written, saved: colors, deferred: failed });
 }
 
 /** Turns the player's second Google calendar ("Rezervátor 2") on or off and
@@ -582,16 +655,21 @@ Deno.serve(async (request) => {
       if (teams === null) return json({ error: "bad_teams" }, 400);
       return await setTeams(user.id, teams);
     }
+    if (body?.action === "team_colors") {
+      const colors = validateTeamColors(body.team_colors);
+      if (colors === null) return json({ error: "bad_colors" }, 400);
+      return await setTeamColors(user.id, colors);
+    }
     if (body?.action === "match_teams") {
       // The shipped 1.2.1 app's action: a bare team-name string[], no
-      // calendar or colour — see the header comment and mapLegacyMatchTeams.
-      // An older client is still just a client: the mapped result goes
-      // through the very same validateTeamChoices as `teams`, or a long
-      // enough name would walk straight past the caps into the table.
+      // calendar — see the header comment and mapLegacyMatchTeams. An older
+      // client is still just a client: the mapped result goes through the
+      // very same validateTeamChoices as `teams`, or a long enough name
+      // would walk straight past the caps into the table.
       if (!Array.isArray(body.teams)) return json({ error: "bad_teams" }, 400);
       const names = body.teams.filter((t: unknown) => typeof t === "string");
       const { data: current } = await admin.from("calendar_teams")
-        .select("team, calendar, color_id").eq("user_id", user.id);
+        .select("team, calendar").eq("user_id", user.id);
       const teams = validateTeamChoices(
         mapLegacyMatchTeams(names, (current ?? []) as TeamChoice[]),
       );

@@ -12,6 +12,7 @@ import {
   remindersFor,
   reservationEventBody,
   validateTeamChoices,
+  validateTeamColors,
   worstResult,
 } from "./google_calendar.ts";
 
@@ -281,33 +282,26 @@ Deno.test("worstResult: retry always wins, even next to auth/gone", () => {
   assertEquals(worstResult(["retry", "auth"]), "retry");
 });
 
-Deno.test("validateTeamChoices: a normal payload passes through, trimmed, calendar/colour defaulted", () => {
+Deno.test("validateTeamChoices: a normal payload passes through, trimmed, calendar defaulted", () => {
   assertEquals(
     validateTeamChoices([
-      { team: " SKK Veverky Brno A ", calendar: "secondary", color_id: 9 },
+      { team: " SKK Veverky Brno A ", calendar: "secondary" },
       { team: "KS Devítka Brno B" },
     ]),
     [
-      { team: "SKK Veverky Brno A", calendar: "secondary", color_id: 9 },
-      { team: "KS Devítka Brno B", calendar: "primary", color_id: null },
+      { team: "SKK Veverky Brno A", calendar: "secondary" },
+      { team: "KS Devítka Brno B", calendar: "primary" },
     ],
-  );
-});
-
-Deno.test("validateTeamChoices: an explicit null colour is the same as omitting it", () => {
-  assertEquals(
-    validateTeamChoices([{ team: "X", color_id: null }]),
-    [{ team: "X", calendar: "primary", color_id: null }],
   );
 });
 
 Deno.test("validateTeamChoices: duplicate team names collapse, first occurrence wins", () => {
   assertEquals(
     validateTeamChoices([
-      { team: "X", calendar: "primary", color_id: 2 },
-      { team: "X", calendar: "secondary", color_id: 5 },
+      { team: "X", calendar: "primary" },
+      { team: "X", calendar: "secondary" },
     ]),
-    [{ team: "X", calendar: "primary", color_id: 2 }],
+    [{ team: "X", calendar: "primary" }],
   );
 });
 
@@ -334,16 +328,110 @@ Deno.test("validateTeamChoices: rejects an unknown calendar", () => {
   assertEquals(validateTeamChoices([{ team: "X", calendar: "tertiary" }]), null);
 });
 
-Deno.test("validateTeamChoices: rejects a colour outside 1-11", () => {
-  assertEquals(validateTeamChoices([{ team: "X", color_id: 0 }]), null);
-  assertEquals(validateTeamChoices([{ team: "X", color_id: 12 }]), null);
-  assertEquals(validateTeamChoices([{ team: "X", color_id: 1.5 }]), null);
-  assertEquals(validateTeamChoices([{ team: "X", color_id: "not a number" }]), null);
-});
-
 Deno.test("validateTeamChoices: rejects a non-object entry", () => {
   assertEquals(validateTeamChoices(["X"]), null);
   assertEquals(validateTeamChoices([null]), null);
+});
+
+Deno.test("validateTeamChoices: a color_id is no longer read at all — garbage or in-range, it never surfaces and never fails the payload (colour moved to validateTeamColors, 0036)", () => {
+  assertEquals(
+    validateTeamChoices([{ team: "X", color_id: 999 }]),
+    [{ team: "X", calendar: "primary" }],
+  );
+  assertEquals(
+    validateTeamChoices([{ team: "X", color_id: "steal-the-database" }]),
+    [{ team: "X", calendar: "primary" }],
+  );
+});
+
+Deno.test("validateTeamColors: a normal payload passes through, trimmed, missing colour becomes null", () => {
+  assertEquals(
+    validateTeamColors([
+      { team: " SKK Veverky Brno A ", color_id: 9 },
+      { team: "KS Devítka Brno B" },
+    ]),
+    [
+      { team: "SKK Veverky Brno A", color_id: 9 },
+      { team: "KS Devítka Brno B", color_id: null },
+    ],
+  );
+});
+
+Deno.test("validateTeamColors: an explicit null colour is the same as omitting it", () => {
+  assertEquals(
+    validateTeamColors([{ team: "X", color_id: null }]),
+    validateTeamColors([{ team: "X" }]),
+  );
+  assertEquals(validateTeamColors([{ team: "X", color_id: null }]), [
+    { team: "X", color_id: null },
+  ]);
+});
+
+Deno.test("validateTeamColors: duplicate team names collapse, first occurrence wins", () => {
+  assertEquals(
+    validateTeamColors([
+      { team: "X", color_id: 2 },
+      { team: "X", color_id: 5 },
+    ]),
+    [{ team: "X", color_id: 2 }],
+  );
+});
+
+Deno.test("validateTeamColors: rejects a non-array, or more than the RPC's 40-entry cap", () => {
+  assertEquals(validateTeamColors(null), null);
+  assertEquals(validateTeamColors("nope"), null);
+  assertEquals(validateTeamColors({ team: "X" }), null);
+  assertEquals(
+    validateTeamColors(
+      Array.from({ length: 41 }, (_, i) => ({ team: `T${i}` })),
+    ),
+    null,
+  );
+});
+
+Deno.test("validateTeamColors: exactly 40 entries is still fine (the RPC's own boundary)", () => {
+  const input = Array.from(
+    { length: 40 },
+    (_, i) => ({ team: `T${i}`, color_id: 1 }),
+  );
+  const out = validateTeamColors(input);
+  assertEquals(out?.length, 40);
+});
+
+Deno.test("validateTeamColors: rejects a blank or implausibly long team name", () => {
+  assertEquals(validateTeamColors([{ team: "" }]), null);
+  assertEquals(validateTeamColors([{ team: "   " }]), null);
+  assertEquals(validateTeamColors([{ team: 42 }]), null);
+  assertEquals(validateTeamColors([{ team: "x".repeat(81) }]), null);
+});
+
+Deno.test("validateTeamColors: rejects a colour outside 1-11", () => {
+  assertEquals(validateTeamColors([{ team: "X", color_id: 0 }]), null);
+  assertEquals(validateTeamColors([{ team: "X", color_id: 12 }]), null);
+  assertEquals(validateTeamColors([{ team: "X", color_id: 1.5 }]), null);
+  assertEquals(
+    validateTeamColors([{ team: "X", color_id: "not a number" }]),
+    null,
+  );
+});
+
+Deno.test("validateTeamColors: rejects a boolean colour rather than coercing it to 0/1", () => {
+  assertEquals(validateTeamColors([{ team: "X", color_id: true }]), null);
+  assertEquals(validateTeamColors([{ team: "X", color_id: false }]), null);
+});
+
+Deno.test("validateTeamColors: rejects a non-object entry", () => {
+  assertEquals(validateTeamColors(["X"]), null);
+  assertEquals(validateTeamColors([null]), null);
+});
+
+Deno.test("validateTeamColors: a malicious extra key (calendar, a bogus role) never reaches the output", () => {
+  assertEquals(
+    validateTeamColors([
+      { team: "X", color_id: 3, calendar: "secondary", role: "admin" },
+    ]),
+    [{ team: "X", color_id: 3 }],
+  );
 });
 
 Deno.test("isEventColorId: only Google's eleven", () => {
@@ -365,23 +453,22 @@ Deno.test("isEventColorId: rejects a boolean rather than coercing it to 0/1", ()
 const TC = (
   team: string,
   calendar: "primary" | "secondary",
-  color_id: number | null,
-) => ({ team, calendar, color_id });
+) => ({ team, calendar });
 
-Deno.test("mapLegacyMatchTeams: a name already tracked keeps its calendar/colour untouched", () => {
+Deno.test("mapLegacyMatchTeams: a name already tracked keeps its calendar untouched", () => {
   assertEquals(
     mapLegacyMatchTeams(
       ["SKK Veverky Brno A"],
-      [TC("SKK Veverky Brno A", "secondary", 9)],
+      [TC("SKK Veverky Brno A", "secondary")],
     ),
-    [TC("SKK Veverky Brno A", "secondary", 9)],
+    [TC("SKK Veverky Brno A", "secondary")],
   );
 });
 
-Deno.test("mapLegacyMatchTeams: a name new to `current` defaults to primary/no colour", () => {
+Deno.test("mapLegacyMatchTeams: a name new to `current` defaults to primary", () => {
   assertEquals(
     mapLegacyMatchTeams(["KS Devítka Brno B"], []),
-    [TC("KS Devítka Brno B", "primary", null)],
+    [TC("KS Devítka Brno B", "primary")],
   );
 });
 
@@ -389,9 +476,9 @@ Deno.test("mapLegacyMatchTeams: a name dropped from the list is just absent from
   assertEquals(
     mapLegacyMatchTeams(
       ["A"],
-      [TC("A", "primary", null), TC("B", "secondary", 3)],
+      [TC("A", "primary"), TC("B", "secondary")],
     ),
-    [TC("A", "primary", null)],
+    [TC("A", "primary")],
   );
 });
 
@@ -399,22 +486,22 @@ Deno.test("mapLegacyMatchTeams: kept and new teams mix in the same call", () => 
   assertEquals(
     mapLegacyMatchTeams(
       ["A", "New"],
-      [TC("A", "secondary", 4), TC("Dropped", "primary", null)],
+      [TC("A", "secondary"), TC("Dropped", "primary")],
     ),
-    [TC("A", "secondary", 4), TC("New", "primary", null)],
+    [TC("A", "secondary"), TC("New", "primary")],
   );
 });
 
 Deno.test("mapLegacyMatchTeams: trims and de-dupes, first occurrence wins", () => {
   assertEquals(
-    mapLegacyMatchTeams([" A ", "A", "B"], [TC("A", "secondary", 2)]),
-    [TC("A", "secondary", 2), TC("B", "primary", null)],
+    mapLegacyMatchTeams([" A ", "A", "B"], [TC("A", "secondary")]),
+    [TC("A", "secondary"), TC("B", "primary")],
   );
 });
 
 Deno.test("mapLegacyMatchTeams: a blank name is dropped, an empty list clears everything", () => {
-  assertEquals(mapLegacyMatchTeams(["  "], [TC("A", "primary", null)]), []);
-  assertEquals(mapLegacyMatchTeams([], [TC("A", "primary", null)]), []);
+  assertEquals(mapLegacyMatchTeams(["  "], [TC("A", "primary")]), []);
+  assertEquals(mapLegacyMatchTeams([], [TC("A", "primary")]), []);
 });
 
 Deno.test("the old app's team names face the same caps as the new screen", () => {
@@ -422,18 +509,18 @@ Deno.test("the old app's team names face the same caps as the new screen", () =>
   // but it is not a validator — an 1.2.1 client is still untrusted, so the
   // caller runs the result through validateTeamChoices.
   const current = [
-    { team: "Veverky A", calendar: "secondary" as const, color_id: 7 },
+    { team: "Veverky A", calendar: "secondary" as const },
   ];
   const mapped = mapLegacyMatchTeams(
     ["Veverky A", "x".repeat(81)],
     current,
   );
-  assertEquals(mapped[0], current[0], "an existing team keeps its calendar and colour");
+  assertEquals(mapped[0], current[0], "an existing team keeps its calendar");
   assertEquals(validateTeamChoices(mapped), null, "an over-long name is refused");
 
   const ok = mapLegacyMatchTeams(["Veverky A", "Devítka B"], current);
   assertEquals(validateTeamChoices(ok), [
-    { team: "Veverky A", calendar: "secondary", color_id: 7 },
-    { team: "Devítka B", calendar: "primary", color_id: null },
+    { team: "Veverky A", calendar: "secondary" },
+    { team: "Devítka B", calendar: "primary" },
   ]);
 });

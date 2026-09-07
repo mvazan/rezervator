@@ -388,7 +388,7 @@ export type MatchRow = {
    * all once a calendar_teams row for one of its teams exists. */
   calendar: "primary" | "secondary";
   /** Google event colorId (1-11) for the followed team, or null = no
-   * colour (calendar_teams.color_id, 0032). Not read by matchEventBody
+   * colour (team_colors.color_id, 0036). Not read by matchEventBody
    * itself — writeFutureMatches passes it on as that function's own
    * explicit `colorId` argument, same as a training's. */
   color_id: number | null;
@@ -414,7 +414,7 @@ export function matchEventId(userId: string, matchId: string): Promise<string> {
  * home matches located at the alley, away ones carry the venue in the
  * description (the app never stores it structurally). Same reminders and
  * the same managed-by footer as a training. `colorId` is the followed
- * team's own colour (calendar_teams.color_id, 0032) — omitted or null means
+ * team's own colour (team_colors.color_id, 0036) — omitted or null means
  * no colour, same as every match before this field existed. */
 export function matchEventBody(
   row: MatchEventSource,
@@ -672,11 +672,12 @@ export function worstResult(results: WriteResult[]): WriteResult {
 }
 
 /** One player's choice for one followed team — calendar-manage's `teams`
- * action payload, once validated. */
+ * action payload, once validated. Colour is a separate concern (0036): see
+ * `team_colors`/`validateTeamColors` below — this shape no longer carries
+ * one. */
 export type TeamChoice = {
   team: string;
   calendar: "primary" | "secondary";
-  color_id: number | null;
 };
 
 /** Google takes only its own eleven event colours, as colorId "1".."11";
@@ -692,18 +693,18 @@ export function isEventColorId(raw: unknown): boolean {
 }
 
 /** Normalises and validates an untrusted `teams` payload before it reaches
- * set_calendar_teams_for: the 0032 RPC only checks the item COUNT and that
+ * set_calendar_teams_for: the 0036 RPC only checks the item COUNT and that
  * the caller has a links row — per-item shape is the edge function's job,
  * same as every other action's client input. Trims each team name and
  * rejects a blank or implausibly long one (mirrors the 80-char limit the
  * pre-0032 RPC enforced itself, which the table's own CHECK constraints do
- * not), an unknown `calendar`, or a `color_id` outside Google's 1-11 (both
- * a missing key and an explicit `null` mean "no colour"). De-duplicates by
- * team name — first occurrence wins, as if a repeat were just re-ticking
- * the same checkbox — so a client bug can never trip the table's
- * (user_id, team) primary key. Returns `null` to reject the WHOLE payload:
- * not an array, more than 20 entries, or one entry that cannot be made
- * valid. */
+ * not), or an unknown `calendar`. De-duplicates by team name — first
+ * occurrence wins, as if a repeat were just re-ticking the same checkbox —
+ * so a client bug can never trip the table's (user_id, team) primary key.
+ * Returns `null` to reject the WHOLE payload: not an array, more than 20
+ * entries, or one entry that cannot be made valid. Colour is a separate
+ * concern now (0036, `team_colors`/`validateTeamColors` below) — a
+ * `color_id` on an item here, however malformed, is simply not read. */
 export function validateTeamChoices(input: unknown): TeamChoice[] | null {
   if (!Array.isArray(input) || input.length > 20) return null;
   const seen = new Set<string>();
@@ -723,6 +724,36 @@ export function validateTeamChoices(input: unknown): TeamChoice[] | null {
     }
     const calendar = raw.calendar === "secondary" ? "secondary" : "primary";
 
+    if (seen.has(team)) continue; // first occurrence wins
+    seen.add(team);
+    out.push({ team, calendar });
+  }
+  return out;
+}
+
+/** Normalises and validates an untrusted `team_colors` payload before it
+ * reaches set_team_colors_for (0036): the RPC only checks the item COUNT
+ * (≤ 40, `bad_colors`) — per-item shape is the edge function's job, the same
+ * discipline as validateTeamChoices above. Trims each team name and rejects
+ * a blank or implausibly long one, and a `color_id` outside Google's 1-11
+ * (both a missing key and an explicit `null` mean "clear this team's
+ * colour" — the RPC deletes the row rather than storing anything).
+ * De-duplicates by team name — first occurrence wins, same reasoning as
+ * validateTeamChoices. Returns `null` to reject the WHOLE payload: not an
+ * array, more than 40 entries, or one entry that cannot be made valid. */
+export function validateTeamColors(
+  input: unknown,
+): { team: string; color_id: number | null }[] | null {
+  if (!Array.isArray(input) || input.length > 40) return null;
+  const seen = new Set<string>();
+  const out: { team: string; color_id: number | null }[] = [];
+  for (const item of input) {
+    if (typeof item !== "object" || item === null) return null;
+    const raw = item as Record<string, unknown>;
+
+    const team = typeof raw.team === "string" ? raw.team.trim() : "";
+    if (!team || team.length > 80) return null;
+
     let color_id: number | null = null;
     if (raw.color_id != null) {
       if (!isEventColorId(raw.color_id)) return null;
@@ -731,23 +762,24 @@ export function validateTeamChoices(input: unknown): TeamChoice[] | null {
 
     if (seen.has(team)) continue; // first occurrence wins
     seen.add(team);
-    out.push({ team, calendar, color_id });
+    out.push({ team, color_id });
   }
   return out;
 }
 
 /** Back-compat for the shipped 1.2.1 app (calendar-manage's OLD `match_teams`
- * action, `Api.setCalendarMatchTeams` there — a bare `string[]`, no calendar
- * or colour: that screen cannot express either). Maps that flat list onto
- * the new per-team shape `teams` needs: a name still present keeps whatever
- * `current` (the player's existing calendar_teams rows) already has for it —
- * an old app must never silently reset a calendar/colour choice made in a
- * newer one — a name that is new to `current` defaults to primary/no colour,
- * same as ticking a team for the first time in the new screen; a name
- * dropped from the list just does not appear in the result, same "whole
- * list, not a delta" contract set_calendar_teams_for already has. Trims and
- * de-dupes (first occurrence wins) like validateTeamChoices, since the old
- * client never did either. */
+ * action, `Api.setCalendarMatchTeams` there — a bare `string[]`, no calendar:
+ * that screen cannot express one). Maps that flat list onto the new per-team
+ * shape `teams` needs: a name still present keeps whatever `current` (the
+ * player's existing calendar_teams rows) already has for it — an old app
+ * must never silently reset a calendar choice made in a newer one — a name
+ * that is new to `current` defaults to primary, same as ticking a team for
+ * the first time in the new screen; a name dropped from the list just does
+ * not appear in the result, same "whole list, not a delta" contract
+ * set_calendar_teams_for already has. Trims and de-dupes (first occurrence
+ * wins) like validateTeamChoices, since the old client never did either.
+ * Colour is untouched either way — it lives in team_colors (0036) now, a
+ * table this legacy path never reads or writes. */
 export function mapLegacyMatchTeams(
   names: string[],
   current: TeamChoice[],
@@ -759,7 +791,7 @@ export function mapLegacyMatchTeams(
     const team = raw.trim();
     if (!team || seen.has(team)) continue;
     seen.add(team);
-    out.push(byName.get(team) ?? { team, calendar: "primary", color_id: null });
+    out.push(byName.get(team) ?? { team, calendar: "primary" });
   }
   return out;
 }
