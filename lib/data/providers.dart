@@ -848,16 +848,26 @@ class Api {
   /// synchronously on purpose, so the card can't offer "Propojit" while the
   /// old calendar is still being cleaned up (that race leaves orphans).
   ///
-  /// Returns true when the calendar had to be left behind — access was
-  /// already revoked outside the app, so only the user can delete it now.
-  /// Throws on a retryable failure (503), having changed nothing.
-  static Future<bool> disconnectCalendar() async {
+  /// Returns the calendars that had to be left behind — Google refused to
+  /// delete them (the grant was already revoked, or the delete itself came
+  /// back 401), so only the user can remove them now. Empty means everything
+  /// really is gone. Throws on a retryable failure (503), having changed
+  /// nothing.
+  static Future<List<CalendarSlot>> disconnectCalendar() async {
     final response = await _db.functions.invoke(
       'calendar-manage',
       body: {'action': 'disconnect'},
     );
     final data = response.data;
-    return data is Map && data['orphaned'] == true;
+    if (data is! Map) return const [];
+    final listed = data['orphaned_calendars'];
+    if (listed is List) {
+      return [for (final slot in listed) CalendarSlot.parse(slot as String?)];
+    }
+    // A backend older than this build says only THAT something was left
+    // behind, never which one. The primary calendar is the one that always
+    // exists when anything is orphaned, so it is the honest guess.
+    return data['orphaned'] == true ? const [CalendarSlot.primary] : const [];
   }
 
   /// Stores the reminder offsets (minutes before a training, max 5, max

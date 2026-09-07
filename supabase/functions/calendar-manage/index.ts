@@ -94,6 +94,19 @@ async function forget(userId: string) {
     .eq("user_id", userId);
 }
 
+/** Which of the two calendars a disconnect could not get rid of. Google
+ * still has them, and after the revoke below the app can never reach them
+ * again — only the player can delete them now, so the app has to be able
+ * to name them. `orphaned` stays a plain boolean next to the list because
+ * the shipped 1.2.1 app reads exactly that field (the same back-compat
+ * reasoning as the `match_teams` wrapper up top); it is simply
+ * `orphaned_calendars` being non-empty. */
+type CalendarSlot = "primary" | "secondary";
+
+function disconnected(orphaned: CalendarSlot[]): Response {
+  return json({ orphaned: orphaned.length > 0, orphaned_calendars: orphaned });
+}
+
 async function disconnect(userId: string): Promise<Response> {
   const { data: token } = await admin.from("google_calendar_tokens")
     .select("refresh_token, google_calendar_id, google_calendar_id_secondary")
@@ -103,7 +116,7 @@ async function disconnect(userId: string): Promise<Response> {
   // only a token without a calendar (a failed link) — just tidy up.
   if (!token?.refresh_token) {
     await forget(userId);
-    return json({ orphaned: false });
+    return disconnected([]);
   }
   const calendarId = token.google_calendar_id as string | null;
   const secondaryId = token.google_calendar_id_secondary as string | null;
@@ -121,7 +134,10 @@ async function disconnect(userId: string): Promise<Response> {
     // side.
     console.warn(`disconnect: grant already revoked for ${userId}`);
     await forget(userId);
-    return json({ orphaned: !!calendarId || !!secondaryId });
+    return disconnected([
+      ...(calendarId ? ["primary" as const] : []),
+      ...(secondaryId ? ["secondary" as const] : []),
+    ]);
   }
 
   // Both calendars, if the player ever turned the second one on — deleting
@@ -131,8 +147,13 @@ async function disconnect(userId: string): Promise<Response> {
   // re-attempts both — deleteCalendar treats an already-gone calendar as
   // "ok" (404/410), so whichever one already succeeded is just a cheap
   // no-op the second time, never repeated for real.
-  let orphaned = false;
-  for (const id of [calendarId, secondaryId]) {
+  const orphaned: CalendarSlot[] = [];
+  for (
+    const [slot, id] of [
+      ["primary", calendarId],
+      ["secondary", secondaryId],
+    ] as const
+  ) {
     if (!id) continue;
     const result = await deleteCalendar(accessToken, id);
     if (result === "retry") {
@@ -142,15 +163,16 @@ async function disconnect(userId: string): Promise<Response> {
     // "ok" (404/410 included = already gone) as well as "auth" mean there
     // is no way left to delete this calendar; carry on tidying up. Only
     // "auth" actually LEAVES ONE BEHIND, though, and the refresh above
-    // having succeeded makes that the surprising case — so it is reported
-    // exactly like the "grant already revoked" branch above and like
-    // setSecondary()'s OFF branch: the player hears that a calendar is
+    // having succeeded makes that the surprising case — so the slot is
+    // collected and named back to the app, the way the "grant already
+    // revoked" branch above does: the player is told WHICH calendar is
     // still sitting in their Google account instead of a plain "smazán".
     // Not guarded by a unit test: disconnect() is unexported and importing
     // this module starts the server, so it would take a fake Google (the
     // GOOGLE_CALENDAR_API seam) plus a DB to reach. The mapping underneath
-    // it, classify(401) = "auth", is covered in _shared/google_calendar_test.
-    if (result === "auth") orphaned = true;
+    // it, classify(401) = "auth", is covered in _shared/google_calendar_test;
+    // the app's side of the contract is covered in profile_screen_test.
+    if (result === "auth") orphaned.push(slot);
     if (result !== "ok") {
       console.warn(`disconnect: calendar ${id} delete ended as ${result}`);
     }
@@ -158,7 +180,7 @@ async function disconnect(userId: string): Promise<Response> {
 
   await revokeToken(token.refresh_token as string);
   await forget(userId);
-  return json({ orphaned });
+  return disconnected(orphaned);
 }
 
 /** Which of the player's two Google calendars is actually live right now —
