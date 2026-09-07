@@ -878,15 +878,11 @@ class Api {
         body: {'action': 'secondary', 'enabled': enabled},
       );
 
-  /// Stores the trainings' own Google event colour — trainings always go to
-  /// the primary calendar, but keep a colour of their own (0032).
-  ///
-  /// NOTE (Task 4, 2026-09-07): calendar-manage does not yet handle a
-  /// Colour of the player's trainings — Google event `colorId` 1-11, or null
-  /// for none (the event then takes the calendar's own colour). Trainings
-  /// always live in the primary calendar, so unlike a team there is nothing
-  /// to route. The `training_color` action stores it (0034) and repaints the
-  /// future trainings on the spot.
+  /// Stores the trainings' own Google event colour (0034) and repaints the
+  /// future trainings on the spot — Google event `colorId` 1-11, or null for
+  /// none (the event then takes the calendar's own colour). Trainings always
+  /// live in the primary calendar, so unlike a team there is nothing to
+  /// route.
   static Future<void> setTrainingColor(int? colorId) => _db.functions.invoke(
         'calendar-manage',
         body: {'action': 'training_color', 'color_id': colorId},

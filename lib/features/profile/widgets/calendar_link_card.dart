@@ -63,12 +63,15 @@ class _CalendarLinkCardState extends ConsumerState<CalendarLinkCard> {
   }
 
   Future<void> _disconnect() async {
+    final link = ref.read(myCalendarLinkProvider).value ?? CalendarLink.none;
     final ok = await confirmDialog(
       context,
       title: 'Odpojit kalendář?',
-      message:
-          'Kalendář „Rezervátor" se z Googlu smaže i s tréninky. '
-          'Propojení jde kdykoli obnovit.',
+      message: link.secondaryEnabled
+          ? 'Kalendáře „Rezervátor" i „Rezervátor 2" se z Googlu smažou '
+                'i s tréninky a zápasy. Propojení jde kdykoli obnovit.'
+          : 'Kalendář „Rezervátor" se z Googlu smaže i s tréninky. '
+                'Propojení jde kdykoli obnovit.',
       confirmLabel: 'Odpojit a smazat',
     );
     if (!ok || !mounted) return;
