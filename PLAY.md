@@ -2,11 +2,14 @@
 
 Stejný postup jako u Termínátoru: **push tagu `v*` → `release.yml`** postaví
 podepsané APK + AAB, vydá je na stránce **Releases** a nahraje AAB na
-**internal testing** track Google Play jako koncept.
+**internal testing** track Google Play, kde ho rovnou i vydá — testeři ho
+dostanou, jakmile ho Play zpracuje, bez klikání v Play Console. Interní
+testování je uzavřený track, takže „vydáno" tu znamená jen lidi na seznamu
+testerů; povýšení do produkce zůstává ruční rozhodnutí.
 
 ```
 git tag v1.1.0 → release.yml → podepsané APK+AAB → GitHub Releases
-                                              └→ AAB → Play internal (draft)
+                                              └→ AAB → Play internal (vydáno testerům)
 ```
 
 Podpisový klíč (`upload-keystore.jks`) i `key.properties` jsou **gitignored** —
@@ -107,8 +110,13 @@ git push origin main v1.1.1
 ```
 
 Za pár minut je na stránce **Releases** podepsané `rezervator-v1.1.0.apk`
-(sdílej odkaz) a v Play na internal tracku čeká **koncept** — v Play Console
-ho zkontroluj a vydej testerům.
+(sdílej odkaz) a v Play na internal tracku je vydaná verze pro testery.
+
+Pozor na délku „Co je nového": Play bere 500 znaků na jazyk a
+`tool/whatsnew.dart` delší text **nepustí** — vydání spadne dřív, než se
+někam nahraje. Zkrať záznam v `changelog_data.dart`, přesuň tag a pushni
+znovu. (Dřív se text potichu uřízl uprostřed věty; to prošlo, dokud koncept
+někdo ručně prohlížel.)
 
 ## Demo přístup pro recenzenty Google Play
 

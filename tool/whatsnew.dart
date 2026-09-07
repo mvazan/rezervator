@@ -10,8 +10,8 @@
 // stdout, which would leak into a `> redirect`. Writing the file from here
 // keeps that noise out of the release notes.
 //
-// Play caps "What's new" at 500 chars per language; we trim with an ellipsis
-// if an entry ever runs long (it warns on stderr so it doesn't pass silently).
+// Play caps "What's new" at 500 chars per language; a longer entry fails the
+// release here rather than reaching testers cut off mid-sentence.
 import 'dart:io';
 
 import 'package:rezervator/features/profile/changelog_data.dart';
@@ -36,11 +36,17 @@ void main(List<String> args) {
       : appChangelog.firstWhere((r) => r.version == version,
           orElse: () => throw 'No changelog entry for $version');
 
-  var text = release.changes.map((c) => '• $c').join('\n');
+  final text = release.changes.map((c) => '• $c').join('\n');
+  // Play caps this at 500 per language. This used to trim with an ellipsis
+  // and carry on, which was survivable while the upload landed as a draft
+  // someone reviewed by hand; now the release goes live on the internal
+  // track straight away, so a sentence cut mid-word would reach testers
+  // with nobody in between. Stop the release instead — shorten the entry,
+  // move the tag, push again.
   if (text.length > 500) {
-    stderr.writeln('warning: What\'s-new text is ${text.length} chars (>500); '
-        'Play will reject it — shorten the ${release.version} entry.');
-    text = '${text.substring(0, 497)}...';
+    stderr.writeln('What\'s-new text is ${text.length} chars, Play takes 500 '
+        '— shorten the ${release.version} entry in changelog_data.dart.');
+    exit(1);
   }
 
   if (outPath != null) {
