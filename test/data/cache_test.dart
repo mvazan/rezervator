@@ -2,12 +2,16 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/data/cache.dart';
+import 'package:rezervator/data/live_refresh.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  setUp(() => SharedPreferences.setMockInitialValues({}));
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+    LiveRefresh.resetThrottle();
+  });
 
   test('RowCache round-trips rows per uid and clears on demand', () async {
     const rows = [
@@ -110,5 +114,73 @@ void main() {
     expect(emissions, isEmpty);
     await sub.cancel();
     await live.close();
+  });
+
+  test('zavřený živý stream (spadlý socket) neukončí stream obrazovky',
+      () async {
+    final live = StreamController<List<Map<String, dynamic>>>();
+    var done = false;
+    final sub = cachedRows('u1', 'blocks', () => live.stream)
+        .listen((_) {}, onDone: () => done = true);
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+
+    // Supabase zavírá .stream() při ztrátě kanálu čistě, bez chyby.
+    await live.close();
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+
+    expect(done, isFalse,
+        reason: 'ukončený stream = provider zamrzne na starých datech');
+    unawaited(sub.cancel());
+  });
+
+  test('probuzení appky se přihlásí znovu hned, bez čekání na backoff',
+      () async {
+    final controllers = <StreamController<List<Map<String, dynamic>>>>[];
+    Stream<List<Map<String, dynamic>>> live() {
+      final c = StreamController<List<Map<String, dynamic>>>();
+      controllers.add(c);
+      return c.stream;
+    }
+
+    final emissions = <List<Map<String, dynamic>>>[];
+    final sub = cachedRows('u1', 'blocks', live).listen(emissions.add);
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    await controllers.last.close(); // socket spadl, běží backoff
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(controllers, hasLength(1));
+
+    LiveRefresh.request();
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(controllers, hasLength(2), reason: 'hned, ne za 5 s');
+
+    controllers.last.add([
+      {'id': 'po probuzení'},
+    ]);
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(emissions.last.single['id'], 'po probuzení');
+    unawaited(sub.cancel());
+  });
+
+  test('probuzení obnoví i stream, který se tváří zdravě (half-open socket)',
+      () async {
+    final controllers = <StreamController<List<Map<String, dynamic>>>>[];
+    Stream<List<Map<String, dynamic>>> live() {
+      final c = StreamController<List<Map<String, dynamic>>>();
+      controllers.add(c);
+      return c.stream;
+    }
+
+    final sub = cachedRows('u1', 'blocks', live).listen((_) {});
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    controllers.last.add([
+      {'id': 'stará data'},
+    ]);
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(controllers, hasLength(1));
+
+    LiveRefresh.request();
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(controllers, hasLength(2));
+    unawaited(sub.cancel());
   });
 }

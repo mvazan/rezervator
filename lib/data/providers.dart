@@ -10,6 +10,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'cache.dart';
+import 'live_refresh.dart';
 
 import '../config.dart';
 import '../domain/collation.dart';
@@ -185,10 +186,20 @@ final timeBlocksProvider = StreamProvider<List<TimeBlock>>((ref) {
 /// losing/regaining the network, and a 3s poll is plenty for a banner.
 final offlineProvider = StreamProvider<bool>((ref) async* {
   yield false;
+  // Po probuzení appky je odpojený socket normální stav — supabase ho na
+  // pozadí sám zavírá a teprve teď ho navazuje. Než to doběhne, nemá cenu
+  // hlásit offline (data mezitím dotahuje HTTP re-subscribe).
+  var wokeAt = DateTime.now();
+  final wake = LiveRefresh.stream.listen((_) => wokeAt = DateTime.now());
+  ref.onDispose(wake.cancel);
   // Stream.periodic (not a delayed loop): its timer is cancelled the moment
   // the provider is disposed, so widget tests never leak a pending timer.
-  yield* Stream.periodic(
-      const Duration(seconds: 3), (_) => !_db.realtime.isConnected);
+  yield* Stream.periodic(const Duration(seconds: 3), (_) {
+    if (DateTime.now().difference(wokeAt) < const Duration(seconds: 6)) {
+      return false;
+    }
+    return !_db.realtime.isConnected;
+  });
 });
 
 /// Ticks every five minutes (after an immediate first value) so the roster

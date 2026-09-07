@@ -1,6 +1,9 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'live_refresh.dart';
 
 /// Tiny JSON row cache behind the offline read-only mode: every data stream
 /// writes its latest rows here and replays them as its first emission on the
@@ -78,11 +81,11 @@ Stream<List<Map<String, dynamic>>> cachedRows(
 
   var attempt = 0;
   while (true) {
-    var errored = false;
+    var woke = false;
     // yield* (not `await for`): consumer cancellation only terminates an
     // async* generator at a yield point, so an await-for loop would leave
     // the generator (and its supabase channel) alive after dispose.
-    yield* live().map((rows) {
+    yield* _untilWake(live(), onWake: () => woke = true).map((rows) {
       attempt = 0;
       emitted = true;
       RowCache.write(uid, name, rows);
@@ -92,11 +95,76 @@ Stream<List<Map<String, dynamic>>> cachedRows(
       // forwards the error to cache-less consumers (their error screens
       // still need it).
       if (!emitted) throw e;
-      errored = true;
     });
-    if (!errored) return; // closed cleanly (or after a forwarded error)
+
+    // The app came back to the foreground: re-subscribe right away. A fresh
+    // subscription re-reads the table over HTTP, so the screen catches up
+    // even when realtime is still limping — and it is the only cure for a
+    // socket that looks alive but delivers nothing (half-open after the
+    // phone slept).
+    if (woke) {
+      attempt = 0;
+      continue;
+    }
+
+    // An error and a clean close mean the same thing here: the channel is
+    // gone. Supabase closes .stream() cleanly when its realtime channel
+    // does (and the socket is dropped on purpose whenever the app goes to
+    // the background), so returning would leave the screen frozen on stale
+    // rows until a restart.
     attempt++;
     final delay = switch (attempt) { 1 => 5, 2 => 10, _ => 30 };
-    await Future<void>.delayed(Duration(seconds: delay));
+    await _sleepOrWake(Duration(seconds: delay));
+  }
+}
+
+/// [source] until it ends on its own — or until the app wakes up, whichever
+/// comes first ([onWake] then tells the caller which of the two it was).
+Stream<T> _untilWake<T>(Stream<T> source, {required void Function() onWake}) {
+  final out = StreamController<T>();
+  StreamSubscription<T>? src;
+  StreamSubscription<void>? wake;
+
+  Future<void> stop() async {
+    await wake?.cancel();
+    wake = null;
+    await src?.cancel();
+    src = null;
+    if (!out.isClosed) await out.close();
+  }
+
+  out.onListen = () {
+    src = source.listen(
+      (data) {
+        if (!out.isClosed) out.add(data);
+      },
+      onError: (Object e, StackTrace st) {
+        if (!out.isClosed) out.addError(e, st);
+      },
+      onDone: stop,
+    );
+    wake = LiveRefresh.stream.listen((_) {
+      onWake();
+      stop();
+    });
+  };
+  out.onCancel = stop;
+  return out.stream;
+}
+
+/// Waits out the retry backoff — but no longer than the next wake-up.
+Future<void> _sleepOrWake(Duration delay) async {
+  final done = Completer<void>();
+  void finish() {
+    if (!done.isCompleted) done.complete();
+  }
+
+  final timer = Timer(delay, finish);
+  final wake = LiveRefresh.stream.listen((_) => finish());
+  try {
+    await done.future;
+  } finally {
+    timer.cancel();
+    await wake.cancel();
   }
 }
