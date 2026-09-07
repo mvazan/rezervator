@@ -15,7 +15,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// did not expect fails on its own assertions (the card swallows the throw
 /// into an error snack).
 Future<Uri> noConsent() async => throw StateError('unexpected consent');
-Future<bool> noDisconnect() async => throw StateError('unexpected disconnect');
+Future<List<CalendarSlot>> noDisconnect() async =>
+    throw StateError('unexpected disconnect');
 Future<void> noReminders(
   List<int> _, {
   CalendarSlot calendar = CalendarSlot.primary,
@@ -24,7 +25,7 @@ Future<void> noMatchTeams(List<CalendarTeam> _) async =>
     throw StateError('unexpected match teams');
 Future<void> noTeamColors(Map<String, int?> _) async =>
     throw StateError('unexpected team colors');
-Future<void> noSecondaryCalendar(bool _) async =>
+Future<bool> noSecondaryCalendar(bool _) async =>
     throw StateError('unexpected secondary calendar');
 Future<void> noTrainingColor(int? _) async =>
     throw StateError('unexpected training color');
@@ -618,7 +619,7 @@ void main() {
       Stream<CalendarLink> link, {
       Future<Uri> Function() consentUrl = noConsent,
       void Function(String url)? openUrl,
-      Future<bool> Function() disconnect = noDisconnect,
+      Future<List<CalendarSlot>> Function() disconnect = noDisconnect,
       Future<void> Function(List<int> minutes, {CalendarSlot calendar})
           setReminders =
           noReminders,
@@ -626,7 +627,7 @@ void main() {
           noMatchTeams,
       Future<void> Function(Map<String, int?> colors) setTeamColors =
           noTeamColors,
-      Future<void> Function(bool enabled) setSecondaryCalendar =
+      Future<bool> Function(bool enabled) setSecondaryCalendar =
           noSecondaryCalendar,
       Future<void> Function(int? colorId) setTrainingColor = noTrainingColor,
       Stream<List<CalendarTeam>>? teams,
@@ -792,7 +793,7 @@ void main() {
           Stream.value(linked),
           disconnect: () async {
             calls++;
-            return false;
+            return const <CalendarSlot>[];
           },
         ),
       );
@@ -810,7 +811,10 @@ void main() {
     testWidgets('an orphaned calendar is reported so the user deletes it '
         'in Google', (tester) async {
       await tester.pumpWidget(
-        card(Stream.value(linked), disconnect: () async => true),
+        card(
+          Stream.value(linked),
+          disconnect: () async => const [CalendarSlot.primary],
+        ),
       );
       await tester.pumpAndSettle();
 
@@ -821,8 +825,57 @@ void main() {
 
       expect(
         find.text(
-          'Odpojeno. Přístup byl odvolaný už dřív, takže kalendář '
-          '„Rezervátor" v Googlu zůstal — smaž si ho tam sám(a).',
+          'Odpojeno, ale kalendář „Rezervátor" v Googlu zůstal — smazat '
+          'se ho nepodařilo, smaž si ho tam prosím sám(a).',
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('only the second calendar orphaned names THAT one, not the '
+        'primary', (tester) async {
+      await tester.pumpWidget(
+        card(
+          Stream.value(linked),
+          disconnect: () async => const [CalendarSlot.secondary],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Odpojit'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Odpojit a smazat'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text(
+          'Odpojeno, ale kalendář „Rezervátor 2" v Googlu zůstal — smazat '
+          'se ho nepodařilo, smaž si ho tam prosím sám(a).',
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('both calendars orphaned are named together, in plural',
+        (tester) async {
+      await tester.pumpWidget(
+        card(
+          Stream.value(linked),
+          disconnect: () async =>
+              const [CalendarSlot.primary, CalendarSlot.secondary],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Odpojit'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Odpojit a smazat'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text(
+          'Odpojeno, ale kalendáře „Rezervátor" a „Rezervátor 2" v Googlu '
+          'zůstaly — smazat se je nepodařilo, smaž si je tam prosím sám(a).',
         ),
         findsOneWidget,
       );
@@ -1030,7 +1083,10 @@ void main() {
       await tester.pumpWidget(
         card(
           Stream.value(const CalendarLink(status: CalendarLinkStatus.linked)),
-          setSecondaryCalendar: (enabled) async => called.add(enabled),
+          setSecondaryCalendar: (enabled) async {
+            called.add(enabled);
+            return false;
+          },
         ),
       );
       await tester.pumpAndSettle();
@@ -1054,7 +1110,10 @@ void main() {
               secondaryEnabled: true,
             ),
           ),
-          setSecondaryCalendar: (_) async => called++,
+          setSecondaryCalendar: (_) async {
+            called++;
+            return false;
+          },
         ),
       );
       await tester.pumpAndSettle();
@@ -1083,7 +1142,10 @@ void main() {
               secondaryEnabled: true,
             ),
           ),
-          setSecondaryCalendar: (enabled) async => called.add(enabled),
+          setSecondaryCalendar: (enabled) async {
+            called.add(enabled);
+            return false;
+          },
         ),
       );
       await tester.pumpAndSettle();
@@ -1094,6 +1156,35 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(called, [false]);
+    });
+
+    testWidgets('turning Druhý kalendář off tells the player when Google '
+        'kept "Rezervátor 2"', (tester) async {
+      await tester.pumpWidget(
+        card(
+          Stream.value(
+            const CalendarLink(
+              status: CalendarLinkStatus.linked,
+              secondaryEnabled: true,
+            ),
+          ),
+          setSecondaryCalendar: (_) async => true,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(SwitchListTile, 'Druhý kalendář'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Vypnout a smazat'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text(
+          'Druhý kalendář je vypnutý, ale „Rezervátor 2" v Googlu zůstal '
+          '— smazat se ho nepodařilo, smaž si ho tam prosím sám(a).',
+        ),
+        findsOneWidget,
+      );
     });
 
     testWidgets('Připomínky hlavního and druhého each save to their own '

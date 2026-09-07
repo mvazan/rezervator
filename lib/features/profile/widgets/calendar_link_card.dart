@@ -7,6 +7,25 @@ import '../../../domain/models.dart';
 import 'calendar_teams_sheet.dart';
 import 'event_color_picker.dart';
 
+/// What the player has to clean up by hand after a disconnect: Google
+/// refused to delete these calendars (the grant was already revoked, or the
+/// DELETE itself came back 401), and the revoke that follows puts them out
+/// of the app's reach for good — so they are named, and the message says
+/// only what is certain. It deliberately does NOT guess at a cause: the
+/// grant may have been revoked earlier, or the token may have died between
+/// the refresh and the delete, and the player can act on neither.
+String _orphanedText(List<CalendarSlot> orphaned) {
+  final names = [
+    for (final slot in orphaned)
+      slot == CalendarSlot.secondary ? '„Rezervátor 2"' : '„Rezervátor"',
+  ];
+  return names.length == 1
+      ? 'Odpojeno, ale kalendář ${names.single} v Googlu zůstal — smazat '
+            'se ho nepodařilo, smaž si ho tam prosím sám(a).'
+      : 'Odpojeno, ale kalendáře ${names.join(' a ')} v Googlu zůstaly — '
+            'smazat se je nepodařilo, smaž si je tam prosím sám(a).';
+}
+
 /// Google Calendar link on Můj profil: connect (opens Google's consent page
 /// in the browser), show the current state, edit reminders, turn the second
 /// calendar on/off, pick the teams whose matches go to each calendar (and
@@ -30,7 +49,7 @@ class CalendarLinkCard extends ConsumerStatefulWidget {
   /// (the Api ones need a live Supabase client).
   final Future<Uri> Function() consentUrl;
   final void Function(String url) openUrl;
-  final Future<bool> Function() disconnect;
+  final Future<List<CalendarSlot>> Function() disconnect;
   final Future<void> Function(List<int> minutes, {CalendarSlot calendar})
   setReminders;
   final Future<void> Function(List<CalendarTeam> teams) setMatchTeams;
@@ -38,7 +57,7 @@ class CalendarLinkCard extends ConsumerStatefulWidget {
   /// A followed team's shared colour (0036) — separate from [setMatchTeams]
   /// (which never carries one any more): see `showCalendarTeamsSheet`.
   final Future<void> Function(Map<String, int?> colors) setTeamColors;
-  final Future<void> Function(bool enabled) setSecondaryCalendar;
+  final Future<bool> Function(bool enabled) setSecondaryCalendar;
   final Future<void> Function(int? colorId) setTrainingColor;
 
   @override
@@ -88,10 +107,9 @@ class _CalendarLinkCardState extends ConsumerState<CalendarLinkCard> {
       if (mounted) {
         snack(
           context,
-          orphaned
-              ? 'Odpojeno. Přístup byl odvolaný už dřív, takže kalendář '
-                    '„Rezervátor" v Googlu zůstal — smaž si ho tam sám(a).'
-              : 'Kalendář odpojen a smazán.',
+          orphaned.isEmpty
+              ? 'Kalendář odpojen a smazán.'
+              : _orphanedText(orphaned),
         );
       }
     } catch (_) {
@@ -128,11 +146,23 @@ class _CalendarLinkCardState extends ConsumerState<CalendarLinkCard> {
     }
     setState(() => _secondaryBusy = true);
     try {
-      await tryAction(
+      // The backend deletes "Rezervátor 2" before it answers, and tells us
+      // when Google would not let it — exactly like a disconnect. Dropping
+      // that on the floor would leave the player with a calendar they can
+      // no longer reach from the app and no idea it is there.
+      var orphaned = false;
+      final ok = await tryAction(
         context,
-        () => widget.setSecondaryCalendar(enabled),
+        () async => orphaned = await widget.setSecondaryCalendar(enabled),
         errorText: friendlyDbError,
       );
+      if (ok && orphaned && mounted) {
+        snack(
+          context,
+          'Druhý kalendář je vypnutý, ale „Rezervátor 2" v Googlu zůstal '
+          '— smazat se ho nepodařilo, smaž si ho tam prosím sám(a).',
+        );
+      }
     } finally {
       if (mounted) setState(() => _secondaryBusy = false);
     }
