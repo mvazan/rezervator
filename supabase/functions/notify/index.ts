@@ -35,10 +35,14 @@ import {
   GoogleAuthError,
   matchEventBody,
   matchEventId,
+  matchTarget,
   type MatchRow,
+  possibleMatchCalendars,
   refreshAccessToken,
   reservationEventBody,
   upsertEvent,
+  type WriteResult,
+  worstResult,
 } from "../_shared/google_calendar.ts";
 
 const supabase = createClient(
@@ -105,21 +109,42 @@ async function notifyRecipient(
 // Google Calendar sync (0023)
 // ---------------------------------------------------------------------------
 
-/** Link + token of one player, or null (not linked / broken / the calendar
- * was never created) — then nothing is synced, silently. */
-async function calendarLink(
-  userId: string,
-): Promise<{ refreshToken: string; calendarId: string } | null> {
+/** Link + tokens of one player, or null (not linked / broken / the primary
+ * calendar was never created) — then nothing is synced, silently.
+ * `secondaryCalendarId` is gated on `secondary_enabled` even though it lives
+ * in a separate table: the two are meant to change together (calendar-manage
+ * clears both on the way out), and gating here is one more guard against a
+ * stale id ever being treated as live if they ever drifted apart. */
+type CalendarLinkInfo = {
+  refreshToken: string;
+  calendarId: string;
+  secondaryCalendarId: string | null;
+  reminderMinutes: number[];
+  reminderMinutesSecondary: number[];
+  trainingColorId: number | null;
+};
+
+async function calendarLink(userId: string): Promise<CalendarLinkInfo | null> {
   const { data: link } = await supabase.from("google_calendar_links")
-    .select("status").eq("user_id", userId).maybeSingle();
+    .select(
+      "status, secondary_enabled, reminder_minutes, reminder_minutes_secondary, training_color_id",
+    )
+    .eq("user_id", userId).maybeSingle();
   if (link?.status !== "linked") return null;
   const { data: token } = await supabase.from("google_calendar_tokens")
-    .select("refresh_token, google_calendar_id")
+    .select("refresh_token, google_calendar_id, google_calendar_id_secondary")
     .eq("user_id", userId).maybeSingle();
   if (!token?.refresh_token || !token.google_calendar_id) return null;
   return {
     refreshToken: token.refresh_token as string,
     calendarId: token.google_calendar_id as string,
+    secondaryCalendarId: link.secondary_enabled
+      ? (token.google_calendar_id_secondary as string | null) ?? null
+      : null,
+    reminderMinutes: (link.reminder_minutes as number[] | null) ?? [],
+    reminderMinutesSecondary:
+      (link.reminder_minutes_secondary as number[] | null) ?? [],
+    trainingColorId: (link.training_color_id as number | null) ?? null,
   };
 }
 
@@ -159,19 +184,17 @@ async function markCalendarBroken(userId: string, reason: string) {
   );
 }
 
-/** How many minutes ahead this player wants a training reminder. */
-async function reminderMinutesOf(userId: string): Promise<number[]> {
-  const { data } = await supabase.from("google_calendar_links")
-    .select("reminder_minutes").eq("user_id", userId).maybeSingle();
-  return (data?.reminder_minutes as number[] | null) ?? [];
-}
-
 /** What the calendar should show for this reservation — or null when it is
  * (no longer) this player's live future training: deleted, re-assigned to
  * someone else, cancelled, or already past (backfill and
  * my_future_reservations draw the same line at Prague-today). Revalidation:
- * the truth is the DB at run time, not the job payload. */
-async function reservationEvent(userId: string, reservationId: string) {
+ * the truth is the DB at run time, not the job payload. Trainings always go
+ * to the primary calendar, with the player's own training colour. */
+async function reservationEvent(
+  userId: string,
+  reservationId: string,
+  link: CalendarLinkInfo,
+) {
   const { data: reservation } = await supabase.from("reservations")
     .select("player_id, date, block_id, lane, cancelled_at, tenant_id")
     .eq("id", reservationId).maybeSingle();
@@ -196,22 +219,73 @@ async function reservationEvent(userId: string, reservationId: string) {
       lane: reservation.lane as number,
       alley_name: tenant.name as string,
     },
-    await reminderMinutesOf(userId),
+    link.reminderMinutes,
+    link.trainingColorId,
   );
 }
 
-/** What the calendar should show for this match — or null when it is no
- * longer one of the player's future matches: the slot is gone, it has been
- * played, or they stopped following that team. my_future_matches draws all
- * three lines already, so asking it for this one match IS the revalidation;
- * like a reservation, the truth is the DB at run time, not the payload. */
-async function matchEvent(userId: string, matchId: string) {
+/** Reconciles one (player, reservation): reality decides whether the event
+ * is written (into the primary calendar — trainings never go anywhere
+ * else) or deleted. */
+async function reservationSync(
+  userId: string,
+  reservationId: string,
+  link: CalendarLinkInfo,
+  accessToken: string,
+): Promise<WriteResult> {
+  const eventId = await eventIdFor(userId, reservationId);
+  const event = await reservationEvent(userId, reservationId, link);
+  return event
+    ? await upsertEvent(accessToken, link.calendarId, eventId, event)
+    : await deleteEvent(accessToken, link.calendarId, eventId);
+}
+
+/** Reconciles one (player, match): my_future_matches (0032) draws the same
+ * "still live and followed" line as everywhere else, so asking it for this
+ * one match IS the revalidation, and it already carries the followed team's
+ * `calendar`/`color_id`. A live match is written into its target calendar
+ * (matchTarget) and swept from the OTHER one, same as writeFutureMatches —
+ * and only once the write itself succeeded: deleting first (or regardless)
+ * would, on a failed write, leave the match in NEITHER calendar until the
+ * next sync. A match that is no longer live (slot gone, unfollowed, already
+ * played) is deleted from every calendar it could be sitting in
+ * (possibleMatchCalendars): its event id never changes when a team moves
+ * calendars, only where it was last WRITTEN, and that history is not kept —
+ * so the only safe cleanup is to try both (idempotent: the one it was never
+ * in just answers 404/410 = "ok"). */
+async function matchSync(
+  userId: string,
+  matchId: string,
+  link: CalendarLinkInfo,
+  accessToken: string,
+): Promise<WriteResult> {
   const { data } = await supabase.rpc("my_future_matches", { p_user: userId });
   const row = ((data ?? []) as MatchRow[])
     .find((m) => m.match_id === matchId);
-  if (!row) return null;
+  const eventId = await matchEventId(userId, matchId);
+  const calendars = { primary: link.calendarId, secondary: link.secondaryCalendarId };
+
+  if (!row) {
+    const results = await Promise.all(
+      possibleMatchCalendars(calendars).map((calendarId) =>
+        deleteEvent(accessToken, calendarId, eventId)
+      ),
+    );
+    return worstResult(results);
+  }
+
   const { match_id: _ignored, ...source } = row;
-  return matchEventBody(source, await reminderMinutesOf(userId));
+  const to = matchTarget(row.calendar, calendars);
+  const body = matchEventBody(
+    source,
+    to.secondary ? link.reminderMinutesSecondary : link.reminderMinutes,
+    row.color_id,
+  );
+  const result = await upsertEvent(accessToken, to.calendarId, eventId, body);
+  if (result === "ok" && to.otherId) {
+    await deleteEvent(accessToken, to.otherId, eventId);
+  }
+  return result;
 }
 
 /** Reconciles one (player, reservation) or (player, match): reality decides
@@ -239,15 +313,9 @@ async function jobCalendarSync(
     return false;
   }
 
-  const eventId = matchId
-      ? await matchEventId(userId, matchId)
-      : await eventIdFor(userId, reservationId!);
-  const event = matchId
-      ? await matchEvent(userId, matchId)
-      : await reservationEvent(userId, reservationId!);
-  const result = event
-    ? await upsertEvent(accessToken, link.calendarId, eventId, event)
-    : await deleteEvent(accessToken, link.calendarId, eventId);
+  const result = matchId
+    ? await matchSync(userId, matchId, link, accessToken)
+    : await reservationSync(userId, reservationId!, link, accessToken);
 
   switch (result) {
     case "ok":

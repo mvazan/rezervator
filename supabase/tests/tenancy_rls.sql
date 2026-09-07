@@ -952,15 +952,14 @@ end $$;
 
 
 -- ---------------------------------------------------------------------------
--- Matches in the calendar (0027): the team choice, the producers, the RPCs
+-- Matches in the calendar (0027, team choice moved to calendar_teams/
+-- set_calendar_teams_for by 0032+Task 3): the producers and the RPCs
 -- ---------------------------------------------------------------------------
 reset role;
 do $$
 begin
   if has_function_privilege('authenticated',
-       'public.set_calendar_match_teams_for(uuid, text[])', 'execute')
-     or has_function_privilege('authenticated',
-          'public.my_future_matches(uuid)', 'execute')
+       'public.my_future_matches(uuid)', 'execute')
      or has_function_privilege('authenticated',
           'public.enqueue_match_calendar_sync(uuid, uuid)', 'execute')
      or has_function_privilege('authenticated',
@@ -968,12 +967,26 @@ begin
     raise exception 'FAIL: a 0027 calendar helper is callable by app roles';
   end if;
   if not has_function_privilege('service_role',
-       'public.set_calendar_match_teams_for(uuid, text[])', 'execute')
-     or not has_function_privilege('service_role',
-          'public.my_future_matches(uuid)', 'execute') then
+       'public.my_future_matches(uuid)', 'execute') then
     raise exception 'FAIL: service_role lacks a 0027 calendar RPC';
   end if;
   raise notice 'OK: 0027 calendar RPCs are server-only';
+end $$;
+
+-- 0033: match_teams and set_calendar_match_teams_for are actually gone, not
+-- merely unused.
+do $$
+begin
+  if exists (select 1 from information_schema.columns
+             where table_schema = 'public' and table_name = 'google_calendar_links'
+               and column_name = 'match_teams') then
+    raise exception 'FAIL: google_calendar_links.match_teams still exists';
+  end if;
+  if exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+             where n.nspname = 'public' and p.proname = 'set_calendar_match_teams_for') then
+    raise exception 'FAIL: set_calendar_match_teams_for still exists';
+  end if;
+  raise notice 'OK: match_teams and set_calendar_match_teams_for were dropped by 0033';
 end $$;
 
 -- A's admin (linked above) follows SKK Veverky Brno A; a home and an away
@@ -987,34 +1000,21 @@ declare
   v_away uuid;
   v_other uuid;
   v_d date := (now() at time zone 'Europe/Prague')::date + 40;
-  v_stored text[];
+  v_stored jsonb;
   v_jobs int;
 begin
-  -- normalised: trimmed, distinct, sorted, blanks dropped
-  v_stored := set_calendar_match_teams_for(v_uid,
-    array[' SKK Veverky Brno A ', 'SKK Veverky Brno A', '', 'KS Devítka Brno B']);
-  if v_stored <> array['KS Devítka Brno B', 'SKK Veverky Brno A'] then
-    raise exception 'FAIL: match teams not normalised: %', v_stored;
+  -- set_calendar_teams_for (0032) only trims, it does not dedupe/sort/drop
+  -- blanks itself — that is calendar-manage's job (validateTeamChoices) —
+  -- so this seeds two already-distinct, pre-trimmed names, one with padding
+  -- to check the trim.
+  v_stored := set_calendar_teams_for(v_uid, jsonb_build_array(
+    jsonb_build_object('team', ' SKK Veverky Brno A ', 'calendar', 'primary'),
+    jsonb_build_object('team', 'KS Devítka Brno B', 'calendar', 'primary')));
+  if (select array_agg(team order by team) from calendar_teams where user_id = v_uid)
+     <> array['KS Devítka Brno B', 'SKK Veverky Brno A'] then
+    raise exception 'FAIL: team names not trimmed: %',
+      (select array_agg(team) from calendar_teams where user_id = v_uid);
   end if;
-  -- match_teams itself is dead weight since 0032 (nothing reads it any
-  -- more); mirror the same pick into calendar_teams so the rest of this
-  -- pre-existing scenario — the trigger and my_future_matches below — still
-  -- sees v_uid as a follower, exactly as the migration's own backfill would.
-  insert into calendar_teams (user_id, team) select v_uid, unnest(v_stored);
-  begin
-    perform set_calendar_match_teams_for(v_uid,
-      (select array_agg('T' || g) from generate_series(1, 21) g));
-    raise exception 'FAIL: 21 teams accepted';
-  exception when others then
-    if sqlerrm <> 'bad_teams' then raise; end if;
-  end;
-  begin
-    perform set_calendar_match_teams_for(
-      '10000000-0000-0000-0000-000000000003', array['X']);
-    raise exception 'FAIL: teams stored for a player without a link';
-  exception when others then
-    if sqlerrm <> 'unknown_link' then raise; end if;
-  end;
 
   select id into v_type from priority_slot_types
     where tenant_id = v_tenant and is_match and builtin;
@@ -1101,8 +1101,7 @@ begin
   end if;
 
   -- dropping the team: no more jobs for its matches, my_future_matches empty
-  perform set_calendar_match_teams_for(v_uid, '{}'::text[]);
-  delete from calendar_teams where user_id = v_uid;
+  perform set_calendar_teams_for(v_uid, '[]'::jsonb);
   delete from notification_jobs where dedupe_key like 'calendar:%:match:%';
   update priority_slots set description = 'KP1 Sever (přeloženo)' where id = v_home;
   if exists (select 1 from notification_jobs where dedupe_key like 'calendar:%:match:%') then
@@ -1252,9 +1251,9 @@ end $$;
 -- Second calendar and match colours (0032): a followed team is a row in
 -- calendar_teams (which calendar, which Google event colour), not an entry
 -- in google_calendar_links.match_teams any more. match_teams and
--- set_calendar_match_teams_for stay in place (still written by the app)
--- until Task 3 stops reading them; match_calendar_followers and
--- my_future_matches read calendar_teams exclusively from here on.
+-- set_calendar_match_teams_for are gone outright (0033, once calendar-manage
+-- moved to set_calendar_teams_for in Task 3); match_calendar_followers and
+-- my_future_matches read calendar_teams exclusively.
 -- ---------------------------------------------------------------------------
 reset role;
 do $$

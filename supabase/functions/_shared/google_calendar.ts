@@ -591,6 +591,87 @@ export function matchTarget(
   };
 }
 
+/** Every calendar id a match's event could currently be sitting in. Its
+ * event id never changes when a followed team moves from one calendar to
+ * the other — only where it gets WRITTEN does (see matchTarget/
+ * writeFutureMatches) — so cleaning up a match that is no longer live at
+ * all (deleted, unfollowed, already played) must be attempted against every
+ * calendar it could have last landed in, not just today's primary. Without
+ * a second calendar there is only ever the one. */
+export function possibleMatchCalendars(
+  calendars: { primary: string; secondary: string | null },
+): string[] {
+  return calendars.secondary
+    ? [calendars.primary, calendars.secondary]
+    : [calendars.primary];
+}
+
+/** Folds the results of the same cleanup attempted against every calendar
+ * (possibleMatchCalendars) into one verdict for the caller's retry switch:
+ * any "retry" wins outright — a transient failure on EITHER calendar must
+ * not be swallowed by an "ok" from the other one, or that calendar's stale
+ * event would never be retried — otherwise the first non-"ok" wins (auth
+ * and gone are both terminal, either is worth reporting), otherwise
+ * everything came back "ok". */
+export function worstResult(results: WriteResult[]): WriteResult {
+  if (results.includes("retry")) return "retry";
+  return results.find((r) => r !== "ok") ?? "ok";
+}
+
+/** One player's choice for one followed team — calendar-manage's `teams`
+ * action payload, once validated. */
+export type TeamChoice = {
+  team: string;
+  calendar: "primary" | "secondary";
+  color_id: number | null;
+};
+
+/** Normalises and validates an untrusted `teams` payload before it reaches
+ * set_calendar_teams_for: the 0032 RPC only checks the item COUNT and that
+ * the caller has a links row — per-item shape is the edge function's job,
+ * same as every other action's client input. Trims each team name and
+ * rejects a blank or implausibly long one (mirrors the 80-char limit the
+ * pre-0032 RPC enforced itself, which the table's own CHECK constraints do
+ * not), an unknown `calendar`, or a `color_id` outside Google's 1-11 (both
+ * a missing key and an explicit `null` mean "no colour"). De-duplicates by
+ * team name — first occurrence wins, as if a repeat were just re-ticking
+ * the same checkbox — so a client bug can never trip the table's
+ * (user_id, team) primary key. Returns `null` to reject the WHOLE payload:
+ * not an array, more than 20 entries, or one entry that cannot be made
+ * valid. */
+export function validateTeamChoices(input: unknown): TeamChoice[] | null {
+  if (!Array.isArray(input) || input.length > 20) return null;
+  const seen = new Set<string>();
+  const out: TeamChoice[] = [];
+  for (const item of input) {
+    if (typeof item !== "object" || item === null) return null;
+    const raw = item as Record<string, unknown>;
+
+    const team = typeof raw.team === "string" ? raw.team.trim() : "";
+    if (!team || team.length > 80) return null;
+
+    if (
+      raw.calendar != null && raw.calendar !== "primary" &&
+      raw.calendar !== "secondary"
+    ) {
+      return null;
+    }
+    const calendar = raw.calendar === "secondary" ? "secondary" : "primary";
+
+    let color_id: number | null = null;
+    if (raw.color_id != null) {
+      const n = Number(raw.color_id);
+      if (!Number.isInteger(n) || n < 1 || n > 11) return null;
+      color_id = n;
+    }
+
+    if (seen.has(team)) continue; // first occurrence wins
+    seen.add(team);
+    out.push({ team, calendar, color_id });
+  }
+  return out;
+}
+
 /** Deletes the event. Already gone (404/410) is done — deletion is
  * idempotent: the job may have been created before the event ever existed. */
 export async function deleteEvent(

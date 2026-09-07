@@ -1584,36 +1584,6 @@ $$;
 ALTER FUNCTION "public"."seed_tenant_defaults"() OWNER TO "postgres";
 
 
-CREATE OR REPLACE FUNCTION "public"."set_calendar_match_teams_for"("p_user" "uuid", "p_teams" "text"[]) RETURNS "text"[]
-    LANGUAGE "plpgsql" SECURITY DEFINER
-    SET "search_path" TO 'public'
-    AS $$
-declare
-  v_teams text[];
-begin
-  select coalesce(array_agg(distinct t order by t), '{}'::text[])
-    into v_teams
-    from (select trim(x) as t
-            from unnest(coalesce(p_teams, '{}'::text[])) as x) s
-    where t <> '';
-  if array_length(v_teams, 1) > 20
-     or exists (select 1 from unnest(v_teams) t where length(t) > 80) then
-    raise exception 'bad_teams';
-  end if;
-  update google_calendar_links
-    set match_teams = v_teams, updated_at = now()
-    where user_id = p_user;
-  if not found then
-    raise exception 'unknown_link';
-  end if;
-  return v_teams;
-end;
-$$;
-
-
-ALTER FUNCTION "public"."set_calendar_match_teams_for"("p_user" "uuid", "p_teams" "text"[]) OWNER TO "postgres";
-
-
 CREATE OR REPLACE FUNCTION "public"."set_calendar_reminders_for"("p_user" "uuid", "p_minutes" integer[], "p_calendar" "text" DEFAULT 'primary'::"text") RETURNS integer[]
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -2045,11 +2015,9 @@ CREATE TABLE IF NOT EXISTS "public"."google_calendar_links" (
     "reminder_minutes" integer[] DEFAULT '{}'::integer[] NOT NULL,
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
-    "match_teams" "text"[] DEFAULT '{}'::"text"[] NOT NULL,
     "secondary_enabled" boolean DEFAULT false NOT NULL,
     "reminder_minutes_secondary" integer[] DEFAULT '{}'::integer[] NOT NULL,
     "training_color_id" smallint,
-    CONSTRAINT "google_calendar_links_match_teams_check" CHECK ((COALESCE("array_length"("match_teams", 1), 0) <= 20)),
     CONSTRAINT "google_calendar_links_reminder_minutes_check" CHECK (((COALESCE("array_length"("reminder_minutes", 1), 0) <= 5) AND (0 <= ALL ("reminder_minutes")) AND (40320 >= ALL ("reminder_minutes")))),
     CONSTRAINT "google_calendar_links_reminder_minutes_secondary_check" CHECK (((COALESCE("array_length"("reminder_minutes_secondary", 1), 0) <= 5) AND (0 <= ALL ("reminder_minutes_secondary")) AND (40320 >= ALL ("reminder_minutes_secondary")))),
     CONSTRAINT "google_calendar_links_status_check" CHECK (("status" = ANY (ARRAY['pending'::"text", 'linked'::"text", 'broken'::"text", 'unlinked'::"text"]))),
@@ -2061,10 +2029,6 @@ ALTER TABLE "public"."google_calendar_links" OWNER TO "postgres";
 
 
 COMMENT ON COLUMN "public"."google_calendar_links"."status" IS 'pending (token stored, calendar not yet created) | linked | broken (token revoked / calendar gone) | unlinked (disconnected)';
-
-
-
-COMMENT ON COLUMN "public"."google_calendar_links"."match_teams" IS 'Teams whose matches go to the calendar — home_team/away_team strings of priority_slots; empty = none.';
 
 
 
@@ -2900,11 +2864,6 @@ GRANT ALL ON FUNCTION "public"."save_placeholder_player"("p_id" "uuid", "p_displ
 
 REVOKE ALL ON FUNCTION "public"."seed_demo_member"("p_email" "text") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."seed_demo_member"("p_email" "text") TO "service_role";
-
-
-
-REVOKE ALL ON FUNCTION "public"."set_calendar_match_teams_for"("p_user" "uuid", "p_teams" "text"[]) FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."set_calendar_match_teams_for"("p_user" "uuid", "p_teams" "text"[]) TO "service_role";
 
 
 

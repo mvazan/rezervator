@@ -6,8 +6,11 @@ import {
   matchEventBody,
   matchEventId,
   matchTarget,
+  possibleMatchCalendars,
   remindersFor,
   reservationEventBody,
+  validateTeamChoices,
+  worstResult,
 } from "./google_calendar.ts";
 
 const USER = "6f9c1d2e-0a1b-4c3d-8e9f-a0b1c2d3e4f5";
@@ -244,4 +247,99 @@ Deno.test("matchTarget: with a second calendar each team gets its own, and "
     otherId: "cal-a",
     secondary: true,
   });
+});
+
+Deno.test("possibleMatchCalendars: only the primary without a second calendar", () => {
+  assertEquals(possibleMatchCalendars({ primary: "cal-a", secondary: null }), [
+    "cal-a",
+  ]);
+});
+
+Deno.test("possibleMatchCalendars: both, primary first, when there is a second", () => {
+  assertEquals(
+    possibleMatchCalendars({ primary: "cal-a", secondary: "cal-b" }),
+    ["cal-a", "cal-b"],
+  );
+});
+
+Deno.test("worstResult: all ok stays ok, including the empty case", () => {
+  assertEquals(worstResult([]), "ok");
+  assertEquals(worstResult(["ok"]), "ok");
+  assertEquals(worstResult(["ok", "ok"]), "ok");
+});
+
+Deno.test("worstResult: a single non-ok result wins", () => {
+  assertEquals(worstResult(["ok", "gone"]), "gone");
+  assertEquals(worstResult(["auth", "ok"]), "auth");
+});
+
+Deno.test("worstResult: retry always wins, even next to auth/gone", () => {
+  assertEquals(worstResult(["ok", "retry"]), "retry");
+  assertEquals(worstResult(["gone", "retry"]), "retry");
+  assertEquals(worstResult(["retry", "auth"]), "retry");
+});
+
+Deno.test("validateTeamChoices: a normal payload passes through, trimmed, calendar/colour defaulted", () => {
+  assertEquals(
+    validateTeamChoices([
+      { team: " SKK Veverky Brno A ", calendar: "secondary", color_id: 9 },
+      { team: "KS Devítka Brno B" },
+    ]),
+    [
+      { team: "SKK Veverky Brno A", calendar: "secondary", color_id: 9 },
+      { team: "KS Devítka Brno B", calendar: "primary", color_id: null },
+    ],
+  );
+});
+
+Deno.test("validateTeamChoices: an explicit null colour is the same as omitting it", () => {
+  assertEquals(
+    validateTeamChoices([{ team: "X", color_id: null }]),
+    [{ team: "X", calendar: "primary", color_id: null }],
+  );
+});
+
+Deno.test("validateTeamChoices: duplicate team names collapse, first occurrence wins", () => {
+  assertEquals(
+    validateTeamChoices([
+      { team: "X", calendar: "primary", color_id: 2 },
+      { team: "X", calendar: "secondary", color_id: 5 },
+    ]),
+    [{ team: "X", calendar: "primary", color_id: 2 }],
+  );
+});
+
+Deno.test("validateTeamChoices: rejects a non-array or more than 20 entries", () => {
+  assertEquals(validateTeamChoices(null), null);
+  assertEquals(validateTeamChoices("nope"), null);
+  assertEquals(validateTeamChoices({ team: "X" }), null);
+  assertEquals(
+    validateTeamChoices(
+      Array.from({ length: 21 }, (_, i) => ({ team: `T${i}` })),
+    ),
+    null,
+  );
+});
+
+Deno.test("validateTeamChoices: rejects a blank or implausibly long team name", () => {
+  assertEquals(validateTeamChoices([{ team: "" }]), null);
+  assertEquals(validateTeamChoices([{ team: "   " }]), null);
+  assertEquals(validateTeamChoices([{ team: 42 }]), null);
+  assertEquals(validateTeamChoices([{ team: "x".repeat(81) }]), null);
+});
+
+Deno.test("validateTeamChoices: rejects an unknown calendar", () => {
+  assertEquals(validateTeamChoices([{ team: "X", calendar: "tertiary" }]), null);
+});
+
+Deno.test("validateTeamChoices: rejects a colour outside 1-11", () => {
+  assertEquals(validateTeamChoices([{ team: "X", color_id: 0 }]), null);
+  assertEquals(validateTeamChoices([{ team: "X", color_id: 12 }]), null);
+  assertEquals(validateTeamChoices([{ team: "X", color_id: 1.5 }]), null);
+  assertEquals(validateTeamChoices([{ team: "X", color_id: "not a number" }]), null);
+});
+
+Deno.test("validateTeamChoices: rejects a non-object entry", () => {
+  assertEquals(validateTeamChoices(["X"]), null);
+  assertEquals(validateTeamChoices([null]), null);
 });

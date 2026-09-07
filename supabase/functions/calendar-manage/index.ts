@@ -1,12 +1,12 @@
 // calendar-manage — actions on the linked calendar that the player asked for
 // and that must finish before the app shows the result.
 //
-// `disconnect`, `reminders` and `match_teams`. Deployed WITHOUT --no-verify-jwt (unlike
-// notify and calendar-oauth-callback): a signed-in player calls it from the
-// app through functions.invoke, which attaches their JWT, and the platform
-// verifies it before the function even runs. Inside we still ask
-// auth.getUser() — without a session the client sends only the anon key and
-// that yields no user.
+// `disconnect`, `reminders`, `teams` and `secondary`. Deployed WITHOUT
+// --no-verify-jwt (unlike notify and calendar-oauth-callback): a signed-in
+// player calls it from the app through functions.invoke, which attaches
+// their JWT, and the platform verifies it before the function even runs.
+// Inside we still ask auth.getUser() — without a session the client sends
+// only the anon key and that yields no user.
 //
 // Why synchronous and not a job: disconnecting must first DELETE the calendar
 // in Google and only then revoke the token — after the revoke the app can
@@ -26,12 +26,16 @@
 
 import { createClient } from "@supabase/supabase-js";
 import {
+  createSecondaryCalendar,
   deleteCalendar,
   deleteEvent,
   GoogleAuthError,
   matchEventId,
+  possibleMatchCalendars,
   refreshAccessToken,
   revokeToken,
+  type TeamChoice,
+  validateTeamChoices,
   writeFutureMatches,
   writeFutureReservations,
 } from "../_shared/google_calendar.ts";
@@ -58,9 +62,16 @@ function json(body: unknown, status = 200): Response {
 }
 
 /** Forgets the link: tokens gone, the row stays as 'unlinked' together with
- * reminder_minutes, so the reminders come back by themselves after a new
- * link. The Google e-mail is personal data — no reason to keep it once
- * disconnected. */
+ * reminder_minutes (and, 0032, reminder_minutes_secondary/training_color_id/
+ * calendar_teams), so those preferences come back by themselves after a new
+ * link. `secondary_enabled` is the one exception: it is reset to false here
+ * because it is not just a preference, it asserts a second calendar EXISTS
+ * — and disconnect() just deleted it (or there never was one). A
+ * calendar_teams row still pointed at 'secondary' is harmless in the
+ * meantime: matchTarget already falls back to primary for a team whose
+ * calendar does not (yet) exist, so nothing is stranded if the player
+ * relinks without turning the second calendar back on. The Google e-mail is
+ * personal data — no reason to keep it once disconnected. */
 async function forget(userId: string) {
   await admin.from("google_calendar_tokens").delete().eq("user_id", userId);
   await admin.from("google_calendar_links")
@@ -68,6 +79,7 @@ async function forget(userId: string) {
       status: "unlinked",
       google_email: null,
       last_error: null,
+      secondary_enabled: false,
       updated_at: new Date().toISOString(),
     })
     .eq("user_id", userId);
@@ -75,7 +87,7 @@ async function forget(userId: string) {
 
 async function disconnect(userId: string): Promise<Response> {
   const { data: token } = await admin.from("google_calendar_tokens")
-    .select("refresh_token, google_calendar_id")
+    .select("refresh_token, google_calendar_id, google_calendar_id_secondary")
     .eq("user_id", userId).maybeSingle();
 
   // Nothing to disconnect (never linked / already done / a second tap) or
@@ -85,6 +97,7 @@ async function disconnect(userId: string): Promise<Response> {
     return json({ orphaned: false });
   }
   const calendarId = token.google_calendar_id as string | null;
+  const secondaryId = token.google_calendar_id_secondary as string | null;
 
   let accessToken: string | null = null;
   try {
@@ -94,23 +107,32 @@ async function disconnect(userId: string): Promise<Response> {
       console.error(`disconnect: token refresh failed for ${userId}:`, error);
       return json({ error: "google_unavailable" }, 503);
     }
-    // Access is gone (revoked in the Google account, expired). The calendar
-    // cannot be deleted — and never will be; say so and tidy up our side.
+    // Access is gone (revoked in the Google account, expired). Neither
+    // calendar can be deleted — and never will be; say so and tidy up our
+    // side.
     console.warn(`disconnect: grant already revoked for ${userId}`);
     await forget(userId);
-    return json({ orphaned: !!calendarId });
+    return json({ orphaned: !!calendarId || !!secondaryId });
   }
 
-  if (calendarId) {
-    const result = await deleteCalendar(accessToken, calendarId);
+  // Both calendars, if the player ever turned the second one on — deleting
+  // takes each one's events with it, so no per-event cleanup either way.
+  // Tried in either order: a "retry" on one leaves the tokens row (and so
+  // the whole DB state) untouched, so the next disconnect() call safely
+  // re-attempts both — deleteCalendar treats an already-gone calendar as
+  // "ok" (404/410), so whichever one already succeeded is just a cheap
+  // no-op the second time, never repeated for real.
+  for (const id of [calendarId, secondaryId]) {
+    if (!id) continue;
+    const result = await deleteCalendar(accessToken, id);
     if (result === "retry") {
       // Nothing was changed — let the player try again, the state is whole.
       return json({ error: "google_unavailable" }, 503);
     }
-    // "ok" (404/410 included = already gone) as well as "auth"/"gone" mean
-    // there is no way left to delete this calendar; carry on tidying up.
+    // "ok" (404/410 included = already gone) as well as "auth" mean there
+    // is no way left to delete this calendar; carry on tidying up.
     if (result !== "ok") {
-      console.warn(`disconnect: calendar delete ended as ${result}`);
+      console.warn(`disconnect: calendar ${id} delete ended as ${result}`);
     }
   }
 
@@ -119,22 +141,45 @@ async function disconnect(userId: string): Promise<Response> {
   return json({ orphaned: false });
 }
 
-/** Stores the reminders preference and writes it RIGHT AWAY into every
- * future reservation. The events carry the reminders themselves
+/** Which of the player's two Google calendars is actually live right now —
+ * gated on `secondary_enabled` even though the id lives in a separate
+ * table, same reasoning as notify's calendarLink: the two are meant to
+ * change together, and gating here is one more guard against a stale id
+ * ever being treated as live if they ever drifted apart. */
+function secondaryCalendarIdOf(
+  link: { secondary_enabled: boolean | null },
+  token: { google_calendar_id_secondary: string | null },
+): string | null {
+  return link.secondary_enabled
+    ? token.google_calendar_id_secondary ?? null
+    : null;
+}
+
+/** Stores the reminders preference for ONE of the player's calendars (the
+ * `calendar` argument) and writes it RIGHT AWAY into every future
+ * reservation and match. The events carry the reminders themselves
  * (calendarList is off limits under this scope), so "change the reminder"
- * = rewrite the events. Through jobs it took two turns of the minutely cron
- * (~2 min) and looked as if nothing happened; the player is watching, so it
- * is done on the spot. Whatever fails is caught up by a job — the count of
- * rewritten events and the remainder flag are returned. */
+ * = rewrite the events; both trainings (always primary) and matches (each
+ * in its own followed team's calendar) draw their reminders from
+ * writeFutureReservations/writeFutureMatches, which read BOTH reminder
+ * columns themselves — rewriting everything keeps every event correct
+ * regardless of which of the two lists just changed, at the cost of a few
+ * redundant (but harmless) rewrites of the calendar that did not. Through
+ * jobs it took two turns of the minutely cron (~2 min) and looked as if
+ * nothing happened; the player is watching, so it is done on the spot.
+ * Whatever fails is caught up by a job — the count of rewritten events and
+ * the remainder flag are returned. */
 async function setReminders(
   userId: string,
   minutes: number[],
+  calendar: "primary" | "secondary",
 ): Promise<Response> {
-  // Normalisation and validation live in the RPC (0023) — it is the source
-  // of truth; here it is only called on the player's behalf.
+  // Normalisation and validation live in the RPC (0023/0032) — it is the
+  // source of truth; here it is only called on the player's behalf.
   const { error } = await admin.rpc("set_calendar_reminders_for", {
     p_user: userId,
     p_minutes: minutes,
+    p_calendar: calendar,
   });
   if (error) {
     console.error(`set reminders failed for ${userId}:`, error);
@@ -142,12 +187,17 @@ async function setReminders(
   }
 
   const { data: link } = await admin.from("google_calendar_links")
-    .select("status, reminder_minutes").eq("user_id", userId).maybeSingle();
-  const saved = (link?.reminder_minutes as number[] | null) ?? [];
+    .select(
+      "status, secondary_enabled, reminder_minutes, reminder_minutes_secondary, training_color_id",
+    )
+    .eq("user_id", userId).maybeSingle();
+  const saved = calendar === "secondary"
+    ? (link?.reminder_minutes_secondary as number[] | null) ?? []
+    : (link?.reminder_minutes as number[] | null) ?? [];
   if (link?.status !== "linked") return json({ rewritten: 0, saved });
 
   const { data: token } = await admin.from("google_calendar_tokens")
-    .select("refresh_token, google_calendar_id")
+    .select("refresh_token, google_calendar_id, google_calendar_id_secondary")
     .eq("user_id", userId).maybeSingle();
   if (!token?.refresh_token || !token.google_calendar_id) {
     return json({ rewritten: 0, saved });
@@ -164,17 +214,14 @@ async function setReminders(
   }
 
   const calendarId = token.google_calendar_id as string;
-  // Reminders live on the events, so both kinds get rewritten.
-  // TODO(task 3): calendarId as {primary, secondary: null} is a placeholder
-  // — this player has no secondary calendar yet in this flow. Once
-  // calendar-manage reads google_calendar_tokens.google_calendar_id_secondary
-  // and calendar_teams, pass the real pair so a secondary-bound team's
-  // matches land in (and stay reconciled with) the right calendar.
-  const written = await writeFutureReservations(admin, userId, accessToken, calendarId) +
-    await writeFutureMatches(admin, userId, accessToken, {
-      primary: calendarId,
-      secondary: null,
-    });
+  const calendars = {
+    primary: calendarId,
+    secondary: secondaryCalendarIdOf(link, token as { google_calendar_id_secondary: string | null }),
+  };
+  const trainingColorId = (link.training_color_id as number | null) ?? null;
+  const written =
+    await writeFutureReservations(admin, userId, accessToken, calendarId, trainingColorId) +
+    await writeFutureMatches(admin, userId, accessToken, calendars);
   const [{ data: reservations }, { data: matches }] = await Promise.all([
     admin.rpc("my_future_reservations", { p_user: userId }),
     admin.rpc("my_future_matches", { p_user: userId }),
@@ -188,38 +235,42 @@ async function setReminders(
   return json({ rewritten: written, saved, deferred: failed });
 }
 
-/** Stores which teams' matches go to the calendar and settles the events
- * on the spot: the matches of teams just dropped are deleted, those of the
- * kept and new teams (re)written — the player is watching. Whatever fails
- * is caught up by a job. Returns the stored teams. */
-async function setMatchTeams(
+/** Stores which teams' matches go to which calendar, with which colour
+ * (calendar_teams, 0032), and settles the events on the spot: the matches
+ * of teams dropped ENTIRELY are deleted, everything kept or new is
+ * (re)written into its chosen calendar (recolouring and recalendaring both
+ * fall out of the same rewrite) — the player is watching. `teams` was
+ * already validated by the caller (validateTeamChoices), so this only talks
+ * to Postgres and Google. Whatever fails is caught up by a job. Returns the
+ * stored teams. */
+async function setTeams(
   userId: string,
-  teams: string[],
+  teams: TeamChoice[],
 ): Promise<Response> {
-  const { data: before } = await admin.from("google_calendar_links")
-    .select("match_teams").eq("user_id", userId).maybeSingle();
-  const previous = (before?.match_teams as string[] | null) ?? [];
-
-  // Normalisation and validation live in the RPC (0027).
-  const { data: stored, error } = await admin.rpc(
-    "set_calendar_match_teams_for",
-    { p_user: userId, p_teams: teams },
-  );
+  // set_calendar_teams_for (0032) returns the PREVIOUS rows — bounds
+  // (≤ 20 items, calendar/color_id) are enforced by the table's own CHECK
+  // constraints and surface as a generic Postgres error, same as "bad_teams"
+  // to the caller; the item shape itself was already validated above.
+  const { data: previous, error } = await admin.rpc("set_calendar_teams_for", {
+    p_user: userId,
+    p_teams: teams,
+  });
   if (error) {
-    console.error(`set match teams failed for ${userId}:`, error);
+    console.error(`set teams failed for ${userId}:`, error);
     return json({ error: "bad_teams" }, 400);
   }
-  const saved = (stored as string[] | null) ?? [];
+  const previousTeams =
+    (previous as { team: string; calendar: string; color_id: number | null }[] | null) ?? [];
 
   const { data: link } = await admin.from("google_calendar_links")
-    .select("status").eq("user_id", userId).maybeSingle();
-  if (link?.status !== "linked") return json({ rewritten: 0, saved });
+    .select("status, secondary_enabled").eq("user_id", userId).maybeSingle();
+  if (link?.status !== "linked") return json({ rewritten: 0, saved: teams });
 
   const { data: token } = await admin.from("google_calendar_tokens")
-    .select("refresh_token, google_calendar_id")
+    .select("refresh_token, google_calendar_id, google_calendar_id_secondary")
     .eq("user_id", userId).maybeSingle();
   if (!token?.refresh_token || !token.google_calendar_id) {
-    return json({ rewritten: 0, saved });
+    return json({ rewritten: 0, saved: teams });
   }
 
   let accessToken: string;
@@ -227,16 +278,23 @@ async function setMatchTeams(
     accessToken = await refreshAccessToken(token.refresh_token as string);
   } catch (_) {
     await admin.rpc("backfill_calendar_jobs", { p_user: userId });
-    return json({ rewritten: 0, saved, deferred: true });
+    return json({ rewritten: 0, saved: teams, deferred: true });
   }
-  const calendarId = token.google_calendar_id as string;
+  const calendars = {
+    primary: token.google_calendar_id as string,
+    secondary: secondaryCalendarIdOf(link, token as { google_calendar_id_secondary: string | null }),
+  };
 
-  // Matches of the teams that were dropped: their events go. The list is
-  // read with the OLD choice re-applied through the same "live future
-  // match" rule, so nothing past or foreign is touched.
-  const dropped = previous.filter((t) => !saved.includes(t));
+  // Matches of the teams that were dropped ENTIRELY (present before, gone
+  // now): their events are deleted outright. The list is read with the OLD
+  // choice re-applied through the same "live future match" rule, so nothing
+  // past or foreign is touched; a derby where only one of the two teams was
+  // dropped is correctly left alone (still followed via the other team).
+  const savedNames = new Set(teams.map((t) => t.team));
+  const dropped = previousTeams.filter((t) => !savedNames.has(t.team));
   let removed = 0;
   if (dropped.length > 0) {
+    const droppedNames = new Set(dropped.map((t) => t.team));
     const { data: profile } = await admin.from("profiles")
       .select("tenant_id").eq("id", userId).maybeSingle();
     const { data: gone } = await admin.from("priority_slots")
@@ -245,29 +303,162 @@ async function setMatchTeams(
       .is("parent_id", null)
       .gte("date", new Date().toISOString().slice(0, 10));
     for (const row of (gone ?? []) as { id: string; home_team: string; away_team: string }[]) {
-      const stillFollowed = saved.includes(row.home_team) || saved.includes(row.away_team);
-      const wasFollowed = dropped.includes(row.home_team) || dropped.includes(row.away_team);
+      const stillFollowed = savedNames.has(row.home_team) || savedNames.has(row.away_team);
+      const wasFollowed = droppedNames.has(row.home_team) || droppedNames.has(row.away_team);
       if (stillFollowed || !wasFollowed) continue;
-      const result = await deleteEvent(
-        accessToken,
-        calendarId,
-        await matchEventId(userId, row.id),
+      const eventId = await matchEventId(userId, row.id);
+      // The dropped team could have been assigned to either calendar —
+      // delete from every one its event could be sitting in (idempotent:
+      // the one it was never in just answers 404/410 = "ok").
+      const results = await Promise.all(
+        possibleMatchCalendars(calendars).map((calendarId) =>
+          deleteEvent(accessToken, calendarId, eventId)
+        ),
       );
-      if (result === "ok") removed++;
+      if (results.every((r) => r === "ok")) removed++;
     }
   }
 
-  // TODO(task 3): same placeholder as setReminders above — {primary,
-  // secondary: null} until this function knows the player's real secondary
-  // calendar id.
+  const written = await writeFutureMatches(admin, userId, accessToken, calendars);
+  const { data: total } = await admin.rpc("my_future_matches", { p_user: userId });
+  const failed = written < ((total ?? []) as unknown[]).length;
+  if (failed) await admin.rpc("backfill_calendar_jobs", { p_user: userId });
+  return json({ rewritten: written, removed, saved: teams, deferred: failed });
+}
+
+/** Turns the player's second Google calendar ("Rezervátor 2") on or off and
+ * settles matches on the spot, same "the player is watching" reasoning as
+ * every other action here.
+ *
+ * ON: creates the calendar (unless one already exists — idempotent against
+ * a repeat call), stores its id, flips `secondary_enabled`, then rewrites
+ * every future match so whichever teams were already pointed at 'secondary'
+ * in calendar_teams (chosen ahead of the toggle — matchTarget tolerates
+ * that) actually land there now.
+ *
+ * OFF: deletes the calendar in Google FIRST — deleting a calendar takes its
+ * events with it, so there is no per-event cleanup to do on the way out,
+ * mirroring disconnect()'s "the calendar must go before we let go of the
+ * token" ordering — only then clears the stored id, flips
+ * `secondary_enabled` off, and resets every calendar_teams row pointed at
+ * 'secondary' back to 'primary' (so the picker in Můj profil, hidden once
+ * the toggle is off, does not silently keep a choice nothing shows any
+ * more). Rewriting future matches then lands those teams' events in the
+ * primary calendar, same as a player who never turned it on.
+ *
+ * A retryable Google failure (5xx, network) changes NOTHING and returns an
+ * error, same as disconnect(); only a revoked grant (invalid_grant) is
+ * treated as terminal for the OFF direction — the calendar is unreachable
+ * and will never be deletable, so the player's own tidy-up still goes
+ * through, exactly like disconnect()'s "grant already revoked" case. */
+async function setSecondary(userId: string, enabled: boolean): Promise<Response> {
+  const { data: link } = await admin.from("google_calendar_links")
+    .select("status, secondary_enabled").eq("user_id", userId).maybeSingle();
+  if (link?.status !== "linked") return json({ error: "not_linked" }, 400);
+
+  const { data: token } = await admin.from("google_calendar_tokens")
+    .select("refresh_token, google_calendar_id, google_calendar_id_secondary")
+    .eq("user_id", userId).maybeSingle();
+  if (!token?.refresh_token || !token.google_calendar_id) {
+    return json({ error: "not_linked" }, 400);
+  }
+  const calendarId = token.google_calendar_id as string;
+  let secondaryId = token.google_calendar_id_secondary as string | null;
+
+  // Idempotent no-ops: a repeat tap (or a race between two devices) should
+  // not re-create or re-delete anything.
+  if (enabled && link.secondary_enabled === true && secondaryId) {
+    return json({ enabled: true });
+  }
+  if (!enabled && link.secondary_enabled !== true && !secondaryId) {
+    return json({ enabled: false });
+  }
+
+  if (!enabled) {
+    let accessToken: string;
+    try {
+      accessToken = await refreshAccessToken(token.refresh_token as string);
+    } catch (error) {
+      if (!(error instanceof GoogleAuthError && error.code === "invalid_grant")) {
+        console.error(`secondary off: token refresh failed for ${userId}:`, error);
+        return json({ error: "google_unavailable" }, 503);
+      }
+      // Terminal: access is gone, the calendar (if any) can never be
+      // deleted now — tidy up our side anyway and say so, same reasoning
+      // as disconnect()'s "grant already revoked" branch.
+      await admin.from("google_calendar_tokens")
+        .update({ google_calendar_id_secondary: null }).eq("user_id", userId);
+      await admin.from("google_calendar_links")
+        .update({ secondary_enabled: false, updated_at: new Date().toISOString() })
+        .eq("user_id", userId);
+      await admin.from("calendar_teams")
+        .update({ calendar: "primary" })
+        .eq("user_id", userId).eq("calendar", "secondary");
+      return json({ enabled: false, orphaned: !!secondaryId });
+    }
+
+    if (secondaryId) {
+      const result = await deleteCalendar(accessToken, secondaryId);
+      if (result === "retry") {
+        // Nothing was changed — let the player try again, the state is whole.
+        return json({ error: "google_unavailable" }, 503);
+      }
+      if (result !== "ok") {
+        console.warn(`secondary off: calendar delete ended as ${result}`);
+      }
+    }
+    await admin.from("google_calendar_tokens")
+      .update({ google_calendar_id_secondary: null }).eq("user_id", userId);
+    await admin.from("google_calendar_links")
+      .update({ secondary_enabled: false, updated_at: new Date().toISOString() })
+      .eq("user_id", userId);
+    await admin.from("calendar_teams")
+      .update({ calendar: "primary" })
+      .eq("user_id", userId).eq("calendar", "secondary");
+
+    const written = await writeFutureMatches(admin, userId, accessToken, {
+      primary: calendarId,
+      secondary: null,
+    });
+    const { data: total } = await admin.rpc("my_future_matches", { p_user: userId });
+    const failed = written < ((total ?? []) as unknown[]).length;
+    if (failed) await admin.rpc("backfill_calendar_jobs", { p_user: userId });
+    return json({ enabled: false, rewritten: written, deferred: failed });
+  }
+
+  // ON.
+  let accessToken: string;
+  try {
+    accessToken = await refreshAccessToken(token.refresh_token as string);
+  } catch (error) {
+    console.error(`secondary on: token refresh failed for ${userId}:`, error);
+    return json({ error: "google_unavailable" }, 503);
+  }
+
+  if (!secondaryId) {
+    try {
+      secondaryId = await createSecondaryCalendar(accessToken, "Rezervátor 2");
+    } catch (error) {
+      // Nothing was changed — same "retry, the state is whole" contract as
+      // every other Google call in this file (see disconnect()).
+      console.error(`secondary on: calendar create failed for ${userId}:`, error);
+      return json({ error: "google_unavailable" }, 503);
+    }
+    await admin.from("google_calendar_tokens")
+      .update({ google_calendar_id_secondary: secondaryId }).eq("user_id", userId);
+  }
+  await admin.from("google_calendar_links")
+    .update({ secondary_enabled: true, updated_at: new Date().toISOString() })
+    .eq("user_id", userId);
+
   const written = await writeFutureMatches(admin, userId, accessToken, {
     primary: calendarId,
-    secondary: null,
+    secondary: secondaryId,
   });
   const { data: total } = await admin.rpc("my_future_matches", { p_user: userId });
   const failed = written < ((total ?? []) as unknown[]).length;
   if (failed) await admin.rpc("backfill_calendar_jobs", { p_user: userId });
-  return json({ rewritten: written, removed, saved, deferred: failed });
+  return json({ enabled: true, rewritten: written, deferred: failed });
 }
 
 Deno.serve(async (request) => {
@@ -295,13 +486,26 @@ Deno.serve(async (request) => {
       const minutes = Array.isArray(body.minutes)
         ? body.minutes.map((m: unknown) => Number(m)).filter(Number.isFinite)
         : [];
-      return await setReminders(user.id, minutes);
+      const calendarRaw = body.calendar;
+      if (
+        calendarRaw != null && calendarRaw !== "primary" &&
+        calendarRaw !== "secondary"
+      ) {
+        return json({ error: "bad_calendar" }, 400);
+      }
+      const calendar = calendarRaw === "secondary" ? "secondary" : "primary";
+      return await setReminders(user.id, minutes, calendar);
     }
-    if (body?.action === "match_teams") {
-      const teams = Array.isArray(body.teams)
-        ? body.teams.filter((t: unknown) => typeof t === "string")
-        : [];
-      return await setMatchTeams(user.id, teams as string[]);
+    if (body?.action === "teams") {
+      const teams = validateTeamChoices(body.teams);
+      if (teams === null) return json({ error: "bad_teams" }, 400);
+      return await setTeams(user.id, teams);
+    }
+    if (body?.action === "secondary") {
+      if (typeof body.enabled !== "boolean") {
+        return json({ error: "bad_enabled" }, 400);
+      }
+      return await setSecondary(user.id, body.enabled);
     }
     return json({ error: "unknown_action" }, 400);
   } catch (error) {
