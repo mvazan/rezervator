@@ -110,6 +110,17 @@ Deno.test("reservationEventBody: reminder minutes become popup overrides", () =>
   });
 });
 
+Deno.test("reservationEventBody: no colour given → still no colorId key (byte-identical to before colours existed)", () => {
+  assertEquals("colorId" in reservationEventBody(ROW, []), false);
+  // An explicit null (the player has no training colour set) must behave
+  // exactly like the colour argument being omitted entirely.
+  assertEquals(reservationEventBody(ROW, []), reservationEventBody(ROW, [], null));
+});
+
+Deno.test("reservationEventBody: a training colour becomes the string colorId", () => {
+  assertEquals(reservationEventBody(ROW, [], 5).colorId, "5");
+});
+
 const MATCH = "5c1a2b3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
 
 Deno.test("matchEventId lives in its own namespace next to reservation ids", async () => {
@@ -157,4 +168,48 @@ Deno.test("matchEventBody: an away match has no location and says venku", () => 
   assertEquals(body.location, undefined);
   assertMatch(body.description, /^KP2 Sever A · Rosice · venku\n/);
   assertEquals(body.reminders, { useDefault: false, overrides: [] });
+});
+
+const HOME_MATCH = {
+  date: "2026-09-11",
+  starts_at: "18:30:00",
+  ends_at: "21:30:00",
+  home_team: "TJ Sokol Brno IV",
+  away_team: "SK Kuželky Dubňany",
+  is_away: false,
+  description: "JM divize",
+  alley_name: "TJ Sokol Brno IV",
+};
+
+Deno.test("matchEventBody: a body without a colour is byte-for-byte what today's callers already get", () => {
+  const body = matchEventBody(HOME_MATCH, [120]);
+  assertEquals(body, {
+    summary: "Zápas · TJ Sokol Brno IV – SK Kuželky Dubňany",
+    description:
+      "JM divize · doma\n\n— spravuje appka Rezervátor, ruční úpravy se přepíšou —",
+    start: { dateTime: "2026-09-11T18:30:00", timeZone: "Europe/Prague" },
+    end: { dateTime: "2026-09-11T21:30:00", timeZone: "Europe/Prague" },
+    status: "confirmed",
+    reminders: {
+      useDefault: false,
+      overrides: [{ method: "popup", minutes: 120 }],
+    },
+    location: "TJ Sokol Brno IV",
+  });
+});
+
+Deno.test("matchEventBody: no colour given → no colorId key, same whether omitted or explicitly null", () => {
+  assertEquals("colorId" in matchEventBody(HOME_MATCH, [120]), false);
+  assertEquals(
+    matchEventBody(HOME_MATCH, [120]),
+    matchEventBody(HOME_MATCH, [120], null),
+  );
+});
+
+Deno.test("matchEventBody: the followed team's colour becomes the string colorId", () => {
+  const body = matchEventBody(HOME_MATCH, [120], 7);
+  assertEquals(body.colorId, "7");
+  // Everything else is untouched by adding a colour.
+  const { colorId: _colorId, ...rest } = body;
+  assertEquals(rest, matchEventBody(HOME_MATCH, [120]));
 });

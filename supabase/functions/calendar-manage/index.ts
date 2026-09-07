@@ -165,8 +165,16 @@ async function setReminders(
 
   const calendarId = token.google_calendar_id as string;
   // Reminders live on the events, so both kinds get rewritten.
+  // TODO(task 3): calendarId as {primary, secondary: null} is a placeholder
+  // — this player has no secondary calendar yet in this flow. Once
+  // calendar-manage reads google_calendar_tokens.google_calendar_id_secondary
+  // and calendar_teams, pass the real pair so a secondary-bound team's
+  // matches land in (and stay reconciled with) the right calendar.
   const written = await writeFutureReservations(admin, userId, accessToken, calendarId) +
-    await writeFutureMatches(admin, userId, accessToken, calendarId);
+    await writeFutureMatches(admin, userId, accessToken, {
+      primary: calendarId,
+      secondary: null,
+    });
   const [{ data: reservations }, { data: matches }] = await Promise.all([
     admin.rpc("my_future_reservations", { p_user: userId }),
     admin.rpc("my_future_matches", { p_user: userId }),
@@ -249,7 +257,13 @@ async function setMatchTeams(
     }
   }
 
-  const written = await writeFutureMatches(admin, userId, accessToken, calendarId);
+  // TODO(task 3): same placeholder as setReminders above — {primary,
+  // secondary: null} until this function knows the player's real secondary
+  // calendar id.
+  const written = await writeFutureMatches(admin, userId, accessToken, {
+    primary: calendarId,
+    secondary: null,
+  });
   const { data: total } = await admin.rpc("my_future_matches", { p_user: userId });
   const failed = written < ((total ?? []) as unknown[]).length;
   if (failed) await admin.rpc("backfill_calendar_jobs", { p_user: userId });
