@@ -96,3 +96,25 @@ class ClubColors {
   required Color fallbackFg,
 }) =>
     ClubColors.of(index, brightness) ?? (fallbackBg, fallbackFg);
+
+/// Google Calendar's eleven fixed event colours (`colorId` 1–11) — the only
+/// RGB values an event may take under the `calendar.app.created` scope: the
+/// app's own calendars hide `calendarList` (measured against the production
+/// API, 401 either way), so a colour can never live on the calendar itself,
+/// only on the event (see
+/// docs/superpowers/specs/2026-09-07-secondary-calendar-design.md). Czech
+/// names as shown there. Elsewhere a `null` colorId means "no colour": the
+/// event just inherits its calendar's own.
+const googleEventColors = <(int id, String name, Color color)>[
+  (1, 'Levandulová', Color(0xFF7986CB)),
+  (2, 'Šalvějová', Color(0xFF33B679)),
+  (3, 'Švestková', Color(0xFF8E24AA)),
+  (4, 'Lososová', Color(0xFFE67C73)),
+  (5, 'Banánová', Color(0xFFF6BF26)),
+  (6, 'Mandarinková', Color(0xFFF4511E)),
+  (7, 'Paví', Color(0xFF039BE5)),
+  (8, 'Grafitová', Color(0xFF616161)),
+  (9, 'Borůvková', Color(0xFF3F51B5)),
+  (10, 'Bazalková', Color(0xFF0B8043)),
+  (11, 'Rajčatová', Color(0xFFD50000)),
+];

@@ -298,6 +298,25 @@ final myCalendarLinkProvider = StreamProvider<CalendarLink>((ref) {
           rows.isEmpty ? CalendarLink.none : CalendarLink.fromJson(rows.first));
 });
 
+/// The caller's team routing choices (`calendar_teams`, 0032): which
+/// calendar each followed team's matches go to and what colour they get.
+/// Replaces the old flat `google_calendar_links.match_teams` list — RLS lets
+/// the owner read (and, from the app, write) these rows directly, no RPC
+/// round trip needed just to tick a box. Czech-sorted by team name.
+final myCalendarTeamsProvider = StreamProvider<List<CalendarTeam>>((ref) {
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return Stream.value(const []);
+  return cachedRows(
+          uid,
+          'calendar_teams',
+          () => _db
+              .from('calendar_teams')
+              .stream(primaryKey: ['user_id', 'team'])
+              .eq('user_id', uid))
+      .map((rows) => rows.map(CalendarTeam.fromJson).toList()
+        ..sort((a, b) => compareCzech(a.team, b.team)));
+});
+
 // ---------------------------------------------------------------------------
 // Actions (writes)
 // ---------------------------------------------------------------------------
@@ -818,22 +837,60 @@ class Api {
   }
 
   /// Stores the reminder offsets (minutes before a training, max 5, max
-  /// 4 weeks) and rewrites every upcoming event with them right away —
-  /// reminders live on the events themselves, so "change the reminder" means
-  /// "rewrite the events". The card redraws from the links stream.
-  static Future<void> setCalendarReminders(List<int> minutes) =>
+  /// 4 weeks) for [calendar] and rewrites every upcoming event with them
+  /// right away — reminders live on the events themselves, so "change the
+  /// reminder" means "rewrite the events". [calendar] defaults to primary,
+  /// so every existing 1-argument call keeps its old behaviour unchanged.
+  /// The card redraws from the links stream.
+  static Future<void> setCalendarReminders(
+    List<int> minutes, {
+    CalendarSlot calendar = CalendarSlot.primary,
+  }) =>
       _db.functions.invoke(
         'calendar-manage',
-        body: {'action': 'reminders', 'minutes': minutes},
+        body: {
+          'action': 'reminders',
+          'minutes': minutes,
+          'calendar': calendar.name,
+        },
       );
 
-  /// Stores which teams' matches go to the calendar and settles the events
-  /// right away (dropped teams' matches deleted, the rest rewritten). The
-  /// card redraws from the links stream.
-  static Future<void> setCalendarMatchTeams(List<String> teams) =>
+  /// Stores which teams' matches go to which calendar, with which colour
+  /// (`calendar_teams`, 0032), and settles the events right away (dropped
+  /// teams' matches deleted, the rest rewritten/recoloured/recalendared).
+  /// The card redraws from [myCalendarTeamsProvider].
+  static Future<void> setCalendarTeams(List<CalendarTeam> teams) =>
       _db.functions.invoke(
         'calendar-manage',
-        body: {'action': 'match_teams', 'teams': teams},
+        body: {
+          'action': 'teams',
+          'teams': [for (final t in teams) t.toJson()],
+        },
+      );
+
+  /// Turns the player's second Google calendar ("Rezervátor 2", 0032) on or
+  /// off. Waits on it like [disconnectCalendar]: turning it off deletes the
+  /// calendar in Google and moves its teams back to primary, so the card
+  /// must not let the picker offer "Druhý" again before that settles.
+  static Future<void> setSecondaryCalendar(bool enabled) =>
+      _db.functions.invoke(
+        'calendar-manage',
+        body: {'action': 'secondary', 'enabled': enabled},
+      );
+
+  /// Stores the trainings' own Google event colour — trainings always go to
+  /// the primary calendar, but keep a colour of their own (0032).
+  ///
+  /// NOTE (Task 4, 2026-09-07): calendar-manage does not yet handle a
+  /// `training_color` action — only disconnect/reminders/teams/secondary
+  /// exist as of this branch's Task 3. Until a backend task adds it, this
+  /// call 400s with {error: "unknown_action"} and changes nothing. Wired
+  /// here anyway because the brief for this task requires the method and
+  /// Task 5's colour picker needs it to exist to build against; see the
+  /// Task 4 report for the flagged gap.
+  static Future<void> setTrainingColor(int? colorId) => _db.functions.invoke(
+        'calendar-manage',
+        body: {'action': 'training_color', 'color_id': colorId},
       );
 
   /// Sets a NEW password for a kiosk account and returns it — the old one
@@ -1011,6 +1068,7 @@ void resetTenantScopedProviders(WidgetRef ref) {
   ref.invalidate(weekReservationsProvider);
   ref.invalidate(myActiveReservationsProvider);
   ref.invalidate(myCalendarLinkProvider);
+  ref.invalidate(myCalendarTeamsProvider);
   ref.invalidate(playersProvider);
   ref.invalidate(tenantsProvider);
   ref.invalidate(myTenantStatusProvider);

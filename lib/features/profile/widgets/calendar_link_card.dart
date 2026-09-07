@@ -6,6 +6,19 @@ import '../../../data/providers.dart';
 import '../../../domain/models.dart';
 import 'team_picker_sheet.dart';
 
+/// Transitional default for [CalendarLinkCard.setMatchTeams]: saves every
+/// checked team to the primary calendar with no colour, via the 0032
+/// `Api.setCalendarTeams`. This is a stand-in for Task 5's real team sheet
+/// (calendar_teams_sheet.dart, per
+/// docs/superpowers/plans/2026-09-07-secondary-calendar.md), which picks a
+/// calendar/colour per team and must NOT reset an existing team's choice
+/// just because the set of ticked teams changed — this shim does, on every
+/// save, until Task 5 replaces the whole checkbox-only sheet below.
+Future<void> _setTeamsPrimaryNoColor(List<String> teams) =>
+    Api.setCalendarTeams([
+      for (final team in teams) CalendarTeam(team: team),
+    ]);
+
 /// Google Calendar link on Můj profil: connect (opens Google's consent page
 /// in the browser), show the current state, edit reminders, pick the teams
 /// whose matches go to the calendar, or disconnect.
@@ -18,7 +31,7 @@ class CalendarLinkCard extends ConsumerStatefulWidget {
     this.openUrl = launchWeb,
     this.disconnect = Api.disconnectCalendar,
     this.setReminders = Api.setCalendarReminders,
-    this.setMatchTeams = Api.setCalendarMatchTeams,
+    this.setMatchTeams = _setTeamsPrimaryNoColor,
   });
 
   /// The backend calls and the browser launch, injectable for widget tests
@@ -156,14 +169,18 @@ class _CalendarLinkCardState extends ConsumerState<CalendarLinkCard> {
         context, () => widget.setReminders([...current, minutes]));
   }
 
+  // TODO(Task 5): calendar_teams_sheet.dart replaces this checkbox-only
+  // sheet with one row per team (checkbox, colour swatch, Hlavní|Druhý), per
+  // docs/superpowers/plans/2026-09-07-secondary-calendar.md.
   Future<void> _editMatchTeams() => showTeamPickerSheet(
         context,
         title: 'Zápasy v kalendáři',
         hint: 'Vyber svůj tým — jeho domácí i venkovní zápasy se přidají do '
             'kalendáře.',
-        chosenOf: (ref) =>
-            (ref.watch(myCalendarLinkProvider).value ?? CalendarLink.none)
-                .matchTeams,
+        chosenOf: (ref) => [
+          for (final t in ref.watch(myCalendarTeamsProvider).value ?? const [])
+            t.team
+        ],
         onChanged: widget.setMatchTeams,
       );
 
@@ -182,6 +199,7 @@ class _CalendarLinkCardState extends ConsumerState<CalendarLinkCard> {
   @override
   Widget build(BuildContext context) {
     final link = ref.watch(myCalendarLinkProvider).value ?? CalendarLink.none;
+    final teams = ref.watch(myCalendarTeamsProvider).value ?? const [];
     // Locals, not fields: the switch arms below close over them.
     final email = link.googleEmail;
     final error = link.lastError;
@@ -209,7 +227,8 @@ class _CalendarLinkCardState extends ConsumerState<CalendarLinkCard> {
           ListTile(
             leading: const Icon(Icons.emoji_events_outlined),
             title: const Text('Zápasy v kalendáři…'),
-            subtitle: Text(matchTeamsSummary(link.matchTeams)),
+            subtitle:
+                Text(matchTeamsSummary([for (final t in teams) t.team])),
             trailing: const Icon(Icons.chevron_right),
             onTap: _editMatchTeams,
           ),

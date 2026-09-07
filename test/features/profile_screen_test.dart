@@ -54,6 +54,7 @@ void main() {
     Profile profile, {
     bool calendarAvailable = false,
     CalendarLink link = CalendarLink.none,
+    List<CalendarTeam> teams = const [],
     Future<void> Function(int color)? setOwnColor,
     Future<void> Function(List<String> teams)? setFollowedTeams,
     Future<void> Function(HomeView view)? setDefaultView,
@@ -67,6 +68,7 @@ void main() {
         ),
         calendarAvailableProvider.overrideWithValue(calendarAvailable),
         myCalendarLinkProvider.overrideWith((ref) => Stream.value(link)),
+        myCalendarTeamsProvider.overrideWith((ref) => Stream.value(teams)),
         prioritySlotsProvider.overrideWithValue(matches),
       ],
       child: MaterialApp(
@@ -361,10 +363,11 @@ void main() {
       await tester.pumpWidget(app(
         me,
         calendarAvailable: true,
-        link: const CalendarLink(
-          status: CalendarLinkStatus.linked,
-          matchTeams: ['SKK Veverky Brno A', 'SKK Veverky Brno B'],
-        ),
+        link: const CalendarLink(status: CalendarLinkStatus.linked),
+        teams: const [
+          CalendarTeam(team: 'SKK Veverky Brno A'),
+          CalendarTeam(team: 'SKK Veverky Brno B'),
+        ],
       ));
       await tester.pumpAndSettle();
 
@@ -450,12 +453,15 @@ void main() {
       Future<bool> Function() disconnect = noDisconnect,
       Future<void> Function(List<int> minutes) setReminders = noReminders,
       Future<void> Function(List<String> teams) setMatchTeams = noMatchTeams,
+      Stream<List<CalendarTeam>>? teams,
       List<PrioritySlot> matches = const [],
     }) {
       return ProviderScope(
         overrides: [
           calendarAvailableProvider.overrideWithValue(true),
           myCalendarLinkProvider.overrideWith((ref) => link),
+          myCalendarTeamsProvider.overrideWith(
+              (ref) => teams ?? Stream.value(const <CalendarTeam>[])),
           prioritySlotsProvider.overrideWithValue(matches),
         ],
         child: MaterialApp(
@@ -475,15 +481,15 @@ void main() {
     testWidgets('Zápasy v kalendáři offers only the alley\'s own teams, '
         'derived from the schedule, and saves each toggle', (tester) async {
       final saved = <List<String>>[];
-      final links = StreamController<CalendarLink>.broadcast();
-      addTearDown(links.close);
-      const linkedNoTeams = CalendarLink(status: CalendarLinkStatus.linked);
+      final teamRows = StreamController<List<CalendarTeam>>.broadcast();
+      addTearDown(teamRows.close);
       await tester.pumpWidget(card(
-        links.stream,
+        Stream.value(const CalendarLink(status: CalendarLinkStatus.linked)),
         matches: schedule,
+        teams: teamRows.stream,
         setMatchTeams: (teams) async => saved.add(teams),
       ));
-      links.add(linkedNoTeams);
+      teamRows.add(const []);
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('Zápasy v kalendáři…'));
@@ -513,10 +519,7 @@ void main() {
 
       // The backend stored it; the stream brings the row back and the sheet
       // redraws ticked. Unticking sends the list without it.
-      links.add(const CalendarLink(
-        status: CalendarLinkStatus.linked,
-        matchTeams: ['SKK Veverky Brno A'],
-      ));
+      teamRows.add(const [CalendarTeam(team: 'SKK Veverky Brno A')]);
       await tester.pumpAndSettle();
       final tile = tester.widget<CheckboxListTile>(
           find.widgetWithText(CheckboxListTile, 'SKK Veverky Brno A'));
@@ -530,11 +533,9 @@ void main() {
     testWidgets('a chosen team that left the schedule stays listed so it can '
         'be unticked', (tester) async {
       await tester.pumpWidget(card(
-        Stream.value(const CalendarLink(
-          status: CalendarLinkStatus.linked,
-          matchTeams: ['TJ Sokol Husovice E'],
-        )),
+        Stream.value(const CalendarLink(status: CalendarLinkStatus.linked)),
         matches: schedule,
+        teams: Stream.value(const [CalendarTeam(team: 'TJ Sokol Husovice E')]),
       ));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Zápasy v kalendáři…'));

@@ -792,6 +792,20 @@ enum CalendarLinkStatus {
       };
 }
 
+/// Which of the player's two Google calendars something goes to
+/// (`calendar_teams.calendar`, 0032). Names are the exact DB values, so
+/// `.name` round-trips through calendar-manage's JSON untouched.
+enum CalendarSlot {
+  primary,
+  secondary;
+
+  /// Anything this build has never heard of (or a missing value) reads as
+  /// [primary] — the same fallback the backend applies to an omitted or
+  /// unknown calendar (calendar-manage, set_calendar_teams_for).
+  static CalendarSlot parse(String? value) =>
+      value == 'secondary' ? CalendarSlot.secondary : CalendarSlot.primary;
+}
+
 /// Google caps calendar reminders at 5 per event, each at most 4 weeks
 /// (40320 minutes) before it. The UI and the RPC both enforce this.
 const maxCalendarReminders = 5;
@@ -818,6 +832,42 @@ String remindersSummary(List<int> minutes) {
   return sorted.map(reminderOffsetLabel).join(' · ');
 }
 
+/// One followed team's routing (`calendar_teams`, 0032): which of the
+/// player's Google calendars its matches go to and what Google event colour
+/// they get. Own row per player+team — replaces the flat `matchTeams` name
+/// list that used to live on [CalendarLink] (see [matchTeamsSummary] for the
+/// unrelated, still-`List<String>`, "Moje týmy" list).
+class CalendarTeam {
+  const CalendarTeam({
+    required this.team,
+    this.calendar = CalendarSlot.primary,
+    this.colorId,
+  });
+
+  /// The federation's team name, as the imported matches carry it (e.g.
+  /// 'SKK Veverky Brno A').
+  final String team;
+  final CalendarSlot calendar;
+
+  /// Google event colorId 1–11; null = no colour (the event inherits its
+  /// calendar's own).
+  final int? colorId;
+
+  factory CalendarTeam.fromJson(Map<String, dynamic> json) => CalendarTeam(
+        team: json['team'] as String,
+        calendar: CalendarSlot.parse(json['calendar'] as String?),
+        colorId: json['color_id'] as int?,
+      );
+
+  /// Exactly the shape calendar-manage's `teams` action validates
+  /// (`validateTeamChoices`/`TeamChoice`): `{team, calendar, color_id}`.
+  Map<String, dynamic> toJson() => {
+        'team': team,
+        'calendar': calendar.name,
+        'color_id': colorId,
+      };
+}
+
 /// One row of `google_calendar_links` (the client-visible half of the link;
 /// tokens live in a server-only table).
 class CalendarLink {
@@ -827,7 +877,9 @@ class CalendarLink {
     this.lastError,
     this.updatedAt,
     this.reminderMinutes = const [],
-    this.matchTeams = const [],
+    this.secondaryEnabled = false,
+    this.reminderMinutesSecondary = const [],
+    this.trainingColorId,
   });
 
   static const none = CalendarLink(status: CalendarLinkStatus.notLinked);
@@ -841,14 +893,23 @@ class CalendarLink {
   final String? lastError;
   final DateTime? updatedAt;
 
-  /// Reminder offsets in minutes before a training, farthest first. Applied
-  /// server-side to every upcoming event when changed.
+  /// Reminder offsets in minutes before a training, farthest first, for the
+  /// PRIMARY calendar. Applied server-side to every upcoming event when
+  /// changed.
   final List<int> reminderMinutes;
 
-  /// Teams whose matches go to the calendar (the federation's names as the
-  /// imported matches carry them, e.g. 'SKK Veverky Brno A'); empty = none.
-  /// Stored sorted by the backend (0027).
-  final List<String> matchTeams;
+  /// Player turned on the second Google calendar ("Rezervátor 2", 0032);
+  /// only then can a [CalendarTeam.calendar] targeting [CalendarSlot.secondary]
+  /// actually land there — see `myCalendarTeamsProvider`.
+  final bool secondaryEnabled;
+
+  /// Reminder offsets for events written to the SECONDARY calendar; same
+  /// shape and bounds as [reminderMinutes].
+  final List<int> reminderMinutesSecondary;
+
+  /// Google event colorId (1–11) for trainings, which always go to the
+  /// primary calendar; null = no colour.
+  final int? trainingColorId;
 
   bool get isLinked => status == CalendarLinkStatus.linked;
 
@@ -863,9 +924,13 @@ class CalendarLink {
           for (final m in json['reminder_minutes'] as List? ?? const [])
             (m as num).toInt(),
         ]..sort((a, b) => b.compareTo(a)),
-        matchTeams: [
-          for (final t in json['match_teams'] as List? ?? const []) t as String,
-        ],
+        secondaryEnabled: json['secondary_enabled'] as bool? ?? false,
+        reminderMinutesSecondary: [
+          for (final m in json['reminder_minutes_secondary'] as List? ??
+              const [])
+            (m as num).toInt(),
+        ]..sort((a, b) => b.compareTo(a)),
+        trainingColorId: json['training_color_id'] as int?,
       );
 }
 
