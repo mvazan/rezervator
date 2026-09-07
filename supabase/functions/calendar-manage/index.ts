@@ -35,6 +35,7 @@ import {
   refreshAccessToken,
   revokeToken,
   type TeamChoice,
+  isEventColorId,
   validateTeamChoices,
   writeFutureMatches,
   writeFutureReservations,
@@ -233,6 +234,57 @@ async function setReminders(
   // stored, so nothing is lost.
   if (failed) await admin.rpc("backfill_calendar_jobs", { p_user: userId });
   return json({ rewritten: written, saved, deferred: failed });
+}
+
+/** Stores the colour of the player's trainings (0034) and repaints the
+ * future ones. Trainings always live in the primary calendar, so unlike
+ * teams there is nothing to route — only the colour changes. */
+async function setTrainingColor(
+  userId: string,
+  colorId: number | null,
+): Promise<Response> {
+  const { error } = await admin.rpc("set_training_color_for", {
+    p_user: userId,
+    p_color: colorId,
+  });
+  if (error) {
+    console.error(`set training colour failed for ${userId}:`, error);
+    return json({ error: "bad_color" }, 400);
+  }
+
+  const { data: link } = await admin.from("google_calendar_links")
+    .select("status").eq("user_id", userId).maybeSingle();
+  if (link?.status !== "linked") return json({ rewritten: 0, saved: colorId });
+
+  const { data: token } = await admin.from("google_calendar_tokens")
+    .select("refresh_token, google_calendar_id")
+    .eq("user_id", userId).maybeSingle();
+  if (!token?.refresh_token || !token.google_calendar_id) {
+    return json({ rewritten: 0, saved: colorId });
+  }
+
+  let accessToken: string;
+  try {
+    accessToken = await refreshAccessToken(token.refresh_token as string);
+  } catch (_) {
+    // Stored either way; a job repaints the events once Google answers.
+    await admin.rpc("backfill_calendar_jobs", { p_user: userId });
+    return json({ rewritten: 0, saved: colorId, deferred: true });
+  }
+
+  const written = await writeFutureReservations(
+    admin,
+    userId,
+    accessToken,
+    token.google_calendar_id as string,
+    colorId,
+  );
+  const { data: reservations } = await admin.rpc("my_future_reservations", {
+    p_user: userId,
+  });
+  const failed = written < ((reservations ?? []) as unknown[]).length;
+  if (failed) await admin.rpc("backfill_calendar_jobs", { p_user: userId });
+  return json({ rewritten: written, saved: colorId, deferred: failed });
 }
 
 /** Stores which teams' matches go to which calendar, with which colour
@@ -506,6 +558,13 @@ Deno.serve(async (request) => {
         return json({ error: "bad_enabled" }, 400);
       }
       return await setSecondary(user.id, body.enabled);
+    }
+    if (body?.action === "training_color") {
+      const raw = body.color_id;
+      if (raw !== null && raw !== undefined && !isEventColorId(raw)) {
+        return json({ error: "bad_color" }, 400);
+      }
+      return await setTrainingColor(user.id, raw == null ? null : Number(raw));
     }
     return json({ error: "unknown_action" }, 400);
   } catch (error) {

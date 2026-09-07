@@ -231,6 +231,12 @@ an empty list there would tell a player their team picks had vanished.
 `set_calendar_teams_for` writes the mirror on every save; a later migration
 drops it once a build with the new screen is out.
 
+- `set_training_color_for(user, color)` — 0034. Stores the colour of the
+  player's trainings (Google event `colorId` 1–11, `null` = none) and raises
+  `bad_color` on anything else. Server-only, like the other calendar RPCs;
+  `calendar-manage`'s `training_color` action calls it and repaints the
+  future trainings on the spot.
+
 - `match_calendar_followers(tenant, home, away)` — same producers, same
   signature, joins `calendar_teams`; `distinct` because a player following
   both teams of a derby has two matching rows and must still come back once.

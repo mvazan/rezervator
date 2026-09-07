@@ -626,6 +626,14 @@ export type TeamChoice = {
   color_id: number | null;
 };
 
+/** Google takes only its own eleven event colours, as colorId "1".."11";
+ * anything else is a client that made something up. null means "no colour"
+ * and is checked by the caller, not here. */
+export function isEventColorId(raw: unknown): boolean {
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 1 && n <= 11;
+}
+
 /** Normalises and validates an untrusted `teams` payload before it reaches
  * set_calendar_teams_for: the 0032 RPC only checks the item COUNT and that
  * the caller has a links row — per-item shape is the edge function's job,
@@ -660,9 +668,8 @@ export function validateTeamChoices(input: unknown): TeamChoice[] | null {
 
     let color_id: number | null = null;
     if (raw.color_id != null) {
-      const n = Number(raw.color_id);
-      if (!Number.isInteger(n) || n < 1 || n > 11) return null;
-      color_id = n;
+      if (!isEventColorId(raw.color_id)) return null;
+      color_id = Number(raw.color_id);
     }
 
     if (seen.has(team)) continue; // first occurrence wins

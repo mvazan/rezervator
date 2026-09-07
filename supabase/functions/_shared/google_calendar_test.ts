@@ -2,6 +2,7 @@ import { assertEquals, assertMatch, assertNotEquals } from "jsr:@std/assert@1";
 import {
   classify,
   eventIdFor,
+  isEventColorId,
   localDateTime,
   matchEventBody,
   matchEventId,
@@ -342,4 +343,13 @@ Deno.test("validateTeamChoices: rejects a colour outside 1-11", () => {
 Deno.test("validateTeamChoices: rejects a non-object entry", () => {
   assertEquals(validateTeamChoices(["X"]), null);
   assertEquals(validateTeamChoices([null]), null);
+});
+
+Deno.test("isEventColorId: only Google's eleven", () => {
+  for (const ok of [1, 11, "7"]) {
+    assertEquals(isEventColorId(ok), true, `${ok} should pass`);
+  }
+  for (const bad of [0, 12, -1, 1.5, "", "modrá", null, undefined, {}]) {
+    assertEquals(isEventColorId(bad), false, `${bad} should fail`);
+  }
 });

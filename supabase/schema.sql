@@ -1779,6 +1779,32 @@ $$;
 ALTER FUNCTION "public"."set_role"("p_user_id" "uuid", "p_role" "text") OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."set_training_color_for"("p_user" "uuid", "p_color" smallint) RETURNS smallint
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare v_color smallint := p_color;
+begin
+  -- null = bez barvy (událost vezme barvu kalendáře); jinak jen Googlem
+  -- povolených jedenáct, viz calendar_teams.color_id.
+  if v_color is not null and (v_color < 1 or v_color > 11) then
+    raise exception 'bad_color';
+  end if;
+  if not exists (select 1 from google_calendar_links where user_id = p_user) then
+    raise exception 'unknown_link';
+  end if;
+
+  update google_calendar_links
+     set training_color_id = v_color, updated_at = now()
+   where user_id = p_user;
+  return v_color;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."set_training_color_for"("p_user" "uuid", "p_color" smallint) OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."start_calendar_link"() RETURNS "text"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -2888,6 +2914,11 @@ GRANT ALL ON FUNCTION "public"."set_calendar_reminders_for"("p_user" "uuid", "p_
 
 REVOKE ALL ON FUNCTION "public"."set_calendar_teams_for"("p_user" "uuid", "p_teams" "jsonb") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."set_calendar_teams_for"("p_user" "uuid", "p_teams" "jsonb") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."set_training_color_for"("p_user" "uuid", "p_color" smallint) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."set_training_color_for"("p_user" "uuid", "p_color" smallint) TO "service_role";
 
 
 

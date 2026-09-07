@@ -1494,5 +1494,34 @@ begin
   raise notice 'OK: calendar_teams routes matches per team, inside the checks';
 end $$;
 
+-- Training colour (0034): server-only, and only Google's eleven.
+reset role;
+do $$
+declare
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+begin
+  if has_function_privilege('authenticated',
+       'public.set_training_color_for(uuid, smallint)', 'execute')
+     or has_function_privilege('anon',
+       'public.set_training_color_for(uuid, smallint)', 'execute') then
+    raise exception 'FAIL: a player may call set_training_color_for directly';
+  end if;
+  perform set_training_color_for(v_uid, 7::smallint);
+  if (select training_color_id from google_calendar_links where user_id = v_uid) <> 7 then
+    raise exception 'FAIL: the training colour did not stick';
+  end if;
+  perform set_training_color_for(v_uid, null);
+  if (select training_color_id from google_calendar_links where user_id = v_uid) is not null then
+    raise exception 'FAIL: clearing the training colour did not stick';
+  end if;
+  begin
+    perform set_training_color_for(v_uid, 12::smallint);
+    raise exception 'FAIL: a colour outside Google''s eleven was accepted';
+  exception when sqlstate 'P0001' then
+    if sqlerrm <> 'bad_color' then raise; end if;
+  end;
+  raise notice 'OK: the training colour is server-only and inside Google''s eleven';
+end $$;
+
 reset role;
 rollback;
