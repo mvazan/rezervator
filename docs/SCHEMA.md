@@ -62,7 +62,7 @@ Every `color` column above is one `integer` (0030): the negative values are the 
 | `notification_jobs` | Deferred-job queue (0023): `kind` (only `calendar_sync` so far), `dedupe_key` unique (`calendar:<user_id>:<reservation_id>` — a repeat re-arms `run_at` instead of adding a row), `payload` jsonb, `run_at`, `attempts` (the handler backs off 2^attempts minutes and drops the job at 5), `created_at`. Index on `run_at`. | **server-only**: RLS on, no policy; `service_role` all, `anon`/`authenticated` nothing. Written by the security-definer producers (§Google kalendář) and `backfill_calendar_jobs`, consumed by the notify function on the cron tick. |
 | `google_calendar_links` | One row per *person* (not per tenant; `user_id → profiles`, cascade): `status` pending \| linked \| broken \| unlinked, `google_email`, `last_error`, `reminder_minutes int[]` (Calendar API shape — ≤ 5 entries, each 0–40320, CHECK-enforced, stored sorted descending), `created_at`, `updated_at`, plus (0032) `secondary_enabled` (the player turned on the second Google calendar "Rezervátor 2"), `reminder_minutes_secondary` (same shape/bounds, for events written there), `training_color_id` (Google event `colorId` 1–11 for trainings, which always go to the primary calendar; `null` = no colour). `match_teams` (0027) is gone (0033) — see `calendar_teams` for what replaced it. Holds no secret: it is in the Realtime publication and the profile card streams it. | select own row only (`user_id = auth.uid()`); `authenticated` has SELECT and nothing else — every write is the server's (`service_role`). |
 | `google_calendar_tokens` | `user_id → profiles` (cascade), `refresh_token`, `google_calendar_id` (the app-created "Rezervátor" calendar), `google_calendar_id_secondary` (0032: the second one, "Rezervátor 2"; `null` until `secondary_enabled`), `updated_at`. A separate table on purpose: a streamed table must never carry the token. | **server-only**: RLS on, zero policies; `service_role` only. |
-| `calendar_teams` | (0032) One row per player **+** followed team — replaces `google_calendar_links.match_teams`, because a team now needs to say more than its name: `user_id → profiles` (cascade), `team` (a `priority_slots.home_team`/`away_team` string), `calendar` (`primary` \| `secondary`, default `primary` — which of the player's two Google calendars this team's matches go to), `color_id` (Google event `colorId` 1–11, `null` = no colour). PK (`user_id`, `team`). | select **and** write own rows only (`user_id = auth.uid()`, one policy, every command) — the Flutter app streams and edits this table directly, no RPC round trip needed just to tick a box. |
+| `calendar_teams` | (0032) One row per player **+** followed team — replaces `google_calendar_links.match_teams`, because a team now needs to say more than its name: `user_id → profiles` (cascade), `team` (a `priority_slots.home_team`/`away_team` string), `calendar` (`primary` \| `secondary`, default `primary` — which of the player's two Google calendars this team's matches go to), `color_id` (Google event `colorId` 1–11, `null` = no colour). PK (`user_id`, `team`). In the Realtime publication (0035) — the profile card streams it. | select own rows only (`user_id = auth.uid()`); `authenticated` has SELECT and nothing else (0035) — every write is the server's, through `calendar-manage`/`set_calendar_teams_for`, which also keeps `google_calendar_links.match_teams` mirrored for the 1.2.1 app. |
 | `oauth_nonces` | The OAuth `state`: `nonce` (48 hex chars from `gen_random_bytes(24)`), `user_id → profiles` (cascade), `created_at`, `consumed_at`. One-shot with a 10-minute TTL — the callback function runs without a JWT, so this is what binds Google's redirect to a signed-in player. | **server-only** like the tokens. |
 
 View `players` (owned by postgres → bypasses `profiles` RLS on purpose):
@@ -194,8 +194,11 @@ re-timed block) reach Google through `notification_jobs`:
   wait (the local stack). The notify function's `processJobs` takes ≤ 100
   due jobs, deletes a job on success, on failure sets `attempts + 1`,
   `run_at = now() + 2^attempts minutes`, and drops it after 5 attempts;
-  a revoked token or a deleted calendar marks the link `broken` and
-  notifies the player.
+  a revoked token or a deleted PRIMARY calendar marks the link `broken` and
+  notifies the player. A deleted SECONDARY calendar (0032/0035) does not: it
+  is cleared (`clearSecondaryCalendar`) and the write falls back to the
+  primary, since the second calendar was always optional and must never
+  take trainings — or the first calendar — down with it.
 - **Not jobs.** Link, disconnect and reminders are user requests and run
   synchronously in the edge functions (`consume_calendar_nonce`,
   `backfill_calendar_jobs`, `set_calendar_reminders_for`,
@@ -230,6 +233,16 @@ read-only mirror**: builds up to 1.2.1 read it off the realtime stream, and
 an empty list there would tell a player their team picks had vanished.
 `set_calendar_teams_for` writes the mirror on every save; a later migration
 drops it once a build with the new screen is out.
+
+- calendar-oauth-callback's relink: when the previous PRIMARY calendar is
+  not reachable under the fresh consent (`calendarExists` false — the old
+  grant was revoked), the old consent's SECONDARY calendar is gone right
+  along with it, so the callback clears `google_calendar_id_secondary` and
+  `secondary_enabled` too (`clearSecondaryCalendar`, 0035). Without this a
+  stale secondary id would survive the relink, route a team's matches at an
+  unreachable calendar, and break the link again within a minute of the
+  next sync — taking trainings down with it, since a broken link stops
+  `calendarLink()` from returning anything at all.
 
 - `set_training_color_for(user, color)` — 0034. Stores the colour of the
   player's trainings (Google event `colorId` 1–11, `null` = none) and raises
@@ -269,11 +282,20 @@ drops it once a build with the new screen is out.
   upserts every live match into its target and, only after that upsert
   succeeds, deletes the same deterministic event id from the other
   calendar — a team moving calendars is then just "next sync writes it into
-  the new one and cleans up the old one", no separate move path.
+  the new one and cleans up the old one", no separate move path. It returns
+  `{written, sweepFailed}`: a sweep that fails transiently (Google 5xx/429)
+  is reported, not just logged, so `calendar-manage` still enqueues a
+  backfill even when every write itself succeeded — otherwise the event
+  would sit duplicated in both calendars with nothing left to retry it.
   `possibleMatchCalendars`/`worstResult` support cleaning up a match that is
   no longer live at all: since an event's id never records which calendar it
   was last written to, deletion is attempted against every calendar it could
-  be sitting in, folding the results into one retry verdict.
+  be sitting in, folding the results into one retry verdict. `notify`'s own
+  `matchSync` folds its write and sweep the same way, and additionally: a
+  write that lands on the SECONDARY calendar and comes back "gone" (deleted
+  by hand in Google) clears it (`clearSecondaryCalendar`) and retries
+  against the primary instead of breaking the whole link over a calendar
+  that was always optional.
 - `notify`'s `jobCalendarSync`: a `match_id` payload reads `my_future_matches`
   at run time (the revalidation) — a live row is written via `matchTarget`
   with that team's reminders (`reminder_minutes` or `_secondary`, by which
@@ -292,7 +314,11 @@ drops it once a build with the new screen is out.
   `'secondary'` back to `'primary'`, and rewrites future matches back into
   the primary); `reminders` (now takes `calendar`, `'primary'` \|
   `'secondary'`, and rewrites both trainings and matches so every event
-  stays correct regardless of which reminder list just changed).
+  stays correct regardless of which reminder list just changed); `match_teams`
+  (0035 — the shipped 1.2.1 app's action, a bare team-name `string[]`: maps
+  it onto `teams` via `mapLegacyMatchTeams`, keeping each surviving team's
+  `calendar`/`color_id` and defaulting a newly added one to primary/no
+  colour, then runs the same `setTeams` path).
 
 ## Edge functions
 
@@ -343,6 +369,10 @@ drops it once a build with the new screen is out.
   `select jobname from cron.job`.
 - Hosted default privileges grant `anon`/`authenticated` on every new
   object; 0017 pins explicit defaults so a git-built database matches.
+- `supabase db dump` does not emit publications — `supabase_realtime`
+  membership (below) is invisible to both `supabase/schema.sql` and a plain
+  migration read; only `tenancy_rls.sql`'s own query against
+  `pg_publication_tables` (0035) catches a streamed table left out of it.
 
 ## Checks
 
@@ -350,9 +380,11 @@ drops it once a build with the new screen is out.
   migration (local stack only).
 - `supabase/tests/tenancy_rls.sql` — cross-tenant isolation, superadmin
   visiting, the 0018 cascade, the 0021 rental exceptions, the
-  `reject_tenant` guard, the 0022 placeholder lifecycle and the 0023
+  `reject_tenant` guard, the 0022 placeholder lifecycle, the 0023
   calendar plumbing (nonce lifecycle, server-only privileges, the job
   producers and their dedupe, backfill, reminders,
-  `my_future_reservations`, the dispatcher without Vault, the cron row);
-  run with `psql … -v ON_ERROR_STOP=1 -f` against the local stack (CI
-  does).
+  `my_future_reservations`, the dispatcher without Vault, the cron row),
+  the 0032/0035 calendar_teams privileges and the 0035 assertion that every
+  table `lib/data/providers.dart` streams is in the `supabase_realtime`
+  publication; run with `psql … -v ON_ERROR_STOP=1 -f` against the local
+  stack (CI does).

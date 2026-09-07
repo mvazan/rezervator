@@ -2015,7 +2015,7 @@ CREATE TABLE IF NOT EXISTS "public"."calendar_teams" (
 ALTER TABLE "public"."calendar_teams" OWNER TO "postgres";
 
 
-COMMENT ON TABLE "public"."calendar_teams" IS 'One row per player+followed team (0032, replaces google_calendar_links.match_teams): which of the two calendars its matches go to and which Google event colourId they get.';
+COMMENT ON TABLE "public"."calendar_teams" IS 'One row per player+followed team (0032, replaces google_calendar_links.match_teams): which of the two calendars its matches go to and which Google event colourId they get. Read-only to the client (0035) — every write goes through calendar-manage (set_calendar_teams_for), which also keeps match_teams mirrored for the 1.2.1 app.';
 
 
 
@@ -2572,7 +2572,7 @@ CREATE POLICY "blocks_update" ON "public"."time_blocks" FOR UPDATE USING ((("ten
 ALTER TABLE "public"."calendar_teams" ENABLE ROW LEVEL SECURITY;
 
 
-CREATE POLICY "calendar_teams_own" ON "public"."calendar_teams" USING (("user_id" = "auth"."uid"())) WITH CHECK (("user_id" = "auth"."uid"()));
+CREATE POLICY "calendar_teams_own" ON "public"."calendar_teams" FOR SELECT USING (("user_id" = "auth"."uid"()));
 
 
 
@@ -2961,7 +2961,7 @@ GRANT SELECT ON TABLE "public"."app_config" TO "authenticated";
 
 
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."calendar_teams" TO "authenticated";
+GRANT SELECT ON TABLE "public"."calendar_teams" TO "authenticated";
 GRANT ALL ON TABLE "public"."calendar_teams" TO "service_role";
 
 

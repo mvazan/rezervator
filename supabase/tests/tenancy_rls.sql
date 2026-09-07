@@ -1271,16 +1271,21 @@ end $$;
 -- in google_calendar_links.match_teams any more. match_teams and
 -- set_calendar_match_teams_for are gone outright (0033, once calendar-manage
 -- moved to set_calendar_teams_for in Task 3); match_calendar_followers and
--- my_future_matches read calendar_teams exclusively.
+-- my_future_matches read calendar_teams exclusively. calendar_teams itself
+-- is select-only for the client (0035) — every write goes through
+-- calendar-manage/set_calendar_teams_for, which also keeps the match_teams
+-- mirror truthful; a direct client write would bypass both.
 -- ---------------------------------------------------------------------------
 reset role;
 do $$
 begin
-  if not has_table_privilege('authenticated', 'public.calendar_teams', 'select')
-     or not has_table_privilege('authenticated', 'public.calendar_teams', 'insert')
-     or not has_table_privilege('authenticated', 'public.calendar_teams', 'update')
-     or not has_table_privilege('authenticated', 'public.calendar_teams', 'delete') then
-    raise exception 'FAIL: calendar_teams is not full DML for authenticated';
+  if not has_table_privilege('authenticated', 'public.calendar_teams', 'select') then
+    raise exception 'FAIL: authenticated cannot read calendar_teams';
+  end if;
+  if has_table_privilege('authenticated', 'public.calendar_teams', 'insert')
+     or has_table_privilege('authenticated', 'public.calendar_teams', 'update')
+     or has_table_privilege('authenticated', 'public.calendar_teams', 'delete') then
+    raise exception 'FAIL: calendar_teams is writable by authenticated directly';
   end if;
   if has_table_privilege('anon', 'public.calendar_teams', 'select') then
     raise exception 'FAIL: anon may read calendar_teams';
@@ -1293,15 +1298,22 @@ begin
        'public.set_calendar_teams_for(uuid, jsonb)', 'execute') then
     raise exception 'FAIL: service_role lacks set_calendar_teams_for';
   end if;
-  raise notice 'OK: calendar_teams is full DML for authenticated, its RPC server-only';
+  raise notice 'OK: calendar_teams is select-only for authenticated, its RPC server-only';
 end $$;
 
--- A foreign row (tenant B's admin) to probe isolation against.
+-- A foreign row (tenant B's admin) to probe isolation against, and this
+-- player's own fixture row — both inserted directly (server context): the
+-- client can no longer write calendar_teams at all (0035), so seeding it
+-- the way a real write happens now is set_calendar_teams_for's job below,
+-- not a client insert.
 insert into calendar_teams (user_id, team, calendar, color_id)
-values ('10000000-0000-0000-0000-000000000002', 'Cizí tým', 'primary', 2);
+values
+  ('10000000-0000-0000-0000-000000000002', 'Cizí tým', 'primary', 2),
+  ('10000000-0000-0000-0000-000000000001', 'Cal Test Home', 'secondary', 9);
 
--- A's admin: reads and writes only their own row; the table CHECK
--- constraints hold even for the row's own player.
+-- A's admin: reads only their own row, and every write — own row or
+-- foreign — is rejected outright (permission denied, not merely RLS-
+-- filtered: the grant itself is gone).
 set local role authenticated;
 set local request.jwt.claims =
   '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
@@ -1310,26 +1322,41 @@ declare
   v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
   v_b constant uuid := '10000000-0000-0000-0000-000000000002';
 begin
-  insert into calendar_teams (user_id, team, calendar, color_id)
-  values (v_uid, 'Cal Test Home', 'secondary', 9);
   if (select calendar from calendar_teams
       where user_id = v_uid and team = 'Cal Test Home') <> 'secondary'
      or (select color_id from calendar_teams
       where user_id = v_uid and team = 'Cal Test Home') <> 9 then
-    raise exception 'FAIL: a player cannot write their own calendar_teams row';
+    raise exception 'FAIL: a player cannot read their own calendar_teams row';
   end if;
   if exists (select 1 from calendar_teams where user_id = v_b) then
     raise exception 'FAIL: a player sees another player''s calendar_teams row';
   end if;
-  update calendar_teams set calendar = 'secondary' where user_id = v_b;
-  if found then
-    raise exception 'FAIL: updating a foreign calendar_teams row matched a row';
-  end if;
   begin
-    insert into calendar_teams (user_id, team) values (v_b, 'Podvod');
-    raise exception 'FAIL: a player inserted a calendar_teams row for someone else';
+    insert into calendar_teams (user_id, team) values (v_uid, 'Nový tým');
+    raise exception 'FAIL: a player inserted their own calendar_teams row directly';
   exception when insufficient_privilege then null;
   end;
+  begin
+    update calendar_teams set calendar = 'primary' where user_id = v_uid;
+    raise exception 'FAIL: a player updated their own calendar_teams row directly';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    delete from calendar_teams where user_id = v_b;
+    raise exception 'FAIL: a player deleted a foreign calendar_teams row';
+  exception when insufficient_privilege then null;
+  end;
+  raise notice 'OK: calendar_teams is readable (own rows only) and not writable by the client';
+end $$;
+
+-- The table's own CHECK constraints still hold for whoever DOES write it —
+-- the service role, via set_calendar_teams_for — now that the client path
+-- is gone (0035).
+reset role;
+do $$
+declare
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+begin
   begin
     insert into calendar_teams (user_id, team, calendar) values (v_uid, 'Bad Calendar', 'třetí');
     raise exception 'FAIL: an unknown calendar value accepted';
@@ -1340,7 +1367,7 @@ begin
     raise exception 'FAIL: color_id 12 accepted';
   exception when check_violation then null;
   end;
-  raise notice 'OK: calendar_teams is readable and writable by its own player only, checks and all';
+  raise notice 'OK: calendar_teams CHECK constraints still hold';
 end $$;
 
 -- set_calendar_teams_for: returns the previous state, stores the new one,
@@ -1521,6 +1548,41 @@ begin
     if sqlerrm <> 'bad_color' then raise; end if;
   end;
   raise notice 'OK: the training colour is server-only and inside Google''s eleven';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- Every table the Flutter app streams (`.stream(...)` in
+-- lib/data/providers.dart) must be in the supabase_realtime publication, or
+-- Realtime silently delivers nothing — no error, no event, just a screen
+-- that never updates until the app restarts. `supabase db dump` does not
+-- emit publications, so neither the schema snapshot nor a migration review
+-- catches a missing one on its own (calendar_teams shipped without it,
+-- fixed by 0035). Whenever a new table gains a `.stream()` provider, add its
+-- name below too.
+-- ---------------------------------------------------------------------------
+reset role;
+do $$
+declare
+  v_streamed text[] := array[
+    'profiles', 'schedule_settings', 'clubs', 'time_blocks', 'app_config',
+    'google_calendar_links', 'calendar_teams', 'reservations',
+    'day_overrides', 'priority_slot_types', 'priority_slots', 'rentals'
+  ];
+  v_missing text[];
+begin
+  select coalesce(array_agg(t), '{}')
+    into v_missing
+    from unnest(v_streamed) as t
+    where not exists (
+      select 1 from pg_publication_tables pt
+        where pt.pubname = 'supabase_realtime'
+          and pt.schemaname = 'public'
+          and pt.tablename = t
+    );
+  if array_length(v_missing, 1) > 0 then
+    raise exception 'FAIL: streamed table(s) missing from supabase_realtime: %', v_missing;
+  end if;
+  raise notice 'OK: every streamed table is in the supabase_realtime publication';
 end $$;
 
 reset role;
