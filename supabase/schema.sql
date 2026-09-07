@@ -630,13 +630,13 @@ CREATE TABLE IF NOT EXISTS "public"."profiles" (
     "superadmin" boolean DEFAULT false NOT NULL,
     "home_tenant_id" "uuid",
     "placeholder" boolean DEFAULT false NOT NULL,
-    "own_color" smallint DEFAULT '-1'::integer NOT NULL,
+    "own_color" integer DEFAULT '-1'::integer NOT NULL,
     "followed_teams" "text"[] DEFAULT '{}'::"text"[] NOT NULL,
     "default_view" "text" DEFAULT 'calendar'::"text" NOT NULL,
     CONSTRAINT "profiles_default_view_check" CHECK (("default_view" = ANY (ARRAY['calendar'::"text", 'trainings'::"text"]))),
     CONSTRAINT "profiles_followed_teams_check" CHECK ((COALESCE("array_length"("followed_teams", 1), 0) <= 20)),
     CONSTRAINT "profiles_nick_check" CHECK (("char_length"("nick") <= 14)),
-    CONSTRAINT "profiles_own_color_check" CHECK ((("own_color" >= '-1'::integer) AND ("own_color" <= 11))),
+    CONSTRAINT "profiles_own_color_check" CHECK (((("own_color" >= '-1'::integer) AND ("own_color" <= 8)) OR (("own_color" >= 16777216) AND ("own_color" <= 33554431)))),
     CONSTRAINT "profiles_placeholder_check" CHECK (((NOT "placeholder") OR (("role" = 'player'::"text") AND ("status" = 'approved'::"text") AND (NOT "superadmin")))),
     CONSTRAINT "profiles_role_check" CHECK (("role" = ANY (ARRAY['player'::"text", 'admin'::"text", 'kiosk'::"text"]))),
     CONSTRAINT "profiles_status_check" CHECK (("status" = ANY (ARRAY['pending'::"text", 'approved'::"text"])))
@@ -650,7 +650,7 @@ COMMENT ON COLUMN "public"."profiles"."placeholder" IS 'Hand-made profile withou
 
 
 
-COMMENT ON COLUMN "public"."profiles"."own_color" IS 'Palette index 0–11 the player chose for their own reservations in their own view; -1 = the club colour.';
+COMMENT ON COLUMN "public"."profiles"."own_color" IS 'The player''s own reservations in their own view: -1 = the club colour, 0-11 a palette entry, 0x1000000|rgb a hand-picked colour.';
 
 
 
@@ -1401,13 +1401,13 @@ CREATE TABLE IF NOT EXISTS "public"."rentals" (
     "note" "text" DEFAULT ''::"text" NOT NULL,
     "created_by" "uuid" NOT NULL,
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
-    "color" smallint DEFAULT '-2'::integer NOT NULL,
+    "color" integer DEFAULT '-2'::integer NOT NULL,
     "tenant_id" "uuid" DEFAULT "public"."current_tenant_id"() NOT NULL,
     "parent_id" "uuid",
     "skipped" boolean DEFAULT false NOT NULL,
     CONSTRAINT "rentals_check" CHECK (("ends_at" > "starts_at")),
     CONSTRAINT "rentals_check1" CHECK ((("date" IS NULL) <> ("weekday" IS NULL))),
-    CONSTRAINT "rentals_color_check" CHECK ((("color" >= '-2'::integer) AND ("color" <= 11))),
+    CONSTRAINT "rentals_color_check" CHECK (((("color" >= '-2'::integer) AND ("color" <= 8)) OR (("color" >= 16777216) AND ("color" <= 33554431)))),
     CONSTRAINT "rentals_exception_shape_check" CHECK ((("parent_id" IS NULL) OR (("date" IS NOT NULL) AND ("weekday" IS NULL) AND ("valid_from" IS NULL) AND ("valid_until" IS NULL)))),
     CONSTRAINT "rentals_lanes_check" CHECK (("cardinality"("lanes") > 0)),
     CONSTRAINT "rentals_skipped_check" CHECK (((NOT "skipped") OR ("parent_id" IS NOT NULL))),
@@ -1416,6 +1416,10 @@ CREATE TABLE IF NOT EXISTS "public"."rentals" (
 
 
 ALTER TABLE "public"."rentals" OWNER TO "postgres";
+
+
+COMMENT ON COLUMN "public"."rentals"."color" IS 'Rental colour: -2 = the rental default, 0-11 a palette entry, 0x1000000|rgb a hand-picked colour.';
+
 
 
 COMMENT ON COLUMN "public"."rentals"."parent_id" IS 'Exception row: overrides the series for `date`; skipped = the occurrence does not happen.';
@@ -1889,17 +1893,21 @@ ALTER FUNCTION "public"."trigger_notification_jobs"() OWNER TO "postgres";
 CREATE TABLE IF NOT EXISTS "public"."clubs" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "name" "text" NOT NULL,
-    "color" smallint DEFAULT '-1'::integer NOT NULL,
+    "color" integer DEFAULT '-1'::integer NOT NULL,
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "tenant_id" "uuid" DEFAULT "public"."current_tenant_id"() NOT NULL,
-    CONSTRAINT "clubs_color_check" CHECK ((("color" >= '-1'::integer) AND ("color" <= 11)))
+    CONSTRAINT "clubs_color_check" CHECK (((("color" >= '-1'::integer) AND ("color" <= 8)) OR (("color" >= 16777216) AND ("color" <= 33554431))))
 );
 
 
 ALTER TABLE "public"."clubs" OWNER TO "postgres";
 
 
-CREATE OR REPLACE FUNCTION "public"."upsert_club"("p_id" "uuid", "p_name" "text", "p_color" smallint) RETURNS "public"."clubs"
+COMMENT ON COLUMN "public"."clubs"."color" IS 'Club colour: -1 = none, 0-11 a palette entry, 0x1000000|rgb a hand-picked colour.';
+
+
+
+CREATE OR REPLACE FUNCTION "public"."upsert_club"("p_id" "uuid", "p_name" "text", "p_color" integer) RETURNS "public"."clubs"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
     AS $$
@@ -1918,7 +1926,7 @@ begin
 end; $$;
 
 
-ALTER FUNCTION "public"."upsert_club"("p_id" "uuid", "p_name" "text", "p_color" smallint) OWNER TO "postgres";
+ALTER FUNCTION "public"."upsert_club"("p_id" "uuid", "p_name" "text", "p_color" integer) OWNER TO "postgres";
 
 
 CREATE TABLE IF NOT EXISTS "public"."app_config" (
@@ -2033,7 +2041,7 @@ CREATE OR REPLACE VIEW "public"."players" AS
     "p"."display_name",
     "p"."nick",
     "p"."club_id",
-    COALESCE(("c"."color")::integer, '-1'::integer) AS "club_color",
+    COALESCE("c"."color", '-1'::integer) AS "club_color",
     "p"."placeholder"
    FROM ("public"."profiles" "p"
      LEFT JOIN "public"."clubs" "c" ON (("c"."id" = "p"."club_id")))
@@ -2046,18 +2054,22 @@ ALTER VIEW "public"."players" OWNER TO "postgres";
 CREATE TABLE IF NOT EXISTS "public"."priority_slot_types" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "name" "text" NOT NULL,
-    "color" smallint DEFAULT '-1'::integer NOT NULL,
+    "color" integer DEFAULT '-1'::integer NOT NULL,
     "lanes" smallint[],
     "is_match" boolean DEFAULT false NOT NULL,
     "builtin" boolean DEFAULT false NOT NULL,
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "tenant_id" "uuid" DEFAULT "public"."current_tenant_id"() NOT NULL,
-    CONSTRAINT "priority_slot_types_color_check" CHECK ((("color" >= '-1'::integer) AND ("color" <= 11))),
+    CONSTRAINT "priority_slot_types_color_check" CHECK (((("color" >= '-1'::integer) AND ("color" <= 8)) OR (("color" >= 16777216) AND ("color" <= 33554431)))),
     CONSTRAINT "priority_slot_types_lanes_check" CHECK ((("lanes" IS NULL) OR ("cardinality"("lanes") > 0)))
 );
 
 
 ALTER TABLE "public"."priority_slot_types" OWNER TO "postgres";
+
+
+COMMENT ON COLUMN "public"."priority_slot_types"."color" IS 'Slot type colour: -1 = none, 0-11 a palette entry, 0x1000000|rgb a hand-picked colour.';
+
 
 
 CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
@@ -2809,6 +2821,12 @@ GRANT ALL ON FUNCTION "public"."trigger_notification_jobs"() TO "service_role";
 
 GRANT ALL ON TABLE "public"."clubs" TO "authenticated";
 GRANT ALL ON TABLE "public"."clubs" TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."upsert_club"("p_id" "uuid", "p_name" "text", "p_color" integer) TO "anon";
+GRANT ALL ON FUNCTION "public"."upsert_club"("p_id" "uuid", "p_name" "text", "p_color" integer) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."upsert_club"("p_id" "uuid", "p_name" "text", "p_color" integer) TO "service_role";
 
 
 
