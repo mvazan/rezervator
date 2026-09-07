@@ -8,6 +8,7 @@ import '../../data/providers.dart';
 import '../../domain/models.dart';
 import 'changelog.dart';
 import '../admin/widgets/color_picker.dart';
+import 'widgets/appearance_card.dart';
 import 'widgets/calendar_link_card.dart';
 import 'widgets/my_teams_card.dart';
 
@@ -113,6 +114,11 @@ class ProfileScreen extends ConsumerWidget {
                     ],
                   ),
                 ),
+                const SizedBox(height: 16),
+                // Appearance (theme, text size): the first thing a player
+                // can change and unrelated to reservations, so it sits right
+                // under the name card and above the reservation-colour card.
+                const AppearanceCard(),
                 const SizedBox(height: 16),
                 Card(
                   child: ListTile(
