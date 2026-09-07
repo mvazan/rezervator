@@ -22,3 +22,18 @@ double contrastRatio(Color a, Color b) {
   final (hi, lo) = la > lb ? (la, lb) : (lb, la);
   return (hi + 0.05) / (lo + 0.05);
 }
+
+/// [fg] with its own alpha composited over an OPAQUE [bg] — the way Flutter
+/// actually paints a translucent fill. A translucent background must be
+/// composited like this before its contrast against anything can be
+/// measured at all; measuring the unmixed [fg] instead silently ignores how
+/// much the page shows through.
+Color composite(Color fg, Color bg) {
+  final a = fg.a;
+  return Color.from(
+    alpha: 1.0,
+    red: fg.r * a + bg.r * (1 - a),
+    green: fg.g * a + bg.g * (1 - a),
+    blue: fg.b * a + bg.b * (1 - a),
+  );
+}

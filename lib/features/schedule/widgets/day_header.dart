@@ -5,6 +5,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../../../core/theme.dart';
 import '../../../core/ui.dart';
 import '../../../domain/models.dart';
 import '../../../domain/schedule.dart' show headerEventLabel;
@@ -31,9 +32,20 @@ class DayHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final textTheme = Theme.of(context).textTheme;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final textTheme = theme.textTheme;
     final reason = closedReason;
+    // See core/theme.dart: at contrastLevel 1 the alpha wash below would
+    // fight the onPrimaryContainer Material already tuned for the FULL
+    // container, dropping the chip's real contrast well under AA.
+    final contrastLevel = theme.extension<ContrastLevel>()?.value ?? 0;
+    final (chipBg, chipFg) = containerTint(
+      container: scheme.primaryContainer,
+      onContainer: scheme.onPrimaryContainer,
+      alpha: 0.5,
+      contrastLevel: contrastLevel,
+    );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -59,8 +71,8 @@ class DayHeader extends StatelessWidget {
             else if (chipLabel != null)
               _pill(
                 text: chipLabel!,
-                background: scheme.primaryContainer.withValues(alpha: 0.5),
-                foreground: scheme.onPrimaryContainer,
+                background: chipBg,
+                foreground: chipFg,
                 bold: true,
               ),
           ],
