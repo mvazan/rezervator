@@ -43,24 +43,16 @@ String changelogHeading(Release r, {required bool web}) {
 }
 
 const appChangelog = <Release>[
-  Release(null, '7. 9. 2026', [
-    'Vzhled si nastavíš v profilu: světlý, tmavý, nebo podle systému — a '
-        'kontrastní varianty pro čtení na slunci a pro slabší zrak.',
-    'Písmo jde zvětšit na 115 % nebo 130 %, i nad rámec toho, co má telefon.',
-    'Moje tréninky se jmenují Můj přehled — jsou v nich i zápasy, ne jen '
-        'tréninky.',
-    'Barvu týmu vybereš jednou v Můj profil → Moje týmy, z barev, které '
-        'Google pro události nabízí, a platí všude: obarví pohár u zápasu '
-        'v přehledu i událost v Google kalendáři. Tréninky mají svou '
-        'vlastní barvu.',
-    'Kdo chce, zapne si v profilu druhý kalendář „Rezervátor 2" a u každého '
-        'týmu řekne, do kterého kalendáře jeho zápasy patří — třeba svůj tým '
-        'do hlavního a zbytek oddílu do druhého, každý s vlastními '
-        'připomínkami.',
-    'Vlastní barva rezervací: kromě palety si jde odstín vybrat z kolečka.',
-    'Z palety zmizely tři barvy, které vedle sebe nešly rozeznat (oranžová, '
-        'limetková, indigo). Komu některá z nich zůstala nastavená, tomu se '
-        'nic nezměnilo — barvu má dál, jen se z ní stala vlastní.',
+  Release('1.2.2', '8. 9. 2026', [
+    'Moje tréninky se jmenují Můj přehled — jsou v něm i zápasy tvých týmů.',
+    'Barvu týmu vybereš jednou v profilu a platí všude: obarví zápas '
+        'v přehledu i událost v Google kalendáři. Tréninky mají svou.',
+    'Druhý kalendář „Rezervátor 2": u každého týmu řekneš, kam jeho zápasy '
+        'patří, a každý kalendář má vlastní připomínky.',
+    'Vzhled a velikost písma v profilu: světlý, tmavý, kontrastní, '
+        'písmo až 130 %.',
+    'Vlastní barva rezervací z kolečka, a paleta bez tří barev, které vedle '
+        'sebe nešly rozeznat.',
   ]),
   Release('1.2.1', '6. 9. 2026', [
     'Kioskový účet se spravuje v Správa → Kiosk, ne mezi hráči — a je u něj '
