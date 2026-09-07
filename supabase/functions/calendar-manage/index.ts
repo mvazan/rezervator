@@ -131,6 +131,7 @@ async function disconnect(userId: string): Promise<Response> {
   // re-attempts both — deleteCalendar treats an already-gone calendar as
   // "ok" (404/410), so whichever one already succeeded is just a cheap
   // no-op the second time, never repeated for real.
+  let orphaned = false;
   for (const id of [calendarId, secondaryId]) {
     if (!id) continue;
     const result = await deleteCalendar(accessToken, id);
@@ -139,7 +140,17 @@ async function disconnect(userId: string): Promise<Response> {
       return json({ error: "google_unavailable" }, 503);
     }
     // "ok" (404/410 included = already gone) as well as "auth" mean there
-    // is no way left to delete this calendar; carry on tidying up.
+    // is no way left to delete this calendar; carry on tidying up. Only
+    // "auth" actually LEAVES ONE BEHIND, though, and the refresh above
+    // having succeeded makes that the surprising case — so it is reported
+    // exactly like the "grant already revoked" branch above and like
+    // setSecondary()'s OFF branch: the player hears that a calendar is
+    // still sitting in their Google account instead of a plain "smazán".
+    // Not guarded by a unit test: disconnect() is unexported and importing
+    // this module starts the server, so it would take a fake Google (the
+    // GOOGLE_CALENDAR_API seam) plus a DB to reach. The mapping underneath
+    // it, classify(401) = "auth", is covered in _shared/google_calendar_test.
+    if (result === "auth") orphaned = true;
     if (result !== "ok") {
       console.warn(`disconnect: calendar ${id} delete ended as ${result}`);
     }
@@ -147,7 +158,7 @@ async function disconnect(userId: string): Promise<Response> {
 
   await revokeToken(token.refresh_token as string);
   await forget(userId);
-  return json({ orphaned: false });
+  return json({ orphaned });
 }
 
 /** Which of the player's two Google calendars is actually live right now —
