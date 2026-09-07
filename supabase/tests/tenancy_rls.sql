@@ -1198,5 +1198,49 @@ begin
   raise notice 'OK: followed_teams and default_view are editable on the own row only, inside the checks';
 end $$;
 
+-- Hand-picked colours (0030): the palette range still holds, and a colour
+-- packed as 0x1000000|rgb goes in everywhere a palette index used to.
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+declare
+  v_club uuid;
+begin
+  update profiles set own_color = 16777216 + 12615680  -- 0xC0A000
+  where id = '10000000-0000-0000-0000-000000000001';
+  if (select own_color from profiles
+      where id = '10000000-0000-0000-0000-000000000001') <> 29392896 then
+    raise exception 'FAIL: a hand-picked own_color did not stick';
+  end if;
+  begin
+    update profiles set own_color = 12
+    where id = '10000000-0000-0000-0000-000000000001';
+    raise exception 'FAIL: 12 accepted as a palette index';
+  exception when check_violation then null;
+  end;
+  begin
+    update profiles set own_color = 33554432  -- one past the packed range
+    where id = '10000000-0000-0000-0000-000000000001';
+    raise exception 'FAIL: a colour past the packed range accepted';
+  exception when check_violation then null;
+  end;
+
+  -- The RPC widened with the column, so the admin can save one on a club.
+  select id into v_club from upsert_club(null, 'Barevný oddíl', 29392896);
+  if (select color from clubs where id = v_club) <> 29392896 then
+    raise exception 'FAIL: upsert_club did not store a hand-picked colour';
+  end if;
+  if (select club_color from players
+      where id = '10000000-0000-0000-0000-000000000001') is null then
+    raise exception 'FAIL: the players view lost club_color';
+  end if;
+
+  update priority_slot_types set color = 29392896
+  where tenant_id = current_tenant_id();
+  update rentals set color = 29392896 where tenant_id = current_tenant_id();
+  raise notice 'OK: hand-picked colours fit every colour column and upsert_club';
+end $$;
+
 reset role;
 rollback;

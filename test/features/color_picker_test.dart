@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rezervator/domain/palette.dart';
 import 'package:rezervator/features/admin/widgets/color_picker.dart';
 
 void main() {
@@ -91,5 +92,65 @@ void main() {
     );
 
     expect(find.byIcon(Icons.check), findsNothing);
+  });
+
+  group('the wheel swatch', () {
+    Future<void> pump(WidgetTester tester, int selected,
+        void Function(int) onChanged) async {
+      tester.view.physicalSize = const Size(900, 1400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: ColorPickerGrid(selected: selected, onChanged: onChanged),
+        ),
+      ));
+    }
+
+    testWidgets('sits last and opens the picker', (tester) async {
+      await pump(tester, -1, (_) {});
+
+      // none + 9 palette entries + the wheel.
+      expect(find.byType(InkWell), findsNWidgets(11));
+      await tester.tap(find.byType(InkWell).last);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Vlastní barva'), findsWidgets);
+    });
+
+    testWidgets('a confirmed colour comes back packed', (tester) async {
+      int? reported;
+      await pump(tester, -1, (v) => reported = v);
+
+      await tester.tap(find.byType(InkWell).last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+
+      expect(reported, isNotNull);
+      expect(isCustomColor(reported!), isTrue);
+    });
+
+    testWidgets('cancelling leaves the selection alone', (tester) async {
+      int? reported;
+      await pump(tester, 3, (v) => reported = v);
+
+      await tester.tap(find.byType(InkWell).last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+
+      expect(reported, isNull);
+    });
+
+    testWidgets('a hand-picked selection shows on the swatch, not the wheel',
+        (tester) async {
+      final value = packCustomColor(const Color(0xFF3366CC));
+      await pump(tester, value, (_) {});
+
+      // The check mark marks the selected swatch — the wheel one here.
+      expect(find.byIcon(Icons.check), findsOneWidget);
+    });
   });
 }
