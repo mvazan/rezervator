@@ -4,6 +4,7 @@ import {
   eventIdFor,
   isEventColorId,
   localDateTime,
+  mapLegacyMatchTeams,
   matchEventBody,
   matchEventId,
   matchTarget,
@@ -352,4 +353,66 @@ Deno.test("isEventColorId: only Google's eleven", () => {
   for (const bad of [0, 12, -1, 1.5, "", "modrá", null, undefined, {}]) {
     assertEquals(isEventColorId(bad), false, `${bad} should fail`);
   }
+});
+
+Deno.test("isEventColorId: rejects a boolean rather than coercing it to 0/1", () => {
+  // Number(true) === 1 and Number(false) === 0 — without a type gate before
+  // the coercion, `color_id: true` would pass as colour 1.
+  assertEquals(isEventColorId(true), false);
+  assertEquals(isEventColorId(false), false);
+});
+
+const TC = (
+  team: string,
+  calendar: "primary" | "secondary",
+  color_id: number | null,
+) => ({ team, calendar, color_id });
+
+Deno.test("mapLegacyMatchTeams: a name already tracked keeps its calendar/colour untouched", () => {
+  assertEquals(
+    mapLegacyMatchTeams(
+      ["SKK Veverky Brno A"],
+      [TC("SKK Veverky Brno A", "secondary", 9)],
+    ),
+    [TC("SKK Veverky Brno A", "secondary", 9)],
+  );
+});
+
+Deno.test("mapLegacyMatchTeams: a name new to `current` defaults to primary/no colour", () => {
+  assertEquals(
+    mapLegacyMatchTeams(["KS Devítka Brno B"], []),
+    [TC("KS Devítka Brno B", "primary", null)],
+  );
+});
+
+Deno.test("mapLegacyMatchTeams: a name dropped from the list is just absent from the result", () => {
+  assertEquals(
+    mapLegacyMatchTeams(
+      ["A"],
+      [TC("A", "primary", null), TC("B", "secondary", 3)],
+    ),
+    [TC("A", "primary", null)],
+  );
+});
+
+Deno.test("mapLegacyMatchTeams: kept and new teams mix in the same call", () => {
+  assertEquals(
+    mapLegacyMatchTeams(
+      ["A", "New"],
+      [TC("A", "secondary", 4), TC("Dropped", "primary", null)],
+    ),
+    [TC("A", "secondary", 4), TC("New", "primary", null)],
+  );
+});
+
+Deno.test("mapLegacyMatchTeams: trims and de-dupes, first occurrence wins", () => {
+  assertEquals(
+    mapLegacyMatchTeams([" A ", "A", "B"], [TC("A", "secondary", 2)]),
+    [TC("A", "secondary", 2), TC("B", "primary", null)],
+  );
+});
+
+Deno.test("mapLegacyMatchTeams: a blank name is dropped, an empty list clears everything", () => {
+  assertEquals(mapLegacyMatchTeams(["  "], [TC("A", "primary", null)]), []);
+  assertEquals(mapLegacyMatchTeams([], [TC("A", "primary", null)]), []);
 });

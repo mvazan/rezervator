@@ -30,6 +30,7 @@ import { pragueEpoch, pragueToday, signCancelToken } from "../_shared/cancel_tok
 import { firebaseConfigured, sendPush } from "../_shared/fcm.ts";
 import { dayLabel, escapeHtml, timeLabel } from "../_shared/format.ts";
 import {
+  clearSecondaryCalendar,
   deleteEvent,
   eventIdFor,
   GoogleAuthError,
@@ -247,12 +248,22 @@ async function reservationSync(
  * (matchTarget) and swept from the OTHER one, same as writeFutureMatches —
  * and only once the write itself succeeded: deleting first (or regardless)
  * would, on a failed write, leave the match in NEITHER calendar until the
- * next sync. A match that is no longer live (slot gone, unfollowed, already
+ * next sync. The sweep's own result is folded in too (worstResult): a
+ * "retry" there must not be reported as "ok" just because the write
+ * succeeded, or a duplicate stuck in the other calendar would never be
+ * retried. A match that is no longer live (slot gone, unfollowed, already
  * played) is deleted from every calendar it could be sitting in
  * (possibleMatchCalendars): its event id never changes when a team moves
  * calendars, only where it was last WRITTEN, and that history is not kept —
  * so the only safe cleanup is to try both (idempotent: the one it was never
- * in just answers 404/410 = "ok"). */
+ * in just answers 404/410 = "ok").
+ *
+ * A write that lands on the SECONDARY calendar and comes back "gone" (the
+ * player deleted "Rezervátor 2" by hand in Google) falls back to the
+ * primary instead of propagating "gone" up to jobCalendarSync, which would
+ * markCalendarBroken and take EVERY sync down — trainings included — over a
+ * calendar that was always optional. The primary itself coming back "gone"
+ * still propagates untouched: that really is the whole link gone. */
 async function matchSync(
   userId: string,
   matchId: string,
@@ -275,17 +286,36 @@ async function matchSync(
   }
 
   const { match_id: _ignored, ...source } = row;
-  const to = matchTarget(row.calendar, calendars);
-  const body = matchEventBody(
-    source,
-    to.secondary ? link.reminderMinutesSecondary : link.reminderMinutes,
-    row.color_id,
+  let to = matchTarget(row.calendar, calendars);
+  let result = await upsertEvent(
+    accessToken,
+    to.calendarId,
+    eventId,
+    matchEventBody(
+      source,
+      to.secondary ? link.reminderMinutesSecondary : link.reminderMinutes,
+      row.color_id,
+    ),
   );
-  const result = await upsertEvent(accessToken, to.calendarId, eventId, body);
-  if (result === "ok" && to.otherId) {
-    await deleteEvent(accessToken, to.otherId, eventId);
+
+  if (result === "gone" && to.secondary) {
+    console.warn(
+      `secondary calendar gone for ${userId}, clearing it and falling back to primary`,
+    );
+    await clearSecondaryCalendar(supabase, userId);
+    to = { calendarId: link.calendarId, otherId: null, secondary: false };
+    result = await upsertEvent(
+      accessToken,
+      to.calendarId,
+      eventId,
+      matchEventBody(source, link.reminderMinutes, row.color_id),
+    );
   }
-  return result;
+
+  const sweep = result === "ok" && to.otherId
+    ? await deleteEvent(accessToken, to.otherId, eventId)
+    : "ok" as const;
+  return worstResult([result, sweep]);
 }
 
 /** Reconciles one (player, reservation) or (player, match): reality decides

@@ -1,7 +1,11 @@
 // calendar-manage — actions on the linked calendar that the player asked for
 // and that must finish before the app shows the result.
 //
-// `disconnect`, `reminders`, `teams` and `secondary`. Deployed WITHOUT
+// `disconnect`, `reminders`, `teams`, `secondary`, `training_color` and
+// `match_teams` (a thin back-compat wrapper over `teams` for the shipped
+// 1.2.1 app, which only ever sends a bare team-name list — see setTeams'
+// call site below; drop it once a build with the new screen is the oldest
+// one still talking to this backend). Deployed WITHOUT
 // --no-verify-jwt (unlike notify and calendar-oauth-callback): a signed-in
 // player calls it from the app through functions.invoke, which attaches
 // their JWT, and the platform verifies it before the function even runs.
@@ -26,10 +30,12 @@
 
 import { createClient } from "@supabase/supabase-js";
 import {
+  CALENDAR_DESCRIPTION_SECONDARY,
   createSecondaryCalendar,
   deleteCalendar,
   deleteEvent,
   GoogleAuthError,
+  mapLegacyMatchTeams,
   matchEventId,
   possibleMatchCalendars,
   refreshAccessToken,
@@ -220,16 +226,30 @@ async function setReminders(
     secondary: secondaryCalendarIdOf(link, token as { google_calendar_id_secondary: string | null }),
   };
   const trainingColorId = (link.training_color_id as number | null) ?? null;
-  const written =
-    await writeFutureReservations(admin, userId, accessToken, calendarId, trainingColorId) +
-    await writeFutureMatches(admin, userId, accessToken, calendars);
+  const reservationsWritten = await writeFutureReservations(
+    admin,
+    userId,
+    accessToken,
+    calendarId,
+    trainingColorId,
+  );
+  const { written: matchesWritten, sweepFailed } = await writeFutureMatches(
+    admin,
+    userId,
+    accessToken,
+    calendars,
+  );
+  const written = reservationsWritten + matchesWritten;
   const [{ data: reservations }, { data: matches }] = await Promise.all([
     admin.rpc("my_future_reservations", { p_user: userId }),
     admin.rpc("my_future_matches", { p_user: userId }),
   ]);
   const expected = ((reservations ?? []) as unknown[]).length +
     ((matches ?? []) as unknown[]).length;
-  const failed = written < expected;
+  // A failed SWEEP (a team's match left duplicated in the calendar it just
+  // moved out of) is exactly as unfinished as a failed write — both need
+  // the backfill job.
+  const failed = written < expected || sweepFailed;
   // Whatever did not go through is caught up by a job — the preference is
   // stored, so nothing is lost.
   if (failed) await admin.rpc("backfill_calendar_jobs", { p_user: userId });
@@ -371,9 +391,9 @@ async function setTeams(
     }
   }
 
-  const written = await writeFutureMatches(admin, userId, accessToken, calendars);
+  const { written, sweepFailed } = await writeFutureMatches(admin, userId, accessToken, calendars);
   const { data: total } = await admin.rpc("my_future_matches", { p_user: userId });
-  const failed = written < ((total ?? []) as unknown[]).length;
+  const failed = written < ((total ?? []) as unknown[]).length || sweepFailed;
   if (failed) await admin.rpc("backfill_calendar_jobs", { p_user: userId });
   return json({ rewritten: written, removed, saved: teams, deferred: failed });
 }
@@ -449,12 +469,17 @@ async function setSecondary(userId: string, enabled: boolean): Promise<Response>
       return json({ enabled: false, orphaned: !!secondaryId });
     }
 
+    // Told the same way disconnect() tells it: an "auth" delete means the
+    // calendar is left behind in Google with nothing the app can do about
+    // it, so the player needs to hear that rather than a plain "off".
+    let orphaned = false;
     if (secondaryId) {
       const result = await deleteCalendar(accessToken, secondaryId);
       if (result === "retry") {
         // Nothing was changed — let the player try again, the state is whole.
         return json({ error: "google_unavailable" }, 503);
       }
+      if (result === "auth") orphaned = true;
       if (result !== "ok") {
         console.warn(`secondary off: calendar delete ended as ${result}`);
       }
@@ -468,14 +493,14 @@ async function setSecondary(userId: string, enabled: boolean): Promise<Response>
       .update({ calendar: "primary" })
       .eq("user_id", userId).eq("calendar", "secondary");
 
-    const written = await writeFutureMatches(admin, userId, accessToken, {
+    const { written, sweepFailed } = await writeFutureMatches(admin, userId, accessToken, {
       primary: calendarId,
       secondary: null,
     });
     const { data: total } = await admin.rpc("my_future_matches", { p_user: userId });
-    const failed = written < ((total ?? []) as unknown[]).length;
+    const failed = written < ((total ?? []) as unknown[]).length || sweepFailed;
     if (failed) await admin.rpc("backfill_calendar_jobs", { p_user: userId });
-    return json({ enabled: false, rewritten: written, deferred: failed });
+    return json({ enabled: false, rewritten: written, deferred: failed, orphaned });
   }
 
   // ON.
@@ -489,7 +514,11 @@ async function setSecondary(userId: string, enabled: boolean): Promise<Response>
 
   if (!secondaryId) {
     try {
-      secondaryId = await createSecondaryCalendar(accessToken, "Rezervátor 2");
+      secondaryId = await createSecondaryCalendar(
+        accessToken,
+        "Rezervátor 2",
+        CALENDAR_DESCRIPTION_SECONDARY,
+      );
     } catch (error) {
       // Nothing was changed — same "retry, the state is whole" contract as
       // every other Google call in this file (see disconnect()).
@@ -503,12 +532,12 @@ async function setSecondary(userId: string, enabled: boolean): Promise<Response>
     .update({ secondary_enabled: true, updated_at: new Date().toISOString() })
     .eq("user_id", userId);
 
-  const written = await writeFutureMatches(admin, userId, accessToken, {
+  const { written, sweepFailed } = await writeFutureMatches(admin, userId, accessToken, {
     primary: calendarId,
     secondary: secondaryId,
   });
   const { data: total } = await admin.rpc("my_future_matches", { p_user: userId });
-  const failed = written < ((total ?? []) as unknown[]).length;
+  const failed = written < ((total ?? []) as unknown[]).length || sweepFailed;
   if (failed) await admin.rpc("backfill_calendar_jobs", { p_user: userId });
   return json({ enabled: true, rewritten: written, deferred: failed });
 }
@@ -551,6 +580,17 @@ Deno.serve(async (request) => {
     if (body?.action === "teams") {
       const teams = validateTeamChoices(body.teams);
       if (teams === null) return json({ error: "bad_teams" }, 400);
+      return await setTeams(user.id, teams);
+    }
+    if (body?.action === "match_teams") {
+      // The shipped 1.2.1 app's action: a bare team-name string[], no
+      // calendar or colour — see the header comment and mapLegacyMatchTeams.
+      const names = Array.isArray(body.teams)
+        ? body.teams.filter((t: unknown) => typeof t === "string")
+        : [];
+      const { data: current } = await admin.from("calendar_teams")
+        .select("team, calendar, color_id").eq("user_id", user.id);
+      const teams = mapLegacyMatchTeams(names, (current ?? []) as TeamChoice[]);
       return await setTeams(user.id, teams);
     }
     if (body?.action === "secondary") {

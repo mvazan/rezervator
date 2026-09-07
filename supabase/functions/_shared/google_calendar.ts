@@ -22,6 +22,11 @@ const tokenEndpoint = () =>
 
 export const CALENDAR_SUMMARY = "Rezervátor";
 export const CALENDAR_DESCRIPTION = "Tvoje tréninky z appky Rezervátor.";
+/** The second calendar ("Rezervátor 2") never holds a training by design —
+ * only matches of the teams routed to it — so it gets its own description
+ * rather than inheriting the primary's, which would be a lie. */
+export const CALENDAR_DESCRIPTION_SECONDARY =
+  "Zápasy sledovaných týmů z appky Rezervátor.";
 export const CALENDAR_TIMEZONE = "Europe/Prague";
 
 /** The user revoked access (or the token expired after 7 days while the
@@ -159,15 +164,54 @@ export async function revokeToken(refreshToken: string): Promise<void> {
   }
 }
 
+/** Clears the player's secondary calendar (id + `secondary_enabled`) without
+ * touching anything else — the one shared fix for two different moments the
+ * SECOND calendar's Google side can go stale while the primary is still
+ * fine:
+ *  - calendar-oauth-callback, relinking under a FRESH consent (the previous
+ *    primary was unreachable, so a new one had to be created): the old
+ *    consent's secondary calendar is gone right along with it, and a stale
+ *    id left behind would route a team into a calendar nothing can ever
+ *    reach again.
+ *  - notify's matchSync, when a write lands on a SECONDARY calendar the
+ *    player deleted by hand in Google (404/410, "gone") while the primary
+ *    is untouched: the fix is to fall back to the primary, not break the
+ *    whole link.
+ *
+ * Deliberately leaves calendar_teams alone: a row still pointed at
+ * 'secondary' just falls back to the primary on its own (matchTarget
+ * treats a null `calendars.secondary` as "route to primary" regardless of
+ * the team's own column), and reappears in the second calendar by itself if
+ * the player turns it back on — exactly the behaviour calendar-manage's
+ * `disconnect`/`secondary` OFF path already relies on. `secondary_enabled`
+ * is reset here for the same reason `forget()` (calendar-manage) resets it
+ * on disconnect: it does not just record a preference, it asserts a second
+ * calendar EXISTS, and it no longer does. */
+export async function clearSecondaryCalendar(
+  // deno-lint-ignore no-explicit-any
+  db: any,
+  userId: string,
+): Promise<void> {
+  const now = new Date().toISOString();
+  await db.from("google_calendar_tokens")
+    .update({ google_calendar_id_secondary: null, updated_at: now })
+    .eq("user_id", userId);
+  await db.from("google_calendar_links")
+    .update({ secondary_enabled: false, updated_at: now })
+    .eq("user_id", userId);
+}
+
 /** Creates a calendar the app owns and returns its id. `summary` defaults to
  * CALENDAR_SUMMARY ("Rezervátor", the one every player already has); pass
- * "Rezervátor 2" to create a player's optional second calendar instead. No
- * calendar-level reminders — the player sets those in Můj profil and they
- * travel on the events themselves; a fresh calendar from the API has no
- * defaultReminders, which is also the wanted default. */
+ * "Rezervátor 2" (and CALENDAR_DESCRIPTION_SECONDARY) to create a player's
+ * optional second calendar instead — its own description, since it never
+ * holds a training. No calendar-level reminders — the player sets those in
+ * Můj profil and they travel on the events themselves; a fresh calendar from
+ * the API has no defaultReminders, which is also the wanted default. */
 export async function createSecondaryCalendar(
   accessToken: string,
   summary: string = CALENDAR_SUMMARY,
+  description: string = CALENDAR_DESCRIPTION,
 ): Promise<string> {
   const response = await fetch(`${calendarApi()}/calendars`, {
     method: "POST",
@@ -177,7 +221,7 @@ export async function createSecondaryCalendar(
     },
     body: JSON.stringify({
       summary,
-      description: CALENDAR_DESCRIPTION,
+      description,
       timeZone: CALENDAR_TIMEZONE,
     }),
   });
@@ -519,14 +563,20 @@ export async function writeFutureReservations(
  * Google call per row.
  *
  * `db` is the caller's service-role client; RPC `my_future_matches` (0032)
- * holds the same definition of "live" as backfill_calendar_jobs. */
+ * holds the same definition of "live" as backfill_calendar_jobs.
+ *
+ * Returns `written` (how many events went through) AND `sweepFailed`: when a
+ * team moves calendars the delete from the OTHER one IS the move, so a
+ * transient failure there (Google 5xx/429) — not just a failed write — must
+ * still send the caller to a backfill job, or the event stays duplicated in
+ * both calendars with nothing to notice and retry it. */
 export async function writeFutureMatches(
   // deno-lint-ignore no-explicit-any
   db: any,
   userId: string,
   accessToken: string,
   calendars: { primary: string; secondary: string | null },
-): Promise<number> {
+): Promise<{ written: number; sweepFailed: boolean }> {
   const { data: prefs } = await db.from("google_calendar_links")
     .select("reminder_minutes, reminder_minutes_secondary")
     .eq("user_id", userId).maybeSingle();
@@ -540,6 +590,7 @@ export async function writeFutureMatches(
   const rows = (matches ?? []) as MatchRow[];
 
   let written = 0;
+  let sweepFailed = false;
   const CHUNK = 5;
   for (let i = 0; i < rows.length; i += CHUNK) {
     await Promise.all(
@@ -561,16 +612,18 @@ export async function writeFutureMatches(
 
         // Only once the event is safely in its target calendar. Deleting
         // first (or regardless) would, on a failed write, leave the match in
-        // NEITHER calendar until the next sync. Failure of the delete itself
-        // is best effort, like every other cleanup delete here — the next
-        // sync retries it against the same event id.
+        // NEITHER calendar until the next sync. A failed sweep is reported
+        // (not just logged): the caller enqueues a backfill job so the
+        // duplicate in the OTHER calendar actually gets cleaned up instead
+        // of sitting there forever.
         if (result === "ok" && to.otherId) {
-          await deleteEvent(accessToken, to.otherId, eventId);
+          const sweep = await deleteEvent(accessToken, to.otherId, eventId);
+          if (sweep !== "ok") sweepFailed = true;
         }
       }),
     );
   }
-  return written;
+  return { written, sweepFailed };
 }
 
 /** Which calendar one match belongs in, and which one it must be swept out
@@ -628,8 +681,12 @@ export type TeamChoice = {
 
 /** Google takes only its own eleven event colours, as colorId "1".."11";
  * anything else is a client that made something up. null means "no colour"
- * and is checked by the caller, not here. */
+ * and is checked by the caller, not here. The type gate runs BEFORE the
+ * coercion: bare `Number(raw)` alone would accept a boolean too
+ * (`Number(true) === 1`), so `color_id: true` would otherwise pass as
+ * colour 1. */
 export function isEventColorId(raw: unknown): boolean {
+  if (typeof raw !== "number" && typeof raw !== "string") return false;
   const n = Number(raw);
   return Number.isInteger(n) && n >= 1 && n <= 11;
 }
@@ -675,6 +732,34 @@ export function validateTeamChoices(input: unknown): TeamChoice[] | null {
     if (seen.has(team)) continue; // first occurrence wins
     seen.add(team);
     out.push({ team, calendar, color_id });
+  }
+  return out;
+}
+
+/** Back-compat for the shipped 1.2.1 app (calendar-manage's OLD `match_teams`
+ * action, `Api.setCalendarMatchTeams` there — a bare `string[]`, no calendar
+ * or colour: that screen cannot express either). Maps that flat list onto
+ * the new per-team shape `teams` needs: a name still present keeps whatever
+ * `current` (the player's existing calendar_teams rows) already has for it —
+ * an old app must never silently reset a calendar/colour choice made in a
+ * newer one — a name that is new to `current` defaults to primary/no colour,
+ * same as ticking a team for the first time in the new screen; a name
+ * dropped from the list just does not appear in the result, same "whole
+ * list, not a delta" contract set_calendar_teams_for already has. Trims and
+ * de-dupes (first occurrence wins) like validateTeamChoices, since the old
+ * client never did either. */
+export function mapLegacyMatchTeams(
+  names: string[],
+  current: TeamChoice[],
+): TeamChoice[] {
+  const byName = new Map(current.map((t) => [t.team, t]));
+  const seen = new Set<string>();
+  const out: TeamChoice[] = [];
+  for (const raw of names) {
+    const team = raw.trim();
+    if (!team || seen.has(team)) continue;
+    seen.add(team);
+    out.push(byName.get(team) ?? { team, calendar: "primary", color_id: null });
   }
   return out;
 }
