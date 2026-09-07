@@ -1651,6 +1651,14 @@ begin
   select p_user, trim(x.team), coalesce(x.calendar, 'primary'), x.color_id
     from jsonb_to_recordset(v_teams) as x(team text, calendar text, color_id smallint);
 
+  -- The mirror the older app reads; see the note at the top.
+  update google_calendar_links
+     set match_teams = coalesce(
+           (select array_agg(team order by team)
+              from calendar_teams where user_id = p_user), '{}'),
+         updated_at = now()
+   where user_id = p_user;
+
   return v_previous;
 end;
 $$;
@@ -2015,9 +2023,11 @@ CREATE TABLE IF NOT EXISTS "public"."google_calendar_links" (
     "reminder_minutes" integer[] DEFAULT '{}'::integer[] NOT NULL,
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "match_teams" "text"[] DEFAULT '{}'::"text"[] NOT NULL,
     "secondary_enabled" boolean DEFAULT false NOT NULL,
     "reminder_minutes_secondary" integer[] DEFAULT '{}'::integer[] NOT NULL,
     "training_color_id" smallint,
+    CONSTRAINT "google_calendar_links_match_teams_check" CHECK ((COALESCE("array_length"("match_teams", 1), 0) <= 20)),
     CONSTRAINT "google_calendar_links_reminder_minutes_check" CHECK (((COALESCE("array_length"("reminder_minutes", 1), 0) <= 5) AND (0 <= ALL ("reminder_minutes")) AND (40320 >= ALL ("reminder_minutes")))),
     CONSTRAINT "google_calendar_links_reminder_minutes_secondary_check" CHECK (((COALESCE("array_length"("reminder_minutes_secondary", 1), 0) <= 5) AND (0 <= ALL ("reminder_minutes_secondary")) AND (40320 >= ALL ("reminder_minutes_secondary")))),
     CONSTRAINT "google_calendar_links_status_check" CHECK (("status" = ANY (ARRAY['pending'::"text", 'linked'::"text", 'broken'::"text", 'unlinked'::"text"]))),
@@ -2029,6 +2039,10 @@ ALTER TABLE "public"."google_calendar_links" OWNER TO "postgres";
 
 
 COMMENT ON COLUMN "public"."google_calendar_links"."status" IS 'pending (token stored, calendar not yet created) | linked | broken (token revoked / calendar gone) | unlinked (disconnected)';
+
+
+
+COMMENT ON COLUMN "public"."google_calendar_links"."match_teams" IS 'DEPRECATED (0033): a read-only mirror of calendar_teams.team for app builds up to 1.2.1. calendar_teams is the truth; drop this once a build with the new screen is out.';
 
 
 

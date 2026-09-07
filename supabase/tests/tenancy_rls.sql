@@ -973,20 +973,38 @@ begin
   raise notice 'OK: 0027 calendar RPCs are server-only';
 end $$;
 
--- 0033: match_teams and set_calendar_match_teams_for are actually gone, not
--- merely unused.
+-- 0033: the old RPC is gone, but match_teams stays as a mirror the shipped
+-- app still reads — and set_calendar_teams_for has to keep it truthful.
 do $$
+declare
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
 begin
-  if exists (select 1 from information_schema.columns
-             where table_schema = 'public' and table_name = 'google_calendar_links'
-               and column_name = 'match_teams') then
-    raise exception 'FAIL: google_calendar_links.match_teams still exists';
-  end if;
   if exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
              where n.nspname = 'public' and p.proname = 'set_calendar_match_teams_for') then
     raise exception 'FAIL: set_calendar_match_teams_for still exists';
   end if;
-  raise notice 'OK: match_teams and set_calendar_match_teams_for were dropped by 0033';
+  if not exists (select 1 from information_schema.columns
+                 where table_schema = 'public'
+                   and table_name = 'google_calendar_links'
+                   and column_name = 'match_teams') then
+    raise exception 'FAIL: the match_teams mirror is gone while 1.2.1 still reads it';
+  end if;
+
+  perform set_calendar_teams_for(v_uid, '[
+    {"team": "SKK Veverky Brno A", "calendar": "secondary", "color_id": 7},
+    {"team": "KS Devítka Brno B", "calendar": "primary", "color_id": null}]'::jsonb);
+  if (select match_teams from google_calendar_links where user_id = v_uid)
+     <> array['KS Devítka Brno B', 'SKK Veverky Brno A'] then
+    raise exception 'FAIL: the mirror does not carry what calendar_teams says';
+  end if;
+
+  perform set_calendar_teams_for(v_uid, '[
+    {"team": "SKK Veverky Brno A", "calendar": "secondary", "color_id": 7}]'::jsonb);
+  if (select match_teams from google_calendar_links where user_id = v_uid)
+     <> array['SKK Veverky Brno A'] then
+    raise exception 'FAIL: a dropped team stayed in the mirror';
+  end if;
+  raise notice 'OK: match_teams mirrors calendar_teams for the app that is out';
 end $$;
 
 -- A's admin (linked above) follows SKK Veverky Brno A; a home and an away

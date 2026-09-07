@@ -222,10 +222,14 @@ calendar itself — only on the event. A followed team therefore needs its
 own calendar (`primary` \| `secondary`) and its own Google event `colorId`
 (1–11, `null` = none), which a `text[]` entry cannot carry — so a team
 became a row, `calendar_teams` (table above), replacing
-`google_calendar_links.match_teams` (dropped outright in 0033 once nothing
-read it any more — column, `set_calendar_match_teams_for`, gone). The 0032
-migration spilled the pre-existing picks into rows (`calendar = 'primary'`,
-`color_id = null`) so nobody's calendar changed at the time.
+`google_calendar_links.match_teams`. The 0032 migration spilled the
+pre-existing picks into rows (`calendar = 'primary'`, `color_id = null`) so
+nobody's calendar changed at the time. 0033 dropped
+`set_calendar_match_teams_for`, but **kept the `match_teams` column as a
+read-only mirror**: builds up to 1.2.1 read it off the realtime stream, and
+an empty list there would tell a player their team picks had vanished.
+`set_calendar_teams_for` writes the mirror on every save; a later migration
+drops it once a build with the new screen is out.
 
 - `match_calendar_followers(tenant, home, away)` — same producers, same
   signature, joins `calendar_teams`; `distinct` because a player following
