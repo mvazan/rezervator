@@ -416,3 +416,24 @@ Deno.test("mapLegacyMatchTeams: a blank name is dropped, an empty list clears ev
   assertEquals(mapLegacyMatchTeams(["  "], [TC("A", "primary", null)]), []);
   assertEquals(mapLegacyMatchTeams([], [TC("A", "primary", null)]), []);
 });
+
+Deno.test("the old app's team names face the same caps as the new screen", () => {
+  // mapLegacyMatchTeams keeps what a team already had and defaults the rest,
+  // but it is not a validator — an 1.2.1 client is still untrusted, so the
+  // caller runs the result through validateTeamChoices.
+  const current = [
+    { team: "Veverky A", calendar: "secondary" as const, color_id: 7 },
+  ];
+  const mapped = mapLegacyMatchTeams(
+    ["Veverky A", "x".repeat(81)],
+    current,
+  );
+  assertEquals(mapped[0], current[0], "an existing team keeps its calendar and colour");
+  assertEquals(validateTeamChoices(mapped), null, "an over-long name is refused");
+
+  const ok = mapLegacyMatchTeams(["Veverky A", "Devítka B"], current);
+  assertEquals(validateTeamChoices(ok), [
+    { team: "Veverky A", calendar: "secondary", color_id: 7 },
+    { team: "Devítka B", calendar: "primary", color_id: null },
+  ]);
+});

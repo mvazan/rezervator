@@ -585,12 +585,17 @@ Deno.serve(async (request) => {
     if (body?.action === "match_teams") {
       // The shipped 1.2.1 app's action: a bare team-name string[], no
       // calendar or colour — see the header comment and mapLegacyMatchTeams.
-      const names = Array.isArray(body.teams)
-        ? body.teams.filter((t: unknown) => typeof t === "string")
-        : [];
+      // An older client is still just a client: the mapped result goes
+      // through the very same validateTeamChoices as `teams`, or a long
+      // enough name would walk straight past the caps into the table.
+      if (!Array.isArray(body.teams)) return json({ error: "bad_teams" }, 400);
+      const names = body.teams.filter((t: unknown) => typeof t === "string");
       const { data: current } = await admin.from("calendar_teams")
         .select("team, calendar, color_id").eq("user_id", user.id);
-      const teams = mapLegacyMatchTeams(names, (current ?? []) as TeamChoice[]);
+      const teams = validateTeamChoices(
+        mapLegacyMatchTeams(names, (current ?? []) as TeamChoice[]),
+      );
+      if (teams === null) return json({ error: "bad_teams" }, 400);
       return await setTeams(user.id, teams);
     }
     if (body?.action === "secondary") {
