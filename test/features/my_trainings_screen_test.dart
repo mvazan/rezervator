@@ -151,7 +151,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Tréninky se nepodařilo načíst.'), findsOneWidget);
+    expect(find.text('Přehled se nepodařilo načíst.'), findsOneWidget);
     expect(find.text('Zkusit znovu'), findsOneWidget);
     expect(find.text('Zatím nic.'), findsNothing);
   });
@@ -166,7 +166,7 @@ void main() {
     await tester.pumpWidget(app(slotsFailed: true));
     await tester.pumpAndSettle();
 
-    expect(find.text('Tréninky se nepodařilo načíst.'), findsOneWidget);
+    expect(find.text('Přehled se nepodařilo načíst.'), findsOneWidget);
     expect(find.text('Zkusit znovu'), findsOneWidget);
     expect(find.text('Zatím nic.'), findsNothing);
   });
@@ -248,8 +248,11 @@ void main() {
   // ---------------------------------------------------------------------
 
   group('match trophy colour (0036)', () {
-    Color colorNamed(String name) =>
-        googleEventColors.firstWhere((c) => c.$2 == name).$3;
+    // The trophy paints a derived shade, legible on the surface (light
+    // theme here, MaterialApp's default) — never Google's raw event RGB;
+    // see legibleShadeOf and _trophyColorOf's own doc comment.
+    Color colorNamed(String name) => legibleShadeOf(
+        googleEventColors.firstWhere((c) => c.$2 == name).$3, Brightness.light);
 
     // match's default teams: home 'SKK Veverky Brno A', away 'KK MS Brno D'.
     final awayMatch = PrioritySlot(
@@ -322,6 +325,42 @@ void main() {
       final icon =
           tester.widget<Icon>(find.byIcon(Icons.emoji_events_outlined));
       expect(icon.color, colorNamed('Lososová'));
+    });
+
+    testWidgets('a colour on a team the player does NOT follow never '
+        'paints a match that only shows because the OTHER team is '
+        'followed', (tester) async {
+      const devitkaFollower = Profile(
+        id: 'me',
+        displayName: 'Já Hráč',
+        email: 'me@example.com',
+        role: Role.player,
+        status: ProfileStatus.approved,
+        followedTeams: ['KS Devítka Brno B'],
+      );
+      final derby = PrioritySlot(
+        id: 'm3',
+        date: today.addDays(2),
+        startsAt: const HourMinute(18, 0),
+        endsAt: const HourMinute(20, 0),
+        type: PrioritySlot.fallbackMatchType,
+        homeTeam: 'SKK Veverky Brno A',
+        awayTeam: 'KS Devítka Brno B',
+      );
+      await tester.pumpWidget(app(
+        profile: devitkaFollower,
+        slots: [derby],
+        // Veverky was once coloured, but the player follows only Devítka.
+        teamColors: const {'SKK Veverky Brno A': 11},
+      ));
+      await tester.pumpAndSettle();
+
+      // The match is listed at all (Devítka is followed) …
+      expect(find.text('SKK Veverky Brno A – KS Devítka Brno B'), findsOneWidget);
+      // … but its trophy must stay plain, not Veverky's red.
+      final icon =
+          tester.widget<Icon>(find.byIcon(Icons.emoji_events_outlined));
+      expect(icon.color, isNull);
     });
   });
 }

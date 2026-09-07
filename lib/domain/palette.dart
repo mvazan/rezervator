@@ -38,6 +38,23 @@ Color unpackCustomColor(int value) => Color(0xFF000000 | (value & 0xFFFFFF));
       : (at(0.92).toColor(), at(0.27).toColor());
 }
 
+/// A single legible shade of [color] for painting straight onto the current
+/// theme surface (an icon glyph, say) rather than filling a background:
+/// unlike [customTint] this returns one colour, not a background/foreground
+/// pair, and only ever moves the LIGHTNESS — hue and saturation survive
+/// untouched, so an achromatic pick (Google's "Grafitová" grey, `colorId`
+/// 8) stays grey instead of gaining a spurious tint. Bright in the dark
+/// theme, deep in the light one, the same two lightness values [customTint]
+/// already uses for its own foreground — legible regardless of which of
+/// the eleven hues it started from. Meant for `googleEventColors`, whose
+/// fixed RGBs are tuned for Google's own white calendar grid and read
+/// poorly painted raw onto a themed surface (`EventColorDot` gets away with
+/// the raw value only because it fills a circle with its own border rather
+/// than sitting directly on the surface).
+Color legibleShadeOf(Color color, Brightness brightness) => HSLColor.fromColor(color)
+    .withLightness(brightness == Brightness.dark ? 0.86 : 0.27)
+    .toColor();
+
 /// Club color palette (spec §2). Index 0–8 = a club color; anything else
 /// (e.g. -1 "no club", -2 rental default) → the neutral fallback.
 ///

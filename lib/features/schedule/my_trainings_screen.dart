@@ -10,16 +10,24 @@ import '../../domain/upcoming.dart';
 import '../profile/profile_screen.dart';
 import 'cancel_own_reservation.dart';
 
-/// The trophy's colour for [slot]: [matchColorOf]'s pick from [teamColors]
-/// (home wins a derby), rendered as Google's actual event colour — the same
-/// eleven the calendar link card's own colour dots use. Null (today's plain
-/// icon) when neither team is coloured or the id is somehow none of the
-/// eleven.
-Color? _trophyColorOf(PrioritySlot slot, Map<String, int> teamColors) {
-  final colorId = matchColorOf(slot, teamColors);
+/// The trophy's colour for [slot]: [matchColorOf]'s pick among
+/// [followedTeams] (home wins a derby, no fall-through to a coloured team
+/// the player does not follow) from [teamColors], derived into a shade
+/// legible for [brightness] (`legibleShadeOf`) rather than Google's raw
+/// event RGB — a bare icon glyph needs more contrast than `EventColorDot`'s
+/// filled, bordered circle. Null (today's plain icon) when neither team is
+/// coloured, the picked team has no colour, or the id is somehow none of
+/// the eleven.
+Color? _trophyColorOf(
+  PrioritySlot slot,
+  List<String> followedTeams,
+  Map<String, int> teamColors,
+  Brightness brightness,
+) {
+  final colorId = matchColorOf(slot, followedTeams, teamColors);
   if (colorId == null) return null;
   for (final (id, _, color) in googleEventColors) {
-    if (id == colorId) return color;
+    if (id == colorId) return legibleShadeOf(color, brightness);
   }
   return null;
 }
@@ -154,7 +162,7 @@ class MyTrainingsScreen extends ConsumerWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text('Tréninky se nepodařilo načíst.'),
+                  const Text('Přehled se nepodařilo načíst.'),
                   const SizedBox(height: 12),
                   OutlinedButton(
                     onPressed: () {
@@ -236,7 +244,12 @@ class MyTrainingsScreen extends ConsumerWidget {
                     UpcomingMatch() => ListTile(
                         leading: Icon(
                           Icons.emoji_events_outlined,
-                          color: _trophyColorOf(item.slot, teamColors),
+                          color: _trophyColorOf(
+                            item.slot,
+                            teams,
+                            teamColors,
+                            theme.brightness,
+                          ),
                         ),
                         title: Text(item.slot.title),
                         subtitle: Text([
