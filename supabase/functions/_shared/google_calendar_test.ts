@@ -5,6 +5,7 @@ import {
   localDateTime,
   matchEventBody,
   matchEventId,
+  matchTarget,
   remindersFor,
   reservationEventBody,
 } from "./google_calendar.ts";
@@ -212,4 +213,35 @@ Deno.test("matchEventBody: the followed team's colour becomes the string colorId
   // Everything else is untouched by adding a colour.
   const { colorId: _colorId, ...rest } = body;
   assertEquals(rest, matchEventBody(HOME_MATCH, [120]));
+});
+
+Deno.test("matchTarget: without a second calendar everything stays put", () => {
+  const one = { primary: "cal-a", secondary: null };
+  assertEquals(matchTarget("primary", one), {
+    calendarId: "cal-a",
+    otherId: null,
+    secondary: false,
+  });
+  // A team still marked 'secondary' (the player turned the second calendar
+  // off) falls back to the primary rather than losing its event.
+  assertEquals(matchTarget("secondary", one), {
+    calendarId: "cal-a",
+    otherId: null,
+    secondary: false,
+  });
+});
+
+Deno.test("matchTarget: with a second calendar each team gets its own, and "
+  + "the other one is swept", () => {
+  const two = { primary: "cal-a", secondary: "cal-b" };
+  assertEquals(matchTarget("primary", two), {
+    calendarId: "cal-a",
+    otherId: "cal-b",
+    secondary: false,
+  });
+  assertEquals(matchTarget("secondary", two), {
+    calendarId: "cal-b",
+    otherId: "cal-a",
+    secondary: true,
+  });
 });

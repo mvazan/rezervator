@@ -544,33 +544,51 @@ export async function writeFutureMatches(
   for (let i = 0; i < rows.length; i += CHUNK) {
     await Promise.all(
       rows.slice(i, i + CHUNK).map(async (row) => {
-        const toSecondary = row.calendar === "secondary" &&
-          calendars.secondary != null;
-        const targetId = toSecondary
-          ? calendars.secondary!
-          : calendars.primary;
-        const otherId = toSecondary ? calendars.primary : calendars.secondary;
+        const to = matchTarget(row.calendar, calendars);
         const eventId = await matchEventId(userId, row.match_id);
 
         const result = await upsertEvent(
           accessToken,
-          targetId,
+          to.calendarId,
           eventId,
           matchEventBody(
             row,
-            toSecondary ? secondaryReminders : primaryReminders,
+            to.secondary ? secondaryReminders : primaryReminders,
             row.color_id,
           ),
         );
         if (result === "ok") written++;
 
-        // Best effort, like every other cleanup delete in this file — a
-        // failure here is caught up by the next sync, same event id.
-        if (otherId) await deleteEvent(accessToken, otherId, eventId);
+        // Only once the event is safely in its target calendar. Deleting
+        // first (or regardless) would, on a failed write, leave the match in
+        // NEITHER calendar until the next sync. Failure of the delete itself
+        // is best effort, like every other cleanup delete here — the next
+        // sync retries it against the same event id.
+        if (result === "ok" && to.otherId) {
+          await deleteEvent(accessToken, to.otherId, eventId);
+        }
       }),
     );
   }
   return written;
+}
+
+/** Which calendar one match belongs in, and which one it must be swept out
+ * of. Pure, because this is the whole of the two-calendar routing: a team
+ * moved from one calendar to the other keeps its event id, so the sweep is
+ * what makes the move happen. A player without a second calendar has
+ * `secondary: null` and everything lands in the primary, with nothing to
+ * sweep — exactly what a one-calendar player had before. */
+export function matchTarget(
+  calendar: MatchRow["calendar"],
+  calendars: { primary: string; secondary: string | null },
+): { calendarId: string; otherId: string | null; secondary: boolean } {
+  const secondary = calendar === "secondary" && calendars.secondary != null;
+  return {
+    calendarId: secondary ? calendars.secondary! : calendars.primary,
+    otherId: secondary ? calendars.primary : calendars.secondary,
+    secondary,
+  };
 }
 
 /** Deletes the event. Already gone (404/410) is done — deletion is
