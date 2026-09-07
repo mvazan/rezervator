@@ -17,12 +17,15 @@ Future<void> showTeamPickerSheet(
   required String hint,
   required List<String> Function(WidgetRef ref) chosenOf,
   required Future<void> Function(List<String> teams) onChanged,
-}) {
-  return showModalBottomSheet<void>(
+}) async {
+  List<String>? edited;
+  List<String> opened = const [];
+  await showModalBottomSheet<void>(
     context: context,
     builder: (sheetContext) => Consumer(
       builder: (context, ref, _) {
         final chosen = chosenOf(ref);
+        opened = chosen;
         final teams = {...ref.watch(ourTeamsProvider), ...chosen}.toList()
           ..sort(compareCzech);
         return _TeamPickerList(
@@ -30,10 +33,24 @@ Future<void> showTeamPickerSheet(
           hint: hint,
           teams: teams,
           chosen: chosen,
-          onChanged: onChanged,
+          onEdited: (list) => edited = list,
         );
       },
     ),
+  );
+  // Untouched, or ticked back to where it started: nothing to send.
+  if (edited == null) return;
+  final before = [...opened]..sort(compareCzech);
+  if (before.length == edited!.length &&
+      List.generate(before.length, (i) => before[i] == edited![i])
+          .every((same) => same)) {
+    return;
+  }
+  if (!context.mounted) return;
+  await tryAction(
+    context,
+    () => onChanged(edited!),
+    errorText: friendlyDbError,
   );
 }
 
@@ -51,14 +68,17 @@ class _TeamPickerList extends StatefulWidget {
     required this.hint,
     required this.teams,
     required this.chosen,
-    required this.onChanged,
+    required this.onEdited,
   });
 
   final String title;
   final String hint;
   final List<String> teams;
   final List<String> chosen;
-  final Future<void> Function(List<String> teams) onChanged;
+
+  /// Reports the full list after every tick; the caller sends the last one
+  /// it heard once the sheet is closed.
+  final void Function(List<String> teams) onEdited;
 
   @override
   State<_TeamPickerList> createState() => _TeamPickerListState();
@@ -67,11 +87,9 @@ class _TeamPickerList extends StatefulWidget {
 class _TeamPickerListState extends State<_TeamPickerList> {
   late Set<String> _ticked = widget.chosen.toSet();
 
-  /// Saves go out one after the other: two quick taps must not become two
-  /// whole-list PATCHes racing over separate connections, where the older
-  /// one can land last and silently drop the newer tick.
-  Future<void> _queue = Future.value();
-  int _pending = 0;
+  /// Set by the first tick: from then on the player's edits own the list,
+  /// not the stream underneath it.
+  bool _edited = false;
 
   @override
   void didUpdateWidget(_TeamPickerList old) {
@@ -80,7 +98,7 @@ class _TeamPickerListState extends State<_TeamPickerList> {
     // no save is in flight — a rebuild triggered by something else (e.g. the
     // schedule changing) or the row of an older save arriving mid-queue must
     // not clobber a tap that is still on its way.
-    if (_pending == 0 && !_sameTeams(old.chosen, widget.chosen)) {
+    if (!_edited && !_sameTeams(old.chosen, widget.chosen)) {
       _ticked = widget.chosen.toSet();
     }
   }
@@ -88,29 +106,13 @@ class _TeamPickerListState extends State<_TeamPickerList> {
   static bool _sameTeams(List<String> a, List<String> b) =>
       a.length == b.length && a.toSet().containsAll(b);
 
+  /// Local only — the whole list goes out once, when the sheet closes.
   void _toggle(String team, bool on) {
-    setState(() => on ? _ticked.add(team) : _ticked.remove(team));
-    final snapshot = _ticked.toList()..sort(compareCzech);
-    _pending++;
-    _queue = _queue.then((_) => _save(snapshot, team, on));
-  }
-
-  Future<void> _save(List<String> snapshot, String team, bool on) async {
-    if (!mounted) {
-      _pending--;
-      return;
-    }
-    final saved = await tryAction(
-      context,
-      () => widget.onChanged(snapshot),
-      errorText: friendlyDbError,
-    );
-    _pending--;
-    // A failed save undoes just this tap, so the box never stays ticked
-    // next to the snack that says it did not stick.
-    if (!saved && mounted) {
-      setState(() => on ? _ticked.remove(team) : _ticked.add(team));
-    }
+    setState(() {
+      _edited = true;
+      on ? _ticked.add(team) : _ticked.remove(team);
+    });
+    widget.onEdited(_ticked.toList()..sort(compareCzech));
   }
 
   @override

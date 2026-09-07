@@ -664,6 +664,11 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      // The sheet edits locally; the whole list goes out once, on close.
+      expect(saved, isEmpty);
+
+      Navigator.of(tester.element(find.text('Zápasy v kalendáři'))).pop();
+      await tester.pumpAndSettle();
 
       expect(saved.map(teamTuples).toList(), [
         [('SKK Veverky Brno A', CalendarSlot.primary, null)],
@@ -1190,6 +1195,10 @@ void main() {
         find.widgetWithText(CheckboxListTile, 'SKK Veverky Brno A'),
       );
       await tester.pumpAndSettle();
+      // Edits are local; the list goes out once, when the sheet closes.
+      expect(saved, isEmpty);
+      Navigator.of(tester.element(find.byType(CheckboxListTile).first)).pop();
+      await tester.pumpAndSettle();
 
       expect(saved, [
         ['SKK Veverky Brno A'],
@@ -1228,6 +1237,8 @@ void main() {
           find.widgetWithText(CheckboxListTile, 'SKK Veverky Brno A'),
         );
         await tester.pumpAndSettle();
+        Navigator.of(tester.element(find.byType(CheckboxListTile).first)).pop();
+        await tester.pumpAndSettle();
         expect(saved, [<String>[]]);
       },
     );
@@ -1249,33 +1260,22 @@ void main() {
       expect(saved, [HomeView.trainings]);
     });
 
-    testWidgets('two quick ticks both land — the second save carries both '
-        'teams (the stale-set bug would compute it from the value before '
-        'the first tick and lose it)', (tester) async {
+    testWidgets('several ticks are ONE save on close, with every tick in it',
+        (tester) async {
       tester.view.physicalSize = const Size(800, 1800);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
       final saved = <List<String>>[];
-      // Holds the FIRST save open until after the second tick, standing in
-      // for a realtime round trip that has not returned yet — the profile
-      // is deliberately never re-pushed while it is held.
-      final firstSaveGate = Completer<void>();
-      await tester.pumpWidget(
-        app(
-          me,
-          matches: schedule,
-          setFollowedTeams: (t) async {
-            saved.add(t);
-            if (saved.length == 1) await firstSaveGate.future;
-          },
-        ),
-      );
+      await tester.pumpWidget(app(
+        me,
+        matches: schedule,
+        setFollowedTeams: (t) async => saved.add(t),
+      ));
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('Vybrat týmy…'));
       await tester.pumpAndSettle();
-
       await tester.tap(
         find.widgetWithText(CheckboxListTile, 'KS Devítka Brno B'),
       );
@@ -1283,96 +1283,22 @@ void main() {
       await tester.tap(
         find.widgetWithText(CheckboxListTile, 'SKK Veverky Brno A'),
       );
-      await tester.pump();
-      firstSaveGate.complete();
       await tester.pumpAndSettle();
 
-      expect(saved.length, 2);
-      expect(saved.last, ['KS Devítka Brno B', 'SKK Veverky Brno A']);
-    });
-
-    testWidgets('the saved list is Czech-sorted no matter the tick order', (
-      tester,
-    ) async {
-      tester.view.physicalSize = const Size(800, 1800);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      final saved = <List<String>>[];
-      await tester.pumpWidget(
-        app(me, matches: schedule, setFollowedTeams: (t) async => saved.add(t)),
-      );
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.text('Vybrat týmy…'));
-      await tester.pumpAndSettle();
-
-      // Ticked in reverse Czech order: Veverky (S) before Devítka (K) —
-      // the saved list must still come out Devítka first.
-      await tester.tap(
-        find.widgetWithText(CheckboxListTile, 'SKK Veverky Brno A'),
-      );
-      await tester.pumpAndSettle();
-      await tester.tap(
-        find.widgetWithText(CheckboxListTile, 'KS Devítka Brno B'),
-      );
-      await tester.pumpAndSettle();
-
-      expect(saved.last, ['KS Devítka Brno B', 'SKK Veverky Brno A']);
-    });
-
-    testWidgets('quick ticks are saved one after the other, each with the '
-        'full list so far', (tester) async {
-      tester.view.physicalSize = const Size(800, 1800);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      final saved = <List<String>>[];
-      final gates = <Completer<void>>[];
-      await tester.pumpWidget(
-        app(
-          me,
-          matches: schedule,
-          setFollowedTeams: (t) {
-            saved.add(t);
-            final gate = Completer<void>();
-            gates.add(gate);
-            return gate.future;
-          },
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.text('Vybrat týmy…'));
-      await tester.pumpAndSettle();
-      await tester.tap(
-        find.widgetWithText(CheckboxListTile, 'SKK Veverky Brno A'),
-      );
-      await tester.pump();
-      await tester.tap(
-        find.widgetWithText(CheckboxListTile, 'KS Devítka Brno B'),
-      );
-      await tester.pump();
-
-      // Both boxes tick at once, but the second save waits for the first —
-      // two PATCHes in flight could land in either order.
+      // Both boxes tick at once and nothing has gone out yet.
       expect(
         tester
             .widget<CheckboxListTile>(
-              find.widgetWithText(CheckboxListTile, 'KS Devítka Brno B'),
-            )
+                find.widgetWithText(CheckboxListTile, 'SKK Veverky Brno A'))
             .value,
         isTrue,
       );
-      expect(saved, [
-        ['SKK Veverky Brno A'],
-      ]);
+      expect(saved, isEmpty);
 
-      gates[0].complete();
+      Navigator.of(tester.element(find.byType(CheckboxListTile).first)).pop();
       await tester.pumpAndSettle();
-      expect(saved.last, ['KS Devítka Brno B', 'SKK Veverky Brno A']);
-      gates[1].complete();
-      await tester.pumpAndSettle();
+      expect(saved.length, 1, reason: 'one call carries the whole list');
+      expect(saved.single, ['KS Devítka Brno B', 'SKK Veverky Brno A']);
     });
 
     testWidgets('a failing save shows the friendly message, not the raw '
@@ -1396,15 +1322,15 @@ void main() {
         find.widgetWithText(CheckboxListTile, 'SKK Veverky Brno A'),
       );
       await tester.pumpAndSettle();
+      Navigator.of(tester.element(find.byType(CheckboxListTile).first)).pop();
+      await tester.pumpAndSettle();
 
+      // The sheet is gone when the answer comes back, so the snack belongs
+      // to the profile underneath — and the card still reads what the
+      // server holds, because nothing was saved.
       expect(find.text('Na tohle nemáš oprávnění.'), findsOneWidget);
       expect(find.textContaining('Nepovedlo se'), findsNothing);
-      // The optimistic tick is rolled back: the box must not stay ticked
-      // while the snack says the save failed.
-      final tile = tester.widget<CheckboxListTile>(
-        find.widgetWithText(CheckboxListTile, 'SKK Veverky Brno A'),
-      );
-      expect(tile.value, isFalse);
+      expect(find.text('Žádný tým'), findsOneWidget);
     });
   });
 }

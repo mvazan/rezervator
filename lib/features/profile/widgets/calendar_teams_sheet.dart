@@ -9,16 +9,21 @@ import 'event_color_picker.dart';
 
 /// Zápasy v kalendáři: the richer sibling of `showTeamPickerSheet` — one row
 /// per team with not just a tick but a colour, and, once the second
-/// calendar is on, which of the two it goes to. Every change saves the
-/// WHOLE list of ticked teams at once via [onChanged] (the shape
-/// `Api.setCalendarTeams` takes), queued the same way `showTeamPickerSheet`
-/// queues its own saves: two quick taps must not become two whole-list
-/// PATCHes racing over separate connections, where the older one can land
-/// last and silently drop the newer change. Unlike that sheet, a save here
-/// must also never lose an untouched row's OWN calendar/colour just because
-/// some other row changed — that is the whole point of this richer sheet
-/// over Task 4's transitional "every ticked team to primary, no colour"
-/// shim.
+/// calendar is on, which of the two it goes to.
+///
+/// Editing is local; the whole list goes out ONCE, when the sheet closes.
+/// One save is an expensive round trip — the edge function refreshes the
+/// Google token and rewrites every future match — so saving per tap meant
+/// ticking three teams cost three of those, and the later ones could still
+/// be waiting when the player closed the sheet. Nothing is lost by waiting:
+/// the action takes the whole list anyway, so one call carries every change.
+/// The snack belongs to the screen underneath, which is still there when
+/// the answer comes back.
+///
+/// A save must never lose an untouched row's OWN calendar/colour just
+/// because another row changed — that is the whole point of this richer
+/// sheet over Task 4's transitional "every ticked team to primary, no
+/// colour" shim.
 ///
 /// Reads [myCalendarTeamsProvider] (which teams are chosen, and each one's
 /// calendar/colour), [ourTeamsProvider] (the alley's own teams, from the
@@ -29,12 +34,15 @@ import 'event_color_picker.dart';
 Future<void> showCalendarTeamsSheet(
   BuildContext context, {
   required Future<void> Function(List<CalendarTeam> teams) onChanged,
-}) {
-  return showModalBottomSheet<void>(
+}) async {
+  List<CalendarTeam>? edited;
+  List<CalendarTeam> opened = const [];
+  await showModalBottomSheet<void>(
     context: context,
     builder: (sheetContext) => Consumer(
       builder: (context, ref, _) {
         final chosen = ref.watch(myCalendarTeamsProvider).value ?? const [];
+        opened = chosen;
         final secondaryEnabled =
             ref.watch(myCalendarLinkProvider).value?.secondaryEnabled ?? false;
         final names = {
@@ -45,11 +53,33 @@ Future<void> showCalendarTeamsSheet(
           teams: names,
           chosen: chosen,
           secondaryEnabled: secondaryEnabled,
-          onChanged: onChanged,
+          onEdited: (teams) => edited = teams,
         );
       },
     ),
   );
+  // Untouched, or fiddled back to where it started: nothing to send.
+  if (edited == null || sameTeamChoices(opened, edited!)) return;
+  if (!context.mounted) return;
+  await tryAction(
+    context,
+    () => onChanged(edited!),
+    errorText: friendlyDbError,
+  );
+}
+
+/// Whether two team lists say the same thing — order included, since both
+/// sides are kept Czech-sorted.
+bool sameTeamChoices(List<CalendarTeam> a, List<CalendarTeam> b) {
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i].team != b[i].team ||
+        a[i].calendar != b[i].calendar ||
+        a[i].colorId != b[i].colorId) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /// The list itself, with a local ticked-map overlay on top of [chosen] —
@@ -62,13 +92,16 @@ class _CalendarTeamsList extends StatefulWidget {
     required this.teams,
     required this.chosen,
     required this.secondaryEnabled,
-    required this.onChanged,
+    required this.onEdited,
   });
 
   final List<String> teams;
   final List<CalendarTeam> chosen;
   final bool secondaryEnabled;
-  final Future<void> Function(List<CalendarTeam> teams) onChanged;
+
+  /// Reports the full list after every change; the caller sends the last one
+  /// it heard once the sheet is closed.
+  final void Function(List<CalendarTeam> teams) onEdited;
 
   @override
   State<_CalendarTeamsList> createState() => _CalendarTeamsListState();
@@ -79,21 +112,17 @@ class _CalendarTeamsListState extends State<_CalendarTeamsList> {
     for (final t in widget.chosen) t.team: t,
   };
 
-  /// Saves go out one after the other: two quick taps must not become two
-  /// whole-list PATCHes racing over separate connections, where the older
-  /// one can land last and silently drop the newer change.
-  Future<void> _queue = Future.value();
-  int _pending = 0;
+  /// Set by the first change: from then on the player's edits own the list,
+  /// not the stream underneath it.
+  bool _edited = false;
 
   @override
   void didUpdateWidget(_CalendarTeamsList old) {
     super.didUpdateWidget(old);
-    // Only a genuine change from upstream resyncs the overlay, and only
-    // while no save is in flight — a rebuild triggered by something else
-    // (e.g. the schedule changing) or an older save's row arriving mid-queue
-    // must not clobber a tap that is still on its way. Same guard as
-    // showTeamPickerSheet.
-    if (_pending == 0 && !_sameChosen(old.chosen, widget.chosen)) {
+    // Nothing has been saved yet, so an upstream change is simply newer
+    // truth — until the player has touched something, in which case their
+    // half-finished edit must not be clobbered by a rebuild.
+    if (!_edited && !_sameChosen(old.chosen, widget.chosen)) {
       _ticked = {for (final t in widget.chosen) t.team: t};
     }
   }
@@ -115,49 +144,18 @@ class _CalendarTeamsListState extends State<_CalendarTeamsList> {
   List<CalendarTeam> _sortedTicked() =>
       _ticked.values.toList()..sort((a, b) => compareCzech(a.team, b.team));
 
-  /// Replaces [team]'s row with [next] (drops it when null), saves the
-  /// whole list, and — only if the save fails — restores exactly the row
-  /// that was there before, not a fresh default. That is what keeps a
-  /// failed colour or calendar change from silently resetting the team to
-  /// "no colour, hlavní" on retry.
+  /// Replaces [team]'s row with [next] (drops it when null). Local only —
+  /// the whole list goes out once, when the sheet closes.
   void _replace(String team, CalendarTeam? next) {
-    final previous = _ticked[team];
     setState(() {
+      _edited = true;
       if (next == null) {
         _ticked.remove(team);
       } else {
         _ticked[team] = next;
       }
     });
-    final snapshot = _sortedTicked();
-    _pending++;
-    _queue = _queue.then((_) => _save(snapshot, team, previous));
-  }
-
-  Future<void> _save(
-    List<CalendarTeam> snapshot,
-    String team,
-    CalendarTeam? previous,
-  ) async {
-    if (!mounted) {
-      _pending--;
-      return;
-    }
-    final saved = await tryAction(
-      context,
-      () => widget.onChanged(snapshot),
-      errorText: friendlyDbError,
-    );
-    _pending--;
-    if (!saved && mounted) {
-      setState(() {
-        if (previous == null) {
-          _ticked.remove(team);
-        } else {
-          _ticked[team] = previous;
-        }
-      });
-    }
+    widget.onEdited(_sortedTicked());
   }
 
   void _toggle(String team, bool on) =>
