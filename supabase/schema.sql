@@ -1811,10 +1811,20 @@ begin
           where y.color_id is null
       );
 
+  -- Collapses a repeated team name itself (distinct on, ordered by each
+  -- element's original array position via WITH ORDINALITY) instead of
+  -- trusting the caller — a second occurrence for the same team used to
+  -- make ON CONFLICT raise "cannot affect row a second time".
   insert into team_colors (user_id, team, color_id)
-  select p_user, trim(y.team), y.color_id
-    from jsonb_to_recordset(v_colors) as y(team text, color_id smallint)
-    where y.color_id is not null
+  select p_user, x.team, x.color_id
+    from (
+      select distinct on (trim(y.team))
+             trim(y.team) as team, y.color_id
+        from jsonb_array_elements(v_colors) with ordinality as e(elem, ord)
+        cross join lateral jsonb_to_record(e.elem) as y(team text, color_id smallint)
+        order by trim(y.team), e.ord
+    ) x
+    where x.color_id is not null
   on conflict (user_id, team) do update set color_id = excluded.color_id;
 
   return v_previous;
@@ -2244,7 +2254,7 @@ CREATE TABLE IF NOT EXISTS "public"."team_colors" (
 ALTER TABLE "public"."team_colors" OWNER TO "postgres";
 
 
-COMMENT ON TABLE "public"."team_colors" IS 'One row per player+team the player has coloured (0036) — independent of both team lists (profiles.followed_teams, calendar_teams): the single colour shown for that team in Můj přehled and in the Google Calendar event alike. No row = no colour; a linked calendar is not required.';
+COMMENT ON TABLE "public"."team_colors" IS 'One row per player+team the player has coloured (0036) — independent of both team lists (profiles.followed_teams, calendar_teams): the single colour shown for that team in Můj přehled and in the Google Calendar event alike. No row = no colour; a linked calendar is not required. Read-only to the client (0037) — every write goes through calendar-manage (set_team_colors_for), which also repaints the affected future Google Calendar events in the same request.';
 
 
 
@@ -2780,7 +2790,7 @@ CREATE POLICY "slot_types_update" ON "public"."priority_slot_types" FOR UPDATE U
 ALTER TABLE "public"."team_colors" ENABLE ROW LEVEL SECURITY;
 
 
-CREATE POLICY "team_colors_own" ON "public"."team_colors" USING (("user_id" = "auth"."uid"())) WITH CHECK (("user_id" = "auth"."uid"()));
+CREATE POLICY "team_colors_own" ON "public"."team_colors" FOR SELECT USING (("user_id" = "auth"."uid"()));
 
 
 
@@ -3100,7 +3110,7 @@ GRANT ALL ON TABLE "public"."schedule_settings" TO "service_role";
 
 
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."team_colors" TO "authenticated";
+GRANT SELECT ON TABLE "public"."team_colors" TO "authenticated";
 GRANT ALL ON TABLE "public"."team_colors" TO "service_role";
 
 

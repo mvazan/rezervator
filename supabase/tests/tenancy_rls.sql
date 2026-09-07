@@ -1307,9 +1307,13 @@ end $$;
 -- player's own fixture row — both inserted directly (server context): the
 -- client can no longer write calendar_teams at all (0035), so seeding it
 -- the way a real write happens now is set_calendar_teams_for's job below,
--- not a client insert. Colour (0036) is a separate table now, seeded the
--- same way with the same two teams so the my_future_matches checks further
--- down still see a colour on each.
+-- not a client insert. Colour (0036) is a separate table now, seeded here
+-- for BOTH of this player's teams — including 'Cal Test Rival', which does
+-- not become one of their calendar_teams rows until set_calendar_teams_for
+-- runs below, since team_colors lives independently of that list — so the
+-- my_future_matches derby check further down sees a real colour on the
+-- home team that wins its tie-break, not a NULL that would let its
+-- assertion pass no matter what my_future_matches actually returned.
 insert into calendar_teams (user_id, team, calendar)
 values
   ('10000000-0000-0000-0000-000000000002', 'Cizí tým', 'primary'),
@@ -1317,7 +1321,8 @@ values
 insert into team_colors (user_id, team, color_id)
 values
   ('10000000-0000-0000-0000-000000000002', 'Cizí tým', 2),
-  ('10000000-0000-0000-0000-000000000001', 'Cal Test Home', 9);
+  ('10000000-0000-0000-0000-000000000001', 'Cal Test Home', 9),
+  ('10000000-0000-0000-0000-000000000001', 'Cal Test Rival', 2);
 
 -- A's admin: reads only their own row, and every write — own row or
 -- foreign — is rejected outright (permission denied, not merely RLS-
@@ -1485,13 +1490,13 @@ begin
   returning id into v_derby;
 
   select * into v_row from my_future_matches(v_uid) where match_id = v_solo;
-  if not found or v_row.calendar <> 'secondary' or v_row.color_id <> 9 then
+  if not found or v_row.calendar <> 'secondary' or v_row.color_id is distinct from 9 then
     raise exception 'FAIL: my_future_matches lost the followed team''s calendar/colour: %',
       to_jsonb(v_row);
   end if;
 
   select * into v_row from my_future_matches(v_uid) where match_id = v_derby;
-  if not found or v_row.calendar <> 'primary' or v_row.color_id <> 2 then
+  if not found or v_row.calendar <> 'primary' or v_row.color_id is distinct from 2 then
     raise exception 'FAIL: my_future_matches did not let the home team win the derby: %',
       to_jsonb(v_row);
   end if;
@@ -1590,21 +1595,43 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------------
--- team_colors (0036): the colour used to live on calendar_teams, so only a
--- player with a linked calendar had one, and it hung off the wrong team list
--- (the calendar's, not followed_teams which draws Můj přehled). Now it is
--- its own table, keyed the same way (user_id, team) but tied to neither
--- list: a plain preference the app writes directly, like profiles.own_color
--- — full grants plus RLS, no server round trip needed just to tick a
--- colour — and it joins the Realtime publication (checked above) so the
--- stream sees it change. set_team_colors_for exists anyway, server-only:
--- calendar-manage needs to save a colour AND immediately repaint the
--- affected future Google Calendar events in the same request, same shape as
--- set_training_color_for (0034).
+-- team_colors (0036 creates it, 0037 makes it select-only): the colour used
+-- to live on calendar_teams, so only a player with a linked calendar had
+-- one, and it hung off the wrong team list (the calendar's, not
+-- followed_teams which draws Můj přehled). Now it is its own table, keyed
+-- the same way (user_id, team) but tied to neither list — and, like
+-- calendar_teams (0035), select-only for the client (0037): every write
+-- goes through calendar-manage/set_team_colors_for, which needs to save a
+-- colour AND immediately repaint the affected future Google Calendar events
+-- in the same request, same shape as set_training_color_for (0034). It
+-- still joins the Realtime publication (checked above) so the stream sees
+-- a colour change.
 -- ---------------------------------------------------------------------------
 reset role;
+do $$
+begin
+  if not has_table_privilege('authenticated', 'public.team_colors', 'select') then
+    raise exception 'FAIL: authenticated cannot read team_colors';
+  end if;
+  if has_table_privilege('authenticated', 'public.team_colors', 'insert')
+     or has_table_privilege('authenticated', 'public.team_colors', 'update')
+     or has_table_privilege('authenticated', 'public.team_colors', 'delete') then
+    raise exception 'FAIL: team_colors is writable by authenticated directly';
+  end if;
+  if has_table_privilege('anon', 'public.team_colors', 'select') then
+    raise exception 'FAIL: anon may read team_colors';
+  end if;
+  raise notice 'OK: team_colors is select-only for authenticated, anon has nothing';
+end $$;
+
+-- A foreign row to probe isolation against, and this player's own fixture
+-- row — both inserted directly (server context): the client can no longer
+-- write team_colors at all (0037), so seeding it the way a real write
+-- happens now is set_team_colors_for's job further down, not a client
+-- insert.
 insert into team_colors (user_id, team, color_id) values
-  ('10000000-0000-0000-0000-000000000002', 'Cizí barva', 6);
+  ('10000000-0000-0000-0000-000000000002', 'Cizí barva', 6),
+  ('10000000-0000-0000-0000-000000000001', 'Barva Home', 5);
 
 set local role authenticated;
 set local request.jwt.claims =
@@ -1614,11 +1641,9 @@ declare
   v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
   v_b constant uuid := '10000000-0000-0000-0000-000000000002';
 begin
-  insert into team_colors (user_id, team, color_id) values (v_uid, 'Barva Home', 3);
-  update team_colors set color_id = 5 where user_id = v_uid and team = 'Barva Home';
   if (select color_id from team_colors
-      where user_id = v_uid and team = 'Barva Home') <> 5 then
-    raise exception 'FAIL: a player cannot write/update their own team_colors row';
+      where user_id = v_uid and team = 'Barva Home') is distinct from 5 then
+    raise exception 'FAIL: a player cannot read their own team_colors row';
   end if;
 
   if exists (select 1 from team_colors where user_id = v_b) then
@@ -1626,11 +1651,34 @@ begin
   end if;
 
   begin
-    insert into team_colors (user_id, team, color_id) values (v_b, 'Cizí vložená', 4);
-    raise exception 'FAIL: a player inserted a team_colors row for someone else';
+    insert into team_colors (user_id, team, color_id) values (v_uid, 'Nová barva', 3);
+    raise exception 'FAIL: a player inserted their own team_colors row directly';
   exception when insufficient_privilege then null;
   end;
 
+  begin
+    update team_colors set color_id = 1 where user_id = v_uid;
+    raise exception 'FAIL: a player updated their own team_colors row directly';
+  exception when insufficient_privilege then null;
+  end;
+
+  begin
+    delete from team_colors where user_id = v_b;
+    raise exception 'FAIL: a player deleted a foreign team_colors row';
+  exception when insufficient_privilege then null;
+  end;
+
+  raise notice 'OK: team_colors is readable (own rows only) and not writable by the client';
+end $$;
+
+-- The table's own CHECK constraint still holds for whoever DOES write it —
+-- the service role, via set_team_colors_for — now that the client path is
+-- gone (0037).
+reset role;
+do $$
+declare
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+begin
   begin
     insert into team_colors (user_id, team, color_id) values (v_uid, 'Bad Colour Big', 12);
     raise exception 'FAIL: color_id 12 accepted';
@@ -1641,29 +1689,15 @@ begin
     raise exception 'FAIL: color_id 0 accepted';
   exception when check_violation then null;
   end;
-
-  -- RLS filters an update/delete aimed at a foreign row instead of raising
-  -- (unlike an insert, whose WITH CHECK fails outright) — these silently
-  -- touch zero rows; the only way to see whether they did anything is to
-  -- look afterwards, with RLS out of the way (below).
-  update team_colors set color_id = 1 where user_id = v_b;
-  delete from team_colors where user_id = v_b;
-end $$;
-
-reset role;
-do $$
-begin
-  if (select color_id from team_colors
-      where user_id = '10000000-0000-0000-0000-000000000002' and team = 'Cizí barva') <> 6 then
-    raise exception 'FAIL: a foreign team_colors row was updated or deleted through RLS';
-  end if;
-  raise notice 'OK: a team colour is the player''s own, one per team, whatever the calendar does';
+  raise notice 'OK: team_colors CHECK constraints still hold';
 end $$;
 
 -- set_team_colors_for: server-only, returns the previous state of exactly
 -- the teams named (not the player's whole set — this call is a partial
 -- upsert/delete, unlike set_calendar_teams_for's full replace), and a null
--- colour deletes that team's row rather than merely blanking it.
+-- colour deletes that team's row rather than merely blanking it. A
+-- repeated team name in one payload is de-duped in the statement itself
+-- (0037) rather than trusting the caller — first occurrence wins.
 reset role;
 do $$
 declare
@@ -1689,8 +1723,10 @@ begin
        jsonb_build_object('team', 'Barva Home', 'color_id', 5)) then
     raise exception 'FAIL: set_team_colors_for did not return the previous state: %', v_previous;
   end if;
-  if (select color_id from team_colors where user_id = v_uid and team = 'Barva Home') <> 8
-     or (select color_id from team_colors where user_id = v_uid and team = 'Barva New') <> 7 then
+  if (select color_id from team_colors where user_id = v_uid and team = 'Barva Home')
+       is distinct from 8
+     or (select color_id from team_colors where user_id = v_uid and team = 'Barva New')
+       is distinct from 7 then
     raise exception 'FAIL: set_team_colors_for did not store the new colours';
   end if;
 
@@ -1699,6 +1735,17 @@ begin
     jsonb_build_object('team', 'Barva Home', 'color_id', null)));
   if exists (select 1 from team_colors where user_id = v_uid and team = 'Barva Home') then
     raise exception 'FAIL: a null colour did not delete the row';
+  end if;
+
+  -- A repeated team name used to make the insert's own ON CONFLICT raise
+  -- "cannot affect row a second time" — the statement now de-dupes itself
+  -- (0037); first occurrence, by original array position, wins.
+  perform set_team_colors_for(v_uid, jsonb_build_array(
+    jsonb_build_object('team', 'Barva Repeat', 'color_id', 3),
+    jsonb_build_object('team', 'Barva Repeat', 'color_id', 4)));
+  if (select color_id from team_colors where user_id = v_uid and team = 'Barva Repeat')
+       is distinct from 3 then
+    raise exception 'FAIL: a repeated team name in one payload was not de-duped (first occurrence wins)';
   end if;
 
   declare
