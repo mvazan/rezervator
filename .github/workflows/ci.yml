@@ -42,6 +42,16 @@ jobs:
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
+      # An empty index.ts is valid TypeScript, so `deno check` is happy with
+      # it — and deploy-backend ships whatever is here. That is how notify
+      # went to production as a 0-byte file and stayed there for two days,
+      # with the job queue and every push notification silently dead. Every
+      # function must actually answer requests, so every function must serve.
+      - name: Every edge function serves something
+        run: |
+          for f in supabase/functions/*/index.ts; do
+            grep -q "Deno.serve" "$f" || { echo "$f has no Deno.serve — it would deploy dead"; exit 1; }
+          done
       - name: Edge functions type-check + tests
         run: |
           deno check --import-map supabase/functions/import_map.json supabase/functions/notify/index.ts supabase/functions/cancel/index.ts supabase/functions/calendar-oauth-callback/index.ts supabase/functions/calendar-manage/index.ts supabase/functions/kiosk-password/index.ts
