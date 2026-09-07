@@ -23,8 +23,14 @@ Color? _trophyColorOf(
   List<String> followedTeams,
   Map<String, int> teamColors,
   Brightness brightness,
-) {
-  final colorId = matchColorOf(slot, followedTeams, teamColors);
+) =>
+    eventShadeOf(matchColorOf(slot, followedTeams, teamColors), brightness);
+
+/// One Google event colour id as a shade legible on [brightness]'s surface,
+/// or null for "no colour" — the plain icon. Shared by the match trophy and
+/// the training T so the two can never drift into different shades of the
+/// same picked colour.
+Color? eventShadeOf(int? colorId, Brightness brightness) {
   if (colorId == null) return null;
   for (final (id, _, color) in googleEventColors) {
     if (id == colorId) return legibleShadeOf(color, brightness);
@@ -73,9 +79,14 @@ class MyTrainingsScreen extends ConsumerWidget {
   /// [started]: today's block has already begun (mirrors the calendar's own
   /// `canCancel`/`inPast` check — see `domain/schedule.dart`) — no tap, no
   /// close icon, but still listed: the player did train, after all.
-  Widget _trainingTile(BuildContext context, UpcomingTraining item, bool started) =>
+  Widget _trainingTile(
+    BuildContext context,
+    UpcomingTraining item,
+    bool started,
+    Color? color,
+  ) =>
       ListTile(
-        leading: const Icon(Icons.title),
+        leading: Icon(Icons.title, color: color),
         title: Text('${item.block.label} · Dráha ${item.reservation.lane}'),
         trailing: started ? null : const Icon(Icons.close),
         onTap: started ? null : () => _confirmCancel(context, item),
@@ -122,7 +133,14 @@ class MyTrainingsScreen extends ConsumerWidget {
     final profile = ref.watch(myProfileProvider).value;
     final teams = profile?.followedTeams ?? const <String>[];
     final teamColors = ref.watch(myTeamColorsProvider).value ?? const {};
+    // A training's own colour, the one set under Barva tréninků — the same
+    // value that colours it in Google Calendar, so the T here and the event
+    // there read as the same thing.
+    final trainingColorId =
+        ref.watch(myCalendarLinkProvider).value?.trainingColorId;
     final theme = Theme.of(context);
+    final trainingColor =
+        eventShadeOf(trainingColorId, theme.brightness);
 
     final header = Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 8, 0),
@@ -240,6 +258,7 @@ class MyTrainingsScreen extends ConsumerWidget {
                         day.date == today &&
                             item.block.startsAt.minutesFromMidnight <=
                                 nowTime.minutesFromMidnight,
+                        trainingColor,
                       ),
                     UpcomingMatch() => ListTile(
                         leading: Icon(

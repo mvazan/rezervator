@@ -152,12 +152,15 @@ class SlotTile extends StatelessWidget {
         );
         // The name alone. Compact cells (the fit-width week grid) get a
         // single clipped line so a long name never overflows the narrow
-        // flexed column; the roomier large "mine" tile keeps two lines. Other
-        // players' large tiles used to stack an initials avatar over the
-        // name, which on a portrait phone read as two rows ("FE" / "FERI").
+        // flexed column. A large tile wraps to two — „Radek Jandera" cut to
+        // „Radek J…" tells you less than the same name over two lines, and
+        // the tile has the room. (The two rows the phone used to show were a
+        // different thing: an initials avatar STACKED over the name, so a
+        // nick read as „FE" / „FERI". That stack is gone; this is one name
+        // wrapping.)
         final content = Text(
           name,
-          maxLines: !_compact && isMine ? 2 : 1,
+          maxLines: _compact ? 1 : 2,
           overflow: TextOverflow.ellipsis,
           textAlign: TextAlign.center,
           style: nameStyle,
