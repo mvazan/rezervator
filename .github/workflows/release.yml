@@ -65,7 +65,9 @@ jobs:
              rezervator-${{ github.ref_name }}.aab
 
       # "What's new" for Play, generated from the in-app changelog so the
-      # store text always matches what users see in Můj profil. The tag is
+      # store text always matches what users see in Můj profil — condensed
+      # to Play's 500-character limit by store_notes.dart when an entry runs
+      # long, always on whole sentences. The tag is
       # v1.0.1; the changelog keys by bare version (1.0.1). Missing entry ->
       # fail loudly (--out keeps dart-run noise out of the file).
       # r0adkll/upload-google-play derives the locale from the filename after
