@@ -76,6 +76,14 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  /// The sheet edits locally and saves the whole list once, on close — so a
+  /// test that wants to see the save has to close it first, the way the
+  /// player does.
+  Future<void> close(WidgetTester tester) async {
+    Navigator.of(tester.element(find.text('Zápasy v kalendáři'))).pop();
+    await tester.pumpAndSettle();
+  }
+
   Finder rowOf(String team) => find.byKey(ValueKey(team));
   Finder checkboxOf(String team) =>
       find.descendant(of: rowOf(team), matching: find.byType(Checkbox));
@@ -155,15 +163,19 @@ void main() {
     await tester.tap(checkboxOf('SKK Veverky Brno A'));
     await tester.pumpAndSettle();
 
-    expect(saved.map(teamTuples).toList(), [
-      [('SKK Veverky Brno A', CalendarSlot.primary, null)],
-    ]);
-    // The row redraws ticked right away (optimistic), with its colour dot.
+    // The row redraws ticked right away, with its colour dot — but nothing
+    // has gone out yet; the save waits for the sheet to close.
     expect(
       tester.widget<Checkbox>(checkboxOf('SKK Veverky Brno A')).value,
       isTrue,
     );
     expect(dotOf('SKK Veverky Brno A'), findsOneWidget);
+    expect(saved, isEmpty);
+
+    await close(tester);
+    expect(saved.map(teamTuples).toList(), [
+      [('SKK Veverky Brno A', CalendarSlot.primary, null)],
+    ]);
   });
 
   testWidgets('unticking one team saves the rest UNCHANGED — colour and '
@@ -193,6 +205,7 @@ void main() {
 
     await tester.tap(checkboxOf('SKK Veverky Brno A'));
     await tester.pumpAndSettle();
+    await close(tester);
 
     expect(saved.map(teamTuples).toList(), [
       [('KS Devítka Brno B', CalendarSlot.secondary, 7)],
@@ -254,6 +267,7 @@ void main() {
       find.descendant(of: picker, matching: find.byTooltip('Šalvějová')),
     );
     await tester.pumpAndSettle();
+    await close(tester);
 
     expect(saved.map(teamTuples).toList(), [
       [('SKK Veverky Brno A', CalendarSlot.secondary, 2)],
@@ -332,14 +346,15 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await close(tester);
 
     expect(saved.map(teamTuples).toList(), [
       [('SKK Veverky Brno A', CalendarSlot.secondary, 9)],
     ]);
   });
 
-  testWidgets('two quick ticks both land — the second save carries both, '
-      'Czech-sorted', (tester) async {
+  testWidgets('several ticks are ONE save on close, Czech-sorted — not one '
+      'round trip per tap', (tester) async {
     final saved = <List<CalendarTeam>>[];
     await tester.pumpWidget(
       harness(matches: schedule, onChanged: (t) async => saved.add(t)),
@@ -349,18 +364,19 @@ void main() {
     await tester.tap(checkboxOf('SKK Veverky Brno A'));
     await tester.pump();
     await tester.tap(checkboxOf('KS Devítka Brno B'));
-    await tester.pump();
     await tester.pumpAndSettle();
+    expect(saved, isEmpty, reason: 'nothing goes out while the sheet is open');
 
-    expect(saved.length, 2);
-    expect(teamTuples(saved.last), [
+    await close(tester);
+    expect(saved.length, 1, reason: 'one call carries the whole list');
+    expect(teamTuples(saved.single), [
       ('KS Devítka Brno B', CalendarSlot.primary, null),
       ('SKK Veverky Brno A', CalendarSlot.primary, null),
     ]);
   });
 
-  testWidgets('a failed colour change rolls back to the EXACT previous row '
-      '(calendar and colour), not a fresh default', (tester) async {
+  testWidgets('a failed save says so on the screen underneath, and the row '
+      'keeps what the server still holds', (tester) async {
     await tester.pumpWidget(
       harness(
         matches: schedule,
@@ -389,9 +405,15 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await close(tester);
 
+    // The sheet is gone by the time the answer comes back, so the snack
+    // belongs to the screen that is still there.
     expect(find.text('Na tohle nemáš oprávnění.'), findsOneWidget);
-    // Rolled back to secondary/colorId 4, NOT unticked and NOT primary/none.
+
+    // Nothing was saved, so reopening shows the row exactly as the server
+    // still has it: secondary, colour 4 — not a fresh default.
+    await open(tester);
     expect(
       tester.widget<Checkbox>(checkboxOf('SKK Veverky Brno A')).value,
       isTrue,

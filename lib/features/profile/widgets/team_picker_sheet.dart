@@ -17,12 +17,15 @@ Future<void> showTeamPickerSheet(
   required String hint,
   required List<String> Function(WidgetRef ref) chosenOf,
   required Future<void> Function(List<String> teams) onChanged,
-}) {
-  return showModalBottomSheet<void>(
+}) async {
+  List<String>? edited;
+  List<String> opened = const [];
+  await showModalBottomSheet<void>(
     context: context,
     builder: (sheetContext) => Consumer(
       builder: (context, ref, _) {
         final chosen = chosenOf(ref);
+        opened = chosen;
         final teams = {...ref.watch(ourTeamsProvider), ...chosen}.toList()
           ..sort(compareCzech);
         return _TeamPickerList(
@@ -30,10 +33,24 @@ Future<void> showTeamPickerSheet(
           hint: hint,
           teams: teams,
           chosen: chosen,
-          onChanged: onChanged,
+          onEdited: (list) => edited = list,
         );
       },
     ),
+  );
+  // Untouched, or ticked back to where it started: nothing to send.
+  if (edited == null) return;
+  final before = [...opened]..sort(compareCzech);
+  if (before.length == edited!.length &&
+      List.generate(before.length, (i) => before[i] == edited![i])
+          .every((same) => same)) {
+    return;
+  }
+  if (!context.mounted) return;
+  await tryAction(
+    context,
+    () => onChanged(edited!),
+    errorText: friendlyDbError,
   );
 }
 
@@ -51,14 +68,17 @@ class _TeamPickerList extends StatefulWidget {
     required this.hint,
     required this.teams,
     required this.chosen,
-    required this.onChanged,
+    required this.onEdited,
   });
 
   final String title;
   final String hint;
   final List<String> teams;
   final List<String> chosen;
-  final Future<void> Function(List<String> teams) onChanged;
+
+  /// Reports the full list after every tick; the caller sends the last one
+  /// it heard once the sheet is closed.
+  final void Function(List<String> teams) onEdited;
 
   @override
   State<_TeamPickerList> createState() => _TeamPickerListState();
@@ -67,13 +87,9 @@ class _TeamPickerList extends StatefulWidget {
 class _TeamPickerListState extends State<_TeamPickerList> {
   late Set<String> _ticked = widget.chosen.toSet();
 
-  /// The newest list waiting to go out, and whether one is already on its
-  /// way. Every save carries the WHOLE list, so a tick made while another
-  /// save is in the air replaces what is waiting instead of queueing behind
-  /// it — and the send outlives the sheet, so closing it right after a tick
-  /// does not throw that tick away. Same shape as showCalendarTeamsSheet.
-  List<String>? _next;
-  bool _sending = false;
+  /// Set by the first tick: from then on the player's edits own the list,
+  /// not the stream underneath it.
+  bool _edited = false;
 
   @override
   void didUpdateWidget(_TeamPickerList old) {
@@ -82,7 +98,7 @@ class _TeamPickerListState extends State<_TeamPickerList> {
     // no save is in flight — a rebuild triggered by something else (e.g. the
     // schedule changing) or the row of an older save arriving mid-queue must
     // not clobber a tap that is still on its way.
-    if (!_sending && _next == null && !_sameTeams(old.chosen, widget.chosen)) {
+    if (!_edited && !_sameTeams(old.chosen, widget.chosen)) {
       _ticked = widget.chosen.toSet();
     }
   }
@@ -90,50 +106,13 @@ class _TeamPickerListState extends State<_TeamPickerList> {
   static bool _sameTeams(List<String> a, List<String> b) =>
       a.length == b.length && a.toSet().containsAll(b);
 
+  /// Local only — the whole list goes out once, when the sheet closes.
   void _toggle(String team, bool on) {
-    setState(() => on ? _ticked.add(team) : _ticked.remove(team));
-    _next = _ticked.toList()..sort(compareCzech);
-    _pump();
-  }
-
-  /// Sends the newest list, then whatever arrived while that was in the air.
-  Future<void> _pump() async {
-    if (_sending) return;
-    _sending = true;
-    final onChanged = widget.onChanged;
-    while (_next != null) {
-      final snapshot = _next!;
-      _next = null;
-      final saved = mounted
-          ? await tryAction(
-              context,
-              () => onChanged(snapshot),
-              errorText: friendlyDbError,
-            )
-          : await _sendDetached(onChanged, snapshot);
-      // One save now covers every tick made while it waited, so a failure
-      // rolls the whole list back to what the server last confirmed rather
-      // than undoing a single box.
-      if (!saved && mounted && _next == null) {
-        setState(() => _ticked = widget.chosen.toSet());
-      }
-    }
-    _sending = false;
-  }
-
-  /// The sheet is gone, so there is nobody to show a snack to — but the tick
-  /// the player made before closing it still deserves to land.
-  Future<bool> _sendDetached(
-    Future<void> Function(List<String>) onChanged,
-    List<String> snapshot,
-  ) async {
-    try {
-      await onChanged(snapshot);
-      return true;
-    } catch (error) {
-      debugPrint('followed teams save after the sheet closed failed: $error');
-      return false;
-    }
+    setState(() {
+      _edited = true;
+      on ? _ticked.add(team) : _ticked.remove(team);
+    });
+    widget.onEdited(_ticked.toList()..sort(compareCzech));
   }
 
   @override
