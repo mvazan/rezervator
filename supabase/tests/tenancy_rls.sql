@@ -1267,14 +1267,16 @@ end $$;
 
 -- ---------------------------------------------------------------------------
 -- Second calendar and match colours (0032): a followed team is a row in
--- calendar_teams (which calendar, which Google event colour), not an entry
--- in google_calendar_links.match_teams any more. match_teams and
--- set_calendar_match_teams_for are gone outright (0033, once calendar-manage
--- moved to set_calendar_teams_for in Task 3); match_calendar_followers and
--- my_future_matches read calendar_teams exclusively. calendar_teams itself
--- is select-only for the client (0035) — every write goes through
+-- calendar_teams (which of the player's two Google calendars its matches go
+-- to), not an entry in google_calendar_links.match_teams any more. match_teams
+-- and set_calendar_match_teams_for are gone outright (0033, once
+-- calendar-manage moved to set_calendar_teams_for in Task 3);
+-- match_calendar_followers reads calendar_teams exclusively. calendar_teams
+-- itself is select-only for the client (0035) — every write goes through
 -- calendar-manage/set_calendar_teams_for, which also keeps the match_teams
--- mirror truthful; a direct client write would bypass both.
+-- mirror truthful; a direct client write would bypass both. The colour used
+-- to live here too (color_id) but moved to its own table, team_colors, by
+-- 0036 — see that section further down.
 -- ---------------------------------------------------------------------------
 reset role;
 do $$
@@ -1305,11 +1307,17 @@ end $$;
 -- player's own fixture row — both inserted directly (server context): the
 -- client can no longer write calendar_teams at all (0035), so seeding it
 -- the way a real write happens now is set_calendar_teams_for's job below,
--- not a client insert.
-insert into calendar_teams (user_id, team, calendar, color_id)
+-- not a client insert. Colour (0036) is a separate table now, seeded the
+-- same way with the same two teams so the my_future_matches checks further
+-- down still see a colour on each.
+insert into calendar_teams (user_id, team, calendar)
 values
-  ('10000000-0000-0000-0000-000000000002', 'Cizí tým', 'primary', 2),
-  ('10000000-0000-0000-0000-000000000001', 'Cal Test Home', 'secondary', 9);
+  ('10000000-0000-0000-0000-000000000002', 'Cizí tým', 'primary'),
+  ('10000000-0000-0000-0000-000000000001', 'Cal Test Home', 'secondary');
+insert into team_colors (user_id, team, color_id)
+values
+  ('10000000-0000-0000-0000-000000000002', 'Cizí tým', 2),
+  ('10000000-0000-0000-0000-000000000001', 'Cal Test Home', 9);
 
 -- A's admin: reads only their own row, and every write — own row or
 -- foreign — is rejected outright (permission denied, not merely RLS-
@@ -1323,9 +1331,7 @@ declare
   v_b constant uuid := '10000000-0000-0000-0000-000000000002';
 begin
   if (select calendar from calendar_teams
-      where user_id = v_uid and team = 'Cal Test Home') <> 'secondary'
-     or (select color_id from calendar_teams
-      where user_id = v_uid and team = 'Cal Test Home') <> 9 then
+      where user_id = v_uid and team = 'Cal Test Home') <> 'secondary' then
     raise exception 'FAIL: a player cannot read their own calendar_teams row';
   end if;
   if exists (select 1 from calendar_teams where user_id = v_b) then
@@ -1351,7 +1357,8 @@ end $$;
 
 -- The table's own CHECK constraints still hold for whoever DOES write it —
 -- the service role, via set_calendar_teams_for — now that the client path
--- is gone (0035).
+-- is gone (0035). (color_id's own CHECK moved to team_colors with the
+-- column, 0036 — tested in that section further down.)
 reset role;
 do $$
 declare
@@ -1360,11 +1367,6 @@ begin
   begin
     insert into calendar_teams (user_id, team, calendar) values (v_uid, 'Bad Calendar', 'třetí');
     raise exception 'FAIL: an unknown calendar value accepted';
-  exception when check_violation then null;
-  end;
-  begin
-    insert into calendar_teams (user_id, team, color_id) values (v_uid, 'Bad Color', 12);
-    raise exception 'FAIL: color_id 12 accepted';
   exception when check_violation then null;
   end;
   raise notice 'OK: calendar_teams CHECK constraints still hold';
@@ -1382,20 +1384,20 @@ declare
   v_many jsonb;
 begin
   v_previous := set_calendar_teams_for(v_uid, jsonb_build_array(
-    jsonb_build_object('team', 'Cal Test Home', 'calendar', 'secondary', 'color_id', 9),
-    jsonb_build_object('team', 'Cal Test Rival', 'calendar', 'primary', 'color_id', 2)));
+    jsonb_build_object('team', 'Cal Test Home', 'calendar', 'secondary'),
+    jsonb_build_object('team', 'Cal Test Rival', 'calendar', 'primary')));
   if v_previous <> jsonb_build_array(
-       jsonb_build_object('team', 'Cal Test Home', 'calendar', 'secondary', 'color_id', 9)) then
+       jsonb_build_object('team', 'Cal Test Home', 'calendar', 'secondary')) then
     raise exception 'FAIL: set_calendar_teams_for did not return the previous state: %', v_previous;
   end if;
 
   select jsonb_agg(jsonb_build_object(
-           'team', team, 'calendar', calendar, 'color_id', color_id) order by team)
+           'team', team, 'calendar', calendar) order by team)
     into v_stored
     from calendar_teams where user_id = v_uid;
   if v_stored <> jsonb_build_array(
-       jsonb_build_object('team', 'Cal Test Home', 'calendar', 'secondary', 'color_id', 9),
-       jsonb_build_object('team', 'Cal Test Rival', 'calendar', 'primary', 'color_id', 2)) then
+       jsonb_build_object('team', 'Cal Test Home', 'calendar', 'secondary'),
+       jsonb_build_object('team', 'Cal Test Rival', 'calendar', 'primary')) then
     raise exception 'FAIL: set_calendar_teams_for did not store the new rows: %', v_stored;
   end if;
 
@@ -1449,8 +1451,10 @@ begin
   raise notice 'OK: set_calendar_reminders_for''s third argument targets the right reminders column';
 end $$;
 
--- my_future_matches: each match carries the followed team's calendar and
--- colour; when both teams are followed (derby), the home team's row wins.
+-- my_future_matches: each match carries the followed team's calendar
+-- (calendar_teams) and colour (team_colors, 0036 — the same team the
+-- calendar/derby resolution above already picked); when both teams are
+-- followed (derby), the home team's row wins.
 do $$
 declare
   v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
@@ -1565,7 +1569,7 @@ do $$
 declare
   v_streamed text[] := array[
     'profiles', 'schedule_settings', 'clubs', 'time_blocks', 'app_config',
-    'google_calendar_links', 'calendar_teams', 'reservations',
+    'google_calendar_links', 'calendar_teams', 'team_colors', 'reservations',
     'day_overrides', 'priority_slot_types', 'priority_slots', 'rentals'
   ];
   v_missing text[];
@@ -1583,6 +1587,134 @@ begin
     raise exception 'FAIL: streamed table(s) missing from supabase_realtime: %', v_missing;
   end if;
   raise notice 'OK: every streamed table is in the supabase_realtime publication';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- team_colors (0036): the colour used to live on calendar_teams, so only a
+-- player with a linked calendar had one, and it hung off the wrong team list
+-- (the calendar's, not followed_teams which draws Můj přehled). Now it is
+-- its own table, keyed the same way (user_id, team) but tied to neither
+-- list: a plain preference the app writes directly, like profiles.own_color
+-- — full grants plus RLS, no server round trip needed just to tick a
+-- colour — and it joins the Realtime publication (checked above) so the
+-- stream sees it change. set_team_colors_for exists anyway, server-only:
+-- calendar-manage needs to save a colour AND immediately repaint the
+-- affected future Google Calendar events in the same request, same shape as
+-- set_training_color_for (0034).
+-- ---------------------------------------------------------------------------
+reset role;
+insert into team_colors (user_id, team, color_id) values
+  ('10000000-0000-0000-0000-000000000002', 'Cizí barva', 6);
+
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+declare
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+  v_b constant uuid := '10000000-0000-0000-0000-000000000002';
+begin
+  insert into team_colors (user_id, team, color_id) values (v_uid, 'Barva Home', 3);
+  update team_colors set color_id = 5 where user_id = v_uid and team = 'Barva Home';
+  if (select color_id from team_colors
+      where user_id = v_uid and team = 'Barva Home') <> 5 then
+    raise exception 'FAIL: a player cannot write/update their own team_colors row';
+  end if;
+
+  if exists (select 1 from team_colors where user_id = v_b) then
+    raise exception 'FAIL: a player sees another player''s team_colors row';
+  end if;
+
+  begin
+    insert into team_colors (user_id, team, color_id) values (v_b, 'Cizí vložená', 4);
+    raise exception 'FAIL: a player inserted a team_colors row for someone else';
+  exception when insufficient_privilege then null;
+  end;
+
+  begin
+    insert into team_colors (user_id, team, color_id) values (v_uid, 'Bad Colour Big', 12);
+    raise exception 'FAIL: color_id 12 accepted';
+  exception when check_violation then null;
+  end;
+  begin
+    insert into team_colors (user_id, team, color_id) values (v_uid, 'Bad Colour Zero', 0);
+    raise exception 'FAIL: color_id 0 accepted';
+  exception when check_violation then null;
+  end;
+
+  -- RLS filters an update/delete aimed at a foreign row instead of raising
+  -- (unlike an insert, whose WITH CHECK fails outright) — these silently
+  -- touch zero rows; the only way to see whether they did anything is to
+  -- look afterwards, with RLS out of the way (below).
+  update team_colors set color_id = 1 where user_id = v_b;
+  delete from team_colors where user_id = v_b;
+end $$;
+
+reset role;
+do $$
+begin
+  if (select color_id from team_colors
+      where user_id = '10000000-0000-0000-0000-000000000002' and team = 'Cizí barva') <> 6 then
+    raise exception 'FAIL: a foreign team_colors row was updated or deleted through RLS';
+  end if;
+  raise notice 'OK: a team colour is the player''s own, one per team, whatever the calendar does';
+end $$;
+
+-- set_team_colors_for: server-only, returns the previous state of exactly
+-- the teams named (not the player's whole set — this call is a partial
+-- upsert/delete, unlike set_calendar_teams_for's full replace), and a null
+-- colour deletes that team's row rather than merely blanking it.
+reset role;
+do $$
+declare
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+  v_previous jsonb;
+begin
+  if has_function_privilege('authenticated',
+       'public.set_team_colors_for(uuid, jsonb)', 'execute')
+     or has_function_privilege('anon',
+       'public.set_team_colors_for(uuid, jsonb)', 'execute') then
+    raise exception 'FAIL: a player may call set_team_colors_for directly';
+  end if;
+  if not has_function_privilege('service_role',
+       'public.set_team_colors_for(uuid, jsonb)', 'execute') then
+    raise exception 'FAIL: service_role lacks set_team_colors_for';
+  end if;
+
+  -- 'Barva Home' already sits at 5 (seeded above); 'Barva New' has no row.
+  v_previous := set_team_colors_for(v_uid, jsonb_build_array(
+    jsonb_build_object('team', 'Barva Home', 'color_id', 8),
+    jsonb_build_object('team', 'Barva New', 'color_id', 7)));
+  if v_previous <> jsonb_build_array(
+       jsonb_build_object('team', 'Barva Home', 'color_id', 5)) then
+    raise exception 'FAIL: set_team_colors_for did not return the previous state: %', v_previous;
+  end if;
+  if (select color_id from team_colors where user_id = v_uid and team = 'Barva Home') <> 8
+     or (select color_id from team_colors where user_id = v_uid and team = 'Barva New') <> 7 then
+    raise exception 'FAIL: set_team_colors_for did not store the new colours';
+  end if;
+
+  -- A null colour deletes the row outright rather than storing a null.
+  perform set_team_colors_for(v_uid, jsonb_build_array(
+    jsonb_build_object('team', 'Barva Home', 'color_id', null)));
+  if exists (select 1 from team_colors where user_id = v_uid and team = 'Barva Home') then
+    raise exception 'FAIL: a null colour did not delete the row';
+  end if;
+
+  declare
+    v_many jsonb;
+  begin
+    select jsonb_agg(jsonb_build_object('team', 'T' || g, 'color_id', 1))
+      into v_many from generate_series(1, 41) g;
+    begin
+      perform set_team_colors_for(v_uid, v_many);
+      raise exception 'FAIL: 41 team colours accepted';
+    exception when others then
+      if sqlerrm <> 'bad_colors' then raise; end if;
+    end;
+  end;
+
+  raise notice 'OK: set_team_colors_for is server-only, returns exactly the previous state and a null colour deletes the row';
 end $$;
 
 reset role;

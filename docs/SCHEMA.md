@@ -62,7 +62,8 @@ Every `color` column above is one `integer` (0030): the negative values are the 
 | `notification_jobs` | Deferred-job queue (0023): `kind` (only `calendar_sync` so far), `dedupe_key` unique (`calendar:<user_id>:<reservation_id>` — a repeat re-arms `run_at` instead of adding a row), `payload` jsonb, `run_at`, `attempts` (the handler backs off 2^attempts minutes and drops the job at 5), `created_at`. Index on `run_at`. | **server-only**: RLS on, no policy; `service_role` all, `anon`/`authenticated` nothing. Written by the security-definer producers (§Google kalendář) and `backfill_calendar_jobs`, consumed by the notify function on the cron tick. |
 | `google_calendar_links` | One row per *person* (not per tenant; `user_id → profiles`, cascade): `status` pending \| linked \| broken \| unlinked, `google_email`, `last_error`, `reminder_minutes int[]` (Calendar API shape — ≤ 5 entries, each 0–40320, CHECK-enforced, stored sorted descending), `created_at`, `updated_at`, plus (0032) `secondary_enabled` (the player turned on the second Google calendar "Rezervátor 2"), `reminder_minutes_secondary` (same shape/bounds, for events written there), `training_color_id` (Google event `colorId` 1–11 for trainings, which always go to the primary calendar; `null` = no colour). `match_teams` (0027) is gone (0033) — see `calendar_teams` for what replaced it. Holds no secret: it is in the Realtime publication and the profile card streams it. | select own row only (`user_id = auth.uid()`); `authenticated` has SELECT and nothing else — every write is the server's (`service_role`). |
 | `google_calendar_tokens` | `user_id → profiles` (cascade), `refresh_token`, `google_calendar_id` (the app-created "Rezervátor" calendar), `google_calendar_id_secondary` (0032: the second one, "Rezervátor 2"; `null` until `secondary_enabled`), `updated_at`. A separate table on purpose: a streamed table must never carry the token. | **server-only**: RLS on, zero policies; `service_role` only. |
-| `calendar_teams` | (0032) One row per player **+** followed team — replaces `google_calendar_links.match_teams`, because a team now needs to say more than its name: `user_id → profiles` (cascade), `team` (a `priority_slots.home_team`/`away_team` string), `calendar` (`primary` \| `secondary`, default `primary` — which of the player's two Google calendars this team's matches go to), `color_id` (Google event `colorId` 1–11, `null` = no colour). PK (`user_id`, `team`). In the Realtime publication (0035) — the profile card streams it. | select own rows only (`user_id = auth.uid()`); `authenticated` has SELECT and nothing else (0035) — every write is the server's, through `calendar-manage`/`set_calendar_teams_for`, which also keeps `google_calendar_links.match_teams` mirrored for the 1.2.1 app. |
+| `calendar_teams` | (0032) One row per player **+** followed team — replaces `google_calendar_links.match_teams`, because a team now needs to say more than its name: `user_id → profiles` (cascade), `team` (a `priority_slots.home_team`/`away_team` string), `calendar` (`primary` \| `secondary`, default `primary` — which of the player's two Google calendars this team's matches go to). PK (`user_id`, `team`). In the Realtime publication (0035) — the profile card streams it. Colour (`color_id`) lived here until 0036 moved it to `team_colors` below, independent of this table. | select own rows only (`user_id = auth.uid()`); `authenticated` has SELECT and nothing else (0035) — every write is the server's, through `calendar-manage`/`set_calendar_teams_for`, which also keeps `google_calendar_links.match_teams` mirrored for the 1.2.1 app. |
+| `team_colors` | (0036) One row per player **+** team the player has coloured — `user_id → profiles` (cascade), `team`, `color_id` (Google event `colorId` 1–11, `not null` — no row at all means no colour). PK (`user_id`, `team`). Independent of **both** team lists (`profiles.followed_teams` and `calendar_teams`) and of whether a calendar is even linked: the one colour shown for a team in Můj přehled and in its Google Calendar event alike. In the Realtime publication. | select **and write** own rows only (`user_id = auth.uid()`), full grants — a plain preference the app writes directly, like `profiles.own_color`, not routed through an edge function. `set_team_colors_for` (RPC, server-only) exists alongside for `calendar-manage`, which needs to save a colour and immediately repaint the affected future Google Calendar events in one request. |
 | `oauth_nonces` | The OAuth `state`: `nonce` (48 hex chars from `gen_random_bytes(24)`), `user_id → profiles` (cascade), `created_at`, `consumed_at`. One-shot with a 10-minute TTL — the callback function runs without a JWT, so this is what binds Google's redirect to a signed-in player. | **server-only** like the tokens. |
 
 View `players` (owned by postgres → bypasses `profiles` RLS on purpose):
@@ -216,7 +217,7 @@ re-timed block) reach Google through `notification_jobs`:
   (`my_future_matches`) and either writes or deletes the event — see
   **Second calendar and match colours** below for exactly where.
 
-### Second calendar and match colours (0032, wired up in Task 3)
+### Second calendar and match colours (0032, colour moved to `team_colors` by 0036, wired up in Task 3)
 
 Google's `calendar.app.created` scope hides `calendarList` for an
 app-created calendar (measured against the production API: 401 either
@@ -233,6 +234,15 @@ read-only mirror**: builds up to 1.2.1 read it off the realtime stream, and
 an empty list there would tell a player their team picks had vanished.
 `set_calendar_teams_for` writes the mirror on every save; a later migration
 drops it once a build with the new screen is out.
+
+0036 moved the colour itself off `calendar_teams` onto its own table,
+`team_colors` (table above): the colour is a player+team preference, shown
+alike in Můj přehled and in the Google Calendar event, so it cannot live on
+a table that only exists for players who linked a calendar, nor on the
+calendar's own team list rather than the app's. `calendar_teams.color_id`
+is gone (its rows spilled into `team_colors` first); `calendar_teams` now
+carries only routing (which calendar), `team_colors` only preference
+(which colour).
 
 - calendar-oauth-callback's relink: when the previous PRIMARY calendar is
   not reachable under the fresh consent (`calendarExists` false — the old
@@ -254,19 +264,37 @@ drops it once a build with the new screen is out.
   signature, joins `calendar_teams`; `distinct` because a player following
   both teams of a derby has two matching rows and must still come back once.
 - `my_future_matches(user)` — same live-future-matches list, with two extra
-  columns, `calendar` and `color_id`, read off the row for whichever
-  followed team is on that match. Derby (both teams followed): the home
+  columns: `calendar`, read off the `calendar_teams` row for whichever
+  followed team is on that match (derby, both teams followed: the home
   team's row wins, via a `lateral` join ordered `team = home_team desc,
-  limit 1`.
+  limit 1`), and (0036) `color_id`, a separate `left join` onto
+  `team_colors` for that SAME resolved team — a match whose team has no
+  `team_colors` row simply comes back with `color_id = null`, exactly like
+  an uncoloured team always has.
 - `set_calendar_teams_for(user, teams jsonb) returns jsonb` — the only way
   `calendar_teams` is written server-side: validates ≤ 20 items
   (`bad_teams`) and that the caller has a links row (`unknown_link`);
-  `calendar`/`color_id` bounds are the table's own CHECK constraints, so a
-  bad value surfaces as `check_violation`. It does **not** trim, dedupe or
-  reject a blank team name itself (unlike the function it replaced) —
-  per-item shape is validated in TypeScript instead, see below. Returns the
-  **previous** rows as `[{team, calendar, color_id}]` before a delete+insert
-  overwrites them — one statement, so a bad row rolls the whole write back.
+  `calendar` bounds are the table's own CHECK constraint, so a bad value
+  surfaces as `check_violation`. It does **not** trim, dedupe or reject a
+  blank team name itself (unlike the function it replaced) — per-item shape
+  is validated in TypeScript instead, see below. Returns the **previous**
+  rows as `[{team, calendar}]` before a delete+insert overwrites them — one
+  statement, so a bad row rolls the whole write back. (0036: dropped
+  `color_id` from both the input and the returned shape — colour is
+  `team_colors`'s contract now, immediately below.)
+- `set_team_colors_for(user, colors jsonb) returns jsonb` — (0036)
+  server-only like the other calendar RPCs, even though `team_colors`
+  itself is directly writable by the client (see table above): calendar-manage
+  calls it so a colour change can repaint the affected future Google
+  Calendar events in the same request, the same reason `set_training_color_for`
+  is server-only. Unlike `set_calendar_teams_for` this is **not** a full
+  replace: it validates ≤ 40 items (`bad_colors`), then per named team
+  either deletes the row (`color_id: null`) or upserts it — every other
+  team's colour, not named in this call, is untouched, since a colour lives
+  independently of whatever `calendar_teams` currently says. Bounds (1–11)
+  are the table's own CHECK. Returns the **previous** `{team, color_id}` of
+  only the teams the call named (a team with no previous row is simply
+  absent from the result, not returned as null).
 - `set_calendar_reminders_for` (table above) takes a third argument,
   `calendar`, defaulting to `'primary'` so every existing 2-argument call
   is unchanged; `'secondary'` writes `reminder_minutes_secondary` instead.
@@ -303,12 +331,17 @@ drops it once a build with the new screen is out.
   row means the match is gone/unfollowed/played, deleted from every calendar
   it could be sitting in (`possibleMatchCalendars`). A `reservation_id`
   payload always targets the primary calendar with `training_color_id`.
-- `calendar-manage` actions: `teams` (`[{team, calendar, color_id}]`,
-  validated by `validateTeamChoices` — trims, rejects a blank/too-long team
-  name or an out-of-range colour, de-duplicates by team name — before
-  `set_calendar_teams_for`; the previous state it returns is diffed to
-  delete the events of teams dropped entirely, then `writeFutureMatches`
-  settles the rest); `secondary` (`{enabled}` — ON creates "Rezervátor 2"
+- `calendar-manage` actions (still pre-0036 shape here — Task 2 moves
+  colour off this action onto the new one below): `teams`
+  (`[{team, calendar, color_id}]`, validated by `validateTeamChoices` —
+  trims, rejects a blank/too-long team name or an out-of-range colour,
+  de-duplicates by team name — before `set_calendar_teams_for`; the
+  previous state it returns is diffed to delete the events of teams dropped
+  entirely, then `writeFutureMatches` settles the rest). Since
+  `set_calendar_teams_for` now silently ignores a `color_id` key
+  (`jsonb_to_recordset` drops columns it was not asked for), this action
+  still runs, but no longer actually stores a colour anywhere — the new
+  `team_colors` action (Task 2) is what will; `secondary` (`{enabled}` — ON creates "Rezervátor 2"
   and rewrites future matches into it, OFF deletes it in Google, which takes
   its events with it, resets any `calendar_teams` rows pointed at
   `'secondary'` back to `'primary'`, and rewrites future matches back into
@@ -384,7 +417,11 @@ drops it once a build with the new screen is out.
   calendar plumbing (nonce lifecycle, server-only privileges, the job
   producers and their dedupe, backfill, reminders,
   `my_future_reservations`, the dispatcher without Vault, the cron row),
-  the 0032/0035 calendar_teams privileges and the 0035 assertion that every
-  table `lib/data/providers.dart` streams is in the `supabase_realtime`
+  the 0032/0035 calendar_teams privileges, the 0036 `team_colors` own-row
+  RLS (read/write own, invisible/untouchable foreign row through RLS, not
+  through a grant), its CHECK bounds, and `set_team_colors_for` (server-only,
+  previous-state return, a null colour deletes the row), and the 0035
+  assertion (now including `team_colors`) that every table
+  `lib/data/providers.dart` streams is in the `supabase_realtime`
   publication; run with `psql … -v ON_ERROR_STOP=1 -f` against the local
   stack (CI does).
