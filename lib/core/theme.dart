@@ -9,51 +9,64 @@ import 'package:flutter/material.dart';
 /// day chip, the primary kiosk button and the name picker's back tile.
 const brandGradientColors = [Color(0xFF6366F1), Color(0xFF22D3EE)];
 
-/// Builds the light or dark [ThemeData] for [brightness].
-ThemeData buildTheme(Brightness brightness) {
+/// Builds the light or dark [ThemeData] for [brightness]. [contrastLevel]
+/// feeds `ColorScheme.fromSeed` (0 = normal, 1 = Material's own maximum
+/// contrast) for the high-contrast appearance choices.
+ThemeData buildTheme(Brightness brightness, {double contrastLevel = 0}) {
   final isDark = brightness == Brightness.dark;
 
   var scheme = ColorScheme.fromSeed(
     seedColor: const Color(0xFF6366F1),
     brightness: brightness,
+    contrastLevel: contrastLevel,
   );
 
-  scheme = isDark
-      ? scheme.copyWith(
-          secondary: const Color(0xFF67E8F9),
-          onSecondary: const Color(0xFF083344),
-          secondaryContainer: const Color(0xFF155E63),
-          onSecondaryContainer: const Color(0xFFCFFAFE),
-          tertiary: const Color(0xFF5EEAD4),
-          onTertiary: const Color(0xFF042F2E),
-          tertiaryContainer: const Color(0xFF115E59),
-          onTertiaryContainer: const Color(0xFFCCFBF1),
-          error: const Color(0xFFFDA4AF),
-          onError: const Color(0xFF4C0519),
-          errorContainer: const Color(0xFF9F1239),
-          onErrorContainer: const Color(0xFFFFE4E6),
-          surface: const Color(0xFF0F172A),
-          surfaceContainerLowest: const Color(0xFF0B1120),
-          surfaceContainerLow: const Color(0xFF141D2E),
-          surfaceContainer: const Color(0xFF1E293B),
-          surfaceContainerHigh: const Color(0xFF283548),
-          surfaceContainerHighest: const Color(0xFF334155),
-          outlineVariant: const Color(0xFF334155),
-        )
-      : scheme.copyWith(
-          secondary: const Color(0xFF0E7490),
-          onSecondary: const Color(0xFFFFFFFF),
-          secondaryContainer: const Color(0xFFCFFAFE),
-          onSecondaryContainer: const Color(0xFF164E63),
-          tertiary: const Color(0xFF0F766E),
-          onTertiary: const Color(0xFFFFFFFF),
-          tertiaryContainer: const Color(0xFFCCFBF1),
-          onTertiaryContainer: const Color(0xFF134E4A),
-          error: const Color(0xFFE11D48),
-          onError: const Color(0xFFFFFFFF),
-          errorContainer: const Color(0xFFFFE4E6),
-          onErrorContainer: const Color(0xFF881337),
-        );
+  // The hand-picked "Noční liga" ramp below applies ONLY at normal contrast.
+  // It overrides dozens of ColorScheme roles with fixed hex values that were
+  // tuned against each other, not against a target contrast level — so
+  // layering them on top of a high-contrast fromSeed scheme would silently
+  // throw away Material's own high-contrast guarantees. The contrast variants
+  // instead keep fromSeed's contrastLevel-driven scheme untouched (same seed,
+  // so the hues still match the brand). See theme_contrast_test.dart, which
+  // is what actually proves this rather than eyeballing it.
+  if (contrastLevel == 0) {
+    scheme = isDark
+        ? scheme.copyWith(
+            secondary: const Color(0xFF67E8F9),
+            onSecondary: const Color(0xFF083344),
+            secondaryContainer: const Color(0xFF155E63),
+            onSecondaryContainer: const Color(0xFFCFFAFE),
+            tertiary: const Color(0xFF5EEAD4),
+            onTertiary: const Color(0xFF042F2E),
+            tertiaryContainer: const Color(0xFF115E59),
+            onTertiaryContainer: const Color(0xFFCCFBF1),
+            error: const Color(0xFFFDA4AF),
+            onError: const Color(0xFF4C0519),
+            errorContainer: const Color(0xFF9F1239),
+            onErrorContainer: const Color(0xFFFFE4E6),
+            surface: const Color(0xFF0F172A),
+            surfaceContainerLowest: const Color(0xFF0B1120),
+            surfaceContainerLow: const Color(0xFF141D2E),
+            surfaceContainer: const Color(0xFF1E293B),
+            surfaceContainerHigh: const Color(0xFF283548),
+            surfaceContainerHighest: const Color(0xFF334155),
+            outlineVariant: const Color(0xFF334155),
+          )
+        : scheme.copyWith(
+            secondary: const Color(0xFF0E7490),
+            onSecondary: const Color(0xFFFFFFFF),
+            secondaryContainer: const Color(0xFFCFFAFE),
+            onSecondaryContainer: const Color(0xFF164E63),
+            tertiary: const Color(0xFF0F766E),
+            onTertiary: const Color(0xFFFFFFFF),
+            tertiaryContainer: const Color(0xFFCCFBF1),
+            onTertiaryContainer: const Color(0xFF134E4A),
+            error: const Color(0xFFE11D48),
+            onError: const Color(0xFFFFFFFF),
+            errorContainer: const Color(0xFFFFE4E6),
+            onErrorContainer: const Color(0xFF881337),
+          );
+  }
 
   final textTheme = _textTheme(scheme);
 
