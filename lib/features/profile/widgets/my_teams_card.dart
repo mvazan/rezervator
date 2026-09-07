@@ -5,7 +5,7 @@ import '../../../data/providers.dart';
 import '../../../domain/models.dart';
 import 'team_picker_sheet.dart';
 
-/// Which teams' matches the player sees in Moje tréninky (0029). Its own
+/// Which teams' matches the player sees in Můj přehled (0029). Its own
 /// list — the calendar card keeps a separate one for the Google sync.
 class MyTeamsCard extends StatelessWidget {
   const MyTeamsCard({

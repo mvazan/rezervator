@@ -1255,7 +1255,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Po spuštění'), findsOneWidget);
-      await tester.tap(find.text('Moje tréninky'));
+      await tester.tap(find.text('Můj přehled'));
       await tester.pumpAndSettle();
       expect(saved, [HomeView.trainings]);
     });

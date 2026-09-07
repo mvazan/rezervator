@@ -105,7 +105,7 @@ class MyTrainingsScreen extends ConsumerWidget {
       child: Row(
         children: [
           Expanded(
-            child: Text('Moje tréninky', style: theme.textTheme.titleLarge),
+            child: Text('Můj přehled', style: theme.textTheme.titleLarge),
           ),
           ...trailing,
         ],

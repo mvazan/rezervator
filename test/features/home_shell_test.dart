@@ -224,7 +224,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(WeekScreen), findsOneWidget);
 
-      await tester.tap(find.text('Moje tréninky'));
+      await tester.tap(find.text('Můj přehled'));
       await tester.pumpAndSettle();
       expect(find.byType(MyTrainingsScreen), findsOneWidget);
       await profiles.close();
@@ -245,7 +245,7 @@ void main() {
       expect(find.byType(NavigationRail), findsOneWidget);
       expect(find.byType(NavigationBar), findsNothing);
 
-      await tester.tap(find.text('Moje tréninky'));
+      await tester.tap(find.text('Můj přehled'));
       await tester.pumpAndSettle();
       expect(find.byType(MyTrainingsScreen), findsOneWidget);
     });
@@ -282,7 +282,7 @@ void main() {
       phone(tester);
       await tester.pumpWidget(app(profile: visiting));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Moje tréninky'));
+      await tester.tap(find.text('Můj přehled'));
       await tester.pumpAndSettle();
       expect(find.text('Prohlížíš kuželnu Demo'), findsOneWidget);
       expect(find.byType(MyTrainingsScreen), findsOneWidget);
@@ -304,8 +304,8 @@ void main() {
       final paged = monday.addDays(7);
       expect(find.text(rangeLabel(paged, paged.addDays(6))), findsOneWidget);
 
-      // A glance at Moje tréninky and back must not reset it.
-      await tester.tap(find.text('Moje tréninky'));
+      // A glance at Můj přehled and back must not reset it.
+      await tester.tap(find.text('Můj přehled'));
       await tester.pumpAndSettle();
       expect(find.byType(MyTrainingsScreen), findsOneWidget);
 
@@ -316,13 +316,13 @@ void main() {
     });
 
     testWidgets(
-        'a back gesture away from Moje tréninky returns to the calendar '
+        'a back gesture away from Můj přehled returns to the calendar '
         'instead of popping the route', (tester) async {
       phone(tester);
       await tester.pumpWidget(app());
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Moje tréninky'));
+      await tester.tap(find.text('Můj přehled'));
       await tester.pumpAndSettle();
       expect(find.byType(MyTrainingsScreen), findsOneWidget);
 

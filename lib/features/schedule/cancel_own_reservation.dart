@@ -1,6 +1,6 @@
 /// Confirm-then-cancel for a player's OWN future reservation: the exact
 /// dialog and copy the calendar (`ScheduleActions._cancel`'s `ownFuture`
-/// branch) and „Moje tréninky" both need — pulled out so the two call sites
+/// branch) and „Můj přehled" both need — pulled out so the two call sites
 /// can never drift apart. Only the actual cancel call differs: a live Api
 /// call on the calendar, an injected one on the screen (and in its tests).
 library;

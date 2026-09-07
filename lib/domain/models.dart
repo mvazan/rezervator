@@ -143,7 +143,7 @@ class Profile {
   /// their own view (0024); -1 = the club colour. Nobody else sees it.
   final int ownColor;
 
-  /// Teams whose matches show in Moje tréninky (0029) — names as they stand
+  /// Teams whose matches show in Můj přehled (0029) — names as they stand
   /// in priority_slots. Display only: the Google Calendar sync has its own
   /// list on the link, managed separately.
   final List<String> followedTeams;

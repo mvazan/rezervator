@@ -184,7 +184,7 @@ class ProfileScreen extends ConsumerWidget {
                             ),
                             ButtonSegment(
                               value: HomeView.trainings,
-                              label: Text('Moje tréninky'),
+                              label: Text('Můj přehled'),
                               icon: Icon(Icons.event_available_outlined),
                             ),
                           ],

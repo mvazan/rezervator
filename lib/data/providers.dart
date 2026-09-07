@@ -724,7 +724,7 @@ class Api {
       .update({'own_color': color})
       .eq('id', currentUserId!);
 
-  /// Which teams' matches the player sees in Moje tréninky (0029). Own row,
+  /// Which teams' matches the player sees in Můj přehled (0029). Own row,
   /// like the colour; the calendar sync's own list is untouched.
   static Future<void> setFollowedTeams(List<String> teams) => _db
       .from('profiles')
@@ -982,7 +982,7 @@ final prioritySlotsProvider = Provider<List<PrioritySlot>>((ref) {
 /// True until the underlying rows stream has delivered its first snapshot.
 /// [prioritySlotsProvider] itself can't tell "no rows yet" apart from "no
 /// rows at all" (both read as `const []`), so a screen that must not flash
-/// an empty state before the first snapshot arrives (Moje tréninky) watches
+/// an empty state before the first snapshot arrives (Můj přehled) watches
 /// this instead.
 final prioritySlotsLoadingProvider = Provider<bool>((ref) {
   final rows = ref.watch(_prioritySlotRowsProvider);

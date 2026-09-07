@@ -98,7 +98,7 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    expect(find.text('Moje tréninky'), findsOneWidget);
+    expect(find.text('Můj přehled'), findsOneWidget);
     expect(find.text('Dnes'), findsOneWidget);
     expect(find.text('Zítra'), findsOneWidget);
     // A day beyond tomorrow (the match, two days out) is labelled with the
@@ -191,7 +191,7 @@ void main() {
     await tester.pumpWidget(app(
       reservations: [res('r1', today)],
       // b1 is 18:00–19:00; the calendar refuses cancel once startsAt has
-      // passed (domain/schedule.dart's canCancel) — Moje tréninky must
+      // passed (domain/schedule.dart's canCancel) — Můj přehled must
       // agree instead of offering a cancel the RPC would reject.
       nowOverride: DateTime(2026, 9, 9, 18, 30),
     ));
