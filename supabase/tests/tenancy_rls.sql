@@ -558,7 +558,7 @@ begin
      or has_function_privilege('authenticated',
           'public.backfill_calendar_jobs(uuid)', 'execute')
      or has_function_privilege('authenticated',
-          'public.set_calendar_reminders_for(uuid, int[])', 'execute')
+          'public.set_calendar_reminders_for(uuid, int[], text)', 'execute')
      or has_function_privilege('authenticated',
           'public.my_future_reservations(uuid)', 'execute')
      or has_function_privilege('authenticated',
@@ -574,7 +574,7 @@ begin
      or not has_function_privilege('service_role',
           'public.backfill_calendar_jobs(uuid)', 'execute')
      or not has_function_privilege('service_role',
-          'public.set_calendar_reminders_for(uuid, int[])', 'execute')
+          'public.set_calendar_reminders_for(uuid, int[], text)', 'execute')
      or not has_function_privilege('service_role',
           'public.my_future_reservations(uuid)', 'execute') then
     raise exception 'FAIL: service_role lacks a calendar RPC';
@@ -996,6 +996,11 @@ begin
   if v_stored <> array['KS Devítka Brno B', 'SKK Veverky Brno A'] then
     raise exception 'FAIL: match teams not normalised: %', v_stored;
   end if;
+  -- match_teams itself is dead weight since 0032 (nothing reads it any
+  -- more); mirror the same pick into calendar_teams so the rest of this
+  -- pre-existing scenario — the trigger and my_future_matches below — still
+  -- sees v_uid as a follower, exactly as the migration's own backfill would.
+  insert into calendar_teams (user_id, team) select v_uid, unnest(v_stored);
   begin
     perform set_calendar_match_teams_for(v_uid,
       (select array_agg('T' || g) from generate_series(1, 21) g));
@@ -1097,6 +1102,7 @@ begin
 
   -- dropping the team: no more jobs for its matches, my_future_matches empty
   perform set_calendar_match_teams_for(v_uid, '{}'::text[]);
+  delete from calendar_teams where user_id = v_uid;
   delete from notification_jobs where dedupe_key like 'calendar:%:match:%';
   update priority_slots set description = 'KP1 Sever (přeloženo)' where id = v_home;
   if exists (select 1 from notification_jobs where dedupe_key like 'calendar:%:match:%') then
@@ -1240,6 +1246,235 @@ begin
   where tenant_id = current_tenant_id();
   update rentals set color = 29392896 where tenant_id = current_tenant_id();
   raise notice 'OK: hand-picked colours fit every colour column and upsert_club';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- Second calendar and match colours (0032): a followed team is a row in
+-- calendar_teams (which calendar, which Google event colour), not an entry
+-- in google_calendar_links.match_teams any more. match_teams and
+-- set_calendar_match_teams_for stay in place (still written by the app)
+-- until Task 3 stops reading them; match_calendar_followers and
+-- my_future_matches read calendar_teams exclusively from here on.
+-- ---------------------------------------------------------------------------
+reset role;
+do $$
+begin
+  if not has_table_privilege('authenticated', 'public.calendar_teams', 'select')
+     or not has_table_privilege('authenticated', 'public.calendar_teams', 'insert')
+     or not has_table_privilege('authenticated', 'public.calendar_teams', 'update')
+     or not has_table_privilege('authenticated', 'public.calendar_teams', 'delete') then
+    raise exception 'FAIL: calendar_teams is not full DML for authenticated';
+  end if;
+  if has_table_privilege('anon', 'public.calendar_teams', 'select') then
+    raise exception 'FAIL: anon may read calendar_teams';
+  end if;
+  if has_function_privilege('authenticated',
+       'public.set_calendar_teams_for(uuid, jsonb)', 'execute') then
+    raise exception 'FAIL: set_calendar_teams_for is callable by the app';
+  end if;
+  if not has_function_privilege('service_role',
+       'public.set_calendar_teams_for(uuid, jsonb)', 'execute') then
+    raise exception 'FAIL: service_role lacks set_calendar_teams_for';
+  end if;
+  raise notice 'OK: calendar_teams is full DML for authenticated, its RPC server-only';
+end $$;
+
+-- A foreign row (tenant B's admin) to probe isolation against.
+insert into calendar_teams (user_id, team, calendar, color_id)
+values ('10000000-0000-0000-0000-000000000002', 'Cizí tým', 'primary', 2);
+
+-- A's admin: reads and writes only their own row; the table CHECK
+-- constraints hold even for the row's own player.
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+declare
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+  v_b constant uuid := '10000000-0000-0000-0000-000000000002';
+begin
+  insert into calendar_teams (user_id, team, calendar, color_id)
+  values (v_uid, 'Cal Test Home', 'secondary', 9);
+  if (select calendar from calendar_teams
+      where user_id = v_uid and team = 'Cal Test Home') <> 'secondary'
+     or (select color_id from calendar_teams
+      where user_id = v_uid and team = 'Cal Test Home') <> 9 then
+    raise exception 'FAIL: a player cannot write their own calendar_teams row';
+  end if;
+  if exists (select 1 from calendar_teams where user_id = v_b) then
+    raise exception 'FAIL: a player sees another player''s calendar_teams row';
+  end if;
+  update calendar_teams set calendar = 'secondary' where user_id = v_b;
+  if found then
+    raise exception 'FAIL: updating a foreign calendar_teams row matched a row';
+  end if;
+  begin
+    insert into calendar_teams (user_id, team) values (v_b, 'Podvod');
+    raise exception 'FAIL: a player inserted a calendar_teams row for someone else';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    insert into calendar_teams (user_id, team, calendar) values (v_uid, 'Bad Calendar', 'třetí');
+    raise exception 'FAIL: an unknown calendar value accepted';
+  exception when check_violation then null;
+  end;
+  begin
+    insert into calendar_teams (user_id, team, color_id) values (v_uid, 'Bad Color', 12);
+    raise exception 'FAIL: color_id 12 accepted';
+  exception when check_violation then null;
+  end;
+  raise notice 'OK: calendar_teams is readable and writable by its own player only, checks and all';
+end $$;
+
+-- set_calendar_teams_for: returns the previous state, stores the new one,
+-- rejects more than 20 items, refuses a player without a link.
+reset role;
+do $$
+declare
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+  v_b constant uuid := '10000000-0000-0000-0000-000000000002';
+  v_previous jsonb;
+  v_stored jsonb;
+  v_many jsonb;
+begin
+  v_previous := set_calendar_teams_for(v_uid, jsonb_build_array(
+    jsonb_build_object('team', 'Cal Test Home', 'calendar', 'secondary', 'color_id', 9),
+    jsonb_build_object('team', 'Cal Test Rival', 'calendar', 'primary', 'color_id', 2)));
+  if v_previous <> jsonb_build_array(
+       jsonb_build_object('team', 'Cal Test Home', 'calendar', 'secondary', 'color_id', 9)) then
+    raise exception 'FAIL: set_calendar_teams_for did not return the previous state: %', v_previous;
+  end if;
+
+  select jsonb_agg(jsonb_build_object(
+           'team', team, 'calendar', calendar, 'color_id', color_id) order by team)
+    into v_stored
+    from calendar_teams where user_id = v_uid;
+  if v_stored <> jsonb_build_array(
+       jsonb_build_object('team', 'Cal Test Home', 'calendar', 'secondary', 'color_id', 9),
+       jsonb_build_object('team', 'Cal Test Rival', 'calendar', 'primary', 'color_id', 2)) then
+    raise exception 'FAIL: set_calendar_teams_for did not store the new rows: %', v_stored;
+  end if;
+
+  select jsonb_agg(jsonb_build_object('team', 'T' || g, 'calendar', 'primary'))
+    into v_many from generate_series(1, 21) g;
+  begin
+    perform set_calendar_teams_for(v_uid, v_many);
+    raise exception 'FAIL: 21 teams accepted';
+  exception when others then
+    if sqlerrm <> 'bad_teams' then raise; end if;
+  end;
+
+  begin
+    perform set_calendar_teams_for(v_b, jsonb_build_array(
+      jsonb_build_object('team', 'X', 'calendar', 'primary')));
+    raise exception 'FAIL: teams stored for a player without a link';
+  exception when others then
+    if sqlerrm <> 'unknown_link' then raise; end if;
+  end;
+  raise notice 'OK: set_calendar_teams_for returns the previous state and stores the new one';
+end $$;
+
+-- set_calendar_reminders_for (0032): the third argument picks which
+-- reminders it writes; omitted, it still means 'primary', so the pre-0032
+-- 2-argument calls above are unaffected.
+do $$
+declare
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+  v_before int[];
+  v_returned int[];
+  v_secondary int[];
+begin
+  select reminder_minutes into v_before from google_calendar_links where user_id = v_uid;
+  -- assign-then-compare, not inline: Postgres does not guarantee this write
+  -- (inside the OR) runs before a sibling read of the same row would see it.
+  v_returned := set_calendar_reminders_for(v_uid, '{30,90}', 'secondary');
+  select reminder_minutes_secondary into v_secondary from google_calendar_links where user_id = v_uid;
+  if v_returned <> '{90,30}'::int[] or v_secondary <> '{90,30}'::int[] then
+    raise exception 'FAIL: secondary reminders not normalised/stored';
+  end if;
+  if (select reminder_minutes from google_calendar_links where user_id = v_uid)
+     is distinct from v_before then
+    raise exception 'FAIL: writing secondary reminders touched the primary list';
+  end if;
+  begin
+    perform set_calendar_reminders_for(v_uid, '{10}', 'tertiary');
+    raise exception 'FAIL: an unknown calendar slot accepted';
+  exception when others then
+    if sqlerrm <> 'bad_calendar' then raise; end if;
+  end;
+  raise notice 'OK: set_calendar_reminders_for''s third argument targets the right reminders column';
+end $$;
+
+-- my_future_matches: each match carries the followed team's calendar and
+-- colour; when both teams are followed (derby), the home team's row wins.
+do $$
+declare
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+  v_tenant constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_type uuid;
+  v_solo uuid;
+  v_derby uuid;
+  v_d date := (now() at time zone 'Europe/Prague')::date + 60;
+  v_row record;
+begin
+  select id into v_type from priority_slot_types
+    where tenant_id = v_tenant and is_match and builtin;
+
+  insert into priority_slots
+    (tenant_id, date, starts_at, ends_at, type_id, home_team, away_team,
+     prep_minutes, description, is_away, created_by)
+  values
+    (v_tenant, v_d, '18:00', '20:00', v_type,
+     'Cal Test Home', 'Cal Test Solo', 0, 'Test 0032 solo', false, v_uid)
+  returning id into v_solo;
+
+  insert into priority_slots
+    (tenant_id, date, starts_at, ends_at, type_id, home_team, away_team,
+     prep_minutes, description, is_away, created_by)
+  values
+    (v_tenant, v_d + 1, '18:00', '20:00', v_type,
+     'Cal Test Rival', 'Cal Test Home', 0, 'Test 0032 derby', false, v_uid)
+  returning id into v_derby;
+
+  select * into v_row from my_future_matches(v_uid) where match_id = v_solo;
+  if not found or v_row.calendar <> 'secondary' or v_row.color_id <> 9 then
+    raise exception 'FAIL: my_future_matches lost the followed team''s calendar/colour: %',
+      to_jsonb(v_row);
+  end if;
+
+  select * into v_row from my_future_matches(v_uid) where match_id = v_derby;
+  if not found or v_row.calendar <> 'primary' or v_row.color_id <> 2 then
+    raise exception 'FAIL: my_future_matches did not let the home team win the derby: %',
+      to_jsonb(v_row);
+  end if;
+  raise notice 'OK: my_future_matches carries each match''s calendar and colour, home team wins a derby';
+end $$;
+
+-- match_calendar_followers: finds the follower through calendar_teams (not
+-- the dead match_teams column), once per player even on a derby.
+do $$
+declare
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+  v_tenant constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_found uuid[];
+begin
+  select array_agg(u) into v_found
+    from match_calendar_followers(v_tenant, 'Cal Test Home', 'Cal Test Solo') u;
+  if v_found <> array[v_uid] then
+    raise exception 'FAIL: match_calendar_followers missed a follower via calendar_teams: %', v_found;
+  end if;
+
+  select array_agg(u) into v_found
+    from match_calendar_followers(v_tenant, 'Cal Test Rival', 'Cal Test Home') u;
+  if v_found <> array[v_uid] then
+    raise exception 'FAIL: match_calendar_followers duplicated a player following both derby teams: %', v_found;
+  end if;
+
+  if exists (select 1 from match_calendar_followers(
+      v_tenant, 'Cal Test Nobody1', 'Cal Test Nobody2')) then
+    raise exception 'FAIL: match_calendar_followers found a follower of unfollowed teams';
+  end if;
+  raise notice 'OK: calendar_teams routes matches per team, inside the checks';
 end $$;
 
 reset role;

@@ -887,12 +887,12 @@ CREATE OR REPLACE FUNCTION "public"."match_calendar_followers"("p_tenant" "uuid"
     LANGUAGE "sql" STABLE SECURITY DEFINER
     SET "search_path" TO 'public'
     AS $$
-  select l.user_id
+  select distinct l.user_id
     from google_calendar_links l
     join profiles p on p.id = l.user_id
+    join calendar_teams t on t.user_id = l.user_id and t.team in (p_home, p_away)
     where p.tenant_id = p_tenant
-      and l.status = 'linked'
-      and l.match_teams && array[p_home, p_away];
+      and l.status = 'linked';
 $$;
 
 
@@ -1094,20 +1094,27 @@ $$;
 ALTER FUNCTION "public"."move_reservation"("p_reservation" "uuid", "p_to_block" "uuid", "p_lane" integer, "p_notify" boolean, "p_message" "text") OWNER TO "postgres";
 
 
-CREATE OR REPLACE FUNCTION "public"."my_future_matches"("p_user" "uuid") RETURNS TABLE("match_id" "uuid", "date" "date", "starts_at" time without time zone, "ends_at" time without time zone, "home_team" "text", "away_team" "text", "is_away" boolean, "description" "text", "alley_name" "text")
+CREATE OR REPLACE FUNCTION "public"."my_future_matches"("p_user" "uuid") RETURNS TABLE("match_id" "uuid", "date" "date", "starts_at" time without time zone, "ends_at" time without time zone, "home_team" "text", "away_team" "text", "is_away" boolean, "description" "text", "alley_name" "text", "calendar" "text", "color_id" smallint)
     LANGUAGE "sql" STABLE SECURITY DEFINER
     SET "search_path" TO 'public'
     AS $$
   select s.id, s.date, s.starts_at, s.ends_at,
-         s.home_team, s.away_team, s.is_away, s.description, t.name
+         s.home_team, s.away_team, s.is_away, s.description, t.name,
+         c.calendar, c.color_id
     from priority_slots s
     join priority_slot_types y on y.id = s.type_id and y.is_match
     join tenants t on t.id = s.tenant_id
     join profiles p on p.id = p_user and p.tenant_id = s.tenant_id
     join google_calendar_links l on l.user_id = p_user
+    join lateral (
+      select ct.calendar, ct.color_id
+        from calendar_teams ct
+        where ct.user_id = p_user and ct.team in (s.home_team, s.away_team)
+        order by (ct.team = s.home_team) desc
+        limit 1
+    ) c on true
     where s.parent_id is null
       and s.date >= (now() at time zone 'Europe/Prague')::date
-      and l.match_teams && array[s.home_team, s.away_team]
     order by s.date, s.starts_at;
 $$;
 
@@ -1607,13 +1614,16 @@ $$;
 ALTER FUNCTION "public"."set_calendar_match_teams_for"("p_user" "uuid", "p_teams" "text"[]) OWNER TO "postgres";
 
 
-CREATE OR REPLACE FUNCTION "public"."set_calendar_reminders_for"("p_user" "uuid", "p_minutes" integer[]) RETURNS integer[]
+CREATE OR REPLACE FUNCTION "public"."set_calendar_reminders_for"("p_user" "uuid", "p_minutes" integer[], "p_calendar" "text" DEFAULT 'primary'::"text") RETURNS integer[]
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
     AS $$
 declare
   v_minutes int[];
 begin
+  if p_calendar not in ('primary', 'secondary') then
+    raise exception 'bad_calendar';
+  end if;
   select coalesce(array_agg(distinct m order by m desc), '{}'::int[])
     into v_minutes
     from unnest(coalesce(p_minutes, '{}'::int[])) as m
@@ -1622,9 +1632,15 @@ begin
      or exists (select 1 from unnest(v_minutes) m where m < 0 or m > 40320) then
     raise exception 'bad_reminders';
   end if;
-  update google_calendar_links
-    set reminder_minutes = v_minutes, updated_at = now()
-    where user_id = p_user;
+  if p_calendar = 'secondary' then
+    update google_calendar_links
+      set reminder_minutes_secondary = v_minutes, updated_at = now()
+      where user_id = p_user;
+  else
+    update google_calendar_links
+      set reminder_minutes = v_minutes, updated_at = now()
+      where user_id = p_user;
+  end if;
   if not found then
     raise exception 'unknown_link';
   end if;
@@ -1633,7 +1649,44 @@ end;
 $$;
 
 
-ALTER FUNCTION "public"."set_calendar_reminders_for"("p_user" "uuid", "p_minutes" integer[]) OWNER TO "postgres";
+ALTER FUNCTION "public"."set_calendar_reminders_for"("p_user" "uuid", "p_minutes" integer[], "p_calendar" "text") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."set_calendar_teams_for"("p_user" "uuid", "p_teams" "jsonb") RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_teams jsonb := coalesce(p_teams, '[]'::jsonb);
+  v_previous jsonb;
+begin
+  if jsonb_typeof(v_teams) <> 'array' then
+    raise exception 'bad_teams';
+  end if;
+  if jsonb_array_length(v_teams) > 20 then
+    raise exception 'bad_teams';
+  end if;
+  if not exists (select 1 from google_calendar_links where user_id = p_user) then
+    raise exception 'unknown_link';
+  end if;
+
+  select coalesce(jsonb_agg(jsonb_build_object(
+           'team', team, 'calendar', calendar, 'color_id', color_id)
+           order by team), '[]'::jsonb)
+    into v_previous
+    from calendar_teams where user_id = p_user;
+
+  delete from calendar_teams where user_id = p_user;
+  insert into calendar_teams (user_id, team, calendar, color_id)
+  select p_user, trim(x.team), coalesce(x.calendar, 'primary'), x.color_id
+    from jsonb_to_recordset(v_teams) as x(team text, calendar text, color_id smallint);
+
+  return v_previous;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."set_calendar_teams_for"("p_user" "uuid", "p_teams" "jsonb") OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."set_day_override"("p_date" "date", "p_closed" boolean, "p_reason" "text" DEFAULT ''::"text", "p_block_ids" "uuid"[] DEFAULT NULL::"uuid"[]) RETURNS "void"
@@ -1945,6 +1998,31 @@ COMMENT ON TABLE "public"."app_config" IS 'Single row. min_build = the oldest ap
 
 
 
+CREATE TABLE IF NOT EXISTS "public"."calendar_teams" (
+    "user_id" "uuid" NOT NULL,
+    "team" "text" NOT NULL,
+    "calendar" "text" DEFAULT 'primary'::"text" NOT NULL,
+    "color_id" smallint,
+    CONSTRAINT "calendar_teams_calendar_check" CHECK (("calendar" = ANY (ARRAY['primary'::"text", 'secondary'::"text"]))),
+    CONSTRAINT "calendar_teams_color_id_check" CHECK ((("color_id" >= 1) AND ("color_id" <= 11)))
+);
+
+
+ALTER TABLE "public"."calendar_teams" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."calendar_teams" IS 'One row per player+followed team (0032, replaces google_calendar_links.match_teams): which of the two calendars its matches go to and which Google event colourId they get.';
+
+
+
+COMMENT ON COLUMN "public"."calendar_teams"."calendar" IS 'Which of the player''s Google calendars this team''s matches go to; secondary only means something once google_calendar_links.secondary_enabled is true.';
+
+
+
+COMMENT ON COLUMN "public"."calendar_teams"."color_id" IS 'Google Calendar event colorId (1-11); null = no colour, the event takes the calendar''s own.';
+
+
+
 CREATE TABLE IF NOT EXISTS "public"."day_overrides" (
     "date" "date" NOT NULL,
     "closed" boolean DEFAULT false NOT NULL,
@@ -1968,9 +2046,14 @@ CREATE TABLE IF NOT EXISTS "public"."google_calendar_links" (
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "match_teams" "text"[] DEFAULT '{}'::"text"[] NOT NULL,
+    "secondary_enabled" boolean DEFAULT false NOT NULL,
+    "reminder_minutes_secondary" integer[] DEFAULT '{}'::integer[] NOT NULL,
+    "training_color_id" smallint,
     CONSTRAINT "google_calendar_links_match_teams_check" CHECK ((COALESCE("array_length"("match_teams", 1), 0) <= 20)),
     CONSTRAINT "google_calendar_links_reminder_minutes_check" CHECK (((COALESCE("array_length"("reminder_minutes", 1), 0) <= 5) AND (0 <= ALL ("reminder_minutes")) AND (40320 >= ALL ("reminder_minutes")))),
-    CONSTRAINT "google_calendar_links_status_check" CHECK (("status" = ANY (ARRAY['pending'::"text", 'linked'::"text", 'broken'::"text", 'unlinked'::"text"])))
+    CONSTRAINT "google_calendar_links_reminder_minutes_secondary_check" CHECK (((COALESCE("array_length"("reminder_minutes_secondary", 1), 0) <= 5) AND (0 <= ALL ("reminder_minutes_secondary")) AND (40320 >= ALL ("reminder_minutes_secondary")))),
+    CONSTRAINT "google_calendar_links_status_check" CHECK (("status" = ANY (ARRAY['pending'::"text", 'linked'::"text", 'broken'::"text", 'unlinked'::"text"]))),
+    CONSTRAINT "google_calendar_links_training_color_id_check" CHECK ((("training_color_id" >= 1) AND ("training_color_id" <= 11)))
 );
 
 
@@ -1985,15 +2068,32 @@ COMMENT ON COLUMN "public"."google_calendar_links"."match_teams" IS 'Teams whose
 
 
 
+COMMENT ON COLUMN "public"."google_calendar_links"."secondary_enabled" IS 'Player turned on the second Google calendar ("Rezervátor 2"); calendar_teams rows may then target it.';
+
+
+
+COMMENT ON COLUMN "public"."google_calendar_links"."reminder_minutes_secondary" IS 'Reminders for events written to the secondary calendar; same shape and bounds as reminder_minutes.';
+
+
+
+COMMENT ON COLUMN "public"."google_calendar_links"."training_color_id" IS 'Google Calendar event colorId (1-11) for trainings, which always go to the primary calendar; null = no colour.';
+
+
+
 CREATE TABLE IF NOT EXISTS "public"."google_calendar_tokens" (
     "user_id" "uuid" NOT NULL,
     "refresh_token" "text" NOT NULL,
     "google_calendar_id" "text",
-    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "google_calendar_id_secondary" "text"
 );
 
 
 ALTER TABLE "public"."google_calendar_tokens" OWNER TO "postgres";
+
+
+COMMENT ON COLUMN "public"."google_calendar_tokens"."google_calendar_id_secondary" IS 'The player''s secondary Google calendar id; null until secondary_enabled is turned on.';
+
 
 
 CREATE TABLE IF NOT EXISTS "public"."notification_jobs" (
@@ -2119,6 +2219,11 @@ ALTER TABLE "public"."time_blocks" OWNER TO "postgres";
 
 ALTER TABLE ONLY "public"."app_config"
     ADD CONSTRAINT "app_config_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."calendar_teams"
+    ADD CONSTRAINT "calendar_teams_pkey" PRIMARY KEY ("user_id", "team");
 
 
 
@@ -2312,6 +2417,11 @@ CREATE OR REPLACE TRIGGER "time_blocks_enqueue_calendar" AFTER UPDATE OF "starts
 
 
 
+ALTER TABLE ONLY "public"."calendar_teams"
+    ADD CONSTRAINT "calendar_teams_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "public"."profiles"("id") ON DELETE CASCADE;
+
+
+
 ALTER TABLE ONLY "public"."clubs"
     ADD CONSTRAINT "clubs_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
 
@@ -2452,6 +2562,13 @@ CREATE POLICY "blocks_select" ON "public"."time_blocks" FOR SELECT USING ((("ten
 
 
 CREATE POLICY "blocks_update" ON "public"."time_blocks" FOR UPDATE USING ((("tenant_id" = "public"."current_tenant_id"()) AND "public"."is_admin"())) WITH CHECK ((("tenant_id" = "public"."current_tenant_id"()) AND "public"."is_admin"()));
+
+
+
+ALTER TABLE "public"."calendar_teams" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "calendar_teams_own" ON "public"."calendar_teams" USING (("user_id" = "auth"."uid"())) WITH CHECK (("user_id" = "auth"."uid"()));
 
 
 
@@ -2791,8 +2908,13 @@ GRANT ALL ON FUNCTION "public"."set_calendar_match_teams_for"("p_user" "uuid", "
 
 
 
-REVOKE ALL ON FUNCTION "public"."set_calendar_reminders_for"("p_user" "uuid", "p_minutes" integer[]) FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."set_calendar_reminders_for"("p_user" "uuid", "p_minutes" integer[]) TO "service_role";
+REVOKE ALL ON FUNCTION "public"."set_calendar_reminders_for"("p_user" "uuid", "p_minutes" integer[], "p_calendar" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."set_calendar_reminders_for"("p_user" "uuid", "p_minutes" integer[], "p_calendar" "text") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."set_calendar_teams_for"("p_user" "uuid", "p_teams" "jsonb") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."set_calendar_teams_for"("p_user" "uuid", "p_teams" "jsonb") TO "service_role";
 
 
 
@@ -2832,6 +2954,11 @@ GRANT ALL ON FUNCTION "public"."upsert_club"("p_id" "uuid", "p_name" "text", "p_
 
 GRANT ALL ON TABLE "public"."app_config" TO "service_role";
 GRANT SELECT ON TABLE "public"."app_config" TO "authenticated";
+
+
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."calendar_teams" TO "authenticated";
+GRANT ALL ON TABLE "public"."calendar_teams" TO "service_role";
 
 
 
