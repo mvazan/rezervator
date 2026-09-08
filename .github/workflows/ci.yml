@@ -28,7 +28,7 @@ jobs:
       - uses: actions/checkout@v7
       # Pinned: supabase/schema.sql is a pg_dump and must come from the same
       # CLI (and bundled Postgres image) that tool/schema_snapshot.sh uses.
-      - uses: supabase/setup-cli@v1
+      - uses: supabase/setup-cli@v3
         with:
           version: 2.109.0
       - name: Build the database from migrations
