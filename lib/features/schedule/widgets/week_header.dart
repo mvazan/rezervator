@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../../../domain/models.dart';
+import 'home_header.dart';
 
-/// The week screen's top strip — it IS the app bar: title (where the width
-/// allows), week navigation, action icons pinned to the right edge; a
-/// narrow portrait phone stacks title/icons over the week selector.
+/// The calendar's take on the home's top strip: [HomeHeader] with the week
+/// navigation in its middle slot. The strip itself — title, padding, the
+/// icons at the right edge — is the shared one, so it lines up with Můj
+/// přehled's to the pixel.
 class WeekHeader extends StatelessWidget {
   const WeekHeader({
     super.key,
@@ -27,34 +29,15 @@ class WeekHeader extends StatelessWidget {
   final List<Widget> trailing;
 
   @override
-  Widget build(BuildContext context) => LayoutBuilder(
-        builder: (context, constraints) => _build(context, constraints.maxWidth),
+  Widget build(BuildContext context) => HomeHeader(
+        trailing: trailing,
+        middle: (stacked) => _weekNav(context, stacked),
       );
 
-  // The top strip IS the app bar. A narrow portrait phone can't fit
-  // title + week navigation + icons on one line, so it stacks them
-  // (title/icons row, week selector under it); everything wider —
-  // landscape phones and the web — keeps ONE line: title (where the
-  // width allows), the week navigation next to it, action icons pinned
-  // to the RIGHT edge.
-  //
-  // [width] is what this strip actually got, not what the screen has: on a
-  // wide-enough screen the shell parks a navigation rail to the left, and
-  // measuring the screen would keep the title on a strip too narrow to hold
-  // it — the row then overflows by the few pixels the rail took.
-  Widget _build(BuildContext context, double width) {
-    final portrait =
-        MediaQuery.orientationOf(context) == Orientation.portrait;
-    final stacked = portrait && width < 700;
-    final title = Padding(
-      padding: const EdgeInsets.only(left: 8, right: 4),
-      child: Text(
-        'Rezervátor',
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: Theme.of(context).textTheme.titleLarge,
-      ),
-    );
+  // On one line the week selector sits centred between the title and the
+  // icons; stacked it has the second line to itself, so the range can take
+  // all the width between the two arrows.
+  Widget _weekNav(BuildContext context, bool stacked) {
     final navPrev = IconButton(
       icon: const Icon(Icons.chevron_left),
       visualDensity: VisualDensity.compact,
@@ -75,44 +58,23 @@ class WeekHeader extends StatelessWidget {
     final todayButton = weekOffset == 0
         ? null
         : TextButton(onPressed: () => onGo(0), child: const Text('dnes'));
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      child: stacked
-          ? Column(
-              children: [
-                Row(children: [title, const Spacer(), ...trailing]),
-                Row(
-                  children: [
-                    navPrev,
-                    Expanded(child: range),
-                    ?todayButton,
-                    navNext,
-                  ],
-                ),
-              ],
-            )
-          : Row(
-              children: [
-                // | Rezervátor      < datum – datum >      admin profil |
-                // The title must NOT be a flex child: Flexible would claim
-                // an equal flex share as the Expanded nav, and its unused
-                // allocation becomes dead space at the row's end — pushing
-                // the icons to the middle instead of the right edge.
-                if (width >= 700) title,
-                Expanded(
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      navPrev,
-                      range,
-                      ?todayButton,
-                      navNext,
-                    ],
-                  ),
-                ),
-                ...trailing,
-              ],
-            ),
-    );
+    return stacked
+        ? Row(
+            children: [
+              navPrev,
+              Expanded(child: range),
+              ?todayButton,
+              navNext,
+            ],
+          )
+        : Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              navPrev,
+              range,
+              ?todayButton,
+              navNext,
+            ],
+          );
   }
 }

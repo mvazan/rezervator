@@ -57,9 +57,10 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     final visitingName = visiting
         ? ref.watch(tenantNameProvider(profile!.tenantId)).value
         : null;
-    // No AppBar at all: WeekScreen's week-navigation row doubles as the top
-    // bar — title (where width allows), week arrows and these icons share
-    // ONE line.
+    // No AppBar at all: both views draw the same top strip (HomeHeader) —
+    // title (where the width allows), whatever the view puts in the middle
+    // and these icons, on ONE line. Same strip on both, so the icons keep
+    // their place when the tabs switch.
     final actions = [
       if (profile?.isAdmin ?? false)
         IconButton(
