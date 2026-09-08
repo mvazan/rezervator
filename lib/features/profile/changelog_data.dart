@@ -43,6 +43,11 @@ String changelogHeading(Release r, {required bool web}) {
 }
 
 const appChangelog = <Release>[
+  Release('1.2.4', '8. 9. 2026', [
+    'Můj přehled je první tab, kalendář druhý.',
+    'Oba pohledy mají stejnou hlavičku — ikony profilu a správy '
+        'při přepnutí tabu neposkočí.',
+  ]),
   Release('1.2.3', '8. 9. 2026', [
     'Po přepnutí zpátky do appky už neprobleskne hláška „Offline" — '
         'ukáže se, až když spojení opravdu vypadne.',
