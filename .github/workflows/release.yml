@@ -20,8 +20,8 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '17'
@@ -82,7 +82,7 @@ jobs:
           cat whatsnew/whatsnew-cs-CZ
 
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             rezervator-*.apk
@@ -107,5 +107,5 @@ jobs:
           packageName: cz.kuzelky.rezervator
           releaseFiles: rezervator-${{ github.ref_name }}.aab
           whatsNewDirectory: whatsnew
-          track: internal
+          tracks: internal
           status: completed
