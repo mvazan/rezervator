@@ -7,6 +7,7 @@ import 'package:rezervator/core/ui.dart' show dayFull;
 import 'package:rezervator/data/clock.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
+import 'package:rezervator/features/schedule/widgets/slot_tile.dart';
 import 'package:rezervator/features/schedule/week_calendar_view.dart';
 import 'package:rezervator/features/schedule/week_screen.dart';
 import 'package:rezervator/features/schedule/widgets/calendar_board.dart';
@@ -575,6 +576,50 @@ void main() {
       expect(find.byType(BoardColumnHeader), findsNWidgets(7));
     },
   );
+
+  testWidgets('day view: the time label sits level with its own row, at any '
+      'text size', (tester) async {
+    // It used to be nudged down by a fixed 14 px against a top-aligned row,
+    // which lined up only at the default size: at 130 % the label wraps to
+    // two lines and the cells grow, and the time floated above its row.
+    for (final scale in [1.0, 1.3]) {
+      portraitSurface(tester);
+      tester.platformDispatcher.textScaleFactorTestValue = scale;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+
+      final chips = find.descendant(
+        of: find.byType(DayChipStrip),
+        matching: find.byType(InkWell),
+      );
+      await tester.tap(chips.at(t.weekday));
+      await tester.pumpAndSettle();
+
+      // A block label reads „15:30–16:30"; the week range „7.9.–13.9." must
+      // not be mistaken for one.
+      final label = find.textContaining(RegExp(r'^\d{1,2}:\d{2}–')).first;
+      final labelBox = tester.getRect(label);
+      final cells = find.byType(SlotTile);
+      expect(cells, findsWidgets);
+
+      // The cell of the label's own row: the one whose vertical span holds
+      // the label's middle. If the label floats above its row, none does.
+      final rowCells = [
+        for (var i = 0; i < tester.widgetList(cells).length; i++)
+          tester.getRect(cells.at(i)),
+      ].where((r) => r.top <= labelBox.center.dy && labelBox.center.dy <= r.bottom);
+      expect(rowCells, isNotEmpty,
+          reason: 'at ${scale}x the time floats outside every cell of its row');
+
+      final cell = rowCells.first;
+      expect(
+        (labelBox.center.dy - cell.center.dy).abs(),
+        lessThan(6),
+        reason: 'at ${scale}x the time is not centred on its row',
+      );
+    }
+  });
 
   testWidgets('booking dialog opens from a large free tile in day view', (
     tester,
