@@ -11,6 +11,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'cache.dart';
 import 'live_refresh.dart';
+import 'offline_gate.dart';
 
 import '../config.dart';
 import '../domain/collation.dart';
@@ -187,18 +188,28 @@ final timeBlocksProvider = StreamProvider<List<TimeBlock>>((ref) {
 final offlineProvider = StreamProvider<bool>((ref) async* {
   yield false;
   // Po probuzení appky je odpojený socket normální stav — supabase ho na
-  // pozadí sám zavírá a teprve teď ho navazuje. Než to doběhne, nemá cenu
-  // hlásit offline (data mezitím dotahuje HTTP re-subscribe).
+  // pozadí sám zavírá a teprve teď ho navazuje. Rozhodnutí, kdy je to už
+  // opravdu offline, drží offlineDecision: čeká, jestli socket zůstane dole,
+  // místo aby spoléhalo na to, že se probuzení ohlásí včas (LiveRefresh svůj
+  // signál škrtí, takže při rychlém přepnutí appky nepřijde vůbec).
   var wokeAt = DateTime.now();
-  final wake = LiveRefresh.stream.listen((_) => wokeAt = DateTime.now());
+  DateTime? disconnectedSince;
+  final wake = LiveRefresh.stream.listen((_) {
+    wokeAt = DateTime.now();
+    disconnectedSince = null;
+  });
   ref.onDispose(wake.cancel);
   // Stream.periodic (not a delayed loop): its timer is cancelled the moment
   // the provider is disposed, so widget tests never leak a pending timer.
   yield* Stream.periodic(const Duration(seconds: 3), (_) {
-    if (DateTime.now().difference(wokeAt) < const Duration(seconds: 6)) {
-      return false;
-    }
-    return !_db.realtime.isConnected;
+    final decision = offlineDecision(
+      connected: _db.realtime.isConnected,
+      now: DateTime.now(),
+      wokeAt: wokeAt,
+      disconnectedSince: disconnectedSince,
+    );
+    disconnectedSince = decision.disconnectedSince;
+    return decision.offline;
   });
 });
 
