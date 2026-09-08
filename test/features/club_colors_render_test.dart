@@ -421,4 +421,87 @@ void main() {
       expect(tester.widget<Text>(find.text('Radek Jandera')).maxLines, 1);
     });
   });
+
+  group('a word wider than the cell', () {
+    // At 130 % text „Pronájem" wrapped as „Pronáje" / „m" — the tile now
+    // shrinks the type by exactly the missing ratio instead of breaking the
+    // word, and only for the name that needs it.
+    //
+    // Widths here are chosen for the TEST font, where every glyph is a full
+    // em square: a word of n characters is n × fontSize wide. „Pronájem" is
+    // 8 chars, so at 12 pt it needs 96 and at 130 % it needs 124.8 — a
+    // 120 px cell (8 px of padding) therefore fits it at normal size and
+    // cannot at 130 %, which is exactly the pair worth testing.
+    final reservation = Reservation(
+      id: 'r-word',
+      playerId: 'p1',
+      date: Day(2026, 3, 2),
+      blockId: 'b1',
+      lane: 1,
+      createdVia: 'app',
+      createdAt: DateTime.utc(2026, 1, 1),
+    );
+    final state =
+        ReservedSlot(reservation, inPast: false, beyondHorizon: false);
+
+    Widget tile(String name, {double textScale = 1.0}) => MaterialApp(
+          theme: buildTheme(Brightness.light),
+          home: MediaQuery(
+            data: MediaQueryData(textScaler: TextScaler.linear(textScale)),
+            child: Scaffold(
+              body: Center(
+                child: SizedBox(
+                  width: 120,
+                  child: SlotTile(
+                    state: state,
+                    size: SlotTileSize.large,
+                    playerName: name,
+                    isMine: false,
+                    clubColorIndex: -1,
+                    laneDigit: 1,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+
+    double? sizeOf(WidgetTester tester, String name) =>
+        tester.widget<Text>(find.text(name)).style?.fontSize;
+
+    testWidgets('the word fits at normal size: nothing is touched',
+        (tester) async {
+      await tester.pumpWidget(tile('Pronájem'));
+      await tester.pumpAndSettle();
+
+      expect(sizeOf(tester, 'Pronájem'), 12);
+    });
+
+    testWidgets('the same word at 130 % shrinks rather than breaking',
+        (tester) async {
+      await tester.pumpWidget(tile('Pronájem', textScale: 1.3));
+      await tester.pumpAndSettle();
+
+      final size = sizeOf(tester, 'Pronájem')!;
+      expect(size, lessThan(12), reason: 'shrunk to fit the whole word');
+      expect(size, greaterThanOrEqualTo(12 * 0.75),
+          reason: 'never past the floor, where an ellipsis is the lesser evil');
+    });
+
+    testWidgets('a name whose words all fit keeps the size the player asked '
+        'for, and still wraps between them', (tester) async {
+      await tester.pumpWidget(tile('Admin Local', textScale: 1.3));
+      await tester.pumpAndSettle();
+
+      expect(sizeOf(tester, 'Admin Local'), 12);
+      expect(tester.widget<Text>(find.text('Admin Local')).maxLines, 2);
+    });
+
+    testWidgets('a short name is never touched', (tester) async {
+      await tester.pumpWidget(tile('Igi', textScale: 1.3));
+      await tester.pumpAndSettle();
+
+      expect(sizeOf(tester, 'Igi'), 12);
+    });
+  });
 }

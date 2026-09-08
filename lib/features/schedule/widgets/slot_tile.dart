@@ -94,12 +94,9 @@ class SlotTile extends StatelessWidget {
             borderRadius: BorderRadius.circular(_compact ? 8 : 12),
           ),
           padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: Text(
+          child: _sizedText(
             slotEventLabel(slot),
-            maxLines: _compact ? 1 : 2,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.center,
-            style: TextStyle(
+            TextStyle(
               fontSize: _compact ? 10 : 12,
               fontWeight: FontWeight.w600,
               color: fg,
@@ -123,12 +120,9 @@ class SlotTile extends StatelessWidget {
             borderRadius: BorderRadius.circular(_compact ? 8 : 12),
           ),
           padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: Text(
+          child: _sizedText(
             rental.renterName,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: _compact ? 10 : 12, color: fg),
+            TextStyle(fontSize: _compact ? 10 : 12, color: fg),
           ),
         );
       case ReservedSlot():
@@ -158,13 +152,13 @@ class SlotTile extends StatelessWidget {
         // different thing: an initials avatar STACKED over the name, so a
         // nick read as „FE" / „FERI". That stack is gone; this is one name
         // wrapping.)
-        final content = Text(
-          name,
-          maxLines: _compact ? 1 : 2,
-          overflow: TextOverflow.ellipsis,
-          textAlign: TextAlign.center,
-          style: nameStyle,
-        );
+        //
+        // A large tile also refuses to break a word in half: at 130 % text
+        // „Pronájem" wrapped as „Pronáje" / „m" and „Časlavská" as
+        // „Časlavs" / „ká", which reads worse than either the whole word or
+        // an ellipsis. _NameText shrinks the type just enough for the widest
+        // WORD to fit and lets the rest wrap between words as before.
+        final content = _sizedText(name, nameStyle);
         return _shell(
           minHeight: minHeight,
           onTap: onTap,
@@ -206,6 +200,20 @@ class SlotTile extends StatelessWidget {
         );
     }
   }
+
+  /// One line of text in a cell. A compact cell keeps a single clipped line —
+  /// its columns are too narrow for anything cleverer. A large cell hands the
+  /// text to [_NameText], which wraps between words and shrinks the type
+  /// rather than splitting a word in half.
+  Widget _sizedText(String text, TextStyle style) => _compact
+      ? Text(
+          text,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
+          style: style,
+        )
+      : _NameText(name: text, style: style);
 
   Widget _shell({
     required double minHeight,
@@ -456,5 +464,63 @@ Widget slotTileFor({
         quiet: !normallyBookable,
         onTap: bookable ? () => slot.onBook(day.date, block, lane) : null,
       );
+  }
+}
+
+/// Text in a large cell — a player, a renter or an event — on at most two
+/// lines, and never with a word split down the middle.
+///
+/// Flutter breaks inside a word when the word alone is wider than the line,
+/// which at large text sizes turned „Pronájem" into „Pronáje" / „m". This
+/// measures the widest word first and, only when it does not fit, scales the
+/// type down by exactly the missing ratio — never below [_minScale], where an
+/// ellipsis is the lesser evil. A name whose words already fit renders at the
+/// size the player asked for, untouched.
+class _NameText extends StatelessWidget {
+  const _NameText({required this.name, required this.style});
+
+  final String name;
+  final TextStyle style;
+
+  /// Below this the type is too small to be worth saving the word for.
+  static const _minScale = 0.75;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final scaler = MediaQuery.textScalerOf(context);
+        // Measure with the style the Text will REALLY be drawn in: these
+        // callers pass a bare size/weight/colour and inherit the family from
+        // the theme, and measuring in the default font instead of Manrope
+        // reads a word as narrower than it lands, which is how „Pronájem"
+        // still broke after the first attempt at this.
+        final effective = DefaultTextStyle.of(context).style.merge(style);
+        var widest = 0.0;
+        for (final word in name.split(' ')) {
+          if (word.isEmpty) continue;
+          final painter = TextPainter(
+            text: TextSpan(text: word, style: effective),
+            textDirection: Directionality.of(context),
+            textScaler: scaler,
+          )..layout();
+          widest = widest > painter.width ? widest : painter.width;
+        }
+        // A pixel of slack: at the exact limit a rounding difference
+        // between this measurement and the real layout still breaks the word.
+        final room = constraints.maxWidth - 1;
+        final fits = widest <= room || room <= 0 || widest == 0;
+        final scale = fits ? 1.0 : (room / widest).clamp(_minScale, 1.0);
+        return Text(
+          name,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
+          style: scale == 1.0
+              ? style
+              : style.copyWith(fontSize: style.fontSize! * scale),
+        );
+      },
+    );
   }
 }
