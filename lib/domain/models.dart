@@ -106,7 +106,11 @@ enum ProfileStatus { pending, approved }
 /// `profiles_default_view_check` allows ('calendar', 'trainings'), and
 /// `Api.setDefaultView` sends them verbatim (`view.name`) — renaming a
 /// value here still compiles, but breaks the write at runtime only.
-enum HomeView { calendar, trainings }
+///
+/// Declaration ORDER is the order of the tabs (and of the rail's
+/// destinations): the shell indexes both by `.index`. Reordering is safe
+/// precisely because the profile stores the choice by name, not position.
+enum HomeView { trainings, calendar }
 
 class Profile {
   const Profile({

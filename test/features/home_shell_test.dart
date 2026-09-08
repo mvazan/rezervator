@@ -315,6 +315,36 @@ void main() {
       expect(find.text(rangeLabel(paged, paged.addDays(6))), findsOneWidget);
     });
 
+    // Můj přehled is the first destination — the personal view leads, the
+    // calendar follows. The order lives in HomeView's declaration, which
+    // also indexes the IndexedStack, so a swap that forgot the children
+    // would put the wrong screen behind the tab (the taps below catch that).
+    testWidgets('Můj přehled leads the bottom tabs', (tester) async {
+      phone(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+
+      expect(
+        tester.getCenter(find.text('Můj přehled')).dx,
+        lessThan(tester.getCenter(find.text('Kalendář')).dx),
+      );
+
+      await tester.tap(find.text('Můj přehled'));
+      await tester.pumpAndSettle();
+      expect(find.byType(MyTrainingsScreen), findsOneWidget);
+    });
+
+    testWidgets('…and the rail, top to bottom', (tester) async {
+      wide(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+
+      expect(
+        tester.getCenter(find.text('Můj přehled')).dy,
+        lessThan(tester.getCenter(find.text('Kalendář')).dy),
+      );
+    });
+
     // Both views draw the SAME top strip, so the profile (and admin) icon
     // must not move a pixel when the tabs switch — a header that shifts
     // makes the icons a moving target and reads as two different screens.

@@ -185,16 +185,18 @@ class ProfileScreen extends ConsumerWidget {
                       Padding(
                         padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                         child: SegmentedButton<HomeView>(
+                          // Same order as the tabs downstairs, so the two
+                          // read as the same pair of views.
                           segments: const [
-                            ButtonSegment(
-                              value: HomeView.calendar,
-                              label: Text('Kalendář'),
-                              icon: Icon(Icons.calendar_month_outlined),
-                            ),
                             ButtonSegment(
                               value: HomeView.trainings,
                               label: Text('Můj přehled'),
                               icon: Icon(Icons.event_available_outlined),
+                            ),
+                            ButtonSegment(
+                              value: HomeView.calendar,
+                              label: Text('Kalendář'),
+                              icon: Icon(Icons.calendar_month_outlined),
                             ),
                           ],
                           selected: {profile.defaultView},

@@ -88,11 +88,11 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     final content = IndexedStack(
       index: view.index,
       children: [
-        WeekScreen(trailing: actions),
         MyTrainingsScreen(
           trailing: actions,
           onOpenCalendar: () => setState(() => _chosen = HomeView.calendar),
         ),
+        WeekScreen(trailing: actions),
       ],
     );
     final body = Column(
@@ -135,8 +135,9 @@ class _HomeShellState extends ConsumerState<HomeShell> {
 
     // A back gesture/button away from the calendar returns to it instead of
     // popping the route (there is nothing to pop to from the home screen
-    // anyway) — the same "back = calendar" behaviour a tab bar's own back
-    // stack would give for free if the two views were separate routes.
+    // anyway). The target is the CALENDAR, not whichever tab comes first:
+    // the calendar is what the app is for and what a fresh profile opens
+    // on, and that did not change when Můj přehled moved to the left.
     return PopScope(
       canPop: view == HomeView.calendar,
       onPopInvokedWithResult: (didPop, result) {
@@ -159,14 +160,14 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                       scrollable: true,
                       destinations: const [
                         NavigationRailDestination(
-                          icon: Icon(Icons.calendar_month_outlined),
-                          selectedIcon: Icon(Icons.calendar_month),
-                          label: Text('Kalendář'),
-                        ),
-                        NavigationRailDestination(
                           icon: Icon(Icons.event_available_outlined),
                           selectedIcon: Icon(Icons.event_available),
                           label: Text('Můj přehled'),
+                        ),
+                        NavigationRailDestination(
+                          icon: Icon(Icons.calendar_month_outlined),
+                          selectedIcon: Icon(Icons.calendar_month),
+                          label: Text('Kalendář'),
                         ),
                       ],
                     ),
@@ -181,14 +182,14 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                 onDestinationSelected: select,
                 destinations: const [
                   NavigationDestination(
-                    icon: Icon(Icons.calendar_month_outlined),
-                    selectedIcon: Icon(Icons.calendar_month),
-                    label: 'Kalendář',
-                  ),
-                  NavigationDestination(
                     icon: Icon(Icons.event_available_outlined),
                     selectedIcon: Icon(Icons.event_available),
                     label: 'Můj přehled',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.calendar_month_outlined),
+                    selectedIcon: Icon(Icons.calendar_month),
+                    label: 'Kalendář',
                   ),
                 ],
               )
