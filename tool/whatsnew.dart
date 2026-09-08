@@ -10,11 +10,12 @@
 // stdout, which would leak into a `> redirect`. Writing the file from here
 // keeps that noise out of the release notes.
 //
-// Play caps "What's new" at 500 chars per language; we trim with an ellipsis
-// if an entry ever runs long (it warns on stderr so it doesn't pass silently).
+// Play caps "What's new" at 500 chars per language; storeNotes condenses a
+// longer entry down to size (see store_notes.dart).
 import 'dart:io';
 
 import 'package:rezervator/features/profile/changelog_data.dart';
+import 'package:rezervator/features/profile/store_notes.dart';
 
 void main(List<String> args) {
   String? version;
@@ -36,12 +37,12 @@ void main(List<String> args) {
       : appChangelog.firstWhere((r) => r.version == version,
           orElse: () => throw 'No changelog entry for $version');
 
-  var text = release.changes.map((c) => '• $c').join('\n');
-  if (text.length > 500) {
-    stderr.writeln('warning: What\'s-new text is ${text.length} chars (>500); '
-        'Play will reject it — shorten the ${release.version} entry.');
-    text = '${text.substring(0, 497)}...';
-  }
+  // Play takes 500 characters per language and refuses anything longer, so
+  // storeNotes trims — whole sentences first, then whole bullets — instead
+  // of letting a release fail on a long entry or, worse, reach testers with
+  // a sentence cut mid-word. What the app shows in Novinky stays the full
+  // text; only the store copy is condensed.
+  final text = storeNotes(release.changes);
 
   if (outPath != null) {
     File(outPath).writeAsStringSync(text);

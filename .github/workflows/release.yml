@@ -65,7 +65,9 @@ jobs:
              rezervator-${{ github.ref_name }}.aab
 
       # "What's new" for Play, generated from the in-app changelog so the
-      # store text always matches what users see in Můj profil. The tag is
+      # store text always matches what users see in Můj profil — condensed
+      # to Play's 500-character limit by store_notes.dart when an entry runs
+      # long, always on whole sentences. The tag is
       # v1.0.1; the changelog keys by bare version (1.0.1). Missing entry ->
       # fail loudly (--out keeps dart-run noise out of the file).
       # r0adkll/upload-google-play derives the locale from the filename after
@@ -87,10 +89,15 @@ jobs:
             rezervator-*.aab
           generate_release_notes: true
 
-      # Upload the AAB straight to Google Play internal testing. Creates a
-      # DRAFT release on the internal track — review and roll it out to
-      # testers manually in Play Console. Needs the play-uploader service
-      # account with "Release apps to testing tracks" on the Rezervátor app.
+      # Upload the AAB to Google Play internal testing and RELEASE it there
+      # (status: completed) — testers get it as soon as Play finishes
+      # processing, no click in Play Console. It used to land as a draft,
+      # which meant a tag could look released while the build sat waiting
+      # for someone to notice it. Internal testing is a closed track, so
+      # "released" here still means the testers on that list and nobody
+      # else; promoting to production stays a human decision in Play
+      # Console. Needs the play-uploader service account with "Release apps
+      # to testing tracks" on the Rezervátor app.
       # NOTE: the FIRST AAB for a brand-new Play app must be uploaded by hand
       # in Play Console; the API can push every release after that.
       - name: Upload AAB to Play internal testing
@@ -101,4 +108,4 @@ jobs:
           releaseFiles: rezervator-${{ github.ref_name }}.aab
           whatsNewDirectory: whatsnew
           track: internal
-          status: draft
+          status: completed

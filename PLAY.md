@@ -2,11 +2,14 @@
 
 Stejný postup jako u Termínátoru: **push tagu `v*` → `release.yml`** postaví
 podepsané APK + AAB, vydá je na stránce **Releases** a nahraje AAB na
-**internal testing** track Google Play jako koncept.
+**internal testing** track Google Play, kde ho rovnou i vydá — testeři ho
+dostanou, jakmile ho Play zpracuje, bez klikání v Play Console. Interní
+testování je uzavřený track, takže „vydáno" tu znamená jen lidi na seznamu
+testerů; povýšení do produkce zůstává ruční rozhodnutí.
 
 ```
 git tag v1.1.0 → release.yml → podepsané APK+AAB → GitHub Releases
-                                              └→ AAB → Play internal (draft)
+                                              └→ AAB → Play internal (vydáno testerům)
 ```
 
 Podpisový klíč (`upload-keystore.jks`) i `key.properties` jsou **gitignored** —
@@ -107,8 +110,18 @@ git push origin main v1.1.1
 ```
 
 Za pár minut je na stránce **Releases** podepsané `rezervator-v1.1.0.apk`
-(sdílej odkaz) a v Play na internal tracku čeká **koncept** — v Play Console
-ho zkontroluj a vydej testerům.
+(sdílej odkaz) a v Play na internal tracku je vydaná verze pro testery.
+
+Délku „Co je nového" řešit nemusíš: Play bere 500 znaků na jazyk a
+`tool/whatsnew.dart` delší záznam **sám zkrátí** (`store_notes.dart`) — nejdřív
+nechá z každé odrážky první větu, pak odebírá odrážky od konce, a teprve
+kdyby jedna jediná byla delší než celý limit, ořízne ji na hranici slova.
+Vždycky tedy odejdou celé věty, ne půlka. V appce v Novinkách zůstává plný
+text; zkrácená je jen kopie pro store.
+
+Pokud chceš mít ve storu přesně to, co je v appce, drž záznam pod 500 znaků —
+test `store_notes_test.dart` upozorní, jakmile se nejnovější vydání začne
+krátit.
 
 ## Demo přístup pro recenzenty Google Play
 
