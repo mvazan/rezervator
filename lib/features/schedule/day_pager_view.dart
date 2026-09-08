@@ -436,14 +436,16 @@ class _DayPage extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        // The time sits in the middle of its row, whatever height the row
+        // takes. It used to be nudged down by a fixed 14 px against a
+        // top-aligned row, which lined up only at the default text size: at
+        // 130 % the label wraps to two lines and the cells grow, and the
+        // fixed nudge left the time floating above its own row.
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           SizedBox(
             width: _laneLabelWidth,
-            child: Padding(
-              padding: const EdgeInsets.only(top: 14),
-              child: _blockLabel(block),
-            ),
+            child: _blockLabel(block),
           ),
           ..._laneCells(
             laneCount: day.laneCount,
