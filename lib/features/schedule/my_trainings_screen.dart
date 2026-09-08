@@ -9,6 +9,7 @@ import '../../domain/palette.dart';
 import '../../domain/upcoming.dart';
 import '../profile/profile_screen.dart';
 import 'cancel_own_reservation.dart';
+import 'widgets/home_header.dart';
 
 /// The trophy's colour for [slot]: [matchColorOf]'s pick among
 /// [followedTeams] (home wins a derby, no fall-through to a coloured team
@@ -142,17 +143,10 @@ class MyTrainingsScreen extends ConsumerWidget {
     final trainingColor =
         eventShadeOf(trainingColorId, theme.brightness);
 
-    final header = Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 8, 0),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text('Můj přehled', style: theme.textTheme.titleLarge),
-          ),
-          ...trailing,
-        ],
-      ),
-    );
+    // The calendar's strip, minus the week navigation: the same title in
+    // the same place and the same icons at the same right edge, so nothing
+    // moves when the tabs switch. Which view this is, the tabs say.
+    final header = HomeHeader(trailing: trailing);
 
     final stillLoading =
         (reservationsAsync.isLoading && !reservationsAsync.hasValue) ||

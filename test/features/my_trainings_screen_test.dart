@@ -110,7 +110,9 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    expect(find.text('Můj přehled'), findsOneWidget);
+    // The shared home strip: the app's name, not the view's — which view
+    // this is, the shell's tabs say.
+    expect(find.text('Rezervátor'), findsOneWidget);
     expect(find.text('Dnes'), findsOneWidget);
     expect(find.text('Zítra'), findsOneWidget);
     // A day beyond tomorrow (the match, two days out) is labelled with the

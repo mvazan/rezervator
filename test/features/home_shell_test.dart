@@ -315,6 +315,93 @@ void main() {
       expect(find.text(rangeLabel(paged, paged.addDays(6))), findsOneWidget);
     });
 
+    // Můj přehled is the first destination — the personal view leads, the
+    // calendar follows. The order lives in HomeView's declaration, which
+    // also indexes the IndexedStack, so a swap that forgot the children
+    // would put the wrong screen behind the tab (the taps below catch that).
+    testWidgets('Můj přehled leads the bottom tabs', (tester) async {
+      phone(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+
+      expect(
+        tester.getCenter(find.text('Můj přehled')).dx,
+        lessThan(tester.getCenter(find.text('Kalendář')).dx),
+      );
+
+      await tester.tap(find.text('Můj přehled'));
+      await tester.pumpAndSettle();
+      expect(find.byType(MyTrainingsScreen), findsOneWidget);
+    });
+
+    testWidgets('…and the rail, top to bottom', (tester) async {
+      wide(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+
+      expect(
+        tester.getCenter(find.text('Můj přehled')).dy,
+        lessThan(tester.getCenter(find.text('Kalendář')).dy),
+      );
+    });
+
+    // Both views draw the SAME top strip, so the profile (and admin) icon
+    // must not move a pixel when the tabs switch — a header that shifts
+    // makes the icons a moving target and reads as two different screens.
+    const admin = Profile(
+      id: 'me',
+      displayName: 'Já Správce',
+      email: 'me@example.com',
+      role: Role.admin,
+      status: ProfileStatus.approved,
+    );
+
+    Future<void> expectHeaderHoldsStill(
+      WidgetTester tester, {
+      bool withTitle = true,
+    }) async {
+      await tester.pumpWidget(app(profile: admin));
+      await tester.pumpAndSettle();
+
+      Rect iconAt(IconData icon) => tester.getRect(find.byIcon(icon));
+      final onCalendar = [
+        iconAt(Icons.admin_panel_settings_outlined),
+        iconAt(Icons.account_circle_outlined),
+        if (withTitle) tester.getRect(find.text('Rezervátor')),
+      ];
+
+      await tester.tap(find.text('Můj přehled'));
+      await tester.pumpAndSettle();
+      expect(find.byType(MyTrainingsScreen), findsOneWidget);
+
+      expect([
+        iconAt(Icons.admin_panel_settings_outlined),
+        iconAt(Icons.account_circle_outlined),
+        if (withTitle) tester.getRect(find.text('Rezervátor')),
+      ], onCalendar);
+    }
+
+    testWidgets('the header holds still across the tabs: phone portrait',
+        (tester) async {
+      phone(tester);
+      await expectHeaderHoldsStill(tester);
+    });
+
+    // A landscape phone spends ~150dp on the rail, which leaves the strip
+    // under the 700dp the title needs — both views drop it, and the icons
+    // still land in the same place.
+    testWidgets('…a landscape phone, where the title does not fit',
+        (tester) async {
+      phoneLandscape(tester);
+      await expectHeaderHoldsStill(tester, withTitle: false);
+      expect(find.text('Rezervátor'), findsNothing);
+    });
+
+    testWidgets('…and a wide screen', (tester) async {
+      wide(tester);
+      await expectHeaderHoldsStill(tester);
+    });
+
     testWidgets(
         'a back gesture away from Můj přehled returns to the calendar '
         'instead of popping the route', (tester) async {
