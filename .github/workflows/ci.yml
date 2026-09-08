@@ -19,6 +19,26 @@ jobs:
       - run: flutter analyze
       - run: flutter test
 
+  # Android: the Gradle/AGP/Kotlin toolchain is otherwise only ever exercised
+  # by release.yml, on a tag — so a toolchain that no longer builds is found
+  # at the worst possible moment, with a version already tagged. A debug APK
+  # needs no keystore and no secrets (the --dart-defines are runtime config)
+  # and runs the whole toolchain, so it catches that here instead.
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter build apk --debug
+
   # Backend: rebuild the database from the migrations alone, prove the
   # committed schema snapshot matches it, run the tenancy smoke-test and
   # type-check + test the Deno edge functions.
