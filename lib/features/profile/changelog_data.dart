@@ -43,6 +43,12 @@ String changelogHeading(Release r, {required bool web}) {
 }
 
 const appChangelog = <Release>[
+  Release('1.2.3', '8. 9. 2026', [
+    'Po přepnutí zpátky do appky už neprobleskne hláška „Offline" — '
+        'ukáže se, až když spojení opravdu vypadne.',
+    'Při zvětšeném písmu sedí časy na svých řádcích a jméno v rezervaci '
+        'se neláme v půlce slova.',
+  ]),
   Release('1.2.2', '8. 9. 2026', [
     'Moje tréninky se jmenují Můj přehled — jsou v něm i zápasy tvých týmů.',
     'Barvu týmu vybereš jednou v profilu a platí všude: obarví zápas '
