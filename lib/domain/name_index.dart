@@ -1,6 +1,12 @@
 /// Adaptive letter drill-down for the kiosk name picker: show first letters,
 /// then two-letter prefixes, … until the remaining names fit on screen.
 /// Pure Dart, unit-tested.
+///
+/// Everything here works on [PlayerName.boardName] — the player's nick when
+/// they set one — because that is what the picker's tiles and the board
+/// itself show. Indexing the full name instead would file "Bobo" under J
+/// for Jan Novák, where nobody reading a tile that says "Bobo" would think
+/// to tap.
 library;
 
 import 'collation.dart';
@@ -36,16 +42,16 @@ NameIndexNode nameIndex({
 }) {
   final folded = _fold(prefix);
   final candidates = players
-      .where((p) => _fold(p.displayName).startsWith(folded))
+      .where((p) => _fold(p.boardName).startsWith(folded))
       .toList()
-    ..sort((a, b) => compareCzech(a.displayName, b.displayName));
+    ..sort((a, b) => compareCzech(a.boardName, b.boardName));
   if (candidates.length <= capacity) {
     return NamesNode(candidates);
   }
   final prefixes = <String>{};
   final exactMatches = <PlayerName>[];
   for (final candidate in candidates) {
-    final name = _fold(candidate.displayName);
+    final name = _fold(candidate.boardName);
     if (name.length <= folded.length) {
       exactMatches.add(candidate);
     } else {

@@ -341,7 +341,11 @@ class _NameTile extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16),
         child: Text(
-          player.displayName,
+          // The player's own nick, when they set one — the same label their
+          // reservations wear on the board behind this dialog. The full name
+          // still appears in the bar once they are picked, which is where a
+          // nick two people share gets caught.
+          player.boardName,
           textAlign: TextAlign.center,
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
