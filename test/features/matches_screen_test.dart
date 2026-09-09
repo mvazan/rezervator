@@ -97,6 +97,82 @@ void main() {
     expect(soonY, lessThan(laterY));
   });
 
+  // The schedule's rows are marked, the admin's own are not — and a
+  // scheduled match the admin corrected says so, because the next import
+  // will leave it alone (0038). The dialog repeats that promise where the
+  // edit happens.
+  testWidgets('imported matches read "z rozpisu", hand-edited ones add '
+      '"upraveno ručně", manual ones carry no mark', (tester) async {
+    final d1 = today().addDays(1);
+    final d2 = today().addDays(2);
+    final d3 = today().addDays(3);
+    await tester.pumpWidget(app(slots: [
+      PrioritySlot(
+        id: 'imp',
+        date: d1,
+        startsAt: const HourMinute(18, 0),
+        endsAt: const HourMinute(21, 0),
+        type: PrioritySlot.fallbackMatchType,
+        homeTeam: 'TJ Sokol Brno IV',
+        awayTeam: 'SK Kuželky Dubňany',
+        importKey: 'rozpis:JM divize:1:TJ Sokol Brno IV – SK Kuželky Dubňany',
+      ),
+      PrioritySlot(
+        id: 'edited',
+        date: d2,
+        startsAt: const HourMinute(18, 0),
+        endsAt: const HourMinute(20, 30),
+        type: PrioritySlot.fallbackMatchType,
+        homeTeam: 'KK MS Brno C',
+        awayTeam: 'TJ Sokol Brno IV',
+        description: 'JM divize · 2. kolo · Brno MS',
+        isAway: true,
+        importKey: 'rozpis:JM divize:2:KK MS Brno C – TJ Sokol Brno IV',
+        handEdited: true,
+      ),
+      PrioritySlot(
+        id: 'manual',
+        date: d3,
+        startsAt: const HourMinute(18, 0),
+        endsAt: const HourMinute(20, 0),
+        type: PrioritySlot.fallbackMatchType,
+        homeTeam: 'Husky',
+        awayTeam: 'přátelák',
+      ),
+    ]));
+    await tester.pumpAndSettle();
+
+    expect(find.text('z rozpisu'), findsOneWidget);
+    expect(
+      find.text('z rozpisu · upraveno ručně · venku — neblokuje kuželnu · '
+          'JM divize · 2. kolo · Brno MS'),
+      findsOneWidget,
+    );
+    // The manual match has nothing to say under its title.
+    expect(find.textContaining('Husky – přátelák'), findsOneWidget);
+    expect(find.textContaining('rozpisu'), findsNWidgets(2));
+
+    // Editing the imported one: the dialog says what the import will do.
+    await tester.tap(find.byIcon(Icons.edit_outlined).first);
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Zápas z rozpisu — co tu změníš, příští import nepřepíše.'),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('Zrušit'));
+    await tester.pumpAndSettle();
+
+    // Editing the manual one: no such note (the list's own marks behind the
+    // dialog are still in the tree, so look for the note itself).
+    await tester.tap(find.byIcon(Icons.edit_outlined).at(2));
+    await tester.pumpAndSettle();
+    expect(find.text('Domácí'), findsOneWidget);
+    expect(
+      find.text('Zápas z rozpisu — co tu změníš, příští import nepřepíše.'),
+      findsNothing,
+    );
+  });
+
   testWidgets('played matches sit collapsed under Odehrané, most recent first',
       (tester) async {
     PrioritySlot match(String id, Day date, String away, HourMinute start) =>

@@ -168,6 +168,15 @@ class _MatchDialogState extends State<MatchDialog> {
       crossAxisAlignment: CrossAxisAlignment.center,
       onSave: _save,
       children: [
+        // An imported match: say up front what an edit means for the next
+        // import, so the admin does not fear it will be reverted (0038).
+        if (widget.existing?.imported ?? false) ...[
+          Text(
+            'Zápas z rozpisu — co tu změníš, příští import nepřepíše.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 8),
+        ],
         PickerTile(
           label: 'Datum',
           value: _date == null ? 'Vybrat' : dayFull(_date!),
