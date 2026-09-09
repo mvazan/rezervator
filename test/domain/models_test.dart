@@ -130,6 +130,16 @@ void main() {
       expect(withNick.clubColor, 3);
     });
 
+    test('boardName is the nick, or the full name when there is none', () {
+      const withNick =
+          PlayerName(id: 'p1', displayName: 'Novák Jan', nick: 'Bobo');
+      const withoutNick = PlayerName(id: 'p2', displayName: 'Eva Novotná');
+      expect(withNick.boardName, 'Bobo');
+      expect(withoutNick.boardName, 'Eva Novotná');
+      expect(const PlayerName(id: 'p3', displayName: 'Petr', nick: '').boardName,
+          'Petr');
+    });
+
     test('fromJson defaults nick, club_id and club_color for old rows', () {
       final withoutNick = PlayerName.fromJson({
         'id': 'p2',

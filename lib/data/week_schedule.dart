@@ -109,7 +109,7 @@ final weekScheduleProvider =
     reservations: reservations,
     nameById: {
       for (final p in players)
-        p.id: p.nick.isNotEmpty ? p.nick : p.displayName,
+        p.id: p.boardName,
     },
     clubColorById: {for (final p in players) p.id: p.clubColor},
     noAccountIds: {
