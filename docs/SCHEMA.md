@@ -52,7 +52,7 @@ and what cascades — and is updated with every migration.
 | `time_blocks` | `starts_at`, `ends_at`, `position`, `active`. `position = -1` marks a day-special block: inactive, reachable only through `day_overrides.block_ids` | select approved/kiosk; insert/update/delete admin. FK from `reservations` is RESTRICT — only never-used blocks can be deleted. |
 | `day_overrides` | PK (`tenant_id`, `date`); `closed`, `reason`, `block_ids uuid[]` (`null` = the default active set) | select approved/kiosk; write admin. Normally written through `set_day_override`. |
 | `priority_slot_types` | `name` unique per tenant, `color` (−1 = none), `lanes smallint[]` (`null` = whole alley), `is_match`, `builtin` ('Zápas', 'Úklid před zápasem' seeded per tenant) | select approved/kiosk; insert/update admin (**column grants: `name, color, lanes` only**); delete admin ∧ `not builtin`. |
-| `priority_slots` | `date`, `starts_at`, `ends_at`, `type_id`, `home_team`, `away_team`, `prep_minutes` 0–240, `description`, `parent_id` (the auto-managed úklid child), `is_away` (announced, blocks nothing), `import_key` (unique per tenant; set by `tool/import_matches.py`, one key per workbook match, so a re-run never duplicates) | select approved/kiosk; write admin. |
+| `priority_slots` | `date`, `starts_at`, `ends_at`, `type_id`, `home_team`, `away_team`, `prep_minutes` 0–240, `description`, `parent_id` (the auto-managed úklid child), `is_away` (announced, blocks nothing), `import_key` (unique per tenant; `null` = entered by hand in the app, otherwise `rozpis:<soutěž>:<kolo>:<domácí> – <hosté>` set by `tool/import_matches.py` — date-free, so a postponed match is an update of the same row; rows keyed `xlsx:<date>:<teams>` by the 2026/27 grid workbook are re-keyed by the first run of the flat-list importer), `hand_edited` (0038: an imported row whose match columns changed outside an import run — the import skips it unless `--force`; see **Import rozpisu** below) | select approved/kiosk; write admin. |
 | `rentals` | `renter_name`, `lanes`, exactly one of `date` / `weekday`, `starts_at`, `ends_at`, `valid_from/until`, `note`, `color` (−2 = default tint). **Exception rows** (0021): `parent_id → rentals` (cascade delete) + `date` = the one occurrence of that weekly series they override, with their own `lanes`, `starts_at`, `ends_at`, `note`; `skipped` = the occurrence does not happen. One per (`parent_id`, `date`). `renter_name`/`color` are copied from the series by `rental_exception_guard`, which also rejects an off-series date, a one-time or child parent and a foreign tenant (`rental_exception_invalid`); `rental_series_changed` prunes children a series edit orphans and re-copies name/colour. | select approved/kiosk; write admin. |
 | `reservations` | `player_id`, `date`, `block_id`, `lane`, `created_via` app\|kiosk\|admin, `cancelled_at/via` app\|one_click\|admin, `cancel_note`, `notify_player`, `notify_message` (per-change intent for the notify function) | **select only** (approved/kiosk). Every write is an RPC, a trigger, or the `cancel` edge function. Live slots are unique: `(date, block_id, lane) where cancelled_at is null`. |
 | `clubs` | `name` unique per tenant, `color` (−1 = none) | select approved/kiosk; all admin. |
@@ -150,12 +150,40 @@ the notify function mails "Trénink zrušen" with the note as the reason
 
 Other triggers: `tenant_seed_defaults` (settings row + builtin types for a
 new tenant), `match_uklid_sync` (keeps a match's úklid child in step with
-`prep_minutes`), `rental_exception_guard` (before insert/update of a rental
+`prep_minutes`), `priority_slots_hand_edit` (0038, before update: flags an
+imported match whose match columns change while `import.run` is not `on`), `rental_exception_guard` (before insert/update of a rental
 exception: validation + name/colour copy), `rental_series_changed` (after
 update of a weekly rental: prune orphaned exceptions, propagate name/colour), `notify_profiles` / `notify_reservations` /
 `notify_tenants` (`notify_webhook` → the notify function),
 `reservations_enqueue_calendar` / `time_blocks_enqueue_calendar` (the
 calendar job producers, next section).
+
+## Import rozpisu (`tool/import_matches.py`, 0038)
+
+The federation's schedule is a flat list (one row per match: kuželna, date,
+time, competition, round, home, away) and the importer reconciles it into
+`priority_slots` instead of replacing anything:
+
+- **Identity** is `import_key = rozpis:<soutěž>:<kolo>:<domácí> – <hosté>`
+  — no date in it, so a postponed match is an UPDATE of its row (same uuid,
+  same Google Calendar event for every follower) rather than a delete +
+  insert. The round is part of the key because a youth league plays the
+  same pairing twice a season.
+- **One transaction as the alley's admin** (the same `set local role
+  authenticated` + jwt claims the app uses, so RLS, `priority_conflicts`,
+  `match_uklid_sync` and the calendar job producers all run exactly as for
+  a match saved in the app), opened with `set_config('import.run', 'on',
+  true)`. Steps: legacy `xlsx:` keys re-keyed (by competition + teams, then
+  by date + time + venue + a shared team for a renamed opponent; whatever
+  is left is a match the schedule dropped) → changed rows updated → new
+  rows inserted → `rozpis:` rows missing from the file deleted → a report.
+- **What the import never touches:** a row with `import_key is null` (the
+  admin's own match), a row with `hand_edited` (unless `--force`, which
+  overwrites and clears the flag), and every user table — `profiles.
+  followed_teams`, `calendar_teams`, `team_colors`, the `match_teams`
+  mirror. Team picks are names, so before writing the import lists picked
+  teams that no longer occur in the file and refuses `--apply` while any
+  exist (`--allow-missing-teams` overrides).
 
 ## Google kalendář — jobs, triggers, cron (0023)
 
@@ -427,7 +455,12 @@ carries only routing (which calendar), `team_colors` only preference
   the 0032/0035 calendar_teams privileges, the 0036 `team_colors` own-row
   RLS (read/write own, invisible/untouchable foreign row through RLS, not
   through a grant), its CHECK bounds, and `set_team_colors_for` (server-only,
-  previous-state return, a null colour deletes the row), and the 0035
+  previous-state return, a null colour deletes the row), the 0038
+  `hand_edited` rule (flags an app edit of an imported match, not the
+  import's own update, a no-op update or a manual match; `--force` clears
+  it) together with the assertion that an import-style update / delete /
+  insert on `priority_slots` leaves every user's team picks byte-identical,
+  and the 0035
   assertion (now including `team_colors`) that every table
   `lib/data/providers.dart` streams is in the `supabase_realtime`
   publication; run with `psql … -v ON_ERROR_STOP=1 -f` against the local

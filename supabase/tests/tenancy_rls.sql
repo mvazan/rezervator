@@ -1131,6 +1131,135 @@ begin
   raise notice 'OK: matches of followed teams enqueue calendar jobs, others do not';
 end $$;
 
+-- hand_edited (0038): an imported match changed OUTSIDE an import run is
+-- flagged so the next import leaves it alone. The import run itself
+-- (import.run = on) never flags, a no-op update never flags, a manual match
+-- (no import_key) never flags, and --force (an import-run update that sets
+-- the column back) clears it. An import-style update / delete / insert on
+-- priority_slots must also leave every user's team picks byte-identical —
+-- the import writes matches, never who follows them.
+reset role;
+do $$
+declare
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+  v_tenant constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_type uuid;
+  v_imported uuid;
+  v_manual uuid;
+  v_d date := (now() at time zone 'Europe/Prague')::date + 50;
+  v_before jsonb;
+  v_after jsonb;
+begin
+  select id into v_type from priority_slot_types
+    where tenant_id = v_tenant and is_match and builtin;
+
+  insert into priority_slots
+    (tenant_id, date, starts_at, ends_at, type_id, home_team, away_team,
+     prep_minutes, description, is_away, created_by, import_key)
+  values
+    (v_tenant, v_d, '18:30', '21:00', v_type,
+     'SKK Veverky Brno A', 'KK MS Brno D', 30, 'KP1 Sever · 3. kolo', false,
+     v_uid, 'rozpis:KP1 Sever:3:SKK Veverky Brno A – KK MS Brno D')
+  returning id into v_imported;
+  insert into priority_slots
+    (tenant_id, date, starts_at, ends_at, type_id, home_team, away_team,
+     prep_minutes, description, is_away, created_by)
+  values
+    (v_tenant, v_d + 1, '18:00', '20:00', v_type,
+     'Husky', 'přátelák', 0, '', false, v_uid)
+  returning id into v_manual;
+
+  -- A no-op update is not an edit.
+  update priority_slots set starts_at = '18:30' where id = v_imported;
+  if (select hand_edited from priority_slots where id = v_imported) then
+    raise exception 'FAIL: a no-op update flagged the imported match';
+  end if;
+
+  -- The import's own update never flags.
+  perform set_config('import.run', 'on', true);
+  update priority_slots set starts_at = '18:00', ends_at = '20:30'
+    where id = v_imported;
+  perform set_config('import.run', '', true);
+  if (select hand_edited from priority_slots where id = v_imported) then
+    raise exception 'FAIL: the import run flagged its own update';
+  end if;
+
+  -- The admin in the app does.
+  update priority_slots set starts_at = '19:00', ends_at = '21:30'
+    where id = v_imported;
+  if not (select hand_edited from priority_slots where id = v_imported) then
+    raise exception 'FAIL: a hand edit of an imported match was not flagged';
+  end if;
+
+  -- A manual match never carries the flag — there is no import to protect
+  -- it from.
+  update priority_slots set starts_at = '19:00' where id = v_manual;
+  if (select hand_edited from priority_slots where id = v_manual) then
+    raise exception 'FAIL: a manual match got flagged';
+  end if;
+
+  -- --force: the import overwrites and clears the flag in one update.
+  perform set_config('import.run', 'on', true);
+  update priority_slots set starts_at = '18:00', ends_at = '20:30',
+    hand_edited = false where id = v_imported;
+  perform set_config('import.run', '', true);
+  if (select hand_edited from priority_slots where id = v_imported) then
+    raise exception 'FAIL: --force could not clear the flag';
+  end if;
+
+  -- Team picks survive an import run untouched: followed_teams, the
+  -- calendar picks, their colours and the 1.2.1 mirror, before vs after an
+  -- import-style rename + delete + insert.
+  select jsonb_build_object(
+    'followed', (select jsonb_agg(followed_teams order by id)
+                   from profiles where tenant_id = v_tenant),
+    'calendar', (select jsonb_agg(to_jsonb(t) order by t.user_id, t.team)
+                   from calendar_teams t join profiles p on p.id = t.user_id
+                   where p.tenant_id = v_tenant),
+    'colors', (select jsonb_agg(to_jsonb(c) order by c.user_id, c.team)
+                 from team_colors c join profiles p on p.id = c.user_id
+                 where p.tenant_id = v_tenant),
+    'mirror', (select jsonb_agg(l.match_teams order by l.user_id)
+                 from google_calendar_links l join profiles p on p.id = l.user_id
+                 where p.tenant_id = v_tenant))
+  into v_before;
+  if v_before->'calendar' is null or v_before->'colors' is null then
+    raise exception 'FAIL: the fixture has no team picks to protect: %', v_before;
+  end if;
+  perform set_config('import.run', 'on', true);
+  update priority_slots
+    set date = v_d + 2, home_team = 'KK MS Brno F', away_team = 'SKK Veverky Brno A',
+        is_away = true, description = 'KP1 Sever · 3. kolo · Brno MS',
+        import_key = 'rozpis:KP1 Sever:3:KK MS Brno F – SKK Veverky Brno A'
+    where id = v_imported;
+  delete from priority_slots where id = v_imported;
+  insert into priority_slots
+    (tenant_id, date, starts_at, ends_at, type_id, home_team, away_team,
+     prep_minutes, description, is_away, created_by, import_key)
+  values
+    (v_tenant, v_d + 3, '09:30', '11:00', v_type,
+     'TJ Sokol Husovice', 'KK Blansko', 30, 'KP dorostu · 11. kolo', false,
+     v_uid, 'rozpis:KP dorostu:11:TJ Sokol Husovice – KK Blansko');
+  perform set_config('import.run', '', true);
+  select jsonb_build_object(
+    'followed', (select jsonb_agg(followed_teams order by id)
+                   from profiles where tenant_id = v_tenant),
+    'calendar', (select jsonb_agg(to_jsonb(t) order by t.user_id, t.team)
+                   from calendar_teams t join profiles p on p.id = t.user_id
+                   where p.tenant_id = v_tenant),
+    'colors', (select jsonb_agg(to_jsonb(c) order by c.user_id, c.team)
+                 from team_colors c join profiles p on p.id = c.user_id
+                 where p.tenant_id = v_tenant),
+    'mirror', (select jsonb_agg(l.match_teams order by l.user_id)
+                 from google_calendar_links l join profiles p on p.id = l.user_id
+                 where p.tenant_id = v_tenant))
+  into v_after;
+  if v_before is distinct from v_after then
+    raise exception 'FAIL: an import run changed team picks: % -> %', v_before, v_after;
+  end if;
+  raise notice 'OK: hand_edited marks app edits of imported matches only, and an import run never touches team picks';
+end $$;
+
 -- Kiosk password (0028): only an admin of the kiosk's OWN alley gets the
 -- go-ahead to set it a new one; everyone else is refused before the edge
 -- function ever touches the Auth admin API.
