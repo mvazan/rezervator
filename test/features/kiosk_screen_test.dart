@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -208,6 +209,40 @@ void main() {
 
     expect(find.text('Nové heslo kiosku'), findsNothing);
     expect(find.byType(SnackBar), findsOneWidget);
+  });
+
+  // Setting a tablet up needs two things from this screen: where to point
+  // its browser, and an account to log in with. The address is derived from
+  // where the app runs (kioskUrlFrom), so the test asserts the route and
+  // the clipboard, not a hard-coded host.
+  testWidgets('the kiosk address is shown and copies to the clipboard',
+      (tester) async {
+    String? copied;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied = (call.arguments as Map)['text'] as String?;
+        }
+        return null;
+      },
+    );
+    addTearDown(() => tester.binding.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, null));
+
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+
+    expect(find.text('Adresa pro tablet'), findsOneWidget);
+    final shown = tester
+        .widget<SelectableText>(find.byType(SelectableText))
+        .data!;
+    expect(shown, endsWith('/#/kiosk-login'));
+
+    await tester.tap(find.byIcon(Icons.copy_outlined));
+    await tester.pumpAndSettle();
+    expect(copied, shown);
+    expect(find.text('Adresa zkopírována.'), findsOneWidget);
   });
 
   testWidgets('without a kiosk account the section explains how to make one',
