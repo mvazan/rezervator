@@ -46,3 +46,7 @@ supabase/.branches/
 
 # Agent worktrees created by Claude Code
 .claude/worktrees/
+
+# Rozpisy zápasů (svazové sešity) — nikdy do repa
+*.xls
+*.xlsx

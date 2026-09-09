@@ -31,27 +31,34 @@ nepřišel, a měsíční docházku si stáhne jako CSV.
   [`PLAY.md`](PLAY.md) — vydání na Google Play.
 - [`docs/superpowers/specs/2026-07-07-rezervator-design.md`](docs/superpowers/specs/2026-07-07-rezervator-design.md) —
   návrh appky (funkce, datový model, fáze vývoje).
-- `tool/import_matches.py` — jednorázový import zápasů z krajského sešitu
-  „Obsazenost kuželen“ (xlsx): domácí zápasy z řádku naší kuželny, venkovní
-  zápasy našich týmů z ostatních řádků; jména klubů bere ze skrytého listu
-  „Utkání – vše“ (kalendář je pro místo zkracuje: „SVeverky“ místo „SKK
-  Veverky“ apod.). Vypíše přehled a vygeneruje SQL, které běží jako správce
-  kuželny (zrušené rezervace jako v appce, úklid před zápasem 30 min);
-  opakované spuštění nic neduplikuje.
+- `tool/import_matches.py` — import zápasů ze svazového rozpisu (plochý
+  seznam, jeden řádek = jeden zápas: Kuželna, Datum, Čas, Soutěž, Kolo,
+  Domácí, Hosté; `.xls` i `.xlsx`, bez závislostí). Domácí zápasy jsou řádky
+  s naší kuželnou, venkovní zápasy našich týmů ostatní řádky. Rozpis se
+  během sezóny mění, proto nástroj **porovnává a mění jen rozdíly**: zápas
+  má klíč `rozpis:<soutěž>:<kolo>:<domácí> – <hosté>` bez data, takže
+  přeložený zápas je úprava téhož řádku (a hráčům se přepíše tatáž událost
+  v Google kalendáři), nový se vloží, zrušený se smaže. Čeho se nikdy
+  nedotkne: zápasu zadaného ručně v appce (bez klíče), zápasu z rozpisu,
+  který správce v appce upravil (`hand_edited`, v Zápasech „upraveno ručně“
+  — přepíše ho jen `--force`), a toho, kdo které týmy sleduje; sledovaný
+  tým, který v rozpise chybí, zápis zastaví (`--allow-missing-teams`).
 
   ```bash
-  python3 tool/import_matches.py ~/Downloads/Obsazenost-kuzelen-2026-27.xlsx
-  python3 tool/import_matches.py ~/Downloads/Obsazenost-kuzelen-2026-27.xlsx --apply
+  python3 tool/import_matches.py ~/Downloads/rozpis.xls            # náhled
+  python3 tool/import_matches.py ~/Downloads/rozpis.xls --apply    # zápis do produkce
   ```
 
-  První příkaz jen vypíše, co by se naimportovalo, a uloží SQL do
-  `build/import_matches.sql`. Druhý zapisuje do **produkce**: nejdřív ukáže,
-  do které kuželny a pod kterým správcem se zapíše, kolik zápasů už tam je a
-  kolik živých rezervací může zrušit, a čeká na napsané „ano“ (`--yes` to
-  přeskočí, `--local` míří na lokální stack). Kuželnu vybereš `--tenant`
-  jménem nebo `--tenant-id` uuid. Délka zápasu je pevná podle soutěže
-  (KP2 90 min, KP1 150 min, jinak — divize a ligy — `--duration`, výchozí
-  180 min); `--length "KP1 Sever=210"` přebije jednu soutěž ručně. Oprava
-  už naimportovaného kola (jiná délka, jiná data) jde přes `--replace`: ve
-  stejné transakci smaže všechny dřív naimportované zápasy té kuželny
-  (`import_key like 'xlsx:%'`) a zapíše je znovu.
+  První příkaz vypíše, co v souboru našel, uloží SQL do
+  `build/import_matches.sql` a ukáže **náhled** — jeden dotaz do databáze
+  (produkce, s `--local` lokální stack), který vypíše každý plánovaný krok:
+  `rekey` / `rename` (staré klíče z mřížkového sešitu 2026/27 a
+  přejmenovaní soupeři), `update` (s tím, co se mění), `insert`, `delete`,
+  `skip` (ručně upravené) a sledované týmy, které v rozpise nejsou. Druhý
+  ukáže totéž a po napsaném „ano“ (`--yes` to přeskočí) zapíše jako jednu
+  transakci správce kuželny (RLS, zrušené rezervace a upozornění jako v
+  appce) — transakce si tentýž plán spočítá znovu a provede ho. Kuželnu
+  vybereš `--tenant` jménem nebo `--tenant-id` uuid. Délka zápasu je pevná
+  podle soutěže (KP2 90 min, KP1 150 min, dorost 90 min, jinak — divize a
+  ligy — `--duration`, výchozí 180 min); `--length "KP1 Sever=210"` přebije
+  jednu soutěž ručně.

@@ -1,58 +1,70 @@
 #!/usr/bin/env python3
-"""Import kuželky matches from the JM "Obsazenost kuželen" workbook.
+"""Import kuželky matches from the federation's schedule (rozpis).
 
-Reads the alley-occupancy calendar (sheet "Kalendář vše", or "Kalendář
-JM+Zlín" when the full one is missing): one row per alley, one column per
-date, each cell holding one or more matches as
+The schedule is a flat list — one row per match — with these columns (the
+header row is found by name, its position does not matter):
 
-    18:30 JM divize
-    Brno IV – Dubňany
-    16:30 KP2 Sever A
-    Brno IV B – Husovice E
+    Kuželna | Datum | Den | Čas | Soutěž | Kolo | Domácí | Hosté | Rozhodčí
 
-Every match in OUR alley's row (--alley, "Brno IV Sokol") is a home match:
+Both .xls (the BIFF8 workbook Excel still writes) and .xlsx are read with
+the standard library alone.
+
+Every row played at OUR alley (--alley, "Brno IV Sokol") is a home match:
 it blocks the alley (cancelled reservations exactly as when entered in the
-app, plus --prep minutes of úklid before it — 30 by default). Team names
-come from the hidden "Utkání – vše" sheet, not the compact calendar grid:
-the grid abbreviates club names inconsistently ("SVeverky" for "SKK
-Veverky", "MS Brno" for "KK MS Brno", "Husovice" for "TJ Sokol Husovice",
-…) to fit the cell, while "Utkání – vše" carries the federation's full
-names. A match missing from that sheet (or ambiguous — two matches at the
-same alley/date/time) keeps the grid's abbreviated name and gets a
-warning. In every other row a match is taken only when one of
-OUR teams (--teams) plays in it, and it is imported as "venkovní zápas" —
-listed in the day header, blocks nothing.
+app, plus --prep minutes of úklid before it — 30 by default). Any other row
+is taken only when one of OUR teams (--teams) plays in it, and becomes a
+"venkovní zápas" — listed in the day header, blocks nothing; the row's
+Kuželna is its venue. Match length is fixed per competition tier (the
+file has no end times): KP2 = 90 min, KP1 = 150 min, dorost = 90 min,
+everything else (divize, the leagues) = --duration (180 min); `--length
+"KP1 Sever=240"` pins one competition by its exact name.
 
-Match length is fixed per competition tier (the sheet has no end times,
-and double-match gaps in the cells turned out to include warm-up/idle
-time, not the real match length): KP2 = 90 min, KP1 = 150 min, everything
-else (divize, the leagues) = --duration (180 min). `--length
-"KP1 Sever=240"` overrides one competition by its exact name.
+RECONCILE, NOT REPLACE. The schedule gets revised during the season, so
+the import compares the file with what is in the database and changes
+only what differs — a match the federation moved is an UPDATE of its row
+(same uuid, so every follower's Google Calendar event is rewritten in
+place instead of deleted and re-created). Identity is the import_key
 
-The output is a SQL file that runs as the alley's admin (RLS, triggers and
-cancellations as in the app). Re-running is safe: every row carries an
-import_key (date + teams) and is never inserted twice; matches edited in
-the app keep their edits.
+    rozpis:<Soutěž>:<Kolo>:<Domácí> – <Hosté>
 
-Temporary tool for the 2026/27 workbook — the federation format changes
-later and the import will then be built into the app.
+with no date in it. Rows keyed by the 2026/27 grid workbook
+(`xlsx:<date>:<teams>`) are re-keyed by the first run: by competition +
+pairing, then — for an opponent the federation renamed — by date + time +
+venue + one team in common; a legacy row nothing pairs with is a match the
+schedule dropped, and is deleted.
 
-    python3 tool/import_matches.py ~/Downloads/Obsazenost-kuzelen-2026-27.xlsx
-    python3 tool/import_matches.py ... --apply          # writes to PROD
-    python3 tool/import_matches.py ... --apply --local  # on the local stack
+WHAT THE IMPORT NEVER TOUCHES: a match without an import_key (the admin
+entered it by hand — a friendly, a cup tie), a match flagged hand_edited
+(the admin corrected an imported row in the app; 0038 — listed as "skip",
+overwritten only with --force, which also clears the flag), and every
+user table: who follows which team (profiles.followed_teams,
+calendar_teams, team_colors) are NAMES, so before writing the import lists
+followed teams that no longer occur in the file and refuses to write while
+any exist (--allow-missing-teams overrides — a team that withdrew).
 
-A prod run first prints a read-only preflight (which alley and admin the
-import resolves to, how many matches are already imported, how many live
-reservations could be cancelled) and asks for confirmation; --yes skips the
-question for an unattended run.
+    python3 tool/import_matches.py ~/Downloads/rozpis.xls            # náhled
+    python3 tool/import_matches.py ~/Downloads/rozpis.xls --apply    # PROD
+    python3 tool/import_matches.py ~/Downloads/rozpis.xls --apply --local
+
+The default run parses the file, prints the matches it found, and shows
+the PREVIEW: one read-only query against the database (prod, or the local
+stack with --local) that lists every planned action — rekey / rename /
+update (with what changes) / insert / delete / skip — plus the followed
+teams missing from the file. --apply shows the same preview, asks for a
+typed "ano" (--yes skips it), then runs the write as ONE transaction as
+the alley's admin (RLS, triggers and cancellations as in the app): the
+transaction re-computes the very same plan and executes it, so what you
+approved is what happens. --no-preview just writes the SQL files.
 """
 import argparse
 import datetime as dt
+import os
 import re
+import struct
 import subprocess
 import sys
+import tempfile
 import zipfile
-from collections import Counter
 from typing import Dict, List, Optional, Tuple
 from xml.etree import ElementTree as ET
 
@@ -62,15 +74,23 @@ REL = '{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id'
 
 WEEKDAYS = ['po', 'út', 'st', 'čt', 'pá', 'so', 'ne']
 LOCAL_DB_URL = 'postgresql://postgres:postgres@127.0.0.1:54322/postgres'
-TIME_LINE = re.compile(r'^\s*(\d{1,2}:\d{2}|\?{2,})\s+(.+?)\s*$')
-TEAMS_LINE = re.compile(r'^\s*(.+?)\s+[–-]\s+(.+?)\s*$')
-DATE_HEAD = re.compile(r'^\s*(\d{1,2})\.(\d{1,2})\.\s*$')
+KEY_PREFIX = 'rozpis:'
+LEGACY_PREFIX = 'xlsx:'
+HEADER_COLUMNS = ('Kuželna', 'Datum', 'Čas', 'Soutěž', 'Kolo', 'Domácí', 'Hosté')
+EXCEL_EPOCH = dt.datetime(1899, 12, 30)
+
+# Fixed by competition tier (substring of the competition name, case
+# insensitive) — the file has no end times. Told by hand for 2026/27.
+TIER_DURATIONS = [('KP2', 90), ('KP1', 150), ('dorost', 90)]
 
 
-# --- workbook -------------------------------------------------------------
+# --- workbook: .xlsx --------------------------------------------------------
 
-def load_workbook(path: str) -> Dict[str, Dict[Tuple[int, int], str]]:
-    """Sheet name -> {(row, col): text} for every non-empty cell (stdlib only)."""
+Cells = Dict[Tuple[int, int], object]
+
+
+def load_workbook_xlsx(path: str) -> Dict[str, Cells]:
+    """Sheet name -> {(row, col): text} for every non-empty cell."""
     z = zipfile.ZipFile(path)
     shared: List[str] = []
     if 'xl/sharedStrings.xml' in z.namelist():
@@ -79,13 +99,13 @@ def load_workbook(path: str) -> Dict[str, Dict[Tuple[int, int], str]]:
             shared.append(''.join(t.text or '' for t in si.iter(M + 't')))
     rels = ET.fromstring(z.read('xl/_rels/workbook.xml.rels'))
     target_of = {r.attrib['Id']: r.attrib['Target'] for r in rels}
-    sheets: Dict[str, Dict[Tuple[int, int], str]] = {}
+    sheets: Dict[str, Cells] = {}
     wb = ET.fromstring(z.read('xl/workbook.xml'))
     for s in wb.find('m:sheets', NS):
         target = target_of[s.attrib[REL]]
         member = target[1:] if target.startswith('/') else 'xl/' + target
         root = ET.fromstring(z.read(member))
-        cells: Dict[Tuple[int, int], str] = {}
+        cells: Cells = {}
         for c in root.iter(M + 'c'):
             kind = c.attrib.get('t')
             v = c.find('m:v', NS)
@@ -111,15 +131,327 @@ def cell_ref(ref: str) -> Tuple[int, int]:
     return int(m.group(2)), col
 
 
-# --- parsing --------------------------------------------------------------
+# --- workbook: .xls (BIFF8 inside an OLE2 compound file) ---------------------
+
+def _ole_stream(data: bytes, wanted: Tuple[str, ...]) -> bytes:
+    """The bytes of the first directory entry named in [wanted]."""
+    if data[:8] != b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1':
+        raise ValueError('not an OLE2 file')
+    ssz = 1 << struct.unpack_from('<H', data, 0x1E)[0]
+    mssz = 1 << struct.unpack_from('<H', data, 0x20)[0]
+    nfat = struct.unpack_from('<I', data, 0x2C)[0]
+    dir_start = struct.unpack_from('<I', data, 0x30)[0]
+    mini_cutoff = struct.unpack_from('<I', data, 0x38)[0]
+    minifat_start = struct.unpack_from('<I', data, 0x3C)[0]
+    difat_start = struct.unpack_from('<I', data, 0x44)[0]
+    ndifat = struct.unpack_from('<I', data, 0x48)[0]
+    per_sector = ssz // 4
+
+    def sector(n: int) -> bytes:
+        off = (n + 1) * ssz
+        return data[off:off + ssz]
+
+    difat = list(struct.unpack_from('<109I', data, 0x4C))
+    s = difat_start
+    for _ in range(ndifat):
+        entries = struct.unpack('<%dI' % per_sector, sector(s))
+        difat += entries[:-1]
+        s = entries[-1]
+    fat: List[int] = []
+    for sid in difat[:nfat]:
+        fat += struct.unpack('<%dI' % per_sector, sector(sid))
+
+    def chain(start: int, table: List[int]) -> List[int]:
+        out = []
+        while start not in (0xFFFFFFFE, 0xFFFFFFFF) and start < len(table):
+            out.append(start)
+            start = table[start]
+        return out
+
+    def read(start: int, size: int) -> bytes:
+        return b''.join(sector(s) for s in chain(start, fat))[:size]
+
+    directory = b''.join(sector(s) for s in chain(dir_start, fat))
+    entries = []
+    for i in range(len(directory) // 128):
+        e = directory[i * 128:(i + 1) * 128]
+        name_len = struct.unpack_from('<H', e, 0x40)[0]
+        entries.append((
+            e[:max(name_len - 2, 0)].decode('utf-16le'), e[0x42],
+            struct.unpack_from('<I', e, 0x74)[0], struct.unpack_from('<I', e, 0x78)[0]))
+    root = entries[0]
+    ministream = read(root[2], root[3])
+    minifat: List[int] = []
+    for sid in chain(minifat_start, fat):
+        minifat += struct.unpack('<%dI' % per_sector, sector(sid))
+    for name, kind, start, size in entries:
+        if kind == 2 and name in wanted:
+            if size < mini_cutoff:
+                return b''.join(ministream[s * mssz:(s + 1) * mssz]
+                                for s in chain(start, minifat))[:size]
+            return read(start, size)
+    raise ValueError('no %s stream in the workbook' % '/'.join(wanted))
+
+
+def _biff_records(buf: bytes, pos: int = 0):
+    while pos + 4 <= len(buf):
+        rid, ln = struct.unpack_from('<HH', buf, pos)
+        yield rid, buf[pos + 4:pos + 4 + ln]
+        pos += 4 + ln
+
+
+def _biff_string(buf: bytes, pos: int, len_bytes: int = 2) -> Tuple[str, int]:
+    """A BIFF8 unicode string at [pos] → (text, position after it)."""
+    if len_bytes == 2:
+        n = struct.unpack_from('<H', buf, pos)[0]
+    else:
+        n = buf[pos]
+    pos += len_bytes
+    flags = buf[pos]
+    pos += 1
+    runs = ext = 0
+    if flags & 8:
+        runs = struct.unpack_from('<H', buf, pos)[0]
+        pos += 2
+    if flags & 4:
+        ext = struct.unpack_from('<I', buf, pos)[0]
+        pos += 4
+    if flags & 1:
+        text = buf[pos:pos + 2 * n].decode('utf-16le')
+        pos += 2 * n
+    else:
+        text = buf[pos:pos + n].decode('latin-1')
+        pos += n
+    return text, pos + 4 * runs + ext
+
+
+def _biff_sst(chunks: List[bytes], count: int) -> List[str]:
+    """The shared-string table, whose strings may straddle CONTINUE records
+    (each continued piece restarts with its own flags byte)."""
+    out: List[str] = []
+    ci = cp = 0
+
+    def settle():
+        nonlocal ci, cp
+        while cp >= len(chunks[ci]) and ci + 1 < len(chunks):
+            ci += 1
+            cp = 0
+
+    for _ in range(count):
+        settle()
+        n = struct.unpack_from('<H', chunks[ci], cp)[0]
+        cp += 2
+        settle()
+        flags = chunks[ci][cp]
+        cp += 1
+        wide = flags & 1
+        runs = ext = 0
+        if flags & 8:
+            settle()
+            runs = struct.unpack_from('<H', chunks[ci], cp)[0]
+            cp += 2
+        if flags & 4:
+            settle()
+            ext = struct.unpack_from('<I', chunks[ci], cp)[0]
+            cp += 4
+        text = ''
+        left = n
+        while left > 0:
+            settle()
+            avail = len(chunks[ci]) - cp
+            take = min(left, avail // (2 if wide else 1))
+            if take == 0:
+                ci += 1
+                cp = 0
+                wide = chunks[ci][cp] & 1
+                cp += 1
+                continue
+            if wide:
+                text += chunks[ci][cp:cp + 2 * take].decode('utf-16le')
+                cp += 2 * take
+            else:
+                text += chunks[ci][cp:cp + take].decode('latin-1')
+                cp += take
+            left -= take
+        skip = 4 * runs + ext
+        while skip > 0:
+            settle()
+            avail = len(chunks[ci]) - cp
+            if avail <= 0:
+                ci += 1
+                cp = 0
+                continue
+            step = min(skip, avail)
+            cp += step
+            skip -= step
+        out.append(text)
+    return out
+
+
+def _rk_value(v: int) -> float:
+    cents = v & 1
+    if v & 2:
+        n = v >> 2
+        if v & 0x80000000:
+            n -= 1 << 30
+        val = float(n)
+    else:
+        val = struct.unpack('<d', struct.pack('<Q', (v & 0xFFFFFFFC) << 32))[0]
+    return val / 100 if cents else val
+
+
+def load_workbook_xls(path: str) -> Dict[str, Cells]:
+    """Sheet name -> {(row, col): value} — str, float, or datetime for a
+    date/time-formatted number (0-based row/col; the header search below
+    does not care)."""
+    with open(path, 'rb') as f:
+        wb = _ole_stream(f.read(), ('Workbook', 'Book'))
+    records = list(_biff_records(wb))
+    sst: List[str] = []
+    sheets: List[Tuple[str, int]] = []
+    formats: Dict[int, str] = {}
+    xf_formats: List[int] = []
+    i = 0
+    while i < len(records):
+        rid, body = records[i]
+        if rid == 0x0085:                                     # BOUNDSHEET
+            sheets.append((_biff_string(body, 6, 1)[0], struct.unpack_from('<I', body, 0)[0]))
+        elif rid == 0x041E:                                   # FORMAT
+            formats[struct.unpack_from('<H', body, 0)[0]] = _biff_string(body, 2)[0]
+        elif rid == 0x00E0:                                   # XF
+            xf_formats.append(struct.unpack_from('<H', body, 2)[0])
+        elif rid == 0x00FC:                                   # SST (+ CONTINUE)
+            count = struct.unpack_from('<I', body, 4)[0]
+            chunks = [body[8:]]
+            j = i + 1
+            while j < len(records) and records[j][0] == 0x003C:
+                chunks.append(records[j][1])
+                j += 1
+            sst = _biff_sst(chunks, count)
+            i = j
+            continue
+        i += 1
+
+    builtin_dates = {14, 15, 16, 17, 18, 19, 20, 21, 22, 45, 46, 47}
+
+    def is_date(xf: int) -> bool:
+        if xf >= len(xf_formats):
+            return False
+        fmt = xf_formats[xf]
+        if fmt in builtin_dates:
+            return True
+        text = formats.get(fmt, '')
+        return any(ch in text for ch in 'dmyh') and '#' not in text
+
+    def number(xf: int, value: float):
+        return EXCEL_EPOCH + dt.timedelta(days=value) if is_date(xf) else value
+
+    out: Dict[str, Cells] = {}
+    for name, start in sheets:
+        cells: Cells = {}
+        for rid, body in _biff_records(wb, start):
+            if rid == 0x000A:                                 # EOF
+                break
+            if rid == 0x00FD:                                 # LABELSST
+                r, c, _, idx = struct.unpack_from('<HHHI', body, 0)
+                cells[(r, c)] = sst[idx]
+            elif rid == 0x0204:                               # LABEL
+                r, c, _ = struct.unpack_from('<HHH', body, 0)
+                cells[(r, c)] = _biff_string(body, 6)[0]
+            elif rid == 0x0203:                               # NUMBER
+                r, c, xf = struct.unpack_from('<HHH', body, 0)
+                cells[(r, c)] = number(xf, struct.unpack_from('<d', body, 6)[0])
+            elif rid == 0x027E:                               # RK
+                r, c, xf, v = struct.unpack_from('<HHHI', body, 0)
+                cells[(r, c)] = number(xf, _rk_value(v))
+            elif rid == 0x00BD:                               # MULRK
+                r, c0 = struct.unpack_from('<HH', body, 0)
+                for k in range((len(body) - 6) // 6):
+                    xf, v = struct.unpack_from('<HI', body, 4 + 6 * k)
+                    cells[(r, c0 + k)] = number(xf, _rk_value(v))
+            elif rid == 0x0006:                               # FORMULA
+                r, c, xf = struct.unpack_from('<HHH', body, 0)
+                result = body[6:14]
+                if result[6:8] != b'\xff\xff':                # a numeric result
+                    cells[(r, c)] = number(xf, struct.unpack('<d', result)[0])
+        out[name] = cells
+    return out
+
+
+# --- rows -------------------------------------------------------------------
+
+def read_rows(path: str) -> List[Dict[str, object]]:
+    """The schedule as dicts keyed by the header texts, from the first sheet
+    whose header row carries every column in HEADER_COLUMNS."""
+    sheets = load_workbook_xls(path) if path.lower().endswith('.xls') else load_workbook_xlsx(path)
+    for name, cells in sheets.items():
+        by_row: Dict[int, Dict[int, object]] = {}
+        for (r, c), v in cells.items():
+            by_row.setdefault(r, {})[c] = v
+        for r in sorted(by_row):
+            texts = {str(v).strip(): c for c, v in by_row[r].items() if isinstance(v, str)}
+            if all(h in texts for h in HEADER_COLUMNS):
+                col_of = {h: texts[h] for h in HEADER_COLUMNS}
+                rows = []
+                for rr in sorted(by_row):
+                    if rr <= r:
+                        continue
+                    row = {h: by_row[rr].get(c) for h, c in col_of.items()}
+                    if any(v not in (None, '') for v in row.values()):
+                        rows.append(row)
+                return rows
+    raise ValueError('no sheet with a header row of %s' % ', '.join(HEADER_COLUMNS))
+
+
+def text_of(v: object) -> str:
+    return '' if v is None else str(v).strip()
+
+
+def date_of(v: object) -> Optional[dt.date]:
+    if isinstance(v, dt.datetime):
+        return v.date()
+    s = text_of(v)
+    m = re.match(r'^(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})$', s)
+    if m:
+        return dt.date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+    m = re.match(r'^(\d{4})-(\d{2})-(\d{2})', s)
+    if m:
+        return dt.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    if re.match(r'^\d+(\.0+)?$', s):                          # an Excel serial
+        return (EXCEL_EPOCH + dt.timedelta(days=int(float(s)))).date()
+    return None
+
+
+def time_of(v: object) -> Optional[str]:
+    """'HH:MM', or None for an unknown time ('??', empty)."""
+    if isinstance(v, dt.datetime):
+        return '%02d:%02d' % (v.hour, v.minute)
+    if isinstance(v, float):
+        minutes = round((v % 1) * 24 * 60)
+        return '%02d:%02d' % divmod(minutes, 60)
+    s = text_of(v)
+    m = re.match(r'^(\d{1,2}):(\d{2})', s)
+    if m:
+        return '%02d:%s' % (int(m.group(1)), m.group(2))
+    if re.match(r'^0?\.\d+$', s):                             # a fraction of a day
+        minutes = round(float(s) * 24 * 60)
+        return '%02d:%02d' % divmod(minutes, 60)
+    return None
+
+
+def int_of(v: object) -> Optional[int]:
+    s = text_of(v)
+    return int(float(s)) if re.match(r'^\d+(\.0+)?$', s) else None
+
 
 class Match:
-    def __init__(self, alley, date, weekday, time, competition, home, away):
+    def __init__(self, alley: str, date: dt.date, time: Optional[str],
+                 competition: str, round_no: int, home: str, away: str):
         self.alley = alley
-        self.date = date            # dt.date
-        self.weekday = weekday      # sheet's weekday label
+        self.date = date
         self.time = time            # 'HH:MM' or None (unknown)
         self.competition = competition
+        self.round_no = round_no
         self.home = home
         self.away = away
         self.is_away = False        # set by classify()
@@ -132,105 +464,36 @@ class Match:
 
     @property
     def import_key(self) -> str:
-        return 'xlsx:%s:%s' % (self.date.isoformat(), self.label)
+        return '%s%s:%d:%s' % (KEY_PREFIX, self.competition, self.round_no, self.label)
+
+    @property
+    def legacy_key(self) -> str:
+        """What the 2026/27 grid importer keyed this match by."""
+        return '%s%s:%s' % (LEGACY_PREFIX, self.date.isoformat(), self.label)
+
+    @property
+    def description(self) -> str:
+        """The competition and round; an away match also names the venue —
+        the app has no column for it, and the calendar event (0027) shows
+        it from here."""
+        base = '%s · %d. kolo' % (self.competition, self.round_no)
+        return '%s · %s' % (base, self.alley) if self.is_away else base
 
 
-def season_date(dd: int, mm: int, season: int) -> dt.date:
-    """'dd.mm.' in a season running Jul→Jun: autumn = season, spring = +1."""
-    return dt.date(season if mm >= 7 else season + 1, mm, dd)
-
-
-def parse_calendar(cells, season: int, warnings: List[str]) -> List[Match]:
-    """Matches of every alley, in sheet order."""
-    rows: Dict[int, Dict[int, str]] = {}
-    for (r, c), v in cells.items():
-        rows.setdefault(r, {})[c] = v
-    dates: Dict[int, dt.date] = {}
-    for c, v in rows.get(2, {}).items():
-        m = DATE_HEAD.match(v)
-        if m:
-            dates[c] = season_date(int(m.group(1)), int(m.group(2)), season)
-    weekday_of = rows.get(3, {})
+def parse_rows(rows: List[Dict[str, object]], warnings: List[str]) -> List[Match]:
     matches: List[Match] = []
-    for r in sorted(rows):
-        if r < 4 or 1 not in rows[r]:
+    for n, row in enumerate(rows, 1):
+        date = date_of(row['Datum'])
+        home, away = text_of(row['Domácí']), text_of(row['Hosté'])
+        competition = text_of(row['Soutěž'])
+        round_no = int_of(row['Kolo'])
+        if date is None or not home or not away or not competition or round_no is None:
+            warnings.append('řádek %d přeskočen — chybí datum, soutěž, kolo nebo tým: %s'
+                            % (n, {k: text_of(v) for k, v in row.items()}))
             continue
-        alley = rows[r][1].strip()
-        for c, text in sorted(rows[r].items()):
-            if c == 1 or c not in dates:
-                continue
-            date = dates[c]
-            label = weekday_of.get(c, '').strip().lower()
-            if label in WEEKDAYS and WEEKDAYS.index(label) != date.weekday():
-                warnings.append('%s %s: sheet says %s but %s is a %s — wrong --season?'
-                                % (alley, date, label, date, WEEKDAYS[date.weekday()]))
-            header: Optional[Tuple[Optional[str], str]] = None
-            for line in text.splitlines():
-                if not line.strip():
-                    continue
-                tm = TIME_LINE.match(line)
-                if tm and not TEAMS_LINE.match(line):
-                    if header is not None:
-                        warnings.append('%s %s: header without teams: %r' % (alley, date, header))
-                    time = None if tm.group(1).startswith('?') else tm.group(1).zfill(5)
-                    header = (time, tm.group(2).strip())
-                    continue
-                teams = TEAMS_LINE.match(line)
-                if teams:
-                    if header is None:
-                        warnings.append('%s %s: teams without a time line: %r' % (alley, date, line))
-                        header = (None, '')
-                    matches.append(Match(alley, date, label, header[0], header[1],
-                                         teams.group(1).strip(), teams.group(2).strip()))
-                    header = None
-                    continue
-                warnings.append('%s %s: unrecognised line %r' % (alley, date, line))
-            if header is not None:
-                warnings.append('%s %s: header without teams: %r' % (alley, date, header))
+        matches.append(Match(text_of(row['Kuželna']), date, time_of(row['Čas']),
+                             competition, round_no, home, away))
     return matches
-
-
-FlatKey = Tuple[str, dt.date, Optional[str]]
-
-
-def parse_flat_list(cells) -> Dict[FlatKey, List[Tuple[str, str]]]:
-    """{(alley, date, time): [(home, away), ...]} from the hidden 'Utkání –
-    vše' sheet — a second, independently laid-out copy of the calendar,
-    with the federation's full club names (the compact grid abbreviates
-    them to fit the cell). Used both to cross-check the grid and to swap
-    in real team names; more than one entry at a key means the calendar
-    grid alone can't tell the matches apart there."""
-    rows: Dict[int, Dict[int, str]] = {}
-    for (r, c), v in cells.items():
-        rows.setdefault(r, {})[c] = v
-    lookup: Dict[FlatKey, List[Tuple[str, str]]] = {}
-    for r, row in rows.items():
-        if r < 4 or 8 not in row or not row.get(2, '').isdigit():
-            continue
-        date = dt.date(1899, 12, 30) + dt.timedelta(days=int(row[2]))
-        time = row.get(4, '').strip()
-        time = None if time.startswith('?') else time.zfill(5)
-        key = (row[1].strip(), date, time)
-        lookup.setdefault(key, []).append((row[7].strip(), row[8].strip()))
-    return lookup
-
-
-def apply_full_names(matches: List[Match],
-                     flat: Dict[FlatKey, List[Tuple[str, str]]],
-                     warnings: List[str]) -> None:
-    """Swaps each match's home/away for the full names at its (alley, date,
-    time) in [flat]; leaves the grid's abbreviated name and warns when the
-    key is missing or ambiguous (>1 match there)."""
-    for m in matches:
-        entries = flat.get((m.alley, m.date, m.time))
-        if not entries:
-            m.warnings.append('plné jméno klubu nenalezeno v "Utkání – vše" — '
-                              'necháno zkrácené')
-        elif len(entries) > 1:
-            m.warnings.append('v "Utkání – vše" je na tomto místě víc zápasů — '
-                              'jméno klubu necháno zkrácené')
-        else:
-            m.home, m.away = entries[0]
 
 
 def ours(name: str, teams: List[str]) -> bool:
@@ -255,16 +518,10 @@ def classify(matches: List[Match], alley: str, teams: List[str]) -> List[Match]:
     return picked
 
 
-# Fixed by competition tier — the observed double-match gaps in the sheet
-# turned out to include warm-up/idle time rather than the true match
-# length, so this replaced that inference (2026/27 season, told by hand).
-TIER_DURATIONS = [('KP2', 90), ('KP1', 150)]
-
-
 def assign_durations(matches: List[Match], fallback: int,
                      overrides: Dict[str, int]) -> Dict[str, int]:
-    """--length override → competition tier (KP2/KP1) → fallback (divize,
-    the leagues); returns {competition: minutes} for the report."""
+    """--length override → competition tier → fallback; returns
+    {competition: minutes} for the report."""
     chosen: Dict[str, int] = {}
     for m in matches:
         if m.competition not in chosen:
@@ -272,13 +529,13 @@ def assign_durations(matches: List[Match], fallback: int,
                 chosen[m.competition] = overrides[m.competition]
             else:
                 chosen[m.competition] = next(
-                    (mins for prefix, mins in TIER_DURATIONS
-                     if prefix in m.competition), fallback)
+                    (mins for needle, mins in TIER_DURATIONS
+                     if needle.lower() in m.competition.lower()), fallback)
         m.duration = chosen[m.competition]
     return chosen
 
 
-# --- output ---------------------------------------------------------------
+# --- SQL --------------------------------------------------------------------
 
 def add_minutes(hhmm: str, minutes: int) -> Tuple[str, bool]:
     h, mi = map(int, hhmm.split(':'))
@@ -306,128 +563,282 @@ def tenant_lookup(tenant: str, tenant_id: Optional[str]) -> Tuple[str, str]:
             'kuželna „%s“' % tenant)
 
 
-def preflight_sql(tenant: str, tenant_id: Optional[str],
-                  import_keys: List[str]) -> str:
-    """Read-only: what the import would write into, and what it may disturb."""
-    lookup, _ = tenant_lookup(tenant, tenant_id)
-    keys = ', '.join(sql_str(k) for k in import_keys)
+ROZPIS_COLUMNS = ('key', 'date', 'starts_at', 'ends_at', 'home', 'away', 'prep',
+                  'description', 'is_away', 'competition')
+
+
+def rozpis_values(matches: List[Match], prep: int) -> str:
+    """The VALUES list both the preview and the write build `rozpis` from —
+    one typed row per match."""
+    rows = []
+    for m in matches:
+        end, _ = add_minutes(m.time, m.duration)
+        rows.append('  (%s, %s, %s, %s, %s, %s, %d, %s, %s, %s)' % (
+            sql_str(m.import_key), sql_str(m.date.isoformat()), sql_str(m.time),
+            sql_str(end), sql_str(m.home), sql_str(m.away),
+            0 if m.is_away else prep, sql_str(m.description),
+            'true' if m.is_away else 'false', sql_str(m.competition)))
+    return ',\n'.join(rows)
+
+
+def rozpis_select(values: str) -> str:
+    """`rozpis` as a typed relation from the VALUES list."""
     return '\n'.join([
-        "with t as (select %s::uuid as id)" % lookup,
-        "select",
-        "  coalesce((select name from tenants where id = (select id from t)),",
-        "           '!! NENALEZENO !!') as kuzelna,",
-        "  coalesce((select display_name from profiles"
-        "     where tenant_id = (select id from t) and role = 'admin'"
-        "       and status = 'approved' and not placeholder"
-        "     order by created_at limit 1), '!! ŽÁDNÝ SPRÁVCE !!') as zapise_jako,",
-        "  (select count(*) from priority_slot_types"
-        "     where tenant_id = (select id from t) and is_match and builtin)"
-        "     as typ_zapas,",
-        "  (select count(*) from priority_slots"
-        "     where tenant_id = (select id from t) and import_key in (%s))" % keys,
-        "     as jiz_naimportovano,",
-        "  (select count(*) from reservations r"
-        "     where r.tenant_id = (select id from t) and r.cancelled_at is null"
-        "       and r.date >= current_date) as zive_rezervace;",
+        'select v.key, v.date::date, v.starts_at::time, v.ends_at::time, v.home, v.away,',
+        '       v.prep::smallint, v.description, v.is_away::boolean, v.competition',
+        'from (values',
+        values,
+        ') as v(%s)' % ', '.join(ROZPIS_COLUMNS),
+    ])
+
+
+# The plan: what the file means for the rows in the database. ONE query,
+# used verbatim by the preview (rozpis = a CTE, read-only) and by the
+# write (rozpis = a temp table, the plan materialised and executed), so
+# the preview the admin approved is the plan that runs.
+#   {tenant} — the alley's uuid expression; {force} — true/false.
+PLAN_SELECT = """
+with cur as (
+  select id, import_key, date, starts_at, ends_at, home_team, away_team,
+         prep_minutes, description, is_away, hand_edited
+  from priority_slots
+  where tenant_id = {tenant} and parent_id is null and import_key is not null),
+-- the row already carries the file's key
+exact as (
+  select c.id, r.key from cur c join rozpis r on r.key = c.import_key),
+-- 2026/27 grid keys (xlsx:<date>:<teams>): the same competition and pairing
+legacy_exact as (
+  select l.id, r.key from cur l join rozpis r
+    on split_part(l.description, ' · ', 1) = r.competition
+   and l.home_team = r.home and l.away_team = r.away
+  where l.import_key like 'xlsx:%'
+    and r.key not in (select key from exact)),
+-- an opponent the federation renamed: the same slot with one team in common
+legacy_rename as (
+  select l.id, r.key from cur l join rozpis r
+    on l.date = r.date and l.starts_at = r.starts_at and l.is_away = r.is_away
+   and (l.home_team = r.home or l.away_team = r.away)
+  where l.import_key like 'xlsx:%'
+    and l.id not in (select id from legacy_exact)
+    and r.key not in (select key from exact union select key from legacy_exact)),
+pairs as (
+  select id, key, 'exact' as how from exact
+  union all select id, key, 'rekey' from legacy_exact
+  union all select id, key, 'rename' from legacy_rename),
+-- names the players follow (Moje týmy, the calendar picks, colours)
+picks as (
+  select unnest(p.followed_teams) as team from profiles p where p.tenant_id = {tenant}
+  union all
+  select t.team from calendar_teams t join profiles p on p.id = t.user_id
+   where p.tenant_id = {tenant}
+  union all
+  select c.team from team_colors c join profiles p on p.id = c.user_id
+   where p.tenant_id = {tenant}),
+plan as (
+  -- a file row paired with a database row
+  select p.id, c.import_key as old_key, p.key as new_key, r.date, r.starts_at,
+         r.home || ' – ' || r.away as zapas,
+         case when c.hand_edited and not {force} then 'skip'
+              when p.how <> 'exact' then p.how
+              when (c.date, c.starts_at, c.ends_at, c.home_team, c.away_team,
+                    c.prep_minutes, c.description, c.is_away)
+                   is distinct from
+                   (r.date, r.starts_at, r.ends_at, r.home, r.away,
+                    r.prep, r.description, r.is_away) then 'update'
+              else 'unchanged' end as action,
+         concat_ws(', ',
+           case when c.hand_edited then 'upraveno ručně' end,
+           case when c.date <> r.date then 'datum ' || c.date || ' → ' || r.date end,
+           case when c.starts_at <> r.starts_at
+                then 'čas ' || to_char(c.starts_at, 'HH24:MI') || ' → ' || to_char(r.starts_at, 'HH24:MI') end,
+           case when c.starts_at = r.starts_at and c.ends_at <> r.ends_at
+                then 'konec ' || to_char(c.ends_at, 'HH24:MI') || ' → ' || to_char(r.ends_at, 'HH24:MI') end,
+           case when (c.home_team, c.away_team) <> (r.home, r.away)
+                then 'týmy ' || c.home_team || ' – ' || c.away_team end,
+           case when c.is_away <> r.is_away then case when r.is_away then '→ venku' else '→ doma' end end,
+           case when c.prep_minutes <> r.prep then 'úklid ' || c.prep_minutes || ' → ' || r.prep end,
+           case when c.description <> r.description then 'popis „' || c.description || '“' end) as poznamka
+  from pairs p join cur c on c.id = p.id join rozpis r on r.key = p.key
+  union all
+  -- a file row nothing in the database pairs with
+  select null, null, r.key, r.date, r.starts_at, r.home || ' – ' || r.away,
+         'insert', case when r.is_away then 'venku' else 'doma' end
+  from rozpis r where r.key not in (select key from pairs)
+  union all
+  -- an imported row the file no longer has
+  select c.id, c.import_key, null, c.date, c.starts_at, c.home_team || ' – ' || c.away_team,
+         case when c.hand_edited and not {force} then 'skip' else 'delete' end,
+         concat_ws(', ', 'v rozpise není', case when c.hand_edited then 'upraveno ručně' end)
+  from cur c where c.id not in (select id from pairs)
+  union all
+  -- a file row or a database row paired more than once: the plan is void
+  select null, null, key, null, null, key, 'CONFLICT', 'řádek souboru sedí na víc zápasů'
+  from pairs group by key having count(*) > 1
+  union all
+  select id, null, null, null, null, id::text, 'CONFLICT', 'zápas sedí na víc řádků souboru'
+  from pairs group by id having count(*) > 1
+  union all
+  -- a followed team the file does not know
+  select null, null, null, null, null, team, 'missing-team',
+         count(*) || '× sledovaný tým, v rozpise není'
+  from picks where team not in (select home from rozpis union select away from rozpis)
+  group by team)
+select * from plan
+"""
+
+ACTION_ORDER = ['CONFLICT', 'missing-team', 'skip', 'delete', 'rename', 'rekey',
+                'update', 'insert', 'unchanged']
+
+
+def plan_sql(tenant_expr: str, force: bool) -> str:
+    return PLAN_SELECT.format(tenant=tenant_expr, force='true' if force else 'false')
+
+
+def order_clause() -> str:
+    return 'array_position(array[%s]::text[], action), date, starts_at, zapas' % ', '.join(
+        sql_str(a) for a in ACTION_ORDER)
+
+
+def preview_sql(matches: List[Match], tenant: str, tenant_id: Optional[str],
+                prep: int, force: bool) -> str:
+    """Read-only: the plan, every action but 'unchanged' in full, plus a
+    count per action. One statement, so it runs through `supabase db query`
+    and psql alike."""
+    lookup, _ = tenant_lookup(tenant, tenant_id)
+    return '\n'.join([
+        'with t as (select %s::uuid as id),' % lookup,
+        'rozpis as (',
+        rozpis_select(rozpis_values(matches, prep)),
+        '),',
+        'p as (',
+        plan_sql('(select id from t)', force),
+        ')',
+        'select * from (',
+        "  select action, to_char(date, 'DD.MM.YYYY') as datum, to_char(starts_at, 'HH24:MI') as cas,",
+        "         zapas, poznamka",
+        "  from p where action <> 'unchanged'",
+        '  union all',
+        "  select 'celkem ' || action, null, null, count(*) || '×', null",
+        '  from p group by action',
+        ') x',
+        "order by (case when action like 'celkem %' then 1 else 0 end),",
+        '         array_position(array[%s]::text[], replace(action, \'celkem \', \'\')), datum, cas, zapas;'
+        % ', '.join(sql_str(a) for a in ACTION_ORDER),
         '',
     ])
 
 
-def description_of(m: Match) -> str:
-    """The competition; an away match also names the venue — the app has no
-    column for it, and the calendar event (0027) shows it from here."""
-    return '%s · %s' % (m.competition, m.alley) if m.is_away else m.competition
-
-
-def build_sql(matches: List[Match], tenant: str, tenant_id: Optional[str],
-              prep: int, source: str, replace: bool) -> str:
-    values = []
-    for m in matches:
-        end, clamped = add_minutes(m.time, m.duration)
-        values.append('  (%s, %s, %s, %s, %s, %d, %s, %s, %s)' % (
-            sql_str(m.date.isoformat()), sql_str(m.time), sql_str(end),
-            sql_str(m.home), sql_str(m.away), 0 if m.is_away else prep,
-            sql_str(description_of(m)), 'true' if m.is_away else 'false',
-            sql_str(m.import_key)))
+def apply_sql(matches: List[Match], tenant: str, tenant_id: Optional[str],
+              prep: int, source: str, force: bool, allow_missing: bool) -> str:
+    """The write: one transaction as the alley's admin that materialises
+    the same plan and executes it."""
+    lookup, label = tenant_lookup(tenant, tenant_id)
     home = sum(1 for m in matches if not m.is_away)
-    replace_note = (
-        "-- --replace: deletes this alley's previously imported matches "
-        "(import_key like 'xlsx:%') first, same transaction."
-        if replace else
-        "-- Safe to re-run: rows are keyed by import_key and never inserted twice."
-    )
     return '\n'.join([
         '-- Generated by tool/import_matches.py from %s on %s: %d home + %d away matches.'
         % (source, dt.date.today().isoformat(), home, len(matches) - home),
         "-- Runs as the alley's admin (RLS and cancelled reservations as in the app).",
-        replace_note,
+        '-- Reconciles: rekeys / updates / inserts / deletes by import_key; never a',
+        '-- match without one, never a hand-edited one%s, never a user table.'
+        % (' (--force: those too)' if force else ''),
         'begin;',
-        "select set_config('import.tenant', coalesce(%s, ''), true);"
-        % tenant_lookup(tenant, tenant_id)[0],
+        "select set_config('import.tenant', coalesce(%s, ''), true);" % lookup,
         "select set_config('import.admin', coalesce((select id::text from profiles where tenant_id = nullif(current_setting('import.tenant'), '')::uuid and role = 'admin' and status = 'approved' and not placeholder order by created_at limit 1), ''), true);",
         "select set_config('import.type', coalesce((select id::text from priority_slot_types where tenant_id = nullif(current_setting('import.tenant'), '')::uuid and is_match and builtin), ''), true);",
         'do $$ begin',
         "  if current_setting('import.tenant') = '' then raise exception 'kuželna %s nenalezena', %s; end if;"
-        % ('%', sql_str(tenant_lookup(tenant, tenant_id)[1])),
+        % ('%', sql_str(label)),
         "  if current_setting('import.admin') = '' then raise exception 'no approved admin in the tenant'; end if;",
         "  if current_setting('import.type') = '' then raise exception 'builtin match type missing'; end if;",
         'end $$;',
-        '-- From here on exactly what the app does when the admin saves a match.',
+        '-- The file, typed, and the plan the preview showed — both built here,',
+        "-- before the role switch, so the admin role can read them below.",
+        'create temp table rozpis on commit drop as',
+        rozpis_select(rozpis_values(matches, prep)) + ';',
+        'create temp table plan on commit drop as',
+        plan_sql("current_setting('import.tenant')::uuid", force) + ';',
+        'grant select on rozpis, plan to authenticated;',
+        'do $$ begin',
+        "  if exists (select 1 from plan where action = 'CONFLICT') then",
+        "    raise exception 'nejednoznačné párování — viz náhled (CONFLICT)';",
+        '  end if;',
+    ] + ([] if allow_missing else [
+        "  if exists (select 1 from plan where action = 'missing-team') then",
+        "    raise exception 'sledované týmy, které v rozpise nejsou — viz náhled; --allow-missing-teams to přebije';",
+        '  end if;',
+    ]) + [
+        'end $$;',
+        '-- From here on exactly what the app does when the admin saves a match —',
+        "-- plus import.run, which keeps the hand-edit trigger (0038) quiet.",
         'set local role authenticated;',
         "select set_config('request.jwt.claims', json_build_object('sub', current_setting('import.admin'), 'role', 'authenticated')::text, true);",
-    ] + ([
-        "delete from priority_slots where tenant_id = current_setting('import.tenant')::uuid"
-        "  and import_key like 'xlsx:%';",
-    ] if replace else []) + [
+        "select set_config('import.run', 'on', true);",
+        '-- Paired rows take the file\'s key and columns (the key first: a renamed',
+        '-- opponent or a legacy key is a change of identity, the rest a change of',
+        '-- fact). Unchanged rows are not written — no needless calendar jobs.',
+        'update priority_slots p',
+        '   set import_key = pl.new_key, date = r.date, starts_at = r.starts_at,',
+        '       ends_at = r.ends_at, home_team = r.home, away_team = r.away,',
+        '       prep_minutes = r.prep, description = r.description, is_away = r.is_away'
+        + (', hand_edited = false' if force else ''),
+        '  from plan pl join rozpis r on r.key = pl.new_key',
+        " where p.id = pl.id and pl.action in ('rekey', 'rename', 'update');",
         'insert into priority_slots',
         '  (date, starts_at, ends_at, type_id, home_team, away_team, prep_minutes, description, is_away, created_by, import_key)',
-        "select v.date::date, v.starts_at::time, v.ends_at::time, current_setting('import.type')::uuid,",
-        "       v.home_team, v.away_team, v.prep_minutes, v.description, v.is_away,",
-        "       current_setting('import.admin')::uuid, v.import_key",
-        'from (values',
-        ',\n'.join(values),
-        ') as v(date, starts_at, ends_at, home_team, away_team, prep_minutes, description, is_away, import_key)',
-        'on conflict (tenant_id, import_key) do nothing',
-        "returning date, starts_at, case when is_away then 'venku' else 'doma' end as kde, home_team || ' – ' || away_team as zapas;",
+        "select r.date, r.starts_at, r.ends_at, current_setting('import.type')::uuid,",
+        "       r.home, r.away, r.prep, r.description, r.is_away,",
+        "       current_setting('import.admin')::uuid, r.key",
+        "  from plan pl join rozpis r on r.key = pl.new_key",
+        " where pl.action = 'insert';",
+        "delete from priority_slots p using plan pl where p.id = pl.id and pl.action = 'delete';",
+        'select action, count(*) as zapasu from plan group by action order by %s;'
+        % 'array_position(array[%s]::text[], action)' % ', '.join(sql_str(a) for a in ACTION_ORDER),
         'commit;',
         '',
     ])
 
 
+# --- running ----------------------------------------------------------------
+
+def run_sql(path: str, local: bool) -> int:
+    """psql on the local stack; the Supabase CLI (management API, no
+    database password needed) on prod. The CLI's own --local path sends a
+    file as one prepared statement and rejects a transaction, hence psql."""
+    if local:
+        cmd = ['psql', LOCAL_DB_URL, '-X', '-v', 'ON_ERROR_STOP=1', '-f', path]
+    else:
+        cmd = ['supabase', 'db', 'query', '--linked', '-f', path]
+    # Flush first: with stdout piped, Python's buffered lines would otherwise
+    # land AFTER psql's unbuffered output.
+    print('running: ' + ' '.join(cmd), flush=True)
+    return subprocess.call(cmd)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
-    ap.add_argument('workbook')
+    ap.add_argument('workbook', help='the schedule: .xls or .xlsx')
     ap.add_argument('--tenant', default='TJ Sokol Brno IV', help='tenants.name in the database')
     ap.add_argument('--tenant-id', help="the alley's uuid — beats --tenant (a renamed alley still matches)")
-    ap.add_argument('--alley', default='Brno IV Sokol', help="our alley's row label in the sheet")
+    ap.add_argument('--alley', default='Brno IV Sokol', help="our alley's name in the Kuželna column")
     ap.add_argument('--teams', nargs='+', default=['Husovice', 'Veverky', 'Devítka', 'Brno IV'],
                     help='substrings identifying our teams')
-    ap.add_argument('--season', type=int, help='autumn year of the season (default: from the file name)')
     ap.add_argument('--duration', type=int, default=180,
-                    help="match length in minutes for competitions outside the KP1/KP2 tiers (divize, the leagues)")
+                    help='match length in minutes outside the KP1/KP2/dorost tiers (divize, the leagues)')
     ap.add_argument('--length', action='append', default=[], metavar='SOUTĚŽ=MIN',
                     help='pin a competition\'s match length by hand, e.g. --length "KP1 Sever=240" (repeatable)')
     ap.add_argument('--prep', type=int, default=30,
                     help='úklid před zápasem in minutes for home matches')
-    ap.add_argument('--out', default='build/import_matches.sql')
-    ap.add_argument('--apply', action='store_true', help='run the SQL — against PROD unless --local')
+    ap.add_argument('--out', default='build/import_matches.sql', help='where the write SQL goes')
+    ap.add_argument('--no-preview', action='store_true', help='only parse and write the SQL files')
+    ap.add_argument('--apply', action='store_true', help='run the write — against PROD unless --local')
     ap.add_argument('--yes', action='store_true', help='with --apply: skip the confirmation question')
-    ap.add_argument('--replace', action='store_true',
-                    help='delete this alley\'s previously imported matches (import_key like xlsx:%%) before writing — same transaction')
-    ap.add_argument('--local', action='store_true', help='with --apply: the local stack (psql) instead of prod')
+    ap.add_argument('--local', action='store_true', help='preview/apply on the local stack (psql) instead of prod')
+    ap.add_argument('--force', action='store_true',
+                    help='overwrite hand-edited matches too (and clear their flag)')
+    ap.add_argument('--allow-missing-teams', action='store_true',
+                    help='write even when a followed team does not occur in the file')
     args = ap.parse_args()
 
-    season = args.season
-    if season is None:
-        m = re.search(r'(20\d\d)', args.workbook)
-        today = dt.date.today()
-        season = int(m.group(1)) if m else (today.year if today.month >= 7 else today.year - 1)
-
-    sheets = load_workbook(args.workbook)
-    calendar = next((n for n in ('Kalendář vše', 'Kalendář JM+Zlín') if n in sheets), None)
-    if calendar is None:
-        print('no calendar sheet found; sheets:', ', '.join(sheets), file=sys.stderr)
-        return 2
     overrides: Dict[str, int] = {}
     for item in args.length:
         name, _, mins = item.rpartition('=')
@@ -437,36 +848,18 @@ def main() -> int:
         overrides[name.strip()] = int(mins)
 
     warnings: List[str] = []
-    all_matches = parse_calendar(sheets[calendar], season, warnings)
+    rows = read_rows(args.workbook)
+    all_matches = parse_rows(rows, warnings)
     if not any(m.alley == args.alley for m in all_matches):
-        print('alley %r not found in %s; rows: %s' % (
-            args.alley, calendar, ', '.join(sorted({m.alley for m in all_matches}))), file=sys.stderr)
+        print('alley %r not found in the Kuželna column; values: %s' % (
+            args.alley, ', '.join(sorted({m.alley for m in all_matches}))), file=sys.stderr)
         return 2
     matches = classify(all_matches, args.alley, args.teams)
     durations = assign_durations(matches, args.duration, overrides)
-
-    # Cross-check with the hidden flat list (laid out independently), and
-    # pull in its full club names.
-    if 'Utkání – vše' in sheets:
-        flat = parse_flat_list(sheets['Utkání – vše'])
-        flat_ours = Counter({
-            k: len(v) for k, v in flat.items()
-            if k[0] == args.alley
-            or any(ours(h, args.teams) or ours(a, args.teams) for h, a in v)})
-        grid = Counter((m.alley, m.date, m.time) for m in matches)
-        diff = (grid - flat_ours) + (flat_ours - grid)
-        if diff:
-            for (alley, date, time), n in sorted(diff.items(), key=lambda x: (x[0][1], x[0][0])):
-                where = 'calendar only' if grid[(alley, date, time)] > flat_ours[(alley, date, time)] else 'flat list only'
-                warnings.append('cross-check: %s %s %s — %s' % (alley, date, time or '??:??', where))
-        else:
-            print('cross-check with "Utkání – vše": OK (%d matches agree)' % len(matches))
-        apply_full_names(matches, flat, warnings)
-
     unknown = [m for m in matches if m.time is None]
     matches = [m for m in matches if m.time is not None]
 
-    print('season %d/%d, sheet %r, tenant %r' % (season, season + 1, calendar, args.tenant))
+    print('%d rows in the file, tenant %r' % (len(rows), args.tenant))
     print('%d matches: %d home at %s, %d away' % (
         len(matches), sum(1 for m in matches if not m.is_away), args.alley,
         sum(1 for m in matches if m.is_away)))
@@ -474,19 +867,19 @@ def main() -> int:
           % fmt_minutes(args.duration))
     for comp in sorted(durations):
         note = ('pinned by --length' if comp in overrides
-                else 'KP2/KP1 tier' if any(p in comp for p, _ in TIER_DURATIONS)
+                else 'tier' if any(n.lower() in comp.lower() for n, _ in TIER_DURATIONS)
                 else 'fallback (divize/liga)')
         print('  %-14s %s  (%s)' % (comp, fmt_minutes(durations[comp]), note))
     print()
     for m in matches:
         end, clamped = add_minutes(m.time, m.duration)
         flags = ' | '.join(m.warnings + (['end clamped to 23:59'] if clamped else []))
-        print('%s %s %s–%s %-5s %-38s %-14s %s%s' % (
+        print('%s %s %s–%s %-5s %-44s %-22s %s%s' % (
             WEEKDAYS[m.date.weekday()], m.date.strftime('%d.%m.%Y'), m.time, end,
-            'venku' if m.is_away else 'doma', m.label, m.competition,
-            '' if m.is_away is False else '@ ' + m.alley, ('  !! ' + flags) if flags else ''))
+            'venku' if m.is_away else 'doma', m.label, m.description,
+            '' if not m.is_away else '@ ' + m.alley, ('  !! ' + flags) if flags else ''))
     if unknown:
-        print('\nSKIPPED (time unknown in the sheet — add by hand once known):')
+        print('\nSKIPPED (time unknown in the file — add by hand once known):')
         for m in unknown:
             print('  %s %s %s %s @ %s' % (WEEKDAYS[m.date.weekday()], m.date, m.label, m.competition, m.alley))
     if warnings:
@@ -494,59 +887,46 @@ def main() -> int:
         for w in warnings:
             print('  ' + w)
 
-    sql = build_sql(matches, args.tenant, args.tenant_id, args.prep,
-                    args.workbook.split('/')[-1], args.replace)
-    import os
     os.makedirs(os.path.dirname(args.out) or '.', exist_ok=True)
     with open(args.out, 'w', encoding='utf-8') as f:
-        f.write(sql)
+        f.write(apply_sql(matches, args.tenant, args.tenant_id, args.prep,
+                          os.path.basename(args.workbook), args.force,
+                          args.allow_missing_teams))
     print('\nSQL written to %s' % args.out)
-    if not args.apply:
-        print('do PRODUKCE:  python3 %s <sešit> --apply' % sys.argv[0])
-        print('   nebo SQL:  supabase db query --linked -f %s' % args.out)
-        print('   lokálně:  psql %s -X -v ON_ERROR_STOP=1 -f %s' % (LOCAL_DB_URL, args.out))
+    if args.no_preview:
         return 0
 
-    if args.local:
-        # The CLI's --local path sends the file as one prepared statement and
-        # rejects a multi-statement transaction; psql handles it.
-        cmd = ['psql', LOCAL_DB_URL, '-X', '-v', 'ON_ERROR_STOP=1', '-f', args.out]
-        print('running: ' + ' '.join(cmd))
-        return subprocess.call(cmd)
-
-    # PROD. Say out loud what the import resolves to before writing: a wrong
-    # alley name or a missing admin would otherwise only show up as an
-    # exception mid-transaction, and cancelled reservations mail players.
-    import os
-    import tempfile
-    keys = [m.import_key for m in matches]
+    # The preview: the plan, read-only, against the database the write
+    # would go to.
+    where = 'LOKÁLNĚ' if args.local else 'PRODUKCE'
     with tempfile.NamedTemporaryFile('w', suffix='.sql', delete=False,
                                      encoding='utf-8') as f:
-        f.write(preflight_sql(args.tenant, args.tenant_id, keys))
+        f.write(preview_sql(matches, args.tenant, args.tenant_id, args.prep, args.force))
         probe = f.name
     try:
-        print('\nPRODUKCE — kontrola cíle:')
-        rc = subprocess.call(['supabase', 'db', 'query', '--linked', '-f', probe])
+        print('\n%s — náhled (co by se změnilo; „unchanged“ jen v součtu):' % where)
+        rc = run_sql(probe, args.local)
     finally:
         os.unlink(probe)
     if rc != 0:
-        print('kontrola cíle selhala — nic se nezapisovalo', file=sys.stderr)
+        print('náhled selhal — nic se nezapisovalo', file=sys.stderr)
         return rc
-    print('\nZapíše se %d zápasů (%d doma, %d venku). Domácí zápasy ruší '
-          'kolidující rezervace a hráčům odejde upozornění.'
-          % (len(matches), sum(1 for m in matches if not m.is_away),
-             sum(1 for m in matches if m.is_away)))
+    if not args.apply:
+        print('\nZápis:  python3 %s <soubor> --apply%s' % (sys.argv[0], ' --local' if args.local else ''))
+        return 0
+
+    print('\nZapíše se plán výše jako jedna transakce (CONFLICT nebo chybějící '
+          'sledovaný tým zápis zastaví). Domácí zápasy ruší kolidující rezervace '
+          'a hráčům odejde upozornění.')
     if not args.yes:
         try:
-            answer = input('Napiš "ano" pro zápis do produkce: ').strip().lower()
+            answer = input('Napiš "ano" pro zápis%s: ' % ('' if args.local else ' do produkce')).strip().lower()
         except EOFError:
             answer = ''
         if answer != 'ano':
             print('nic se nezapisovalo')
             return 1
-    cmd = ['supabase', 'db', 'query', '--linked', '-f', args.out]
-    print('running: ' + ' '.join(cmd))
-    return subprocess.call(cmd)
+    return run_sql(args.out, args.local)
 
 
 if __name__ == '__main__':
