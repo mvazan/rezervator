@@ -231,12 +231,17 @@ CREATE TABLE IF NOT EXISTS "public"."priority_slots" (
     "tenant_id" "uuid" DEFAULT "public"."current_tenant_id"() NOT NULL,
     "parent_id" "uuid",
     "is_away" boolean DEFAULT false NOT NULL,
+    "hand_edited" boolean DEFAULT false NOT NULL,
     CONSTRAINT "matches_check" CHECK (("ends_at" > "starts_at")),
     CONSTRAINT "matches_prep_minutes_check" CHECK ((("prep_minutes" >= 0) AND ("prep_minutes" <= 240)))
 );
 
 
 ALTER TABLE "public"."priority_slots" OWNER TO "postgres";
+
+
+COMMENT ON COLUMN "public"."priority_slots"."hand_edited" IS 'Imported match (import_key set) whose match columns changed outside an import run (session setting import.run <> ''on''). The next import leaves the row alone unless forced. Set by priority_slots_hand_edit.';
+
 
 
 CREATE OR REPLACE FUNCTION "public"."cancel_res_for_priority_slot"("p_slot" "public"."priority_slots") RETURNS "void"
@@ -1216,6 +1221,28 @@ $$;
 
 
 ALTER FUNCTION "public"."priority_slots_enqueue_calendar"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."priority_slots_mark_hand_edit"() RETURNS "trigger"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  if new.import_key is not null
+     and current_setting('import.run', true) is distinct from 'on'
+     and (old.date, old.starts_at, old.ends_at, old.home_team, old.away_team,
+          old.prep_minutes, old.description, old.is_away)
+         is distinct from
+         (new.date, new.starts_at, new.ends_at, new.home_team, new.away_team,
+          new.prep_minutes, new.description, new.is_away) then
+    new.hand_edited := true;
+  end if;
+  return new;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."priority_slots_mark_hand_edit"() OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."register_profile"("p_display_name" "text", "p_tenant_id" "uuid", "p_club_id" "uuid" DEFAULT NULL::"uuid", "p_nick" "text" DEFAULT ''::"text") RETURNS "public"."profiles"
@@ -2463,6 +2490,10 @@ CREATE OR REPLACE TRIGGER "priority_slots_enqueue_calendar" AFTER INSERT OR DELE
 
 
 
+CREATE OR REPLACE TRIGGER "priority_slots_hand_edit" BEFORE UPDATE ON "public"."priority_slots" FOR EACH ROW EXECUTE FUNCTION "public"."priority_slots_mark_hand_edit"();
+
+
+
 CREATE OR REPLACE TRIGGER "rental_conflicts" AFTER INSERT OR DELETE OR UPDATE ON "public"."rentals" FOR EACH ROW EXECUTE FUNCTION "public"."cancel_res_for_rental"();
 
 
@@ -2940,6 +2971,12 @@ GRANT ALL ON FUNCTION "public"."notify_webhook_config"() TO "service_role";
 GRANT ALL ON FUNCTION "public"."priority_slots_enqueue_calendar"() TO "anon";
 GRANT ALL ON FUNCTION "public"."priority_slots_enqueue_calendar"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."priority_slots_enqueue_calendar"() TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."priority_slots_mark_hand_edit"() TO "anon";
+GRANT ALL ON FUNCTION "public"."priority_slots_mark_hand_edit"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."priority_slots_mark_hand_edit"() TO "service_role";
 
 
 

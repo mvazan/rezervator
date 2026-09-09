@@ -219,6 +219,42 @@ void main() {
       }, const {});
       expect(m.prepMinutes, 0);
     });
+
+    // import_key is the line between the schedule's rows and the admin's
+    // own; hand_edited (0038) marks a scheduled row the admin corrected in
+    // the app. Both arrive with the streamed row and the list shows them.
+    test('fromJson reads import_key and hand_edited; absent = a manual match',
+        () {
+      final imported = PrioritySlot.fromJson(const {
+        'id': 'm4',
+        'date': '2026-09-11',
+        'starts_at': '18:00:00',
+        'ends_at': '21:00:00',
+        'home_team': 'TJ Sokol Brno IV',
+        'away_team': 'SK Kuželky Dubňany',
+        'description': 'JM divize · 1. kolo',
+        'import_key': 'rozpis:JM divize:1:TJ Sokol Brno IV – SK Kuželky Dubňany',
+        'hand_edited': true,
+      }, const {});
+      expect(imported.importKey,
+          'rozpis:JM divize:1:TJ Sokol Brno IV – SK Kuželky Dubňany');
+      expect(imported.imported, isTrue);
+      expect(imported.handEdited, isTrue);
+
+      final manual = PrioritySlot.fromJson(const {
+        'id': 'm5',
+        'date': '2026-09-12',
+        'starts_at': '18:00:00',
+        'ends_at': '20:00:00',
+        'home_team': 'Husky',
+        'away_team': 'přátelák',
+        'description': '',
+        'import_key': null,
+      }, const {});
+      expect(manual.importKey, isNull);
+      expect(manual.imported, isFalse);
+      expect(manual.handEdited, isFalse);
+    });
   });
 
   group('Rental.occursOn', () {

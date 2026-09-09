@@ -496,6 +496,8 @@ class PrioritySlot {
     this.description = '',
     this.parentId,
     this.isAway = false,
+    this.importKey,
+    this.handEdited = false,
   });
 
   final String id;
@@ -503,6 +505,17 @@ class PrioritySlot {
   final HourMinute startsAt;
   final HourMinute endsAt;
   final PrioritySlotType type;
+
+  /// Set when the row came from the federation's schedule
+  /// (`tool/import_matches.py`); null = the admin entered the match by hand
+  /// and no import will ever touch it.
+  final String? importKey;
+
+  /// An imported match the admin corrected in the app (0038): the next
+  /// import leaves it alone instead of reverting the correction.
+  final bool handEdited;
+
+  bool get imported => importKey != null;
 
   /// Team fields are only meaningful when [type.isMatch].
   final String homeTeam;
@@ -548,6 +561,8 @@ class PrioritySlot {
         description: json['description'] as String? ?? '',
         parentId: json['parent_id'] as String?,
         isAway: json['is_away'] as bool? ?? false,
+        importKey: json['import_key'] as String?,
+        handEdited: json['hand_edited'] as bool? ?? false,
       );
 
   /// A fully-powered stand-in match type for tests and previews.
