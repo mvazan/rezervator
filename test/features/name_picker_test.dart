@@ -154,6 +154,32 @@ void main() {
     expect(find.text('B'), findsOneWidget);
   });
 
+  testWidgets('a tile shows the nick when the player set one, and lives '
+      'under its letter', (tester) async {
+    final players = [
+      const PlayerName(id: 'p1', displayName: 'Jan Novák', nick: 'Bobo'),
+      const PlayerName(id: 'p2', displayName: 'Eva Novotná'),
+      for (var i = 0; i < 30; i++)
+        PlayerName(id: 'x$i', displayName: 'Zdeněk Zeman $i'),
+    ];
+    surface(tester, const Size(1280, 800));
+    await tester.pumpWidget(picker(players));
+    await tester.pumpAndSettle();
+
+    // Over capacity, so this is the letter step: Jan is under B, not J.
+    await tester.tap(find.text('B'));
+    await tester.pumpAndSettle();
+    expect(find.text('Bobo'), findsOneWidget);
+    expect(find.text('Jan Novák'), findsNothing);
+
+    // A player without a nick keeps their full name, letter and all.
+    await tester.tap(find.text('Zpět'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('E'));
+    await tester.pumpAndSettle();
+    expect(find.text('Eva Novotná'), findsOneWidget);
+  });
+
   testWidgets('picking a name pops it', (tester) async {
     surface(tester, const Size(1280, 800));
     PlayerName? picked;

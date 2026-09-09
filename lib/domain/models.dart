@@ -254,6 +254,13 @@ class PlayerName {
   /// Short board name (<=14 chars); empty means "use displayName".
   final String nick;
 
+  /// What the kiosk calls this player: their own board nick, the full name
+  /// only when there is none. The board has always shown this; the name
+  /// picker shows it too, and indexes its letters by it — a letter that
+  /// sorted by one string while the tile read another would file a player
+  /// under a letter their own tile does not start with.
+  String get boardName => nick.isEmpty ? displayName : nick;
+
   /// FK into `clubs`; null when the player has no assigned club.
   final String? clubId;
 
