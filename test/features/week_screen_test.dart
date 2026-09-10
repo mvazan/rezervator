@@ -324,6 +324,34 @@ void main() {
     expect(find.text('Vybráno: Květa Malá'), findsOneWidget);
   });
 
+  // Typing filters the list, and a list that shrinks used to take the
+  // dialog with it: the box jumped under the finger doing the typing.
+  for (final keyboard in [0.0, 330.0]) {
+    testWidgets(
+        'the dialog holds its height while the search narrows'
+        '${keyboard == 0 ? '' : ' (keyboard up)'}', (tester) async {
+      reporterPhone(tester, keyboard: keyboard);
+      await tester.pumpWidget(app(profile: admin, roster: crowd));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.add).first);
+      await tester.pumpAndSettle();
+      final before = dialogSurface(tester);
+
+      await tester.enterText(find.byType(TextField), 'kv');
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(ListTile, 'Květa Malá'), findsOneWidget);
+      expect(find.widgetWithText(ListTile, 'Petr Novák'), findsNothing);
+      expect(dialogSurface(tester), before,
+          reason: 'eight names down to one must not move the dialog');
+
+      // Nor when nothing matches at all.
+      await tester.enterText(find.byType(TextField), 'xyz');
+      await tester.pumpAndSettle();
+      expect(find.text('Nikdo neodpovídá hledání.'), findsOneWidget);
+      expect(dialogSurface(tester), before);
+    });
+  }
+
   testWidgets('the cap warning waits for the keyboard to go', (tester) async {
     reporterPhone(tester);
     await tester.pumpWidget(app(
