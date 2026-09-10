@@ -116,19 +116,21 @@ ThemeData buildTheme(Brightness brightness, {double contrastLevel = 0}) {
           );
   }
 
-  final textTheme = _textTheme(scheme);
-
   return ThemeData(
     colorScheme: scheme,
     useMaterial3: true,
     fontFamily: appFontFamily,
-    textTheme: textTheme,
+    textTheme: _textTheme,
     scaffoldBackgroundColor: scheme.surfaceContainerLowest,
     appBarTheme: AppBarTheme(
       backgroundColor: scheme.surfaceContainerLowest,
       elevation: 0,
       scrolledUnderElevation: 0,
-      titleTextStyle: textTheme.titleLarge?.copyWith(color: scheme.onSurface),
+      // Colour only. Pinning titleTextStyle here would REPLACE Material's
+      // own title style — and a style built from the weights above carries
+      // no size or family, so the title would come out small and in the
+      // platform font (the trap filledButtonTheme fell into below).
+      foregroundColor: scheme.onSurface,
     ),
     // Both use `outline`, not the `outlineVariant` every divider/chip border
     // in this theme otherwise uses: `outlineVariant` is a low-emphasis role
@@ -215,29 +217,36 @@ ThemeData buildTheme(Brightness brightness, {double contrastLevel = 0}) {
   );
 }
 
-TextTheme _textTheme(ColorScheme scheme) {
-  const base = TextTheme();
-  return base.copyWith(
-    displayLarge:
-        base.displayLarge?.copyWith(fontWeight: FontWeight.w800),
-    displayMedium:
-        base.displayMedium?.copyWith(fontWeight: FontWeight.w800),
-    displaySmall:
-        base.displaySmall?.copyWith(fontWeight: FontWeight.w800),
-    headlineLarge:
-        base.headlineLarge?.copyWith(fontWeight: FontWeight.w800),
-    headlineMedium:
-        base.headlineMedium?.copyWith(fontWeight: FontWeight.w800),
-    headlineSmall:
-        base.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
-    titleLarge: base.titleLarge?.copyWith(fontWeight: FontWeight.w800),
-    titleMedium: base.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-    titleSmall: base.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-    bodyLarge: base.bodyLarge?.copyWith(fontWeight: FontWeight.w400),
-    bodyMedium: base.bodyMedium?.copyWith(fontWeight: FontWeight.w400),
-    bodySmall: base.bodySmall?.copyWith(fontWeight: FontWeight.w400),
-    labelLarge: base.labelLarge?.copyWith(fontWeight: FontWeight.w700),
-    labelMedium: base.labelMedium?.copyWith(fontWeight: FontWeight.w500),
-    labelSmall: base.labelSmall?.copyWith(fontWeight: FontWeight.w500),
-  );
-}
+/// The weights the design asks for — and NOTHING else. Material merges this
+/// over its own text theme (`defaultTextTheme.merge(textTheme)`), so every
+/// size, letter spacing and colour still comes from there, and with the
+/// sizes comes the user's text-size choice: that is a [TextScaler] applied
+/// to whatever size a style ends up with (core/text_size.dart), a different
+/// axis from weight, so the two never fight.
+///
+/// This used to be built by copying onto `const TextTheme()`, whose styles
+/// are all null — `base.titleLarge?.copyWith(…)` is null, `copyWith` keeps
+/// null, and the whole thing quietly did nothing for as long as it existed.
+/// Stating the styles outright is both shorter and the only version that
+/// works.
+///
+/// Every weight here has a Manrope file behind it (400/500/700/800, see
+/// pubspec.yaml); asking for one that is not bundled makes Flutter
+/// synthesise it, which looks like a smeared version of the real thing.
+const _textTheme = TextTheme(
+  displayLarge: TextStyle(fontWeight: FontWeight.w800),
+  displayMedium: TextStyle(fontWeight: FontWeight.w800),
+  displaySmall: TextStyle(fontWeight: FontWeight.w800),
+  headlineLarge: TextStyle(fontWeight: FontWeight.w800),
+  headlineMedium: TextStyle(fontWeight: FontWeight.w800),
+  headlineSmall: TextStyle(fontWeight: FontWeight.w800),
+  titleLarge: TextStyle(fontWeight: FontWeight.w800),
+  titleMedium: TextStyle(fontWeight: FontWeight.w700),
+  titleSmall: TextStyle(fontWeight: FontWeight.w700),
+  bodyLarge: TextStyle(fontWeight: FontWeight.w400),
+  bodyMedium: TextStyle(fontWeight: FontWeight.w400),
+  bodySmall: TextStyle(fontWeight: FontWeight.w400),
+  labelLarge: TextStyle(fontWeight: FontWeight.w700),
+  labelMedium: TextStyle(fontWeight: FontWeight.w500),
+  labelSmall: TextStyle(fontWeight: FontWeight.w500),
+);
