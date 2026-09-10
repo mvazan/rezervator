@@ -626,22 +626,25 @@ class _BookingDialogState extends ConsumerState<_BookingDialog> {
                 ),
               ),
             const SizedBox(height: 8),
-            // Flexible, not a bare 220: a Column hands a child the height it
-            // asks for whatever room is left, so a fixed list under the
-            // message, the field and the warning simply ran out of the
-            // dialog — the names were painted across the page behind it and
-            // Zrušit with Rezervovat sat on top of them. The list now takes
-            // what is left over and scrolls the rest.
+            // A box of its own, the same one from the first keystroke to
+            // the last. Two things used to move it: it asked for the height
+            // of its contents, so a fixed 220 under the message, the field
+            // and the warning ran out of the dialog — the names were painted
+            // across the page behind it, with Zrušit and Rezervovat sitting
+            // on top of them — and then it shrank as typing narrowed eight
+            // names to one, and the dialog jumped under the finger doing the
+            // typing. So: 220 where there is room for 220, whatever is left
+            // where there is not, and the same either way however many names
+            // answer the search.
             Flexible(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 220),
+              child: SizedBox(
+                height: 220,
                 child: candidates.isEmpty
                     ? const Padding(
                         padding: EdgeInsets.all(12),
                         child: Text('Nikdo neodpovídá hledání.'),
                       )
                     : ListView(
-                        shrinkWrap: true,
                         // Reaching for the names means the typing is done:
                         // letting the keyboard go hands the dialog back some
                         // 330px, and the list grows into them.
