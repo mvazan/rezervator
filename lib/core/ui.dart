@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../domain/models.dart';
+import 'messages.dart';
 
 const weekdaysShort = ['po', 'út', 'st', 'čt', 'pá', 'so', 'ne'];
 const _weekdaysFull = [
@@ -66,7 +67,18 @@ String initialsOf(String displayName) {
       .toUpperCase();
 }
 
+/// One line of feedback: an error, a refusal, a confirmation.
+///
+/// From a page this is the ordinary snackbar. From a DIALOG or a bottom
+/// sheet it is not: a Scaffold paints its snackbar on the route underneath,
+/// so the message would appear below the modal barrier (dimmed, half-hidden
+/// by the dialog, and behind the keyboard the form has open) — see
+/// core/messages.dart, which puts it in the root overlay instead.
 void snack(BuildContext context, String message) {
+  if (isBehindBarrier(context)) {
+    showOverlayMessage(context, message);
+    return;
+  }
   ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
 }
 
