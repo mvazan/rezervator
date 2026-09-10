@@ -201,7 +201,7 @@ class _RentalOccurrenceDialogState extends State<RentalOccurrenceDialog> {
     );
     if (!mounted) return;
     if (ok) {
-      Navigator.of(context).pop(true);
+      closeDialog(context, true);
     } else {
       setState(() => _busy = false);
     }
@@ -218,7 +218,7 @@ class _RentalOccurrenceDialogState extends State<RentalOccurrenceDialog> {
     );
     if (!mounted) return;
     if (ok) {
-      Navigator.of(context).pop(true);
+      closeDialog(context, true);
     } else {
       setState(() => _busy = false);
     }

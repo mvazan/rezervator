@@ -367,7 +367,7 @@ class _MoveReservationsDialogState
     );
     if (!mounted) return;
     if (ok) {
-      Navigator.of(context).pop(true);
+      closeDialog(context, true);
     } else {
       setState(() => _committing = false);
     }

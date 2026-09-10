@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -132,6 +134,62 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Přidat oddíl'), findsNothing);
       expect(result, 'hotovo');
+    });
+  });
+
+  group('FormDialog while it saves', () {
+    testWidgets('the fields go quiet — no menu opens over a closing dialog',
+        (tester) async {
+      final save = Completer<bool>();
+      bool? result;
+      await tester.pumpWidget(MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: FilledButton(
+              onPressed: () async {
+                result = await showDialog<bool>(
+                  context: context,
+                  builder: (_) => FormDialog<bool>(
+                    title: 'Přidat hráče bez účtu',
+                    onSave: () => save.future,
+                    children: [
+                      DropdownButtonFormField<String?>(
+                        key: const Key('oddil'),
+                        initialValue: null,
+                        items: const [
+                          DropdownMenuItem(
+                              value: null, child: Text('Bez oddílu')),
+                          DropdownMenuItem(value: 'v', child: Text('Veverky')),
+                        ],
+                        onChanged: (_) {},
+                      ),
+                    ],
+                  ),
+                );
+              },
+              child: const Text('OTEVŘÍT'),
+            ),
+          ),
+        ),
+      ));
+      await tester.tap(find.text('OTEVŘÍT'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Uložit'));
+      await tester.pump();
+      expect(find.text('Ukládám…'), findsOneWidget);
+
+      // The values are already on their way to the server; a dropdown
+      // opened now would only lose its pick — and would put its menu over
+      // a dialog that is about to close.
+      await tester.tap(find.byKey(const Key('oddil')), warnIfMissed: false);
+      await tester.pumpAndSettle();
+      expect(find.text('Veverky'), findsNothing);
+
+      save.complete(true);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(result, isTrue);
+      expect(find.text('Přidat hráče bez účtu'), findsNothing);
     });
   });
 

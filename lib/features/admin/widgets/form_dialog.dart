@@ -7,6 +7,8 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../../../core/ui.dart';
+
 class FormDialog<T> extends StatefulWidget {
   const FormDialog({
     super.key,
@@ -57,7 +59,9 @@ class _FormDialogState<T> extends State<FormDialog<T>> {
     final result = await widget.onSave();
     if (!mounted) return;
     if (result != null) {
-      Navigator.of(context).pop(result);
+      // Not Navigator.pop: while the save ran, a dropdown menu may have
+      // opened over us, and popping the top route would hit THAT.
+      closeDialog(context, result);
     } else {
       setState(() => _saving = false);
     }
@@ -67,11 +71,18 @@ class _FormDialogState<T> extends State<FormDialog<T>> {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: Text(widget.title),
+      // The fields go quiet while „Ukládám…" runs: the values are already
+      // on their way to the server, so an edit made now would be silently
+      // dropped — and a dropdown opened now would land its menu on top of
+      // a dialog that is about to close itself.
       content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: widget.crossAxisAlignment,
-          children: widget.children,
+        child: AbsorbPointer(
+          absorbing: _saving,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: widget.crossAxisAlignment,
+            children: widget.children,
+          ),
         ),
       ),
       actions: [

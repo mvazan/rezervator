@@ -158,6 +158,33 @@ Future<bool> tryAction(
   }
 }
 
+/// Closes the dialog [context] lives in, handing [result] back to whoever
+/// awaits `showDialog`.
+///
+/// Not the same as `Navigator.pop`, which pops whatever is on TOP — and
+/// after an await that need not be this dialog. Tapping a dropdown while
+/// „Ukládám…" runs pushes its menu above the dialog, so the save's pop
+/// landed on the MENU: a result of the wrong type, thrown mid-pop, leaving
+/// the navigator half-popped — the menu still on screen while the dialog
+/// already counts as the top route, the next tap popping the wrong thing
+/// again, and the back button finally finding no route at all (Sentry
+/// REZERVATOR-4/5/6 in 1.2.4, all three from one save).
+///
+/// So: close anything that opened on top of us, then pop OUR route.
+void closeDialog<T>(BuildContext context, [T? result]) {
+  final route = ModalRoute.of(context);
+  if (route == null) {
+    // Not inside a route (a form hosted straight on a page) — nothing of
+    // ours to find; leave it to the navigator.
+    Navigator.of(context).pop(result);
+    return;
+  }
+  final navigator = route.navigator;
+  if (navigator == null || !route.isActive) return; // already gone
+  if (!route.isCurrent) navigator.popUntil((r) => r == route);
+  navigator.pop(result);
+}
+
 /// Standard confirm dialog; resolves to true when [confirmLabel] was tapped.
 Future<bool> confirmDialog(
   BuildContext context, {
