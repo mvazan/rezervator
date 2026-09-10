@@ -575,6 +575,13 @@ class _BookingDialogState extends ConsumerState<_BookingDialog> {
   @override
   Widget build(BuildContext context) {
     final candidates = _candidates();
+    // The cap warning takes three lines, and while the keyboard is up the
+    // whole dialog has some 455px — three lines is two names fewer. So it
+    // steps aside during the search and comes back the moment the keyboard
+    // goes, which is when it is actually read: picking a name closes the
+    // keyboard, and Rezervovat is the next tap.
+    final warning =
+        MediaQuery.viewInsetsOf(context).bottom > 0 ? null : _limitWarning();
     return AlertDialog(
       title: const Text('Rezervovat termín?'),
       // A fixed width: the dialog sizes its content by intrinsic width,
@@ -600,52 +607,70 @@ class _BookingDialogState extends ConsumerState<_BookingDialog> {
               ),
               onChanged: (_) => setState(() {}),
             ),
-            ?switch (_limitWarning()) {
-              null => null,
-              final warning => Padding(
-                  padding: const EdgeInsets.only(top: 12),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Icon(Icons.warning_amber_outlined,
-                          color: Theme.of(context).colorScheme.tertiary),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          warning,
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
+            if (warning != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.warning_amber_outlined,
+                        color: Theme.of(context).colorScheme.tertiary),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        warning,
+                        style: Theme.of(context).textTheme.bodySmall,
                       ),
-                    ],
-                  ),
-                ),
-            },
-            const SizedBox(height: 8),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 220),
-              child: candidates.isEmpty
-                  ? const Padding(
-                      padding: EdgeInsets.all(12),
-                      child: Text('Nikdo neodpovídá hledání.'),
-                    )
-                  : ListView(
-                      shrinkWrap: true,
-                      children: [
-                        for (final c in candidates)
-                          ListTile(
-                            dense: true,
-                            contentPadding: EdgeInsets.zero,
-                            title: Text(c.title),
-                            subtitle:
-                                c.nick.isEmpty ? null : Text('„${c.nick}“'),
-                            selected: c.id == _playerId,
-                            trailing: c.id == _playerId
-                                ? const Icon(Icons.check)
-                                : null,
-                            onTap: () => setState(() => _playerId = c.id),
-                          ),
-                      ],
                     ),
+                  ],
+                ),
+              ),
+            const SizedBox(height: 8),
+            // Flexible, not a bare 220: a Column hands a child the height it
+            // asks for whatever room is left, so a fixed list under the
+            // message, the field and the warning simply ran out of the
+            // dialog — the names were painted across the page behind it and
+            // Zrušit with Rezervovat sat on top of them. The list now takes
+            // what is left over and scrolls the rest.
+            Flexible(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 220),
+                child: candidates.isEmpty
+                    ? const Padding(
+                        padding: EdgeInsets.all(12),
+                        child: Text('Nikdo neodpovídá hledání.'),
+                      )
+                    : ListView(
+                        shrinkWrap: true,
+                        // Reaching for the names means the typing is done:
+                        // letting the keyboard go hands the dialog back some
+                        // 330px, and the list grows into them.
+                        keyboardDismissBehavior:
+                            ScrollViewKeyboardDismissBehavior.onDrag,
+                        children: [
+                          for (final c in candidates)
+                            ListTile(
+                              dense: true,
+                              contentPadding: EdgeInsets.zero,
+                              title: Text(c.title),
+                              subtitle:
+                                  c.nick.isEmpty ? null : Text('„${c.nick}“'),
+                              selected: c.id == _playerId,
+                              trailing: c.id == _playerId
+                                  ? const Icon(Icons.check)
+                                  : null,
+                              onTap: () {
+                                // Picked — the search is over. The keyboard
+                                // goes, the dialog gets its height back, and
+                                // the cap warning (if any) is there to read
+                                // before Rezervovat.
+                                FocusScope.of(context).unfocus();
+                                setState(() => _playerId = c.id);
+                              },
+                            ),
+                        ],
+                      ),
+              ),
             ),
           ],
         ),
