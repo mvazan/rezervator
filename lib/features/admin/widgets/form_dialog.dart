@@ -71,11 +71,18 @@ class _FormDialogState<T> extends State<FormDialog<T>> {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: Text(widget.title),
+      // The fields go quiet while „Ukládám…" runs: the values are already
+      // on their way to the server, so an edit made now would be silently
+      // dropped — and a dropdown opened now would land its menu on top of
+      // a dialog that is about to close itself.
       content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: widget.crossAxisAlignment,
-          children: widget.children,
+        child: AbsorbPointer(
+          absorbing: _saving,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: widget.crossAxisAlignment,
+            children: widget.children,
+          ),
         ),
       ),
       actions: [
