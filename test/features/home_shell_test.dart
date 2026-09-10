@@ -395,6 +395,35 @@ void main() {
       expect(find.text(rangeLabel(paged, paged.addDays(6))), findsOneWidget);
     });
 
+    // Rotating a phone crosses the 600dp breakpoint, so the shell swaps
+    // bottom tabs for a rail — and the calendar underneath must not take
+    // that as a reason to start over on this week.
+    testWidgets('turning the phone sideways keeps the paged week',
+        (tester) async {
+      phone(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+
+      final monday = today.addDays(1 - today.weekday);
+      await tester.tap(find.byIcon(Icons.chevron_right));
+      await tester.pumpAndSettle();
+      final paged = monday.addDays(7);
+      expect(find.text(rangeLabel(paged, paged.addDays(6))), findsOneWidget);
+
+      // The same phone, turned sideways.
+      tester.view.physicalSize = const Size(800, 400);
+      await tester.pumpAndSettle();
+      expect(find.byType(NavigationRail), findsOneWidget,
+          reason: 'the layout did change — that is the point');
+      expect(find.text(rangeLabel(paged, paged.addDays(6))), findsOneWidget,
+          reason: 'the week the user chose survives the rotation');
+
+      // And back again.
+      tester.view.physicalSize = const Size(400, 800);
+      await tester.pumpAndSettle();
+      expect(find.text(rangeLabel(paged, paged.addDays(6))), findsOneWidget);
+    });
+
     // Můj přehled is the first destination — the personal view leads, the
     // calendar follows. The order lives in HomeView's declaration, which
     // also indexes the IndexedStack, so a swap that forgot the children

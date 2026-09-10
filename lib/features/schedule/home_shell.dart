@@ -35,6 +35,16 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   /// running app to the other view.
   HomeView? _atLaunch;
 
+  /// The body's own identity, so the LAYOUT may move it without the app
+  /// starting over. Turning a phone sideways crosses the 600dp breakpoint:
+  /// bottom tabs give way to a rail, and the body goes from being the
+  /// SafeArea's child to sitting in a Row beside that rail. That is a
+  /// different place in the tree, so without a key Flutter builds the whole
+  /// thing afresh — and the calendar underneath loses the week the user had
+  /// paged to, snapping back to the current one mid-rotation. With the key
+  /// the subtree is MOVED, State and all.
+  final _bodyKey = GlobalKey();
+
   /// Superadmin's way back from a foreign kuželna (0015): switch the
   /// membership home and re-create every tenant-scoped stream.
   Future<void> _goHome(BuildContext context, String homeTenantId) async {
@@ -99,6 +109,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       ],
     );
     final body = Column(
+      key: _bodyKey,
       children: [
         if (offline)
           MaterialBanner(
