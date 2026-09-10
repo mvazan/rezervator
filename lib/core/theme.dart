@@ -52,6 +52,11 @@ class ContrastLevel extends ThemeExtension<ContrastLevel> {
         ? (container.withValues(alpha: alpha), onContainer)
         : (container, onContainer);
 
+/// The app's typeface, bundled in assets/fonts. Named once because it has
+/// to be repeated wherever a widget REPLACES the ambient text style rather
+/// than merging with it (buttons — see filledButtonTheme below).
+const appFontFamily = 'Manrope';
+
 /// Builds the light or dark [ThemeData] for [brightness]. [contrastLevel]
 /// feeds `ColorScheme.fromSeed` (0 = normal, 1 = Material's own maximum
 /// contrast) for the high-contrast appearance choices.
@@ -116,7 +121,7 @@ ThemeData buildTheme(Brightness brightness, {double contrastLevel = 0}) {
   return ThemeData(
     colorScheme: scheme,
     useMaterial3: true,
-    fontFamily: 'Manrope',
+    fontFamily: appFontFamily,
     textTheme: textTheme,
     scaffoldBackgroundColor: scheme.surfaceContainerLowest,
     appBarTheme: AppBarTheme(
@@ -167,7 +172,16 @@ ThemeData buildTheme(Brightness brightness, {double contrastLevel = 0}) {
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
         shape:
             RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        textStyle: const TextStyle(fontWeight: FontWeight.w700),
+        // The family has to be repeated here. A button hands its resolved
+        // textStyle to `Material(textStyle:)`, which REPLACES the ambient
+        // DefaultTextStyle instead of merging with it — so a style that
+        // names only a weight loses the app's font, and every Uložit was
+        // being drawn in the platform's default (Roboto) while the dialog
+        // around it was Manrope.
+        textStyle: const TextStyle(
+          fontFamily: appFontFamily,
+          fontWeight: FontWeight.w700,
+        ),
       ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
