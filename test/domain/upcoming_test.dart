@@ -68,6 +68,38 @@ void main() {
     );
   });
 
+  // The youth squad shares its club's name in the federation's schedule, so
+  // the import marks ours with a suffix (TEAM_SUFFIXES in
+  // tool/import_matches.py). Following one squad must then leave the other
+  // out — the overview matches a team by its exact name, which is what
+  // makes the split by competition work at all.
+  test('a followed squad does not drag its namesake along', () {
+    final slots = [
+      match('a', today, const HourMinute(11, 30), home: 'TJ Sokol Husovice'),
+      match('d', today, const HourMinute(9, 30),
+          home: 'TJ Sokol Husovice (dorost)'),
+    ];
+    List<String> idsFor(List<String> teams) => [
+          for (final day in upcomingTimeline(
+            reservations: const [],
+            blocks: const [b1],
+            slots: slots,
+            teams: teams,
+            today: today,
+          ))
+            for (final item in day.items)
+              if (item is UpcomingMatch) item.slot.id,
+        ];
+
+    expect(idsFor(const ['TJ Sokol Husovice']), ['a']);
+    expect(idsFor(const ['TJ Sokol Husovice (dorost)']), ['d']);
+    expect(
+      idsFor(const ['TJ Sokol Husovice', 'TJ Sokol Husovice (dorost)']),
+      ['d', 'a'],
+      reason: 'both followed, both shown, in the order they are played',
+    );
+  });
+
   test('two own trainings tied on date and start (same block) break by '
       'lane, lower first', () {
     final days = upcomingTimeline(

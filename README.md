@@ -61,4 +61,7 @@ nepřišel, a měsíční docházku si stáhne jako CSV.
   vybereš `--tenant` jménem nebo `--tenant-id` uuid. Délka zápasu je pevná
   podle soutěže (KP2 90 min, KP1 150 min, dorost 90 min, jinak — divize a
   ligy — `--duration`, výchozí 180 min); `--length "KP1 Sever=210"` přebije
-  jednu soutěž ručně.
+  jednu soutěž ručně. V soutěžích, kde by náš tým splynul s áčkem, dostane
+  jméno příponu (`TEAM_SUFFIXES`, dnes `dorost` → „TJ Sokol Husovice
+  (dorost)“) — appka drží týmy podle jména, takže se tím dorost stane
+  vlastním týmem v Moje týmy i v kalendáři. Soupeř si nechává jméno holé.

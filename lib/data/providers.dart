@@ -293,11 +293,26 @@ final calendarAvailableProvider =
 /// of every home match and the away team of every away match, Czech-sorted.
 /// The pick list for "which matches go to my calendar" — no admin upkeep,
 /// always exactly the teams that have matches in the schedule.
+///
+/// Only matches from the federation's SCHEDULE (`import_key`) name teams
+/// here. A match the admin typed in by hand is usually an event rather than
+/// a fixture — „Husky – přátelák", „PMN – 1.turnaj" — and its two halves
+/// are not teams anyone follows, but they used to fill the picker all the
+/// same. An alley that enters everything by hand still gets a list: without
+/// a single imported match, every match names teams again, or the feature
+/// would quietly vanish there.
 final ourTeamsProvider = Provider<List<String>>((ref) {
-  final teams = <String>{
+  final matches = [
     for (final s in ref.watch(prioritySlotsProvider))
-      if (s.type.isMatch && s.parentId == null)
-        if (s.isAway) s.awayTeam else s.homeTeam,
+      if (s.type.isMatch && s.parentId == null) s,
+  ];
+  final imported = [
+    for (final s in matches)
+      if (s.imported) s,
+  ];
+  final teams = <String>{
+    for (final s in imported.isEmpty ? matches : imported)
+      if (s.isAway) s.awayTeam else s.homeTeam,
   }..remove('');
   return teams.toList()..sort(compareCzech);
 });
