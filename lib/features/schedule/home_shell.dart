@@ -2,8 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/ui.dart';
+import '../../data/clock.dart';
 import '../../data/providers.dart';
+import '../../domain/labels.dart';
 import '../../domain/models.dart';
+import '../../domain/schedule.dart';
 import '../admin/admin_screen.dart';
 import '../profile/profile_screen.dart';
 import 'my_trainings_screen.dart';
@@ -103,6 +106,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
             leading: const Icon(Icons.cloud_off_outlined),
             actions: const [SizedBox.shrink()],
           ),
+        const _ReservationLimitBanner(),
         if (visiting)
           MaterialBanner(
             content: Text(
@@ -195,6 +199,40 @@ class _HomeShellState extends ConsumerState<HomeShell> {
               )
             : null,
       ),
+    );
+  }
+}
+
+/// Why no ＋ shows up anywhere: at the alley's cap on live reservations both
+/// views simply stop offering free slots, which without a word reads as a
+/// broken screen. A leaf of its own, so the minute tick it needs to know
+/// what "future" means repaints this strip and not the whole shell; the
+/// count and the cap are already streamed for the calendar itself, so it
+/// costs no new subscription either.
+class _ReservationLimitBanner extends ConsumerWidget {
+  const _ReservationLimitBanner();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final profile = ref.watch(myProfileProvider).value;
+    final settings = ref.watch(settingsProvider).value;
+    if (profile == null || settings == null) return const SizedBox.shrink();
+    // An ADMIN is never stopped by the cap — create_reservation skips the
+    // limit for them — so telling them "another one will go once this one
+    // is over" would simply be false. What they get instead is a warning in
+    // the booking dialog, about whoever they are booking for.
+    if (profile.isAdmin) return const SizedBox.shrink();
+    final now = ref.watch(nowProvider).value ?? DateTime.now();
+    final count = activeReservationCount(
+      ref.watch(myActiveReservationsProvider).value ?? const [],
+      profile.id,
+      Day.fromDateTime(now),
+    );
+    if (!atReservationLimit(count, settings)) return const SizedBox.shrink();
+    return MaterialBanner(
+      content: Text(reservationLimitNote(settings.maxActiveReservations)),
+      leading: const Icon(Icons.info_outline),
+      actions: const [SizedBox.shrink()],
     );
   }
 }

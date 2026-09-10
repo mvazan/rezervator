@@ -5,6 +5,7 @@ import '../../core/ui.dart';
 import '../../data/providers.dart';
 import '../../domain/calendar_layout.dart' show hourMinuteAt;
 import '../../domain/collation.dart';
+import '../../domain/labels.dart';
 import '../../domain/models.dart';
 import '../../domain/schedule.dart';
 import '../admin/widgets/block_dialog.dart';
@@ -158,6 +159,7 @@ class ScheduleActions {
           message: message,
           me: me,
           players: ref.read(playersProvider).value ?? const [],
+          settings: ref.read(settingsProvider).value,
         ),
       );
     } else {
@@ -486,22 +488,27 @@ class ScheduleActions {
 /// the picker is a search field — focused on open, so the phone keyboard
 /// is up at once — matching the name or the board nick, over a short list
 /// to tap. Pops the chosen player's id, or null on cancel.
-class _BookingDialog extends StatefulWidget {
+class _BookingDialog extends ConsumerStatefulWidget {
   const _BookingDialog({
     required this.message,
     required this.me,
     required this.players,
+    required this.settings,
   });
 
   final String message;
   final Profile me;
   final List<PlayerName> players;
 
+  /// For the cap: `create_reservation` lets an ADMIN book past
+  /// `max_active_reservations` — the dialog warns instead of refusing.
+  final ScheduleSettings? settings;
+
   @override
-  State<_BookingDialog> createState() => _BookingDialogState();
+  ConsumerState<_BookingDialog> createState() => _BookingDialogState();
 }
 
-class _BookingDialogState extends State<_BookingDialog> {
+class _BookingDialogState extends ConsumerState<_BookingDialog> {
   late String _playerId = widget.me.id;
   final _query = TextEditingController();
 
@@ -539,6 +546,32 @@ class _BookingDialogState extends State<_BookingDialog> {
               ?.displayName ??
           '';
 
+  /// The chosen player's name for a sentence about THEM; the admin's own
+  /// name when they are the choice, which only the null branch of
+  /// [reservationLimitAdminNote] ever needs to avoid.
+  String get _selectedFullName => _playerId == widget.me.id
+      ? widget.me.displayName
+      : widget.players
+              .where((p) => p.id == _playerId)
+              .firstOrNull
+              ?.displayName ??
+          '';
+
+  /// The cap warning for whoever is chosen right now, or null while the
+  /// count is still loading, failed, or leaves them under the cap. Failing
+  /// silently is the honest fallback: the RPC would take the booking either
+  /// way, so a count the app could not fetch must not stand in the way.
+  String? _limitWarning() {
+    final settings = widget.settings;
+    if (settings == null) return null;
+    final count =
+        ref.watch(activeReservationCountProvider(_playerId)).value;
+    if (count == null || !atReservationLimit(count, settings)) return null;
+    return reservationLimitAdminNote(
+        _playerId == widget.me.id ? null : _selectedFullName,
+        settings.maxActiveReservations);
+  }
+
   @override
   Widget build(BuildContext context) {
     final candidates = _candidates();
@@ -567,6 +600,26 @@ class _BookingDialogState extends State<_BookingDialog> {
               ),
               onChanged: (_) => setState(() {}),
             ),
+            ?switch (_limitWarning()) {
+              null => null,
+              final warning => Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.warning_amber_outlined,
+                          color: Theme.of(context).colorScheme.tertiary),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          warning,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            },
             const SizedBox(height: 8),
             ConstrainedBox(
               constraints: const BoxConstraints(maxHeight: 220),

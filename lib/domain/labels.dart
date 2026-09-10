@@ -52,3 +52,21 @@ String eventBandLabel(OffBlockEvent e) {
   };
   return '$label · ${e.start.display()}–${e.end.display()}';
 }
+
+/// Why the ＋ is gone. The alley caps how many live future reservations one
+/// player may hold (`max_active_reservations`); create_reservation refuses
+/// anything past it with `limit_reached`, and the app simply stops offering
+/// free slots — which, without a word, reads as a broken screen.
+String reservationLimitNote(int max) =>
+    'Máš maximální počet rezervací ($max). Další půjde, až jedna proběhne '
+    'nebo ji zrušíš.';
+
+/// The same fact in an ADMIN's booking dialog, where the cap is a warning
+/// and not a wall: create_reservation lets an admin book past it. [player]
+/// is null when the admin is booking for themself — "Admin Local už má…"
+/// about oneself reads like a note about a stranger.
+String reservationLimitAdminNote(String? player, int max) => player == null
+    ? 'Máš už maximální počet rezervací ($max). Jako správce si ji můžeš '
+        'vytvořit i tak.'
+    : '$player už má maximální počet rezervací ($max). Jako správce ji můžeš '
+        'vytvořit i tak.';
