@@ -84,6 +84,18 @@ EXCEL_EPOCH = dt.datetime(1899, 12, 30)
 TIER_DURATIONS = [('KP2', 90), ('KP1', 150), ('dorost', 90)]
 
 
+# Squads that share their club's name. The federation lists the youth team
+# as plain "TJ Sokol Husovice" — the very string the men's A team uses — so
+# a player following one follows both, in Můj přehled and in their Google
+# calendar alike. OUR teams in these competitions get a suffix, which makes
+# the squad a team of its own everywhere the app keys by name: its own row
+# in Moje týmy, its own colour, its own calendar. The opponent keeps its
+# plain name — "KK Vyškov – TJ Sokol Husovice (dorost)" already says which
+# of ours is playing, and suffixing both halves would only make every title
+# longer.
+TEAM_SUFFIXES = [('dorost', ' (dorost)')]
+
+
 # --- workbook: .xlsx --------------------------------------------------------
 
 Cells = Dict[Tuple[int, int], object]
@@ -518,6 +530,23 @@ def classify(matches: List[Match], alley: str, teams: List[str]) -> List[Match]:
     return picked
 
 
+def apply_team_suffixes(matches: List[Match], teams: List[str]) -> Dict[str, str]:
+    """Marks our squad in the competitions of TEAM_SUFFIXES; returns
+    {competition: suffix} for the report."""
+    used: Dict[str, str] = {}
+    for m in matches:
+        suffix = next((s for needle, s in TEAM_SUFFIXES
+                       if needle.lower() in m.competition.lower()), None)
+        if suffix is None:
+            continue
+        used[m.competition] = suffix
+        if ours(m.home, teams) and not m.home.endswith(suffix):
+            m.home += suffix
+        if ours(m.away, teams) and not m.away.endswith(suffix):
+            m.away += suffix
+    return used
+
+
 def assign_durations(matches: List[Match], fallback: int,
                      overrides: Dict[str, int]) -> Dict[str, int]:
     """--length override → competition tier → fallback; returns
@@ -855,6 +884,7 @@ def main() -> int:
             args.alley, ', '.join(sorted({m.alley for m in all_matches}))), file=sys.stderr)
         return 2
     matches = classify(all_matches, args.alley, args.teams)
+    suffixes = apply_team_suffixes(matches, args.teams)
     durations = assign_durations(matches, args.duration, overrides)
     unknown = [m for m in matches if m.time is None]
     matches = [m for m in matches if m.time is not None]
@@ -870,6 +900,9 @@ def main() -> int:
                 else 'tier' if any(n.lower() in comp.lower() for n, _ in TIER_DURATIONS)
                 else 'fallback (divize/liga)')
         print('  %-14s %s  (%s)' % (comp, fmt_minutes(durations[comp]), note))
+    for comp in sorted(suffixes):
+        print('%-14s naše týmy nesou „%s" (jinak by splynuly s A týmem)'
+              % (comp, suffixes[comp].strip()))
     print()
     for m in matches:
         end, clamped = add_minutes(m.time, m.duration)
