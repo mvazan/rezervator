@@ -43,6 +43,18 @@ String changelogHeading(Release r, {required bool web}) {
 }
 
 const appChangelog = <Release>[
+  Release('1.2.5', '10. 9. 2026', [
+    'Na kiosku vybíráš jméno z mřížky v barvách oddílů a vede v ní '
+        'přezdívka.',
+    'V rezervačním dialogu se jména vejdou i s klávesnicí a okno při psaní '
+        'neskáče.',
+    'Vyčerpaný limit rezervací je vidět rovnou — i správci, než rezervaci '
+        'hráči vytvoří.',
+    'Schválení hráče se projeví hned, bez obnovení.',
+    'Hlášky z dialogu se ukazují nad ním, ne pod klávesnicí.',
+    'Uložení dialogu už neshodí appku.',
+    'Zápasy z rozpisu jsou označené a ruční úpravy import nepřepíše.',
+  ]),
   Release('1.2.4', '8. 9. 2026', [
     'Můj přehled je první tab, kalendář druhý.',
     'Oba pohledy mají stejnou hlavičku — ikony profilu a správy '
