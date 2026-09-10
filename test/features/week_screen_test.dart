@@ -324,6 +324,31 @@ void main() {
     expect(find.text('Vybráno: Květa Malá'), findsOneWidget);
   });
 
+  testWidgets('the cap warning waits for the keyboard to go', (tester) async {
+    reporterPhone(tester);
+    await tester.pumpWidget(app(
+      profile: admin,
+      roster: crowd,
+      activeCounts: const {'me': 3},
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.add).first);
+    await tester.pumpAndSettle();
+
+    // Three lines of warning while searching would be two names fewer.
+    expect(find.textContaining('maximální počet rezervací'), findsNothing);
+
+    // Picking a name closes the keyboard; the dialog gets its height back
+    // and the warning is there to read before Rezervovat.
+    tester.view.viewInsets = FakeViewPadding.zero;
+    await tester.pumpAndSettle();
+    expect(
+        find.text('Máš už maximální počet rezervací (3). Jako správce si ji '
+            'můžeš vytvořit i tak.'),
+        findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('player search matches the name or the board nick, '
       'tapping picks the player', (tester) async {
     wideSurface(tester);

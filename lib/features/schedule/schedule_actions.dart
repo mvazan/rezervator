@@ -575,7 +575,13 @@ class _BookingDialogState extends ConsumerState<_BookingDialog> {
   @override
   Widget build(BuildContext context) {
     final candidates = _candidates();
-    final warning = _limitWarning();
+    // The cap warning takes three lines, and while the keyboard is up the
+    // whole dialog has some 455px — three lines is two names fewer. So it
+    // steps aside during the search and comes back the moment the keyboard
+    // goes, which is when it is actually read: picking a name closes the
+    // keyboard, and Rezervovat is the next tap.
+    final warning =
+        MediaQuery.viewInsetsOf(context).bottom > 0 ? null : _limitWarning();
     return AlertDialog(
       title: const Text('Rezervovat termín?'),
       // A fixed width: the dialog sizes its content by intrinsic width,
@@ -653,8 +659,14 @@ class _BookingDialogState extends ConsumerState<_BookingDialog> {
                               trailing: c.id == _playerId
                                   ? const Icon(Icons.check)
                                   : null,
-                              onTap: () =>
-                                  setState(() => _playerId = c.id),
+                              onTap: () {
+                                // Picked — the search is over. The keyboard
+                                // goes, the dialog gets its height back, and
+                                // the cap warning (if any) is there to read
+                                // before Rezervovat.
+                                FocusScope.of(context).unfocus();
+                                setState(() => _playerId = c.id);
+                              },
                             ),
                         ],
                       ),
