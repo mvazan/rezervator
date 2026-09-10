@@ -124,9 +124,14 @@ void main() {
     Profile profile = me,
     List<Widget> trailing = const [],
     List<PlayerName> roster = players,
+    Map<String, int> activeCounts = const {},
   }) {
     return ProviderScope(
       overrides: [
+        // What Api.activeReservationCount would answer: the cap counts every
+        // future date, which the drawn week alone cannot know.
+        activeReservationCountProvider
+            .overrideWith((ref, playerId) async => activeCounts[playerId] ?? 0),
         settingsProvider.overrideWith((ref) => Stream.value(settings)),
         timeBlocksProvider.overrideWith((ref) => Stream.value(blocks)),
         dayOverridesProvider.overrideWith((ref) => Stream.value(overrides)),
@@ -281,6 +286,68 @@ void main() {
     expect(find.text('Nikdo neodpovídá hledání.'), findsOneWidget);
     // The pick survives a search that hides it.
     expect(find.text('Vybráno: Šimon Řezáč'), findsOneWidget);
+  });
+
+  // create_reservation lets an ADMIN book past max_active_reservations
+  // (the limit branch is skipped for admins) — so the dialog warns and
+  // still books, rather than hiding the player or refusing.
+  testWidgets('a player at the cap is flagged in the booking dialog, and the '
+      'admin can book anyway', (tester) async {
+    wideSurface(tester);
+    await tester.pumpWidget(app(
+      profile: admin,
+      roster: const [
+        PlayerName(id: 'p2', displayName: 'Petr Novák'),
+        PlayerName(id: 'p3', displayName: 'Eva Malá'),
+      ],
+      // settings.maxActiveReservations is 3 in this suite.
+      activeCounts: const {'p2': 3, 'p3': 1},
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.add).first);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('maximální počet rezervací'), findsNothing,
+        reason: 'já holds nothing here');
+
+    await tester.tap(find.widgetWithText(ListTile, 'Petr Novák'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Petr Novák už má maximální počet rezervací (3). '
+          'Jako správce ji můžeš vytvořit i tak.'),
+      findsOneWidget,
+    );
+    // Warned, not blocked.
+    expect(
+      tester
+          .widget<FilledButton>(find.widgetWithText(FilledButton, 'Rezervovat'))
+          .onPressed,
+      isNotNull,
+    );
+
+    // Someone under the cap draws no warning.
+    await tester.tap(find.widgetWithText(ListTile, 'Eva Malá'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('maximální počet rezervací'), findsNothing);
+  });
+
+  // An admin at their own cap is warned in the second person — "Já Hráč už
+  // má maximální počet rezervací" reads like a note about a stranger.
+  testWidgets('an admin at their own cap is told so in their own words',
+      (tester) async {
+    wideSurface(tester);
+    await tester.pumpWidget(app(
+      profile: admin,
+      activeCounts: const {'me': 3},
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.add).first);
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('Máš už maximální počet rezervací (3). Jako správce si ji '
+          'můžeš vytvořit i tak.'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('admin booking dialog marks players without an account', (

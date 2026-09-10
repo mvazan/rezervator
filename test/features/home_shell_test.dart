@@ -79,7 +79,21 @@ void main() {
     homeTenantId: 't-home',
   );
 
-  Widget app({Profile profile = me, Stream<Profile>? profileStream}) =>
+  Reservation res(String id, Day date) => Reservation(
+        id: id,
+        playerId: me.id,
+        date: date,
+        blockId: 'b1',
+        lane: 1,
+        createdVia: 'app',
+        createdAt: DateTime.utc(2026, 1, 1),
+      );
+
+  Widget app({
+    Profile profile = me,
+    Stream<Profile>? profileStream,
+    List<Reservation> mine = const [],
+  }) =>
       ProviderScope(
         overrides: [
           settingsProvider.overrideWith((ref) => Stream.value(settings)),
@@ -90,9 +104,7 @@ void main() {
           weekReservationsProvider.overrideWith(
             (ref, monday) => StreamController<List<Reservation>>().stream,
           ),
-          myActiveReservationsProvider.overrideWith(
-            (ref) => Stream.value(const []),
-          ),
+          myActiveReservationsProvider.overrideWith((ref) => Stream.value(mine)),
           myProfileProvider.overrideWith(
             (ref) => profileStream ?? Stream.value(profile),
           ),
@@ -112,6 +124,74 @@ void main() {
     // Logout now lives on the profile screen, not the AppBar.
     expect(find.byIcon(Icons.logout), findsNothing);
     expect(find.byIcon(Icons.account_circle_outlined), findsOneWidget);
+  });
+
+  // At the cap both views stop offering ＋ — without a word, that reads as a
+  // broken screen. The banner is the word. settings.maxActiveReservations
+  // is 3 in this suite.
+  testWidgets('the reservation cap is announced, and only at the cap',
+      (tester) async {
+    await tester.pumpWidget(app(mine: [
+      res('r1', today),
+      res('r2', today.addDays(1)),
+      res('r3', today.addDays(2)),
+    ]));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Máš maximální počet rezervací (3). Další půjde, až jedna '
+          'proběhne nebo ji zrušíš.'),
+      findsOneWidget,
+    );
+
+  });
+
+  // The cap does not bind an admin: create_reservation lets them book past
+  // it, so the banner's promise ("another one once this is over") would be
+  // a lie. They get the booking dialog's warning instead.
+  testWidgets('…and never to an admin, whom the cap does not stop',
+      (tester) async {
+    const boss = Profile(
+      id: 'me',
+      displayName: 'Správce',
+      email: 'admin@example.com',
+      role: Role.admin,
+      status: ProfileStatus.approved,
+    );
+    await tester.pumpWidget(app(profile: boss, mine: [
+      res('r1', today),
+      res('r2', today.addDays(1)),
+      res('r3', today.addDays(2)),
+    ]));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('maximální počet rezervací'), findsNothing);
+  });
+
+  // A second pumpWidget would keep the first ProviderScope's overrides, so
+  // "under the cap" is a test of its own.
+  testWidgets('…and stays quiet under the cap', (tester) async {
+    await tester.pumpWidget(app(mine: [res('r1', today), res('r2', today)]));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('maximální počet rezervací'), findsNothing);
+  });
+
+  testWidgets('a cancelled or past reservation does not count towards the cap',
+      (tester) async {
+    await tester.pumpWidget(app(mine: [
+      res('r1', today),
+      res('r2', today.addDays(-1)), // played
+      Reservation(
+        id: 'r3',
+        playerId: me.id,
+        date: today.addDays(3),
+        blockId: 'b1',
+        lane: 1,
+        createdVia: 'app',
+        createdAt: DateTime.utc(2026, 1, 1),
+        cancelledAt: DateTime.utc(2026, 9, 1),
+      ),
+    ]));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('maximální počet rezervací'), findsNothing);
   });
 
   testWidgets('a regular member sees no visiting banner', (tester) async {

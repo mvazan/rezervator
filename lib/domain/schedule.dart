@@ -479,6 +479,12 @@ int activeReservationCount(
             r.playerId == playerId && r.isLive && !r.date.isBefore(today))
         .length;
 
+/// The cap create_reservation measures [activeCount] against: at it, the
+/// RPC answers `limit_reached` — for everyone but an admin, who may book
+/// past it on a player's behalf (and is warned instead).
+bool atReservationLimit(int activeCount, ScheduleSettings settings) =>
+    activeCount >= settings.maxActiveReservations;
+
 /// Client-side mirror of create_reservation's rules — honest UI only,
 /// the RPC remains the authority.
 bool canBook({
@@ -491,7 +497,7 @@ bool canBook({
   if (isAdmin) return true;
   return !state.inPast &&
       !state.beyondHorizon &&
-      myActiveCount < settings.maxActiveReservations;
+      !atReservationLimit(myActiveCount, settings);
 }
 
 /// Own reservation whose block has not started yet may be cancelled in-app;

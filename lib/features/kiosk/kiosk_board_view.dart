@@ -18,6 +18,7 @@ import '../../data/clock.dart';
 import '../../data/providers.dart';
 import '../../data/week_schedule.dart';
 import '../../domain/calendar_layout.dart';
+import '../../domain/labels.dart';
 import '../../domain/models.dart';
 import '../../domain/schedule.dart';
 import '../schedule/widgets/calendar_board.dart';
@@ -290,7 +291,10 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
     }
     final headerHeight = boardHeaderHeight(maxHeaderEvents);
 
-    return LayoutBuilder(
+    // At the cap the board simply stops offering ＋, which on a kiosk —
+    // where the player has just tapped their own name and is waiting for
+    // something to happen — looks like a screen that will not work. Say why.
+    final board = LayoutBuilder(
       builder: (context, constraints) {
         final columnWidth = boardColumnWidth(constraints.maxWidth);
         // Two admin-selectable modes (settings.kioskFitDay):
@@ -423,6 +427,24 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
           ],
         );
       },
+    );
+
+    if (selected == null ||
+        !atReservationLimit(selectedCount, settings)) {
+      return board;
+    }
+    return Column(
+      children: [
+        MaterialBanner(
+          content: Text(
+            reservationLimitNote(settings.maxActiveReservations),
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          leading: const Icon(Icons.info_outline),
+          actions: const [SizedBox.shrink()],
+        ),
+        Expanded(child: board),
+      ],
     );
   }
 

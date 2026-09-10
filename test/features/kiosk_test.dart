@@ -232,7 +232,8 @@ void main() {
 
       // Anna already holds one live future reservation and the limit is
       // one: the board must not offer ＋ anywhere — create_reservation
-      // would only bounce it with limit_reached.
+      // would only bounce it with limit_reached — and it has to SAY so,
+      // or the kiosk just looks broken to whoever is standing there.
       await tester.pumpWidget(
         kioskApp(
           maxActiveReservations: 1,
@@ -242,13 +243,20 @@ void main() {
       await tester.pumpAndSettle();
       await selectAnna();
       expect(find.text('＋'), findsNothing);
+      expect(
+        find.textContaining('Máš maximální počet rezervací (1)'),
+        findsOneWidget,
+        reason: 'the missing ＋ has to be explained, not just missing',
+      );
       await finish(tester);
 
-      // Same limit, nothing booked yet: free slots offer ＋.
+      // Same limit, nothing booked yet: free slots offer ＋ and nobody is
+      // told about a cap they have not reached.
       await tester.pumpWidget(kioskApp(maxActiveReservations: 1));
       await tester.pumpAndSettle();
       await selectAnna();
       expect(find.text('＋'), findsWidgets);
+      expect(find.textContaining('maximální počet rezervací'), findsNothing);
       await finish(tester);
     },
   );

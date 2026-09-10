@@ -485,6 +485,21 @@ class Api {
         'p_lane': lane,
       });
 
+  /// Live future reservations a player holds — the count
+  /// `create_reservation` measures against `max_active_reservations`. The
+  /// board never has this: it knows the weeks it draws, while the cap counts
+  /// every date from today on, so an admin about to book for someone else
+  /// has to ask.
+  static Future<int> activeReservationCount(String playerId) async {
+    final rows = await _db
+        .from('reservations')
+        .select('id')
+        .eq('player_id', playerId)
+        .isFilter('cancelled_at', null)
+        .gte('date', Day.fromDateTime(DateTime.now()).toSql());
+    return rows.length;
+  }
+
   static Future<void> cancelReservation(String id,
           {String note = '', bool notify = true}) =>
       _db.rpc('cancel_reservation',
@@ -1135,6 +1150,13 @@ final myActiveReservationsProvider =
               .eq('player_id', uid))
       .map((rows) => rows.map(Reservation.fromJson).toList());
 });
+
+/// How many live future reservations [playerId] holds. Read when the admin's
+/// booking dialog needs to warn that a player is at the cap; autoDispose so
+/// every opening asks again rather than trusting a count from an hour ago.
+final activeReservationCountProvider =
+    FutureProvider.autoDispose.family<int, String>(
+        (ref, playerId) => Api.activeReservationCount(playerId));
 
 /// Monthly attendance rows (admin), keyed by (year, month) — the report
 /// screen watches this instead of holding a Future in its state, so a
