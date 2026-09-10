@@ -225,7 +225,7 @@ class _BlockDialogState extends State<BlockDialog> {
     );
     if (!mounted) return;
     if (done) {
-      Navigator.of(context).pop();
+      closeDialog(context);
     } else {
       setState(() => _saving = false);
     }
@@ -265,7 +265,7 @@ class _BlockDialogState extends State<BlockDialog> {
     );
     if (!mounted) return;
     if (done) {
-      Navigator.of(context).pop();
+      closeDialog(context);
     } else {
       setState(() => _saving = false);
     }
@@ -281,7 +281,7 @@ class _BlockDialogState extends State<BlockDialog> {
       success: 'Blok deaktivován.',
       errorText: friendlyDbError,
     );
-    if (done && mounted) Navigator.of(context).pop();
+    if (done && mounted) closeDialog(context);
   }
 
   Future<void> _save() async {
@@ -310,7 +310,7 @@ class _BlockDialogState extends State<BlockDialog> {
         day: _day,
         rows: const []);
     if (dry is DayEditNoOp) {
-      Navigator.of(context).pop();
+      closeDialog(context);
       return;
     }
     setState(() => _saving = true);
@@ -372,7 +372,7 @@ class _BlockDialogState extends State<BlockDialog> {
     );
     if (!mounted) return;
     if (ok) {
-      Navigator.of(context).pop();
+      closeDialog(context);
     } else {
       setState(() => _saving = false);
     }
@@ -529,7 +529,7 @@ class _BlockDialogState extends State<BlockDialog> {
     );
     if (!mounted) return;
     if (done) {
-      Navigator.of(context).pop();
+      closeDialog(context);
     } else {
       setState(() => _saving = false);
     }

@@ -7,6 +7,8 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../../../core/ui.dart';
+
 class FormDialog<T> extends StatefulWidget {
   const FormDialog({
     super.key,
@@ -57,7 +59,9 @@ class _FormDialogState<T> extends State<FormDialog<T>> {
     final result = await widget.onSave();
     if (!mounted) return;
     if (result != null) {
-      Navigator.of(context).pop(result);
+      // Not Navigator.pop: while the save ran, a dropdown menu may have
+      // opened over us, and popping the top route would hit THAT.
+      closeDialog(context, result);
     } else {
       setState(() => _saving = false);
     }
