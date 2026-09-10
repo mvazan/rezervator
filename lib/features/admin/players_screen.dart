@@ -16,15 +16,43 @@ import 'widgets/profile_picker_sheet.dart';
 class PlayersScreen extends ConsumerWidget {
   const PlayersScreen({super.key});
 
-  Future<void> _setRole(BuildContext context, Profile p, Role role) =>
-      tryAction(
+  /// Runs a change to a member's row and RE-READS the lists it touched.
+  ///
+  /// They are fed by a realtime stream, which is fine while the socket is
+  /// listening and silent when it is not — after a phone has slept, say. The
+  /// change then lands in the database and the screen does not move: Schválit
+  /// looks like it did nothing, and invites a second tap. What we changed
+  /// ourselves we do not wait to be told about.
+  Future<void> _change(
+    BuildContext context,
+    WidgetRef ref,
+    Future<void> Function() action, {
+    required String success,
+  }) async {
+    final ok = await tryAction(
+      context,
+      action,
+      success: success,
+      errorText: friendlyDbError,
+    );
+    if (!ok || !context.mounted) return;
+    // profiles draws this screen; the players view feeds the booking search
+    // and the kiosk board, and an approved member belongs in both.
+    ref.invalidate(profilesProvider);
+    ref.invalidate(playersProvider);
+  }
+
+  Future<void> _setRole(
+          BuildContext context, WidgetRef ref, Profile p, Role role) =>
+      _change(
         context,
+        ref,
         () => Api.setRole(p.id, role),
         success: 'Hotovo.',
-        errorText: friendlyDbError,
       );
 
-  Future<void> _makeKiosk(BuildContext context, Profile p) async {
+  Future<void> _makeKiosk(
+      BuildContext context, WidgetRef ref, Profile p) async {
     final confirmed = await confirmDialog(
       context,
       title: 'Nastavit jako kiosk?',
@@ -33,10 +61,11 @@ class PlayersScreen extends ConsumerWidget {
       confirmLabel: 'Nastavit',
     );
     if (!confirmed || !context.mounted) return;
-    await _setRole(context, p, Role.kiosk);
+    await _setRole(context, ref, p, Role.kiosk);
   }
 
-  Future<void> _editNick(BuildContext context, Profile p) async {
+  Future<void> _editNick(
+      BuildContext context, WidgetRef ref, Profile p) async {
     final input = await promptText(
       context,
       title: 'Zkratka na tabuli',
@@ -44,25 +73,27 @@ class PlayersScreen extends ConsumerWidget {
       initial: p.nick,
     );
     if (input == null || !context.mounted) return;
-    await tryAction(
+    await _change(
       context,
+      ref,
       () => Api.setNick(p.id, input),
       success: 'Uloženo.',
-      errorText: friendlyDbError,
     );
   }
 
-  Future<void> _setClub(BuildContext context, Profile p, String? clubId) =>
-      tryAction(
+  Future<void> _setClub(
+          BuildContext context, WidgetRef ref, Profile p, String? clubId) =>
+      _change(
         context,
+        ref,
         () => Api.setPlayerClub(p.id, clubId),
         success: 'Uloženo.',
-        errorText: friendlyDbError,
       );
 
   /// Bottom sheet with a radio list of clubs; picking one saves immediately.
   Future<void> _pickClub(
     BuildContext context,
+    WidgetRef ref,
     Profile p,
     List<Club> clubs,
   ) async {
@@ -101,7 +132,7 @@ class PlayersScreen extends ConsumerWidget {
       ),
     );
     if (picked == null || !context.mounted) return;
-    if (picked.$1 != current) await _setClub(context, p, picked.$1);
+    if (picked.$1 != current) await _setClub(context, ref, p, picked.$1);
   }
 
   /// Add (no [existing]) or edit a hráč bez účtu. The kiosk roster is a
@@ -295,8 +326,9 @@ class PlayersScreen extends ConsumerWidget {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           FilledButton(
-                            onPressed: () => tryAction(
+                            onPressed: () => _change(
                               context,
+                              ref,
                               () => Api.approvePlayer(p.id),
                               success: 'Schváleno.',
                             ),
@@ -349,15 +381,15 @@ class PlayersScreen extends ConsumerWidget {
                             _addOrEditPlaceholder(context, ref, clubs,
                                 existing: p);
                           case 'club':
-                            _pickClub(context, p, clubs);
+                            _pickClub(context, ref, p, clubs);
                           case 'make_admin':
-                            _setRole(context, p, Role.admin);
+                            _setRole(context, ref, p, Role.admin);
                           case 'remove_admin':
-                            _setRole(context, p, Role.player);
+                            _setRole(context, ref, p, Role.player);
                           case 'make_kiosk':
-                            _makeKiosk(context, p);
+                            _makeKiosk(context, ref, p);
                           case 'edit_nick':
-                            _editNick(context, p);
+                            _editNick(context, ref, p);
                           case 'merge':
                             _mergePlaceholderIntoAccount(
                                 context, ref, p, profiles, clubs);

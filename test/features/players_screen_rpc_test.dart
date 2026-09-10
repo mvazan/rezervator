@@ -42,11 +42,16 @@ void main() {
 
   late List<http.Request> requests;
 
+  /// Lets a test move the SERVER on: the row an RPC changed comes back
+  /// changed the next time the screen reads it.
+  late void Function(http.Request) onRequest;
+
   setUpAll(() async {
     TestWidgetsFlutterBinding.ensureInitialized();
     SharedPreferences.setMockInitialValues({});
     final mock = MockClient((request) async {
       requests.add(request);
+      onRequest(request);
       return http.Response('{}', 200,
           headers: {'content-type': 'application/json'}, request: request);
     });
@@ -61,7 +66,10 @@ void main() {
     );
   });
 
-  setUp(() => requests = []);
+  setUp(() {
+    requests = [];
+    onRequest = (_) {};
+  });
 
   // One ProviderScope per test: a second pumpWidget does not swap overrides.
   Widget app(List<Profile> profiles) => ProviderScope(
@@ -127,5 +135,54 @@ void main() {
     expect(body['p_club_id'], 'c1'); // the only club there is
     expect(find.text('Sloučit hráče'), findsNothing);
     expect(find.text('Hráči sloučeni.'), findsOneWidget);
+  });
+
+  // Reported from the live app: Schválit did its work in the database and
+  // the pending card stayed put, so it read as "nothing happened" — the
+  // member was approved all along, and a reload proved it. The lists come
+  // from a realtime stream, and a stream that is not listening (a phone
+  // that slept, a tab that woke) says nothing. So the screen re-reads what
+  // it changed rather than waiting to be told.
+  testWidgets('Schválit re-reads the roster instead of waiting for the '
+      'stream to say so', (tester) async {
+    var rows = [admin, registrant];
+    onRequest = (r) {
+      if (r.url.path.endsWith('/rpc/approve_player')) {
+        // The database is now ahead of the screen, and nothing pushes.
+        rows = [
+          admin,
+          const Profile(
+            id: 'u1',
+            displayName: 'B. Kroupa',
+            email: 'b@example.com',
+            role: Role.player,
+            status: ProfileStatus.approved,
+          ),
+        ];
+      }
+    };
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        myProfileProvider.overrideWith((ref) => Stream.value(admin)),
+        // Reads `rows` when it is subscribed to — so a re-read sees the
+        // approval, and only a re-read does.
+        profilesProvider.overrideWith((ref) => Stream.value(rows)),
+        clubsProvider.overrideWith((ref) => Stream.value(clubs)),
+      ],
+      child: const MaterialApp(home: PlayersScreen()),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('Čekají na schválení'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Schválit'));
+    await tester.pumpAndSettle();
+
+    expect(bodyOf(rpc('approve_player')), {'p_user_id': 'u1'});
+    expect(find.text('Schváleno.'), findsOneWidget);
+    expect(find.text('Čekají na schválení'), findsNothing,
+        reason: 'the pending section went with the approval');
+    expect(find.widgetWithText(FilledButton, 'Schválit'), findsNothing);
+    expect(find.text('Hráči (2)'), findsOneWidget,
+        reason: 'and the member is counted among the players now');
   });
 }
