@@ -249,6 +249,81 @@ void main() {
     expect(find.widgetWithText(ListTile, 'já'), findsOneWidget);
   });
 
+  // The reporter's phone, to the pixel: 1080×2186 at 2.625, so 411×833 in
+  // logical pixels, of which the keyboard takes some 330 — the dialog is
+  // left with 455 to live in.
+  void reporterPhone(WidgetTester tester, {double keyboard = 330}) {
+    tester.view.physicalSize = const Size(1080, 2186);
+    tester.view.devicePixelRatio = 2.625;
+    tester.view.viewInsets = FakeViewPadding(bottom: keyboard * 2.625);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetViewInsets);
+  }
+
+  const crowd = [
+    PlayerName(id: 'me', displayName: 'Já Hráč'),
+    PlayerName(id: 'p2', displayName: 'Blanka Sedláková', nick: 'Blanka'),
+    PlayerName(id: 'p3', displayName: 'Dalibor Dvorník', nick: 'Dalas'),
+    PlayerName(id: 'p4', displayName: 'Tomáš Pavlů'),
+    PlayerName(id: 'p5', displayName: 'Petr Novák', nick: 'Péťa'),
+    PlayerName(id: 'p6', displayName: 'Bohumil Kroupa', nick: 'Bob'),
+    PlayerName(id: 'p7', displayName: 'Šimon Řezáč'),
+    PlayerName(id: 'p8', displayName: 'Květa Malá'),
+  ];
+
+  /// The dialog's own surface — an AlertDialog's box is the whole screen.
+  Rect dialogSurface(WidgetTester tester) => tester.getRect(find
+      .descendant(of: find.byType(Dialog), matching: find.byType(Material))
+      .first);
+
+  testWidgets('with the keyboard up the names stay inside the dialog, under a '
+      'search field that stays put', (tester) async {
+    reporterPhone(tester);
+    await tester.pumpWidget(app(profile: admin, roster: crowd));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.add).first);
+    await tester.pumpAndSettle();
+    expect(find.text('Rezervovat termín?'), findsOneWidget);
+    expect(tester.takeException(), isNull,
+        reason: 'the content has to fit the room the keyboard leaves');
+
+    // Nothing of the dialog is drawn past its own edge — that is what the
+    // report showed: names across the page, Zrušit and Rezervovat on top.
+    final surface = dialogSurface(tester);
+    final list = find.descendant(
+        of: find.byType(AlertDialog), matching: find.byType(ListView));
+    expect(tester.getRect(list).bottom, lessThanOrEqualTo(surface.bottom));
+    expect(
+        tester.getRect(find.widgetWithText(FilledButton, 'Rezervovat')).bottom,
+        lessThanOrEqualTo(surface.bottom + 0.5),
+        reason: 'the names must not push the buttons out of the dialog');
+
+    // Only the NAMES scroll: the field you are typing in holds its place.
+    final field = tester.getRect(find.byType(TextField));
+    final last = find.text('Květa Malá');
+    expect(last, findsNothing, reason: 'the last name is below the fold');
+    await tester.drag(list, const Offset(0, -600));
+    await tester.pumpAndSettle();
+    expect(tester.getRect(find.byType(TextField)), field);
+    expect(tester.getRect(last).bottom,
+        lessThanOrEqualTo(tester.getRect(list).bottom + 0.5),
+        reason: 'and scrolling the list brings it into view');
+
+    // Reaching for the names also lets the keyboard go, which is where the
+    // dialog gets its height back from.
+    expect(
+        tester
+            .widget<EditableText>(find.byType(EditableText))
+            .focusNode
+            .hasFocus,
+        isFalse);
+
+    await tester.tap(find.widgetWithText(ListTile, 'Květa Malá'));
+    await tester.pumpAndSettle();
+    expect(find.text('Vybráno: Květa Malá'), findsOneWidget);
+  });
+
   testWidgets('player search matches the name or the board nick, '
       'tapping picks the player', (tester) async {
     wideSurface(tester);
