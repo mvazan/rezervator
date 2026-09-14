@@ -406,6 +406,15 @@ async function setTeams(
     const droppedNames = new Set(dropped.map((t) => t.team));
     const { data: profile } = await admin.from("profiles")
       .select("tenant_id").eq("id", userId).maybeSingle();
+    // A match the player is playing as a guest (0039) is theirs whatever
+    // happens to the teams: this loop is the ONE path that reads
+    // priority_slots directly instead of my_future_matches, which already
+    // knows about exceptions — so it has to ask separately.
+    const { data: guestRows } = await admin.from("match_exceptions")
+      .select("match_id").eq("user_id", userId);
+    const guestMatches = new Set(
+      ((guestRows ?? []) as { match_id: string }[]).map((r) => r.match_id),
+    );
     const { data: gone } = await admin.from("priority_slots")
       .select("id, home_team, away_team")
       .eq("tenant_id", profile?.tenant_id)
@@ -414,7 +423,7 @@ async function setTeams(
     for (const row of (gone ?? []) as { id: string; home_team: string; away_team: string }[]) {
       const stillFollowed = savedNames.has(row.home_team) || savedNames.has(row.away_team);
       const wasFollowed = droppedNames.has(row.home_team) || droppedNames.has(row.away_team);
-      if (stillFollowed || !wasFollowed) continue;
+      if (stillFollowed || !wasFollowed || guestMatches.has(row.id)) continue;
       const eventId = await matchEventId(userId, row.id);
       // The dropped team could have been assigned to either calendar —
       // delete from every one its event could be sitting in (idempotent:
