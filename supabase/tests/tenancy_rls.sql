@@ -2005,7 +2005,9 @@ begin
 end $$;
 
 -- An exception outranks the team's own routing: Cal Test Home goes to the
--- second calendar, but a match one is PLAYING belongs in the main one.
+-- second calendar, and an added match lands in the MAIN one — which is also
+-- what keeps it out of both at once, since the sync writes to the target
+-- and sweeps the same (deterministic) event id from the other calendar.
 set local role authenticated;
 set local request.jwt.claims =
   '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
@@ -2043,8 +2045,8 @@ begin
   perform set_match_exception(
     (select id from priority_slots
        where home_team = 'Cal Test Home' and away_team = 'Cal Test Solo'),
-    false);
-  perform set_match_exception(v_guest, false);
+    null);
+  perform set_match_exception(v_guest, null);
   if exists (select 1 from match_exceptions
                where user_id = v_uid and match_id = v_guest) then
     raise exception 'FAIL: the exception survived being switched off';
@@ -2066,6 +2068,67 @@ begin
                where home_team = 'Cal Test Guest A') then
     raise exception 'FAIL: the match stayed in the future after the exception went';
   end if;
+end $$;
+
+-- The other direction: a match a team DOES give the player, taken away.
+-- Away next weekend, not interested — out of the overview and out of
+-- Google, which the sync does by finding no row at all.
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+declare
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+  v_solo uuid;
+begin
+  select id into v_solo from priority_slots
+    where home_team = 'Cal Test Home' and away_team = 'Cal Test Solo';
+  perform set_match_exception(v_solo, false);
+  if (select shown from match_exceptions
+        where user_id = v_uid and match_id = v_solo) is not false then
+    raise exception 'FAIL: hiding a match did not store it as hidden';
+  end if;
+end $$;
+reset role;
+do $$
+declare
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+begin
+  if exists (select 1 from my_future_matches(v_uid)
+               where home_team = 'Cal Test Home' and away_team = 'Cal Test Solo') then
+    raise exception 'FAIL: a hidden match stayed in the player''s future';
+  end if;
+end $$;
+
+-- And handed back to the teams: no row, no opinion — the team decides
+-- again, in the calendar it always did.
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+declare
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+  v_solo uuid;
+begin
+  select id into v_solo from priority_slots
+    where home_team = 'Cal Test Home' and away_team = 'Cal Test Solo';
+  perform set_match_exception(v_solo, null);
+  if exists (select 1 from match_exceptions
+               where user_id = v_uid and match_id = v_solo) then
+    raise exception 'FAIL: clearing an exception left the row behind';
+  end if;
+end $$;
+reset role;
+do $$
+declare
+  v_row record;
+begin
+  select * into v_row from my_future_matches('10000000-0000-0000-0000-000000000001')
+    where home_team = 'Cal Test Home' and away_team = 'Cal Test Solo';
+  if not found or v_row.calendar <> 'secondary' then
+    raise exception 'FAIL: the team did not get its match back: %', to_jsonb(v_row);
+  end if;
+  raise notice 'OK: an exception hides a team''s match too, and clearing it hands the match back to the team (0039)';
 end $$;
 
 -- A match that is not this alley's, not a match at all, or already over.

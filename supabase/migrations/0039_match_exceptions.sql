@@ -1,14 +1,24 @@
--- 0039 — match_exceptions: „tenhle zápas hraju".
+-- 0039 — match_exceptions: jeden zápas navíc, nebo jeden zápas pryč.
 --
--- Hráč nižšího týmu občas nastoupí za vyšší — dorost za muže, béčko za
--- áčko. Ten JEDEN zápas je jeho, i když tým jinak nesleduje: má ho vidět v
--- Můj přehled a má mu přijít do hlavního Google kalendáře. Dosud to šlo jen
--- přes celý tým, což znamená i všechny ostatní jeho zápasy.
+-- Týmy odpovídají na otázku hromadně: sleduju áčko, tak mám jeho zápasy.
+-- Jenže občas jde o JEDEN zápas. Hráč béčka nastoupí za áčko; nebo je ten
+-- zápas prostě zajímavý a chci ho vidět, i když tým nesleduju. A naopak:
+-- příští týden jsem pryč, ten zápas mě nezajímá, ať mi nepřekáží v přehledu
+-- ani v kalendáři. Dosud šlo jen přidat či odebrat celý tým — se vším, co k
+-- němu patří.
 --
--- Výjimka je proto (hráč, zápas), ne (hráč, tým). Sloupec calendar je dnes
--- vždy 'primary' — kdo hraje, chce to v hlavním kalendáři, ne v tom na
--- koukání — ale stojí tu proto, že volba mezi kalendáři už v appce existuje
--- (calendar_teams) a až ji tu někdo bude chtít, bude kam ji uložit.
+-- Výjimka je proto (hráč, zápas), ne (hráč, tým), a `shown` říká, kterým
+-- směrem: true = přidat, false = skrýt. DŮVOD tu nikde není a nemá být —
+-- appka zaznamenává rozhodnutí, ne motivaci.
+--
+-- Řádek existuje jen tehdy, když se rozchází s tím, co říkají týmy;
+-- souhlasné rozhodnutí se maže (p_shown => null), takže se seznam výjimek
+-- sám nenafukuje a „vrátit to k týmu" je smazání, ne opačná výjimka.
+--
+-- Sloupec calendar je dnes vždy 'primary' a v praxi se uplatní jen u
+-- přidaného zápasu, který žádný tým nedává (jinak by řádek nevznikl). Stojí
+-- tu proto, že volba mezi kalendáři už v appce existuje (calendar_teams) a
+-- až ji tu někdo bude chtít, bude kam ji uložit.
 --
 -- Zápis jde přes set_match_exception: tabulka je pro klienta jen ke čtení,
 -- stejně jako calendar_teams (0035) a team_colors (0037), protože zápis
@@ -19,14 +29,17 @@
 create table match_exceptions (
   user_id  uuid not null references profiles(id) on delete cascade,
   match_id uuid not null references priority_slots(id) on delete cascade,
+  shown    boolean not null default true,
   calendar text not null default 'primary'
     check (calendar in ('primary', 'secondary')),
   primary key (user_id, match_id)
 );
 comment on table match_exceptions is
-  'One row per player+match the player plays as a guest (0039): the match counts as theirs even though neither of its teams is in their lists — it shows in Můj přehled and goes to the calendar named here. Read-only to the client; every write goes through set_match_exception, whose trigger queues the calendar job.';
+  'One row per player+match where the player disagrees with what their teams say (0039): shown = true adds the match (it counts as theirs though neither team is in their lists), false hides one a team would have given them. Agreeing with the teams stores nothing — the row is deleted instead, so "back to what the team says" is not a third tick but the absence of a row. Read-only to the client; every write goes through set_match_exception, whose trigger queues the calendar job.';
+comment on column match_exceptions.shown is
+  'true = show this match (Můj přehled + the calendar below), false = hide it wherever a team would have put it.';
 comment on column match_exceptions.calendar is
-  'Which Google calendar the match goes to, overriding whatever calendar_teams would say. Always ''primary'' today (the app offers no choice): a match you are playing belongs in the calendar you live by.';
+  'Which Google calendar an ADDED match goes to. Always ''primary'' today (the app offers no choice) and only ever consulted for a match no team gives the player — a match a team already gives them needs no row at all.';
 
 alter table match_exceptions enable row level security;
 create policy match_exceptions_own on match_exceptions
@@ -43,7 +56,10 @@ alter publication supabase_realtime add table match_exceptions;
 -- Client-callable (unlike the calendar RPCs, which only calendar-manage may
 -- call): it writes nothing but the player's own row, and the app needs the
 -- answer at once — the Google side follows through the job queue.
-create or replace function set_match_exception(p_match uuid, p_on boolean)
+--
+-- p_shown: true adds the match, false hides it, NULL drops the exception
+-- and lets the teams decide again.
+create or replace function set_match_exception(p_match uuid, p_shown boolean)
 returns void
 language plpgsql security definer set search_path = public
 as $$
@@ -71,13 +87,13 @@ begin
     raise exception 'match_past';
   end if;
 
-  if p_on then
-    insert into match_exceptions (user_id, match_id)
-    values (auth.uid(), p_match)
-    on conflict (user_id, match_id) do nothing;
-  else
+  if p_shown is null then
     delete from match_exceptions
      where user_id = auth.uid() and match_id = p_match;
+  else
+    insert into match_exceptions (user_id, match_id, shown)
+    values (auth.uid(), p_match, p_shown)
+    on conflict (user_id, match_id) do update set shown = excluded.shown;
   end if;
 end;
 $$;
@@ -144,12 +160,13 @@ $$;
 -- my_future_matches: an exception is a match of one's own.
 -- ---------------------------------------------------------------------------
 -- The lateral join over calendar_teams stops being the filter (it becomes a
--- LEFT join) — a match now qualifies through a followed team OR an
--- exception, and the exception also decides the calendar, overriding what
--- the team would have said. Colour: a followed team's own, otherwise the
--- colour the player gave OUR team of that match (is_away says which side is
--- ours), the same rule lib/domain/upcoming.dart's matchColorOf follows.
--- Return shape unchanged, so create or replace keeps the grants.
+-- LEFT join): what a match belongs to the player is now
+-- `coalesce(e.shown, c.team is not null)` — the exception if there is one,
+-- the teams otherwise, in one expression, both directions at once. Colour:
+-- a followed team's own, otherwise the colour the player gave OUR team of
+-- that match (is_away says which side is ours), the same rule
+-- lib/domain/upcoming.dart's matchColorOf follows. Return shape unchanged,
+-- so create or replace keeps the grants.
 create or replace function my_future_matches(p_user uuid)
 returns table (
   match_id uuid, date date, starts_at time, ends_at time,
@@ -181,7 +198,7 @@ as $$
            case when s.is_away then s.away_team else s.home_team end)
     where s.parent_id is null
       and s.date >= (now() at time zone 'Europe/Prague')::date
-      and (c.team is not null or e.match_id is not null)
+      and coalesce(e.shown, c.team is not null)
     order by s.date, s.starts_at;
 $$;
 revoke all on function my_future_matches(uuid) from public, anon, authenticated;

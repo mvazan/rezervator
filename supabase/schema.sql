@@ -1143,7 +1143,7 @@ CREATE OR REPLACE FUNCTION "public"."my_future_matches"("p_user" "uuid") RETURNS
            case when s.is_away then s.away_team else s.home_team end)
     where s.parent_id is null
       and s.date >= (now() at time zone 'Europe/Prague')::date
-      and (c.team is not null or e.match_id is not null)
+      and coalesce(e.shown, c.team is not null)
     order by s.date, s.starts_at;
 $$;
 
@@ -1760,7 +1760,7 @@ $$;
 ALTER FUNCTION "public"."set_day_override"("p_date" "date", "p_closed" boolean, "p_reason" "text", "p_block_ids" "uuid"[]) OWNER TO "postgres";
 
 
-CREATE OR REPLACE FUNCTION "public"."set_match_exception"("p_match" "uuid", "p_on" boolean) RETURNS "void"
+CREATE OR REPLACE FUNCTION "public"."set_match_exception"("p_match" "uuid", "p_shown" boolean) RETURNS "void"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
     AS $$
@@ -1788,19 +1788,19 @@ begin
     raise exception 'match_past';
   end if;
 
-  if p_on then
-    insert into match_exceptions (user_id, match_id)
-    values (auth.uid(), p_match)
-    on conflict (user_id, match_id) do nothing;
-  else
+  if p_shown is null then
     delete from match_exceptions
      where user_id = auth.uid() and match_id = p_match;
+  else
+    insert into match_exceptions (user_id, match_id, shown)
+    values (auth.uid(), p_match, p_shown)
+    on conflict (user_id, match_id) do update set shown = excluded.shown;
   end if;
 end;
 $$;
 
 
-ALTER FUNCTION "public"."set_match_exception"("p_match" "uuid", "p_on" boolean) OWNER TO "postgres";
+ALTER FUNCTION "public"."set_match_exception"("p_match" "uuid", "p_shown" boolean) OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."set_nick"("p_user_id" "uuid", "p_nick" "text" DEFAULT ''::"text") RETURNS "void"
@@ -2252,6 +2252,7 @@ COMMENT ON COLUMN "public"."google_calendar_tokens"."google_calendar_id_secondar
 CREATE TABLE IF NOT EXISTS "public"."match_exceptions" (
     "user_id" "uuid" NOT NULL,
     "match_id" "uuid" NOT NULL,
+    "shown" boolean DEFAULT true NOT NULL,
     "calendar" "text" DEFAULT 'primary'::"text" NOT NULL,
     CONSTRAINT "match_exceptions_calendar_check" CHECK (("calendar" = ANY (ARRAY['primary'::"text", 'secondary'::"text"])))
 );
@@ -2260,11 +2261,15 @@ CREATE TABLE IF NOT EXISTS "public"."match_exceptions" (
 ALTER TABLE "public"."match_exceptions" OWNER TO "postgres";
 
 
-COMMENT ON TABLE "public"."match_exceptions" IS 'One row per player+match the player plays as a guest (0039): the match counts as theirs even though neither of its teams is in their lists — it shows in Můj přehled and goes to the calendar named here. Read-only to the client; every write goes through set_match_exception, whose trigger queues the calendar job.';
+COMMENT ON TABLE "public"."match_exceptions" IS 'One row per player+match where the player disagrees with what their teams say (0039): shown = true adds the match (it counts as theirs though neither team is in their lists), false hides one a team would have given them. Agreeing with the teams stores nothing — the row is deleted instead, so "back to what the team says" is not a third tick but the absence of a row. Read-only to the client; every write goes through set_match_exception, whose trigger queues the calendar job.';
 
 
 
-COMMENT ON COLUMN "public"."match_exceptions"."calendar" IS 'Which Google calendar the match goes to, overriding whatever calendar_teams would say. Always ''primary'' today (the app offers no choice): a match you are playing belongs in the calendar you live by.';
+COMMENT ON COLUMN "public"."match_exceptions"."shown" IS 'true = show this match (Můj přehled + the calendar below), false = hide it wherever a team would have put it.';
+
+
+
+COMMENT ON COLUMN "public"."match_exceptions"."calendar" IS 'Which Google calendar an ADDED match goes to. Always ''primary'' today (the app offers no choice) and only ever consulted for a match no team gives the player — a match a team already gives them needs no row at all.';
 
 
 
@@ -3163,9 +3168,9 @@ GRANT ALL ON FUNCTION "public"."set_calendar_teams_for"("p_user" "uuid", "p_team
 
 
 
-REVOKE ALL ON FUNCTION "public"."set_match_exception"("p_match" "uuid", "p_on" boolean) FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."set_match_exception"("p_match" "uuid", "p_on" boolean) TO "authenticated";
-GRANT ALL ON FUNCTION "public"."set_match_exception"("p_match" "uuid", "p_on" boolean) TO "service_role";
+REVOKE ALL ON FUNCTION "public"."set_match_exception"("p_match" "uuid", "p_shown" boolean) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."set_match_exception"("p_match" "uuid", "p_shown" boolean) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."set_match_exception"("p_match" "uuid", "p_shown" boolean) TO "service_role";
 
 
 
