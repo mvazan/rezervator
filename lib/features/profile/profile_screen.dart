@@ -26,6 +26,7 @@ class ProfileScreen extends ConsumerWidget {
     this.signOut = Api.signOut,
     this.setOwnColor = Api.setOwnColor,
     this.setFollowedTeams = Api.setFollowedTeams,
+    this.setCalendarTeams = Api.setCalendarTeams,
     this.setTeamColors = Api.setTeamColors,
     this.setDefaultView = Api.setDefaultView,
   });
@@ -34,6 +35,7 @@ class ProfileScreen extends ConsumerWidget {
   final Future<void> Function() signOut;
   final Future<void> Function(int color) setOwnColor;
   final Future<void> Function(List<String> teams) setFollowedTeams;
+  final Future<void> Function(List<CalendarTeam> teams) setCalendarTeams;
   final Future<void> Function(Map<String, int?> colors) setTeamColors;
   final Future<void> Function(HomeView view) setDefaultView;
 
@@ -115,31 +117,32 @@ class ProfileScreen extends ConsumerWidget {
                   ),
                 ),
                 const SizedBox(height: 16),
-                // Appearance (theme, text size): the first thing a player
-                // can change and unrelated to reservations, so it sits right
-                // under the name card and above the reservation-colour card.
-                const AppearanceCard(),
-                const SizedBox(height: 16),
-                Card(
-                  child: ListTile(
-                    title: const Text('Přezdívka na tabuli'),
-                    subtitle: Text(
-                      profile.nick.isEmpty ? 'nenastavena' : profile.nick,
-                    ),
-                    trailing: TextButton(
-                      onPressed: () => _editNick(context, profile.nick),
-                      child: const Text('Upravit'),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                // Own colour for own reservations (0024): the board is read
-                // by club colour, this lets the player's own cells stand out
-                // in their own view; everyone else keeps seeing the club.
+                // Tabule: the two things that say how the player appears in
+                // the schedule — the short name their cells carry (and the
+                // kiosk board shows), and the colour those cells wear. They
+                // were two cards saying two halves of one answer.
                 Card(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      const ListTile(
+                        title: Text('Tabule'),
+                        subtitle: Text('Jak vypadají tvoje rezervace.'),
+                      ),
+                      ListTile(
+                        title: const Text('Přezdívka'),
+                        subtitle: Text(
+                          profile.nick.isEmpty ? 'nenastavena' : profile.nick,
+                        ),
+                        trailing: TextButton(
+                          onPressed: () => _editNick(context, profile.nick),
+                          child: const Text('Upravit'),
+                        ),
+                      ),
+                      // Own colour for own reservations (0024): the board is
+                      // read by club colour, this lets the player's own cells
+                      // stand out in their own view; everyone else keeps
+                      // seeing the club.
                       const ListTile(
                         title: Text('Barva mých rezervací'),
                         subtitle: Text(
@@ -161,12 +164,6 @@ class ProfileScreen extends ConsumerWidget {
                       ),
                     ],
                   ),
-                ),
-                const SizedBox(height: 16),
-                MyTeamsCard(
-                  profile: profile,
-                  setFollowedTeams: setFollowedTeams,
-                  setTeamColors: setTeamColors,
                 ),
                 const SizedBox(height: 16),
                 // What opens at launch (0029). A tab tap changes the view for
@@ -211,6 +208,13 @@ class ProfileScreen extends ConsumerWidget {
                   ),
                 ),
                 const SizedBox(height: 16),
+                MyTeamsCard(
+                  profile: profile,
+                  setFollowedTeams: setFollowedTeams,
+                  setCalendarTeams: setCalendarTeams,
+                  setTeamColors: setTeamColors,
+                ),
+                const SizedBox(height: 16),
                 // Hidden without a Google client ID baked in, and for the
                 // Play-review demo account (a shared account has no calendar
                 // of its own to link).
@@ -219,6 +223,11 @@ class ProfileScreen extends ConsumerWidget {
                   const CalendarLinkCard(),
                   const SizedBox(height: 16),
                 ],
+                // Appearance (theme, text size) last: it is about the app
+                // rather than about the player's kuželky, and nothing above
+                // it depends on it.
+                const AppearanceCard(),
+                const SizedBox(height: 16),
                 Card(
                   child: ListTile(
                     leading: Icon(

@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/ui.dart';
 import '../../../data/providers.dart';
 import '../../../domain/models.dart';
-import 'calendar_teams_sheet.dart';
 import 'event_color_picker.dart';
 
 /// What the player has to clean up by hand after a disconnect: Google
@@ -28,8 +27,10 @@ String _orphanedText(List<CalendarSlot> orphaned) {
 
 /// Google Calendar link on Můj profil: connect (opens Google's consent page
 /// in the browser), show the current state, edit reminders, turn the second
-/// calendar on/off, pick the teams whose matches go to each calendar (and
-/// their colours), set the trainings' own colour, or disconnect.
+/// calendar on/off, set the trainings' own colour, or disconnect. WHICH
+/// teams go to the calendar is not here: that is one of the three boxes a
+/// team has in Moje týmy (`my_teams_sheet.dart`), where it sits beside the
+/// two the calendar knows nothing about.
 /// Nothing comes back into the app via a deep link — the backend writes the
 /// result and this card flips on its own through the live stream.
 class CalendarLinkCard extends ConsumerStatefulWidget {
@@ -39,8 +40,6 @@ class CalendarLinkCard extends ConsumerStatefulWidget {
     this.openUrl = launchWeb,
     this.disconnect = Api.disconnectCalendar,
     this.setReminders = Api.setCalendarReminders,
-    this.setMatchTeams = Api.setCalendarTeams,
-    this.setTeamColors = Api.setTeamColors,
     this.setSecondaryCalendar = Api.setSecondaryCalendar,
     this.setTrainingColor = Api.setTrainingColor,
   });
@@ -52,11 +51,6 @@ class CalendarLinkCard extends ConsumerStatefulWidget {
   final Future<List<CalendarSlot>> Function() disconnect;
   final Future<void> Function(List<int> minutes, {CalendarSlot calendar})
   setReminders;
-  final Future<void> Function(List<CalendarTeam> teams) setMatchTeams;
-
-  /// A followed team's shared colour (0036) — separate from [setMatchTeams]
-  /// (which never carries one any more): see `showCalendarTeamsSheet`.
-  final Future<void> Function(Map<String, int?> colors) setTeamColors;
   final Future<bool> Function(bool enabled) setSecondaryCalendar;
   final Future<void> Function(int? colorId) setTrainingColor;
 
@@ -263,12 +257,6 @@ class _CalendarLinkCardState extends ConsumerState<CalendarLinkCard> {
     );
   }
 
-  Future<void> _editMatchTeams() => showCalendarTeamsSheet(
-    context,
-    onChanged: widget.setMatchTeams,
-    onColorsChanged: widget.setTeamColors,
-  );
-
   Future<void> _editTrainingColor() async {
     final link = ref.read(myCalendarLinkProvider).value ?? CalendarLink.none;
     final picked = await pickEventColor(
@@ -299,7 +287,6 @@ class _CalendarLinkCardState extends ConsumerState<CalendarLinkCard> {
   @override
   Widget build(BuildContext context) {
     final link = ref.watch(myCalendarLinkProvider).value ?? CalendarLink.none;
-    final teams = ref.watch(myCalendarTeamsProvider).value ?? const [];
     // Locals, not fields: the switch arms below close over them.
     final email = link.googleEmail;
     final error = link.lastError;
@@ -324,8 +311,8 @@ class _CalendarLinkCardState extends ConsumerState<CalendarLinkCard> {
         SwitchListTile(
           title: const Text('Druhý kalendář'),
           subtitle: const Text(
-            'Založí v Googlu kalendář „Rezervátor 2" a u každého týmu '
-            'půjde vybrat, do kterého kalendáře jeho zápasy patří.',
+            'Založí v Googlu kalendář „Rezervátor 2". V Moje týmy pak '
+            'podržíš tým a vybereš, do kterého kalendáře jeho zápasy patří.',
           ),
           value: link.secondaryEnabled,
           onChanged: _secondaryBusy
@@ -355,13 +342,6 @@ class _CalendarLinkCardState extends ConsumerState<CalendarLinkCard> {
             trailing: const Icon(Icons.chevron_right),
             onTap: () => _editReminders(CalendarSlot.primary),
           ),
-        ListTile(
-          leading: const Icon(Icons.emoji_events_outlined),
-          title: const Text('Zápasy v kalendáři…'),
-          subtitle: Text(matchTeamsSummary([for (final t in teams) t.team])),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: _editMatchTeams,
-        ),
         ListTile(
           leading: EventColorDot(colorId: link.trainingColorId),
           title: const Text('Barva tréninků'),
