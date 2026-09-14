@@ -319,7 +319,7 @@ void main() {
         top('Tabule'),
         top('Po spuštění'),
         top('Moje týmy'),
-        top('Připomínky'),
+        top('Připomínky z appky'),
         top('Google kalendář'),
         top('Vzhled'),
         top('Odhlásit se'),
@@ -1470,7 +1470,11 @@ void main() {
       await tester.pumpWidget(app(me, setNotifyBefore: (m) async => saved.add(m)));
       await tester.pumpAndSettle();
 
-      expect(find.text('Před tréninkem a zápasem. Žádné'), findsOneWidget);
+      expect(
+        find.text('Před tréninkem a zápasem — push do mobilu, jinak '
+            'e-mailem.\nŽádné'),
+        findsOneWidget,
+      );
       await tester.tap(find.text('Nastavit…'));
       await tester.pumpAndSettle();
       expect(find.text('Před tréninkem ani zápasem se nic neozve.'),
@@ -1506,8 +1510,11 @@ void main() {
       await tester.pumpAndSettle();
 
       // Farthest first, as the calendar's own lists read.
-      expect(find.text('Před tréninkem a zápasem. 1 den předem · 2 h předem'),
-          findsOneWidget);
+      expect(
+        find.text('Před tréninkem a zápasem — push do mobilu, jinak '
+            'e-mailem.\n1 den předem · 2 h předem'),
+        findsOneWidget,
+      );
 
       await tester.tap(find.text('Nastavit…'));
       await tester.pumpAndSettle();
