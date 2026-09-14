@@ -7,6 +7,7 @@ import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/profile/widgets/calendar_teams_sheet.dart';
 import 'package:rezervator/features/profile/widgets/event_color_picker.dart';
+import 'package:rezervator/features/profile/widgets/picker_sheet.dart';
 
 /// showCalendarTeamsSheet is the richer sibling of showTeamPickerSheet:
 /// every ticked team carries its own calendar and, once the second
@@ -91,11 +92,17 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  /// The sheet edits locally and saves the whole list once, on close — so a
-  /// test that wants to see the save has to close it first, the way the
-  /// player does.
+  /// The sheet edits locally and saves the whole list once, on Uložit — so
+  /// a test that wants to see the save has to press it, the way the player
+  /// does. Leaving any other way saves nothing (see `dismissing`).
   Future<void> close(WidgetTester tester) async {
-    Navigator.of(tester.element(find.text('Zápasy v kalendáři'))).pop();
+    await tester.tap(find.widgetWithText(FilledButton, 'Uložit'));
+    await tester.pumpAndSettle();
+  }
+
+  /// Closing WITHOUT the button — the scrim above the sheet.
+  Future<void> dismiss(WidgetTester tester) async {
+    await tester.tapAt(const Offset(400, 20));
     await tester.pumpAndSettle();
   }
 
@@ -104,6 +111,104 @@ void main() {
       find.descendant(of: rowOf(team), matching: find.byType(Checkbox));
   Finder dotOf(String team) =>
       find.descendant(of: rowOf(team), matching: find.byType(EventColorDot));
+
+  // Reported: people did not trust the sheet, because leaving it was the
+  // only way to save and nothing said so. Uložit is now the only way in —
+  // which means every other way out has to keep its promise and save
+  // nothing.
+  group('Uložit is the only way to save', () {
+    testWidgets('the scrim asks before it throws the ticks away',
+        (tester) async {
+      final saved = <List<CalendarTeam>>[];
+      await tester.pumpWidget(
+        harness(matches: schedule, onChanged: (t) async => saved.add(t)),
+      );
+      await open(tester);
+      await tester.tap(checkboxOf('SKK Veverky Brno A'));
+      await tester.pumpAndSettle();
+
+      await dismiss(tester);
+      expect(find.text('Zahodit změny?'), findsOneWidget,
+          reason: 'a tick already made is worth a question');
+      expect(find.byType(Checkbox), findsWidgets, reason: 'still open');
+
+      // Staying keeps the tick.
+      await tester.tap(find.text('Zpět'));
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<Checkbox>(checkboxOf('SKK Veverky Brno A')).value,
+        isTrue,
+      );
+
+      await dismiss(tester);
+      await tester.tap(find.text('Zahodit'));
+      await tester.pumpAndSettle();
+      expect(find.byType(Checkbox), findsNothing, reason: 'sheet closed');
+      expect(saved, isEmpty, reason: 'leaving is not saving any more');
+    });
+
+    testWidgets('Zrušit takes the word for it, and saves nothing',
+        (tester) async {
+      final saved = <List<CalendarTeam>>[];
+      await tester.pumpWidget(
+        harness(matches: schedule, onChanged: (t) async => saved.add(t)),
+      );
+      await open(tester);
+      await tester.tap(checkboxOf('SKK Veverky Brno A'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(TextButton, 'Zrušit'));
+      await tester.pumpAndSettle();
+      expect(find.text('Zahodit změny?'), findsNothing,
+          reason: 'an explicit cancel is not second-guessed');
+      expect(find.byType(Checkbox), findsNothing);
+      expect(saved, isEmpty);
+    });
+
+    testWidgets('nothing touched, nothing asked', (tester) async {
+      final saved = <List<CalendarTeam>>[];
+      await tester.pumpWidget(
+        harness(matches: schedule, onChanged: (t) async => saved.add(t)),
+      );
+      await open(tester);
+
+      await dismiss(tester);
+      expect(find.text('Zahodit změny?'), findsNothing);
+      expect(find.byType(Checkbox), findsNothing);
+      expect(saved, isEmpty);
+    });
+
+    testWidgets('the buttons stay in sight, however long the list',
+        (tester) async {
+      tester.view.physicalSize = const Size(400, 700);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final saved = <List<CalendarTeam>>[];
+      await tester.pumpWidget(harness(
+        matches: [
+          for (var i = 0; i < 20; i++) match('m$i', 'Tým ${i + 10}', 'Soupeř'),
+        ],
+        onChanged: (t) async => saved.add(t),
+      ));
+      await open(tester);
+
+      // The last team is below the fold — the list scrolls…
+      expect(find.text('Tým 29'), findsNothing);
+      // …and the buttons did not scroll away with it.
+      final button = find.widgetWithText(FilledButton, 'Uložit');
+      expect(button, findsOneWidget);
+      final sheet = tester.getRect(find.byType(PickerSheetFrame));
+      expect(tester.getRect(button).bottom, lessThanOrEqualTo(sheet.bottom));
+
+      await tester.tap(checkboxOf('Tým 10'));
+      await tester.pumpAndSettle();
+      await tester.tap(button);
+      await tester.pumpAndSettle();
+      expect(saved.single.map((t) => t.team).toList(), ['Tým 10']);
+    });
+  });
 
   testWidgets('offers only the alley\'s own teams, Czech-sorted, unticked '
       'with an empty checkbox and no extra controls', (tester) async {
@@ -525,9 +630,9 @@ void main() {
       isTrue,
     );
 
-    // The player closes the sheet without waiting — and it is really gone,
-    // disposed, before the first save even answers.
-    Navigator.of(tester.element(find.byType(Checkbox).first)).pop();
+    // The player saves and leaves without waiting — the sheet is really
+    // gone, disposed, before the first save even answers.
+    await tester.tap(find.widgetWithText(FilledButton, 'Uložit'));
     await tester.pumpAndSettle();
     expect(find.byType(Checkbox), findsNothing, reason: 'sheet closed');
 

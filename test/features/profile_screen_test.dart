@@ -689,10 +689,10 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      // The sheet edits locally; the whole list goes out once, on close.
+      // The sheet edits locally; the whole list goes out once, on Uložit.
       expect(saved, isEmpty);
 
-      Navigator.of(tester.element(find.text('Zápasy v kalendáři'))).pop();
+      await tester.tap(find.widgetWithText(FilledButton, 'Uložit'));
       await tester.pumpAndSettle();
 
       expect(saved.map(teamTuples).toList(), [
@@ -733,7 +733,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      Navigator.of(tester.element(find.text('Zápasy v kalendáři'))).pop();
+      await tester.tap(find.widgetWithText(FilledButton, 'Uložit'));
       await tester.pumpAndSettle();
 
       expect(savedColors, [
@@ -1364,9 +1364,9 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(teamCheckbox('SKK Veverky Brno A'));
       await tester.pumpAndSettle();
-      // Edits are local; the list goes out once, when the sheet closes.
+      // Edits are local; the list goes out once, on Uložit.
       expect(saved, isEmpty);
-      Navigator.of(tester.element(find.byType(Checkbox).first)).pop();
+      await tester.tap(find.widgetWithText(FilledButton, 'Uložit'));
       await tester.pumpAndSettle();
 
       expect(saved, [
@@ -1404,7 +1404,7 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(teamCheckbox('SKK Veverky Brno A'));
         await tester.pumpAndSettle();
-        Navigator.of(tester.element(find.byType(Checkbox).first)).pop();
+        await tester.tap(find.widgetWithText(FilledButton, 'Uložit'));
         await tester.pumpAndSettle();
         expect(saved, [<String>[]]);
       },
@@ -1427,7 +1427,7 @@ void main() {
       expect(saved, [HomeView.trainings]);
     });
 
-    testWidgets('several ticks are ONE save on close, with every tick in it',
+    testWidgets('several ticks are ONE save on Uložit, with every tick in it',
         (tester) async {
       tester.view.physicalSize = const Size(800, 1800);
       tester.view.devicePixelRatio = 1.0;
@@ -1453,7 +1453,7 @@ void main() {
           isTrue);
       expect(saved, isEmpty);
 
-      Navigator.of(tester.element(find.byType(Checkbox).first)).pop();
+      await tester.tap(find.widgetWithText(FilledButton, 'Uložit'));
       await tester.pumpAndSettle();
       expect(saved.length, 1, reason: 'one call carries the whole list');
       expect(saved.single, ['KS Devítka Brno B', 'SKK Veverky Brno A']);
@@ -1478,7 +1478,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(teamCheckbox('SKK Veverky Brno A'));
       await tester.pumpAndSettle();
-      Navigator.of(tester.element(find.byType(Checkbox).first)).pop();
+      await tester.tap(find.widgetWithText(FilledButton, 'Uložit'));
       await tester.pumpAndSettle();
 
       // The sheet is gone when the answer comes back, so the snack belongs
@@ -1543,7 +1543,7 @@ void main() {
 
     testWidgets('ticking a team and picking its colour saves BOTH — the '
         'tick through setFollowedTeams, the colour through setTeamColors — '
-        'once, when the sheet closes', (tester) async {
+        'once, on Uložit', (tester) async {
       tester.view.physicalSize = const Size(800, 1800);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
@@ -1574,7 +1574,7 @@ void main() {
       expect(savedTeams, isEmpty);
       expect(savedColors, isEmpty);
 
-      Navigator.of(tester.element(find.byType(Checkbox).first)).pop();
+      await tester.tap(find.widgetWithText(FilledButton, 'Uložit'));
       await tester.pumpAndSettle();
 
       expect(savedTeams, [
@@ -1621,7 +1621,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      Navigator.of(tester.element(find.byType(Checkbox).first)).pop();
+      await tester.tap(find.widgetWithText(FilledButton, 'Uložit'));
       await tester.pumpAndSettle();
 
       expect(savedColors, [
@@ -1679,7 +1679,7 @@ void main() {
         tester.widget<EventColorDot>(teamColorDot('SKK Veverky Brno A')).colorId,
         5,
       );
-      Navigator.of(tester.element(find.byType(Checkbox).first)).pop();
+      await tester.tap(find.widgetWithText(FilledButton, 'Uložit'));
       await tester.pumpAndSettle();
       // setFollowedTeams/setTeamColors would have fail()ed had either fired.
     });

@@ -6,12 +6,16 @@ import '../../../data/providers.dart';
 import '../../../domain/collation.dart';
 import '../../../domain/models.dart';
 import 'event_color_picker.dart';
+import 'picker_sheet.dart';
 
 /// Zápasy v kalendáři: the richer sibling of `showTeamPickerSheet` — one row
 /// per team with not just a tick but a colour, and, once the second
 /// calendar is on, which of the two it goes to.
 ///
-/// Editing is local; the whole list goes out ONCE, when the sheet closes.
+/// Editing is local and NOTHING is saved until Uložit — leaving the sheet
+/// any other way keeps the choice as it was (see [PickerSheetFrame], which
+/// also explains why the sheet cannot be swiped away). The whole list then
+/// goes out ONCE.
 /// One save is an expensive round trip — the edge function refreshes the
 /// Google token and rewrites every future match — so saving per tap meant
 /// ticking three teams cost three of those, and the later ones could still
@@ -48,8 +52,11 @@ Future<void> showCalendarTeamsSheet(
   List<CalendarTeam> opened = const [];
   Map<String, int?>? editedColors;
   Map<String, int> openedColors = const {};
-  await showModalBottomSheet<void>(
+  final saved = await showModalBottomSheet<bool>(
     context: context,
+    // Uložit is the only way to commit, so the one dismissal that cannot be
+    // guarded must not exist — see PickerSheetFrame.
+    enableDrag: false,
     builder: (sheetContext) => Consumer(
       builder: (context, ref, _) {
         final chosen = ref.watch(myCalendarTeamsProvider).value ?? const [];
@@ -73,6 +80,7 @@ Future<void> showCalendarTeamsSheet(
       },
     ),
   );
+  if (saved != true) return;
   // Untouched, or fiddled back to where it started: nothing to send —
   // teams and colours are judged independently, since they now save
   // separately.
@@ -133,13 +141,13 @@ class _CalendarTeamsList extends StatefulWidget {
   final bool secondaryEnabled;
 
   /// Reports the full list after every change; the caller sends the last one
-  /// it heard once the sheet is closed.
+  /// it heard if the sheet is left with Uložit.
   final void Function(List<CalendarTeam> teams) onEdited;
 
   /// Reports every colour CHANGE so far (team -> new colorId, or null for
   /// "bez barvy"); a team whose colour was never touched this session is
   /// simply absent. [showCalendarTeamsSheet] diffs this against [colors]
-  /// once the sheet closes, so picking a colour back to what it already was
+  /// on Uložit, so picking a colour back to what it already was
   /// sends nothing.
   final void Function(Map<String, int?> edits) onColorsEdited;
 
@@ -189,7 +197,7 @@ class _CalendarTeamsListState extends State<_CalendarTeamsList> {
       _ticked.values.toList()..sort((a, b) => compareCzech(a.team, b.team));
 
   /// Replaces [team]'s row with [next] (drops it when null). Local only —
-  /// the whole list goes out once, when the sheet closes.
+  /// the whole list goes out once, on Uložit.
   void _replace(String team, CalendarTeam? next) {
     setState(() {
       _edited = true;
@@ -223,35 +231,23 @@ class _CalendarTeamsListState extends State<_CalendarTeamsList> {
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
+    return PickerSheetFrame(
+      title: 'Zápasy v kalendáři',
+      hints: const [
+        'Vyber svůj tým — jeho domácí i venkovní zápasy se '
+            'přidají do kalendáře.',
+        'Barva platí i v Můj přehled.',
+      ],
+      dirty: _edited || _colorEdits.isNotEmpty,
       child: ListView(
         shrinkWrap: true,
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-            child: Text(
-              'Zápasy v kalendáři',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-          ),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 0, 16, 4),
-            child: Text(
-              'Vyber svůj tým — jeho domácí i venkovní zápasy se '
-              'přidají do kalendáře.',
-            ),
-          ),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: Text('Barva platí i v Můj přehled.'),
-          ),
           if (widget.teams.isEmpty)
             const ListTile(
               leading: Icon(Icons.emoji_events_outlined),
               title: Text('Zatím žádné zápasy v rozvrhu'),
             ),
           for (final team in widget.teams) _teamRow(team),
-          const SizedBox(height: 8),
         ],
       ),
     );

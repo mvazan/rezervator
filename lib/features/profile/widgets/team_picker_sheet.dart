@@ -5,6 +5,7 @@ import '../../../core/ui.dart';
 import '../../../data/providers.dart';
 import '../../../domain/collation.dart';
 import 'event_color_picker.dart';
+import 'picker_sheet.dart';
 
 /// Moje týmy: the checkbox sheet `my_teams_card.dart` opens — every team the
 /// schedule knows (home team of a home match, away team of an away match)
@@ -16,8 +17,10 @@ import 'event_color_picker.dart';
 /// even after the team is unticked here, since following and colouring a
 /// team are independent.
 ///
-/// Editing is local; the whole tick list is saved at once by [onChanged],
-/// exactly as before this feature existed, and any changed colour goes out
+/// Editing is local and NOTHING is saved until Uložit — leaving the sheet
+/// any other way keeps the ticks as they were (see [PickerSheetFrame],
+/// which also explains why the sheet cannot be swiped away). The whole tick
+/// list then goes out at once through [onChanged], and any changed colour
 /// alongside it through [onColorsChanged] — its own call, only when a
 /// colour actually changed. The chosen list and colours are re-read through
 /// [chosenOf]/[colorsOf] on every build, so the sheet follows the same
@@ -35,8 +38,11 @@ Future<void> showTeamPickerSheet(
   List<String> opened = const [];
   Map<String, int?>? editedColors;
   Map<String, int> openedColors = const {};
-  await showModalBottomSheet<void>(
+  final saved = await showModalBottomSheet<bool>(
     context: context,
+    // Uložit is the only way to commit, so the one dismissal that cannot be
+    // guarded must not exist — see PickerSheetFrame.
+    enableDrag: false,
     builder: (sheetContext) => Consumer(
       builder: (context, ref, _) {
         final chosen = chosenOf(ref);
@@ -57,6 +63,7 @@ Future<void> showTeamPickerSheet(
       },
     ),
   );
+  if (saved != true) return;
   final before = [...opened]..sort(compareCzech);
   // Untouched, or ticked back to where it started: nothing to send — teams
   // and colours are judged independently, since they now save separately
@@ -115,14 +122,14 @@ class _TeamPickerList extends StatefulWidget {
   final Map<String, int> colors;
 
   /// Reports the full list after every tick; the caller sends the last one
-  /// it heard once the sheet is closed.
+  /// it heard if the sheet is left with Uložit.
   final void Function(List<String> teams) onEdited;
 
   /// Reports every colour CHANGE so far (team -> new colorId, or null for
   /// "bez barvy"); a team whose colour was never touched this session is
-  /// simply absent. [showTeamPickerSheet] diffs this against [colors] once
-  /// the sheet closes, so picking a colour back to what it already was
-  /// sends nothing.
+  /// simply absent. [showTeamPickerSheet] diffs this against [colors] on
+  /// Uložit, so picking a colour back to what it already was sends
+  /// nothing.
   final void Function(Map<String, int?> edits) onColorsEdited;
 
   @override
@@ -157,7 +164,7 @@ class _TeamPickerListState extends State<_TeamPickerList> {
   static bool _sameTeams(List<String> a, List<String> b) =>
       a.length == b.length && a.toSet().containsAll(b);
 
-  /// Local only — the whole list goes out once, when the sheet closes.
+  /// Local only — the whole list goes out once, on Uložit.
   void _toggle(String team, bool on) {
     setState(() {
       _edited = true;
@@ -178,26 +185,19 @@ class _TeamPickerListState extends State<_TeamPickerList> {
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
+    return PickerSheetFrame(
+      title: widget.title,
+      hints: [widget.hint],
+      dirty: _edited || _colorEdits.isNotEmpty,
       child: ListView(
         shrinkWrap: true,
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-            child: Text(widget.title,
-                style: Theme.of(context).textTheme.titleMedium),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: Text(widget.hint),
-          ),
           if (widget.teams.isEmpty)
             const ListTile(
               leading: Icon(Icons.emoji_events_outlined),
               title: Text('Zatím žádné zápasy v rozvrhu'),
             ),
           for (final team in widget.teams) _teamRow(team),
-          const SizedBox(height: 8),
         ],
       ),
     );
