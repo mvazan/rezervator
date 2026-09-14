@@ -43,7 +43,9 @@ class ProfileScreen extends ConsumerWidget {
     final input = await promptText(
       context,
       title: 'Přezdívka na tabuli',
-      hint: 'Tom P.',
+      message: 'Krátké jméno do rezervace a na tabuli v kuželně. Necháš-li '
+          'ji prázdnou, ukáže se tvoje celé jméno.',
+      hint: 'např. Tom P.',
       initial: currentNick,
       confirmLabel: 'Uložit',
     );
@@ -93,6 +95,10 @@ class ProfileScreen extends ConsumerWidget {
                         subtitle: Text(profile.displayName),
                       ),
                       ListTile(
+                        title: const Text('E-mail'),
+                        subtitle: Text(profile.email),
+                      ),
+                      ListTile(
                         title: const Text('Oddíl'),
                         subtitle: Text(
                           clubNameOf(profile.clubId, clubs).isEmpty
@@ -105,7 +111,8 @@ class ProfileScreen extends ConsumerWidget {
                         child: Align(
                           alignment: Alignment.centerLeft,
                           child: Text(
-                            'Jméno a oddíl nastavuje správce.',
+                            'Jméno a oddíl nastavuje správce; e-mail je ten, '
+                            'kterým se přihlašuješ.',
                             style: TextStyle(
                               fontSize: 12,
                               color: Colors.grey,

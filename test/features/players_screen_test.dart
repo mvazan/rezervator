@@ -92,9 +92,10 @@ void main() {
     expect(ys[0], lessThan(ys[1]));
     expect(ys[1], lessThan(ys[2]));
 
-    // Members render under their club; the admin is marked in the subtitle.
+    // Members render under their club; the subtitle marks the admin and
+    // names the e-mail they sign in with.
     expect(find.text('Blanka'), findsOneWidget);
-    expect(find.text('správce'), findsOneWidget);
+    expect(find.text('správce\nadmin@example.com'), findsOneWidget);
   });
 
   testWidgets('renders without overflow on a narrow phone', (tester) async {
@@ -115,6 +116,17 @@ void main() {
     // No RenderFlex overflow exceptions were thrown during layout.
     expect(tester.takeException(), isNull);
     expect(find.text('Schválit'), findsOneWidget);
+    expect(find.text('b@example.com'), findsOneWidget,
+        reason: 'the pending card names who is asking');
+  });
+
+  // A hand-made player has no account and so no e-mail: the row keeps the
+  // single line it always had rather than growing an empty one.
+  testWidgets('a player without an account has no e-mail line',
+      (tester) async {
+    await tester.pumpWidget(app([admin, placeholder]));
+    await tester.pumpAndSettle();
+
     expect(find.text('bez účtu · „Bohouš“'), findsOneWidget);
   });
 
@@ -182,7 +194,9 @@ void main() {
     await tester.pumpWidget(app([admin, pending]));
     await tester.pumpAndSettle();
 
-    expect(find.text('Veverky'), findsOneWidget);
+    // Club and, under it, the e-mail — on a pending card that is often the
+    // only way to tell which of two Nováčeks is asking to be let in.
+    expect(find.text('Veverky\npend@example.com'), findsOneWidget);
     expect(find.text('Staré jméno'), findsNothing);
   });
 
@@ -337,7 +351,15 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(BottomSheet), findsNothing);
     expect(find.text('Sloučit hráče'), findsOneWidget);
-    expect(find.textContaining('b@example.com'), findsOneWidget);
+    // Scoped to the dialog: the pending card underneath names the same
+    // e-mail now.
+    expect(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.textContaining('b@example.com'),
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets('the search also matches the nick', (tester) async {

@@ -159,6 +159,15 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Přezdívka na tabuli'), findsWidgets);
+    // An empty field showing "Tom P." read as a value somebody had already
+    // entered; the line above it says what the field is for and what an
+    // empty one means.
+    expect(
+      find.text('Krátké jméno do rezervace a na tabuli v kuželně. Necháš-li '
+          'ji prázdnou, ukáže se tvoje celé jméno.'),
+      findsOneWidget,
+    );
+    expect(find.text('např. Tom P.'), findsOneWidget);
     expect(find.text('Uložit'), findsOneWidget);
     expect(find.widgetWithText(TextField, 'Já H.'), findsOneWidget);
   });
@@ -1426,6 +1435,23 @@ void main() {
       // does not pin the schedule stream, so it may still be loading).
       expect(find.byType(MatchExceptionsScreen), findsOneWidget);
       expect(find.widgetWithText(AppBar, 'Výjimky'), findsOneWidget);
+    });
+
+    testWidgets('the identity card names the e-mail one signs in with',
+        (tester) async {
+      tester.view.physicalSize = const Size(800, 2000);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(app(me));
+      await tester.pumpAndSettle();
+
+      expect(find.text('E-mail'), findsOneWidget);
+      expect(find.text('me@example.com'), findsOneWidget);
+      expect(tester.getTopLeft(find.text('E-mail')).dy,
+          greaterThan(tester.getTopLeft(find.text('Jméno')).dy));
+      expect(tester.getTopLeft(find.text('E-mail')).dy,
+          lessThan(tester.getTopLeft(find.text('Oddíl')).dy));
     });
 
     testWidgets('Po spuštění saves the chosen launch view', (tester) async {

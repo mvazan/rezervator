@@ -216,9 +216,15 @@ Future<bool> confirmDialog(
 }
 
 /// Single-field text prompt; resolves to the trimmed input, or null on cancel.
+///
+/// [message] is a line above the field: what the value is for, and what
+/// happens when it is left empty. A [hint] alone cannot carry that — an
+/// empty field showing "Tom P." was read as a value somebody had already
+/// entered, not as an example.
 Future<String?> promptText(
   BuildContext context, {
   required String title,
+  String? message,
   String? hint,
   String? initial,
   String confirmLabel = 'Uložit',
@@ -231,11 +237,22 @@ Future<String?> promptText(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: Text(title),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          keyboardType: keyboardType,
-          decoration: InputDecoration(hintText: hint, suffixText: suffixText),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (message != null) ...[
+              Text(message, style: Theme.of(dialogContext).textTheme.bodySmall),
+              const SizedBox(height: 12),
+            ],
+            TextField(
+              controller: controller,
+              autofocus: true,
+              keyboardType: keyboardType,
+              decoration:
+                  InputDecoration(hintText: hint, suffixText: suffixText),
+            ),
+          ],
         ),
         actions: [
           TextButton(
