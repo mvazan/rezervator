@@ -14,7 +14,10 @@
 //                           the one branch that talks to the Calendar API
 //                           instead of FCM/Resend. Posted by the minutely
 //                           pg_cron tick through the same Vault-configured
-//                           webhook (URL + x-webhook-secret).
+//                           webhook (URL + x-webhook-secret). The same tick
+//                           also carries the due reminders (0040): "za 2
+//                           hodiny trénink", by the same push-or-e-mail
+//                           rule as everything else.
 //
 // Channel per recipient: FCM push when profiles.fcm_token is set AND
 // FIREBASE_SERVICE_ACCOUNT is configured; otherwise e-mail via Resend.
@@ -28,7 +31,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { pragueEpoch, pragueToday, signCancelToken } from "../_shared/cancel_token.ts";
 import { firebaseConfigured, sendPush } from "../_shared/fcm.ts";
-import { dayLabel, escapeHtml, timeLabel } from "../_shared/format.ts";
+import { dayLabel, escapeHtml, leadLabel, timeLabel } from "../_shared/format.ts";
 import {
   clearSecondaryCalendar,
   deleteEvent,
@@ -422,6 +425,73 @@ async function processJobs() {
 }
 
 // ---------------------------------------------------------------------------
+// Reminders before a training or a match (0040)
+// ---------------------------------------------------------------------------
+
+type DueReminder = {
+  user_id: string;
+  email: string;
+  fcm_token: string | null;
+  event_key: string;
+  offset_minutes: number;
+  kind: "training" | "match";
+  starts_at: string;
+  ends_at: string;
+  lane: number | null;
+  alley_name: string | null;
+  home_team: string | null;
+  away_team: string | null;
+  is_away: boolean | null;
+};
+
+/// "st 17.9. 18:30–19:30, dráha 2" / "SKK Veverky A – KK Blansko, 18:00,
+/// doma" — what the reminder is about, under a title that says when.
+function reminderBody(row: DueReminder): string {
+  const date = row.starts_at.slice(0, 10);
+  const from = timeLabel(row.starts_at.slice(11, 16));
+  const to = timeLabel(row.ends_at);
+  if (row.kind === "training") {
+    const where = row.lane === null ? "" : `, dráha ${row.lane}`;
+    return `${dayLabel(date)} ${from}–${to}${where}`;
+  }
+  return `${row.home_team} – ${row.away_team}, ${dayLabel(date)} ${from}, ` +
+    `${row.is_away ? "venku" : "doma"}`;
+}
+
+/// Everything whose moment has come, sent through the same push-or-e-mail
+/// door as every other message. The ledger is written per reminder AFTER it
+/// goes out: a send that throws is simply due again on the next tick, which
+/// is the behaviour one wants from a reminder — late beats never.
+async function sendDueReminders() {
+  const { data, error } = await supabase.rpc("due_reminders");
+  if (error) {
+    console.error("due_reminders failed:", error);
+    return;
+  }
+  for (const row of (data ?? []) as DueReminder[]) {
+    const title = row.kind === "training"
+      ? `Trénink ${leadLabel(row.offset_minutes)}`
+      : `Zápas ${leadLabel(row.offset_minutes)}`;
+    const body = reminderBody(row);
+    try {
+      await notifyRecipient(
+        { id: row.user_id, email: row.email, fcm_token: row.fcm_token },
+        title,
+        body,
+        { data: { kind: "reminder" } },
+      );
+      await supabase.rpc("mark_reminder_sent", {
+        p_user: row.user_id,
+        p_event_key: row.event_key,
+        p_offset: row.offset_minutes,
+      });
+    } catch (error) {
+      console.error(`reminder ${row.event_key} failed:`, error);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Event handlers
 // ---------------------------------------------------------------------------
 
@@ -461,9 +531,11 @@ async function whenLabel(record: Record<string, unknown>): Promise<string | null
 
 async function handle(payload: WebhookPayload) {
   if (payload.type === "CRON" && payload.table === "notification_jobs") {
-    // The minutely pg_cron tick (0023): process everything that's due. Its
-    // record is null, so it must never reach the row handlers below.
+    // The minutely pg_cron tick (0023): process everything that's due — the
+    // calendar jobs, and then the reminders whose moment has come (0040).
+    // Its record is null, so it must never reach the row handlers below.
     await processJobs();
+    await sendDueReminders();
     return;
   }
 

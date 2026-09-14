@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { dayLabel, escapeHtml, timeLabel } from "./format.ts";
+import { dayLabel, escapeHtml, leadLabel, timeLabel } from "./format.ts";
 
 Deno.test("escapeHtml escapes & < > \" and leaves ' alone", () => {
   assertEquals(
@@ -27,4 +27,29 @@ Deno.test("timeLabel strips seconds", () => {
 
 Deno.test("timeLabel drops the leading zero of the hour only", () => {
   assertEquals(timeLabel("09:05"), "9:05");
+});
+
+Deno.test("leadLabel: whole days read as days, and tomorrow says so", () => {
+  assertEquals(leadLabel(1440), "zítra");
+  assertEquals(leadLabel(2880), "za 2 dny");
+  assertEquals(leadLabel(7200), "za 5 dnů");
+});
+
+Deno.test("leadLabel: hours, with Czech counting three ways", () => {
+  assertEquals(leadLabel(60), "za hodinu");
+  assertEquals(leadLabel(120), "za 2 hodiny");
+  assertEquals(leadLabel(300), "za 5 hodin");
+});
+
+Deno.test("leadLabel: anything that is not a whole hour stays in minutes", () => {
+  assertEquals(leadLabel(1), "za minutu");
+  assertEquals(leadLabel(30), "za 30 minut");
+  assertEquals(leadLabel(90), "za 90 minut");
+  // 25 hours is not a whole day, but it is whole hours — and "za 25 hodin"
+  // is a great deal easier to read than "za 1500 minut".
+  assertEquals(leadLabel(1500), "za 25 hodin");
+});
+
+Deno.test("leadLabel: no lead time at all is not 'za 0 minut'", () => {
+  assertEquals(leadLabel(0), "právě teď");
 });
