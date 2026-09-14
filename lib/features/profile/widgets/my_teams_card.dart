@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../config.dart';
 import '../../../data/providers.dart';
 import '../../../domain/models.dart';
+import '../match_exceptions_screen.dart';
 import 'my_teams_sheet.dart';
 
 /// The one place teams are set up: which teams' matches show in Můj přehled
@@ -12,6 +13,14 @@ import 'my_teams_sheet.dart';
 /// `team_colors`). The sheet behind "Vybrat týmy…" holds all three — the
 /// Google card used to hold the middle one, in a row of its own, and nobody
 /// found it there.
+/// "2 výjimky" — Czech counts three ways, and the card says the number
+/// often enough for "1 výjimek" to look like a bug.
+String _exceptionCount(int n) => switch (n) {
+      1 => '1 výjimka',
+      2 || 3 || 4 => '$n výjimky',
+      _ => '$n výjimek',
+    };
+
 class MyTeamsCard extends ConsumerWidget {
   const MyTeamsCard({
     super.key,
@@ -35,6 +44,8 @@ class MyTeamsCard extends ConsumerWidget {
     final hasCalendar = ref.watch(calendarAvailableProvider) &&
         !AppConfig.isDemoAccount(profile.email) &&
         link.isLinked;
+    final exceptions =
+        ref.watch(myMatchExceptionsProvider).value ?? const <String, bool>{};
     final routed = hasCalendar
         ? ref.watch(myCalendarTeamsProvider).value ?? const <CalendarTeam>[]
         : const <CalendarTeam>[];
@@ -67,6 +78,21 @@ class MyTeamsCard extends ConsumerWidget {
                 ),
                 child: const Text('Vybrat týmy…'),
               ),
+            ),
+          ),
+          // The other half of "whose matches are mine", one match at a time
+          // (0039): one the teams do not give, or one they do and the
+          // player would rather not see. Its own screen — it is seldom used
+          // and the list it needs is the whole schedule.
+          ListTile(
+            leading: const Icon(Icons.star_outline),
+            title: const Text('Výjimky'),
+            subtitle: Text(exceptions.isEmpty
+                ? 'Jednotlivé zápasy navíc nebo skryté.'
+                : _exceptionCount(exceptions.length)),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const MatchExceptionsScreen()),
             ),
           ),
         ],

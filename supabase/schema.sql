@@ -904,6 +904,22 @@ $$;
 ALTER FUNCTION "public"."match_calendar_followers"("p_tenant" "uuid", "p_home" "text", "p_away" "text") OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."match_exceptions_enqueue_calendar"() RETURNS "trigger"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  perform enqueue_match_calendar_sync(
+    coalesce(new.user_id, old.user_id),
+    coalesce(new.match_id, old.match_id));
+  return coalesce(new, old);
+end;
+$$;
+
+
+ALTER FUNCTION "public"."match_exceptions_enqueue_calendar"() OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."merge_placeholder_player"("p_placeholder_id" "uuid", "p_target_id" "uuid", "p_display_name" "text", "p_nick" "text", "p_club_id" "uuid") RETURNS "void"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -1105,22 +1121,29 @@ CREATE OR REPLACE FUNCTION "public"."my_future_matches"("p_user" "uuid") RETURNS
     AS $$
   select s.id, s.date, s.starts_at, s.ends_at,
          s.home_team, s.away_team, s.is_away, s.description, t.name,
-         c.calendar, tc.color_id
+         coalesce(e.calendar, c.calendar), tc.color_id
     from priority_slots s
     join priority_slot_types y on y.id = s.type_id and y.is_match
     join tenants t on t.id = s.tenant_id
     join profiles p on p.id = p_user and p.tenant_id = s.tenant_id
     join google_calendar_links l on l.user_id = p_user
-    join lateral (
+    left join lateral (
       select ct.team, ct.calendar
         from calendar_teams ct
         where ct.user_id = p_user and ct.team in (s.home_team, s.away_team)
         order by (ct.team = s.home_team) desc
         limit 1
     ) c on true
-    left join team_colors tc on tc.user_id = p_user and tc.team = c.team
+    left join match_exceptions e
+      on e.user_id = p_user and e.match_id = s.id
+    left join team_colors tc
+      on tc.user_id = p_user
+     and tc.team = coalesce(
+           c.team,
+           case when s.is_away then s.away_team else s.home_team end)
     where s.parent_id is null
       and s.date >= (now() at time zone 'Europe/Prague')::date
+      and coalesce(e.shown, c.team is not null)
     order by s.date, s.starts_at;
 $$;
 
@@ -1215,6 +1238,12 @@ begin
       from match_calendar_followers(
         new.tenant_id, new.home_team, new.away_team) u;
   end if;
+  -- Whoever holds an exception on this match, followed teams or not. On
+  -- DELETE the cascade has usually emptied this already (and the trigger
+  -- above has queued the job) — then this finds nothing, which is the
+  -- right answer either way.
+  perform enqueue_match_calendar_sync(e.user_id, coalesce(new.id, old.id))
+    from match_exceptions e where e.match_id = coalesce(new.id, old.id);
   return coalesce(new, old);
 end;
 $$;
@@ -1731,6 +1760,49 @@ $$;
 ALTER FUNCTION "public"."set_day_override"("p_date" "date", "p_closed" boolean, "p_reason" "text", "p_block_ids" "uuid"[]) OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."set_match_exception"("p_match" "uuid", "p_shown" boolean) RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_slot priority_slots%rowtype;
+begin
+  if auth.uid() is null then
+    raise exception 'not_authenticated';
+  end if;
+  -- The kiosk is the alley's tablet, not a player; a pending profile has no
+  -- business in anyone's calendar yet.
+  if not is_approved() or is_kiosk() then
+    raise exception 'not_allowed';
+  end if;
+
+  select * into v_slot from priority_slots
+   where id = p_match and tenant_id = current_tenant_id();
+  if not found
+     or v_slot.parent_id is not null
+     or not exists (select 1 from priority_slot_types
+                    where id = v_slot.type_id and is_match) then
+    raise exception 'unknown_match';
+  end if;
+  if v_slot.date < (now() at time zone 'Europe/Prague')::date then
+    raise exception 'match_past';
+  end if;
+
+  if p_shown is null then
+    delete from match_exceptions
+     where user_id = auth.uid() and match_id = p_match;
+  else
+    insert into match_exceptions (user_id, match_id, shown)
+    values (auth.uid(), p_match, p_shown)
+    on conflict (user_id, match_id) do update set shown = excluded.shown;
+  end if;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."set_match_exception"("p_match" "uuid", "p_shown" boolean) OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."set_nick"("p_user_id" "uuid", "p_nick" "text" DEFAULT ''::"text") RETURNS "void"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -2177,6 +2249,30 @@ COMMENT ON COLUMN "public"."google_calendar_tokens"."google_calendar_id_secondar
 
 
 
+CREATE TABLE IF NOT EXISTS "public"."match_exceptions" (
+    "user_id" "uuid" NOT NULL,
+    "match_id" "uuid" NOT NULL,
+    "shown" boolean DEFAULT true NOT NULL,
+    "calendar" "text" DEFAULT 'primary'::"text" NOT NULL,
+    CONSTRAINT "match_exceptions_calendar_check" CHECK (("calendar" = ANY (ARRAY['primary'::"text", 'secondary'::"text"])))
+);
+
+
+ALTER TABLE "public"."match_exceptions" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."match_exceptions" IS 'One row per player+match where the player disagrees with what their teams say (0039): shown = true adds the match (it counts as theirs though neither team is in their lists), false hides one a team would have given them. Agreeing with the teams stores nothing — the row is deleted instead, so "back to what the team says" is not a third tick but the absence of a row. Read-only to the client; every write goes through set_match_exception, whose trigger queues the calendar job.';
+
+
+
+COMMENT ON COLUMN "public"."match_exceptions"."shown" IS 'true = show this match (Můj přehled + the calendar below), false = hide it wherever a team would have put it.';
+
+
+
+COMMENT ON COLUMN "public"."match_exceptions"."calendar" IS 'Which Google calendar an ADDED match goes to. Always ''primary'' today (the app offers no choice) and only ever consulted for a match no team gives the player — a match a team already gives them needs no row at all.';
+
+
+
 CREATE TABLE IF NOT EXISTS "public"."notification_jobs" (
     "id" bigint NOT NULL,
     "kind" "text" NOT NULL,
@@ -2352,6 +2448,11 @@ ALTER TABLE ONLY "public"."google_calendar_tokens"
 
 
 
+ALTER TABLE ONLY "public"."match_exceptions"
+    ADD CONSTRAINT "match_exceptions_pkey" PRIMARY KEY ("user_id", "match_id");
+
+
+
 ALTER TABLE ONLY "public"."priority_slots"
     ADD CONSTRAINT "matches_pkey" PRIMARY KEY ("id");
 
@@ -2462,6 +2563,10 @@ CREATE OR REPLACE TRIGGER "block_deactivated" AFTER UPDATE OF "active" ON "publi
 
 
 
+CREATE OR REPLACE TRIGGER "match_exceptions_enqueue_calendar" AFTER INSERT OR DELETE OR UPDATE ON "public"."match_exceptions" FOR EACH ROW EXECUTE FUNCTION "public"."match_exceptions_enqueue_calendar"();
+
+
+
 CREATE OR REPLACE TRIGGER "match_uklid_sync" AFTER INSERT OR UPDATE ON "public"."priority_slots" FOR EACH ROW EXECUTE FUNCTION "public"."sync_uklid_for_match"();
 
 
@@ -2553,6 +2658,16 @@ ALTER TABLE ONLY "public"."google_calendar_links"
 
 ALTER TABLE ONLY "public"."google_calendar_tokens"
     ADD CONSTRAINT "google_calendar_tokens_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "public"."profiles"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."match_exceptions"
+    ADD CONSTRAINT "match_exceptions_match_id_fkey" FOREIGN KEY ("match_id") REFERENCES "public"."priority_slots"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."match_exceptions"
+    ADD CONSTRAINT "match_exceptions_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "public"."profiles"("id") ON DELETE CASCADE;
 
 
 
@@ -2708,6 +2823,13 @@ CREATE POLICY "google_calendar_links_select_own" ON "public"."google_calendar_li
 
 
 ALTER TABLE "public"."google_calendar_tokens" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."match_exceptions" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "match_exceptions_own" ON "public"."match_exceptions" FOR SELECT USING (("user_id" = "auth"."uid"()));
+
 
 
 ALTER TABLE "public"."notification_jobs" ENABLE ROW LEVEL SECURITY;
@@ -2947,6 +3069,12 @@ GRANT ALL ON FUNCTION "public"."match_calendar_followers"("p_tenant" "uuid", "p_
 
 
 
+GRANT ALL ON FUNCTION "public"."match_exceptions_enqueue_calendar"() TO "anon";
+GRANT ALL ON FUNCTION "public"."match_exceptions_enqueue_calendar"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."match_exceptions_enqueue_calendar"() TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."merge_placeholder_player"("p_placeholder_id" "uuid", "p_target_id" "uuid", "p_display_name" "text", "p_nick" "text", "p_club_id" "uuid") TO "anon";
 GRANT ALL ON FUNCTION "public"."merge_placeholder_player"("p_placeholder_id" "uuid", "p_target_id" "uuid", "p_display_name" "text", "p_nick" "text", "p_club_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."merge_placeholder_player"("p_placeholder_id" "uuid", "p_target_id" "uuid", "p_display_name" "text", "p_nick" "text", "p_club_id" "uuid") TO "service_role";
@@ -3040,6 +3168,12 @@ GRANT ALL ON FUNCTION "public"."set_calendar_teams_for"("p_user" "uuid", "p_team
 
 
 
+REVOKE ALL ON FUNCTION "public"."set_match_exception"("p_match" "uuid", "p_shown" boolean) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."set_match_exception"("p_match" "uuid", "p_shown" boolean) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."set_match_exception"("p_match" "uuid", "p_shown" boolean) TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."set_team_colors_for"("p_user" "uuid", "p_colors" "jsonb") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."set_team_colors_for"("p_user" "uuid", "p_colors" "jsonb") TO "service_role";
 
@@ -3105,6 +3239,11 @@ GRANT SELECT ON TABLE "public"."google_calendar_links" TO "authenticated";
 
 
 GRANT ALL ON TABLE "public"."google_calendar_tokens" TO "service_role";
+
+
+
+GRANT SELECT ON TABLE "public"."match_exceptions" TO "authenticated";
+GRANT ALL ON TABLE "public"."match_exceptions" TO "service_role";
 
 
 

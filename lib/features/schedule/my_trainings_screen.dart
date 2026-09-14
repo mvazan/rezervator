@@ -23,9 +23,13 @@ Color? _trophyColorOf(
   PrioritySlot slot,
   List<String> followedTeams,
   Map<String, int> teamColors,
+  Map<String, bool> exceptions,
   Brightness brightness,
 ) =>
-    eventShadeOf(matchColorOf(slot, followedTeams, teamColors), brightness);
+    eventShadeOf(
+      matchColorOf(slot, followedTeams, teamColors, exceptions: exceptions),
+      brightness,
+    );
 
 /// One Google event colour id as a shade legible on [brightness]'s surface,
 /// or null for "no colour" — the plain icon. Shared by the match trophy and
@@ -134,6 +138,11 @@ class MyTrainingsScreen extends ConsumerWidget {
     final profile = ref.watch(myProfileProvider).value;
     final teams = profile?.followedTeams ?? const <String>[];
     final teamColors = ref.watch(myTeamColorsProvider).value ?? const {};
+    // Matches played for somebody else's team (0039) belong on this list
+    // like any other — nothing marks them out, they simply are the
+    // player's.
+    final exceptions =
+        ref.watch(myMatchExceptionsProvider).value ?? const <String, bool>{};
     // A training's own colour, the one set under Barva tréninků — the same
     // value that colours it in Google Calendar, so the T here and the event
     // there read as the same thing.
@@ -198,6 +207,7 @@ class MyTrainingsScreen extends ConsumerWidget {
       slots: slots,
       teams: teams,
       today: today,
+      exceptions: exceptions,
     );
 
     if (days.isEmpty) {
@@ -261,6 +271,7 @@ class MyTrainingsScreen extends ConsumerWidget {
                             item.slot,
                             teams,
                             teamColors,
+                            exceptions,
                             theme.brightness,
                           ),
                         ),

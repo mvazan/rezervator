@@ -1,8 +1,10 @@
-/// What is coming for a player: their live future reservations and the
-/// future matches of the teams they follow, one timeline by day. Pure Dart,
-/// unit-tested; the screen only renders it.
+/// What is coming for a player: their live future reservations, the future
+/// matches of the teams they follow, and any single match they said they
+/// are playing (0039) — one timeline by day. Pure Dart, unit-tested; the
+/// screen only renders it.
 library;
 
+import 'collation.dart';
 import 'models.dart';
 
 sealed class UpcomingItem {
@@ -57,17 +59,61 @@ class UpcomingDay {
 /// wins, then that team's colour, no fall-through — but over
 /// `calendar_teams`, the calendar's own (deliberately different) team
 /// list: the tie-break shape is shared, the list it runs over is not.
+///
+/// A match the player is playing as a GUEST (0039, `match_exceptions`) is on
+/// the list without either of its teams being followed — there is no
+/// followed team to take a colour from, so it takes the colour of OUR side
+/// of the match (`isAway` says which side that is), which is what the alley
+/// calls its own team. `my_future_matches` falls back the same way, so the
+/// trophy and the Google event still agree.
 int? matchColorOf(
   PrioritySlot slot,
   List<String> followedTeams,
-  Map<String, int> teamColors,
-) {
+  Map<String, int> teamColors, {
+  Map<String, bool> exceptions = const {},
+}) {
   final team = followedTeams.contains(slot.homeTeam)
       ? slot.homeTeam
       : followedTeams.contains(slot.awayTeam)
           ? slot.awayTeam
-          : null;
+          : exceptions[slot.id] == true
+              ? (slot.isAway ? slot.awayTeam : slot.homeTeam)
+              : null;
   return team == null ? null : teamColors[team];
+}
+
+/// Whether [slot] is the player's: what their exception says about this one
+/// match, and what their [teams] say when it has no exception. Both
+/// directions live here — an exception adds a match no team gives them and
+/// takes away one a team does. `my_future_matches` resolves the same shape
+/// in SQL (`coalesce(e.shown, c.team is not null)`), over the calendar's own
+/// team list.
+bool matchIsMine(
+  PrioritySlot slot,
+  List<String> teams,
+  Map<String, bool> exceptions,
+) =>
+    exceptions[slot.id] ??
+    (teams.contains(slot.homeTeam) || teams.contains(slot.awayTeam));
+
+/// Every upcoming match of the alley, chronological — what the Výjimky
+/// screen lists. Deliberately unfiltered: which of them are the player's is
+/// a per-row answer ([matchIsMine]), not a reason to leave a match out. A
+/// list whose CONTENTS changed with the player's teams would shift under
+/// them every time they picked one, and hiding a match would need it to be
+/// there in the first place.
+List<PrioritySlot> upcomingMatches({
+  required List<PrioritySlot> slots,
+  required Day today,
+  String query = '',
+}) {
+  final q = foldDiacritics(query.trim()).toLowerCase();
+  bool hit(String s) => q.isEmpty || foldDiacritics(s).toLowerCase().contains(q);
+  return [
+    for (final s in slots)
+      if (s.type.isMatch && s.parentId == null && !s.date.isBefore(today))
+        if (hit(s.homeTeam) || hit(s.awayTeam) || hit(s.description)) s,
+  ]..sort((a, b) => compareDayTime(a.date, a.startsAt, b.date, b.startsAt));
 }
 
 /// Live reservations from [today] on whose block still exists, plus match
@@ -80,6 +126,7 @@ List<UpcomingDay> upcomingTimeline({
   required List<PrioritySlot> slots,
   required List<String> teams,
   required Day today,
+  Map<String, bool> exceptions = const {},
 }) {
   final blockById = {for (final b in blocks) b.id: b};
   final items = <UpcomingItem>[
@@ -89,8 +136,8 @@ List<UpcomingDay> upcomingTimeline({
           UpcomingTraining(r, block),
     for (final s in slots)
       if (s.type.isMatch && s.parentId == null && !s.date.isBefore(today))
-        if (teams.contains(s.homeTeam) || teams.contains(s.awayTeam))
-          UpcomingMatch(s),
+        // The teams say it, unless this one match says otherwise (0039).
+        if (matchIsMine(s, teams, exceptions)) UpcomingMatch(s),
   ];
   items.sort((a, b) {
     final byDayTime = compareDayTime(a.date, a.startsAt, b.date, b.startsAt);

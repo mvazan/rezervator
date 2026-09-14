@@ -288,4 +288,152 @@ void main() {
       expect(matchColorOf(m, bothFollowed, const {'KK MS Brno D': 5}), isNull);
     });
   });
+
+  // A player of the B team turns out for the A team once (0039): that one
+  // match is theirs, without the team and the rest of its season.
+  group('exceptions', () {
+    test('a match of nobody\'s team is on the list when it is excepted', () {
+      final m = match('m1', today.addDays(2), const HourMinute(10, 0),
+          home: 'Cizí A', away: 'Cizí B');
+      expect(
+        upcomingTimeline(
+            reservations: const [],
+            blocks: const [],
+            slots: [m],
+            teams: const [],
+            today: today),
+        isEmpty,
+      );
+      final days = upcomingTimeline(
+          reservations: const [],
+          blocks: const [],
+          slots: [m],
+          teams: const [],
+          today: today,
+          exceptions: const {'m1': true});
+      expect(days.single.items.single, isA<UpcomingMatch>());
+    });
+
+    test('an exception on another match changes nothing', () {
+      final m = match('m1', today.addDays(2), const HourMinute(10, 0),
+          home: 'Cizí A', away: 'Cizí B');
+      expect(
+        upcomingTimeline(
+            reservations: const [],
+            blocks: const [],
+            slots: [m],
+            teams: const [],
+            today: today,
+            exceptions: const {'jiny': true}),
+        isEmpty,
+      );
+    });
+
+    test('a followed team\'s match is listed once, exception or not', () {
+      final m = match('m1', today.addDays(2), const HourMinute(10, 0));
+      final days = upcomingTimeline(
+          reservations: const [],
+          blocks: const [],
+          slots: [m],
+          teams: const ['SKK Veverky Brno A'],
+          today: today,
+          exceptions: const {'m1': true});
+      expect(days.single.items.length, 1);
+    });
+
+    // No followed team means no followed team's colour — it takes the one
+    // given to OUR side of the match, which is what my_future_matches does.
+    test('the trophy takes our team\'s colour', () {
+      final home = match('m1', today, const HourMinute(10, 0),
+          home: 'Cizí A', away: 'Cizí B');
+      final away = match('m2', today, const HourMinute(10, 0),
+          home: 'Cizí A', away: 'Cizí B', isAway: true);
+      const colors = {'Cizí A': 4, 'Cizí B': 7};
+      expect(matchColorOf(home, const [], colors, exceptions: const {'m1': true}), 4);
+      expect(matchColorOf(away, const [], colors, exceptions: const {'m2': true}), 7);
+      // Without the exception there is nothing of ours in it at all.
+      expect(matchColorOf(home, const [], colors), isNull);
+    });
+
+    test('a followed team still wins the colour over the exception', () {
+      final m = match('m1', today, const HourMinute(10, 0),
+          home: 'Cizí A', away: 'SKK Veverky Brno A');
+      expect(
+        matchColorOf(m, const ['SKK Veverky Brno A'],
+            const {'Cizí A': 4, 'SKK Veverky Brno A': 9}, exceptions: const {'m1': true}),
+        9,
+      );
+    });
+  });
+
+  group('matchIsMine', () {
+    final m = match('m1', today, const HourMinute(10, 0));
+
+    test('the teams answer when the match has no exception', () {
+      expect(matchIsMine(m, const ['SKK Veverky Brno A'], const {}), isTrue);
+      expect(matchIsMine(m, const [], const {}), isFalse);
+    });
+
+    test('an exception answers instead, both ways', () {
+      expect(matchIsMine(m, const [], const {'m1': true}), isTrue);
+      expect(
+        matchIsMine(m, const ['SKK Veverky Brno A'], const {'m1': false}),
+        isFalse,
+        reason: 'hiding takes away what the team gave',
+      );
+    });
+
+    test('an exception on another match says nothing about this one', () {
+      expect(matchIsMine(m, const [], const {'jiny': true}), isFalse);
+      expect(matchIsMine(m, const ['SKK Veverky Brno A'], const {'jiny': false}),
+          isTrue);
+    });
+  });
+
+  group('upcomingMatches', () {
+    List<String> ids(List<PrioritySlot> slots) => [for (final s in slots) s.id];
+
+    test('every upcoming match, chronological, whatever the player follows',
+        () {
+      final later = match('later', today.addDays(5), const HourMinute(10, 0));
+      final soon = match('soon', today.addDays(1), const HourMinute(10, 0),
+          home: 'Cizí A', away: 'Cizí B');
+      expect(
+        ids(upcomingMatches(slots: [later, soon], today: today)),
+        ['soon', 'later'],
+      );
+    });
+
+    test('played matches and úklid children are not matches to pick', () {
+      final past = match('past', today.addDays(-1), const HourMinute(10, 0));
+      final child = match('child', today.addDays(1), const HourMinute(9, 0),
+          parentId: 'later');
+      final ok = match('ok', today.addDays(1), const HourMinute(10, 0));
+      expect(ids(upcomingMatches(slots: [past, child, ok], today: today)),
+          ['ok']);
+    });
+
+    test('the search matches a team or the description, ignoring diacritics '
+        'and case', () {
+      final a = match('a', today.addDays(1), const HourMinute(10, 0),
+          home: 'SKK Veverky Brno A', away: 'KK MS Brno D');
+      final b = match('b', today.addDays(1), const HourMinute(12, 0),
+          home: 'TJ Sokol Husovice', away: 'KK Blansko');
+      final c = match('c', today.addDays(2), const HourMinute(12, 0),
+          home: 'KK Vyškov', away: 'KK Znojmo');
+      final slots = [a, b, c];
+      expect(ids(upcomingMatches(slots: slots, today: today, query: 'veverky')),
+          ['a']);
+      expect(ids(upcomingMatches(slots: slots, today: today, query: 'HUSOVICE')),
+          ['b']);
+      expect(ids(upcomingMatches(slots: slots, today: today, query: 'vyskov')),
+          ['c'], reason: 'diacritics are not a spelling test');
+      expect(ids(upcomingMatches(slots: slots, today: today, query: 'brno')),
+          ['a'], reason: 'either side of the match counts');
+      expect(ids(upcomingMatches(slots: slots, today: today, query: '  ')),
+          ['a', 'b', 'c'], reason: 'blank is not a filter');
+      expect(ids(upcomingMatches(slots: slots, today: today, query: 'nikdo')),
+          isEmpty);
+    });
+  });
 }

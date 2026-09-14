@@ -1704,7 +1704,8 @@ declare
   v_streamed text[] := array[
     'profiles', 'schedule_settings', 'clubs', 'time_blocks', 'app_config',
     'google_calendar_links', 'calendar_teams', 'team_colors', 'reservations',
-    'day_overrides', 'priority_slot_types', 'priority_slots', 'rentals'
+    'day_overrides', 'priority_slot_types', 'priority_slots', 'rentals',
+    'match_exceptions'
   ];
   v_missing text[];
 begin
@@ -1891,6 +1892,375 @@ begin
   end;
 
   raise notice 'OK: set_team_colors_for is server-only, returns exactly the previous state and a null colour deletes the row';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- match_exceptions (0039): "I am playing this one." A B-team player turns
+-- out for the A team once — that single match is theirs, in Můj přehled and
+-- in the main Google calendar, without following the team and collecting
+-- the rest of its season.
+-- ---------------------------------------------------------------------------
+reset role;
+
+-- A match of two teams this player follows in neither list, plus a colour
+-- for OUR side of it (the home team, since is_away is false) — the colour
+-- an exception has to find, by the same rule matchColorOf follows in the app.
+do $$
+declare
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+  v_tenant constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_type uuid;
+begin
+  select id into v_type from priority_slot_types
+    where tenant_id = v_tenant and is_match and builtin;
+  insert into priority_slots
+    (tenant_id, date, starts_at, ends_at, type_id, home_team, away_team,
+     prep_minutes, description, is_away, created_by)
+  values
+    (v_tenant, (now() at time zone 'Europe/Prague')::date + 62,
+     '10:00', '13:00', v_type,
+     'Cal Test Guest A', 'Cal Test Guest B', 0, 'Test 0039 guest', false,
+     v_uid);
+  insert into team_colors (user_id, team, color_id)
+  values (v_uid, 'Cal Test Guest A', 11);
+end $$;
+
+do $$
+begin
+  if has_table_privilege('authenticated', 'public.match_exceptions', 'select')
+     is not true then
+    raise exception 'FAIL: authenticated cannot read match_exceptions';
+  end if;
+  if has_table_privilege('authenticated', 'public.match_exceptions', 'insert')
+     or has_table_privilege('authenticated', 'public.match_exceptions', 'update')
+     or has_table_privilege('authenticated', 'public.match_exceptions', 'delete') then
+    raise exception 'FAIL: the client can write match_exceptions directly';
+  end if;
+  if has_table_privilege('anon', 'public.match_exceptions', 'select') then
+    raise exception 'FAIL: anon can read match_exceptions';
+  end if;
+  -- The RPC is the way in, and the job helper it leans on is not.
+  if not has_function_privilege('authenticated',
+       'set_match_exception(uuid, boolean)', 'execute') then
+    raise exception 'FAIL: the app cannot call set_match_exception';
+  end if;
+  if has_function_privilege('authenticated',
+       'enqueue_match_calendar_sync(uuid, uuid)', 'execute') then
+    raise exception 'FAIL: the client can enqueue calendar jobs by hand';
+  end if;
+  raise notice 'OK: match_exceptions is select-only for the client, own rows only; set_match_exception is the way in (0039)';
+end $$;
+
+-- The app's half: turning an exception on and off. (my_future_matches is
+-- server-only — the edge function reads it — so the routing it produces is
+-- checked from server context below, each time as the calendar sync would.)
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+declare
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+  v_guest uuid;
+begin
+  select id into v_guest from priority_slots
+    where home_team = 'Cal Test Guest A' and away_team = 'Cal Test Guest B';
+  perform set_match_exception(v_guest, true);
+  if (select count(*) from match_exceptions
+        where user_id = v_uid and match_id = v_guest) <> 1 then
+    raise exception 'FAIL: set_match_exception did not add the row';
+  end if;
+  -- Saying it twice is saying it once.
+  perform set_match_exception(v_guest, true);
+  if (select count(*) from match_exceptions
+        where user_id = v_uid and match_id = v_guest) <> 1 then
+    raise exception 'FAIL: a repeated exception duplicated the row';
+  end if;
+  if (select calendar from match_exceptions
+        where user_id = v_uid and match_id = v_guest) <> 'primary' then
+    raise exception 'FAIL: an exception did not default to the main calendar';
+  end if;
+end $$;
+
+reset role;
+do $$
+declare
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+  v_row record;
+begin
+  select * into v_row from my_future_matches(v_uid)
+    where home_team = 'Cal Test Guest A';
+  if not found then
+    raise exception 'FAIL: my_future_matches does not carry the exception';
+  end if;
+  if v_row.calendar <> 'primary' then
+    raise exception 'FAIL: an exception did not land in the main calendar: %',
+      v_row.calendar;
+  end if;
+  -- Neither of its teams is in any of the player's lists, so the colour can
+  -- only have come from OUR side of the match — the same rule the app uses.
+  if v_row.color_id is distinct from 11 then
+    raise exception 'FAIL: the exception lost our team''s colour: %',
+      v_row.color_id;
+  end if;
+end $$;
+
+-- An exception outranks the team's own routing: Cal Test Home goes to the
+-- second calendar, and an added match lands in the MAIN one — which is also
+-- what keeps it out of both at once, since the sync writes to the target
+-- and sweeps the same (deterministic) event id from the other calendar.
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+begin
+  perform set_match_exception(
+    (select id from priority_slots
+       where home_team = 'Cal Test Home' and away_team = 'Cal Test Solo'),
+    true);
+end $$;
+reset role;
+do $$
+declare
+  v_row record;
+begin
+  select * into v_row from my_future_matches('10000000-0000-0000-0000-000000000001')
+    where home_team = 'Cal Test Home' and away_team = 'Cal Test Solo';
+  if v_row.calendar <> 'primary' then
+    raise exception 'FAIL: the exception did not outrank the team''s calendar: %',
+      v_row.calendar;
+  end if;
+end $$;
+
+-- Switched off, both of them: the team gets its own calendar back, and the
+-- match nobody's team plays drops out of the future altogether.
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+declare
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+  v_guest uuid;
+begin
+  select id into v_guest from priority_slots where home_team = 'Cal Test Guest A';
+  perform set_match_exception(
+    (select id from priority_slots
+       where home_team = 'Cal Test Home' and away_team = 'Cal Test Solo'),
+    null);
+  perform set_match_exception(v_guest, null);
+  if exists (select 1 from match_exceptions
+               where user_id = v_uid and match_id = v_guest) then
+    raise exception 'FAIL: the exception survived being switched off';
+  end if;
+end $$;
+reset role;
+do $$
+declare
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+  v_row record;
+begin
+  select * into v_row from my_future_matches(v_uid)
+    where home_team = 'Cal Test Home' and away_team = 'Cal Test Solo';
+  if v_row.calendar <> 'secondary' then
+    raise exception 'FAIL: dropping the exception did not give the team its calendar back: %',
+      v_row.calendar;
+  end if;
+  if exists (select 1 from my_future_matches(v_uid)
+               where home_team = 'Cal Test Guest A') then
+    raise exception 'FAIL: the match stayed in the future after the exception went';
+  end if;
+end $$;
+
+-- The other direction: a match a team DOES give the player, taken away.
+-- Away next weekend, not interested — out of the overview and out of
+-- Google, which the sync does by finding no row at all.
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+declare
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+  v_solo uuid;
+begin
+  select id into v_solo from priority_slots
+    where home_team = 'Cal Test Home' and away_team = 'Cal Test Solo';
+  perform set_match_exception(v_solo, false);
+  if (select shown from match_exceptions
+        where user_id = v_uid and match_id = v_solo) is not false then
+    raise exception 'FAIL: hiding a match did not store it as hidden';
+  end if;
+end $$;
+reset role;
+do $$
+declare
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+begin
+  if exists (select 1 from my_future_matches(v_uid)
+               where home_team = 'Cal Test Home' and away_team = 'Cal Test Solo') then
+    raise exception 'FAIL: a hidden match stayed in the player''s future';
+  end if;
+end $$;
+
+-- And handed back to the teams: no row, no opinion — the team decides
+-- again, in the calendar it always did.
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+declare
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+  v_solo uuid;
+begin
+  select id into v_solo from priority_slots
+    where home_team = 'Cal Test Home' and away_team = 'Cal Test Solo';
+  perform set_match_exception(v_solo, null);
+  if exists (select 1 from match_exceptions
+               where user_id = v_uid and match_id = v_solo) then
+    raise exception 'FAIL: clearing an exception left the row behind';
+  end if;
+end $$;
+reset role;
+do $$
+declare
+  v_row record;
+begin
+  select * into v_row from my_future_matches('10000000-0000-0000-0000-000000000001')
+    where home_team = 'Cal Test Home' and away_team = 'Cal Test Solo';
+  if not found or v_row.calendar <> 'secondary' then
+    raise exception 'FAIL: the team did not get its match back: %', to_jsonb(v_row);
+  end if;
+  raise notice 'OK: an exception hides a team''s match too, and clearing it hands the match back to the team (0039)';
+end $$;
+
+-- A match that is not this alley's, not a match at all, or already over.
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+declare
+  v_child uuid;
+begin
+  begin
+    perform set_match_exception(gen_random_uuid(), true);
+    raise exception 'FAIL: an unknown match was accepted';
+  exception when others then
+    if sqlerrm <> 'unknown_match' then raise; end if;
+  end;
+  begin
+    perform set_match_exception(
+      (select id from priority_slots
+         where tenant_id = '00000000-0000-0000-0000-00000000000b' limit 1),
+      true);
+    raise exception 'FAIL: another alley''s match was accepted';
+  exception when others then
+    if sqlerrm <> 'unknown_match' then raise; end if;
+  end;
+  select id into v_child from priority_slots where parent_id is not null limit 1;
+  if v_child is not null then
+    begin
+      perform set_match_exception(v_child, true);
+      raise exception 'FAIL: an úklid child was accepted as a match';
+    exception when others then
+      if sqlerrm <> 'unknown_match' then raise; end if;
+    end;
+  end if;
+  raise notice 'OK: set_match_exception adds a match of nobody''s team, routes it to the main calendar and outranks the team''s own (0039)';
+end $$;
+
+-- Yesterday's match is not something one is about to play.
+reset role;
+do $$
+declare
+  v_tenant constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_type uuid;
+begin
+  select id into v_type from priority_slot_types
+    where tenant_id = v_tenant and is_match and builtin;
+  insert into priority_slots
+    (tenant_id, date, starts_at, ends_at, type_id, home_team, away_team,
+     prep_minutes, description, is_away, created_by)
+  values
+    (v_tenant, (now() at time zone 'Europe/Prague')::date - 1,
+     '10:00', '13:00', v_type, 'Cal Test Past A', 'Cal Test Past B', 0,
+     'Test 0039 past', false, '10000000-0000-0000-0000-000000000001');
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+begin
+  begin
+    perform set_match_exception(
+      (select id from priority_slots where home_team = 'Cal Test Past A'), true);
+    raise exception 'FAIL: a match that is already over was accepted';
+  exception when others then
+    if sqlerrm <> 'match_past' then raise; end if;
+  end;
+  raise notice 'OK: an exception cannot be set on a match that is already over (0039)';
+end $$;
+
+-- The kiosk is the alley's tablet: it plays nothing.
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000006","role":"authenticated"}';
+do $$
+begin
+  begin
+    perform set_match_exception(
+      (select id from priority_slots where home_team = 'Cal Test Guest A'), true);
+    raise exception 'FAIL: the kiosk claimed a match';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  raise notice 'OK: the kiosk cannot claim a match (0039)';
+end $$;
+
+-- An exception is a calendar change like any other: switched on, the match
+-- re-timed under it, or gone with the match itself.
+reset role;
+delete from notification_jobs;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+begin
+  perform set_match_exception(
+    (select id from priority_slots where home_team = 'Cal Test Guest A'), true);
+end $$;
+
+-- notification_jobs is the server's own table (0023), so the queue is read
+-- from server context — which is also who reads it for real.
+reset role;
+do $$
+declare
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+  v_guest uuid;
+begin
+  select id into v_guest from priority_slots where home_team = 'Cal Test Guest A';
+  if not exists (select 1 from notification_jobs
+                   where dedupe_key = 'calendar:' || v_uid || ':match:' || v_guest) then
+    raise exception 'FAIL: switching an exception on queued no calendar job';
+  end if;
+
+  -- The match moves: its teams have no followers at all, so only the
+  -- exception can carry the news.
+  delete from notification_jobs;
+  update priority_slots set starts_at = '11:00' where id = v_guest;
+  if not exists (select 1 from notification_jobs
+                   where dedupe_key = 'calendar:' || v_uid || ':match:' || v_guest) then
+    raise exception 'FAIL: a re-timed match did not reach the player playing it';
+  end if;
+
+  -- The match is called off: the row goes with it, and the job that tells
+  -- Google to drop the event goes out.
+  delete from notification_jobs;
+  delete from priority_slots where id = v_guest;
+  if exists (select 1 from match_exceptions where match_id = v_guest) then
+    raise exception 'FAIL: the exception outlived its match';
+  end if;
+  if not exists (select 1 from notification_jobs
+                   where dedupe_key = 'calendar:' || v_uid || ':match:' || v_guest) then
+    raise exception 'FAIL: a deleted match left its event in the calendar';
+  end if;
+  raise notice 'OK: an exception rides the calendar jobs — on, re-timed, and gone with its match (0039)';
 end $$;
 
 reset role;

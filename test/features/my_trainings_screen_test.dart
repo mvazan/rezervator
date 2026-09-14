@@ -67,6 +67,7 @@ void main() {
     bool slotsFailed = false,
     int? trainingColorId,
     DateTime? nowOverride,
+    Map<String, bool> exceptions = const {},
   }) {
     return ProviderScope(
       overrides: [
@@ -82,6 +83,7 @@ void main() {
         prioritySlotsFailedProvider.overrideWithValue(slotsFailed),
         nowProvider.overrideWith((ref) => Stream.value(nowOverride ?? now)),
         myTeamColorsProvider.overrideWith((ref) => Stream.value(teamColors)),
+        myMatchExceptionsProvider.overrideWith((ref) => Stream.value(exceptions)),
         myCalendarLinkProvider.overrideWith((ref) => Stream.value(
               trainingColorId == null
                   ? CalendarLink.none
@@ -419,6 +421,58 @@ void main() {
         tester.widget<Icon>(find.byIcon(Icons.emoji_events_outlined)).color,
         colorNamed('Švestková'),
       );
+    });
+  });
+
+  // A match played for somebody else's team (0039) is on the list like any
+  // other — nothing marks it out, it simply is the player's.
+  group('an exception', () {
+    final guest = PrioritySlot(
+      id: 'guest',
+      date: today.addDays(2),
+      startsAt: const HourMinute(10, 0),
+      endsAt: const HourMinute(13, 0),
+      type: PrioritySlot.fallbackMatchType,
+      homeTeam: 'KK Vyškov A',
+      awayTeam: 'KK Vyškov B',
+    );
+
+    // One ProviderScope per test: a second pumpWidget does not swap them.
+    testWidgets('without one, a match of nobody\'s team is not on the list',
+        (tester) async {
+      await tester.pumpWidget(app(slots: [guest]));
+      await tester.pumpAndSettle();
+      expect(find.text('KK Vyškov A – KK Vyškov B'), findsNothing);
+    });
+
+    testWidgets('puts a match of nobody\'s team on the list', (tester) async {
+      await tester.pumpWidget(app(slots: [guest], exceptions: const {'guest': true}));
+      await tester.pumpAndSettle();
+      expect(find.text('KK Vyškov A – KK Vyškov B'), findsOneWidget);
+      // No badge, no note: it reads exactly like a followed team's match.
+      expect(find.text('10:00–13:00 · doma'), findsOneWidget);
+    });
+
+    testWidgets('wears our team\'s colour on the trophy', (tester) async {
+      await tester.pumpWidget(app(
+        slots: [guest],
+        exceptions: const {'guest': true},
+        teamColors: const {'KK Vyškov A': 11},
+      ));
+      await tester.pumpAndSettle();
+
+      final icon = tester.widget<Icon>(find.byIcon(Icons.emoji_events_outlined));
+      expect(icon.color, isNotNull);
+      expect(icon.color, eventShadeOf(11, Brightness.light));
+    });
+
+    testWidgets('a team with no colour leaves the trophy plain',
+        (tester) async {
+      await tester.pumpWidget(app(slots: [guest], exceptions: const {'guest': true}));
+      await tester.pumpAndSettle();
+
+      final icon = tester.widget<Icon>(find.byIcon(Icons.emoji_events_outlined));
+      expect(icon.color, isNull);
     });
   });
 }

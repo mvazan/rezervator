@@ -64,6 +64,27 @@ final profilesProvider = StreamProvider<List<Profile>>((ref) {
         ..sort((a, b) => compareCzech(a.displayName, b.displayName)));
 });
 
+/// Where this player disagrees with their own teams about a single match
+/// (0039, `match_exceptions`): match id -> shown, true for a match they
+/// added, false for one they hid. A match with no entry is whatever the
+/// teams say. Written through [Api.setMatchException], never directly: the
+/// table is select-only, and the RPC's trigger queues the Google job.
+final myMatchExceptionsProvider = StreamProvider<Map<String, bool>>((ref) {
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return Stream.value(const {});
+  return cachedRows(
+          uid,
+          'match_exceptions',
+          () => _db
+              .from('match_exceptions')
+              .stream(primaryKey: ['user_id', 'match_id'])
+              .eq('user_id', uid))
+      .map((rows) => {
+            for (final row in rows)
+              row['match_id'] as String: row['shown'] as bool? ?? true,
+          });
+});
+
 /// Alley configuration singleton (null until the backend is seeded).
 /// Alleys offered at registration (id + name; RLS exposes nothing more).
 /// Session-gated, not profile-gated — the register screen runs pre-profile.
@@ -802,6 +823,15 @@ class Api {
 
   /// Which teams' matches the player sees in Můj přehled (0029). Own row,
   /// like the colour; the calendar sync's own list is untouched.
+  /// One match, against what the teams say (0039): [shown] true adds it
+  /// (Můj přehled shows it, the main Google calendar gets it), false hides
+  /// one a team gives, and NULL drops the exception so the teams decide
+  /// again. Google follows through the same job queue a re-timed match
+  /// rides — within minutes, not in this call.
+  static Future<void> setMatchException(String matchId, bool? shown) =>
+      _db.rpc('set_match_exception',
+          params: {'p_match': matchId, 'p_shown': shown});
+
   static Future<void> setFollowedTeams(List<String> teams) => _db
       .from('profiles')
       .update({'followed_teams': teams})
@@ -1186,6 +1216,7 @@ void resetTenantScopedProviders(WidgetRef ref) {
   ref.invalidate(myCalendarLinkProvider);
   ref.invalidate(myCalendarTeamsProvider);
   ref.invalidate(myTeamColorsProvider);
+  ref.invalidate(myMatchExceptionsProvider);
   ref.invalidate(playersProvider);
   ref.invalidate(tenantsProvider);
   ref.invalidate(myTenantStatusProvider);
