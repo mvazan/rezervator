@@ -64,9 +64,12 @@ void main() {
         'role': 'admin',
         'status': 'approved',
         'fcm_token': null,
+        'notify_before_minutes': [60, 1440],
         'club_id': 'club-1',
       });
       expect(p.role, Role.admin);
+      // Farthest first, whatever order the row happens to hold (0040).
+      expect(p.notifyBefore, [1440, 60]);
       expect(p.isAdmin, isTrue);
       expect(p.isApproved, isTrue);
       expect(p.clubId, 'club-1');

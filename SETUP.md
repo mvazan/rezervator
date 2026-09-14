@@ -301,6 +301,11 @@ report odpovídá skutečné účasti, ne jen tomu, kdo si trénink rezervoval.
 
 ### 8.2 Push notifikace (FCM) — volitelné
 
+> Push je kanál, ne funkce: **co** se posílá, rozhoduje appka (zrušený
+> trénink, rezervace z kiosku, připomínka před tréninkem — 0040), **kudy**
+> to půjde, rozhoduje `notify`: push tomu, kdo má appku v telefonu, e-mail
+> všem ostatním. Bez nastavení níž chodí všechno e-mailem a nic se neztratí.
+
 Appka od začátku (Fáze 0) umí číst 4 `FIREBASE_*` dart-defines (viz krok 4
 výše), ale bez dalšího nastavení zůstávají push notifikace vypnuté a
 appka běží normálně dál jen s e-mailem (Fáze 3). Zapnutí push je volitelné

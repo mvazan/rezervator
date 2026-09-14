@@ -5,6 +5,7 @@ import '../../../core/ui.dart';
 import '../../../data/providers.dart';
 import '../../../domain/models.dart';
 import 'event_color_picker.dart';
+import 'reminders_sheet.dart';
 
 /// What the player has to clean up by hand after a disconnect: Google
 /// refused to delete these calendars (the grant was already revoked, or the
@@ -165,95 +166,32 @@ class _CalendarLinkCardState extends ConsumerState<CalendarLinkCard> {
   /// Reminder editor for [calendar]: a live list of "N hodin/dní předem"
   /// entries with add/remove, mirroring Google Calendar's own model (max 5,
   /// max 4 weeks). Every change is saved immediately — the sheet watches the
-  /// same stream as the card, so it redraws itself when the row lands.
+  /// same stream as the card, so it redraws itself when the row lands. The
+  /// list itself is shared with Můj profil's own reminders (0040).
   Future<void> _editReminders(CalendarSlot calendar) {
-    return showModalBottomSheet<void>(
-      context: context,
-      builder: (sheetContext) => Consumer(
-        builder: (context, ref, _) {
-          final link =
-              ref.watch(myCalendarLinkProvider).value ?? CalendarLink.none;
-          final minutes = calendar == CalendarSlot.secondary
-              ? link.reminderMinutesSecondary
-              : link.reminderMinutes;
-          // The second calendar never carries trainings (those always stay
-          // on primary, per the design), so its empty state talks about
-          // matches instead — and while there is only one calendar, the
-          // title stays exactly what it always was.
-          final title = !link.secondaryEnabled
-              ? 'Připomínky tréninků v kalendáři'
-              : (calendar == CalendarSlot.secondary
-                    ? 'Připomínky druhého kalendáře'
-                    : 'Připomínky hlavního kalendáře');
-          final emptyCopy = calendar == CalendarSlot.secondary
-              ? 'Zápasy se přidávají tiše, bez upozornění.'
-              : 'Tréninky se přidávají tiše, bez upozornění.';
-          return SafeArea(
-            child: ListView(
-              shrinkWrap: true,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-                  child: Text(
-                    title,
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                ),
-                if (minutes.isEmpty)
-                  ListTile(
-                    leading: const Icon(Icons.notifications_off_outlined),
-                    title: const Text('Žádné připomínky'),
-                    subtitle: Text(emptyCopy),
-                  ),
-                for (final m in minutes)
-                  ListTile(
-                    leading: const Icon(Icons.notifications_none_outlined),
-                    title: Text(reminderOffsetLabel(m)),
-                    trailing: IconButton(
-                      tooltip: 'Odebrat',
-                      icon: const Icon(Icons.close),
-                      onPressed: () => tryAction(
-                        context,
-                        () => widget.setReminders([
-                          for (final x in minutes)
-                            if (x != m) x,
-                        ], calendar: calendar),
-                      ),
-                    ),
-                  ),
-                if (minutes.length < maxCalendarReminders)
-                  ListTile(
-                    leading: const Icon(Icons.add),
-                    title: const Text('Přidat připomínku'),
-                    onTap: () => _addReminder(context, minutes, calendar),
-                  ),
-                const SizedBox(height: 8),
-              ],
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  /// "Number + unit" dialog; converts to minutes and saves to [calendar].
-  Future<void> _addReminder(
-    BuildContext context,
-    List<int> current,
-    CalendarSlot calendar,
-  ) async {
-    final minutes = await showDialog<int>(
-      context: context,
-      builder: (_) => const _ReminderDialog(),
-    );
-    if (minutes == null || !context.mounted) return;
-    if (minutes > maxReminderMinutes) {
-      snack(context, 'Nejdál to jde 4 týdny (28 dní) předem.');
-      return;
-    }
-    await tryAction(
+    final link = ref.read(myCalendarLinkProvider).value ?? CalendarLink.none;
+    // The second calendar never carries trainings (those always stay on
+    // primary, per the design), so its empty state talks about matches
+    // instead — and while there is only one calendar, the title stays
+    // exactly what it always was.
+    final title = !link.secondaryEnabled
+        ? 'Připomínky tréninků v kalendáři'
+        : (calendar == CalendarSlot.secondary
+            ? 'Připomínky druhého kalendáře'
+            : 'Připomínky hlavního kalendáře');
+    return showRemindersSheet(
       context,
-      () => widget.setReminders([...current, minutes], calendar: calendar),
+      title: title,
+      emptyCopy: calendar == CalendarSlot.secondary
+          ? 'Zápasy se přidávají tiše, bez upozornění.'
+          : 'Tréninky se přidávají tiše, bez upozornění.',
+      minutesOf: (ref) {
+        final live = ref.watch(myCalendarLinkProvider).value ?? CalendarLink.none;
+        return calendar == CalendarSlot.secondary
+            ? live.reminderMinutesSecondary
+            : live.reminderMinutes;
+      },
+      onChanged: (minutes) => widget.setReminders(minutes, calendar: calendar),
     );
   }
 
@@ -396,81 +334,6 @@ class _CalendarLinkCardState extends ConsumerState<CalendarLinkCard> {
     };
     return Card(child: Column(children: rows));
   }
-}
-
-/// "Kolik" + hodiny/dny; pops with the offset in minutes (never with zero
-/// or garbage — the button just waits for a real number). Owns its text
-/// controller, so the exit animation can still rebuild the field safely.
-class _ReminderDialog extends StatefulWidget {
-  const _ReminderDialog();
-
-  @override
-  State<_ReminderDialog> createState() => _ReminderDialogState();
-}
-
-class _ReminderDialogState extends State<_ReminderDialog> {
-  final _amount = TextEditingController();
-  var _unit = _ReminderUnit.hours;
-
-  @override
-  void dispose() {
-    _amount.dispose();
-    super.dispose();
-  }
-
-  void _submit() {
-    final n = int.tryParse(_amount.text.trim());
-    if (n == null || n <= 0) return;
-    Navigator.pop(context, n * _unit.inMinutes);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Připomínka předem'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TextField(
-            controller: _amount,
-            autofocus: true,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(labelText: 'Kolik'),
-            onSubmitted: (_) => _submit(),
-          ),
-          const SizedBox(height: 12),
-          SegmentedButton<_ReminderUnit>(
-            segments: [
-              for (final u in _ReminderUnit.values)
-                ButtonSegment(value: u, label: Text(u.label)),
-            ],
-            selected: {_unit},
-            onSelectionChanged: (s) => setState(() => _unit = s.first),
-          ),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Zrušit'),
-        ),
-        FilledButton(onPressed: _submit, child: const Text('Přidat')),
-      ],
-    );
-  }
-}
-
-/// Units for the "reminder ahead" dialog, converted to minutes on save.
-/// Deliberately no minutes — for a training nobody sets "37 minut předem",
-/// and two units keep the dialog one glance wide.
-enum _ReminderUnit {
-  hours('hodiny', 60),
-  days('dny', 1440);
-
-  const _ReminderUnit(this.label, this.inMinutes);
-
-  final String label;
-  final int inMinutes;
 }
 
 class _Spinner extends StatelessWidget {
