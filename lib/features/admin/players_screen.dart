@@ -69,7 +69,9 @@ class PlayersScreen extends ConsumerWidget {
     final input = await promptText(
       context,
       title: 'Zkratka na tabuli',
-      hint: 'Tom P.',
+      message: 'Krátké jméno do rezervace a na tabuli v kuželně. Prázdná '
+          'zkratka znamená celé jméno.',
+      hint: 'např. Tom P.',
       initial: p.nick,
     );
     if (input == null || !context.mounted) return;
@@ -231,21 +233,32 @@ class PlayersScreen extends ConsumerWidget {
         placeholder: placeholder, target: picked, clubs: clubs);
   }
 
-  /// Club name for rows outside the club sections (pending, kiosk).
+  /// Club name for rows outside the club sections (pending, kiosk), with
+  /// the e-mail under it — on a pending card it is often the only way to
+  /// tell which of two Nováks is asking to be let in.
   Widget? _clubSubtitle(Profile p, List<Club> clubs) {
-    final name = clubNameOf(p.clubId, clubs);
-    return name.isEmpty ? null : Text(name);
+    final lines = [
+      if (clubNameOf(p.clubId, clubs).isNotEmpty) clubNameOf(p.clubId, clubs),
+      if (p.email.isNotEmpty) p.email,
+    ];
+    return lines.isEmpty ? null : Text(lines.join('\n'));
   }
 
-  /// "bez účtu · správce · „nick“" (any part may be absent). The club is
-  /// shown by the section header, so it stays out of the row.
+  /// "bez účtu · správce · „nick“" and, on the next line, the e-mail the
+  /// member signs in with (a player without an account has none). Any part
+  /// may be absent; the club is shown by the section header, so it stays
+  /// out of the row.
   String? _subtitle(Profile p) {
-    final parts = [
+    final marks = [
       if (!p.hasAccount) 'bez účtu',
       if (p.role == Role.admin) 'správce',
       if (p.nick.isNotEmpty) '„${p.nick}“',
+    ].join(' · ');
+    final lines = [
+      if (marks.isNotEmpty) marks,
+      if (p.email.isNotEmpty) p.email,
     ];
-    return parts.isEmpty ? null : parts.join(' · ');
+    return lines.isEmpty ? null : lines.join('\n');
   }
 
   /// The member menu: roles, kiosk, club, nick.
@@ -321,6 +334,8 @@ class PlayersScreen extends ConsumerWidget {
                   Card(
                     child: ListTile(
                       title: Text(p.displayName),
+                      isThreeLine: clubNameOf(p.clubId, clubs).isNotEmpty &&
+                          p.email.isNotEmpty,
                       subtitle: _clubSubtitle(p, clubs),
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
@@ -372,6 +387,7 @@ class PlayersScreen extends ConsumerWidget {
                 for (final p in members)
                   ListTile(
                     title: Text(p.displayName),
+                    isThreeLine: _subtitle(p)?.contains('\n') ?? false,
                     subtitle:
                         _subtitle(p) == null ? null : Text(_subtitle(p)!),
                     trailing: PopupMenuButton<String>(
