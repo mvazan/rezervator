@@ -15,10 +15,12 @@ twice a week cron ──────► keepalive.yml: pings Supabase so the fre
                           never pauses
 ```
 
-**Firebase?** Only for FCM push, which is dormant. Nothing to deploy: the app
-gets the `FIREBASE_*` values baked in at build time (empty until push is
-enabled), and the notify function reads the service-account JSON from a
-Supabase secret if/when set. Nothing here changes until then.
+**Firebase?** FCM push, live since 2026-07-08 — both halves are set on prod
+(the four `FIREBASE_*` GitHub secrets, and `FIREBASE_SERVICE_ACCOUNT` in
+Supabase), so a player with the app installed gets push and everyone else
+gets e-mail. Nothing to deploy either way: the app bakes the `FIREBASE_*`
+values in at build time and the notify function reads the service-account
+JSON from the Supabase secret.
 
 ## One-time setup
 
@@ -40,7 +42,7 @@ Add the rest:
 | `PLAY_SERVICE_ACCOUNT_JSON` | release | play-uploader service-account JSON |
 | `DEMO_PASSWORD` | release | password for the Play-review demo account (see PLAY.md) |
 | `SENTRY_DSN` | deploy-web, release | Sentry DSN (optional — empty keeps Sentry off) |
-| `FIREBASE_*` (4) | deploy-web, release | optional; empty keeps push off |
+| `FIREBASE_*` (4) | deploy-web, release | set since 2026-07-08 — a build carrying them registers a device token and that device then gets push instead of e-mail; empty turns push off for that build alone. The server half is `FIREBASE_SERVICE_ACCOUNT`, a **Supabase** secret (SETUP.md §8.2), not a GitHub one |
 | `GOOGLE_CLIENT_ID` | deploy-web, release | optional; the OAuth **client ID** (public) for the Google Calendar link — empty hides the calendar card. The **client secret** is a Supabase secret only (`supabase secrets set GOOGLE_CLIENT_ID=… GOOGLE_CLIENT_SECRET=…`, SETUP.md §8.4) |
 
 ### Auth + SMTP config lives in git too
