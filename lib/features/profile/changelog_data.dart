@@ -44,6 +44,8 @@ String changelogHeading(Release r, {required bool web}) {
 
 const appChangelog = <Release>[
   Release(null, '14. 9. 2026', [
+    'Připomínky v Můj profil: ozveme se ti hodinu, dvě nebo den před '
+        'tréninkem i zápasem — do mobilu, a bez appky e-mailem.',
     'Výjimky v Moje týmy: jednotlivý zápas si přidáš do přehledu, nebo ho '
         'z něj skryješ — ať už hraješ za jiný tým, nebo tě zrovna nezajímá.',
     'Týmy nastavuješ na jednom místě: v Moje týmy u každého zaškrtneš '

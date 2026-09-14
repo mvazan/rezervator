@@ -86,6 +86,7 @@ void main() {
     Future<void> Function(int color)? setOwnColor,
     Future<void> Function(List<String> teams)? setFollowedTeams,
     Future<void> Function(List<CalendarTeam> teams)? setCalendarTeams,
+    Future<void> Function(List<int> minutes)? setNotifyBefore,
     Future<void> Function(Map<String, int?> colors)? setTeamColors,
     Future<void> Function(HomeView view)? setDefaultView,
     List<PrioritySlot> matches = const [],
@@ -112,6 +113,8 @@ void main() {
               setFollowedTeams ?? (_) async => throw StateError('unexpected'),
           setCalendarTeams:
               setCalendarTeams ?? (_) async => throw StateError('unexpected'),
+          setNotifyBefore:
+              setNotifyBefore ?? (_) async => throw StateError('unexpected'),
           setTeamColors:
               setTeamColors ?? (_) async => throw StateError('unexpected'),
           setDefaultView:
@@ -300,10 +303,10 @@ void main() {
     // reservations look, what opens first, whose matches you follow, the
     // calendar they go to — and only then the app's own looks, which has
     // nothing to do with kuželky at all.
-    testWidgets('the cards run: name, Tabule, Po spuštění, Moje týmy, Google '
-        'kalendář, Vzhled', (tester) async {
+    testWidgets('the cards run: name, Tabule, Po spuštění, Moje týmy, '
+        'Připomínky, Google kalendář, Vzhled', (tester) async {
       // Tall enough for every card to be built (the ListView is lazy).
-      tester.view.physicalSize = const Size(800, 2000);
+      tester.view.physicalSize = const Size(800, 2400);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -316,6 +319,7 @@ void main() {
         top('Tabule'),
         top('Po spuštění'),
         top('Moje týmy'),
+        top('Připomínky'),
         top('Google kalendář'),
         top('Vzhled'),
         top('Odhlásit se'),
@@ -1452,6 +1456,75 @@ void main() {
           greaterThan(tester.getTopLeft(find.text('Jméno')).dy));
       expect(tester.getTopLeft(find.text('E-mail')).dy,
           lessThan(tester.getTopLeft(find.text('Oddíl')).dy));
+    });
+
+    // Reminders of the app's own (0040) — for the player who has no Google
+    // calendar, or who wants both.
+    testWidgets('Připomínky sums up the lead times and adds one',
+        (tester) async {
+      tester.view.physicalSize = const Size(800, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final saved = <List<int>>[];
+      await tester.pumpWidget(app(me, setNotifyBefore: (m) async => saved.add(m)));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Před tréninkem a zápasem. Žádné'), findsOneWidget);
+      await tester.tap(find.text('Nastavit…'));
+      await tester.pumpAndSettle();
+      expect(find.text('Před tréninkem ani zápasem se nic neozve.'),
+          findsOneWidget);
+
+      await tester.tap(find.text('Přidat připomínku'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), '2');
+      await tester.tap(find.text('Přidat'));
+      await tester.pumpAndSettle();
+      expect(saved, [
+        [120],
+      ], reason: 'hours by default');
+    });
+
+    testWidgets('Připomínky names what is set, and removing one saves the rest',
+        (tester) async {
+      tester.view.physicalSize = const Size(800, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      const reminded = Profile(
+        id: 'me',
+        displayName: 'Já Hráč',
+        email: 'me@example.com',
+        role: Role.player,
+        status: ProfileStatus.approved,
+        notifyBefore: [120, 1440],
+      );
+      final saved = <List<int>>[];
+      await tester.pumpWidget(
+          app(reminded, setNotifyBefore: (m) async => saved.add(m)));
+      await tester.pumpAndSettle();
+
+      // Farthest first, as the calendar's own lists read.
+      expect(find.text('Před tréninkem a zápasem. 1 den předem · 2 h předem'),
+          findsOneWidget);
+
+      await tester.tap(find.text('Nastavit…'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(ListTile, '2 h předem')
+          .last
+          .hitTestable());
+      await tester.pumpAndSettle();
+      expect(saved, isEmpty, reason: 'tapping the row itself does nothing');
+
+      await tester.tap(find.descendant(
+        of: find.widgetWithText(ListTile, '2 h předem'),
+        matching: find.byTooltip('Odebrat'),
+      ));
+      await tester.pumpAndSettle();
+      expect(saved, [
+        [1440],
+      ]);
     });
 
     testWidgets('Po spuštění saves the chosen launch view', (tester) async {

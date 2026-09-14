@@ -832,6 +832,15 @@ class Api {
       _db.rpc('set_match_exception',
           params: {'p_match': matchId, 'p_shown': shown});
 
+  /// How long before a training or a match to be reminded (0040), in
+  /// minutes. Own row, like the colour — the reminder itself is the
+  /// server's job, and it reaches the player the way every other message
+  /// does: push with the app installed, e-mail without it.
+  static Future<void> setNotifyBefore(List<int> minutes) => _db
+      .from('profiles')
+      .update({'notify_before_minutes': minutes})
+      .eq('id', currentUserId!);
+
   static Future<void> setFollowedTeams(List<String> teams) => _db
       .from('profiles')
       .update({'followed_teams': teams})

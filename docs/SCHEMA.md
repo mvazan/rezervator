@@ -65,6 +65,7 @@ Every `color` column above is one `integer` (0030): the negative values are the 
 | `calendar_teams` | (0032) One row per player **+** followed team — replaces `google_calendar_links.match_teams`, because a team now needs to say more than its name: `user_id → profiles` (cascade), `team` (a `priority_slots.home_team`/`away_team` string), `calendar` (`primary` \| `secondary`, default `primary` — which of the player's two Google calendars this team's matches go to). PK (`user_id`, `team`). In the Realtime publication (0035) — the profile card streams it. Colour (`color_id`) lived here until 0036 moved it to `team_colors` below, independent of this table. | select own rows only (`user_id = auth.uid()`); `authenticated` has SELECT and nothing else (0035) — every write is the server's, through `calendar-manage`/`set_calendar_teams_for`, which also keeps `google_calendar_links.match_teams` mirrored for the 1.2.1 app. |
 | `team_colors` | (0036) One row per player **+** team the player has coloured — `user_id → profiles` (cascade), `team`, `color_id` (Google event `colorId` 1–11, `not null` — no row at all means no colour). PK (`user_id`, `team`). Independent of **both** team lists (`profiles.followed_teams` and `calendar_teams`) and of whether a calendar is even linked: the one colour shown for a team in Můj přehled and in its Google Calendar event alike. In the Realtime publication. | select own rows only (`user_id = auth.uid()`); `authenticated` has SELECT and nothing else (0037) — every write is the server's, through `calendar-manage`/`set_team_colors_for`, which saves a colour and immediately repaints the affected future Google Calendar events in the same request. |
 | `match_exceptions` | (0039) One row per player **+** match where the player disagrees with their teams — `user_id → profiles` (cascade), `match_id → priority_slots` (cascade), `shown` (`true` adds a match no team gives them, `false` hides one a team does), `calendar` (`primary` \| `secondary`, default `primary`; only ever consulted for an added match, and the app offers no choice — the column is there for the day it does). PK (`user_id`, `match_id`). Agreeing with the teams stores nothing: the row is deleted instead, so "back to what the team says" is the absence of a row rather than a third state. In the Realtime publication. | select own rows only (`user_id = auth.uid()`); `authenticated` has SELECT and nothing else — the one way in is `set_match_exception`, callable by the app. |
+| `reminders_sent` | (0040) The receipt for a reminder already delivered — `user_id → profiles` (cascade), `event_key` (`r:<uuid>` for a reservation, `m:<uuid>` for a match — one column instead of two nullable foreign keys and a CHECK to police them), `offset_minutes`, `sent_at`. PK all three. Nothing schedules reminders; `due_reminders()` asks every minute what is due *now* from the data as it stands, and this table is the only state that carries over, so a repeated tick or a retried send does not ring twice. No foreign key to the event and therefore no cascade: the tick prunes anything older than 30 days. | **server-only**: RLS on, zero policies, every grant revoked. |
 | `oauth_nonces` | The OAuth `state`: `nonce` (48 hex chars from `gen_random_bytes(24)`), `user_id → profiles` (cascade), `created_at`, `consumed_at`. One-shot with a 10-minute TTL — the callback function runs without a JWT, so this is what binds Google's redirect to a signed-in player. | **server-only** like the tokens. |
 
 View `players` (owned by postgres → bypasses `profiles` RLS on purpose):
@@ -431,6 +432,37 @@ answer, so the exception is per MATCH:
   directly (the one path that does not go through `my_future_matches`), so
   without the check, dropping a team would take a guest match with it.
 
+### Připomínky před akcí (0040)
+
+A player with a Google calendar gets reminded by Google (`reminder_minutes`,
+0032). A player without one had nothing: the app announced what had
+*happened* — a cancelled training, a booking made at the kiosk — never what
+was *coming*. `profiles.notify_before_minutes` is the other half, set the
+same way (up to five lead times, 0 to four weeks) and delivered through the
+same door as every other message: push where the profile has an `fcm_token`
+and FCM is configured, e-mail otherwise.
+
+- **Nothing is scheduled.** A row queued at (start − lead) would have to be
+  re-planned every time anything moved — a cancelled reservation, a re-timed
+  block, a postponed match, a dropped team, a new exception, a changed lead
+  time. Six triggers that must agree, and one forgotten means a reminder for
+  a training that no longer exists. Instead `due_reminders()` answers, every
+  minute, what is due *right now* from the data as it stands.
+- **`due_reminders()`** unions `my_future_reservations` with
+  **`my_upcoming_matches`** — the server-side twin of what `upcomingTimeline`
+  computes in the app: followed teams plus added exceptions, minus hidden
+  ones (0039). Not `my_future_matches`, which is about the Google calendar
+  and returns nothing without a link. A reminder is due when
+  `starts − lead <= now()` and the event has not started yet: after an
+  outage a late reminder ("za 20 minut") is worth sending, one for a training
+  already under way is not.
+- **`notifications_due()`** is the gate the minutely tick reads, a function
+  of its own so a test can ask it directly — without Vault configured the
+  tick returns before posting, so calling it proves nothing.
+- **`mark_reminder_sent()`** writes the receipt after a successful send and
+  prunes the table. A send that throws is simply due again next minute, which
+  is what one wants from a reminder: late beats never.
+
 ## Edge functions
 
 - **notify** — called by `notify_webhook()` (pg_net POST; URL and
@@ -503,6 +535,10 @@ answer, so the exception is per MATCH:
   import's own update, a no-op update or a manual match; `--force` clears
   it) together with the assertion that an import-style update / delete /
   insert on `priority_slots` leaves every user's team picks byte-identical,
+  the 0040 reminders (the player's own lead times inside their checks and on
+  their own row only, due at the lead time and only once, following Můj
+  přehled through teams / added / hidden matches, the tick's gate awake for a
+  reminder with an empty job queue, and the ledger server-only),
   the 0039 exceptions (select-only table + client-callable RPC, a match of
   nobody's team routed to the main calendar with our team's colour, an
   exception outranking the team's own calendar, hiding a match a team does

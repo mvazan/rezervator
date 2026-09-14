@@ -11,6 +11,7 @@ import '../admin/widgets/color_picker.dart';
 import 'widgets/appearance_card.dart';
 import 'widgets/calendar_link_card.dart';
 import 'widgets/my_teams_card.dart';
+import 'widgets/reminders_sheet.dart';
 
 /// App version/build, read once from the platform — drives the version line
 /// at the bottom of the profile screen.
@@ -27,6 +28,7 @@ class ProfileScreen extends ConsumerWidget {
     this.setOwnColor = Api.setOwnColor,
     this.setFollowedTeams = Api.setFollowedTeams,
     this.setCalendarTeams = Api.setCalendarTeams,
+    this.setNotifyBefore = Api.setNotifyBefore,
     this.setTeamColors = Api.setTeamColors,
     this.setDefaultView = Api.setDefaultView,
   });
@@ -36,6 +38,7 @@ class ProfileScreen extends ConsumerWidget {
   final Future<void> Function(int color) setOwnColor;
   final Future<void> Function(List<String> teams) setFollowedTeams;
   final Future<void> Function(List<CalendarTeam> teams) setCalendarTeams;
+  final Future<void> Function(List<int> minutes) setNotifyBefore;
   final Future<void> Function(Map<String, int?> colors) setTeamColors;
   final Future<void> Function(HomeView view) setDefaultView;
 
@@ -220,6 +223,48 @@ class ProfileScreen extends ConsumerWidget {
                   setFollowedTeams: setFollowedTeams,
                   setCalendarTeams: setCalendarTeams,
                   setTeamColors: setTeamColors,
+                ),
+                const SizedBox(height: 16),
+                // Reminders of one's own (0040): the app says what is
+                // coming, for the player who has no Google calendar — or
+                // who wants both, which is nobody's business but theirs.
+                // Not gated on the app being installed: the reminder
+                // reaches them the way every other message does, push with
+                // a phone in their pocket and e-mail without one.
+                Card(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      ListTile(
+                        leading: const Icon(Icons.notifications_none_outlined),
+                        title: const Text('Připomínky'),
+                        subtitle: Text(
+                          'Před tréninkem a zápasem. '
+                          '${remindersSummary(profile.notifyBefore)}',
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: FilledButton.tonal(
+                            onPressed: () => showRemindersSheet(
+                              context,
+                              title: 'Připomínky',
+                              emptyCopy: 'Před tréninkem ani zápasem se nic '
+                                  'neozve.',
+                              minutesOf: (sheetRef) =>
+                                  sheetRef.watch(myProfileProvider).value
+                                      ?.notifyBefore ??
+                                  const [],
+                              onChanged: setNotifyBefore,
+                            ),
+                            child: const Text('Nastavit…'),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
                 const SizedBox(height: 16),
                 // Hidden without a Google client ID baked in, and for the

@@ -2263,5 +2263,222 @@ begin
   raise notice 'OK: an exception rides the calendar jobs — on, re-timed, and gone with its match (0039)';
 end $$;
 
+-- ---------------------------------------------------------------------------
+-- Připomínky před tréninkem a zápasem (0040): kdo má propojený Google, dostane
+-- upozornění od něj — kdo ne, neměl dosud nic. Stejné předstihy, stejný kanál
+-- jako u ostatních zpráv (push, kdo má appku; jinak e-mail).
+-- ---------------------------------------------------------------------------
+reset role;
+do $$
+declare
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+  v_tenant constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_block uuid;
+  v_type uuid;
+  -- Derived from the timestamps, never from "today plus a time": this suite
+  -- runs in CI at any hour, and two hours from 23:30 is tomorrow.
+  v_train timestamp := (now() at time zone 'Europe/Prague') + interval '2 hours';
+  v_match timestamp := (now() at time zone 'Europe/Prague') + interval '3 hours';
+begin
+  -- The team whose matches count as this player's — Můj přehled reads
+  -- followed_teams, and so do the reminders.
+  update profiles set followed_teams = array['Rem Test Home'] where id = v_uid;
+
+  -- A training that starts in two hours, and a match in three.
+  select id into v_block from time_blocks
+    where tenant_id = v_tenant and active limit 1;
+  update time_blocks set starts_at = v_train::time,
+         ends_at = (v_train + interval '1 hour')::time
+   where id = v_block;
+  insert into reservations
+    (tenant_id, player_id, date, block_id, lane, created_via, created_by)
+  values (v_tenant, v_uid, v_train::date, v_block, 3, 'app', v_uid);
+
+  select id into v_type from priority_slot_types
+    where tenant_id = v_tenant and is_match and builtin;
+  insert into priority_slots
+    (tenant_id, date, starts_at, ends_at, type_id, home_team, away_team,
+     prep_minutes, description, is_away, created_by)
+  values
+    (v_tenant, v_match::date, v_match::time,
+     (v_match + interval '3 hours')::time,
+     v_type, 'Rem Test Home', 'Rem Test Away', 0, '', false, v_uid);
+end $$;
+
+-- Nothing is set up yet, so nothing is due — whatever the schedule says.
+do $$
+begin
+  if exists (select 1 from due_reminders()
+               where user_id = '10000000-0000-0000-0000-000000000001') then
+    raise exception 'FAIL: a reminder was due for a player who asked for none';
+  end if;
+end $$;
+
+-- The player's own row, written from the app like every other preference.
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+declare
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+begin
+  update profiles set notify_before_minutes = array[180, 60] where id = v_uid;
+  if (select notify_before_minutes from profiles where id = v_uid)
+     <> array[180, 60] then
+    raise exception 'FAIL: the player could not set their own reminders';
+  end if;
+  -- Somebody else's row stays out of reach (profiles_update_own).
+  update profiles set notify_before_minutes = array[10]
+   where id = '10000000-0000-0000-0000-000000000002';
+  if (select notify_before_minutes from profiles
+        where id = '10000000-0000-0000-0000-000000000002') <> '{}' then
+    raise exception 'FAIL: a player set somebody else''s reminders';
+  end if;
+  -- The bounds hold.
+  begin
+    update profiles set notify_before_minutes = array[50000] where id = v_uid;
+    raise exception 'FAIL: a reminder further ahead than four weeks was taken';
+  exception when check_violation then null;
+  end;
+  begin
+    update profiles set notify_before_minutes = array[-1] where id = v_uid;
+    raise exception 'FAIL: a negative lead time was taken';
+  exception when check_violation then null;
+  end;
+  begin
+    update profiles set notify_before_minutes = array[1, 2, 3, 4, 5, 6]
+     where id = v_uid;
+    raise exception 'FAIL: a sixth reminder was taken';
+  exception when check_violation then null;
+  end;
+  raise notice 'OK: reminders are the player''s own preference, inside the checks (0040)';
+end $$;
+
+reset role;
+do $$
+declare
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+  v_rows record;
+  v_count int;
+begin
+  -- 3 h before a training that starts in 2 h: due, and so is the match's
+  -- 3 h reminder (it starts in 3 h). The 1 h ones are not — their moment
+  -- has not come.
+  select count(*) into v_count from due_reminders() where user_id = v_uid;
+  if v_count <> 2 then
+    raise exception 'FAIL: expected the two 3-hour reminders, got %', v_count;
+  end if;
+  if not exists (select 1 from due_reminders()
+                   where user_id = v_uid and kind = 'training'
+                     and offset_minutes = 180) then
+    raise exception 'FAIL: the training reminder is not due';
+  end if;
+  if not exists (select 1 from due_reminders()
+                   where user_id = v_uid and kind = 'match'
+                     and offset_minutes = 180 and home_team = 'Rem Test Home') then
+    raise exception 'FAIL: the match of a followed team is not due';
+  end if;
+  if exists (select 1 from due_reminders()
+               where user_id = v_uid and offset_minutes = 60) then
+    raise exception 'FAIL: an hour-before reminder rang three hours early';
+  end if;
+
+  -- Everyone is reachable: a player without the app has an e-mail, and the
+  -- channel is notify's business, not this function's.
+  select * into v_rows from due_reminders() where user_id = v_uid limit 1;
+  if v_rows.email is null or v_rows.email = '' then
+    raise exception 'FAIL: due_reminders dropped the e-mail fallback';
+  end if;
+
+  -- Sent once, never again.
+  perform mark_reminder_sent(v_uid, r.event_key, r.offset_minutes)
+    from due_reminders() r where r.user_id = v_uid;
+  if exists (select 1 from due_reminders() where user_id = v_uid) then
+    raise exception 'FAIL: a reminder rang twice';
+  end if;
+  raise notice 'OK: a reminder is due at its lead time, once, for the player''s own trainings and matches (0040)';
+end $$;
+
+-- A match nobody's team plays is nobody's reminder; an exception makes it
+-- theirs, and hiding one takes it away (0039 all the way through).
+do $$
+declare
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+  v_tenant constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_type uuid;
+  v_guest uuid;
+  v_own uuid;
+  v_match timestamp := (now() at time zone 'Europe/Prague') + interval '3 hours';
+begin
+  select id into v_type from priority_slot_types
+    where tenant_id = v_tenant and is_match and builtin;
+  insert into priority_slots
+    (tenant_id, date, starts_at, ends_at, type_id, home_team, away_team,
+     prep_minutes, description, is_away, created_by)
+  values
+    (v_tenant, v_match::date, v_match::time,
+     (v_match + interval '3 hours')::time,
+     v_type, 'Rem Guest A', 'Rem Guest B', 0, '', false, v_uid)
+  returning id into v_guest;
+  select id into v_own from priority_slots where home_team = 'Rem Test Home';
+
+  if exists (select 1 from due_reminders()
+               where user_id = v_uid and event_key = 'm:' || v_guest) then
+    raise exception 'FAIL: a match of nobody''s team was reminded about';
+  end if;
+
+  insert into match_exceptions (user_id, match_id, shown)
+  values (v_uid, v_guest, true);
+  if not exists (select 1 from due_reminders()
+                   where user_id = v_uid and event_key = 'm:' || v_guest) then
+    raise exception 'FAIL: an added match is not worth a reminder';
+  end if;
+
+  insert into match_exceptions (user_id, match_id, shown)
+  values (v_uid, v_own, false);
+  if exists (select 1 from due_reminders()
+               where user_id = v_uid and event_key = 'm:' || v_own
+                 and offset_minutes = 60) then
+    raise exception 'FAIL: a hidden match still rings';
+  end if;
+  raise notice 'OK: reminders follow Můj přehled — a team''s matches, plus what the player added, minus what they hid (0040)';
+end $$;
+
+-- The minutely tick knows about reminders: without them in its condition it
+-- would stay silent, because the job queue is empty.
+do $$
+declare
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+begin
+  delete from notification_jobs;
+  delete from reminders_sent;
+  if not exists (select 1 from due_reminders()) then
+    raise exception 'FAIL: the fixtures stopped being due';
+  end if;
+  -- The gate the tick reads, asked directly: with no Vault configured the
+  -- post never happens, so calling the tick proves nothing either way.
+  if not notifications_due() then
+    raise exception 'FAIL: the tick would sleep through a due reminder';
+  end if;
+  -- And it still tolerates an unset Vault, as 0023 promised.
+  perform trigger_notification_jobs();
+  raise notice 'OK: the minutely tick fires for a due reminder, not only for a queued job (0040)';
+end $$;
+
+-- The ledger is the server's alone.
+do $$
+begin
+  if has_table_privilege('authenticated', 'public.reminders_sent', 'select')
+     or has_table_privilege('anon', 'public.reminders_sent', 'select') then
+    raise exception 'FAIL: the client can read reminders_sent';
+  end if;
+  if has_function_privilege('authenticated', 'due_reminders()', 'execute')
+     or has_function_privilege('authenticated',
+          'mark_reminder_sent(uuid, text, integer)', 'execute') then
+    raise exception 'FAIL: the client can drive the reminder machinery';
+  end if;
+  raise notice 'OK: the reminder ledger and its functions are server-only (0040)';
+end $$;
+
 reset role;
 rollback;

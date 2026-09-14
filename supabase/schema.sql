@@ -638,9 +638,11 @@ CREATE TABLE IF NOT EXISTS "public"."profiles" (
     "own_color" integer DEFAULT '-1'::integer NOT NULL,
     "followed_teams" "text"[] DEFAULT '{}'::"text"[] NOT NULL,
     "default_view" "text" DEFAULT 'calendar'::"text" NOT NULL,
+    "notify_before_minutes" integer[] DEFAULT '{}'::integer[] NOT NULL,
     CONSTRAINT "profiles_default_view_check" CHECK (("default_view" = ANY (ARRAY['calendar'::"text", 'trainings'::"text"]))),
     CONSTRAINT "profiles_followed_teams_check" CHECK ((COALESCE("array_length"("followed_teams", 1), 0) <= 20)),
     CONSTRAINT "profiles_nick_check" CHECK (("char_length"("nick") <= 14)),
+    CONSTRAINT "profiles_notify_before_minutes_check" CHECK (((COALESCE("array_length"("notify_before_minutes", 1), 0) <= 5) AND (0 <= ALL ("notify_before_minutes")) AND (40320 >= ALL ("notify_before_minutes")))),
     CONSTRAINT "profiles_own_color_check" CHECK (((("own_color" >= '-1'::integer) AND ("own_color" <= 8)) OR (("own_color" >= 16777216) AND ("own_color" <= 33554431)))),
     CONSTRAINT "profiles_placeholder_check" CHECK (((NOT "placeholder") OR (("role" = 'player'::"text") AND ("status" = 'approved'::"text") AND (NOT "superadmin")))),
     CONSTRAINT "profiles_role_check" CHECK (("role" = ANY (ARRAY['player'::"text", 'admin'::"text", 'kiosk'::"text"]))),
@@ -664,6 +666,10 @@ COMMENT ON COLUMN "public"."profiles"."followed_teams" IS 'Teams whose matches t
 
 
 COMMENT ON COLUMN "public"."profiles"."default_view" IS 'View the app opens at launch: calendar | trainings.';
+
+
+
+COMMENT ON COLUMN "public"."profiles"."notify_before_minutes" IS 'Minutes before a training or a match to send the player a reminder (0040) — up to five, each 0 to 40320 (four weeks), the same bounds google_calendar_links.reminder_minutes uses (deliberately a different name: that one tells GOOGLE when to ring, this one tells us). Empty = no reminders. The channel is the app''s usual one — push where there is a device, e-mail otherwise.';
 
 
 
@@ -744,6 +750,59 @@ $$;
 
 
 ALTER FUNCTION "public"."delete_placeholder_player"("p_id" "uuid") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."due_reminders"() RETURNS TABLE("user_id" "uuid", "email" "text", "fcm_token" "text", "event_key" "text", "offset_minutes" integer, "kind" "text", "starts_at" timestamp with time zone, "ends_at" time without time zone, "lane" smallint, "alley_name" "text", "home_team" "text", "away_team" "text", "is_away" boolean)
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  with people as (
+    -- No fcm_token condition: a player without the app is reachable by
+    -- e-mail, and notify picks the channel for every message the same way.
+    select p.id, p.email, p.fcm_token, p.notify_before_minutes
+      from profiles p
+      where p.status = 'approved'
+        and not p.placeholder  -- hráč bez účtu se nikam nepřihlašuje
+        and coalesce(array_length(p.notify_before_minutes, 1), 0) > 0
+  ),
+  events as (
+    select pe.id as user_id, pe.email, pe.fcm_token, pe.notify_before_minutes,
+           'training' as kind,
+           'r:' || r.reservation_id as event_key,
+           ((r.date + r.starts_at) at time zone 'Europe/Prague') as starts_ts,
+           r.ends_at, r.lane, r.alley_name,
+           null::text as home_team, null::text as away_team,
+           null::boolean as is_away
+      from people pe
+      cross join lateral my_future_reservations(pe.id) r
+    union all
+    select pe.id, pe.email, pe.fcm_token, pe.notify_before_minutes,
+           'match',
+           'm:' || m.match_id,
+           ((m.date + m.starts_at) at time zone 'Europe/Prague'),
+           m.ends_at, null::smallint, null::text,
+           m.home_team, m.away_team, m.is_away
+      from people pe
+      cross join lateral my_upcoming_matches(pe.id) m
+  )
+  select e.user_id, e.email, e.fcm_token, e.event_key, o.offset_minutes::integer,
+         e.kind, e.starts_ts, e.ends_at, e.lane, e.alley_name,
+         e.home_team, e.away_team, e.is_away
+    from events e
+    cross join lateral unnest(e.notify_before_minutes) as o(offset_minutes)
+    where e.starts_ts > now()
+      and e.starts_ts - make_interval(mins => o.offset_minutes) <= now()
+      and not exists (
+        select 1 from reminders_sent s
+        where s.user_id = e.user_id
+          and s.event_key = e.event_key
+          and s.offset_minutes = o.offset_minutes
+      )
+    order by e.starts_ts;
+$$;
+
+
+ALTER FUNCTION "public"."due_reminders"() OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."enqueue_calendar_sync"("p_user" "uuid", "p_reservation" "uuid") RETURNS "void"
@@ -886,6 +945,22 @@ ALTER FUNCTION "public"."kiosk_password_target"("p_user_id" "uuid") OWNER TO "po
 
 COMMENT ON FUNCTION "public"."kiosk_password_target"("p_user_id" "uuid") IS 'Kiosk účtu p_user_id smí správce téže kuželny nastavit nové heslo — vrací jeho id, jinak not_allowed/unknown_kiosk. Volá edge funkce kiosk-password jménem volajícího.';
 
+
+
+CREATE OR REPLACE FUNCTION "public"."mark_reminder_sent"("p_user" "uuid", "p_event_key" "text", "p_offset" integer) RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  insert into reminders_sent (user_id, event_key, offset_minutes)
+  values (p_user, p_event_key, p_offset)
+  on conflict (user_id, event_key, offset_minutes) do nothing;
+  delete from reminders_sent where sent_at < now() - interval '30 days';
+end;
+$$;
+
+
+ALTER FUNCTION "public"."mark_reminder_sent"("p_user" "uuid", "p_event_key" "text", "p_offset" integer) OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."match_calendar_followers"("p_tenant" "uuid", "p_home" "text", "p_away" "text") RETURNS SETOF "uuid"
@@ -1167,6 +1242,40 @@ $$;
 
 
 ALTER FUNCTION "public"."my_future_reservations"("p_user" "uuid") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."my_upcoming_matches"("p_user" "uuid") RETURNS TABLE("match_id" "uuid", "date" "date", "starts_at" time without time zone, "ends_at" time without time zone, "home_team" "text", "away_team" "text", "is_away" boolean, "description" "text")
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  select s.id, s.date, s.starts_at, s.ends_at,
+         s.home_team, s.away_team, s.is_away, s.description
+    from priority_slots s
+    join priority_slot_types y on y.id = s.type_id and y.is_match
+    join profiles p on p.id = p_user and p.tenant_id = s.tenant_id
+    left join match_exceptions e on e.user_id = p_user and e.match_id = s.id
+    where s.parent_id is null
+      and s.date >= (now() at time zone 'Europe/Prague')::date
+      and coalesce(
+            e.shown,
+            p.followed_teams && array[s.home_team, s.away_team])
+    order by s.date, s.starts_at;
+$$;
+
+
+ALTER FUNCTION "public"."my_upcoming_matches"("p_user" "uuid") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."notifications_due"() RETURNS boolean
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  select exists (select 1 from notification_jobs where run_at <= now())
+      or exists (select 1 from due_reminders());
+$$;
+
+
+ALTER FUNCTION "public"."notifications_due"() OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."notify_webhook"() RETURNS "trigger"
@@ -2079,7 +2188,7 @@ declare
   v_url text;
   v_secret text;
 begin
-  if not exists (select 1 from notification_jobs where run_at <= now()) then
+  if not notifications_due() then
     return;
   end if;
   select c.url, c.secret into v_url, v_secret from notify_webhook_config() c;
@@ -2349,6 +2458,21 @@ COMMENT ON COLUMN "public"."priority_slot_types"."color" IS 'Slot type colour: -
 
 
 
+CREATE TABLE IF NOT EXISTS "public"."reminders_sent" (
+    "user_id" "uuid" NOT NULL,
+    "event_key" "text" NOT NULL,
+    "offset_minutes" integer NOT NULL,
+    "sent_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."reminders_sent" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."reminders_sent" IS 'Which reminders have already gone out (0040), so a repeated tick or a retried send does not ring twice. Server-only; pruned after 30 days by the tick itself.';
+
+
+
 CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     "lane_count" smallint DEFAULT 4 NOT NULL,
     "training_weekdays" smallint[] DEFAULT '{1,2,4}'::smallint[] NOT NULL,
@@ -2485,6 +2609,11 @@ ALTER TABLE ONLY "public"."priority_slot_types"
 
 ALTER TABLE ONLY "public"."profiles"
     ADD CONSTRAINT "profiles_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."reminders_sent"
+    ADD CONSTRAINT "reminders_sent_pkey" PRIMARY KEY ("user_id", "event_key", "offset_minutes");
 
 
 
@@ -2721,6 +2850,11 @@ ALTER TABLE ONLY "public"."profiles"
 
 
 
+ALTER TABLE ONLY "public"."reminders_sent"
+    ADD CONSTRAINT "reminders_sent_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "public"."profiles"("id") ON DELETE CASCADE;
+
+
+
 ALTER TABLE ONLY "public"."rentals"
     ADD CONSTRAINT "rentals_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "public"."profiles"("id");
 
@@ -2887,6 +3021,9 @@ CREATE POLICY "profiles_update_own" ON "public"."profiles" FOR UPDATE USING (("i
 
 
 
+ALTER TABLE "public"."reminders_sent" ENABLE ROW LEVEL SECURITY;
+
+
 ALTER TABLE "public"."rentals" ENABLE ROW LEVEL SECURITY;
 
 
@@ -3037,9 +3174,18 @@ GRANT UPDATE("default_view") ON TABLE "public"."profiles" TO "authenticated";
 
 
 
+GRANT UPDATE("notify_before_minutes") ON TABLE "public"."profiles" TO "authenticated";
+
+
+
 GRANT ALL ON FUNCTION "public"."delete_placeholder_player"("p_id" "uuid") TO "anon";
 GRANT ALL ON FUNCTION "public"."delete_placeholder_player"("p_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."delete_placeholder_player"("p_id" "uuid") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."due_reminders"() FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."due_reminders"() TO "service_role";
 
 
 
@@ -3061,6 +3207,11 @@ GRANT ALL ON FUNCTION "public"."enqueue_notification"("p_kind" "text", "p_dedupe
 GRANT ALL ON FUNCTION "public"."kiosk_password_target"("p_user_id" "uuid") TO "anon";
 GRANT ALL ON FUNCTION "public"."kiosk_password_target"("p_user_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."kiosk_password_target"("p_user_id" "uuid") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."mark_reminder_sent"("p_user" "uuid", "p_event_key" "text", "p_offset" integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."mark_reminder_sent"("p_user" "uuid", "p_event_key" "text", "p_offset" integer) TO "service_role";
 
 
 
@@ -3088,6 +3239,16 @@ GRANT ALL ON FUNCTION "public"."my_future_matches"("p_user" "uuid") TO "service_
 
 REVOKE ALL ON FUNCTION "public"."my_future_reservations"("p_user" "uuid") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."my_future_reservations"("p_user" "uuid") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."my_upcoming_matches"("p_user" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."my_upcoming_matches"("p_user" "uuid") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."notifications_due"() FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."notifications_due"() TO "service_role";
 
 
 
@@ -3278,6 +3439,10 @@ GRANT INSERT("color"),UPDATE("color") ON TABLE "public"."priority_slot_types" TO
 
 
 GRANT INSERT("lanes"),UPDATE("lanes") ON TABLE "public"."priority_slot_types" TO "authenticated";
+
+
+
+GRANT ALL ON TABLE "public"."reminders_sent" TO "service_role";
 
 
 

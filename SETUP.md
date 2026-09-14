@@ -299,13 +299,18 @@ jen našeptávaný text v poli, ne pevná hodnota, takže jde napsat i jiný
 důvod). Rezervace se zruší a do měsíční docházky se už nezapočítá, takže
 report odpovídá skutečné účasti, ne jen tomu, kdo si trénink rezervoval.
 
-### 8.2 Push notifikace (FCM) — volitelné
+### 8.2 Push notifikace (FCM) — **na produkci zapnuté od 8. 7. 2026**
 
-Appka od začátku (Fáze 0) umí číst 4 `FIREBASE_*` dart-defines (viz krok 4
-výše), ale bez dalšího nastavení zůstávají push notifikace vypnuté a
-appka běží normálně dál jen s e-mailem (Fáze 3). Zapnutí push je volitelné
-a vyžaduje dvě samostatné věci — klientskou konfiguraci (Firebase projekt)
-a serverovou (`FIREBASE_SERVICE_ACCOUNT`):
+> Push je kanál, ne funkce: **co** se posílá, rozhoduje appka (zrušený
+> trénink, rezervace z kiosku, připomínka před tréninkem — 0040), **kudy**
+> to půjde, rozhoduje `notify`: push tomu, kdo má appku v telefonu, e-mail
+> všem ostatním. Obojí je na produkci nastavené; postup níž je pro nový
+> projekt (nebo když se Firebase projekt mění).
+
+Appka čte 4 `FIREBASE_*` dart-defines (viz krok 4 výše); bez nich — a na
+webu — je push tiše vypnutý a chodí e-mail. Zapnutí vyžaduje dvě samostatné
+věci, klientskou konfiguraci (Firebase projekt) a serverovou
+(`FIREBASE_SERVICE_ACCOUNT`); obě jsou na produkci hotové:
 
 1. Založ **Firebase projekt** na <https://console.firebase.google.com> →
    **Add project** (Google Analytics není potřeba, klidně vypni).

@@ -128,6 +128,7 @@ class Profile {
     this.hasAccount = true,
     this.ownColor = -1,
     this.followedTeams = const [],
+    this.notifyBefore = const [],
     this.defaultView = HomeView.calendar,
   });
 
@@ -151,6 +152,13 @@ class Profile {
   /// in priority_slots. Display only: the Google Calendar sync has its own
   /// list on the link, managed separately.
   final List<String> followedTeams;
+
+  /// How long before a training or a match the app should remind them
+  /// (0040), in minutes, farthest first — empty means no reminders. The
+  /// Google calendar keeps its own list on the link; this one is the app's
+  /// own and reaches the player wherever they are (push with the app in
+  /// their pocket, e-mail without it).
+  final List<int> notifyBefore;
 
   /// The view the app opens at launch (0029).
   final HomeView defaultView;
@@ -200,6 +208,12 @@ class Profile {
           for (final t in json['followed_teams'] as List? ?? const [])
             t as String,
         ],
+        // Farthest first, like the calendar's own reminder lists — the
+        // sheet shows them in that order and the server does not care.
+        notifyBefore: [
+          for (final m in json['notify_before_minutes'] as List? ?? const [])
+            m as int,
+        ]..sort((a, b) => b.compareTo(a)),
         defaultView: HomeView.values.asNameMap()[json['default_view']] ??
             HomeView.calendar,
       );
