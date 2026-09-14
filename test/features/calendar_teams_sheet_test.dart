@@ -202,6 +202,13 @@ void main() {
       final sheet = tester.getRect(find.byType(PickerSheetFrame));
       expect(tester.getRect(button).bottom, lessThanOrEqualTo(sheet.bottom));
 
+      // And they are not neighbours: the slip that costs something is
+      // hitting Zrušit while aiming at Uložit, so they sit at opposite
+      // ends with a thumb's width of nothing between them.
+      final gap = tester.getRect(button).left -
+          tester.getRect(find.widgetWithText(TextButton, 'Zrušit')).right;
+      expect(gap, greaterThan(100), reason: 'mis-tap distance');
+
       await tester.tap(checkboxOf('Tým 10'));
       await tester.pumpAndSettle();
       await tester.tap(button);

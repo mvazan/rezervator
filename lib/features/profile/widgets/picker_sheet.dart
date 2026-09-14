@@ -80,17 +80,23 @@ class PickerSheetFrame extends StatelessWidget {
               ),
             Flexible(child: child),
             const Divider(height: 1),
+            // The two sit at opposite ends, not side by side as they would
+            // in a dialog. The costly slip here is hitting Zrušit while
+            // aiming at Uložit — it throws away every tick and, being an
+            // explicit answer, is not questioned — and a thumb travelling
+            // to the right edge cannot land on a button by the left one.
+            // (Both stay within thumb reach at the bottom; a filter sheet
+            // in Google's own apps is laid out exactly this way.)
             Padding(
               padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   TextButton(
                     // Explicit — no second question about it.
                     onPressed: () => Navigator.of(context).pop(false),
                     child: const Text('Zrušit'),
                   ),
-                  const SizedBox(width: 8),
                   FilledButton(
                     onPressed: () => Navigator.of(context).pop(true),
                     child: const Text('Uložit'),
