@@ -1,28 +1,43 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../config.dart';
 import '../../../data/providers.dart';
 import '../../../domain/models.dart';
-import 'team_picker_sheet.dart';
+import 'my_teams_sheet.dart';
 
-/// Which teams' matches the player sees in Můj přehled (0029), and each
-/// one's shared colour (0036, `team_colors`) — the SAME colour shown there
-/// and on the Google Calendar event, wherever it was last set. Its own team
-/// LIST is separate from the calendar card's; the colour registry is not.
-class MyTeamsCard extends StatelessWidget {
+/// The one place teams are set up: which teams' matches show in Můj přehled
+/// (0029, `profiles.followed_teams`), which go to Google Calendar (0032,
+/// `calendar_teams`) and what colour each wears in both (0036,
+/// `team_colors`). The sheet behind "Vybrat týmy…" holds all three — the
+/// Google card used to hold the middle one, in a row of its own, and nobody
+/// found it there.
+class MyTeamsCard extends ConsumerWidget {
   const MyTeamsCard({
     super.key,
     required this.profile,
     required this.setFollowedTeams,
+    required this.setCalendarTeams,
     required this.setTeamColors,
   });
 
   final Profile profile;
   final Future<void> Function(List<String> teams) setFollowedTeams;
+  final Future<void> Function(List<CalendarTeam> teams) setCalendarTeams;
   final Future<void> Function(Map<String, int?> colors) setTeamColors;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final link = ref.watch(myCalendarLinkProvider).value ?? CalendarLink.none;
+    // The same gate the sheet uses for its Kalendář column, and the card
+    // for the Google card itself: without one, there is only the overview
+    // to sum up.
+    final hasCalendar = ref.watch(calendarAvailableProvider) &&
+        !AppConfig.isDemoAccount(profile.email) &&
+        link.isLinked;
+    final routed = hasCalendar
+        ? ref.watch(myCalendarTeamsProvider).value ?? const <CalendarTeam>[]
+        : const <CalendarTeam>[];
     return Card(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -30,25 +45,24 @@ class MyTeamsCard extends StatelessWidget {
           ListTile(
             leading: const Icon(Icons.groups_outlined),
             title: const Text('Moje týmy'),
-            subtitle: Text(matchTeamsSummary(profile.followedTeams)),
+            isThreeLine: hasCalendar,
+            subtitle: Text(
+              hasCalendar
+                  ? 'Přehled: ${matchTeamsSummary(profile.followedTeams)}\n'
+                      'Kalendář: '
+                      '${matchTeamsSummary([for (final t in routed) t.team])}'
+                  : matchTeamsSummary(profile.followedTeams),
+            ),
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
             child: Align(
               alignment: Alignment.centerLeft,
               child: FilledButton.tonal(
-                onPressed: () => showTeamPickerSheet(
+                onPressed: () => showMyTeamsSheet(
                   context,
-                  title: 'Moje týmy',
-                  hint: 'Jejich domácí i venkovní zápasy uvidíš v Můj '
-                      'přehled. Do Google kalendáře jdou zápasy podle '
-                      'vlastního výběru u kalendáře.',
-                  chosenOf: (WidgetRef sheetRef) =>
-                      sheetRef.watch(myProfileProvider).value?.followedTeams ??
-                      const [],
-                  onChanged: setFollowedTeams,
-                  colorsOf: (WidgetRef sheetRef) =>
-                      sheetRef.watch(myTeamColorsProvider).value ?? const {},
+                  onFollowedChanged: setFollowedTeams,
+                  onCalendarChanged: setCalendarTeams,
                   onColorsChanged: setTeamColors,
                 ),
                 child: const Text('Vybrat týmy…'),

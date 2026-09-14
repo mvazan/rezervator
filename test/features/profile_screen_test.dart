@@ -84,6 +84,7 @@ void main() {
     Map<String, int> teamColors = const <String, int>{},
     Future<void> Function(int color)? setOwnColor,
     Future<void> Function(List<String> teams)? setFollowedTeams,
+    Future<void> Function(List<CalendarTeam> teams)? setCalendarTeams,
     Future<void> Function(Map<String, int?> colors)? setTeamColors,
     Future<void> Function(HomeView view)? setDefaultView,
     List<PrioritySlot> matches = const [],
@@ -106,6 +107,8 @@ void main() {
               setOwnColor ?? (_) async => throw StateError('unexpected'),
           setFollowedTeams:
               setFollowedTeams ?? (_) async => throw StateError('unexpected'),
+          setCalendarTeams:
+              setCalendarTeams ?? (_) async => throw StateError('unexpected'),
           setTeamColors:
               setTeamColors ?? (_) async => throw StateError('unexpected'),
           setDefaultView:
@@ -391,20 +394,13 @@ void main() {
       expect(find.text('1 den předem · 2 h předem'), findsOneWidget);
       expect(find.text('Odpojit'), findsOneWidget);
       expect(find.text(connectLabel), findsNothing);
-      // No team chosen yet — matches stay out of the calendar (the profile's
-      // own Moje týmy card reads the same "Žádný tým" copy when its own list
-      // is empty, so this one is scoped to the calendar card).
-      expect(find.text('Zápasy v kalendáři…'), findsOneWidget);
-      expect(
-        find.descendant(
-          of: find.byType(CalendarLinkCard),
-          matching: find.text('Žádný tým'),
-        ),
-        findsOneWidget,
-      );
+      // WHICH teams go to the calendar is not the card's business any more
+      // — that is one of the three boxes a team has in Moje týmy.
+      expect(find.text('Zápasy v kalendáři…'), findsNothing);
     });
 
-    testWidgets('linked with a team chosen names it under Zápasy v kalendáři', (
+    testWidgets('with a calendar linked, Moje týmy sums up both lists — what '
+        'the app shows and what Google gets', (
       tester,
     ) async {
       tester.view.physicalSize = const Size(800, 1600);
@@ -425,9 +421,34 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.text('SKK Veverky Brno A · SKK Veverky Brno B'),
+        find.text('Přehled: Žádný tým\n'
+            'Kalendář: SKK Veverky Brno A · SKK Veverky Brno B'),
         findsOneWidget,
       );
+    });
+
+    // Without one there is only the overview to sum up, so the card says
+    // just that — no empty "Kalendář:" line for something the player has
+    // not got.
+    testWidgets('without a calendar, Moje týmy sums up the overview alone',
+        (tester) async {
+      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      const follower = Profile(
+        id: 'me',
+        displayName: 'Já Hráč',
+        email: 'me@example.com',
+        role: Role.player,
+        status: ProfileStatus.approved,
+        followedTeams: ['SKK Veverky Brno A'],
+      );
+      await tester.pumpWidget(app(follower));
+      await tester.pumpAndSettle();
+
+      expect(find.text('SKK Veverky Brno A'), findsOneWidget);
+      expect(find.textContaining('Kalendář:'), findsNothing);
     });
 
     testWidgets('linked without reminders reads "Žádné"', (tester) async {
@@ -623,10 +644,6 @@ void main() {
       Future<void> Function(List<int> minutes, {CalendarSlot calendar})
           setReminders =
           noReminders,
-      Future<void> Function(List<CalendarTeam> teams) setMatchTeams =
-          noMatchTeams,
-      Future<void> Function(Map<String, int?> colors) setTeamColors =
-          noTeamColors,
       Future<bool> Function(bool enabled) setSecondaryCalendar =
           noSecondaryCalendar,
       Future<void> Function(int? colorId) setTrainingColor = noTrainingColor,
@@ -651,8 +668,6 @@ void main() {
               openUrl: openUrl ?? (_) => fail('unexpected openUrl'),
               disconnect: disconnect,
               setReminders: setReminders,
-              setMatchTeams: setMatchTeams,
-              setTeamColors: setTeamColors,
               setSecondaryCalendar: setSecondaryCalendar,
               setTrainingColor: setTrainingColor,
             ),
@@ -661,84 +676,27 @@ void main() {
       );
     }
 
-    testWidgets('Zápasy v kalendáři opens the calendar-teams sheet and '
-        'saves each tick through setMatchTeams (the sheet\'s own row-level '
-        'behaviour — colours, calendars, Czech order, teams that left the '
-        'schedule — is covered in calendar_teams_sheet_test.dart)', (
-      tester,
-    ) async {
-      final saved = <List<CalendarTeam>>[];
-      await tester.pumpWidget(
-        card(
-          Stream.value(const CalendarLink(status: CalendarLinkStatus.linked)),
-          matches: schedule,
-          setMatchTeams: (teams) async => saved.add(teams),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.text('Zápasy v kalendáři…'));
-      await tester.pumpAndSettle();
-      expect(find.text('Zápasy v kalendáři'), findsOneWidget);
-      expect(find.text('SKK Veverky Brno A'), findsOneWidget);
-
-      await tester.tap(
-        find.descendant(
-          of: find.byKey(const ValueKey('SKK Veverky Brno A')),
-          matching: find.byType(Checkbox),
-        ),
-      );
-      await tester.pumpAndSettle();
-      // The sheet edits locally; the whole list goes out once, on Uložit.
-      expect(saved, isEmpty);
-
-      await tester.tap(find.widgetWithText(FilledButton, 'Uložit'));
-      await tester.pumpAndSettle();
-
-      expect(saved.map(teamTuples).toList(), [
-        [('SKK Veverky Brno A', CalendarSlot.primary)],
-      ]);
-    });
-
-    testWidgets('Zápasy v kalendáři\'s colour dot saves through '
-        'setTeamColors, never setMatchTeams (row-level colour behaviour is '
-        'covered in calendar_teams_sheet_test.dart)', (tester) async {
-      final savedColors = <Map<String, int?>>[];
+    // Teams moved to Moje týmy, all three boxes of them — the calendar card
+    // has no team row any more, and no way to write one.
+    testWidgets('the linked card sets up the calendar itself, not who is in '
+        'it', (tester) async {
       await tester.pumpWidget(
         card(
           Stream.value(const CalendarLink(status: CalendarLinkStatus.linked)),
           matches: schedule,
           teams: Stream.value(const [CalendarTeam(team: 'SKK Veverky Brno A')]),
-          setMatchTeams: (_) async => fail('unexpected team save'),
-          setTeamColors: (c) async => savedColors.add(c),
         ),
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Zápasy v kalendáři…'));
-      await tester.pumpAndSettle();
-      // Not a bare find.byType(EventColorDot): the card's own "Barva
-      // tréninků" row (underneath the sheet) has one too.
-      await tester.tap(
-        find.descendant(
-          of: find.byKey(const ValueKey('SKK Veverky Brno A')),
-          matching: find.byType(EventColorDot),
-        ),
-      );
-      await tester.pumpAndSettle();
-      await tester.tap(
-        find.descendant(
-          of: find.byType(EventColorPicker),
-          matching: find.byTooltip('Rajčatová'),
-        ),
-      );
-      await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(FilledButton, 'Uložit'));
-      await tester.pumpAndSettle();
-
-      expect(savedColors, [
-        {'SKK Veverky Brno A': 11},
-      ]);
+      expect(find.text('Zápasy v kalendáři…'), findsNothing);
+      expect(find.text('SKK Veverky Brno A'), findsNothing);
+      // What the card does keep: the link, the second calendar, reminders
+      // and the trainings' colour.
+      expect(find.text('Google kalendář'), findsOneWidget);
+      expect(find.text('Druhý kalendář'), findsOneWidget);
+      expect(find.text('Připomínky…'), findsOneWidget);
+      expect(find.text('Barva tréninků'), findsOneWidget);
     });
 
     testWidgets('connect opens the consent page in the browser and asks to '
@@ -1336,13 +1294,15 @@ void main() {
       awayTeam: 'KK MS Brno D',
     );
 
-    // The sheet's rows are plain ListTiles (leading Checkbox, trailing
-    // colour dot once ticked) keyed by team name — see team_picker_sheet.dart.
-    Finder teamRow(String team) => find.byKey(ValueKey(team));
-    Finder teamCheckbox(String team) =>
-        find.descendant(of: teamRow(team), matching: find.byType(Checkbox));
+    // A sheet row is three fixed cells — Přehled, Kalendář (only with a
+    // linked calendar) and the colour — each keyed `<team>:<column>`; see
+    // my_teams_sheet.dart, whose own test covers the row in detail.
+    Finder teamCell(String team, String column) =>
+        find.byKey(ValueKey('$team:$column'));
+    Finder teamCheckbox(String team) => find.descendant(
+        of: teamCell(team, 'overview'), matching: find.byType(Checkbox));
     Finder teamColorDot(String team) => find.descendant(
-        of: teamRow(team), matching: find.byType(EventColorDot));
+        of: teamCell(team, 'color'), matching: find.byType(EventColorDot));
 
     testWidgets('the card sums up the followed teams and the sheet ticks one', (
       tester,

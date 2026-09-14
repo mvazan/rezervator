@@ -26,6 +26,7 @@ class ProfileScreen extends ConsumerWidget {
     this.signOut = Api.signOut,
     this.setOwnColor = Api.setOwnColor,
     this.setFollowedTeams = Api.setFollowedTeams,
+    this.setCalendarTeams = Api.setCalendarTeams,
     this.setTeamColors = Api.setTeamColors,
     this.setDefaultView = Api.setDefaultView,
   });
@@ -34,6 +35,7 @@ class ProfileScreen extends ConsumerWidget {
   final Future<void> Function() signOut;
   final Future<void> Function(int color) setOwnColor;
   final Future<void> Function(List<String> teams) setFollowedTeams;
+  final Future<void> Function(List<CalendarTeam> teams) setCalendarTeams;
   final Future<void> Function(Map<String, int?> colors) setTeamColors;
   final Future<void> Function(HomeView view) setDefaultView;
 
@@ -166,6 +168,7 @@ class ProfileScreen extends ConsumerWidget {
                 MyTeamsCard(
                   profile: profile,
                   setFollowedTeams: setFollowedTeams,
+                  setCalendarTeams: setCalendarTeams,
                   setTeamColors: setTeamColors,
                 ),
                 const SizedBox(height: 16),
