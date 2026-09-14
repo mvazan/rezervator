@@ -388,8 +388,11 @@ class _MyTeamsListState extends State<_MyTeamsList> {
   Widget _teamRow(String team) {
     final followed = _followed.contains(team);
     final entry = _routed[team];
-    // A colour is worth picking once the team is somewhere to be seen.
-    final coloured = followed || entry != null;
+    // A colour is worth picking once the team is somewhere to be seen —
+    // and only somewhere this row SHOWS. Without the Kalendář column a
+    // calendar-only team is a dot beside nothing ticked, which reads as a
+    // bug rather than as a colour.
+    final coloured = followed || (widget.hasCalendar && entry != null);
     final routable = widget.hasCalendar && widget.secondaryEnabled;
     return InkWell(
       key: ValueKey(team),
@@ -456,8 +459,8 @@ class _MyTeamsListState extends State<_MyTeamsList> {
       children: [
         checkbox,
         Positioned(
-          right: 0,
-          bottom: 2,
+          right: 2,
+          bottom: 6,
           child: Tooltip(
             message: 'Druhý kalendář',
             child: Text(

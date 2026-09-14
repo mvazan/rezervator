@@ -314,6 +314,28 @@ void main() {
       expect(tester.getRect(cellOf(team, 'color')), before.colour);
     });
 
+    // A dot beside a row with nothing ticked on it reads as a bug, not as
+    // a colour: without the Kalendář column, a calendar-only team has
+    // nothing visible to be coloured for.
+    testWidgets('a calendar-only team wears no colour where there is no '
+        'Kalendář column', (tester) async {
+      await tester.pumpWidget(harness(
+        matches: schedule,
+        teams: const [CalendarTeam(team: 'SKK Veverky Brno A')],
+        colors: const {'SKK Veverky Brno A': 5},
+      ));
+      await open(tester);
+
+      expect(ticked(tester, overviewBox('SKK Veverky Brno A')), isFalse);
+      expect(dotOf('SKK Veverky Brno A'), findsNothing);
+
+      // …and it is back the moment the row has a tick of its own.
+      await tester.tap(overviewBox('SKK Veverky Brno A'));
+      await tester.pumpAndSettle();
+      expect(tester.widget<EventColorDot>(dotOf('SKK Veverky Brno A')).colorId,
+          5);
+    });
+
     testWidgets('offers only the alley\'s own teams, Czech-sorted and '
         'unticked', (tester) async {
       await tester.pumpWidget(harness(matches: schedule, link: _linked));
