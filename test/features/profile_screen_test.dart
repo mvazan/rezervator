@@ -89,7 +89,7 @@ void main() {
     Future<void> Function(Map<String, int?> colors)? setTeamColors,
     Future<void> Function(HomeView view)? setDefaultView,
     List<PrioritySlot> matches = const [],
-    Set<String> exceptions = const {},
+    Map<String, bool> exceptions = const {},
   }) {
     return ProviderScope(
       overrides: [
@@ -1392,7 +1392,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Výjimky'), findsOneWidget);
-      expect(find.text('Zápasy, které hraješ za jiný tým.'), findsOneWidget);
+      expect(find.text('Jednotlivé zápasy navíc nebo skryté.'), findsOneWidget);
       expect(tester.getTopLeft(find.text('Výjimky')).dy,
           greaterThan(tester.getTopLeft(find.text('Vybrat týmy…')).dy));
     });
@@ -1404,10 +1404,12 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
       await tester.pumpWidget(
-          app(me, matches: [match], exceptions: const {'m1'}));
+          app(me, matches: [match], exceptions: const {'m1': true}));
       await tester.pumpAndSettle();
 
-      expect(find.text('1 zápasů navíc'), findsOneWidget);
+      // Czech counts three ways and the card says the number often enough
+      // for "1 výjimek" to read as a bug.
+      expect(find.text('1 výjimka'), findsOneWidget);
     });
 
     testWidgets('Výjimky opens its screen', (tester) async {

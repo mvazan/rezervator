@@ -44,9 +44,8 @@ String changelogHeading(Release r, {required bool web}) {
 
 const appChangelog = <Release>[
   Release(null, '14. 9. 2026', [
-    'Výjimky: zápas, který hraješ za jiný tým, si zaškrtneš v Moje týmy → '
-        'Výjimky — uvidíš ho v Můj přehled a přijde ti do hlavního Google '
-        'kalendáře.',
+    'Výjimky v Moje týmy: jednotlivý zápas si přidáš do přehledu, nebo ho '
+        'z něj skryješ — ať už hraješ za jiný tým, nebo tě zrovna nezajímá.',
     'Týmy nastavuješ na jednom místě: v Moje týmy u každého zaškrtneš '
         'Přehled, Kalendář a vybereš barvu.',
     'S druhým kalendářem tým podržíš a vybereš, do kterého kalendáře jeho '

@@ -4,6 +4,7 @@
 /// screen only renders it.
 library;
 
+import 'collation.dart';
 import 'models.dart';
 
 sealed class UpcomingItem {
@@ -69,48 +70,49 @@ int? matchColorOf(
   PrioritySlot slot,
   List<String> followedTeams,
   Map<String, int> teamColors, {
-  Set<String> exceptions = const {},
+  Map<String, bool> exceptions = const {},
 }) {
   final team = followedTeams.contains(slot.homeTeam)
       ? slot.homeTeam
       : followedTeams.contains(slot.awayTeam)
           ? slot.awayTeam
-          : exceptions.contains(slot.id)
+          : exceptions[slot.id] == true
               ? (slot.isAway ? slot.awayTeam : slot.homeTeam)
               : null;
   return team == null ? null : teamColors[team];
 }
 
-/// The matches worth offering on the Výjimky screen: upcoming matches the
-/// player would NOT otherwise have.
-///
-/// "Would have" means both halves of what an exception grants — the match in
-/// Můj přehled (a [followed] team) and, where a calendar is linked, the
-/// match in the MAIN Google calendar (a [routed] team pointed at
-/// `primary`). A team followed but routed to the second calendar is the
-/// interesting case: its matches are on the list, because saying "I am
-/// playing this one" is exactly how one match of it comes over to the main
-/// calendar. Everything already excepted stays listed, or there would be no
-/// way to take it back.
-List<PrioritySlot> exceptionCandidates({
-  required List<PrioritySlot> slots,
-  required List<String> followed,
-  required List<CalendarTeam> routed,
-  required bool hasCalendar,
-  required Set<String> exceptions,
-  required Day today,
-}) {
-  bool mine(String team) {
-    if (!followed.contains(team)) return false;
-    if (!hasCalendar) return true;
-    return routed.any((r) => r.team == team && r.calendar == CalendarSlot.primary);
-  }
+/// Whether [slot] is the player's: what their exception says about this one
+/// match, and what their [teams] say when it has no exception. Both
+/// directions live here — an exception adds a match no team gives them and
+/// takes away one a team does. `my_future_matches` resolves the same shape
+/// in SQL (`coalesce(e.shown, c.team is not null)`), over the calendar's own
+/// team list.
+bool matchIsMine(
+  PrioritySlot slot,
+  List<String> teams,
+  Map<String, bool> exceptions,
+) =>
+    exceptions[slot.id] ??
+    (teams.contains(slot.homeTeam) || teams.contains(slot.awayTeam));
 
+/// Every upcoming match of the alley, chronological — what the Výjimky
+/// screen lists. Deliberately unfiltered: which of them are the player's is
+/// a per-row answer ([matchIsMine]), not a reason to leave a match out. A
+/// list whose CONTENTS changed with the player's teams would shift under
+/// them every time they picked one, and hiding a match would need it to be
+/// there in the first place.
+List<PrioritySlot> upcomingMatches({
+  required List<PrioritySlot> slots,
+  required Day today,
+  String query = '',
+}) {
+  final q = foldDiacritics(query.trim()).toLowerCase();
+  bool hit(String s) => q.isEmpty || foldDiacritics(s).toLowerCase().contains(q);
   return [
     for (final s in slots)
       if (s.type.isMatch && s.parentId == null && !s.date.isBefore(today))
-        if (exceptions.contains(s.id) || !(mine(s.homeTeam) || mine(s.awayTeam)))
-          s,
+        if (hit(s.homeTeam) || hit(s.awayTeam) || hit(s.description)) s,
   ]..sort((a, b) => compareDayTime(a.date, a.startsAt, b.date, b.startsAt));
 }
 
@@ -124,7 +126,7 @@ List<UpcomingDay> upcomingTimeline({
   required List<PrioritySlot> slots,
   required List<String> teams,
   required Day today,
-  Set<String> exceptions = const {},
+  Map<String, bool> exceptions = const {},
 }) {
   final blockById = {for (final b in blocks) b.id: b};
   final items = <UpcomingItem>[
@@ -134,12 +136,8 @@ List<UpcomingDay> upcomingTimeline({
           UpcomingTraining(r, block),
     for (final s in slots)
       if (s.type.isMatch && s.parentId == null && !s.date.isBefore(today))
-        // A followed team's match, or one the player said they are playing
-        // (0039) — which is the whole of what an exception does here.
-        if (teams.contains(s.homeTeam) ||
-            teams.contains(s.awayTeam) ||
-            exceptions.contains(s.id))
-          UpcomingMatch(s),
+        // The teams say it, unless this one match says otherwise (0039).
+        if (matchIsMine(s, teams, exceptions)) UpcomingMatch(s),
   ];
   items.sort((a, b) {
     final byDayTime = compareDayTime(a.date, a.startsAt, b.date, b.startsAt);

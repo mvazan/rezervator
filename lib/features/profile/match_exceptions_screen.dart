@@ -1,15 +1,22 @@
-/// Výjimky: the matches a player is playing that their teams are not.
+/// Výjimky: the one-match answers, where the team's answer is the wrong
+/// size.
 ///
-/// A B-team player turns out for the A team once. Following the A team for
-/// it would drag in the rest of its season — every match in Můj přehled and
-/// in Google — so this screen is per MATCH: tick the one you are playing.
-/// It shows in the overview and goes to the main Google calendar (0039),
-/// and the tick is the whole of the choice: someone who is playing wants it
-/// where they live, not in the calendar they keep for watching.
+/// Teams decide wholesale — follow the A team and its whole season is
+/// yours. But sometimes it is about ONE match: you are turning out for the
+/// A team, or the match is simply worth watching; and the other way round,
+/// next weekend you are away and would rather not see it at all. The screen
+/// records the decision and never asks why.
 ///
-/// A screen of its own rather than a control in Můj přehled, because it is
-/// a rare thing to do and the overview is read every day. It offers only
-/// what the player does not already have — see `exceptionCandidates`.
+/// It lists the WHOLE upcoming schedule, ticked where the match is already
+/// yours. A filtered list would shift under the player every time they
+/// picked a team on another screen — and hiding a match needs the match to
+/// be there in the first place. What it does instead is show, up top, the
+/// handful of matches where the player has overruled their teams, each with
+/// an ✕ that hands it back.
+///
+/// Nothing is stored when the tick agrees with the teams: taking an
+/// exception back is deleting a row, not ticking a third state, so the list
+/// up top cannot fill with decisions the teams already make.
 library;
 
 import 'package:flutter/material.dart';
@@ -22,91 +29,119 @@ import '../../data/providers.dart';
 import '../../domain/models.dart';
 import '../../domain/upcoming.dart';
 
-class MatchExceptionsScreen extends ConsumerWidget {
+class MatchExceptionsScreen extends ConsumerStatefulWidget {
   const MatchExceptionsScreen({super.key, this.setMatchException});
 
   /// Injectable for widget tests (the Api one needs a live Supabase client).
-  final Future<void> Function(String matchId, bool on)? setMatchException;
+  final Future<void> Function(String matchId, bool? shown)? setMatchException;
 
-  /// Dnes / Zítra / "čtvrtek 17. 9." — the same heading Můj přehled uses,
-  /// so the two lists read as the same kind of list.
+  @override
+  ConsumerState<MatchExceptionsScreen> createState() =>
+      _MatchExceptionsScreenState();
+}
+
+class _MatchExceptionsScreenState extends ConsumerState<MatchExceptionsScreen> {
+  final _query = TextEditingController();
+
+  @override
+  void dispose() {
+    _query.dispose();
+    super.dispose();
+  }
+
+  /// Dnes / Zítra / "čtvrtek 17. 9." — the same heading Můj přehled uses, so
+  /// the two lists read as the same kind of list.
   static String _dayLabel(Day date, Day today) {
     if (date == today) return 'Dnes';
     if (date == today.addDays(1)) return 'Zítra';
     return dayFull(date);
   }
 
+  static String _when(PrioritySlot slot) => [
+        '${slot.startsAt.display()}–${slot.endsAt.display()}',
+        slot.isAway ? 'venku' : 'doma',
+        if (slot.description.isNotEmpty) slot.description,
+      ].join(' · ');
+
+  Future<void> _set(String matchId, bool? shown) => tryAction(
+        context,
+        () => (widget.setMatchException ?? Api.setMatchException)(
+            matchId, shown),
+        errorText: friendlyDbError,
+      );
+
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final save = setMatchException ?? Api.setMatchException;
-    final today = Day.fromDateTime(ref.watch(nowProvider).value ?? DateTime.now());
+  Widget build(BuildContext context) {
+    final today =
+        Day.fromDateTime(ref.watch(nowProvider).value ?? DateTime.now());
     final slots = ref.watch(prioritySlotsProvider);
     final slotsLoading = ref.watch(prioritySlotsLoadingProvider);
     final slotsFailed = ref.watch(prioritySlotsFailedProvider);
     final profile = ref.watch(myProfileProvider).value;
-    final exceptions = ref.watch(myMatchExceptionsProvider).value ?? const <String>{};
+    final teams = profile?.followedTeams ?? const <String>[];
+    final exceptions =
+        ref.watch(myMatchExceptionsProvider).value ?? const <String, bool>{};
     final link = ref.watch(myCalendarLinkProvider).value ?? CalendarLink.none;
     final hasCalendar = ref.watch(calendarAvailableProvider) &&
         !AppConfig.isDemoAccount(profile?.email ?? '') &&
         link.isLinked;
     final theme = Theme.of(context);
 
-    final body = switch ((slotsLoading, slotsFailed)) {
-      (true, _) => const Center(child: CircularProgressIndicator()),
-      (_, true) => Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('Zápasy se nepodařilo načíst.'),
-              const SizedBox(height: 12),
-              OutlinedButton(
-                onPressed: () => retryPrioritySlots(ref),
-                child: const Text('Zkusit znovu'),
-              ),
-            ],
-          ),
-        ),
-      _ => _list(
-          context,
-          ref,
-          save: save,
-          today: today,
-          exceptions: exceptions,
-          candidates: exceptionCandidates(
-            slots: slots,
-            followed: profile?.followedTeams ?? const [],
-            routed: hasCalendar
-                ? ref.watch(myCalendarTeamsProvider).value ?? const []
-                : const [],
-            hasCalendar: hasCalendar,
-            exceptions: exceptions,
-            today: today,
-          ),
-          hasCalendar: hasCalendar,
-          theme: theme,
-        ),
-    };
-
     return Scaffold(
       appBar: AppBar(title: const Text('Výjimky')),
-      body: body,
+      body: switch ((slotsLoading, slotsFailed)) {
+        (true, _) => const Center(child: CircularProgressIndicator()),
+        (_, true) => Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('Zápasy se nepodařilo načíst.'),
+                const SizedBox(height: 12),
+                OutlinedButton(
+                  onPressed: () => retryPrioritySlots(ref),
+                  child: const Text('Zkusit znovu'),
+                ),
+              ],
+            ),
+          ),
+        _ => _body(
+            today: today,
+            slots: slots,
+            teams: teams,
+            exceptions: exceptions,
+            hasCalendar: hasCalendar,
+            secondary: hasCalendar && link.secondaryEnabled,
+            theme: theme,
+          ),
+      },
     );
   }
 
-  Widget _list(
-    BuildContext context,
-    WidgetRef ref, {
-    required Future<void> Function(String matchId, bool on) save,
+  Widget _body({
     required Day today,
-    required Set<String> exceptions,
-    required List<PrioritySlot> candidates,
+    required List<PrioritySlot> slots,
+    required List<String> teams,
+    required Map<String, bool> exceptions,
     required bool hasCalendar,
+    required bool secondary,
     required ThemeData theme,
   }) {
-    // Grouped by day the way Můj přehled groups its timeline: one pass over
-    // an already-sorted list.
+    // The overruled matches, oldest first — the same order as the schedule
+    // below, so the two lists never disagree about which match comes first.
+    final byId = {for (final s in slots) s.id: s};
+    final overruled = [
+      for (final entry in exceptions.entries)
+        if (byId[entry.key] case final slot?) (slot, entry.value),
+    ]..sort((a, b) =>
+        compareDayTime(a.$1.date, a.$1.startsAt, b.$1.date, b.$1.startsAt));
+
+    final matches = upcomingMatches(
+      slots: slots,
+      today: today,
+      query: _query.text,
+    );
     final days = <Day, List<PrioritySlot>>{};
-    for (final slot in candidates) {
+    for (final slot in matches) {
       (days[slot.date] ??= []).add(slot);
     }
 
@@ -116,29 +151,71 @@ class MatchExceptionsScreen extends ConsumerWidget {
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
           child: Text(
-            'Zápasy, které hraješ navíc — třeba když jdeš vypomoct áčku.',
+            'Zápasy, které chceš v přehledu navíc — nebo naopak nevidět.',
             style: theme.textTheme.bodyMedium,
           ),
         ),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
           child: Text(
-            hasCalendar
-                ? 'Zaškrtnutý zápas uvidíš v Můj přehled a přijde ti do '
-                    'hlavního Google kalendáře.'
-                : 'Zaškrtnutý zápas uvidíš v Můj přehled.',
+            // "Hlavní" means nothing to someone who has one calendar.
+            !hasCalendar
+                ? 'Přidaný zápas uvidíš v Můj přehled.'
+                : secondary
+                    ? 'Přidaný zápas uvidíš v Můj přehled a přijde ti do '
+                        'hlavního Google kalendáře.'
+                    : 'Přidaný zápas uvidíš v Můj přehled a přijde ti do '
+                        'Google kalendáře.',
             style: theme.textTheme.bodySmall
                 ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
           ),
         ),
-        if (candidates.isEmpty)
+        if (overruled.isNotEmpty) ...[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+            child: Text('Tvoje výjimky', style: theme.textTheme.titleSmall),
+          ),
+          for (final (slot, shown) in overruled)
+            ListTile(
+              key: ValueKey('exception:${slot.id}'),
+              dense: true,
+              leading: Icon(
+                shown ? Icons.add_circle_outline : Icons.visibility_off_outlined,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+              title: Text(slot.title),
+              subtitle: Text(
+                '${dayLabel(slot.date)} · ${shown ? 'přidáno' : 'skryto'}',
+              ),
+              trailing: IconButton(
+                tooltip: 'Zrušit výjimku',
+                icon: const Icon(Icons.close),
+                // Back to whatever the teams say — which is deleting the
+                // row, not ticking the opposite.
+                onPressed: () => _set(slot.id, null),
+              ),
+            ),
+          const Divider(height: 24),
+        ],
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+          child: TextField(
+            controller: _query,
+            decoration: const InputDecoration(
+              labelText: 'Hledat tým',
+              prefixIcon: Icon(Icons.search),
+              isDense: true,
+            ),
+            onChanged: (_) => setState(() {}),
+          ),
+        ),
+        if (matches.isEmpty)
           ListTile(
             leading: Icon(Icons.emoji_events_outlined,
                 color: theme.colorScheme.outline),
-            title: const Text('Není co přidat'),
-            subtitle: const Text(
-              'Zápasy svých týmů už máš — tady jsou jen ty ostatní.',
-            ),
+            title: Text(_query.text.trim().isEmpty
+                ? 'V rozpisu nejsou žádné další zápasy'
+                : 'Nikdo neodpovídá hledání'),
           ),
         for (final entry in days.entries) ...[
           Padding(
@@ -149,25 +226,28 @@ class MatchExceptionsScreen extends ConsumerWidget {
             ),
           ),
           for (final slot in entry.value)
-            CheckboxListTile(
-              key: ValueKey(slot.id),
-              value: exceptions.contains(slot.id),
-              title: Text(slot.title),
-              subtitle: Text([
-                '${slot.startsAt.display()}–${slot.endsAt.display()}',
-                slot.isAway ? 'venku' : 'doma',
-                if (slot.description.isNotEmpty) slot.description,
-              ].join(' · ')),
-              // One tap, one answer — there is nothing here to batch, and
-              // the Google side follows through the job queue anyway.
-              onChanged: (on) => tryAction(
-                context,
-                () => save(slot.id, on == true),
-                errorText: friendlyDbError,
-              ),
-            ),
+            _matchRow(slot, teams: teams, exceptions: exceptions),
         ],
       ],
+    );
+  }
+
+  Widget _matchRow(
+    PrioritySlot slot, {
+    required List<String> teams,
+    required Map<String, bool> exceptions,
+  }) {
+    final mine = matchIsMine(slot, teams, exceptions);
+    final fromTeam =
+        teams.contains(slot.homeTeam) || teams.contains(slot.awayTeam);
+    return CheckboxListTile(
+      key: ValueKey(slot.id),
+      value: mine,
+      title: Text(slot.title),
+      subtitle: Text(_when(slot)),
+      // Ticking back to what the teams say stores nothing: the exception is
+      // dropped instead, so an untouched decision never becomes a row.
+      onChanged: (on) => _set(slot.id, (on == true) == fromTeam ? null : on),
     );
   }
 }

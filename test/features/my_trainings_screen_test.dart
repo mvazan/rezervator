@@ -67,7 +67,7 @@ void main() {
     bool slotsFailed = false,
     int? trainingColorId,
     DateTime? nowOverride,
-    Set<String> exceptions = const {},
+    Map<String, bool> exceptions = const {},
   }) {
     return ProviderScope(
       overrides: [
@@ -446,7 +446,7 @@ void main() {
     });
 
     testWidgets('puts a match of nobody\'s team on the list', (tester) async {
-      await tester.pumpWidget(app(slots: [guest], exceptions: const {'guest'}));
+      await tester.pumpWidget(app(slots: [guest], exceptions: const {'guest': true}));
       await tester.pumpAndSettle();
       expect(find.text('KK Vyškov A – KK Vyškov B'), findsOneWidget);
       // No badge, no note: it reads exactly like a followed team's match.
@@ -456,7 +456,7 @@ void main() {
     testWidgets('wears our team\'s colour on the trophy', (tester) async {
       await tester.pumpWidget(app(
         slots: [guest],
-        exceptions: const {'guest'},
+        exceptions: const {'guest': true},
         teamColors: const {'KK Vyškov A': 11},
       ));
       await tester.pumpAndSettle();
@@ -468,7 +468,7 @@ void main() {
 
     testWidgets('a team with no colour leaves the trophy plain',
         (tester) async {
-      await tester.pumpWidget(app(slots: [guest], exceptions: const {'guest'}));
+      await tester.pumpWidget(app(slots: [guest], exceptions: const {'guest': true}));
       await tester.pumpAndSettle();
 
       final icon = tester.widget<Icon>(find.byIcon(Icons.emoji_events_outlined));

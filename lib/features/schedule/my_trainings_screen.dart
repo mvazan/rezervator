@@ -23,7 +23,7 @@ Color? _trophyColorOf(
   PrioritySlot slot,
   List<String> followedTeams,
   Map<String, int> teamColors,
-  Set<String> exceptions,
+  Map<String, bool> exceptions,
   Brightness brightness,
 ) =>
     eventShadeOf(
@@ -142,7 +142,7 @@ class MyTrainingsScreen extends ConsumerWidget {
     // like any other — nothing marks them out, they simply are the
     // player's.
     final exceptions =
-        ref.watch(myMatchExceptionsProvider).value ?? const <String>{};
+        ref.watch(myMatchExceptionsProvider).value ?? const <String, bool>{};
     // A training's own colour, the one set under Barva tréninků — the same
     // value that colours it in Google Calendar, so the T here and the event
     // there read as the same thing.

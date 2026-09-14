@@ -310,7 +310,7 @@ void main() {
           slots: [m],
           teams: const [],
           today: today,
-          exceptions: {'m1'});
+          exceptions: const {'m1': true});
       expect(days.single.items.single, isA<UpcomingMatch>());
     });
 
@@ -324,7 +324,7 @@ void main() {
             slots: [m],
             teams: const [],
             today: today,
-            exceptions: {'jiny'}),
+            exceptions: const {'jiny': true}),
         isEmpty,
       );
     });
@@ -337,7 +337,7 @@ void main() {
           slots: [m],
           teams: const ['SKK Veverky Brno A'],
           today: today,
-          exceptions: {'m1'});
+          exceptions: const {'m1': true});
       expect(days.single.items.length, 1);
     });
 
@@ -349,8 +349,8 @@ void main() {
       final away = match('m2', today, const HourMinute(10, 0),
           home: 'Cizí A', away: 'Cizí B', isAway: true);
       const colors = {'Cizí A': 4, 'Cizí B': 7};
-      expect(matchColorOf(home, const [], colors, exceptions: {'m1'}), 4);
-      expect(matchColorOf(away, const [], colors, exceptions: {'m2'}), 7);
+      expect(matchColorOf(home, const [], colors, exceptions: const {'m1': true}), 4);
+      expect(matchColorOf(away, const [], colors, exceptions: const {'m2': true}), 7);
       // Without the exception there is nothing of ours in it at all.
       expect(matchColorOf(home, const [], colors), isNull);
     });
@@ -360,102 +360,80 @@ void main() {
           home: 'Cizí A', away: 'SKK Veverky Brno A');
       expect(
         matchColorOf(m, const ['SKK Veverky Brno A'],
-            const {'Cizí A': 4, 'SKK Veverky Brno A': 9}, exceptions: {'m1'}),
+            const {'Cizí A': 4, 'SKK Veverky Brno A': 9}, exceptions: const {'m1': true}),
         9,
       );
     });
   });
 
-  group('exceptionCandidates', () {
-    final soon = today.addDays(3);
-    PrioritySlot ours(String id) =>
-        match(id, soon, const HourMinute(10, 0), home: 'SKK Veverky Brno A');
-    PrioritySlot theirs(String id) =>
-        match(id, soon, const HourMinute(12, 0), home: 'Cizí A', away: 'Cizí B');
+  group('matchIsMine', () {
+    final m = match('m1', today, const HourMinute(10, 0));
 
+    test('the teams answer when the match has no exception', () {
+      expect(matchIsMine(m, const ['SKK Veverky Brno A'], const {}), isTrue);
+      expect(matchIsMine(m, const [], const {}), isFalse);
+    });
+
+    test('an exception answers instead, both ways', () {
+      expect(matchIsMine(m, const [], const {'m1': true}), isTrue);
+      expect(
+        matchIsMine(m, const ['SKK Veverky Brno A'], const {'m1': false}),
+        isFalse,
+        reason: 'hiding takes away what the team gave',
+      );
+    });
+
+    test('an exception on another match says nothing about this one', () {
+      expect(matchIsMine(m, const [], const {'jiny': true}), isFalse);
+      expect(matchIsMine(m, const ['SKK Veverky Brno A'], const {'jiny': false}),
+          isTrue);
+    });
+  });
+
+  group('upcomingMatches', () {
     List<String> ids(List<PrioritySlot> slots) => [for (final s in slots) s.id];
 
-    test('a team that is in the overview and the main calendar is not worth '
-        'offering', () {
+    test('every upcoming match, chronological, whatever the player follows',
+        () {
+      final later = match('later', today.addDays(5), const HourMinute(10, 0));
+      final soon = match('soon', today.addDays(1), const HourMinute(10, 0),
+          home: 'Cizí A', away: 'Cizí B');
       expect(
-        ids(exceptionCandidates(
-          slots: [ours('a'), theirs('b')],
-          followed: const ['SKK Veverky Brno A'],
-          routed: const [CalendarTeam(team: 'SKK Veverky Brno A')],
-          hasCalendar: true,
-          exceptions: const {},
-          today: today,
-        )),
-        ['b'],
+        ids(upcomingMatches(slots: [later, soon], today: today)),
+        ['soon', 'later'],
       );
     });
 
-    test('a team in the overview but only in the SECOND calendar is offered '
-        '— that is how one of its matches comes over to the main one', () {
-      expect(
-        ids(exceptionCandidates(
-          slots: [ours('a')],
-          followed: const ['SKK Veverky Brno A'],
-          routed: const [
-            CalendarTeam(
-                team: 'SKK Veverky Brno A', calendar: CalendarSlot.secondary),
-          ],
-          hasCalendar: true,
-          exceptions: const {},
-          today: today,
-        )),
-        ['a'],
-      );
+    test('played matches and úklid children are not matches to pick', () {
+      final past = match('past', today.addDays(-1), const HourMinute(10, 0));
+      final child = match('child', today.addDays(1), const HourMinute(9, 0),
+          parentId: 'later');
+      final ok = match('ok', today.addDays(1), const HourMinute(10, 0));
+      expect(ids(upcomingMatches(slots: [past, child, ok], today: today)),
+          ['ok']);
     });
 
-    test('without a calendar, being in the overview is the whole of it', () {
-      expect(
-        ids(exceptionCandidates(
-          slots: [ours('a'), theirs('b')],
-          followed: const ['SKK Veverky Brno A'],
-          routed: const [],
-          hasCalendar: false,
-          exceptions: const {},
-          today: today,
-        )),
-        ['b'],
-      );
-    });
-
-    test('what is already excepted stays listed, or it could never be taken '
-        'back', () {
-      expect(
-        ids(exceptionCandidates(
-          slots: [ours('a')],
-          followed: const ['SKK Veverky Brno A'],
-          routed: const [CalendarTeam(team: 'SKK Veverky Brno A')],
-          hasCalendar: true,
-          exceptions: const {'a'},
-          today: today,
-        )),
-        ['a'],
-      );
-    });
-
-    test('played matches and úklid children are not on offer, and the rest '
-        'is chronological', () {
-      final past = match('past', today.addDays(-1), const HourMinute(10, 0),
-          home: 'Cizí A');
-      final child = match('child', soon, const HourMinute(9, 0),
-          home: 'Cizí A', parentId: 'b');
-      final later = match('later', today.addDays(5), const HourMinute(10, 0),
-          home: 'Cizí A');
-      expect(
-        ids(exceptionCandidates(
-          slots: [later, past, child, theirs('b')],
-          followed: const [],
-          routed: const [],
-          hasCalendar: false,
-          exceptions: const {},
-          today: today,
-        )),
-        ['b', 'later'],
-      );
+    test('the search matches a team or the description, ignoring diacritics '
+        'and case', () {
+      final a = match('a', today.addDays(1), const HourMinute(10, 0),
+          home: 'SKK Veverky Brno A', away: 'KK MS Brno D');
+      final b = match('b', today.addDays(1), const HourMinute(12, 0),
+          home: 'TJ Sokol Husovice', away: 'KK Blansko');
+      final c = match('c', today.addDays(2), const HourMinute(12, 0),
+          home: 'KK Vyškov', away: 'KK Znojmo');
+      final slots = [a, b, c];
+      expect(ids(upcomingMatches(slots: slots, today: today, query: 'veverky')),
+          ['a']);
+      expect(ids(upcomingMatches(slots: slots, today: today, query: 'HUSOVICE')),
+          ['b']);
+      expect(ids(upcomingMatches(slots: slots, today: today, query: 'vyskov')),
+          ['c'], reason: 'diacritics are not a spelling test');
+      expect(ids(upcomingMatches(slots: slots, today: today, query: 'brno')),
+          ['a'], reason: 'either side of the match counts');
+      expect(ids(upcomingMatches(slots: slots, today: today, query: '  ')),
+          ['a', 'b', 'c'], reason: 'blank is not a filter');
+      expect(ids(upcomingMatches(slots: slots, today: today, query: 'nikdo')),
+          isEmpty);
     });
   });
 }

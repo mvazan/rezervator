@@ -406,12 +406,14 @@ async function setTeams(
     const droppedNames = new Set(dropped.map((t) => t.team));
     const { data: profile } = await admin.from("profiles")
       .select("tenant_id").eq("id", userId).maybeSingle();
-    // A match the player is playing as a guest (0039) is theirs whatever
-    // happens to the teams: this loop is the ONE path that reads
-    // priority_slots directly instead of my_future_matches, which already
-    // knows about exceptions — so it has to ask separately.
+    // A match the player ADDED (0039) is theirs whatever happens to the
+    // teams: this loop is the ONE path that reads priority_slots directly
+    // instead of my_future_matches, which already knows about exceptions —
+    // so it has to ask separately. A HIDDEN one is not asked about: its
+    // event is meant to go, and dropping the team is as good a reason as
+    // any.
     const { data: guestRows } = await admin.from("match_exceptions")
-      .select("match_id").eq("user_id", userId);
+      .select("match_id").eq("user_id", userId).eq("shown", true);
     const guestMatches = new Set(
       ((guestRows ?? []) as { match_id: string }[]).map((r) => r.match_id),
     );
