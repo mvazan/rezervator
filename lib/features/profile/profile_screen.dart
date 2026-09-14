@@ -237,9 +237,16 @@ class ProfileScreen extends ConsumerWidget {
                     children: [
                       ListTile(
                         leading: const Icon(Icons.notifications_none_outlined),
-                        title: const Text('Připomínky'),
+                        // Whose reminders these are, said in the title: the
+                        // Google calendar has its own set a card below, and
+                        // a player who runs both would otherwise have two
+                        // rows called Připomínky and no way to tell them
+                        // apart.
+                        title: const Text('Připomínky z appky'),
+                        isThreeLine: true,
                         subtitle: Text(
-                          'Před tréninkem a zápasem. '
+                          'Před tréninkem a zápasem — push do mobilu, jinak '
+                          'e-mailem.\n'
                           '${remindersSummary(profile.notifyBefore)}',
                         ),
                       ),
@@ -250,7 +257,7 @@ class ProfileScreen extends ConsumerWidget {
                           child: FilledButton.tonal(
                             onPressed: () => showRemindersSheet(
                               context,
-                              title: 'Připomínky',
+                              title: 'Připomínky z appky',
                               emptyCopy: 'Před tréninkem ani zápasem se nic '
                                   'neozve.',
                               minutesOf: (sheetRef) =>
