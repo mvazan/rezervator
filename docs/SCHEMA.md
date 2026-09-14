@@ -64,6 +64,7 @@ Every `color` column above is one `integer` (0030): the negative values are the 
 | `google_calendar_tokens` | `user_id → profiles` (cascade), `refresh_token`, `google_calendar_id` (the app-created "Rezervátor" calendar), `google_calendar_id_secondary` (0032: the second one, "Rezervátor 2"; `null` until `secondary_enabled`), `updated_at`. A separate table on purpose: a streamed table must never carry the token. | **server-only**: RLS on, zero policies; `service_role` only. |
 | `calendar_teams` | (0032) One row per player **+** followed team — replaces `google_calendar_links.match_teams`, because a team now needs to say more than its name: `user_id → profiles` (cascade), `team` (a `priority_slots.home_team`/`away_team` string), `calendar` (`primary` \| `secondary`, default `primary` — which of the player's two Google calendars this team's matches go to). PK (`user_id`, `team`). In the Realtime publication (0035) — the profile card streams it. Colour (`color_id`) lived here until 0036 moved it to `team_colors` below, independent of this table. | select own rows only (`user_id = auth.uid()`); `authenticated` has SELECT and nothing else (0035) — every write is the server's, through `calendar-manage`/`set_calendar_teams_for`, which also keeps `google_calendar_links.match_teams` mirrored for the 1.2.1 app. |
 | `team_colors` | (0036) One row per player **+** team the player has coloured — `user_id → profiles` (cascade), `team`, `color_id` (Google event `colorId` 1–11, `not null` — no row at all means no colour). PK (`user_id`, `team`). Independent of **both** team lists (`profiles.followed_teams` and `calendar_teams`) and of whether a calendar is even linked: the one colour shown for a team in Můj přehled and in its Google Calendar event alike. In the Realtime publication. | select own rows only (`user_id = auth.uid()`); `authenticated` has SELECT and nothing else (0037) — every write is the server's, through `calendar-manage`/`set_team_colors_for`, which saves a colour and immediately repaints the affected future Google Calendar events in the same request. |
+| `match_exceptions` | (0039) One row per player **+** match the player is playing as a guest — `user_id → profiles` (cascade), `match_id → priority_slots` (cascade), `calendar` (`primary` \| `secondary`, default `primary`; the app offers no choice — a match you play belongs in the calendar you live by, the column is there for the day that stops being true). PK (`user_id`, `match_id`). The match counts as the player's even though neither of its teams is in `followed_teams` or `calendar_teams`: it shows in Můj přehled and goes to the named calendar, outranking whatever routing the team would have had. In the Realtime publication. | select own rows only (`user_id = auth.uid()`); `authenticated` has SELECT and nothing else — the one way in is `set_match_exception`, callable by the app. |
 | `oauth_nonces` | The OAuth `state`: `nonce` (48 hex chars from `gen_random_bytes(24)`), `user_id → profiles` (cascade), `created_at`, `consumed_at`. One-shot with a 10-minute TTL — the callback function runs without a JWT, so this is what binds Google's redirect to a signed-in player. | **server-only** like the tokens. |
 
 View `players` (owned by postgres → bypasses `profiles` RLS on purpose):
@@ -180,8 +181,9 @@ time, competition, round, home, away) and the importer reconciles it into
 - **What the import never touches:** a row with `import_key is null` (the
   admin's own match), a row with `hand_edited` (unless `--force`, which
   overwrites and clears the flag), and every user table — `profiles.
-  followed_teams`, `calendar_teams`, `team_colors`, the `match_teams`
-  mirror. Team picks are names, so before writing the import lists picked
+  followed_teams`, `calendar_teams`, `team_colors`, `match_exceptions`, the
+  `match_teams` mirror. A `match_exceptions` row dies with its match
+  (cascade) and survives a re-key, because re-keying keeps the row's uuid. Team picks are names, so before writing the import lists picked
   teams that no longer occur in the file and refuses `--apply` while any
   exist (`--allow-missing-teams` overrides).
 
@@ -388,6 +390,36 @@ carries only routing (which calendar), `team_colors` only preference
   path; colour is untouched either way — `team_colors` is a table this
   legacy path never reads or writes).
 
+### One match of one's own (0039)
+
+A B-team player turns out for the A team once. Following the team would
+bring its whole season along, so the exception is per MATCH:
+
+- **`match_exceptions`** (table above). Written only through
+  **`set_match_exception(p_match, p_on)`** — unlike the calendar RPCs this
+  one is called straight from the app (it writes the caller's own row and
+  nothing else), and it refuses a match that is not this alley's, is not a
+  match (an úklid child, a blockage), or is already over
+  (`unknown_match` / `match_past`); the kiosk and a pending profile get
+  `not_allowed`.
+- **`my_future_matches`** now qualifies a match through a followed team OR
+  an exception (the `calendar_teams` lateral join became a LEFT join), and
+  the exception decides the calendar, overriding the team's own. Its colour
+  falls back to the one the player gave OUR team of the match (`is_away`
+  says which side that is) — the same rule `matchColorOf` follows in the
+  app, so the trophy in Můj přehled and the Google event agree.
+- **Jobs.** A trigger on `match_exceptions` queues
+  `enqueue_match_calendar_sync` on insert, update and delete — including the
+  delete the match's own cascade causes, which is what takes the Google
+  event away with the match. `priority_slots_enqueue_calendar` additionally
+  fans out to everyone holding an exception on the row:
+  `match_calendar_followers` only knows `calendar_teams`, and the whole
+  point of an exception is a player who follows neither team.
+- **`calendar-manage`'s `teams`** skips a match with an exception when it
+  deletes the events of dropped teams: that loop reads `priority_slots`
+  directly (the one path that does not go through `my_future_matches`), so
+  without the check, dropping a team would take a guest match with it.
+
 ## Edge functions
 
 - **notify** — called by `notify_webhook()` (pg_net POST; URL and
@@ -460,8 +492,13 @@ carries only routing (which calendar), `team_colors` only preference
   import's own update, a no-op update or a manual match; `--force` clears
   it) together with the assertion that an import-style update / delete /
   insert on `priority_slots` leaves every user's team picks byte-identical,
-  and the 0035
-  assertion (now including `team_colors`) that every table
+  the 0039 exceptions (select-only table + client-callable RPC, a match of
+  nobody's team routed to the main calendar with our team's colour, an
+  exception outranking the team's own calendar and giving it back when
+  switched off, the unknown/foreign/past/úklid refusals, the kiosk refusal,
+  and the jobs — queued when switched on, when the match is re-timed under
+  it, and when the match is deleted), and the 0035
+  assertion (now including `team_colors` and `match_exceptions`) that every table
   `lib/data/providers.dart` streams is in the `supabase_realtime`
   publication; run with `psql … -v ON_ERROR_STOP=1 -f` against the local
   stack (CI does).
