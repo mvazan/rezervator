@@ -43,16 +43,17 @@ String changelogHeading(Release r, {required bool web}) {
 }
 
 const appChangelog = <Release>[
-  Release(null, '14. 9. 2026', [
-    'Připomínky v Můj profil: ozveme se ti hodinu, dvě nebo den před '
-        'tréninkem i zápasem — do mobilu, a bez appky e-mailem.',
-    'Výjimky v Moje týmy: jednotlivý zápas si přidáš do přehledu, nebo ho '
-        'z něj skryješ — ať už hraješ za jiný tým, nebo tě zrovna nezajímá.',
-    'Týmy nastavuješ na jednom místě: v Moje týmy u každého zaškrtneš '
-        'Přehled, Kalendář a vybereš barvu.',
-    'S druhým kalendářem tým podržíš a vybereš, do kterého kalendáře jeho '
-        'zápasy patří.',
-    'Výběr v panelu se uloží až tlačítkem Uložit — odchod nic nemění.',
+  Release('1.2.6', '14. 9. 2026', [
+    'Připomínky v profilu: ozveme se ti pár hodin nebo den před tréninkem '
+        'i zápasem — do mobilu, bez appky e-mailem.',
+    'Výjimky v Moje týmy: jednotlivý zápas přidáš do přehledu, nebo ho '
+        'z něj skryješ.',
+    'Týmy nastavíš na jednom místě: u každého zaškrtneš Přehled, Kalendář '
+        'a barvu.',
+    'S druhým kalendářem tým podržíš a vybereš, kam jeho zápasy patří.',
+    'Výběr v panelu se uloží až tlačítkem Uložit.',
+    'Otočení telefonu nechá zvolený týden na pokoji.',
+    'Správce vidí u hráčů e-mail.',
   ]),
   Release('1.2.5', '10. 9. 2026', [
     'Na kiosku vybíráš jméno z mřížky v barvách oddílů a vede v ní '
