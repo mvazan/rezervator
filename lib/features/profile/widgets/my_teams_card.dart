@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../config.dart';
 import '../../../data/providers.dart';
 import '../../../domain/models.dart';
+import '../match_exceptions_screen.dart';
 import 'my_teams_sheet.dart';
 
 /// The one place teams are set up: which teams' matches show in Můj přehled
@@ -35,6 +36,8 @@ class MyTeamsCard extends ConsumerWidget {
     final hasCalendar = ref.watch(calendarAvailableProvider) &&
         !AppConfig.isDemoAccount(profile.email) &&
         link.isLinked;
+    final exceptions =
+        ref.watch(myMatchExceptionsProvider).value ?? const <String>{};
     final routed = hasCalendar
         ? ref.watch(myCalendarTeamsProvider).value ?? const <CalendarTeam>[]
         : const <CalendarTeam>[];
@@ -67,6 +70,22 @@ class MyTeamsCard extends ConsumerWidget {
                 ),
                 child: const Text('Vybrat týmy…'),
               ),
+            ),
+          ),
+          // The rare other half of "whose matches are mine": a single match
+          // played for a team one does not follow (0039). Its own screen —
+          // it is seldom used and the list it needs is the whole schedule.
+          ListTile(
+            leading: const Icon(Icons.star_outline),
+            title: const Text('Výjimky'),
+            subtitle: Text(
+              exceptions.isEmpty
+                  ? 'Zápasy, které hraješ za jiný tým.'
+                  : '${exceptions.length} zápasů navíc',
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const MatchExceptionsScreen()),
             ),
           ),
         ],

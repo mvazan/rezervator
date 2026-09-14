@@ -7,6 +7,7 @@ import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/profile/profile_screen.dart';
 import 'package:rezervator/features/admin/widgets/color_picker.dart';
+import 'package:rezervator/features/profile/match_exceptions_screen.dart';
 import 'package:rezervator/features/profile/widgets/calendar_link_card.dart';
 import 'package:rezervator/features/profile/widgets/event_color_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -88,6 +89,7 @@ void main() {
     Future<void> Function(Map<String, int?> colors)? setTeamColors,
     Future<void> Function(HomeView view)? setDefaultView,
     List<PrioritySlot> matches = const [],
+    Set<String> exceptions = const {},
   }) {
     return ProviderScope(
       overrides: [
@@ -99,6 +101,7 @@ void main() {
         myCalendarLinkProvider.overrideWith((ref) => Stream.value(link)),
         myCalendarTeamsProvider.overrideWith((ref) => Stream.value(teams)),
         myTeamColorsProvider.overrideWith((ref) => Stream.value(teamColors)),
+        myMatchExceptionsProvider.overrideWith((ref) => Stream.value(exceptions)),
         prioritySlotsProvider.overrideWithValue(matches),
       ],
       child: MaterialApp(
@@ -1376,6 +1379,52 @@ void main() {
         expect(saved, [<String>[]]);
       },
     );
+
+    // The rare other half of "whose matches are mine" (0039): its own
+    // screen, reached from the card that owns the question.
+    testWidgets('Výjimky sits under the team button and counts what is set',
+        (tester) async {
+      tester.view.physicalSize = const Size(800, 2000);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(app(me, matches: [match]));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Výjimky'), findsOneWidget);
+      expect(find.text('Zápasy, které hraješ za jiný tým.'), findsOneWidget);
+      expect(tester.getTopLeft(find.text('Výjimky')).dy,
+          greaterThan(tester.getTopLeft(find.text('Vybrat týmy…')).dy));
+    });
+
+    // One ProviderScope per test: a second pumpWidget does not swap them.
+    testWidgets('Výjimky counts what is already set', (tester) async {
+      tester.view.physicalSize = const Size(800, 2000);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(
+          app(me, matches: [match], exceptions: const {'m1'}));
+      await tester.pumpAndSettle();
+
+      expect(find.text('1 zápasů navíc'), findsOneWidget);
+    });
+
+    testWidgets('Výjimky opens its screen', (tester) async {
+      tester.view.physicalSize = const Size(800, 2000);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(app(me, matches: [match]));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Výjimky'));
+      await tester.pumpAndSettle();
+      // What the screen then shows is its own test's business (this harness
+      // does not pin the schedule stream, so it may still be loading).
+      expect(find.byType(MatchExceptionsScreen), findsOneWidget);
+      expect(find.widgetWithText(AppBar, 'Výjimky'), findsOneWidget);
+    });
 
     testWidgets('Po spuštění saves the chosen launch view', (tester) async {
       tester.view.physicalSize = const Size(800, 1800);
