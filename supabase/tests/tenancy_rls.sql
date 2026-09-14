@@ -2279,6 +2279,14 @@ declare
   -- runs in CI at any hour, and two hours from 23:30 is tomorrow.
   v_train timestamp := (now() at time zone 'Europe/Prague') + interval '2 hours';
   v_match timestamp := (now() at time zone 'Europe/Prague') + interval '3 hours';
+  -- ...and they have to END on the day they start: both tables store a date
+  -- plus two times and check ends_at > starts_at, so nothing here may cross
+  -- midnight. Full length while the day has room, otherwise halfway to it —
+  -- the suite cares when these start, never when they end.
+  v_train_end timestamp := v_train + least(interval '1 hour',
+    (date_trunc('day', v_train) + interval '1 day' - v_train) / 2);
+  v_match_end timestamp := v_match + least(interval '3 hours',
+    (date_trunc('day', v_match) + interval '1 day' - v_match) / 2);
 begin
   -- The team whose matches count as this player's — Můj přehled reads
   -- followed_teams, and so do the reminders.
@@ -2288,7 +2296,7 @@ begin
   select id into v_block from time_blocks
     where tenant_id = v_tenant and active limit 1;
   update time_blocks set starts_at = v_train::time,
-         ends_at = (v_train + interval '1 hour')::time
+         ends_at = v_train_end::time
    where id = v_block;
   insert into reservations
     (tenant_id, player_id, date, block_id, lane, created_via, created_by)
@@ -2301,7 +2309,7 @@ begin
      prep_minutes, description, is_away, created_by)
   values
     (v_tenant, v_match::date, v_match::time,
-     (v_match + interval '3 hours')::time,
+     v_match_end::time,
      v_type, 'Rem Test Home', 'Rem Test Away', 0, '', false, v_uid);
 end $$;
 
@@ -2409,6 +2417,9 @@ declare
   v_guest uuid;
   v_own uuid;
   v_match timestamp := (now() at time zone 'Europe/Prague') + interval '3 hours';
+  -- Same day, same reason as the fixture above.
+  v_match_end timestamp := v_match + least(interval '3 hours',
+    (date_trunc('day', v_match) + interval '1 day' - v_match) / 2);
 begin
   select id into v_type from priority_slot_types
     where tenant_id = v_tenant and is_match and builtin;
@@ -2417,7 +2428,7 @@ begin
      prep_minutes, description, is_away, created_by)
   values
     (v_tenant, v_match::date, v_match::time,
-     (v_match + interval '3 hours')::time,
+     v_match_end::time,
      v_type, 'Rem Guest A', 'Rem Guest B', 0, '', false, v_uid)
   returning id into v_guest;
   select id into v_own from priority_slots where home_team = 'Rem Test Home';
