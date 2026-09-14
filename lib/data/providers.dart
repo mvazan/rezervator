@@ -64,6 +64,24 @@ final profilesProvider = StreamProvider<List<Profile>>((ref) {
         ..sort((a, b) => compareCzech(a.displayName, b.displayName)));
 });
 
+/// The matches this player said they are playing though neither team is
+/// theirs (0039, `match_exceptions`) — just the match ids; the rest of the
+/// match is already in `prioritySlotsProvider`. Written through
+/// [Api.setMatchException], never directly: the table is select-only, and
+/// the RPC's trigger queues the Google job.
+final myMatchExceptionsProvider = StreamProvider<Set<String>>((ref) {
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return Stream.value(const {});
+  return cachedRows(
+          uid,
+          'match_exceptions',
+          () => _db
+              .from('match_exceptions')
+              .stream(primaryKey: ['user_id', 'match_id'])
+              .eq('user_id', uid))
+      .map((rows) => {for (final row in rows) row['match_id'] as String});
+});
+
 /// Alley configuration singleton (null until the backend is seeded).
 /// Alleys offered at registration (id + name; RLS exposes nothing more).
 /// Session-gated, not profile-gated — the register screen runs pre-profile.
@@ -802,6 +820,13 @@ class Api {
 
   /// Which teams' matches the player sees in Můj přehled (0029). Own row,
   /// like the colour; the calendar sync's own list is untouched.
+  /// "I am playing this one" (0039): one match becomes the player's even
+  /// though neither of its teams is in their lists — Můj přehled shows it
+  /// and the main Google calendar gets it, the latter through the same job
+  /// queue a re-timed match rides (so: within minutes, not in this call).
+  static Future<void> setMatchException(String matchId, bool on) =>
+      _db.rpc('set_match_exception', params: {'p_match': matchId, 'p_on': on});
+
   static Future<void> setFollowedTeams(List<String> teams) => _db
       .from('profiles')
       .update({'followed_teams': teams})
@@ -1186,6 +1211,7 @@ void resetTenantScopedProviders(WidgetRef ref) {
   ref.invalidate(myCalendarLinkProvider);
   ref.invalidate(myCalendarTeamsProvider);
   ref.invalidate(myTeamColorsProvider);
+  ref.invalidate(myMatchExceptionsProvider);
   ref.invalidate(playersProvider);
   ref.invalidate(tenantsProvider);
   ref.invalidate(myTenantStatusProvider);

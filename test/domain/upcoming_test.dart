@@ -288,4 +288,174 @@ void main() {
       expect(matchColorOf(m, bothFollowed, const {'KK MS Brno D': 5}), isNull);
     });
   });
+
+  // A player of the B team turns out for the A team once (0039): that one
+  // match is theirs, without the team and the rest of its season.
+  group('exceptions', () {
+    test('a match of nobody\'s team is on the list when it is excepted', () {
+      final m = match('m1', today.addDays(2), const HourMinute(10, 0),
+          home: 'Cizí A', away: 'Cizí B');
+      expect(
+        upcomingTimeline(
+            reservations: const [],
+            blocks: const [],
+            slots: [m],
+            teams: const [],
+            today: today),
+        isEmpty,
+      );
+      final days = upcomingTimeline(
+          reservations: const [],
+          blocks: const [],
+          slots: [m],
+          teams: const [],
+          today: today,
+          exceptions: {'m1'});
+      expect(days.single.items.single, isA<UpcomingMatch>());
+    });
+
+    test('an exception on another match changes nothing', () {
+      final m = match('m1', today.addDays(2), const HourMinute(10, 0),
+          home: 'Cizí A', away: 'Cizí B');
+      expect(
+        upcomingTimeline(
+            reservations: const [],
+            blocks: const [],
+            slots: [m],
+            teams: const [],
+            today: today,
+            exceptions: {'jiny'}),
+        isEmpty,
+      );
+    });
+
+    test('a followed team\'s match is listed once, exception or not', () {
+      final m = match('m1', today.addDays(2), const HourMinute(10, 0));
+      final days = upcomingTimeline(
+          reservations: const [],
+          blocks: const [],
+          slots: [m],
+          teams: const ['SKK Veverky Brno A'],
+          today: today,
+          exceptions: {'m1'});
+      expect(days.single.items.length, 1);
+    });
+
+    // No followed team means no followed team's colour — it takes the one
+    // given to OUR side of the match, which is what my_future_matches does.
+    test('the trophy takes our team\'s colour', () {
+      final home = match('m1', today, const HourMinute(10, 0),
+          home: 'Cizí A', away: 'Cizí B');
+      final away = match('m2', today, const HourMinute(10, 0),
+          home: 'Cizí A', away: 'Cizí B', isAway: true);
+      const colors = {'Cizí A': 4, 'Cizí B': 7};
+      expect(matchColorOf(home, const [], colors, exceptions: {'m1'}), 4);
+      expect(matchColorOf(away, const [], colors, exceptions: {'m2'}), 7);
+      // Without the exception there is nothing of ours in it at all.
+      expect(matchColorOf(home, const [], colors), isNull);
+    });
+
+    test('a followed team still wins the colour over the exception', () {
+      final m = match('m1', today, const HourMinute(10, 0),
+          home: 'Cizí A', away: 'SKK Veverky Brno A');
+      expect(
+        matchColorOf(m, const ['SKK Veverky Brno A'],
+            const {'Cizí A': 4, 'SKK Veverky Brno A': 9}, exceptions: {'m1'}),
+        9,
+      );
+    });
+  });
+
+  group('exceptionCandidates', () {
+    final soon = today.addDays(3);
+    PrioritySlot ours(String id) =>
+        match(id, soon, const HourMinute(10, 0), home: 'SKK Veverky Brno A');
+    PrioritySlot theirs(String id) =>
+        match(id, soon, const HourMinute(12, 0), home: 'Cizí A', away: 'Cizí B');
+
+    List<String> ids(List<PrioritySlot> slots) => [for (final s in slots) s.id];
+
+    test('a team that is in the overview and the main calendar is not worth '
+        'offering', () {
+      expect(
+        ids(exceptionCandidates(
+          slots: [ours('a'), theirs('b')],
+          followed: const ['SKK Veverky Brno A'],
+          routed: const [CalendarTeam(team: 'SKK Veverky Brno A')],
+          hasCalendar: true,
+          exceptions: const {},
+          today: today,
+        )),
+        ['b'],
+      );
+    });
+
+    test('a team in the overview but only in the SECOND calendar is offered '
+        '— that is how one of its matches comes over to the main one', () {
+      expect(
+        ids(exceptionCandidates(
+          slots: [ours('a')],
+          followed: const ['SKK Veverky Brno A'],
+          routed: const [
+            CalendarTeam(
+                team: 'SKK Veverky Brno A', calendar: CalendarSlot.secondary),
+          ],
+          hasCalendar: true,
+          exceptions: const {},
+          today: today,
+        )),
+        ['a'],
+      );
+    });
+
+    test('without a calendar, being in the overview is the whole of it', () {
+      expect(
+        ids(exceptionCandidates(
+          slots: [ours('a'), theirs('b')],
+          followed: const ['SKK Veverky Brno A'],
+          routed: const [],
+          hasCalendar: false,
+          exceptions: const {},
+          today: today,
+        )),
+        ['b'],
+      );
+    });
+
+    test('what is already excepted stays listed, or it could never be taken '
+        'back', () {
+      expect(
+        ids(exceptionCandidates(
+          slots: [ours('a')],
+          followed: const ['SKK Veverky Brno A'],
+          routed: const [CalendarTeam(team: 'SKK Veverky Brno A')],
+          hasCalendar: true,
+          exceptions: const {'a'},
+          today: today,
+        )),
+        ['a'],
+      );
+    });
+
+    test('played matches and úklid children are not on offer, and the rest '
+        'is chronological', () {
+      final past = match('past', today.addDays(-1), const HourMinute(10, 0),
+          home: 'Cizí A');
+      final child = match('child', soon, const HourMinute(9, 0),
+          home: 'Cizí A', parentId: 'b');
+      final later = match('later', today.addDays(5), const HourMinute(10, 0),
+          home: 'Cizí A');
+      expect(
+        ids(exceptionCandidates(
+          slots: [later, past, child, theirs('b')],
+          followed: const [],
+          routed: const [],
+          hasCalendar: false,
+          exceptions: const {},
+          today: today,
+        )),
+        ['b', 'later'],
+      );
+    });
+  });
 }
