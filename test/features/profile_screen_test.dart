@@ -284,32 +284,39 @@ void main() {
       expect(find.text(connectLabel), findsNothing);
     });
 
-    testWidgets('Vzhled sits right under the name card and above the '
-        'own-colour card; Google kalendář sits between the own-colour card '
-        'and the sign-out card', (tester) async {
+    // The order the screen reads in, top to bottom: who you are, how your
+    // reservations look, what opens first, whose matches you follow, the
+    // calendar they go to — and only then the app's own looks, which has
+    // nothing to do with kuželky at all.
+    testWidgets('the cards run: name, Tabule, Po spuštění, Moje týmy, Google '
+        'kalendář, Vzhled', (tester) async {
       // Tall enough for every card to be built (the ListView is lazy).
-      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.physicalSize = const Size(800, 2000);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
       await tester.pumpWidget(app(me, calendarAvailable: true));
       await tester.pumpAndSettle();
 
-      final name = tester.getTopLeft(find.text('Jméno')).dy;
-      final appearance = tester.getTopLeft(find.text('Vzhled')).dy;
-      final nick = tester.getTopLeft(find.text('Přezdívka na tabuli')).dy;
-      final colour = tester.getTopLeft(find.text('Barva mých rezervací')).dy;
-      final myTeams = tester.getTopLeft(find.text('Moje týmy')).dy;
-      final launchView = tester.getTopLeft(find.text('Po spuštění')).dy;
-      final calendar = tester.getTopLeft(find.text('Google kalendář')).dy;
-      final logout = tester.getTopLeft(find.text('Odhlásit se')).dy;
-      expect(name, lessThan(appearance));
-      expect(appearance, lessThan(nick));
-      expect(nick, lessThan(colour));
-      expect(colour, lessThan(myTeams));
-      expect(myTeams, lessThan(launchView));
-      expect(launchView, lessThan(calendar));
-      expect(calendar, lessThan(logout));
+      double top(String label) => tester.getTopLeft(find.text(label)).dy;
+      final order = [
+        top('Jméno'),
+        top('Tabule'),
+        top('Po spuštění'),
+        top('Moje týmy'),
+        top('Google kalendář'),
+        top('Vzhled'),
+        top('Odhlásit se'),
+      ];
+      for (var i = 1; i < order.length; i++) {
+        expect(order[i - 1], lessThan(order[i]), reason: 'card $i out of order');
+      }
+
+      // Tabule is ONE card: the nick and the colour of the cells it draws.
+      expect(top('Přezdívka'), greaterThan(top('Tabule')));
+      expect(top('Barva mých rezervací'), lessThan(top('Po spuštění')));
+      expect(find.text('Přezdívka na tabuli'), findsNothing,
+          reason: 'the card above it says Tabule now');
     });
 
     testWidgets('not linked: explains the calendar and offers to connect', (
