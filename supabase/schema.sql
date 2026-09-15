@@ -1512,6 +1512,54 @@ $$;
 ALTER FUNCTION "public"."reject_tenant"("p_tenant_id" "uuid") OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."rental_add_date"("p_rental" "uuid", "p_date" "date", "p_starts_at" time without time zone, "p_ends_at" time without time zone, "p_lanes" smallint[], "p_note" "text" DEFAULT ''::"text") RETURNS "uuid"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_src rentals;
+  v_group uuid;
+  v_new uuid;
+begin
+  if auth.uid() is null then
+    raise exception 'not_authenticated';
+  end if;
+  if not is_admin() then
+    raise exception 'not_allowed';
+  end if;
+  -- for update: dva správci, kteří přidávají termín ke stejnému pronájmu bez
+  -- skupiny ve stejnou chvíli, by jinak oba viděli group_id = null, oba
+  -- založili skupinu a pronájem by se rozpadl na dva. Zámek na zdrojovém
+  -- řádku je drží za sebou — druhý uvidí už osvojený řádek.
+  select * into v_src from rentals
+   where id = p_rental and tenant_id = current_tenant_id()
+   for update;
+  -- Týdenní série termíny nepřidává — má výjimky (0021).
+  if not found or v_src.parent_id is not null or v_src.weekday is not null then
+    raise exception 'unknown_rental';
+  end if;
+
+  v_group := v_src.group_id;
+  if v_group is null then
+    insert into rental_groups (tenant_id, renter_name, color, created_by)
+    values (v_src.tenant_id, v_src.renter_name, v_src.color, auth.uid())
+    returning id into v_group;
+    update rentals set group_id = v_group where id = v_src.id;
+  end if;
+
+  insert into rentals (tenant_id, group_id, renter_name, color, date, lanes,
+                       starts_at, ends_at, note, created_by)
+  values (v_src.tenant_id, v_group, v_src.renter_name, v_src.color, p_date,
+          p_lanes, p_starts_at, p_ends_at, coalesce(p_note, ''), auth.uid())
+  returning id into v_new;
+  return v_new;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."rental_add_date"("p_rental" "uuid", "p_date" "date", "p_starts_at" time without time zone, "p_ends_at" time without time zone, "p_lanes" smallint[], "p_note" "text") OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."rental_exception_guard"() RETURNS "trigger"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -1538,6 +1586,61 @@ $$;
 
 
 ALTER FUNCTION "public"."rental_exception_guard"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."rental_group_changed"() RETURNS "trigger"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  if old.renter_name is distinct from new.renter_name
+     or old.color is distinct from new.color then
+    update rentals set renter_name = new.renter_name, color = new.color
+    where group_id = new.id;
+  end if;
+  return new;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."rental_group_changed"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."rental_group_guard"() RETURNS "trigger"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_group rental_groups;
+begin
+  select * into v_group from rental_groups where id = new.group_id;
+  if not found or v_group.tenant_id <> new.tenant_id then
+    raise exception 'rental_group_invalid';
+  end if;
+  new.renter_name := v_group.renter_name;
+  new.color := v_group.color;
+  return new;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."rental_group_guard"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."rental_group_prune"() RETURNS "trigger"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  if not exists (select 1 from rentals where group_id = old.group_id) then
+    delete from rental_groups where id = old.group_id;
+  end if;
+  return null;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."rental_group_prune"() OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."rental_occurrences"("p_tenant" "uuid", "p_date" "date") RETURNS TABLE("rental_id" "uuid", "override_id" "uuid", "renter_name" "text", "lanes" smallint[], "starts_at" time without time zone, "ends_at" time without time zone)
@@ -1578,10 +1681,12 @@ CREATE TABLE IF NOT EXISTS "public"."rentals" (
     "tenant_id" "uuid" DEFAULT "public"."current_tenant_id"() NOT NULL,
     "parent_id" "uuid",
     "skipped" boolean DEFAULT false NOT NULL,
+    "group_id" "uuid",
     CONSTRAINT "rentals_check" CHECK (("ends_at" > "starts_at")),
     CONSTRAINT "rentals_check1" CHECK ((("date" IS NULL) <> ("weekday" IS NULL))),
     CONSTRAINT "rentals_color_check" CHECK (((("color" >= '-2'::integer) AND ("color" <= 8)) OR (("color" >= 16777216) AND ("color" <= 33554431)))),
     CONSTRAINT "rentals_exception_shape_check" CHECK ((("parent_id" IS NULL) OR (("date" IS NOT NULL) AND ("weekday" IS NULL) AND ("valid_from" IS NULL) AND ("valid_until" IS NULL)))),
+    CONSTRAINT "rentals_group_shape_check" CHECK ((("group_id" IS NULL) OR (("date" IS NOT NULL) AND ("parent_id" IS NULL)))),
     CONSTRAINT "rentals_lanes_check" CHECK (("cardinality"("lanes") > 0)),
     CONSTRAINT "rentals_skipped_check" CHECK (((NOT "skipped") OR ("parent_id" IS NOT NULL))),
     CONSTRAINT "rentals_weekday_check" CHECK ((("weekday" >= 1) AND ("weekday" <= 7)))
@@ -1596,6 +1701,10 @@ COMMENT ON COLUMN "public"."rentals"."color" IS 'Rental colour: -2 = the rental 
 
 
 COMMENT ON COLUMN "public"."rentals"."parent_id" IS 'Exception row: overrides the series for `date`; skipped = the occurrence does not happen.';
+
+
+
+COMMENT ON COLUMN "public"."rentals"."group_id" IS 'The rental_groups row this one-time date belongs to (0041); null for a lone one-time rental, a weekly series or an exception row.';
 
 
 
@@ -2473,6 +2582,28 @@ COMMENT ON TABLE "public"."reminders_sent" IS 'Which reminders have already gone
 
 
 
+CREATE TABLE IF NOT EXISTS "public"."rental_groups" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "tenant_id" "uuid" DEFAULT "public"."current_tenant_id"() NOT NULL,
+    "renter_name" "text" NOT NULL,
+    "color" integer DEFAULT '-2'::integer NOT NULL,
+    "created_by" "uuid" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "rental_groups_color_check" CHECK (((("color" >= '-2'::integer) AND ("color" <= 8)) OR (("color" >= 16777216) AND ("color" <= 33554431))))
+);
+
+
+ALTER TABLE "public"."rental_groups" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."rental_groups" IS 'One renter with several one-time rental dates (0041): the identity (name, colour) its rentals rows carry a copy of. A lone one-time rental has no group; rental_add_date creates one when a second date arrives, rental_group_prune removes it with the last date.';
+
+
+
+COMMENT ON COLUMN "public"."rental_groups"."color" IS 'Group colour, the same domain as rentals.color: -2 = the rental default, 0-8 a palette entry, 0x1000000|rgb a hand-picked colour.';
+
+
+
 CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     "lane_count" smallint DEFAULT 4 NOT NULL,
     "training_weekdays" smallint[] DEFAULT '{1,2,4}'::smallint[] NOT NULL,
@@ -2617,6 +2748,11 @@ ALTER TABLE ONLY "public"."reminders_sent"
 
 
 
+ALTER TABLE ONLY "public"."rental_groups"
+    ADD CONSTRAINT "rental_groups_pkey" PRIMARY KEY ("id");
+
+
+
 ALTER TABLE ONLY "public"."rentals"
     ADD CONSTRAINT "rentals_pkey" PRIMARY KEY ("id");
 
@@ -2669,6 +2805,10 @@ CREATE INDEX "priority_slots_parent_idx" ON "public"."priority_slots" USING "btr
 
 
 CREATE INDEX "profiles_tenant_idx" ON "public"."profiles" USING "btree" ("tenant_id");
+
+
+
+CREATE INDEX "rentals_group_idx" ON "public"."rentals" USING "btree" ("group_id") WHERE ("group_id" IS NOT NULL);
 
 
 
@@ -2733,6 +2873,18 @@ CREATE OR REPLACE TRIGGER "rental_conflicts" AFTER INSERT OR DELETE OR UPDATE ON
 
 
 CREATE OR REPLACE TRIGGER "rental_exception_guard" BEFORE INSERT OR UPDATE ON "public"."rentals" FOR EACH ROW WHEN (("new"."parent_id" IS NOT NULL)) EXECUTE FUNCTION "public"."rental_exception_guard"();
+
+
+
+CREATE OR REPLACE TRIGGER "rental_group_changed" AFTER UPDATE ON "public"."rental_groups" FOR EACH ROW EXECUTE FUNCTION "public"."rental_group_changed"();
+
+
+
+CREATE OR REPLACE TRIGGER "rental_group_guard" BEFORE INSERT OR UPDATE ON "public"."rentals" FOR EACH ROW WHEN (("new"."group_id" IS NOT NULL)) EXECUTE FUNCTION "public"."rental_group_guard"();
+
+
+
+CREATE OR REPLACE TRIGGER "rental_group_prune" AFTER DELETE ON "public"."rentals" FOR EACH ROW WHEN (("old"."group_id" IS NOT NULL)) EXECUTE FUNCTION "public"."rental_group_prune"();
 
 
 
@@ -2855,8 +3007,23 @@ ALTER TABLE ONLY "public"."reminders_sent"
 
 
 
+ALTER TABLE ONLY "public"."rental_groups"
+    ADD CONSTRAINT "rental_groups_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "public"."profiles"("id");
+
+
+
+ALTER TABLE ONLY "public"."rental_groups"
+    ADD CONSTRAINT "rental_groups_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE CASCADE;
+
+
+
 ALTER TABLE ONLY "public"."rentals"
     ADD CONSTRAINT "rentals_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "public"."profiles"("id");
+
+
+
+ALTER TABLE ONLY "public"."rentals"
+    ADD CONSTRAINT "rentals_group_id_fkey" FOREIGN KEY ("group_id") REFERENCES "public"."rental_groups"("id") ON DELETE CASCADE;
 
 
 
@@ -3022,6 +3189,25 @@ CREATE POLICY "profiles_update_own" ON "public"."profiles" FOR UPDATE USING (("i
 
 
 ALTER TABLE "public"."reminders_sent" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."rental_groups" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "rental_groups_delete" ON "public"."rental_groups" FOR DELETE USING ((("tenant_id" = "public"."current_tenant_id"()) AND "public"."is_admin"()));
+
+
+
+CREATE POLICY "rental_groups_insert" ON "public"."rental_groups" FOR INSERT WITH CHECK ((("tenant_id" = "public"."current_tenant_id"()) AND "public"."is_admin"()));
+
+
+
+CREATE POLICY "rental_groups_select" ON "public"."rental_groups" FOR SELECT USING ((("tenant_id" = "public"."current_tenant_id"()) AND "public"."is_approved_or_kiosk"()));
+
+
+
+CREATE POLICY "rental_groups_update" ON "public"."rental_groups" FOR UPDATE USING ((("tenant_id" = "public"."current_tenant_id"()) AND "public"."is_admin"())) WITH CHECK ((("tenant_id" = "public"."current_tenant_id"()) AND "public"."is_admin"()));
+
 
 
 ALTER TABLE "public"."rentals" ENABLE ROW LEVEL SECURITY;
@@ -3275,9 +3461,33 @@ GRANT ALL ON FUNCTION "public"."reject_tenant"("p_tenant_id" "uuid") TO "service
 
 
 
+REVOKE ALL ON FUNCTION "public"."rental_add_date"("p_rental" "uuid", "p_date" "date", "p_starts_at" time without time zone, "p_ends_at" time without time zone, "p_lanes" smallint[], "p_note" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."rental_add_date"("p_rental" "uuid", "p_date" "date", "p_starts_at" time without time zone, "p_ends_at" time without time zone, "p_lanes" smallint[], "p_note" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."rental_add_date"("p_rental" "uuid", "p_date" "date", "p_starts_at" time without time zone, "p_ends_at" time without time zone, "p_lanes" smallint[], "p_note" "text") TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."rental_exception_guard"() TO "anon";
 GRANT ALL ON FUNCTION "public"."rental_exception_guard"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."rental_exception_guard"() TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."rental_group_changed"() TO "anon";
+GRANT ALL ON FUNCTION "public"."rental_group_changed"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."rental_group_changed"() TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."rental_group_guard"() TO "anon";
+GRANT ALL ON FUNCTION "public"."rental_group_guard"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."rental_group_guard"() TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."rental_group_prune"() TO "anon";
+GRANT ALL ON FUNCTION "public"."rental_group_prune"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."rental_group_prune"() TO "service_role";
 
 
 
@@ -3443,6 +3653,11 @@ GRANT INSERT("lanes"),UPDATE("lanes") ON TABLE "public"."priority_slot_types" TO
 
 
 GRANT ALL ON TABLE "public"."reminders_sent" TO "service_role";
+
+
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."rental_groups" TO "authenticated";
+GRANT ALL ON TABLE "public"."rental_groups" TO "service_role";
 
 
 

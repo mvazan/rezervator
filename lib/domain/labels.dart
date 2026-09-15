@@ -44,6 +44,16 @@ String rentalExceptionCountLabel(int n) {
   return '$n výjimek';
 }
 
+/// After "včetně", which governs the genitive: 1 termínu, 2 termínů.
+String rentalDateCountGenitive(int n) => n == 1 ? '1 termínu' : '$n termínů';
+
+/// The tail of a group tile: how many dates its two shown lines leave out.
+String rentalMoreDatesLabel(int n) {
+  if (n == 1) return '…a ještě 1 termín';
+  if (n >= 2 && n <= 4) return '…a další $n termíny';
+  return '…a dalších $n termínů';
+}
+
 /// Band text: the label above + ' · od–do' using HourMinute.display().
 String eventBandLabel(OffBlockEvent e) {
   final label = switch (e) {

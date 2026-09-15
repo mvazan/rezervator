@@ -7,16 +7,27 @@ import 'color_picker.dart';
 import 'form_dialog.dart';
 import 'form_fields.dart';
 
-enum _RentalMode { oneTime, weekly }
+/// Which kind of rental the add dialog creates — the chooser on Pronájmy
+/// decides; the dialog itself no longer asks.
+enum RentalKind { weekly, irregular }
 
-/// Add/edit dialog for a lane rental. The mode radio (Jednorázový /
-/// Týdenní) structurally guarantees date XOR weekday: only the field for
-/// the active mode is ever read when saving, so the other is always sent
-/// as null.
+/// Add/edit dialog for a lane rental. The kind comes from the chooser on
+/// Pronájmy (or from [existing]); only the fields of that kind are ever
+/// read when saving, so the other is always sent as null.
 class RentalDialog extends StatefulWidget {
-  const RentalDialog({super.key, this.existing, required this.laneCount});
+  const RentalDialog({
+    super.key,
+    this.existing,
+    this.kind,
+    required this.laneCount,
+  }) : assert(existing != null || kind != null,
+            'a new rental needs its kind');
 
   final Rental? existing;
+
+  /// For a new rental: weekly (den v týdnu, platí od/do) or irregular (the
+  /// first date; more come through RentalDatesDialog).
+  final RentalKind? kind;
   final int laneCount;
 
   @override
@@ -26,7 +37,7 @@ class RentalDialog extends StatefulWidget {
 class _RentalDialogState extends State<RentalDialog> {
   final _renterName = TextEditingController();
   final _note = TextEditingController();
-  _RentalMode _mode = _RentalMode.oneTime;
+  RentalKind _mode = RentalKind.irregular;
   Day? _date;
   int _weekday = DateTime.monday;
   Day? _validFrom;
@@ -47,12 +58,12 @@ class _RentalDialogState extends State<RentalDialog> {
     _lanes.addAll(existing?.lanes ?? const []);
     _color = existing?.color ?? -2;
     if (existing == null) {
-      _mode = _RentalMode.oneTime;
+      _mode = widget.kind!;
     } else if (existing.date != null) {
-      _mode = _RentalMode.oneTime;
+      _mode = RentalKind.irregular;
       _date = existing.date;
     } else {
-      _mode = _RentalMode.weekly;
+      _mode = RentalKind.weekly;
       _weekday = existing.weekday!;
       _validFrom = existing.validFrom;
       _validUntil = existing.validUntil;
@@ -108,7 +119,7 @@ class _RentalDialogState extends State<RentalDialog> {
       snack(context, 'Konec musí být po začátku.');
       return null;
     }
-    if (_mode == _RentalMode.oneTime && _date == null) {
+    if (_mode == RentalKind.irregular && _date == null) {
       snack(context, 'Vyber datum.');
       return null;
     }
@@ -116,8 +127,8 @@ class _RentalDialogState extends State<RentalDialog> {
       snack(context, 'Vyber aspoň jednu dráhu.');
       return null;
     }
-    final validFrom = _mode == _RentalMode.weekly ? _validFrom : null;
-    final validUntil = _mode == _RentalMode.weekly ? _validUntil : null;
+    final validFrom = _mode == RentalKind.weekly ? _validFrom : null;
+    final validUntil = _mode == RentalKind.weekly ? _validUntil : null;
     if (validFrom != null &&
         validUntil != null &&
         validUntil.isBefore(validFrom)) {
@@ -132,8 +143,8 @@ class _RentalDialogState extends State<RentalDialog> {
         id: widget.existing?.id,
         renterName: renterName,
         lanes: lanes,
-        date: _mode == _RentalMode.oneTime ? _date : null,
-        weekday: _mode == _RentalMode.weekly ? _weekday : null,
+        date: _mode == RentalKind.irregular ? _date : null,
+        weekday: _mode == RentalKind.weekly ? _weekday : null,
         startsAt: start,
         endsAt: end,
         validFrom: validFrom,
@@ -155,33 +166,18 @@ class _RentalDialogState extends State<RentalDialog> {
     final earliestDate = now.addDays(-365);
 
     return FormDialog<bool>(
-      title: widget.existing == null ? 'Přidat pronájem' : 'Upravit pronájem',
+      title: widget.existing != null
+          ? 'Upravit pronájem'
+          : widget.kind == RentalKind.weekly
+              ? 'Přidat pravidelný pronájem'
+              : 'Přidat nepravidelný pronájem',
       onSave: _save,
       children: [
         TextField(
           controller: _renterName,
           decoration: const InputDecoration(labelText: 'Nájemce'),
         ),
-        const SizedBox(height: 8),
-        RadioGroup<_RentalMode>(
-          groupValue: _mode,
-          onChanged: (v) => setState(() => _mode = v!),
-          child: const Column(
-            children: [
-              RadioListTile<_RentalMode>(
-                contentPadding: EdgeInsets.zero,
-                title: Text('Jednorázový'),
-                value: _RentalMode.oneTime,
-              ),
-              RadioListTile<_RentalMode>(
-                contentPadding: EdgeInsets.zero,
-                title: Text('Týdenní'),
-                value: _RentalMode.weekly,
-              ),
-            ],
-          ),
-        ),
-        if (_mode == _RentalMode.oneTime)
+        if (_mode == RentalKind.irregular)
           PickerTile(
             label: 'Datum',
             value: _date == null ? 'Vybrat' : dayFull(_date!),

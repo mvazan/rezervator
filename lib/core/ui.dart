@@ -116,6 +116,8 @@ String friendlyDbError(Object error) {
     'empty_tenant_name': 'Napiš název nové kuželny.',
     'empty_display_name': 'Vyplň své jméno.',
     'unknown_reservation': 'Tahle rezervace už neexistuje.',
+    'unknown_rental': 'Tenhle pronájem už neexistuje.',
+    'rental_group_invalid': 'Termín nejde přiřadit k tomuhle pronájmu.',
     'unknown_match': 'Tenhle zápas už v rozpisu není.',
     'match_past': 'Tenhle zápas už byl.',
   };

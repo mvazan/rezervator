@@ -822,6 +822,68 @@ class Api {
     }
   }
 
+  /// One date of a nepravidelný pronájem (or a lone one-time rental): its
+  /// own lanes, times and note. The group's name and colour ride along the
+  /// way an exception carries its series' (the server re-copies them anyway,
+  /// rental_group_guard); group_id is deliberately NOT in the row — the
+  /// update must not move the date between groups.
+  static Future<void> saveRentalDate({
+    required String id,
+    required String renterName,
+    required int color,
+    required Day date,
+    required List<int> lanes,
+    required HourMinute startsAt,
+    required HourMinute endsAt,
+    String note = '',
+  }) =>
+      _db.from('rentals').update({
+        'renter_name': renterName,
+        'color': color,
+        'date': date.toSql(),
+        'weekday': null,
+        'valid_from': null,
+        'valid_until': null,
+        'lanes': lanes,
+        'starts_at': startsAt.toSql(),
+        'ends_at': endsAt.toSql(),
+        'note': note,
+      }).eq('id', id);
+
+  /// Adds a date next to [rentalId] — the group is created and the row
+  /// adopted server-side when it has none (rental_add_date, 0041). Returns
+  /// the new row's id.
+  static Future<String> addRentalDate({
+    required String rentalId,
+    required Day date,
+    required HourMinute startsAt,
+    required HourMinute endsAt,
+    required List<int> lanes,
+    String note = '',
+  }) async =>
+      await _db.rpc('rental_add_date', params: {
+        'p_rental': rentalId,
+        'p_date': date.toSql(),
+        'p_starts_at': startsAt.toSql(),
+        'p_ends_at': endsAt.toSql(),
+        'p_lanes': lanes,
+        'p_note': note,
+      }) as String;
+
+  /// Name and colour of a group; rental_group_changed propagates them.
+  static Future<void> saveRentalGroup({
+    required String id,
+    required String renterName,
+    required int color,
+  }) =>
+      _db
+          .from('rental_groups')
+          .update({'renter_name': renterName, 'color': color}).eq('id', id);
+
+  /// The whole nepravidelný pronájem — its dates go with it (cascade).
+  static Future<void> deleteRentalGroup(String id) =>
+      _db.from('rental_groups').delete().eq('id', id);
+
   static Future<void> deleteRental(String id) =>
       _db.from('rentals').delete().eq('id', id);
 

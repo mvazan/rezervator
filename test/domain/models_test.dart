@@ -386,6 +386,24 @@ void main() {
       expect(c.isSeries, isFalse);
     });
 
+    test('fromJson reads group_id, null when the row has none', () {
+      // Nothing else would notice this line going missing: every other test
+      // builds its grouped Rental by hand. In production the whole feature
+      // would vanish silently — each date would arrive with groupId == null
+      // and one renter's dates would scatter into separate tiles, while the
+      // DB and the SQL suite stayed green.
+      const base = {
+        'id': 'r3',
+        'renter_name': 'Firma',
+        'lanes': [1],
+        'date': '2026-07-15',
+        'starts_at': '18:00:00',
+        'ends_at': '20:00:00',
+      };
+      expect(Rental.fromJson({...base, 'group_id': 'g1'}).groupId, 'g1');
+      expect(Rental.fromJson(base).groupId, isNull);
+    });
+
     test("overriddenBy takes the child's lanes, times and note and keeps "
         'the series identity', () {
       final r = series.overriddenBy(child);

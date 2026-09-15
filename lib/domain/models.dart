@@ -623,6 +623,7 @@ class Rental {
     this.parentId,
     this.skipped = false,
     this.overrideId,
+    this.groupId,
   });
 
   final String id;
@@ -643,6 +644,11 @@ class Rental {
   /// Set only on resolved per-day copies (see [overriddenBy] / `rentalsOn`):
   /// the id of the exception row that shaped this occurrence.
   final String? overrideId;
+
+  /// The rental_groups row this one-time date belongs to (0041) — null on a
+  /// lone one-time rental, a weekly series and an exception row. Name and
+  /// colour on a grouped row mirror the group (the server copies them).
+  final String? groupId;
 
   /// Exactly one of [date] (one-time) and [weekday] (weekly, ISO) is set —
   /// enforced by a DB check constraint.
@@ -708,6 +714,7 @@ class Rental {
         color: json['color'] as int? ?? -2,
         parentId: json['parent_id'] as String?,
         skipped: json['skipped'] as bool? ?? false,
+        groupId: json['group_id'] as String?,
       );
 }
 
