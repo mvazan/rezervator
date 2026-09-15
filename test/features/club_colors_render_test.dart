@@ -290,6 +290,35 @@ void main() {
           ClubColors.of(3, Brightness.light)!.$1);
     });
 
+    testWidgets("a packed-RGB own_color (what the app writes since 0042) "
+        'tints the mine-cell via customTint', (tester) async {
+      // The reservation-colour picker now stores a Google preset or a wheel
+      // pick as a packed RGB; the board must render it through customTint,
+      // exactly as clubTint already does for a hand-picked colour — no
+      // special-casing was added, this pins that it keeps working.
+      const mine = PlayerName(id: 'me', displayName: 'Já Hráč', clubColor: 3);
+      final own = packCustomColor(const Color(0xFF3F51B5)); // Borůvková
+      final coloured = Profile(
+        id: 'me',
+        displayName: 'Já Hráč',
+        email: 'me@example.com',
+        role: Role.player,
+        status: ProfileStatus.approved,
+        ownColor: own,
+      );
+      await tester.pumpWidget(app(
+        roster: [mine],
+        reservations: [res('r1', 'me')],
+        profile: coloured,
+      ));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Já Hráč').first);
+      await tester.pumpAndSettle();
+
+      expect(bgOf(tester, find.text('Já Hráč').first),
+          customTint(own, Brightness.light).$1);
+    });
+
     testWidgets('a rental cell uses its own palette colour', (tester) async {
       final rental = Rental(
         id: 'rent1',

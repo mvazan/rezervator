@@ -7,7 +7,7 @@ import '../../core/ui.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
 import 'changelog.dart';
-import '../admin/widgets/color_picker.dart';
+import 'widgets/reservation_color_picker.dart';
 import 'widgets/appearance_card.dart';
 import 'widgets/calendar_link_card.dart';
 import 'widgets/my_teams_card.dart';
@@ -161,10 +161,8 @@ class ProfileScreen extends ConsumerWidget {
                       ),
                       Padding(
                         padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                        child: ColorPickerGrid(
+                        child: ReservationColorPicker(
                           selected: profile.ownColor,
-                          noneValue: -1,
-                          noneLabel: 'Podle oddílu',
                           onChanged: (color) => tryAction(
                             context,
                             () => setOwnColor(color),

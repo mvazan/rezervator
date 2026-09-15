@@ -6,7 +6,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/profile/profile_screen.dart';
-import 'package:rezervator/features/admin/widgets/color_picker.dart';
+import 'package:rezervator/domain/palette.dart';
+import 'package:rezervator/features/profile/widgets/reservation_color_picker.dart';
 import 'package:rezervator/features/profile/match_exceptions_screen.dart';
 import 'package:rezervator/features/profile/widgets/calendar_link_card.dart';
 import 'package:rezervator/features/profile/widgets/event_color_picker.dart';
@@ -1266,7 +1267,7 @@ void main() {
   });
   group('own colour card', () {
     Finder swatches() => find.descendant(
-      of: find.byType(ColorPickerGrid),
+      of: find.byType(ReservationColorPicker),
       matching: find.byType(InkWell),
     );
 
@@ -1278,11 +1279,11 @@ void main() {
 
       expect(find.text('Barva mých rezervací'), findsOneWidget);
       expect(find.byTooltip('Podle oddílu'), findsOneWidget);
-      expect(find.byType(ColorPickerGrid), findsOneWidget);
+      expect(find.byType(ReservationColorPicker), findsOneWidget);
     });
 
-    testWidgets('tapping a swatch saves its palette index, the none option '
-        'saves -1', (tester) async {
+    testWidgets('tapping a Google swatch saves its packed RGB, the none '
+        'option saves -1', (tester) async {
       // Tall enough that ensureVisible below brings the WHOLE grid on
       // screen at once — the Vzhled card above it pushes it further down
       // than the default test viewport allows.
@@ -1294,15 +1295,16 @@ void main() {
       await tester.pumpWidget(app(me, setOwnColor: (c) async => saved.add(c)));
       await tester.pumpAndSettle();
 
-      await tester.ensureVisible(find.byType(ColorPickerGrid));
-      await tester.tap(swatches().at(3)); // index 0 is the none option
+      await tester.ensureVisible(find.byType(ReservationColorPicker));
+      // Order: none, then the eleven Google colours, then the wheel.
+      // swatches().at(3) is the third Google colour, Švestková (0x8E24AA).
+      await tester.tap(swatches().at(3));
       await tester.pumpAndSettle();
-      // By position, not by the block icon: "Podle oddílu" is the current
-      // choice here, so it wears the check mark instead.
+      // "Podle oddílu" is the first swatch.
       await tester.tap(swatches().first);
       await tester.pumpAndSettle();
 
-      expect(saved, [2, -1]);
+      expect(saved, [packCustomColor(const Color(0xFF8E24AA)), -1]);
     });
   });
 
