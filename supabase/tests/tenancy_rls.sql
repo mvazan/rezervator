@@ -2706,6 +2706,44 @@ end $$;
 set local request.jwt.claims =
   '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
 
+-- The other tenant's rental is a stranger too: the RPC is security definer, so
+-- its tenant filter is the only boundary there is.
+do $$
+declare
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+  v_lone uuid;
+begin
+  insert into rentals (renter_name, lanes, date, starts_at, ends_at, created_by)
+  values ('Firma X', '{1}', (now() at time zone 'Europe/Prague')::date + 200,
+          '20:00', '21:00', v_uid)
+  returning id into v_lone;
+  perform set_config('probe.rental_a', v_lone::text, true);
+end $$;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000002","role":"authenticated"}';
+do $$
+begin
+  begin
+    perform rental_add_date(current_setting('probe.rental_a')::uuid,
+      (now() at time zone 'Europe/Prague')::date + 203, '19:00', '20:00', '{2}');
+    raise exception 'FAIL: admin B added a date to tenant A''s rental';
+  exception when others then
+    if sqlerrm <> 'unknown_rental' then raise; end if;
+  end;
+end $$;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+begin
+  if (select count(*) from rentals where renter_name = 'Firma X') <> 1 then
+    raise exception 'FAIL: the foreign call wrote a date into tenant A';
+  end if;
+  if exists (select 1 from rental_groups where renter_name = 'Firma X') then
+    raise exception 'FAIL: the foreign call created a group in tenant A';
+  end if;
+  raise notice 'OK: rental_add_date refuses another tenant''s rental (0041)';
+end $$;
+
 reset role;
 do $$
 begin
