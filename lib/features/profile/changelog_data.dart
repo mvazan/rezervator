@@ -43,6 +43,10 @@ String changelogHeading(Release r, {required bool web}) {
 }
 
 const appChangelog = <Release>[
+  Release(null, '15. 9. 2026', [
+    'Po spuštění už neprobleskne „Offline" jen proto, že se appka teprve '
+        'připojuje.',
+  ]),
   Release('1.2.6', '14. 9. 2026', [
     'Připomínky v profilu: ozveme se ti pár hodin nebo den před tréninkem '
         'i zápasem — do mobilu, bez appky e-mailem.',

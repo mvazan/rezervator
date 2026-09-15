@@ -215,6 +215,9 @@ final offlineProvider = StreamProvider<bool>((ref) async* {
   // signál škrtí, takže při rychlém přepnutí appky nepřijde vůbec).
   var wokeAt = DateTime.now();
   DateTime? disconnectedSince;
+  // Dokud socket nebyl ani jednou nahoře, appka se teprve připojuje — a to
+  // není výpadek. Bez tohohle hlásila offline pár vteřin po každém spuštění.
+  var everConnected = false;
   final wake = LiveRefresh.stream.listen((_) {
     wokeAt = DateTime.now();
     disconnectedSince = null;
@@ -223,8 +226,11 @@ final offlineProvider = StreamProvider<bool>((ref) async* {
   // Stream.periodic (not a delayed loop): its timer is cancelled the moment
   // the provider is disposed, so widget tests never leak a pending timer.
   yield* Stream.periodic(const Duration(seconds: 3), (_) {
+    final connected = _db.realtime.isConnected;
+    everConnected = everConnected || connected;
     final decision = offlineDecision(
-      connected: _db.realtime.isConnected,
+      connected: connected,
+      everConnected: everConnected,
       now: DateTime.now(),
       wokeAt: wokeAt,
       disconnectedSince: disconnectedSince,

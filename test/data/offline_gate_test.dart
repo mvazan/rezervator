@@ -9,6 +9,7 @@ void main() {
     test('a connected socket is never offline, and forgets any outage', () {
       final d = offlineDecision(
         connected: true,
+        everConnected: true,
         now: at(100),
         wokeAt: t0,
         disconnectedSince: at(10),
@@ -20,6 +21,7 @@ void main() {
     test('the first tick of an outage only starts the clock', () {
       final d = offlineDecision(
         connected: false,
+        everConnected: true,
         now: at(100),
         wokeAt: t0,
         disconnectedSince: null,
@@ -31,6 +33,7 @@ void main() {
     test('a socket that stays down past the grace is offline', () {
       final d = offlineDecision(
         connected: false,
+        everConnected: true,
         now: at(100 + offlineGrace.inSeconds),
         wokeAt: t0,
         disconnectedSince: at(100),
@@ -46,6 +49,7 @@ void main() {
       // still down, and wokeAt is not yet updated.
       var since = offlineDecision(
         connected: false,
+        everConnected: true,
         now: at(300),
         wokeAt: t0, // stale on purpose
         disconnectedSince: null,
@@ -55,6 +59,7 @@ void main() {
       // Supabase finishes dialling a second later.
       final back = offlineDecision(
         connected: true,
+        everConnected: true,
         now: at(301),
         wokeAt: t0,
         disconnectedSince: since.disconnectedSince,
@@ -68,10 +73,16 @@ void main() {
       // minimise/restore emits nothing: wokeAt stays old and only the
       // persistence rule protects the banner.
       var since = offlineDecision(
-        connected: false, now: at(600), wokeAt: t0, disconnectedSince: null);
+        connected: false,
+        everConnected: true,
+        now: at(600),
+        wokeAt: t0,
+        disconnectedSince: null,
+      );
       expect(since.offline, isFalse);
       since = offlineDecision(
         connected: false,
+        everConnected: true,
         now: at(603),
         wokeAt: t0,
         disconnectedSince: since.disconnectedSince,
@@ -79,6 +90,7 @@ void main() {
       expect(since.offline, isFalse, reason: 'still inside the grace');
       final back = offlineDecision(
         connected: true,
+        everConnected: true,
         now: at(604),
         wokeAt: t0,
         disconnectedSince: since.disconnectedSince,
@@ -91,6 +103,7 @@ void main() {
       final woke = at(1000);
       final d = offlineDecision(
         connected: false,
+        everConnected: true,
         now: woke.add(const Duration(seconds: 1)),
         wokeAt: woke,
         disconnectedSince: at(10), // down for ages
@@ -99,11 +112,72 @@ void main() {
 
       final later = offlineDecision(
         connected: false,
+        everConnected: true,
         now: woke.add(offlineGrace),
         wokeAt: woke,
         disconnectedSince: at(10),
       );
       expect(later.offline, isTrue);
+    });
+    test('a launch says nothing while the socket is still being dialled — '
+        'however long it takes', () {
+      // The reported bug: the banner appeared a few seconds after every
+      // launch. A socket that has never been up is not an outage, it is a
+      // connection in progress, and the poll cannot tell those apart on its
+      // own. Termínátor never had this because its banner reacts to close
+      // events, not to a boolean.
+      var d = offlineDecision(
+        connected: false,
+        everConnected: false,
+        now: at(3),
+        wokeAt: t0,
+        disconnectedSince: null,
+      );
+      expect(d.offline, isFalse);
+
+      // Well past the grace, and still just dialling.
+      d = offlineDecision(
+        connected: false,
+        everConnected: false,
+        now: at(60),
+        wokeAt: t0,
+        disconnectedSince: d.disconnectedSince,
+      );
+      expect(d.offline, isFalse, reason: 'it has never been up to go down');
+      expect(d.disconnectedSince, isNull,
+          reason: 'no outage has started, so there is no outage clock');
+    });
+
+    test('once the socket has been up, a later outage is reported as before',
+        () {
+      // The guard is about the first connection only — it must not make the
+      // banner permanently toothless.
+      final connected = offlineDecision(
+        connected: true,
+        everConnected: true,
+        now: at(10),
+        wokeAt: t0,
+        disconnectedSince: null,
+      );
+      expect(connected.offline, isFalse);
+
+      final drop = offlineDecision(
+        connected: false,
+        everConnected: true,
+        now: at(20),
+        wokeAt: t0,
+        disconnectedSince: null,
+      );
+      expect(drop.offline, isFalse, reason: 'first tick only starts the clock');
+
+      final stillDown = offlineDecision(
+        connected: false,
+        everConnected: true,
+        now: at(20 + offlineGrace.inSeconds),
+        wokeAt: t0,
+        disconnectedSince: drop.disconnectedSince,
+      );
+      expect(stillDown.offline, isTrue);
     });
   });
 }

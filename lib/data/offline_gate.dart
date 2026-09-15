@@ -29,13 +29,25 @@ const offlineGrace = Duration(seconds: 6);
 /// [wokeAt] still counts: a resume also restarts the grace, so a socket that
 /// went down BEFORE the app was minimised does not report offline the
 /// instant it comes back — it gets the same fair chance to reconnect.
+///
+/// [everConnected] is the launch rule: a socket that has never been up is
+/// being DIALLED, not down. Supabase opens it only once the first stream
+/// subscribes, and a slow first connection — a cold start, a token being
+/// refreshed, a phone still finding the network — looked exactly like an
+/// outage to a poll that sees nothing but a boolean. So the app accused
+/// itself of being offline a few seconds after every launch, while it was
+/// busy connecting. Nothing is lost by staying quiet: the screens show
+/// cached data either way, and anything the player actually tries says
+/// "Jsi offline" from friendlyDbError the moment it fails.
 ({bool offline, DateTime? disconnectedSince}) offlineDecision({
   required bool connected,
+  required bool everConnected,
   required DateTime now,
   required DateTime wokeAt,
   required DateTime? disconnectedSince,
 }) {
   if (connected) return (offline: false, disconnectedSince: null);
+  if (!everConnected) return (offline: false, disconnectedSince: null);
   final since = disconnectedSince ?? now;
   final downFor = now.difference(since);
   final awakeFor = now.difference(wokeAt);
