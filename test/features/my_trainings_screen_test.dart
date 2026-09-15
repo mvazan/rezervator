@@ -261,11 +261,18 @@ void main() {
   // ---------------------------------------------------------------------
 
   group('match trophy colour (0036)', () {
-    // The trophy paints a derived shade, legible on the surface (light
-    // theme here, MaterialApp's default) — never Google's raw event RGB;
-    // see legibleShadeOf and _trophyColorOf's own doc comment.
-    Color colorNamed(String name) => legibleShadeOf(
-        googleEventColors.firstWhere((c) => c.$2 == name).$3, Brightness.light);
+    // The pick is unchanged (matchColorOf); what changed is how it is shown —
+    // a filled dot in the team's raw Google colour instead of an outlined
+    // glyph tinted a legible shade, so a colour change is not missed.
+    Color rawNamed(String name) =>
+        googleEventColors.firstWhere((c) => c.$2 == name).$3;
+    int? trophyColorId(WidgetTester t) =>
+        t.widget<MatchTrophy>(find.byType(MatchTrophy)).colorId;
+    Color? dotFill(WidgetTester t) {
+      final c = t.widget<Container>(find.descendant(
+          of: find.byType(MatchTrophy), matching: find.byType(Container)));
+      return (c.decoration as BoxDecoration).color;
+    }
 
     // match's default teams: home 'SKK Veverky Brno A', away 'KK MS Brno D'.
     final awayMatch = PrioritySlot(
@@ -279,18 +286,17 @@ void main() {
       isAway: true,
     );
 
-    testWidgets('neither team coloured keeps today\'s plain trophy', (
+    testWidgets('neither team coloured keeps today\'s plain outlined trophy', (
       tester,
     ) async {
       await tester.pumpWidget(app(slots: [match]));
       await tester.pumpAndSettle();
 
-      final icon =
-          tester.widget<Icon>(find.byIcon(Icons.emoji_events_outlined));
-      expect(icon.color, isNull);
+      expect(trophyColorId(tester), isNull);
+      expect(find.byIcon(Icons.emoji_events_outlined), findsOneWidget);
     });
 
-    testWidgets('the followed HOME team\'s colour tints the trophy', (
+    testWidgets('the followed HOME team\'s colour fills the dot', (
       tester,
     ) async {
       await tester.pumpWidget(app(
@@ -299,12 +305,14 @@ void main() {
       ));
       await tester.pumpAndSettle();
 
-      final icon =
-          tester.widget<Icon>(find.byIcon(Icons.emoji_events_outlined));
-      expect(icon.color, colorNamed('Švestková'));
+      expect(trophyColorId(tester), 3);
+      expect(dotFill(tester), rawNamed('Švestková'));
+      // The dot carries the filled trophy glyph, not the outlined one.
+      expect(find.byIcon(Icons.emoji_events), findsOneWidget);
+      expect(find.byIcon(Icons.emoji_events_outlined), findsNothing);
     });
 
-    testWidgets('the followed AWAY team\'s colour tints the trophy too', (
+    testWidgets('the followed AWAY team\'s colour fills the dot too', (
       tester,
     ) async {
       await tester.pumpWidget(app(
@@ -313,12 +321,11 @@ void main() {
       ));
       await tester.pumpAndSettle();
 
-      final icon =
-          tester.widget<Icon>(find.byIcon(Icons.emoji_events_outlined));
-      expect(icon.color, colorNamed('Mandarinková'));
+      expect(trophyColorId(tester), 6);
+      expect(dotFill(tester), rawNamed('Mandarinková'));
     });
 
-    testWidgets('a derby — both teams coloured — tints with the HOME '
+    testWidgets('a derby — both teams coloured — fills with the HOME '
         'team\'s colour, same tie-break as the Google event', (tester) async {
       const bothFollower = Profile(
         id: 'me',
@@ -335,9 +342,8 @@ void main() {
       ));
       await tester.pumpAndSettle();
 
-      final icon =
-          tester.widget<Icon>(find.byIcon(Icons.emoji_events_outlined));
-      expect(icon.color, colorNamed('Lososová'));
+      expect(trophyColorId(tester), 4);
+      expect(dotFill(tester), rawNamed('Lososová'));
     });
 
     testWidgets('a colour on a team the player does NOT follow never '
@@ -370,16 +376,22 @@ void main() {
 
       // The match is listed at all (Devítka is followed) …
       expect(find.text('SKK Veverky Brno A – KS Devítka Brno B'), findsOneWidget);
-      // … but its trophy must stay plain, not Veverky's red.
-      final icon =
-          tester.widget<Icon>(find.byIcon(Icons.emoji_events_outlined));
-      expect(icon.color, isNull);
+      // … but its trophy stays plain, not Veverky's red.
+      expect(trophyColorId(tester), isNull);
+      expect(find.byIcon(Icons.emoji_events_outlined), findsOneWidget);
     });
   });
 
   group('training colour', () {
     Color colorNamed(String name) => legibleShadeOf(
         googleEventColors.firstWhere((c) => c.$2 == name).$3, Brightness.light);
+    Color rawNamed(String name) =>
+        googleEventColors.firstWhere((c) => c.$2 == name).$3;
+    Color? dotFill(WidgetTester t) {
+      final c = t.widget<Container>(find.descendant(
+          of: find.byType(MatchTrophy), matching: find.byType(Container)));
+      return (c.decoration as BoxDecoration).color;
+    }
 
     testWidgets('without a training colour the T stays plain', (tester) async {
       await tester.pumpWidget(app(reservations: [res('r1', today)]));
@@ -413,14 +425,13 @@ void main() {
       ));
       await tester.pumpAndSettle();
 
+      // The training T keeps its tinted-letter look (the player's own
+      // colour); the match now shows as a filled dot in the team's colour.
       expect(
         tester.widget<Icon>(find.byIcon(Icons.title)).color,
         colorNamed('Banánová'),
       );
-      expect(
-        tester.widget<Icon>(find.byIcon(Icons.emoji_events_outlined)).color,
-        colorNamed('Švestková'),
-      );
+      expect(dotFill(tester), rawNamed('Švestková'));
     });
   });
 
@@ -461,9 +472,10 @@ void main() {
       ));
       await tester.pumpAndSettle();
 
-      final icon = tester.widget<Icon>(find.byIcon(Icons.emoji_events_outlined));
-      expect(icon.color, isNotNull);
-      expect(icon.color, eventShadeOf(11, Brightness.light));
+      final dot = tester.widget<Container>(find.descendant(
+          of: find.byType(MatchTrophy), matching: find.byType(Container)));
+      expect((dot.decoration as BoxDecoration).color,
+          googleEventColors.firstWhere((c) => c.$1 == 11).$3);
     });
 
     testWidgets('a team with no colour leaves the trophy plain',

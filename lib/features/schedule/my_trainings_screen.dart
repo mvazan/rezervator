@@ -11,25 +11,69 @@ import '../profile/profile_screen.dart';
 import 'cancel_own_reservation.dart';
 import 'widgets/home_header.dart';
 
-/// The trophy's colour for [slot]: [matchColorOf]'s pick among
-/// [followedTeams] (home wins a derby, no fall-through to a coloured team
-/// the player does not follow) from [teamColors], derived into a shade
-/// legible for [brightness] (`legibleShadeOf`) rather than Google's raw
-/// event RGB — a bare icon glyph needs more contrast than `EventColorDot`'s
-/// filled, bordered circle. Null (today's plain icon) when neither team is
-/// coloured, the picked team has no colour, or the id is somehow none of
-/// the eleven.
-Color? _trophyColorOf(
-  PrioritySlot slot,
-  List<String> followedTeams,
-  Map<String, int> teamColors,
-  Map<String, bool> exceptions,
-  Brightness brightness,
-) =>
-    eventShadeOf(
-      matchColorOf(slot, followedTeams, teamColors, exceptions: exceptions),
-      brightness,
+/// Fixed-width, centred slot every list row's leading sits in, so the match
+/// trophy dots and the training T line up down one straight column however
+/// wide each glyph is (a 36 dp dot beside a 24 dp letter would otherwise
+/// read ragged).
+class _LeadingSlot extends StatelessWidget {
+  const _LeadingSlot({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) =>
+      SizedBox(width: 40, height: 40, child: Center(child: child));
+}
+
+/// A match's trophy in the overview: a filled dot in the followed team's own
+/// Google colour (like `EventColorDot`, the app's established colour token)
+/// so a change of colour is unmissable — an outlined glyph tinted a legible
+/// shade, which is what this used to be, put too little ink on screen to
+/// notice. [colorId] is [matchColorOf]'s pick (home wins a derby, no
+/// fall-through to a coloured team the player does not follow). Null — no
+/// followed team is coloured — keeps today's plain outlined trophy, so an
+/// uncoloured match is not dressed up as a coloured one.
+class MatchTrophy extends StatelessWidget {
+  const MatchTrophy({super.key, required this.colorId});
+
+  final int? colorId;
+
+  @override
+  Widget build(BuildContext context) {
+    final raw = _rawEventColor(colorId);
+    if (raw == null) {
+      return const _LeadingSlot(child: Icon(Icons.emoji_events_outlined));
+    }
+    return _LeadingSlot(
+      child: Container(
+        width: 36,
+        height: 36,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: raw,
+          border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+        ),
+        child: Icon(Icons.emoji_events, size: 20, color: _legibleOn(raw)),
+      ),
     );
+  }
+}
+
+/// The raw Google RGB for [colorId] (the dot fill), or null for "no colour"
+/// and any id that is none of the eleven.
+Color? _rawEventColor(int? colorId) {
+  if (colorId == null) return null;
+  for (final (id, _, color) in googleEventColors) {
+    if (id == colorId) return color;
+  }
+  return null;
+}
+
+/// Black or white glyph, whichever reads on [color] — the eleven are fixed
+/// RGBs, so contrast goes by luminance (as `EventColorPicker` does).
+Color _legibleOn(Color color) =>
+    color.computeLuminance() > 0.5 ? Colors.black87 : Colors.white;
 
 /// One Google event colour id as a shade legible on [brightness]'s surface,
 /// or null for "no colour" — the plain icon. Shared by the match trophy and
@@ -91,7 +135,7 @@ class MyTrainingsScreen extends ConsumerWidget {
     Color? color,
   ) =>
       ListTile(
-        leading: Icon(Icons.title, color: color),
+        leading: _LeadingSlot(child: Icon(Icons.title, color: color)),
         title: Text('${item.block.label} · Dráha ${item.reservation.lane}'),
         trailing: started ? null : const Icon(Icons.close),
         onTap: started ? null : () => _confirmCancel(context, item),
@@ -265,14 +309,12 @@ class MyTrainingsScreen extends ConsumerWidget {
                         trainingColor,
                       ),
                     UpcomingMatch() => ListTile(
-                        leading: Icon(
-                          Icons.emoji_events_outlined,
-                          color: _trophyColorOf(
+                        leading: MatchTrophy(
+                          colorId: matchColorOf(
                             item.slot,
                             teams,
                             teamColors,
-                            exceptions,
-                            theme.brightness,
+                            exceptions: exceptions,
                           ),
                         ),
                         title: Text(item.slot.title),
