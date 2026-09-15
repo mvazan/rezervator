@@ -9,6 +9,7 @@ import '../../../core/theme.dart';
 import '../../../core/ui.dart';
 import '../../../domain/models.dart';
 import '../../../domain/schedule.dart' show headerEventLabel;
+import 'day_matches_dialog.dart';
 
 class DayHeader extends StatelessWidget {
   const DayHeader({
@@ -77,12 +78,24 @@ class DayHeader extends StatelessWidget {
               ),
           ],
         ),
-        for (final m in priority)
-          Padding(
-            padding: const EdgeInsets.only(top: 5, left: 52),
-            child: Text(
-              headerEventLabel(m),
-              style: TextStyle(color: scheme.primary, fontSize: 13),
+        if (priority.isNotEmpty)
+          // Tap the strip to read the day's events in full — a long match is
+          // ellipsised to "…" in the pager column just as in the week view.
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => showDayMatchesDialog(context, date, priority),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (final m in priority)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 5, left: 52),
+                    child: Text(
+                      headerEventLabel(m),
+                      style: TextStyle(color: scheme.primary, fontSize: 13),
+                    ),
+                  ),
+              ],
             ),
           ),
       ],
