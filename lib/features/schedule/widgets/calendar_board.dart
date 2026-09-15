@@ -14,6 +14,7 @@ import '../../../core/ui.dart';
 import '../../../domain/calendar_layout.dart';
 import '../../../domain/models.dart';
 import '../../../domain/schedule.dart' show headerEventLabel;
+import 'day_matches_dialog.dart';
 
 /// Width of the hour ruler column.
 const double calendarRulerWidth = 46.0;
@@ -414,38 +415,48 @@ class BoardColumnHeader extends StatelessWidget {
           AnimatedOpacity(
             duration: const Duration(milliseconds: 150),
             opacity: collapsed ? 0 : 1,
-            child: Column(
-              children: [
-                if (priority.isNotEmpty)
-                  for (final m in priority)
-                    Text(
-                      headerEventLabel(m),
-                      textAlign: TextAlign.center,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 10,
-                        height: 1.25,
-                        color: isToday
-                            ? Colors.white.withValues(alpha: 0.9)
-                            : scheme.primary,
-                      ),
-                    )
-                else if (subtitle != null)
-                  Text(
-                    subtitle!,
-                    textAlign: TextAlign.center,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: isToday
-                          ? Colors.white.withValues(alpha: 0.85)
-                          : scheme.onSurfaceVariant.withValues(alpha: 0.7),
+            // The event lines are one-line ellipsised, so a long match reads
+            // "…"; tapping the strip opens the day's events in full. Not while
+            // collapsed — then the header's own tap (admin: add a slot) wins.
+            child: priority.isNotEmpty
+                ? GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: collapsed
+                        ? null
+                        : () => showDayMatchesDialog(context, date, priority),
+                    child: Column(
+                      children: [
+                        for (final m in priority)
+                          Text(
+                            headerEventLabel(m),
+                            textAlign: TextAlign.center,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 10,
+                              height: 1.25,
+                              color: isToday
+                                  ? Colors.white.withValues(alpha: 0.9)
+                                  : scheme.primary,
+                            ),
+                          ),
+                      ],
                     ),
-                  ),
-              ],
-            ),
+                  )
+                : subtitle != null
+                    ? Text(
+                        subtitle!,
+                        textAlign: TextAlign.center,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: isToday
+                              ? Colors.white.withValues(alpha: 0.85)
+                              : scheme.onSurfaceVariant.withValues(alpha: 0.7),
+                        ),
+                      )
+                    : const SizedBox.shrink(),
           ),
         ],
       ),
