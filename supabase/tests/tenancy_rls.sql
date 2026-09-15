@@ -926,7 +926,23 @@ begin
     raise exception 'FAIL: own_color outside the palette accepted';
   exception when check_violation then null;
   end;
-  raise notice 'OK: own_color is editable on the own row only, inside the palette';
+  -- 0042 switched the app's picker to store a packed RGB, but the check
+  -- stays permissive on purpose: the 1.2.6 app in the field still writes a
+  -- palette index 0-8, and clubTint still renders both. Guard that so the
+  -- back-compat window is not tightened away by accident.
+  update profiles set own_color = 0
+  where id = '10000000-0000-0000-0000-000000000001';  -- legacy Modrá index
+  if (select own_color from profiles
+      where id = '10000000-0000-0000-0000-000000000001') <> 0 then
+    raise exception 'FAIL: a legacy palette index is no longer accepted';
+  end if;
+  update profiles set own_color = 16777216 + 5985718  -- 0x5B4136, a packed RGB
+  where id = '10000000-0000-0000-0000-000000000001';
+  if (select own_color from profiles
+      where id = '10000000-0000-0000-0000-000000000001') <> 16777216 + 5985718 then
+    raise exception 'FAIL: a packed RGB own_color was rejected';
+  end if;
+  raise notice 'OK: own_color is own-row only; legacy index and packed RGB both accepted (0042)';
 end $$;
 
 -- app_config (0025): readable by every signed-in client, writable by nobody
