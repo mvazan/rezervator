@@ -87,7 +87,7 @@ declare
   v_d date := (now() at time zone 'Europe/Prague')::date + 90;
   v_weekdays smallint[];
   v_name text;
-  v_color smallint;
+  v_color integer;
 begin
   update schedule_settings set lane_count = 4
   where tenant_id = current_tenant_id();
@@ -252,7 +252,11 @@ create table rental_groups (
   tenant_id uuid not null default current_tenant_id()
     references tenants (id) on delete cascade,
   renter_name text not null,
-  color smallint not null default -2,
+  -- integer, ne smallint: ručně vybraná barva je 0x1000000|rgb (až 33 554 431)
+  -- a do smallintu (max 32 767) se nevejde. Stejná doména jako rentals.color.
+  color integer not null default -2,
+  constraint rental_groups_color_check check (
+    color between -2 and 8 or color between 16777216 and 33554431),
   created_by uuid not null references profiles (id),
   created_at timestamptz not null default now()
 );

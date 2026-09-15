@@ -550,7 +550,7 @@ and FCM is configured, e-mail otherwise.
   name/colour — a hand-picked one included — copied and propagated, a grouped
   date blocks like a lone rental, the group vanishes with its last date,
   invisible across tenants, full-DML privileges), and the 0035
-  assertion (now including `team_colors` and `match_exceptions`) that every table
+  assertion (now including `team_colors`, `match_exceptions` and `rental_groups`) that every table
   `lib/data/providers.dart` streams is in the `supabase_realtime`
   publication; run with `psql … -v ON_ERROR_STOP=1 -f` against the local
   stack (CI does).
