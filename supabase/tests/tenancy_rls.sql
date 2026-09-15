@@ -1705,7 +1705,7 @@ declare
     'profiles', 'schedule_settings', 'clubs', 'time_blocks', 'app_config',
     'google_calendar_links', 'calendar_teams', 'team_colors', 'reservations',
     'day_overrides', 'priority_slot_types', 'priority_slots', 'rentals',
-    'match_exceptions'
+    'match_exceptions', 'rental_groups'
   ];
   v_missing text[];
 begin
@@ -2489,6 +2489,146 @@ begin
     raise exception 'FAIL: the client can drive the reminder machinery';
   end if;
   raise notice 'OK: the reminder ledger and its functions are server-only (0040)';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 0041 — rental_groups: one renter, many one-time dates. A grouped date IS a
+-- one-time rental; the group only lends it a name and a colour.
+-- ---------------------------------------------------------------------------
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+declare
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+  v_blk uuid;
+  v_g uuid;
+  v_r1 uuid;
+  v_r2 uuid;
+  v_d date := (now() at time zone 'Europe/Prague')::date + 90;
+  v_weekdays smallint[];
+  v_name text;
+  v_color smallint;
+begin
+  update schedule_settings set lane_count = 4
+  where tenant_id = current_tenant_id();
+  insert into time_blocks (starts_at, ends_at, position)
+  values ('20:00', '21:00', 9) returning id into v_blk;
+  select training_weekdays into v_weekdays from schedule_settings
+  where tenant_id = current_tenant_id();
+  while not (extract(isodow from v_d)::smallint = any (v_weekdays)) loop
+    v_d := v_d + 1;
+  end loop;
+
+  -- 1) shape: a weekly series cannot join a group
+  insert into rental_groups (renter_name, color, created_by)
+  values ('Firma G', 5, v_uid) returning id into v_g;
+  begin
+    insert into rentals (group_id, renter_name, lanes, weekday, starts_at,
+                         ends_at, created_by)
+    values (v_g, 'Firma G', '{1}', 1, '20:00', '21:00', v_uid);
+    raise exception 'FAIL: a weekly series joined a group';
+  exception when check_violation then null;
+  end;
+
+  -- 2) the guard copies the group's name and colour onto the date
+  insert into rentals (group_id, renter_name, lanes, date, starts_at, ends_at,
+                       created_by)
+  values (v_g, 'jiné jméno', '{1}', v_d, '20:00', '21:00', v_uid)
+  returning id into v_r1;
+  select renter_name, color into v_name, v_color from rentals where id = v_r1;
+  if v_name <> 'Firma G' or v_color <> 5 then
+    raise exception 'FAIL: rental_group_guard did not copy renter_name/color';
+  end if;
+
+  -- 3) a grouped date blocks its lane exactly like a lone one-time rental
+  begin
+    perform create_reservation(v_uid, v_d, v_blk, 1::smallint);
+    raise exception 'FAIL: a grouped date did not block its lane';
+  exception when others then
+    if sqlerrm <> 'blocked_by_rental' then raise; end if;
+  end;
+  perform create_reservation(v_uid, v_d, v_blk, 2::smallint);
+
+  -- 4) editing the group propagates to its dates
+  update rental_groups set renter_name = 'Firma H', color = 7 where id = v_g;
+  select renter_name, color into v_name, v_color from rentals where id = v_r1;
+  if v_name <> 'Firma H' or v_color <> 7 then
+    raise exception 'FAIL: a group edit did not propagate to its dates';
+  end if;
+
+  -- 5) the group lives while a date remains, and vanishes with the last one
+  insert into rentals (group_id, renter_name, lanes, date, starts_at, ends_at,
+                       created_by)
+  values (v_g, 'Firma H', '{3}', v_d + 7, '20:00', '21:00', v_uid)
+  returning id into v_r2;
+  delete from rentals where id = v_r2;
+  if not exists (select 1 from rental_groups where id = v_g) then
+    raise exception 'FAIL: the group was pruned while a date remained';
+  end if;
+  delete from rentals where id = v_r1;
+  if exists (select 1 from rental_groups where id = v_g) then
+    raise exception 'FAIL: an empty group survived its last date';
+  end if;
+
+  -- 6) deleting a group takes its dates along and frees the lanes
+  insert into rental_groups (renter_name, created_by)
+  values ('Firma K', v_uid) returning id into v_g;
+  insert into rentals (group_id, renter_name, lanes, date, starts_at, ends_at,
+                       created_by)
+  values (v_g, 'Firma K', '{1}', v_d + 14, '20:00', '21:00', v_uid);
+  delete from rental_groups where id = v_g;
+  if exists (select 1 from rentals where group_id = v_g) then
+    raise exception 'FAIL: the cascade left a date behind';
+  end if;
+  perform create_reservation(v_uid, v_d + 14, v_blk, 1::smallint);
+
+  raise notice 'OK: rental_groups hold one-time dates only, copy and propagate name/colour, block like a lone rental and vanish with their last date (0041)';
+end $$;
+
+-- A group belongs to its tenant: invisible and unusable from the other one.
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000002","role":"authenticated"}';
+do $$
+begin
+  insert into rental_groups (id, renter_name, created_by)
+  values ('30000000-0000-0000-0000-000000000001', 'Firma B',
+          '10000000-0000-0000-0000-000000000002');
+end $$;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+begin
+  if exists (select 1 from rental_groups
+             where id = '30000000-0000-0000-0000-000000000001') then
+    raise exception 'FAIL: tenant A sees tenant B''s group';
+  end if;
+  begin
+    insert into rentals (group_id, renter_name, lanes, date, starts_at,
+                         ends_at, created_by)
+    values ('30000000-0000-0000-0000-000000000001', 'x', '{1}',
+            (now() at time zone 'Europe/Prague')::date + 100,
+            '20:00', '21:00', '10000000-0000-0000-0000-000000000001');
+    raise exception 'FAIL: a date attached itself to a foreign group';
+  exception when others then
+    if sqlerrm <> 'rental_group_invalid' then raise; end if;
+  end;
+  raise notice 'OK: a rental group is invisible and unusable across tenants (0041)';
+end $$;
+
+reset role;
+do $$
+begin
+  if not (has_table_privilege('authenticated', 'public.rental_groups', 'select')
+      and has_table_privilege('authenticated', 'public.rental_groups', 'insert')
+      and has_table_privilege('authenticated', 'public.rental_groups', 'update')
+      and has_table_privilege('authenticated', 'public.rental_groups', 'delete')) then
+    raise exception 'FAIL: authenticated lacks DML on rental_groups (RLS decides the rows)';
+  end if;
+  if has_table_privilege('anon', 'public.rental_groups', 'select') then
+    raise exception 'FAIL: anon can read rental_groups';
+  end if;
+  raise notice 'OK: rental_groups is full DML for the app, RLS decides, anon nothing (0041)';
 end $$;
 
 reset role;
