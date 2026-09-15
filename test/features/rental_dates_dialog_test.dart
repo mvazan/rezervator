@@ -214,6 +214,52 @@ void main() {
     expect(find.text('Termíny · Firma Trak'), findsOneWidget);
   });
 
+  testWidgets('a lone rental that gains a group and then loses the row it was '
+      'opened with keeps listing what is left', (tester) async {
+    // The sequence that a lookup frozen at open time cannot survive: the
+    // dialog opens on a LONE one-time rental (no group id, one known row),
+    // Přidat termín makes the server create the group around it, and then
+    // that very first row is deleted. The group's id was never in the
+    // snapshot and the surviving row was never among the opened ids — so
+    // the dialog has to have learned both from the stream meanwhile, or it
+    // claims the rental has no dates while it plainly has one.
+    final lone = Rental(
+      id: 'd-lone',
+      renterName: 'Firma Trak',
+      lanes: const [1, 2],
+      date: next,
+      weekday: null,
+      startsAt: const HourMinute(18, 0),
+      endsAt: const HourMinute(20, 0),
+      validFrom: null,
+      validUntil: null,
+      note: '',
+      color: 3,
+    );
+    final live = StreamController<List<Rental>>();
+    addTearDown(live.close);
+    await openLive(tester, [lone], live.stream);
+    live.add([lone]);
+    await tester.pumpAndSettle();
+    expect(find.text(dayFull(next)), findsOneWidget);
+
+    // rental_add_date: the group appears and adopts the row it was made from.
+    live.add([date(id: 'd-lone', day: next), date(id: 'd-new', day: later)]);
+    await tester.pumpAndSettle();
+    expect(find.text(dayFull(next)), findsOneWidget);
+    expect(find.text(dayFull(later)), findsOneWidget);
+
+    // The originally-opened row goes; only the one added inside the dialog
+    // remains, and its id is nowhere in the snapshot the dialog opened with.
+    live.add([date(id: 'd-new', day: later)]);
+    await tester.pumpAndSettle();
+    expect(find.text('Tenhle pronájem už nemá žádné termíny.'), findsNothing,
+        reason: 'the group still has a date — the dialog just has to find it');
+    expect(find.text(dayFull(next)), findsNothing);
+    expect(find.text(dayFull(later)), findsOneWidget);
+    expect(find.text('Přidat termín'), findsOneWidget);
+  });
+
   testWidgets('deleting the LAST date says so instead of showing a ghost',
       (tester) async {
     // The 0041 prune trigger drops the group with its last date, so no live
