@@ -51,6 +51,9 @@ String rentalDateCountLabel(int n) {
   return '$n termínů';
 }
 
+/// After "včetně", which governs the genitive: 1 termínu, 2 termínů.
+String rentalDateCountGenitive(int n) => n == 1 ? '1 termínu' : '$n termínů';
+
 /// The tail of a group tile: how many dates its two shown lines leave out.
 String rentalMoreDatesLabel(int n) {
   if (n == 1) return '…a ještě 1 termín';

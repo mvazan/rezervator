@@ -286,10 +286,53 @@ void main() {
     await tester.tap(find.text('Zavřít'));
     await tester.pumpAndSettle();
 
+    // Upravit must open the GROUP dialog (name + colour), not the rental
+    // form — the two look alike and only the title tells them apart.
+    await tester.tap(find.byTooltip('Upravit'));
+    await tester.pumpAndSettle();
+    expect(find.text('Upravit pronájem'), findsOneWidget);
+    expect(find.text('Nájemce'), findsOneWidget);
+    expect(find.text('Barva'), findsOneWidget);
+    expect(find.text('Datum'), findsNothing, reason: 'a group has no one date');
+    await tester.tap(find.text('Zrušit'));
+    await tester.pumpAndSettle();
+
     await tester.tap(find.byTooltip('Smazat'));
     await tester.pumpAndSettle();
     expect(find.text('Smazat pronájem?'), findsOneWidget);
-    expect(find.textContaining('včetně 2 termíny'), findsOneWidget);
+    expect(find.textContaining('včetně 2 termínů'), findsOneWidget,
+        reason: '"včetně" governs the genitive');
+  });
+
+  testWidgets('a group tile shows what is coming, not what is over',
+      (tester) async {
+    // Two dates behind, one ahead. The group is in the list BECAUSE of the
+    // date ahead, so filling both lines with history would hide the reason.
+    final past1 = today().addDays(-20);
+    final past2 = today().addDays(-6);
+    await tester.pumpWidget(app(rentals: [
+      grouped(id: 'g1-p1', date: past1),
+      grouped(id: 'g1-p2', date: past2),
+      grouped(id: 'g1-n', date: d1, lanes: const [2]),
+    ]));
+    await tester.pumpAndSettle();
+    expect(find.textContaining(dayLabel(d1)), findsOneWidget);
+    expect(find.textContaining(dayLabel(past1)), findsNothing);
+    expect(find.textContaining(dayLabel(past2)), findsNothing);
+    expect(find.textContaining(rentalMoreDatesLabel(2)), findsOneWidget);
+  });
+
+  testWidgets('a group with nothing ahead still shows its last dates',
+      (tester) async {
+    final past1 = today().addDays(-20);
+    final past2 = today().addDays(-6);
+    await tester.pumpWidget(app(rentals: [
+      grouped(id: 'g1-p1', date: past1),
+      grouped(id: 'g1-p2', date: past2),
+    ]));
+    await tester.pumpAndSettle();
+    expect(find.textContaining(dayLabel(past1)), findsOneWidget);
+    expect(find.textContaining(dayLabel(past2)), findsOneWidget);
   });
 
   testWidgets('a lone one-off is deleted like before, no count', (tester) async {

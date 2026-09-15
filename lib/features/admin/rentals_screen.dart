@@ -5,7 +5,10 @@ import '../../core/ui.dart';
 import '../../data/providers.dart';
 import '../../domain/collation.dart';
 import '../../domain/labels.dart'
-    show rentalDateCountLabel, rentalExceptionCountLabel, rentalMoreDatesLabel;
+    show
+        rentalDateCountGenitive,
+        rentalExceptionCountLabel,
+        rentalMoreDatesLabel;
 import '../../domain/models.dart';
 import '../../domain/rental_groups.dart';
 import 'widgets/admin_scaffold.dart';
@@ -47,7 +50,7 @@ class RentalsScreen extends ConsumerWidget {
       message: n == 1
           ? 'Opravdu smazat pronájem pro ${group.renterName}?'
           : 'Opravdu smazat pronájem pro ${group.renterName} včetně '
-              '${rentalDateCountLabel(n)}?',
+              '${rentalDateCountGenitive(n)}?',
       action: () => id != null
           ? Api.deleteRentalGroup(id)
           : Api.deleteRental(group.dates.single.id),
@@ -126,7 +129,7 @@ class RentalsScreen extends ConsumerWidget {
     );
   }
 
-  String _groupSubtitle(RentalGroup group) {
+  String _groupSubtitle(RentalGroup group, Day now) {
     String line(Rental d) {
       final parts = [
         dayLabel(d.date!),
@@ -137,17 +140,25 @@ class RentalsScreen extends ConsumerWidget {
       return parts.join(' · ');
     }
 
-    final shown = group.dates.take(2).map(line).toList();
-    final rest = group.dates.length - shown.length;
+    // Start at the next upcoming date, not at the oldest one. The tile is
+    // sorted into the list BY that date, so filling both lines with dates
+    // that have already happened would make the order look arbitrary — and
+    // hide the one thing the admin came to see. Nothing ahead: show the two
+    // most recent, which is all the rental has left to say.
+    final dates = group.dates;
+    final next = dates.indexWhere((d) => !d.date!.isBefore(now));
+    final start = next >= 0 ? next : (dates.length - 2).clamp(0, dates.length);
+    final shown = dates.skip(start).take(2).map(line).toList();
+    final rest = dates.length - shown.length;
     if (rest > 0) shown.add(rentalMoreDatesLabel(rest));
     return shown.join('\n');
   }
 
   Widget _groupTile(BuildContext context, RentalGroup group,
-      {required int laneCount}) {
+      {required int laneCount, required Day now}) {
     return ListTile(
       title: Text(group.renterName),
-      subtitle: Text(_groupSubtitle(group)),
+      subtitle: Text(_groupSubtitle(group, now)),
       isThreeLine: group.dates.length > 1,
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
@@ -240,7 +251,8 @@ class RentalsScreen extends ConsumerWidget {
             }
           }
           series.sort(_compareSeries);
-          final groups = rentalGroupsOf(rentals, today: today());
+          final now = today();
+          final groups = rentalGroupsOf(rentals, today: now);
           if (series.isEmpty && groups.isEmpty) {
             return const Center(child: Text('Zatím žádné pronájmy.'));
           }
@@ -256,7 +268,7 @@ class RentalsScreen extends ConsumerWidget {
                 ),
               if (groups.isNotEmpty) _header(context, 'Nepravidelné'),
               for (final group in groups)
-                _groupTile(context, group, laneCount: laneCount),
+                _groupTile(context, group, laneCount: laneCount, now: now),
             ],
           );
         },
