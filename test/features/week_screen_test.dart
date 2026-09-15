@@ -960,7 +960,53 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Upravit pronájem'), findsOneWidget);
+    expect(find.text('Nájemce'), findsOneWidget,
+        reason: 'a lone one-off owns its name and colour');
     expect(find.text('Výjimka pronájmu'), findsNothing);
+  });
+
+  testWidgets('admin taps a GROUPED date into the one-date dialog, which '
+      'offers no Nájemce and no Barva', (tester) async {
+    // A date of a nepravidelný pronájem (0041): name and colour belong to
+    // the group, and rental_group_guard copies them back over any PATCH.
+    // Offering the plain rental form here would promise an edit the server
+    // silently throws away and still snack "Pronájem uložen."
+    wideSurface(tester);
+    await tester.pumpWidget(app(
+      profile: admin,
+      rentals: [
+        Rental(
+          id: 'n1',
+          renterName: 'Firma X',
+          lanes: const [1],
+          date: tomorrow,
+          weekday: null,
+          startsAt: const HourMinute(22, 58),
+          endsAt: const HourMinute(23, 59),
+          validFrom: null,
+          validUntil: null,
+          note: '',
+          groupId: 'g1',
+        ),
+      ],
+    ));
+    await tester.pumpAndSettle();
+
+    final cell = rentedCellInTomorrow();
+    await tester.ensureVisible(cell);
+    await tester.pumpAndSettle();
+    await tester.tap(cell);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Upravit termín'), findsOneWidget);
+    expect(find.text('Upravit pronájem'), findsNothing);
+    expect(find.text('Nájemce'), findsNothing,
+        reason: 'the name lives on the group, not on the date');
+    expect(find.text('Barva'), findsNothing,
+        reason: 'so does the colour');
+    // What the date DOES own is all there.
+    expect(find.text('Datum'), findsOneWidget);
+    expect(find.text('Poznámka'), findsOneWidget);
   });
 
   testWidgets('a rented cell already shaped by an exception row opens the '

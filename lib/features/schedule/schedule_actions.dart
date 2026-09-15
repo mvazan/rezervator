@@ -12,6 +12,7 @@ import '../admin/widgets/block_dialog.dart';
 import '../admin/widgets/blockage_dialog.dart';
 import '../admin/widgets/match_dialog.dart';
 import '../admin/widgets/notify_choice_dialog.dart';
+import '../admin/widgets/rental_date_dialog.dart';
 import '../admin/widgets/rental_dialog.dart';
 import '../admin/widgets/rental_occurrence_dialog.dart';
 import 'cancel_own_reservation.dart';
@@ -351,16 +352,29 @@ class ScheduleActions {
     );
   }
 
-  /// Tap on a rented cell / click on a rental band: a one-time rental opens
-  /// its plain dialog, a weekly one the "jen tento den" dialog for that
+  /// Tap on a rented cell / click on a rental band: a lone one-time rental
+  /// opens its plain dialog, a date of a nepravidelný pronájem (0041) the
+  /// one-date dialog, and a weekly one the "jen tento den" dialog for that
   /// date (prefilled with the existing exception row when there is one).
   /// No past-date guard — rentals allow retro entries.
+  ///
+  /// A grouped date must NOT open the plain rental dialog: it offers Nájemce
+  /// and Barva, but those belong to the group — `rental_group_guard` copies
+  /// them back from `rental_groups` over whatever the PATCH sent, so the
+  /// screen would report a saved edit the server threw away. Renaming lives
+  /// on Pronájmy → Upravit (`Api.saveRentalGroup`). Same reason an exception
+  /// row is edited by RentalOccurrenceDialog rather than this form (0021).
   void _editRental(Day date, Rental rental) {
     if (rental.weekday == null) {
       showDialog<void>(
         context: context,
-        builder: (_) =>
-            RentalDialog(existing: rental, laneCount: settings.laneCount),
+        builder: (_) => rental.groupId != null
+            ? RentalDateDialog(
+                anchor: rental,
+                existing: rental,
+                laneCount: settings.laneCount,
+              )
+            : RentalDialog(existing: rental, laneCount: settings.laneCount),
       );
       return;
     }
