@@ -2508,7 +2508,7 @@ declare
   v_d date := (now() at time zone 'Europe/Prague')::date + 90;
   v_weekdays smallint[];
   v_name text;
-  v_color smallint;
+  v_color integer;
 begin
   update schedule_settings set lane_count = 4
   where tenant_id = current_tenant_id();
@@ -2556,6 +2556,16 @@ begin
   if v_name <> 'Firma H' or v_color <> 7 then
     raise exception 'FAIL: a group edit did not propagate to its dates';
   end if;
+
+  -- 4b) a hand-picked colour (0x1000000|rgb) fits the group column too — it is
+  -- the same domain as rentals.color, which is where the group copies it and
+  -- where rental_add_date copies it back from.
+  update rental_groups set color = 29392896 where id = v_g;
+  select color into v_color from rentals where id = v_r1;
+  if v_color <> 29392896 then
+    raise exception 'FAIL: a hand-picked group colour did not reach its dates';
+  end if;
+  update rental_groups set color = 7 where id = v_g;
 
   -- 5) the group lives while a date remains, and vanishes with the last one
   insert into rentals (group_id, renter_name, lanes, date, starts_at, ends_at,

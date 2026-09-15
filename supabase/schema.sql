@@ -2538,9 +2538,10 @@ CREATE TABLE IF NOT EXISTS "public"."rental_groups" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "tenant_id" "uuid" DEFAULT "public"."current_tenant_id"() NOT NULL,
     "renter_name" "text" NOT NULL,
-    "color" smallint DEFAULT '-2'::integer NOT NULL,
+    "color" integer DEFAULT '-2'::integer NOT NULL,
     "created_by" "uuid" NOT NULL,
-    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "rental_groups_color_check" CHECK (((("color" >= '-2'::integer) AND ("color" <= 8)) OR (("color" >= 16777216) AND ("color" <= 33554431))))
 );
 
 
@@ -2548,6 +2549,10 @@ ALTER TABLE "public"."rental_groups" OWNER TO "postgres";
 
 
 COMMENT ON TABLE "public"."rental_groups" IS 'One renter with several one-time rental dates (0041): the identity (name, colour) its rentals rows carry a copy of. A lone one-time rental has no group; rental_add_date creates one when a second date arrives, rental_group_prune removes it with the last date.';
+
+
+
+COMMENT ON COLUMN "public"."rental_groups"."color" IS 'Group colour, the same domain as rentals.color: -2 = the rental default, 0-8 a palette entry, 0x1000000|rgb a hand-picked colour.';
 
 
 

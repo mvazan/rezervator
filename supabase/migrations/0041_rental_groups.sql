@@ -14,18 +14,29 @@
 --
 -- Týdenní série do skupiny nesmí (rentals_group_shape_check): série je
 -- pravidlo bez konce, skupina je konečný seznam. Jsou to dvě různé věci.
+--
+-- color je integer se stejnou doménou jako rentals.color (0030/0031): ručně
+-- vybraná barva se ukládá jako 0x1000000 | rgb, tedy 16777216–33554431, a do
+-- smallintu se nevejde. Skupina svou barvu kopíruje na řádky rentals a
+-- rental_add_date naopak barvu řádku kopíruje do nové skupiny — kdyby byl
+-- sloupec užší než zdroj, první ručně vybraná barva by skončila na
+-- "smallint out of range" (22003).
 
 create table rental_groups (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null default current_tenant_id()
     references tenants (id) on delete cascade,
   renter_name text not null,
-  color smallint not null default -2,
+  color integer not null default -2,
   created_by uuid not null references profiles (id),
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  constraint rental_groups_color_check check (
+    color between -2 and 8 or color between 16777216 and 33554431)
 );
 comment on table rental_groups is
   'One renter with several one-time rental dates (0041): the identity (name, colour) its rentals rows carry a copy of. A lone one-time rental has no group; rental_add_date creates one when a second date arrives, rental_group_prune removes it with the last date.';
+comment on column rental_groups.color is
+  'Group colour, the same domain as rentals.color: -2 = the rental default, 0-8 a palette entry, 0x1000000|rgb a hand-picked colour.';
 
 alter table rental_groups enable row level security;
 create policy rental_groups_select on rental_groups for select
