@@ -31,6 +31,18 @@ void main() {
         reason: 'stored as a packed RGB, so it never means a club index');
   });
 
+  testWidgets('a Google swatch shows the raw vivid colour, like the calendar '
+      'picker — not a pale board tint', (tester) async {
+    await pump(tester, selected: -1, onChanged: (_) {});
+    // The inner coloured circle carries the fill (the outer is the ring).
+    final fills = tester
+        .widgetList<Container>(find.descendant(
+            of: find.byTooltip('Borůvková'), matching: find.byType(Container)))
+        .map((c) => (c.decoration as BoxDecoration).color)
+        .toList();
+    expect(fills, contains(const Color(0xFF3F51B5)));
+  });
+
   testWidgets('the selected Google colour shows its check', (tester) async {
     await pump(
       tester,

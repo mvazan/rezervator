@@ -49,8 +49,8 @@ const appChangelog = <Release>[
     'Nepravidelný pronájem: jeden nájemce, víc termínů — každý s vlastním '
         'časem a drahami. Pronájmy jsou nově rozdělené na pravidelné a '
         'nepravidelné.',
-    'Barva mých rezervací teď nabízí stejnou paletu jako Google kalendář, '
-        'plus vlastní barvu z kolečka.',
+    'Barva mých rezervací teď nabízí stejnou paletu jako Google kalendář '
+        '(sytě, jako tam), plus vlastní barvu z kolečka.',
     'Ťuknutím na zápasy v hlavičce dne se otevře jejich úplný přehled — '
         'dlouhé názvy už nejsou oříznuté.',
   ]),

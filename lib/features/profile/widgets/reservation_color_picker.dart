@@ -13,6 +13,11 @@ import '../../../domain/palette.dart';
 /// Google's white grid and read poorly on a dark board). A Google swatch is
 /// therefore just a preset hue; it shows as selected when the stored RGB
 /// equals it exactly. The board's own rendering does not change.
+///
+/// The SWATCHES show the raw, vivid Google colour — the same the calendar's
+/// EventColorPicker shows — so the two pickers read as one palette. The board
+/// still paints a paler theme-legible tint of the chosen hue; the swatch
+/// names the colour, it does not preview the cell.
 class ReservationColorPicker extends StatelessWidget {
   const ReservationColorPicker({
     super.key,
@@ -26,6 +31,11 @@ class ReservationColorPicker extends StatelessWidget {
 
   /// The packed value a Google preset stores.
   static int _packed((int, String, Color) e) => packCustomColor(e.$3);
+
+  /// Black or white glyph, whichever reads on [c] — the swatch shows a vivid
+  /// colour now, so contrast goes by luminance (as `EventColorPicker` does).
+  static Color _legibleOn(Color c) =>
+      c.computeLuminance() > 0.5 ? Colors.black87 : Colors.white;
 
   Future<void> _pickCustom(BuildContext context) async {
     final start = isCustomColor(selected)
@@ -60,7 +70,6 @@ class ReservationColorPicker extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final b = scheme.brightness;
     // A packed pick that is not one of the eleven presets belongs to the
     // wheel — a migrated old-palette colour, or a genuinely hand-picked one.
     final isPreset =
@@ -79,19 +88,22 @@ class ReservationColorPicker extends StatelessWidget {
           child: const Icon(Icons.block, size: 18),
         ),
         for (final e in googleEventColors)
-          // Shown the way the board will render it — customTint of the same
-          // hue — not the raw Google RGB, so the swatch and the cell match.
+          // The raw Google colour, vivid — the same swatch the calendar's
+          // own EventColorPicker shows, so the two pickers speak one palette.
+          // (The board still paints a paler, theme-legible tint of it; the
+          // swatch names the colour, it is not a preview of the cell.)
           _Swatch(
             selected: selected == _packed(e),
-            color: customTint(_packed(e), b).$1,
-            onColor: customTint(_packed(e), b).$2,
+            color: e.$3,
+            onColor: _legibleOn(e.$3),
             tooltip: e.$2,
             onTap: () => onChanged(_packed(e)),
           ),
         _Swatch(
           selected: isWheel,
-          color: isWheel ? customTint(selected, b).$1 : Colors.transparent,
-          onColor: isWheel ? customTint(selected, b).$2 : scheme.onSurface,
+          color: isWheel ? unpackCustomColor(selected) : Colors.transparent,
+          onColor:
+              isWheel ? _legibleOn(unpackCustomColor(selected)) : scheme.onSurface,
           tooltip: 'Vlastní barva',
           onTap: () => _pickCustom(context),
           child: isWheel ? null : const _WheelDot(),
