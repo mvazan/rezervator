@@ -44,6 +44,20 @@ String rentalExceptionCountLabel(int n) {
   return '$n výjimek';
 }
 
+/// "1 termín" / "2 termíny" / "5 termínů".
+String rentalDateCountLabel(int n) {
+  if (n == 1) return '1 termín';
+  if (n >= 2 && n <= 4) return '$n termíny';
+  return '$n termínů';
+}
+
+/// The tail of a group tile: how many dates its two shown lines leave out.
+String rentalMoreDatesLabel(int n) {
+  if (n == 1) return '…a ještě 1 termín';
+  if (n <= 4) return '…a další $n termíny';
+  return '…a dalších $n termínů';
+}
+
 /// Band text: the label above + ' · od–do' using HourMinute.display().
 String eventBandLabel(OffBlockEvent e) {
   final label = switch (e) {

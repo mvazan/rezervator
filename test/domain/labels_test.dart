@@ -144,4 +144,18 @@ void main() {
       expect(rentalExceptionCountLabel(11), '11 výjimek');
     });
   });
+
+  group('rental date labels', () {
+    test('counts dates three ways', () {
+      expect(rentalDateCountLabel(1), '1 termín');
+      expect(rentalDateCountLabel(2), '2 termíny');
+      expect(rentalDateCountLabel(4), '4 termíny');
+      expect(rentalDateCountLabel(5), '5 termínů');
+    });
+    test('names the dates a tile leaves out', () {
+      expect(rentalMoreDatesLabel(1), '…a ještě 1 termín');
+      expect(rentalMoreDatesLabel(3), '…a další 3 termíny');
+      expect(rentalMoreDatesLabel(5), '…a dalších 5 termínů');
+    });
+  });
 }
