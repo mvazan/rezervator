@@ -67,7 +67,10 @@ RLS přesně podle vzoru `rentals` (0005:692–704): select
 `tenant_id = current_tenant_id() and is_approved_or_kiosk()`, insert/update/
 delete `… and is_admin()`. Grants: přidat do výčtu v 0017 (`0017_table_grants`
 dává `select, insert, update, delete` roli `authenticated`; RLS pak rozhoduje).
-Realtime: `alter publication supabase_realtime add table rental_groups`.
+Realtime: **schválně ne** — tabulka v `supabase_realtime` není. Appka skupiny odvozuje
+z řádků `rentals`, které už streamuje, a přejmenování k ní doteče přes
+`rental_group_changed`, který jméno i barvu na ty řádky přepíše. Publikovat
+tabulku bez odběratele by hlídalo mrtvou konfiguraci.
 
 ### Vazba
 

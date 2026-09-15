@@ -26,6 +26,29 @@ Spec: `docs/superpowers/specs/2026-09-15-rentals-irregular-design.md`.
 
 ---
 
+## Odchylky při realizaci (co finální review změnilo oproti textu níže)
+
+Plán je záznam toho, co se plánovalo; tohle je rozdíl proti tomu, co se postavilo.
+
+- **`rental_groups.color` je `integer`**, ne `smallint` — ručně vybraná barva je
+  `0x1000000|rgb`, do smallintu se nevejde (Task 1). Text níže už opraven.
+- **Tabulka není v `supabase_realtime`** a `'rental_groups'` není ve `v_streamed`
+  — nikdo ji nestreamuje (Task 1 → finální review, položka 8).
+- **`rentalDateCountLabel` neexistuje**; potvrzení mazání používá
+  `rentalDateCountGenitive` („včetně 2 termínů" — *včetně* žádá genitiv).
+  Zmínky níže jsou historické.
+- **`rental_add_date` čte zdrojový řádek `for update`** — dva správci najednou
+  by jinak založili dvě skupiny.
+- **`_editRental` v rozvrhu** posílá termín se skupinou do `RentalDateDialog`,
+  ne do `RentalDialog` — ten nabízel Nájemce a Barvu, které guard přepíše.
+- **`RentalDatesDialog` je stateful** a učí se id skupiny i řádky za běhu.
+- **Podtitul dlaždice** začíná u nejbližšího budoucího termínu a ocásek počítá
+  jen to, co následuje po zobrazených dvou.
+- **Fixtury dat v testech dialogů** se odvozují od `today()`, ne natvrdo —
+  okno pickeru je `[dnes−365, dnes+730]`.
+
+---
+
 ## Soubory
 
 | Soubor | Role |

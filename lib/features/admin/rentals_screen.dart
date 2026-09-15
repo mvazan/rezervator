@@ -160,10 +160,13 @@ class RentalsScreen extends ConsumerWidget {
 
   Widget _groupTile(BuildContext context, RentalGroup group,
       {required int laneCount, required Day now}) {
+    // isThreeLine follows the subtitle it pads for, not the date count: the
+    // window can turn two dates into one line (one behind, one ahead).
+    final subtitle = _groupSubtitle(group, now);
     return ListTile(
       title: Text(group.renterName),
-      subtitle: Text(_groupSubtitle(group, now)),
-      isThreeLine: group.dates.length > 1,
+      subtitle: Text(subtitle),
+      isThreeLine: subtitle.contains('\n'),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
