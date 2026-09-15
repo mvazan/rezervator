@@ -51,7 +51,12 @@ create policy rental_groups_delete on rental_groups for delete
 -- Stejný tvar jako rentals (0017): plné DML pro přihlášené, řádky řeší RLS.
 grant select, insert, update, delete on rental_groups to authenticated;
 revoke all on rental_groups from anon;
-alter publication supabase_realtime add table rental_groups;
+-- Do supabase_realtime tahle tabulka NEPATŘÍ: appka skupiny odvozuje
+-- z řádků rentals, které už streamuje (rentalGroupsOf), a přejmenování se
+-- ke klientu dostane přes rental_group_changed, který jméno i barvu na ty
+-- řádky přepíše. Publikovat tabulku, kterou nikdo neodebírá, by znamenalo
+-- posílat změny do prázdna — a pojistka v tenancy_rls.sql by hlídala mrtvou
+-- konfiguraci.
 
 -- ---------------------------------------------------------------------------
 -- Vazba: do skupiny smí jen jednorázový řádek, který není výjimkou.
@@ -152,8 +157,13 @@ begin
   if not is_admin() then
     raise exception 'not_allowed';
   end if;
+  -- for update: dva správci, kteří přidávají termín ke stejnému pronájmu bez
+  -- skupiny ve stejnou chvíli, by jinak oba viděli group_id = null, oba
+  -- založili skupinu a pronájem by se rozpadl na dva. Zámek na zdrojovém
+  -- řádku je drží za sebou — druhý uvidí už osvojený řádek.
   select * into v_src from rentals
-   where id = p_rental and tenant_id = current_tenant_id();
+   where id = p_rental and tenant_id = current_tenant_id()
+   for update;
   -- Týdenní série termíny nepřidává — má výjimky (0021).
   if not found or v_src.parent_id is not null or v_src.weekday is not null then
     raise exception 'unknown_rental';

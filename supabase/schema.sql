@@ -1527,8 +1527,13 @@ begin
   if not is_admin() then
     raise exception 'not_allowed';
   end if;
+  -- for update: dva správci, kteří přidávají termín ke stejnému pronájmu bez
+  -- skupiny ve stejnou chvíli, by jinak oba viděli group_id = null, oba
+  -- založili skupinu a pronájem by se rozpadl na dva. Zámek na zdrojovém
+  -- řádku je drží za sebou — druhý uvidí už osvojený řádek.
   select * into v_src from rentals
-   where id = p_rental and tenant_id = current_tenant_id();
+   where id = p_rental and tenant_id = current_tenant_id()
+   for update;
   -- Týdenní série termíny nepřidává — má výjimky (0021).
   if not found or v_src.parent_id is not null or v_src.weekday is not null then
     raise exception 'unknown_rental';

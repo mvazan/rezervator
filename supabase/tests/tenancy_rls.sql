@@ -1705,7 +1705,7 @@ declare
     'profiles', 'schedule_settings', 'clubs', 'time_blocks', 'app_config',
     'google_calendar_links', 'calendar_teams', 'team_colors', 'reservations',
     'day_overrides', 'priority_slot_types', 'priority_slots', 'rentals',
-    'match_exceptions', 'rental_groups'
+    'match_exceptions'
   ];
   v_missing text[];
 begin
@@ -2742,6 +2742,71 @@ begin
     raise exception 'FAIL: the foreign call created a group in tenant A';
   end if;
   raise notice 'OK: rental_add_date refuses another tenant''s rental (0041)';
+end $$;
+
+-- The write policies themselves: rental_groups insert/update/delete all
+-- carry is_admin(), and nothing so far has falsified that half — every
+-- write above was an admin's. Player C of tenant A is the counter-example:
+-- approved (the merge further up approved them), so the select policy
+-- (is_approved_or_kiosk(), the same as rentals) lets them READ the groups —
+-- which is the point: they are genuinely inside the tenant and genuinely
+-- reach the table, so the three refusals below are the is_admin() checks
+-- doing their job, not a session that was never authenticated.
+do $$
+declare
+  v_g uuid;
+begin
+  insert into rental_groups (renter_name, color, created_by)
+  values ('Firma P', 6, '10000000-0000-0000-0000-000000000001')
+  returning id into v_g;
+  perform set_config('probe.group_a', v_g::text, true);
+end $$;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000003","role":"authenticated"}';
+do $$
+declare
+  v_g constant uuid := current_setting('probe.group_a')::uuid;
+  v_rows integer;
+begin
+  if not exists (select 1 from rental_groups where id = v_g) then
+    raise exception 'FAIL: an approved player of the tenant cannot read its groups';
+  end if;
+  if exists (select 1 from rental_groups
+             where id = '30000000-0000-0000-0000-000000000001') then
+    raise exception 'FAIL: a player reads the other tenant''s group';
+  end if;
+  begin
+    insert into rental_groups (renter_name, created_by)
+    values ('Firma Č', '10000000-0000-0000-0000-000000000003');
+    raise exception 'FAIL: a non-admin created a rental group';
+  exception when insufficient_privilege then null;
+  end;
+  -- update/delete do not raise under RLS: the rows simply are not there.
+  update rental_groups set renter_name = 'Přejmenováno' where id = v_g;
+  get diagnostics v_rows = row_count;
+  if v_rows <> 0 then
+    raise exception 'FAIL: a non-admin updated a rental group';
+  end if;
+  delete from rental_groups where id = v_g;
+  get diagnostics v_rows = row_count;
+  if v_rows <> 0 then
+    raise exception 'FAIL: a non-admin deleted a rental group';
+  end if;
+end $$;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+begin
+  -- And from the admin's side: the group is still there, still itself.
+  if (select renter_name from rental_groups
+      where id = current_setting('probe.group_a')::uuid)
+     is distinct from 'Firma P' then
+    raise exception 'FAIL: the non-admin write reached the group after all';
+  end if;
+  if exists (select 1 from rental_groups where renter_name = 'Firma Č') then
+    raise exception 'FAIL: the non-admin insert landed in tenant A';
+  end if;
+  raise notice 'OK: rental_groups writes are admin-only — a non-admin who CAN read them changes nothing (0041)';
 end $$;
 
 reset role;
