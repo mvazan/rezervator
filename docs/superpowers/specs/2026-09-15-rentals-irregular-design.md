@@ -86,7 +86,17 @@ pronájem s jedním termínem. Žádný backfill.
 
 Index `create index rentals_group_idx on rentals (group_id) where group_id is not null;`
 
-### Propagace jména a barvy
+### Guard, propagace, prune
+
+**`rental_group_guard`** (before insert/update on `rentals` when `group_id is
+not null`, vzor `rental_exception_guard` z 0021): skupina musí být z téhož
+tenantu — jinak `rental_group_invalid` — a jméno s barvou se na řádek kopírují
+z ní. Klient je sice posílá taky, ale pravdu má server.
+
+**`rental_group_prune`** (after delete on `rentals`): skupina, které zmizel
+poslední termín, zaniká. Bez toho by po smazání termínů zůstávaly prázdné,
+neviditelné skupiny.
+
 
 ```sql
 create or replace function rental_group_changed() returns trigger …
@@ -149,13 +159,20 @@ uvnitř chronologicky. Skupiny seřazené podle **nejbližšího nadcházející
 termínu; skupiny, které mají všechno za sebou, na konec (pravidlo „chronologicky,
 proběhlé sbalené" jako jinde v appce).
 
-### Providery a `Api`
+### Model, `Api`, chyby
 
-- `rentalGroupsProvider = StreamProvider<List<RentalGroup>>` nad
-  `cachedRows(uid, 'rental_groups', …)`, přidat do `resetTenantScopedProviders`.
-- `Api.saveRentalGroup({id, renterName, color})`, `Api.deleteRentalGroup(id)`,
-  `Api.addRentalDate(...)` (volá RPC výše).
-- `friendlyDbError` += `'unknown_rental': 'Tenhle pronájem už neexistuje.'`
+- `Rental.groupId` (`String?`, z JSON `group_id`). **Tabulka `rental_groups` se
+  nestreamuje**: řádky `rentals` nesou kopii jména i barvy, takže
+  `rentalGroupsOf(rentals)` má všechno, co UI potřebuje — druhý stream, klíč
+  v cache a join by nepřinesly nic.
+- `Api.saveRentalDate(...)` — úprava jednoho termínu: plný řádek s jménem a
+  barvou skupiny (jako `saveRentalException` nese hodnoty série), **bez
+  `group_id`** — update nesmí termín přesunout. Stávající `saveRental` posílá
+  celý řádek včetně jména, proto pro termíny ve skupině nestačí.
+- `Api.addRentalDate(...)` (volá RPC výše), `Api.saveRentalGroup({id,
+  renterName, color})`, `Api.deleteRentalGroup(id)`.
+- `friendlyDbError` += `'unknown_rental': 'Tenhle pronájem už neexistuje.'`,
+  `'rental_group_invalid': 'Termín nejde přiřadit k tomuhle pronájmu.'`
 
 ### Obrazovka `rentals_screen.dart`
 
@@ -172,9 +189,11 @@ příslušný dialog.
 
 ### Dialogy
 
-Nové `RentalDatesDialog` (seznam termínů skupiny s přidáním, úpravou, mazáním)
-a `RentalDateDialog` (jeden termín: datum kalendářem, čas, dráhy, poznámka;
-nový termín předvyplněný podle posledního).
+Nové `RentalDatesDialog` (seznam termínů skupiny s přidáním, úpravou, mazáním),
+`RentalDateDialog` (jeden termín: datum kalendářem, čas, dráhy, poznámka; nový
+termín má dráhy a čas předvyplněné podle posledního, datum nikdy — špatný odhad
+ponechaný na místě by zarezervoval špatný den) a `RentalGroupDialog` (jméno,
+barva; u osamělého termínu bez skupiny upraví jeho řádek na místě).
 
 **`RentalExceptionsDialog` ani `RentalOccurrenceDialog` se nerecyklují** — jsou
 srostlé s logikou série (přeskočení dne, „série se vrátí k pravidelnému
@@ -214,8 +233,10 @@ Každý blok stylem `do $$ … raise notice 'OK: …'`, fixtury A/B/kiosk jako j
    admin; `anon` nic. Falzifikace: odebrat policy.
 2. **Tvar.** Omezení odmítne ve skupině týdenní sérii i výjimku
    (`rentals_group_shape_check`). Falzifikace: odebrat constraint.
-3. **Propagace.** Přejmenování skupiny přepíše `renter_name` jejích řádků;
-   změna barvy totéž. Falzifikace: odebrat trigger.
+3. **Guard, propagace, prune.** Vložený termín dostane jméno a barvu skupiny;
+   cizí skupina → `rental_group_invalid`; přejmenování skupiny přepíše
+   `renter_name` jejích řádků, změna barvy totéž; smazání posledního termínu
+   smaže skupinu, ne dřív. Falzifikace: odebrat prune trigger.
 4. **RPC.** `rental_add_date` na pronájmu bez skupiny ji založí a osvojí oba
    řádky; na týdenní sérii a cizím tenantu vrátí `unknown_rental`; neadmin
    `not_allowed`. Falzifikace: vrátit tělo na prostý insert.
