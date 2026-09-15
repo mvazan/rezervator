@@ -657,7 +657,7 @@ COMMENT ON COLUMN "public"."profiles"."placeholder" IS 'Hand-made profile withou
 
 
 
-COMMENT ON COLUMN "public"."profiles"."own_color" IS 'The player''s own reservations in their own view: -1 = the club colour, 0-11 a palette entry, 0x1000000|rgb a hand-picked colour.';
+COMMENT ON COLUMN "public"."profiles"."own_color" IS 'The player''s own reservations in their own view (0024): -1 = the club colour, 0x1000000|rgb a hand-picked or Google-palette colour. Palette indices 0-11 are legacy — the 1.2.6 app still writes them and clubTint still renders them, but the current app writes only -1 or a packed RGB (0042).';
 
 
 
