@@ -11,8 +11,8 @@ import 'rental_date_dialog.dart';
 /// to edit, a delete per row and Přidat termín for a new one. Watches the
 /// rentals stream itself, so the list follows adds and deletes made from
 /// the dialogs it opens while it stays up — including the moment a lone
-/// rental gains its group: the group is re-found by the row it was opened
-/// from, not by an id it may not have had yet.
+/// rental gains its group: the group is re-found by the rows it was opened
+/// with, not by an id it may not have had yet.
 class RentalDatesDialog extends ConsumerWidget {
   const RentalDatesDialog({
     super.key,
@@ -27,9 +27,16 @@ class RentalDatesDialog extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final rentals = ref.watch(rentalsProvider).value ?? const <Rental>[];
     final now = today();
-    final anchorId = group.dates.first.id;
+    // Re-found on every emission: by the group id when the snapshot already
+    // had one, otherwise by ANY row it was opened with. Anchoring on a single
+    // row would lose the group the moment that row is deleted from this very
+    // list — the fallback would then serve the stale snapshot and the deleted
+    // date would sit there, tappable and falsely saveable.
+    final openedIds = {for (final d in group.dates) d.id};
     final live = rentalGroupsOf(rentals, today: now)
-            .where((g) => g.dates.any((d) => d.id == anchorId))
+            .where((g) =>
+                (g.id != null && g.id == group.id) ||
+                g.dates.any((d) => openedIds.contains(d.id)))
             .firstOrNull ??
         group;
 

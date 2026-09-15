@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -91,6 +93,37 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  // Same dialog, but on a stream that can emit again — production re-emits
+  // after every delete.
+  Future<void> openLive(
+    WidgetTester tester,
+    List<Rental> rentals,
+    Stream<List<Rental>> stream,
+  ) async {
+    final group = rentalGroupsOf(rentals, today: today()).single;
+    await tester.pumpWidget(ProviderScope(
+      overrides: [rentalsProvider.overrideWith((ref) => stream)],
+      child: MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => Center(
+              child: TextButton(
+                onPressed: () => showDialog<void>(
+                  context: context,
+                  builder: (_) => RentalDatesDialog(group: group, laneCount: 3),
+                ),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+  }
+
   testWidgets('lists the dates chronologically with lanes, times and note; '
       'a past date is shown but inert', (tester) async {
     await open(tester, rows);
@@ -149,5 +182,35 @@ void main() {
     final del = requests.singleWhere((r) => r.method == 'DELETE');
     expect(del.url.path, '/rest/v1/rentals');
     expect(del.url.queryParameters['id'], 'eq.d-next');
+  });
+
+  testWidgets('deleting the EARLIEST date really removes it from the list',
+      (tester) async {
+    // Every date ahead, so the first row is deletable too — the group is
+    // re-found on the stream, and it must survive losing that very row.
+    final ahead = [
+      date(id: 'd-next', day: next, note: 'bez rozbrusu'),
+      date(id: 'd-later', day: later, lanes: const [2]),
+    ];
+    final live = StreamController<List<Rental>>();
+    addTearDown(live.close);
+    await openLive(tester, ahead, live.stream);
+    live.add(ahead);
+    await tester.pumpAndSettle();
+    expect(find.text(dayFull(next)), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Smazat termín').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Ano'));
+    await tester.pumpAndSettle();
+    final del = requests.singleWhere((r) => r.method == 'DELETE');
+    expect(del.url.queryParameters['id'], 'eq.d-next');
+
+    live.add([ahead.last]);
+    await tester.pumpAndSettle();
+    expect(find.text(dayFull(next)), findsNothing,
+        reason: 'the deleted date must not come back on the stale snapshot');
+    expect(find.text(dayFull(later)), findsOneWidget);
+    expect(find.text('Termíny · Firma Trak'), findsOneWidget);
   });
 }
