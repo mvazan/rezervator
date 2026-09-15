@@ -146,12 +146,6 @@ void main() {
   });
 
   group('rental date labels', () {
-    test('counts dates three ways', () {
-      expect(rentalDateCountLabel(1), '1 termín');
-      expect(rentalDateCountLabel(2), '2 termíny');
-      expect(rentalDateCountLabel(4), '4 termíny');
-      expect(rentalDateCountLabel(5), '5 termínů');
-    });
     test('counts dates in the genitive after "včetně"', () {
       // "včetně" governs the genitive, so the nominative label would read
       // "včetně 2 termíny" — wrong case in the one place a user reads it.

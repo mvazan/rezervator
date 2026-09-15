@@ -149,8 +149,12 @@ class RentalsScreen extends ConsumerWidget {
     final next = dates.indexWhere((d) => !d.date!.isBefore(now));
     final start = next >= 0 ? next : (dates.length - 2).clamp(0, dates.length);
     final shown = dates.skip(start).take(2).map(line).toList();
-    final rest = dates.length - shown.length;
-    if (rest > 0) shown.add(rentalMoreDatesLabel(rest));
+    // Only what comes AFTER the window is still to come. Counting everything
+    // the two lines leave out would count the past dates the window
+    // deliberately skipped too — two behind and one ahead would read
+    // "…a další 2 termíny", i.e. two more coming, which is a lie.
+    final after = dates.length - start - shown.length;
+    if (after > 0) shown.add(rentalMoreDatesLabel(after));
     return shown.join('\n');
   }
 

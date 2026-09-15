@@ -319,7 +319,30 @@ void main() {
     expect(find.textContaining(dayLabel(d1)), findsOneWidget);
     expect(find.textContaining(dayLabel(past1)), findsNothing);
     expect(find.textContaining(dayLabel(past2)), findsNothing);
-    expect(find.textContaining(rentalMoreDatesLabel(2)), findsOneWidget);
+    // Nothing follows the window, so there is no tail: the two dates the
+    // window skipped are over, and "…a další 2 termíny" would announce two
+    // more still to come.
+    expect(find.textContaining('…a'), findsNothing);
+  });
+
+  testWidgets('the tail counts only the dates AFTER the two shown, past ones '
+      'excluded', (tester) async {
+    // Two behind and three ahead: the tile shows the first two ahead, and
+    // exactly one date is still to come after them.
+    final past1 = today().addDays(-20);
+    final past2 = today().addDays(-6);
+    await tester.pumpWidget(app(rentals: [
+      grouped(id: 'g1-p1', date: past1),
+      grouped(id: 'g1-p2', date: past2),
+      grouped(id: 'g1-a', date: d1),
+      grouped(id: 'g1-b', date: d2),
+      grouped(id: 'g1-c', date: d3),
+    ]));
+    await tester.pumpAndSettle();
+    expect(find.textContaining(dayLabel(d1)), findsOneWidget);
+    expect(find.textContaining(dayLabel(d2)), findsOneWidget);
+    expect(find.textContaining(dayLabel(d3)), findsNothing);
+    expect(find.textContaining(rentalMoreDatesLabel(1)), findsOneWidget);
   });
 
   testWidgets('a group with nothing ahead still shows its last dates',

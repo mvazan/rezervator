@@ -44,13 +44,6 @@ String rentalExceptionCountLabel(int n) {
   return '$n výjimek';
 }
 
-/// "1 termín" / "2 termíny" / "5 termínů".
-String rentalDateCountLabel(int n) {
-  if (n == 1) return '1 termín';
-  if (n >= 2 && n <= 4) return '$n termíny';
-  return '$n termínů';
-}
-
 /// After "včetně", which governs the genitive: 1 termínu, 2 termínů.
 String rentalDateCountGenitive(int n) => n == 1 ? '1 termínu' : '$n termínů';
 
