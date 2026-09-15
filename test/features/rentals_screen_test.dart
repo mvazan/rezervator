@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:rezervator/core/ui.dart' show dayFull, today;
+import 'package:rezervator/core/ui.dart' show dayFull, dayLabel, today;
 import 'package:rezervator/data/providers.dart';
+import 'package:rezervator/domain/labels.dart' show rentalMoreDatesLabel;
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/admin/rentals_screen.dart';
 
@@ -76,52 +77,71 @@ void main() {
     exception(id: 'x-lane', date: secondThursday, lanes: const [1]),
   ];
 
-  // One fixture per test: a second pumpWidget does not swap ProviderScope
-  // overrides.
-  testWidgets('lists one-time rentals before weekly ones, with lanes, '
-      'validity and note', (tester) async {
-    await tester.pumpWidget(app(rentals: [
+  // A renter with three scattered dates in one group, and a lone one-off.
+  Rental grouped({required String id, required Day date, List<int> lanes = const [1]}) =>
       Rental(
-        id: 'r-weekly',
-        renterName: 'Firma Kolo',
-        lanes: const [1, 2],
-        date: null,
-        weekday: DateTime.thursday,
+        id: id,
+        renterName: 'Firma Trak',
+        lanes: lanes,
+        date: date,
+        weekday: null,
         startsAt: const HourMinute(18, 0),
         endsAt: const HourMinute(20, 0),
-        validFrom: Day(2026, 9, 1),
-        validUntil: null,
-        note: 'faktura měsíčně',
-      ),
-      Rental(
-        id: 'r-once',
-        renterName: 'Oslava Novákovi',
-        lanes: const [2],
-        date: today().addDays(5),
-        weekday: null,
-        startsAt: const HourMinute(15, 0),
-        endsAt: const HourMinute(17, 0),
         validFrom: null,
         validUntil: null,
         note: '',
-      ),
+        color: 3,
+        groupId: 'g1',
+      );
+  final d1 = today().addDays(3);
+  final d2 = today().addDays(9);
+  final d3 = today().addDays(30);
+  final lone = Rental(
+    id: 'r-lone',
+    renterName: 'Oslava Novákovi',
+    lanes: const [1, 2],
+    date: today().addDays(5),
+    weekday: null,
+    startsAt: const HourMinute(19, 0),
+    endsAt: const HourMinute(22, 0),
+    validFrom: null,
+    validUntil: null,
+    note: 'dort',
+  );
+
+  // One fixture per test: a second pumpWidget does not swap ProviderScope
+  // overrides.
+  testWidgets('series under Pravidelné, groups under Nepravidelné by next '
+      'date, each tile with its dates and lanes', (tester) async {
+    await tester.pumpWidget(app(rentals: [
+      weekly,
+      grouped(id: 'g1-c', date: d3, lanes: const [3]),
+      grouped(id: 'g1-a', date: d1),
+      grouped(id: 'g1-b', date: d2, lanes: const [1, 2]),
+      lone,
     ]));
     await tester.pumpAndSettle();
 
-    expect(find.text('Pronájmy'), findsOneWidget);
-    expect(find.text('Oslava Novákovi'), findsOneWidget);
+    expect(find.text('Pravidelné'), findsOneWidget);
+    expect(find.text('Nepravidelné'), findsOneWidget);
     expect(find.text('Firma Kolo'), findsOneWidget);
-    expect(find.textContaining('jednorázově'), findsOneWidget);
     expect(find.textContaining('každý čtvrtek 18:00–20:00'), findsOneWidget);
-    expect(find.textContaining('dráhy 1, 2'), findsOneWidget);
-    expect(find.textContaining('platí od út 1.9.'), findsOneWidget);
-    expect(find.textContaining('faktura měsíčně'), findsOneWidget);
-
-    // One-time first, weekly after.
-    expect(
-      tester.getTopLeft(find.text('Oslava Novákovi')).dy,
-      lessThan(tester.getTopLeft(find.text('Firma Kolo')).dy),
-    );
+    // The group tile: first two dates, the rest counted.
+    expect(find.textContaining('${dayLabel(d1)} · 18:00–20:00 · dráhy 1'),
+        findsOneWidget);
+    expect(find.textContaining('${dayLabel(d2)} · 18:00–20:00 · dráhy 1, 2'),
+        findsOneWidget);
+    expect(find.textContaining(dayLabel(d3)), findsNothing);
+    expect(find.textContaining(rentalMoreDatesLabel(1)), findsOneWidget);
+    // The lone one-off is a group of one, with its note.
+    expect(find.textContaining('${dayLabel(lone.date!)} · 19:00–22:00 · dráhy 1, 2 · dort'),
+        findsOneWidget);
+    // Order: header Pravidelné, series, header Nepravidelné, Trak (d1) before Oslava (d1+2).
+    double y(String text) => tester.getTopLeft(find.text(text)).dy;
+    expect(y('Pravidelné'), lessThan(y('Firma Kolo')));
+    expect(y('Firma Kolo'), lessThan(y('Nepravidelné')));
+    expect(y('Nepravidelné'), lessThan(y('Firma Trak')));
+    expect(y('Firma Trak'), lessThan(y('Oslava Novákovi')));
   });
 
   testWidgets('empty state', (tester) async {
@@ -132,29 +152,38 @@ void main() {
     expect(find.text('Přidat pronájem'), findsOneWidget);
   });
 
-  testWidgets("Přidat pronájem opens the rental dialog with the alley's lanes",
-      (tester) async {
+  testWidgets('Přidat pronájem asks which kind; Nepravidelný opens the '
+      "dialog with the alley's lanes and no mode switch", (tester) async {
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
-
     await tester.tap(find.text('Přidat pronájem'));
     await tester.pumpAndSettle();
-
-    // The dialog's title (the FAB label underneath reads the same).
-    expect(
-      find.descendant(
-        of: find.byType(AlertDialog),
-        matching: find.text('Přidat pronájem'),
-      ),
-      findsOneWidget,
-    );
+    expect(find.text('Pravidelný'), findsOneWidget);
+    expect(find.text('Nepravidelný'), findsOneWidget);
+    await tester.tap(find.text('Nepravidelný'));
+    await tester.pumpAndSettle();
+    expect(find.text('Přidat nepravidelný pronájem'), findsOneWidget);
     expect(find.text('Nájemce'), findsOneWidget);
-    expect(find.text('Jednorázový'), findsOneWidget);
-    expect(find.text('Týdenní'), findsOneWidget);
+    expect(find.text('Datum'), findsOneWidget);
+    expect(find.text('Jednorázový'), findsNothing);
+    expect(find.text('Týdenní'), findsNothing);
+    expect(find.text('Den v týdnu'), findsNothing);
     expect(find.text('Dráha 1'), findsOneWidget);
     expect(find.text('Dráha 2'), findsOneWidget);
     expect(find.text('Dráha 3'), findsNothing);
     expect(find.text('Uložit'), findsOneWidget);
+  });
+
+  testWidgets('Pravidelný opens the weekly form', (tester) async {
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Přidat pronájem'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Pravidelný'));
+    await tester.pumpAndSettle();
+    expect(find.text('Přidat pravidelný pronájem'), findsOneWidget);
+    expect(find.text('Den v týdnu'), findsOneWidget);
+    expect(find.text('Datum'), findsNothing);
   });
 
   testWidgets('a weekly rental counts its exceptions and offers Výjimky; '
@@ -165,7 +194,7 @@ void main() {
     expect(find.text('Firma Kolo'), findsOneWidget);
     expect(find.textContaining('2 výjimky'), findsOneWidget);
     expect(find.byTooltip('Výjimky'), findsOneWidget);
-    expect(find.textContaining('jednorázově'), findsNothing);
+    expect(find.text('Nepravidelné'), findsNothing);
     expect(find.byType(ListTile), findsOneWidget);
   });
 
@@ -242,5 +271,33 @@ void main() {
     expect(find.byTooltip('Výjimky'), findsNothing);
     expect(find.byIcon(Icons.edit_outlined), findsOneWidget);
     expect(find.byIcon(Icons.delete_outline), findsOneWidget);
+  });
+
+  testWidgets('a group tile offers Termíny, Upravit and Smazat naming the '
+      'date count', (tester) async {
+    await tester.pumpWidget(app(rentals: [
+      grouped(id: 'g1-a', date: d1),
+      grouped(id: 'g1-b', date: d2),
+    ]));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Termíny'));
+    await tester.pumpAndSettle();
+    expect(find.text('Termíny · Firma Trak'), findsOneWidget);
+    await tester.tap(find.text('Zavřít'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Smazat'));
+    await tester.pumpAndSettle();
+    expect(find.text('Smazat pronájem?'), findsOneWidget);
+    expect(find.textContaining('včetně 2 termíny'), findsOneWidget);
+  });
+
+  testWidgets('a lone one-off is deleted like before, no count', (tester) async {
+    await tester.pumpWidget(app(rentals: [lone]));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Smazat'));
+    await tester.pumpAndSettle();
+    expect(find.text('Opravdu smazat pronájem pro Oslava Novákovi?'),
+        findsOneWidget);
   });
 }

@@ -46,6 +46,9 @@ const appChangelog = <Release>[
   Release(null, '15. 9. 2026', [
     'Po spuštění už neprobleskne „Offline" jen proto, že se appka teprve '
         'připojuje — když síť opravdu chybí, banner se ukáže dál.',
+    'Nepravidelný pronájem: jeden nájemce, víc termínů — každý s vlastním '
+        'časem a drahami. Pronájmy jsou nově rozdělené na pravidelné a '
+        'nepravidelné.',
   ]),
   Release('1.2.6', '14. 9. 2026', [
     'Připomínky v profilu: ozveme se ti pár hodin nebo den před tréninkem '
