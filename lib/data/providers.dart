@@ -11,6 +11,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'cache.dart';
 import 'live_refresh.dart';
+import 'backend_reachable.dart';
 import 'offline_gate.dart';
 
 import '../config.dart';
@@ -215,6 +216,11 @@ final offlineProvider = StreamProvider<bool>((ref) async* {
   // signál škrtí, takže při rychlém přepnutí appky nepřijde vůbec).
   var wokeAt = DateTime.now();
   DateTime? disconnectedSince;
+  // Poslední odpověď sondy a kdy padla. Ptáme se jen tehdy, když socket
+  // nestojí — při běžném provozu tedy vůbec.
+  DateTime? lastProbe;
+  var lastProbeOk = true;
+  var wasOffline = false;
   final wake = LiveRefresh.stream.listen((_) {
     wokeAt = DateTime.now();
     disconnectedSince = null;
@@ -222,14 +228,26 @@ final offlineProvider = StreamProvider<bool>((ref) async* {
   ref.onDispose(wake.cancel);
   // Stream.periodic (not a delayed loop): its timer is cancelled the moment
   // the provider is disposed, so widget tests never leak a pending timer.
-  yield* Stream.periodic(const Duration(seconds: 3), (_) {
+  yield* Stream<void>.periodic(const Duration(seconds: 3)).asyncMap((_) async {
+    // Socket nahoře je sám o sobě důkaz spojení — ptát se nemá proč.
+    var reachable = _db.realtime.isConnected;
+    // Bez nakonfigurovaného backendu není od čeho být offline.
+    if (!reachable && AppConfig.hasSupabase) {
+      final now = DateTime.now();
+      if (probeDue(now: now, lastProbe: lastProbe, offline: wasOffline)) {
+        lastProbe = now;
+        lastProbeOk = await backendReachable();
+      }
+      reachable = lastProbeOk;
+    }
     final decision = offlineDecision(
-      connected: _db.realtime.isConnected,
+      reachable: reachable,
       now: DateTime.now(),
       wokeAt: wokeAt,
       disconnectedSince: disconnectedSince,
     );
     disconnectedSince = decision.disconnectedSince;
+    wasOffline = decision.offline;
     return decision.offline;
   });
 });
