@@ -54,7 +54,7 @@ String rentalDateCountLabel(int n) {
 /// The tail of a group tile: how many dates its two shown lines leave out.
 String rentalMoreDatesLabel(int n) {
   if (n == 1) return '…a ještě 1 termín';
-  if (n <= 4) return '…a další $n termíny';
+  if (n >= 2 && n <= 4) return '…a další $n termíny';
   return '…a dalších $n termínů';
 }
 

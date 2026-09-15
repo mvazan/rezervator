@@ -721,12 +721,18 @@ void main() {
     });
 
     test('same next date sorts by renter name, Czech collation', () {
+      // Names picked so plain compareTo CANNOT produce this order: Czech
+      // sorts "ch" after "h" (Hora before Chalupa) and Š before Z, while
+      // code points give Chalupa, Hora, Zeman, Šimek. Swap compareCzech for
+      // compareTo and this test fails — which is the point of having it.
       final groups = rentalGroupsOf([
-        date(id: '1', name: 'Šimek', day: Day(2026, 9, 20)),
+        date(id: '1', name: 'Zeman', day: Day(2026, 9, 20)),
         date(id: '2', name: 'Chalupa', day: Day(2026, 9, 20)),
-        date(id: '3', name: 'Adam', day: Day(2026, 9, 20)),
+        date(id: '3', name: 'Šimek', day: Day(2026, 9, 20)),
+        date(id: '4', name: 'Hora', day: Day(2026, 9, 20)),
       ], today: today);
-      expect(groups.map((g) => g.renterName), ['Adam', 'Chalupa', 'Šimek']);
+      expect(groups.map((g) => g.renterName),
+          ['Hora', 'Chalupa', 'Šimek', 'Zeman']);
     });
 
     test('today counts as upcoming', () {
@@ -878,7 +884,7 @@ String rentalDateCountLabel(int n) {
 /// The tail of a group tile: how many dates its two shown lines leave out.
 String rentalMoreDatesLabel(int n) {
   if (n == 1) return '…a ještě 1 termín';
-  if (n <= 4) return '…a další $n termíny';
+  if (n >= 2 && n <= 4) return '…a další $n termíny';
   return '…a dalších $n termínů';
 }
 ```
