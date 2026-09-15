@@ -49,12 +49,14 @@ dependencies:
   package_info_plus: ^10.2.0
   flex_color_picker: ^3.8.0
 
+  # Jeden dotaz na /auth/v1/health (data/backend_reachable.dart): rozlišuje
+  # "socket se teprve vytáčí" od "není síť". Supabase ho stejně táhne
+  # tranzitivně; v testech ten samý balík dodává MockClient.
+  http: ^1.2.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
-
-  # Test-only: MockClient stubs Supabase's HTTP calls in login_screen_test.
-  http: ^1.2.0
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
