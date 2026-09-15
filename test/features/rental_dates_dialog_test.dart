@@ -213,4 +213,32 @@ void main() {
     expect(find.text(dayFull(later)), findsOneWidget);
     expect(find.text('Termíny · Firma Trak'), findsOneWidget);
   });
+
+  testWidgets('deleting the LAST date says so instead of showing a ghost',
+      (tester) async {
+    // The 0041 prune trigger drops the group with its last date, so no live
+    // group comes back. Falling back to the snapshot would leave a deleted
+    // date on screen — tappable, and saveable into a zero-row update that
+    // reports success.
+    final only = [date(id: 'd-only', day: next)];
+    final live = StreamController<List<Rental>>();
+    addTearDown(live.close);
+    await openLive(tester, only, live.stream);
+    live.add(only);
+    await tester.pumpAndSettle();
+    expect(find.text(dayFull(next)), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Smazat termín'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Ano'));
+    await tester.pumpAndSettle();
+
+    live.add(const []);
+    await tester.pumpAndSettle();
+    expect(find.text(dayFull(next)), findsNothing,
+        reason: 'the deleted date must not linger on the stale snapshot');
+    expect(find.text('Tenhle pronájem už nemá žádné termíny.'), findsOneWidget);
+    expect(find.text('Termíny · Firma Trak'), findsOneWidget);
+    expect(find.text('Přidat termín'), findsNothing);
+  });
 }

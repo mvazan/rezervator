@@ -25,7 +25,8 @@ class RentalDatesDialog extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final rentals = ref.watch(rentalsProvider).value ?? const <Rental>[];
+    final rentalsAsync = ref.watch(rentalsProvider);
+    final rentals = rentalsAsync.value ?? const <Rental>[];
     final now = today();
     // Re-found on every emission: by the group id when the snapshot already
     // had one, otherwise by ANY row it was opened with. Anchoring on a single
@@ -37,11 +38,29 @@ class RentalDatesDialog extends ConsumerWidget {
             .where((g) =>
                 (g.id != null && g.id == group.id) ||
                 g.dates.any((d) => openedIds.contains(d.id)))
-            .firstOrNull ??
-        group;
+            .firstOrNull;
+
+    // Every date gone: the last delete took the group with it (the 0041
+    // prune trigger). Serving the snapshot here would list a date that no
+    // longer exists — tappable, and saveable into a zero-row update that
+    // reports success. Only trust the absence once the stream actually has
+    // data; without a value we cannot tell "deleted" from "not loaded yet".
+    if (live == null && rentalsAsync.hasValue) {
+      return AlertDialog(
+        title: Text('Termíny · ${group.renterName}'),
+        content: const Text('Tenhle pronájem už nemá žádné termíny.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Zavřít'),
+          ),
+        ],
+      );
+    }
+    final shown = live ?? group;
 
     return AlertDialog(
-      title: Text('Termíny · ${live.renterName}'),
+      title: Text('Termíny · ${shown.renterName}'),
       content: SizedBox(
         width: 360,
         child: SingleChildScrollView(
@@ -49,7 +68,7 @@ class RentalDatesDialog extends ConsumerWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              for (final d in live.dates) _tile(context, live, d, now),
+              for (final d in shown.dates) _tile(context, shown, d, now),
             ],
           ),
         ),
@@ -63,7 +82,7 @@ class RentalDatesDialog extends ConsumerWidget {
           onPressed: () => showDialog<bool>(
             context: context,
             builder: (_) => RentalDateDialog(
-              anchor: live.dates.last,
+              anchor: shown.dates.last,
               laneCount: laneCount,
             ),
           ),
