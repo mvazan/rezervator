@@ -1512,6 +1512,49 @@ $$;
 ALTER FUNCTION "public"."reject_tenant"("p_tenant_id" "uuid") OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."rental_add_date"("p_rental" "uuid", "p_date" "date", "p_starts_at" time without time zone, "p_ends_at" time without time zone, "p_lanes" smallint[], "p_note" "text" DEFAULT ''::"text") RETURNS "uuid"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_src rentals;
+  v_group uuid;
+  v_new uuid;
+begin
+  if auth.uid() is null then
+    raise exception 'not_authenticated';
+  end if;
+  if not is_admin() then
+    raise exception 'not_allowed';
+  end if;
+  select * into v_src from rentals
+   where id = p_rental and tenant_id = current_tenant_id();
+  -- Týdenní série termíny nepřidává — má výjimky (0021).
+  if not found or v_src.parent_id is not null or v_src.weekday is not null then
+    raise exception 'unknown_rental';
+  end if;
+
+  v_group := v_src.group_id;
+  if v_group is null then
+    insert into rental_groups (tenant_id, renter_name, color, created_by)
+    values (v_src.tenant_id, v_src.renter_name, v_src.color, auth.uid())
+    returning id into v_group;
+    update rentals set group_id = v_group where id = v_src.id;
+  end if;
+
+  insert into rentals (tenant_id, group_id, renter_name, color, date, lanes,
+                       starts_at, ends_at, note, created_by)
+  values (v_src.tenant_id, v_group, v_src.renter_name, v_src.color, p_date,
+          p_lanes, p_starts_at, p_ends_at, coalesce(p_note, ''), auth.uid())
+  returning id into v_new;
+  return v_new;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."rental_add_date"("p_rental" "uuid", "p_date" "date", "p_starts_at" time without time zone, "p_ends_at" time without time zone, "p_lanes" smallint[], "p_note" "text") OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."rental_exception_guard"() RETURNS "trigger"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -3410,6 +3453,12 @@ GRANT ALL ON FUNCTION "public"."priority_slots_mark_hand_edit"() TO "service_rol
 REVOKE ALL ON FUNCTION "public"."reject_tenant"("p_tenant_id" "uuid") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."reject_tenant"("p_tenant_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."reject_tenant"("p_tenant_id" "uuid") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."rental_add_date"("p_rental" "uuid", "p_date" "date", "p_starts_at" time without time zone, "p_ends_at" time without time zone, "p_lanes" smallint[], "p_note" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."rental_add_date"("p_rental" "uuid", "p_date" "date", "p_starts_at" time without time zone, "p_ends_at" time without time zone, "p_lanes" smallint[], "p_note" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."rental_add_date"("p_rental" "uuid", "p_date" "date", "p_starts_at" time without time zone, "p_ends_at" time without time zone, "p_lanes" smallint[], "p_note" "text") TO "service_role";
 
 
 

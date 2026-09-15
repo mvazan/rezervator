@@ -126,3 +126,56 @@ create trigger rental_group_prune
   after delete on rentals
   for each row when (old.group_id is not null)
   execute function rental_group_prune();
+
+-- ---------------------------------------------------------------------------
+-- rental_add_date: jediný zápis, který sahá na víc řádků najednou.
+-- ---------------------------------------------------------------------------
+-- Přidání termínu k pronájmu, který skupinu ještě nemá: skupina vznikne z jeho
+-- jména a barvy, řádek si ji osvojí a nový termín se zapíše k ní — v jedné
+-- transakci. Ostatní zápisy (úprava termínu, skupiny, mazání) jdou přímo přes
+-- RLS; tohle RPC je tu kvůli atomicitě, ne kvůli oprávněním.
+-- Chyby ve stylu set_match_exception (0039).
+create or replace function rental_add_date(
+  p_rental uuid, p_date date, p_starts_at time, p_ends_at time,
+  p_lanes smallint[], p_note text default '')
+returns uuid
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_src rentals;
+  v_group uuid;
+  v_new uuid;
+begin
+  if auth.uid() is null then
+    raise exception 'not_authenticated';
+  end if;
+  if not is_admin() then
+    raise exception 'not_allowed';
+  end if;
+  select * into v_src from rentals
+   where id = p_rental and tenant_id = current_tenant_id();
+  -- Týdenní série termíny nepřidává — má výjimky (0021).
+  if not found or v_src.parent_id is not null or v_src.weekday is not null then
+    raise exception 'unknown_rental';
+  end if;
+
+  v_group := v_src.group_id;
+  if v_group is null then
+    insert into rental_groups (tenant_id, renter_name, color, created_by)
+    values (v_src.tenant_id, v_src.renter_name, v_src.color, auth.uid())
+    returning id into v_group;
+    update rentals set group_id = v_group where id = v_src.id;
+  end if;
+
+  insert into rentals (tenant_id, group_id, renter_name, color, date, lanes,
+                       starts_at, ends_at, note, created_by)
+  values (v_src.tenant_id, v_group, v_src.renter_name, v_src.color, p_date,
+          p_lanes, p_starts_at, p_ends_at, coalesce(p_note, ''), auth.uid())
+  returning id into v_new;
+  return v_new;
+end;
+$$;
+revoke all on function rental_add_date(uuid, date, time, time, smallint[], text)
+  from public, anon;
+grant execute on function rental_add_date(uuid, date, time, time, smallint[], text)
+  to authenticated, service_role;

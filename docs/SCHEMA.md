@@ -107,6 +107,7 @@ EXECUTE revoked from the app roles (see below).
 | `move_reservation(...)`, `move_day_reservations(...)` | admin | Re-seat one / all reservations of a day; same collision rules as create (rentals resolved by `rental_occurrences`). `slot_taken`, `blocked_by_*`. |
 | `cancel_block_day_reservations(date, block, note?)` | admin | Bulk cancel before hiding a template block for one day. |
 | `set_day_override(date, closed, reason?, block_ids?)` | admin | Upsert the override and cancel the reservations it displaces. |
+| `rental_add_date(rental, date, starts_at, ends_at, lanes, note)` | admin | Adds a one-time date next to `rental` (a one-time row of the caller's tenant): creates its `rental_groups` row from the rental's name/colour and adopts it when it has none, then inserts the date with its own lanes/times/note. Returns the new row id. Raises `not_authenticated`, `not_allowed`, `unknown_rental` (foreign, exception or weekly row). |
 | `monthly_attendance(year, month)` | admin | Rows (player, club name, attended) — uncancelled reservation = attendance. |
 | `admin_list_tenants()`, `approve_tenant(id)`, `reject_tenant(id)`, `switch_tenant(id)` | superadmin (`not_allowed` otherwise) | `reject_tenant`: pending only (`not_pending`), refuses while the caller is switched into it (`switch_home_first`), deletes the whole tenant. |
 | `start_calendar_link()` | approved member, not the kiosk (`not_allowed`) | Issues the OAuth `state` nonce (48 hex) and returns it; the caller's earlier unconsumed nonce is replaced. The app opens Google's consent URL with it. |

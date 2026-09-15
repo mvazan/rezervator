@@ -2626,6 +2626,86 @@ begin
   raise notice 'OK: a rental group is invisible and unusable across tenants (0041)';
 end $$;
 
+do $$
+declare
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+  v_lone uuid;
+  v_new uuid;
+  v_new2 uuid;
+  v_series uuid;
+  v_g uuid;
+  v_g2 uuid;
+  v_d date := (now() at time zone 'Europe/Prague')::date + 120;
+begin
+  insert into rentals (renter_name, lanes, date, starts_at, ends_at, color,
+                       created_by)
+  values ('Firma L', '{1}', v_d, '20:00', '21:00', 4, v_uid)
+  returning id into v_lone;
+
+  -- a lone rental adopts a group with the new date
+  v_new := rental_add_date(v_lone, v_d + 3, '19:00', '20:00', '{2,3}',
+                           'druhý termín');
+  select group_id into v_g from rentals where id = v_lone;
+  if v_g is null then
+    raise exception 'FAIL: the lone rental did not adopt a group';
+  end if;
+  select group_id into v_g2 from rentals where id = v_new;
+  if v_g2 is distinct from v_g then
+    raise exception 'FAIL: the new date is not in the same group';
+  end if;
+  if (select renter_name from rental_groups where id = v_g) <> 'Firma L'
+     or (select color from rental_groups where id = v_g) <> 4 then
+    raise exception 'FAIL: the group did not take the rental''s name and colour';
+  end if;
+  if (select note from rentals where id = v_new) <> 'druhý termín'
+     or (select lanes from rentals where id = v_new) <> '{2,3}'::smallint[]
+     or (select starts_at from rentals where id = v_new) <> '19:00'::time then
+    raise exception 'FAIL: the new date lost its own lanes, time or note';
+  end if;
+
+  -- a second call reuses the group
+  v_new2 := rental_add_date(v_new, v_d + 10, '20:00', '21:00', '{1}');
+  if (select count(*) from rentals where group_id = v_g) <> 3 then
+    raise exception 'FAIL: expected three dates in the group';
+  end if;
+
+  -- a weekly series has exceptions, not dates
+  insert into rentals (renter_name, lanes, weekday, starts_at, ends_at,
+                       created_by)
+  values ('Firma S', '{1}', 2, '20:00', '21:00', v_uid)
+  returning id into v_series;
+  begin
+    perform rental_add_date(v_series, v_d, '20:00', '21:00', '{1}');
+    raise exception 'FAIL: a date was added to a weekly series';
+  exception when others then
+    if sqlerrm <> 'unknown_rental' then raise; end if;
+  end;
+  begin
+    perform rental_add_date(gen_random_uuid(), v_d, '20:00', '21:00', '{1}');
+    raise exception 'FAIL: an unknown rental accepted a date';
+  exception when others then
+    if sqlerrm <> 'unknown_rental' then raise; end if;
+  end;
+  raise notice 'OK: rental_add_date adopts a lone rental into a group and grows it; series and strangers are refused (0041)';
+end $$;
+
+-- Not an admin: refused before anything is looked up.
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000003","role":"authenticated"}';
+do $$
+begin
+  begin
+    perform rental_add_date(gen_random_uuid(),
+      (now() at time zone 'Europe/Prague')::date + 5, '20:00', '21:00', '{1}');
+    raise exception 'FAIL: a non-admin added a rental date';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  raise notice 'OK: rental_add_date is admin-only (0041)';
+end $$;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+
 reset role;
 do $$
 begin
@@ -2637,6 +2717,14 @@ begin
   end if;
   if has_table_privilege('anon', 'public.rental_groups', 'select') then
     raise exception 'FAIL: anon can read rental_groups';
+  end if;
+  if not has_function_privilege('authenticated',
+       'rental_add_date(uuid, date, time, time, smallint[], text)', 'execute') then
+    raise exception 'FAIL: the app cannot call rental_add_date';
+  end if;
+  if has_function_privilege('anon',
+       'rental_add_date(uuid, date, time, time, smallint[], text)', 'execute') then
+    raise exception 'FAIL: anon can call rental_add_date';
   end if;
   raise notice 'OK: rental_groups is full DML for the app, RLS decides, anon nothing (0041)';
 end $$;
