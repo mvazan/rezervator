@@ -21,6 +21,10 @@ void main() {
         'Hráč bez účtu nemůže být správce ani kiosk.');
     expect(friendlyDbError(Exception('unknown_player')),
         'Tenhle hráč už neexistuje.');
+    expect(friendlyDbError(Exception('unknown_rental')),
+        'Tenhle pronájem už neexistuje.');
+    expect(friendlyDbError(Exception('rental_group_invalid')),
+        'Termín nejde přiřadit k tomuhle pronájmu.');
     expect(friendlyDbError(Exception('something else')),
         startsWith('Něco se nepovedlo.'));
   });

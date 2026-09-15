@@ -1079,7 +1079,7 @@ void main() {
         reason: 'the row keeps its group; the update must not touch it');
   });
 
-  testWidgets('refuses a missing date and an empty lane set', (tester) async {
+  testWidgets('refuses a missing date', (tester) async {
     await open(tester, RentalDateDialog(anchor: anchor, laneCount: 3));
     await tester.tap(find.text('Uložit'));
     await tester.pump();
@@ -1090,6 +1090,8 @@ void main() {
 ```
 
 Run: `flutter test test/features/rental_date_dialog_test.dart` → Expected: chyba kompilace (soubor dialogu neexistuje).
+
+**Pozn. z realizace:** fixtury dat musí být odvozené od `today()`, ne natvrdo — okno pickeru je `[dnes−365, dnes+730]`, takže pevné datum ze sady po roce vypadne a testy zčervenají bez jakékoli změny kódu. A pojistka na prázdné dráhy potřebuje vlastní test (datum se kontroluje dřív, dráhy jsou předvyplněné z kotvy, takže v původním testu byla nedosažitelná).
 
 - [ ] **Step 2: `Api` a `friendlyDbError`**
 
