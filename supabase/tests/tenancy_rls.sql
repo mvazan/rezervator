@@ -3007,6 +3007,27 @@ begin
   raise notice 'OK: unknown and switched-off slugs give the same unknown_tenant (0043)';
 end $$;
 
+-- Anon: an enabled slug on a not-yet-approved tenant is unknown_tenant too
+-- (tenant B is still 'pending' — nobody approved it in this suite).
+reset role;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000002","role":"authenticated"}';
+select set_public_overview('kuzelna-b', true);
+reset role;
+set local role anon;
+set local request.jwt.claims = '{"role":"anon"}';
+do $$
+begin
+  begin
+    perform public_week('kuzelna-b', current_date);
+    raise exception 'FAIL: an enabled slug on a pending tenant answered';
+  exception when others then
+    if sqlerrm <> 'unknown_tenant' then raise; end if;
+  end;
+  raise notice 'OK: an enabled slug on a non-approved tenant also gives unknown_tenant (0043)';
+end $$;
+
 -- Switched on: anon reads the week — occupancy and club colour, no names.
 reset role;
 set local role authenticated;
