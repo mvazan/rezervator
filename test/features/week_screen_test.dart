@@ -507,7 +507,8 @@ void main() {
   });
 
   testWidgets('admin tap on foreign reservation opens the cancel dialog with '
-      'the notify choice', (
+      'the notify choice, naming the player — the board nick alone is not '
+      'always enough to tell who is who', (
     tester,
   ) async {
     wideSurface(tester);
@@ -520,28 +521,38 @@ void main() {
     await tester.tap(find.text('Péťa').first);
     await tester.pumpAndSettle();
     expect(find.text('Zrušit rezervaci'), findsOneWidget);
+    // 'Péťa' is the tapped nick; 'Petr Novák' is the name this dialog adds.
+    expect(find.textContaining('Petr Novák'), findsOneWidget);
     expect(find.text('Zrušit a poslat zprávu'), findsOneWidget);
     expect(find.text('Zrušit bez zprávy'), findsOneWidget);
   });
 
   testWidgets("admin cancel of a hráč bez účtu's reservation asks plainly — "
-      'nobody to message', (tester) async {
+      'nobody to message — and still names the player behind the board nick',
+      (tester) async {
     wideSurface(tester);
     await tester.pumpWidget(app(
       profile: admin,
       roster: const [
         ...players,
-        PlayerName(id: 'p3', displayName: 'Bohumil Kroupa', hasAccount: false),
+        PlayerName(
+          id: 'p3',
+          displayName: 'Bohumil Kroupa',
+          nick: 'Bob',
+          hasAccount: false,
+        ),
       ],
       reservations: [res('r3', 'p3', tomorrow)],
     ));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Bohumil Kroupa').first);
+    await tester.ensureVisible(find.text('Bob').first);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Bohumil Kroupa').first);
+    await tester.tap(find.text('Bob').first);
     await tester.pumpAndSettle();
 
     expect(find.text('Zrušit rezervaci?'), findsOneWidget);
+    // 'Bob' is the tapped nick; 'Bohumil Kroupa' is the name this dialog adds.
+    expect(find.textContaining('Bohumil Kroupa'), findsOneWidget);
     expect(find.textContaining('Hráč bez účtu se o zrušení nedozví.'),
         findsOneWidget);
     expect(find.text('Zrušit a poslat zprávu'), findsNothing);
@@ -551,7 +562,8 @@ void main() {
     expect(find.text('Zrušit rezervaci'), findsOneWidget);
   });
 
-  testWidgets('non-admin tap on foreign reservation stays inert', (
+  testWidgets('non-admin tap on foreign reservation shows the full name — '
+      'not a cancel dialog, they cannot cancel someone else\'s booking', (
     tester,
   ) async {
     wideSurface(tester);
@@ -562,6 +574,7 @@ void main() {
     await tester.tap(find.text('Péťa').first);
     await tester.pumpAndSettle();
     expect(find.byType(AlertDialog), findsNothing);
+    expect(find.text('Petr Novák'), findsOneWidget);
   });
 
   testWidgets('whole-alley match cancels the touched block for its day and '

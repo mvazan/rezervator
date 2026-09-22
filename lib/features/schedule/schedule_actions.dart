@@ -91,6 +91,7 @@ class ScheduleActions {
         onBook: onBook,
         onCancel: onCancel,
         onRental: onEditRental,
+        onInfo: onInfo,
       );
   CalendarAdminHooks get admin => CalendarAdminHooks(
         onEditBlock: onEditBlock,
@@ -108,6 +109,11 @@ class ScheduleActions {
 
   void Function(Day, TimeBlock, Reservation, {required bool ownFuture})
       get onCancel => _cancel;
+
+  /// [slot_tile.dart] only fires this where [onCancel] would not — a
+  /// signed-in player tapping someone else's reservation.
+  void Function(Day, TimeBlock, Reservation)? get onInfo =>
+      me == null ? null : (_, _, r) => _info(r);
 
   void Function(Day, TimeBlock)? get onEditBlock =>
       canEditBlocks ? _editBlock : null;
@@ -186,6 +192,23 @@ class ScheduleActions {
     );
   }
 
+  /// Full name for [playerId] — the roster the admin booking dialog already
+  /// reads. Only ever looked up right when a dialog opens (never carried on
+  /// the board's own nameById, which is deliberately the shorter nick), so
+  /// admin cancel dialogs and [_info] can name someone their board nick
+  /// alone might not identify.
+  String _displayNameOf(String playerId) {
+    for (final p in ref.read(playersProvider).value ?? const <PlayerName>[]) {
+      if (p.id == playerId) return p.displayName;
+    }
+    return '?';
+  }
+
+  /// A player taps a reservation that is not theirs and they cannot cancel:
+  /// the board only had room for a nick, so a quiet snack with the full
+  /// name is all this needs — no dialog, nothing to decide.
+  void _info(Reservation r) => snack(context, _displayNameOf(r.playerId));
+
   Future<void> _cancel(
     Day date,
     TimeBlock block,
@@ -206,7 +229,8 @@ class ScheduleActions {
       final ok = await confirmDialog(
         context,
         title: 'Zrušit rezervaci?',
-        message: '${dayFull(date)} · ${block.label} · Dráha ${r.lane}\n'
+        message: '${_displayNameOf(r.playerId)}\n'
+            '${dayFull(date)} · ${block.label} · Dráha ${r.lane}\n'
             'Hráč bez účtu se o zrušení nedozví.',
         confirmLabel: 'Zrušit rezervaci',
         cancelLabel: 'Zpět',
@@ -226,7 +250,8 @@ class ScheduleActions {
     final choice = await showNotifyChoiceDialog(
       context,
       title: 'Zrušit rezervaci',
-      summary: '${dayFull(date)} · ${block.label} · Dráha ${r.lane}',
+      summary: '${_displayNameOf(r.playerId)}\n'
+          '${dayFull(date)} · ${block.label} · Dráha ${r.lane}',
       messageLabel: 'Poznámka / důvod (nepovinné)',
       sendLabel: 'Zrušit a poslat zprávu',
       silentLabel: 'Zrušit bez zprávy',
