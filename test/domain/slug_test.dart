@@ -24,12 +24,13 @@ void main() {
 
   group('slugPattern mirrors the DB check', () {
     test('accepts', () {
+      // 'abc' is the 3-character minimum the DB check still accepts.
       for (final s in ['abc', 'kuzelna-a', 'a1-b2', 'x' * 40]) {
         expect(slugPattern.hasMatch(s), isTrue, reason: s);
       }
     });
     test('rejects', () {
-      for (final s in ['ab', '-abc', 'abc-', 'Abc', 'a_b', 'kuželna', 'x' * 41]) {
+      for (final s in ['a', 'ab', '-abc', 'abc-', 'Abc', 'a_b', 'kuželna', 'x' * 41]) {
         expect(slugPattern.hasMatch(s), isFalse, reason: s);
       }
     });

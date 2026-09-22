@@ -2888,6 +2888,14 @@ begin
   insert into clubs (tenant_id, name, color) values (v_a, 'Pub Oddíl', 5)
     returning id into v_club;
   update profiles set club_id = v_club where id = v_uid;
+  -- A day_overrides row, so the public_week key-set guard below has a first
+  -- element to check on the 'overrides' list too. Inserted BEFORE the
+  -- reservations below: the insert cascades (override_changed ->
+  -- cascade_schedule_change) and re-sweeps every future reservation of the
+  -- WHOLE tenant, not just this override's own date — done here, before any
+  -- reservation exists, it has nothing to cancel.
+  insert into day_overrides (tenant_id, date, closed, reason, created_by)
+  values (v_a, v_monday + 6, true, 'test override', v_uid);
   insert into time_blocks (tenant_id, starts_at, ends_at, position)
     values (v_a, '06:00', '06:30', 99) returning id into v_block;
   perform set_config('probe.pub_block', v_block::text, true);
@@ -2903,6 +2911,12 @@ begin
     (tenant_id, renter_name, note, lanes, date, starts_at, ends_at, created_by)
   values (v_a, 'Firma Tajná', 'tajná poznámka', '{1}', v_monday + 4,
           '05:00', '05:30', v_uid);
+  -- A weekly (weekday-based) rental, open-ended, so it always covers the
+  -- test week — exercises public_week's OTHER rentals arm (weekday is not
+  -- null) alongside the one-time rental above.
+  insert into rentals
+    (tenant_id, renter_name, note, lanes, weekday, starts_at, ends_at, created_by)
+  values (v_a, 'Firma Série', 'series poznámka', '{2}', 3, '05:00', '05:30', v_uid);
   select id into v_type from priority_slot_types
     where tenant_id = v_a and is_match and builtin;
   insert into priority_slots
@@ -2920,6 +2934,12 @@ do $$
 declare
   v jsonb;
 begin
+  begin
+    perform set_public_overview('a', false);
+    raise exception 'FAIL: a 1-character slug was accepted';
+  exception when others then
+    if sqlerrm <> 'invalid_slug' then raise; end if;
+  end;
   begin
     perform set_public_overview('Ab', false);
     raise exception 'FAIL: a 2-character slug was accepted';
@@ -3064,15 +3084,86 @@ begin
      or v->'settings'->'lane_count' is null then
     raise exception 'FAIL: the week is incomplete: %', v;
   end if;
+  -- The weekly (weekday-based) rental appears too, masked the same way as
+  -- the one-time one — public_week's OTHER rentals arm (weekday is not
+  -- null). Matched on weekday/lanes/times rather than a bare count: tenant
+  -- A already carries weekly rentals from earlier sections of this suite.
+  if not v->'rentals' @> jsonb_build_array(jsonb_build_object(
+       'weekday', 3, 'lanes', jsonb_build_array(2),
+       'starts_at', '05:00:00', 'ends_at', '05:30:00',
+       'renter_name', '', 'note', '')) then
+    raise exception 'FAIL: the weekly rental is missing or not masked like the one-time one: %', v->'rentals';
+  end if;
   if v::text like '%10000000-0000-0000-0000-000000000001%'
      or v::text like '%Hráč A%'
      or v::text like '%Firma Tajná%'
      or v::text like '%tajná poznámka%'
+     or v::text like '%Firma Série%'
+     or v::text like '%series poznámka%'
      or v::text like '%00000000-0000-0000-0000-00000000000a%'
      or v::text like '%Kuželna B%' then
     raise exception 'FAIL: public_week leaks a name, an id or another tenant: %', v;
   end if;
   raise notice 'OK: public_week shows occupancy in club colours and the matches, never a name (0043)';
+end $$;
+
+-- Key-set guard: public_week masks sensitive columns with
+-- to_jsonb(row) - 'col1' - 'col2' ... — correct today, but with no tripwire
+-- of its own. A new column added later to rentals, priority_slots,
+-- overrides, blocks, priority_slot_types or schedule_settings would
+-- silently reach anon (the Dart client ignores unknown JSON keys, and the
+-- block above only greps for specific fixture strings, not the full key
+-- set). Assert the EXACT keys of each list, so a schema change here fails
+-- loudly instead of leaking quietly.
+do $$
+declare
+  v_monday constant date := current_setting('probe.pub_monday')::date;
+  v jsonb;
+  v_keys text[];
+begin
+  v := public_week('kuzelna-a', v_monday);
+
+  v_keys := array(select jsonb_object_keys(v->'settings') order by 1);
+  if v_keys <> array['booking_horizon_days', 'kiosk_dark', 'kiosk_fit_day',
+                      'lane_count', 'max_active_reservations', 'training_weekdays'] then
+    raise exception 'FAIL: public_week''s settings keys changed — a new column may be reaching anon: %', v_keys;
+  end if;
+
+  v_keys := array(select jsonb_object_keys(v->'blocks'->0) order by 1);
+  if v_keys <> array['active', 'ends_at', 'id', 'position', 'starts_at'] then
+    raise exception 'FAIL: public_week''s blocks keys changed — a new column may be reaching anon: %', v_keys;
+  end if;
+
+  v_keys := array(select jsonb_object_keys(v->'slot_types'->0) order by 1);
+  if v_keys <> array['builtin', 'color', 'id', 'is_match', 'lanes', 'name'] then
+    raise exception 'FAIL: public_week''s slot_types keys changed — a new column may be reaching anon: %', v_keys;
+  end if;
+
+  v_keys := array(select jsonb_object_keys(v->'overrides'->0) order by 1);
+  if v_keys <> array['block_ids', 'closed', 'date', 'reason'] then
+    raise exception 'FAIL: public_week''s overrides keys changed — a new column may be reaching anon: %', v_keys;
+  end if;
+
+  v_keys := array(select jsonb_object_keys(v->'priority_slots'->0) order by 1);
+  if v_keys <> array['away_team', 'date', 'description', 'ends_at', 'hand_edited',
+                      'home_team', 'id', 'import_key', 'is_away', 'parent_id',
+                      'prep_minutes', 'starts_at', 'type_id'] then
+    raise exception 'FAIL: public_week''s priority_slots keys changed — a new column may be reaching anon: %', v_keys;
+  end if;
+
+  v_keys := array(select jsonb_object_keys(v->'rentals'->0) order by 1);
+  if v_keys <> array['color', 'date', 'ends_at', 'group_id', 'id', 'lanes', 'note',
+                      'parent_id', 'renter_name', 'skipped', 'starts_at',
+                      'valid_from', 'valid_until', 'weekday'] then
+    raise exception 'FAIL: public_week''s rentals keys changed — a new column may be reaching anon: %', v_keys;
+  end if;
+
+  v_keys := array(select jsonb_object_keys(v->'occupied'->0) order by 1);
+  if v_keys <> array['block_id', 'club_color', 'date', 'lane'] then
+    raise exception 'FAIL: public_week''s occupied keys changed — a new column may be reaching anon: %', v_keys;
+  end if;
+
+  raise notice 'OK: public_week''s key sets are exactly what''s expected — a new column on any masked table would trip this (0043)';
 end $$;
 
 reset role;

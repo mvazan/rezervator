@@ -10,7 +10,7 @@ alter table tenants add column public_slug text;
 alter table tenants add column public_enabled boolean not null default false;
 alter table tenants add constraint tenants_public_slug_key unique (public_slug);
 alter table tenants add constraint tenants_public_slug_format
-  check (public_slug ~ '^[a-z0-9]([a-z0-9-]{1,38}[a-z0-9])?$');
+  check (public_slug ~ '^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$');
 alter table tenants add constraint tenants_public_needs_slug
   check (not public_enabled or public_slug is not null);
 

@@ -2782,7 +2782,7 @@ CREATE TABLE IF NOT EXISTS "public"."tenants" (
     "public_slug" "text",
     "public_enabled" boolean DEFAULT false NOT NULL,
     CONSTRAINT "tenants_public_needs_slug" CHECK (((NOT "public_enabled") OR ("public_slug" IS NOT NULL))),
-    CONSTRAINT "tenants_public_slug_format" CHECK (("public_slug" ~ '^[a-z0-9]([a-z0-9-]{1,38}[a-z0-9])?$'::"text")),
+    CONSTRAINT "tenants_public_slug_format" CHECK (("public_slug" ~ '^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$'::"text")),
     CONSTRAINT "tenants_status_check" CHECK (("status" = ANY (ARRAY['pending'::"text", 'approved'::"text"])))
 );
 

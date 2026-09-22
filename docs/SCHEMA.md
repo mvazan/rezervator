@@ -46,7 +46,7 @@ and what cascades — and is updated with every migration.
 
 | Table | Purpose / key columns | RLS (all `tenant_id = current_tenant_id()` unless noted) |
 |---|---|---|
-| `tenants` | `name` unique, `founder_email` (only the founder can become the first admin), `status`, `approved_at` | select for `authenticated` `using (true)` **but column grants expose only `id, name, status`** — `founder_email` never leaves the server. Writes: RPC only. |
+| `tenants` | `name` unique, `founder_email` (only the founder can become the first admin), `status`, `approved_at`. **Public overview** (0043): `public_slug` unique, 3–40 lower-case letters/digits/hyphens (`tenants_public_slug_format`), `public_enabled` default off, `tenants_public_needs_slug` (can't enable without a slug) | select for `authenticated` `using (true)` **but column grants expose only `id, name, status`** — `founder_email` never leaves the server; `public_slug`/`public_enabled` are likewise outside the `authenticated` grant, read only by `public_tenant_id`/`my_public_overview`. Writes: RPC only. |
 | `profiles` | `id` (= `auth.uid()` for real accounts; no FK to `auth.users` since 0022), `display_name`, `nick` ≤ 14, `email` ('' for placeholders), `role`, `status`, `club_id → clubs`, `fcm_token`, `superadmin`, `home_tenant_id`, `approved_by/at`, `placeholder` (hand-made row: player ∧ approved ∧ not superadmin), `own_color` (0024: the colour the player picked for their own reservations in their own view, −1 = club colour, else a packed RGB — 0042 moved the picker to the Google palette + wheel, both stored as `0x1000000\|rgb`; a legacy palette index 0-11 from the 1.2.6 app still renders), `followed_teams` (≤ 20 names, the Můj přehled list — separate from the calendar's `calendar_teams`), `default_view` (`calendar` | `trainings`, what the app opens at launch); both own-row updatable (0029) | select: own row, or admin of the same tenant. update: own row, columns `display_name`, `fcm_token`, `own_color`, `followed_teams`, `default_view` only. insert/delete: RPC only. |
 | `schedule_settings` | PK `tenant_id`; `lane_count` 1–12, `training_weekdays smallint[]` (ISO 1–7), `booking_horizon_days` 1–90, `max_active_reservations` 1–50, `kiosk_dark`, `kiosk_fit_day` | select approved/kiosk; update admin. |
 | `time_blocks` | `starts_at`, `ends_at`, `position`, `active`. `position = -1` marks a day-special block: inactive, reachable only through `day_overrides.block_ids` | select approved/kiosk; insert/update/delete admin. FK from `reservations` is RESTRICT — only never-used blocks can be deleted. |
@@ -80,7 +80,8 @@ ACL). This is the only profile data the kiosk account can read. SELECT for
 
 `authenticated` has select/insert/update/delete on the app tables (policies
 decide rows), the column-restricted exceptions above, SELECT on `players`
-and `tenants(id, name, status)`. `anon` has nothing. `service_role`
+and `tenants(id, name, status)`. `anon` has nothing (the one exception:
+`execute` on `public_week`, 0043). `service_role`
 (edge functions) has everything. Default privileges are pinned (0017,
 0020) so new tables get exactly that shape on hosted and local stacks —
 note that a `drop … create` of a view re-applies the defaults, so a
