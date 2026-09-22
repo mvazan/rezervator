@@ -35,7 +35,7 @@ alter table tenants
 ```
 
 Slug: 3–40 znaků, malá písmena bez diakritiky, číslice, pomlčka uvnitř.
-Grant `select (id, name)` na `tenants` pro `authenticated` se **nerozšiřuje** —
+Grant `select (id, name, status)` na `tenants` pro `authenticated` se **nerozšiřuje** —
 nové sloupce čtou jen RPC níže.
 
 ## RPC
@@ -43,7 +43,8 @@ nové sloupce čtou jen RPC níže.
 Všechny `security definer`, `set search_path = public`.
 
 1. **`public_tenant_id(p_slug text) returns uuid`** — interní pomocník:
-   tenant se slugem **a** `public_enabled`, jinak `raise 'unknown_tenant'`.
+   tenant se slugem **a** `public_enabled` **a** `status = 'approved'`, jinak
+   `raise 'unknown_tenant'`.
    Neexistující i vypnutý slug dávají **stejnou** chybu (nejde zjistit, které
    slugy existují). `revoke all … from public, anon, authenticated`.
 
@@ -52,16 +53,20 @@ Všechny `security definer`, `set search_path = public`.
    - `tenant_name`
    - `settings` — řádek `schedule_settings` (`to_jsonb(…) - 'tenant_id'`,
      ať ho přečte existující továrna; nic citlivého v něm není)
-   - `blocks`, `overrides` (týden `p_monday … +6`), `priority_slots` (týden;
-     zápasy i blokace celé)
-   - `rentals` — platné v týdnu, s `renter_name = ''` a `note = ''`
+   - `blocks`, `slot_types` (typy blokací, bez nich se `PrioritySlot`
+     nepřečte), `overrides` a `priority_slots` (zápasy i blokace celé)
+   - `rentals` — s `renter_name = ''` a `note = ''`
+   - okno pro `overrides`, `priority_slots` a `rentals` je **neděle před až
+     pondělí po** týdnu (9 dní): denní pager na telefonu při přetažení přes
+     okraj týdne náhledem vykreslí sousední den ze stejných seznamů
+   - ze všech řádků se odstraní `tenant_id`, `created_by`, `created_at`
    - `occupied` — pole `{block_id, date, lane, club_color}` pro nezrušené
      rezervace týdne; `club_color` = `clubs.color` klubu hráče, `-1` bez
      klubu. **Žádné `player_id`, jméno ani id rezervace.**
 
    Klíče kopírují sloupce DB (`to_jsonb` řádku / výběr sloupců), aby je
    přečetly existující `fromJson` továrny. `p_monday` se normalizuje na
-   pondělí (`date_trunc('week', …)`), rozsah je vždy 7 dní.
+   pondělí (`date_trunc('week', …)`); `occupied` pokrývá vždy 7 dní týdne.
 
 3. **`set_public_overview(p_slug text, p_enabled boolean) returns void`** —
    jen správce vlastní kuželny (`is_admin()`, `current_tenant_id()`), jinak
@@ -70,9 +75,9 @@ Všechny `security definer`, `set search_path = public`.
    `slug_taken`, zapnutí bez slugu → `invalid_slug`.
    `revoke all … from public, anon`.
 
-4. **`my_public_overview() returns table(public_slug text, public_enabled
-   boolean)`** — správce čte nastavení své kuželny (jiný než admin →
-   `not_allowed`). `revoke all … from public, anon`.
+4. **`my_public_overview() returns jsonb`** — `{public_slug, public_enabled,
+   tenant_name}` kuželny správce (jiný než admin → `not_allowed`; název
+   kvůli návrhu slugu). `revoke all … from public, anon`.
 
 Pozor na default privileges z 0017: `execute` na nové funkce dostane `anon`
 automaticky — každá kromě `public_week` ho musí explicitně odebrat.
@@ -91,13 +96,17 @@ automaticky — každá kromě `public_week` ho musí explicitně odebrat.
   'pub-<block>-<date>-<lane>'`, `created_via = 'public'`; k tomu
   `nameById` → vše „Obsazeno" a `clubColorById` → `club_color` podle
   syntetického id.
+- **Sdílená tabule.** Z `WeekScreen` se vytáhne `WeekBoard` (přepínání
+  orientace: na výšku `DayPagerView`, na šířku `WeekCalendarView`) a mixin
+  `WeekNavigation` (týden/den, šipky, přetažení přes okraj týdne). Použije je
+  `WeekScreen` i veřejná stránka — veřejný přehled vypadá a ovládá se na
+  telefonu i na počítači stejně jako appka.
 - **`PublicScheduleScreen`** (`lib/features/public/public_schedule_screen.dart`):
-  drží `weekOffset`, data přes `FutureProvider.family<PublicWeek, (String,
-  Day)>`, vykreslí `WeekHeader(trailing: const [])` + `WeekCalendarView(me:
-  null, interactive: false, …)` s nečinnými `SlotCallbacks` a
-  `CalendarAdminHooks.none`. Stav načítání/chyby přes `AsyncBody`.
-  Titulek = název kuželny. Znovupoužité `buildWeekSchedule` — žádná vlastní
-  logika rozvrhu.
+  `WeekNavigation`, data přes `FutureProvider.family<PublicWeek, (String,
+  Day)>`, `WeekHeader(trailing: const [])` + `WeekBoard(me: null,
+  interactive: false, …)` s nečinnými `SlotCallbacks`. Stav načítání/chyby
+  přes `AsyncBody` (nový volitelný `errorText`). Titulek = název kuželny.
+  Znovupoužité `buildWeekSchedule` — žádná vlastní logika rozvrhu.
 - `unknown_tenant` → „Tahle kuželna veřejný přehled nemá." (na této stránce
   vlastní text místo obecného „Tahle kuželna už neexistuje.").
 - Bez realtime: stránka se načte při otevření a při přepnutí týdne; tlačítko
@@ -110,6 +119,8 @@ automaticky — každá kromě `public_week` ho musí explicitně odebrat.
 - Obsah: přepínač *Zveřejnit přehled*, pole *Adresa* (slug, s náhledem
   `rezervator.online/#/prehled/<slug>`), tlačítko **Uložit** (volá
   `set_public_overview`), po uložení se zapnutým přehledem **Kopírovat odkaz**.
+- Adresa se zobrazí a kopíruje stejným prvkem jako adresa kiosku (vytáhnout
+  `_KioskAddress` do `admin/widgets/copyable_address.dart`).
 - Kořen URL přes sdílenou logiku z `core/kiosk_url.dart` (vytáhnout
   `appRootUrl(Uri)`, kterou použije `kioskUrlFrom` i nový `publicUrlFrom(Uri,
   slug)`) — žádné kopírování.
