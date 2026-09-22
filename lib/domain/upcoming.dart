@@ -96,6 +96,26 @@ bool matchIsMine(
     exceptions[slot.id] ??
     (teams.contains(slot.homeTeam) || teams.contains(slot.awayTeam));
 
+/// The overruled matches still ahead, oldest first — the same order as the
+/// schedule, so the two never disagree about which match comes first. A
+/// played one is gone: the server refuses to change it anyway
+/// (`match_past`), so an ✕ there could only fail. One definition, so the
+/// Výjimky screen's list/sheet and Moje týmy's summary count never disagree
+/// about which exceptions are still worth mentioning.
+List<(PrioritySlot, bool)> overruledMatches(
+  List<PrioritySlot> slots,
+  Map<String, bool> exceptions,
+  Day today,
+) {
+  final byId = {for (final s in slots) s.id: s};
+  return [
+    for (final entry in exceptions.entries)
+      if (byId[entry.key] case final slot? when !slot.date.isBefore(today))
+        (slot, entry.value),
+  ]..sort((a, b) =>
+      compareDayTime(a.$1.date, a.$1.startsAt, b.$1.date, b.$1.startsAt));
+}
+
 /// Every upcoming match of the alley, chronological — what the Výjimky
 /// screen lists. Deliberately unfiltered: which of them are the player's is
 /// a per-row answer ([matchIsMine]), not a reason to leave a match out. A

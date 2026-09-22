@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../config.dart';
+import '../../../data/clock.dart';
 import '../../../data/providers.dart';
 import '../../../domain/models.dart';
+import '../../../domain/upcoming.dart';
 import '../match_exceptions_screen.dart';
 import 'my_teams_sheet.dart';
 
@@ -44,8 +46,14 @@ class MyTeamsCard extends ConsumerWidget {
     final hasCalendar = ref.watch(calendarAvailableProvider) &&
         !AppConfig.isDemoAccount(profile.email) &&
         link.isLinked;
+    // Same definition the Výjimky screen itself uses (overruledMatches) —
+    // a played match drops out of both, so the two numbers never disagree.
+    final today =
+        Day.fromDateTime(ref.watch(nowProvider).value ?? DateTime.now());
     final exceptions =
         ref.watch(myMatchExceptionsProvider).value ?? const <String, bool>{};
+    final slots = ref.watch(prioritySlotsProvider);
+    final overruledCount = overruledMatches(slots, exceptions, today).length;
     final routed = hasCalendar
         ? ref.watch(myCalendarTeamsProvider).value ?? const <CalendarTeam>[]
         : const <CalendarTeam>[];
@@ -87,9 +95,9 @@ class MyTeamsCard extends ConsumerWidget {
           ListTile(
             leading: const Icon(Icons.star_outline),
             title: const Text('Výjimky'),
-            subtitle: Text(exceptions.isEmpty
+            subtitle: Text(overruledCount == 0
                 ? 'Jednotlivé zápasy navíc nebo skryté.'
-                : _exceptionCount(exceptions.length)),
+                : _exceptionCount(overruledCount)),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const MatchExceptionsScreen()),

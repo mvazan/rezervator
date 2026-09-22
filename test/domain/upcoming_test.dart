@@ -390,6 +390,37 @@ void main() {
     });
   });
 
+  group('overruledMatches', () {
+    test('lists an exception whose match is still ahead, oldest first', () {
+      final later = match('later', today.addDays(2), const HourMinute(10, 0));
+      final soon = match('soon', today.addDays(1), const HourMinute(10, 0));
+      final out = overruledMatches(
+        [later, soon],
+        const {'later': true, 'soon': false},
+        today,
+      );
+      expect(out.map((e) => e.$1.id), ['soon', 'later']);
+      expect(out.map((e) => e.$2), [false, true]);
+    });
+
+    test('a played match drops out — the server would refuse to change it '
+        'anyway', () {
+      final past = match('past', today.addDays(-1), const HourMinute(10, 0));
+      expect(overruledMatches([past], const {'past': true}, today), isEmpty);
+    });
+
+    test('an exception whose match is no longer in the schedule drops out',
+        () {
+      expect(overruledMatches(const [], const {'pryc': true}, today), isEmpty);
+    });
+
+    test('agreeing with the teams stores nothing, so there is nothing to '
+        'list', () {
+      final m1 = match('m1', today.addDays(1), const HourMinute(10, 0));
+      expect(overruledMatches([m1], const {}, today), isEmpty);
+    });
+  });
+
   group('upcomingMatches', () {
     List<String> ids(List<PrioritySlot> slots) => [for (final s in slots) s.id];
 

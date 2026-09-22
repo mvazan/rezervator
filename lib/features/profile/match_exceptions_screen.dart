@@ -131,7 +131,7 @@ class _MatchExceptionsScreenState extends ConsumerState<MatchExceptionsScreen> {
     required bool secondary,
     required ThemeData theme,
   }) {
-    final overruled = _overruled(slots, exceptions, today);
+    final overruled = overruledMatches(slots, exceptions, today);
 
     final matches = upcomingMatches(
       slots: slots,
@@ -219,24 +219,6 @@ class _MatchExceptionsScreenState extends ConsumerState<MatchExceptionsScreen> {
     );
   }
 
-  /// The overruled matches still ahead, oldest first — the same order as the
-  /// schedule, so the two never disagree about which match comes first. A
-  /// played one is gone: the server refuses to change it anyway
-  /// (`match_past`), so an ✕ there could only fail.
-  static List<(PrioritySlot, bool)> _overruled(
-    List<PrioritySlot> slots,
-    Map<String, bool> exceptions,
-    Day today,
-  ) {
-    final byId = {for (final s in slots) s.id: s};
-    return [
-      for (final entry in exceptions.entries)
-        if (byId[entry.key] case final slot? when !slot.date.isBefore(today))
-          (slot, entry.value),
-    ]..sort((a, b) =>
-        compareDayTime(a.$1.date, a.$1.startsAt, b.$1.date, b.$1.startsAt));
-  }
-
   /// The sheet re-reads the providers itself, so an ✕ takes its row away at
   /// once; it stays open when the last one goes, saying so.
   void _openExceptions() => showModalBottomSheet<void>(
@@ -246,7 +228,7 @@ class _MatchExceptionsScreenState extends ConsumerState<MatchExceptionsScreen> {
           builder: (sheetContext, ref, _) {
             final today = Day.fromDateTime(
                 ref.watch(nowProvider).value ?? DateTime.now());
-            final overruled = _overruled(
+            final overruled = overruledMatches(
               ref.watch(prioritySlotsProvider),
               ref.watch(myMatchExceptionsProvider).value ?? const {},
               today,
