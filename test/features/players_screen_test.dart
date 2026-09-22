@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/data/providers.dart';
+import 'package:rezervator/domain/groups.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/admin/players_screen.dart';
 
@@ -50,14 +51,24 @@ void main() {
     status: ProfileStatus.pending,
   );
 
-  Widget app(List<Profile> profiles, {Size? surface}) {
+  Widget app(
+    List<Profile> profiles, {
+    Size? surface,
+    List<GroupRow> groupRows = const [],
+    Future<void> Function(String userId)? removeFromGroup,
+  }) {
     return ProviderScope(
       overrides: [
         myProfileProvider.overrideWith((ref) => Stream.value(admin)),
         profilesProvider.overrideWith((ref) => Stream.value(profiles)),
         clubsProvider.overrideWith((ref) => Stream.value(clubs)),
+        groupRowsProvider.overrideWith((ref) => Stream.value(groupRows)),
       ],
-      child: const MaterialApp(home: PlayersScreen()),
+      child: MaterialApp(
+        home: PlayersScreen(
+          removeFromGroup: removeFromGroup ?? (_) async {},
+        ),
+      ),
     );
   }
 
@@ -443,5 +454,52 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Smazat hráče?'), findsNothing);
     expect(find.text('Bohumil Kroupa'), findsOneWidget);
+  });
+
+  testWidgets(
+      'a group mate is named in the subtitle and the admin can remove them '
+      'from the group; a player outside any group has no such menu item',
+      (tester) async {
+    String? removedId;
+    await tester.pumpWidget(app(
+      [
+        admin,
+        player('p1', 'Adam', clubId: 'c1'),
+        player('p2', 'Blanka', clubId: 'c1'),
+        player('p3', 'Cyril', clubId: 'c1'),
+      ],
+      groupRows: const [
+        GroupRow(groupId: 'g1', userId: 'p1', status: GroupStatus.member),
+        GroupRow(groupId: 'g1', userId: 'p2', status: GroupStatus.member),
+      ],
+      removeFromGroup: (id) async => removedId = id,
+    ));
+    await tester.pumpAndSettle();
+
+    // p1's subtitle names their group mate.
+    expect(find.textContaining('skupina: Blanka'), findsOneWidget);
+
+    // p1 (in a group) offers to remove them from it.
+    await tester.tap(menuOf('Adam'));
+    await tester.pumpAndSettle();
+    expect(find.text('Odebrat ze skupiny'), findsOneWidget);
+
+    await tester.tap(find.text('Odebrat ze skupiny'));
+    await tester.pumpAndSettle();
+    expect(find.text('Odebrat ze skupiny?'), findsOneWidget);
+    expect(
+      find.text(
+          'Adam přestane rezervovat za ostatní ve skupině a oni za něj.'),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.text('Odebrat'));
+    await tester.pumpAndSettle();
+    expect(removedId, 'p1');
+
+    // p3 (outside any group) has no such menu item.
+    await tester.tap(menuOf('Cyril'));
+    await tester.pumpAndSettle();
+    expect(find.text('Odebrat ze skupiny'), findsNothing);
   });
 }

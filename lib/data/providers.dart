@@ -17,6 +17,7 @@ import 'optimistic.dart';
 
 import '../config.dart';
 import '../domain/collation.dart';
+import '../domain/groups.dart';
 import '../domain/models.dart';
 import '../domain/public_week.dart';
 
@@ -86,6 +87,28 @@ final myMatchExceptionsProvider = StreamProvider<Map<String, bool>>((ref) {
             for (final row in rows)
               row['match_id'] as String: row['shown'] as bool? ?? true,
           });
+});
+
+/// Rows of `player_group_members` (0044) the caller may see: their own
+/// group and invites, or — for an admin — the whole alley's. Written only
+/// through the group_* RPCs.
+final groupRowsProvider = StreamProvider<List<GroupRow>>((ref) {
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return Stream.value(const []);
+  return cachedRows(
+          uid,
+          cacheKeyGroups,
+          () => _db
+              .from('player_group_members')
+              .stream(primaryKey: ['group_id', 'user_id']))
+      .map((rows) => rows.map(GroupRow.fromJson).toList());
+});
+
+/// The signed-in player's group, pending invites included.
+final myGroupProvider = Provider<MyGroup>((ref) {
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return MyGroup.none;
+  return myGroupOf(ref.watch(groupRowsProvider).value ?? const [], uid);
 });
 
 /// Alley configuration singleton (null until the backend is seeded).
@@ -966,6 +989,20 @@ class Api {
             params: {'p_match': matchId, 'p_shown': shown}),
       );
 
+  // --- skupiny hráčů (0044) ---
+  static Future<void> groupInvite(String userId) =>
+      _db.rpc('group_invite', params: {'p_user': userId});
+  static Future<void> groupAccept(String groupId) =>
+      _db.rpc('group_accept', params: {'p_group': groupId});
+  static Future<void> groupDecline(String groupId) =>
+      _db.rpc('group_decline', params: {'p_group': groupId});
+  static Future<void> groupLeave() => _db.rpc('group_leave');
+  static Future<void> groupCancelInvite(String groupId, String userId) =>
+      _db.rpc('group_cancel_invite',
+          params: {'p_group': groupId, 'p_user': userId});
+  static Future<void> groupRemoveMember(String userId) =>
+      _db.rpc('group_remove_member', params: {'p_user': userId});
+
   /// The public board of one alley (0043). Anyone may call it — signed in or
   /// not — and the slug picks the alley; `unknown_tenant` when it is unknown
   /// or switched off.
@@ -1440,6 +1477,7 @@ void resetTenantScopedProviders(WidgetRef ref) {
   ref.invalidate(myCalendarTeamsProvider);
   ref.invalidate(myTeamColorsProvider);
   ref.invalidate(myMatchExceptionsProvider);
+  ref.invalidate(groupRowsProvider);
   ref.invalidate(playersProvider);
   ref.invalidate(tenantsProvider);
   ref.invalidate(myTenantStatusProvider);

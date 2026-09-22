@@ -10,6 +10,7 @@ import 'changelog.dart';
 import 'widgets/reservation_color_picker.dart';
 import 'widgets/appearance_card.dart';
 import 'widgets/calendar_link_card.dart';
+import 'widgets/my_group_card.dart';
 import 'widgets/my_teams_card.dart';
 import 'widgets/reminders_sheet.dart';
 
@@ -222,6 +223,8 @@ class ProfileScreen extends ConsumerWidget {
                   setCalendarTeams: setCalendarTeams,
                   setTeamColors: setTeamColors,
                 ),
+                const SizedBox(height: 16),
+                MyGroupCard(meId: profile.id),
                 const SizedBox(height: 16),
                 // Reminders of one's own (0040): the app says what is
                 // coming, for the player who has no Google calendar — or

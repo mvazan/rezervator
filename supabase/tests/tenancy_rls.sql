@@ -1721,7 +1721,7 @@ declare
     'profiles', 'schedule_settings', 'clubs', 'time_blocks', 'app_config',
     'google_calendar_links', 'calendar_teams', 'team_colors', 'reservations',
     'day_overrides', 'priority_slot_types', 'priority_slots', 'rentals',
-    'match_exceptions'
+    'match_exceptions', 'player_group_members'
   ];
   v_missing text[];
 begin
@@ -3164,6 +3164,412 @@ begin
   end if;
 
   raise notice 'OK: public_week''s key sets are exactly what''s expected — a new column on any masked table would trip this (0043)';
+end $$;
+
+-- 0044 skupiny hráčů -------------------------------------------------------
+reset role;
+-- Fixtures: four approved players in tenant A (no auth.users stub needed
+-- since 0022), a placeholder, one player in tenant B, a block of their own
+-- at 07:00 and a week open every day with a cap of 2.
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+  v_block uuid;
+begin
+  insert into profiles (id, tenant_id, display_name, email, role, status)
+  values
+    ('20000000-0000-0000-0000-000000000001', v_a, 'Petr', 'p1@example.com', 'player', 'approved'),
+    ('20000000-0000-0000-0000-000000000002', v_a, 'Jana', 'p2@example.com', 'player', 'approved'),
+    ('20000000-0000-0000-0000-000000000003', v_a, 'Karel', 'p3@example.com', 'player', 'approved'),
+    ('20000000-0000-0000-0000-000000000004', v_a, 'Lenka', 'p4@example.com', 'player', 'approved'),
+    ('20000000-0000-0000-0000-0000000000b1', '00000000-0000-0000-0000-000000000002',
+     'Cizí', 'q@example.com', 'player', 'approved');
+  insert into profiles (id, tenant_id, display_name, role, status, placeholder)
+  values ('20000000-0000-0000-0000-000000000005', v_a, 'Bez účtu', 'player', 'approved', true);
+  update schedule_settings
+     set training_weekdays = '{1,2,3,4,5,6,7}', max_active_reservations = 2
+   where tenant_id = v_a;
+  -- An earlier block closes this week's Sunday; the next three days must
+  -- simply be open here.
+  delete from day_overrides
+   where tenant_id = v_a and date between v_today + 1 and v_today + 3;
+  insert into time_blocks (tenant_id, starts_at, ends_at, position)
+    values (v_a, '07:00', '07:30', 97) returning id into v_block;
+  perform set_config('probe.grp_block', v_block::text, true);
+end $$;
+
+do $$
+begin
+  if has_table_privilege('authenticated', 'public.player_groups', 'select')
+     or has_table_privilege('anon', 'public.player_groups', 'select') then
+    raise exception 'FAIL: player_groups is readable by the client';
+  end if;
+  if not has_table_privilege('authenticated', 'public.player_group_members', 'select')
+     or has_table_privilege('authenticated', 'public.player_group_members', 'insert')
+     or has_table_privilege('authenticated', 'public.player_group_members', 'update')
+     or has_table_privilege('authenticated', 'public.player_group_members', 'delete')
+     or has_table_privilege('anon', 'public.player_group_members', 'select') then
+    raise exception 'FAIL: player_group_members must be select-only for the app, nothing for anon';
+  end if;
+  if has_function_privilege('authenticated', 'same_group(uuid, uuid)', 'execute')
+     or has_function_privilege('authenticated', '_group_drop_member(uuid, uuid)', 'execute')
+     or has_function_privilege('anon', 'group_invite(uuid)', 'execute')
+     or has_function_privilege('anon', 'my_group_id()', 'execute') then
+    raise exception 'FAIL: an internal group function is callable from the app, or one is open to anon';
+  end if;
+  if not (has_function_privilege('authenticated', 'group_invite(uuid)', 'execute')
+      and has_function_privilege('authenticated', 'group_accept(uuid)', 'execute')
+      and has_function_privilege('authenticated', 'group_decline(uuid)', 'execute')
+      and has_function_privilege('authenticated', 'group_leave()', 'execute')
+      and has_function_privilege('authenticated', 'group_cancel_invite(uuid, uuid)', 'execute')
+      and has_function_privilege('authenticated', 'group_remove_member(uuid)', 'execute')
+      and has_function_privilege('authenticated', 'my_group_id()', 'execute')) then
+    raise exception 'FAIL: the app cannot call the group RPCs';
+  end if;
+  if not exists (select 1 from pg_trigger
+                 where tgname = 'notify_player_group_members' and not tgisinternal) then
+    raise exception 'FAIL: no webhook on player_group_members';
+  end if;
+  raise notice 'OK: groups are RPC-written, select-only through RLS, anon nothing (0044)';
+end $$;
+
+-- Petr invites Jana: the group is born with Petr in it.
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"20000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+begin
+  perform group_invite('20000000-0000-0000-0000-000000000002');
+  begin
+    perform group_invite('20000000-0000-0000-0000-000000000002');
+    raise exception 'FAIL: a second invite went through';
+  exception when others then
+    if sqlerrm <> 'already_invited' then raise; end if;
+  end;
+  begin
+    perform group_invite('20000000-0000-0000-0000-000000000005');
+    raise exception 'FAIL: a player without an account was invited';
+  exception when others then
+    if sqlerrm <> 'unknown_player' then raise; end if;
+  end;
+  begin
+    perform group_invite('10000000-0000-0000-0000-000000000006');
+    raise exception 'FAIL: the kiosk was invited';
+  exception when others then
+    if sqlerrm <> 'unknown_player' then raise; end if;
+  end;
+  begin
+    perform group_invite('20000000-0000-0000-0000-0000000000b1');
+    raise exception 'FAIL: a player of another alley was invited';
+  exception when others then
+    if sqlerrm <> 'unknown_player' then raise; end if;
+  end;
+  begin
+    perform group_invite('20000000-0000-0000-0000-000000000001');
+    raise exception 'FAIL: Petr invited himself';
+  exception when others then
+    if sqlerrm <> 'unknown_player' then raise; end if;
+  end;
+  if (select count(*) from player_group_members) <> 2 then
+    raise exception 'FAIL: Petr should see his own row and Jana''s invite';
+  end if;
+  raise notice 'OK: an invite founds the group; nobody outside the alley''s approved account holders can be invited (0044)';
+end $$;
+
+-- Jana before accepting: sees her invite, may not book for Petr. Karel
+-- (not involved) sees nothing.
+reset role;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"20000000-0000-0000-0000-000000000002","role":"authenticated"}';
+do $$
+begin
+  if (select count(*) from player_group_members
+      where user_id = '20000000-0000-0000-0000-000000000002' and status = 'invited') <> 1 then
+    raise exception 'FAIL: Jana does not see her invite';
+  end if;
+  begin
+    perform create_reservation('20000000-0000-0000-0000-000000000001',
+      (now() at time zone 'Europe/Prague')::date + 1,
+      current_setting('probe.grp_block')::uuid, 1::smallint);
+    raise exception 'FAIL: an invitee booked for the group before accepting';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+end $$;
+reset role;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"20000000-0000-0000-0000-000000000003","role":"authenticated"}';
+do $$
+begin
+  if exists (select 1 from player_group_members) then
+    raise exception 'FAIL: Karel sees a group he has nothing to do with';
+  end if;
+  raise notice 'OK: an invite gives no power until accepted, and outsiders see nothing (0044)';
+end $$;
+
+-- Jana accepts.
+reset role;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"20000000-0000-0000-0000-000000000002","role":"authenticated"}';
+select group_accept((select group_id from player_group_members
+                     where user_id = '20000000-0000-0000-0000-000000000002'));
+
+-- Karel founds his own group (invites Lenka), Petr invites Karel too:
+-- Karel cannot accept a second group.
+reset role;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"20000000-0000-0000-0000-000000000003","role":"authenticated"}';
+select group_invite('20000000-0000-0000-0000-000000000004');
+reset role;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"20000000-0000-0000-0000-000000000001","role":"authenticated"}';
+select group_invite('20000000-0000-0000-0000-000000000003');
+reset role;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"20000000-0000-0000-0000-000000000003","role":"authenticated"}';
+do $$
+declare
+  v_petr_group uuid;
+begin
+  select group_id into v_petr_group from player_group_members
+   where user_id = '20000000-0000-0000-0000-000000000003' and status = 'invited';
+  begin
+    perform group_accept(v_petr_group);
+    raise exception 'FAIL: Karel joined a second group';
+  exception when others then
+    if sqlerrm <> 'already_in_group' then raise; end if;
+  end;
+  perform group_decline(v_petr_group);
+  begin
+    perform group_decline(v_petr_group);
+    raise exception 'FAIL: a declined invite declined twice';
+  exception when others then
+    if sqlerrm <> 'unknown_invite' then raise; end if;
+  end;
+  raise notice 'OK: one group per player; an invite can be declined once (0044)';
+end $$;
+
+reset role;
+do $$
+begin
+  if not same_group('20000000-0000-0000-0000-000000000001',
+                    '20000000-0000-0000-0000-000000000002')
+     or same_group('20000000-0000-0000-0000-000000000001',
+                   '20000000-0000-0000-0000-000000000003') then
+    raise exception 'FAIL: same_group is wrong';
+  end if;
+end $$;
+
+-- Petr books for Jana: the group branch, Jana's cap, not Petr's.
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"20000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+declare
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+  v_block constant uuid := current_setting('probe.grp_block')::uuid;
+  v_res reservations;
+begin
+  select * into v_res from create_reservation(
+    '20000000-0000-0000-0000-000000000002', v_today + 1, v_block, 1::smallint);
+  if v_res.created_via <> 'group'
+     or v_res.created_by <> '20000000-0000-0000-0000-000000000001' then
+    raise exception 'FAIL: a group booking is not marked as one: %', v_res;
+  end if;
+  perform set_config('probe.grp_res', v_res.id::text, true);
+  perform create_reservation(
+    '20000000-0000-0000-0000-000000000002', v_today + 2, v_block, 1::smallint);
+  begin
+    perform create_reservation(
+      '20000000-0000-0000-0000-000000000002', v_today + 3, v_block, 1::smallint);
+    raise exception 'FAIL: Jana''s cap did not hold for a group booking';
+  exception when others then
+    if sqlerrm <> 'member_at_limit' then raise; end if;
+  end;
+  -- Petr's own cap is untouched by Jana's two.
+  perform create_reservation(
+    '20000000-0000-0000-0000-000000000001', v_today + 3, v_block, 2::smallint);
+  raise notice 'OK: a member books for a member under the member''s own cap (0044)';
+end $$;
+
+-- Cancelling: Petr cancels Jana's future one; a started one is too late;
+-- Karel (another group) may not.
+reset role;
+insert into reservations (tenant_id, player_id, date, block_id, lane,
+                          created_via, created_by)
+values ('00000000-0000-0000-0000-00000000000a',
+        '20000000-0000-0000-0000-000000000002',
+        (now() at time zone 'Europe/Prague')::date - 1,
+        current_setting('probe.grp_block')::uuid, 3, 'app',
+        '20000000-0000-0000-0000-000000000002')
+returning set_config('probe.grp_past', id::text, true);
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"20000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+begin
+  perform cancel_reservation(current_setting('probe.grp_res')::uuid);
+  begin
+    perform cancel_reservation(current_setting('probe.grp_past')::uuid);
+    raise exception 'FAIL: a started training was cancelled by a member';
+  exception when others then
+    if sqlerrm <> 'too_late' then raise; end if;
+  end;
+end $$;
+reset role;
+do $$
+declare
+  v_res reservations;
+begin
+  select * into v_res from reservations
+   where id = current_setting('probe.grp_res')::uuid;
+  if v_res.cancelled_via <> 'group'
+     or v_res.cancelled_by <> '20000000-0000-0000-0000-000000000001' then
+    raise exception 'FAIL: a group cancel is not marked as one: %', v_res;
+  end if;
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"20000000-0000-0000-0000-000000000003","role":"authenticated"}';
+do $$
+begin
+  begin
+    perform cancel_reservation((select id from reservations
+      where player_id = '20000000-0000-0000-0000-000000000002'
+        and cancelled_at is null
+        and date = (now() at time zone 'Europe/Prague')::date + 2));
+    raise exception 'FAIL: an outsider cancelled a member''s training';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  raise notice 'OK: a member cancels a member''s training until it starts, an outsider never (0044)';
+end $$;
+
+-- group_cancel_invite requires membership in THAT group: Jana (still in
+-- Petr's group at this point) may not withdraw Karel's pending invite to
+-- Lenka, even though she is in a group of her own.
+reset role;
+do $$
+declare
+  v_karel_group uuid;
+begin
+  select group_id into v_karel_group from player_group_members
+   where user_id = '20000000-0000-0000-0000-000000000003' and status = 'member';
+  perform set_config('probe.grp_karel', v_karel_group::text, true);
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"20000000-0000-0000-0000-000000000002","role":"authenticated"}';
+do $$
+begin
+  begin
+    perform group_cancel_invite(current_setting('probe.grp_karel')::uuid,
+      '20000000-0000-0000-0000-000000000004');
+    raise exception 'FAIL: an outsider withdrew another group''s invite';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+end $$;
+reset role;
+do $$
+begin
+  if not exists (select 1 from player_group_members
+                 where group_id = current_setting('probe.grp_karel')::uuid
+                   and user_id = '20000000-0000-0000-0000-000000000004'
+                   and status = 'invited') then
+    raise exception 'FAIL: the refused cancel still removed Karel''s invite to Lenka';
+  end if;
+  raise notice 'OK: group_cancel_invite refuses a non-member with not_allowed, invite untouched (0044)';
+end $$;
+
+-- Leaving: Jana leaves (group stays with Petr); Petr withdraws an invite,
+-- then leaves — the group is gone.
+reset role;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"20000000-0000-0000-0000-000000000002","role":"authenticated"}';
+select group_leave();
+reset role;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"20000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+declare
+  v_group uuid := my_group_id();
+begin
+  if v_group is null then
+    raise exception 'FAIL: the group went with Jana although Petr is still in it';
+  end if;
+  perform set_config('probe.grp_petr', v_group::text, true);
+  perform group_invite('20000000-0000-0000-0000-000000000004');
+  perform group_cancel_invite(v_group, '20000000-0000-0000-0000-000000000004');
+  if exists (select 1 from player_group_members
+             where group_id = v_group and user_id = '20000000-0000-0000-0000-000000000004') then
+    raise exception 'FAIL: a withdrawn invite is still there';
+  end if;
+  perform group_invite('20000000-0000-0000-0000-000000000004');
+  perform group_leave();
+end $$;
+reset role;
+do $$
+begin
+  if exists (select 1 from player_groups
+             where id = current_setting('probe.grp_petr')::uuid)
+     or exists (select 1 from player_group_members
+                where group_id = current_setting('probe.grp_petr')::uuid) then
+    raise exception 'FAIL: the last member left and the group (or its invite) stayed';
+  end if;
+  raise notice 'OK: leaving keeps the group while anyone is in it, the last one takes it away (0044)';
+end $$;
+
+-- The admin: sees Karel's group, removes Karel; the other alley's admin
+-- sees nothing and may not.
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"20000000-0000-0000-0000-000000000004","role":"authenticated"}';
+select group_accept((select group_id from player_group_members
+                     where user_id = '20000000-0000-0000-0000-000000000004'
+                       and status = 'invited'));
+reset role;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000002","role":"authenticated"}';
+do $$
+begin
+  if exists (select 1 from player_group_members) then
+    raise exception 'FAIL: another alley''s admin sees our groups';
+  end if;
+  begin
+    perform group_remove_member('20000000-0000-0000-0000-000000000003');
+    raise exception 'FAIL: another alley''s admin removed our player';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+end $$;
+reset role;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+begin
+  if (select count(*) from player_group_members
+      where user_id in ('20000000-0000-0000-0000-000000000003',
+                        '20000000-0000-0000-0000-000000000004')) <> 2 then
+    raise exception 'FAIL: the admin does not see the alley''s group';
+  end if;
+  perform group_remove_member('20000000-0000-0000-0000-000000000003');
+  if exists (select 1 from player_group_members
+             where user_id = '20000000-0000-0000-0000-000000000003') then
+    raise exception 'FAIL: the admin could not remove Karel';
+  end if;
+  raise notice 'OK: the admin sees and prunes the alley''s groups, a foreign admin neither (0044)';
 end $$;
 
 reset role;

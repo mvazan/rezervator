@@ -13,6 +13,7 @@ class SlotCallbacks {
     required this.onCancel,
     this.onRental,
     this.onInfo,
+    this.groupMateIds = const {},
   });
 
   final void Function(Day date, TimeBlock block, int lane) onBook;
@@ -37,6 +38,11 @@ class SlotCallbacks {
   /// signed-in player, e.g. the kiosk), which never calls this either.
   final void Function(Day date, TimeBlock block, Reservation reservation)?
       onInfo;
+
+  /// Group mates (0044) whose reservations the signed-in player may book
+  /// and cancel as their own. Empty outside a group, for admins it does not
+  /// matter (they may anything), the kiosk never sets it.
+  final Set<String> groupMateIds;
 }
 
 /// The calendar boards' admin gestures — every hook optional (null = not

@@ -3,13 +3,20 @@
 // Triggered by Supabase Database Webhooks (triggers in 0001_schema.sql) on:
 //   INSERT profiles      -> "new player waiting for approval" (to admins)
 //   INSERT reservations  -> kiosk booking confirmation (to the player;
-//                           the e-mail variant carries a one-click cancel link)
+//                           the e-mail variant carries a one-click cancel link);
+//                           or, created_via = 'group' (0044), "X ti
+//                           zarezervoval(a) trénink" to the player it's for
 //   UPDATE reservations  -> admin cancelled an upcoming reservation, or an
 //                           admin MOVED it ("termín přesunut z X na Y") —
 //                           both honour the per-change notify_player flag +
-//                           optional notify_message the RPCs stamp (0011)
+//                           optional notify_message the RPCs stamp (0011);
+//                           or, cancelled_via = 'group' (0044), "X ti zrušil(a)
+//                           trénink" to the player it was for
 //   INSERT tenants       -> "new kuželna waiting for approval" (to the
 //                           superadmins — trigger added in 0014)
+//   INSERT/UPDATE player_group_members -> player-group notifications (0044):
+//                           an invite (to the invitee), and a new member
+//                           joining (to the rest of the group)
 //   CRON notification_jobs -> deferred jobs (0023): Google Calendar sync —
 //                           the one branch that talks to the Calendar API
 //                           instead of FCM/Resend. Posted by the minutely
@@ -32,6 +39,12 @@ import { createClient } from "@supabase/supabase-js";
 import { pragueEpoch, pragueToday, signCancelToken } from "../_shared/cancel_token.ts";
 import { firebaseConfigured, sendPush } from "../_shared/fcm.ts";
 import { dayLabel, escapeHtml, leadLabel, timeLabel } from "../_shared/format.ts";
+import {
+  groupBookedMessage,
+  groupCancelledMessage,
+  groupInviteMessage,
+  groupJoinedMessage,
+} from "../_shared/group_messages.ts";
 import {
   clearSecondaryCalendar,
   deleteEvent,
@@ -518,6 +531,14 @@ async function reservationContext(record: Record<string, unknown>) {
   return { player: player as Recipient & { display_name: string }, block, when };
 }
 
+/// One profile as a notification recipient (and its name for the text).
+async function profileOf(id: unknown) {
+  if (id == null) return null;
+  const { data } = await supabase.from("profiles")
+    .select("id, email, fcm_token, display_name").eq("id", id).maybeSingle();
+  return data as (Recipient & { display_name: string }) | null;
+}
+
 /// 'po 13.7. 17:30–18:30, dráha 2' for the OLD side of a move — the block
 /// row still exists (moves only retarget block_id), so a plain lookup works.
 async function whenLabel(record: Record<string, unknown>): Promise<string | null> {
@@ -595,6 +616,18 @@ async function handle(payload: WebhookPayload) {
 
     case "reservations": {
       if (payload.type === "INSERT") {
+        if (record.created_via === "group") {
+          const [ctx, by] = await Promise.all([
+            reservationContext(record),
+            profileOf(record.created_by),
+          ]);
+          if (!ctx || !by) return;
+          const m = groupBookedMessage(by.display_name, ctx.when);
+          await notifyRecipient(ctx.player, m.title, m.body, {
+            data: { kind: "group_booking", reservation_id: String(record.id) },
+          });
+          return;
+        }
         if (record.created_via !== "kiosk") return;
         const ctx = await reservationContext(record);
         if (!ctx) return;
@@ -643,6 +676,19 @@ async function handle(payload: WebhookPayload) {
 
         // ADMIN CANCEL of an upcoming reservation.
         if (record.cancelled_at != null) {
+          if (record.cancelled_via === "group") {
+            if ((record.date as string) < pragueToday()) return;
+            const [ctx, by] = await Promise.all([
+              reservationContext(record),
+              profileOf(record.cancelled_by),
+            ]);
+            if (!ctx || !by) return;
+            const m = groupCancelledMessage(by.display_name, ctx.when);
+            await notifyRecipient(ctx.player, m.title, m.body, {
+              data: { kind: "group_cancelled" },
+            });
+            return;
+          }
           if (record.cancelled_via !== "admin") return;
           if (!wantsNotify) return;
           // Retro no-show cancels (past dates) stay silent.
@@ -695,6 +741,42 @@ async function handle(payload: WebhookPayload) {
           },
         );
         return;
+      }
+      return;
+    }
+
+    case "player_group_members": {
+      // Invite → the invitee. Accept (invited → member) → everyone else in
+      // the group. The founder's own INSERT (status member) says nothing.
+      if (payload.type === "INSERT" && record.status === "invited") {
+        const [invitee, inviter] = await Promise.all([
+          profileOf(record.user_id),
+          profileOf(record.invited_by),
+        ]);
+        if (!invitee || !inviter) return;
+        const m = groupInviteMessage(inviter.display_name);
+        await notifyRecipient(invitee, m.title, m.body, {
+          data: { kind: "group_invite" },
+        });
+        return;
+      }
+      const old = payload.old_record ?? {};
+      if (payload.type === "UPDATE" && old.status === "invited" &&
+          record.status === "member") {
+        const joiner = await profileOf(record.user_id);
+        if (!joiner) return;
+        const { data: others } = await supabase.from("player_group_members")
+          .select("user_id").eq("group_id", record.group_id)
+          .eq("status", "member").neq("user_id", record.user_id);
+        const m = groupJoinedMessage(joiner.display_name);
+        for (const row of (others ?? []) as { user_id: string }[]) {
+          const recipient = await profileOf(row.user_id);
+          if (recipient) {
+            await notifyRecipient(recipient, m.title, m.body, {
+              data: { kind: "group_joined" },
+            });
+          }
+        }
       }
       return;
     }

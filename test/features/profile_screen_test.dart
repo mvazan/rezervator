@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/data/providers.dart';
+import 'package:rezervator/domain/groups.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/profile/profile_screen.dart';
 import 'package:rezervator/domain/palette.dart';
@@ -105,6 +106,7 @@ void main() {
         myTeamColorsProvider.overrideWith((ref) => Stream.value(teamColors)),
         myMatchExceptionsProvider.overrideWith((ref) => Stream.value(exceptions)),
         prioritySlotsProvider.overrideWithValue(matches),
+        myGroupProvider.overrideWithValue(MyGroup.none),
       ],
       child: MaterialApp(
         home: ProfileScreen(
@@ -177,7 +179,9 @@ void main() {
   });
 
   testWidgets('shows a logout action', (tester) async {
-    tester.view.physicalSize = const Size(800, 1600);
+    // Tall enough for Odhlásit se to land inside ListView's build+cache
+    // window without scrolling — Moje skupina (0044) added a card above it.
+    tester.view.physicalSize = const Size(800, 2200);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -191,7 +195,9 @@ void main() {
   testWidgets('tapping logout asks for confirmation before signing out', (
     tester,
   ) async {
-    tester.view.physicalSize = const Size(800, 1600);
+    // Tall enough for Odhlásit se to land inside ListView's build+cache
+    // window without scrolling — Moje skupina (0044) added a card above it.
+    tester.view.physicalSize = const Size(800, 2200);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -211,7 +217,9 @@ void main() {
       '(the pushed screen must not linger above the login gate)', (
     tester,
   ) async {
-    tester.view.physicalSize = const Size(800, 1600);
+    // Tall enough for Odhlásit se to land inside ListView's build+cache
+    // window without scrolling — Moje skupina (0044) added a card above it.
+    tester.view.physicalSize = const Size(800, 2200);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -219,7 +227,10 @@ void main() {
 
     await tester.pumpWidget(
       ProviderScope(
-        overrides: [myProfileProvider.overrideWith((ref) => Stream.value(me))],
+        overrides: [
+          myProfileProvider.overrideWith((ref) => Stream.value(me)),
+          myGroupProvider.overrideWithValue(MyGroup.none),
+        ],
         child: MaterialApp(
           home: Builder(
             builder: (context) => Scaffold(
@@ -684,6 +695,7 @@ void main() {
           ),
           myTeamColorsProvider.overrideWith((ref) => Stream.value(colors)),
           prioritySlotsProvider.overrideWithValue(matches),
+          myGroupProvider.overrideWithValue(MyGroup.none),
         ],
         child: MaterialApp(
           home: Scaffold(

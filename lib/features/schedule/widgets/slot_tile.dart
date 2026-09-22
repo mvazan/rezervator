@@ -425,7 +425,12 @@ Widget slotTileFor({
       // non-admin may only cancel their own not-yet-started one.
       final cancellable = interactive &&
           me != null &&
-          canCancel(state: state, myPlayerId: me.id, isAdmin: me.isAdmin);
+          canCancel(
+            state: state,
+            myPlayerId: me.id,
+            isAdmin: me.isAdmin,
+            groupMateIds: slot.groupMateIds,
+          );
       // A reservation someone else cannot cancel is not necessarily one
       // they should learn nothing from: the board nick can be too short to
       // say who is who. "Mine" is excluded — that cell is already marked
@@ -456,6 +461,7 @@ Widget slotTileFor({
             myActiveCount: myCount,
             settings: settings,
             isAdmin: isAdmin,
+            forGroup: slot.groupMateIds.isNotEmpty,
           );
       // Cells only bookable through the admin exemption (inPast or
       // beyondHorizon, which a regular player could never book) render the

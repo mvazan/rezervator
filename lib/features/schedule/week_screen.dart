@@ -48,6 +48,7 @@ class _WeekScreenState extends ConsumerState<WeekScreen> with WeekNavigation {
     final rentals = ref.watch(rentalsProvider).value ?? const [];
     final me = ref.watch(myProfileProvider).value;
     final mine = ref.watch(myActiveReservationsProvider).value ?? const [];
+    final group = ref.watch(myGroupProvider);
 
     final header = WeekHeader(
       monday: monday,
@@ -127,6 +128,7 @@ class _WeekScreenState extends ConsumerState<WeekScreen> with WeekNavigation {
       me: me,
       canEditBlocks: canEditBlocks,
       noAccountIds: wv.noAccountIds,
+      groupMateIds: me == null ? const {} : group.matesOf(me.id),
     );
 
     return Column(
