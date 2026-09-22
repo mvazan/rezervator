@@ -120,6 +120,11 @@ String friendlyDbError(Object error) {
     'rental_group_invalid': 'Termín nejde přiřadit k tomuhle pronájmu.',
     'unknown_match': 'Tenhle zápas už v rozpisu není.',
     'match_past': 'Tenhle zápas už byl.',
+    'member_at_limit': 'Člen skupiny už má maximální počet rezervací.',
+    'already_member': 'Už je ve tvé skupině.',
+    'already_invited': 'Pozvánku už má — čeká se, až ji přijme.',
+    'unknown_invite': 'Tahle pozvánka už neplatí.',
+    'already_in_group': 'Už jsi v jiné skupině — nejdřív z ní odejdi.',
     'invalid_slug': 'Adresa smí mít 3–40 znaků: malá písmena, číslice a pomlčky.',
     'slug_taken': 'Tuhle adresu už má jiná kuželna.',
   };

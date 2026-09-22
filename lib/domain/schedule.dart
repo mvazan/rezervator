@@ -490,31 +490,38 @@ bool atReservationLimit(int activeCount, ScheduleSettings settings) =>
 
 /// Client-side mirror of create_reservation's rules — honest UI only,
 /// the RPC remains the authority.
+///
+/// [forGroup]: the caller may book for a group mate (0044), whose own cap
+/// the server checks — the caller's full cap then no longer closes the cell.
 bool canBook({
   required SlotState state,
   required int myActiveCount,
   required ScheduleSettings settings,
   bool isAdmin = false,
+  bool forGroup = false,
 }) {
   if (state is! FreeSlot) return false;
   if (isAdmin) return true;
   return !state.inPast &&
       !state.beyondHorizon &&
-      !atReservationLimit(myActiveCount, settings);
+      (forGroup || !atReservationLimit(myActiveCount, settings));
 }
 
-/// Own reservation whose block has not started yet may be cancelled in-app;
-/// an admin may cancel ANY reservation (own or foreign, past or future).
+/// Own reservation — or a group mate's (0044) — whose block has not started
+/// yet may be cancelled in-app; an admin may cancel ANY reservation.
 /// Client-side mirror of the cancel RPC's rules — honest UI only, the RPC
 /// remains the authority.
 bool canCancel({
   required SlotState state,
   required String myPlayerId,
   bool isAdmin = false,
+  Set<String> groupMateIds = const {},
 }) {
   if (state is! ReservedSlot) return false;
   if (isAdmin) return true;
-  return !state.inPast && state.reservation.playerId == myPlayerId;
+  final owner = state.reservation.playerId;
+  return !state.inPast &&
+      (owner == myPlayerId || groupMateIds.contains(owner));
 }
 
 /// Slots of [day] the caller could book right now — [canBook] over every

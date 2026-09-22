@@ -35,6 +35,19 @@ void main() {
     expect(friendlyDbError(Exception('slug_taken')), 'Tuhle adresu už má jiná kuželna.');
   });
 
+  test('group errors (0044)', () {
+    expect(friendlyDbError(Exception('member_at_limit')),
+        'Člen skupiny už má maximální počet rezervací.');
+    expect(friendlyDbError(Exception('already_member')), 'Už je ve tvé skupině.');
+    expect(friendlyDbError(Exception('already_invited')),
+        'Pozvánku už má — čeká se, až ji přijme.');
+    expect(friendlyDbError(Exception('unknown_invite')), 'Tahle pozvánka už neplatí.');
+    expect(friendlyDbError(Exception('already_in_group')),
+        'Už jsi v jiné skupině — nejdřív z ní odejdi.');
+    expect(friendlyDbError(Exception('member_at_limit')),
+        isNot('Máš už maximální počet rezervací.'));
+  });
+
   test('initialsOf takes first letters of the first two words, uppercased',
       () {
     expect(initialsOf('Ján Novák'), 'JN');

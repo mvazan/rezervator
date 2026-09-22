@@ -16,6 +16,7 @@ const cacheKeyCalendarTeams = 'calendar_teams';
 const cacheKeyTeamColors = 'team_colors';
 const cacheKeyMatchExceptions = 'match_exceptions';
 const cacheKeySettings = 'settings';
+const cacheKeyGroups = 'player_groups';
 
 /// Tiny JSON row cache behind the offline read-only mode: every data stream
 /// writes its latest rows here and replays them as its first emission on the

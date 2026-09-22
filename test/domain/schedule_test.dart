@@ -678,6 +678,55 @@ void main() {
           4);
     });
 
+    test('canBook at the active limit: forGroup lets a group booking through, '
+        'a past slot never opens regardless', () {
+      const atLimit = FreeSlot(inPast: false, beyondHorizon: false);
+      expect(
+          canBook(state: atLimit, myActiveCount: 2, settings: settings),
+          isFalse);
+      expect(
+          canBook(
+              state: atLimit,
+              myActiveCount: 2,
+              settings: settings,
+              forGroup: true),
+          isTrue);
+      const pastAtLimit = FreeSlot(inPast: true, beyondHorizon: false);
+      expect(
+          canBook(
+              state: pastAtLimit,
+              myActiveCount: 2,
+              settings: settings,
+              forGroup: true),
+          isFalse);
+    });
+
+    test('canCancel for a group mate needs groupMateIds and a future slot',
+        () {
+      final matesReservation = ReservedSlot(
+          res(playerId: 'jana', date: thursday, blockId: 'b1', lane: 1),
+          inPast: false,
+          beyondHorizon: false);
+      expect(
+          canCancel(state: matesReservation, myPlayerId: 'petr'), isFalse);
+      expect(
+          canCancel(
+              state: matesReservation,
+              myPlayerId: 'petr',
+              groupMateIds: const {'jana'}),
+          isTrue);
+      final startedMatesReservation = ReservedSlot(
+          res(playerId: 'jana', date: monday, blockId: 'b1', lane: 1),
+          inPast: true,
+          beyondHorizon: false);
+      expect(
+          canCancel(
+              state: startedMatesReservation,
+              myPlayerId: 'petr',
+              groupMateIds: const {'jana'}),
+          isFalse);
+    });
+
     test('admin may book past/beyond-horizon free slots and ignores limit', () {
       const past = FreeSlot(inPast: true, beyondHorizon: false);
       const far = FreeSlot(inPast: false, beyondHorizon: true);
