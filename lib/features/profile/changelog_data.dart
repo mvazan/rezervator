@@ -51,6 +51,8 @@ const appChangelog = <Release>[
     'Veřejný přehled: správce ho zapne v Správa → Veřejný přehled a kuželna '
         'dostane vlastní adresu, kde kdokoli uvidí rozvrh bez přihlášení — '
         'jen obsazenost, bez jmen.',
+    'Změny v profilu a u kalendáře (připomínky, barvy, týmy, výchozí '
+        'pohled) se ukážou hned po uložení — i na pomalé síti.',
   ]),
   Release('1.2.7', '15. 9. 2026', [
     'Po spuštění už neprobleskne „Offline" jen proto, že se appka teprve '

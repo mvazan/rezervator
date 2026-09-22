@@ -13,6 +13,7 @@ import 'cache.dart';
 import 'live_refresh.dart';
 import 'backend_reachable.dart';
 import 'offline_gate.dart';
+import 'optimistic.dart';
 
 import '../config.dart';
 import '../domain/collation.dart';
@@ -49,7 +50,7 @@ final myProfileProvider = StreamProvider<Profile?>((ref) {
   if (uid == null) return Stream.value(null);
   // cachedRows unblocks AuthGate offline: without it this stream never
   // emits without a connection and the app hangs on the splash forever.
-  return cachedRows(uid, 'profile',
+  return cachedRows(uid, cacheKeyProfile,
           () => _db.from('profiles').stream(primaryKey: ['id']).eq('id', uid))
       .map((rows) => rows.isEmpty ? null : Profile.fromJson(rows.first));
 });
@@ -76,7 +77,7 @@ final myMatchExceptionsProvider = StreamProvider<Map<String, bool>>((ref) {
   if (uid == null) return Stream.value(const {});
   return cachedRows(
           uid,
-          'match_exceptions',
+          cacheKeyMatchExceptions,
           () => _db
               .from('match_exceptions')
               .stream(primaryKey: ['user_id', 'match_id'])
@@ -175,7 +176,7 @@ final settingsProvider = StreamProvider<ScheduleSettings?>((ref) {
   if (uid == null) return Stream.value(null);
   // primaryKey mirrors the 0005 PK (tenant_id): realtime DELETE events carry
   // only PK columns and bypass RLS, so the key must be tenant-scoped.
-  return cachedRows(uid, 'settings',
+  return cachedRows(uid, cacheKeySettings,
           () => _db.from('schedule_settings').stream(primaryKey: ['tenant_id']))
       .map((rows) => rows.isEmpty ? null : ScheduleSettings.fromJson(rows.first));
 });
@@ -366,7 +367,7 @@ final myCalendarLinkProvider = StreamProvider<CalendarLink>((ref) {
   if (uid == null) return Stream.value(CalendarLink.none);
   return cachedRows(
           uid,
-          'calendar_link',
+          cacheKeyCalendarLink,
           () => _db
               .from('google_calendar_links')
               .stream(primaryKey: ['user_id'])
@@ -385,7 +386,7 @@ final myCalendarTeamsProvider = StreamProvider<List<CalendarTeam>>((ref) {
   if (uid == null) return Stream.value(const []);
   return cachedRows(
           uid,
-          'calendar_teams',
+          cacheKeyCalendarTeams,
           () => _db
               .from('calendar_teams')
               .stream(primaryKey: ['user_id', 'team'])
@@ -407,7 +408,7 @@ final myTeamColorsProvider = StreamProvider<Map<String, int>>((ref) {
   if (uid == null) return Stream.value(const {});
   return cachedRows(
           uid,
-          'team_colors',
+          cacheKeyTeamColors,
           () => _db
               .from('team_colors')
               .stream(primaryKey: ['user_id', 'team'])
@@ -561,18 +562,43 @@ class Api {
       }).eq('tenant_id', tenantId);
 
   /// Toggles the kiosk display mode: whole-day fit-to-screen vs the
-  /// comfortable scrolling scale.
+  /// comfortable scrolling scale. Optimistic (`optimistic.dart`):
+  /// [settingsProvider] flips right away, not after the realtime echo. The
+  /// optimistic key is the CALLER's own uid (matching [settingsProvider]'s
+  /// own `cachedRows` key, not [tenantId]) — a signed-in admin always has
+  /// one, so the `?? write()` fallback only ever matters to a caller with
+  /// no auth session at all, which cannot reach this screen for real.
   static Future<void> setKioskFitDay(bool kioskFitDay,
-          {required String tenantId}) =>
-      _db
-          .from('schedule_settings')
-          .update({'kiosk_fit_day': kioskFitDay}).eq('tenant_id', tenantId);
+      {required String tenantId}) {
+    Future<void> write() => _db
+        .from('schedule_settings')
+        .update({'kiosk_fit_day': kioskFitDay}).eq('tenant_id', tenantId);
+    final uid = currentUserId;
+    if (uid == null) return write();
+    return optimisticWrite(
+      uid,
+      cacheKeySettings,
+      patchRow('tenant_id', tenantId, {'kiosk_fit_day': kioskFitDay}),
+      write,
+    );
+  }
 
-  /// Toggles the kiosk board's dark/light theme (spec §4).
-  static Future<void> setKioskDark(bool kioskDark, {required String tenantId}) =>
-      _db
-          .from('schedule_settings')
-          .update({'kiosk_dark': kioskDark}).eq('tenant_id', tenantId);
+  /// Toggles the kiosk board's dark/light theme (spec §4). Optimistic, same
+  /// reasoning as [setKioskFitDay].
+  static Future<void> setKioskDark(bool kioskDark,
+      {required String tenantId}) {
+    Future<void> write() => _db
+        .from('schedule_settings')
+        .update({'kiosk_dark': kioskDark}).eq('tenant_id', tenantId);
+    final uid = currentUserId;
+    if (uid == null) return write();
+    return optimisticWrite(
+      uid,
+      cacheKeySettings,
+      patchRow('tenant_id', tenantId, {'kiosk_dark': kioskDark}),
+      write,
+    );
+  }
 
   static Future<void> addTimeBlock(HourMinute startsAt, HourMinute endsAt, int position) =>
       _db.from('time_blocks').insert({
@@ -897,10 +923,17 @@ class Api {
       _db.rpc('set_nick', params: {'p_user_id': userId, 'p_nick': nick});
 
   /// The caller's own colour for their own reservations (0024); -1 = club.
-  static Future<void> setOwnColor(int color) => _db
-      .from('profiles')
-      .update({'own_color': color})
-      .eq('id', currentUserId!);
+  /// Optimistic (`optimistic.dart`): shows up on [myProfileProvider]
+  /// immediately, not after the realtime echo.
+  static Future<void> setOwnColor(int color) => optimisticWrite(
+        currentUserId!,
+        cacheKeyProfile,
+        patchRow('id', currentUserId!, {'own_color': color}),
+        () => _db
+            .from('profiles')
+            .update({'own_color': color})
+            .eq('id', currentUserId!),
+      );
 
   /// Which teams' matches the player sees in Můj přehled (0029). Own row,
   /// like the colour; the calendar sync's own list is untouched.
@@ -909,9 +942,29 @@ class Api {
   /// one a team gives, and NULL drops the exception so the teams decide
   /// again. Google follows through the same job queue a re-timed match
   /// rides — within minutes, not in this call.
+  /// Optimistic (`optimistic.dart`): [myMatchExceptionsProvider] reflects
+  /// the choice immediately — `null` drops the row (mirrors
+  /// `set_match_exception`'s own delete-on-null).
   static Future<void> setMatchException(String matchId, bool? shown) =>
-      _db.rpc('set_match_exception',
-          params: {'p_match': matchId, 'p_shown': shown});
+      optimisticWrite(
+        currentUserId!,
+        cacheKeyMatchExceptions,
+        upsertOrDeleteRows(
+          matchKey: (row) => row['match_id'] as String,
+          upserts: shown == null
+              ? const {}
+              : {
+                  matchId: {
+                    'user_id': currentUserId!,
+                    'match_id': matchId,
+                    'shown': shown,
+                  },
+                },
+          deletes: shown == null ? {matchId} : const {},
+        ),
+        () => _db.rpc('set_match_exception',
+            params: {'p_match': matchId, 'p_shown': shown}),
+      );
 
   /// The public board of one alley (0043). Anyone may call it — signed in or
   /// not — and the slug picks the alley; `unknown_tenant` when it is unknown
@@ -932,22 +985,39 @@ class Api {
   /// How long before a training or a match to be reminded (0040), in
   /// minutes. Own row, like the colour — the reminder itself is the
   /// server's job, and it reaches the player the way every other message
-  /// does: push with the app installed, e-mail without it.
-  static Future<void> setNotifyBefore(List<int> minutes) => _db
-      .from('profiles')
-      .update({'notify_before_minutes': minutes})
-      .eq('id', currentUserId!);
+  /// does: push with the app installed, e-mail without it. Optimistic
+  /// (`optimistic.dart`): the list on [myProfileProvider] updates right
+  /// away, not after the realtime echo.
+  static Future<void> setNotifyBefore(List<int> minutes) => optimisticWrite(
+        currentUserId!,
+        cacheKeyProfile,
+        patchRow('id', currentUserId!, {'notify_before_minutes': minutes}),
+        () => _db
+            .from('profiles')
+            .update({'notify_before_minutes': minutes})
+            .eq('id', currentUserId!),
+      );
 
-  static Future<void> setFollowedTeams(List<String> teams) => _db
-      .from('profiles')
-      .update({'followed_teams': teams})
-      .eq('id', currentUserId!);
+  static Future<void> setFollowedTeams(List<String> teams) => optimisticWrite(
+        currentUserId!,
+        cacheKeyProfile,
+        patchRow('id', currentUserId!, {'followed_teams': teams}),
+        () => _db
+            .from('profiles')
+            .update({'followed_teams': teams})
+            .eq('id', currentUserId!),
+      );
 
   /// The view the app opens at launch (0029).
-  static Future<void> setDefaultView(HomeView view) => _db
-      .from('profiles')
-      .update({'default_view': view.name})
-      .eq('id', currentUserId!);
+  static Future<void> setDefaultView(HomeView view) => optimisticWrite(
+        currentUserId!,
+        cacheKeyProfile,
+        patchRow('id', currentUserId!, {'default_view': view.name}),
+        () => _db
+            .from('profiles')
+            .update({'default_view': view.name})
+            .eq('id', currentUserId!),
+      );
 
   // --- admin: players without an account (0022, `placeholder` rows) ---
 
@@ -1063,19 +1133,30 @@ class Api {
   /// right away — reminders live on the events themselves, so "change the
   /// reminder" means "rewrite the events". [calendar] defaults to primary,
   /// so every existing 1-argument call keeps its old behaviour unchanged.
-  /// The card redraws from the links stream.
+  /// The card redraws from the links stream. Optimistic (`optimistic.dart`):
+  /// shows up right away — the server may still re-sort/de-duplicate the
+  /// list, which lands once its own echo arrives.
   static Future<void> setCalendarReminders(
     List<int> minutes, {
     CalendarSlot calendar = CalendarSlot.primary,
-  }) =>
-      _db.functions.invoke(
+  }) {
+    final field = calendar == CalendarSlot.secondary
+        ? 'reminder_minutes_secondary'
+        : 'reminder_minutes';
+    return optimisticWrite(
+      currentUserId!,
+      cacheKeyCalendarLink,
+      patchRow('user_id', currentUserId!, {field: minutes}),
+      () => _db.functions.invoke(
         'calendar-manage',
         body: {
           'action': 'reminders',
           'minutes': minutes,
           'calendar': calendar.name,
         },
-      );
+      ),
+    );
+  }
 
   /// Stores which teams' matches go to which calendar (`calendar_teams`,
   /// 0032) and settles the events right away (dropped teams' matches
@@ -1083,13 +1164,22 @@ class Api {
   /// colour [myTeamColorsProvider] currently holds for it (0036 moved
   /// colour off this table onto its own; [setTeamColors] is the only way to
   /// change it now). The card redraws from [myCalendarTeamsProvider].
+  /// Optimistic (`optimistic.dart`): a FULL replace, mirroring what
+  /// `set_calendar_teams_for` itself does server-side.
   static Future<void> setCalendarTeams(List<CalendarTeam> teams) =>
-      _db.functions.invoke(
-        'calendar-manage',
-        body: {
-          'action': 'teams',
-          'teams': [for (final t in teams) t.toJson()],
-        },
+      optimisticWrite(
+        currentUserId!,
+        cacheKeyCalendarTeams,
+        (_) => [
+          for (final t in teams) {...t.toJson(), 'user_id': currentUserId!},
+        ],
+        () => _db.functions.invoke(
+          'calendar-manage',
+          body: {
+            'action': 'teams',
+            'teams': [for (final t in teams) t.toJson()],
+          },
+        ),
       );
 
   /// Stores (or clears, for a null entry) the shared colour of one or more
@@ -1099,16 +1189,38 @@ class Api {
   /// team missing from [colors] simply keeps whatever colour it already
   /// had. Never touches which teams are followed or how they're routed to
   /// a calendar — [setFollowedTeams] and [setCalendarTeams] own those.
+  /// Optimistic (`optimistic.dart`), same delete-on-null shape as
+  /// `set_team_colors_for`.
   static Future<void> setTeamColors(Map<String, int?> colors) =>
-      _db.functions.invoke(
-        'calendar-manage',
-        body: {
-          'action': 'team_colors',
-          'team_colors': [
+      optimisticWrite(
+        currentUserId!,
+        cacheKeyTeamColors,
+        upsertOrDeleteRows(
+          matchKey: (row) => row['team'] as String,
+          upserts: {
             for (final e in colors.entries)
-              {'team': e.key, 'color_id': e.value},
-          ],
-        },
+              if (e.value != null)
+                e.key: {
+                  'user_id': currentUserId!,
+                  'team': e.key,
+                  'color_id': e.value,
+                },
+          },
+          deletes: {
+            for (final e in colors.entries)
+              if (e.value == null) e.key,
+          },
+        ),
+        () => _db.functions.invoke(
+          'calendar-manage',
+          body: {
+            'action': 'team_colors',
+            'team_colors': [
+              for (final e in colors.entries)
+                {'team': e.key, 'color_id': e.value},
+            ],
+          },
+        ),
       );
 
   /// Turns the player's second Google calendar ("Rezervátor 2", 0032) on or
@@ -1132,10 +1244,15 @@ class Api {
   /// future trainings on the spot — Google event `colorId` 1-11, or null for
   /// none (the event then takes the calendar's own colour). Trainings always
   /// live in the primary calendar, so unlike a team there is nothing to
-  /// route.
-  static Future<void> setTrainingColor(int? colorId) => _db.functions.invoke(
-        'calendar-manage',
-        body: {'action': 'training_color', 'color_id': colorId},
+  /// route. Optimistic (`optimistic.dart`).
+  static Future<void> setTrainingColor(int? colorId) => optimisticWrite(
+        currentUserId!,
+        cacheKeyCalendarLink,
+        patchRow('user_id', currentUserId!, {'training_color_id': colorId}),
+        () => _db.functions.invoke(
+          'calendar-manage',
+          body: {'action': 'training_color', 'color_id': colorId},
+        ),
       );
 
   /// Sets a NEW password for a kiosk account and returns it — the old one
