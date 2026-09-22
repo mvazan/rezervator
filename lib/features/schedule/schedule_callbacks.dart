@@ -12,6 +12,7 @@ class SlotCallbacks {
     required this.onBook,
     required this.onCancel,
     this.onRental,
+    this.onInfo,
   });
 
   final void Function(Day date, TimeBlock block, int lane) onBook;
@@ -29,6 +30,13 @@ class SlotCallbacks {
   /// opens its "jen tento den" exception dialog, a one-time one the plain
   /// dialog. Null = the cell stays inert.
   final void Function(Day date, Rental rental)? onRental;
+
+  /// A regular player taps someone else's reservation, which [onCancel]
+  /// never fires for (they cannot cancel it) — the board's nick can be too
+  /// short to say who that even is. Null on the pure read-only board (no
+  /// signed-in player, e.g. the kiosk), which never calls this either.
+  final void Function(Day date, TimeBlock block, Reservation reservation)?
+      onInfo;
 }
 
 /// The calendar boards' admin gestures — every hook optional (null = not

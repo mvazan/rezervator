@@ -426,6 +426,13 @@ Widget slotTileFor({
       final cancellable = interactive &&
           me != null &&
           canCancel(state: state, myPlayerId: me.id, isAdmin: me.isAdmin);
+      // A reservation someone else cannot cancel is not necessarily one
+      // they should learn nothing from: the board nick can be too short to
+      // say who is who. "Mine" is excluded — that cell is already marked
+      // out (bold, outlined), so tapping it would only say "it's you".
+      final onInfo = slot.onInfo;
+      final showInfo =
+          interactive && me != null && !isMine && !cancellable && onInfo != null;
       return SlotTile(
         state: state,
         size: size,
@@ -435,7 +442,9 @@ Widget slotTileFor({
         onTap: cancellable
             ? () =>
                 slot.onCancel(day.date, block, reservation, ownFuture: ownFuture)
-            : null,
+            : showInfo
+                ? () => onInfo(day.date, block, reservation)
+                : null,
       );
     case FreeSlot():
       final isAdmin = me?.isAdmin ?? false;

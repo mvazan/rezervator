@@ -46,6 +46,8 @@ const appChangelog = <Release>[
   Release(null, '22. 9. 2026', [
     'Ve správě appky se tlačítko pro přidání (oddíl, hráč, pronájem…) už '
         'nemůže zakrýt poslední položku v seznamu.',
+    'Ťuknutí na cizí rezervaci teď ukáže celé jméno hráče — přezdívka '
+        'na rozvrhu ne vždy stačí poznat, kdo je kdo.',
   ]),
   Release('1.2.7', '15. 9. 2026', [
     'Po spuštění už neprobleskne „Offline" jen proto, že se appka teprve '
