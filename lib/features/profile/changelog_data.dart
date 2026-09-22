@@ -53,6 +53,8 @@ const appChangelog = <Release>[
         'jen obsazenost, bez jmen.',
     'Změny v profilu a u kalendáře (připomínky, barvy, týmy, výchozí '
         'pohled) se ukážou hned po uložení — i na pomalé síti.',
+    'Skupiny: rodina nebo dvojice si může rezervovat a rušit tréninky '
+        'navzájem — založíš ji v Můj profil.',
   ]),
   Release('1.2.7', '15. 9. 2026', [
     'Po spuštění už neprobleskne „Offline" jen proto, že se appka teprve '
