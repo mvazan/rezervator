@@ -242,6 +242,9 @@ List<Day> upcomingSeriesDates(Rental series,
   return out;
 }
 
+/// The public overview assembles these same inputs on the server
+/// (`public_week`, 0043) — a new input here needs adding there too, and in
+/// `PublicWeek.fromJson`.
 WeekSchedule buildWeekSchedule({
   required Day monday,
   required Day today,

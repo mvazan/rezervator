@@ -75,11 +75,16 @@ class AsyncBody<T> extends StatelessWidget {
     required this.value,
     required this.builder,
     this.onRetry,
+    this.errorText = friendlyDbError,
   });
 
   final AsyncValue<T> value;
   final Widget Function(T data) builder;
   final VoidCallback? onRetry;
+
+  /// How a failure reads — the app-wide wording unless a screen knows
+  /// better what its error means (the public board's `unknown_tenant`).
+  final String Function(Object error) errorText;
 
   @override
   Widget build(BuildContext context) {
@@ -89,7 +94,7 @@ class AsyncBody<T> extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(friendlyDbError(e), textAlign: TextAlign.center),
+            Text(errorText(e), textAlign: TextAlign.center),
             if (onRetry != null) ...[
               const SizedBox(height: 8),
               FilledButton(
