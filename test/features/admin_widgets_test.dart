@@ -65,6 +65,48 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Jen pro správce aplikace.'), findsOneWidget);
     });
+
+    // A floatingActionButton used to go straight to Scaffold's own slot,
+    // which floats OVER the body — on a list long enough to fill the
+    // screen, that put the button on top of the last row (reported: the
+    // list "obcas [tlacitko] zakryva posledny item"). It must instead sit
+    // in its own strip below the list, the way report_screen.dart's
+    // (Docházka) Export CSV button already did — see [ListActionBar].
+    testWidgets(
+        'a floatingActionButton is docked below the body, not floated over '
+        'it, so it can never cover the last row', (tester) async {
+      await tester.pumpWidget(app(
+        AdminScaffold(
+          title: 'Oddíly',
+          body: ListView(
+            children: [
+              for (var i = 0; i < 30; i++)
+                SizedBox(height: 56, child: Text('Řádek $i')),
+            ],
+          ),
+          floatingActionButton: FloatingActionButton.extended(
+            onPressed: () {},
+            icon: const Icon(Icons.add),
+            label: const Text('Přidat oddíl'),
+          ),
+        ),
+        me: admin,
+      ));
+      await tester.pumpAndSettle();
+
+      // Not Flutter's floating mechanism — that is the overlap-prone path
+      // this replaces.
+      final scaffold = tester.widget<Scaffold>(find.byType(Scaffold));
+      expect(scaffold.floatingActionButton, isNull);
+
+      // The list and the button occupy disjoint vertical bands: whatever
+      // the list renders — including its very last row, however long the
+      // list — sits entirely above where the button starts.
+      final listBottom = tester.getBottomLeft(find.byType(ListView)).dy;
+      final buttonTop =
+          tester.getTopLeft(find.byType(FloatingActionButton)).dy;
+      expect(buttonTop, greaterThanOrEqualTo(listBottom));
+    });
   });
 
   group('AsyncBody', () {
