@@ -436,6 +436,8 @@ V `docs/SCHEMA.md`:
   - `` | `public_week(slug, monday)` (0043) | **anon** i signed-in | Veřejný přehled: týden (`monday` se zarovná na pondělí) publikované a schválené kuželny — `tenant_name`, `settings`, `blocks`, `slot_types`, `overrides`/`priority_slots`/`rentals` za neděli před … pondělí po, `occupied` (`block_id, date, lane, club_color`) za týden. Žádná jména, `player_id`, `renter_name`, `note`, `created_by`. `unknown_tenant` pro neznámý, vypnutý i neschválený slug (stejně). | ``
   - `` | `set_public_overview(slug, enabled)`, `my_public_overview()` (0043) | admin | Slug (trim + lower, `''` = žádný) a přepínač vlastní kuželny; čtení vrací `{public_slug, public_enabled, tenant_name}`. `not_allowed`, `invalid_slug` (formát / zapnutí bez slugu), `slug_taken`. | ``
 - do věty „Internal, no EXECUTE for app roles:" přidat `` `public_tenant_id` ``.
+- za odstavec o `rental_occurrences` (konec `## RPCs`) přidat odstavec:
+  „**`public_week` skládá týden znovu, na serveri (0043).** Anon nemá na tabulky žádný grant a jména se musí maskovat na serveru, takže veřejný přehled nečte streamy appky. Nový vstup do `buildWeekSchedule` (nový parametr = nová tabulka ovlivňující sloty) proto znamená doplnit ho i do `public_week` a do `PublicWeek.fromJson` — klientskou stranu vynutí kompilátor (parametry jsou povinné), SQL stranu ne."
 - do `## Checks` za „the 0041 rental groups (…)," doplnit: „the 0043 public overview (anon may call only `public_week`; slug format, normalisation and uniqueness; admin-only setting; unknown and switched-off slugs indistinguishable; occupancy in club colours without any name, player id, renter, note or other tenant),".
 
 - [ ] **Step 7: Commit**
@@ -1426,6 +1428,15 @@ class _PublicScheduleScreenState extends ConsumerState<PublicScheduleScreen>
 }
 ```
 
+- [ ] **Step 4b: Připomínka u zdroje** — na konec doc komentáře `buildWeekSchedule` v `lib/domain/schedule.dart` přidat:
+
+```dart
+///
+/// The public overview assembles these same inputs on the server
+/// (`public_week`, 0043) — a new input here needs adding there too, and in
+/// `PublicWeek.fromJson`.
+```
+
 - [ ] **Step 5: Route v `lib/main.dart`**
 
 Import `features/public/public_schedule_screen.dart` a do `routes` za `/kiosk-login`:
@@ -1451,7 +1462,7 @@ Expected: `No issues found!`, vše PASS. Když `find.text('Obsazeno')` najde jin
 - [ ] **Step 8: Commit**
 
 ```bash
-git add lib/features/public/ lib/features/admin/widgets/admin_scaffold.dart lib/main.dart test/features/public_schedule_screen_test.dart test/features/admin_widgets_test.dart
+git add lib/features/public/ lib/features/admin/widgets/admin_scaffold.dart lib/main.dart lib/domain/schedule.dart test/features/public_schedule_screen_test.dart test/features/admin_widgets_test.dart
 git commit -m "feat(přehled): veřejná stránka rozvrhu na #/prehled/<slug>
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
