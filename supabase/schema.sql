@@ -23,6 +23,24 @@ COMMENT ON SCHEMA "public" IS 'standard public schema';
 
 
 
+CREATE OR REPLACE FUNCTION "public"."_group_drop_member"("p_group" "uuid", "p_user" "uuid") RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  delete from player_group_members
+   where group_id = p_group and user_id = p_user and status = 'member';
+  if not exists (select 1 from player_group_members
+                 where group_id = p_group and status = 'member') then
+    delete from player_groups where id = p_group;
+  end if;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."_group_drop_member"("p_group" "uuid", "p_user" "uuid") OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."admin_list_tenants"() RETURNS TABLE("id" "uuid", "name" "text", "status" "text", "founder_email" "text", "created_at" timestamp with time zone, "approved_at" timestamp with time zone, "member_count" bigint)
     LANGUAGE "plpgsql" STABLE SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -383,19 +401,21 @@ begin
   if v_caller.role = 'admin' and v_caller.status = 'approved'
      and v_res.tenant_id = v_caller.tenant_id then
     v_via := 'admin';
-  elsif v_res.player_id = v_uid and v_caller.status = 'approved' then
+  elsif v_caller.status = 'approved'
+        and (v_res.player_id = v_uid
+             or (v_caller.role = 'player' and same_group(v_uid, v_res.player_id))) then
     select * into v_block from time_blocks where id = v_res.block_id;
     v_starts := (v_res.date + v_block.starts_at) at time zone 'Europe/Prague';
     if v_now >= v_starts then
       raise exception 'too_late';
     end if;
-    v_via := 'app';
+    v_via := case when v_res.player_id = v_uid then 'app' else 'group' end;
   else
     raise exception 'not_allowed';
   end if;
 
   update reservations
-  set cancelled_at = v_now, cancelled_via = v_via,
+  set cancelled_at = v_now, cancelled_via = v_via, cancelled_by = v_uid,
       cancel_note = trim(coalesce(p_note, '')),
       notify_player = coalesce(p_notify, true),
       notify_message = null
@@ -495,8 +515,9 @@ CREATE TABLE IF NOT EXISTS "public"."reservations" (
     "tenant_id" "uuid" NOT NULL,
     "notify_player" boolean DEFAULT true NOT NULL,
     "notify_message" "text",
-    CONSTRAINT "reservations_cancelled_via_check" CHECK (("cancelled_via" = ANY (ARRAY['app'::"text", 'one_click'::"text", 'admin'::"text"]))),
-    CONSTRAINT "reservations_created_via_check" CHECK (("created_via" = ANY (ARRAY['app'::"text", 'kiosk'::"text", 'admin'::"text"]))),
+    "cancelled_by" "uuid",
+    CONSTRAINT "reservations_cancelled_via_check" CHECK (("cancelled_via" = ANY (ARRAY['app'::"text", 'one_click'::"text", 'admin'::"text", 'group'::"text"]))),
+    CONSTRAINT "reservations_created_via_check" CHECK (("created_via" = ANY (ARRAY['app'::"text", 'kiosk'::"text", 'admin'::"text", 'group'::"text"]))),
     CONSTRAINT "reservations_lane_check" CHECK (("lane" >= 1))
 );
 
@@ -534,6 +555,9 @@ begin
     v_via := 'kiosk';
   elsif v_caller.status = 'approved' and p_player_id = v_uid then
     v_via := 'app';
+  elsif v_caller.status = 'approved' and v_caller.role = 'player'
+        and same_group(v_uid, p_player_id) then
+    v_via := 'group';
   else
     raise exception 'not_allowed';
   end if;
@@ -576,7 +600,9 @@ begin
     from reservations
     where player_id = p_player_id and cancelled_at is null and date >= v_today;
     if v_active_count >= v_settings.max_active_reservations then
-      raise exception 'limit_reached';
+      -- "Máš už…" would be a lie about a member's cap.
+      raise exception '%',
+        case when v_via = 'group' then 'member_at_limit' else 'limit_reached' end;
     end if;
   end if;
 
@@ -849,6 +875,167 @@ $$;
 
 
 ALTER FUNCTION "public"."enqueue_notification"("p_kind" "text", "p_dedupe_key" "text", "p_payload" "jsonb", "p_delay" interval) OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."group_accept"("p_group" "uuid") RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  if auth.uid() is null then
+    raise exception 'not_authenticated';
+  end if;
+  update player_group_members set status = 'member'
+   where group_id = p_group and user_id = auth.uid() and status = 'invited';
+  if not found then
+    raise exception 'unknown_invite';
+  end if;
+exception when unique_violation then
+  raise exception 'already_in_group';
+end;
+$$;
+
+
+ALTER FUNCTION "public"."group_accept"("p_group" "uuid") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."group_cancel_invite"("p_group" "uuid", "p_user" "uuid") RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  if auth.uid() is null then
+    raise exception 'not_authenticated';
+  end if;
+  if my_group_id() is distinct from p_group then
+    raise exception 'not_allowed';
+  end if;
+  delete from player_group_members
+   where group_id = p_group and user_id = p_user and status = 'invited';
+  if not found then
+    raise exception 'unknown_invite';
+  end if;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."group_cancel_invite"("p_group" "uuid", "p_user" "uuid") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."group_decline"("p_group" "uuid") RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  if auth.uid() is null then
+    raise exception 'not_authenticated';
+  end if;
+  delete from player_group_members
+   where group_id = p_group and user_id = auth.uid() and status = 'invited';
+  if not found then
+    raise exception 'unknown_invite';
+  end if;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."group_decline"("p_group" "uuid") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."group_invite"("p_user" "uuid") RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_uid uuid := auth.uid();
+  v_caller profiles;
+  v_group uuid;
+  v_status text;
+begin
+  if v_uid is null then
+    raise exception 'not_authenticated';
+  end if;
+  select * into v_caller from profiles where id = v_uid;
+  if not found or v_caller.status <> 'approved' or v_caller.role = 'kiosk' then
+    raise exception 'not_allowed';
+  end if;
+  if p_user = v_uid or not exists (
+    select 1 from profiles
+     where id = p_user and tenant_id = v_caller.tenant_id
+       and status = 'approved' and role <> 'kiosk' and not placeholder
+  ) then
+    raise exception 'unknown_player';
+  end if;
+
+  select group_id into v_group from player_group_members
+   where user_id = v_uid and status = 'member';
+  if v_group is null then
+    insert into player_groups (tenant_id, created_by)
+      values (v_caller.tenant_id, v_uid) returning id into v_group;
+    insert into player_group_members (group_id, user_id, tenant_id, status)
+      values (v_group, v_uid, v_caller.tenant_id, 'member');
+  end if;
+
+  select status into v_status from player_group_members
+   where group_id = v_group and user_id = p_user;
+  if v_status = 'member' then
+    raise exception 'already_member';
+  elsif v_status = 'invited' then
+    raise exception 'already_invited';
+  end if;
+  insert into player_group_members (group_id, user_id, tenant_id, status, invited_by)
+    values (v_group, p_user, v_caller.tenant_id, 'invited', v_uid);
+end;
+$$;
+
+
+ALTER FUNCTION "public"."group_invite"("p_user" "uuid") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."group_leave"() RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_group uuid := my_group_id();
+begin
+  if auth.uid() is null then
+    raise exception 'not_authenticated';
+  end if;
+  if v_group is not null then
+    perform _group_drop_member(v_group, auth.uid());
+  end if;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."group_leave"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."group_remove_member"("p_user" "uuid") RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_group uuid;
+begin
+  if not is_admin() then
+    raise exception 'not_allowed';
+  end if;
+  if not exists (select 1 from profiles
+                 where id = p_user and tenant_id = current_tenant_id()) then
+    raise exception 'not_allowed';
+  end if;
+  select group_id into v_group from player_group_members
+   where user_id = p_user and status = 'member';
+  if v_group is not null then
+    perform _group_drop_member(v_group, p_user);
+  end if;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."group_remove_member"("p_user" "uuid") OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."is_admin"() RETURNS boolean
@@ -1242,6 +1429,18 @@ $$;
 
 
 ALTER FUNCTION "public"."my_future_reservations"("p_user" "uuid") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."my_group_id"() RETURNS "uuid"
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  select group_id from player_group_members
+   where user_id = auth.uid() and status = 'member'
+$$;
+
+
+ALTER FUNCTION "public"."my_group_id"() OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."my_public_overview"() RETURNS "jsonb"
@@ -1867,6 +2066,22 @@ $$;
 
 
 ALTER FUNCTION "public"."reservations_enqueue_calendar"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."same_group"("a" "uuid", "b" "uuid") RETURNS boolean
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  select exists (
+    select 1
+      from player_group_members x
+      join player_group_members y on y.group_id = x.group_id
+     where x.user_id = a and x.status = 'member'
+       and y.user_id = b and y.status = 'member')
+$$;
+
+
+ALTER FUNCTION "public"."same_group"("a" "uuid", "b" "uuid") OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."save_placeholder_player"("p_id" "uuid", "p_display_name" "text", "p_nick" "text", "p_club_id" "uuid") RETURNS "public"."profiles"
@@ -2663,6 +2878,39 @@ CREATE TABLE IF NOT EXISTS "public"."oauth_nonces" (
 ALTER TABLE "public"."oauth_nonces" OWNER TO "postgres";
 
 
+CREATE TABLE IF NOT EXISTS "public"."player_group_members" (
+    "group_id" "uuid" NOT NULL,
+    "user_id" "uuid" NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "status" "text" NOT NULL,
+    "invited_by" "uuid",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "player_group_members_status_check" CHECK (("status" = ANY (ARRAY['invited'::"text", 'member'::"text"])))
+);
+
+
+ALTER TABLE "public"."player_group_members" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."player_group_members" IS 'Membership and pending invites of player_groups (0044). tenant_id is denormalised so the admin policy never has to read player_groups (no policy cycle). Written only through the group_* RPCs.';
+
+
+
+CREATE TABLE IF NOT EXISTS "public"."player_groups" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "created_by" "uuid",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."player_groups" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."player_groups" IS 'A group of players who may book and cancel trainings for each other (0044). Server-only: the app reads player_group_members.';
+
+
+
 CREATE OR REPLACE VIEW "public"."players" AS
  SELECT "p"."id",
     "p"."display_name",
@@ -2864,6 +3112,16 @@ ALTER TABLE ONLY "public"."oauth_nonces"
 
 
 
+ALTER TABLE ONLY "public"."player_group_members"
+    ADD CONSTRAINT "player_group_members_pkey" PRIMARY KEY ("group_id", "user_id");
+
+
+
+ALTER TABLE ONLY "public"."player_groups"
+    ADD CONSTRAINT "player_groups_pkey" PRIMARY KEY ("id");
+
+
+
 ALTER TABLE ONLY "public"."priority_slot_types"
     ADD CONSTRAINT "priority_slot_types_pkey" PRIMARY KEY ("id");
 
@@ -2937,6 +3195,10 @@ CREATE INDEX "notification_jobs_due_idx" ON "public"."notification_jobs" USING "
 
 
 
+CREATE UNIQUE INDEX "player_group_one_membership" ON "public"."player_group_members" USING "btree" ("user_id") WHERE ("status" = 'member'::"text");
+
+
+
 CREATE UNIQUE INDEX "priority_slots_import_key_idx" ON "public"."priority_slots" USING "btree" ("tenant_id", "import_key");
 
 
@@ -2978,6 +3240,10 @@ CREATE OR REPLACE TRIGGER "match_exceptions_enqueue_calendar" AFTER INSERT OR DE
 
 
 CREATE OR REPLACE TRIGGER "match_uklid_sync" AFTER INSERT OR UPDATE ON "public"."priority_slots" FOR EACH ROW EXECUTE FUNCTION "public"."sync_uklid_for_match"();
+
+
+
+CREATE OR REPLACE TRIGGER "notify_player_group_members" AFTER INSERT OR UPDATE ON "public"."player_group_members" FOR EACH ROW EXECUTE FUNCTION "public"."notify_webhook"();
 
 
 
@@ -3103,6 +3369,36 @@ ALTER TABLE ONLY "public"."oauth_nonces"
 
 
 
+ALTER TABLE ONLY "public"."player_group_members"
+    ADD CONSTRAINT "player_group_members_group_id_fkey" FOREIGN KEY ("group_id") REFERENCES "public"."player_groups"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."player_group_members"
+    ADD CONSTRAINT "player_group_members_invited_by_fkey" FOREIGN KEY ("invited_by") REFERENCES "public"."profiles"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."player_group_members"
+    ADD CONSTRAINT "player_group_members_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."player_group_members"
+    ADD CONSTRAINT "player_group_members_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "public"."profiles"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."player_groups"
+    ADD CONSTRAINT "player_groups_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "public"."profiles"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."player_groups"
+    ADD CONSTRAINT "player_groups_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE CASCADE;
+
+
+
 ALTER TABLE ONLY "public"."priority_slot_types"
     ADD CONSTRAINT "priority_slot_types_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
 
@@ -3180,6 +3476,11 @@ ALTER TABLE ONLY "public"."rentals"
 
 ALTER TABLE ONLY "public"."reservations"
     ADD CONSTRAINT "reservations_block_id_fkey" FOREIGN KEY ("block_id") REFERENCES "public"."time_blocks"("id") ON DELETE RESTRICT;
+
+
+
+ALTER TABLE ONLY "public"."reservations"
+    ADD CONSTRAINT "reservations_cancelled_by_fkey" FOREIGN KEY ("cancelled_by") REFERENCES "public"."profiles"("id") ON DELETE SET NULL;
 
 
 
@@ -3294,6 +3595,16 @@ CREATE POLICY "overrides_select" ON "public"."day_overrides" FOR SELECT USING ((
 
 CREATE POLICY "overrides_update" ON "public"."day_overrides" FOR UPDATE USING ((("tenant_id" = "public"."current_tenant_id"()) AND "public"."is_admin"())) WITH CHECK ((("tenant_id" = "public"."current_tenant_id"()) AND "public"."is_admin"()));
 
+
+
+ALTER TABLE "public"."player_group_members" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "player_group_members_select" ON "public"."player_group_members" FOR SELECT USING ((("user_id" = "auth"."uid"()) OR ("group_id" = "public"."my_group_id"()) OR ("public"."is_admin"() AND ("tenant_id" = "public"."current_tenant_id"()))));
+
+
+
+ALTER TABLE "public"."player_groups" ENABLE ROW LEVEL SECURITY;
 
 
 CREATE POLICY "priority_delete" ON "public"."priority_slots" FOR DELETE USING ((("tenant_id" = "public"."current_tenant_id"()) AND "public"."is_admin"()));
@@ -3428,6 +3739,11 @@ GRANT USAGE ON SCHEMA "public" TO "service_role";
 
 
 
+REVOKE ALL ON FUNCTION "public"."_group_drop_member"("p_group" "uuid", "p_user" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."_group_drop_member"("p_group" "uuid", "p_user" "uuid") TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."admin_list_tenants"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."admin_list_tenants"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."admin_list_tenants"() TO "service_role";
@@ -3531,6 +3847,42 @@ GRANT ALL ON FUNCTION "public"."enqueue_notification"("p_kind" "text", "p_dedupe
 
 
 
+REVOKE ALL ON FUNCTION "public"."group_accept"("p_group" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."group_accept"("p_group" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."group_accept"("p_group" "uuid") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."group_cancel_invite"("p_group" "uuid", "p_user" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."group_cancel_invite"("p_group" "uuid", "p_user" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."group_cancel_invite"("p_group" "uuid", "p_user" "uuid") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."group_decline"("p_group" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."group_decline"("p_group" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."group_decline"("p_group" "uuid") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."group_invite"("p_user" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."group_invite"("p_user" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."group_invite"("p_user" "uuid") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."group_leave"() FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."group_leave"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."group_leave"() TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."group_remove_member"("p_user" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."group_remove_member"("p_user" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."group_remove_member"("p_user" "uuid") TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."kiosk_password_target"("p_user_id" "uuid") TO "anon";
 GRANT ALL ON FUNCTION "public"."kiosk_password_target"("p_user_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."kiosk_password_target"("p_user_id" "uuid") TO "service_role";
@@ -3566,6 +3918,12 @@ GRANT ALL ON FUNCTION "public"."my_future_matches"("p_user" "uuid") TO "service_
 
 REVOKE ALL ON FUNCTION "public"."my_future_reservations"("p_user" "uuid") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."my_future_reservations"("p_user" "uuid") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."my_group_id"() FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."my_group_id"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."my_group_id"() TO "service_role";
 
 
 
@@ -3674,6 +4032,11 @@ GRANT ALL ON FUNCTION "public"."rental_series_changed"() TO "service_role";
 GRANT ALL ON FUNCTION "public"."reservations_enqueue_calendar"() TO "anon";
 GRANT ALL ON FUNCTION "public"."reservations_enqueue_calendar"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."reservations_enqueue_calendar"() TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."same_group"("a" "uuid", "b" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."same_group"("a" "uuid", "b" "uuid") TO "service_role";
 
 
 
@@ -3792,6 +4155,15 @@ GRANT UPDATE ON SEQUENCE "public"."notification_jobs_id_seq" TO "service_role";
 
 
 GRANT ALL ON TABLE "public"."oauth_nonces" TO "service_role";
+
+
+
+GRANT SELECT ON TABLE "public"."player_group_members" TO "authenticated";
+GRANT ALL ON TABLE "public"."player_group_members" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."player_groups" TO "service_role";
 
 
 
