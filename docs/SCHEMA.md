@@ -115,13 +115,16 @@ EXECUTE revoked from the app roles (see below).
 | `backfill_calendar_jobs(user)` | service_role only (callback, right after `status = 'linked'`) | One `calendar_sync` job per live reservation of the player from Prague-today on, due now (a pending job is re-armed); returns the count. |
 | `set_calendar_reminders_for(user, minutes int[], calendar text default 'primary')` | service_role only (calendar-manage) | Normalises (distinct, sorted descending, nulls dropped), stores on `reminder_minutes` or (0032) `reminder_minutes_secondary` and returns the stored array. `bad_calendar` (not `primary`/`secondary`), `bad_reminders` (more than 5, or any outside 0–40320), `unknown_link` (no links row). |
 | `my_future_reservations(user)` | service_role only (callback, calendar-manage) | `(reservation_id, date, starts_at, ends_at, lane, alley_name)` for the player's live reservations from Prague-today on — block times, tenant name — ordered by date, starts_at. The raw material of the calendar events. |
+| `public_week(slug, monday)` (0043) | **anon** i signed-in | Veřejný přehled: týden (`monday` se zarovná na pondělí) publikované a schválené kuželny — `tenant_name`, `settings`, `blocks`, `slot_types`, `overrides`/`priority_slots`/`rentals` za neděli před … pondělí po, `occupied` (`block_id, date, lane, club_color`) za týden. Žádná jména, `player_id`, `renter_name`, `note`, `created_by`. `unknown_tenant` pro neznámý, vypnutý i neschválený slug (stejně). |
+| `set_public_overview(slug, enabled)`, `my_public_overview()` (0043) | admin | Slug (trim + lower, `''` = žádný) a přepínač vlastní kuželny; čtení vrací `{public_slug, public_enabled, tenant_name}`. `not_allowed`, `invalid_slug` (formát / zapnutí bez slugu), `slug_taken`. |
 
 Internal, no EXECUTE for app roles: `current_tenant_id`, `is_*`,
 `block_day_status`, `cancel_stranded_reservations`, `rental_occurs`,
 `rental_occurrences`, `cancel_res_for_priority_slot`,
 `enqueue_notification`, `enqueue_calendar_sync`,
 `trigger_notification_jobs` (called by cron), `notify_webhook_config`,
-`seed_demo_member` (service_role only — Play-review demo account).
+`seed_demo_member` (service_role only — Play-review demo account),
+`public_tenant_id`.
 
 `block_day_status(tenant, date, block)` → `open` | `day_closed` |
 `invalid_block` | `unknown_block` is the one definition of "this block is
@@ -136,6 +139,13 @@ cascade below both use it.
 with the date's exception row overriding lanes/times and a `skipped` one
 removing the occurrence. `create_reservation`, `move_reservation` and the
 rental cascade all use it; the client mirrors it in `rentalsOn`.
+
+**`public_week` skládá týden znovu, na serveri (0043).** Anon nemá na
+tabulky žádný grant a jména se musí maskovat na serveru, takže veřejný
+přehled nečte streamy appky. Nový vstup do `buildWeekSchedule` (nový
+parametr = nová tabulka ovlivňující sloty) proto znamená doplnit ho i do
+`public_week` a do `PublicWeek.fromJson` — klientskou stranu vynutí
+kompilátor (parametry jsou povinné), SQL stranu ne.
 
 ## Cascades — what cancels reservations
 
@@ -551,7 +561,11 @@ and FCM is configured, e-mail otherwise.
   name/colour — a hand-picked one included — copied and propagated, a grouped
   date blocks like a lone rental, the group vanishes with its last date,
   invisible across tenants, writes refused for a non-admin who can read
-  them, full-DML privileges), and the 0035
+  them, full-DML privileges), the 0043 public overview (anon may call only
+  `public_week`; slug format, normalisation and uniqueness; admin-only
+  setting; unknown and switched-off slugs indistinguishable; occupancy in
+  club colours without any name, player id, renter, note or other tenant),
+  and the 0035
   assertion (now including `team_colors` and `match_exceptions`) that every table
   `lib/data/providers.dart` streams is in the `supabase_realtime`
   publication; run with `psql … -v ON_ERROR_STOP=1 -f` against the local

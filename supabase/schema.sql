@@ -1244,6 +1244,26 @@ $$;
 ALTER FUNCTION "public"."my_future_reservations"("p_user" "uuid") OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."my_public_overview"() RETURNS "jsonb"
+    LANGUAGE "plpgsql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  if not is_admin() then
+    raise exception 'not_allowed';
+  end if;
+  return (
+    select jsonb_build_object('public_slug', t.public_slug,
+                              'public_enabled', t.public_enabled,
+                              'tenant_name', t.name)
+      from tenants t where t.id = current_tenant_id());
+end;
+$$;
+
+
+ALTER FUNCTION "public"."my_public_overview"() OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."my_upcoming_matches"("p_user" "uuid") RETURNS TABLE("match_id" "uuid", "date" "date", "starts_at" time without time zone, "ends_at" time without time zone, "home_team" "text", "away_team" "text", "is_away" boolean, "description" "text")
     LANGUAGE "sql" STABLE SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -1381,6 +1401,89 @@ $$;
 
 
 ALTER FUNCTION "public"."priority_slots_mark_hand_edit"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."public_tenant_id"("p_slug" "text") RETURNS "uuid"
+    LANGUAGE "plpgsql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_tenant uuid;
+begin
+  select id into v_tenant from tenants
+   where public_slug = lower(trim(coalesce(p_slug, '')))
+     and public_enabled
+     and status = 'approved';
+  if v_tenant is null then
+    raise exception 'unknown_tenant';
+  end if;
+  return v_tenant;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."public_tenant_id"("p_slug" "text") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."public_week"("p_slug" "text", "p_monday" "date") RETURNS "jsonb"
+    LANGUAGE "plpgsql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_tenant constant uuid := public_tenant_id(p_slug);
+  v_monday constant date :=
+    date_trunc('week', coalesce(p_monday, current_date))::date;
+  v_from constant date := v_monday - 1;
+  v_to constant date := v_monday + 7;
+begin
+  return jsonb_build_object(
+    'tenant_name', (select name from tenants where id = v_tenant),
+    'settings', (select to_jsonb(s) - 'tenant_id'
+                   from schedule_settings s where s.tenant_id = v_tenant),
+    'blocks', coalesce((
+      select jsonb_agg(to_jsonb(b) - 'tenant_id')
+        from time_blocks b where b.tenant_id = v_tenant), '[]'),
+    'slot_types', coalesce((
+      select jsonb_agg(to_jsonb(t) - 'tenant_id' - 'created_at')
+        from priority_slot_types t where t.tenant_id = v_tenant), '[]'),
+    'overrides', coalesce((
+      select jsonb_agg(to_jsonb(o) - 'tenant_id' - 'created_by' - 'created_at')
+        from day_overrides o
+       where o.tenant_id = v_tenant and o.date between v_from and v_to), '[]'),
+    'priority_slots', coalesce((
+      select jsonb_agg(to_jsonb(p) - 'tenant_id' - 'created_by' - 'created_at')
+        from priority_slots p
+       where p.tenant_id = v_tenant and p.date between v_from and v_to), '[]'),
+    -- Names and notes never leave: the board says "Obsazeno" instead.
+    'rentals', coalesce((
+      select jsonb_agg((to_jsonb(r) - 'tenant_id' - 'created_by' - 'created_at')
+                       || jsonb_build_object('renter_name', '', 'note', ''))
+        from rentals r
+       where r.tenant_id = v_tenant
+         and (r.date between v_from and v_to
+              or (r.weekday is not null
+                  and (r.valid_from is null or r.valid_from <= v_to)
+                  and (r.valid_until is null or r.valid_until >= v_from)))),
+      '[]'),
+    -- Who holds a lane is exactly what the public board must not say: a
+    -- live reservation is its cell and the player's club colour, nothing more.
+    'occupied', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'block_id', x.block_id, 'date', x.date, 'lane', x.lane,
+               'club_color', coalesce(c.color, -1))
+             order by x.date, x.block_id, x.lane)
+        from reservations x
+        join profiles pr on pr.id = x.player_id
+        left join clubs c on c.id = pr.club_id
+       where x.tenant_id = v_tenant
+         and x.cancelled_at is null
+         and x.date between v_monday and v_monday + 6), '[]')
+  );
+end;
+$$;
+
+
+ALTER FUNCTION "public"."public_week"("p_slug" "text", "p_monday" "date") OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."register_profile"("p_display_name" "text", "p_tenant_id" "uuid", "p_club_id" "uuid" DEFAULT NULL::"uuid", "p_nick" "text" DEFAULT ''::"text") RETURNS "public"."profiles"
@@ -2065,6 +2168,35 @@ end; $$;
 ALTER FUNCTION "public"."set_player_club"("p_user_id" "uuid", "p_club_id" "uuid") OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."set_public_overview"("p_slug" "text", "p_enabled" boolean) RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_slug constant text := nullif(lower(trim(coalesce(p_slug, ''))), '');
+begin
+  if auth.uid() is null then
+    raise exception 'not_authenticated';
+  end if;
+  if not is_admin() then
+    raise exception 'not_allowed';
+  end if;
+  if coalesce(p_enabled, false) and v_slug is null then
+    raise exception 'invalid_slug';
+  end if;
+  update tenants
+     set public_slug = v_slug, public_enabled = coalesce(p_enabled, false)
+   where id = current_tenant_id();
+exception
+  when check_violation then raise exception 'invalid_slug';
+  when unique_violation then raise exception 'slug_taken';
+end;
+$$;
+
+
+ALTER FUNCTION "public"."set_public_overview"("p_slug" "text", "p_enabled" boolean) OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."set_role"("p_user_id" "uuid", "p_role" "text") RETURNS "void"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -2647,6 +2779,10 @@ CREATE TABLE IF NOT EXISTS "public"."tenants" (
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "status" "text" DEFAULT 'pending'::"text" NOT NULL,
     "approved_at" timestamp with time zone,
+    "public_slug" "text",
+    "public_enabled" boolean DEFAULT false NOT NULL,
+    CONSTRAINT "tenants_public_needs_slug" CHECK (((NOT "public_enabled") OR ("public_slug" IS NOT NULL))),
+    CONSTRAINT "tenants_public_slug_format" CHECK (("public_slug" ~ '^[a-z0-9]([a-z0-9-]{1,38}[a-z0-9])?$'::"text")),
     CONSTRAINT "tenants_status_check" CHECK (("status" = ANY (ARRAY['pending'::"text", 'approved'::"text"])))
 );
 
@@ -2780,6 +2916,11 @@ ALTER TABLE ONLY "public"."tenants"
 
 ALTER TABLE ONLY "public"."tenants"
     ADD CONSTRAINT "tenants_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."tenants"
+    ADD CONSTRAINT "tenants_public_slug_key" UNIQUE ("public_slug");
 
 
 
@@ -3428,6 +3569,12 @@ GRANT ALL ON FUNCTION "public"."my_future_reservations"("p_user" "uuid") TO "ser
 
 
 
+REVOKE ALL ON FUNCTION "public"."my_public_overview"() FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."my_public_overview"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."my_public_overview"() TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."my_upcoming_matches"("p_user" "uuid") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."my_upcoming_matches"("p_user" "uuid") TO "service_role";
 
@@ -3452,6 +3599,18 @@ GRANT ALL ON FUNCTION "public"."priority_slots_enqueue_calendar"() TO "service_r
 GRANT ALL ON FUNCTION "public"."priority_slots_mark_hand_edit"() TO "anon";
 GRANT ALL ON FUNCTION "public"."priority_slots_mark_hand_edit"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."priority_slots_mark_hand_edit"() TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."public_tenant_id"("p_slug" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."public_tenant_id"("p_slug" "text") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."public_week"("p_slug" "text", "p_monday" "date") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."public_week"("p_slug" "text", "p_monday" "date") TO "anon";
+GRANT ALL ON FUNCTION "public"."public_week"("p_slug" "text", "p_monday" "date") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."public_week"("p_slug" "text", "p_monday" "date") TO "service_role";
 
 
 
@@ -3542,6 +3701,12 @@ GRANT ALL ON FUNCTION "public"."set_calendar_teams_for"("p_user" "uuid", "p_team
 REVOKE ALL ON FUNCTION "public"."set_match_exception"("p_match" "uuid", "p_shown" boolean) FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."set_match_exception"("p_match" "uuid", "p_shown" boolean) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."set_match_exception"("p_match" "uuid", "p_shown" boolean) TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."set_public_overview"("p_slug" "text", "p_enabled" boolean) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."set_public_overview"("p_slug" "text", "p_enabled" boolean) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."set_public_overview"("p_slug" "text", "p_enabled" boolean) TO "service_role";
 
 
 

@@ -2848,5 +2848,211 @@ begin
   raise notice 'OK: rental_groups is full DML for the app, RLS decides, anon nothing (0041)';
 end $$;
 
+-- 0043 veřejný přehled ------------------------------------------------------
+reset role;
+do $$
+begin
+  if not has_function_privilege('anon', 'public_week(text, date)', 'execute') then
+    raise exception 'FAIL: anon cannot call public_week';
+  end if;
+  if has_function_privilege('anon', 'set_public_overview(text, boolean)', 'execute')
+     or has_function_privilege('anon', 'my_public_overview()', 'execute')
+     or has_function_privilege('anon', 'public_tenant_id(text)', 'execute')
+     or has_function_privilege('authenticated', 'public_tenant_id(text)', 'execute') then
+    raise exception 'FAIL: an admin/internal public-overview function is callable by anon (or the helper by the app)';
+  end if;
+  if not has_function_privilege('authenticated', 'set_public_overview(text, boolean)', 'execute')
+     or not has_function_privilege('authenticated', 'my_public_overview()', 'execute') then
+    raise exception 'FAIL: the app cannot manage its public overview';
+  end if;
+  if has_column_privilege('authenticated', 'public.tenants', 'public_slug', 'select') then
+    raise exception 'FAIL: tenants.public_slug is readable directly — every alley''s slug would leak';
+  end if;
+  raise notice 'OK: public_week is the one door for anon; the rest is admin-only or internal (0043)';
+end $$;
+
+-- Fixtures: an approved tenant A with a club-coloured reservation, a
+-- cancelled one, a named rental with a note and a match — all on a block of
+-- their own (06:00), so nothing else in this suite shares the cells.
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+  v_monday constant date :=
+    date_trunc('week', (now() at time zone 'Europe/Prague')::date)::date;
+  v_club uuid;
+  v_block uuid;
+  v_type uuid;
+begin
+  update tenants set status = 'approved' where id = v_a;
+  insert into clubs (tenant_id, name, color) values (v_a, 'Pub Oddíl', 5)
+    returning id into v_club;
+  update profiles set club_id = v_club where id = v_uid;
+  insert into time_blocks (tenant_id, starts_at, ends_at, position)
+    values (v_a, '06:00', '06:30', 99) returning id into v_block;
+  perform set_config('probe.pub_block', v_block::text, true);
+  perform set_config('probe.pub_monday', v_monday::text, true);
+  insert into reservations
+    (tenant_id, player_id, date, block_id, lane, created_via, created_by)
+  values (v_a, v_uid, v_monday + 2, v_block, 1, 'app', v_uid);
+  insert into reservations
+    (tenant_id, player_id, date, block_id, lane, created_via, created_by,
+     cancelled_at, cancelled_via)
+  values (v_a, v_uid, v_monday + 2, v_block, 2, 'app', v_uid, now(), 'app');
+  insert into rentals
+    (tenant_id, renter_name, note, lanes, date, starts_at, ends_at, created_by)
+  values (v_a, 'Firma Tajná', 'tajná poznámka', '{1}', v_monday + 4,
+          '05:00', '05:30', v_uid);
+  select id into v_type from priority_slot_types
+    where tenant_id = v_a and is_match and builtin;
+  insert into priority_slots
+    (tenant_id, date, starts_at, ends_at, type_id, home_team, away_team,
+     prep_minutes, description, is_away, created_by)
+  values (v_a, v_monday + 5, '05:00', '05:45', v_type, 'Pub Domácí',
+          'Pub Hosté', 0, '', false, v_uid);
+end $$;
+
+-- Admin A: format checks, then a disabled save (trimmed + lower-cased).
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+declare
+  v jsonb;
+begin
+  begin
+    perform set_public_overview('Ab', false);
+    raise exception 'FAIL: a 2-character slug was accepted';
+  exception when others then
+    if sqlerrm <> 'invalid_slug' then raise; end if;
+  end;
+  begin
+    perform set_public_overview('kuzelna_a', false);
+    raise exception 'FAIL: an underscore slug was accepted';
+  exception when others then
+    if sqlerrm <> 'invalid_slug' then raise; end if;
+  end;
+  begin
+    perform set_public_overview('', true);
+    raise exception 'FAIL: switched on without a slug';
+  exception when others then
+    if sqlerrm <> 'invalid_slug' then raise; end if;
+  end;
+  perform set_public_overview('  Kuzelna-A ', false);
+  v := my_public_overview();
+  if v->>'public_slug' is distinct from 'kuzelna-a'
+     or (v->>'public_enabled')::boolean
+     or v->>'tenant_name' is distinct from 'Kuželna A' then
+    raise exception 'FAIL: my_public_overview returned %', v;
+  end if;
+  raise notice 'OK: set_public_overview validates the slug and stores it normalised; my_public_overview reads it back (0043)';
+end $$;
+
+-- Admin B cannot take A's slug; pending C is no admin.
+reset role;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000002","role":"authenticated"}';
+do $$
+begin
+  begin
+    perform set_public_overview('kuzelna-a', true);
+    raise exception 'FAIL: tenant B took tenant A''s slug';
+  exception when others then
+    if sqlerrm <> 'slug_taken' then raise; end if;
+  end;
+  if (my_public_overview()->>'public_slug') is not null then
+    raise exception 'FAIL: the refused save still wrote tenant B';
+  end if;
+end $$;
+reset role;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000003","role":"authenticated"}';
+do $$
+begin
+  begin
+    perform set_public_overview('cizi-slug', true);
+    raise exception 'FAIL: a non-admin set the public overview';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  begin
+    perform my_public_overview();
+    raise exception 'FAIL: a non-admin read the public overview setting';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  raise notice 'OK: a slug is one alley''s, and only its admin sets it (0043)';
+end $$;
+
+-- Anon: unknown and switched-off slugs look the same.
+reset role;
+set local role anon;
+set local request.jwt.claims = '{"role":"anon"}';
+do $$
+begin
+  begin
+    perform public_week('nikdo-tu-neni', current_date);
+    raise exception 'FAIL: an unknown slug answered';
+  exception when others then
+    if sqlerrm <> 'unknown_tenant' then raise; end if;
+  end;
+  begin
+    perform public_week('kuzelna-a', current_date);
+    raise exception 'FAIL: a switched-off slug answered';
+  exception when others then
+    if sqlerrm <> 'unknown_tenant' then raise; end if;
+  end;
+  raise notice 'OK: unknown and switched-off slugs give the same unknown_tenant (0043)';
+end $$;
+
+-- Switched on: anon reads the week — occupancy and club colour, no names.
+reset role;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+select set_public_overview('kuzelna-a', true);
+reset role;
+set local role anon;
+set local request.jwt.claims = '{"role":"anon"}';
+do $$
+declare
+  v_block constant text := current_setting('probe.pub_block');
+  v_monday constant date := current_setting('probe.pub_monday')::date;
+  v jsonb;
+begin
+  -- Mid-week date: the function snaps it to the Monday.
+  v := public_week('kuzelna-a', v_monday + 3);
+  if v->>'tenant_name' is distinct from 'Kuželna A' then
+    raise exception 'FAIL: tenant_name %', v->>'tenant_name';
+  end if;
+  if not v->'occupied' @> jsonb_build_array(jsonb_build_object(
+       'block_id', v_block, 'date', (v_monday + 2)::text, 'lane', 1,
+       'club_color', 5)) then
+    raise exception 'FAIL: the live reservation is not an occupied cell in the club colour: %', v->'occupied';
+  end if;
+  if v->'occupied' @> jsonb_build_array(jsonb_build_object(
+       'block_id', v_block, 'lane', 2)) then
+    raise exception 'FAIL: a cancelled reservation shows as occupied';
+  end if;
+  if not v->'rentals' @> '[{"renter_name": "", "note": ""}]'
+     or not v->'priority_slots' @> '[{"home_team": "Pub Domácí"}]'
+     or jsonb_array_length(v->'blocks') = 0
+     or jsonb_array_length(v->'slot_types') = 0
+     or v->'settings'->'lane_count' is null then
+    raise exception 'FAIL: the week is incomplete: %', v;
+  end if;
+  if v::text like '%10000000-0000-0000-0000-000000000001%'
+     or v::text like '%Hráč A%'
+     or v::text like '%Firma Tajná%'
+     or v::text like '%tajná poznámka%'
+     or v::text like '%00000000-0000-0000-0000-00000000000a%'
+     or v::text like '%Kuželna B%' then
+    raise exception 'FAIL: public_week leaks a name, an id or another tenant: %', v;
+  end if;
+  raise notice 'OK: public_week shows occupancy in club colours and the matches, never a name (0043)';
+end $$;
+
 reset role;
 rollback;
