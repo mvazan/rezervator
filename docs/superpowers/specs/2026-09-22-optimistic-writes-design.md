@@ -45,17 +45,27 @@ z Hráčů pro kohokoli jiného) a bez rozdělení funkce na dvě by optimistick
 oprava nevěděla, jestli má patchnout `myProfileProvider`, nebo řádek v
 `profilesProvider`. Nestojí to za komplikaci — zůstává beze změny.
 
-**V rozsahu** (8 zápisů, všechny už dnes výhradně vlastní):
+**V rozsahu** (11 zápisů, všechny už dnes výhradně vlastní):
 `setNotifyBefore`, `setOwnColor`, `setFollowedTeams`, `setDefaultView`
-(`profiles`), `setCalendarReminders`, `setTrainingColor`,
-`setCalendarTeams`, `setTeamColors` (Google kalendář, přes edge funkci
-`calendar-manage`), plus `setMatchException` (RPC `set_match_exception`)
-a kioskové přepínače `setKioskDark`/`setKioskFitDay` (`schedule_settings`
-— tenantové, ne uživatelské, ale nekonfliktní admin přepínač).
+(`profiles`), `setKioskDark`, `setKioskFitDay` (`schedule_settings` —
+tenantové, ne uživatelské, ale nekonfliktní admin přepínač),
+`setCalendarReminders`, `setTrainingColor`, `setCalendarTeams`,
+`setTeamColors` (Google kalendář, přes edge funkci `calendar-manage`),
+`setMatchException` (RPC `set_match_exception`).
 
-**Úspěch přemaže optimistickou hodnotu skutečnou.** Google kalendář
-připomínky server třídí a odstraňuje duplicity — po uložení se zobrazí,
-co server opravdu uložil, ne co appka poslala.
+**Úspěch nesmaže optimistickou hodnotu hned.** Kdyby zmizela okamžitě,
+`withOptimisticOverlay` by na okamžik znovu vydal poslední *staré*
+skutečné řádky (ještě neaktualizované) a stará hodnota by bliklo zpátky,
+než dorazí ozvěna. Proto se patch po úspěchu jen označí jako **potvrzený**
+a zůstává aktivní; teprve PRVNÍ další skutečné doručení ho zahodí a
+definitivně platí to, co poslal server (Google kalendář připomínky např.
+setřídí a odstraní duplicity). Aby ozvěna nečekala na náhodu, potvrzení
+zápisu navíc vyžádá **cílené obnovení** — přesně ten jeden dotčený stream
+se hned znovu přihlásí (čerstvý REST fetch), stejně jako to dnes dělá
+[LiveRefresh] po návratu appky z pozadí, jen mířené na jeden klíč místo
+všech streamů najednou. Řeší to i zaseknutý socket, který popsání
+motivace výše zmiňuje: zápis, který appka sama potvrdí, cílené obnovení
+spustí bez ohledu na to, v jakém stavu byl.
 
 **Neúspěch spadne zpátky na poslední známý stav.** Chyba jde dál přesně
 jako dnes — `tryAction` ji odchytí a ukáže `friendlyDbError`. Žádná
@@ -63,174 +73,78 @@ obrazovka se kvůli tomu nemění.
 
 ## Mechanismus
 
-Nový soubor `lib/data/optimistic.dart`, používaný jen z `lib/data/cache.dart`
+Nový soubor `lib/data/optimistic.dart`, používaný z `lib/data/cache.dart`
 (čtecí strana) a `lib/data/providers.dart` (zápisová strana, `class Api`).
-`cachedRows` samotné (replay z cache, live stream, retry po chybě, probuzení
-appky) se nemění ani o řádek — dostává jen obálku navíc kolem svého výstupu.
+`cachedRows`'s vlastní tělo (replay z cache, live stream, retry po chybě,
+probuzení appky) se přejmenovalo na privátní `_cachedRowsCore` beze změny
+uvnitř — veřejná `cachedRows` ho jen obaluje a `_untilWake`/`_sleepOrWake`
+navíc poslouchají [refreshRequests] vedle [LiveRefresh].
+
+**Stav** (`lib/data/optimistic.dart`):
 
 ```dart
-// lib/data/optimistic.dart
-/// Optimistická vrstva nad [cachedRows] (`lib/data/cache.dart`): appka ví,
-/// co právě zapsala, a nemusí čekat, až se to vrátí přes realtime. Klíč je
-/// stejný pár (uid, name) jako u cachedRows a RowCache — viz konstanty
-/// cacheKey* níže, sdílené mezi čtecí stranou (cachedRows) a zápisovou
-/// (Api.setXxx).
-library;
-
-import 'dart:async';
-
-/// Jeden probíhající zápis pro jeden klíč. [apply] přemění, co by
-/// [cachedRows] jinak vydal, na to, co tenhle zápis očekává — volá se
-/// znovu na KAŽDÉ skutečné doručení, dokud zápis neskončí, aby nesouvisející
-/// změna (např. admin schválí jiného hráče a přepíše celý profil) tu
-/// optimistickou nezahodila.
+/// Jeden probíhající (nebo právě potvrzený) zápis pro jeden klíč. [apply]
+/// přemění, co by cachedRows jinak vydal, na to, co tenhle zápis očekává
+/// — volá se znovu na KAŽDÉ skutečné doručení, dokud zápis neskončí, aby
+/// nesouvisející změna (např. admin schválí jiného hráče a přepíše celý
+/// profil) tu optimistickou nezahodila.
+///
+/// [confirmed] rozlišuje „ještě čekám na odpověď serveru" od „server
+/// potvrdil, čekám na ozvěnu přes realtime, abych patch mohl zahodit" —
+/// než ozvěna dorazí, patch musí zůstat.
 class _Pending {
   _Pending(this.apply);
   final List<Map<String, dynamic>> Function(List<Map<String, dynamic>> rows)
       apply;
+  bool confirmed = false;
 }
 
 final _pending = <String, _Pending>{};
 
-/// Globální signál „pro tenhle klíč se něco změnilo" — [withOptimisticOverlay]
-/// na něj reaguje okamžitým přemapováním posledních známých řádků, BEZ
-/// nového připojení k live streamu (na rozdíl od LiveRefresh, který stream
-/// nutí se odpojit a znovu přihlásit).
+/// „Pro tenhle klíč se něco změnilo" — withOptimisticOverlay na to reaguje
+/// okamžitým přemapováním posledních známých řádků, BEZ nového připojení
+/// k live streamu.
 final _changed = StreamController<String>.broadcast();
 
-String _key(String uid, String name) => '$uid.$name';
-
-/// [rows], jak by je viděl volající, když se na klíč (uid, name) právě
-/// vztahuje probíhající optimistický zápis — jinak beze změny.
-List<Map<String, dynamic>> applyPending(
-        String uid, String name, List<Map<String, dynamic>> rows) =>
-    _pending[_key(uid, name)]?.apply(rows) ?? rows;
-
-/// Poslouchá se v [withOptimisticOverlay]: „přemapuj znovu, pro tenhle
-/// klíč se něco stalo" (nový zápis začal, nebo předchozí skončil).
-Stream<void> pendingChanges(String uid, String name) =>
-    _changed.stream.where((k) => k == _key(uid, name));
-
-/// Spustí [write] na pozadí; UI vidí efekt [apply] OKAMŽITĚ, ne až po
-/// odpovědi serveru. Když [write] uspěje, patch zmizí a další skutečné
-/// doručení (stream běžel dál po celou dobu) ukáže přesně to, co server
-/// uložil. Když selže, patch zmizí stejně tak a chyba jde dál — volající
-/// (`tryAction`) ji odchytí jako dnes.
-///
-/// Druhý zápis na STEJNÝ klíč dřív, než první doběhne (rychlé přidání dvou
-/// připomínek za sebou), přebírá viditelnost: patch vidí appka vždycky ten
-/// z posledního volání. Dokončení staršího volání proto smaže `_pending`
-/// jen tehdy, když mezitím nepřevzalo novější — jinak by na okamžik
-/// shodilo ještě neuloženou novější změnu. Chyba staršího volání jde
-/// jeho volajícímu dál bez ohledu na to.
-Future<void> optimisticWrite(
-  String uid,
-  String name,
-  List<Map<String, dynamic>> Function(List<Map<String, dynamic>> rows) apply,
-  Future<void> Function() write,
-) async {
-  final key = _key(uid, name);
-  final entry = _Pending(apply);
-  _pending[key] = entry;
-  _changed.add(key);
-  try {
-    await write();
-  } finally {
-    if (identical(_pending[key], entry)) {
-      _pending.remove(key);
-      _changed.add(key);
-    }
-  }
-}
-
-/// Obaluje [raw] (výstup [cachedRows]'s core generátoru, beze změny) tak,
-/// že každé doručení — replay z cache i každé živé — projde [applyPending].
-/// Navíc reaguje na [pendingChanges]: nové/skončené optimistické psaní
-/// přemapuje POSLEDNÍ známé řádky okamžitě, bez zásahu do `raw` (žádné
-/// nové připojení, žádná síť).
-Stream<List<Map<String, dynamic>>> withOptimisticOverlay(
-  String uid,
-  String name,
-  Stream<List<Map<String, dynamic>>> raw,
-) {
-  final out = StreamController<List<Map<String, dynamic>>>();
-  StreamSubscription<List<Map<String, dynamic>>>? rawSub;
-  StreamSubscription<void>? changeSub;
-  var last = <Map<String, dynamic>>[];
-  var hasLast = false;
-
-  void emit() {
-    if (hasLast && !out.isClosed) out.add(applyPending(uid, name, last));
-  }
-
-  out.onListen = () {
-    rawSub = raw.listen(
-      (rows) {
-        last = rows;
-        hasLast = true;
-        emit();
-      },
-      onError: (Object e, StackTrace st) {
-        if (!out.isClosed) out.addError(e, st);
-      },
-      onDone: out.close,
-    );
-    changeSub = pendingChanges(uid, name).listen((_) => emit());
-  };
-  out.onCancel = () async {
-    await changeSub?.cancel();
-    await rawSub?.cancel();
-  };
-  return out.stream;
-}
-
-/// Patch jednoho řádku podle klíčového sloupce — tvar, který sdílí profil,
-/// google_calendar_links a schedule_settings (jeden řádek na vlastníka,
-/// nezávisle upravitelná pole).
-List<Map<String, dynamic>> Function(List<Map<String, dynamic>> rows) patchRow(
-  String keyColumn,
-  Object keyValue,
-  Map<String, dynamic> fields,
-) =>
-    (rows) => [
-          for (final r in rows)
-            if (r[keyColumn] == keyValue) {...r, ...fields} else r,
-        ];
-
-/// Částečný upsert-nebo-smazání podle klíče vypočteného z řádku — tvar,
-/// který sdílí setTeamColors (klíč = team) a setMatchException (klíč =
-/// match_id): [upserts] řádek pro daný klíč přidá/nahradí, [deletes] ho
-/// smaže, všechno ostatní zůstává beze změny.
-List<Map<String, dynamic>> Function(List<Map<String, dynamic>> rows)
-    upsertOrDeleteRows({
-  required String Function(Map<String, dynamic> row) matchKey,
-  required Map<String, Map<String, dynamic>> upserts,
-  required Set<String> deletes,
-}) =>
-        (rows) => [
-              for (final r in rows)
-                if (!deletes.contains(matchKey(r)) &&
-                    !upserts.containsKey(matchKey(r)))
-                  r,
-              ...upserts.values,
-            ];
+/// „Tenhle klíč má právě potvrzený zápis — přihlas se znovu, ať přijde
+/// ozvěna co nejdřív, i kdyby byl socket zaseknutý." Stejný efekt jako
+/// LiveRefresh, ale mířený jen na jeden stream.
+final _refresh = StreamController<String>.broadcast();
 ```
 
-`lib/data/cache.dart`: `cachedRows`'s tělo se přejmenuje na privátní
-`_cachedRowsCore` (beze změny) a veřejná `cachedRows` ho jen obalí:
+**Veřejné funkce:**
 
-```dart
-Stream<List<Map<String, dynamic>>> cachedRows(
-  String uid,
-  String name,
-  Stream<List<Map<String, dynamic>>> Function() live,
-) =>
-    withOptimisticOverlay(uid, name, _cachedRowsCore(uid, name, live));
-```
+- `applyPending(uid, name, rows)` — `rows`, jak by je viděl volající, když
+  se na klíč právě vztahuje probíhající nebo potvrzený zápis, jinak beze
+  změny.
+- `pendingChanges(uid, name)` / `refreshRequests(uid, name)` — `Stream<void>`
+  filtrované na jeden klíč.
+- `settlePending(uid, name)` — odstraní patch, jen pokud je `confirmed`
+  (nepotvrzený patch nesouvisející doručení nesmí zahodit).
+- `optimisticWrite(uid, name, apply, write)`:
+  1. uloží `_Pending(apply)`, pošle `_changed`,
+  2. `await write()`,
+  3. **úspěch** a entry je stále ta samá (`identical`, viz níž): označí
+     `confirmed = true`, pošle `_refresh`,
+  4. **chyba** a entry je stále ta samá: smaže ji, pošle `_changed`,
+     `rethrow`,
+  5. pokud entry mezitím převzal novější zápis na stejný klíč (druhé rychlé
+     přidání připomínky dřív, než první doběhne), krok 3/4 na `_pending`
+     nesáhne — jen `rethrow` při chybě jde volajícímu dál i tak. Vidí se
+     vždy patch z POSLEDNÍHO volání.
+- `withOptimisticOverlay(uid, name, raw)` — obaluje `raw` (výstup
+  `_cachedRowsCore`): každé doručení nejdřív zavolá `settlePending`, pak
+  uloží poslední řádky a vydá je přes `applyPending`; navíc poslouchá
+  `pendingChanges` a při každé události přemapuje POSLEDNÍ známé řádky
+  znovu, bez zásahu do `raw`.
+- `patchRow(keyColumn, keyValue, fields)` — patch jednoho řádku podle
+  klíčového sloupce (tvar sdílený `profiles`, `google_calendar_links`,
+  `schedule_settings`).
+- `upsertOrDeleteRows({matchKey, upserts, deletes})` — částečný
+  upsert-nebo-smazání podle klíče vypočteného z řádku (tvar sdílený
+  `team_colors`, `match_exceptions`).
 
-Sdílené klíče (stejný string na čtecí i zápisové straně — dřív existoval
-jen na jedné, teď musí sedět na obou, proto konstanty místo řetězců
-napsaných dvakrát) v `lib/data/cache.dart`:
+**`lib/data/cache.dart`:**
 
 ```dart
 const cacheKeyProfile = 'profile';
@@ -239,19 +153,26 @@ const cacheKeyCalendarTeams = 'calendar_teams';
 const cacheKeyTeamColors = 'team_colors';
 const cacheKeyMatchExceptions = 'match_exceptions';
 const cacheKeySettings = 'settings';
+
+Stream<List<Map<String, dynamic>>> cachedRows(
+  String uid,
+  String name,
+  Stream<List<Map<String, dynamic>>> Function() live,
+) =>
+    withOptimisticOverlay(uid, name, _cachedRowsCore(uid, name, live));
 ```
 
-`lib/data/providers.dart` — existující `cachedRows(uid, 'profile', …)` a
-podobná volání v `myProfileProvider`, `myCalendarLinkProvider`,
-`myCalendarTeamsProvider`, `myTeamColorsProvider`,
-`myMatchExceptionsProvider`, `settingsProvider` přejdou na tyto konstanty
-(mechanická záměna řetězce za konstantu, žádná jiná změna).
+`_untilWake` dostal `uid`/`name` a vedle `LiveRefresh.stream` poslouchá i
+`refreshRequests(uid, name)` — stejné `onWake(); stop();`. `_sleepOrWake`
+(čekání na backoff) dostal `uid`/`name` stejně a poslouchá `refreshRequests`
+vedle `LiveRefresh.stream` — jinak by potvrzený zápis, který přijde
+zrovna ve chvíli, kdy je stream v backoffu po výpadku, čekal až na
+vypršení časovače (5–30 s).
 
-## Osm zápisů — přesná transformace
+## 11 zápisů — přesná transformace
 
-Každý dnešní `Api.setXxx` dostane misto přímého `.update()`/`.invoke()`/
-`.rpc()` volání obálku `optimisticWrite(uid, key, apply, write)`, kde
-`write` je přesně to, co dělal dnes.
+Každý `Api.setXxx` volá `optimisticWrite(uid, key, apply, write)`, kde
+`write` je přesně to, co dělal dřív.
 
 | Funkce | Klíč | `apply` |
 |---|---|---|
@@ -261,82 +182,101 @@ Každý dnešní `Api.setXxx` dostane misto přímého `.update()`/`.invoke()`/
 | `setDefaultView(view)` | `cacheKeyProfile` | `patchRow('id', uid, {'default_view': view.name})` |
 | `setKioskDark(dark, {tenantId})` | `cacheKeySettings` | `patchRow('tenant_id', tenantId, {'kiosk_dark': dark})` |
 | `setKioskFitDay(fit, {tenantId})` | `cacheKeySettings` | `patchRow('tenant_id', tenantId, {'kiosk_fit_day': fit})` |
-| `setCalendarReminders(minutes, {calendar})` | `cacheKeyCalendarLink` | `patchRow('user_id', uid, {field: minutes})`, kde `field` je `'reminder_minutes_secondary'` pro `CalendarSlot.secondary`, jinak `'reminder_minutes'` |
+| `setCalendarReminders(minutes, {calendar})` | `cacheKeyCalendarLink` | `patchRow('user_id', uid, {field: minutes})`, `field` = `'reminder_minutes_secondary'` pro `CalendarSlot.secondary`, jinak `'reminder_minutes'` |
 | `setTrainingColor(colorId)` | `cacheKeyCalendarLink` | `patchRow('user_id', uid, {'training_color_id': colorId})` |
-| `setCalendarTeams(teams)` | `cacheKeyCalendarTeams` | `(_) => [for (t in teams) {...t.toJson(), 'user_id': uid}]` — úplná náhrada, server (`set_calendar_teams_for`) taky maže vše a vkládá znovu |
-| `setTeamColors(colors)` | `cacheKeyTeamColors` | `upsertOrDeleteRows` — `upserts` pro `color_id != null` (`{'user_id': uid, 'team': t, 'color_id': c}`), `deletes` pro `color_id == null`, klíč `team` |
-| `setMatchException(matchId, shown)` | `cacheKeyMatchExceptions` | `shown == null` → `upsertOrDeleteRows(deletes: {matchId})`; jinak `upsertOrDeleteRows(upserts: {matchId: {'user_id': uid, 'match_id': matchId, 'shown': shown}})`, klíč `match_id` |
+| `setCalendarTeams(teams)` | `cacheKeyCalendarTeams` | `(_) => [for t: {...t.toJson(), 'user_id': uid}]` — úplná náhrada, jako `set_calendar_teams_for` |
+| `setTeamColors(colors)` | `cacheKeyTeamColors` | `upsertOrDeleteRows`, klíč `team`: `color_id == null` → delete, jinak upsert `{user_id, team, color_id}` — jako `set_team_colors_for` |
+| `setMatchException(matchId, shown)` | `cacheKeyMatchExceptions` | `upsertOrDeleteRows`, klíč `match_id`: `shown == null` → delete, jinak upsert `{user_id, match_id, shown}` — jako `set_match_exception` |
 
-`uid` je všude `currentUserId!` (výhradně vlastní zápisy, viz výše).
+`uid` je pro `profiles`/`calendar_link`/`calendar_teams`/`team_colors`/
+`match_exceptions` vždy `currentUserId!` — výhradně vlastní zápisy, viz
+výše.
+
+**Výjimka: kioskové přepínače.** `setKioskDark`/`setKioskFitDay` nikdy
+neodkazovaly na `currentUserId` — jen na `tenantId` (parametr). Existující
+test appky (žádná auth session, `settingsProvider` overridnutý napřímo)
+to potvrdil pádem `Bad state: No element`, když se `currentUserId!`
+vynutilo bezpodmínečně. Obě funkce proto zápis nejdřív připraví jako
+prostou funkci a `optimisticWrite` zavolají, jen když `currentUserId`
+skutečně existuje — jinak zapíšou přímo jako dřív:
+
+```dart
+static Future<void> setKioskDark(bool kioskDark, {required String tenantId}) {
+  Future<void> write() => _db.from('schedule_settings')
+      .update({'kiosk_dark': kioskDark}).eq('tenant_id', tenantId);
+  final uid = currentUserId;
+  if (uid == null) return write();
+  return optimisticWrite(uid, cacheKeySettings,
+      patchRow('tenant_id', tenantId, {'kiosk_dark': kioskDark}), write);
+}
+```
+
+Přihlášený admin `currentUserId` má vždy (obrazovka je za `AdminScaffold`
+gatem) — fallback větev je čistě pro testovací/degenerovaný stav bez
+session.
+
 `setCalendarReminders`/`setTrainingColor`/`setCalendarTeams`/
 `setTeamColors` chodí přes edge funkci `calendar-manage`, samotné
 `_db.functions.invoke(...)` volání se nemění — jen se obalí.
 
 **UI se nemění vůbec.** `reminders_sheet.dart`, `profile_screen.dart`,
 `calendar_link_card.dart` volají `Api.setXxx` a `tryAction` přesně jako
-dnes — chybová hláška, úspěšná hláška, žádný nový parametr. Optimismus je
-neviditelný detail datové vrstvy.
+dnes.
 
 ## Chybové stavy a hrany
 
-- **Zápis selže:** `optimisticWrite`'s `finally` smaže patch (pokud ho
-  mezitím nepřevzal novější — viz níž), `withOptimisticOverlay` se vrátí
-  k poslednímu skutečnému stavu, chyba jde dál, `tryAction` ukáže
+- **Zápis selže:** `optimisticWrite`'s krok 4 smaže patch (pokud ho
+  mezitím nepřevzal novější), `withOptimisticOverlay` se vrátí k
+  poslednímu skutečnému stavu, chyba jde dál, `tryAction` ukáže
   `friendlyDbError`.
-- **Dva rychlé zápisy na stejný klíč (přidání dvou připomínek za sebou,
-  dřív než první doběhne):** druhé volání čte `minutesOf(ref)`, který už
-  ukazuje optimistickou hodnotu PRVNÍHO — takže samo o sobě počítá se
-  správným základem a jeho `apply` popisuje kompletní cílový stav (ne jen
-  „přidej jednu"). Když starší zápis doběhne (ať uspěje, nebo ne), `_pending`
-  smaže JEN pokud je pořád jeho — jinak nechá novější patch být. Zpráva o
-  chybě staršího zápisu jde dál i tak (jeho vlastnímu volajícímu), ale
-  zobrazený seznam zůstává u novější (ještě neuzavřené) verze.
+- **Dva rychlé zápisy na stejný klíč** (přidání dvou připomínek za sebou,
+  dřív než první doběhne): druhé volání čte `minutesOf(ref)`, který už
+  ukazuje optimistickou hodnotu PRVNÍHO — jeho `apply` proto popisuje
+  kompletní cílový stav, ne jen „přidej jednu". Dokončení staršího zápisu
+  (úspěch i chyba) na `_pending` sáhne jen tehdy, když je pořád jeho.
+- **Potvrzený zápis přijde zrovna, když je stream v backoffu** (po
+  výpadku spojení): `_sleepOrWake` poslouchá `refreshRequests` vedle
+  `LiveRefresh`, takže se hned přihlásí znovu — nečeká na 5–30s časovač.
 - **Provider se mezitím zruší** (`ref.invalidate`, autoDispose): nová
   instance `cachedRows`/`withOptimisticOverlay` čte `_pending` znovu podle
   klíče — pokud zápis pořád běží, nová instance ho uvidí taky.
-- **Testy sdílející stejné (uid, name):** `_pending`/`_changed` jsou
-  modulové globály (stejně jako `RowCache`'s SharedPreferences klíče) —
-  testy proto používají různé `name` řetězce na test, stejná konvence,
-  jakou už `test/data/cache_test.dart` dodržuje.
+- **Testy sdílející stejné (uid, name):** `_pending`/`_changed`/`_refresh`
+  jsou modulové globály (stejně jako `RowCache`'s SharedPreferences klíče)
+  — testy proto používají různé `name` řetězce na test, stejná konvence,
+  jakou dodržuje `test/data/cache_test.dart`.
 
 ## Testy
 
-**`test/data/optimistic_test.dart`** (nový soubor, čisté jednotky bez
-`cachedRows`):
-- `applyPending` beze zápisu vrací `rows` beze změny.
-- `optimisticWrite` zavolá `apply` ihned (patch je vidět přes
-  `applyPending` dřív, než `write` doběhne).
-- Po úspěchu `applyPending` vrací zase `rows` beze změny (patch zmizel).
-- Po chybě `applyPending` taky vrací `rows` beze změny A chyba proletí
-  ven z `optimisticWrite`'s Future.
-- Dva zápisy na stejný klíč: druhý přebírá viditelnost; doběhnutí PRVNÍHO
-  (úspěch i chyba) nesmaže patch druhého, dokud ten taky nedoběhne.
-- `pendingChanges` vyšle událost při začátku i konci zápisu, a nevyšle nic
-  pro jiný klíč.
-- `patchRow`: nahradí pole na řádku s odpovídajícím klíčem, ostatní řádky
-  nechá beze změny, žádný odpovídající řádek → beze změny.
-- `upsertOrDeleteRows`: upsert existujícího řádku ho nahradí (nezdvojí),
-  upsert neexistujícího přidá, delete odstraní, nedotčené řádky zůstanou.
+**`test/data/optimistic_test.dart`** (11 testů, čisté jednotky):
+patch je vidět okamžitě; přežije nesouvisející doručení během zápisu; po
+úspěchu drží, dokud nepřijde další doručení (pak zmizí a `refreshRequests`
+vyšle); po chybě zmizí a `rethrow`; dva zápisy na stejný klíč — dokončení
+staršího nezhodí patch novějšího; signály nevyšlou nic pro jiný klíč;
+`patchRow`/`upsertOrDeleteRows` (nahrazení bez duplikátu, přidání,
+smazání, nedotčené řádky). Dvě klíčová místa falzifikována
+(`settlePending` bez podmínky na `confirmed`; `optimisticWrite`'s chybová
+větev bez `identical` kontroly) — oba pády potvrzeny a vráceny zpět.
 
-**`test/data/cache_test.dart`** (integrace s `cachedRows`, vzor podle
-existujícího „probuzení obnoví i stream, který se tváří zdravě"):
-- Bez jakéhokoliv doručení z `live()` `optimisticWrite` na klíč streamu
-  hned přepíše to, co `cachedRows` vydává.
-- Skutečné doručení PO zápisu (nesouvisející změna od serveru) se
-  přemapuje skrz patch dál, dokud zápis neskončí — patch nezmizí sám.
-- Po dokončení zápisu (fake `write` dokončí Future) další skutečné
-  doručení ukáže přesně to, co přišlo (patch je pryč).
+**`test/data/cache_test.dart`** (5 nových testů, integrace s
+`cachedRows`): okamžitá viditelnost bez doručení z `live()`; potvrzený
+zápis cíleně znovu přihlásí PRÁVĚ tenhle stream (jiný klíč netknutý);
+neúspěch vrátí poslední skutečný stav; potvrzený zápis uprostřed backoffu
+probudí okamžitě, ne až za 5 s (falzifikováno — bez `refreshRequests` v
+`_sleepOrWake` test padá). Existujících 8 testů beze změny, celý soubor
+zelený.
 
-**Žádný existující widget test se měnit nemusí.** `ProfileScreen` i
-`CalendarLinkCard` berou `setNotifyBefore`/`setReminders`/… jako
-injektovaný parametr s výchozí hodnotou `Api.setXxx` — testy si vždycky
-injektují vlastní falešnou funkci (a v případě kalendářových připomínek
-si samy ručně pushují novou hodnotu do svého `StreamController`, viz
-„the reminders sheet composes…" test). Skutečná `Api.setXxx` (to, co se
-mění) se tak v žádném widget testu vůbec nevolá — nová optimistická
-vrstva je za injekčním švem, který testy dnes obchází. Ověřit až po
-implementaci: `flutter test test/features/` beze změny zůstává celé
-zelené.
+**Žádný widget test se měnit nemusel.** `ProfileScreen`, `CalendarLinkCard`
+i `KioskSettingsScreen` berou `setXxx` jako injektovaný parametr s
+výchozí hodnotou `Api.setXxx` (nebo, u kiosku, volají `Api.setKioskDark`
+napřímo proti mockovanému HTTP klientovi bez auth session — to je přesně
+test, který objevil výjimku výše) — `flutter test` po celé změně zůstal
+zelený beze změny v `test/features/`.
+
+## Changelog
+
+`lib/features/profile/changelog_data.dart`, nejnovější web-only dávka:
+„Změny v profilu a u kalendáře (připomínky, barvy, týmy, výchozí pohled)
+se ukážou hned po uložení — i na pomalé síti."
 
 ## Mimo rozsah
 
