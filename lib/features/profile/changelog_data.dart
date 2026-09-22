@@ -53,6 +53,9 @@ const appChangelog = <Release>[
         'jen obsazenost, bez jmen.',
     'Změny v profilu a u kalendáře (připomínky, barvy, týmy, výchozí '
         'pohled) se ukážou hned po uložení — i na pomalé síti.',
+    'Výjimky: seznam při zaškrtávání už neposkakuje — tvoje výjimky jsou '
+        'shrnuté v jednom řádku nahoře a v rozpisu je označí ikonka. '
+        'Odehrané zápasy mezi výjimkami nejsou.',
   ]),
   Release('1.2.7', '15. 9. 2026', [
     'Po spuštění už neprobleskne „Offline" jen proto, že se appka teprve '
