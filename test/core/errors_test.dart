@@ -29,6 +29,12 @@ void main() {
         startsWith('Něco se nepovedlo.'));
   });
 
+  test('public overview slug errors', () {
+    expect(friendlyDbError(Exception('invalid_slug')),
+        'Adresa smí mít 3–40 znaků: malá písmena, číslice a pomlčky.');
+    expect(friendlyDbError(Exception('slug_taken')), 'Tuhle adresu už má jiná kuželna.');
+  });
+
   test('initialsOf takes first letters of the first two words, uppercased',
       () {
     expect(initialsOf('Ján Novák'), 'JN');

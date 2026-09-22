@@ -35,4 +35,18 @@ void main() {
           'http://localhost:8765/#/kiosk-login');
     });
   });
+
+  group('publicUrlFrom', () {
+    test('the public overview of a slug, same root rules as the kiosk', () {
+      expect(publicUrlFrom(Uri.parse('https://rezervator.online/#/prehled/x'), 'sokol'),
+          'https://rezervator.online/#/prehled/sokol');
+      expect(publicUrlFrom(Uri.parse('https://kuzelky.example/rezervator/?x=1'), 'sokol'),
+          'https://kuzelky.example/rezervator/#/prehled/sokol');
+    });
+  });
+
+  test('appRootUrl ends with exactly one slash', () {
+    expect(appRootUrl(Uri.parse('https://rezervator.online')), 'https://rezervator.online/');
+    expect(appRootUrl(Uri.parse('http://localhost:8765/#/')), 'http://localhost:8765/');
+  });
 }

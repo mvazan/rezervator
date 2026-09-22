@@ -17,6 +17,7 @@ import 'offline_gate.dart';
 import '../config.dart';
 import '../domain/collation.dart';
 import '../domain/models.dart';
+import '../domain/public_week.dart';
 
 SupabaseClient get _db => Supabase.instance.client;
 
@@ -912,6 +913,22 @@ class Api {
       _db.rpc('set_match_exception',
           params: {'p_match': matchId, 'p_shown': shown});
 
+  /// The public board of one alley (0043). Anyone may call it — signed in or
+  /// not — and the slug picks the alley; `unknown_tenant` when it is unknown
+  /// or switched off.
+  static Future<Map<String, dynamic>> publicWeek(String slug, Day monday) async =>
+      Map<String, dynamic>.from(await _db.rpc('public_week',
+          params: {'p_slug': slug, 'p_monday': monday.toSql()}) as Map);
+
+  /// The admin's own alley: `{public_slug, public_enabled, tenant_name}`.
+  static Future<Map<String, dynamic>> myPublicOverview() async =>
+      Map<String, dynamic>.from(await _db.rpc('my_public_overview') as Map);
+
+  /// Admin: publish (or not) the alley's board under [slug].
+  static Future<void> setPublicOverview(String slug, bool enabled) => _db.rpc(
+      'set_public_overview',
+      params: {'p_slug': slug, 'p_enabled': enabled});
+
   /// How long before a training or a match to be reminded (0040), in
   /// minutes. Own row, like the colour — the reminder itself is the
   /// server's job, and it reaches the player the way every other message
@@ -1311,3 +1328,16 @@ void resetTenantScopedProviders(WidgetRef ref) {
   ref.invalidate(myTenantStatusProvider);
   ref.invalidate(tenantNameProvider);
 }
+
+/// One public week (0043), keyed by (slug, Monday). No auth and no tenant
+/// scoping — the slug IS the alley — so it lives outside
+/// [resetTenantScopedProviders].
+final publicWeekProvider =
+    FutureProvider.autoDispose.family<PublicWeek, (String, Day)>(
+  (ref, key) async => PublicWeek.fromJson(await Api.publicWeek(key.$1, key.$2)),
+);
+
+/// The admin's public-overview setting (Správa → Veřejný přehled).
+final publicOverviewProvider = FutureProvider.autoDispose<PublicOverview>(
+  (ref) async => PublicOverview.fromJson(await Api.myPublicOverview()),
+);

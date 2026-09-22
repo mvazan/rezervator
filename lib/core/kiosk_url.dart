@@ -5,14 +5,15 @@
 /// hosting its own copy under a sub-path (SETUP.md), a preview build on a
 /// laptop — so the address is DERIVED from where the app is actually running
 /// rather than written down anywhere. Only the Android build has no address
-/// of its own; there the caller passes the public web one.
+/// of its own; there the caller passes the public web one. The public overview's
+/// address (0043) follows the same rules.
 library;
 
-/// The kiosk address for an app served at [appUrl] — a full page URL is
-/// fine, its query and fragment are dropped, which is what makes it safe to
-/// pass `Uri.base` while the admin sits deep inside the app on a route of
-/// their own.
-String kioskUrlFrom(Uri appUrl) {
+/// The root the app is served at, ending with exactly one '/' — a full page
+/// URL is fine, its query and fragment are dropped, which is what makes it
+/// safe to pass `Uri.base` while the admin sits deep inside the app on a
+/// route of their own.
+String appRootUrl(Uri appUrl) {
   final root = Uri(
     scheme: appUrl.scheme,
     host: appUrl.host,
@@ -22,5 +23,12 @@ String kioskUrlFrom(Uri appUrl) {
     // there is nothing else in here to strip.
     path: appUrl.path,
   ).toString();
-  return '${root.endsWith('/') ? root : '$root/'}#/kiosk-login';
+  return root.endsWith('/') ? root : '$root/';
 }
+
+/// The kiosk address for an app served at [appUrl].
+String kioskUrlFrom(Uri appUrl) => '${appRootUrl(appUrl)}#/kiosk-login';
+
+/// The public overview (0043) of the alley published under [slug].
+String publicUrlFrom(Uri appUrl, String slug) =>
+    '${appRootUrl(appUrl)}#/prehled/$slug';
