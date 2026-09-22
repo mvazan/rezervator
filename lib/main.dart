@@ -14,6 +14,7 @@ import 'core/theme_choice.dart';
 import 'data/local_prefs.dart';
 import 'features/auth/auth_gate.dart';
 import 'features/kiosk/kiosk_login_screen.dart';
+import 'features/public/public_schedule_screen.dart';
 import 'push/push.dart';
 
 Future<void> main() async {
@@ -74,6 +75,14 @@ final _router = GoRouter(
       path: '/kiosk-login',
       builder: (_, _) => AppConfig.hasSupabase
           ? const KioskLoginScreen()
+          : const _NotConfigured(),
+    ),
+    // The public board (0043) — no sign-in, so outside AuthGate. A hash
+    // route (#/prehled/<slug>) needs no server rewrite on GitHub Pages.
+    GoRoute(
+      path: '/prehled/:slug',
+      builder: (_, state) => AppConfig.hasSupabase
+          ? PublicScheduleScreen(slug: state.pathParameters['slug']!)
           : const _NotConfigured(),
     ),
   ],

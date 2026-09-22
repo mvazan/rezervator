@@ -9,6 +9,7 @@ import '../../data/providers.dart';
 import '../../domain/models.dart';
 import '../auth/update_screen.dart' show UpdateScreen;
 import 'widgets/admin_scaffold.dart';
+import 'widgets/copyable_address.dart';
 
 /// Admin: kiosk-specific settings (the board theme) and the kiosk accounts
 /// themselves. The accounts live here, not among Hráči: a kiosk is the
@@ -155,7 +156,7 @@ class KioskSettingsScreen extends ConsumerWidget {
               'přihlašování hráčů.',
             ),
             const SizedBox(height: 8),
-            _KioskAddress(url: _kioskUrl()),
+            CopyableAddress(url: _kioskUrl()),
             const SizedBox(height: 24),
             Text('Kioskové účty',
                 style: Theme.of(context).textTheme.titleMedium),
@@ -190,44 +191,6 @@ class KioskSettingsScreen extends ConsumerWidget {
               ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-/// The address, readable and copyable: selectable text so it can be read
-/// aloud or picked apart on the web, one button for the clipboard.
-class _KioskAddress extends StatelessWidget {
-  const _KioskAddress({required this.url});
-
-  final String url;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHigh,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
-      child: Row(
-        children: [
-          Expanded(
-            child: SelectableText(
-              url,
-              style: Theme.of(context).textTheme.titleSmall,
-            ),
-          ),
-          IconButton(
-            tooltip: 'Kopírovat adresu',
-            icon: const Icon(Icons.copy_outlined),
-            onPressed: () async {
-              await Clipboard.setData(ClipboardData(text: url));
-              if (context.mounted) snack(context, 'Adresa zkopírována.');
-            },
-          ),
-        ],
       ),
     );
   }

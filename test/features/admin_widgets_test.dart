@@ -133,6 +133,17 @@ void main() {
       await tester.pumpWidget(body(const AsyncData(7)));
       expect(find.text('DATA 7'), findsOneWidget);
     });
+
+    testWidgets('AsyncBody uses its own errorText when given', (tester) async {
+      await tester.pumpWidget(MaterialApp(
+        home: AsyncBody<int>(
+          value: AsyncError(Exception('unknown_tenant'), StackTrace.empty),
+          errorText: (_) => 'Vlastní hláška',
+          builder: (_) => const SizedBox(),
+        ),
+      ));
+      expect(find.text('Vlastní hláška'), findsOneWidget);
+    });
   });
 
   group('FormDialog', () {

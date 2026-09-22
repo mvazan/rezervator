@@ -120,6 +120,8 @@ String friendlyDbError(Object error) {
     'rental_group_invalid': 'Termín nejde přiřadit k tomuhle pronájmu.',
     'unknown_match': 'Tenhle zápas už v rozpisu není.',
     'match_past': 'Tenhle zápas už byl.',
+    'invalid_slug': 'Adresa smí mít 3–40 znaků: malá písmena, číslice a pomlčky.',
+    'slug_taken': 'Tuhle adresu už má jiná kuželna.',
   };
   for (final entry in messages.entries) {
     if (raw.contains(entry.key)) return entry.value;

@@ -8,6 +8,7 @@ import 'kiosk_screen.dart';
 import 'matches_screen.dart';
 import 'overrides_screen.dart';
 import 'players_screen.dart';
+import 'public_overview_screen.dart';
 import 'rentals_screen.dart';
 import 'report_screen.dart';
 import 'schedule_screen.dart';
@@ -64,6 +65,11 @@ class AdminScreen extends ConsumerWidget {
       label: 'Kiosk',
       icon: Icons.tablet_mac_outlined,
       screen: () => const KioskSettingsScreen(),
+    ),
+    (
+      label: 'Veřejný přehled',
+      icon: Icons.public,
+      screen: () => const PublicOverviewScreen(),
     ),
   ];
 

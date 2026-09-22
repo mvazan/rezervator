@@ -48,6 +48,9 @@ const appChangelog = <Release>[
         'nemůže zakrýt poslední položku v seznamu.',
     'Ťuknutí na cizí rezervaci teď ukáže celé jméno hráče — přezdívka '
         'na rozvrhu ne vždy stačí poznat, kdo je kdo.',
+    'Veřejný přehled: správce ho zapne v Správa → Veřejný přehled a kuželna '
+        'dostane vlastní adresu, kde kdokoli uvidí rozvrh bez přihlášení — '
+        'jen obsazenost, bez jmen.',
   ]),
   Release('1.2.7', '15. 9. 2026', [
     'Po spuštění už neprobleskne „Offline" jen proto, že se appka teprve '

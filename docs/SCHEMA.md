@@ -46,7 +46,7 @@ and what cascades — and is updated with every migration.
 
 | Table | Purpose / key columns | RLS (all `tenant_id = current_tenant_id()` unless noted) |
 |---|---|---|
-| `tenants` | `name` unique, `founder_email` (only the founder can become the first admin), `status`, `approved_at` | select for `authenticated` `using (true)` **but column grants expose only `id, name, status`** — `founder_email` never leaves the server. Writes: RPC only. |
+| `tenants` | `name` unique, `founder_email` (only the founder can become the first admin), `status`, `approved_at`. **Public overview** (0043): `public_slug` unique, 3–40 lower-case letters/digits/hyphens (`tenants_public_slug_format`), `public_enabled` default off, `tenants_public_needs_slug` (can't enable without a slug) | select for `authenticated` `using (true)` **but column grants expose only `id, name, status`** — `founder_email` never leaves the server; `public_slug`/`public_enabled` are likewise outside the `authenticated` grant, read only by `public_tenant_id`/`my_public_overview`. Writes: RPC only. |
 | `profiles` | `id` (= `auth.uid()` for real accounts; no FK to `auth.users` since 0022), `display_name`, `nick` ≤ 14, `email` ('' for placeholders), `role`, `status`, `club_id → clubs`, `fcm_token`, `superadmin`, `home_tenant_id`, `approved_by/at`, `placeholder` (hand-made row: player ∧ approved ∧ not superadmin), `own_color` (0024: the colour the player picked for their own reservations in their own view, −1 = club colour, else a packed RGB — 0042 moved the picker to the Google palette + wheel, both stored as `0x1000000\|rgb`; a legacy palette index 0-11 from the 1.2.6 app still renders), `followed_teams` (≤ 20 names, the Můj přehled list — separate from the calendar's `calendar_teams`), `default_view` (`calendar` | `trainings`, what the app opens at launch); both own-row updatable (0029) | select: own row, or admin of the same tenant. update: own row, columns `display_name`, `fcm_token`, `own_color`, `followed_teams`, `default_view` only. insert/delete: RPC only. |
 | `schedule_settings` | PK `tenant_id`; `lane_count` 1–12, `training_weekdays smallint[]` (ISO 1–7), `booking_horizon_days` 1–90, `max_active_reservations` 1–50, `kiosk_dark`, `kiosk_fit_day` | select approved/kiosk; update admin. |
 | `time_blocks` | `starts_at`, `ends_at`, `position`, `active`. `position = -1` marks a day-special block: inactive, reachable only through `day_overrides.block_ids` | select approved/kiosk; insert/update/delete admin. FK from `reservations` is RESTRICT — only never-used blocks can be deleted. |
@@ -80,7 +80,8 @@ ACL). This is the only profile data the kiosk account can read. SELECT for
 
 `authenticated` has select/insert/update/delete on the app tables (policies
 decide rows), the column-restricted exceptions above, SELECT on `players`
-and `tenants(id, name, status)`. `anon` has nothing. `service_role`
+and `tenants(id, name, status)`. `anon` has nothing (the one exception:
+`execute` on `public_week`, 0043). `service_role`
 (edge functions) has everything. Default privileges are pinned (0017,
 0020) so new tables get exactly that shape on hosted and local stacks —
 note that a `drop … create` of a view re-applies the defaults, so a
@@ -115,13 +116,16 @@ EXECUTE revoked from the app roles (see below).
 | `backfill_calendar_jobs(user)` | service_role only (callback, right after `status = 'linked'`) | One `calendar_sync` job per live reservation of the player from Prague-today on, due now (a pending job is re-armed); returns the count. |
 | `set_calendar_reminders_for(user, minutes int[], calendar text default 'primary')` | service_role only (calendar-manage) | Normalises (distinct, sorted descending, nulls dropped), stores on `reminder_minutes` or (0032) `reminder_minutes_secondary` and returns the stored array. `bad_calendar` (not `primary`/`secondary`), `bad_reminders` (more than 5, or any outside 0–40320), `unknown_link` (no links row). |
 | `my_future_reservations(user)` | service_role only (callback, calendar-manage) | `(reservation_id, date, starts_at, ends_at, lane, alley_name)` for the player's live reservations from Prague-today on — block times, tenant name — ordered by date, starts_at. The raw material of the calendar events. |
+| `public_week(slug, monday)` (0043) | **anon** i signed-in | Veřejný přehled: týden (`monday` se zarovná na pondělí) publikované a schválené kuželny — `tenant_name`, `settings`, `blocks`, `slot_types`, `overrides`/`priority_slots`/`rentals` za neděli před … pondělí po, `occupied` (`block_id, date, lane, club_color`) za týden. Žádná jména, `player_id`, `renter_name`, `note`, `created_by`. `unknown_tenant` pro neznámý, vypnutý i neschválený slug (stejně). |
+| `set_public_overview(slug, enabled)`, `my_public_overview()` (0043) | admin | Slug (trim + lower, `''` = žádný) a přepínač vlastní kuželny; čtení vrací `{public_slug, public_enabled, tenant_name}`. `not_allowed`, `invalid_slug` (formát / zapnutí bez slugu), `slug_taken`. |
 
 Internal, no EXECUTE for app roles: `current_tenant_id`, `is_*`,
 `block_day_status`, `cancel_stranded_reservations`, `rental_occurs`,
 `rental_occurrences`, `cancel_res_for_priority_slot`,
 `enqueue_notification`, `enqueue_calendar_sync`,
 `trigger_notification_jobs` (called by cron), `notify_webhook_config`,
-`seed_demo_member` (service_role only — Play-review demo account).
+`seed_demo_member` (service_role only — Play-review demo account),
+`public_tenant_id`.
 
 `block_day_status(tenant, date, block)` → `open` | `day_closed` |
 `invalid_block` | `unknown_block` is the one definition of "this block is
@@ -136,6 +140,13 @@ cascade below both use it.
 with the date's exception row overriding lanes/times and a `skipped` one
 removing the occurrence. `create_reservation`, `move_reservation` and the
 rental cascade all use it; the client mirrors it in `rentalsOn`.
+
+**`public_week` skládá týden znovu, na serveri (0043).** Anon nemá na
+tabulky žádný grant a jména se musí maskovat na serveru, takže veřejný
+přehled nečte streamy appky. Nový vstup do `buildWeekSchedule` (nový
+parametr = nová tabulka ovlivňující sloty) proto znamená doplnit ho i do
+`public_week` a do `PublicWeek.fromJson` — klientskou stranu vynutí
+kompilátor (parametry jsou povinné), SQL stranu ne.
 
 ## Cascades — what cancels reservations
 
@@ -551,7 +562,11 @@ and FCM is configured, e-mail otherwise.
   name/colour — a hand-picked one included — copied and propagated, a grouped
   date blocks like a lone rental, the group vanishes with its last date,
   invisible across tenants, writes refused for a non-admin who can read
-  them, full-DML privileges), and the 0035
+  them, full-DML privileges), the 0043 public overview (anon may call only
+  `public_week`; slug format, normalisation and uniqueness; admin-only
+  setting; unknown and switched-off slugs indistinguishable; occupancy in
+  club colours without any name, player id, renter, note or other tenant),
+  and the 0035
   assertion (now including `team_colors` and `match_exceptions`) that every table
   `lib/data/providers.dart` streams is in the `supabase_realtime`
   publication; run with `psql … -v ON_ERROR_STOP=1 -f` against the local
