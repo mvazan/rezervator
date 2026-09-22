@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/data/cache.dart';
 import 'package:rezervator/data/live_refresh.dart';
+import 'package:rezervator/data/optimistic.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -182,5 +183,158 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 20));
     expect(controllers, hasLength(2));
     unawaited(sub.cancel());
+  });
+
+  group('optimistic overlay (optimistic.dart)', () {
+    test('a pending write shows up on cachedRows before anything arrives '
+        'from live()', () async {
+      final live = StreamController<List<Map<String, dynamic>>>();
+      final emissions = <List<Map<String, dynamic>>>[];
+      final sub =
+          cachedRows('u1', 'opt-instant', () => live.stream).listen(emissions.add);
+      live.add([
+        {'id': 'p1', 'nick': ''},
+      ]);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(emissions.last.single['nick'], '');
+
+      unawaited(optimisticWrite(
+        'u1',
+        'opt-instant',
+        patchRow('id', 'p1', {'nick': 'Péťa'}),
+        () => Completer<void>().future, // never resolves in this test
+      ));
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(emissions.last.single['nick'], 'Péťa',
+          reason: 'no delivery from live() was needed');
+
+      unawaited(sub.cancel());
+      await live.close();
+    });
+
+    test('a confirmed write re-subscribes THIS stream targetedly — a live '
+        'controller error/close on another key is untouched', () async {
+      final controllers = <StreamController<List<Map<String, dynamic>>>>[];
+      Stream<List<Map<String, dynamic>>> live() {
+        final c = StreamController<List<Map<String, dynamic>>>();
+        controllers.add(c);
+        return c.stream;
+      }
+
+      final emissions = <List<Map<String, dynamic>>>[];
+      final sub = cachedRows('u1', 'opt-confirmed', live).listen(emissions.add);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      controllers.last.add([
+        {'id': 'p1', 'nick': ''},
+      ]);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(controllers, hasLength(1));
+
+      await optimisticWrite('u1', 'opt-confirmed',
+          patchRow('id', 'p1', {'nick': 'Péťa'}), () async {});
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      // Optimistic patch visible, and the stream targetedly re-subscribed —
+      // not waiting on the OLD controller for its own echo.
+      expect(emissions.last.single['nick'], 'Péťa');
+      expect(controllers, hasLength(2), reason: 'confirmed = re-subscribe now');
+
+      // The server's own row (could differ from what we sent) wins once it
+      // arrives on the fresh controller.
+      controllers.last.add([
+        {'id': 'p1', 'nick': 'Péťa'},
+      ]);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(emissions.last.single['nick'], 'Péťa');
+      expect(applyPending('u1', 'opt-confirmed', const []), const []);
+
+      unawaited(sub.cancel());
+      for (final c in controllers) {
+        await c.close();
+      }
+    });
+
+    test('a failed write leaves cachedRows on the last real rows', () async {
+      final live = StreamController<List<Map<String, dynamic>>>();
+      final emissions = <List<Map<String, dynamic>>>[];
+      final sub =
+          cachedRows('u1', 'opt-failed', () => live.stream).listen(emissions.add);
+      live.add([
+        {'id': 'p1', 'nick': ''},
+      ]);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      await expectLater(
+        optimisticWrite('u1', 'opt-failed', patchRow('id', 'p1', {'nick': 'X'}),
+            () async => throw Exception('offline')),
+        throwsException,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(emissions.last.single['nick'], '');
+
+      unawaited(sub.cancel());
+      await live.close();
+    });
+
+    test('a confirmed write on one key never re-subscribes a stream on a '
+        'different key', () async {
+      var subscriptionsA = 0;
+      var subscriptionsB = 0;
+      final liveControllers = <StreamController<List<Map<String, dynamic>>>>[];
+      Stream<List<Map<String, dynamic>>> liveA() {
+        subscriptionsA++;
+        final c = StreamController<List<Map<String, dynamic>>>();
+        liveControllers.add(c);
+        return c.stream;
+      }
+
+      Stream<List<Map<String, dynamic>>> liveB() {
+        subscriptionsB++;
+        final c = StreamController<List<Map<String, dynamic>>>();
+        liveControllers.add(c);
+        return c.stream;
+      }
+
+      final subA = cachedRows('u1', 'opt-a', liveA).listen((_) {});
+      final subB = cachedRows('u1', 'opt-b', liveB).listen((_) {});
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(subscriptionsA, 1);
+      expect(subscriptionsB, 1);
+
+      await optimisticWrite('u1', 'opt-a', (rows) => rows, () async {});
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(subscriptionsA, 2, reason: 'confirmed write on A re-subscribes A');
+      expect(subscriptionsB, 1, reason: 'B is untouched');
+
+      unawaited(subA.cancel());
+      unawaited(subB.cancel());
+      for (final c in liveControllers) {
+        await c.close();
+      }
+    });
+
+    test('a confirmed write landing mid-backoff wakes it immediately, not '
+        'after the 5s timer', () async {
+      final controllers = <StreamController<List<Map<String, dynamic>>>>[];
+      Stream<List<Map<String, dynamic>>> live() {
+        final c = StreamController<List<Map<String, dynamic>>>();
+        controllers.add(c);
+        return c.stream;
+      }
+
+      final sub = cachedRows('u1', 'opt-backoff', live).listen((_) {});
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      await controllers.last.close(); // socket spadl, běží 5s backoff
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      await optimisticWrite(
+          'u1', 'opt-backoff', (rows) => rows, () async {});
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(controllers, hasLength(2), reason: 'hned, ne za 5 s');
+
+      unawaited(sub.cancel());
+      for (final c in controllers) {
+        await c.close();
+      }
+    });
   });
 }
