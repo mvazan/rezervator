@@ -243,8 +243,11 @@ class ScheduleActions {
       return;
     }
     // A group mate's (0044): the tile only offers it before the start, as
-    // for one's own; the mate hears about it from the server.
+    // for one's own; the mate hears about it from the server. Checked
+    // locally (not just relying on slot_tile.dart's cancellable gate) so a
+    // non-admin can never fall through into the admin-only flows below.
     if (!(me?.isAdmin ?? false)) {
+      if (!groupMateIds.contains(r.playerId)) return;
       final ok = await confirmDialog(
         context,
         title: 'Zrušit rezervaci?',

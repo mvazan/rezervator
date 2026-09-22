@@ -3452,6 +3452,43 @@ begin
   raise notice 'OK: a member cancels a member''s training until it starts, an outsider never (0044)';
 end $$;
 
+-- group_cancel_invite requires membership in THAT group: Jana (still in
+-- Petr's group at this point) may not withdraw Karel's pending invite to
+-- Lenka, even though she is in a group of her own.
+reset role;
+do $$
+declare
+  v_karel_group uuid;
+begin
+  select group_id into v_karel_group from player_group_members
+   where user_id = '20000000-0000-0000-0000-000000000003' and status = 'member';
+  perform set_config('probe.grp_karel', v_karel_group::text, true);
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"20000000-0000-0000-0000-000000000002","role":"authenticated"}';
+do $$
+begin
+  begin
+    perform group_cancel_invite(current_setting('probe.grp_karel')::uuid,
+      '20000000-0000-0000-0000-000000000004');
+    raise exception 'FAIL: an outsider withdrew another group''s invite';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+end $$;
+reset role;
+do $$
+begin
+  if not exists (select 1 from player_group_members
+                 where group_id = current_setting('probe.grp_karel')::uuid
+                   and user_id = '20000000-0000-0000-0000-000000000004'
+                   and status = 'invited') then
+    raise exception 'FAIL: the refused cancel still removed Karel''s invite to Lenka';
+  end if;
+  raise notice 'OK: group_cancel_invite refuses a non-member with not_allowed, invite untouched (0044)';
+end $$;
+
 -- Leaving: Jana leaves (group stays with Petr); Petr withdraws an invite,
 -- then leaves — the group is gone.
 reset role;

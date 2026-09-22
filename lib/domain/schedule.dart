@@ -526,11 +526,17 @@ bool canCancel({
 
 /// Slots of [day] the caller could book right now — [canBook] over every
 /// block × lane. The "N volných" figure in day headers.
+///
+/// [forGroup]: same as [canBook] — a player in a group may still book past
+/// their own cap (it counts against the target mate's), so pass true when
+/// the caller has group mates or the header undercounts what the grid
+/// below still offers.
 int bookableSlotCount(
   OpenDay day, {
   required int myActiveCount,
   required ScheduleSettings settings,
   bool isAdmin = false,
+  bool forGroup = false,
 }) {
   var count = 0;
   for (final block in day.blocks) {
@@ -540,6 +546,7 @@ int bookableSlotCount(
         myActiveCount: myActiveCount,
         settings: settings,
         isAdmin: isAdmin,
+        forGroup: forGroup,
       )) {
         count++;
       }

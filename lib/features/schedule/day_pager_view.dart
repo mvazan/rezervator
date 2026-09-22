@@ -334,6 +334,7 @@ class _DayPage extends StatelessWidget {
       myActiveCount: myCount,
       settings: settings,
       isAdmin: me?.isAdmin ?? false,
+      forGroup: slot.groupMateIds.isNotEmpty,
     );
 
     return Card(
