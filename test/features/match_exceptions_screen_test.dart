@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -48,6 +50,7 @@ void main() {
   Widget app({
     List<PrioritySlot> slots = const [],
     Map<String, bool> exceptions = const {},
+    Stream<Map<String, bool>>? exceptionsStream,
     Profile profile = me,
     List<CalendarTeam> routed = const [],
     CalendarLink link = CalendarLink.none,
@@ -62,7 +65,8 @@ void main() {
           prioritySlotsProvider.overrideWithValue(slots),
           prioritySlotsLoadingProvider.overrideWithValue(slotsLoading),
           prioritySlotsFailedProvider.overrideWithValue(slotsFailed),
-          myMatchExceptionsProvider.overrideWith((ref) => Stream.value(exceptions)),
+          myMatchExceptionsProvider.overrideWith(
+              (ref) => exceptionsStream ?? Stream.value(exceptions)),
           myCalendarTeamsProvider.overrideWith((ref) => Stream.value(routed)),
           myCalendarLinkProvider.overrideWith((ref) => Stream.value(link)),
           calendarAvailableProvider.overrideWithValue(calendarAvailable),
@@ -167,9 +171,16 @@ void main() {
     expect(saved, [('m1', null), ('m2', null)]);
   });
 
+  Finder summary() => find.byKey(const ValueKey('exceptions-summary'));
+
+  Future<void> openExceptions(WidgetTester tester) async {
+    await tester.tap(summary());
+    await tester.pumpAndSettle();
+  }
+
   group('Tvoje výjimky', () {
-    testWidgets('names what was overruled, which way, and takes it back',
-        (tester) async {
+    testWidgets('one row up top counts them; its sheet names what was '
+        'overruled, which way, and takes it back', (tester) async {
       final saved = <(String, bool?)>[];
       await tester.pumpWidget(app(
         slots: [
@@ -182,7 +193,12 @@ void main() {
       ));
       await tester.pumpAndSettle();
 
-      expect(find.text('Tvoje výjimky'), findsOneWidget);
+      expect(find.descendant(of: summary(), matching: find.text('2')),
+          findsOneWidget);
+      // The details wait in the sheet, not in the list the player ticks.
+      expect(find.text('čt 10.9. · přidáno'), findsNothing);
+
+      await openExceptions(tester);
       expect(find.text('čt 10.9. · přidáno'), findsOneWidget);
       expect(find.text('pá 11.9. · skryto'), findsOneWidget);
 
@@ -196,12 +212,97 @@ void main() {
       expect(saved, [('m1', null)]);
     });
 
-    testWidgets('is not there when nothing is overruled', (tester) async {
+    testWidgets('with nothing overruled the row says so and opens nothing',
+        (tester) async {
       await tester.pumpWidget(app(
         slots: [match('m1', today.addDays(1), const HourMinute(18, 0))],
       ));
       await tester.pumpAndSettle();
-      expect(find.text('Tvoje výjimky'), findsNothing);
+      expect(find.descendant(of: summary(), matching: find.text('žádné')),
+          findsOneWidget);
+      await tester.tap(summary());
+      await tester.pumpAndSettle();
+      expect(find.byType(BottomSheet), findsNothing);
+    });
+
+    testWidgets('a match already played is no longer counted or listed',
+        (tester) async {
+      await tester.pumpWidget(app(
+        slots: [
+          match('past', today.addDays(-1), const HourMinute(18, 0)),
+          match('m1', today.addDays(1), const HourMinute(18, 0)),
+        ],
+        exceptions: const {'past': true, 'm1': true},
+      ));
+      await tester.pumpAndSettle();
+      expect(find.descendant(of: summary(), matching: find.text('1')),
+          findsOneWidget);
+
+      await openExceptions(tester);
+      expect(find.byKey(const ValueKey('exception:m1')), findsOneWidget);
+      expect(find.byKey(const ValueKey('exception:past')), findsNothing);
+    });
+
+    // The whole point: ticking one match must not move the next one out
+    // from under the finger.
+    testWidgets('a new exception moves no row of the schedule',
+        (tester) async {
+      final live = StreamController<Map<String, bool>>();
+      addTearDown(live.close);
+      await tester.pumpWidget(app(
+        slots: [
+          match('m1', today.addDays(1), const HourMinute(18, 0)),
+          match('m2', today.addDays(1), const HourMinute(20, 0)),
+          match('m3', today.addDays(2), const HourMinute(10, 0)),
+        ],
+        exceptionsStream: live.stream,
+      ));
+      live.add(const {});
+      await tester.pumpAndSettle();
+      Finder titleOf(String id) => find.descendant(
+          of: rowOf(id), matching: find.text('KK Vyškov A – KK Vyškov B'));
+      final before = {
+        for (final id in ['m1', 'm2', 'm3'])
+          id: tester.getRect(rowOf(id)),
+      };
+      final titleBefore = tester.getRect(titleOf('m1'));
+
+      live.add(const {'m1': true});
+      await tester.pumpAndSettle();
+      live.add(const {'m1': true, 'm2': true});
+      await tester.pumpAndSettle();
+
+      for (final id in ['m1', 'm2', 'm3']) {
+        expect(tester.getRect(rowOf(id)), before[id], reason: id);
+      }
+      expect(tester.getRect(titleOf('m1')), titleBefore,
+          reason: 'the mark must not push the title sideways');
+      // …while the rows themselves still say which ones are exceptions.
+      expect(
+          find.descendant(
+              of: rowOf('m1'), matching: find.byIcon(Icons.add_circle_outline)),
+          findsOneWidget);
+      expect(
+          find.descendant(
+              of: rowOf('m3'), matching: find.byIcon(Icons.add_circle_outline)),
+          findsNothing);
+    });
+
+    testWidgets('a hidden match is marked in the schedule too',
+        (tester) async {
+      await tester.pumpWidget(app(
+        slots: [
+          match('m1', today.addDays(1), const HourMinute(18, 0),
+              home: 'SKK Veverky Brno A', away: 'KK MS Brno D'),
+        ],
+        exceptions: const {'m1': false},
+      ));
+      await tester.pumpAndSettle();
+      expect(
+          find.descendant(
+              of: rowOf('m1'),
+              matching: find.byIcon(Icons.visibility_off_outlined)),
+          findsOneWidget);
     });
   });
 
@@ -222,9 +323,10 @@ void main() {
     await tester.pumpAndSettle();
     expect(rowOf('m2'), findsOneWidget);
     expect(rowOf('m1'), findsNothing, reason: 'filtered out of the schedule');
-    // …but the exception is still there to be taken back, which is what one
-    // comes back to this screen for.
-    expect(find.byKey(const ValueKey('exception:m1')), findsOneWidget);
+    // …but the exception is still counted up top, to be taken back, which
+    // is what one comes back to this screen for.
+    expect(find.descendant(of: summary(), matching: find.text('1')),
+        findsOneWidget);
 
     await tester.enterText(find.byType(TextField), 'nikdo');
     await tester.pumpAndSettle();

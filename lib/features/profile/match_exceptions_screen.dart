@@ -10,9 +10,13 @@
 /// It lists the WHOLE upcoming schedule, ticked where the match is already
 /// yours. A filtered list would shift under the player every time they
 /// picked a team on another screen — and hiding a match needs the match to
-/// be there in the first place. What it does instead is show, up top, the
-/// handful of matches where the player has overruled their teams, each with
-/// an ✕ that hands it back.
+/// be there in the first place. What it does instead is count, in ONE row
+/// up top, the matches where the player has overruled their teams; the row
+/// opens a sheet listing them, each with an ✕ that hands it back. One row
+/// of fixed height, not the list itself: a list up top grew with every
+/// tick and pushed the schedule down under the player's finger. In the
+/// schedule itself an overruled match carries a small mark in a slot every
+/// row reserves, so marking it moves nothing either.
 ///
 /// Nothing is stored when the tick agrees with the teams: taking an
 /// exception back is deleting a row, not ticking a third state, so the list
@@ -63,8 +67,9 @@ class _MatchExceptionsScreenState extends ConsumerState<MatchExceptionsScreen> {
         if (slot.description.isNotEmpty) slot.description,
       ].join(' · ');
 
-  Future<void> _set(String matchId, bool? shown) => tryAction(
-        context,
+  Future<void> _set(String matchId, bool? shown, [BuildContext? from]) =>
+      tryAction(
+        from ?? context,
         () => (widget.setMatchException ?? Api.setMatchException)(
             matchId, shown),
         errorText: friendlyDbError,
@@ -126,14 +131,7 @@ class _MatchExceptionsScreenState extends ConsumerState<MatchExceptionsScreen> {
     required bool secondary,
     required ThemeData theme,
   }) {
-    // The overruled matches, oldest first — the same order as the schedule
-    // below, so the two lists never disagree about which match comes first.
-    final byId = {for (final s in slots) s.id: s};
-    final overruled = [
-      for (final entry in exceptions.entries)
-        if (byId[entry.key] case final slot?) (slot, entry.value),
-    ]..sort((a, b) =>
-        compareDayTime(a.$1.date, a.$1.startsAt, b.$1.date, b.$1.startsAt));
+    final overruled = _overruled(slots, exceptions, today);
 
     final matches = upcomingMatches(
       slots: slots,
@@ -170,33 +168,22 @@ class _MatchExceptionsScreenState extends ConsumerState<MatchExceptionsScreen> {
                 ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
           ),
         ),
-        if (overruled.isNotEmpty) ...[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-            child: Text('Tvoje výjimky', style: theme.textTheme.titleSmall),
-          ),
-          for (final (slot, shown) in overruled)
-            ListTile(
-              key: ValueKey('exception:${slot.id}'),
-              dense: true,
-              leading: Icon(
-                shown ? Icons.add_circle_outline : Icons.visibility_off_outlined,
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-              title: Text(slot.title),
-              subtitle: Text(
-                '${dayLabel(slot.date)} · ${shown ? 'přidáno' : 'skryto'}',
-              ),
-              trailing: IconButton(
-                tooltip: 'Zrušit výjimku',
-                icon: const Icon(Icons.close),
-                // Back to whatever the teams say — which is deleting the
-                // row, not ticking the opposite.
-                onPressed: () => _set(slot.id, null),
-              ),
-            ),
-          const Divider(height: 24),
-        ],
+        ListTile(
+          key: const ValueKey('exceptions-summary'),
+          leading: const Icon(Icons.rule),
+          title: const Text('Tvoje výjimky'),
+          trailing: overruled.isEmpty
+              ? const Text('žádné')
+              : Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('${overruled.length}'),
+                    const Icon(Icons.chevron_right),
+                  ],
+                ),
+          onTap: overruled.isEmpty ? null : _openExceptions,
+        ),
+        const Divider(height: 24),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
           child: TextField(
@@ -232,6 +219,81 @@ class _MatchExceptionsScreenState extends ConsumerState<MatchExceptionsScreen> {
     );
   }
 
+  /// The overruled matches still ahead, oldest first — the same order as the
+  /// schedule, so the two never disagree about which match comes first. A
+  /// played one is gone: the server refuses to change it anyway
+  /// (`match_past`), so an ✕ there could only fail.
+  static List<(PrioritySlot, bool)> _overruled(
+    List<PrioritySlot> slots,
+    Map<String, bool> exceptions,
+    Day today,
+  ) {
+    final byId = {for (final s in slots) s.id: s};
+    return [
+      for (final entry in exceptions.entries)
+        if (byId[entry.key] case final slot? when !slot.date.isBefore(today))
+          (slot, entry.value),
+    ]..sort((a, b) =>
+        compareDayTime(a.$1.date, a.$1.startsAt, b.$1.date, b.$1.startsAt));
+  }
+
+  /// The sheet re-reads the providers itself, so an ✕ takes its row away at
+  /// once; it stays open when the last one goes, saying so.
+  void _openExceptions() => showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        builder: (_) => Consumer(
+          builder: (sheetContext, ref, _) {
+            final today = Day.fromDateTime(
+                ref.watch(nowProvider).value ?? DateTime.now());
+            final overruled = _overruled(
+              ref.watch(prioritySlotsProvider),
+              ref.watch(myMatchExceptionsProvider).value ?? const {},
+              today,
+            );
+            final theme = Theme.of(sheetContext);
+            return SafeArea(
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+                    child: Text('Tvoje výjimky',
+                        style: theme.textTheme.titleMedium),
+                  ),
+                  if (overruled.isEmpty)
+                    const ListTile(title: Text('Žádné výjimky')),
+                  for (final (slot, shown) in overruled)
+                    ListTile(
+                      key: ValueKey('exception:${slot.id}'),
+                      leading: Icon(
+                        _markIcon(shown),
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                      title: Text(slot.title),
+                      subtitle: Text(
+                        '${dayLabel(slot.date)} · '
+                        '${shown ? 'přidáno' : 'skryto'}',
+                      ),
+                      trailing: IconButton(
+                        tooltip: 'Zrušit výjimku',
+                        icon: const Icon(Icons.close),
+                        // Back to whatever the teams say — which is deleting
+                        // the row, not ticking the opposite.
+                        onPressed: () => _set(slot.id, null, sheetContext),
+                      ),
+                    ),
+                  const SizedBox(height: 8),
+                ],
+              ),
+            );
+          },
+        ),
+      );
+
+  static IconData _markIcon(bool shown) =>
+      shown ? Icons.add_circle_outline : Icons.visibility_off_outlined;
+
   Widget _matchRow(
     PrioritySlot slot, {
     required List<String> teams,
@@ -240,9 +302,23 @@ class _MatchExceptionsScreenState extends ConsumerState<MatchExceptionsScreen> {
     final mine = matchIsMine(slot, teams, exceptions);
     final fromTeam =
         teams.contains(slot.homeTeam) || teams.contains(slot.awayTeam);
+    final exception = exceptions[slot.id];
     return CheckboxListTile(
       key: ValueKey(slot.id),
       value: mine,
+      // Every row reserves the slot, marked or not — a mark appearing must
+      // not shift the title sideways either.
+      secondary: SizedBox.square(
+        dimension: 24,
+        child: exception == null
+            ? null
+            : Icon(
+                _markIcon(exception),
+                size: 20,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                semanticLabel: exception ? 'přidáno' : 'skryto',
+              ),
+      ),
       title: Text(slot.title),
       subtitle: Text(_when(slot)),
       // Ticking back to what the teams say stores nothing: the exception is
