@@ -6,20 +6,19 @@ import '../../data/providers.dart';
 import '../../data/week_schedule.dart';
 import '../../domain/models.dart';
 import '../../domain/schedule.dart';
-import 'day_pager_view.dart';
 import 'schedule_actions.dart';
-import 'week_calendar_view.dart';
+import 'week_board.dart';
 import 'widgets/week_header.dart';
 
 /// Live week view: grid computed by buildWeekSchedule, booking via RPCs.
 /// Acts as the "shell": owns navigation (week offset) and all provider
-/// wiring; delegates rendering to [WeekCalendarView] or [DayPagerView],
-/// which both receive the same pre-computed [WeekSchedule] and the handlers
-/// a [ScheduleActions] builds from it; the top strip is a [WeekHeader].
+/// wiring; delegates rendering to [WeekBoard], which receives the same
+/// pre-computed [WeekSchedule] and the handlers a [ScheduleActions] builds
+/// from it; the top strip is a [WeekHeader].
 ///
 /// The view follows the device orientation — portrait shows the day pager,
 /// landscape the week calendar — and both always fit the screen width, so
-/// there are no toggle buttons to explain.
+/// there are no toggle buttons to explain (see [WeekBoard]).
 class WeekScreen extends ConsumerStatefulWidget {
   const WeekScreen({super.key, this.trailing = const []});
 
@@ -31,50 +30,13 @@ class WeekScreen extends ConsumerStatefulWidget {
   ConsumerState<WeekScreen> createState() => _WeekScreenState();
 }
 
-class _WeekScreenState extends ConsumerState<WeekScreen> {
-  int _weekOffset = 0;
-  int _dayIndex = 0;
-
-  Day _monday(Day today) => today.addDays(1 - today.weekday + 7 * _weekOffset);
-
-  @override
-  void initState() {
-    super.initState();
-    _dayIndex = Day.fromDateTime(DateTime.now()).weekday - 1;
-  }
-
-  void _go(int delta) {
-    setState(() {
-      _weekOffset = delta == 0 ? 0 : _weekOffset + delta;
-      if (delta == 0) {
-        _dayIndex = Day.fromDateTime(DateTime.now()).weekday - 1;
-      }
-    });
-  }
-
-  /// Called by [DayPagerView] when a swipe crosses the Monday/Sunday edge:
-  /// [weekDelta] is +1/-1 and [landingDayIndex] (0=Mon..6=Sun) is the day to
-  /// land on in the adjacent week (Sunday when moving back, Monday when
-  /// moving forward).
-  void _shiftWeek(int weekDelta, int landingDayIndex) {
-    setState(() {
-      _weekOffset += weekDelta;
-      _dayIndex = landingDayIndex;
-    });
-  }
-
-  void _selectDay(int dayIndex) => setState(() => _dayIndex = dayIndex);
-
+class _WeekScreenState extends ConsumerState<WeekScreen> with WeekNavigation {
   @override
   Widget build(BuildContext context) {
     final nowDt = ref.watch(nowProvider).value ?? DateTime.now();
     final todayDay = Day.fromDateTime(nowDt);
     final now = HourMinute(nowDt.hour, nowDt.minute);
-    final monday = _monday(todayDay);
-    // Orientation IS the view switch: portrait reads day-by-day, landscape
-    // shows the whole week. Both always stretch to the full width.
-    final landscape =
-        MediaQuery.orientationOf(context) == Orientation.landscape;
+    final monday = mondayOf(todayDay);
 
     final settings =
         ref.watch(settingsProvider).value ?? ScheduleSettings.defaults;
@@ -89,8 +51,8 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
 
     final header = WeekHeader(
       monday: monday,
-      weekOffset: _weekOffset,
-      onGo: _go,
+      weekOffset: weekOffset,
+      onGo: goWeek,
       trailing: widget.trailing,
     );
 
@@ -171,41 +133,28 @@ class _WeekScreenState extends ConsumerState<WeekScreen> {
       children: [
         header,
         Expanded(
-          child: landscape
-              ? WeekCalendarView(
-                  week: week,
-                  today: todayDay,
-                  now: now,
-                  me: me,
-                  myCount: myCount,
-                  settings: settings,
-                  nameById: nameById,
-                  clubColorById: clubColorById,
-                  interactive: interactive,
-                  slot: actions.slot,
-                  admin: actions.admin,
-                )
-              : DayPagerView(
-                  week: week,
-                  weekOffset: _weekOffset,
-                  dayIndex: _dayIndex,
-                  today: todayDay,
-                  now: now,
-                  settings: settings,
-                  blocks: blocks,
-                  overrides: overrides,
-                  priority: priority,
-                  rentals: rentals,
-                  me: me,
-                  myCount: myCount,
-                  myCountByIndex: myCountByIndex,
-                  nameById: nameById,
-                  clubColorById: clubColorById,
-                  interactive: interactive,
-                  slot: actions.slot,
-                  onSelectDay: _selectDay,
-                  onShiftWeek: _shiftWeek,
-                ),
+          child: WeekBoard(
+            week: week,
+            weekOffset: weekOffset,
+            dayIndex: dayIndex,
+            today: todayDay,
+            now: now,
+            settings: settings,
+            blocks: blocks,
+            overrides: overrides,
+            priority: priority,
+            rentals: rentals,
+            me: me,
+            myCount: myCount,
+            myCountByIndex: myCountByIndex,
+            nameById: nameById,
+            clubColorById: clubColorById,
+            interactive: interactive,
+            slot: actions.slot,
+            admin: actions.admin,
+            onSelectDay: selectDay,
+            onShiftWeek: shiftWeek,
+          ),
         ),
       ],
     );
