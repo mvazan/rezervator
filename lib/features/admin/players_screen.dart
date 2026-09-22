@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/ui.dart';
 import '../../data/providers.dart';
 import '../../domain/grouping.dart';
+import '../../domain/groups.dart';
 import '../../domain/models.dart';
 import 'widgets/admin_scaffold.dart';
 import 'widgets/merge_players_dialog.dart';
@@ -14,7 +15,10 @@ import 'widgets/profile_picker_sheet.dart';
 /// and keep the hand-made "hráči bez účtu" (0022) — add or edit them, merge
 /// one into the account its owner eventually registers, or delete it.
 class PlayersScreen extends ConsumerWidget {
-  const PlayersScreen({super.key});
+  const PlayersScreen({super.key, this.removeFromGroup = Api.groupRemoveMember});
+
+  /// Injectable for widget tests (the Api one needs a live Supabase client).
+  final Future<void> Function(String userId) removeFromGroup;
 
   /// Runs a change to a member's row and RE-READS the lists it touched.
   ///
@@ -81,6 +85,27 @@ class PlayersScreen extends ConsumerWidget {
       () => Api.setNick(p.id, input),
       success: 'Uloženo.',
     );
+  }
+
+  /// The group (0044) is a player's own arrangement — the admin only steps
+  /// in when it needs undoing, so this asks first like any other removal.
+  Future<void> _removeFromGroup(
+      BuildContext context, WidgetRef ref, Profile p) async {
+    final confirmed = await confirmDialog(
+      context,
+      title: 'Odebrat ze skupiny?',
+      message:
+          '${p.displayName} přestane rezervovat za ostatní ve skupině a oni za něj.',
+      confirmLabel: 'Odebrat',
+    );
+    if (!confirmed || !context.mounted) return;
+    final ok = await tryAction(
+      context,
+      () => removeFromGroup(p.id),
+      success: 'Odebráno ze skupiny.',
+      errorText: friendlyDbError,
+    );
+    if (ok && context.mounted) ref.invalidate(groupRowsProvider);
   }
 
   Future<void> _setClub(
@@ -244,15 +269,16 @@ class PlayersScreen extends ConsumerWidget {
     return lines.isEmpty ? null : Text(lines.join('\n'));
   }
 
-  /// "bez účtu · správce · „nick“" and, on the next line, the e-mail the
-  /// member signs in with (a player without an account has none). Any part
-  /// may be absent; the club is shown by the section header, so it stays
-  /// out of the row.
-  String? _subtitle(Profile p) {
+  /// "bez účtu · správce · „nick“ · skupina: …" and, on the next line, the
+  /// e-mail the member signs in with (a player without an account has
+  /// none). Any part may be absent; the club is shown by the section
+  /// header, so it stays out of the row.
+  String? _subtitle(Profile p, List<String> groupNames) {
     final marks = [
       if (!p.hasAccount) 'bez účtu',
       if (p.role == Role.admin) 'správce',
       if (p.nick.isNotEmpty) '„${p.nick}“',
+      if (groupNames.isNotEmpty) 'skupina: ${groupNames.join(', ')}',
     ].join(' · ');
     final lines = [
       if (marks.isNotEmpty) marks,
@@ -261,8 +287,9 @@ class PlayersScreen extends ConsumerWidget {
     return lines.isEmpty ? null : lines.join('\n');
   }
 
-  /// The member menu: roles, kiosk, club, nick.
-  List<PopupMenuEntry<String>> _memberMenu(Profile p) => [
+  /// The member menu: roles, kiosk, club, nick, and — for someone in a
+  /// group (0044) — a way for the admin to undo it.
+  List<PopupMenuEntry<String>> _memberMenu(Profile p, {required bool inGroup}) => [
         const PopupMenuItem(value: 'club', child: Text('Oddíl…')),
         PopupMenuItem(
           value: p.role == Role.admin ? 'remove_admin' : 'make_admin',
@@ -278,6 +305,11 @@ class PlayersScreen extends ConsumerWidget {
           value: 'edit_nick',
           child: Text('Zkratka na tabuli…'),
         ),
+        if (inGroup)
+          const PopupMenuItem(
+            value: 'remove_from_group',
+            child: Text('Odebrat ze skupiny'),
+          ),
       ];
 
   /// A hráč bez účtu is never an admin or a kiosk; instead it is edited
@@ -290,11 +322,59 @@ class PlayersScreen extends ConsumerWidget {
         PopupMenuItem(value: 'delete', child: Text('Smazat')),
       ];
 
+  /// One approved member's row: name, subtitle (marks + group mates), and
+  /// its popup menu wired to every action above.
+  Widget _memberTile(
+    BuildContext context,
+    WidgetRef ref,
+    Profile p,
+    List<Club> clubs,
+    List<Profile> profiles,
+    List<String> groupNames,
+  ) {
+    final subtitle = _subtitle(p, groupNames);
+    return ListTile(
+      title: Text(p.displayName),
+      isThreeLine: subtitle?.contains('\n') ?? false,
+      subtitle: subtitle == null ? null : Text(subtitle),
+      trailing: PopupMenuButton<String>(
+        onSelected: (action) {
+          switch (action) {
+            case 'edit':
+              _addOrEditPlaceholder(context, ref, clubs, existing: p);
+            case 'club':
+              _pickClub(context, ref, p, clubs);
+            case 'make_admin':
+              _setRole(context, ref, p, Role.admin);
+            case 'remove_admin':
+              _setRole(context, ref, p, Role.player);
+            case 'make_kiosk':
+              _makeKiosk(context, ref, p);
+            case 'edit_nick':
+              _editNick(context, ref, p);
+            case 'remove_from_group':
+              _removeFromGroup(context, ref, p);
+            case 'merge':
+              _mergePlaceholderIntoAccount(context, ref, p, profiles, clubs);
+            case 'delete':
+              _deletePlaceholder(context, ref, p);
+          }
+        },
+        itemBuilder: (context) => p.hasAccount
+            ? _memberMenu(p, inGroup: groupNames.isNotEmpty)
+            : _placeholderMenu(),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     // The roster drives the loading/error state; the clubs only name the
     // sections, so a not-yet-streamed club list just means "Bez oddílu".
     final clubs = ref.watch(clubsProvider).value ?? const <Club>[];
+    // 0044: each member with the OTHER members of their group, by user id.
+    final mates =
+        groupMatesByPlayer(ref.watch(groupRowsProvider).value ?? const []);
 
     return AdminScaffold(
       title: 'Hráči',
@@ -320,6 +400,11 @@ class PlayersScreen extends ConsumerWidget {
           // Kiosk accounts are the alley's tablet, not people: they are
           // administered on the Kiosk screen and never appear here.
           final sections = playersByClub(approved, clubs);
+          List<String> groupNamesOf(Profile p) => [
+                for (final id in mates[p.id] ?? const <String>[])
+                  profiles.where((x) => x.id == id).firstOrNull?.displayName ??
+                      '?',
+              ];
 
           return ListView(
             // Room under the last row for the extended FAB.
@@ -385,38 +470,8 @@ class PlayersScreen extends ConsumerWidget {
                   ),
                 ),
                 for (final p in members)
-                  ListTile(
-                    title: Text(p.displayName),
-                    isThreeLine: _subtitle(p)?.contains('\n') ?? false,
-                    subtitle:
-                        _subtitle(p) == null ? null : Text(_subtitle(p)!),
-                    trailing: PopupMenuButton<String>(
-                      onSelected: (action) {
-                        switch (action) {
-                          case 'edit':
-                            _addOrEditPlaceholder(context, ref, clubs,
-                                existing: p);
-                          case 'club':
-                            _pickClub(context, ref, p, clubs);
-                          case 'make_admin':
-                            _setRole(context, ref, p, Role.admin);
-                          case 'remove_admin':
-                            _setRole(context, ref, p, Role.player);
-                          case 'make_kiosk':
-                            _makeKiosk(context, ref, p);
-                          case 'edit_nick':
-                            _editNick(context, ref, p);
-                          case 'merge':
-                            _mergePlaceholderIntoAccount(
-                                context, ref, p, profiles, clubs);
-                          case 'delete':
-                            _deletePlaceholder(context, ref, p);
-                        }
-                      },
-                      itemBuilder: (context) =>
-                          p.hasAccount ? _memberMenu(p) : _placeholderMenu(),
-                    ),
-                  ),
+                  _memberTile(context, ref, p, clubs, profiles,
+                      groupNamesOf(p)),
               ],
             ],
           );
