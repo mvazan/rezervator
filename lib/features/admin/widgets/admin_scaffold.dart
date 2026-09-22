@@ -27,6 +27,11 @@ class AdminScaffold extends ConsumerWidget {
 
   final String title;
   final Widget body;
+
+  /// Rendered in its own strip below [body] via [ListActionBar] — NOT
+  /// Scaffold's floating slot, which would sit on top of [body] and could
+  /// cover a list's last row. Pass a [FloatingActionButton.extended] as
+  /// before; only where it ends up changes.
   final Widget? floatingActionButton;
   final List<Widget> actions;
 
@@ -52,10 +57,11 @@ class AdminScaffold extends ConsumerWidget {
         ),
       );
     }
+    final fab = floatingActionButton;
+    final content = fab == null ? body : ListActionBar(button: fab, child: body);
     return Scaffold(
       appBar: AppBar(title: Text(title), actions: actions),
-      body: constrainBody ? AdminBody(child: body) : body,
-      floatingActionButton: floatingActionButton,
+      body: constrainBody ? AdminBody(child: content) : content,
     );
   }
 }

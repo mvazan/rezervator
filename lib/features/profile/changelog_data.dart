@@ -43,6 +43,10 @@ String changelogHeading(Release r, {required bool web}) {
 }
 
 const appChangelog = <Release>[
+  Release(null, '22. 9. 2026', [
+    'Ve správě appky se tlačítko pro přidání (oddíl, hráč, pronájem…) už '
+        'nemůže zakrýt poslední položku v seznamu.',
+  ]),
   Release('1.2.7', '15. 9. 2026', [
     'Po spuštění už neprobleskne „Offline" jen proto, že se appka teprve '
         'připojuje — když síť opravdu chybí, banner se ukáže dál.',

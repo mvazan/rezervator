@@ -9,6 +9,7 @@ import '../../data/providers.dart';
 import '../../domain/csv.dart';
 import '../../domain/grouping.dart';
 import '../../domain/models.dart';
+import 'widgets/admin_body.dart';
 import 'widgets/admin_scaffold.dart';
 
 /// Admin: monthly attendance report (per player training count) with CSV
@@ -104,45 +105,49 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
             ),
           ),
           Expanded(
-            child: AsyncBody(
-              value: rows,
-              onRetry: () => ref.invalidate(attendanceProvider(month)),
-              builder: (report) {
-                if (report.isEmpty) {
-                  return const Center(
-                    child: Text('Žádné rezervace v tomto měsíci.'),
-                  );
-                }
-                final scheme = Theme.of(context).colorScheme;
-                return ListView(
-                  children: [
-                    for (final (club, members) in attendanceByClub(report)) ...[
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 2),
-                        child: Text(
-                          '$club — '
-                          '${members.fold(0, (s, r) => s + r.attended)}× / '
-                          '${_players(members.length)}',
-                          style: Theme.of(context).textTheme.labelLarge
-                              ?.copyWith(color: scheme.onSurfaceVariant),
+            // Same reason every other admin list uses this (ListActionBar's
+            // own doc comment): the button must not float on top of the
+            // list, or it can cover the last row.
+            child: ListActionBar(
+              alignment: Alignment.center,
+              button: FilledButton(
+                onPressed: canExport ? () => _export(loaded) : null,
+                child: Text(_exporting ? 'Exportuji…' : 'Export CSV'),
+              ),
+              child: AsyncBody(
+                value: rows,
+                onRetry: () => ref.invalidate(attendanceProvider(month)),
+                builder: (report) {
+                  if (report.isEmpty) {
+                    return const Center(
+                      child: Text('Žádné rezervace v tomto měsíci.'),
+                    );
+                  }
+                  final scheme = Theme.of(context).colorScheme;
+                  return ListView(
+                    children: [
+                      for (final (club, members)
+                          in attendanceByClub(report)) ...[
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 2),
+                          child: Text(
+                            '$club — '
+                            '${members.fold(0, (s, r) => s + r.attended)}× / '
+                            '${_players(members.length)}',
+                            style: Theme.of(context).textTheme.labelLarge
+                                ?.copyWith(color: scheme.onSurfaceVariant),
+                          ),
                         ),
-                      ),
-                      for (final r in members)
-                        ListTile(
-                          dense: true,
-                          title: Text('${r.displayName} — ${r.attended}×'),
-                        ),
+                        for (final r in members)
+                          ListTile(
+                            dense: true,
+                            title: Text('${r.displayName} — ${r.attended}×'),
+                          ),
+                      ],
                     ],
-                  ],
-                );
-              },
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: FilledButton(
-              onPressed: canExport ? () => _export(loaded) : null,
-              child: Text(_exporting ? 'Exportuji…' : 'Export CSV'),
+                  );
+                },
+              ),
             ),
           ),
         ],
