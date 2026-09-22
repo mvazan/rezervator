@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rezervator/core/ui.dart' show today;
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/groups.dart';
 import 'package:rezervator/domain/models.dart';
@@ -1323,7 +1324,7 @@ void main() {
   group('Moje týmy and Po spuštění', () {
     final match = PrioritySlot(
       id: 'm1',
-      date: Day(2026, 9, 11),
+      date: today().addDays(1),
       startsAt: const HourMinute(18, 30),
       endsAt: const HourMinute(21, 30),
       type: PrioritySlot.fallbackMatchType,
@@ -1437,6 +1438,32 @@ void main() {
       // Czech counts three ways and the card says the number often enough
       // for "1 výjimek" to read as a bug.
       expect(find.text('1 výjimka'), findsOneWidget);
+    });
+
+    // Same rule the Výjimky screen itself uses (overruledMatches): an
+    // exception on a played match no longer counts, so the two numbers
+    // never disagree.
+    testWidgets('a played match does not count as an exception',
+        (tester) async {
+      tester.view.physicalSize = const Size(800, 2000);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final played = PrioritySlot(
+        id: 'past',
+        date: today().addDays(-1),
+        startsAt: const HourMinute(18, 30),
+        endsAt: const HourMinute(21, 30),
+        type: PrioritySlot.fallbackMatchType,
+        homeTeam: 'SKK Veverky Brno A',
+        awayTeam: 'KK MS Brno D',
+      );
+      await tester.pumpWidget(app(me,
+          matches: [played], exceptions: const {'past': true}));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Jednotlivé zápasy navíc nebo skryté.'), findsOneWidget);
+      expect(find.textContaining('výjimk'), findsNothing);
     });
 
     testWidgets('Výjimky opens its screen', (tester) async {
