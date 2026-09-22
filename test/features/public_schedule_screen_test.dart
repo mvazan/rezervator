@@ -82,6 +82,9 @@ void main() {
     // The reservation and the rental — both only „Obsazeno".
     expect(find.text('Obsazeno'), findsNWidgets(2));
     expect(find.textContaining('Sokol'), findsWidgets);
+    // No second, app-branded header underneath the alley's own name — the
+    // week range sits right under the title on the same AppBar.
+    expect(find.text('Rezervátor'), findsNothing);
   });
 
   testWidgets('portrait: the day pager', (tester) async {

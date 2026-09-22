@@ -15,7 +15,7 @@ import '../../domain/schedule.dart';
 import '../admin/widgets/admin_scaffold.dart' show AsyncBody;
 import '../schedule/schedule_callbacks.dart';
 import '../schedule/week_board.dart';
-import '../schedule/widgets/week_header.dart';
+import '../schedule/widgets/week_range_nav.dart';
 
 /// The public board's own wording for a slug that answers nothing — unknown
 /// and switched off look the same on purpose (the server does not say which).
@@ -58,54 +58,56 @@ class _PublicScheduleScreenState extends ConsumerState<PublicScheduleScreen>
     _tenantName = value.value?.tenantName ?? _tenantName;
 
     return Scaffold(
-      appBar: AppBar(title: Text(_tenantName ?? 'Rozvrh')),
-      body: Column(
-        children: [
-          WeekHeader(
+      // The week range sits as the AppBar's own second line — centred under
+      // the alley name, not a separate app-branded strip below it (that was
+      // [WeekHeader]'s job for the signed-in app, whose "Rezervátor" title
+      // makes no sense repeated here under the alley's own name).
+      appBar: AppBar(
+        title: Text(_tenantName ?? 'Rozvrh'),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(48),
+          child: WeekRangeNav(
             monday: monday,
             weekOffset: weekOffset,
             onGo: goWeek,
-            trailing: const [],
           ),
-          Expanded(
-            child: AsyncBody(
-              value: value,
-              errorText: publicWeekError,
-              onRetry: () => ref.invalidate(publicWeekProvider(key)),
-              builder: (pw) => WeekBoard(
-                week: buildWeekSchedule(
-                  monday: monday,
-                  today: today,
-                  now: now,
-                  settings: pw.settings,
-                  blocks: pw.blocks,
-                  overrides: pw.overrides,
-                  priority: pw.prioritySlots,
-                  rentals: pw.rentals,
-                  reservations: pw.reservations,
-                ),
-                weekOffset: weekOffset,
-                dayIndex: dayIndex,
-                today: today,
-                now: now,
-                settings: pw.settings,
-                blocks: pw.blocks,
-                overrides: pw.overrides,
-                priority: pw.prioritySlots,
-                rentals: pw.rentals,
-                me: null,
-                myCount: 0,
-                myCountByIndex: const [0, 0, 0, 0, 0, 0, 0],
-                nameById: pw.nameById,
-                clubColorById: pw.clubColorById,
-                interactive: false,
-                slot: _inert,
-                onSelectDay: selectDay,
-                onShiftWeek: shiftWeek,
-              ),
-            ),
+        ),
+      ),
+      body: AsyncBody(
+        value: value,
+        errorText: publicWeekError,
+        onRetry: () => ref.invalidate(publicWeekProvider(key)),
+        builder: (pw) => WeekBoard(
+          week: buildWeekSchedule(
+            monday: monday,
+            today: today,
+            now: now,
+            settings: pw.settings,
+            blocks: pw.blocks,
+            overrides: pw.overrides,
+            priority: pw.prioritySlots,
+            rentals: pw.rentals,
+            reservations: pw.reservations,
           ),
-        ],
+          weekOffset: weekOffset,
+          dayIndex: dayIndex,
+          today: today,
+          now: now,
+          settings: pw.settings,
+          blocks: pw.blocks,
+          overrides: pw.overrides,
+          priority: pw.prioritySlots,
+          rentals: pw.rentals,
+          me: null,
+          myCount: 0,
+          myCountByIndex: const [0, 0, 0, 0, 0, 0, 0],
+          nameById: pw.nameById,
+          clubColorById: pw.clubColorById,
+          interactive: false,
+          slot: _inert,
+          onSelectDay: selectDay,
+          onShiftWeek: shiftWeek,
+        ),
       ),
     );
   }
