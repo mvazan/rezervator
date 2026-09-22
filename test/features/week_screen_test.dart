@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/core/ui.dart' show dayFull;
 import 'package:rezervator/data/clock.dart';
 import 'package:rezervator/data/providers.dart';
+import 'package:rezervator/domain/groups.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/schedule/widgets/slot_tile.dart';
 import 'package:rezervator/features/schedule/week_calendar_view.dart';
@@ -125,6 +126,7 @@ void main() {
     List<Widget> trailing = const [],
     List<PlayerName> roster = players,
     Map<String, int> activeCounts = const {},
+    MyGroup group = MyGroup.none,
   }) {
     return ProviderScope(
       overrides: [
@@ -147,6 +149,7 @@ void main() {
         myProfileProvider.overrideWith((ref) => Stream.value(profile)),
         playersProvider.overrideWith((ref) async => roster),
         nowProvider.overrideWith((ref) => Stream.value(now)),
+        myGroupProvider.overrideWithValue(group),
       ],
       child: MaterialApp(home: Scaffold(body: WeekScreen(trailing: trailing))),
     );
@@ -574,6 +577,74 @@ void main() {
     await tester.tap(find.text('Péťa').first);
     await tester.pumpAndSettle();
     expect(find.byType(AlertDialog), findsNothing);
+    expect(find.text('Petr Novák'), findsOneWidget);
+  });
+
+  testWidgets('in a group a free cell asks for whom', (tester) async {
+    wideSurface(tester);
+    await tester.pumpWidget(app(
+      group: const MyGroup(groupId: 'g', memberIds: ['me', 'p2']),
+    ));
+    await tester.pumpAndSettle();
+    // Book in `tomorrow`'s column, same cell-finding as the plain booking
+    // test above.
+    final addInTomorrow = find.descendant(
+      of: find.byKey(ValueKey(tomorrow)),
+      matching: find.byIcon(Icons.add),
+    );
+    await tester.ensureVisible(addInTomorrow.first);
+    await tester.pumpAndSettle();
+    await tester.tap(addInTomorrow.first);
+    await tester.pumpAndSettle();
+    expect(find.text('Pro koho'), findsOneWidget);
+    expect(find.text('Petr Novák'), findsOneWidget);
+  });
+
+  testWidgets('without a group the plain confirm stays', (tester) async {
+    wideSurface(tester);
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+    final addInTomorrow = find.descendant(
+      of: find.byKey(ValueKey(tomorrow)),
+      matching: find.byIcon(Icons.add),
+    );
+    await tester.ensureVisible(addInTomorrow.first);
+    await tester.pumpAndSettle();
+    await tester.tap(addInTomorrow.first);
+    await tester.pumpAndSettle();
+    expect(find.text('Rezervovat termín?'), findsOneWidget);
+    expect(find.text('Pro koho'), findsNothing);
+  });
+
+  testWidgets("a group mate's reservation offers the cancel, naming them",
+      (tester) async {
+    wideSurface(tester);
+    await tester.pumpWidget(app(
+      reservations: [res('r1', 'p2', tomorrow)],
+      group: const MyGroup(groupId: 'g', memberIds: ['me', 'p2']),
+    ));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Péťa').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Péťa').first);
+    await tester.pumpAndSettle();
+    expect(find.text('Zrušit rezervaci?'), findsOneWidget);
+    // 'Péťa' is the tapped nick; 'Petr Novák' is the name this dialog adds.
+    expect(find.textContaining('Petr Novák'), findsOneWidget);
+    expect(find.textContaining('Dostane o tom zprávu.'), findsOneWidget);
+  });
+
+  testWidgets("outside the group the same tap only names the player",
+      (tester) async {
+    wideSurface(tester);
+    await tester.pumpWidget(app(reservations: [res('r1', 'p2', tomorrow)]));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Péťa').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Péťa').first);
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(find.byType(SnackBar), findsOneWidget);
     expect(find.text('Petr Novák'), findsOneWidget);
   });
 
@@ -1239,6 +1310,7 @@ void main() {
               PlayerName(id: 'me', displayName: 'Já Hráč'),
             ],
           ),
+          myGroupProvider.overrideWithValue(MyGroup.none),
         ],
         child: const MaterialApp(home: Scaffold(body: WeekScreen())),
       ),

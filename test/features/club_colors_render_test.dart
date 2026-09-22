@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/core/theme.dart';
 import 'package:rezervator/core/ui.dart' show today;
 import 'package:rezervator/data/providers.dart';
+import 'package:rezervator/domain/groups.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/domain/palette.dart';
 import 'package:rezervator/features/kiosk/kiosk_board_view.dart';
@@ -76,6 +77,7 @@ void main() {
             (ref, monday) => Stream.value(reservations),
           ),
           playersProvider.overrideWith((ref) async => roster),
+          myGroupProvider.overrideWithValue(MyGroup.none),
         ],
         // Pin the ambient app theme to light so a dark kiosk can only be
         // credited to KioskShell's own theme, not the harness default.
@@ -213,6 +215,7 @@ void main() {
           ),
           myProfileProvider.overrideWith((ref) => Stream.value(profile)),
           playersProvider.overrideWith((ref) async => roster),
+          myGroupProvider.overrideWithValue(MyGroup.none),
         ],
         // Pin light so the expected ClubColors brightness is deterministic.
         child: MaterialApp(

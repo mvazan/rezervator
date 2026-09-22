@@ -17,6 +17,7 @@ import '../admin/widgets/rental_dialog.dart';
 import '../admin/widgets/rental_occurrence_dialog.dart';
 import 'cancel_own_reservation.dart';
 import 'schedule_callbacks.dart';
+import 'widgets/group_booking_dialog.dart';
 
 /// Every user action the schedule views can trigger, built once per
 /// WeekScreen build from the current data. The callbacks keep exactly the
@@ -43,6 +44,7 @@ class ScheduleActions {
     required this.me,
     required this.canEditBlocks,
     this.noAccountIds = const {},
+    this.groupMateIds = const {},
   })  : _overrideByDate = {for (final o in overrides) o.date: o},
         _blockById = {for (final b in dbBlocks) b.id: b};
 
@@ -83,6 +85,11 @@ class ScheduleActions {
   /// a move never offers to message them.
   final Set<String> noAccountIds;
 
+  /// Group mates (0044) whose reservations the signed-in player may book
+  /// and cancel as their own. Empty outside a group, for admins it does not
+  /// matter (they may anything), the kiosk never sets it.
+  final Set<String> groupMateIds;
+
   final Map<Day, DayOverride> _overrideByDate;
   final Map<String, TimeBlock> _blockById;
 
@@ -92,6 +99,7 @@ class ScheduleActions {
         onCancel: onCancel,
         onRental: onEditRental,
         onInfo: onInfo,
+        groupMateIds: groupMateIds,
       );
   CalendarAdminHooks get admin => CalendarAdminHooks(
         onEditBlock: onEditBlock,
@@ -169,6 +177,16 @@ class ScheduleActions {
           settings: ref.read(settingsProvider).value,
         ),
       );
+    } else if (groupMateIds.isNotEmpty) {
+      final mates = [
+        for (final id in groupMateIds) (id: id, name: _displayNameOf(id)),
+      ]..sort((a, b) => compareCzech(a.name, b.name));
+      playerId = await showGroupBookingDialog(
+        context,
+        message: message,
+        meId: me.id,
+        mates: mates,
+      );
     } else {
       final confirmed = await confirmDialog(
         context,
@@ -221,6 +239,27 @@ class ScheduleActions {
         reservation: r,
         block: block,
         cancel: (id) => Api.cancelReservation(id),
+      );
+      return;
+    }
+    // A group mate's (0044): the tile only offers it before the start, as
+    // for one's own; the mate hears about it from the server.
+    if (!(me?.isAdmin ?? false)) {
+      final ok = await confirmDialog(
+        context,
+        title: 'Zrušit rezervaci?',
+        message: '${_displayNameOf(r.playerId)}\n'
+            '${dayFull(date)} · ${block.label} · Dráha ${r.lane}\n'
+            'Dostane o tom zprávu.',
+        confirmLabel: 'Zrušit rezervaci',
+        cancelLabel: 'Zpět',
+      );
+      if (!ok || !context.mounted) return;
+      await tryAction(
+        context,
+        () => Api.cancelReservation(r.id),
+        success: 'Rezervace zrušena.',
+        errorText: friendlyDbError,
       );
       return;
     }

@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:rezervator/data/clock.dart';
 import 'package:rezervator/data/providers.dart';
+import 'package:rezervator/domain/groups.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/schedule/home_shell.dart';
 import 'package:rezervator/features/schedule/my_trainings_screen.dart';
@@ -111,6 +112,7 @@ void main() {
           playersProvider.overrideWith((ref) async => const []),
           tenantNameProvider.overrideWith((ref, id) async => 'Demo'),
           nowProvider.overrideWith((ref) => Stream.value(now)),
+          myGroupProvider.overrideWithValue(MyGroup.none),
         ],
         child: const MaterialApp(home: HomeShell()),
       );
