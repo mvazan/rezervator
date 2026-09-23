@@ -171,18 +171,21 @@ begin
     end if;
   end loop;
 
-  -- A future match the site no longer lists (a team withdrew). Played
-  -- matches stay whatever the site says later.
-  with gone as (
-    delete from priority_slots p
-     where p.tenant_id = p_tenant and p.parent_id is null
-       and p.import_key like 'cka:%'
-       and p.site_slug like p_competition_slug || '-kolo-%'
-       and p.date >= (now() at time zone 'Europe/Prague')::date
-       and not p.hand_edited
-       and not (p.site_match_id = any (v_seen))
-    returning 1)
-  select count(*) into v_del from gone;
+  -- A match not yet started that the site no longer lists (a team
+  -- withdrew). Started matches stay whatever the site says later; an empty
+  -- list is a failed fetch, not a withdrawn season.
+  if jsonb_array_length(p_matches) > 0 then
+    with gone as (
+      delete from priority_slots p
+       where p.tenant_id = p_tenant and p.parent_id is null
+         and p.import_key like 'cka:%'
+         and p.site_slug like p_competition_slug || '-kolo-%'
+         and (p.date + p.starts_at) > (now() at time zone 'Europe/Prague')
+         and not p.hand_edited
+         and not (p.site_match_id = any (v_seen))
+      returning 1)
+    select count(*) into v_del from gone;
+  end if;
 
   return jsonb_build_object('inserted', v_ins, 'updated', v_upd, 'rekeyed', v_rekey,
     'deleted', v_del, 'skipped_hand_edited', v_skipped);
@@ -1109,7 +1112,8 @@ CREATE OR REPLACE FUNCTION "public"."enqueue_federation_match"("p_tenant" "uuid"
           p_run_at)
   on conflict (dedupe_key) do update
     set run_at = least(notification_jobs.run_at, excluded.run_at),
-        payload = excluded.payload;
+        payload = excluded.payload || jsonb_strip_nulls(jsonb_build_object(
+                    'requested_at', notification_jobs.payload->'requested_at'));
 $$;
 
 
@@ -1996,6 +2000,7 @@ declare
   v_status text;
   v_fetched timestamptz;
   v_start timestamptz;
+  v_job bigint;
 begin
   if not is_approved_or_kiosk() then
     raise exception 'not_allowed';
@@ -2017,9 +2022,24 @@ begin
   if v_fetched is not null and v_fetched > now() - interval '5 minutes' then
     return 'fresh';
   end if;
-  perform enqueue_federation_match(v_slot.tenant_id, v_slot.site_match_id,
-                                   v_slot.site_slug, now());
-  perform trigger_notification_jobs();
+  -- fetched_at alone does not gate a fetch that is pending, running or
+  -- backing off: the job's requested_at does.
+  insert into notification_jobs (kind, dedupe_key, payload, run_at)
+  values ('federation_match',
+          'federation_match:' || v_slot.tenant_id || ':' || v_slot.site_match_id,
+          jsonb_build_object('tenant_id', v_slot.tenant_id,
+                             'site_match_id', v_slot.site_match_id,
+                             'slug', v_slot.site_slug, 'requested_at', now()),
+          now())
+  on conflict (dedupe_key) do update
+    set run_at = least(notification_jobs.run_at, excluded.run_at),
+        payload = notification_jobs.payload || jsonb_build_object('requested_at', now())
+    where coalesce((notification_jobs.payload->>'requested_at')::timestamptz, '-infinity')
+          < now() - interval '5 minutes'
+  returning id into v_job;
+  if v_job is not null then
+    perform trigger_notification_jobs();
+  end if;
   return 'queued';
 end;
 $$;
@@ -3176,9 +3196,12 @@ begin
     if found then
       continue;
     end if;
-    v_name := t->>'name';
+    v_name := left(t->>'name', 80);
     if exists (select 1 from teams where tenant_id = p_tenant and name = v_name) then
-      v_name := v_name || ' (' || (t->>'competition_name') || ')';
+      v_name := left((t->>'name') || ' (' || (t->>'competition_name') || ')', 80);
+    end if;
+    if exists (select 1 from teams where tenant_id = p_tenant and name = v_name) then
+      v_name := left((t->>'site_name') || ' (' || (t->>'site_slug') || ')', 80);
     end if;
     insert into teams (tenant_id, name, club_id, site_team_id, site_slug, site_name,
                        competition_slug, competition_name)

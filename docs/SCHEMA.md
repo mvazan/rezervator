@@ -132,7 +132,7 @@ EXECUTE revoked from the app roles (see below).
 | `set_federation_sync(venue_slug, enabled)` (0045) | admin | Upserts the caller's `federation_sync` (slug trimmed + lower-cased, must be non-empty). `not_allowed`, `invalid_slug`. |
 | `request_federation_discovery()`, `request_federation_sync()` (0045) | admin | Enqueue a `federation_discover` job / one `federation_competition` job per active team's competition, due now, and kick the dispatcher. `not_allowed`; `federation_not_configured` (no venue slug) / `federation_disabled` (sync off or no slug). |
 | `update_team(id, name, club_id, active)` (0045) | admin | Renames (trimmed), assigns a club of the same alley, switches the team on/off. `not_allowed` (foreign team or club, not admin), `empty_name`, `team_name_taken`. |
-| `refresh_match(match_id)` (0045) | approved member or kiosk | On-demand refresh of a live match → `queued` (a `federation_match` job due now), `fresh` (fetched < 5 min ago) or `not_live` (not a federation match, foreign, or outside the window: `preparation`/`in_progress` until start + 12 h, `scheduled` from start − 1 h to start + 6 h). `not_allowed`. |
+| `refresh_match(match_id)` (0045) | approved member or kiosk | On-demand refresh of a live match → `queued` (a `federation_match` job due now, at most one request per 5 minutes — see below), `fresh` (fetched < 5 min ago) or `not_live` (not a federation match, foreign, or outside the window: `preparation`/`in_progress` until start + 12 h, `scheduled` from start − 1 h to start + 6 h). `not_allowed`. |
 | `apply_federation_matches(tenant, competition_slug, matches)`, `apply_federation_result(tenant, site_match_id, result)`, `upsert_federation_teams(tenant, teams)`, `record_federation_run(tenant, key, report, error)`, `enqueue_federation_match(tenant, site_match_id, slug, run_at)` (0045) | service_role only (notify function) | The sync's writes — see **Výsledkový servis ČKA** below. `apply_federation_matches` raises `federation_tenant_not_ready` when the tenant has no approved admin or no builtin match type. |
 
 Internal, no EXECUTE for app roles: `current_tenant_id`, `is_*`,
@@ -205,8 +205,9 @@ superseded.
 
 - **Discovery** (`federation_discover` job, `request_federation_discovery`):
   the venue's teams → `upsert_federation_teams`. A new team arrives active
-  under the site's name (a clash with an existing name gets
-  ` (<competition>)` appended); an existing one (same `site_slug`) keeps
+  under the site's name, cut to 80 chars (a clash with an existing name
+  gets ` (<competition>)` appended; if that is taken too,
+  `<site_name> (<site_slug>)`); an existing one (same `site_slug`) keeps
   the admin's name, club and switch — only the site's facts are refreshed.
 - **Schedule** (`federation_competition` job per active team's
   competition): `apply_federation_matches` in one transaction with
@@ -224,9 +225,11 @@ superseded.
     `is_away`) only when not `hand_edited` — a hand-edited row is listed in
     the report's `skipped_hand_edited` instead. Home/away comes from
     `home_is_ours` until a match detail told us the venue.
-  - **Delete only the future:** a `cka:` match of this competition dated
-    Prague-today or later that the site no longer lists, not hand-edited,
-    is deleted; a played match never is.
+  - **Delete only the future:** a `cka:` match of this competition that
+    has not started yet (`date + starts_at` after Prague now), that the
+    site no longer lists and that is not hand-edited, is deleted; a match
+    already under way or played never is. An empty list is a failed fetch
+    and deletes nothing.
   - Report: `{inserted, updated, rekeyed, deleted, skipped_hand_edited[]}`.
 - **Match detail** (`federation_match` job): `apply_federation_result`
   upserts `match_results`, replaces `match_player_results`, writes
@@ -235,7 +238,8 @@ superseded.
   `prep_minutes` (0 away) and the description (`<soutěž> · <n>. kolo`, plus
   ` · <kuželna>` away). `enqueue_federation_match` arms the job with
   dedupe key `federation_match:<tenant>:<site_match_id>`; an earlier
-  `run_at` wins, so a later checkpoint never pushes back an earlier one.
+  `run_at` wins, so a later checkpoint never pushes back an earlier one,
+  and a re-arm keeps the payload's `requested_at`.
 - **Runs:** `record_federation_run(tenant, key, report, error)` stamps
   `last_run_at`; a success sets `last_success_at`, clears `last_error` and
   merges `{key: report + at}` into `last_report`; a failure only sets
@@ -245,8 +249,12 @@ superseded.
   distinct active competition of every enabled tenant with a venue slug,
   spaced one minute apart.
 - **Live refresh:** `refresh_match` lets any member ask for a fresh
-  result of a live match, gated on the server to one fetch per match per
-  5 minutes (`fetched_at`), so no client can hammer the site.
+  result of a live match, gated on the server so no client can hammer the
+  site: `fresh` while `fetched_at` is under 5 minutes old; otherwise it
+  upserts the `federation_match` job stamped `requested_at = now()` and
+  due now, but a job already requested less than 5 minutes ago (pending,
+  running or backing off) is left alone — still answered `queued`, without
+  kicking the dispatcher.
 - **What the sync never touches:** a row with `import_key is null` (the
   admin's own match), a hand-edited row's match columns, and every user
   table — `profiles.followed_teams`, `calendar_teams`, `team_colors`,

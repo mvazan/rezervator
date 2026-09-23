@@ -3642,13 +3642,24 @@ do $$
 declare
   v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
   r jsonb;
+  v_before tid[];
 begin
+  -- xmin cannot tell inside this one transaction; every UPDATE writes a
+  -- new tuple version, so an untouched row keeps its ctid.
+  v_before := array(select ctid from priority_slots
+                     where tenant_id = v_a and import_key in ('cka:101', 'cka:102')
+                     order by import_key);
   r := apply_federation_matches(v_a, 'jihomoravska-divize-2026-2027', jsonb_build_array(
          pg_temp.fed_match(101, true, 10, '17:00', '20:00', 5),
          pg_temp.fed_match(102, false, 17, '10:00', '13:00', 6)));
   if (r->>'inserted')::int <> 0 or (r->>'updated')::int <> 0
      or (r->>'deleted')::int <> 0 then
     raise exception 'FAIL: a repeated apply changed something: %', r;
+  end if;
+  if array(select ctid from priority_slots
+            where tenant_id = v_a and import_key in ('cka:101', 'cka:102')
+            order by import_key) <> v_before then
+    raise exception 'FAIL: a repeated identical apply rewrote a row';
   end if;
   r := apply_federation_matches(v_a, 'jihomoravska-divize-2026-2027', jsonb_build_array(
          pg_temp.fed_match(101, true, 10, '17:00', '20:00', 5)
@@ -3774,6 +3785,51 @@ begin
   raise notice 'OK: a future match the site dropped is deleted; played, hand-edited and other competitions stay (0045)';
 end $$;
 
+-- 5b. An empty list (a failed fetch) deletes nothing; a match already
+-- under way today is not "future".
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_now constant timestamp := now() at time zone 'Europe/Prague';
+  -- Near midnight these fall on yesterday / tomorrow: still started / not.
+  v_started constant timestamp := v_now - interval '1 hour';
+  v_later constant timestamp := v_now + interval '1 hour';
+  v_type uuid;
+  r jsonb;
+begin
+  r := apply_federation_matches(v_a, 'jihomoravska-divize-2026-2027', '[]');
+  if (r->>'deleted')::int <> 0
+     or (select count(*) from priority_slots
+         where tenant_id = v_a
+           and import_key in ('cka:101', 'cka:103', 'cka:104', 'cka:106')) <> 4 then
+    raise exception 'FAIL: an empty list deleted matches: %', r;
+  end if;
+  select id into v_type from priority_slot_types
+   where tenant_id = v_a and is_match and builtin;
+  insert into priority_slots
+    (tenant_id, date, starts_at, ends_at, type_id, home_team, away_team,
+     created_by, import_key, site_slug, site_match_id, is_away)
+  values
+    (v_a, v_started::date, v_started::time, '23:59:59.999', v_type,
+     'KK Jiný', 'TJ Sokol Brno IV', '10000000-0000-0000-0000-000000000001',
+     'cka:108', 'jihomoravska-divize-2026-2027-kolo-8-x-y', 108, true),
+    (v_a, v_later::date, v_later::time, '23:59:59.999', v_type,
+     'KK Jiný', 'TJ Sokol Brno IV', '10000000-0000-0000-0000-000000000001',
+     'cka:109', 'jihomoravska-divize-2026-2027-kolo-9-x-y', 109, true);
+  r := apply_federation_matches(v_a, 'jihomoravska-divize-2026-2027', jsonb_build_array(
+         pg_temp.fed_match(101, true, 10, '18:00', '21:00', 5)
+           || '{"video_url":"https://youtu.be/x"}',
+         pg_temp.fed_match(103, true, 20, '17:00', '20:00', 7)));
+  if (r->>'deleted')::int <> 1
+     or exists (select 1 from priority_slots where tenant_id = v_a and import_key = 'cka:109') then
+    raise exception 'FAIL: expected exactly the later-today match 109 deleted: %', r;
+  end if;
+  if not exists (select 1 from priority_slots where tenant_id = v_a and import_key = 'cka:108') then
+    raise exception 'FAIL: a match already under way was deleted';
+  end if;
+  raise notice 'OK: an empty list deletes nothing; a started match survives, a later one today does not (0045)';
+end $$;
+
 -- 6. A match detail: result, players, and the venue decides home/away.
 do $$
 declare
@@ -3811,6 +3867,8 @@ begin
 end $$;
 
 -- 7. RLS: own alley reads, the other alley sees nothing, nobody writes.
+insert into teams (tenant_id, name, site_slug)
+values ('00000000-0000-0000-0000-00000000000a', 'RLS sonda', 'rls-sonda');
 set local role authenticated;
 set local request.jwt.claims =
   '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
@@ -3820,7 +3878,9 @@ begin
      or (select count(*) from match_player_results) <> 1 then
     raise exception 'FAIL: the admin does not see the alley''s results';
   end if;
-  perform count(*) from teams;
+  if (select count(*) from teams) <> 1 then
+    raise exception 'FAIL: the admin does not see the alley''s teams';
+  end if;
   if (select count(*) from federation_sync) <> 1 then
     raise exception 'FAIL: the admin does not see the sync settings';
   end if;
@@ -3843,8 +3903,9 @@ set local request.jwt.claims =
   '{"sub":"20000000-0000-0000-0000-000000000001","role":"authenticated"}';
 do $$
 begin
-  if (select count(*) from match_results) <> 1 then
-    raise exception 'FAIL: a player does not see the alley''s results';
+  if (select count(*) from match_results) <> 1
+     or (select count(*) from teams) <> 1 then
+    raise exception 'FAIL: a player does not see the alley''s results or teams';
   end if;
   if exists (select 1 from federation_sync) then
     raise exception 'FAIL: a player sees the sync settings';
@@ -3863,6 +3924,28 @@ begin
   raise notice 'OK: federation tables are read-only for the app, per alley; sync settings admin-only (0045)';
 end $$;
 reset role;
+delete from teams where site_slug = 'rls-sonda';
+
+-- 6b. A hand-edited match learns its venue but keeps home/away as edited.
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_before priority_slots;
+  s priority_slots;
+begin
+  select * into v_before from priority_slots where tenant_id = v_a and import_key = 'cka:101';
+  perform apply_federation_result(v_a, 101,
+    '{"status":"scheduled","venue":{"slug":"jinde","name":"Kuželna Jinde"},"home_prep":30,"home":null,"away":null,"players":[]}');
+  select * into s from priority_slots where id = v_before.id;
+  if s.venue is distinct from 'Kuželna Jinde' or s.venue_slug is distinct from 'jinde' then
+    raise exception 'FAIL: the venue of a hand-edited match was not recorded: %', to_jsonb(s);
+  end if;
+  if (s.is_away, s.prep_minutes, s.description, s.hand_edited)
+     is distinct from (v_before.is_away, v_before.prep_minutes, v_before.description, true) then
+    raise exception 'FAIL: apply_federation_result overwrote a hand-edited match: %', to_jsonb(s);
+  end if;
+  raise notice 'OK: apply_federation_result records the venue of a hand-edited match without touching home/away (0045)';
+end $$;
 
 -- 8. Teams: discovery upserts, the admin renames and switches.
 do $$
@@ -3891,6 +3974,23 @@ begin
                  and name = 'TJ Sokol Brno IV (Jihomoravský přebor)') then
     raise exception 'FAIL: a clashing discovered name was not disambiguated';
   end if;
+  if upsert_federation_teams(v_a, jsonb_build_array(
+       v_team || '{"site_slug":"tj-sokol-brno-iv-prebor-b","site_team_id":4,"site_name":"TJ Sokol Brno IV B","competition_slug":"jihomoravsky-prebor-2026-2027","competition_name":"Jihomoravský přebor"}',
+       v_team || jsonb_build_object('site_slug', 'dlouhy', 'site_team_id', 5,
+                                    'name', repeat('Dlouhý ', 20)))) <> 2 then
+    raise exception 'FAIL: a double clash or a long name broke discovery';
+  end if;
+  if not exists (select 1 from teams where tenant_id = v_a
+                 and site_slug = 'tj-sokol-brno-iv-prebor-b'
+                 and name = 'TJ Sokol Brno IV B (tj-sokol-brno-iv-prebor-b)') then
+    raise exception 'FAIL: a doubly clashing name did not fall back to site name + slug';
+  end if;
+  if (select length(name) from teams where tenant_id = v_a and site_slug = 'dlouhy') <> 80 then
+    raise exception 'FAIL: a long discovered name was not cut to 80';
+  end if;
+  delete from teams where tenant_id = v_a and site_slug = 'dlouhy';
+  update teams set active = false
+   where tenant_id = v_a and site_slug = 'tj-sokol-brno-iv-prebor-b';
   perform set_config('probe.fed_team',
     (select id::text from teams where tenant_id = v_a and site_slug = 'tj-sokol-brno-iv-muzi'), true);
   perform set_config('probe.fed_team_prebor',
@@ -3923,7 +4023,7 @@ do $$
 declare
   v_team constant uuid := current_setting('probe.fed_team')::uuid;
 begin
-  if (select count(*) from teams) <> 3 then
+  if (select count(*) from teams) <> 4 then
     raise exception 'FAIL: the admin does not see the alley''s teams';
   end if;
   perform update_team(v_team, '  Brno IV A ', null, false);
@@ -4092,26 +4192,88 @@ begin
   end if;
 end $$;
 reset role;
+-- The fetch is pending and backing off: requested 2 minutes ago, next try
+-- in a minute.
+do $$
+begin
+  if not exists (select 1 from notification_jobs
+                 where kind = 'federation_match'
+                   and dedupe_key = 'federation_match:00000000-0000-0000-0000-00000000000a:103'
+                   and payload->>'site_match_id' = '103'
+                   and payload->>'slug' = 'jihomoravska-divize-2026-2027-kolo-7-x-y'
+                   and (payload->>'requested_at')::timestamptz = now()
+                   and run_at = now()) then
+    raise exception 'FAIL: refresh_match enqueued no stamped federation_match job for 103';
+  end if;
+  update notification_jobs
+     set run_at = now() + interval '1 minute',
+         payload = payload || jsonb_build_object('requested_at', now() - interval '2 minutes')
+   where dedupe_key = 'federation_match:00000000-0000-0000-0000-00000000000a:103';
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+begin
+  if refresh_match(current_setting('probe.fed_103')::uuid) <> 'queued' then
+    raise exception 'FAIL: a repeated refresh of a pending fetch was not answered queued';
+  end if;
+end $$;
+reset role;
+do $$
+begin
+  if not exists (select 1 from notification_jobs
+                 where dedupe_key = 'federation_match:00000000-0000-0000-0000-00000000000a:103'
+                   and run_at = now() + interval '1 minute'
+                   and (payload->>'requested_at')::timestamptz = now() - interval '2 minutes') then
+    raise exception 'FAIL: a refresh within 5 minutes of the last request re-armed the job';
+  end if;
+  update notification_jobs
+     set payload = payload || jsonb_build_object('requested_at', now() - interval '10 minutes')
+   where dedupe_key = 'federation_match:00000000-0000-0000-0000-00000000000a:103';
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+begin
+  if refresh_match(current_setting('probe.fed_103')::uuid) <> 'queued' then
+    raise exception 'FAIL: a refresh after 5 minutes was not queued';
+  end if;
+end $$;
+reset role;
 do $$
 declare
-  v_run timestamptz;
+  v_local constant timestamp := (now() at time zone 'Europe/Prague') + interval '30 minutes';
 begin
-  select run_at into v_run from notification_jobs
-   where kind = 'federation_match'
-     and dedupe_key = 'federation_match:00000000-0000-0000-0000-00000000000a:103'
-     and payload->>'site_match_id' = '103'
-     and payload->>'slug' = 'jihomoravska-divize-2026-2027-kolo-7-x-y';
-  if v_run is null then
-    raise exception 'FAIL: refresh_match enqueued no federation_match job for 103';
+  if not exists (select 1 from notification_jobs
+                 where dedupe_key = 'federation_match:00000000-0000-0000-0000-00000000000a:103'
+                   and run_at = now()
+                   and (payload->>'requested_at')::timestamptz = now()) then
+    raise exception 'FAIL: a refresh after 5 minutes did not re-arm and re-stamp the job';
   end if;
   perform enqueue_federation_match('00000000-0000-0000-0000-00000000000a', 103,
     'jihomoravska-divize-2026-2027-kolo-7-x-y', now() + interval '1 day');
-  if (select run_at from notification_jobs
-      where dedupe_key = 'federation_match:00000000-0000-0000-0000-00000000000a:103') <> v_run then
-    raise exception 'FAIL: a later checkpoint pushed back an earlier one';
+  if not exists (select 1 from notification_jobs
+                 where dedupe_key = 'federation_match:00000000-0000-0000-0000-00000000000a:103'
+                   and run_at = now()
+                   and (payload->>'requested_at')::timestamptz = now()) then
+    raise exception 'FAIL: a later checkpoint pushed back the job or dropped requested_at';
   end if;
   update match_results set fetched_at = now()
    where match_id = current_setting('probe.fed_103')::uuid;
+  -- A scheduled match starting in 30 minutes, nothing fetched yet.
+  insert into priority_slots
+    (tenant_id, date, starts_at, ends_at, type_id, home_team, away_team,
+     created_by, import_key, site_slug, site_match_id, is_away)
+  values
+    ('00000000-0000-0000-0000-00000000000a', v_local::date, v_local::time, '23:59:59.999',
+     (select id from priority_slot_types
+       where tenant_id = '00000000-0000-0000-0000-00000000000a' and is_match and builtin),
+     'KK Jiný', 'TJ Sokol Brno IV', '10000000-0000-0000-0000-000000000001',
+     'cka:107', 'jihomoravska-divize-2026-2027-kolo-10-x-y', 107, true);
+  perform set_config('probe.fed_107', (select id::text from priority_slots
+    where import_key = 'cka:107' and tenant_id = '00000000-0000-0000-0000-00000000000a'), true);
 end $$;
 set local role authenticated;
 set local request.jwt.claims =
@@ -4121,7 +4283,30 @@ begin
   if refresh_match(current_setting('probe.fed_103')::uuid) <> 'fresh' then
     raise exception 'FAIL: a result fetched just now was not fresh';
   end if;
-  raise notice 'OK: refresh_match queues only a live match, gated to one fetch per 5 minutes (0045)';
+  if refresh_match(current_setting('probe.fed_107')::uuid) <> 'queued' then
+    raise exception 'FAIL: a scheduled match about to start was not queued';
+  end if;
+end $$;
+reset role;
+do $$
+begin
+  if not exists (select 1 from notification_jobs
+                 where dedupe_key = 'federation_match:00000000-0000-0000-0000-00000000000a:107'
+                   and payload->>'requested_at' is not null) then
+    raise exception 'FAIL: no federation_match job for the scheduled match 107';
+  end if;
+  update match_results set status = 'finished', fetched_at = now() - interval '1 hour'
+   where match_id = current_setting('probe.fed_103')::uuid;
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+begin
+  if refresh_match(current_setting('probe.fed_103')::uuid) <> 'not_live' then
+    raise exception 'FAIL: a finished match was refreshed';
+  end if;
+  raise notice 'OK: refresh_match queues only a live match, at most one request per 5 minutes even while a fetch is pending (0045)';
 end $$;
 reset role;
 
@@ -4238,6 +4423,38 @@ begin
     raise exception 'FAIL: a success did not clear the error or merge the report: %', to_jsonb(s);
   end if;
   raise notice 'OK: record_federation_run keeps the last good report per key and the last error (0045)';
+end $$;
+
+-- 7b. With both alleys configured, each admin sees only their own settings.
+do $$
+begin
+  if (select count(distinct tenant_id) from federation_sync
+      where tenant_id in ('00000000-0000-0000-0000-00000000000a',
+                          '00000000-0000-0000-0000-000000000002')) <> 2 then
+    raise exception 'FAIL: fixture — both alleys should have a federation_sync row';
+  end if;
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000002","role":"authenticated"}';
+do $$
+begin
+  if (select array_agg(tenant_id) from federation_sync)
+     is distinct from array['00000000-0000-0000-0000-000000000002'::uuid] then
+    raise exception 'FAIL: another alley''s admin sees our sync settings';
+  end if;
+end $$;
+reset role;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+begin
+  if (select array_agg(tenant_id) from federation_sync)
+     is distinct from array['00000000-0000-0000-0000-00000000000a'::uuid] then
+    raise exception 'FAIL: the admin sees another alley''s sync settings';
+  end if;
+  raise notice 'OK: with both alleys configured, each admin sees only their own sync settings (0045)';
 end $$;
 
 reset role;
