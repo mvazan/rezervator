@@ -206,24 +206,31 @@ void main() {
         scoreText.style,
         Theme.of(tester.element(find.text('5 : 3'))).textTheme.headlineSmall,
       );
-      final homeName = tester.widget<Text>(find.text(home));
+      // The header card is the only Card on screen — scope to it, since the
+      // legacy score sheet's team summary row shows the same team name text
+      // again further down.
+      final headerCard = find.byType(Card);
+      expect(headerCard, findsOneWidget);
+      final homeName = tester.widget<Text>(
+        find.descendant(of: headerCard, matching: find.text(home)),
+      );
       expect(homeName.style?.fontWeight, FontWeight.w800);
-      final awayName = tester.widget<Text>(find.text(away));
+      final awayName = tester.widget<Text>(
+        find.descendant(of: headerCard, matching: find.text(away)),
+      );
       expect(awayName.style?.fontWeight, isNot(FontWeight.w800));
       expect(find.text('3460 : 3349'), findsOneWidget);
       expect(find.textContaining('SB 15 : 9'), findsOneWidget);
       // The joined format+status line, exactly (formatLabel + ' · ' + status).
       expect(find.text('6 hráčů · 120 HS · Dokončeno'), findsOneWidget);
-      expect(find.text('Domácí — $home'), findsOneWidget);
-      expect(find.text('Hosté — $away'), findsOneWidget);
+
+      // The legacy score sheet: team names (again, in the summary row),
+      // player names with position prefix, and the lane totals.
+      expect(find.text(home), findsNWidgets(2));
+      expect(find.text(away), findsNWidgets(2));
       expect(find.text('1. Jan Novák'), findsOneWidget);
       expect(find.text('1. Petr Svoboda'), findsOneWidget);
-      expect(find.text('P 350 · D 20 · Ch 5'), findsOneWidget);
-
-      await tester.tap(find.text('1. Jan Novák'));
-      await tester.pumpAndSettle();
-
-      expect(find.text('Dráha'), findsOneWidget);
+      expect(find.text('Série'), findsNWidgets(2));
       expect(find.text('290'), findsNWidgets(2));
     },
   );

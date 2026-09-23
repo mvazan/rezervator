@@ -14,7 +14,7 @@ import '../../data/providers.dart';
 import '../../domain/models.dart';
 import '../../domain/results.dart';
 import 'venue_detail_screen.dart';
-import 'widgets/match_players.dart';
+import 'widgets/legacy_score_sheet.dart';
 
 class MatchDetailScreen extends ConsumerStatefulWidget {
   const MatchDetailScreen({
@@ -291,45 +291,6 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     );
   }
 
-  Widget _statsTable(BuildContext context, MatchResult? result) {
-    final theme = Theme.of(context);
-    final rows = [
-      ('Plné', result?.homeFulls, result?.awayFulls),
-      ('Dorážka', result?.homeSpares, result?.awaySpares),
-      ('Chyby', result?.homeErrors, result?.awayErrors),
-      ('Výkon', result?.homeTotal, result?.awayTotal),
-    ];
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-      child: Table(
-        columnWidths: const {
-          0: FlexColumnWidth(2),
-          1: FlexColumnWidth(1),
-          2: FlexColumnWidth(1),
-        },
-        children: [
-          for (final row in rows)
-            TableRow(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: Text(row.$1, style: theme.textTheme.bodyMedium),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: Text(numLabel(row.$2), textAlign: TextAlign.center),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: Text(numLabel(row.$3), textAlign: TextAlign.center),
-                ),
-              ],
-            ),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final now = ref.watch(nowProvider).value ?? DateTime.now();
@@ -423,28 +384,13 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
                   ),
                 ),
                 _buttonsRow(context, slot, result, now),
-                _statsTable(context, result),
                 if (players.isEmpty)
                   const Padding(
                     padding: EdgeInsets.all(16),
                     child: Text('Sestavy zatím nejsou k dispozici.'),
                   )
-                else ...[
-                  MatchPlayerSection(
-                    title: 'Domácí — ${slot.homeTeam}',
-                    players: [
-                      for (final p in players)
-                        if (p.side == 'home') p,
-                    ],
-                  ),
-                  MatchPlayerSection(
-                    title: 'Hosté — ${slot.awayTeam}',
-                    players: [
-                      for (final p in players)
-                        if (p.side == 'away') p,
-                    ],
-                  ),
-                ],
+                else
+                  LegacyScoreSheet(slot: slot, result: result, players: players),
               ],
             ),
     );
