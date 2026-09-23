@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/hub_menu.dart';
 import '../../core/ui.dart';
 import '../../data/providers.dart';
 import 'clubs_screen.dart';
@@ -18,10 +19,8 @@ import 'widgets/admin_scaffold.dart';
 /// One admin hub entry: label + icon + target screen.
 typedef _Entry = ({String label, IconData icon, Widget Function() screen});
 
-const double _wideBreakpoint = 840;
-
 /// Admin hub: entry point to every admin-only screen. Narrow windows get a
-/// list; wide (web/desktop) windows a card grid.
+/// list; wide (web/desktop) windows a card grid — [HubMenu]'s shared layout.
 class AdminScreen extends ConsumerWidget {
   const AdminScreen({super.key});
 
@@ -99,7 +98,6 @@ class AdminScreen extends ConsumerWidget {
     final homeName = isVisiting
         ? ref.watch(tenantNameProvider(profile!.homeTenantId)).value
         : null;
-    final scheme = Theme.of(context).colorScheme;
     void openTenants() => Navigator.of(context)
         .push(MaterialPageRoute(builder: (_) => const TenantsScreen()));
     Future<void> goHome() async {
@@ -123,206 +121,150 @@ class AdminScreen extends ConsumerWidget {
     return AdminScaffold(
       title: 'Správa kuželny',
       constrainBody: false,
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          if (constraints.maxWidth < _wideBreakpoint) {
-            return ListView(
-              children: [
-                for (final entry in _entries)
-                  ListTile(
-                    leading: _AdminIcon(entry.icon),
-                    title: Text(entry.label),
-                    onTap: () => _open(context, entry),
-                  ),
-                if (isSuperadmin) ...[
-                  const Divider(),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-                    child: Text(
-                      'Správce aplikace',
-                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                            color: scheme.tertiary,
-                          ),
-                    ),
-                  ),
-                  ListTile(
-                    tileColor: scheme.tertiaryContainer.withValues(alpha: 0.35),
-                    leading: _AdminIcon(superEntry.icon, tinted: true),
-                    title: Text(superEntry.label),
-                    subtitle: const Text('schvalování a přepínání kuželen'),
-                    onTap: openTenants,
-                  ),
-                  if (isVisiting)
-                    ListTile(
-                      tileColor:
-                          scheme.tertiaryContainer.withValues(alpha: 0.35),
-                      leading: const _AdminIcon(
-                        Icons.home_outlined,
-                        tinted: true,
-                      ),
-                      title: const Text('Zpět domů'),
-                      subtitle: Text(homeSubtitle),
-                      onTap: goHome,
-                    ),
-                ],
-              ],
-            );
-          }
-          return Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 960),
-              child: GridView(
-                padding: const EdgeInsets.all(24),
-                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                  maxCrossAxisExtent: 300,
-                  mainAxisExtent: 96,
-                  crossAxisSpacing: 16,
-                  mainAxisSpacing: 16,
-                ),
-                children: [
-                  for (final entry in _entries)
-                    Card(
-                      clipBehavior: Clip.antiAlias,
-                      child: InkWell(
-                        onTap: () => _open(context, entry),
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Row(
-                            children: [
-                              _AdminIcon(entry.icon),
-                              const SizedBox(width: 16),
-                              Expanded(
-                                child: Text(
-                                  entry.label,
-                                  style: Theme.of(
-                                    context,
-                                  ).textTheme.titleMedium,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  if (isSuperadmin)
-                    Card(
-                      clipBehavior: Clip.antiAlias,
-                      color: scheme.tertiaryContainer.withValues(alpha: 0.4),
-                      child: InkWell(
-                        onTap: openTenants,
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Row(
-                            children: [
-                              _AdminIcon(superEntry.icon, tinted: true),
-                              const SizedBox(width: 16),
-                              Expanded(
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      superEntry.label,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .titleMedium,
-                                    ),
-                                    Text(
-                                      'správce aplikace',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .labelSmall
-                                          ?.copyWith(color: scheme.tertiary),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  if (isVisiting)
-                    Card(
-                      clipBehavior: Clip.antiAlias,
-                      color: scheme.tertiaryContainer.withValues(alpha: 0.4),
-                      child: InkWell(
-                        onTap: goHome,
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Row(
-                            children: [
-                              const _AdminIcon(
-                                Icons.home_outlined,
-                                tinted: true,
-                              ),
-                              const SizedBox(width: 16),
-                              Expanded(
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      'Zpět domů',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .titleMedium,
-                                    ),
-                                    Text(
-                                      homeSubtitle,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .labelSmall
-                                          ?.copyWith(color: scheme.tertiary),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
+      body: HubMenu(
+        entries: [
+          for (final entry in _entries)
+            (
+              label: entry.label,
+              icon: entry.icon,
+              subtitle: null,
+              onTap: () => _open(context, entry),
             ),
-          );
-        },
+        ],
+        extra: (wide) => _superadminSection(
+          context,
+          wide: wide,
+          isSuperadmin: isSuperadmin,
+          isVisiting: isVisiting,
+          superEntry: superEntry,
+          homeSubtitle: homeSubtitle,
+          openTenants: openTenants,
+          goHome: goHome,
+        ),
       ),
     );
   }
-}
 
-/// Admin hub leading icon: tonal 40×40 rounded square around the glyph.
-class _AdminIcon extends StatelessWidget {
-  const _AdminIcon(this.icon, {this.tinted = false});
-
-  final IconData icon;
-
-  /// Tertiary treatment for the superadmin section — visually apart from
-  /// the regular (primary-tinted) kuželna admin tiles.
-  final bool tinted;
-
-  @override
-  Widget build(BuildContext context) {
+  /// Správa's superadmin/visiting section — a divider + tinted list tiles
+  /// below the wide breakpoint, tinted cards above it. Kept exactly as it
+  /// rendered before the [HubMenu] extraction.
+  List<Widget> _superadminSection(
+    BuildContext context, {
+    required bool wide,
+    required bool isSuperadmin,
+    required bool isVisiting,
+    required ({String label, IconData icon}) superEntry,
+    required String homeSubtitle,
+    required VoidCallback openTenants,
+    required VoidCallback goHome,
+  }) {
+    if (!isSuperadmin) return const [];
     final scheme = Theme.of(context).colorScheme;
-    return Container(
-      width: 40,
-      height: 40,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: tinted ? scheme.tertiary : scheme.primaryContainer,
-        borderRadius: BorderRadius.circular(12),
+
+    if (!wide) {
+      return [
+        const Divider(),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+          child: Text(
+            'Správce aplikace',
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  color: scheme.tertiary,
+                ),
+          ),
+        ),
+        ListTile(
+          tileColor: scheme.tertiaryContainer.withValues(alpha: 0.35),
+          leading: HubIcon(superEntry.icon, tinted: true),
+          title: Text(superEntry.label),
+          subtitle: const Text('schvalování a přepínání kuželen'),
+          onTap: openTenants,
+        ),
+        if (isVisiting)
+          ListTile(
+            tileColor: scheme.tertiaryContainer.withValues(alpha: 0.35),
+            leading: const HubIcon(Icons.home_outlined, tinted: true),
+            title: const Text('Zpět domů'),
+            subtitle: Text(homeSubtitle),
+            onTap: goHome,
+          ),
+      ];
+    }
+
+    return [
+      Card(
+        clipBehavior: Clip.antiAlias,
+        color: scheme.tertiaryContainer.withValues(alpha: 0.4),
+        child: InkWell(
+          onTap: openTenants,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                HubIcon(superEntry.icon, tinted: true),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        superEntry.label,
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      Text(
+                        'správce aplikace',
+                        style: Theme.of(context)
+                            .textTheme
+                            .labelSmall
+                            ?.copyWith(color: scheme.tertiary),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
-      child: Icon(
-        icon,
-        color: tinted ? scheme.onTertiary : scheme.onPrimaryContainer,
-        size: 22,
-      ),
-    );
+      if (isVisiting)
+        Card(
+          clipBehavior: Clip.antiAlias,
+          color: scheme.tertiaryContainer.withValues(alpha: 0.4),
+          child: InkWell(
+            onTap: goHome,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  const HubIcon(Icons.home_outlined, tinted: true),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Zpět domů',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        Text(
+                          homeSubtitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context)
+                              .textTheme
+                              .labelSmall
+                              ?.copyWith(color: scheme.tertiary),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+    ];
   }
 }

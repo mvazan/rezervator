@@ -1592,6 +1592,29 @@ void main() {
       expect(saved, [HomeView.trainings]);
     });
 
+    // Klubovna is a tab, not something to launch straight into — the picker
+    // must stay at exactly its two original choices even after HomeView
+    // grew a third value.
+    testWidgets('the launch-view picker still offers only two choices',
+        (tester) async {
+      tester.view.physicalSize = const Size(800, 1800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(app(me));
+      await tester.pumpAndSettle();
+
+      final picker = tester.widget<SegmentedButton<HomeView>>(
+        find.byType(SegmentedButton<HomeView>),
+      );
+      expect(picker.segments, hasLength(2));
+      expect(
+        picker.segments.map((s) => s.value),
+        containsAll([HomeView.trainings, HomeView.calendar]),
+      );
+      expect(find.text('Klubovna'), findsNothing);
+    });
+
     testWidgets('several ticks are ONE save on Uložit, with every tick in it',
         (tester) async {
       tester.view.physicalSize = const Size(800, 1800);
