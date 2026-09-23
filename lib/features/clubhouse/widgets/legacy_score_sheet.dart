@@ -32,6 +32,77 @@ const _kCelkemTotalRed = Color(0xFF8B0000);
 const _kBlack = Color(0xFF000000);
 const _kWhite = Color(0xFFFFFFFF);
 
+// Every text role this table ever renders, as ONE shared constant each —
+// used both to actually draw a cell and, in [_ColumnMetrics.compute], to
+// MEASURE how wide that cell's content needs to be. Using the exact same
+// `TextStyle` object for both is what keeps the measurement honest (Fix
+// round 5): a mismatched style there was exactly how round 4 shipped
+// columns real Manrope ellipsized into ("22…" instead of "2280").
+const _s10w400 = TextStyle(
+  fontFamily: appFontFamily,
+  fontSize: 10,
+  fontWeight: FontWeight.w400,
+  height: 1.0,
+  letterSpacing: 0,
+);
+const _s10w700 = TextStyle(
+  fontFamily: appFontFamily,
+  fontSize: 10,
+  fontWeight: FontWeight.w700,
+  height: 1.0,
+  letterSpacing: 0,
+);
+const _s16w400 = TextStyle(
+  fontFamily: appFontFamily,
+  fontSize: 16,
+  fontWeight: FontWeight.w400,
+  height: 1.0,
+  letterSpacing: 0,
+);
+const _s16w700 = TextStyle(
+  fontFamily: appFontFamily,
+  fontSize: 16,
+  fontWeight: FontWeight.w700,
+  height: 1.0,
+  letterSpacing: 0,
+);
+const _s20w400 = TextStyle(
+  fontFamily: appFontFamily,
+  fontSize: 20,
+  fontWeight: FontWeight.w400,
+  height: 1.0,
+  letterSpacing: 0,
+);
+const _s20w700 = TextStyle(
+  fontFamily: appFontFamily,
+  fontSize: 20,
+  fontWeight: FontWeight.w700,
+  height: 1.0,
+  letterSpacing: 0,
+);
+const _s24w700 = TextStyle(
+  fontFamily: appFontFamily,
+  fontSize: 24,
+  fontWeight: FontWeight.w700,
+  height: 1.0,
+  letterSpacing: 0,
+);
+
+/// "+13" / "-2" / "0" — a signed pin difference; negative values already
+/// carry their own minus, so only the positive case needs a prefix.
+String _signed(int v) => v > 0 ? '+$v' : '$v';
+
+/// Sum of [MatchPlayerResult.teamPoints] for one side's players — the
+/// team-row "Družstvo" column (kuzelky's "team points won from duels";
+/// `MatchResult` carries no such stat of its own).
+num _teamPointsSum(List<MatchPlayerResult> players, String side) {
+  num sum = 0;
+  for (final p in players) {
+    if (p.side == side) sum += p.teamPoints ?? 0;
+  }
+  return sum;
+}
+
 /// One pairing block per position (1..N): the home and away player who
 /// faced each other, each with a line per lane thrown plus a Celkem total,
 /// and the pin difference between them. Above the blocks, a team summary
@@ -103,22 +174,219 @@ class LegacyScoreSheet extends StatelessWidget {
   }
 }
 
+/// Every column's width, computed once per render from the table's actual
+/// content (Fix round 5) — kuzelky uses `table-layout: auto`, so its
+/// columns grow to fit whatever they hold; the brief's own widths are
+/// MINIMUMS, not fixed sizes. A column's width is `max(brief minimum,
+/// widest content that column ever holds + 9dp)` — 9dp because [_cell]'s
+/// own padding (4+4) plus its 1px border account for exactly that much
+/// beyond a glyph run's raw measured width. Mirror columns (the same
+/// column on the home and away side) share ONE width — the wider side's
+/// requirement — so the table stays visually symmetric, the same way a
+/// real HTML `<col>` would if both sides sat in the same `<colgroup>`.
+class _ColumnMetrics {
+  const _ColumnMetrics({
+    required this.nameWidth,
+    required this.serieWidth,
+    required this.plneWidth,
+    required this.dorWidth,
+    required this.chWidth,
+    required this.celkemColWidth,
+    required this.dilciWidth,
+    required this.druzstvoWidth,
+    required this.rozdilWidth,
+  });
+
+  final double nameWidth;
+  final double serieWidth;
+  final double plneWidth;
+  final double dorWidth;
+  final double chWidth;
+  final double celkemColWidth;
+  final double dilciWidth;
+  final double druzstvoWidth;
+  final double rozdilWidth;
+
+  double get sideWidth =>
+      nameWidth +
+      serieWidth +
+      plneWidth +
+      dorWidth +
+      chWidth +
+      celkemColWidth +
+      dilciWidth +
+      druzstvoWidth;
+
+  double get totalWidth => sideWidth * 2 + rozdilWidth;
+
+  /// [_cell]'s own horizontal padding (4+4) + its 1px border.
+  static const _cellChrome = 9.0;
+
+  static double _measure(String text, TextStyle style) {
+    if (text.isEmpty) return 0;
+    // Deliberately NO `maxLines` here: combined with an unconstrained
+    // (infinite) layout width, it measures something other than the
+    // text's true natural single-line width — the discrepancy this
+    // caused (a real string this app renders came back ~4.5dp too
+    // narrow) is exactly what made round 4's own ellipsis bug possible
+    // despite an earlier, similar-looking width check (Fix round 5). A
+    // single line with no explicit newline never needs to wrap anyway
+    // when given infinite width, so `maxLines` adds nothing here.
+    final painter = TextPainter(
+      text: TextSpan(text: text, style: style),
+      textDirection: TextDirection.ltr,
+      textScaler: TextScaler.noScaling,
+      textWidthBasis: TextWidthBasis.longestLine,
+    )..layout();
+    return painter.width;
+  }
+
+  static double _widest(Iterable<(String, TextStyle)> cells, double min) {
+    var widest = min;
+    for (final (text, style) in cells) {
+      final needed = _measure(text, style) + _cellChrome;
+      if (needed > widest) widest = needed;
+    }
+    // Rounded UP to a whole px: every cell edge then lands on an integer
+    // device pixel (at the common 1.0 pixel ratio), which is what keeps
+    // the 1px/2px border grid crisp instead of anti-aliased/blurred across
+    // 2 pixels at a fractional boundary (Fix round 5).
+    return widest.ceilToDouble();
+  }
+
+  factory _ColumnMetrics.compute({
+    required PrioritySlot slot,
+    required MatchResult? result,
+    required List<MatchPlayerResult> players,
+  }) {
+    final positions = <int>{for (final p in players) p.position}.toList();
+    MatchPlayerResult? forSide(String side, int position) {
+      for (final p in players) {
+        if (p.side == side && p.position == position) return p;
+      }
+      return null;
+    }
+
+    final nameWidth = _widest([
+      ('Jméno a příjmení hráče', _s10w400),
+      ('Registrační číslo', _s10w400),
+      (slot.homeTeam, _s16w700),
+      (slot.awayTeam, _s16w700),
+      for (final p in players) (p.playerName, _s16w700),
+    ], 144.0);
+
+    // Deliberately EXCLUDES "Série hodů" — it's the one header allowed to
+    // wrap onto its own 2-row-tall cell (Fix round 5, item 3), so it must
+    // not force this column wide enough for a single line.
+    final serieWidth = _widest([
+      (numLabel(result?.homePoints), _s24w700),
+      (numLabel(result?.awayPoints), _s24w700),
+      ('Celkem', _s10w700),
+      for (final p in players)
+        for (final lane in p.lanes) ('${lane.lane}', _s10w400),
+    ], 42.0);
+
+    final plneWidth = _widest([
+      ('Plné', _s10w400),
+      (numLabel(result?.homeFulls), _s20w400),
+      (numLabel(result?.awayFulls), _s20w400),
+      for (final p in players) (numLabel(p.fulls), _s10w700),
+      for (final p in players)
+        for (final lane in p.lanes) (numLabel(lane.fulls), _s10w400),
+    ], 55.0);
+
+    final dorWidth = _widest([
+      ('Dor.', _s10w400),
+      (numLabel(result?.homeSpares), _s20w400),
+      (numLabel(result?.awaySpares), _s20w400),
+      for (final p in players) (numLabel(p.spares), _s10w700),
+      for (final p in players)
+        for (final lane in p.lanes) (numLabel(lane.spares), _s10w400),
+    ], 46.0);
+
+    final chWidth = _widest([
+      ('Ch.', _s10w400),
+      (numLabel(result?.homeErrors), _s20w400),
+      (numLabel(result?.awayErrors), _s20w400),
+      for (final p in players) (numLabel(p.errors), _s10w700),
+      for (final p in players)
+        for (final lane in p.lanes) (numLabel(lane.errors), _s10w400),
+    ], 33.0);
+
+    final celkemColWidth = _widest([
+      ('Celkem', _s10w400),
+      (numLabel(result?.homeTotal), _s20w700),
+      (numLabel(result?.awayTotal), _s20w700),
+      for (final p in players) (numLabel(p.total), _s16w700),
+      for (final p in players)
+        for (final lane in p.lanes) (numLabel(lane.total), _s10w400),
+    ], 58.0);
+
+    final dilciWidth = _widest([
+      ('Dílčí', _s10w400),
+      (numLabel(result?.homeSetPoints), _s20w400),
+      (numLabel(result?.awaySetPoints), _s20w400),
+      for (final p in players) (numLabel(p.setPoints), _s10w400),
+      for (final p in players)
+        for (final lane in p.lanes) (numLabel(lane.setPoints), _s10w400),
+    ], 31.0);
+
+    final druzstvoWidth = _widest([
+      ('Body', _s10w400),
+      ('Družstvo', _s10w400),
+      (numLabel(_teamPointsSum(players, 'home')), _s20w700),
+      (numLabel(_teamPointsSum(players, 'away')), _s20w700),
+      for (final p in players) (numLabel(p.teamPoints), _s20w700),
+    ], 51.0);
+
+    final rozdilCells = <(String, TextStyle)>[('Rozdíl', _s10w400)];
+    final home = result?.homeTotal;
+    final away = result?.awayTotal;
+    if (home != null && away != null) {
+      rozdilCells.add((_signed(home - away), _s20w700));
+    }
+    for (final pos in positions) {
+      final h = forSide('home', pos);
+      final a = forSide('away', pos);
+      if (h?.total != null && a?.total != null) {
+        rozdilCells.add((_signed(h!.total! - a!.total!), _s16w400));
+      }
+    }
+    final rozdilWidth = _widest(rozdilCells, 46.0);
+
+    return _ColumnMetrics(
+      nameWidth: nameWidth,
+      serieWidth: serieWidth,
+      plneWidth: plneWidth,
+      dorWidth: dorWidth,
+      chWidth: chWidth,
+      celkemColWidth: celkemColWidth,
+      dilciWidth: dilciWidth,
+      druzstvoWidth: druzstvoWidth,
+      rozdilWidth: rozdilWidth,
+    );
+  }
+}
+
 /// The actual table — a 1:1 replica of kuzelky.com's own `table#tabzap`
 /// grid, shared by the embedded [LegacyScoreSheet] (inside a horizontal
 /// [SingleChildScrollView]) and [LegacyScoreSheetPage] (scaled to fit via
-/// `_ScaleToFitViewer`, never scrolled). Every column and row is a
-/// hard-coded dp value copied from the reference site, not derived from
-/// the app's theme — see `.superpowers/sdd/legacy-sheet-styles-brief.md`.
+/// `_ScaleToFitViewer`, never scrolled). Row heights are hard-coded dp
+/// values copied from the reference site; column widths are computed per
+/// render by [_ColumnMetrics] (Fix round 5 — see its own doc comment).
 ///
-/// Built from plain bordered [Container]s (not [Table], which has no
-/// rowspan) — the player name, "Družstvo" (team points) and "Rozdíl"
-/// cells each span several rows by being ONE tall [Container] rather than
-/// several stacked ones, which is what actually reproduces the reference
-/// site's rowspan cells here (no internal seam for that cell, since it's
-/// a single shape). Fix round 2: this table no longer follows the app's
-/// accessibility text-size setting (`core/text_size.dart`) —
-/// [MediaQuery.withNoTextScaling] pins text scaling off here, the one
-/// place both call sites share.
+/// Built from plain [Container]s (not [Table], which has no rowspan) — the
+/// player name, "Družstvo" (team points) and "Rozdíl" cells each span
+/// several rows by being ONE tall [Container] rather than several stacked
+/// ones. Fix round 5: every cell paints only its RIGHT and BOTTOM 1px
+/// border — kuzelky's own grid is a 2px OUTER frame with 1px collapsed
+/// seams inside, the opposite of "every cell draws all 4 sides" (which
+/// doubles every internal seam to 2px and leaves the outer frame at only
+/// 1px). The 2px outer frame itself comes from the `Container` this
+/// widget returns, via `foregroundDecoration` — see [build]. Fix round 2:
+/// this table no longer follows the app's accessibility text-size setting
+/// (`core/text_size.dart`) — [MediaQuery.withNoTextScaling] pins text
+/// scaling off here, the one place both call sites share.
 class _ScoreTableBody extends StatelessWidget {
   const _ScoreTableBody({
     required this.slot,
@@ -130,51 +398,17 @@ class _ScoreTableBody extends StatelessWidget {
   final MatchResult? result;
   final List<MatchPlayerResult> players;
 
-  // Column widths (dp), copied 1:1 from kuzelky.com's own table (home and
-  // away differ by a dp or two on a few columns — the reference site's own
-  // layout, not a rounding choice made here).
-  static const _nameWidthHome = 144.0;
-  static const _nameWidthAway = 143.0;
-  static const _serieWidth = 42.0;
-  static const _plneWidth = 55.0;
-  static const _dorWidth = 46.0;
-  static const _chWidthHome = 33.0;
-  static const _chWidthAway = 30.0;
-  static const _celkemColWidth = 58.0;
-  static const _dilciWidth = 31.0;
-  static const _druzstvoWidthHome = 51.0;
-  static const _druzstvoWidthAway = 52.0;
-  static const _rozdilWidth = 46.0;
-
-  static const _sideWidthHome =
-      _nameWidthHome +
-      _serieWidth +
-      _plneWidth +
-      _dorWidth +
-      _chWidthHome +
-      _celkemColWidth +
-      _dilciWidth +
-      _druzstvoWidthHome;
-  static const _sideWidthAway =
-      _nameWidthAway +
-      _serieWidth +
-      _plneWidth +
-      _dorWidth +
-      _chWidthAway +
-      _celkemColWidth +
-      _dilciWidth +
-      _druzstvoWidthAway;
-
-  /// The table's total natural width (dp) — ≈963, matching the reference
-  /// site. Used for the full-width separator row between pairing blocks.
-  static const totalWidth = _sideWidthHome + _rozdilWidth + _sideWidthAway;
-
-  // Row heights (dp), also copied 1:1.
+  // Row heights (dp), copied 1:1 from kuzelky.com's own table.
   static const _teamRowHeight = 43.0;
   static const _headerRowHeight = 23.0;
   static const _laneRowHeight = 23.0;
   static const _celkemRowHeight = 31.0;
   static const _separatorHeight = 9.0;
+
+  /// The outer 2px border frame's own [padding] (`fromLTRB(2, 2, 1, 1)`),
+  /// added to a content size to get this widget's actual rendered size.
+  static const _frameWidth = 3.0; // left 2 + right 1
+  static const _frameHeight = 3.0; // top 2 + bottom 1
 
   MatchPlayerResult? _forSide(String side, int position) {
     for (final p in players) {
@@ -183,37 +417,85 @@ class _ScoreTableBody extends StatelessWidget {
     return null;
   }
 
-  /// Team-level "Družstvo" column (Fix round 4): the total match/team
-  /// points this side's players individually earned — summed from each
-  /// [MatchPlayerResult.teamPoints], not a separate stat `MatchResult`
-  /// carries on its own.
-  num _teamPointsSum(String side) {
-    num sum = 0;
-    for (final p in players) {
-      if (p.side == side) sum += p.teamPoints ?? 0;
+  /// This table's real rendered size, computed WITHOUT building it —
+  /// [_ColumnMetrics.compute] and the row-height arithmetic below are both
+  /// pure functions of [slot]/[result]/[players], so [LegacyScoreSheetPage]
+  /// can know the exact size to scale-to-fit synchronously, on the very
+  /// first frame (Fix round 5, item 7 — no more measure-then-correct
+  /// post-frame callback).
+  static Size naturalSize({
+    required PrioritySlot slot,
+    required MatchResult? result,
+    required List<MatchPlayerResult> players,
+  }) {
+    final metrics = _ColumnMetrics.compute(
+      slot: slot,
+      result: result,
+      players: players,
+    );
+    var height = _teamRowHeight;
+    if (players.isNotEmpty) {
+      height += _headerRowHeight * 2;
+      final positions = <int>{for (final p in players) p.position}.toList()
+        ..sort();
+      for (final (i, pos) in positions.indexed) {
+        int laneCountFor(String side) {
+          for (final p in players) {
+            if (p.side == side && p.position == pos) return p.lanes.length;
+          }
+          return 0;
+        }
+
+        final laneRowCount = math.max(
+          laneCountFor('home'),
+          laneCountFor('away'),
+        );
+        height += laneRowCount * _laneRowHeight + _celkemRowHeight;
+        if (i != positions.length - 1) height += _separatorHeight;
+      }
     }
-    return sum;
+    return Size(metrics.totalWidth + _frameWidth, height + _frameHeight);
   }
 
   @override
   Widget build(BuildContext context) {
+    final metrics = _ColumnMetrics.compute(
+      slot: slot,
+      result: result,
+      players: players,
+    );
     final positions = <int>{for (final p in players) p.position}.toList()
       ..sort();
 
     return MediaQuery.withNoTextScaling(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _teamSummaryRow(),
-          if (players.isNotEmpty) ...[
-            _headerRows(),
-            for (final (i, pos) in positions.indexed) ...[
-              _pairingBlock(pos, _forSide('home', pos), _forSide('away', pos)),
-              if (i != positions.length - 1) _separatorRow(),
+      child: Container(
+        // The 2px OUTER frame (Fix round 5) — every cell only paints its
+        // own right/bottom 1px edge, so this is the table's only top/left
+        // border and its only "thick" edge anywhere. `foregroundDecoration`
+        // paints on top of the padded content rather than behind it, which
+        // is what keeps the border crisp at the very outer boundary.
+        padding: const EdgeInsets.fromLTRB(2, 2, 1, 1),
+        foregroundDecoration: const BoxDecoration(
+          border: Border.fromBorderSide(BorderSide(color: _kBorder, width: 2)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _teamSummaryRow(metrics),
+            if (players.isNotEmpty) ...[
+              _headerRows(metrics),
+              for (final (i, pos) in positions.indexed) ...[
+                _pairingBlock(
+                  metrics,
+                  _forSide('home', pos),
+                  _forSide('away', pos),
+                ),
+                if (i != positions.length - 1) _separatorRow(metrics),
+              ],
             ],
           ],
-        ],
+        ),
       ),
     );
   }
@@ -230,8 +512,7 @@ class _ScoreTableBody extends StatelessWidget {
     required double height,
     required Color bg,
     required String text,
-    required double fontSize,
-    required FontWeight weight,
+    required TextStyle style,
     Color color = _kBlack,
     TextAlign align = TextAlign.center,
     int maxLines = 1,
@@ -245,125 +526,110 @@ class _ScoreTableBody extends StatelessWidget {
           : Alignment.center,
       decoration: BoxDecoration(
         color: bg,
-        border: Border.all(color: _kBorder, width: 1),
+        border: const Border(
+          right: BorderSide(color: _kBorder, width: 1),
+          bottom: BorderSide(color: _kBorder, width: 1),
+        ),
       ),
       child: Text(
         text,
         textAlign: align,
         maxLines: maxLines,
         overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          fontFamily: appFontFamily,
-          fontSize: fontSize,
-          fontWeight: weight,
-          color: color,
-          height: 1.0,
-        ),
+        style: style.copyWith(color: color),
       ),
     );
   }
 
   // ---- row 0: team summary ----
 
-  Widget _teamSummarySide(String teamName, bool isHome) {
+  Widget _teamSummarySide(_ColumnMetrics m, String teamName, bool isHome) {
     final body = isHome ? result?.homePoints : result?.awayPoints;
     final fulls = isHome ? result?.homeFulls : result?.awayFulls;
     final spares = isHome ? result?.homeSpares : result?.awaySpares;
     final errors = isHome ? result?.homeErrors : result?.awayErrors;
     final total = isHome ? result?.homeTotal : result?.awayTotal;
     final setPoints = isHome ? result?.homeSetPoints : result?.awaySetPoints;
-    final nameWidth = isHome ? _nameWidthHome : _nameWidthAway;
-    final chWidth = isHome ? _chWidthHome : _chWidthAway;
-    final druzstvoWidth = isHome ? _druzstvoWidthHome : _druzstvoWidthAway;
 
     return Row(
       children: [
         _cell(
-          width: nameWidth,
+          width: m.nameWidth,
           height: _teamRowHeight,
           bg: _kHeaderGrey,
           text: teamName,
-          fontSize: 16,
-          weight: FontWeight.w700,
+          style: _s16w700,
           maxLines: 2,
         ),
         _cell(
-          width: _serieWidth,
+          width: m.serieWidth,
           height: _teamRowHeight,
           bg: _kBodyYellow,
           text: numLabel(body),
-          fontSize: 24,
-          weight: FontWeight.w700,
+          style: _s24w700,
         ),
         _cell(
-          width: _plneWidth,
+          width: m.plneWidth,
           height: _teamRowHeight,
           bg: _kStatsPurple,
           text: numLabel(fulls),
-          fontSize: 20,
-          weight: FontWeight.w400,
+          style: _s20w400,
         ),
         _cell(
-          width: _dorWidth,
+          width: m.dorWidth,
           height: _teamRowHeight,
           bg: _kStatsPurple,
           text: numLabel(spares),
-          fontSize: 20,
-          weight: FontWeight.w400,
+          style: _s20w400,
         ),
         _cell(
-          width: chWidth,
+          width: m.chWidth,
           height: _teamRowHeight,
           bg: _kStatsPurple,
           text: numLabel(errors),
-          fontSize: 20,
-          weight: FontWeight.w400,
+          style: _s20w400,
         ),
         _cell(
-          width: _celkemColWidth,
+          width: m.celkemColWidth,
           height: _teamRowHeight,
           bg: _kStatsPurple,
           text: numLabel(total),
-          fontSize: 20,
-          weight: FontWeight.w700,
+          style: _s20w700,
         ),
         _cell(
-          width: _dilciWidth,
+          width: m.dilciWidth,
           height: _teamRowHeight,
           bg: _kStatsPurple,
           text: numLabel(setPoints),
-          fontSize: 20,
-          weight: FontWeight.w400,
+          style: _s20w400,
         ),
         _cell(
-          width: druzstvoWidth,
+          width: m.druzstvoWidth,
           height: _teamRowHeight,
           bg: _kDruzstvoBlue,
-          text: numLabel(_teamPointsSum(isHome ? 'home' : 'away')),
-          fontSize: 20,
-          weight: FontWeight.w700,
+          text: numLabel(_teamPointsSum(players, isHome ? 'home' : 'away')),
+          style: _s20w700,
         ),
       ],
     );
   }
 
-  Widget _teamSummaryRow() {
+  Widget _teamSummaryRow(_ColumnMetrics m) {
     final home = result?.homeTotal;
     final away = result?.awayTotal;
     final diff = (home != null && away != null) ? home - away : null;
     return Row(
       children: [
-        _teamSummarySide(slot.homeTeam, true),
+        _teamSummarySide(m, slot.homeTeam, true),
         _cell(
-          width: _rozdilWidth,
+          width: m.rozdilWidth,
           height: _teamRowHeight,
           bg: _kBodyYellow,
           text: diff == null ? '' : _signed(diff),
-          fontSize: 20,
-          weight: FontWeight.w700,
+          style: _s20w700,
           color: _diffColor(diff),
         ),
-        _teamSummarySide(slot.awayTeam, false),
+        _teamSummarySide(m, slot.awayTeam, false),
       ],
     );
   }
@@ -375,221 +641,214 @@ class _ScoreTableBody extends StatelessWidget {
     double height,
     String text, {
     TextAlign align = TextAlign.center,
+    int maxLines = 1,
   }) => _cell(
     width: width,
     height: height,
     bg: _kHeaderGrey,
     text: text,
-    fontSize: 10,
-    weight: FontWeight.w400,
+    style: _s10w400,
     align: align,
-    maxLines: 2,
+    maxLines: maxLines,
   );
 
-  Widget _headerColumn(bool isHome) {
-    final nameWidth = isHome ? _nameWidthHome : _nameWidthAway;
-    final chWidth = isHome ? _chWidthHome : _chWidthAway;
-    final druzstvoWidth = isHome ? _druzstvoWidthHome : _druzstvoWidthAway;
+  Widget _headerColumn(_ColumnMetrics m) {
     final vykonWidth =
-        _plneWidth + _dorWidth + chWidth + _celkemColWidth + _dilciWidth;
+        m.plneWidth + m.dorWidth + m.chWidth + m.celkemColWidth + m.dilciWidth;
 
     return Row(
       children: [
         Column(
           children: [
             _headerCell(
-              nameWidth,
+              m.nameWidth,
               _headerRowHeight,
               'Jméno a příjmení hráče',
               align: TextAlign.left,
             ),
             _headerCell(
-              nameWidth,
+              m.nameWidth,
               _headerRowHeight,
               'Registrační číslo',
               align: TextAlign.left,
             ),
           ],
         ),
-        _headerCell(_serieWidth, _headerRowHeight * 2, 'Série hodů'),
+        // The one header allowed to wrap (Fix round 5, item 3) — its own
+        // width never has to fit "Série hodů" on a single line.
+        _headerCell(
+          m.serieWidth,
+          _headerRowHeight * 2,
+          'Série hodů',
+          maxLines: 2,
+        ),
         Column(
           children: [
             _headerCell(vykonWidth, _headerRowHeight, 'Výkon'),
             Row(
               children: [
-                _headerCell(_plneWidth, _headerRowHeight, 'Plné'),
-                _headerCell(_dorWidth, _headerRowHeight, 'Dor.'),
-                _headerCell(chWidth, _headerRowHeight, 'Ch.'),
-                _headerCell(_celkemColWidth, _headerRowHeight, 'Celkem'),
-                _headerCell(_dilciWidth, _headerRowHeight, 'Dílčí'),
+                _headerCell(m.plneWidth, _headerRowHeight, 'Plné'),
+                _headerCell(m.dorWidth, _headerRowHeight, 'Dor.'),
+                _headerCell(m.chWidth, _headerRowHeight, 'Ch.'),
+                _headerCell(m.celkemColWidth, _headerRowHeight, 'Celkem'),
+                _headerCell(m.dilciWidth, _headerRowHeight, 'Dílčí'),
               ],
             ),
           ],
         ),
         Column(
           children: [
-            _headerCell(druzstvoWidth, _headerRowHeight, 'Body'),
-            _headerCell(druzstvoWidth, _headerRowHeight, 'Družstvo'),
+            _headerCell(m.druzstvoWidth, _headerRowHeight, 'Body'),
+            _headerCell(m.druzstvoWidth, _headerRowHeight, 'Družstvo'),
           ],
         ),
       ],
     );
   }
 
-  Widget _headerRows() {
+  Widget _headerRows(_ColumnMetrics m) {
     return Row(
       children: [
-        _headerColumn(true),
-        _headerCell(_rozdilWidth, _headerRowHeight * 2, 'Rozdíl'),
-        _headerColumn(false),
+        _headerColumn(m),
+        _headerCell(m.rozdilWidth, _headerRowHeight * 2, 'Rozdíl'),
+        _headerColumn(m),
       ],
     );
   }
 
   // ---- pairing blocks ----
 
-  Widget _pairingSide(int position, MatchPlayerResult? player, bool isHome) {
-    final nameWidth = isHome ? _nameWidthHome : _nameWidthAway;
-    final chWidth = isHome ? _chWidthHome : _chWidthAway;
-    final druzstvoWidth = isHome ? _druzstvoWidthHome : _druzstvoWidthAway;
-
+  Widget _pairingSide(
+    _ColumnMetrics m,
+    MatchPlayerResult? player,
+    int laneRowCount,
+    double blockHeight,
+  ) {
     if (player == null) {
-      // Ragged data (a position only the other side fielded): a single
-      // blank cell keeps this side from collapsing to zero width, without
-      // crashing or fabricating a player (spec carried over from the
-      // original task).
+      // Ragged data (a position only the other side fielded): one blank
+      // bordered cell spanning the FULL block height — matching the other
+      // side's height, so there's no unpainted/unbordered gap below it
+      // (Fix round 5, item 5's same reasoning applied to a wholly missing
+      // side, not just an uneven lane count).
       final width =
-          nameWidth +
-          _serieWidth +
-          _plneWidth +
-          _dorWidth +
-          chWidth +
-          _celkemColWidth +
-          _dilciWidth +
-          druzstvoWidth;
+          m.nameWidth +
+          m.serieWidth +
+          m.plneWidth +
+          m.dorWidth +
+          m.chWidth +
+          m.celkemColWidth +
+          m.dilciWidth +
+          m.druzstvoWidth;
       return _cell(
         width: width,
-        height: _celkemRowHeight,
+        height: blockHeight,
         bg: _kWhite,
         text: '',
-        fontSize: 10,
-        weight: FontWeight.w400,
+        style: _s10w400,
       );
     }
 
-    final laneCount = player.lanes.length;
-    // A live match with no lane data yet: the "registrační číslo" slot
-    // (which we never have real data for) shows the player's name instead
-    // of going fully blank, so the identity isn't lost entirely (Fix
-    // round 4 design call — the reference site always has lanes by the
-    // time a sheet exists).
-    final hasLanes = laneCount > 0;
-    final blockHeight = laneCount * _laneRowHeight + _celkemRowHeight;
-    final nameText = '$position. ${player.playerName}';
+    final realLaneCount = player.lanes.length;
+    final hasLaneRows = laneRowCount > 0;
+    final nameText = player.playerName; // no "N. " prefix (Fix round 5).
 
-    Widget laneRow(PlayerLane lane) => Row(
-      children: [
-        _cell(
-          width: _serieWidth,
-          height: _laneRowHeight,
-          bg: _kBodyYellow,
-          text: '${lane.lane}',
-          fontSize: 10,
-          weight: FontWeight.w400,
-        ),
-        _cell(
-          width: _plneWidth,
-          height: _laneRowHeight,
-          bg: _kLaneStatsGreen,
-          text: numLabel(lane.fulls),
-          fontSize: 10,
-          weight: FontWeight.w400,
-        ),
-        _cell(
-          width: _dorWidth,
-          height: _laneRowHeight,
-          bg: _kLaneStatsGreen,
-          text: numLabel(lane.spares),
-          fontSize: 10,
-          weight: FontWeight.w400,
-        ),
-        _cell(
-          width: chWidth,
-          height: _laneRowHeight,
-          bg: _kLaneStatsGreen,
-          text: numLabel(lane.errors),
-          fontSize: 10,
-          weight: FontWeight.w400,
-        ),
-        _cell(
-          width: _celkemColWidth,
-          height: _laneRowHeight,
-          bg: _kStatsPurple,
-          text: numLabel(lane.total),
-          fontSize: 10,
-          weight: FontWeight.w400,
-        ),
-        _cell(
-          width: _dilciWidth,
-          height: _laneRowHeight,
-          bg: _kStatsPurple,
-          text: numLabel(lane.setPoints),
-          fontSize: 10,
-          weight: FontWeight.w400,
-        ),
-      ],
-    );
+    Widget laneRow(PlayerLane? lane) {
+      // A filler row when this side threw fewer lanes than the other side
+      // at this position — styled exactly like a real lane row, just
+      // blank, so the shorter side's column is still fully painted and
+      // bordered up to the taller side's height (Fix round 5, item 5).
+      return Row(
+        children: [
+          _cell(
+            width: m.serieWidth,
+            height: _laneRowHeight,
+            bg: _kBodyYellow,
+            text: lane == null ? '' : '${lane.lane}',
+            style: _s10w400,
+          ),
+          _cell(
+            width: m.plneWidth,
+            height: _laneRowHeight,
+            bg: _kLaneStatsGreen,
+            text: lane == null ? '' : numLabel(lane.fulls),
+            style: _s10w400,
+          ),
+          _cell(
+            width: m.dorWidth,
+            height: _laneRowHeight,
+            bg: _kLaneStatsGreen,
+            text: lane == null ? '' : numLabel(lane.spares),
+            style: _s10w400,
+          ),
+          _cell(
+            width: m.chWidth,
+            height: _laneRowHeight,
+            bg: _kLaneStatsGreen,
+            text: lane == null ? '' : numLabel(lane.errors),
+            style: _s10w400,
+          ),
+          _cell(
+            width: m.celkemColWidth,
+            height: _laneRowHeight,
+            bg: _kStatsPurple,
+            text: lane == null ? '' : numLabel(lane.total),
+            style: _s10w400,
+          ),
+          _cell(
+            width: m.dilciWidth,
+            height: _laneRowHeight,
+            bg: _kStatsPurple,
+            text: lane == null ? '' : numLabel(lane.setPoints),
+            style: _s10w400,
+          ),
+        ],
+      );
+    }
 
     final celkemRow = Row(
       children: [
         _cell(
-          width: _serieWidth,
+          width: m.serieWidth,
           height: _celkemRowHeight,
           bg: _kStatsPurple,
           text: 'Celkem',
-          fontSize: 10,
-          weight: FontWeight.w700,
+          style: _s10w700,
         ),
         _cell(
-          width: _plneWidth,
+          width: m.plneWidth,
           height: _celkemRowHeight,
           bg: _kStatsPurple,
           text: numLabel(player.fulls),
-          fontSize: 10,
-          weight: FontWeight.w700,
+          style: _s10w700,
         ),
         _cell(
-          width: _dorWidth,
+          width: m.dorWidth,
           height: _celkemRowHeight,
           bg: _kStatsPurple,
           text: numLabel(player.spares),
-          fontSize: 10,
-          weight: FontWeight.w700,
+          style: _s10w700,
         ),
         _cell(
-          width: chWidth,
+          width: m.chWidth,
           height: _celkemRowHeight,
           bg: _kStatsPurple,
           text: numLabel(player.errors),
-          fontSize: 10,
-          weight: FontWeight.w700,
+          style: _s10w700,
         ),
         _cell(
-          width: _celkemColWidth,
+          width: m.celkemColWidth,
           height: _celkemRowHeight,
           bg: _kRegCellBlue,
           text: numLabel(player.total),
-          fontSize: 16,
-          weight: FontWeight.w700,
+          style: _s16w700,
           color: _kCelkemTotalRed,
         ),
         _cell(
-          width: _dilciWidth,
+          width: m.dilciWidth,
           height: _celkemRowHeight,
           bg: _kRegCellBlue,
           text: numLabel(player.setPoints),
-          fontSize: 10,
-          weight: FontWeight.w400,
+          style: _s10w400,
         ),
       ],
     );
@@ -599,46 +858,51 @@ class _ScoreTableBody extends StatelessWidget {
       children: [
         Column(
           children: [
-            if (hasLanes)
+            if (hasLaneRows)
               _cell(
-                width: nameWidth,
-                height: laneCount * _laneRowHeight,
+                width: m.nameWidth,
+                height: laneRowCount * _laneRowHeight,
                 bg: _kNameCellGrey,
                 text: nameText,
-                fontSize: 16,
-                weight: FontWeight.w700,
+                style: _s16w700,
                 align: TextAlign.left,
                 maxLines: 2,
               ),
             _cell(
-              width: nameWidth,
+              width: m.nameWidth,
+              // A player with zero lane rows at all (nothing to pad to
+              // either) puts their name straight into this cell instead —
+              // one line only, so a 31px-tall row can actually fit it
+              // without clipping (Fix round 5, item 6).
               height: _celkemRowHeight,
               bg: _kRegCellBlue,
-              text: hasLanes ? '' : nameText,
-              fontSize: 16,
-              weight: FontWeight.w700,
+              text: hasLaneRows ? '' : nameText,
+              style: _s16w700,
               align: TextAlign.left,
-              maxLines: hasLanes ? 1 : 2,
+              maxLines: 1,
             ),
           ],
         ),
         Column(
-          children: [for (final lane in player.lanes) laneRow(lane), celkemRow],
+          children: [
+            for (var i = 0; i < laneRowCount; i++)
+              laneRow(i < realLaneCount ? player.lanes[i] : null),
+            celkemRow,
+          ],
         ),
         _cell(
-          width: druzstvoWidth,
+          width: m.druzstvoWidth,
           height: blockHeight,
           bg: _kDruzstvoBlue,
           text: numLabel(player.teamPoints),
-          fontSize: 20,
-          weight: FontWeight.w700,
+          style: _s20w700,
         ),
       ],
     );
   }
 
   Widget _pairingBlock(
-    int position,
+    _ColumnMetrics m,
     MatchPlayerResult? home,
     MatchPlayerResult? away,
   ) {
@@ -647,40 +911,34 @@ class _ScoreTableBody extends StatelessWidget {
         : null;
     final homeLanes = home?.lanes.length ?? 0;
     final awayLanes = away?.lanes.length ?? 0;
-    final blockHeight =
-        math.max(homeLanes, awayLanes) * _laneRowHeight + _celkemRowHeight;
+    final laneRowCount = math.max(homeLanes, awayLanes);
+    final blockHeight = laneRowCount * _laneRowHeight + _celkemRowHeight;
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _pairingSide(position, home, true),
+        _pairingSide(m, home, laneRowCount, blockHeight),
         _cell(
-          width: _rozdilWidth,
+          width: m.rozdilWidth,
           height: blockHeight,
           bg: _kBodyYellow,
           text: diff == null ? '' : _signed(diff),
-          fontSize: 16,
-          weight: FontWeight.w400,
+          style: _s16w400,
           color: _diffColor(diff),
         ),
-        _pairingSide(position, away, false),
+        _pairingSide(m, away, laneRowCount, blockHeight),
       ],
     );
   }
 
-  Widget _separatorRow() => _cell(
-    width: totalWidth,
+  Widget _separatorRow(_ColumnMetrics m) => _cell(
+    width: m.totalWidth,
     height: _separatorHeight,
     bg: _kWhite,
     text: '',
-    fontSize: 10,
-    weight: FontWeight.w400,
+    style: _s10w400,
   );
 }
-
-/// "+13" / "-2" / "0" — a signed pin difference; negative values already
-/// carry their own minus, so only the positive case needs a prefix.
-String _signed(int v) => v > 0 ? '+$v' : '$v';
 
 /// Full-screen "Zápis" route (the "Zvětšit" tap target): the same table
 /// content as [LegacyScoreSheet] ([_ScoreTableBody]), scaled to fit on
@@ -709,6 +967,11 @@ class LegacyScoreSheetPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final naturalSize = _ScoreTableBody.naturalSize(
+      slot: slot,
+      result: result,
+      players: players,
+    );
     return Scaffold(
       appBar: AppBar(
         title: const Text('Zápis'),
@@ -721,6 +984,7 @@ class LegacyScoreSheetPage extends StatelessWidget {
       body: Padding(
         padding: const EdgeInsets.all(24),
         child: _ScaleToFitViewer(
+          naturalSize: naturalSize,
           child: _ScoreTableBody(slot: slot, result: result, players: players),
         ),
       ),
@@ -728,23 +992,23 @@ class LegacyScoreSheetPage extends StatelessWidget {
   }
 }
 
-/// Scales [child] to fit the available space on first layout — same "see
-/// the whole table at once" goal a plain [FittedBox] gives — but, unlike
-/// [FittedBox], lets the user then pinch past that initial scale to read
-/// the detail and pan around. [InteractiveViewer] has no scrollbar chrome
-/// of its own — it's a direct-manipulation gesture surface, not a
-/// scrollable — so "no scrollbars anywhere on this page" still holds.
+/// Scales [child] to fit the available space — same "see the whole table
+/// at once" goal a plain [FittedBox] gives — but, unlike [FittedBox], lets
+/// the user then pinch past that initial scale to read the detail and pan
+/// around. [InteractiveViewer] has no scrollbar chrome of its own — it's a
+/// direct-manipulation gesture surface, not a scrollable — so "no
+/// scrollbars anywhere on this page" still holds.
 ///
-/// [child] is measured once via [_contentKey] after its first layout (its
-/// own [RenderBox.size] is unaffected by [InteractiveViewer]'s pan/zoom
-/// [Transform], which only changes how it's painted, not its layout size),
-/// against the [LayoutBuilder] constraints this sits in — [minScale] is set
-/// to exactly that fit scale, so the page never opens more zoomed-in than
-/// "see it all at once", but [maxScale] leaves room to pinch in several
-/// times past that for readability.
+/// Fix round 5: the fit scale is computed straight from [naturalSize] —
+/// [child]'s real size, known up front by [_ScoreTableBody.naturalSize]
+/// without building anything — so the very first frame already renders at
+/// the right scale. Round 3's approach (measure the built child via a
+/// [GlobalKey] in a post-frame callback, then correct) always painted one
+/// wrong-scale frame first.
 class _ScaleToFitViewer extends StatefulWidget {
-  const _ScaleToFitViewer({required this.child});
+  const _ScaleToFitViewer({required this.naturalSize, required this.child});
 
+  final Size naturalSize;
   final Widget child;
 
   @override
@@ -752,13 +1016,12 @@ class _ScaleToFitViewer extends StatefulWidget {
 }
 
 class _ScaleToFitViewerState extends State<_ScaleToFitViewer> {
-  final _contentKey = GlobalKey();
   final _controller = TransformationController();
 
-  /// Never lets a huge lineup shrink to the point of being useless, and is
-  /// this state's own fallback before the first real measurement lands.
+  /// Never lets a huge lineup shrink to the point of being useless.
   static const _minFitScale = 0.15;
   double _minScale = 1.0;
+  bool _initialized = false;
 
   @override
   void dispose() {
@@ -766,45 +1029,36 @@ class _ScaleToFitViewerState extends State<_ScaleToFitViewer> {
     super.dispose();
   }
 
-  void _fitToScreen(BoxConstraints constraints) {
-    final renderBox =
-        _contentKey.currentContext?.findRenderObject() as RenderBox?;
-    if (renderBox == null || !renderBox.hasSize) return;
-    final size = renderBox.size;
-    if (size.width <= 0 || size.height <= 0) return;
-    // Only a floor, deliberately no ceiling: on a screen wider/taller than
-    // the table's own natural size (a desktop window), this scales UP past
-    // 1.0 to fill it — the plain `FittedBox` this replaces capped at 1.0
-    // and left the table small in the middle of the screen there.
-    final fit = math.max(
-      math.min(
-        constraints.maxWidth / size.width,
-        constraints.maxHeight / size.height,
-      ),
-      _minFitScale,
-    );
-    if ((fit - _minScale).abs() < 0.001) return;
-    setState(() {
-      _minScale = fit;
-      _controller.value = Matrix4.diagonal3Values(fit, fit, 1.0);
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        // Deferred to right after this frame's own layout — `renderBox`
-        // above needs `child`'s size, which isn't known during `build`.
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _fitToScreen(constraints);
-        });
+        // Only a floor, deliberately no ceiling: on a screen wider/taller
+        // than the table's own natural size (a desktop window), this
+        // scales UP past 1.0 to fill it — the plain `FittedBox` this
+        // replaces capped at 1.0 and left the table small in the middle
+        // of the screen there.
+        final fit = math.max(
+          math.min(
+            constraints.maxWidth / widget.naturalSize.width,
+            constraints.maxHeight / widget.naturalSize.height,
+          ),
+          _minFitScale,
+        );
+        // Applied once, synchronously, on this very first build — never
+        // re-applied on a later resize, so it can't fight a pinch the
+        // user has already made.
+        if (!_initialized) {
+          _initialized = true;
+          _minScale = fit;
+          _controller.value = Matrix4.diagonal3Values(fit, fit, 1.0);
+        }
         return InteractiveViewer(
           transformationController: _controller,
           constrained: false,
           minScale: _minScale,
           maxScale: math.max(_minScale * 4, 3.0),
-          child: KeyedSubtree(key: _contentKey, child: widget.child),
+          child: widget.child,
         );
       },
     );

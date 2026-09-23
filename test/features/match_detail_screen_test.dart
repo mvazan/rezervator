@@ -231,8 +231,8 @@ void main() {
       // player names with position prefix, and the lane totals.
       expect(find.text(home), findsNWidgets(2));
       expect(find.text(away), findsNWidgets(2));
-      expect(find.text('1. Jan Novák'), findsOneWidget);
-      expect(find.text('1. Petr Svoboda'), findsOneWidget);
+      expect(find.text('Jan Novák'), findsOneWidget);
+      expect(find.text('Petr Svoboda'), findsOneWidget);
       expect(find.text('Série hodů'), findsNWidgets(2));
       expect(find.text('290'), findsNWidgets(2));
     },

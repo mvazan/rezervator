@@ -1,10 +1,27 @@
+import 'dart:io';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/clubhouse/widgets/legacy_score_sheet.dart';
+
+/// Loads the real Manrope font into the test binding — without this, every
+/// `TextStyle(fontFamily: 'Manrope', ...)` measures against the test
+/// harness's fallback font instead, which has different metrics and can
+/// hide a real overflow/clipping regression (this is exactly what made
+/// an earlier round's own width test vacuous).
+Future<void> loadManrope() async {
+  final loader = FontLoader('Manrope');
+  for (final weight in ['Regular', 'Medium', 'Bold', 'ExtraBold']) {
+    final bytes = File('assets/fonts/Manrope-$weight.ttf').readAsBytesSync();
+    loader.addFont(Future.value(ByteData.view(bytes.buffer)));
+  }
+  await loader.load();
+}
 
 void main() {
   const home = 'SKK Veverky Brno A';
@@ -133,8 +150,8 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('1. Jan Novák'), findsOneWidget);
-      expect(find.text('1. Petr Svoboda'), findsOneWidget);
+      expect(find.text('Jan Novák'), findsOneWidget);
+      expect(find.text('Petr Svoboda'), findsOneWidget);
 
       // Lane lines (home player only).
       expect(find.text('175'), findsOneWidget);
@@ -212,7 +229,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('2. Karel Dvořák'), findsOneWidget);
+      expect(find.text('Karel Dvořák'), findsOneWidget);
       // No away player at position 2, and no crash getting there.
       expect(tester.takeException(), isNull);
       // Ragged position's Rozdíl is blank (no away total to diff against) —
@@ -521,22 +538,21 @@ void main() {
       },
     );
 
-    testWidgets(
-      'the table\'s total width matches the reference site (≈963dp)',
-      (tester) async {
-        await tester.pumpWidget(
-          app(result: result, players: [homePlayer, awayPlayer]),
-        );
-        await tester.pumpAndSettle();
+    testWidgets('the table\'s total width is never narrower than the reference '
+        'site\'s own minimums (≈963dp) — auto-width only ever grows a '
+        'column, never shrinks it below the brief', (tester) async {
+      await tester.pumpWidget(
+        app(result: result, players: [homePlayer, awayPlayer]),
+      );
+      await tester.pumpAndSettle();
 
-        final tableSize = tester.getSize(
-          find.byWidgetPredicate(
-            (w) => w.runtimeType.toString() == '_ScoreTableBody',
-          ),
-        );
-        expect(tableSize.width, 963.0);
-      },
-    );
+      final tableSize = tester.getSize(
+        find.byWidgetPredicate(
+          (w) => w.runtimeType.toString() == '_ScoreTableBody',
+        ),
+      );
+      expect(tableSize.width, greaterThanOrEqualTo(963.0));
+    });
   });
 
   MatchPlayerResult bigPlayer(String side, int position) =>
@@ -616,7 +632,7 @@ void main() {
       expect(find.byType(Scrollable), findsNothing);
       final viewerFinder = find.byType(InteractiveViewer);
       expect(viewerFinder, findsOneWidget);
-      expect(find.text('6. Away 6'), findsOneWidget);
+      expect(find.text('Away 6'), findsOneWidget);
 
       final viewer = tester.widget<InteractiveViewer>(viewerFinder);
       final tableSize = tester.getSize(scoreTableBodyFinder());
@@ -648,7 +664,7 @@ void main() {
         find.byType(InteractiveViewer),
       );
       final controller = viewer.transformationController!;
-      final probe = find.text('6. Away 6');
+      final probe = find.text('Away 6');
       Size onScreenSize() {
         final delta = tester.getBottomRight(probe) - tester.getTopLeft(probe);
         return Size(delta.dx, delta.dy);
@@ -684,7 +700,358 @@ void main() {
       expect(find.byType(SingleChildScrollView), findsNothing);
       expect(find.byType(Scrollable), findsNothing);
       expect(find.byType(InteractiveViewer), findsOneWidget);
-      expect(find.text('1. Jan Novák'), findsOneWidget);
+      expect(find.text('Jan Novák'), findsOneWidget);
     });
+  });
+
+  group('Fix round 5: 1px collapsed grid, auto-width columns', () {
+    testWidgets(
+      'the grid is a 2px outer frame with 1px collapsed internal seams — '
+      'not the other way around',
+      (tester) async {
+        await loadManrope();
+        // Wide enough that the embedded card's own horizontal scroll
+        // viewport shows the WHOLE table at once — otherwise
+        // `RepaintBoundary.toImage()` only captures the visible viewport
+        // slice, silently cutting off the right edge this test needs to
+        // see.
+        tester.view.physicalSize = const Size(1200, 300);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        final boundaryKey = GlobalKey();
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: SingleChildScrollView(
+                child: RepaintBoundary(
+                  key: boundaryKey,
+                  child: LegacyScoreSheet(
+                    slot: slot,
+                    result: result,
+                    players: [homePlayer, awayPlayer],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final boundary =
+            boundaryKey.currentContext!.findRenderObject()
+                as RenderRepaintBoundary;
+        // `toImage`/`toByteData` schedule real engine work that never
+        // completes inside `testWidgets`' fake-async zone — `runAsync`
+        // steps outside it so the awaited Futures actually resolve,
+        // instead of hanging forever.
+        late Uint8List bytes;
+        late int imgWidth;
+        late int imgHeight;
+        await tester.runAsync(() async {
+          final image = await boundary.toImage(pixelRatio: 1.0);
+          final byteData = await image.toByteData(
+            format: ui.ImageByteFormat.rawRgba,
+          );
+          bytes = byteData!.buffer.asUint8List();
+          imgWidth = image.width;
+          imgHeight = image.height;
+        });
+
+        bool isDark(int x, int y) {
+          if (x < 0 || y < 0 || x >= imgWidth || y >= imgHeight) return false;
+          final i = (y * imgWidth + x) * 4;
+          final a = bytes[i + 3];
+          if (a < 200) return false;
+          return bytes[i] < 80 && bytes[i + 1] < 80 && bytes[i + 2] < 80;
+        }
+
+        // Every dark (border-coloured) run along a scan line, as a list of
+        // run lengths — independent of exact column/row positions, so this
+        // doesn't need to know the table's own widths.
+        List<int> darkRuns({
+          required int fixedAxis,
+          required int scanStart,
+          required int scanEnd,
+          required bool horizontal,
+        }) {
+          final runs = <int>[];
+          var pos = scanStart;
+          while (pos < scanEnd) {
+            final dark = horizontal
+                ? isDark(pos, fixedAxis)
+                : isDark(fixedAxis, pos);
+            if (dark) {
+              var len = 0;
+              while (pos < scanEnd &&
+                  (horizontal
+                      ? isDark(pos, fixedAxis)
+                      : isDark(fixedAxis, pos))) {
+                len++;
+                pos++;
+              }
+              runs.add(len);
+            } else {
+              pos++;
+            }
+          }
+          return runs;
+        }
+
+        final tableTopLeft = tester.getTopLeft(
+          find.byWidgetPredicate(
+            (w) => w.runtimeType.toString() == '_ScoreTableBody',
+          ),
+        );
+        final tableSize = tester.getSize(
+          find.byWidgetPredicate(
+            (w) => w.runtimeType.toString() == '_ScoreTableBody',
+          ),
+        );
+        final boundaryTopLeft = tester.getTopLeft(find.byKey(boundaryKey));
+        final originX = (tableTopLeft.dx - boundaryTopLeft.dx).round();
+        final originY = (tableTopLeft.dy - boundaryTopLeft.dy).round();
+        final tableRight = originX + tableSize.width.round();
+        final tableBottom = originY + tableSize.height.round();
+        // A couple of px of slack beyond the logical bounds — layout size
+        // vs. actual painted pixels can be off by a hair from float
+        // accumulation, and `isDark` already returns false outside the
+        // image, so widening the scan never introduces a spurious run.
+        const scanSlack = 2;
+
+        // Horizontal scan 2px into the team row (43px tall) — safely inside
+        // every cell's own 4px padding, so it never crosses glyph ink, only
+        // the vertical seams between columns.
+        final horizontalRuns = darkRuns(
+          fixedAxis: originY + 2,
+          scanStart: originX - scanSlack,
+          scanEnd: tableRight + scanSlack,
+          horizontal: true,
+        );
+        expect(
+          horizontalRuns.length,
+          greaterThan(2),
+          reason: 'expected several column seams in the team row',
+        );
+        expect(horizontalRuns.first, 2, reason: 'left outer frame');
+        expect(horizontalRuns.last, 2, reason: 'right outer frame');
+        for (final run in horizontalRuns.sublist(
+          1,
+          horizontalRuns.length - 1,
+        )) {
+          expect(run, 1, reason: 'internal column seam should collapse to 1px');
+        }
+
+        // Vertical scan 2px into the name column — inside its own left
+        // padding, so it only ever crosses the horizontal row seams.
+        final verticalRuns = darkRuns(
+          fixedAxis: originX + 2,
+          scanStart: originY - scanSlack,
+          scanEnd: tableBottom + scanSlack,
+          horizontal: false,
+        );
+        expect(
+          verticalRuns.length,
+          greaterThan(2),
+          reason: 'expected several row seams down the name column',
+        );
+        expect(verticalRuns.first, 2, reason: 'top outer frame');
+        expect(verticalRuns.last, 2, reason: 'bottom outer frame');
+        for (final run in verticalRuns.sublist(1, verticalRuns.length - 1)) {
+          expect(run, 1, reason: 'internal row seam should collapse to 1px');
+        }
+      },
+    );
+
+    testWidgets(
+      'with realistic full-width data (4 lanes, totals ≈3460, "15,5", '
+      '"+211", Ch. "40"), no cell text is clipped or exceeds its line limit',
+      (tester) async {
+        await loadManrope();
+
+        final realisticResult = MatchResult.fromJson(const {
+          'match_id': 'r1',
+          'status': 'finished',
+          'home_points': 6,
+          'away_points': 2,
+          'home_total': 3460,
+          'away_total': 3249, // team Rozdíl = +211
+          'home_fulls': 2280,
+          'away_fulls': 2100,
+          'home_spares': 1180,
+          'away_spares': 1049,
+          'home_errors': 40,
+          'away_errors': 38,
+          'home_set_points': 15.5,
+          'away_set_points': 8.5,
+          'fetched_at': '2026-09-23T10:00:00+00:00',
+        });
+        MatchPlayerResult fourLanePlayer(String side, String name) =>
+            MatchPlayerResult.fromJson({
+              'id': '$side-r1',
+              'match_id': 'r1',
+              'side': side,
+              'position': 1,
+              'player_name': name,
+              'fulls': 570,
+              'spares': 295,
+              'errors': 10,
+              'total': 865,
+              'set_points': 4,
+              'team_points': side == 'home' ? 1 : 0,
+              'lanes': [
+                for (var lane = 1; lane <= 4; lane++)
+                  {
+                    'lane': lane,
+                    'fulls': 142,
+                    'spares': 74,
+                    'errors': 3,
+                    'total': 217,
+                    'setPoints': 1,
+                  },
+              ],
+            });
+        final realisticHome = fourLanePlayer('home', 'Realistický Domácí');
+        final realisticAway = fourLanePlayer('away', 'Realistický Host');
+
+        await tester.pumpWidget(
+          app(result: realisticResult, players: [realisticHome, realisticAway]),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+
+        // The exact strings the bug report named as broken.
+        expect(find.text('2280'), findsOneWidget); // was "22…"
+        expect(find.text('1180'), findsOneWidget); // was "11…"
+        expect(find.text('3460'), findsOneWidget); // was "34…"
+        expect(find.text('15,5'), findsOneWidget); // was "1…"
+        expect(find.text('+211'), findsOneWidget); // was "+…"
+        expect(find.text('40'), findsOneWidget); // was blank
+
+        final tableFinder = find.byWidgetPredicate(
+          (w) => w.runtimeType.toString() == '_ScoreTableBody',
+        );
+        for (final element
+            in find
+                .descendant(of: tableFinder, matching: find.byType(RichText))
+                .evaluate()) {
+          final rp = element.renderObject! as RenderParagraph;
+          final text = rp.text.toPlainText();
+          expect(
+            rp.didExceedMaxLines,
+            isFalse,
+            reason: '"$text" wrapped past its line limit and got clipped',
+          );
+          // "Série hodů" is the one header deliberately allowed to wrap
+          // onto its own 2-row-tall cell (Fix round 5, item 3) — its
+          // single-line natural width is expected to exceed its (narrow,
+          // content-driven) column, that's the whole point of letting it
+          // wrap instead of forcing the column wide enough for one line.
+          if (text == 'Série hodů') continue;
+          final natural = rp.getMaxIntrinsicWidth(double.infinity);
+          expect(
+            natural,
+            lessThanOrEqualTo(rp.size.width + 0.5),
+            reason:
+                '"$text" needs $natural but its box is only '
+                '${rp.size.width}',
+          );
+        }
+      },
+    );
+
+    testWidgets(
+      'uneven lane counts pad the shorter side with filler cells instead '
+      'of leaving a gap, and both sides report the same block height',
+      (tester) async {
+        final fourLaneHome = MatchPlayerResult.fromJson(const {
+          'id': 'fh',
+          'match_id': 'm3',
+          'side': 'home',
+          'position': 1,
+          'player_name': 'Čtyři Dráhy',
+          'total': 900,
+          'lanes': [
+            {'lane': 1, 'total': 225},
+            {'lane': 2, 'total': 225},
+            {'lane': 3, 'total': 225},
+            {'lane': 4, 'total': 225},
+          ],
+        });
+        final twoLaneAway = MatchPlayerResult.fromJson(const {
+          'id': 'tl',
+          'match_id': 'm3',
+          'side': 'away',
+          'position': 1,
+          'player_name': 'Dvě Dráhy',
+          'total': 460,
+          'lanes': [
+            {'lane': 1, 'total': 230},
+            {'lane': 2, 'total': 230},
+          ],
+        });
+        await tester.pumpWidget(app(players: [fourLaneHome, twoLaneAway]));
+        await tester.pumpAndSettle();
+
+        expect(tester.takeException(), isNull);
+        // 4 real lane numbers (home) + 2 real lane numbers (away) + 2
+        // filler rows padding the away side up to 4 — filler cells render
+        // blank, not a stray extra "1"/"2".
+        expect(find.text('3'), findsOneWidget);
+        expect(find.text('4'), findsOneWidget);
+
+        // Družstvo (spans the whole block) reports the SAME height on
+        // both sides — proof the shorter side was padded up, not left
+        // short.
+        final druzstvoCells = tester
+            .widgetList<Container>(
+              find.byWidgetPredicate(
+                (w) =>
+                    w is Container &&
+                    (w.decoration as BoxDecoration?)?.color ==
+                        const Color(0xFFADD8E6),
+              ),
+            )
+            .toList();
+        final allHeights = {
+          for (final c in druzstvoCells)
+            if (c.constraints?.maxHeight != null) c.constraints!.maxHeight,
+        };
+        // Exclude the team summary row's own Družstvo cells (43px, fixed
+        // per the brief) — only the two PAIRING-level cells (one per side)
+        // are what this test is about.
+        final pairingHeights = allHeights.where((h) => h != 43.0).toSet();
+        expect(
+          pairingHeights.length,
+          1,
+          reason:
+              'both Družstvo cells should share one height, got $allHeights',
+        );
+      },
+    );
+
+    testWidgets(
+      'a player with zero lanes gets a single-line name that fits the '
+      '31px Celkem row without wrapping',
+      (tester) async {
+        final noLaneHome = MatchPlayerResult.fromJson(const {
+          'id': 'nl',
+          'match_id': 'm4',
+          'side': 'home',
+          'position': 1,
+          'player_name': 'Živě Bez Drah',
+          'total': 500,
+        });
+        await tester.pumpWidget(app(players: [noLaneHome]));
+        await tester.pumpAndSettle();
+
+        final nameFinder = find.text('Živě Bez Drah');
+        expect(nameFinder, findsOneWidget);
+        expect(tester.widget<Text>(nameFinder).maxLines, 1);
+        final rp = tester.renderObject<RenderParagraph>(nameFinder);
+        expect(rp.didExceedMaxLines, isFalse);
+      },
+    );
   });
 }
