@@ -241,7 +241,10 @@ superseded and retired.
     `type_id`, `parent_id`). The sync-only columns and `import_key` do not
     — the calendar handler deletes events of past matches it no longer
     lists, so a T+24 h video link or the first run's rekey would otherwise
-    wipe played matches from followers' calendars.
+    wipe played matches from followers' calendars. For the same reason an
+    UPDATE of a match dated before Prague today both before and after
+    (the first run rewriting an old away row's description or times)
+    enqueues nothing; INSERT and DELETE are unchanged.
   - **Delete only the future:** a `cka:` match of this competition that
     has not started yet (`date + starts_at` after Prague now), that the
     site no longer lists and that is not hand-edited, is deleted; a match
@@ -295,8 +298,11 @@ superseded and retired.
   deploying the functions, so for a minute the old `notify` (which logs
   and drops job kinds it does not know) runs against 0045. Harmless:
   federation jobs are created only by the admin RPCs or the 01:00 UTC
-  nightly cron, and both need a tenant with the sync enabled — enable it
-  only after the new `notify` is deployed.
+  nightly cron. `request_federation_sync` and the cron need a tenant with
+  the sync enabled — enable it only after the new `notify` is deployed.
+  `request_federation_discovery` needs only a saved venue slug: a
+  „Načíst týmy z webu“ clicked while the old `notify` is still deployed
+  is dropped and just needs clicking again after the function deploy.
 - **After the first run** (Správa → Oddíly → Synchronizovat teď), check
   what each competition did:
 
