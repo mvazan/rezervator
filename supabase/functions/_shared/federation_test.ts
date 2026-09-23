@@ -1,7 +1,7 @@
 import { assert, assertEquals, assertThrows } from "jsr:@std/assert@1";
 import {
   competitionSlugsForClubs, endTime, matchFormat, nextCheckpoint, normalizeTeam,
-  pairLegacy, parseCompetition, parseMatch, parseSitemapLocs, parseVenueClubs,
+  pairLegacy, parseCompetition, parseMatch, parseSitemapLocs, parseVenue, parseVenueClubs,
   resultPayload, rscText, teamBelongsToClub, valueAfter,
 } from "./federation.ts";
 
@@ -102,6 +102,42 @@ Deno.test("venue clubs and sitemaps", () => {
   assert(index.some((u) => /\/sitemap\/matches-\d+\.xml$/.test(u)));
   const comps = parseSitemapLocs(fixture("sitemap_competitions.xml"));
   assert(comps.includes("https://vysledky.kuzelky.cz/detail-souteze/jihomoravska-divize-2026-2027"));
+});
+
+Deno.test("venue page: home venue with full technical info", () => {
+  const v = parseVenue(fixture("venue.html"), "tj-sokol-brno-iv");
+  assertEquals(v.slug, "tj-sokol-brno-iv");
+  assertEquals(v.name, "TJ Sokol Brno IV");
+  assertEquals(v.address, "Štolcova 551/8, 61800 Brno");
+  assertEquals(v.phone, "736435492");
+  assertEquals(v.email, "kuzelkybrnoiv@email.cz");
+  assert(v.lat !== null && Math.abs(v.lat - 49.1891783) < 1e-6);
+  assert(v.lng !== null && Math.abs(v.lng - 16.6354503) < 1e-6);
+  assert(v.sections.some((s) =>
+    s.items.some((i) => i.label === "Dráhy" && i.value === "4") &&
+    s.items.some((i) => i.label === "Stavěč kuželek" && i.value === "Pro-Tec K800")
+  ));
+  assert(v.sections.every((s) =>
+    s.items.every((i) => !["Adresa", "Telefon", "E-mail"].includes(i.label))
+  ));
+  assertEquals(v.clubs.sort(), [
+    "KS Devítka Brno", "SKK Veverky Brno", "TJ Sokol Brno IV", "TJ Sokol Husovice",
+  ]);
+});
+
+Deno.test("venue page: away venue with missing technical fields dropped", () => {
+  const v = parseVenue(fixture("venue_away.html"), "tj-odry");
+  const tech = v.sections.find((s) => s.items.some((i) => i.label === "Dráhy"));
+  assert(tech);
+  assert(!tech!.items.some((i) => i.label === "Kuželky"));
+  assert(!tech!.items.some((i) => i.label === "Stavěč kuželek"));
+  const guests = v.sections.find((s) => s.items.some((i) => i.label === "Samostatné WC"));
+  assertEquals(guests!.items.find((i) => i.label === "Samostatné WC")!.value, "ne");
+  assertEquals(v.clubs, ["TJ Odry"]);
+});
+
+Deno.test("parseVenue refuses a page without the data", () => {
+  assertThrows(() => parseVenue("<html></html>", "x"));
 });
 
 Deno.test("competitions where the clubs play, from match slugs", () => {

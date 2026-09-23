@@ -26,6 +26,13 @@ export type SiteCompetition = {
   name: string; roundIds: number[]; currentRound: number; matches: SiteMatch[]; standings: SiteStanding[];
 };
 export type VenueClub = { slug: string; name: string };
+export type VenueItem = { label: string; value: string };
+export type VenueSection = { title: string; items: VenueItem[] };
+export type SiteVenue = {
+  slug: string; name: string; address: string | null; phone: string | null;
+  email: string | null; lat: number | null; lng: number | null;
+  sections: VenueSection[]; clubs: string[];
+};
 export type LegacyRow = {
   id: string; import_key: string; date: string; starts_at: string; home_team: string; away_team: string;
 };
@@ -176,6 +183,67 @@ export function parseVenueClubs(html: string): VenueClub[] {
 const decodeEntities = (s: string) =>
   s.replaceAll("&amp;", "&").replaceAll("&quot;", '"').replaceAll("&#x27;", "'")
     .replaceAll("&lt;", "<").replaceAll("&gt;", ">");
+
+// React SSR sprinkles `<!-- -->` between interpolated text nodes (e.g. the
+// h1's "Detail kuželny: <name>"); strip those along with any tags.
+const textOf = (html: string) =>
+  decodeEntities(html.replace(/<!--[\s\S]*?-->/g, "").replace(/<[^>]+>/g, "")).trim();
+
+function dlPairs(dlHtml: string): { label: string; ddHtml: string }[] {
+  return [...dlHtml.matchAll(/<dt[^>]*>([\s\S]*?)<\/dt>\s*<dd[^>]*>([\s\S]*?)<\/dd>/g)]
+    .map((m) => ({ label: textOf(m[1]).replace(/:\s*$/, ""), ddHtml: m[2] }));
+}
+
+export function parseVenue(html: string, slug: string): SiteVenue {
+  const h1 = /<h1[^>]*>([\s\S]*?)<\/h1>/.exec(html);
+  const h1Text = h1 ? textOf(h1[1]) : "";
+  const name = h1Text.includes(":") ? h1Text.slice(h1Text.indexOf(":") + 1).trim() : "";
+  const blocks = [...html.matchAll(/<h[23][^>]*>([^<]*)<\/h[23]>\s*<dl[^>]*>([\s\S]*?)<\/dl>/g)];
+  if (!name || blocks.length === 0) throw new Error("venue data missing");
+
+  let address: string | null = null;
+  let phone: string | null = null;
+  let email: string | null = null;
+  let lat: number | null = null;
+  let lng: number | null = null;
+  const sections: VenueSection[] = [];
+
+  for (const block of blocks) {
+    const title = textOf(block[1]);
+    const items: VenueItem[] = [];
+    for (const { label, ddHtml } of dlPairs(block[2])) {
+      if (label === "Adresa") {
+        const span = /<span[^>]*>([\s\S]*?)<\/span>/.exec(ddHtml);
+        address = span ? textOf(span[1]) : null;
+        const decoded = decodeEntities(ddHtml);
+        const x = /[?&]x=(-?[\d.]+)/.exec(decoded);
+        const y = /[?&]y=(-?[\d.]+)/.exec(decoded);
+        lng = x ? Number(x[1]) : null;
+        lat = y ? Number(y[1]) : null;
+        continue;
+      }
+      if (label === "Telefon") {
+        const tel = /href="tel:([^"]*)"/.exec(ddHtml);
+        phone = tel ? tel[1] : null;
+        continue;
+      }
+      if (label === "E-mail") {
+        const mail = /href="mailto:([^"]*)"/.exec(ddHtml);
+        email = mail ? mail[1] : null;
+        continue;
+      }
+      const value = textOf(ddHtml);
+      if (!value || value === "–") continue;
+      items.push({ label, value });
+    }
+    if (items.length > 0) sections.push({ title, items });
+  }
+
+  return {
+    slug, name, address, phone, email, lat, lng, sections,
+    clubs: parseVenueClubs(html).map((c) => c.name),
+  };
+}
 
 export function parseSitemapLocs(xml: string): string[] {
   return [...xml.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/g)].map((m) => m[1]);
