@@ -46,6 +46,8 @@ const appChangelog = <Release>[
   Release(null, '23. 9. 2026', [
     'Zápasy a výsledky se nově stahují z výsledkového servisu ČKA — '
         'správce je zapne v Správa → Oddíly.',
+    'Nový tab Klubovna: výsledky zápasů našich týmů (i živě, s videem a '
+        'výkony hráčů) a kuželny soupeřů s kontakty a navigací.',
   ]),
   Release('1.2.8', '22. 9. 2026', [
     'Ve správě appky se tlačítko pro přidání (oddíl, hráč, pronájem…) už '
