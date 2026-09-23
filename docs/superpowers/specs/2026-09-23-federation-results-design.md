@@ -58,7 +58,7 @@ KP2 `T100` × 4. Nikde se nezadává ručně.
   (otevření detailu, tlačítko, stažení seznamu) s bránou 5 minut na
   serveru — vzor z Termínátora (`scrapeTtl` + ruční sync).
 - **Nastavení v Správa → Oddíly** (ne nová položka „Svaz").
-- **V appce nový 3. tab „Zápasy"**, chronologicky, otevřený na dnešku;
+- **V appce nový 3. tab „Klubovna"** (mřížka karet: Výsledky, Kuželny; dřív navržený tab „Zápasy" je karta Výsledky), chronologicky, otevřený na dnešku;
   detail zápasu s výkony hráčů; video a skóre i v dialogu zápasů dne.
 - **Dva PR:** A = backend + Správa (data tečou, vidět v Správa → Zápasy),
   B = tab Zápasy + detail + dialog dne.
@@ -223,9 +223,12 @@ příchozí provoz, do egressu se nepočítá.
 - Správa → Zápasy: `cka:` zápasy mají podtitul „ze svazu“.
 - Novinka ve web-only dávce changelogu.
 
-## Appka — PR B (tab Zápasy)
+## Appka — PR B (tab Klubovna: Výsledky, Kuželny)
 
-- `HomeView.matches` (třetí; `default_view` v DB zůstává
+Obrazovka níže je karta **Výsledky** v tabu Klubovna (viz Kuželny), ne
+samostatný tab.
+
+- `HomeView.clubhouse` (třetí; `default_view` v DB zůstává
   calendar/trainings). Třetí destinace v railu i spodní liště.
 - Seznam: čipy „Moje“ (sledované týmy, výchozí pokud nějaké jsou), každý
   aktivní tým, „Vše“. Po dnech chronologicky od začátku sezóny, otevře se
@@ -237,6 +240,32 @@ příchozí provoz, do egressu se nepočítá.
   pozicích s rozkladem po drahách, „Video“, „Na webu ČKA“, ⟳ a „Výsledky
   z webu: před N min“. Otevření živého zápasu zavolá `refresh_match`.
 - Dialog zápasů dne: skóre, ikona videa, ťuknutí otevře detail.
+
+## Kuželny (backend v PR A, UI v PR B)
+
+Hráči chtějí mít po ruce kuželny, kde naše týmy hrají — kontakt, adresu a
+technické informace. Stránka `/detail-kuzelny/<slug>` je nese jako HTML
+(sekce `<h2>`/`<h3>` a dvojice `<dt>`/`<dd>`), ne jako čistý JSON:
+adresa (odkaz na mapy.com se souřadnicemi `x` = délka, `y` = šířka),
+telefon (`tel:`), e-mail (`mailto:`), uvedeno do provozu, rekonstrukce,
+zázemí pro diváky a hráče, dráhy, kuželky, stavěč, kolaudace, kluby. „–“
+znamená prázdnou hodnotu.
+
+- **Tabulka `venues`** (tenant, `slug` unique v tenantu): `name`,
+  `address`, `phone`, `email`, `lat`, `lng`, `sections jsonb`
+  (`[{title, items: [{label, value}]}]` — technické údaje obecně, bez
+  sloupce na každé pole, appka je vykreslí tak, jak jsou), `clubs text[]`,
+  `fetched_at`. Select schválení a kiosk tenantu, zápis jen server.
+- **Které kuželny:** naše (`federation_sync.venue_slug`) a každá, kterou
+  sync zná z detailu zápasu (`priority_slots.venue_slug`).
+- **Kdy:** job `federation_venue {tenant_id, slug}` — hned, když detail
+  zápasu přinese kuželnu, kterou ještě nemáme; noční producent obnoví
+  kuželny starší než 7 dní. Nejvýš 3 za tick.
+- **UI (PR B):** třetí tab **Klubovna** — mřížka karet jako Správa
+  kuželny, pro všechny přihlášené. Karty: **Výsledky** (dřívější návrh tabu
+  Zápasy) a **Kuželny** (seznam abecedně s hledáním; detail s tlačítky
+  Zavolat / Napsat e-mail / Navigovat a sekcemi technických údajů). Detail
+  venkovního zápasu odkáže na svou kuželnu. Další karty budou přibývat.
 
 ## Nasazení
 

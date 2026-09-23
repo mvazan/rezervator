@@ -2020,6 +2020,65 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
+### Task 7: Venue page parser
+
+**Files:**
+- Modify: `supabase/functions/_shared/federation.ts`
+- Modify: `supabase/functions/_shared/federation_test.ts`
+- Fixtures (already saved): `supabase/functions/_shared/fixtures/federation/venue.html` (TJ Sokol Brno IV), `venue_away.html` (TJ Odry)
+
+**Interfaces — Produces** (Task 8):
+
+```ts
+export type VenueItem = { label: string; value: string };
+export type VenueSection = { title: string; items: VenueItem[] };
+export type SiteVenue = {
+  slug: string; name: string; address: string | null; phone: string | null;
+  email: string | null; lat: number | null; lng: number | null;
+  sections: VenueSection[]; clubs: string[];
+};
+export function parseVenue(html: string, slug: string): SiteVenue;
+```
+
+The venue page is HTML, not RSC JSON (checked 2026-09-23). Structure: the venue name in the page's `<h1>` (verify against the fixture); sections are headings (`<h2>` / `<h3>`, e.g. „Základní informace“, „Zázemí kuželny – diváci“, „Zázemí kuželny – hráči“, „Technické informace“, „Kolaudační informace“) each followed by a `<dl>` of `<dt>Label:</dt><dd>…</dd>` pairs; the „Kluby působící v kuželně“ block lists `/detail-klubu/` links (reuse `parseVenueClubs` for names). Rules:
+- `address` = the text of the `Adresa:` dd's first `<span>` (not the „Zobrazit na mapě“ link text). `lat`/`lng` from that dd's mapy.com link: `y` = latitude, `x` = longitude (`…&x=16.6354503&y=49.1891783…`, `&amp;` encoded in the HTML).
+- `phone` = digits/spaces of the `tel:` href (keep the visible text if it differs only by spacing — store the `tel:` value, e.g. `736435492` / `739070839`); `email` from `mailto:`.
+- `sections` = every heading+dl pair except those items already lifted into columns (Adresa, Telefon, E-mail are excluded from `sections`), labels without the trailing colon, values as trimmed plain text with HTML entities decoded. A value of `–` (en dash) or empty is dropped; a section left without items is dropped. Order as on the page.
+- Throw when no name / no `<dl>` is found (page changed).
+
+Tests (on the two fixtures): Brno IV → name `TJ Sokol Brno IV`, address `Štolcova 551/8, 61800 Brno`, phone `736435492`, email `kuzelkybrnoiv@email.cz`, lat ≈ 49.1891783, lng ≈ 16.6354503, a section containing `{label: "Dráhy", value: "4"}` and `{label: "Stavěč kuželek", value: "Pro-Tec K800"}`, no item labelled `Adresa`/`Telefon`/`E-mail`, clubs = the 4 club names. Odry → `Kuželky` and `Stavěč kuželek` absent (were `–`), `Samostatné WC` = `ne`, clubs `["TJ Odry"]`. `parseVenue("<html></html>", "x")` throws.
+
+- [ ] Write the failing tests, run `deno test --allow-read supabase/functions/_shared/federation_test.ts` (RED), implement, GREEN, then `deno test --allow-read supabase/functions` and `deno check supabase/functions/_shared/federation.ts`.
+- [ ] Commit `feat(federation): venue page parser` (+ `git add` the two venue fixtures if not yet tracked).
+
+---
+
+### Task 8: Venues table and job
+
+**Files:**
+- Modify: `supabase/migrations/0045_federation.sql` (unreleased — edit in place)
+- Modify: `supabase/tests/tenancy_rls.sql`, `supabase/schema.sql` (snapshot), `docs/SCHEMA.md`
+- Modify: `supabase/functions/_shared/federation_jobs.ts`, `federation_jobs_test.ts`
+
+**Interfaces:**
+- Consumes (Task 7): `parseVenue(html, slug): SiteVenue`.
+- Produces (PR B reads it): table `venues` — `id uuid pk`, `tenant_id`, `slug text not null`, `name text not null`, `address text`, `phone text`, `email text`, `lat numeric`, `lng numeric`, `sections jsonb not null default '[]'`, `clubs text[] not null default '{}'`, `fetched_at timestamptz not null default now()`, unique `(tenant_id, slug)`; RLS select `tenant_id = current_tenant_id() and is_approved_or_kiosk()`; revoke anon all + authenticated DML; grant all to service_role; in `supabase_realtime`.
+- Server function `upsert_federation_venue(p_tenant uuid, p_venue jsonb) returns void` (service_role only; keys = `SiteVenue` fields in snake_case: `slug, name, address, phone, email, lat, lng, sections, clubs`; sets `fetched_at = now()`).
+- Job kind `federation_venue`, payload `{tenant_id, slug}`, dedupe key `federation_venue:<tenant>:<slug>`.
+
+Behaviour:
+1. `apply_federation_result`: after it writes `venue_slug`, if no `venues` row exists for `(tenant, that slug)`, `enqueue_notification('federation_venue', key, payload, interval '0')`.
+2. `enqueue_federation_jobs()` (nightly): for each enabled tenant, every distinct slug among `federation_sync.venue_slug` and the tenant's `priority_slots.venue_slug` whose `venues` row is missing or `fetched_at < now() - interval '7 days'` → enqueue `federation_venue`, staggered by 1 minute after the competition jobs.
+3. `request_federation_sync()` also enqueues the tenant's own venue (`federation_sync.venue_slug`) when it has no row yet — so the home alley shows up right after the first sync.
+4. `federation_jobs.ts`: `LIMITS` gains `["federation_venue", 3]` (processed after competitions, before matches — keep live match checks unaffected by the budget: put venues LAST if that is simpler and say which you chose); `runVenue(db, get, tenantId, slug)` = GET `/detail-kuzelny/${slug}` → `parseVenue` → `rpc("upsert_federation_venue", …)`; success returns `null` (one-shot). Errors go through the existing per-key `record_federation_run` path with key `venue:<slug>`.
+
+Tests: SQL — `upsert_federation_venue` inserts then updates (one row, `fetched_at` moves); B's admin cannot see A's venues, anon has no select, authenticated has no insert; `apply_federation_result` with a new venue enqueues exactly one `federation_venue` job and with a known venue enqueues none; `enqueue_federation_jobs()` enqueues a stale venue and skips a fresh one; `request_federation_sync()` enqueues the home venue when missing. Deno — fake-db `processFederationJobs` test that a `federation_venue` job fetches `/detail-kuzelny/<slug>` (serve `venue.html`) and calls `upsert_federation_venue` with name `TJ Sokol Brno IV` and the phone, then deletes the job.
+
+- [ ] TDD as above; `supabase db reset`, full `tenancy_rls.sql` exit 0, `tool/schema_snapshot.sh`, `deno test --allow-read supabase/functions`, `deno check --import-map supabase/functions/import_map.json supabase/functions/notify/index.ts`; update `docs/SCHEMA.md` (venues row + a paragraph in the Výsledkový servis section).
+- [ ] Commit `feat(federation): venues of our teams' matches`.
+
+---
+
 ## Deployment notes (not part of the tasks — for the PR description)
 
 1. Merge → `deploy-backend.yml` runs `supabase db push` and then deploys the functions. The minute in between (old `notify`, which logs and drops unknown job kinds, against 0045) is harmless: federation jobs only come from the admin RPCs or the 01:00 UTC nightly cron. The sync request and the cron need a tenant with the sync enabled, so wait until the workflow has deployed `notify`, only then enable the sync. „Načíst týmy z webu“ needs only a saved venue slug — clicked while the old `notify` is still deployed, the discovery is dropped and just needs clicking again after the function deploy.
