@@ -53,10 +53,10 @@ class MatchLeading extends StatefulWidget {
 
 class _MatchLeadingState extends State<MatchLeading>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _pulse = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 1400),
-  );
+  // Lazily created — only in the LIVE branch of _syncPulse — so the ~200
+  // non-live rows results_screen builds eagerly never force a controller
+  // (and its Ticker) into existence just to immediately stop it.
+  AnimationController? _pulse;
 
   bool get _live =>
       widget.slot.videoUrl != null &&
@@ -82,15 +82,19 @@ class _MatchLeadingState extends State<MatchLeading>
   void _syncPulse() {
     final shouldRun = _live && !MediaQuery.disableAnimationsOf(context);
     if (shouldRun) {
-      if (!_pulse.isAnimating) _pulse.repeat();
-    } else if (_pulse.isAnimating) {
-      _pulse.stop();
+      final pulse = _pulse ??= AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 1400),
+      );
+      if (!pulse.isAnimating) pulse.repeat();
+    } else if (_pulse case final pulse? when pulse.isAnimating) {
+      pulse.stop();
     }
   }
 
   @override
   void dispose() {
-    _pulse.dispose();
+    _pulse?.dispose();
     super.dispose();
   }
 
@@ -119,9 +123,11 @@ class _MatchLeadingState extends State<MatchLeading>
             children: [
               if (pulsing)
                 AnimatedBuilder(
-                  animation: _pulse,
+                  // pulsing implies _syncPulse already created it (same
+                  // condition it runs the LIVE branch under).
+                  animation: _pulse!,
                   builder: (context, _) {
-                    final t = _pulse.value;
+                    final t = _pulse!.value;
                     return Opacity(
                       opacity: (0.6 * (1 - t)).clamp(0.0, 1.0),
                       child: Transform.scale(

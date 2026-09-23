@@ -188,6 +188,17 @@ void main() {
     expect(tester.hasRunningAnimations, isFalse);
   });
 
+  testWidgets(
+      'a non-live, non-video match never creates a running animation '
+      'controller (perf: no Ticker for the ~200 non-live rows Výsledky '
+      'builds eagerly)', (tester) async {
+    await tester.pumpWidget(wrap(slot: slot(videoUrl: null)));
+    await tester.pumpAndSettle();
+
+    expect(tester.hasRunningAnimations, isFalse);
+    expect(tester.binding.transientCallbackCount, 0);
+  });
+
   testWidgets('a live match WITHOUT disableAnimations does run the pulse',
       (tester) async {
     await tester.pumpWidget(wrap(
