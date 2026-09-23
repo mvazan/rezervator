@@ -1846,6 +1846,13 @@ begin
           new.away_team, new.is_away, new.description, new.type_id, new.parent_id) then
     return new;
   end if;
+  -- For a match played before and after, the handler could only delete the
+  -- event (the first run rewrites old rows' description and times).
+  if tg_op = 'UPDATE'
+     and old.date < (now() at time zone 'Europe/Prague')::date
+     and new.date < (now() at time zone 'Europe/Prague')::date then
+    return new;
+  end if;
   if tg_op in ('UPDATE', 'DELETE') and old.parent_id is null
      and exists (select 1 from priority_slot_types
                  where id = old.type_id and is_match) then
