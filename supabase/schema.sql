@@ -225,6 +225,11 @@ begin
      where id = v_row.id
        and (venue, venue_slug) is distinct from
            (p_result#>>'{venue,name}', p_result#>>'{venue,slug}');
+    if coalesce(p_result#>>'{venue,slug}', '') <> ''
+       and not exists (select 1 from venues
+                        where tenant_id = p_tenant and slug = p_result#>>'{venue,slug}') then
+      perform enqueue_federation_venue(p_tenant, p_result#>>'{venue,slug}');
+    end if;
     v_is_away := (p_result#>>'{venue,slug}') is distinct from v_venue;
     v_prep := case when v_is_away then 0 else (p_result->>'home_prep')::smallint end;
     v_desc := federation_description(v_row.competition, v_row.round, v_is_away,
@@ -1096,6 +1101,23 @@ begin
       make_interval(mins => i));
     i := i + 1;
   end loop;
+  for r in
+    select distinct x.tenant_id, x.slug
+      from federation_sync s
+      cross join lateral (
+        select s.tenant_id, s.venue_slug as slug
+        union
+        select p.tenant_id, p.venue_slug from priority_slots p
+         where p.tenant_id = s.tenant_id and p.venue_slug is not null) x
+     where s.enabled and s.venue_slug <> '' and x.slug <> ''
+       and not exists (select 1 from venues v
+                        where v.tenant_id = x.tenant_id and v.slug = x.slug
+                          and v.fetched_at >= now() - interval '7 days')
+     order by 1, 2
+  loop
+    perform enqueue_federation_venue(r.tenant_id, r.slug, make_interval(mins => i));
+    i := i + 1;
+  end loop;
 end;
 $$;
 
@@ -1120,6 +1142,19 @@ $$;
 
 
 ALTER FUNCTION "public"."enqueue_federation_match"("p_tenant" "uuid", "p_site_match_id" integer, "p_slug" "text", "p_run_at" timestamp with time zone) OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."enqueue_federation_venue"("p_tenant" "uuid", "p_slug" "text", "p_delay" interval DEFAULT '00:00:00'::interval) RETURNS "void"
+    LANGUAGE "sql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  select enqueue_notification('federation_venue',
+    'federation_venue:' || p_tenant || ':' || p_slug,
+    jsonb_build_object('tenant_id', p_tenant, 'slug', p_slug), p_delay);
+$$;
+
+
+ALTER FUNCTION "public"."enqueue_federation_venue"("p_tenant" "uuid", "p_slug" "text", "p_delay" interval) OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."enqueue_match_calendar_sync"("p_user" "uuid", "p_match" "uuid") RETURNS "void"
@@ -2477,6 +2512,11 @@ begin
       jsonb_build_object('tenant_id', v_tenant, 'competition_slug', r.competition_slug),
       interval '0');
   end loop;
+  perform enqueue_federation_venue(s.tenant_id, s.venue_slug)
+     from federation_sync s
+    where s.tenant_id = v_tenant
+      and not exists (select 1 from venues v
+                       where v.tenant_id = s.tenant_id and v.slug = s.venue_slug);
   perform trigger_notification_jobs();
 end;
 $$;
@@ -3235,6 +3275,27 @@ $$;
 ALTER FUNCTION "public"."upsert_federation_teams"("p_tenant" "uuid", "p_teams" "jsonb") OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."upsert_federation_venue"("p_tenant" "uuid", "p_venue" "jsonb") RETURNS "void"
+    LANGUAGE "sql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  insert into venues as v
+    (tenant_id, slug, name, address, phone, email, lat, lng, sections, clubs, fetched_at)
+  values
+    (p_tenant, p_venue->>'slug', p_venue->>'name', p_venue->>'address',
+     p_venue->>'phone', p_venue->>'email', (p_venue->>'lat')::numeric,
+     (p_venue->>'lng')::numeric, coalesce(p_venue->'sections', '[]'::jsonb),
+     coalesce(array(select jsonb_array_elements_text(p_venue->'clubs')), '{}'), now())
+  on conflict (tenant_id, slug) do update set
+    name = excluded.name, address = excluded.address, phone = excluded.phone,
+    email = excluded.email, lat = excluded.lat, lng = excluded.lng,
+    sections = excluded.sections, clubs = excluded.clubs, fetched_at = now();
+$$;
+
+
+ALTER FUNCTION "public"."upsert_federation_venue"("p_tenant" "uuid", "p_venue" "jsonb") OWNER TO "postgres";
+
+
 CREATE TABLE IF NOT EXISTS "public"."app_config" (
     "id" boolean DEFAULT true NOT NULL,
     "min_build" integer DEFAULT 1 NOT NULL,
@@ -3668,6 +3729,25 @@ CREATE TABLE IF NOT EXISTS "public"."time_blocks" (
 ALTER TABLE "public"."time_blocks" OWNER TO "postgres";
 
 
+CREATE TABLE IF NOT EXISTS "public"."venues" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "slug" "text" NOT NULL,
+    "name" "text" NOT NULL,
+    "address" "text",
+    "phone" "text",
+    "email" "text",
+    "lat" numeric,
+    "lng" numeric,
+    "sections" "jsonb" DEFAULT '[]'::"jsonb" NOT NULL,
+    "clubs" "text"[] DEFAULT '{}'::"text"[] NOT NULL,
+    "fetched_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."venues" OWNER TO "postgres";
+
+
 ALTER TABLE ONLY "public"."app_config"
     ADD CONSTRAINT "app_config_pkey" PRIMARY KEY ("id");
 
@@ -3835,6 +3915,16 @@ ALTER TABLE ONLY "public"."tenants"
 
 ALTER TABLE ONLY "public"."time_blocks"
     ADD CONSTRAINT "time_blocks_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."venues"
+    ADD CONSTRAINT "venues_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."venues"
+    ADD CONSTRAINT "venues_tenant_id_slug_key" UNIQUE ("tenant_id", "slug");
 
 
 
@@ -4204,6 +4294,11 @@ ALTER TABLE ONLY "public"."time_blocks"
 
 
 
+ALTER TABLE ONLY "public"."venues"
+    ADD CONSTRAINT "venues_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE CASCADE;
+
+
+
 ALTER TABLE "public"."app_config" ENABLE ROW LEVEL SECURITY;
 
 
@@ -4450,6 +4545,13 @@ CREATE POLICY "tenants_select" ON "public"."tenants" FOR SELECT TO "authenticate
 ALTER TABLE "public"."time_blocks" ENABLE ROW LEVEL SECURITY;
 
 
+ALTER TABLE "public"."venues" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "venues_select" ON "public"."venues" FOR SELECT USING ((("tenant_id" = "public"."current_tenant_id"()) AND "public"."is_approved_or_kiosk"()));
+
+
+
 GRANT USAGE ON SCHEMA "public" TO "postgres";
 GRANT USAGE ON SCHEMA "public" TO "anon";
 GRANT USAGE ON SCHEMA "public" TO "authenticated";
@@ -4572,6 +4674,11 @@ GRANT ALL ON FUNCTION "public"."enqueue_federation_jobs"() TO "service_role";
 
 REVOKE ALL ON FUNCTION "public"."enqueue_federation_match"("p_tenant" "uuid", "p_site_match_id" integer, "p_slug" "text", "p_run_at" timestamp with time zone) FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."enqueue_federation_match"("p_tenant" "uuid", "p_site_match_id" integer, "p_slug" "text", "p_run_at" timestamp with time zone) TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."enqueue_federation_venue"("p_tenant" "uuid", "p_slug" "text", "p_delay" interval) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."enqueue_federation_venue"("p_tenant" "uuid", "p_slug" "text", "p_delay" interval) TO "service_role";
 
 
 
@@ -4900,6 +5007,11 @@ GRANT ALL ON FUNCTION "public"."upsert_federation_teams"("p_tenant" "uuid", "p_t
 
 
 
+REVOKE ALL ON FUNCTION "public"."upsert_federation_venue"("p_tenant" "uuid", "p_venue" "jsonb") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."upsert_federation_venue"("p_tenant" "uuid", "p_venue" "jsonb") TO "service_role";
+
+
+
 GRANT ALL ON TABLE "public"."app_config" TO "service_role";
 GRANT SELECT ON TABLE "public"."app_config" TO "authenticated";
 
@@ -5029,6 +5141,11 @@ GRANT SELECT("status") ON TABLE "public"."tenants" TO "authenticated";
 
 GRANT ALL ON TABLE "public"."time_blocks" TO "authenticated";
 GRANT ALL ON TABLE "public"."time_blocks" TO "service_role";
+
+
+
+GRANT SELECT ON TABLE "public"."venues" TO "authenticated";
+GRANT ALL ON TABLE "public"."venues" TO "service_role";
 
 
 

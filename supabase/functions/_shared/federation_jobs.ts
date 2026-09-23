@@ -4,7 +4,7 @@ import { pragueEpoch } from "./cancel_token.ts";
 import {
   competitionSlugsForClubs, endTime, HOME_PREP_MINUTES, type LegacyRow, matchFormat,
   nextCheckpoint, normalizeTeam, pairLegacy, parseCompetition, parseMatch,
-  parseSitemapLocs, parseVenueClubs, resultPayload, type SiteCompetition,
+  parseSitemapLocs, parseVenue, parseVenueClubs, resultPayload, type SiteCompetition,
   type SiteMatch, teamBelongsToClub, type VenueClub,
 } from "./federation.ts";
 
@@ -33,6 +33,8 @@ const LIMITS: [string, number][] = [
   ["federation_discover", 1],
   ["federation_competition", 1],
   ["federation_match", 10],
+  // Last, so live match checks never wait behind venue pages for the budget.
+  ["federation_venue", 3],
 ];
 const MATCH_CONCURRENCY = 3;
 
@@ -277,13 +279,25 @@ export async function runMatch(
   return nextCheckpoint(d.status, startOf(d), now);
 }
 
+export async function runVenue(db: Db, get: Fetcher, tenantId: string, slug: string) {
+  const v = parseVenue(await get(`/detail-kuzelny/${slug}`), slug);
+  must(await db.rpc("upsert_federation_venue", {
+    p_tenant: tenantId,
+    p_venue: {
+      slug: v.slug, name: v.name, address: v.address, phone: v.phone, email: v.email,
+      lat: v.lat, lng: v.lng, sections: v.sections, clubs: v.clubs,
+    },
+  }));
+}
+
 type Job = { id: number; payload: Record<string, unknown>; attempts: number; run_at: string };
 
 /** The last_report key a job's success is stored under, so its failure
- * replaces the same entry. Match jobs record only failures. */
+ * replaces the same entry. Match and venue jobs record only failures. */
 function reportKey(kind: string, job: Job): string {
   if (kind === "federation_discover") return "discover";
   if (kind === "federation_competition") return `competition:${job.payload.competition_slug}`;
+  if (kind === "federation_venue") return `venue:${job.payload.slug}`;
   return kind;
 }
 
@@ -308,6 +322,10 @@ async function runJob(db: Db, get: Fetcher, kind: string, job: Job, now: Date): 
     const report = await runCompetition(db, get, tenant, slug, now);
     must(await db.rpc("record_federation_run",
       { p_tenant: tenant, p_key: reportKey(kind, job), p_report: report, p_error: null }));
+    return null;
+  }
+  if (kind === "federation_venue") {
+    await runVenue(db, get, tenant, String(job.payload.slug));
     return null;
   }
   return await runMatch(db, get, tenant, Number(job.payload.site_match_id),

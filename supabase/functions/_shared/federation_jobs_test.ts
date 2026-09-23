@@ -392,6 +392,56 @@ Deno.test("processFederationJobs: a failing job backs off from its attempts and 
   assertEquals(recorded!.args.p_error, "federation_match: network down");
 });
 
+Deno.test("processFederationJobs: a venue job fetches the venue page, upserts it and is deleted", async () => {
+  const now = new Date("2026-10-10T06:00:00Z");
+  const jobs: FakeJob[] = [{
+    id: 7, kind: "federation_venue", attempts: 0,
+    run_at: new Date(now.getTime() - 60e3).toISOString(),
+    payload: { tenant_id: "t1", slug: "tj-sokol-brno-iv" },
+  }];
+  const { db, calls } = fakeJobsDb(jobs);
+  const fetched: string[] = [];
+  const get = async (path: string) => {
+    fetched.push(path);
+    return fixture("venue.html");
+  };
+
+  await processFederationJobs(db, get, now);
+
+  assertEquals(fetched, ["/detail-kuzelny/tj-sokol-brno-iv"]);
+  const upsert = calls.find((c) => c.kind === "rpc" && c.name === "upsert_federation_venue") as
+    { kind: "rpc"; name: string; args: Record<string, unknown> } | undefined;
+  assertEquals(upsert?.args.p_tenant, "t1");
+  const venue = upsert?.args.p_venue as Record<string, unknown>;
+  assertEquals(venue.slug, "tj-sokol-brno-iv");
+  assertEquals(venue.name, "TJ Sokol Brno IV");
+  assertEquals(venue.phone, "736435492");
+  assert(Array.isArray(venue.sections) && Array.isArray(venue.clubs));
+  assertEquals(jobs.length, 0);
+  assert(!calls.some((c) => c.kind === "rpc" && c.name === "record_federation_run"));
+});
+
+Deno.test("processFederationJobs: a failing venue job records its error under venue:<slug>", async () => {
+  const now = new Date("2026-10-10T06:00:00Z");
+  const jobs: FakeJob[] = [{
+    id: 8, kind: "federation_venue", attempts: 0,
+    run_at: new Date(now.getTime() - 60e3).toISOString(),
+    payload: { tenant_id: "t1", slug: "jinde" },
+  }];
+  const { db, calls } = fakeJobsDb(jobs);
+  const get = async () => {
+    throw new Error("site down");
+  };
+
+  await processFederationJobs(db, get, now);
+
+  const recorded = calls.find((c) => c.kind === "rpc" && c.name === "record_federation_run") as
+    { kind: "rpc"; name: string; args: Record<string, unknown> } | undefined;
+  assertEquals(recorded?.args.p_key, "venue:jinde");
+  assertEquals(recorded?.args.p_error, "federation_venue: site down");
+  assertEquals(jobs[0].attempts, 1);
+});
+
 Deno.test("processFederationJobs: a zero budget leases nothing", async () => {
   const jobs: FakeJob[] = [{
     id: 4, kind: "federation_match", attempts: 0,

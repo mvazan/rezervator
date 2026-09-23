@@ -4433,7 +4433,8 @@ declare
   f text;
 begin
   foreach t in array array['public.teams', 'public.federation_sync',
-                           'public.match_results', 'public.match_player_results'] loop
+                           'public.match_results', 'public.match_player_results',
+                           'public.venues'] loop
     if has_table_privilege('anon', t, 'select')
        or not has_table_privilege('authenticated', t, 'select')
        or has_table_privilege('authenticated', t, 'insert')
@@ -4452,7 +4453,9 @@ begin
                            'public.record_federation_run(uuid, text, jsonb, text)',
                            'public.enqueue_federation_match(uuid, integer, text, timestamptz)',
                            'public.enqueue_federation_jobs()',
-                           'public.federation_description(text, integer, boolean, text)'] loop
+                           'public.federation_description(text, integer, boolean, text)',
+                           'public.upsert_federation_venue(uuid, jsonb)',
+                           'public.enqueue_federation_venue(uuid, text, interval)'] loop
     if has_function_privilege('authenticated', f, 'execute')
        or has_function_privilege('anon', f, 'execute') then
       raise exception 'FAIL: % is callable from the app', f;
@@ -4462,7 +4465,8 @@ begin
                            'public.apply_federation_result(uuid, integer, jsonb)',
                            'public.upsert_federation_teams(uuid, jsonb)',
                            'public.record_federation_run(uuid, text, jsonb, text)',
-                           'public.enqueue_federation_match(uuid, integer, text, timestamptz)'] loop
+                           'public.enqueue_federation_match(uuid, integer, text, timestamptz)',
+                           'public.upsert_federation_venue(uuid, jsonb)'] loop
     if not has_function_privilege('service_role', f, 'execute') then
       raise exception 'FAIL: the service cannot call %', f;
     end if;
@@ -4615,6 +4619,148 @@ begin
   delete from priority_slots where id in (v_past, v_future);
   delete from notification_jobs where dedupe_key like 'calendar:%:match:%';
   raise notice 'OK: an update that keeps a match in the past enqueues no calendar job (0045)';
+end $$;
+
+-- 15. Venues: the server upserts one row per alley and slug; a match
+-- detail with an unknown venue, the nightly pass (missing or a week old)
+-- and a sync request (the home alley) enqueue its fetch.
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_b constant uuid := '00000000-0000-0000-0000-000000000002';
+  v_venue constant jsonb := '{"slug":"jinde","name":"Kuželna Jinde","address":"Jinde 1, Brno","phone":"736435492","email":null,"lat":49.2,"lng":16.6,"sections":[{"title":"Kontakty","items":[{"label":"Správce","value":"Jan"}]}],"clubs":["TJ Jinde"]}';
+  v_res constant jsonb := '{"status":"finished","venue":{"slug":"nova-kuzelna","name":"Nová kuželna"},"home_prep":30,"home":null,"away":null,"players":[]}';
+  v venues;
+begin
+  perform upsert_federation_venue(v_a, v_venue);
+  update venues set fetched_at = now() - interval '1 day' where tenant_id = v_a;
+  perform upsert_federation_venue(v_a, v_venue || '{"name":"Kuželna Jinde 2","phone":null}');
+  if (select count(*) from venues where tenant_id = v_a and slug = 'jinde') <> 1 then
+    raise exception 'FAIL: upsert_federation_venue duplicated the venue';
+  end if;
+  select * into v from venues where tenant_id = v_a and slug = 'jinde';
+  if v.name <> 'Kuželna Jinde 2' or v.phone is not null or v.address <> 'Jinde 1, Brno'
+     or v.lat <> 49.2 or v.lng <> 16.6 or v.email is not null
+     or v.sections->0->'items'->0->>'value' <> 'Jan' or v.clubs <> array['TJ Jinde']
+     or v.fetched_at <> now() then
+    raise exception 'FAIL: upsert_federation_venue stored the venue wrong: %', to_jsonb(v);
+  end if;
+  perform upsert_federation_venue(v_b, '{"slug":"kuzelna-b","name":"Kuželna B"}');
+  select * into v from venues where tenant_id = v_b;
+  if v.sections <> '[]'::jsonb or v.clubs <> '{}'::text[] or v.address is not null then
+    raise exception 'FAIL: a bare venue did not take the defaults: %', to_jsonb(v);
+  end if;
+
+  delete from notification_jobs where kind = 'federation_venue';
+  perform apply_federation_result(v_a, 103, v_res);
+  if (select count(*) from notification_jobs where kind = 'federation_venue') <> 1
+     or not exists (select 1 from notification_jobs
+                    where dedupe_key = 'federation_venue:' || v_a || ':nova-kuzelna'
+                      and payload = jsonb_build_object('tenant_id', v_a, 'slug', 'nova-kuzelna')
+                      and run_at <= now()) then
+    raise exception 'FAIL: a match at an unknown venue should enqueue its fetch once';
+  end if;
+  delete from notification_jobs where kind = 'federation_venue';
+  perform apply_federation_result(v_a, 103, v_res || '{"venue":{"slug":"jinde","name":"Kuželna Jinde"}}');
+  if exists (select 1 from notification_jobs where kind = 'federation_venue') then
+    raise exception 'FAIL: a match at a known venue enqueued a venue fetch';
+  end if;
+  raise notice 'OK: upsert_federation_venue inserts then updates; an unknown match venue is fetched once (0045)';
+end $$;
+
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_b constant uuid := '00000000-0000-0000-0000-000000000002';
+begin
+  -- A's matches are at jinde (fresh) and nova-kuzelna (missing); its home
+  -- alley's row is a week and a day old. B is not enabled.
+  insert into priority_slots (tenant_id, date, starts_at, ends_at, type_id, home_team,
+                              away_team, created_by, is_away, venue_slug)
+  values (v_a, current_date + 30, '10:00', '13:00',
+          (select id from priority_slot_types where tenant_id = v_a and is_match and builtin),
+          'Host', 'TJ Sokol Brno IV', '10000000-0000-0000-0000-000000000001', true,
+          'nova-kuzelna');
+  perform upsert_federation_venue(v_a, '{"slug":"tj-sokol-brno-iv","name":"TJ Sokol Brno IV"}');
+  update venues set fetched_at = now() - interval '8 days'
+   where tenant_id = v_a and slug = 'tj-sokol-brno-iv';
+  insert into priority_slots (tenant_id, date, starts_at, ends_at, type_id, home_team,
+                              away_team, created_by, venue_slug)
+  values (v_b, current_date + 30, '10:00', '13:00',
+          (select id from priority_slot_types where tenant_id = v_b and is_match and builtin),
+          'Kuželna B', 'Host', '10000000-0000-0000-0000-000000000002', 'cizi-b');
+  delete from notification_jobs where kind in ('federation_venue', 'federation_competition');
+  perform enqueue_federation_jobs();
+  if (select array_agg(payload->>'slug' order by payload->>'slug')
+        from notification_jobs where kind = 'federation_venue')
+     is distinct from array['nova-kuzelna', 'tj-sokol-brno-iv'] then
+    raise exception 'FAIL: the nightly pass should fetch exactly the missing and the stale venue: %',
+      (select array_agg(dedupe_key) from notification_jobs where kind = 'federation_venue');
+  end if;
+  if (select count(distinct run_at) from notification_jobs where kind = 'federation_venue') <> 2
+     or (select min(run_at) from notification_jobs where kind = 'federation_venue')
+        <= (select max(run_at) from notification_jobs where kind = 'federation_competition') then
+    raise exception 'FAIL: venue jobs should come a minute apart after the competition jobs';
+  end if;
+  if exists (select 1 from notification_jobs where kind = 'federation_venue'
+             and payload->>'tenant_id' <> v_a::text) then
+    raise exception 'FAIL: a disabled alley got a venue job';
+  end if;
+  raise notice 'OK: the nightly pass enqueues missing and week-old venues after the competitions (0045)';
+end $$;
+
+delete from venues where tenant_id = '00000000-0000-0000-0000-00000000000a'
+                     and slug = 'tj-sokol-brno-iv';
+delete from notification_jobs where kind = 'federation_venue';
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+begin
+  perform request_federation_sync();
+  if (select array_agg(slug order by slug) from venues)
+     is distinct from array['jinde'] then
+    raise exception 'FAIL: the admin should see exactly the alley''s venues';
+  end if;
+  begin
+    insert into venues (tenant_id, slug, name)
+    values ('00000000-0000-0000-0000-00000000000a', 'x', 'X');
+    raise exception 'FAIL: the admin wrote venues directly';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+reset role;
+do $$
+begin
+  if (select array_agg(dedupe_key) from notification_jobs where kind = 'federation_venue')
+     is distinct from array['federation_venue:00000000-0000-0000-0000-00000000000a:tj-sokol-brno-iv'] then
+    raise exception 'FAIL: request_federation_sync should enqueue the missing home venue';
+  end if;
+  delete from notification_jobs where kind = 'federation_venue';
+  perform upsert_federation_venue('00000000-0000-0000-0000-00000000000a',
+    '{"slug":"tj-sokol-brno-iv","name":"TJ Sokol Brno IV"}');
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$ begin perform request_federation_sync(); end $$;
+reset role;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000002","role":"authenticated"}';
+do $$
+begin
+  if exists (select 1 from venues where tenant_id = '00000000-0000-0000-0000-00000000000a') then
+    raise exception 'FAIL: another alley''s admin sees our venues';
+  end if;
+end $$;
+reset role;
+do $$
+begin
+  if exists (select 1 from notification_jobs where kind = 'federation_venue') then
+    raise exception 'FAIL: request_federation_sync enqueued a home venue it already has';
+  end if;
+  raise notice 'OK: venues are read-only per alley; a sync request fetches a missing home venue (0045)';
 end $$;
 
 -- 7b. With both alleys configured, each admin sees only their own settings.

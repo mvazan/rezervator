@@ -154,7 +154,40 @@ revoke insert, update, delete on match_results, match_player_results from authen
 grant all on match_results, match_player_results to service_role;
 alter publication supabase_realtime add table match_results, match_player_results;
 
+-- -------------------------------------------------------------- venues
+-- The alleys our teams play at, as the site's venue page shows them.
+create table venues (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  slug text not null,
+  name text not null,
+  address text,
+  phone text,
+  email text,
+  lat numeric,
+  lng numeric,
+  sections jsonb not null default '[]'::jsonb,
+  clubs text[] not null default '{}',
+  fetched_at timestamptz not null default now(),
+  unique (tenant_id, slug)
+);
+alter table venues enable row level security;
+create policy venues_select on venues for select
+  using (tenant_id = current_tenant_id() and is_approved_or_kiosk());
+revoke all on venues from anon;
+revoke insert, update, delete on venues from authenticated;
+grant all on venues to service_role;
+alter publication supabase_realtime add table venues;
+
 -- ------------------------------------------------------------- helpers
+create or replace function enqueue_federation_venue(
+  p_tenant uuid, p_slug text, p_delay interval default interval '0')
+returns void language sql security definer set search_path = public as $$
+  select enqueue_notification('federation_venue',
+    'federation_venue:' || p_tenant || ':' || p_slug,
+    jsonb_build_object('tenant_id', p_tenant, 'slug', p_slug), p_delay);
+$$;
+
 create or replace function federation_description(
   p_competition text, p_round integer, p_is_away boolean, p_venue text)
 returns text language sql immutable as $$
@@ -324,6 +357,11 @@ begin
      where id = v_row.id
        and (venue, venue_slug) is distinct from
            (p_result#>>'{venue,name}', p_result#>>'{venue,slug}');
+    if coalesce(p_result#>>'{venue,slug}', '') <> ''
+       and not exists (select 1 from venues
+                        where tenant_id = p_tenant and slug = p_result#>>'{venue,slug}') then
+      perform enqueue_federation_venue(p_tenant, p_result#>>'{venue,slug}');
+    end if;
     v_is_away := (p_result#>>'{venue,slug}') is distinct from v_venue;
     v_prep := case when v_is_away then 0 else (p_result->>'home_prep')::smallint end;
     v_desc := federation_description(v_row.competition, v_row.round, v_is_away,
@@ -415,6 +453,21 @@ begin
 end;
 $$;
 
+create or replace function upsert_federation_venue(p_tenant uuid, p_venue jsonb)
+returns void language sql security definer set search_path = public as $$
+  insert into venues as v
+    (tenant_id, slug, name, address, phone, email, lat, lng, sections, clubs, fetched_at)
+  values
+    (p_tenant, p_venue->>'slug', p_venue->>'name', p_venue->>'address',
+     p_venue->>'phone', p_venue->>'email', (p_venue->>'lat')::numeric,
+     (p_venue->>'lng')::numeric, coalesce(p_venue->'sections', '[]'::jsonb),
+     coalesce(array(select jsonb_array_elements_text(p_venue->'clubs')), '{}'), now())
+  on conflict (tenant_id, slug) do update set
+    name = excluded.name, address = excluded.address, phone = excluded.phone,
+    email = excluded.email, lat = excluded.lat, lng = excluded.lng,
+    sections = excluded.sections, clubs = excluded.clubs, fetched_at = now();
+$$;
+
 create or replace function record_federation_run(
   p_tenant uuid, p_key text, p_report jsonb, p_error text)
 returns void language plpgsql security definer set search_path = public as $$
@@ -468,6 +521,23 @@ begin
       make_interval(mins => i));
     i := i + 1;
   end loop;
+  for r in
+    select distinct x.tenant_id, x.slug
+      from federation_sync s
+      cross join lateral (
+        select s.tenant_id, s.venue_slug as slug
+        union
+        select p.tenant_id, p.venue_slug from priority_slots p
+         where p.tenant_id = s.tenant_id and p.venue_slug is not null) x
+     where s.enabled and s.venue_slug <> '' and x.slug <> ''
+       and not exists (select 1 from venues v
+                        where v.tenant_id = x.tenant_id and v.slug = x.slug
+                          and v.fetched_at >= now() - interval '7 days')
+     order by 1, 2
+  loop
+    perform enqueue_federation_venue(r.tenant_id, r.slug, make_interval(mins => i));
+    i := i + 1;
+  end loop;
 end;
 $$;
 
@@ -478,11 +548,14 @@ revoke all on function upsert_federation_teams(uuid, jsonb) from public, anon, a
 revoke all on function record_federation_run(uuid, text, jsonb, text) from public, anon, authenticated;
 revoke all on function enqueue_federation_match(uuid, integer, text, timestamptz) from public, anon, authenticated;
 revoke all on function enqueue_federation_jobs() from public, anon, authenticated;
+revoke all on function enqueue_federation_venue(uuid, text, interval) from public, anon, authenticated;
+revoke all on function upsert_federation_venue(uuid, jsonb) from public, anon, authenticated;
 grant execute on function apply_federation_matches(uuid, text, jsonb, integer[]) to service_role;
 grant execute on function apply_federation_result(uuid, integer, jsonb) to service_role;
 grant execute on function upsert_federation_teams(uuid, jsonb) to service_role;
 grant execute on function record_federation_run(uuid, text, jsonb, text) to service_role;
 grant execute on function enqueue_federation_match(uuid, integer, text, timestamptz) to service_role;
+grant execute on function upsert_federation_venue(uuid, jsonb) to service_role;
 
 -- ---------------------------------------------------------------- RPCs
 create or replace function set_federation_sync(p_venue_slug text, p_enabled boolean)
@@ -541,6 +614,11 @@ begin
       jsonb_build_object('tenant_id', v_tenant, 'competition_slug', r.competition_slug),
       interval '0');
   end loop;
+  perform enqueue_federation_venue(s.tenant_id, s.venue_slug)
+     from federation_sync s
+    where s.tenant_id = v_tenant
+      and not exists (select 1 from venues v
+                       where v.tenant_id = s.tenant_id and v.slug = s.venue_slug);
   perform trigger_notification_jobs();
 end;
 $$;
