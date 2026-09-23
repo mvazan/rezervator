@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rezervator/core/theme.dart';
 import 'package:rezervator/data/clock.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
@@ -25,6 +26,11 @@ void main() {
     Widget home, {
     Map<String, MatchResult> results = const {},
     List<PrioritySlot> slots = const [],
+    // Defaults to Flutter's own bare M3 theme, same as always — pass the
+    // app's real buildTheme() only where a test's assertion actually
+    // depends on the app's own text-role weights (see the winner-name-bold
+    // test below, the reason this parameter exists at all).
+    ThemeData? theme,
   }) {
     return ProviderScope(
       overrides: [
@@ -37,7 +43,7 @@ void main() {
         ),
         venuesProvider.overrideWith((ref) => Stream.value(const [])),
       ],
-      child: MaterialApp(home: home),
+      child: MaterialApp(theme: theme, home: home),
     );
   }
 
@@ -67,25 +73,30 @@ void main() {
   ];
 
   group('showDayMatchesDialog', () {
-    testWidgets('lists every event in full with its time and side',
-        (tester) async {
-      await tester.pumpWidget(wrap(
-        Scaffold(
-          body: Builder(
-            builder: (context) => TextButton(
-              onPressed: () => showDayMatchesDialog(context, date, matches),
-              child: const Text('open'),
+    testWidgets('lists every event in full with its time and side', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        wrap(
+          Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () => showDayMatchesDialog(context, date, matches),
+                child: const Text('open'),
+              ),
             ),
           ),
         ),
-      ));
+      );
       await tester.tap(find.text('open'));
       await tester.pumpAndSettle();
 
       expect(find.byType(AlertDialog), findsOneWidget);
       // Full names, untruncated — both, even the long second one.
-      expect(find.text('SKK Veverky Brno C – SK Brno Žabovřesky B'),
-          findsOneWidget);
+      expect(
+        find.text('SKK Veverky Brno C – SK Brno Žabovřesky B'),
+        findsOneWidget,
+      );
       expect(find.text('KK MS Brno C – TJ Sokol Brno IV D'), findsOneWidget);
       expect(find.text('16:30–18:30 · doma'), findsNWidgets(2));
 
@@ -95,40 +106,46 @@ void main() {
     });
 
     testWidgets('an away match reads "venku"', (tester) async {
-      await tester.pumpWidget(wrap(
-        Scaffold(
-          body: Builder(
-            builder: (context) => TextButton(
-              onPressed: () => showDayMatchesDialog(
-                  context, date, [match('A', 'B', away_: true)]),
-              child: const Text('open'),
+      await tester.pumpWidget(
+        wrap(
+          Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () => showDayMatchesDialog(context, date, [
+                  match('A', 'B', away_: true),
+                ]),
+                child: const Text('open'),
+              ),
             ),
           ),
         ),
-      ));
+      );
       await tester.tap(find.text('open'));
       await tester.pumpAndSettle();
       expect(find.text('16:30–18:30 · venku'), findsOneWidget);
     });
 
     testWidgets('no events opens nothing', (tester) async {
-      await tester.pumpWidget(wrap(
-        Scaffold(
-          body: Builder(
-            builder: (context) => TextButton(
-              onPressed: () => showDayMatchesDialog(context, date, const []),
-              child: const Text('open'),
+      await tester.pumpWidget(
+        wrap(
+          Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () => showDayMatchesDialog(context, date, const []),
+                child: const Text('open'),
+              ),
             ),
           ),
         ),
-      ));
+      );
       await tester.tap(find.text('open'));
       await tester.pumpAndSettle();
       expect(find.byType(AlertDialog), findsNothing);
     });
 
-    testWidgets('a finished federation match shows its points and pins',
-        (tester) async {
+    testWidgets('a finished federation match shows its points and pins', (
+      tester,
+    ) async {
       final finished = match(
         'TJ Sokol Husovice',
         'TJ Slovan Karlovy Vary',
@@ -144,19 +161,21 @@ void main() {
         'away_total': 3349,
         'fetched_at': '2026-09-17T21:00:00+00:00',
       });
-      await tester.pumpWidget(wrap(
-        Scaffold(
-          body: Builder(
-            builder: (context) => TextButton(
-              onPressed: () =>
-                  showDayMatchesDialog(context, date, [finished]),
-              child: const Text('open'),
+      await tester.pumpWidget(
+        wrap(
+          Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () =>
+                    showDayMatchesDialog(context, date, [finished]),
+                child: const Text('open'),
+              ),
             ),
           ),
+          results: {'m1': result},
+          slots: [finished],
         ),
-        results: {'m1': result},
-        slots: [finished],
-      ));
+      );
       await tester.tap(find.text('open'));
       await tester.pumpAndSettle();
 
@@ -165,44 +184,52 @@ void main() {
     });
 
     testWidgets(
-        'a scheduled result shows only the title — no score, hours before '
-        'kickoff (well outside isLive\'s own refresh window, which does not '
-        'gate this — hasScoreData does, on status alone)', (tester) async {
-      final upcoming = match(
-        'TJ Sokol Husovice',
-        'TJ Slovan Karlovy Vary',
-        id: 'm7',
-        importKey: 'cka:m7',
-      );
-      // A row the sync created ahead of kickoff — status scheduled, all
-      // points null.
-      final result = MatchResult.fromJson(const {
-        'match_id': 'm7',
-        'status': 'scheduled',
-        'fetched_at': '2026-09-18T11:00:00+00:00',
-      });
-      await tester.pumpWidget(wrap(
-        Scaffold(
-          body: Builder(
-            builder: (context) => TextButton(
-              onPressed: () => showDayMatchesDialog(context, date, [upcoming]),
-              child: const Text('open'),
+      'a scheduled result shows only the title — no score, hours before '
+      'kickoff (well outside isLive\'s own refresh window, which does not '
+      'gate this — hasScoreData does, on status alone)',
+      (tester) async {
+        final upcoming = match(
+          'TJ Sokol Husovice',
+          'TJ Slovan Karlovy Vary',
+          id: 'm7',
+          importKey: 'cka:m7',
+        );
+        // A row the sync created ahead of kickoff — status scheduled, all
+        // points null.
+        final result = MatchResult.fromJson(const {
+          'match_id': 'm7',
+          'status': 'scheduled',
+          'fetched_at': '2026-09-18T11:00:00+00:00',
+        });
+        await tester.pumpWidget(
+          wrap(
+            Scaffold(
+              body: Builder(
+                builder: (context) => TextButton(
+                  onPressed: () =>
+                      showDayMatchesDialog(context, date, [upcoming]),
+                  child: const Text('open'),
+                ),
+              ),
             ),
+            results: {'m7': result},
+            slots: [upcoming],
           ),
-        ),
-        results: {'m7': result},
-        slots: [upcoming],
-      ));
-      await tester.tap(find.text('open'));
-      await tester.pumpAndSettle();
+        );
+        await tester.tap(find.text('open'));
+        await tester.pumpAndSettle();
 
-      expect(find.text('TJ Sokol Husovice – TJ Slovan Karlovy Vary'),
-          findsOneWidget);
-      expect(find.text('–'), findsNothing);
-    });
+        expect(
+          find.text('TJ Sokol Husovice – TJ Slovan Karlovy Vary'),
+          findsOneWidget,
+        );
+        expect(find.text('–'), findsNothing);
+      },
+    );
 
-    testWidgets(
-        'a preparation result also shows only the title', (tester) async {
+    testWidgets('a preparation result also shows only the title', (
+      tester,
+    ) async {
       final upcoming = match(
         'TJ Sokol Husovice',
         'TJ Slovan Karlovy Vary',
@@ -214,100 +241,126 @@ void main() {
         'status': 'preparation',
         'fetched_at': '2026-09-18T11:00:00+00:00',
       });
-      await tester.pumpWidget(wrap(
-        Scaffold(
-          body: Builder(
-            builder: (context) => TextButton(
-              onPressed: () => showDayMatchesDialog(context, date, [upcoming]),
-              child: const Text('open'),
+      await tester.pumpWidget(
+        wrap(
+          Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () =>
+                    showDayMatchesDialog(context, date, [upcoming]),
+                child: const Text('open'),
+              ),
             ),
           ),
+          results: {'m8': result},
+          slots: [upcoming],
         ),
-        results: {'m8': result},
-        slots: [upcoming],
-      ));
+      );
       await tester.tap(find.text('open'));
       await tester.pumpAndSettle();
 
-      expect(find.text('TJ Sokol Husovice – TJ Slovan Karlovy Vary'),
-          findsOneWidget);
+      expect(
+        find.text('TJ Sokol Husovice – TJ Slovan Karlovy Vary'),
+        findsOneWidget,
+      );
     });
 
     testWidgets(
-        'an in_progress result with null points still shows the score row '
-        '(a dash)', (tester) async {
-      final live = match(
-        'TJ Sokol Husovice',
-        'TJ Slovan Karlovy Vary',
-        id: 'm9',
-        importKey: 'cka:m9',
-      );
-      final result = MatchResult.fromJson(const {
-        'match_id': 'm9',
-        'status': 'in_progress',
-        'fetched_at': '2026-09-18T11:40:00+00:00',
-      });
-      await tester.pumpWidget(wrap(
-        Scaffold(
-          body: Builder(
-            builder: (context) => TextButton(
-              onPressed: () => showDayMatchesDialog(context, date, [live]),
-              child: const Text('open'),
+      'an in_progress result with null points still shows the score row '
+      '(a dash)',
+      (tester) async {
+        final live = match(
+          'TJ Sokol Husovice',
+          'TJ Slovan Karlovy Vary',
+          id: 'm9',
+          importKey: 'cka:m9',
+        );
+        final result = MatchResult.fromJson(const {
+          'match_id': 'm9',
+          'status': 'in_progress',
+          'fetched_at': '2026-09-18T11:40:00+00:00',
+        });
+        await tester.pumpWidget(
+          wrap(
+            Scaffold(
+              body: Builder(
+                builder: (context) => TextButton(
+                  onPressed: () => showDayMatchesDialog(context, date, [live]),
+                  child: const Text('open'),
+                ),
+              ),
             ),
+            results: {'m9': result},
+            slots: [live],
           ),
-        ),
-        results: {'m9': result},
-        slots: [live],
-      ));
-      await tester.tap(find.text('open'));
-      await tester.pumpAndSettle();
+        );
+        await tester.tap(find.text('open'));
+        await tester.pumpAndSettle();
 
-      expect(find.text('–'), findsOneWidget);
-    });
+        expect(find.text('–'), findsOneWidget);
+      },
+    );
 
-    testWidgets('the winning side\'s team NAME is bold in the day dialog',
-        (tester) async {
-      final finished = match(
-        'TJ Sokol Husovice',
-        'TJ Slovan Karlovy Vary',
-        id: 'm11',
-        importKey: 'cka:m11',
-      );
-      final result = MatchResult.fromJson(const {
-        'match_id': 'm11',
-        'status': 'finished',
-        'home_points': 5,
-        'away_points': 3,
-        'fetched_at': '2026-09-18T11:40:00+00:00',
-      });
-      await tester.pumpWidget(wrap(
-        Scaffold(
-          body: Builder(
-            builder: (context) => TextButton(
-              onPressed: () => showDayMatchesDialog(context, date, [finished]),
-              child: const Text('open'),
+    testWidgets(
+      'the winning side\'s team NAME gets a fixed w900 weight under the '
+      'app\'s REAL theme, where titleSmall is already w700 — plain '
+      '"bold" (also w700) would be a no-op here, which is exactly the '
+      'bug this test guards against',
+      (tester) async {
+        final finished = match(
+          'TJ Sokol Husovice',
+          'TJ Slovan Karlovy Vary',
+          id: 'm11',
+          importKey: 'cka:m11',
+        );
+        final result = MatchResult.fromJson(const {
+          'match_id': 'm11',
+          'status': 'finished',
+          'home_points': 5,
+          'away_points': 3,
+          'fetched_at': '2026-09-18T11:40:00+00:00',
+        });
+        await tester.pumpWidget(
+          wrap(
+            Scaffold(
+              body: Builder(
+                builder: (context) => TextButton(
+                  onPressed: () =>
+                      showDayMatchesDialog(context, date, [finished]),
+                  child: const Text('open'),
+                ),
+              ),
             ),
+            results: {'m11': result},
+            slots: [finished],
+            theme: buildTheme(Brightness.light),
           ),
-        ),
-        results: {'m11': result},
-        slots: [finished],
-      ));
-      await tester.tap(find.text('open'));
-      await tester.pumpAndSettle();
+        );
+        await tester.tap(find.text('open'));
+        await tester.pumpAndSettle();
 
-      // Plain, unweighted score — emphasis moved to the winning name.
-      final scoreText = tester.widget<Text>(find.text('5 : 3'));
-      expect(scoreText.style?.fontWeight, isNot(FontWeight.bold));
+        // The score is a single plain Text(pointsLabel(...), style: ...) — no
+        // per-side branching to test; both digits necessarily share the one
+        // style. Confirm it's exactly the base style, nothing conditional.
+        final scoreText = tester.widget<Text>(find.text('5 : 3'));
+        expect(
+          scoreText.style,
+          Theme.of(tester.element(find.text('5 : 3'))).textTheme.titleSmall,
+        );
 
-      final titleText =
-          tester.widget<Text>(find.text('TJ Sokol Husovice – TJ Slovan Karlovy Vary'));
-      final spans = (titleText.textSpan! as TextSpan).children!.cast<TextSpan>();
-      expect(spans[0].style?.fontWeight, FontWeight.bold, reason: 'home won');
-      expect(spans[2].style?.fontWeight, isNot(FontWeight.bold));
-    });
+        final titleText = tester.widget<Text>(
+          find.text('TJ Sokol Husovice – TJ Slovan Karlovy Vary'),
+        );
+        final spans = (titleText.textSpan! as TextSpan).children!
+            .cast<TextSpan>();
+        expect(spans[0].style?.fontWeight, FontWeight.w900, reason: 'home won');
+        expect(spans[2].style?.fontWeight, isNot(FontWeight.w900));
+      },
+    );
 
-    testWidgets('a video button exists with tooltip Video and launches it',
-        (tester) async {
+    testWidgets('a video button exists with tooltip Video and launches it', (
+      tester,
+    ) async {
       final withVideo = match(
         'TJ Sokol Husovice',
         'TJ Slovan Karlovy Vary',
@@ -316,22 +369,21 @@ void main() {
         videoUrl: 'https://vysledky.kuzelky.cz/video/m3',
       );
       final launched = <String>[];
-      await tester.pumpWidget(wrap(
-        Scaffold(
-          body: Builder(
-            builder: (context) => TextButton(
-              onPressed: () => showDayMatchesDialog(
-                context,
-                date,
-                [withVideo],
-                launch: launched.add,
+      await tester.pumpWidget(
+        wrap(
+          Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () => showDayMatchesDialog(context, date, [
+                  withVideo,
+                ], launch: launched.add),
+                child: const Text('open'),
               ),
-              child: const Text('open'),
             ),
           ),
+          slots: [withVideo],
         ),
-        slots: [withVideo],
-      ));
+      );
       await tester.tap(find.text('open'));
       await tester.pumpAndSettle();
 
@@ -347,8 +399,7 @@ void main() {
       expect(find.byType(MatchDetailScreen), findsNothing);
     });
 
-    testWidgets(
-        'opened non-interactively: score shows, no video button, no '
+    testWidgets('opened non-interactively: score shows, no video button, no '
         'tap-through', (tester) async {
       final federationWithVideo = match(
         'TJ Sokol Husovice',
@@ -364,23 +415,22 @@ void main() {
         'away_points': 3,
         'fetched_at': '2026-09-17T21:00:00+00:00',
       });
-      await tester.pumpWidget(wrap(
-        Scaffold(
-          body: Builder(
-            builder: (context) => TextButton(
-              onPressed: () => showDayMatchesDialog(
-                context,
-                date,
-                [federationWithVideo],
-                interactive: false,
+      await tester.pumpWidget(
+        wrap(
+          Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () => showDayMatchesDialog(context, date, [
+                  federationWithVideo,
+                ], interactive: false),
+                child: const Text('open'),
               ),
-              child: const Text('open'),
             ),
           ),
+          results: {'m6': result},
+          slots: [federationWithVideo],
         ),
-        results: {'m6': result},
-        slots: [federationWithVideo],
-      ));
+      );
       await tester.tap(find.text('open'));
       await tester.pumpAndSettle();
 
@@ -392,8 +442,7 @@ void main() {
       expect(find.byIcon(Icons.videocam), findsNothing);
       expect(find.byIcon(Icons.emoji_events_outlined), findsOneWidget);
 
-      await tester.tap(
-          find.text('TJ Sokol Husovice – TJ Slovan Karlovy Vary'));
+      await tester.tap(find.text('TJ Sokol Husovice – TJ Slovan Karlovy Vary'));
       await tester.pumpAndSettle();
 
       expect(find.byType(MatchDetailScreen), findsNothing);
@@ -401,51 +450,58 @@ void main() {
     });
 
     testWidgets(
-        'tapping a federation match closes the dialog and opens the detail',
-        (tester) async {
-      final federation = match(
-        'TJ Sokol Husovice',
-        'TJ Slovan Karlovy Vary',
-        id: 'm4',
-        importKey: 'cka:m4',
-      );
-      await tester.pumpWidget(wrap(
-        Scaffold(
-          body: Builder(
-            builder: (context) => TextButton(
-              onPressed: () =>
-                  showDayMatchesDialog(context, date, [federation]),
-              child: const Text('open'),
+      'tapping a federation match closes the dialog and opens the detail',
+      (tester) async {
+        final federation = match(
+          'TJ Sokol Husovice',
+          'TJ Slovan Karlovy Vary',
+          id: 'm4',
+          importKey: 'cka:m4',
+        );
+        await tester.pumpWidget(
+          wrap(
+            Scaffold(
+              body: Builder(
+                builder: (context) => TextButton(
+                  onPressed: () =>
+                      showDayMatchesDialog(context, date, [federation]),
+                  child: const Text('open'),
+                ),
+              ),
             ),
+            slots: [federation],
           ),
-        ),
-        slots: [federation],
-      ));
-      await tester.tap(find.text('open'));
-      await tester.pumpAndSettle();
+        );
+        await tester.tap(find.text('open'));
+        await tester.pumpAndSettle();
 
-      await tester.tap(
-          find.text('TJ Sokol Husovice – TJ Slovan Karlovy Vary'));
-      await tester.pumpAndSettle();
+        await tester.tap(
+          find.text('TJ Sokol Husovice – TJ Slovan Karlovy Vary'),
+        );
+        await tester.pumpAndSettle();
 
-      expect(find.byType(AlertDialog), findsNothing);
-      expect(find.byType(MatchDetailScreen), findsOneWidget);
-    });
+        expect(find.byType(AlertDialog), findsNothing);
+        expect(find.byType(MatchDetailScreen), findsOneWidget);
+      },
+    );
 
-    testWidgets('a manual (non-federation) match is not tappable',
-        (tester) async {
+    testWidgets('a manual (non-federation) match is not tappable', (
+      tester,
+    ) async {
       final manual = match('A', 'B', id: 'm5');
-      await tester.pumpWidget(wrap(
-        Scaffold(
-          body: Builder(
-            builder: (context) => TextButton(
-              onPressed: () => showDayMatchesDialog(context, date, [manual]),
-              child: const Text('open'),
+      await tester.pumpWidget(
+        wrap(
+          Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () => showDayMatchesDialog(context, date, [manual]),
+                child: const Text('open'),
+              ),
             ),
           ),
+          slots: [manual],
         ),
-        slots: [manual],
-      ));
+      );
       await tester.tap(find.text('open'));
       await tester.pumpAndSettle();
 
@@ -458,30 +514,38 @@ void main() {
   });
 
   testWidgets('tapping the week header strip opens the dialog', (tester) async {
-    await tester.pumpWidget(wrap(
-      BoardColumnHeader(
-        date: date,
-        isToday: false,
-        priority: matches,
-        height: 120,
+    await tester.pumpWidget(
+      wrap(
+        BoardColumnHeader(
+          date: date,
+          isToday: false,
+          priority: matches,
+          height: 120,
+        ),
       ),
-    ));
+    );
     // Before the tap the bare title is nowhere — the strip shows the label.
-    expect(find.text('SKK Veverky Brno C – SK Brno Žabovřesky B'), findsNothing);
+    expect(
+      find.text('SKK Veverky Brno C – SK Brno Žabovřesky B'),
+      findsNothing,
+    );
 
     await tester.tap(find.textContaining('SKK Veverky Brno C').first);
     await tester.pumpAndSettle();
 
     expect(find.byType(AlertDialog), findsOneWidget);
-    expect(find.text('SKK Veverky Brno C – SK Brno Žabovřesky B'),
-        findsOneWidget);
+    expect(
+      find.text('SKK Veverky Brno C – SK Brno Žabovřesky B'),
+      findsOneWidget,
+    );
   });
 
-  testWidgets('tapping the pager header strip opens the dialog too',
-      (tester) async {
-    await tester.pumpWidget(wrap(
-      DayHeader(date: date, priority: matches, chipLabel: '7 volných'),
-    ));
+  testWidgets('tapping the pager header strip opens the dialog too', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      wrap(DayHeader(date: date, priority: matches, chipLabel: '7 volných')),
+    );
     await tester.tap(find.textContaining('KK MS Brno C').first);
     await tester.pumpAndSettle();
 

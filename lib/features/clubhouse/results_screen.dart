@@ -40,7 +40,7 @@ class ResultsScreen extends ConsumerStatefulWidget {
 
 class _ResultsScreenState extends ConsumerState<ResultsScreen> {
   String? _team;
-  bool _scrolledToToday = false;
+  bool _scrolledToRecentResults = false;
   bool _didLiveRefreshCheck = false;
   final Map<Day, GlobalKey> _dayKeys = {};
 
@@ -58,9 +58,7 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
 
   static void _openMatch(BuildContext context, PrioritySlot slot) =>
       Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => MatchDetailScreen(matchId: slot.id),
-        ),
+        MaterialPageRoute(builder: (_) => MatchDetailScreen(matchId: slot.id)),
       );
 
   static List<PrioritySlot> _liveMatches(
@@ -160,7 +158,7 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
         ),
         launch: widget.launch,
       ),
-      title: MatchTitle(slot: slot, winner: winningSide(result?.homePoints, result?.awayPoints)),
+      title: MatchTitle(slot: slot, winner: displayWinner(result)),
       subtitle: Text(subtitle),
       trailing: Column(
         crossAxisAlignment: CrossAxisAlignment.end,
@@ -232,9 +230,9 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
     final scrollIdx = recentResultsIndex(days, results, today);
     if (!slotsLoading &&
         resultsAsync.hasValue &&
-        !_scrolledToToday &&
+        !_scrolledToRecentResults &&
         scrollIdx >= 0) {
-      _scrolledToToday = true;
+      _scrolledToRecentResults = true;
       final key = _keyFor(days[scrollIdx].day);
       WidgetsBinding.instance.addPostFrameCallback((_) {
         final ctx = key.currentContext;

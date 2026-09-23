@@ -220,38 +220,46 @@ void main() {
     expect(find.text('–'), findsOneWidget);
   });
 
-  testWidgets('the winning side\'s team NAME is bold, the score stays plain', (
-    tester,
-  ) async {
-    await tester.pumpWidget(
-      app(slots: [finishedYesterday], results: {'m1': finishedResult}),
-    );
-    await tester.pumpAndSettle();
+  testWidgets(
+    'the winning side\'s team NAME gets the fixed w900 weight, the score '
+    'never gets winner-conditional styling',
+    (tester) async {
+      await tester.pumpWidget(
+        app(slots: [finishedYesterday], results: {'m1': finishedResult}),
+      );
+      await tester.pumpAndSettle();
 
-    final scoreText = tester.widget<Text>(find.text('5 : 3'));
-    expect(scoreText.style?.fontWeight, isNot(FontWeight.bold));
+      // The score is a single plain Text(pointsLabel(...), style: ...) — no
+      // per-side branching in the code to test; both digits necessarily
+      // share the one style regardless of who won.
+      final scoreText = tester.widget<Text>(find.text('5 : 3'));
+      expect(
+        scoreText.style,
+        Theme.of(tester.element(find.text('5 : 3'))).textTheme.titleMedium,
+      );
 
-    final titleText =
-        tester.widget<Text>(find.text('$veverky – $souperA'));
-    final spans = (titleText.textSpan! as TextSpan).children!.cast<TextSpan>();
-    expect(spans[0].style?.fontWeight, FontWeight.bold, reason: 'home won');
-    expect(spans[2].style?.fontWeight, isNot(FontWeight.bold));
-  });
+      final titleText = tester.widget<Text>(find.text('$veverky – $souperA'));
+      final spans = (titleText.textSpan! as TextSpan).children!
+          .cast<TextSpan>();
+      expect(spans[0].style?.fontWeight, FontWeight.w900, reason: 'home won');
+      expect(spans[2].style?.fontWeight, isNot(FontWeight.w900));
+    },
+  );
 
   testWidgets(
-      'a draw or a match with no result renders with no bold winner name', (
-    tester,
-  ) async {
-    await tester.pumpWidget(app(slots: [futureNoResult]));
-    await tester.pumpAndSettle();
+    'a draw or a match with no result renders with no weighted winner '
+    'name',
+    (tester) async {
+      await tester.pumpWidget(app(slots: [futureNoResult]));
+      await tester.pumpAndSettle();
 
-    // No result at all — MatchTitle falls back to a plain Text, same as
-    // find.text always matched before this batch.
-    final titleText =
-        tester.widget<Text>(find.text('$veverky – $souperB'));
-    expect(titleText.textSpan, isNull);
-    expect(titleText.style?.fontWeight, isNot(FontWeight.bold));
-  });
+      // No result at all — MatchTitle falls back to a plain Text, same as
+      // find.text always matched before this batch.
+      final titleText = tester.widget<Text>(find.text('$veverky – $souperB'));
+      expect(titleText.textSpan, isNull);
+      expect(titleText.style?.fontWeight, isNot(FontWeight.w900));
+    },
+  );
 
   testWidgets('subtitle shows time, competition, round and doma/venku', (
     tester,
@@ -265,29 +273,30 @@ void main() {
   });
 
   testWidgets(
-      'a live match shows the videocam badge (tooltip Živý přenos), which '
-      'launches the video url', (tester) async {
-    final launched = <String>[];
-    await tester.pumpWidget(
-      app(
-        slots: [liveToday],
-        results: {'m2': liveResult},
-        launch: launched.add,
-      ),
-    );
-    await tester.pumpAndSettle();
+    'a live match shows the videocam badge (tooltip Živý přenos), which '
+    'launches the video url',
+    (tester) async {
+      final launched = <String>[];
+      await tester.pumpWidget(
+        app(
+          slots: [liveToday],
+          results: {'m2': liveResult},
+          launch: launched.add,
+        ),
+      );
+      await tester.pumpAndSettle();
 
-    final button = find.widgetWithIcon(IconButton, Icons.videocam);
-    expect(button, findsOneWidget);
-    expect(tester.widget<IconButton>(button).tooltip, 'Živý přenos');
-    await tester.tap(button);
-    await tester.pumpAndSettle();
+      final button = find.widgetWithIcon(IconButton, Icons.videocam);
+      expect(button, findsOneWidget);
+      expect(tester.widget<IconButton>(button).tooltip, 'Živý přenos');
+      await tester.tap(button);
+      await tester.pumpAndSettle();
 
-    expect(launched, ['https://vysledky.kuzelky.cz/video/m2']);
-  });
+      expect(launched, ['https://vysledky.kuzelky.cz/video/m2']);
+    },
+  );
 
-  testWidgets(
-      'a finished match with a video shows the play_circle_fill badge '
+  testWidgets('a finished match with a video shows the play_circle_fill badge '
       '(tooltip Záznam) in place of the trophy', (tester) async {
     final finishedWithVideo = match(
       id: 'm6',
@@ -302,10 +311,7 @@ void main() {
       'fetched_at': '2026-09-22T21:00:00+00:00',
     });
     await tester.pumpWidget(
-      app(
-        slots: [finishedWithVideo],
-        results: {'m6': finishedResultWithVideo},
-      ),
+      app(slots: [finishedWithVideo], results: {'m6': finishedResultWithVideo}),
     );
     await tester.pumpAndSettle();
 
@@ -447,40 +453,39 @@ void main() {
     },
   );
 
-  testWidgets(
-    'with a decided past match, scrolls to ITS day, not today\'s',
-    (tester) async {
-      // today-2 is decided (finished); today-1 and today itself are still
-      // undecided (scheduled) — recentResultsIndex must land on today-2's
-      // header, not on 'Dnes'.
-      final decidedDay = today.addDays(-2);
-      final pastMatches = [
-        for (var i = 2; i >= 1; i--) match(id: 'past$i', date: today.addDays(-i)),
-      ];
-      final futureMatches = [
-        for (var i = 1; i <= 10; i++)
-          match(id: 'future$i', date: today.addDays(i)),
-      ];
-      final decidedResult = MatchResult.fromJson(const {
-        'match_id': 'past2',
-        'status': 'finished',
-        'home_points': 5,
-        'away_points': 3,
-        'fetched_at': '2026-09-20T21:00:00+00:00',
-      });
-      await tester.pumpWidget(
-        app(
-          slots: [...pastMatches, liveToday, ...futureMatches],
-          results: {'past2': decidedResult},
-        ),
-      );
-      await tester.pumpAndSettle();
+  testWidgets('with a decided past match, scrolls to ITS day, not today\'s', (
+    tester,
+  ) async {
+    // today-2 is decided (finished); today-1 and today itself are still
+    // undecided (scheduled) — recentResultsIndex must land on today-2's
+    // header, not on 'Dnes'.
+    final decidedDay = today.addDays(-2);
+    final pastMatches = [
+      for (var i = 2; i >= 1; i--) match(id: 'past$i', date: today.addDays(-i)),
+    ];
+    final futureMatches = [
+      for (var i = 1; i <= 10; i++)
+        match(id: 'future$i', date: today.addDays(i)),
+    ];
+    final decidedResult = MatchResult.fromJson(const {
+      'match_id': 'past2',
+      'status': 'finished',
+      'home_points': 5,
+      'away_points': 3,
+      'fetched_at': '2026-09-20T21:00:00+00:00',
+    });
+    await tester.pumpWidget(
+      app(
+        slots: [...pastMatches, liveToday, ...futureMatches],
+        results: {'past2': decidedResult},
+      ),
+    );
+    await tester.pumpAndSettle();
 
-      final decidedHeader = tester.getTopLeft(find.text(dayFull(decidedDay)));
-      // Aligned to the top of the scrollable area, just below chips/app bar.
-      expect(decidedHeader.dy, inInclusiveRange(0, 200));
-    },
-  );
+    final decidedHeader = tester.getTopLeft(find.text(dayFull(decidedDay)));
+    // Aligned to the top of the scrollable area, just below chips/app bar.
+    expect(decidedHeader.dy, inInclusiveRange(0, 200));
+  });
 
   testWidgets('tapping a row opens the match detail screen', (tester) async {
     await tester.pumpWidget(app(slots: [finishedYesterday]));

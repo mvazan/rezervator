@@ -107,12 +107,14 @@ void main() {
     'team_points': 0,
   });
 
-  MatchResult liveResultWith({String status = 'in_progress', String fetchedAt = '2026-09-23T17:40:00+00:00'}) =>
-      MatchResult.fromJson({
-        'match_id': 'm2',
-        'status': status,
-        'fetched_at': fetchedAt,
-      });
+  MatchResult liveResultWith({
+    String status = 'in_progress',
+    String fetchedAt = '2026-09-23T17:40:00+00:00',
+  }) => MatchResult.fromJson({
+    'match_id': 'm2',
+    'status': status,
+    'fetched_at': fetchedAt,
+  });
 
   // A test-only StreamProvider our own prioritySlotsProvider/
   // prioritySlotsLoadingProvider overrides can watch, so a test can flip
@@ -171,9 +173,9 @@ void main() {
                 body: Builder(
                   builder: (context) => Center(
                     child: ElevatedButton(
-                      onPressed: () => Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => screen),
-                      ),
+                      onPressed: () => Navigator.of(
+                        context,
+                      ).push(MaterialPageRoute(builder: (_) => screen)),
                       child: const Text('open'),
                     ),
                   ),
@@ -197,13 +199,17 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // Plain, unweighted score — emphasis is on the winning team's NAME.
+      // The score is a single plain Text(pointsLabel(...), style: ...) — no
+      // per-side branching in the code to test.
       final scoreText = tester.widget<Text>(find.text('5 : 3'));
-      expect(scoreText.style?.fontWeight, isNot(FontWeight.bold));
+      expect(
+        scoreText.style,
+        Theme.of(tester.element(find.text('5 : 3'))).textTheme.headlineSmall,
+      );
       final homeName = tester.widget<Text>(find.text(home));
-      expect(homeName.style?.fontWeight, FontWeight.bold);
+      expect(homeName.style?.fontWeight, FontWeight.w900);
       final awayName = tester.widget<Text>(find.text(away));
-      expect(awayName.style?.fontWeight, isNot(FontWeight.bold));
+      expect(awayName.style?.fontWeight, isNot(FontWeight.w900));
       expect(find.text('3460 : 3349'), findsOneWidget);
       expect(find.textContaining('SB 15 : 9'), findsOneWidget);
       // The joined format+status line, exactly (formatLabel + ' · ' + status).
@@ -300,47 +306,51 @@ void main() {
   });
 
   testWidgets(
-      'a scheduled match with a video (not yet live) reads the plain Video '
-      'label', (tester) async {
-    await tester.pumpWidget(
-      app(
-        slots: [
-          match(
-            id: 'm1',
-            date: today.addDays(5),
-            videoUrl: 'https://vysledky.kuzelky.cz/video/m1',
-          ),
-        ],
-      ),
-    );
-    await tester.pumpAndSettle();
+    'a scheduled match with a video (not yet live) reads the plain Video '
+    'label',
+    (tester) async {
+      await tester.pumpWidget(
+        app(
+          slots: [
+            match(
+              id: 'm1',
+              date: today.addDays(5),
+              videoUrl: 'https://vysledky.kuzelky.cz/video/m1',
+            ),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
 
-    expect(find.text('Video'), findsOneWidget);
-    expect(find.byIcon(Icons.play_circle_fill), findsOneWidget);
-  });
+      expect(find.text('Video'), findsOneWidget);
+      expect(find.byIcon(Icons.play_circle_fill), findsOneWidget);
+    },
+  );
 
   testWidgets(
-      'a live match reads Sledovat živě with a small red dot, not the play '
-      'icon', (tester) async {
-    await tester.pumpWidget(
-      app(
-        matchId: 'm2',
-        slots: [
-          match(
-            id: 'm2',
-            date: today,
-            videoUrl: 'https://vysledky.kuzelky.cz/video/m2',
-          ),
-        ],
-        results: {'m2': liveResultWith()},
-      ),
-    );
-    await tester.pumpAndSettle();
+    'a live match reads Sledovat živě with a small red dot, not the play '
+    'icon',
+    (tester) async {
+      await tester.pumpWidget(
+        app(
+          matchId: 'm2',
+          slots: [
+            match(
+              id: 'm2',
+              date: today,
+              videoUrl: 'https://vysledky.kuzelky.cz/video/m2',
+            ),
+          ],
+          results: {'m2': liveResultWith()},
+        ),
+      );
+      await tester.pumpAndSettle();
 
-    expect(find.text('Sledovat živě'), findsOneWidget);
-    expect(find.byIcon(Icons.circle), findsOneWidget);
-    expect(find.byIcon(Icons.play_circle_fill), findsNothing);
-  });
+      expect(find.text('Sledovat živě'), findsOneWidget);
+      expect(find.byIcon(Icons.circle), findsOneWidget);
+      expect(find.byIcon(Icons.play_circle_fill), findsNothing);
+    },
+  );
 
   testWidgets('freshness line reads relative to nowProvider', (tester) async {
     final fetched = now.subtract(const Duration(minutes: 20));
@@ -362,7 +372,9 @@ void main() {
 
   testWidgets('no result yet shows the no-results line', (tester) async {
     await tester.pumpWidget(
-      app(slots: [match(id: 'm1', date: today.addDays(5))]),
+      app(
+        slots: [match(id: 'm1', date: today.addDays(5))],
+      ),
     );
     await tester.pumpAndSettle();
 
@@ -451,9 +463,7 @@ void main() {
     },
   );
 
-  testWidgets('a finished match never shows the refresh icon', (
-    tester,
-  ) async {
+  testWidgets('a finished match never shows the refresh icon', (tester) async {
     await tester.pumpWidget(
       app(
         slots: [match(id: 'm1', date: today.addDays(-1))],
@@ -653,10 +663,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(VenueDetailScreen), findsOneWidget);
-      expect(
-        find.widgetWithText(AppBar, 'TJ Sokol Brno IV'),
-        findsOneWidget,
-      );
+      expect(find.widgetWithText(AppBar, 'TJ Sokol Brno IV'), findsOneWidget);
     },
   );
 

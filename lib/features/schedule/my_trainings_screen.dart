@@ -6,8 +6,10 @@ import '../../data/clock.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
 import '../../domain/palette.dart';
-import '../../domain/results.dart' show hasScoreData, pointsLabel;
+import '../../domain/results.dart'
+    show displayWinner, hasScoreData, pointsLabel;
 import '../../domain/upcoming.dart';
+import '../clubhouse/widgets/match_title.dart';
 import '../profile/profile_screen.dart';
 import 'cancel_own_reservation.dart';
 import 'widgets/home_header.dart';
@@ -53,7 +55,9 @@ class MatchTrophy extends StatelessWidget {
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           color: raw,
-          border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+          border: Border.all(
+            color: Theme.of(context).colorScheme.outlineVariant,
+          ),
         ),
         child: Icon(Icons.emoji_events, size: 20, color: _legibleOn(raw)),
       ),
@@ -144,13 +148,12 @@ class _MyTrainingsScreenState extends ConsumerState<MyTrainingsScreen> {
     UpcomingTraining item,
     bool started,
     Color? color,
-  ) =>
-      ListTile(
-        leading: _LeadingSlot(child: Icon(Icons.title, color: color)),
-        title: Text('${item.block.label} · Dráha ${item.reservation.lane}'),
-        trailing: started ? null : const Icon(Icons.close),
-        onTap: started ? null : () => _confirmCancel(context, item),
-      );
+  ) => ListTile(
+    leading: _LeadingSlot(child: Icon(Icons.title, color: color)),
+    title: Text('${item.block.label} · Dráha ${item.reservation.lane}'),
+    trailing: started ? null : const Icon(Icons.close),
+    onTap: started ? null : () => _confirmCancel(context, item),
+  );
 
   /// „Zápasy svých týmů…" hint — shown wherever the player follows no teams:
   /// the list's footer, and the empty state below „Do kalendáře". One widget
@@ -163,9 +166,9 @@ class _MyTrainingsScreenState extends ConsumerState<MyTrainingsScreen> {
           'Můj profil → Moje týmy.',
           style: theme.textTheme.bodySmall,
         ),
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const ProfileScreen()),
-        ),
+        onTap: () => Navigator.of(
+          context,
+        ).push(MaterialPageRoute(builder: (_) => const ProfileScreen())),
       );
 
   @override
@@ -206,11 +209,12 @@ class _MyTrainingsScreenState extends ConsumerState<MyTrainingsScreen> {
     // A training's own colour, the one set under Barva tréninků — the same
     // value that colours it in Google Calendar, so the T here and the event
     // there read as the same thing.
-    final trainingColorId =
-        ref.watch(myCalendarLinkProvider).value?.trainingColorId;
+    final trainingColorId = ref
+        .watch(myCalendarLinkProvider)
+        .value
+        ?.trainingColorId;
     final theme = Theme.of(context);
-    final trainingColor =
-        eventShadeOf(trainingColorId, theme.brightness);
+    final trainingColor = eventShadeOf(trainingColorId, theme.brightness);
 
     // The calendar's strip, minus the week navigation: the same title in
     // the same place and the same icons at the same right edge, so nothing
@@ -219,8 +223,8 @@ class _MyTrainingsScreenState extends ConsumerState<MyTrainingsScreen> {
 
     final stillLoading =
         (reservationsAsync.isLoading && !reservationsAsync.hasValue) ||
-            (blocksAsync.isLoading && !blocksAsync.hasValue) ||
-            slotsLoading;
+        (blocksAsync.isLoading && !blocksAsync.hasValue) ||
+        slotsLoading;
     if (stillLoading) {
       return Column(
         children: [
@@ -232,8 +236,8 @@ class _MyTrainingsScreenState extends ConsumerState<MyTrainingsScreen> {
 
     final failedToLoad =
         (reservationsAsync.hasError && !reservationsAsync.hasValue) ||
-            (blocksAsync.hasError && !blocksAsync.hasValue) ||
-            slotsFailed;
+        (blocksAsync.hasError && !blocksAsync.hasValue) ||
+        slotsFailed;
     if (failedToLoad) {
       return Column(
         children: [
@@ -304,11 +308,15 @@ class _MyTrainingsScreenState extends ConsumerState<MyTrainingsScreen> {
     // latching this on their pre-stream fallback values (`[]`/`{}`) would
     // scroll to a partial list's index and never revisit once the real
     // teams/exceptions arrive — same race class results_screen.dart's own
-    // recentResultsIndex gate was fixed for.
+    // recentResultsIndex gate was fixed for. A failed stream unblocks the
+    // scroll too (like it does everywhere else on this screen, see
+    // `stillLoading` above): either stream's own fallback (`[]`/`{}`) is
+    // then already final, and waiting forever for a value that will never
+    // come would leave the screen stuck unscrolled.
     final upcomingIdx = upcomingScrollIndex(days, today);
     if (!slotsLoading &&
-        profileAsync.hasValue &&
-        exceptionsAsync.hasValue &&
+        (profileAsync.hasValue || profileAsync.hasError) &&
+        (exceptionsAsync.hasValue || exceptionsAsync.hasError) &&
         !_scrolledToUpcoming &&
         upcomingIdx >= 0) {
       _scrolledToUpcoming = true;
@@ -347,41 +355,47 @@ class _MyTrainingsScreenState extends ConsumerState<MyTrainingsScreen> {
                   for (final item in day.items)
                     switch (item) {
                       UpcomingTraining() => _trainingTile(
-                          context,
-                          item,
-                          day.date == today &&
-                              item.block.startsAt.minutesFromMidnight <=
-                                  nowTime.minutesFromMidnight,
-                          trainingColor,
-                        ),
+                        context,
+                        item,
+                        day.date == today &&
+                            item.block.startsAt.minutesFromMidnight <=
+                                nowTime.minutesFromMidnight,
+                        trainingColor,
+                      ),
                       UpcomingMatch() => ListTile(
-                          leading: MatchTrophy(
-                            colorId: matchColorOf(
-                              item.slot,
-                              teams,
-                              teamColors,
-                              exceptions: exceptions,
-                            ),
+                        leading: MatchTrophy(
+                          colorId: matchColorOf(
+                            item.slot,
+                            teams,
+                            teamColors,
+                            exceptions: exceptions,
                           ),
-                          title: Text(item.slot.title),
-                          subtitle: Text([
+                        ),
+                        title: MatchTitle(
+                          slot: item.slot,
+                          winner: displayWinner(results[item.slot.id]),
+                        ),
+                        subtitle: Text(
+                          [
                             '${item.slot.startsAt.display()}–'
                                 '${item.slot.endsAt.display()}',
                             item.slot.isAway ? 'venku' : 'doma',
                             if (item.slot.description.isNotEmpty)
                               item.slot.description,
-                          ].join(' · ')),
-                          trailing: item.slot.fromFederation &&
-                                  hasScoreData(results[item.slot.id])
-                              ? Text(
-                                  pointsLabel(
-                                    results[item.slot.id]?.homePoints,
-                                    results[item.slot.id]?.awayPoints,
-                                  ),
-                                  style: theme.textTheme.bodyMedium,
-                                )
-                              : null,
+                          ].join(' · '),
                         ),
+                        trailing:
+                            item.slot.fromFederation &&
+                                hasScoreData(results[item.slot.id])
+                            ? Text(
+                                pointsLabel(
+                                  results[item.slot.id]?.homePoints,
+                                  results[item.slot.id]?.awayPoints,
+                                ),
+                                style: theme.textTheme.bodyMedium,
+                              )
+                            : null,
+                      ),
                     },
                 ],
                 if (teams.isEmpty) _followTeamsHint(context, theme),

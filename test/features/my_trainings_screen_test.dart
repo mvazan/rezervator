@@ -36,14 +36,14 @@ void main() {
     status: ProfileStatus.approved,
   );
   Reservation res(String id, Day date) => Reservation(
-        id: id,
-        playerId: 'me',
-        date: date,
-        blockId: 'b1',
-        lane: 2,
-        createdVia: 'app',
-        createdAt: DateTime.utc(2026, 1, 1),
-      );
+    id: id,
+    playerId: 'me',
+    date: date,
+    blockId: 'b1',
+    lane: 2,
+    createdVia: 'app',
+    createdAt: DateTime.utc(2026, 1, 1),
+  );
   final match = PrioritySlot(
     id: 'm1',
     date: today.addDays(2),
@@ -75,9 +75,11 @@ void main() {
     return ProviderScope(
       overrides: [
         myProfileProvider.overrideWith(
-            (ref) => profileStream ?? Stream.value(profile)),
+          (ref) => profileStream ?? Stream.value(profile),
+        ),
         myActiveReservationsProvider.overrideWith(
-            (ref) => reservationsStream ?? Stream.value(reservations)),
+          (ref) => reservationsStream ?? Stream.value(reservations),
+        ),
         timeBlocksProvider.overrideWith((ref) => Stream.value(const [b1])),
         prioritySlotsProvider.overrideWithValue(slots),
         // _prioritySlotRowsProvider is private to providers.dart, so a test
@@ -88,22 +90,26 @@ void main() {
         nowProvider.overrideWith((ref) => Stream.value(nowOverride ?? now)),
         myTeamColorsProvider.overrideWith((ref) => Stream.value(teamColors)),
         myMatchExceptionsProvider.overrideWith(
-            (ref) => exceptionsStream ?? Stream.value(exceptions)),
+          (ref) => exceptionsStream ?? Stream.value(exceptions),
+        ),
         matchResultsProvider.overrideWith((ref) => Stream.value(results)),
-        myCalendarLinkProvider.overrideWith((ref) => Stream.value(
-              trainingColorId == null
-                  ? CalendarLink.none
-                  : CalendarLink(
-                      status: CalendarLinkStatus.linked,
-                      trainingColorId: trainingColorId,
-                    ),
-            )),
+        myCalendarLinkProvider.overrideWith(
+          (ref) => Stream.value(
+            trainingColorId == null
+                ? CalendarLink.none
+                : CalendarLink(
+                    status: CalendarLinkStatus.linked,
+                    trainingColorId: trainingColorId,
+                  ),
+          ),
+        ),
       ],
       child: MaterialApp(
         home: Scaffold(
           body: MyTrainingsScreen(
             onOpenCalendar: onOpenCalendar ?? () {},
-            cancelReservation: cancel ?? (_) async => throw StateError('unexpected'),
+            cancelReservation:
+                cancel ?? (_) async => throw StateError('unexpected'),
           ),
         ),
       ),
@@ -112,10 +118,12 @@ void main() {
 
   testWidgets('lists trainings and followed matches by day, today and '
       'tomorrow by name', (tester) async {
-    await tester.pumpWidget(app(
-      reservations: [res('r1', today), res('r2', today.addDays(1))],
-      slots: [match],
-    ));
+    await tester.pumpWidget(
+      app(
+        reservations: [res('r1', today), res('r2', today.addDays(1))],
+        slots: [match],
+      ),
+    );
     await tester.pumpAndSettle();
 
     // The shared home strip: the app's name, not the view's — which view
@@ -132,7 +140,9 @@ void main() {
     // Chronological: today's training above the match two days out.
     expect(
       tester.getTopLeft(find.text('Dnes')).dy,
-      lessThan(tester.getTopLeft(find.text('SKK Veverky Brno A – KK MS Brno D')).dy),
+      lessThan(
+        tester.getTopLeft(find.text('SKK Veverky Brno A – KK MS Brno D')).dy,
+      ),
     );
     expect(find.textContaining('Moje týmy'), findsNothing);
   });
@@ -150,10 +160,9 @@ void main() {
       description: 'KP1 Sever',
       importKey: 'cka:past',
     );
-    await tester.pumpWidget(app(
-      reservations: [res('r1', today)],
-      slots: [pastMatch, match],
-    ));
+    await tester.pumpWidget(
+      app(reservations: [res('r1', today)], slots: [pastMatch, match]),
+    );
     await tester.pumpAndSettle();
 
     expect(find.text(dayFull(today.addDays(-3))), findsOneWidget);
@@ -191,23 +200,26 @@ void main() {
           importKey: 'cka:future$i',
         ),
     ];
-    await tester.pumpWidget(app(
-      reservations: [res('r1', today)],
-      slots: [...pastMatches, ...futureMatches],
-    ));
+    await tester.pumpWidget(
+      app(
+        reservations: [res('r1', today)],
+        slots: [...pastMatches, ...futureMatches],
+      ),
+    );
     await tester.pumpAndSettle();
 
-    final earliestHeader =
-        tester.getTopLeft(find.text(dayFull(today.addDays(-3))));
+    final earliestHeader = tester.getTopLeft(
+      find.text(dayFull(today.addDays(-3))),
+    );
     final todayHeader = tester.getTopLeft(find.text('Dnes'));
     expect(earliestHeader.dy, lessThan(0));
     expect(todayHeader.dy, inInclusiveRange(0, 200));
   });
 
-  testWidgets(
-      'the scroll waits for the profile stream too, not just slots — a '
-      'reservations-only partial list must not lock in the scroll target',
-      (tester) async {
+  testWidgets('the scroll waits for the profile stream too, not just slots — a '
+      'reservations-only partial list must not lock in the scroll target', (
+    tester,
+  ) async {
     // Matches need `teams` (from myProfileProvider) to be on the list at
     // all — while the profile stream is still pending, `days` only has the
     // reservation (today+5), a single day whose own "scroll" is a no-op
@@ -246,11 +258,13 @@ void main() {
     ];
     final profileCtrl = StreamController<Profile>();
     addTearDown(profileCtrl.close);
-    await tester.pumpWidget(app(
-      reservations: [res('r1', today.addDays(5))],
-      slots: [...pastMatches, ...upcomingMatches],
-      profileStream: profileCtrl.stream,
-    ));
+    await tester.pumpWidget(
+      app(
+        reservations: [res('r1', today.addDays(5))],
+        slots: [...pastMatches, ...upcomingMatches],
+        profileStream: profileCtrl.stream,
+      ),
+    );
     await tester.pump();
 
     // Profile still pending: only the reservation's day is on the list.
@@ -264,8 +278,9 @@ void main() {
     // stream instead of latching onto the reservation-only list (which
     // would have left the ten PAST days' headers pinned at the top and
     // "Zítra" scrolled far below the fold instead).
-    final earliestPastHeader =
-        tester.getTopLeft(find.text(dayFull(today.addDays(-10))));
+    final earliestPastHeader = tester.getTopLeft(
+      find.text(dayFull(today.addDays(-10))),
+    );
     final firstUpcomingHeader = tester.getTopLeft(find.text('Zítra'));
     expect(firstUpcomingHeader.dy, inInclusiveRange(0, 200));
     expect(earliestPastHeader.dy, lessThan(firstUpcomingHeader.dy));
@@ -291,45 +306,80 @@ void main() {
       'away_points': 3,
       'fetched_at': '2026-09-06T21:00:00+00:00',
     });
-    await tester.pumpWidget(app(
-      slots: [pastMatch],
-      results: {'past': result},
-    ));
+    await tester.pumpWidget(app(slots: [pastMatch], results: {'past': result}));
     await tester.pumpAndSettle();
 
     expect(find.text('5 : 3'), findsOneWidget);
   });
 
   testWidgets(
-      'a federation match with a scheduled/null-points result row shows no '
-      'trailing score (no bare dash before kickoff)', (tester) async {
-    final upcoming = PrioritySlot(
-      id: 'upcoming',
-      date: today.addDays(2),
-      startsAt: const HourMinute(18, 30),
-      endsAt: const HourMinute(21, 30),
-      type: PrioritySlot.fallbackMatchType,
-      homeTeam: 'SKK Veverky Brno A',
-      awayTeam: 'KK MS Brno D',
-      importKey: 'cka:upcoming',
-    );
-    final result = MatchResult.fromJson(const {
-      'match_id': 'upcoming',
-      'status': 'scheduled',
-      'fetched_at': '2026-09-08T21:00:00+00:00',
-    });
-    await tester.pumpWidget(app(
-      slots: [upcoming],
-      results: {'upcoming': result},
-    ));
-    await tester.pumpAndSettle();
+    'a decided federation match\'s winning team NAME is weighted, matching '
+    'Výsledky and the day dialog',
+    (tester) async {
+      final pastMatch = PrioritySlot(
+        id: 'past',
+        date: today.addDays(-3),
+        startsAt: const HourMinute(18, 30),
+        endsAt: const HourMinute(21, 30),
+        type: PrioritySlot.fallbackMatchType,
+        homeTeam: 'SKK Veverky Brno A',
+        awayTeam: 'KK MS Brno D',
+        importKey: 'cka:past',
+      );
+      final result = MatchResult.fromJson(const {
+        'match_id': 'past',
+        'status': 'finished',
+        'home_points': 5,
+        'away_points': 3,
+        'fetched_at': '2026-09-06T21:00:00+00:00',
+      });
+      await tester.pumpWidget(
+        app(slots: [pastMatch], results: {'past': result}),
+      );
+      await tester.pumpAndSettle();
 
-    expect(find.text('SKK Veverky Brno A – KK MS Brno D'), findsOneWidget);
-    expect(find.text('–'), findsNothing);
-    final tile = tester.widget<ListTile>(find.widgetWithText(
-        ListTile, 'SKK Veverky Brno A – KK MS Brno D'));
-    expect(tile.trailing, isNull);
-  });
+      final titleText = tester.widget<Text>(
+        find.text('SKK Veverky Brno A – KK MS Brno D'),
+      );
+      final spans = (titleText.textSpan! as TextSpan).children!
+          .cast<TextSpan>();
+      expect(spans[0].style?.fontWeight, FontWeight.w900, reason: 'home won');
+      expect(spans[2].style?.fontWeight, isNot(FontWeight.w900));
+    },
+  );
+
+  testWidgets(
+    'a federation match with a scheduled/null-points result row shows no '
+    'trailing score (no bare dash before kickoff)',
+    (tester) async {
+      final upcoming = PrioritySlot(
+        id: 'upcoming',
+        date: today.addDays(2),
+        startsAt: const HourMinute(18, 30),
+        endsAt: const HourMinute(21, 30),
+        type: PrioritySlot.fallbackMatchType,
+        homeTeam: 'SKK Veverky Brno A',
+        awayTeam: 'KK MS Brno D',
+        importKey: 'cka:upcoming',
+      );
+      final result = MatchResult.fromJson(const {
+        'match_id': 'upcoming',
+        'status': 'scheduled',
+        'fetched_at': '2026-09-08T21:00:00+00:00',
+      });
+      await tester.pumpWidget(
+        app(slots: [upcoming], results: {'upcoming': result}),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('SKK Veverky Brno A – KK MS Brno D'), findsOneWidget);
+      expect(find.text('–'), findsNothing);
+      final tile = tester.widget<ListTile>(
+        find.widgetWithText(ListTile, 'SKK Veverky Brno A – KK MS Brno D'),
+      );
+      expect(tile.trailing, isNull);
+    },
+  );
 
   testWidgets('while reservations have not loaded yet shows a progress '
       'indicator, never the empty state', (tester) async {
@@ -370,8 +420,9 @@ void main() {
   });
 
   testWidgets('when the priority slots failed before their first snapshot, '
-      'shows the error text with a retry, never the empty state',
-      (tester) async {
+      'shows the error text with a retry, never the empty state', (
+    tester,
+  ) async {
     // The cache rethrows only a first-ever error, so a cache-less player
     // whose priority_slots fetch fails would otherwise see a quiet list
     // without their teams' matches — indistinguishable from "nothing
@@ -386,10 +437,12 @@ void main() {
 
   testWidgets('tapping a training asks, then cancels it', (tester) async {
     final cancelled = <String>[];
-    await tester.pumpWidget(app(
-      reservations: [res('r1', today.addDays(1))],
-      cancel: (id) async => cancelled.add(id),
-    ));
+    await tester.pumpWidget(
+      app(
+        reservations: [res('r1', today.addDays(1))],
+        cancel: (id) async => cancelled.add(id),
+      ),
+    );
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('18:00–19:00 · Dráha 2'));
@@ -404,13 +457,15 @@ void main() {
 
   testWidgets('a training whose block already started today offers no '
       'cancel, but stays listed', (tester) async {
-    await tester.pumpWidget(app(
-      reservations: [res('r1', today)],
-      // b1 is 18:00–19:00; the calendar refuses cancel once startsAt has
-      // passed (domain/schedule.dart's canCancel) — Můj přehled must
-      // agree instead of offering a cancel the RPC would reject.
-      nowOverride: DateTime(2026, 9, 9, 18, 30),
-    ));
+    await tester.pumpWidget(
+      app(
+        reservations: [res('r1', today)],
+        // b1 is 18:00–19:00; the calendar refuses cancel once startsAt has
+        // passed (domain/schedule.dart's canCancel) — Můj přehled must
+        // agree instead of offering a cancel the RPC would reject.
+        nowOverride: DateTime(2026, 9, 9, 18, 30),
+      ),
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('18:00–19:00 · Dráha 2'), findsOneWidget);
@@ -421,7 +476,9 @@ void main() {
     expect(find.text('Zrušit rezervaci?'), findsNothing);
   });
 
-  testWidgets('empty: says so and the button opens the calendar', (tester) async {
+  testWidgets('empty: says so and the button opens the calendar', (
+    tester,
+  ) async {
     var opened = 0;
     await tester.pumpWidget(app(onOpenCalendar: () => opened++));
     await tester.pumpAndSettle();
@@ -443,12 +500,12 @@ void main() {
     expect(find.textContaining('Moje týmy'), findsOneWidget);
   });
 
-  testWidgets('without followed teams the list ends with the hint', (tester) async {
-    await tester.pumpWidget(app(
-      profile: nobody,
-      reservations: [res('r1', today)],
-      slots: [match],
-    ));
+  testWidgets('without followed teams the list ends with the hint', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(profile: nobody, reservations: [res('r1', today)], slots: [match]),
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('SKK Veverky Brno A – KK MS Brno D'), findsNothing);
@@ -469,8 +526,12 @@ void main() {
     int? trophyColorId(WidgetTester t) =>
         t.widget<MatchTrophy>(find.byType(MatchTrophy)).colorId;
     Color? dotFill(WidgetTester t) {
-      final c = t.widget<Container>(find.descendant(
-          of: find.byType(MatchTrophy), matching: find.byType(Container)));
+      final c = t.widget<Container>(
+        find.descendant(
+          of: find.byType(MatchTrophy),
+          matching: find.byType(Container),
+        ),
+      );
       return (c.decoration as BoxDecoration).color;
     }
 
@@ -499,10 +560,9 @@ void main() {
     testWidgets('the followed HOME team\'s colour fills the dot', (
       tester,
     ) async {
-      await tester.pumpWidget(app(
-        slots: [match],
-        teamColors: const {'SKK Veverky Brno A': 3},
-      ));
+      await tester.pumpWidget(
+        app(slots: [match], teamColors: const {'SKK Veverky Brno A': 3}),
+      );
       await tester.pumpAndSettle();
 
       expect(trophyColorId(tester), 3);
@@ -515,10 +575,9 @@ void main() {
     testWidgets('the followed AWAY team\'s colour fills the dot too', (
       tester,
     ) async {
-      await tester.pumpWidget(app(
-        slots: [awayMatch],
-        teamColors: const {'SKK Veverky Brno A': 6},
-      ));
+      await tester.pumpWidget(
+        app(slots: [awayMatch], teamColors: const {'SKK Veverky Brno A': 6}),
+      );
       await tester.pumpAndSettle();
 
       expect(trophyColorId(tester), 6);
@@ -535,11 +594,13 @@ void main() {
         status: ProfileStatus.approved,
         followedTeams: ['SKK Veverky Brno A', 'KK MS Brno D'],
       );
-      await tester.pumpWidget(app(
-        profile: bothFollower,
-        slots: [match], // home 'SKK Veverky Brno A', away 'KK MS Brno D'
-        teamColors: const {'SKK Veverky Brno A': 4, 'KK MS Brno D': 9},
-      ));
+      await tester.pumpWidget(
+        app(
+          profile: bothFollower,
+          slots: [match], // home 'SKK Veverky Brno A', away 'KK MS Brno D'
+          teamColors: const {'SKK Veverky Brno A': 4, 'KK MS Brno D': 9},
+        ),
+      );
       await tester.pumpAndSettle();
 
       expect(trophyColorId(tester), 4);
@@ -566,16 +627,21 @@ void main() {
         homeTeam: 'SKK Veverky Brno A',
         awayTeam: 'KS Devítka Brno B',
       );
-      await tester.pumpWidget(app(
-        profile: devitkaFollower,
-        slots: [derby],
-        // Veverky was once coloured, but the player follows only Devítka.
-        teamColors: const {'SKK Veverky Brno A': 11},
-      ));
+      await tester.pumpWidget(
+        app(
+          profile: devitkaFollower,
+          slots: [derby],
+          // Veverky was once coloured, but the player follows only Devítka.
+          teamColors: const {'SKK Veverky Brno A': 11},
+        ),
+      );
       await tester.pumpAndSettle();
 
       // The match is listed at all (Devítka is followed) …
-      expect(find.text('SKK Veverky Brno A – KS Devítka Brno B'), findsOneWidget);
+      expect(
+        find.text('SKK Veverky Brno A – KS Devítka Brno B'),
+        findsOneWidget,
+      );
       // … but its trophy stays plain, not Veverky's red.
       expect(trophyColorId(tester), isNull);
       expect(find.byIcon(Icons.emoji_events_outlined), findsOneWidget);
@@ -584,12 +650,18 @@ void main() {
 
   group('training colour', () {
     Color colorNamed(String name) => legibleShadeOf(
-        googleEventColors.firstWhere((c) => c.$2 == name).$3, Brightness.light);
+      googleEventColors.firstWhere((c) => c.$2 == name).$3,
+      Brightness.light,
+    );
     Color rawNamed(String name) =>
         googleEventColors.firstWhere((c) => c.$2 == name).$3;
     Color? dotFill(WidgetTester t) {
-      final c = t.widget<Container>(find.descendant(
-          of: find.byType(MatchTrophy), matching: find.byType(Container)));
+      final c = t.widget<Container>(
+        find.descendant(
+          of: find.byType(MatchTrophy),
+          matching: find.byType(Container),
+        ),
+      );
       return (c.decoration as BoxDecoration).color;
     }
 
@@ -602,10 +674,9 @@ void main() {
 
     testWidgets('the training colour tints the T, in the same derived shade '
         'the trophy uses', (tester) async {
-      await tester.pumpWidget(app(
-        reservations: [res('r1', today)],
-        trainingColorId: 5,
-      ));
+      await tester.pumpWidget(
+        app(reservations: [res('r1', today)], trainingColorId: 5),
+      );
       await tester.pumpAndSettle();
 
       expect(
@@ -617,12 +688,14 @@ void main() {
     testWidgets('a training and a match each take their own colour', (
       tester,
     ) async {
-      await tester.pumpWidget(app(
-        reservations: [res('r1', today)],
-        slots: [match],
-        teamColors: const {'SKK Veverky Brno A': 3},
-        trainingColorId: 5,
-      ));
+      await tester.pumpWidget(
+        app(
+          reservations: [res('r1', today)],
+          slots: [match],
+          teamColors: const {'SKK Veverky Brno A': 3},
+          trainingColorId: 5,
+        ),
+      );
       await tester.pumpAndSettle();
 
       // The training T keeps its tinted-letter look (the player's own
@@ -649,15 +722,18 @@ void main() {
     );
 
     // One ProviderScope per test: a second pumpWidget does not swap them.
-    testWidgets('without one, a match of nobody\'s team is not on the list',
-        (tester) async {
+    testWidgets('without one, a match of nobody\'s team is not on the list', (
+      tester,
+    ) async {
       await tester.pumpWidget(app(slots: [guest]));
       await tester.pumpAndSettle();
       expect(find.text('KK Vyškov A – KK Vyškov B'), findsNothing);
     });
 
     testWidgets('puts a match of nobody\'s team on the list', (tester) async {
-      await tester.pumpWidget(app(slots: [guest], exceptions: const {'guest': true}));
+      await tester.pumpWidget(
+        app(slots: [guest], exceptions: const {'guest': true}),
+      );
       await tester.pumpAndSettle();
       expect(find.text('KK Vyškov A – KK Vyškov B'), findsOneWidget);
       // No badge, no note: it reads exactly like a followed team's match.
@@ -665,25 +741,38 @@ void main() {
     });
 
     testWidgets('wears our team\'s colour on the trophy', (tester) async {
-      await tester.pumpWidget(app(
-        slots: [guest],
-        exceptions: const {'guest': true},
-        teamColors: const {'KK Vyškov A': 11},
-      ));
+      await tester.pumpWidget(
+        app(
+          slots: [guest],
+          exceptions: const {'guest': true},
+          teamColors: const {'KK Vyškov A': 11},
+        ),
+      );
       await tester.pumpAndSettle();
 
-      final dot = tester.widget<Container>(find.descendant(
-          of: find.byType(MatchTrophy), matching: find.byType(Container)));
-      expect((dot.decoration as BoxDecoration).color,
-          googleEventColors.firstWhere((c) => c.$1 == 11).$3);
+      final dot = tester.widget<Container>(
+        find.descendant(
+          of: find.byType(MatchTrophy),
+          matching: find.byType(Container),
+        ),
+      );
+      expect(
+        (dot.decoration as BoxDecoration).color,
+        googleEventColors.firstWhere((c) => c.$1 == 11).$3,
+      );
     });
 
-    testWidgets('a team with no colour leaves the trophy plain',
-        (tester) async {
-      await tester.pumpWidget(app(slots: [guest], exceptions: const {'guest': true}));
+    testWidgets('a team with no colour leaves the trophy plain', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        app(slots: [guest], exceptions: const {'guest': true}),
+      );
       await tester.pumpAndSettle();
 
-      final icon = tester.widget<Icon>(find.byIcon(Icons.emoji_events_outlined));
+      final icon = tester.widget<Icon>(
+        find.byIcon(Icons.emoji_events_outlined),
+      );
       expect(icon.color, isNull);
     });
   });

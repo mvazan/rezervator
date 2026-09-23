@@ -22,11 +22,12 @@ bool isLive(PrioritySlot slot, MatchResult? result, DateTime now) {
   );
   return switch (result?.status ?? MatchStatus.scheduled) {
     MatchStatus.finished || MatchStatus.forfeit => false,
-    MatchStatus.preparation ||
-    MatchStatus.inProgress =>
-      now.isBefore(start.add(const Duration(hours: 12))),
-    MatchStatus.scheduled => now.isAfter(start.subtract(const Duration(hours: 1))) &&
-        now.isBefore(start.add(const Duration(hours: 6))),
+    MatchStatus.preparation || MatchStatus.inProgress => now.isBefore(
+      start.add(const Duration(hours: 12)),
+    ),
+    MatchStatus.scheduled =>
+      now.isAfter(start.subtract(const Duration(hours: 1))) &&
+          now.isBefore(start.add(const Duration(hours: 6))),
   };
 }
 
@@ -39,8 +40,9 @@ String numLabel(num? v) {
 }
 
 /// "5 : 3", "2,5 : 5,5", or "–" before the match has any points.
-String pointsLabel(num? home, num? away) =>
-    home == null && away == null ? '–' : '${numLabel(home)} : ${numLabel(away)}';
+String pointsLabel(num? home, num? away) => home == null && away == null
+    ? '–'
+    : '${numLabel(home)} : ${numLabel(away)}';
 
 /// "3460 : 3349", or '' before the match has a pin count (the row then omits
 /// this column instead of showing a bare dash).
@@ -84,6 +86,14 @@ bool hasScoreData(MatchResult? r) =>
     (r.status == MatchStatus.inProgress ||
         r.status == MatchStatus.finished ||
         r.status == MatchStatus.forfeit);
+
+/// Which side `MatchTitle` (`widgets/match_title.dart`) should weight for
+/// [r] — null before there's real score data ([hasScoreData]), otherwise
+/// whoever's ahead ([winningSide]), final or not. The one place the day
+/// dialog, Výsledky and Můj přehled all compute this, so the three can't
+/// drift apart on what counts as "the winner to show".
+MatchSide? displayWinner(MatchResult? r) =>
+    hasScoreData(r) ? winningSide(r!.homePoints, r.awayPoints) : null;
 
 /// "právě teď" / "před N min" / "před N h" — how long ago [fetchedAt] was,
 /// for the match detail's "Výsledky z webu:" line.

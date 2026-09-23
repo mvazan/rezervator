@@ -117,11 +117,20 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     MatchStatus.forfeit => 'Kontumace',
   };
 
-  Widget _headerCard(PrioritySlot slot, MatchResult? result, Venue? venueMatch) {
+  Widget _headerCard(
+    PrioritySlot slot,
+    MatchResult? result,
+    Venue? venueMatch,
+  ) {
     final theme = Theme.of(context);
-    final format = formatLabel(result?.matchType ?? '', result?.discipline ?? '');
+    final format = formatLabel(
+      result?.matchType ?? '',
+      result?.discipline ?? '',
+    );
     final status = _statusLabel(result?.status ?? MatchStatus.scheduled);
-    final pins = result == null ? '' : pinsLabel(result.homeTotal, result.awayTotal);
+    final pins = result == null
+        ? ''
+        : pinsLabel(result.homeTotal, result.awayTotal);
     final setPoints = result == null
         ? '–'
         : pointsLabel(result.homeSetPoints, result.awaySetPoints);
@@ -131,13 +140,18 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     // Card's own Material sets the ambient DefaultTextStyle to bodyMedium
     // for this subtree, which is what an unstyled `Text(slot.awayTeam)`
     // actually resolves to — rather than bodyLarge's bigger size, so the
-    // winner reads bold at the same baseline as the loser, not bigger. (Not
-    // `DefaultTextStyle.of(context)`: `context` here is `_headerCard`'s own
-    // parameter — this State's outer context, ABOVE the Scaffold/Card it
-    // builds — so it resolves to the app-root ambient style, not the one
-    // actually in effect where the Text widgets below render.)
-    final teamNameStyle =
-        theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold);
+    // winner reads heavier at the same baseline as the loser, not bigger.
+    // (Not `DefaultTextStyle.of(context)`: `context` here is
+    // `_headerCard`'s own parameter — this State's outer context, ABOVE the
+    // Scaffold/Card it builds — so it resolves to the app-root ambient
+    // style, not the one actually in effect where the Text widgets below
+    // render.) A FIXED w900, not "add bold" relative to bodyMedium: bold
+    // (w700) happens to differ from bodyMedium's own w400 today, but a
+    // fixed weight doesn't depend on that — see MatchTitle's own comment
+    // (`widgets/match_title.dart`) for the text-role this bit for.
+    final teamNameStyle = theme.textTheme.bodyMedium?.copyWith(
+      fontWeight: FontWeight.w900,
+    );
     return Card(
       margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
       child: Padding(
@@ -232,7 +246,8 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     final siteUrl = slot.siteUrl;
     if (videoUrl == null && siteUrl == null) return const SizedBox.shrink();
     final live = isLive(slot, result, now);
-    final recorded = result?.status == MatchStatus.finished ||
+    final recorded =
+        result?.status == MatchStatus.finished ||
         result?.status == MatchStatus.forfeit;
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
@@ -243,10 +258,15 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
             FilledButton.icon(
               onPressed: () => widget.launch(videoUrl),
               icon: live
-                  ? Icon(Icons.circle,
-                      size: 12, color: Theme.of(context).colorScheme.error)
+                  ? Icon(
+                      Icons.circle,
+                      size: 12,
+                      color: Theme.of(context).colorScheme.error,
+                    )
                   : const Icon(Icons.play_circle_fill),
-              label: Text(live ? 'Sledovat živě' : (recorded ? 'Záznam' : 'Video')),
+              label: Text(
+                live ? 'Sledovat živě' : (recorded ? 'Záznam' : 'Video'),
+              ),
             ),
           if (siteUrl != null)
             OutlinedButton.icon(
