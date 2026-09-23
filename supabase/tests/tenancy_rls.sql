@@ -4535,7 +4535,7 @@ begin
     (tenant_id, date, starts_at, ends_at, type_id, home_team, away_team,
      prep_minutes, description, is_away, created_by, import_key)
   values
-    (v_a, (now() at time zone 'Europe/Prague')::date - 2, '17:00', '20:00',
+    (v_a, (now() at time zone 'Europe/Prague')::date + 45, '17:00', '20:00',
      (select id from priority_slot_types where tenant_id = v_a and is_match and builtin),
      'KK Jiný', 'TJ Sokol Kalendář', 0, 'Jihomoravská divize · 1. kolo', true, v_uid,
      'rozpis:JmD:1:KK Jiný – TJ Sokol Kalendář')
@@ -4563,6 +4563,58 @@ begin
   delete from priority_slots where id = v_id;
   delete from notification_jobs where dedupe_key like 'calendar:%:match:%';
   raise notice 'OK: only a change of what the event shows enqueues a calendar job (0045)';
+end $$;
+
+-- 14b. A played match's event can only be deleted by the calendar handler:
+-- an UPDATE that keeps it in the past (the first run rewriting an old away
+-- row's description) enqueues nothing; the same change of a future match does.
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+  v_type uuid;
+  v_past uuid;
+  v_future uuid;
+begin
+  perform set_calendar_teams_for(v_uid, jsonb_build_array(
+    jsonb_build_object('team', 'TJ Sokol Kalendář', 'calendar', 'primary')));
+  select id into v_type from priority_slot_types
+   where tenant_id = v_a and is_match and builtin;
+  insert into priority_slots
+    (tenant_id, date, starts_at, ends_at, type_id, home_team, away_team,
+     prep_minutes, description, is_away, created_by, import_key)
+  values
+    (v_a, v_today - 3, '17:00', '20:00', v_type, 'KK Jiný', 'TJ Sokol Kalendář', 0,
+     'JmD 1. kolo · Jinde', true, v_uid, 'rozpis:JmD:1:KK Jiný – TJ Sokol Kalendář')
+  returning id into v_past;
+  insert into priority_slots
+    (tenant_id, date, starts_at, ends_at, type_id, home_team, away_team,
+     prep_minutes, description, is_away, created_by, import_key)
+  values
+    (v_a, v_today + 3, '17:00', '20:00', v_type, 'KK Jiný', 'TJ Sokol Kalendář', 0,
+     'JmD 2. kolo · Jinde', true, v_uid, 'rozpis:JmD:2:KK Jiný – TJ Sokol Kalendář')
+  returning id into v_future;
+  delete from notification_jobs where dedupe_key like 'calendar:%:match:%';
+
+  perform set_config('import.run', 'on', true);
+  update priority_slots set description = 'Jihomoravská divize · 1. kolo', import_key = 'cka:920'
+   where id = v_past;
+  if exists (select 1 from notification_jobs where dedupe_key like 'calendar:%:match:%') then
+    raise exception 'FAIL: an update of a played match enqueued a calendar job';
+  end if;
+  update priority_slots set description = 'Jihomoravská divize · 2. kolo', import_key = 'cka:921'
+   where id = v_future;
+  perform set_config('import.run', '', true);
+  if not exists (select 1 from notification_jobs
+                 where dedupe_key = 'calendar:' || v_uid || ':match:' || v_future) then
+    raise exception 'FAIL: a future match''s new description enqueued no calendar job';
+  end if;
+
+  perform set_calendar_teams_for(v_uid, '[]'::jsonb);
+  delete from priority_slots where id in (v_past, v_future);
+  delete from notification_jobs where dedupe_key like 'calendar:%:match:%';
+  raise notice 'OK: an update that keeps a match in the past enqueues no calendar job (0045)';
 end $$;
 
 -- 7b. With both alleys configured, each admin sees only their own settings.

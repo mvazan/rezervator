@@ -64,7 +64,8 @@ alter table priority_slots
 -- 0027/0039's calendar trigger enqueued on every UPDATE. The sync rewrites
 -- the columns above (video link a day later, venue, rekey) and the calendar
 -- handler drops events of past matches — an UPDATE now enqueues only when
--- something the event shows (or who follows it) changed.
+-- something the event shows (or who follows it) changed, and never for a
+-- match that stays in the past.
 create or replace function priority_slots_enqueue_calendar()
 returns trigger
 language plpgsql security definer set search_path = public
@@ -76,6 +77,13 @@ begin
          is not distinct from
          (new.tenant_id, new.date, new.starts_at, new.ends_at, new.home_team,
           new.away_team, new.is_away, new.description, new.type_id, new.parent_id) then
+    return new;
+  end if;
+  -- For a match played before and after, the handler could only delete the
+  -- event (the first run rewrites old rows' description and times).
+  if tg_op = 'UPDATE'
+     and old.date < (now() at time zone 'Europe/Prague')::date
+     and new.date < (now() at time zone 'Europe/Prague')::date then
     return new;
   end if;
   if tg_op in ('UPDATE', 'DELETE') and old.parent_id is null
