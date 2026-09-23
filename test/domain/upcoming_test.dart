@@ -202,6 +202,19 @@ void main() {
     expect(days, isEmpty);
   });
 
+  test('a past match of a followed team is included, ahead of today\'s '
+      'entries', () {
+    final days = upcomingTimeline(
+      reservations: [res('today', today)],
+      blocks: const [b1],
+      slots: [match('past', today.addDays(-3), const HourMinute(18, 0))],
+      teams: const ['SKK Veverky Brno A'],
+      today: today,
+    );
+    expect(days.map((d) => d.date), [today.addDays(-3), today]);
+    expect((days.first.items.single as UpcomingMatch).slot.id, 'past');
+  });
+
   test('no followed teams means no matches; nothing at all means no days', () {
     final only = upcomingTimeline(
       reservations: const [],
@@ -387,6 +400,29 @@ void main() {
       expect(matchIsMine(m, const [], const {'jiny': true}), isFalse);
       expect(matchIsMine(m, const ['SKK Veverky Brno A'], const {'jiny': false}),
           isTrue);
+    });
+  });
+
+  group('upcomingScrollIndex', () {
+    UpcomingDay dayOf(String d) => UpcomingDay(Day.parse(d), const []);
+
+    test('first day >= today', () {
+      final days = [dayOf('2026-09-06'), dayOf('2026-09-09'), dayOf('2026-09-13')];
+      expect(upcomingScrollIndex(days, Day.parse('2026-09-09')), 1);
+    });
+
+    test('past days need scrolling up: today itself is the anchor', () {
+      final days = [dayOf('2026-09-06'), dayOf('2026-09-07'), dayOf('2026-09-09')];
+      expect(upcomingScrollIndex(days, Day.parse('2026-09-09')), 2);
+    });
+
+    test('every day is in the past → last index', () {
+      final days = [dayOf('2026-09-06'), dayOf('2026-09-07')];
+      expect(upcomingScrollIndex(days, Day.parse('2026-09-09')), 1);
+    });
+
+    test('empty list → -1', () {
+      expect(upcomingScrollIndex(const [], Day.parse('2026-09-09')), -1);
     });
   });
 

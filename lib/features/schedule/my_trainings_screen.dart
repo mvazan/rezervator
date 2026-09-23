@@ -7,6 +7,7 @@ import '../../data/providers.dart';
 import '../../domain/models.dart';
 import '../../domain/palette.dart';
 import '../../domain/upcoming.dart';
+import '../clubhouse/widgets/score_label.dart';
 import '../profile/profile_screen.dart';
 import 'cancel_own_reservation.dart';
 import 'widgets/home_header.dart';
@@ -91,7 +92,7 @@ Color? eventShadeOf(int? colorId, Brightness brightness) {
 /// trainings they booked and the matches of the teams they follow, by day.
 /// A training can be cancelled here (own future reservation, the same
 /// confirm as the calendar); matches are read-only.
-class MyTrainingsScreen extends ConsumerWidget {
+class MyTrainingsScreen extends ConsumerStatefulWidget {
   const MyTrainingsScreen({
     super.key,
     this.trailing = const [],
@@ -111,12 +112,22 @@ class MyTrainingsScreen extends ConsumerWidget {
 
   static Future<void> _cancel(String id) => Api.cancelReservation(id);
 
+  @override
+  ConsumerState<MyTrainingsScreen> createState() => _MyTrainingsScreenState();
+}
+
+class _MyTrainingsScreenState extends ConsumerState<MyTrainingsScreen> {
+  bool _scrolledToUpcoming = false;
+  final Map<Day, GlobalKey> _dayKeys = {};
+
+  GlobalKey _keyFor(Day day) => _dayKeys.putIfAbsent(day, GlobalKey.new);
+
   Future<void> _confirmCancel(BuildContext context, UpcomingTraining t) =>
       confirmCancelOwnReservation(
         context,
         reservation: t.reservation,
         block: t.block,
-        cancel: cancelReservation,
+        cancel: widget.cancelReservation,
       );
 
   static String _dayLabel(Day date, Day today) {
@@ -158,7 +169,7 @@ class MyTrainingsScreen extends ConsumerWidget {
       );
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final now = ref.watch(nowProvider).value ?? DateTime.now();
     final today = Day.fromDateTime(now);
     final nowTime = HourMinute(now.hour, now.minute);
@@ -187,6 +198,10 @@ class MyTrainingsScreen extends ConsumerWidget {
     // player's.
     final exceptions =
         ref.watch(myMatchExceptionsProvider).value ?? const <String, bool>{};
+    // Score trailing on a federation match's row (Task 3) — read here since
+    // Můj přehled did not watch it before.
+    final results =
+        ref.watch(matchResultsProvider).value ?? const <String, MatchResult>{};
     // A training's own colour, the one set under Barva tréninků — the same
     // value that colours it in Google Calendar, so the T here and the event
     // there read as the same thing.
@@ -199,7 +214,7 @@ class MyTrainingsScreen extends ConsumerWidget {
     // The calendar's strip, minus the week navigation: the same title in
     // the same place and the same icons at the same right edge, so nothing
     // moves when the tabs switch. Which view this is, the tabs say.
-    final header = HomeHeader(trailing: trailing);
+    final header = HomeHeader(trailing: widget.trailing);
 
     final stillLoading =
         (reservationsAsync.isLoading && !reservationsAsync.hasValue) ||
@@ -268,7 +283,7 @@ class MyTrainingsScreen extends ConsumerWidget {
                   const Text('Trénink si rezervuješ v kalendáři.'),
                   const SizedBox(height: 16),
                   FilledButton.tonal(
-                    onPressed: onOpenCalendar,
+                    onPressed: widget.onOpenCalendar,
                     child: const Text('Do kalendáře'),
                   ),
                   if (teams.isEmpty) ...[
@@ -283,53 +298,82 @@ class MyTrainingsScreen extends ConsumerWidget {
       );
     }
 
+    final upcomingIdx = upcomingScrollIndex(days, today);
+    if (!_scrolledToUpcoming && upcomingIdx >= 0) {
+      _scrolledToUpcoming = true;
+      final key = _keyFor(days[upcomingIdx].date);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final ctx = key.currentContext;
+        if (ctx != null) {
+          Scrollable.ensureVisible(ctx, alignment: 0, duration: Duration.zero);
+        }
+      });
+    }
+
     return Column(
       children: [
         header,
         Expanded(
-          child: ListView(
+          // A plain, eagerly built scroll view (not a lazy ListView) — same
+          // reason as results_screen.dart's own list: Scrollable.ensureVisible
+          // above needs the target day header's element to already exist,
+          // which a lazily built Sliver would not guarantee on the first
+          // frame.
+          child: SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(8, 4, 8, 24),
-            children: [
-              for (final day in days) ...[
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-                  child: Text(
-                    _dayLabel(day.date, today),
-                    style: theme.textTheme.titleSmall,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (final day in days) ...[
+                  Padding(
+                    key: _keyFor(day.date),
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+                    child: Text(
+                      _dayLabel(day.date, today),
+                      style: theme.textTheme.titleSmall,
+                    ),
                   ),
-                ),
-                for (final item in day.items)
-                  switch (item) {
-                    UpcomingTraining() => _trainingTile(
-                        context,
-                        item,
-                        day.date == today &&
-                            item.block.startsAt.minutesFromMidnight <=
-                                nowTime.minutesFromMidnight,
-                        trainingColor,
-                      ),
-                    UpcomingMatch() => ListTile(
-                        leading: MatchTrophy(
-                          colorId: matchColorOf(
-                            item.slot,
-                            teams,
-                            teamColors,
-                            exceptions: exceptions,
-                          ),
+                  for (final item in day.items)
+                    switch (item) {
+                      UpcomingTraining() => _trainingTile(
+                          context,
+                          item,
+                          day.date == today &&
+                              item.block.startsAt.minutesFromMidnight <=
+                                  nowTime.minutesFromMidnight,
+                          trainingColor,
                         ),
-                        title: Text(item.slot.title),
-                        subtitle: Text([
-                          '${item.slot.startsAt.display()}–'
-                              '${item.slot.endsAt.display()}',
-                          item.slot.isAway ? 'venku' : 'doma',
-                          if (item.slot.description.isNotEmpty)
-                            item.slot.description,
-                        ].join(' · ')),
-                      ),
-                  },
+                      UpcomingMatch() => ListTile(
+                          leading: MatchTrophy(
+                            colorId: matchColorOf(
+                              item.slot,
+                              teams,
+                              teamColors,
+                              exceptions: exceptions,
+                            ),
+                          ),
+                          title: Text(item.slot.title),
+                          subtitle: Text([
+                            '${item.slot.startsAt.display()}–'
+                                '${item.slot.endsAt.display()}',
+                            item.slot.isAway ? 'venku' : 'doma',
+                            if (item.slot.description.isNotEmpty)
+                              item.slot.description,
+                          ].join(' · ')),
+                          trailing: item.slot.fromFederation &&
+                                  results[item.slot.id] != null
+                              ? ScoreLabel(
+                                  home: results[item.slot.id]?.homePoints,
+                                  away: results[item.slot.id]?.awayPoints,
+                                  style: theme.textTheme.bodyMedium,
+                                )
+                              : null,
+                        ),
+                    },
+                ],
+                if (teams.isEmpty) _followTeamsHint(context, theme),
               ],
-              if (teams.isEmpty) _followTeamsHint(context, theme),
-            ],
+            ),
           ),
         ),
       ],

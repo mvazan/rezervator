@@ -68,6 +68,7 @@ void main() {
     int? trainingColorId,
     DateTime? nowOverride,
     Map<String, bool> exceptions = const {},
+    Map<String, MatchResult> results = const {},
   }) {
     return ProviderScope(
       overrides: [
@@ -84,6 +85,7 @@ void main() {
         nowProvider.overrideWith((ref) => Stream.value(nowOverride ?? now)),
         myTeamColorsProvider.overrideWith((ref) => Stream.value(teamColors)),
         myMatchExceptionsProvider.overrideWith((ref) => Stream.value(exceptions)),
+        matchResultsProvider.overrideWith((ref) => Stream.value(results)),
         myCalendarLinkProvider.overrideWith((ref) => Stream.value(
               trainingColorId == null
                   ? CalendarLink.none
@@ -129,6 +131,102 @@ void main() {
       lessThan(tester.getTopLeft(find.text('SKK Veverky Brno A – KK MS Brno D')).dy),
     );
     expect(find.textContaining('Moje týmy'), findsNothing);
+  });
+
+  testWidgets('a past match of a followed team is listed, above today\'s '
+      'entries', (tester) async {
+    final pastMatch = PrioritySlot(
+      id: 'past',
+      date: today.addDays(-3),
+      startsAt: const HourMinute(18, 30),
+      endsAt: const HourMinute(21, 30),
+      type: PrioritySlot.fallbackMatchType,
+      homeTeam: 'SKK Veverky Brno A',
+      awayTeam: 'KK MS Brno D',
+      description: 'KP1 Sever',
+      importKey: 'cka:past',
+    );
+    await tester.pumpWidget(app(
+      reservations: [res('r1', today)],
+      slots: [pastMatch, match],
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text(dayFull(today.addDays(-3))), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text(dayFull(today.addDays(-3)))).dy,
+      lessThan(tester.getTopLeft(find.text('Dnes')).dy),
+    );
+  });
+
+  testWidgets('opens scrolled to the first day at/after today, past days '
+      'scrolled above', (tester) async {
+    final pastMatches = [
+      for (var i = 3; i >= 1; i--)
+        PrioritySlot(
+          id: 'past$i',
+          date: today.addDays(-i),
+          startsAt: const HourMinute(18, 30),
+          endsAt: const HourMinute(21, 30),
+          type: PrioritySlot.fallbackMatchType,
+          homeTeam: 'SKK Veverky Brno A',
+          awayTeam: 'KK MS Brno D',
+          importKey: 'cka:past$i',
+        ),
+    ];
+    final futureMatches = [
+      for (var i = 1; i <= 10; i++)
+        PrioritySlot(
+          id: 'future$i',
+          date: today.addDays(i),
+          startsAt: const HourMinute(18, 30),
+          endsAt: const HourMinute(21, 30),
+          type: PrioritySlot.fallbackMatchType,
+          homeTeam: 'SKK Veverky Brno A',
+          awayTeam: 'KK MS Brno D',
+          importKey: 'cka:future$i',
+        ),
+    ];
+    await tester.pumpWidget(app(
+      reservations: [res('r1', today)],
+      slots: [...pastMatches, ...futureMatches],
+    ));
+    await tester.pumpAndSettle();
+
+    final earliestHeader =
+        tester.getTopLeft(find.text(dayFull(today.addDays(-3))));
+    final todayHeader = tester.getTopLeft(find.text('Dnes'));
+    expect(earliestHeader.dy, lessThan(0));
+    expect(todayHeader.dy, inInclusiveRange(0, 200));
+  });
+
+  testWidgets('a past finished federation match shows its score', (
+    tester,
+  ) async {
+    final pastMatch = PrioritySlot(
+      id: 'past',
+      date: today.addDays(-3),
+      startsAt: const HourMinute(18, 30),
+      endsAt: const HourMinute(21, 30),
+      type: PrioritySlot.fallbackMatchType,
+      homeTeam: 'SKK Veverky Brno A',
+      awayTeam: 'KK MS Brno D',
+      importKey: 'cka:past',
+    );
+    final result = MatchResult.fromJson(const {
+      'match_id': 'past',
+      'status': 'finished',
+      'home_points': 5,
+      'away_points': 3,
+      'fetched_at': '2026-09-06T21:00:00+00:00',
+    });
+    await tester.pumpWidget(app(
+      slots: [pastMatch],
+      results: {'past': result},
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('5 : 3'), findsOneWidget);
   });
 
   testWidgets('while reservations have not loaded yet shows a progress '
