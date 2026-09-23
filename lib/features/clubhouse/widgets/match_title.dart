@@ -27,26 +27,29 @@ class MatchTitle extends StatelessWidget {
       return Text(slot.title, style: style);
     }
     final base = style ?? DefaultTextStyle.of(context).style;
-    // A FIXED heavier weight, not "add bold" relative to base: some text
-    // roles this renders under (e.g. titleSmall) are already w700 —
-    // `FontWeight.bold` IS w700, so copying it on top would be a no-op.
-    // w800 guarantees visible contrast whatever the surrounding role's own
-    // weight already is, and is the heaviest Manrope cut this app actually
-    // bundles (pubspec.yaml) — w900 would synthesise/fall back instead of
-    // rendering the real font. The losing side stays exactly `base`,
-    // untouched.
+    // FIXED weights on both sides, not "add bold" to one relative to base:
+    // some text roles this renders under (e.g. titleSmall) are already
+    // w700 — `FontWeight.bold` IS w700, so copying it onto just the winner
+    // would be a no-op there, and even a genuinely heavier fixed winner
+    // weight reads as barely-there next to an already-bold base (w700 vs
+    // w800 is one Manrope step). Setting the LOSING side to w400 as well
+    // guarantees a real, consistent gap on every base role this is used
+    // under. w800 is the heaviest Manrope cut this app actually bundles
+    // (pubspec.yaml) — w900 would synthesise/fall back instead of
+    // rendering the real font.
     final winnerStyle = base.copyWith(fontWeight: FontWeight.w800);
+    final loserStyle = base.copyWith(fontWeight: FontWeight.w400);
     return Text.rich(
       TextSpan(
         children: [
           TextSpan(
             text: slot.homeTeam,
-            style: winner == MatchSide.home ? winnerStyle : base,
+            style: winner == MatchSide.home ? winnerStyle : loserStyle,
           ),
           TextSpan(text: ' – ', style: base),
           TextSpan(
             text: slot.awayTeam,
-            style: winner == MatchSide.away ? winnerStyle : base,
+            style: winner == MatchSide.away ? winnerStyle : loserStyle,
           ),
         ],
       ),

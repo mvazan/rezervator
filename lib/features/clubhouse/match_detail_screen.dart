@@ -145,13 +145,16 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     // `_headerCard`'s own parameter — this State's outer context, ABOVE the
     // Scaffold/Card it builds — so it resolves to the app-root ambient
     // style, not the one actually in effect where the Text widgets below
-    // render.) A FIXED w800, not "add bold" relative to bodyMedium: bold
-    // (w700) happens to differ from bodyMedium's own w400 today, but a
-    // fixed weight doesn't depend on that. w800 is the heaviest Manrope
-    // cut this app actually bundles (pubspec.yaml) — see MatchTitle's own
-    // comment (`widgets/match_title.dart`) for the text-role this bit for.
-    final teamNameStyle = theme.textTheme.bodyMedium?.copyWith(
+    // render.) FIXED weights on both sides — see MatchTitle's own comment
+    // (`widgets/match_title.dart`) for why the loser is explicitly
+    // lightened too, not left at bold/w700: w800 alone next to an
+    // already-bold base reads as barely-there. w800 is the heaviest
+    // Manrope cut this app actually bundles (pubspec.yaml).
+    final winnerNameStyle = theme.textTheme.bodyMedium?.copyWith(
       fontWeight: FontWeight.w800,
+    );
+    final loserNameStyle = theme.textTheme.bodyMedium?.copyWith(
+      fontWeight: FontWeight.w400,
     );
     return Card(
       margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
@@ -171,7 +174,11 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
                   child: Text(
                     slot.homeTeam,
                     textAlign: TextAlign.end,
-                    style: winner == MatchSide.home ? teamNameStyle : null,
+                    style: winner == null
+                        ? null
+                        : winner == MatchSide.home
+                        ? winnerNameStyle
+                        : loserNameStyle,
                   ),
                 ),
                 Padding(
@@ -184,7 +191,11 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
                 Expanded(
                   child: Text(
                     slot.awayTeam,
-                    style: winner == MatchSide.away ? teamNameStyle : null,
+                    style: winner == null
+                        ? null
+                        : winner == MatchSide.away
+                        ? winnerNameStyle
+                        : loserNameStyle,
                   ),
                 ),
               ],
