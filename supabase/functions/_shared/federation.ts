@@ -182,7 +182,9 @@ export function parseVenueClubs(html: string): VenueClub[] {
 
 const decodeEntities = (s: string) =>
   s.replaceAll("&amp;", "&").replaceAll("&quot;", '"').replaceAll("&#x27;", "'")
-    .replaceAll("&lt;", "<").replaceAll("&gt;", ">");
+    .replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&nbsp;", " ")
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(parseInt(dec, 10)));
 
 // React SSR sprinkles `<!-- -->` between interpolated text nodes (e.g. the
 // h1's "Detail kuželny: <name>"); strip those along with any tags.
@@ -215,11 +217,17 @@ export function parseVenue(html: string, slug: string): SiteVenue {
       if (label === "Adresa") {
         const span = /<span[^>]*>([\s\S]*?)<\/span>/.exec(ddHtml);
         address = span ? textOf(span[1]) : null;
-        const decoded = decodeEntities(ddHtml);
-        const x = /[?&]x=(-?[\d.]+)/.exec(decoded);
-        const y = /[?&]y=(-?[\d.]+)/.exec(decoded);
-        lng = x ? Number(x[1]) : null;
-        lat = y ? Number(y[1]) : null;
+        const mapyHref = /href="([^"]*mapy\.com[^"]*)"/.exec(ddHtml);
+        if (mapyHref) {
+          const params = new URL(decodeEntities(mapyHref[1])).searchParams;
+          const x = params.get("x");
+          const y = params.get("y");
+          lng = x !== null ? Number(x) : null;
+          lat = y !== null ? Number(y) : null;
+        } else {
+          lng = null;
+          lat = null;
+        }
         continue;
       }
       if (label === "Telefon") {

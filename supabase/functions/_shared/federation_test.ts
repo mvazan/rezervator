@@ -140,6 +140,44 @@ Deno.test("parseVenue refuses a page without the data", () => {
   assertThrows(() => parseVenue("<html></html>", "x"));
 });
 
+Deno.test("venue lat/lng come only from the mapy.com link, not a stray x=/y= elsewhere in the dd", () => {
+  const html = [
+    "<h1>Detail kuželny<!-- -->: <!-- -->Test Venue</h1>",
+    '<h2 class="text-base uppercase mb-5">Základní informace</h2>',
+    "<dl>",
+    "<dt>Adresa:</dt>",
+    '<dd class="flex &x=1&y=2"><span>Foo 1, Bar</span>',
+    '<a href="https://mapy.com/zakladni?source=coor&amp;x=16.6354503&amp;y=49.1891783&amp;z=17">Zobrazit na mapě</a></dd>',
+    "</dl>",
+    '<h2 class="text-base uppercase mb-5">Kluby působící v kuželně</h2>',
+    '<div><a href="/detail-klubu/test-club"><span>Test Club</span></a></div>',
+  ].join("");
+  const v = parseVenue(html, "test-venue");
+  assert(v.lng !== null && Math.abs(v.lng - 16.6354503) < 1e-6);
+  assert(v.lat !== null && Math.abs(v.lat - 49.1891783) < 1e-6);
+});
+
+Deno.test("venue lat/lng are null when the Adresa dd has no mapy.com link", () => {
+  const html = [
+    "<h1>Detail kuželny<!-- -->: <!-- -->Test Venue</h1>",
+    '<h2 class="text-base uppercase mb-5">Základní informace</h2>',
+    "<dl><dt>Adresa:</dt><dd><span>Foo 1, Bar</span></dd></dl>",
+  ].join("");
+  const v = parseVenue(html, "test-venue");
+  assertEquals(v.lat, null);
+  assertEquals(v.lng, null);
+});
+
+Deno.test("venue section values decode nbsp and numeric HTML entities, not just named ones", () => {
+  const html = [
+    "<h1>Detail kuželny<!-- -->: <!-- -->Test Venue</h1>",
+    '<h2 class="text-base uppercase mb-5">Základní informace</h2>',
+    "<dl><dt>Poznámka:</dt><dd>&#65;&#x42;&nbsp;test</dd></dl>",
+  ].join("");
+  const v = parseVenue(html, "test-venue");
+  assertEquals(v.sections[0].items[0], { label: "Poznámka", value: "AB test" });
+});
+
 Deno.test("competitions where the clubs play, from match slugs", () => {
   const locs = [
     "https://vysledky.kuzelky.cz/detail-zapasu/jihomoravska-divize-2026-2027-kolo-1-tj-sokol-brno-iv-muzi-kc-zlin-b-muzi",
