@@ -123,10 +123,11 @@ v `supabase_realtime`.
 ### Serverové funkce (security definer, jen `service_role`)
 
 - `apply_federation_matches(p_tenant, p_competition, p_matches jsonb)` —
-  jedna transakce se `set_config('import.run','on',true)`, jako správce
-  tenantu (první schválený admin; `set local role authenticated` + claims
-  jako Python import, aby RLS, `priority_conflicts`, `match_uklid_sync` a
-  producenti kalendáře běželi jako v appce). Pro každý zápas: existuje
+  jedna transakce se `set_config('import.run','on',true)`; `created_by` je
+  první schválený správce tenantu, `tenant_id` se píše výslovně. (Security
+  definer funkce si roli přepnout nesmí; triggery `priority_conflicts`,
+  `match_uklid_sync` a producenti kalendáře berou tenant z řádku, takže
+  běží stejně jako při uložení v appce.) Pro každý zápas: existuje
   `cka:<id>` → update (zápasové sloupce jen bez `hand_edited`, jinak do
   reportu; `video_url`, `competition`, `round`, `site_*` vždy); jinak
   `legacy_id` (řádek `rozpis:` spárovaný v edge funkci) → překlíčování
