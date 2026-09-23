@@ -2724,7 +2724,7 @@ begin
     raise exception 'not_allowed';
   end if;
   if v_slug !~ '^[a-z0-9]+(-[a-z0-9]+)*$' then
-    raise exception 'invalid_slug';
+    raise exception 'invalid_venue_slug';
   end if;
   insert into federation_sync (tenant_id, venue_slug, enabled)
   values (current_tenant_id(), v_slug, p_enabled)

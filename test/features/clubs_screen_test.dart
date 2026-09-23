@@ -156,6 +156,24 @@ void main() {
     });
 
     testWidgets(
+        'a team whose club was deleted sits under Nezařazené týmy too',
+        (tester) async {
+      const teams = [
+        Team(
+          id: 't1',
+          name: 'Bývalí Nešemice',
+          clubId: 'gone', // no club in `clubs` has this id
+          competitionName: 'OP II. třída',
+        ),
+      ];
+      await pumpApp(tester, app(clubs, teams: teams));
+
+      expect(find.text('Nezařazené týmy'), findsOneWidget);
+      expect(find.text('Bývalí Nešemice'), findsOneWidget);
+      expect(find.text('OP II. třída'), findsOneWidget);
+    });
+
+    testWidgets(
         'unconfigured sync seeds the default slug and disables Načíst týmy',
         (tester) async {
       await pumpApp(tester, app(clubs));

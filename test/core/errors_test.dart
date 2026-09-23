@@ -29,16 +29,24 @@ void main() {
         startsWith('Něco se nepovedlo.'));
   });
 
-  test('public overview / federation slug errors (shared code)', () {
-    expect(
-      friendlyDbError(Exception('invalid_slug')),
-      'Adresa kuželny smí mít jen malá písmena bez diakritiky, číslice '
-          'a pomlčky.',
-    );
+  test('public overview slug errors', () {
+    expect(friendlyDbError(Exception('invalid_slug')),
+        'Adresa smí mít 3–40 znaků: malá písmena, číslice a pomlčky.');
     expect(friendlyDbError(Exception('slug_taken')), 'Tuhle adresu už má jiná kuželna.');
   });
 
-  test('federation sync errors (0045)', () {
+  test('federation sync errors (0045) — invalid_venue_slug has its own copy, '
+      'distinct from the unrelated invalid_slug (0043) despite the shared '
+      'substring', () {
+    expect(
+      friendlyDbError(Exception('invalid_venue_slug')),
+      'Adresa kuželny smí mít jen malá písmena bez diakritiky, číslice '
+          'a pomlčky.',
+    );
+    expect(
+      friendlyDbError(Exception('invalid_slug')),
+      isNot(contains('diakritiky')),
+    );
     expect(friendlyDbError(Exception('federation_not_configured')),
         'Nejdřív ulož kuželnu z výsledkového servisu.');
     expect(friendlyDbError(Exception('federation_disabled')),

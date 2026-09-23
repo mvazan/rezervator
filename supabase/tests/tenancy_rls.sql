@@ -4081,7 +4081,7 @@ begin
     perform set_federation_sync('Bad Slug', true);
     raise exception 'FAIL: an invalid venue slug was accepted';
   exception when others then
-    if sqlerrm <> 'invalid_slug' then raise; end if;
+    if sqlerrm <> 'invalid_venue_slug' then raise; end if;
   end;
   perform set_federation_sync(' TJ-Sokol-Brno-IV ', true);
   if not exists (select 1 from federation_sync
