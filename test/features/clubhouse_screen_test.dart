@@ -11,10 +11,10 @@ void main() {
   // hub's ListTiles/Cards find the Material ancestor they need, same as in
   // the real app.
   Widget app({List<Widget> trailing = const []}) => ProviderScope(
-        child: MaterialApp(
-          home: Scaffold(body: ClubhouseScreen(trailing: trailing)),
-        ),
-      );
+    child: MaterialApp(
+      home: Scaffold(body: ClubhouseScreen(trailing: trailing)),
+    ),
+  );
 
   void narrow(WidgetTester tester) {
     tester.view.physicalSize = const Size(800, 1600);
@@ -30,8 +30,9 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
   }
 
-  testWidgets('shows the Výsledky and Kuželny entries with their subtitles',
-      (tester) async {
+  testWidgets('shows the Výsledky and Kuželny entries with their subtitles', (
+    tester,
+  ) async {
     narrow(tester);
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
@@ -54,7 +55,9 @@ void main() {
     expect(find.byType(ListTile), findsNWidgets(2));
   });
 
-  testWidgets('at 840 dp and above the hub renders a card grid', (tester) async {
+  testWidgets('at 840 dp and above the hub renders a card grid', (
+    tester,
+  ) async {
     wide(tester);
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
@@ -64,26 +67,30 @@ void main() {
     expect(find.byType(Card), findsNWidgets(2));
   });
 
-  testWidgets('tapping an entry pushes a placeholder screen titled after it '
-      '(until Results/Venues exist)', (tester) async {
-    narrow(tester);
-    await tester.pumpWidget(app());
-    await tester.pumpAndSettle();
+  testWidgets(
+    'tapping Výsledky opens the real results screen, Kuželny still opens '
+    'its placeholder (until Task 5 builds it)',
+    (tester) async {
+      narrow(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Výsledky'));
-    await tester.pumpAndSettle();
-    expect(find.widgetWithText(AppBar, 'Výsledky'), findsOneWidget);
+      await tester.tap(find.text('Výsledky'));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(AppBar, 'Výsledky'), findsOneWidget);
 
-    await tester.pageBack();
-    await tester.pumpAndSettle();
+      await tester.pageBack();
+      await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Kuželny'));
-    await tester.pumpAndSettle();
-    expect(find.widgetWithText(AppBar, 'Kuželny'), findsOneWidget);
-  });
+      await tester.tap(find.text('Kuželny'));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(AppBar, 'Kuželny'), findsOneWidget);
+    },
+  );
 
-  testWidgets('the shell\'s trailing actions ride along on the header',
-      (tester) async {
+  testWidgets('the shell\'s trailing actions ride along on the header', (
+    tester,
+  ) async {
     narrow(tester);
     await tester.pumpWidget(app(trailing: const [Icon(Icons.person)]));
     await tester.pumpAndSettle();

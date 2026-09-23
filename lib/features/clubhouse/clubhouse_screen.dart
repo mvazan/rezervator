@@ -7,11 +7,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/hub_menu.dart';
 import '../schedule/widgets/home_header.dart';
+import 'results_screen.dart';
 
-/// A stand-in for a hub entry whose real screen (Task 3/5) does not exist
+/// A stand-in for a hub entry whose real screen (Task 5) does not exist
 /// yet — just enough to prove the entry and the tap wiring. This is the
-/// only place that names Výsledky's and Kuželny's eventual targets, so
-/// swapping them in later touches one list, not the whole screen.
+/// only place that names Kuželny's eventual target, so swapping it in
+/// later touches one list, not the whole screen.
 Widget _placeholder(String label) =>
     Scaffold(appBar: AppBar(title: Text(label)));
 
@@ -24,8 +25,9 @@ class ClubhouseScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    void open(BuildContext context, String label) => Navigator.of(context)
-        .push(MaterialPageRoute(builder: (_) => _placeholder(label)));
+    void open(BuildContext context, String label) => Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => _placeholder(label)));
 
     return Column(
       children: [
@@ -37,7 +39,9 @@ class ClubhouseScreen extends ConsumerWidget {
                 label: 'Výsledky',
                 icon: Icons.scoreboard_outlined,
                 subtitle: 'Zápasy a výsledky našich týmů',
-                onTap: () => open(context, 'Výsledky'),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const ResultsScreen()),
+                ),
               ),
               (
                 label: 'Kuželny',
