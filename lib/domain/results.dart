@@ -1,0 +1,128 @@
+/// Klubovna's "Výsledky" card: pure helpers over the federation's matches
+/// and results (0045) — what's live, how the score reads, which matches show
+/// on the timeline. Pure Dart, unit-tested; the screens (Task 2+) only
+/// render it.
+library;
+
+import 'collation.dart';
+import 'models.dart';
+import 'upcoming.dart' show matchIsMine;
+
+/// Whether [slot]'s live score/video are worth polling right now — mirrors
+/// `refresh_match`'s own gate (0045) so the button and the background fetch
+/// agree on what "live" means. [result] null (nothing fetched yet) reads as
+/// [MatchStatus.scheduled].
+bool isLive(PrioritySlot slot, MatchResult? result, DateTime now) {
+  final start = DateTime(
+    slot.date.year,
+    slot.date.month,
+    slot.date.day,
+    slot.startsAt.hour,
+    slot.startsAt.minute,
+  );
+  return switch (result?.status ?? MatchStatus.scheduled) {
+    MatchStatus.finished || MatchStatus.forfeit => false,
+    MatchStatus.preparation ||
+    MatchStatus.inProgress =>
+      now.isBefore(start.add(const Duration(hours: 12))),
+    MatchStatus.scheduled => now.isAfter(start.subtract(const Duration(hours: 1))) &&
+        now.isBefore(start.add(const Duration(hours: 6))),
+  };
+}
+
+/// "2" for a whole point, "2,5" for a half (Czech decimal comma); "–" when
+/// there is nothing to show.
+String numLabel(num? v) {
+  if (v == null) return '–';
+  if (v == v.roundToDouble()) return v.toInt().toString();
+  return v.toString().replaceAll('.', ',');
+}
+
+/// "5 : 3", "2,5 : 5,5", or "–" before the match has any points.
+String pointsLabel(num? home, num? away) =>
+    home == null && away == null ? '–' : '${numLabel(home)} : ${numLabel(away)}';
+
+/// "3460 : 3349", or '' before the match has a pin count (the row then omits
+/// this column instead of showing a bare dash).
+String pinsLabel(int? home, int? away) {
+  if (home == null && away == null) return '';
+  String s(int? v) => v?.toString() ?? '–';
+  return '${s(home)} : ${s(away)}';
+}
+
+/// "6 hráčů · 120 HS" from the site's own codes (`TEAMS_OF_6`/`TEAMS_OF_4`,
+/// `T100`/`T120`) — Czech numeral agreement (2–4 "hráči", else "hráčů").
+/// Either half is simply omitted when its code is empty or unrecognised.
+String formatLabel(String matchType, String discipline) {
+  final playersMatch = RegExp(r'^TEAMS_OF_(\d+)$').firstMatch(matchType);
+  String? players;
+  if (playersMatch != null) {
+    final n = int.parse(playersMatch.group(1)!);
+    final word = n == 1 ? 'hráč' : (n >= 2 && n <= 4 ? 'hráči' : 'hráčů');
+    players = '$n $word';
+  }
+  final hsMatch = RegExp(r'^T(\d+)$').firstMatch(discipline);
+  final hs = hsMatch == null ? null : '${hsMatch.group(1)} HS';
+  return [?players, ?hs].join(' · ');
+}
+
+/// The Czech-sorted [venues] whose name, address or a club matches [query]
+/// (accent- and case-insensitive); an empty query keeps everything.
+List<Venue> venuesMatching(List<Venue> venues, String query) {
+  final q = foldDiacritics(query.trim()).toLowerCase();
+  bool hit(String s) => foldDiacritics(s).toLowerCase().contains(q);
+  return [
+    for (final v in venues)
+      if (q.isEmpty || hit(v.name) || hit(v.address ?? '') || v.clubs.any(hit))
+        v,
+  ]..sort((a, b) => compareCzech(a.name, b.name));
+}
+
+/// The Klubovna "Výsledky" list: federation matches (never manual/xlsx rows,
+/// never their úklid children) grouped by day, days ascending and each day's
+/// matches by start time then title. [team] (an exact team name) wins over
+/// [mineOnly]/[followedTeams]/[exceptions] when given; otherwise [mineOnly]
+/// applies the same "is this mine" rule as Můj přehled ([matchIsMine]).
+List<({Day day, List<PrioritySlot> matches})> resultsTimeline({
+  required List<PrioritySlot> slots,
+  String? team,
+  required bool mineOnly,
+  required List<String> followedTeams,
+  required Map<String, bool> exceptions,
+}) {
+  final filtered = [
+    for (final s in slots)
+      if (s.type.isMatch && s.parentId == null && s.fromFederation)
+        if (team != null
+            ? (s.homeTeam == team || s.awayTeam == team)
+            : (!mineOnly || matchIsMine(s, followedTeams, exceptions)))
+          s,
+  ];
+  final byDay = <Day, List<PrioritySlot>>{};
+  for (final s in filtered) {
+    (byDay[s.date] ??= []).add(s);
+  }
+  final days = byDay.keys.toList()..sort();
+  return [
+    for (final day in days)
+      (
+        day: day,
+        matches: byDay[day]!
+          ..sort((a, b) {
+            final byStart = a.startsAt.compareTo(b.startsAt);
+            return byStart != 0 ? byStart : a.title.compareTo(b.title);
+          }),
+      ),
+  ];
+}
+
+/// Which day of [days] (as [resultsTimeline] returns them, ascending) the
+/// list should open on: the first at or after [today], else the last one
+/// (the season is over), else -1 (nothing to show).
+int todayIndex(List<({Day day, List<PrioritySlot> matches})> days, Day today) {
+  if (days.isEmpty) return -1;
+  for (var i = 0; i < days.length; i++) {
+    if (!days[i].day.isBefore(today)) return i;
+  }
+  return days.length - 1;
+}

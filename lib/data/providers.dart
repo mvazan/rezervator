@@ -237,6 +237,50 @@ final federationSyncProvider = StreamProvider<FederationSync>((ref) {
           rows.isEmpty ? FederationSync.none : FederationSync.fromJson(rows.first));
 });
 
+/// All of the tenant's `match_results` rows (0045), keyed by match id — every
+/// federation match that has been fetched at least once.
+final matchResultsProvider = StreamProvider<Map<String, MatchResult>>((ref) {
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return Stream.value(const {});
+  return cachedRows(uid, cacheKeyMatchResults,
+          () => _db.from('match_results').stream(primaryKey: ['match_id']))
+      .map((rows) => {
+            for (final row in rows)
+              row['match_id'] as String: MatchResult.fromJson(row),
+          });
+});
+
+/// One match's `match_player_results` rows (0045), home side first then by
+/// position. autoDispose: each match detail otherwise leaks a permanent
+/// realtime channel, same reasoning as [weekReservationsProvider].
+final matchPlayerResultsProvider = StreamProvider.autoDispose
+    .family<List<MatchPlayerResult>, String>((ref, matchId) {
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return Stream.value(const []);
+  return cachedRows(
+          uid,
+          'match_player_results:$matchId',
+          () => _db
+              .from('match_player_results')
+              .stream(primaryKey: ['id'])
+              .eq('match_id', matchId))
+      .map((rows) => rows.map(MatchPlayerResult.fromJson).toList()
+        ..sort((a, b) {
+          final bySide = (a.side == 'home' ? 0 : 1) - (b.side == 'home' ? 0 : 1);
+          return bySide != 0 ? bySide : a.position.compareTo(b.position);
+        }));
+});
+
+/// The alleys our teams play at (0045), Czech-sorted by name.
+final venuesProvider = StreamProvider<List<Venue>>((ref) {
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return Stream.value(const []);
+  return cachedRows(uid, cacheKeyVenues,
+          () => _db.from('venues').stream(primaryKey: ['id']))
+      .map((rows) => rows.map(Venue.fromJson).toList()
+        ..sort((a, b) => compareCzech(a.name, b.name)));
+});
+
 final timeBlocksProvider = StreamProvider<List<TimeBlock>>((ref) {
   final uid = ref.watch(_authUidProvider);
   if (uid == null) return Stream.value(const []);
@@ -574,6 +618,13 @@ class Api {
 
   static Future<void> requestFederationSync() =>
       _db.rpc('request_federation_sync');
+
+  /// On-demand live refresh of one match's score (0045) — gated server-side
+  /// to at most one fetch per match per 5 minutes. Returns 'queued' (a fetch
+  /// was scheduled), 'fresh' (already refreshed within the last 5 minutes),
+  /// or 'not_live' (outside the match's live window).
+  static Future<String> refreshMatch(String matchId) async =>
+      await _db.rpc('refresh_match', params: {'p_match_id': matchId}) as String;
 
   static Future<void> updateTeam({
     required String id,
@@ -1526,6 +1577,8 @@ void resetTenantScopedProviders(WidgetRef ref) {
   ref.invalidate(clubsProvider);
   ref.invalidate(teamsProvider);
   ref.invalidate(federationSyncProvider);
+  ref.invalidate(matchResultsProvider);
+  ref.invalidate(venuesProvider);
   ref.invalidate(timeBlocksProvider);
   ref.invalidate(dayOverridesProvider);
   ref.invalidate(slotTypesProvider);

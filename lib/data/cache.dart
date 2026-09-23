@@ -19,6 +19,8 @@ const cacheKeySettings = 'settings';
 const cacheKeyGroups = 'player_groups';
 const cacheKeyTeams = 'teams';
 const cacheKeyFederationSync = 'federation_sync';
+const cacheKeyMatchResults = 'match_results';
+const cacheKeyVenues = 'venues';
 
 /// Tiny JSON row cache behind the offline read-only mode: every data stream
 /// writes its latest rows here and replays them as its first emission on the
