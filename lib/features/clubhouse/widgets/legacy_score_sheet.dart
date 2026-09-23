@@ -1,28 +1,46 @@
 /// Match detail (Task 4, federation-results-ui): a dense per-pairing score
-/// sheet styled like kuzelky.com's old table (team summary + one block per
-/// roster position), in the app's own font. Replaces `MatchPlayerSection`'s
-/// two ExpansionTile lists.
+/// sheet, styled as a 1:1 replica of kuzelky.com's own `table#tabzap`
+/// (colours, sizes, weights, widths, row heights — see
+/// `.superpowers/sdd/legacy-sheet-styles-brief.md`), except the typeface
+/// (kept as the app's own Manrope, never the reference site's). Replaces
+/// `MatchPlayerSection`'s two ExpansionTile lists.
 library;
 
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../../core/theme.dart' show appFontFamily;
 import '../../../domain/models.dart';
 import '../../../domain/results.dart';
 
+// kuzelky.com's own fixed sheet colours (measured via getComputedStyle on a
+// real match page) — a literal replica, not app theming. Never route these
+// through app_theme/SurfaceColors or adapt them to dark mode: the
+// reference sheet is always light, black-on-colour (Fix round 4).
+const _kBorder = Color(0xFF111111);
+const _kHeaderGrey = Color(0xFFCCCCCC);
+const _kBodyYellow = Color(0xFFFDFDEC);
+const _kStatsPurple = Color(0xFFF4E4FC);
+const _kDruzstvoBlue = Color(0xFFADD8E6);
+const _kNameCellGrey = Color(0xFFF0F0F0);
+const _kLaneStatsGreen = Color(0xFFEEFFEC);
+const _kRegCellBlue = Color(0xFFCDE9FF);
+const _kPositiveGreen = Color(0xFF008000);
+const _kNegativeRed = Color(0xFFFF0000);
+const _kCelkemTotalRed = Color(0xFF8B0000);
+const _kBlack = Color(0xFF000000);
+const _kWhite = Color(0xFFFFFFFF);
+
 /// One pairing block per position (1..N): the home and away player who
 /// faced each other, each with a line per lane thrown plus a Celkem total,
-/// and the pin difference between them. Above the blocks, a team-column
-/// label row, a team summary row and (when there IS a lineup) a column
-/// header row, all mirrored for both sides.
+/// and the pin difference between them. Above the blocks, a team summary
+/// row and two column-header rows, mirrored for both sides.
 ///
 /// Returns `SizedBox.shrink()` only when there is truly nothing to show
 /// ([result] null AND [players] empty). When [result] carries team-level
 /// data but [players] is empty (lineup not synced yet), the team summary
-/// still renders — Fix round 1: it used to disappear along with the
-/// per-player section, silently hiding Plné/Dor./Ch. the header card
-/// doesn't show. The caller (`match_detail_screen.dart`) still owns the
+/// still renders — the caller (`match_detail_screen.dart`) still owns the
 /// "Sestavy zatím nejsou k dispozici." message for the missing-lineup case.
 class LegacyScoreSheet extends StatelessWidget {
   const LegacyScoreSheet({
@@ -85,21 +103,22 @@ class LegacyScoreSheet extends StatelessWidget {
   }
 }
 
-/// The actual table — team-column labels, team summary, column header and
-/// pairing blocks — shared by the embedded [LegacyScoreSheet] (inside a
-/// horizontal [SingleChildScrollView]) and [LegacyScoreSheetPage] (scaled
-/// to fit via `_ScaleToFitViewer`, never scrolled). A fixed-size widget by
-/// design:
-/// every column is a hard-coded width sized for THIS table's own real
-/// content at 1.0×, not for arbitrary layout.
+/// The actual table — a 1:1 replica of kuzelky.com's own `table#tabzap`
+/// grid, shared by the embedded [LegacyScoreSheet] (inside a horizontal
+/// [SingleChildScrollView]) and [LegacyScoreSheetPage] (scaled to fit via
+/// `_ScaleToFitViewer`, never scrolled). Every column and row is a
+/// hard-coded dp value copied from the reference site, not derived from
+/// the app's theme — see `.superpowers/sdd/legacy-sheet-styles-brief.md`.
 ///
-/// Fix round 2: this table no longer follows the app's accessibility
-/// text-size setting (`core/text_size.dart`) — [MediaQuery.withNoTextScaling]
-/// pins text scaling off here, the one place both call sites share, so a
-/// user's "larger text" choice can't blow the column widths out
-/// (that was fix round 1's problem: widening every column enough for 1.3×
-/// nearly doubled the table's width). Seeing this table BIGGER is instead
-/// what [LegacyScoreSheetPage]'s scale-to-fit view is for.
+/// Built from plain bordered [Container]s (not [Table], which has no
+/// rowspan) — the player name, "Družstvo" (team points) and "Rozdíl"
+/// cells each span several rows by being ONE tall [Container] rather than
+/// several stacked ones, which is what actually reproduces the reference
+/// site's rowspan cells here (no internal seam for that cell, since it's
+/// a single shape). Fix round 2: this table no longer follows the app's
+/// accessibility text-size setting (`core/text_size.dart`) —
+/// [MediaQuery.withNoTextScaling] pins text scaling off here, the one
+/// place both call sites share.
 class _ScoreTableBody extends StatelessWidget {
   const _ScoreTableBody({
     required this.slot,
@@ -111,21 +130,51 @@ class _ScoreTableBody extends StatelessWidget {
   final MatchResult? result;
   final List<MatchPlayerResult> players;
 
-  // Measured against the real app font/theme (Manrope via buildTheme, see
-  // legacy_score_sheet_test.dart's `widths` group) at 1.0× — this table no
-  // longer needs 1.3×/2.0× headroom (see the class doc). Each width is the
-  // widest real content that column ever holds, plus a few dp of margin:
-  //   _nameWidth: bold team name, e.g. "TJ Slovan Karlovy Vary" (~154dp).
-  //   _labelColWidth: the lane/"Celkem" column — bold "Celkem" row label
-  //     is its widest content (~52dp), wider than any lane number.
-  //   _numColWidth: the 5 plain numeric columns — their own bold "Celkem"
-  //     HEADER label (~43dp) is wider than any 4-digit total they hold.
-  //   _diffWidth: "Rozdíl" header (~35dp) and a signed diff value.
-  static const _nameWidth = 158.0;
-  static const _labelColWidth = 58.0;
-  static const _numColWidth = 47.0;
-  static const _diffWidth = 40.0;
-  static const _sideWidth = _nameWidth + _labelColWidth + _numColWidth * 5;
+  // Column widths (dp), copied 1:1 from kuzelky.com's own table (home and
+  // away differ by a dp or two on a few columns — the reference site's own
+  // layout, not a rounding choice made here).
+  static const _nameWidthHome = 144.0;
+  static const _nameWidthAway = 143.0;
+  static const _serieWidth = 42.0;
+  static const _plneWidth = 55.0;
+  static const _dorWidth = 46.0;
+  static const _chWidthHome = 33.0;
+  static const _chWidthAway = 30.0;
+  static const _celkemColWidth = 58.0;
+  static const _dilciWidth = 31.0;
+  static const _druzstvoWidthHome = 51.0;
+  static const _druzstvoWidthAway = 52.0;
+  static const _rozdilWidth = 46.0;
+
+  static const _sideWidthHome =
+      _nameWidthHome +
+      _serieWidth +
+      _plneWidth +
+      _dorWidth +
+      _chWidthHome +
+      _celkemColWidth +
+      _dilciWidth +
+      _druzstvoWidthHome;
+  static const _sideWidthAway =
+      _nameWidthAway +
+      _serieWidth +
+      _plneWidth +
+      _dorWidth +
+      _chWidthAway +
+      _celkemColWidth +
+      _dilciWidth +
+      _druzstvoWidthAway;
+
+  /// The table's total natural width (dp) — ≈963, matching the reference
+  /// site. Used for the full-width separator row between pairing blocks.
+  static const totalWidth = _sideWidthHome + _rozdilWidth + _sideWidthAway;
+
+  // Row heights (dp), also copied 1:1.
+  static const _teamRowHeight = 43.0;
+  static const _headerRowHeight = 23.0;
+  static const _laneRowHeight = 23.0;
+  static const _celkemRowHeight = 31.0;
+  static const _separatorHeight = 9.0;
 
   MatchPlayerResult? _forSide(String side, int position) {
     for (final p in players) {
@@ -134,354 +183,499 @@ class _ScoreTableBody extends StatelessWidget {
     return null;
   }
 
+  /// Team-level "Družstvo" column (Fix round 4): the total match/team
+  /// points this side's players individually earned — summed from each
+  /// [MatchPlayerResult.teamPoints], not a separate stat `MatchResult`
+  /// carries on its own.
+  num _teamPointsSum(String side) {
+    num sum = 0;
+    for (final p in players) {
+      if (p.side == side) sum += p.teamPoints ?? 0;
+    }
+    return sum;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final positions = <int>{for (final p in players) p.position}.toList()
       ..sort();
 
     return MediaQuery.withNoTextScaling(
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _teamLabelRow(theme),
-          _teamSummaryRow(theme),
+          _teamSummaryRow(),
           if (players.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            _columnHeaderRow(theme),
-            for (final (i, pos) in positions.indexed)
-              _pairingBlock(
-                theme,
-                pos,
-                _forSide('home', pos),
-                _forSide('away', pos),
-                tinted: i.isOdd,
-              ),
+            _headerRows(),
+            for (final (i, pos) in positions.indexed) ...[
+              _pairingBlock(pos, _forSide('home', pos), _forSide('away', pos)),
+              if (i != positions.length - 1) _separatorRow(),
+            ],
           ],
         ],
       ),
     );
   }
 
-  Widget _numCell(String text, {TextStyle? style}) => SizedBox(
-    width: _numColWidth,
-    child: Text(
-      text,
-      textAlign: TextAlign.center,
-      maxLines: 1,
-      softWrap: false,
-      overflow: TextOverflow.visible,
-      style: style,
-    ),
-  );
+  // ---- low-level cell ----
 
-  Widget _labelCell(String text, {TextStyle? style}) => SizedBox(
-    width: _labelColWidth,
-    child: Text(
-      text,
-      textAlign: TextAlign.center,
-      maxLines: 1,
-      softWrap: false,
-      overflow: TextOverflow.visible,
-      style: style,
-    ),
-  );
+  Color _diffColor(int? diff) {
+    if (diff == null || diff == 0) return _kBlack;
+    return diff > 0 ? _kPositiveGreen : _kNegativeRed;
+  }
 
-  Widget _teamLabelSide(ThemeData theme) {
-    final style = theme.textTheme.labelSmall?.copyWith(
-      fontWeight: FontWeight.bold,
-    );
-    return SizedBox(
-      width: _sideWidth,
-      child: Row(
-        children: [
-          SizedBox(
-            width: _nameWidth,
-            child: Text('Družstvo', style: style, maxLines: 1, softWrap: false),
-          ),
-          _labelCell('Body', style: style),
-          _numCell('Plné', style: style),
-          _numCell('Dor.', style: style),
-          _numCell('Ch.', style: style),
-          _numCell('Celkem', style: style),
-          _numCell('Sady', style: style),
-        ],
+  Widget _cell({
+    required double width,
+    required double height,
+    required Color bg,
+    required String text,
+    required double fontSize,
+    required FontWeight weight,
+    Color color = _kBlack,
+    TextAlign align = TextAlign.center,
+    int maxLines = 1,
+  }) {
+    return Container(
+      width: width,
+      height: height,
+      padding: const EdgeInsets.all(4),
+      alignment: align == TextAlign.left
+          ? Alignment.centerLeft
+          : Alignment.center,
+      decoration: BoxDecoration(
+        color: bg,
+        border: Border.all(color: _kBorder, width: 1),
+      ),
+      child: Text(
+        text,
+        textAlign: align,
+        maxLines: maxLines,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          fontFamily: appFontFamily,
+          fontSize: fontSize,
+          fontWeight: weight,
+          color: color,
+          height: 1.0,
+        ),
       ),
     );
   }
 
-  /// The team summary's OWN column labels (Fix round 1) — before this, the
-  /// summary row's Body/…/Sady cells sat directly under the player column
-  /// header's Série/…/Dílčí labels, which don't describe them.
-  Widget _teamLabelRow(ThemeData theme) => Row(
-    children: [
-      _teamLabelSide(theme),
-      const SizedBox(width: _diffWidth),
-      _teamLabelSide(theme),
-    ],
-  );
+  // ---- row 0: team summary ----
 
-  Widget _teamSummarySide(ThemeData theme, String teamName, bool isHome) {
+  Widget _teamSummarySide(String teamName, bool isHome) {
     final body = isHome ? result?.homePoints : result?.awayPoints;
     final fulls = isHome ? result?.homeFulls : result?.awayFulls;
     final spares = isHome ? result?.homeSpares : result?.awaySpares;
     final errors = isHome ? result?.homeErrors : result?.awayErrors;
     final total = isHome ? result?.homeTotal : result?.awayTotal;
     final setPoints = isHome ? result?.homeSetPoints : result?.awaySetPoints;
-    final style = theme.textTheme.bodyMedium?.copyWith(
-      fontWeight: FontWeight.w700,
-    );
-    return SizedBox(
-      width: _sideWidth,
-      child: Row(
-        children: [
-          SizedBox(
-            width: _nameWidth,
-            child: Text(
-              teamName,
-              style: style,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          _labelCell(numLabel(body), style: style),
-          _numCell(numLabel(fulls), style: style),
-          _numCell(numLabel(spares), style: style),
-          _numCell(numLabel(errors), style: style),
-          _numCell(numLabel(total), style: style),
-          _numCell(numLabel(setPoints), style: style),
-        ],
-      ),
+    final nameWidth = isHome ? _nameWidthHome : _nameWidthAway;
+    final chWidth = isHome ? _chWidthHome : _chWidthAway;
+    final druzstvoWidth = isHome ? _druzstvoWidthHome : _druzstvoWidthAway;
+
+    return Row(
+      children: [
+        _cell(
+          width: nameWidth,
+          height: _teamRowHeight,
+          bg: _kHeaderGrey,
+          text: teamName,
+          fontSize: 16,
+          weight: FontWeight.w700,
+          maxLines: 2,
+        ),
+        _cell(
+          width: _serieWidth,
+          height: _teamRowHeight,
+          bg: _kBodyYellow,
+          text: numLabel(body),
+          fontSize: 24,
+          weight: FontWeight.w700,
+        ),
+        _cell(
+          width: _plneWidth,
+          height: _teamRowHeight,
+          bg: _kStatsPurple,
+          text: numLabel(fulls),
+          fontSize: 20,
+          weight: FontWeight.w400,
+        ),
+        _cell(
+          width: _dorWidth,
+          height: _teamRowHeight,
+          bg: _kStatsPurple,
+          text: numLabel(spares),
+          fontSize: 20,
+          weight: FontWeight.w400,
+        ),
+        _cell(
+          width: chWidth,
+          height: _teamRowHeight,
+          bg: _kStatsPurple,
+          text: numLabel(errors),
+          fontSize: 20,
+          weight: FontWeight.w400,
+        ),
+        _cell(
+          width: _celkemColWidth,
+          height: _teamRowHeight,
+          bg: _kStatsPurple,
+          text: numLabel(total),
+          fontSize: 20,
+          weight: FontWeight.w700,
+        ),
+        _cell(
+          width: _dilciWidth,
+          height: _teamRowHeight,
+          bg: _kStatsPurple,
+          text: numLabel(setPoints),
+          fontSize: 20,
+          weight: FontWeight.w400,
+        ),
+        _cell(
+          width: druzstvoWidth,
+          height: _teamRowHeight,
+          bg: _kDruzstvoBlue,
+          text: numLabel(_teamPointsSum(isHome ? 'home' : 'away')),
+          fontSize: 20,
+          weight: FontWeight.w700,
+        ),
+      ],
     );
   }
 
-  Widget _teamSummaryRow(ThemeData theme) {
+  Widget _teamSummaryRow() {
     final home = result?.homeTotal;
     final away = result?.awayTotal;
     final diff = (home != null && away != null) ? home - away : null;
     return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        _teamSummarySide(theme, slot.homeTeam, true),
-        SizedBox(
-          width: _diffWidth,
-          child: Center(
-            child: Text(
-              diff == null ? '' : _signed(diff),
-              maxLines: 1,
-              softWrap: false,
-              overflow: TextOverflow.visible,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
+        _teamSummarySide(slot.homeTeam, true),
+        _cell(
+          width: _rozdilWidth,
+          height: _teamRowHeight,
+          bg: _kBodyYellow,
+          text: diff == null ? '' : _signed(diff),
+          fontSize: 20,
+          weight: FontWeight.w700,
+          color: _diffColor(diff),
         ),
-        _teamSummarySide(theme, slot.awayTeam, false),
+        _teamSummarySide(slot.awayTeam, false),
       ],
     );
   }
 
-  Widget _headerSide(ThemeData theme) {
-    final style = theme.textTheme.labelSmall?.copyWith(
-      fontWeight: FontWeight.bold,
-    );
-    return SizedBox(
-      width: _sideWidth,
-      child: Row(
-        children: [
-          SizedBox(
-            width: _nameWidth,
-            child: Text(
-              'Jméno a příjmení hráče',
-              style: style,
-              maxLines: 1,
-              softWrap: false,
-            ),
-          ),
-          _labelCell('Série', style: style),
-          _numCell('Plné', style: style),
-          _numCell('Dor.', style: style),
-          _numCell('Ch.', style: style),
-          _numCell('Celkem', style: style),
-          _numCell('Dílčí', style: style),
-        ],
-      ),
-    );
-  }
+  // ---- rows 1–2: column headers ----
 
-  Widget _columnHeaderRow(ThemeData theme) {
-    final style = theme.textTheme.labelSmall?.copyWith(
-      fontWeight: FontWeight.bold,
-    );
-    return Row(
-      children: [
-        _headerSide(theme),
-        SizedBox(
-          width: _diffWidth,
-          child: Center(
-            child: Text('Rozdíl', style: style, maxLines: 1, softWrap: false),
-          ),
-        ),
-        _headerSide(theme),
-      ],
-    );
-  }
-
-  Widget _badge(ThemeData theme) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-    decoration: BoxDecoration(
-      color: theme.colorScheme.primaryContainer,
-      borderRadius: BorderRadius.circular(4),
-    ),
-    child: Text(
-      'bod',
-      style: theme.textTheme.labelSmall?.copyWith(
-        color: theme.colorScheme.onPrimaryContainer,
-      ),
-    ),
+  Widget _headerCell(
+    double width,
+    double height,
+    String text, {
+    TextAlign align = TextAlign.center,
+  }) => _cell(
+    width: width,
+    height: height,
+    bg: _kHeaderGrey,
+    text: text,
+    fontSize: 10,
+    weight: FontWeight.w400,
+    align: align,
+    maxLines: 2,
   );
 
-  Widget _playerRow(
-    ThemeData theme, {
-    required String name,
-    required bool showBadge,
-    required String seriesLabel,
-    required int? fulls,
-    required int? spares,
-    required int? errors,
-    required int? total,
-    required num? setPoints,
-    bool bold = false,
-  }) {
-    final style = bold
-        ? theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700)
-        : theme.textTheme.bodyMedium;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 1),
-      child: Row(
-        children: [
-          SizedBox(
-            width: _nameWidth,
-            child: Row(
+  Widget _headerColumn(bool isHome) {
+    final nameWidth = isHome ? _nameWidthHome : _nameWidthAway;
+    final chWidth = isHome ? _chWidthHome : _chWidthAway;
+    final druzstvoWidth = isHome ? _druzstvoWidthHome : _druzstvoWidthAway;
+    final vykonWidth =
+        _plneWidth + _dorWidth + chWidth + _celkemColWidth + _dilciWidth;
+
+    return Row(
+      children: [
+        Column(
+          children: [
+            _headerCell(
+              nameWidth,
+              _headerRowHeight,
+              'Jméno a příjmení hráče',
+              align: TextAlign.left,
+            ),
+            _headerCell(
+              nameWidth,
+              _headerRowHeight,
+              'Registrační číslo',
+              align: TextAlign.left,
+            ),
+          ],
+        ),
+        _headerCell(_serieWidth, _headerRowHeight * 2, 'Série hodů'),
+        Column(
+          children: [
+            _headerCell(vykonWidth, _headerRowHeight, 'Výkon'),
+            Row(
               children: [
-                Expanded(
-                  child: Text(
-                    name,
-                    style: style,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                if (showBadge) ...[_badge(theme), const SizedBox(width: 4)],
+                _headerCell(_plneWidth, _headerRowHeight, 'Plné'),
+                _headerCell(_dorWidth, _headerRowHeight, 'Dor.'),
+                _headerCell(chWidth, _headerRowHeight, 'Ch.'),
+                _headerCell(_celkemColWidth, _headerRowHeight, 'Celkem'),
+                _headerCell(_dilciWidth, _headerRowHeight, 'Dílčí'),
               ],
             ),
-          ),
-          _labelCell(seriesLabel, style: style),
-          _numCell(numLabel(fulls), style: style),
-          _numCell(numLabel(spares), style: style),
-          _numCell(numLabel(errors), style: style),
-          _numCell(numLabel(total), style: style),
-          _numCell(numLabel(setPoints), style: style),
-        ],
-      ),
+          ],
+        ),
+        Column(
+          children: [
+            _headerCell(druzstvoWidth, _headerRowHeight, 'Body'),
+            _headerCell(druzstvoWidth, _headerRowHeight, 'Družstvo'),
+          ],
+        ),
+      ],
     );
   }
 
-  Widget _playerMiniBlock(
-    ThemeData theme,
-    int position,
-    MatchPlayerResult player,
-  ) {
+  Widget _headerRows() {
+    return Row(
+      children: [
+        _headerColumn(true),
+        _headerCell(_rozdilWidth, _headerRowHeight * 2, 'Rozdíl'),
+        _headerColumn(false),
+      ],
+    );
+  }
+
+  // ---- pairing blocks ----
+
+  Widget _pairingSide(int position, MatchPlayerResult? player, bool isHome) {
+    final nameWidth = isHome ? _nameWidthHome : _nameWidthAway;
+    final chWidth = isHome ? _chWidthHome : _chWidthAway;
+    final druzstvoWidth = isHome ? _druzstvoWidthHome : _druzstvoWidthAway;
+
+    if (player == null) {
+      // Ragged data (a position only the other side fielded): a single
+      // blank cell keeps this side from collapsing to zero width, without
+      // crashing or fabricating a player (spec carried over from the
+      // original task).
+      final width =
+          nameWidth +
+          _serieWidth +
+          _plneWidth +
+          _dorWidth +
+          chWidth +
+          _celkemColWidth +
+          _dilciWidth +
+          druzstvoWidth;
+      return _cell(
+        width: width,
+        height: _celkemRowHeight,
+        bg: _kWhite,
+        text: '',
+        fontSize: 10,
+        weight: FontWeight.w400,
+      );
+    }
+
     final laneCount = player.lanes.length;
-    final hasBadge = (player.teamPoints ?? 0) > 0;
-    return Column(
+    // A live match with no lane data yet: the "registrační číslo" slot
+    // (which we never have real data for) shows the player's name instead
+    // of going fully blank, so the identity isn't lost entirely (Fix
+    // round 4 design call — the reference site always has lanes by the
+    // time a sheet exists).
+    final hasLanes = laneCount > 0;
+    final blockHeight = laneCount * _laneRowHeight + _celkemRowHeight;
+    final nameText = '$position. ${player.playerName}';
+
+    Widget laneRow(PlayerLane lane) => Row(
+      children: [
+        _cell(
+          width: _serieWidth,
+          height: _laneRowHeight,
+          bg: _kBodyYellow,
+          text: '${lane.lane}',
+          fontSize: 10,
+          weight: FontWeight.w400,
+        ),
+        _cell(
+          width: _plneWidth,
+          height: _laneRowHeight,
+          bg: _kLaneStatsGreen,
+          text: numLabel(lane.fulls),
+          fontSize: 10,
+          weight: FontWeight.w400,
+        ),
+        _cell(
+          width: _dorWidth,
+          height: _laneRowHeight,
+          bg: _kLaneStatsGreen,
+          text: numLabel(lane.spares),
+          fontSize: 10,
+          weight: FontWeight.w400,
+        ),
+        _cell(
+          width: chWidth,
+          height: _laneRowHeight,
+          bg: _kLaneStatsGreen,
+          text: numLabel(lane.errors),
+          fontSize: 10,
+          weight: FontWeight.w400,
+        ),
+        _cell(
+          width: _celkemColWidth,
+          height: _laneRowHeight,
+          bg: _kStatsPurple,
+          text: numLabel(lane.total),
+          fontSize: 10,
+          weight: FontWeight.w400,
+        ),
+        _cell(
+          width: _dilciWidth,
+          height: _laneRowHeight,
+          bg: _kStatsPurple,
+          text: numLabel(lane.setPoints),
+          fontSize: 10,
+          weight: FontWeight.w400,
+        ),
+      ],
+    );
+
+    final celkemRow = Row(
+      children: [
+        _cell(
+          width: _serieWidth,
+          height: _celkemRowHeight,
+          bg: _kStatsPurple,
+          text: 'Celkem',
+          fontSize: 10,
+          weight: FontWeight.w700,
+        ),
+        _cell(
+          width: _plneWidth,
+          height: _celkemRowHeight,
+          bg: _kStatsPurple,
+          text: numLabel(player.fulls),
+          fontSize: 10,
+          weight: FontWeight.w700,
+        ),
+        _cell(
+          width: _dorWidth,
+          height: _celkemRowHeight,
+          bg: _kStatsPurple,
+          text: numLabel(player.spares),
+          fontSize: 10,
+          weight: FontWeight.w700,
+        ),
+        _cell(
+          width: chWidth,
+          height: _celkemRowHeight,
+          bg: _kStatsPurple,
+          text: numLabel(player.errors),
+          fontSize: 10,
+          weight: FontWeight.w700,
+        ),
+        _cell(
+          width: _celkemColWidth,
+          height: _celkemRowHeight,
+          bg: _kRegCellBlue,
+          text: numLabel(player.total),
+          fontSize: 16,
+          weight: FontWeight.w700,
+          color: _kCelkemTotalRed,
+        ),
+        _cell(
+          width: _dilciWidth,
+          height: _celkemRowHeight,
+          bg: _kRegCellBlue,
+          text: numLabel(player.setPoints),
+          fontSize: 10,
+          weight: FontWeight.w400,
+        ),
+      ],
+    );
+
+    return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        for (final (i, lane) in player.lanes.indexed)
-          _playerRow(
-            theme,
-            name: i == 0 ? '$position. ${player.playerName}' : '',
-            showBadge: i == 0 && hasBadge,
-            seriesLabel: '${lane.lane}',
-            fulls: lane.fulls,
-            spares: lane.spares,
-            errors: lane.errors,
-            total: lane.total,
-            setPoints: lane.setPoints,
-          ),
-        _playerRow(
-          theme,
-          name: laneCount == 0 ? '$position. ${player.playerName}' : '',
-          showBadge: laneCount == 0 && hasBadge,
-          seriesLabel: 'Celkem',
-          fulls: player.fulls,
-          spares: player.spares,
-          errors: player.errors,
-          total: player.total,
-          setPoints: player.setPoints,
-          bold: true,
+        Column(
+          children: [
+            if (hasLanes)
+              _cell(
+                width: nameWidth,
+                height: laneCount * _laneRowHeight,
+                bg: _kNameCellGrey,
+                text: nameText,
+                fontSize: 16,
+                weight: FontWeight.w700,
+                align: TextAlign.left,
+                maxLines: 2,
+              ),
+            _cell(
+              width: nameWidth,
+              height: _celkemRowHeight,
+              bg: _kRegCellBlue,
+              text: hasLanes ? '' : nameText,
+              fontSize: 16,
+              weight: FontWeight.w700,
+              align: TextAlign.left,
+              maxLines: hasLanes ? 1 : 2,
+            ),
+          ],
+        ),
+        Column(
+          children: [for (final lane in player.lanes) laneRow(lane), celkemRow],
+        ),
+        _cell(
+          width: druzstvoWidth,
+          height: blockHeight,
+          bg: _kDruzstvoBlue,
+          text: numLabel(player.teamPoints),
+          fontSize: 20,
+          weight: FontWeight.w700,
         ),
       ],
     );
   }
 
   Widget _pairingBlock(
-    ThemeData theme,
     int position,
     MatchPlayerResult? home,
-    MatchPlayerResult? away, {
-    required bool tinted,
-  }) {
+    MatchPlayerResult? away,
+  ) {
     final diff = (home?.total != null && away?.total != null)
         ? home!.total! - away!.total!
         : null;
-    // A tie (diff == 0) is neutral, not a tertiary "home ahead" tint (Fix
-    // round 1 — the old `>= 0` check painted a 0 the same as a real lead).
-    final diffColor = diff == null || diff == 0
-        ? theme.colorScheme.onSurface
-        : diff > 0
-        ? theme.colorScheme.tertiary
-        : theme.colorScheme.error;
-    return Container(
-      color: tinted
-          ? theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5)
-          : Colors.transparent,
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          SizedBox(
-            width: _sideWidth,
-            child: home == null
-                ? const SizedBox.shrink()
-                : _playerMiniBlock(theme, position, home),
-          ),
-          SizedBox(
-            width: _diffWidth,
-            child: Center(
-              child: Text(
-                diff == null ? '' : _signed(diff),
-                maxLines: 1,
-                softWrap: false,
-                overflow: TextOverflow.visible,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  color: diffColor,
-                ),
-              ),
-            ),
-          ),
-          SizedBox(
-            width: _sideWidth,
-            child: away == null
-                ? const SizedBox.shrink()
-                : _playerMiniBlock(theme, position, away),
-          ),
-        ],
-      ),
+    final homeLanes = home?.lanes.length ?? 0;
+    final awayLanes = away?.lanes.length ?? 0;
+    final blockHeight =
+        math.max(homeLanes, awayLanes) * _laneRowHeight + _celkemRowHeight;
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _pairingSide(position, home, true),
+        _cell(
+          width: _rozdilWidth,
+          height: blockHeight,
+          bg: _kBodyYellow,
+          text: diff == null ? '' : _signed(diff),
+          fontSize: 16,
+          weight: FontWeight.w400,
+          color: _diffColor(diff),
+        ),
+        _pairingSide(position, away, false),
+      ],
     );
   }
+
+  Widget _separatorRow() => _cell(
+    width: totalWidth,
+    height: _separatorHeight,
+    bg: _kWhite,
+    text: '',
+    fontSize: 10,
+    weight: FontWeight.w400,
+  );
 }
 
 /// "+13" / "-2" / "0" — a signed pin difference; negative values already

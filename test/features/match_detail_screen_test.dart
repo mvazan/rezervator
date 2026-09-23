@@ -233,7 +233,7 @@ void main() {
       expect(find.text(away), findsNWidgets(2));
       expect(find.text('1. Jan Novák'), findsOneWidget);
       expect(find.text('1. Petr Svoboda'), findsOneWidget);
-      expect(find.text('Série'), findsNWidgets(2));
+      expect(find.text('Série hodů'), findsNWidgets(2));
       expect(find.text('290'), findsNWidgets(2));
     },
   );

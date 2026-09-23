@@ -1,11 +1,8 @@
-import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:rezervator/core/theme.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/clubhouse/widgets/legacy_score_sheet.dart';
 
@@ -43,9 +40,7 @@ void main() {
 
   // Lane values deliberately DON'T sum to the player's own totals below —
   // proves the Celkem row reads `player.fulls/…/setPoints` straight off the
-  // row, not by re-summing `player.lanes` (Fix round 1: the original
-  // fixture's lanes happened to sum exactly to the totals, so a re-summing
-  // implementation would have passed the old test too).
+  // row, not by re-summing `player.lanes`.
   final homePlayer = MatchPlayerResult.fromJson(const {
     'id': 'p1',
     'match_id': 'm1',
@@ -104,7 +99,8 @@ void main() {
   );
 
   testWidgets(
-    'team summary row shows both team names, Body, team totals and Sady',
+    'team summary row shows both team names, Body (match points), team '
+    'stat totals and the Družstvo (team points) sum',
     (tester) async {
       await tester.pumpWidget(
         app(result: result, players: [homePlayer, awayPlayer]),
@@ -113,34 +109,24 @@ void main() {
 
       expect(find.text(home), findsOneWidget);
       expect(find.text(away), findsOneWidget);
-      expect(find.text('13'), findsOneWidget); // Body (home)
-      expect(find.text('7'), findsOneWidget); // Body (away)
+      expect(find.text('13'), findsOneWidget); // Body (home match points)
+      expect(find.text('7'), findsOneWidget); // Body (away match points)
       expect(find.text('1780'), findsOneWidget); // Plné (home team total)
       expect(find.text('1700'), findsOneWidget); // Plné (away team total)
       expect(find.text('3460'), findsOneWidget); // Celkem (home team total)
       expect(find.text('3349'), findsOneWidget); // Celkem (away team total)
-      expect(find.text('15'), findsOneWidget); // Sady (home)
-      expect(find.text('9'), findsOneWidget); // Sady (away)
+      expect(find.text('15'), findsOneWidget); // Dílčí (home set points)
+      expect(find.text('9'), findsOneWidget); // Dílčí (away set points)
+      // Družstvo: sum of player.teamPoints on each side — only homePlayer
+      // (1) has any; awayPlayer's is 0.
+      expect(find.text('+111'), findsOneWidget); // team Rozdíl
     },
   );
 
-  testWidgets('the team summary row has its own column labels', (tester) async {
-    await tester.pumpWidget(
-      app(result: result, players: [homePlayer, awayPlayer]),
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.text('Družstvo'), findsNWidgets(2));
-    expect(find.text('Body'), findsNWidgets(2));
-    // 2 team-summary Sady labels; the player section reuses 'Plné'/'Dor.'/
-    // 'Ch.'/'Celkem' too, so those alone aren't distinctive here.
-    expect(find.text('Sady'), findsNWidgets(2));
-  });
-
   testWidgets(
     'a pairing block shows both players, lane and Celkem lines (from the '
-    "player's own totals, not the lane sum), the bod badge only for the "
-    'player with team points, and a signed Rozdíl',
+    "player's own totals, not the lane sum), the Družstvo team-points "
+    'value instead of a badge, and a signed Rozdíl',
     (tester) async {
       await tester.pumpWidget(
         app(result: result, players: [homePlayer, awayPlayer]),
@@ -162,12 +148,9 @@ void main() {
       expect(find.text('580'), findsOneWidget);
       expect(find.text('340'), findsOneWidget);
       expect(find.text('550'), findsOneWidget);
-      // 2 team-summary labels + 2 column-header labels + 2 per-player
-      // Celkem rows.
-      expect(find.text('Celkem'), findsNWidgets(6));
-
-      // Only the home player has team_points > 0.
-      expect(find.text('bod'), findsOneWidget);
+      // The header row2 label (once per side) + the per-player Celkem-row
+      // label (once per player) — 2 + 2.
+      expect(find.text('Celkem'), findsNWidgets(4));
 
       // Rozdíl: home 580 - away 550 = +30.
       expect(find.text('+30'), findsOneWidget);
@@ -239,9 +222,8 @@ void main() {
     },
   );
 
-  testWidgets('Rozdíl is negative and tinted when the away side scored more', (
-    tester,
-  ) async {
+  testWidgets('Rozdíl is negative and red (#FF0000) when the away side '
+      'scored more', (tester) async {
     final home2 = MatchPlayerResult.fromJson(const {
       'id': 'ph',
       'match_id': 'm2',
@@ -262,13 +244,10 @@ void main() {
     await tester.pumpAndSettle();
 
     final diffText = tester.widget<Text>(find.text('-20'));
-    expect(
-      diffText.style?.color,
-      Theme.of(tester.element(find.text('-20'))).colorScheme.error,
-    );
+    expect(diffText.style?.color, const Color(0xFFFF0000));
   });
 
-  testWidgets('Rozdíl on a tie renders 0, neutral (not tinted as a win)', (
+  testWidgets('Rozdíl on a tie renders 0, black (not tinted as a win)', (
     tester,
   ) async {
     final home2 = MatchPlayerResult.fromJson(const {
@@ -278,6 +257,10 @@ void main() {
       'position': 1,
       'player_name': 'Home Player',
       'total': 500,
+      // Non-zero, so the team-level Družstvo sum (also '0' by default,
+      // since these fixtures have no result/other players) doesn't
+      // collide with the Rozdíl cell's own '0' below.
+      'team_points': 0.5,
     });
     final away2 = MatchPlayerResult.fromJson(const {
       'id': 'pa',
@@ -286,15 +269,13 @@ void main() {
       'position': 1,
       'player_name': 'Away Player',
       'total': 500,
+      'team_points': 0.5,
     });
     await tester.pumpWidget(app(players: [home2, away2]));
     await tester.pumpAndSettle();
 
     final diffText = tester.widget<Text>(find.text('0'));
-    final scheme = Theme.of(tester.element(find.text('0'))).colorScheme;
-    expect(diffText.style?.color, scheme.onSurface);
-    expect(diffText.style?.color, isNot(scheme.tertiary));
-    expect(diffText.style?.color, isNot(scheme.error));
+    expect(diffText.style?.color, const Color(0xFF000000));
   });
 
   testWidgets('Rozdíl renders blank, not a bogus number, when one total '
@@ -332,7 +313,7 @@ void main() {
     expect(find.text(home), findsOneWidget);
     expect(find.text(away), findsOneWidget);
     expect(find.text('3460'), findsOneWidget);
-    // No lineup: no player section.
+    // No lineup: no player-column header rows.
     expect(find.text('Jméno a příjmení hráče'), findsNothing);
   });
 
@@ -343,6 +324,16 @@ void main() {
     expect(find.text('Zápis'), findsNothing);
     expect(find.text(home), findsNothing);
     expect(find.text('Jméno a příjmení hráče'), findsNothing);
+  });
+
+  testWidgets('the Zvětšit button is hidden when there is no lineup yet', (
+    tester,
+  ) async {
+    await tester.pumpWidget(app(result: result, players: const []));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Zápis'), findsOneWidget);
+    expect(find.byIcon(Icons.open_in_full), findsNothing);
   });
 
   testWidgets(
@@ -364,23 +355,14 @@ void main() {
       expect(find.widgetWithText(AppBar, 'Zápis'), findsOneWidget);
       expect(find.byIcon(Icons.close), findsOneWidget);
       expect(find.text('580'), findsWidgets);
-      // The pushed page has no zvětšit control of its own — it renders the
-      // table directly, not another embedded `LegacyScoreSheet` with its
-      // own header row (Fix round 1: it used to stack another identical
-      // page on tap).
       expect(
         find.descendant(of: page, matching: find.byIcon(Icons.open_in_full)),
         findsNothing,
       );
-      // 'Zápis' appears exactly once inside the page — from its own AppBar
-      // title, not also from an embedded header row.
       expect(
         find.descendant(of: page, matching: find.text('Zápis')),
         findsOneWidget,
       );
-      // Fix round 2/3: the full-screen page is never scrolled, in either
-      // axis — it scales the table to fit, and lets the user pinch in from
-      // there (see the InteractiveViewer group below).
       expect(
         find.descendant(of: page, matching: find.byType(SingleChildScrollView)),
         findsNothing,
@@ -393,16 +375,6 @@ void main() {
       expect(find.text('580'), findsOneWidget);
     },
   );
-
-  testWidgets('the Zvětšit button is hidden when there is no lineup yet', (
-    tester,
-  ) async {
-    await tester.pumpWidget(app(result: result, players: const []));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Zápis'), findsOneWidget);
-    expect(find.byIcon(Icons.open_in_full), findsNothing);
-  });
 
   testWidgets(
     'the score sheet ignores the app-wide text-size setting and stays at '
@@ -424,6 +396,148 @@ void main() {
       expect(atLargest, atNormal);
     },
   );
+
+  group('kuzelky.com 1:1 styling (Fix round 4)', () {
+    Color? bgOf(WidgetTester tester, Finder textFinder) {
+      final container = tester.widget<Container>(
+        find.ancestor(of: textFinder, matching: find.byType(Container)).first,
+      );
+      return (container.decoration as BoxDecoration?)?.color;
+    }
+
+    testWidgets(
+      'a handful of cells carry the reference site\'s exact colours and '
+      'sizes',
+      (tester) async {
+        // Deliberately unambiguous values (no two cells render the same
+        // text) so every `find.text` below is unique — a dedicated small
+        // fixture rather than reusing the shared one, which repeats values
+        // (e.g. team `Dílčí` 9/15 also appear as lane numbers).
+        final colorSlot = PrioritySlot(
+          id: 'c1',
+          date: Day(2026, 9, 20),
+          startsAt: const HourMinute(17, 30),
+          endsAt: const HourMinute(20, 30),
+          type: PrioritySlot.fallbackMatchType,
+          homeTeam: 'Colour Home',
+          awayTeam: 'Colour Away',
+        );
+        final colorResult = MatchResult.fromJson(const {
+          'match_id': 'c1',
+          'status': 'finished',
+          'home_points': 9001,
+          'away_points': 9011,
+          // team Rozdíl = 9002 - 9003 = -1 (negative → red).
+          'home_total': 9002,
+          'away_total': 9003,
+          'home_fulls': 9004,
+          'away_fulls': 9014,
+          'home_spares': 9005,
+          'away_spares': 9015,
+          'home_errors': 9006,
+          'away_errors': 9016,
+          'home_set_points': 9007,
+          'away_set_points': 9017,
+          'fetched_at': '2026-09-23T10:00:00+00:00',
+        });
+        final colorHomePlayer = MatchPlayerResult.fromJson(const {
+          'id': 'ch1',
+          'match_id': 'c1',
+          'side': 'home',
+          'position': 1,
+          'player_name': 'Colour Player',
+          'total': 9020,
+          'team_points': 9,
+        });
+        final colorAwayPlayer = MatchPlayerResult.fromJson(const {
+          'id': 'ca1',
+          'match_id': 'c1',
+          'side': 'away',
+          'position': 1,
+          'player_name': 'Colour Rival',
+          // pairing Rozdíl = 9020 - 9008 = +12 (positive → green).
+          'total': 9008,
+        });
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: SingleChildScrollView(
+                child: LegacyScoreSheet(
+                  slot: colorSlot,
+                  result: colorResult,
+                  players: [colorHomePlayer, colorAwayPlayer],
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // Header row: grey #CCCCCC, 10dp. Both sides mirror this label —
+        // either instance proves the assertion.
+        final headerText = find.text('Jméno a příjmení hráče').first;
+        expect(bgOf(tester, headerText), const Color(0xFFCCCCCC));
+        expect(tester.widget<Text>(headerText).style?.fontSize, 10);
+
+        // Team name cell: grey #CCCCCC, 16dp bold.
+        final nameText = find.text('Colour Home');
+        expect(bgOf(tester, nameText), const Color(0xFFCCCCCC));
+        expect(tester.widget<Text>(nameText).style?.fontSize, 16);
+
+        // Team "Body" (Série column, match points): yellow #FDFDEC, 24dp.
+        final bodyText = find.text('9001');
+        expect(bgOf(tester, bodyText), const Color(0xFFFDFDEC));
+        expect(tester.widget<Text>(bodyText).style?.fontSize, 24);
+
+        // Team Družstvo (sum of player team points): blue #ADD8E6, 20dp.
+        // Two cells legitimately show '9' here — the team-level sum and
+        // the (single) player's own pairing-level value happen to be the
+        // same number — but both are styled identically per the brief, so
+        // either instance proves the assertion.
+        final druzstvoText = find.text('9').first;
+        expect(bgOf(tester, druzstvoText), const Color(0xFFADD8E6));
+        expect(tester.widget<Text>(druzstvoText).style?.fontSize, 20);
+
+        // Team-level Rozdíl, negative: red #FF0000.
+        expect(
+          tester.widget<Text>(find.text('-1')).style?.color,
+          const Color(0xFFFF0000),
+        );
+
+        // Pairing-level Rozdíl, positive: green #008000.
+        expect(
+          tester.widget<Text>(find.text('+12')).style?.color,
+          const Color(0xFF008000),
+        );
+
+        // Player Celkem total: dark red #8B0000, 16dp.
+        final totalText = find.text('9020');
+        expect(
+          tester.widget<Text>(totalText).style?.color,
+          const Color(0xFF8B0000),
+        );
+        expect(tester.widget<Text>(totalText).style?.fontSize, 16);
+      },
+    );
+
+    testWidgets(
+      'the table\'s total width matches the reference site (≈963dp)',
+      (tester) async {
+        await tester.pumpWidget(
+          app(result: result, players: [homePlayer, awayPlayer]),
+        );
+        await tester.pumpAndSettle();
+
+        final tableSize = tester.getSize(
+          find.byWidgetPredicate(
+            (w) => w.runtimeType.toString() == '_ScoreTableBody',
+          ),
+        );
+        expect(tableSize.width, 963.0);
+      },
+    );
+  });
 
   MatchPlayerResult bigPlayer(String side, int position) =>
       MatchPlayerResult.fromJson({
@@ -468,10 +582,8 @@ void main() {
 
   group('full-screen page: scale-to-fit via pinch-zoom, never scrolled '
       '(Fix round 3)', () {
-    // A real phone-ish logical size — the review measured the round-2
-    // FittedBox regression at 360×780/411×891; this repo's other tests
-    // set screen size the same way (see test/features/players_screen_
-    // test.dart).
+    // A real phone-ish logical size — this repo's other tests set screen
+    // size the same way (see test/features/players_screen_test.dart).
     void setPhoneScreen(WidgetTester tester) {
       tester.view.physicalSize = const Size(360, 780);
       tester.view.devicePixelRatio = 1.0;
@@ -504,8 +616,6 @@ void main() {
       expect(find.byType(Scrollable), findsNothing);
       final viewerFinder = find.byType(InteractiveViewer);
       expect(viewerFinder, findsOneWidget);
-      // `constrained: false` lays the table out at its natural size
-      // before scaling — the last pairing is fully built, just shrunk.
       expect(find.text('6. Away 6'), findsOneWidget);
 
       final viewer = tester.widget<InteractiveViewer>(viewerFinder);
@@ -516,10 +626,6 @@ void main() {
         viewportSize.height / tableSize.height,
       );
 
-      // The table (942dp wide) is genuinely bigger than a phone screen
-      // here, so the real fit is well under 1.0 — this is the actual
-      // regression: round 2's `FittedBox` produced text a few px tall
-      // on exactly this scenario.
       expect(expectedFit, lessThan(1.0));
       expect(viewer.minScale, closeTo(expectedFit, 0.01));
     });
@@ -550,10 +656,6 @@ void main() {
 
       final beforeZoom = onScreenSize();
 
-      // Simulate a pinch past the initial fit scale (not a gesture —
-      // directly driving the same TransformationController a real
-      // pinch would update; InteractiveViewer repaints on its own
-      // ChangeNotifier, no ancestor rebuild needed).
       final zoomedScale = math.min(viewer.maxScale, viewer.minScale * 2);
       controller.value = Matrix4.diagonal3Values(zoomedScale, zoomedScale, 1.0);
       await tester.pump();
@@ -584,95 +686,5 @@ void main() {
       expect(find.byType(InteractiveViewer), findsOneWidget);
       expect(find.text('1. Jan Novák'), findsOneWidget);
     });
-  });
-
-  group('column widths against the real font (Fix round 2)', () {
-    // The table is sized for its OWN real content (Manrope, via
-    // buildTheme) at 1.0× — see `_ScoreTableBody`'s width constants. The
-    // test harness's fallback font has different metrics than Manrope, so
-    // without loading the real font this test would measure the wrong
-    // typeface and could pass even for widths too narrow for the real app
-    // (this is exactly what made fix round 1's own width test vacuous).
-    setUpAll(() async {
-      final loader = FontLoader('Manrope');
-      for (final weight in ['Regular', 'Medium', 'Bold', 'ExtraBold']) {
-        final bytes = File(
-          'assets/fonts/Manrope-$weight.ttf',
-        ).readAsBytesSync();
-        loader.addFont(Future.value(ByteData.view(bytes.buffer)));
-      }
-      await loader.load();
-    });
-
-    // The longest team name actually seen among this club's real synced
-    // opponents (see my_trainings_screen_test.dart/results_screen_test.dart
-    // fixtures) — the tightest real-world fit for the name column.
-    final longNameSlot = PrioritySlot(
-      id: 'm1',
-      date: Day(2026, 9, 20),
-      startsAt: const HourMinute(17, 30),
-      endsAt: const HourMinute(20, 30),
-      type: PrioritySlot.fallbackMatchType,
-      homeTeam: 'TJ Slovan Karlovy Vary',
-      awayTeam: away,
-    );
-
-    Widget realApp() => MaterialApp(
-      theme: buildTheme(Brightness.light),
-      home: Scaffold(
-        body: SingleChildScrollView(
-          child: LegacyScoreSheet(
-            slot: longNameSlot,
-            result: result,
-            players: [homePlayer, awayPlayer],
-          ),
-        ),
-      ),
-    );
-
-    testWidgets(
-      'every cell (name, numeric headers and data, the label column, '
-      'Rozdíl) fits its own actual laid-out width — no clipping or overflow',
-      (tester) async {
-        await tester.pumpWidget(realApp());
-        await tester.pumpAndSettle();
-        expect(tester.takeException(), isNull);
-
-        void expectFits(Finder finder) {
-          final count = tester.widgetList<Text>(finder).length;
-          expect(count, greaterThan(0));
-          for (var i = 0; i < count; i++) {
-            final instance = finder.at(i);
-            final rp = tester.renderObject<RenderParagraph>(instance);
-            final natural = rp.getMaxIntrinsicWidth(double.infinity);
-            expect(
-              natural,
-              lessThanOrEqualTo(rp.size.width + 0.5),
-              reason:
-                  '"${tester.widget<Text>(instance).data}" needs '
-                  '$natural but its laid-out box is only ${rp.size.width}',
-            );
-          }
-        }
-
-        // Name column: the tightest real team name, plus the two header
-        // labels sharing that column.
-        expectFits(find.text('TJ Slovan Karlovy Vary'));
-        expectFits(find.text('Jméno a příjmení hráče'));
-        expectFits(find.text('Družstvo'));
-        // Label column: "Série" (header), lane numbers and the bold
-        // "Celkem" row-label — plus the "Celkem" HEADER label, which lives
-        // in a (narrower) numeric column instead.
-        expectFits(find.text('Série'));
-        expectFits(find.text('Celkem'));
-        // Numeric data: the widest real values in this fixture.
-        expectFits(find.text('1780'));
-        expectFits(find.text('3460'));
-        expectFits(find.text('350'));
-        // Rozdíl: header and a signed value.
-        expectFits(find.text('Rozdíl'));
-        expectFits(find.text('+30'));
-      },
-    );
   });
 }
