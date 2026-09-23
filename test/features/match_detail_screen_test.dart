@@ -113,20 +113,50 @@ void main() {
         'fetched_at': fetchedAt,
       });
 
+  // A test-only StreamProvider our own prioritySlotsProvider/
+  // prioritySlotsLoadingProvider overrides can watch, so a test can flip
+  // "still loading" -> "loaded" mid-lifetime the same way the real
+  // _prioritySlotRowsProvider does — without touching Supabase. Mirrors
+  // results_screen_test.dart's own helper.
+  final testSlotsStreamProvider = StreamProvider<List<PrioritySlot>>(
+    (ref) => const Stream.empty(),
+  );
+
   Widget app({
     String matchId = 'm1',
     List<PrioritySlot> slots = const [],
     bool slotsLoading = false,
+    Stream<List<PrioritySlot>>? slotsStream,
     Map<String, MatchResult> results = const {},
     List<MatchPlayerResult> players = const [],
     List<Venue> venues = const [],
     Future<String> Function(String matchId)? refresh,
     void Function(String url)? launch,
+    // When true, MatchDetailScreen is pushed on top of a host route (via a
+    // button tap) instead of being the app's own `home` — lets a test pop
+    // it back off while a refresh is outstanding.
+    bool pushable = false,
   }) {
+    final screen = MatchDetailScreen(
+      matchId: matchId,
+      refresh: refresh ?? (_) async => 'queued',
+      launch: launch ?? (_) {},
+    );
     return ProviderScope(
       overrides: [
-        prioritySlotsProvider.overrideWithValue(slots),
-        prioritySlotsLoadingProvider.overrideWithValue(slotsLoading),
+        if (slotsStream != null) ...[
+          testSlotsStreamProvider.overrideWith((ref) => slotsStream),
+          prioritySlotsProvider.overrideWith(
+            (ref) => ref.watch(testSlotsStreamProvider).value ?? const [],
+          ),
+          prioritySlotsLoadingProvider.overrideWith((ref) {
+            final v = ref.watch(testSlotsStreamProvider);
+            return v.isLoading && !v.hasValue;
+          }),
+        ] else ...[
+          prioritySlotsProvider.overrideWithValue(slots),
+          prioritySlotsLoadingProvider.overrideWithValue(slotsLoading),
+        ],
         matchResultsProvider.overrideWith((ref) => Stream.value(results)),
         matchPlayerResultsProvider.overrideWith(
           (ref, id) => Stream.value(players),
@@ -135,11 +165,20 @@ void main() {
         nowProvider.overrideWith((ref) => Stream.value(now)),
       ],
       child: MaterialApp(
-        home: MatchDetailScreen(
-          matchId: matchId,
-          refresh: refresh ?? (_) async => 'queued',
-          launch: launch ?? (_) {},
-        ),
+        home: pushable
+            ? Scaffold(
+                body: Builder(
+                  builder: (context) => Center(
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => screen),
+                      ),
+                      child: const Text('open'),
+                    ),
+                  ),
+                ),
+              )
+            : screen,
       ),
     );
   }
@@ -160,7 +199,8 @@ void main() {
       expect(find.text('5 : 3'), findsOneWidget);
       expect(find.text('3460 : 3349'), findsOneWidget);
       expect(find.textContaining('SB 15 : 9'), findsOneWidget);
-      expect(find.textContaining('Dokončeno'), findsOneWidget);
+      // The joined format+status line, exactly (formatLabel + ' · ' + status).
+      expect(find.text('6 hráčů · 120 HS · Dokončeno'), findsOneWidget);
       expect(find.text('Domácí — $home'), findsOneWidget);
       expect(find.text('Hosté — $away'), findsOneWidget);
       expect(find.text('1. Jan Novák'), findsOneWidget);
@@ -317,6 +357,46 @@ void main() {
     );
     expect(button.tooltip, 'Obnovit');
   });
+
+  testWidgets(
+    'the once-only live refresh waits for slots to finish loading, not '
+    'just for results to arrive',
+    (tester) async {
+      // Regression for the same class of bug results_screen_test.dart
+      // guards against: matchResultsProvider can already carry a live
+      // result before prioritySlotsProvider's own stream delivers its
+      // first snapshot (which reads `[]` while loading) — gating the
+      // one-time open refresh on results alone would let it latch on a
+      // null slot and never see the live match once slots actually load.
+      final refreshed = <String>[];
+      final slotsCtrl = StreamController<List<PrioritySlot>>();
+      addTearDown(slotsCtrl.close);
+      await tester.pumpWidget(
+        app(
+          matchId: 'm2',
+          slotsStream: slotsCtrl.stream,
+          results: {'m2': liveResultWith()},
+          refresh: (id) async {
+            refreshed.add(id);
+            return 'queued';
+          },
+        ),
+      );
+      await tester.pump();
+      expect(refreshed, isEmpty);
+
+      slotsCtrl.add([match(id: 'm2', date: today)]);
+      await tester.pumpAndSettle();
+
+      expect(refreshed, ['m2']);
+
+      // A later emission of the same data must not refresh again.
+      slotsCtrl.add([match(id: 'm2', date: today)]);
+      await tester.pumpAndSettle();
+
+      expect(refreshed, ['m2']);
+    },
+  );
 
   testWidgets('a finished match never shows the refresh icon', (
     tester,
@@ -515,4 +595,45 @@ void main() {
     expect(find.text('Kuželna: TJ Sokol Brno IV'), findsOneWidget);
     expect(find.byIcon(Icons.chevron_right), findsNothing);
   });
+
+  testWidgets(
+    'popping the route while a manual refresh is still pending throws '
+    'nothing, and the 20s wait timer does not fire into a disposed state',
+    (tester) async {
+      final completer = Completer<String>();
+      var callCount = 0;
+      await tester.pumpWidget(
+        app(
+          matchId: 'm2',
+          slots: [match(id: 'm2', date: today)],
+          results: {'m2': liveResultWith()},
+          pushable: true,
+          refresh: (id) {
+            callCount++;
+            if (callCount == 1) return Future.value('queued'); // open-time
+            return completer.future; // manual tap: stays pending
+          },
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.refresh));
+      await tester.pump();
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+      // Pop the detail screen back off while the refresh is outstanding.
+      await tester.tap(find.byIcon(Icons.arrow_back));
+      await tester.pumpAndSettle();
+
+      // The refresh finally resolves, and the 20s wait timer's own
+      // duration elapses — both after the State is long gone.
+      completer.complete('queued');
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 20));
+      await tester.pump();
+
+      expect(tester.takeException(), isNull);
+    },
+  );
 }
