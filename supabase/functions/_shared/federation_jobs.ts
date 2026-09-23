@@ -66,7 +66,10 @@ export function planCompetition(args: {
     });
   }
   const pairs = pairLegacy(
-    rows.map((r) => ({ siteId: r.site_match_id, date: r.date, round: r.round, home: r.home, away: r.away })),
+    rows.map((r) => ({
+      siteId: r.site_match_id, date: r.date, startsAt: r.starts_at, round: r.round,
+      home: r.home, away: r.away,
+    })),
     args.legacy,
   );
   for (const r of rows) r.legacy_id = pairs.get(r.site_match_id) ?? null;
@@ -212,12 +215,16 @@ export async function runCompetition(db: Db, get: Fetcher, tenantId: string, slu
   }
   const matches = pages.flatMap((p) => p.matches);
   const legacy = must(await db.from("priority_slots")
-    .select("id, import_key, date, home_team, away_team")
+    .select("id, import_key, date, starts_at, home_team, away_team")
     .eq("tenant_id", tenantId).like("import_key", "rozpis:%")) as LegacyRow[];
   const { rows, skipped, keepIds } = planCompetition({ matches, teams, legacy });
   const report = must(await db.rpc("apply_federation_matches", {
     p_tenant: tenantId, p_competition_slug: slug, p_matches: rows, p_keep_ids: keepIds,
   })) as Record<string, unknown>;
+  const stillLegacy = rows.length === 0 ? [] : must(await db.from("priority_slots")
+    .select("date, starts_at, home_team, away_team")
+    .eq("tenant_id", tenantId).like("import_key", "rozpis:%")) as
+    { date: string; starts_at: string; home_team: string; away_team: string }[];
   const stored = must(await db.from("priority_slots")
     .select("site_match_id, venue_slug, match_results(status)")
     .eq("tenant_id", tenantId).like("site_slug", `${slug}-kolo-%`)) as {
@@ -236,7 +243,29 @@ export async function runCompetition(db: Db, get: Fetcher, tenantId: string, slu
       p_run_at: j.run_at.toISOString(),
     }));
   }
-  return { ...report, skipped_no_time: skipped, match_jobs: jobs.length };
+  return {
+    ...report, skipped_no_time: skipped, match_jobs: jobs.length,
+    legacy_unpaired: unpairedLegacy(rows, stillLegacy),
+  };
+}
+
+/** Old importer rows the first run could not pair that look like this
+ * competition's (its dates, one of its teams) — for the admin to check. */
+function unpairedLegacy(
+  rows: SlotRow[],
+  legacy: { date: string; starts_at: string; home_team: string; away_team: string }[],
+): { date: string; title: string }[] {
+  if (rows.length === 0) return [];
+  const names = new Set(rows.flatMap((r) => [normalizeTeam(r.home), normalizeTeam(r.away)]));
+  const dates = rows.map((r) => r.date).sort();
+  return legacy
+    .filter((l) =>
+      l.date >= dates[0] && l.date <= dates[dates.length - 1] &&
+      (names.has(normalizeTeam(l.home_team)) || names.has(normalizeTeam(l.away_team)))
+    )
+    .sort((a, b) => `${a.date} ${a.starts_at}`.localeCompare(`${b.date} ${b.starts_at}`))
+    .slice(0, 20)
+    .map((l) => ({ date: l.date, title: `${l.home_team} – ${l.away_team}` }));
 }
 
 export async function runMatch(

@@ -26,8 +26,12 @@ export type SiteCompetition = {
   name: string; roundIds: number[]; currentRound: number; matches: SiteMatch[]; standings: SiteStanding[];
 };
 export type VenueClub = { slug: string; name: string };
-export type LegacyRow = { id: string; import_key: string; date: string; home_team: string; away_team: string };
-export type PairCandidate = { siteId: number; date: string; round: number; home: string; away: string };
+export type LegacyRow = {
+  id: string; import_key: string; date: string; starts_at: string; home_team: string; away_team: string;
+};
+export type PairCandidate = {
+  siteId: number; date: string; startsAt: string; round: number; home: string; away: string;
+};
 
 export const HOME_PREP_MINUTES = 30;
 const STATUSES = new Set(["SCHEDULED", "PREPARATION", "IN_PROGRESS", "FINISHED", "FORFEIT"]);
@@ -219,18 +223,36 @@ export function pairLegacy(candidates: PairCandidate[], legacy: LegacyRow[]): Ma
   const pairs = new Map<number, string>();
   const keyed = (l: LegacyRow) => /^rozpis:.*:(\d+):(.*) – (.*)$/.exec(l.import_key);
   const same = (a: string, b: string) => normalizeTeam(a) === normalizeTeam(b);
-  const rules: ((c: PairCandidate, l: LegacyRow) => boolean)[] = [
-    (c, l) => {
-      const k = keyed(l);
-      return !!k && Number(k[1]) === c.round && same(k[2], c.home) && same(k[3], c.away);
+  // The last rule is the old importer's "renamed opponent": the same slot
+  // with one team in common. Loose enough that a legacy row must also have
+  // just one candidate.
+  const rules: { test: (c: PairCandidate, l: LegacyRow) => boolean; strict: boolean }[] = [
+    {
+      test: (c, l) => {
+        const k = keyed(l);
+        return !!k && Number(k[1]) === c.round && same(k[2], c.home) && same(k[3], c.away);
+      },
+      strict: false,
     },
-    (c, l) => l.date === c.date && same(l.home_team, c.home) && same(l.away_team, c.away),
+    {
+      test: (c, l) => l.date === c.date && same(l.home_team, c.home) && same(l.away_team, c.away),
+      strict: false,
+    },
+    {
+      test: (c, l) =>
+        l.date === c.date && l.starts_at.slice(0, 5) === c.startsAt &&
+        (same(l.home_team, c.home) || same(l.away_team, c.away)),
+      strict: true,
+    },
   ];
-  for (const rule of rules) {
+  for (const { test, strict } of rules) {
     for (const c of candidates) {
       if (pairs.has(c.siteId)) continue;
-      const hits = [...free.values()].filter((l) => rule(c, l));
+      const hits = [...free.values()].filter((l) => test(c, l));
       if (hits.length !== 1) continue;
+      if (strict && candidates.filter((o) => !pairs.has(o.siteId) && test(o, hits[0])).length !== 1) {
+        continue;
+      }
       pairs.set(c.siteId, hits[0].id);
       free.delete(hits[0].id);
     }

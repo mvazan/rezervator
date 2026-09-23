@@ -123,27 +123,45 @@ Deno.test("team names compare without case, accents and the A suffix", () => {
 
 Deno.test("legacy rozpis rows pair by round and teams, then by date and teams", () => {
   const legacy = [
-    { id: "L1", import_key: "rozpis:Jihomoravská divize:5:TJ Sokol Brno IV A – KC Zlín B", date: "2026-10-10", home_team: "TJ Sokol Brno IV A", away_team: "KC Zlín B" },
-    { id: "L2", import_key: "rozpis:KP2:3:SKK Veverky Brno B – KK Orel Telnice B", date: "2026-10-03", home_team: "SKK Veverky Brno B", away_team: "KK Orel Telnice B" },
-    { id: "L3", import_key: "rozpis:X:1:A – B", date: "2026-09-01", home_team: "A", away_team: "B" },
+    { id: "L1", import_key: "rozpis:Jihomoravská divize:5:TJ Sokol Brno IV A – KC Zlín B", date: "2026-10-10", starts_at: "17:00:00", home_team: "TJ Sokol Brno IV A", away_team: "KC Zlín B" },
+    { id: "L2", import_key: "rozpis:KP2:3:SKK Veverky Brno B – KK Orel Telnice B", date: "2026-10-03", starts_at: "17:00:00", home_team: "SKK Veverky Brno B", away_team: "KK Orel Telnice B" },
+    { id: "L3", import_key: "rozpis:X:1:A – B", date: "2026-09-01", starts_at: "17:00:00", home_team: "A", away_team: "B" },
   ];
   const pairs = pairLegacy([
     // postponed: other date, same round + teams
-    { siteId: 1, date: "2026-10-17", round: 5, home: "TJ Sokol Brno IV", away: "KC Zlín B" },
+    { siteId: 1, date: "2026-10-17", startsAt: "10:00", round: 5, home: "TJ Sokol Brno IV", away: "KC Zlín B" },
     // other round in the key, same date + teams
-    { siteId: 2, date: "2026-10-03", round: 4, home: "SKK Veverky Brno B", away: "KK Orel Telnice B" },
-    { siteId: 3, date: "2026-11-01", round: 9, home: "Nobody", away: "Else" },
+    { siteId: 2, date: "2026-10-03", startsAt: "10:00", round: 4, home: "SKK Veverky Brno B", away: "KK Orel Telnice B" },
+    { siteId: 3, date: "2026-11-01", startsAt: "10:00", round: 9, home: "Nobody", away: "Else" },
   ], legacy);
   assertEquals(pairs.get(1), "L1");
   assertEquals(pairs.get(2), "L2");
   assertEquals(pairs.has(3), false);
 });
 
-Deno.test("a legacy row pairs at most once", () => {
-  const legacy = [{ id: "L1", import_key: "rozpis:X:1:A – B", date: "2026-09-01", home_team: "A", away_team: "B" }];
+Deno.test("a renamed opponent pairs by date, start and one team in common — unambiguous only", () => {
+  const legacy = [
+    { id: "L1", import_key: "rozpis:JmD:5:TJ Sokol Brno IV A – KK Starý", date: "2026-10-10", starts_at: "17:00:00", home_team: "TJ Sokol Brno IV A", away_team: "KK Starý" },
+    { id: "L2", import_key: "rozpis:JmD:6:KK Jiný – TJ Sokol Brno IV A", date: "2026-10-17", starts_at: "10:00:00", home_team: "KK Jiný", away_team: "TJ Sokol Brno IV A" },
+    { id: "L3", import_key: "rozpis:JmD:7:KK Třetí – KK Čtvrtý", date: "2026-10-24", starts_at: "09:00:00", home_team: "KK Třetí", away_team: "KK Čtvrtý" },
+  ];
   const pairs = pairLegacy([
-    { siteId: 1, date: "2026-09-01", round: 1, home: "A", away: "B" },
-    { siteId: 2, date: "2026-09-01", round: 1, home: "A", away: "B" },
+    // opponent renamed, round moved: only the third rule sees it
+    { siteId: 1, date: "2026-10-10", startsAt: "17:00", round: 9, home: "TJ Sokol Brno IV", away: "KK Nový" },
+    // same date and teams in common, other start: no pair
+    { siteId: 2, date: "2026-10-17", startsAt: "11:00", round: 6, home: "KK Přejmenovaný", away: "TJ Sokol Brno IV A" },
+    // two candidates share a team with L3 at its slot: ambiguous, no pair
+    { siteId: 3, date: "2026-10-24", startsAt: "09:00", round: 7, home: "KK Třetí", away: "KK X" },
+    { siteId: 4, date: "2026-10-24", startsAt: "09:00", round: 7, home: "KK Y", away: "KK Čtvrtý" },
+  ], legacy);
+  assertEquals([...pairs], [[1, "L1"]]);
+});
+
+Deno.test("a legacy row pairs at most once", () => {
+  const legacy = [{ id: "L1", import_key: "rozpis:X:1:A – B", date: "2026-09-01", starts_at: "17:00:00", home_team: "A", away_team: "B" }];
+  const pairs = pairLegacy([
+    { siteId: 1, date: "2026-09-01", startsAt: "10:00", round: 1, home: "A", away: "B" },
+    { siteId: 2, date: "2026-09-01", startsAt: "10:00", round: 1, home: "A", away: "B" },
   ], legacy);
   assertEquals([...pairs.values()], ["L1"]);
 });

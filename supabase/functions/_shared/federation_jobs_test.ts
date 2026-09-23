@@ -76,7 +76,19 @@ Deno.test("planCompetition pairs legacy rows", () => {
     matches: [match({ id: 1, round: 5, date: "2026-10-17" })],
     teams,
     legacy: [{ id: "L1", import_key: "rozpis:JmD:5:TJ Sokol Brno IV A – KC Zlín B",
-      date: "2026-10-10", home_team: "TJ Sokol Brno IV A", away_team: "KC Zlín B" }],
+      date: "2026-10-10", starts_at: "10:00:00", home_team: "TJ Sokol Brno IV A",
+      away_team: "KC Zlín B" }],
+  });
+  assertEquals(rows[0].legacy_id, "L1");
+});
+
+Deno.test("planCompetition hands the start time to the pairing", () => {
+  const { rows } = planCompetition({
+    matches: [match({ id: 1, round: 5, date: "2026-10-17", time: "17:00" })],
+    teams,
+    legacy: [{ id: "L1", import_key: "rozpis:JmD:3:TJ Sokol Brno IV A – KC Zlín",
+      date: "2026-10-17", starts_at: "17:00:00", home_team: "TJ Sokol Brno IV A",
+      away_team: "KC Zlín" }],
   });
   assertEquals(rows[0].legacy_id, "L1");
 });
@@ -380,4 +392,131 @@ Deno.test("runCompetition: throws when the site ignores ?round= and re-serves th
     Error,
     "round",
   );
+});
+
+/** A one-round competition page as the site renders it (RSC flight chunk). */
+function competitionPage(matches: SiteMatch[]): string {
+  const data = {
+    data: {
+      title: "Jihomoravská divize", rounds: [{ id: 1 }],
+      currentRound: { id: 1, matches: matches.map((m) => ({ ...m, time: m.time ?? "$undefined" })) },
+    },
+  };
+  return `<script>self.__next_f.push([1,${JSON.stringify(`5:${JSON.stringify(data)}\n`)}])</script>`;
+}
+
+type Legacy = {
+  id: string; import_key: string; date: string; starts_at: string; home_team: string; away_team: string;
+};
+
+/** The reads and RPCs runCompetition issues. apply_federation_matches
+ * "rekeys" the paired legacy rows, so the read after it sees them gone. */
+function fakeCompetitionDb(state: {
+  teams: { site_slug: string; name: string; active: boolean }[];
+  legacy: Legacy[];
+  stored: { site_match_id: number; venue_slug: string | null; match_results: null }[];
+}) {
+  const rpcs: { name: string; args: Record<string, unknown> }[] = [];
+  const selects: string[] = [];
+  const db = {
+    from(table: string) {
+      let cols = "";
+      let like: [string, string] | undefined;
+      // deno-lint-ignore no-explicit-any
+      const chain: any = {
+        select(c: string) {
+          cols = c;
+          selects.push(`${table}: ${c}`);
+          return chain;
+        },
+        eq() {
+          return chain;
+        },
+        like(col: string, pattern: string) {
+          like = [col, pattern];
+          return chain;
+        },
+        then(onFulfilled: (v: unknown) => unknown) {
+          let data: unknown = [];
+          if (table === "teams") data = state.teams;
+          else if (like?.[0] === "import_key") data = state.legacy.map((l) => ({ ...l }));
+          else if (like?.[0] === "site_slug") data = state.stored;
+          void cols;
+          return Promise.resolve({ data, error: null }).then(onFulfilled);
+        },
+      };
+      return chain;
+    },
+    async rpc(name: string, args: Record<string, unknown>) {
+      rpcs.push({ name, args });
+      if (name === "apply_federation_matches") {
+        const paired = new Set((args.p_matches as { legacy_id: string | null }[])
+          .map((r) => r.legacy_id).filter((id) => id));
+        state.legacy = state.legacy.filter((l) => !paired.has(l.id));
+        return { data: { inserted: 0, updated: 0, rekeyed: paired.size, deleted: 0 }, error: null };
+      }
+      return { data: null, error: null };
+    },
+  };
+  return { db, rpcs, selects };
+}
+
+const ourTeam = { site_slug: "tj-sokol-brno-iv-muzi", name: "TJ Sokol Brno IV A", active: true };
+const legacyRow = (id: string, date: string, home: string, away: string): Legacy => ({
+  id, import_key: `rozpis:JmD:1:${home} – ${away}`, date, starts_at: "17:00:00",
+  home_team: home, away_team: away,
+});
+
+Deno.test("runCompetition: keeps time-less ids, fetches venue-less matches, reports unpaired legacy rows", async () => {
+  const slug = "jihomoravska-divize-2026-2027";
+  const page = competitionPage([
+    match({ id: 1, date: "2026-10-10", time: "10:00" }),
+    match({ id: 2, date: "2026-10-17", time: null }),
+    match({ id: 3, date: "2026-11-07", time: "10:00",
+      homeTeam: { id: 9, name: "KK Y", slug: "kk-y-muzi" },
+      awayTeam: { id: 1, name: "TJ Sokol Brno IV", slug: "tj-sokol-brno-iv-muzi" } }),
+  ]);
+  const { db, rpcs, selects } = fakeCompetitionDb({
+    teams: [ourTeam],
+    legacy: [
+      { ...legacyRow("L1", "2026-10-10", "TJ Sokol Brno IV A", "KC Zlín B"), starts_at: "10:00:00" },
+      legacyRow("L2", "2026-10-24", "TJ Sokol Brno IV A", "KK Starý"),
+      legacyRow("L3", "2026-10-20", "KK Cizí", "KK Jiný"),
+      legacyRow("L4", "2027-03-01", "TJ Sokol Brno IV A", "KK Z"),
+    ],
+    stored: [
+      { site_match_id: 1, venue_slug: null, match_results: null },
+      { site_match_id: 3, venue_slug: "tj-sokol-brno-iv", match_results: null },
+    ],
+  });
+  const now = new Date("2026-10-01T06:00:00Z");
+
+  const report = await runCompetition(db, async () => page, "t1", slug, now);
+
+  const apply = rpcs.find((r) => r.name === "apply_federation_matches")!;
+  assertEquals(apply.args.p_keep_ids, [2]);
+  assertEquals((apply.args.p_matches as { legacy_id: string | null }[]).map((r) => r.legacy_id),
+    ["L1", null]);
+  assert(selects.some((s) => s.includes("import_key") && s.includes("starts_at")));
+  const enqueued = rpcs.filter((r) => r.name === "enqueue_federation_match");
+  assertEquals(enqueued.map((r) => [r.args.p_site_match_id, r.args.p_run_at]),
+    [[1, now.toISOString()]]);
+  assertEquals(report.legacy_unpaired, [{ date: "2026-10-24", title: "TJ Sokol Brno IV A – KK Starý" }]);
+});
+
+Deno.test("runCompetition: at most 20 unpaired legacy rows, in date order", async () => {
+  const page = competitionPage([
+    match({ id: 1, date: "2026-09-01", time: "10:00" }),
+    match({ id: 2, date: "2026-12-31", time: "10:00" }),
+  ]);
+  const legacy = Array.from({ length: 25 }, (_, i) =>
+    legacyRow(`L${i}`, `2026-10-${String(30 - i).padStart(2, "0")}`, "TJ Sokol Brno IV A", `KK ${i}`));
+  const { db } = fakeCompetitionDb({ teams: [ourTeam], legacy, stored: [] });
+
+  const report = await runCompetition(db, async () => page, "t1", "x", new Date("2026-08-01T00:00:00Z"));
+
+  const out = report.legacy_unpaired as { date: string }[];
+  assertEquals(out.length, 20);
+  assertEquals(out[0].date, "2026-10-06");
+  assertEquals(out.map((o) => o.date), [...out.map((o) => o.date)].sort());
 });
