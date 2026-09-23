@@ -3830,6 +3830,40 @@ begin
   raise notice 'OK: an empty list deletes nothing; a started match survives, a later one today does not (0045)';
 end $$;
 
+-- 5c. A match the edge function skipped (no time on the site yet) comes
+-- as p_keep_ids: its stored future row is not "dropped by the site".
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+  r jsonb;
+begin
+  insert into priority_slots
+    (tenant_id, date, starts_at, ends_at, type_id, home_team, away_team,
+     created_by, import_key, site_slug, site_match_id, is_away)
+  values
+    (v_a, v_today + 30, '17:00', '20:00',
+     (select id from priority_slot_types where tenant_id = v_a and is_match and builtin),
+     'KK Jiný', 'TJ Sokol Brno IV', '10000000-0000-0000-0000-000000000001',
+     'cka:111', 'jihomoravska-divize-2026-2027-kolo-11-x-y', 111, true);
+  r := apply_federation_matches(v_a, 'jihomoravska-divize-2026-2027', jsonb_build_array(
+         pg_temp.fed_match(101, true, 10, '18:00', '21:00', 5)
+           || '{"video_url":"https://youtu.be/x"}',
+         pg_temp.fed_match(103, true, 20, '17:00', '20:00', 7)), array[111]);
+  if (r->>'deleted')::int <> 0
+     or not exists (select 1 from priority_slots where tenant_id = v_a and import_key = 'cka:111') then
+    raise exception 'FAIL: a kept (time-less) match was deleted: %', r;
+  end if;
+  r := apply_federation_matches(v_a, 'jihomoravska-divize-2026-2027', jsonb_build_array(
+         pg_temp.fed_match(101, true, 10, '18:00', '21:00', 5)
+           || '{"video_url":"https://youtu.be/x"}',
+         pg_temp.fed_match(103, true, 20, '17:00', '20:00', 7)));
+  if (r->>'deleted')::int <> 1 then
+    raise exception 'FAIL: without p_keep_ids the dropped match 111 should go: %', r;
+  end if;
+  raise notice 'OK: p_keep_ids protects matches the edge function skipped (0045)';
+end $$;
+
 -- 6. A match detail: result, players, and the venue decides home/away.
 do $$
 declare
@@ -4361,7 +4395,7 @@ begin
       raise exception 'FAIL: % is not in supabase_realtime', t;
     end if;
   end loop;
-  foreach f in array array['public.apply_federation_matches(uuid, text, jsonb)',
+  foreach f in array array['public.apply_federation_matches(uuid, text, jsonb, integer[])',
                            'public.apply_federation_result(uuid, integer, jsonb)',
                            'public.upsert_federation_teams(uuid, jsonb)',
                            'public.record_federation_run(uuid, text, jsonb, text)',
@@ -4373,7 +4407,7 @@ begin
       raise exception 'FAIL: % is callable from the app', f;
     end if;
   end loop;
-  foreach f in array array['public.apply_federation_matches(uuid, text, jsonb)',
+  foreach f in array array['public.apply_federation_matches(uuid, text, jsonb, integer[])',
                            'public.apply_federation_result(uuid, integer, jsonb)',
                            'public.upsert_federation_teams(uuid, jsonb)',
                            'public.record_federation_run(uuid, text, jsonb, text)',

@@ -41,17 +41,19 @@ const startOf = (m: { date: string; time: string | null }) =>
 
 export function planCompetition(args: {
   matches: SiteMatch[]; teams: TeamRow[]; legacy: LegacyRow[];
-}): { rows: SlotRow[]; skipped: string[] } {
+}): { rows: SlotRow[]; skipped: string[]; keepIds: number[] } {
   const ours = new Set(args.teams.map((t) => t.site_slug));
   const active = new Set(args.teams.filter((t) => t.active).map((t) => t.site_slug));
   const nameOf = new Map(args.teams.map((t) => [t.site_slug, t.name]));
   const unique = [...new Map(args.matches.map((m) => [m.id, m])).values()];
   const rows: SlotRow[] = [];
   const skipped: string[] = [];
+  const keepIds: number[] = [];
   for (const m of unique) {
     if (!active.has(m.homeTeam.slug) && !active.has(m.awayTeam.slug)) continue;
     if (!m.time) {
       skipped.push(`${m.homeTeam.name} – ${m.awayTeam.name} (${m.date}): bez času`);
+      keepIds.push(m.id);
       continue;
     }
     rows.push({
@@ -68,7 +70,7 @@ export function planCompetition(args: {
     args.legacy,
   );
   for (const r of rows) r.legacy_id = pairs.get(r.site_match_id) ?? null;
-  return { rows, skipped };
+  return { rows, skipped, keepIds };
 }
 
 export function matchJobsFor(args: {
@@ -208,9 +210,10 @@ export async function runCompetition(db: Db, get: Fetcher, tenantId: string, slu
   const legacy = must(await db.from("priority_slots")
     .select("id, import_key, date, home_team, away_team")
     .eq("tenant_id", tenantId).like("import_key", "rozpis:%")) as LegacyRow[];
-  const { rows, skipped } = planCompetition({ matches, teams, legacy });
-  const report = must(await db.rpc("apply_federation_matches",
-    { p_tenant: tenantId, p_competition_slug: slug, p_matches: rows })) as Record<string, unknown>;
+  const { rows, skipped, keepIds } = planCompetition({ matches, teams, legacy });
+  const report = must(await db.rpc("apply_federation_matches", {
+    p_tenant: tenantId, p_competition_slug: slug, p_matches: rows, p_keep_ids: keepIds,
+  })) as Record<string, unknown>;
   const stored = must(await db.from("priority_slots")
     .select("site_match_id, match_results(status)")
     .eq("tenant_id", tenantId).like("site_slug", `${slug}-kolo-%`)) as

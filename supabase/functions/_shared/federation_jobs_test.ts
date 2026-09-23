@@ -45,6 +45,19 @@ Deno.test("planCompetition keeps our active teams' matches, once, with app names
   });
 });
 
+Deno.test("planCompetition keeps the ids of our matches it skipped for no time", () => {
+  const { rows, keepIds } = planCompetition({
+    matches: [
+      match({ id: 1 }),
+      match({ id: 4, time: null }),
+      match({ id: 7, time: null, homeTeam: { id: 3, name: "KK X", slug: "kk-x-muzi" } }),
+    ],
+    teams, legacy: [],
+  });
+  assertEquals(rows.map((r) => r.site_match_id), [1]);
+  assertEquals(keepIds, [4]);
+});
+
 Deno.test("an away match of ours: home is not ours; inactive teams still count as ours for home", () => {
   const { rows } = planCompetition({
     matches: [match({ id: 5,
