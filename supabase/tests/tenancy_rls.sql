@@ -4494,20 +4494,25 @@ begin
      or s.last_report->'discover'->>'at' is null then
     raise exception 'FAIL: a successful run was not recorded: %', to_jsonb(s);
   end if;
+  perform record_federation_run(v_b, 'krajsky-prebor-2026-2027', '{"inserted":1}', null);
   update federation_sync set last_success_at = now() - interval '1 hour' where tenant_id = v_b;
   perform record_federation_run(v_b, 'discover', '{"teams":0}', 'site down');
   select * into s from federation_sync where tenant_id = v_b;
-  if s.last_error <> 'site down' or s.last_report->'discover'->>'teams' <> '3'
-     or s.last_success_at <> now() - interval '1 hour' then
-    raise exception 'FAIL: a failed run overwrote the good report: %', to_jsonb(s);
-  end if;
-  perform record_federation_run(v_b, 'krajsky-prebor-2026-2027', '{"inserted":1}', null);
-  select * into s from federation_sync where tenant_id = v_b;
-  if s.last_error is not null or s.last_report->'discover'->>'teams' <> '3'
+  if s.last_error <> 'site down' or s.last_success_at <> now() - interval '1 hour'
+     or s.last_report->'discover'->>'error' is distinct from 'site down'
+     or s.last_report->'discover'->>'at' is null
+     or s.last_report->'discover' ? 'teams'
      or s.last_report->'krajsky-prebor-2026-2027'->>'inserted' <> '1' then
-    raise exception 'FAIL: a success did not clear the error or merge the report: %', to_jsonb(s);
+    raise exception 'FAIL: a failed run is not recorded under its key: %', to_jsonb(s);
   end if;
-  raise notice 'OK: record_federation_run keeps the last good report per key and the last error (0045)';
+  perform record_federation_run(v_b, 'discover', '{"teams":4}', null);
+  select * into s from federation_sync where tenant_id = v_b;
+  if s.last_error is not null or s.last_report->'discover'->>'teams' <> '4'
+     or s.last_report->'discover' ? 'error'
+     or s.last_report->'krajsky-prebor-2026-2027'->>'inserted' <> '1' then
+    raise exception 'FAIL: a success did not replace the key''s error or clear last_error: %', to_jsonb(s);
+  end if;
+  raise notice 'OK: record_federation_run keeps a report or an error per key and the last error (0045)';
 end $$;
 
 -- 14. A sync-only column change (video link, venue, site ids, import key)

@@ -79,8 +79,9 @@ const str = (v: unknown): string | null =>
 
 function team(v: unknown): SiteTeam {
   const t = v as Json;
-  if (typeof t?.id !== "number" || typeof t.slug !== "string") throw new Error("bad team");
-  return { id: t.id, name: String(t.name), slug: t.slug };
+  const slug = str(t?.slug);
+  if (typeof t?.id !== "number" || !slug) throw new Error("bad team");
+  return { id: t.id, name: str(t.name) ?? slug, slug };
 }
 
 function siteMatch(v: unknown): SiteMatch {

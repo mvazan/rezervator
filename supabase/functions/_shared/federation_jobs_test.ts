@@ -185,6 +185,7 @@ type Call =
 function fakeJobsDb(
   jobs: FakeJob[],
   onRpc?: (name: string, args: Record<string, unknown>) => { data: unknown; error: unknown },
+  leaseError?: { message: string },
 ) {
   const calls: Call[] = [];
   function chainFor(table: string) {
@@ -240,6 +241,7 @@ function fakeJobsDb(
         const job = jobs.find((j) => j.id === idEq);
         if (!job) return { data: isSelect ? [] : null, error: null };
         const runAtEq = eqs.find(([c]) => c === "run_at")?.[1];
+        if (runAtEq !== undefined && leaseError) return { data: null, error: leaseError };
         if (runAtEq !== undefined && job.run_at !== runAtEq) {
           return { data: isSelect ? [] : null, error: null }; // lost the optimistic lock
         }
@@ -302,7 +304,7 @@ Deno.test("processFederationJobs: a job past MAX_ATTEMPTS is deleted without fet
     run_at: new Date(Date.now() - 60e3).toISOString(),
     payload: { tenant_id: "t1", site_match_id: 1, slug: "x" },
   }];
-  const { db } = fakeJobsDb(jobs);
+  const { db, calls } = fakeJobsDb(jobs);
   let fetched = false;
   const get = async () => {
     fetched = true;
@@ -313,6 +315,59 @@ Deno.test("processFederationJobs: a job past MAX_ATTEMPTS is deleted without fet
 
   assert(!fetched);
   assertEquals(jobs.length, 0);
+  const recorded = calls.find((c) => c.kind === "rpc" && c.name === "record_federation_run") as
+    { kind: "rpc"; name: string; args: Record<string, unknown> } | undefined;
+  assertEquals(recorded?.args, {
+    p_tenant: "t1", p_key: "federation_match", p_report: null,
+    p_error: "federation_match: dropped after 6 attempts",
+  });
+});
+
+Deno.test("processFederationJobs: a failing lease is logged and the job left alone", async () => {
+  const jobs: FakeJob[] = [{
+    id: 5, kind: "federation_match", attempts: 1,
+    run_at: new Date(Date.now() - 60e3).toISOString(),
+    payload: { tenant_id: "t1", site_match_id: 1, slug: "x" },
+  }];
+  const before = JSON.parse(JSON.stringify(jobs));
+  const { db } = fakeJobsDb(jobs, undefined, { message: "lease boom" });
+  let fetched = false;
+  const get = async () => {
+    fetched = true;
+    return "";
+  };
+  const errors: unknown[][] = [];
+  const original = console.error;
+  console.error = (...args: unknown[]) => errors.push(args);
+  try {
+    await processFederationJobs(db, get, new Date());
+  } finally {
+    console.error = original;
+  }
+
+  assert(!fetched);
+  assertEquals(jobs, before);
+  assert(errors.some((e) => JSON.stringify(e).includes("lease boom")));
+});
+
+Deno.test("processFederationJobs: a failing competition job records its error under its report key", async () => {
+  const now = new Date("2026-10-10T06:00:00Z");
+  const jobs: FakeJob[] = [{
+    id: 6, kind: "federation_competition", attempts: 0,
+    run_at: new Date(now.getTime() - 60e3).toISOString(),
+    payload: { tenant_id: "t1", competition_slug: "kp1-sever-2026-2027" },
+  }];
+  const { db, calls } = fakeJobsDb(jobs);
+  const get = async () => {
+    throw new Error("site down");
+  };
+
+  await processFederationJobs(db, get, now);
+
+  const recorded = calls.find((c) => c.kind === "rpc" && c.name === "record_federation_run") as
+    { kind: "rpc"; name: string; args: Record<string, unknown> } | undefined;
+  assertEquals(recorded?.args.p_key, "competition:kp1-sever-2026-2027");
+  assertEquals(recorded?.args.p_error, "federation_competition: site down");
 });
 
 Deno.test("processFederationJobs: a failing job backs off from its attempts and records the error", async () => {

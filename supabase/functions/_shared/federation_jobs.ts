@@ -279,19 +279,35 @@ export async function runMatch(
 
 type Job = { id: number; payload: Record<string, unknown>; attempts: number; run_at: string };
 
+/** The last_report key a job's success is stored under, so its failure
+ * replaces the same entry. Match jobs record only failures. */
+function reportKey(kind: string, job: Job): string {
+  if (kind === "federation_discover") return "discover";
+  if (kind === "federation_competition") return `competition:${job.payload.competition_slug}`;
+  return kind;
+}
+
+function recordError(db: Db, kind: string, job: Job, message: string) {
+  return logged(`record_federation_run ${kind}/${job.id}`, () =>
+    db.rpc("record_federation_run", {
+      p_tenant: String(job.payload.tenant_id), p_key: reportKey(kind, job), p_report: null,
+      p_error: `${kind}: ${message}`,
+    }));
+}
+
 async function runJob(db: Db, get: Fetcher, kind: string, job: Job, now: Date): Promise<Date | null> {
   const tenant = String(job.payload.tenant_id);
   if (kind === "federation_discover") {
     const report = await runDiscover(db, get, tenant);
     must(await db.rpc("record_federation_run",
-      { p_tenant: tenant, p_key: "discover", p_report: report, p_error: null }));
+      { p_tenant: tenant, p_key: reportKey(kind, job), p_report: report, p_error: null }));
     return null;
   }
   if (kind === "federation_competition") {
     const slug = String(job.payload.competition_slug);
     const report = await runCompetition(db, get, tenant, slug, now);
     must(await db.rpc("record_federation_run",
-      { p_tenant: tenant, p_key: `competition:${slug}`, p_report: report, p_error: null }));
+      { p_tenant: tenant, p_key: reportKey(kind, job), p_report: report, p_error: null }));
     return null;
   }
   return await runMatch(db, get, tenant, Number(job.payload.site_match_id),
@@ -343,11 +359,16 @@ export async function processFederationJobs(
         console.error(`job ${kind}/${job.id} exceeded ${MAX_ATTEMPTS} attempts without finishing, deleting`);
         await logged(`delete stale ${kind}/${job.id}`, () =>
           db.from("notification_jobs").delete().eq("id", job.id));
+        await recordError(db, kind, job, `dropped after ${job.attempts} attempts`);
         continue;
       }
-      const { data } = await db.from("notification_jobs")
+      const { data, error } = await db.from("notification_jobs")
         .update({ run_at: new Date(Date.now() + LEASE_MS).toISOString(), attempts: job.attempts + 1 })
         .eq("id", job.id).eq("run_at", job.run_at).select("id");
+      if (error) {
+        console.error(`lease ${kind}/${job.id} failed:`, { error });
+        continue;
+      }
       if (data?.length) leased.push(job);
     }
     for (let i = 0; i < leased.length; i += MATCH_CONCURRENCY) {
@@ -359,11 +380,7 @@ export async function processFederationJobs(
           const message = error instanceof Error ? error.message : String(error);
           console.error(`job ${kind}/${job.id} failed:`, message);
           outcome = jobOutcome({ error: message }, job.attempts, now);
-          await logged(`record_federation_run ${kind}/${job.id}`, () =>
-            db.rpc("record_federation_run", {
-              p_tenant: String(job.payload.tenant_id), p_key: kind, p_report: null,
-              p_error: `${kind}: ${message}`,
-            }));
+          await recordError(db, kind, job, message);
         }
         if (outcome.action === "delete") {
           await logged(`delete ${kind}/${job.id}`, () =>

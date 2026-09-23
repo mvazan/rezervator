@@ -44,6 +44,22 @@ Deno.test("video links and four-player teams come through", () => {
   assert(k.standings.some((s) => s.teamSlug === "tj-sokol-husovice-e-muzi"));
 });
 
+Deno.test("team placeholders: a missing name falls back to the slug, a missing slug is refused", () => {
+  const page = (home: Record<string, unknown>) => {
+    const m = {
+      id: 1, slug: "x-kolo-1-a-b", date: "2026-10-10", time: "10:00", round: 1,
+      status: "SCHEDULED", matchType: "TEAMS_OF_6", discipline: "T120", videoUrl: "$undefined",
+      homeTeam: home, awayTeam: { id: 2, name: "KK B", slug: "kk-b-muzi" },
+      competition: { slug: "x", name: "X" },
+    };
+    const data = { data: { title: "X", rounds: [{ id: 1 }], currentRound: { id: 1, matches: [m] } } };
+    return `<script>self.__next_f.push([1,${JSON.stringify(`5:${JSON.stringify(data)}`)}])</script>`;
+  };
+  const c = parseCompetition(page({ id: 1, name: "$undefined", slug: "kk-a-muzi" }));
+  assertEquals(c.matches[0].homeTeam, { id: 1, name: "kk-a-muzi", slug: "kk-a-muzi" });
+  assertThrows(() => parseCompetition(page({ id: 1, name: "KK A", slug: "$L7" })));
+});
+
 Deno.test("a finished match: venue, totals, players with lanes", () => {
   const d = parseMatch(fixture("match_finished.html"));
   assertEquals(d.id, 4859);

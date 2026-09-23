@@ -416,10 +416,10 @@ begin
      set last_run_at = now(),
          last_success_at = case when p_error is null then now() else last_success_at end,
          last_error = p_error,
-         last_report = case when p_error is null
-           then last_report || jsonb_build_object(p_key,
-                  coalesce(p_report, '{}'::jsonb) || jsonb_build_object('at', now()))
-           else last_report end
+         last_report = last_report || jsonb_build_object(p_key,
+           case when p_error is null
+             then coalesce(p_report, '{}'::jsonb) || jsonb_build_object('at', now())
+             else jsonb_build_object('error', p_error, 'at', now()) end)
    where tenant_id = p_tenant;
 end;
 $$;
