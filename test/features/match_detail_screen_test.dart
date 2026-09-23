@@ -207,9 +207,9 @@ void main() {
         Theme.of(tester.element(find.text('5 : 3'))).textTheme.headlineSmall,
       );
       final homeName = tester.widget<Text>(find.text(home));
-      expect(homeName.style?.fontWeight, FontWeight.w900);
+      expect(homeName.style?.fontWeight, FontWeight.w800);
       final awayName = tester.widget<Text>(find.text(away));
-      expect(awayName.style?.fontWeight, isNot(FontWeight.w900));
+      expect(awayName.style?.fontWeight, isNot(FontWeight.w800));
       expect(find.text('3460 : 3349'), findsOneWidget);
       expect(find.textContaining('SB 15 : 9'), findsOneWidget);
       // The joined format+status line, exactly (formatLabel + ' · ' + status).

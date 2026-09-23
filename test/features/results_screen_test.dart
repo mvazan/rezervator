@@ -241,8 +241,8 @@ void main() {
       final titleText = tester.widget<Text>(find.text('$veverky – $souperA'));
       final spans = (titleText.textSpan! as TextSpan).children!
           .cast<TextSpan>();
-      expect(spans[0].style?.fontWeight, FontWeight.w900, reason: 'home won');
-      expect(spans[2].style?.fontWeight, isNot(FontWeight.w900));
+      expect(spans[0].style?.fontWeight, FontWeight.w800, reason: 'home won');
+      expect(spans[2].style?.fontWeight, isNot(FontWeight.w800));
     },
   );
 
@@ -257,7 +257,7 @@ void main() {
       // find.text always matched before this batch.
       final titleText = tester.widget<Text>(find.text('$veverky – $souperB'));
       expect(titleText.textSpan, isNull);
-      expect(titleText.style?.fontWeight, isNot(FontWeight.w900));
+      expect(titleText.style?.fontWeight, isNot(FontWeight.w800));
     },
   );
 

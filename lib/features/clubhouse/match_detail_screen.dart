@@ -145,12 +145,13 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     // `_headerCard`'s own parameter — this State's outer context, ABOVE the
     // Scaffold/Card it builds — so it resolves to the app-root ambient
     // style, not the one actually in effect where the Text widgets below
-    // render.) A FIXED w900, not "add bold" relative to bodyMedium: bold
+    // render.) A FIXED w800, not "add bold" relative to bodyMedium: bold
     // (w700) happens to differ from bodyMedium's own w400 today, but a
-    // fixed weight doesn't depend on that — see MatchTitle's own comment
-    // (`widgets/match_title.dart`) for the text-role this bit for.
+    // fixed weight doesn't depend on that. w800 is the heaviest Manrope
+    // cut this app actually bundles (pubspec.yaml) — see MatchTitle's own
+    // comment (`widgets/match_title.dart`) for the text-role this bit for.
     final teamNameStyle = theme.textTheme.bodyMedium?.copyWith(
-      fontWeight: FontWeight.w900,
+      fontWeight: FontWeight.w800,
     );
     return Card(
       margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),

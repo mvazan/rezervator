@@ -30,9 +30,12 @@ class MatchTitle extends StatelessWidget {
     // A FIXED heavier weight, not "add bold" relative to base: some text
     // roles this renders under (e.g. titleSmall) are already w700 —
     // `FontWeight.bold` IS w700, so copying it on top would be a no-op.
-    // w900 guarantees visible contrast whatever the surrounding role's own
-    // weight already is. The losing side stays exactly `base`, untouched.
-    final winnerStyle = base.copyWith(fontWeight: FontWeight.w900);
+    // w800 guarantees visible contrast whatever the surrounding role's own
+    // weight already is, and is the heaviest Manrope cut this app actually
+    // bundles (pubspec.yaml) — w900 would synthesise/fall back instead of
+    // rendering the real font. The losing side stays exactly `base`,
+    // untouched.
+    final winnerStyle = base.copyWith(fontWeight: FontWeight.w800);
     return Text.rich(
       TextSpan(
         children: [
