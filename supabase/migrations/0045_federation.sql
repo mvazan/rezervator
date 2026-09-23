@@ -61,6 +61,47 @@ alter table priority_slots
   add column venue text,
   add column venue_slug text;
 
+-- 0027/0039's calendar trigger enqueued on every UPDATE. The sync rewrites
+-- the columns above (video link a day later, venue, rekey) and the calendar
+-- handler drops events of past matches — an UPDATE now enqueues only when
+-- something the event shows (or who follows it) changed.
+create or replace function priority_slots_enqueue_calendar()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if tg_op = 'UPDATE'
+     and (old.tenant_id, old.date, old.starts_at, old.ends_at, old.home_team,
+          old.away_team, old.is_away, old.description, old.type_id, old.parent_id)
+         is not distinct from
+         (new.tenant_id, new.date, new.starts_at, new.ends_at, new.home_team,
+          new.away_team, new.is_away, new.description, new.type_id, new.parent_id) then
+    return new;
+  end if;
+  if tg_op in ('UPDATE', 'DELETE') and old.parent_id is null
+     and exists (select 1 from priority_slot_types
+                 where id = old.type_id and is_match) then
+    perform enqueue_match_calendar_sync(u, old.id)
+      from match_calendar_followers(
+        old.tenant_id, old.home_team, old.away_team) u;
+  end if;
+  if tg_op in ('INSERT', 'UPDATE') and new.parent_id is null
+     and exists (select 1 from priority_slot_types
+                 where id = new.type_id and is_match) then
+    perform enqueue_match_calendar_sync(u, new.id)
+      from match_calendar_followers(
+        new.tenant_id, new.home_team, new.away_team) u;
+  end if;
+  -- Whoever holds an exception on this match, followed teams or not. On
+  -- DELETE the cascade has usually emptied this already (and the trigger
+  -- above has queued the job) — then this finds nothing, which is the
+  -- right answer either way.
+  perform enqueue_match_calendar_sync(e.user_id, coalesce(new.id, old.id))
+    from match_exceptions e where e.match_id = coalesce(new.id, old.id);
+  return coalesce(new, old);
+end;
+$$;
+
 -- ------------------------------------------------------- match results
 create table match_results (
   match_id uuid primary key references priority_slots(id) on delete cascade,
@@ -115,7 +156,7 @@ $$;
 
 -- One competition's matches as the site lists them → priority_slots.
 -- import.run keeps the 0038 hand-edit trigger quiet; writes happen only
--- when something differs (every UPDATE enqueues calendar jobs).
+-- when something differs.
 create or replace function apply_federation_matches(
   p_tenant uuid, p_competition_slug text, p_matches jsonb)
 returns jsonb language plpgsql security definer set search_path = public as $$

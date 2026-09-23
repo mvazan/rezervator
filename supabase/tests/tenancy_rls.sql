@@ -4425,6 +4425,56 @@ begin
   raise notice 'OK: record_federation_run keeps the last good report per key and the last error (0045)';
 end $$;
 
+-- 14. A sync-only column change (video link, venue, site ids, import key)
+-- leaves followers' calendars alone: the calendar handler deletes events of
+-- past matches, so a needless job would wipe them. An event column still
+-- enqueues. A's admin is linked (0023 section) and follows the team here.
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
+  v_id uuid;
+begin
+  if not exists (select 1 from google_calendar_links
+                 where user_id = v_uid and status = 'linked') then
+    raise exception 'FAIL: fixture — A''s admin should have a linked calendar';
+  end if;
+  perform set_calendar_teams_for(v_uid, jsonb_build_array(
+    jsonb_build_object('team', 'TJ Sokol Kalendář', 'calendar', 'primary')));
+  insert into priority_slots
+    (tenant_id, date, starts_at, ends_at, type_id, home_team, away_team,
+     prep_minutes, description, is_away, created_by, import_key)
+  values
+    (v_a, (now() at time zone 'Europe/Prague')::date - 2, '17:00', '20:00',
+     (select id from priority_slot_types where tenant_id = v_a and is_match and builtin),
+     'KK Jiný', 'TJ Sokol Kalendář', 0, 'Jihomoravská divize · 1. kolo', true, v_uid,
+     'rozpis:JmD:1:KK Jiný – TJ Sokol Kalendář')
+  returning id into v_id;
+  delete from notification_jobs where dedupe_key like 'calendar:%:match:%';
+
+  perform set_config('import.run', 'on', true);
+  update priority_slots
+     set video_url = 'https://youtu.be/v', venue = 'Kuželna Jinde', venue_slug = 'jinde',
+         competition = 'Jihomoravská divize', round = 1, site_match_id = 910,
+         site_slug = 'jihomoravska-divize-2026-2027-kolo-1-x-y', import_key = 'cka:910'
+   where id = v_id;
+  if exists (select 1 from notification_jobs where dedupe_key like 'calendar:%:match:%') then
+    raise exception 'FAIL: a sync-only update enqueued a calendar job';
+  end if;
+
+  update priority_slots set starts_at = '17:30' where id = v_id;
+  perform set_config('import.run', '', true);
+  if not exists (select 1 from notification_jobs
+                 where dedupe_key = 'calendar:' || v_uid || ':match:' || v_id) then
+    raise exception 'FAIL: a re-timed match enqueued no calendar job';
+  end if;
+
+  perform set_calendar_teams_for(v_uid, '[]'::jsonb);
+  delete from priority_slots where id = v_id;
+  delete from notification_jobs where dedupe_key like 'calendar:%:match:%';
+  raise notice 'OK: only a change of what the event shows enqueues a calendar job (0045)';
+end $$;
+
 -- 7b. With both alleys configured, each admin sees only their own settings.
 do $$
 begin
