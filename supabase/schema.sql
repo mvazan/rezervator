@@ -63,7 +63,7 @@ $$;
 ALTER FUNCTION "public"."admin_list_tenants"() OWNER TO "postgres";
 
 
-CREATE OR REPLACE FUNCTION "public"."apply_federation_matches"("p_tenant" "uuid", "p_competition_slug" "text", "p_matches" "jsonb") RETURNS "jsonb"
+CREATE OR REPLACE FUNCTION "public"."apply_federation_matches"("p_tenant" "uuid", "p_competition_slug" "text", "p_matches" "jsonb", "p_keep_ids" integer[] DEFAULT '{}'::integer[]) RETURNS "jsonb"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
     AS $$
@@ -143,10 +143,12 @@ begin
            (m->>'video_url', m->>'competition', (m->>'round')::smallint,
             m->>'site_slug', (m->>'site_match_id')::integer);
 
-    -- Once a detail fetch told us the venue, it decides home/away.
+    -- Once a detail fetch told us the venue, it decides home/away. Before
+    -- that the stored value stands: a legacy row knew it better than the
+    -- guess from the site's home team.
     v_is_away := case when v_row.venue_slug is not null
                       then v_row.venue_slug is distinct from v_venue
-                      else not (m->>'home_is_ours')::boolean end;
+                      else v_row.is_away end;
     v_prep := case when v_is_away then 0 else (m->>'prep')::smallint end;
     v_desc := federation_description(m->>'competition', (m->>'round')::integer,
                                      v_is_away, v_row.venue);
@@ -182,7 +184,7 @@ begin
          and p.site_slug like p_competition_slug || '-kolo-%'
          and (p.date + p.starts_at) > (now() at time zone 'Europe/Prague')
          and not p.hand_edited
-         and not (p.site_match_id = any (v_seen))
+         and not (p.site_match_id = any (v_seen || coalesce(p_keep_ids, '{}')))
       returning 1)
     select count(*) into v_del from gone;
   end if;
@@ -193,7 +195,7 @@ end;
 $$;
 
 
-ALTER FUNCTION "public"."apply_federation_matches"("p_tenant" "uuid", "p_competition_slug" "text", "p_matches" "jsonb") OWNER TO "postgres";
+ALTER FUNCTION "public"."apply_federation_matches"("p_tenant" "uuid", "p_competition_slug" "text", "p_matches" "jsonb", "p_keep_ids" integer[]) OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."apply_federation_result"("p_tenant" "uuid", "p_site_match_id" integer, "p_result" "jsonb") RETURNS "void"
@@ -1836,6 +1838,14 @@ CREATE OR REPLACE FUNCTION "public"."priority_slots_enqueue_calendar"() RETURNS 
     SET "search_path" TO 'public'
     AS $$
 begin
+  if tg_op = 'UPDATE'
+     and (old.tenant_id, old.date, old.starts_at, old.ends_at, old.home_team,
+          old.away_team, old.is_away, old.description, old.type_id, old.parent_id)
+         is not distinct from
+         (new.tenant_id, new.date, new.starts_at, new.ends_at, new.home_team,
+          new.away_team, new.is_away, new.description, new.type_id, new.parent_id) then
+    return new;
+  end if;
   if tg_op in ('UPDATE', 'DELETE') and old.parent_id is null
      and exists (select 1 from priority_slot_types
                  where id = old.type_id and is_match) then
@@ -1979,10 +1989,10 @@ begin
      set last_run_at = now(),
          last_success_at = case when p_error is null then now() else last_success_at end,
          last_error = p_error,
-         last_report = case when p_error is null
-           then last_report || jsonb_build_object(p_key,
-                  coalesce(p_report, '{}'::jsonb) || jsonb_build_object('at', now()))
-           else last_report end
+         last_report = last_report || jsonb_build_object(p_key,
+           case when p_error is null
+             then coalesce(p_report, '{}'::jsonb) || jsonb_build_object('at', now())
+             else jsonb_build_object('error', p_error, 'at', now()) end)
    where tenant_id = p_tenant;
 end;
 $$;
@@ -4451,8 +4461,8 @@ GRANT ALL ON FUNCTION "public"."admin_list_tenants"() TO "service_role";
 
 
 
-REVOKE ALL ON FUNCTION "public"."apply_federation_matches"("p_tenant" "uuid", "p_competition_slug" "text", "p_matches" "jsonb") FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."apply_federation_matches"("p_tenant" "uuid", "p_competition_slug" "text", "p_matches" "jsonb") TO "service_role";
+REVOKE ALL ON FUNCTION "public"."apply_federation_matches"("p_tenant" "uuid", "p_competition_slug" "text", "p_matches" "jsonb", "p_keep_ids" integer[]) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."apply_federation_matches"("p_tenant" "uuid", "p_competition_slug" "text", "p_matches" "jsonb", "p_keep_ids" integer[]) TO "service_role";
 
 
 
