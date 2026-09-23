@@ -52,17 +52,21 @@ and what cascades — and is updated with every migration.
 | `time_blocks` | `starts_at`, `ends_at`, `position`, `active`. `position = -1` marks a day-special block: inactive, reachable only through `day_overrides.block_ids` | select approved/kiosk; insert/update/delete admin. FK from `reservations` is RESTRICT — only never-used blocks can be deleted. |
 | `day_overrides` | PK (`tenant_id`, `date`); `closed`, `reason`, `block_ids uuid[]` (`null` = the default active set) | select approved/kiosk; write admin. Normally written through `set_day_override`. |
 | `priority_slot_types` | `name` unique per tenant, `color` (−1 = none), `lanes smallint[]` (`null` = whole alley), `is_match`, `builtin` ('Zápas', 'Úklid před zápasem' seeded per tenant) | select approved/kiosk; insert/update admin (**column grants: `name, color, lanes` only**); delete admin ∧ `not builtin`. |
-| `priority_slots` | `date`, `starts_at`, `ends_at`, `type_id`, `home_team`, `away_team`, `prep_minutes` 0–240, `description`, `parent_id` (the auto-managed úklid child), `is_away` (announced, blocks nothing), `import_key` (unique per tenant; `null` = entered by hand in the app, otherwise `rozpis:<soutěž>:<kolo>:<domácí> – <hosté>` set by `tool/import_matches.py` — date-free, so a postponed match is an update of the same row; rows keyed `xlsx:<date>:<teams>` by the 2026/27 grid workbook are re-keyed by the first run of the flat-list importer), `hand_edited` (0038: an imported row whose match columns changed outside an import run — the import skips it unless `--force`; see **Import rozpisu** below) | select approved/kiosk; write admin. |
+| `priority_slots` | `date`, `starts_at`, `ends_at`, `type_id`, `home_team`, `away_team`, `prep_minutes` 0–240, `description`, `parent_id` (the auto-managed úklid child), `is_away` (announced, blocks nothing), `import_key` (unique per tenant; `null` = entered by hand in the app, otherwise `rozpis:<soutěž>:<kolo>:<domácí> – <hosté>` set by `tool/import_matches.py` — date-free, so a postponed match is an update of the same row; rows keyed `xlsx:<date>:<teams>` by the 2026/27 grid workbook are re-keyed by the first run of the flat-list importer), `hand_edited` (0038: an imported row whose match columns changed outside an import run — the sync skips it; see **Výsledkový servis ČKA** below). Federation columns (0045, written only by the sync, never compared by the hand-edit trigger, all public in `public_week`): `video_url`, `competition`, `round`, `site_slug` (the match's page on vysledky.kuzelky.cz), `site_match_id`, `venue` / `venue_slug` (from the match detail — once known, they decide `is_away`). Since 0045 the sync keys its rows `cka:<site_match_id>`. | select approved/kiosk; write admin. |
 | `rentals` | `renter_name`, `lanes`, exactly one of `date` / `weekday`, `starts_at`, `ends_at`, `valid_from/until`, `note`, `color` (−2 = default tint). **Grouped dates** (0041): `group_id` — see `rental_groups`. **Exception rows** (0021): `parent_id → rentals` (cascade delete) + `date` = the one occurrence of that weekly series they override, with their own `lanes`, `starts_at`, `ends_at`, `note`; `skipped` = the occurrence does not happen. One per (`parent_id`, `date`). `renter_name`/`color` are copied from the series by `rental_exception_guard`, which also rejects an off-series date, a one-time or child parent and a foreign tenant (`rental_exception_invalid`); `rental_series_changed` prunes children a series edit orphans and re-copies name/colour. | select approved/kiosk; write admin. |
 | `rental_groups` | `renter_name`, `color` (−2 = default tint; the same domain as `rentals.color`, hand-picked values included — `rental_groups_color_check`). One renter with several one-time dates (0041): `rentals.group_id → rental_groups` (cascade delete), allowed only on a row with `date` and no `parent_id` (`rentals_group_shape_check`). `rental_group_guard` copies name/colour onto a grouped row and refuses a foreign tenant (`rental_group_invalid`); `rental_group_changed` propagates a group edit; `rental_group_prune` deletes a group with its last date. A lone one-time rental has no group. **Not in the Realtime publication, on purpose**: the app derives groups from the `rentals` rows it already streams (`rentalGroupsOf`), and a rename reaches the client through `rental_group_changed` copying name/colour onto those rows — a second stream would carry nothing the client needs. | select approved/kiosk; write admin. |
 | `reservations` | `player_id`, `date`, `block_id`, `lane`, `created_via` app\|kiosk\|admin\|group (0044), `cancelled_at/via` app\|one_click\|admin\|group (0044), `cancelled_by` (0044: who actually cancelled it — the owner or a fellow group member, for "Petr ti zrušil trénink"), `cancel_note`, `notify_player`, `notify_message` (per-change intent for the notify function) | **select only** (approved/kiosk). Every write is an RPC, a trigger, or the `cancel` edge function. Live slots are unique: `(date, block_id, lane) where cancelled_at is null`. |
 | `clubs` | `name` unique per tenant, `color` (−1 = none) | select approved/kiosk; all admin. |
 | `player_groups` | (0044) `tenant_id`, `created_by` | **server-only**: RLS on, zero policies, every grant revoked from `anon`/`authenticated`. Internal bookkeeping only — the app reads `player_group_members`. |
 | `player_group_members` | (0044) `group_id → player_groups` (cascade), `user_id → profiles` (cascade), `tenant_id` (denormalised so the admin policy never has to read `player_groups` — no policy cycle), `status` invited\|member, `invited_by`. PK (`group_id`, `user_id`). Partial unique index `player_group_one_membership` on `user_id where status = 'member'` — one group per player. In the Realtime publication. | select: own rows (`user_id = auth.uid()`), the caller's own group (`my_group_id()`), or the alley's admin (`tenant_id = current_tenant_id()`). No insert/update/delete for `authenticated`, nothing for `anon` — written only through the `group_*` RPCs below. |
+| `teams` | (0045) The alley's own teams as the federation lists them: `name` (unique per tenant, 1–80 chars — **the string the app keys by**: `priority_slots.home_team`/`away_team`, `followed_teams`, `calendar_teams`, `team_colors`; set at discovery, editable by the admin), `club_id → clubs` (set null), `site_team_id`, `site_slug` (unique per tenant — discovery's identity), `site_name`, `competition_slug`, `competition_name`, `active` (an inactive team's competition is not synced). In the Realtime publication. | select approved/kiosk. No insert/update/delete for `authenticated`, nothing for `anon` — discovery (`upsert_federation_teams`) and `update_team` write it. |
+| `federation_sync` | (0045) PK `tenant_id`: `venue_slug` (the alley's kuželna on the site, `''` = not configured, same slug format as `tenants.public_slug` but may be empty), `enabled` (default off), `last_run_at`, `last_success_at`, `last_error`, `last_report jsonb` (per job key — `discover` or a competition slug — the last successful report + `at`). In the Realtime publication. | select **admin** only. Written by `set_federation_sync` and `record_federation_run`. |
+| `match_results` | (0045) PK `match_id → priority_slots` (cascade), `tenant_id`, `status` scheduled \| preparation \| in_progress \| finished \| forfeit, `match_type`, `discipline`, per side `points`, `total`, `fulls`, `spares`, `errors`, `set_points` (`home_*`/`away_*`), `fetched_at`. In the Realtime publication. | select approved/kiosk; server-only writes (`apply_federation_result`). |
+| `match_player_results` | (0045) `match_id → priority_slots` (cascade), `tenant_id`, `side` home\|away, `position`, `player_name`, `player_site_id`, `player_slug`, `fulls`, `spares`, `errors`, `total`, `set_points`, `team_points`, `lanes jsonb` (`[{lane, fulls, spares, errors, total, setPoints}]`). Unique (`match_id`, `side`, `position`); index (`tenant_id`, `player_site_id`). Replaced whole on every fetch. In the Realtime publication. | as `match_results`. |
 
 Every `color` column above is one `integer` (0030): the negative values are the "none"/default markers, 0–8 a palette entry from `domain/palette.dart` (0031 dropped the three that measured under ΔE2000 10 from a neighbour and kept every affected row on its exact colour as a hand-picked one), and `0x1000000 | rgb` (16777216–33554431) a hand-picked colour. Dart derives the four rendered shades (dark and light background plus its text) from a hand-picked value rather than painting it raw, so it stays readable in both themes; `upsert_club` takes `integer` for the same reason.
 | `app_config` | single row: `min_build` (0025) — the oldest app build the backend still supports; the app streams it (Realtime) and blocks on an update screen while older. Raised by a migration with a breaking release. | select for `authenticated`; writes: migrations only. |
-| `notification_jobs` | Deferred-job queue (0023): `kind` (only `calendar_sync` so far), `dedupe_key` unique (`calendar:<user_id>:<reservation_id>` — a repeat re-arms `run_at` instead of adding a row), `payload` jsonb, `run_at`, `attempts` (the handler backs off 2^attempts minutes and drops the job at 5), `created_at`. Index on `run_at`. | **server-only**: RLS on, no policy; `service_role` all, `anon`/`authenticated` nothing. Written by the security-definer producers (§Google kalendář) and `backfill_calendar_jobs`, consumed by the notify function on the cron tick. |
+| `notification_jobs` | Deferred-job queue (0023): `kind` (`calendar_sync`; 0045 adds `federation_discover`, `federation_competition`, `federation_match`), `dedupe_key` unique (`calendar:<user_id>:<reservation_id>` — a repeat re-arms `run_at` instead of adding a row), `payload` jsonb, `run_at`, `attempts` (the handler backs off 2^attempts minutes and drops the job at 5), `created_at`. Index on `run_at`. | **server-only**: RLS on, no policy; `service_role` all, `anon`/`authenticated` nothing. Written by the security-definer producers (§Google kalendář) and `backfill_calendar_jobs`, consumed by the notify function on the cron tick. |
 | `google_calendar_links` | One row per *person* (not per tenant; `user_id → profiles`, cascade): `status` pending \| linked \| broken \| unlinked, `google_email`, `last_error`, `reminder_minutes int[]` (Calendar API shape — ≤ 5 entries, each 0–40320, CHECK-enforced, stored sorted descending), `created_at`, `updated_at`, plus (0032) `secondary_enabled` (the player turned on the second Google calendar "Rezervátor 2"), `reminder_minutes_secondary` (same shape/bounds, for events written there), `training_color_id` (Google event `colorId` 1–11 for trainings, which always go to the primary calendar; `null` = no colour). `match_teams` (0027) is gone (0033) — see `calendar_teams` for what replaced it. Holds no secret: it is in the Realtime publication and the profile card streams it. | select own row only (`user_id = auth.uid()`); `authenticated` has SELECT and nothing else — every write is the server's (`service_role`). |
 | `google_calendar_tokens` | `user_id → profiles` (cascade), `refresh_token`, `google_calendar_id` (the app-created "Rezervátor" calendar), `google_calendar_id_secondary` (0032: the second one, "Rezervátor 2"; `null` until `secondary_enabled`), `updated_at`. A separate table on purpose: a streamed table must never carry the token. | **server-only**: RLS on, zero policies; `service_role` only. |
 | `calendar_teams` | (0032) One row per player **+** followed team — replaces `google_calendar_links.match_teams`, because a team now needs to say more than its name: `user_id → profiles` (cascade), `team` (a `priority_slots.home_team`/`away_team` string), `calendar` (`primary` \| `secondary`, default `primary` — which of the player's two Google calendars this team's matches go to). PK (`user_id`, `team`). In the Realtime publication (0035) — the profile card streams it. Colour (`color_id`) lived here until 0036 moved it to `team_colors` below, independent of this table. | select own rows only (`user_id = auth.uid()`); `authenticated` has SELECT and nothing else (0035) — every write is the server's, through `calendar-manage`/`set_calendar_teams_for`, which also keeps `google_calendar_links.match_teams` mirrored for the 1.2.1 app. |
@@ -125,6 +129,11 @@ EXECUTE revoked from the app roles (see below).
 | `my_future_reservations(user)` | service_role only (callback, calendar-manage) | `(reservation_id, date, starts_at, ends_at, lane, alley_name)` for the player's live reservations from Prague-today on — block times, tenant name — ordered by date, starts_at. The raw material of the calendar events. |
 | `public_week(slug, monday)` (0043) | **anon** i signed-in | Veřejný přehled: týden (`monday` se zarovná na pondělí) publikované a schválené kuželny — `tenant_name`, `settings`, `blocks`, `slot_types`, `overrides`/`priority_slots`/`rentals` za neděli před … pondělí po, `occupied` (`block_id, date, lane, club_color`) za týden. Žádná jména, `player_id`, `renter_name`, `note`, `created_by`. `unknown_tenant` pro neznámý, vypnutý i neschválený slug (stejně). |
 | `set_public_overview(slug, enabled)`, `my_public_overview()` (0043) | admin | Slug (trim + lower, `''` = žádný) a přepínač vlastní kuželny; čtení vrací `{public_slug, public_enabled, tenant_name}`. `not_allowed`, `invalid_slug` (formát / zapnutí bez slugu), `slug_taken`. |
+| `set_federation_sync(venue_slug, enabled)` (0045) | admin | Upserts the caller's `federation_sync` (slug trimmed + lower-cased, must be non-empty). `not_allowed`, `invalid_slug`. |
+| `request_federation_discovery()`, `request_federation_sync()` (0045) | admin | Enqueue a `federation_discover` job / one `federation_competition` job per active team's competition, due now, and kick the dispatcher. `not_allowed`; `federation_not_configured` (no venue slug) / `federation_disabled` (sync off or no slug). |
+| `update_team(id, name, club_id, active)` (0045) | admin | Renames (trimmed), assigns a club of the same alley, switches the team on/off. `not_allowed` (foreign team or club, not admin), `empty_name`, `team_name_taken`. |
+| `refresh_match(match_id)` (0045) | approved member or kiosk | On-demand refresh of a live match → `queued` (a `federation_match` job due now), `fresh` (fetched < 5 min ago) or `not_live` (not a federation match, foreign, or outside the window: `preparation`/`in_progress` until start + 12 h, `scheduled` from start − 1 h to start + 6 h). `not_allowed`. |
+| `apply_federation_matches(tenant, competition_slug, matches)`, `apply_federation_result(tenant, site_match_id, result)`, `upsert_federation_teams(tenant, teams)`, `record_federation_run(tenant, key, report, error)`, `enqueue_federation_match(tenant, site_match_id, slug, run_at)` (0045) | service_role only (notify function) | The sync's writes — see **Výsledkový servis ČKA** below. `apply_federation_matches` raises `federation_tenant_not_ready` when the tenant has no approved admin or no builtin match type. |
 
 Internal, no EXECUTE for app roles: `current_tenant_id`, `is_*`,
 `block_day_status`, `cancel_stranded_reservations`, `rental_occurs`,
@@ -132,7 +141,8 @@ Internal, no EXECUTE for app roles: `current_tenant_id`, `is_*`,
 `enqueue_notification`, `enqueue_calendar_sync`,
 `trigger_notification_jobs` (called by cron), `notify_webhook_config`,
 `seed_demo_member` (service_role only — Play-review demo account),
-`public_tenant_id`, `same_group`, `_group_drop_member` (0044).
+`public_tenant_id`, `same_group`, `_group_drop_member` (0044),
+`federation_description`, `enqueue_federation_jobs` (called by cron) (0045).
 
 `block_day_status(tenant, date, block)` → `open` | `day_closed` |
 `invalid_block` | `unknown_block` is the one definition of "this block is
@@ -173,40 +183,75 @@ the notify function mails "Trénink zrušen" with the note as the reason
 Other triggers: `tenant_seed_defaults` (settings row + builtin types for a
 new tenant), `match_uklid_sync` (keeps a match's úklid child in step with
 `prep_minutes`), `priority_slots_hand_edit` (0038, before update: flags an
-imported match whose match columns change while `import.run` is not `on`), `rental_exception_guard` (before insert/update of a rental
+imported match whose match columns change while `import.run` is not `on`;
+the 0045 federation columns are not compared), `rental_exception_guard` (before insert/update of a rental
 exception: validation + name/colour copy), `rental_series_changed` (after
 update of a weekly rental: prune orphaned exceptions, propagate name/colour), `notify_profiles` / `notify_reservations` /
 `notify_tenants` (`notify_webhook` → the notify function),
 `reservations_enqueue_calendar` / `time_blocks_enqueue_calendar` (the
 calendar job producers, next section).
 
-## Import rozpisu (`tool/import_matches.py`, 0038)
+## Výsledkový servis ČKA (0045)
 
-The federation's schedule is a flat list (one row per match: kuželna, date,
-time, competition, round, home, away) and the importer reconciles it into
-`priority_slots` instead of replacing anything:
+The federation's results site (vysledky.kuzelky.cz) is the importer now:
+the notify edge function scrapes it and writes through security-definer
+functions callable by `service_role` only (they cannot `set role`, so they
+write `tenant_id` and `created_by` — the tenant's first approved admin,
+never a visiting superadmin — explicitly; `priority_conflicts`,
+`match_uklid_sync` and the calendar producers take the tenant from the row
+and run exactly as for a match saved in the app). The app only reads the
+tables and calls the RPCs above. `tool/import_matches.py` (0038) is
+superseded.
 
-- **Identity** is `import_key = rozpis:<soutěž>:<kolo>:<domácí> – <hosté>`
-  — no date in it, so a postponed match is an UPDATE of its row (same uuid,
-  same Google Calendar event for every follower) rather than a delete +
-  insert. The round is part of the key because a youth league plays the
-  same pairing twice a season.
-- **One transaction as the alley's admin** (the same `set local role
-  authenticated` + jwt claims the app uses, so RLS, `priority_conflicts`,
-  `match_uklid_sync` and the calendar job producers all run exactly as for
-  a match saved in the app), opened with `set_config('import.run', 'on',
-  true)`. Steps: legacy `xlsx:` keys re-keyed (by competition + teams, then
-  by date + time + venue + a shared team for a renamed opponent; whatever
-  is left is a match the schedule dropped) → changed rows updated → new
-  rows inserted → `rozpis:` rows missing from the file deleted → a report.
-- **What the import never touches:** a row with `import_key is null` (the
-  admin's own match), a row with `hand_edited` (unless `--force`, which
-  overwrites and clears the flag), and every user table — `profiles.
-  followed_teams`, `calendar_teams`, `team_colors`, `match_exceptions`, the
-  `match_teams` mirror. A `match_exceptions` row dies with its match
-  (cascade) and survives a re-key, because re-keying keeps the row's uuid. Team picks are names, so before writing the import lists picked
-  teams that no longer occur in the file and refuses `--apply` while any
-  exist (`--allow-missing-teams` overrides).
+- **Discovery** (`federation_discover` job, `request_federation_discovery`):
+  the venue's teams → `upsert_federation_teams`. A new team arrives active
+  under the site's name (a clash with an existing name gets
+  ` (<competition>)` appended); an existing one (same `site_slug`) keeps
+  the admin's name, club and switch — only the site's facts are refreshed.
+- **Schedule** (`federation_competition` job per active team's
+  competition): `apply_federation_matches` in one transaction with
+  `set_config('import.run', 'on', true)`, so the 0038 hand-edit trigger
+  stays quiet.
+  - **Identity** is `import_key = cka:<site_match_id>` — a postponed match
+    is an UPDATE of its row (same uuid, same Google Calendar event).
+  - **Rekeying:** a match carrying `legacy_id` (a `rozpis:` row of the old
+    importer, paired by the edge function) takes over that row in place —
+    its `import_key` becomes `cka:<id>`, uuid and `match_exceptions` stay.
+  - **Update in place, only on a difference** (every UPDATE enqueues
+    calendar jobs). `video_url`, `competition`, `round`, `site_slug`,
+    `site_match_id` are always rewritten and never count as `updated`; the
+    match columns (date, times, teams, `prep_minutes`, `description`,
+    `is_away`) only when not `hand_edited` — a hand-edited row is listed in
+    the report's `skipped_hand_edited` instead. Home/away comes from
+    `home_is_ours` until a match detail told us the venue.
+  - **Delete only the future:** a `cka:` match of this competition dated
+    Prague-today or later that the site no longer lists, not hand-edited,
+    is deleted; a played match never is.
+  - Report: `{inserted, updated, rekeyed, deleted, skipped_hand_edited[]}`.
+- **Match detail** (`federation_match` job): `apply_federation_result`
+  upserts `match_results`, replaces `match_player_results`, writes
+  `video_url` and, when the detail names the venue, `venue`/`venue_slug`
+  and — unless hand-edited — `is_away` (venue ≠ `federation_sync.venue_slug`),
+  `prep_minutes` (0 away) and the description (`<soutěž> · <n>. kolo`, plus
+  ` · <kuželna>` away). `enqueue_federation_match` arms the job with
+  dedupe key `federation_match:<tenant>:<site_match_id>`; an earlier
+  `run_at` wins, so a later checkpoint never pushes back an earlier one.
+- **Runs:** `record_federation_run(tenant, key, report, error)` stamps
+  `last_run_at`; a success sets `last_success_at`, clears `last_error` and
+  merges `{key: report + at}` into `last_report`; a failure only sets
+  `last_error`.
+- **Nightly:** `cron.job` `federation-nightly` (`0 1 * * *` UTC) runs
+  `enqueue_federation_jobs()` — one `federation_competition` job per
+  distinct active competition of every enabled tenant with a venue slug,
+  spaced one minute apart.
+- **Live refresh:** `refresh_match` lets any member ask for a fresh
+  result of a live match, gated on the server to one fetch per match per
+  5 minutes (`fetched_at`), so no client can hammer the site.
+- **What the sync never touches:** a row with `import_key is null` (the
+  admin's own match), a hand-edited row's match columns, and every user
+  table — `profiles.followed_teams`, `calendar_teams`, `team_colors`,
+  `match_exceptions`. Team picks are names; `teams.name` is the name the
+  sync writes into `home_team`/`away_team` for the alley's own team.
 
 ## Google kalendář — jobs, triggers, cron (0023)
 
