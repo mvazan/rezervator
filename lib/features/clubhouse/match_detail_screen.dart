@@ -13,6 +13,7 @@ import '../../data/clock.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
 import '../../domain/results.dart';
+import 'venue_detail_screen.dart';
 import 'widgets/match_players.dart';
 
 class MatchDetailScreen extends ConsumerStatefulWidget {
@@ -116,7 +117,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     MatchStatus.forfeit => 'Kontumace',
   };
 
-  Widget _headerCard(PrioritySlot slot, MatchResult? result) {
+  Widget _headerCard(PrioritySlot slot, MatchResult? result, Venue? venueMatch) {
     final theme = Theme.of(context);
     final format = formatLabel(result?.matchType ?? '', result?.discipline ?? '');
     final status = _statusLabel(result?.status ?? MatchStatus.scheduled);
@@ -174,7 +175,27 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
             ),
             if (venue != null && venue.isNotEmpty) ...[
               const SizedBox(height: 4),
-              Text('Kuželna: $venue', style: theme.textTheme.bodySmall),
+              if (venueMatch == null)
+                Text('Kuželna: $venue', style: theme.textTheme.bodySmall)
+              else
+                InkWell(
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => VenueDetailScreen(slug: venueMatch.slug),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text('Kuželna: $venue', style: theme.textTheme.bodySmall),
+                      Icon(
+                        Icons.chevron_right,
+                        size: 16,
+                        color: theme.textTheme.bodySmall?.color,
+                      ),
+                    ],
+                  ),
+                ),
             ],
           ],
         ),
@@ -258,12 +279,23 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     final players =
         ref.watch(matchPlayerResultsProvider(widget.matchId)).value ??
         const <MatchPlayerResult>[];
+    final venues = ref.watch(venuesProvider).value ?? const <Venue>[];
 
     PrioritySlot? slot;
     for (final s in slots) {
       if (s.id == widget.matchId) {
         slot = s;
         break;
+      }
+    }
+
+    Venue? venueMatch;
+    if (slot?.venueSlug case final slug? when slug.isNotEmpty) {
+      for (final v in venues) {
+        if (v.slug == slug) {
+          venueMatch = v;
+          break;
+        }
       }
     }
 
@@ -318,7 +350,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
           : ListView(
               padding: const EdgeInsets.only(bottom: 24),
               children: [
-                _headerCard(slot, result),
+                _headerCard(slot, result, venueMatch),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
                   child: Text(

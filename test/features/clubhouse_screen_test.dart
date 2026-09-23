@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rezervator/data/providers.dart';
+import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/clubhouse/clubhouse_screen.dart';
 
 /// The Klubovna hub: its two entries, the shell's trailing icons riding
@@ -11,6 +13,7 @@ void main() {
   // hub's ListTiles/Cards find the Material ancestor they need, same as in
   // the real app.
   Widget app({List<Widget> trailing = const []}) => ProviderScope(
+    overrides: [venuesProvider.overrideWith((ref) => Stream.value(const <Venue>[]))],
     child: MaterialApp(
       home: Scaffold(body: ClubhouseScreen(trailing: trailing)),
     ),
@@ -68,8 +71,8 @@ void main() {
   });
 
   testWidgets(
-    'tapping Výsledky opens the real results screen, Kuželny still opens '
-    'its placeholder (until Task 5 builds it)',
+    'tapping Výsledky opens the real results screen, Kuželny opens the '
+    'real venues screen',
     (tester) async {
       narrow(tester);
       await tester.pumpWidget(app());

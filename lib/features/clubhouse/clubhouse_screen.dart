@@ -3,20 +3,13 @@
 library;
 
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/hub_menu.dart';
 import '../schedule/widgets/home_header.dart';
 import 'results_screen.dart';
+import 'venues_screen.dart';
 
-/// A stand-in for a hub entry whose real screen (Task 5) does not exist
-/// yet — just enough to prove the entry and the tap wiring. This is the
-/// only place that names Kuželny's eventual target, so swapping it in
-/// later touches one list, not the whole screen.
-Widget _placeholder(String label) =>
-    Scaffold(appBar: AppBar(title: Text(label)));
-
-class ClubhouseScreen extends ConsumerWidget {
+class ClubhouseScreen extends StatelessWidget {
   const ClubhouseScreen({super.key, this.trailing = const []});
 
   /// The shell's profile/admin icons — parked here so they keep their exact
@@ -24,11 +17,7 @@ class ClubhouseScreen extends ConsumerWidget {
   final List<Widget> trailing;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    void open(BuildContext context, String label) => Navigator.of(
-      context,
-    ).push(MaterialPageRoute(builder: (_) => _placeholder(label)));
-
+  Widget build(BuildContext context) {
     return Column(
       children: [
         HomeHeader(trailing: trailing),
@@ -47,7 +36,9 @@ class ClubhouseScreen extends ConsumerWidget {
                 label: 'Kuželny',
                 icon: Icons.location_on_outlined,
                 subtitle: 'Kontakty a vybavení kuželen',
-                onTap: () => open(context, 'Kuželny'),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const VenuesScreen()),
+                ),
               ),
             ],
           ),

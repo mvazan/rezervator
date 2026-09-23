@@ -7,6 +7,7 @@ import 'package:rezervator/data/clock.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/clubhouse/match_detail_screen.dart';
+import 'package:rezervator/features/clubhouse/venue_detail_screen.dart';
 
 void main() {
   final now = DateTime.utc(2026, 9, 23, 18, 0);
@@ -566,35 +567,70 @@ void main() {
     );
   });
 
-  testWidgets('venue line shows the name, not tappable (Task 5 wires it)', (
-    tester,
-  ) async {
-    await tester.pumpWidget(
-      app(
-        slots: [
-          match(
-            id: 'm1',
-            date: today.addDays(-1),
-            venue: 'TJ Sokol Brno IV',
-            venueSlug: 'tj-sokol-brno-iv',
-          ),
-        ],
-        results: {'m1': finishedResult},
-        venues: [
-          Venue.fromJson(const {
-            'id': 'v1',
-            'slug': 'tj-sokol-brno-iv',
-            'name': 'TJ Sokol Brno IV',
-            'fetched_at': '2026-09-23T01:00:00+00:00',
-          }),
-        ],
-      ),
-    );
-    await tester.pumpAndSettle();
+  testWidgets(
+    'venue line is tappable and opens the venue detail when a matching '
+    'venue exists',
+    (tester) async {
+      await tester.pumpWidget(
+        app(
+          slots: [
+            match(
+              id: 'm1',
+              date: today.addDays(-1),
+              venue: 'TJ Sokol Brno IV',
+              venueSlug: 'tj-sokol-brno-iv',
+            ),
+          ],
+          results: {'m1': finishedResult},
+          venues: [
+            Venue.fromJson(const {
+              'id': 'v1',
+              'slug': 'tj-sokol-brno-iv',
+              'name': 'TJ Sokol Brno IV',
+              'fetched_at': '2026-09-23T01:00:00+00:00',
+            }),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
 
-    expect(find.text('Kuželna: TJ Sokol Brno IV'), findsOneWidget);
-    expect(find.byIcon(Icons.chevron_right), findsNothing);
-  });
+      expect(find.text('Kuželna: TJ Sokol Brno IV'), findsOneWidget);
+      expect(find.byIcon(Icons.chevron_right), findsOneWidget);
+
+      await tester.tap(find.text('Kuželna: TJ Sokol Brno IV'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(VenueDetailScreen), findsOneWidget);
+      expect(
+        find.widgetWithText(AppBar, 'TJ Sokol Brno IV'),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
+    'venue line shows plain text, not tappable, when no matching venue '
+    'exists',
+    (tester) async {
+      await tester.pumpWidget(
+        app(
+          slots: [
+            match(
+              id: 'm1',
+              date: today.addDays(-1),
+              venue: 'TJ Sokol Brno IV',
+              venueSlug: 'tj-sokol-brno-iv',
+            ),
+          ],
+          results: {'m1': finishedResult},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Kuželna: TJ Sokol Brno IV'), findsOneWidget);
+      expect(find.byIcon(Icons.chevron_right), findsNothing);
+    },
+  );
 
   testWidgets(
     'popping the route while a manual refresh is still pending throws '
