@@ -195,6 +195,179 @@ void main() {
       expect(find.textContaining('probíhá'), findsOneWidget);
     });
 
+    testWidgets(
+        'a scheduled result inside the "live" time window shows only the '
+        'title — no score, no probíhá', (tester) async {
+      final upcoming = match(
+        'TJ Sokol Husovice',
+        'TJ Slovan Karlovy Vary',
+        id: 'm7',
+        importKey: 'cka:m7',
+      );
+      // A row the sync created ahead of kickoff — status scheduled, all
+      // points null — inside isLive's own refresh window (1h before start).
+      final result = MatchResult.fromJson(const {
+        'match_id': 'm7',
+        'status': 'scheduled',
+        'fetched_at': '2026-09-18T11:00:00+00:00',
+      });
+      await tester.pumpWidget(wrap(
+        Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () => showDayMatchesDialog(context, date, [upcoming]),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+        results: {'m7': result},
+        slots: [upcoming],
+      ));
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('TJ Sokol Husovice – TJ Slovan Karlovy Vary'),
+          findsOneWidget);
+      expect(find.textContaining('probíhá'), findsNothing);
+      expect(find.text('–'), findsNothing);
+    });
+
+    testWidgets(
+        'a preparation result also shows only the title', (tester) async {
+      final upcoming = match(
+        'TJ Sokol Husovice',
+        'TJ Slovan Karlovy Vary',
+        id: 'm8',
+        importKey: 'cka:m8',
+      );
+      final result = MatchResult.fromJson(const {
+        'match_id': 'm8',
+        'status': 'preparation',
+        'fetched_at': '2026-09-18T11:00:00+00:00',
+      });
+      await tester.pumpWidget(wrap(
+        Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () => showDayMatchesDialog(context, date, [upcoming]),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+        results: {'m8': result},
+        slots: [upcoming],
+      ));
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('TJ Sokol Husovice – TJ Slovan Karlovy Vary'),
+          findsOneWidget);
+      expect(find.textContaining('probíhá'), findsNothing);
+    });
+
+    testWidgets(
+        'an in_progress result with null points shows the score row and '
+        'probíhá', (tester) async {
+      final live = match(
+        'TJ Sokol Husovice',
+        'TJ Slovan Karlovy Vary',
+        id: 'm9',
+        importKey: 'cka:m9',
+      );
+      final result = MatchResult.fromJson(const {
+        'match_id': 'm9',
+        'status': 'in_progress',
+        'fetched_at': '2026-09-18T11:40:00+00:00',
+      });
+      await tester.pumpWidget(wrap(
+        Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () => showDayMatchesDialog(context, date, [live]),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+        results: {'m9': result},
+        slots: [live],
+      ));
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('–'), findsOneWidget);
+      expect(find.textContaining('probíhá'), findsOneWidget);
+    });
+
+    testWidgets(
+        'a finished result shows the score, no probíhá', (tester) async {
+      final finished = match(
+        'TJ Sokol Husovice',
+        'TJ Slovan Karlovy Vary',
+        id: 'm10',
+        importKey: 'cka:m10',
+      );
+      final result = MatchResult.fromJson(const {
+        'match_id': 'm10',
+        'status': 'finished',
+        'home_points': 5,
+        'away_points': 3,
+        'fetched_at': '2026-09-18T11:40:00+00:00',
+      });
+      await tester.pumpWidget(wrap(
+        Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () => showDayMatchesDialog(context, date, [finished]),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+        results: {'m10': result},
+        slots: [finished],
+      ));
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('5 : 3'), findsOneWidget);
+      expect(find.textContaining('probíhá'), findsNothing);
+    });
+
+    testWidgets('the winning side\'s number is bold in the day dialog',
+        (tester) async {
+      final finished = match(
+        'TJ Sokol Husovice',
+        'TJ Slovan Karlovy Vary',
+        id: 'm11',
+        importKey: 'cka:m11',
+      );
+      final result = MatchResult.fromJson(const {
+        'match_id': 'm11',
+        'status': 'finished',
+        'home_points': 5,
+        'away_points': 3,
+        'fetched_at': '2026-09-18T11:40:00+00:00',
+      });
+      await tester.pumpWidget(wrap(
+        Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () => showDayMatchesDialog(context, date, [finished]),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+        results: {'m11': result},
+        slots: [finished],
+      ));
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+
+      final scoreText = tester.widget<Text>(find.text('5 : 3'));
+      final spans = (scoreText.textSpan! as TextSpan).children!.cast<TextSpan>();
+      expect(spans[0].style?.fontWeight, FontWeight.w800);
+      expect(spans[2].style?.fontWeight, isNot(FontWeight.w800));
+    });
+
     testWidgets('a video button exists with tooltip Video and launches it',
         (tester) async {
       final withVideo = match(

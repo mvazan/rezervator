@@ -50,6 +50,15 @@ String pinsLabel(int? home, int? away) {
   return '${s(home)} : ${s(away)}';
 }
 
+enum MatchSide { home, away }
+
+/// Which side won on points, or null when it's a draw, or either points
+/// value is missing.
+MatchSide? winningSide(num? home, num? away) {
+  if (home == null || away == null || home == away) return null;
+  return home > away ? MatchSide.home : MatchSide.away;
+}
+
 /// "6 hráčů · 120 HS" from the site's own codes (`TEAMS_OF_6`/`TEAMS_OF_4`,
 /// `T100`/`T120`) — Czech numeral agreement (2–4 "hráči", else "hráčů").
 /// Either half is simply omitted when its code is empty or unrecognised.
@@ -65,6 +74,16 @@ String formatLabel(String matchType, String discipline) {
   final hs = hsMatch == null ? null : '${hsMatch.group(1)} HS';
   return [?players, ?hs].join(' · ');
 }
+
+/// Whether [r] has a real, on-the-board score worth showing — as opposed to
+/// a `match_results` row the sync created ahead of kickoff (status
+/// `scheduled`/`preparation`, all points still null). A different question
+/// than [isLive], which other code still needs unchanged for refresh timing.
+bool hasScoreData(MatchResult? r) =>
+    r != null &&
+    (r.status == MatchStatus.inProgress ||
+        r.status == MatchStatus.finished ||
+        r.status == MatchStatus.forfeit);
 
 /// "právě teď" / "před N min" / "před N h" — how long ago [fetchedAt] was,
 /// for the match detail's "Výsledky z webu:" line.

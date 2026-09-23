@@ -230,7 +230,10 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('5 : 3'), findsOneWidget);
+    final scoreText = tester.widget<Text>(find.text('5 : 3'));
+    final spans = (scoreText.textSpan! as TextSpan).children!.cast<TextSpan>();
+    expect(spans[0].style?.fontWeight, FontWeight.w800, reason: 'home won');
+    expect(spans[2].style?.fontWeight, isNot(FontWeight.w800));
     expect(find.text('3460 : 3349'), findsOneWidget);
   });
 

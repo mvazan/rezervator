@@ -15,6 +15,7 @@ import '../../domain/models.dart';
 import '../../domain/results.dart';
 import 'venue_detail_screen.dart';
 import 'widgets/match_players.dart';
+import 'widgets/score_label.dart';
 
 class MatchDetailScreen extends ConsumerStatefulWidget {
   const MatchDetailScreen({
@@ -126,6 +127,9 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
         ? '–'
         : pointsLabel(result.homeSetPoints, result.awaySetPoints);
     final venue = slot.venue;
+    final winner = winningSide(result?.homePoints, result?.awayPoints);
+    final teamNameStyle =
+        theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.bold);
     return Card(
       margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
       child: Padding(
@@ -141,18 +145,26 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
             Row(
               children: [
                 Expanded(
-                  child: Text(slot.homeTeam, textAlign: TextAlign.end),
+                  child: Text(
+                    slot.homeTeam,
+                    textAlign: TextAlign.end,
+                    style: winner == MatchSide.home ? teamNameStyle : null,
+                  ),
                 ),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: Text(
-                    pointsLabel(result?.homePoints, result?.awayPoints),
-                    style: theme.textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
+                  child: ScoreLabel(
+                    home: result?.homePoints,
+                    away: result?.awayPoints,
+                    style: theme.textTheme.headlineSmall,
                   ),
                 ),
-                Expanded(child: Text(slot.awayTeam)),
+                Expanded(
+                  child: Text(
+                    slot.awayTeam,
+                    style: winner == MatchSide.away ? teamNameStyle : null,
+                  ),
+                ),
               ],
             ),
             if (pins.isNotEmpty || result != null) ...[

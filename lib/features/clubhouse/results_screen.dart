@@ -17,6 +17,7 @@ import '../../domain/upcoming.dart' show matchColorOf;
 import '../schedule/my_trainings_screen.dart' show MatchTrophy;
 import 'match_detail_screen.dart';
 import 'widgets/match_video_icon.dart';
+import 'widgets/score_label.dart';
 
 class ResultsScreen extends ConsumerStatefulWidget {
   const ResultsScreen({
@@ -168,9 +169,6 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
       if (competitionPart.isNotEmpty) competitionPart,
       slot.isAway ? 'venku' : 'doma',
     ].join(' · ');
-    final points = result == null
-        ? '–'
-        : pointsLabel(result.homePoints, result.awayPoints);
     final pins = result == null
         ? ''
         : pinsLabel(result.homeTotal, result.awayTotal);
@@ -200,11 +198,10 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                points,
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
+              ScoreLabel(
+                home: result?.homePoints,
+                away: result?.awayPoints,
+                style: theme.textTheme.titleMedium,
               ),
               if (live)
                 Text(

@@ -37,6 +37,36 @@ void main() {
         () => expect(formatLabel('', ''), ''));
   });
 
+  group('winningSide', () {
+    test('home wins', () => expect(winningSide(5, 3), MatchSide.home));
+    test('away wins', () => expect(winningSide(3, 5), MatchSide.away));
+    test('a draw is null', () => expect(winningSide(4, 4), isNull));
+    test('either side missing is null', () {
+      expect(winningSide(null, 3), isNull);
+      expect(winningSide(5, null), isNull);
+      expect(winningSide(null, null), isNull);
+    });
+  });
+
+  group('hasScoreData', () {
+    MatchResult result(String status) => MatchResult.fromJson({
+          'match_id': 'm1',
+          'status': status,
+          'fetched_at': '2026-09-27T09:00:00+00:00',
+        });
+
+    test('null result has no score data', () => expect(hasScoreData(null), isFalse));
+    test('scheduled/preparation have no score data yet', () {
+      expect(hasScoreData(result('scheduled')), isFalse);
+      expect(hasScoreData(result('preparation')), isFalse);
+    });
+    test('in_progress, finished and forfeit all have score data', () {
+      expect(hasScoreData(result('in_progress')), isTrue);
+      expect(hasScoreData(result('finished')), isTrue);
+      expect(hasScoreData(result('forfeit')), isTrue);
+    });
+  });
+
   group('isLive', () {
     PrioritySlot slot() => PrioritySlot.fromJson(const {
           'id': 'm1',

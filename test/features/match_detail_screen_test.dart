@@ -198,6 +198,14 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('5 : 3'), findsOneWidget);
+      final scoreText = tester.widget<Text>(find.text('5 : 3'));
+      final spans = (scoreText.textSpan! as TextSpan).children!.cast<TextSpan>();
+      expect(spans[0].style?.fontWeight, FontWeight.w800, reason: 'home won');
+      expect(spans[2].style?.fontWeight, isNot(FontWeight.w800));
+      final homeName = tester.widget<Text>(find.text(home));
+      expect(homeName.style?.fontWeight, FontWeight.bold);
+      final awayName = tester.widget<Text>(find.text(away));
+      expect(awayName.style?.fontWeight, isNot(FontWeight.bold));
       expect(find.text('3460 : 3349'), findsOneWidget);
       expect(find.textContaining('SB 15 : 9'), findsOneWidget);
       // The joined format+status line, exactly (formatLabel + ' · ' + status).

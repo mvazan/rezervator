@@ -19,6 +19,7 @@ import '../../../domain/models.dart';
 import '../../../domain/results.dart';
 import '../../clubhouse/match_detail_screen.dart';
 import '../../clubhouse/widgets/match_video_icon.dart';
+import '../../clubhouse/widgets/score_label.dart';
 
 /// Lists [events] (the header's own `headerEvents` — matches and blockages,
 /// no úklid children) for [date] in full. No-op when [events] is empty.
@@ -105,7 +106,8 @@ Widget _eventRow(
   void Function(String url)? launch,
   VoidCallback? onOpen,
 ) {
-  final live = result != null && isLive(m, result, now);
+  final showScore = hasScoreData(result);
+  final live = showScore && result!.status == MatchStatus.inProgress;
   final pins =
       result == null ? '' : pinsLabel(result.homeTotal, result.awayTotal);
   final row = Row(
@@ -128,7 +130,7 @@ Widget _eventRow(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (result == null)
+            if (!showScore)
               Text(m.title, style: theme.textTheme.titleSmall)
             else
               Row(
@@ -138,10 +140,10 @@ Widget _eventRow(
                     child: Text(m.title, style: theme.textTheme.titleSmall),
                   ),
                   const SizedBox(width: 8),
-                  Text(
-                    pointsLabel(result.homePoints, result.awayPoints),
-                    style: theme.textTheme.titleSmall
-                        ?.copyWith(fontWeight: FontWeight.bold),
+                  ScoreLabel(
+                    home: result!.homePoints,
+                    away: result.awayPoints,
+                    style: theme.textTheme.titleSmall,
                   ),
                   if (live)
                     Text(
