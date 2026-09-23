@@ -231,6 +231,59 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(launched, ['https://vysledky.kuzelky.cz/video/m3']);
+      // Tapping the video icon must not ALSO trigger the row's own
+      // tap-through to the detail screen.
+      expect(find.byType(MatchDetailScreen), findsNothing);
+    });
+
+    testWidgets(
+        'opened non-interactively: score shows, no video button, no '
+        'tap-through', (tester) async {
+      final federationWithVideo = match(
+        'TJ Sokol Husovice',
+        'TJ Slovan Karlovy Vary',
+        id: 'm6',
+        importKey: 'cka:m6',
+        videoUrl: 'https://vysledky.kuzelky.cz/video/m6',
+      );
+      final result = MatchResult.fromJson(const {
+        'match_id': 'm6',
+        'status': 'finished',
+        'home_points': 5,
+        'away_points': 3,
+        'fetched_at': '2026-09-17T21:00:00+00:00',
+      });
+      await tester.pumpWidget(wrap(
+        Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () => showDayMatchesDialog(
+                context,
+                date,
+                [federationWithVideo],
+                interactive: false,
+              ),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+        results: {'m6': result},
+        slots: [federationWithVideo],
+      ));
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+
+      // Score/pins still render — only the tap-through and video button
+      // are gated by [interactive].
+      expect(find.text('5 : 3'), findsOneWidget);
+      expect(find.byIcon(Icons.play_circle_outline), findsNothing);
+
+      await tester.tap(
+          find.text('TJ Sokol Husovice – TJ Slovan Karlovy Vary'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(MatchDetailScreen), findsNothing);
+      expect(find.byType(AlertDialog), findsOneWidget);
     });
 
     testWidgets(

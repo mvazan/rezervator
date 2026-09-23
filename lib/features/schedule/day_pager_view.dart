@@ -319,6 +319,7 @@ class _DayPage extends StatelessWidget {
                 date: day.date,
                 priority: headerEvents(day),
                 closedReason: reason,
+                interactive: interactive,
               ),
             ),
           ),
@@ -348,6 +349,7 @@ class _DayPage extends StatelessWidget {
               date: day.date,
               priority: headerEvents(day),
               chipLabel: '$freeCount volných',
+              interactive: interactive,
             ),
             const SizedBox(height: 10),
             // Lane header + block rows always stay column-aligned: lanes flex

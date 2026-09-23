@@ -1,10 +1,12 @@
 /// The day-column header lists a day's matches (and blockages) in a strip
 /// whose lines are one-line, ellipsised — a long "Home – Away" pair is cut to
 /// "…". Tapping the strip opens this dialog, where the same events read in
-/// full — a federation match also shows its score/pins/video (PR B) and taps
-/// through to [MatchDetailScreen]. Shared by the week header
-/// ([BoardColumnHeader]) and the pager header ([DayHeader]); the kiosk board
-/// is a passive display and does not use it.
+/// full — a federation match also shows its score/pins/video (PR B) and, when
+/// [showDayMatchesDialog] is opened interactively, taps through to
+/// [MatchDetailScreen]. Shared by the week header ([BoardColumnHeader]) and
+/// the pager header ([DayHeader]) — which the kiosk board and the public,
+/// unauthenticated overview use too, always non-interactively (see
+/// [showDayMatchesDialog]'s own [interactive] doc).
 library;
 
 import 'package:flutter/material.dart';
@@ -20,11 +22,19 @@ import '../../clubhouse/match_detail_screen.dart';
 /// Lists [events] (the header's own `headerEvents` — matches and blockages,
 /// no úklid children) for [date] in full. No-op when [events] is empty.
 /// [launch] is injectable so tests never reach the platform's browser.
+///
+/// [interactive] gates BOTH the video button and the tap-through to
+/// [MatchDetailScreen] (scores/pins/the live marker still render either
+/// way) — false on the kiosk board (its own 60 s idle-reset `Listener`
+/// never sees touches on a pushed route, and an external video browser on a
+/// kiosk tablet is undesirable) and on the public, unauthenticated overview
+/// (whose slots are auth-gated, so the detail screen would be a dead end).
 Future<void> showDayMatchesDialog(
   BuildContext context,
   Day date,
   List<PrioritySlot> events, {
   void Function(String url) launch = launchWeb,
+  bool interactive = true,
 }) {
   if (events.isEmpty) return Future.value();
   // Captured before the dialog opens: the same Navigator that will host the
@@ -57,8 +67,8 @@ Future<void> showDayMatchesDialog(
                         m,
                         m.fromFederation ? results[m.id] : null,
                         now,
-                        launch,
-                        m.fromFederation
+                        interactive ? launch : null,
+                        interactive && m.fromFederation
                             ? () {
                                 navigator.pop();
                                 navigator.push(MaterialPageRoute(
@@ -91,7 +101,7 @@ Widget _eventRow(
   PrioritySlot m,
   MatchResult? result,
   DateTime now,
-  void Function(String url) launch,
+  void Function(String url)? launch,
   VoidCallback? onOpen,
 ) {
   final live = result != null && isLive(m, result, now);
@@ -146,11 +156,11 @@ Widget _eventRow(
           ],
         ),
       ),
-      if (m.videoUrl case final url?)
+      if (launch != null && m.videoUrl != null)
         IconButton(
           icon: const Icon(Icons.play_circle_outline),
           tooltip: 'Video',
-          onPressed: () => launch(url),
+          onPressed: () => launch(m.videoUrl!),
         ),
     ],
   );

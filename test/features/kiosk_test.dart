@@ -5,6 +5,7 @@ import 'package:rezervator/core/theme.dart';
 import 'package:rezervator/core/ui.dart' show today;
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
+import 'package:rezervator/features/clubhouse/match_detail_screen.dart';
 import 'package:rezervator/features/kiosk/kiosk_board_view.dart';
 import 'package:rezervator/features/kiosk/kiosk_shell.dart';
 import 'package:rezervator/features/kiosk/name_picker.dart';
@@ -1092,6 +1093,77 @@ void main() {
       expect(find.text('15:30'), findsOneWidget);
       expect(find.text('16:30'), findsOneWidget);
       expect(find.text('15:00'), findsNothing);
+
+      await finish(tester);
+    },
+  );
+
+  testWidgets(
+    's: the day dialog opens non-interactively from the kiosk header — '
+    'score shows, but no video button and no tap-through (PR B fix round 1: '
+    'the 60 s idle-reset Listener never sees touches on a pushed route, and '
+    'an external video browser on a kiosk tablet is undesirable)',
+    (tester) async {
+      final match = PrioritySlot(
+        type: PrioritySlot.fallbackMatchType,
+        id: 'mFed',
+        date: t,
+        startsAt: const HourMinute(20, 0),
+        endsAt: const HourMinute(21, 0),
+        homeTeam: 'Naši',
+        awayTeam: 'Soupeř',
+        importKey: 'cka:mFed',
+        videoUrl: 'https://vysledky.kuzelky.cz/video/mFed',
+      );
+      final result = MatchResult.fromJson(const {
+        'match_id': 'mFed',
+        'status': 'finished',
+        'home_points': 5,
+        'away_points': 3,
+        'fetched_at': '2026-09-17T21:00:00+00:00',
+      });
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            settingsProvider.overrideWith((ref) => Stream.value(settings)),
+            timeBlocksProvider.overrideWith((ref) => Stream.value(const [b1])),
+            dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
+            prioritySlotsProvider.overrideWithValue([match]),
+            rentalsProvider.overrideWith((ref) => Stream.value(const [])),
+            weekReservationsProvider.overrideWith(
+              (ref, monday) => Stream.value(const []),
+            ),
+            playersProvider.overrideWith((ref) async => players),
+            matchResultsProvider
+                .overrideWith((ref) => Stream.value({'mFed': result})),
+          ],
+          child: const MaterialApp(home: KioskShell()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // KioskShell's own status bar also summarises today's matches with
+      // headerEventLabel — scope to the board's header so the tap lands on
+      // the actual (tappable) BoardColumnHeader strip, not that status line.
+      await tester.tap(find.descendant(
+        of: find.byType(BoardColumnHeader),
+        matching: find.textContaining('Naši'),
+      ).first);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(AlertDialog), findsOneWidget);
+      // The score still renders non-interactively.
+      expect(find.text('5 : 3'), findsOneWidget);
+      // No video button at all.
+      expect(find.byIcon(Icons.play_circle_outline), findsNothing);
+
+      // Tapping the match row does nothing — no tap-through, dialog stays.
+      await tester.tap(find.text('Naši – Soupeř'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(MatchDetailScreen), findsNothing);
+      expect(find.byType(AlertDialog), findsOneWidget);
 
       await finish(tester);
     },

@@ -233,6 +233,7 @@ class _WeekCalendarViewState extends State<WeekCalendarView> {
               onAdd: widget.admin.onAddForDay == null
                   ? null
                   : () => widget.admin.onAddForDay!(day.date),
+              interactive: widget.interactive,
             ),
           ),
       ],

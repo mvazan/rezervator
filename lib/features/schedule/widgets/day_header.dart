@@ -18,6 +18,7 @@ class DayHeader extends StatelessWidget {
     required this.priority,
     this.chipLabel,
     this.closedReason,
+    this.interactive = true,
   });
 
   final Day date;
@@ -30,6 +31,10 @@ class DayHeader extends StatelessWidget {
   /// Non-null when the day is closed: '' renders 'Zavřeno', otherwise
   /// 'Zavřeno — $closedReason'.
   final String? closedReason;
+
+  /// Passed straight through to [showDayMatchesDialog]: false on the public,
+  /// unauthenticated overview (see its own doc for why).
+  final bool interactive;
 
   @override
   Widget build(BuildContext context) {
@@ -83,7 +88,12 @@ class DayHeader extends StatelessWidget {
           // ellipsised to "…" in the pager column just as in the week view.
           GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onTap: () => showDayMatchesDialog(context, date, priority),
+            onTap: () => showDayMatchesDialog(
+              context,
+              date,
+              priority,
+              interactive: interactive,
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
