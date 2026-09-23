@@ -1,6 +1,10 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rezervator/core/theme.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/clubhouse/widgets/legacy_score_sheet.dart';
 
@@ -372,6 +376,13 @@ void main() {
         find.descendant(of: page, matching: find.text('Zápis')),
         findsOneWidget,
       );
+      // Fix round 2: the full-screen page is never scrolled, in either
+      // axis — it scales the table to fit instead (see the FittedBox
+      // group below).
+      expect(
+        find.descendant(of: page, matching: find.byType(SingleChildScrollView)),
+        findsNothing,
+      );
 
       await tester.tap(find.byIcon(Icons.close));
       await tester.pumpAndSettle();
@@ -381,123 +392,211 @@ void main() {
     },
   );
 
-  group('text scale (core/text_size.dart, up to 1.3×)', () {
-    Widget scaledApp(double scale) => MediaQuery(
-      data: MediaQueryData(textScaler: TextScaler.linear(scale)),
-      child: app(result: result, players: [homePlayer, awayPlayer]),
-    );
+  testWidgets('the Zvětšit button is hidden when there is no lineup yet', (
+    tester,
+  ) async {
+    await tester.pumpWidget(app(result: result, players: const []));
+    await tester.pumpAndSettle();
 
-    // With `softWrap: false` (set on every cell — see `_cell`), a Text
-    // widget never actually wraps onto a second line — it just paints
-    // beyond its SizedBox's bounds into the neighbouring column instead, so
-    // `didExceedMaxLines`/rendered height are always "1 line" regardless of
-    // how narrow the column is and can't catch a too-narrow column. The
-    // real signal is the text's natural (unconstrained) width vs. the
-    // column's actual width — `getMaxIntrinsicWidth` gives exactly that,
-    // from the resolved `TextSpan` the RenderParagraph is really painting
-    // (fully merged with the ambient font/theme, unlike `Text.style`).
-    void expectFitsColumn(
-      WidgetTester tester,
-      Finder finder,
-      double columnWidth,
-    ) {
-      final count = tester.widgetList<Text>(finder).length;
-      expect(count, greaterThan(0));
-      for (var i = 0; i < count; i++) {
-        final instance = finder.at(i);
-        final rp = tester.renderObject<RenderParagraph>(instance);
-        final naturalWidth = rp.getMaxIntrinsicWidth(double.infinity);
-        expect(
-          naturalWidth,
-          lessThanOrEqualTo(columnWidth),
-          reason:
-              '"${tester.widget<Text>(instance).data}" needs '
-              '$naturalWidth but its column is only $columnWidth wide',
-        );
-      }
-    }
-
-    // Matches LegacyScoreSheet's own private `_colWidth` — there's no way
-    // to reference the private constant from here, so this is the contract
-    // this test actually pins.
-    const colWidth = 120.0;
-
-    for (final scale in [1.0, 1.3]) {
-      testWidgets('at ${scale}x, "Celkem", "Série" and a 4-digit total stay '
-          'single-line', (tester) async {
-        await tester.pumpWidget(scaledApp(scale));
-        await tester.pumpAndSettle();
-        expect(tester.takeException(), isNull);
-
-        expectFitsColumn(tester, find.text('Celkem'), colWidth);
-        expectFitsColumn(tester, find.text('Série'), colWidth);
-        expectFitsColumn(tester, find.text('1780'), colWidth);
-        expectFitsColumn(tester, find.text('3460'), colWidth);
-      });
-    }
+    expect(find.text('Zápis'), findsOneWidget);
+    expect(find.byIcon(Icons.open_in_full), findsNothing);
   });
 
   testWidgets(
-    'the full-screen page scrolls vertically instead of overflowing on a '
-    'big lineup (6 pairings × 4 lanes)',
+    'the score sheet ignores the app-wide text-size setting and stays at '
+    'its own authored (1.0×) size',
     (tester) async {
-      MatchPlayerResult bigPlayer(String side, int position) =>
-          MatchPlayerResult.fromJson({
-            'id': '$side-$position',
-            'match_id': 'big',
-            'side': side,
-            'position': position,
-            'player_name': '${side == 'home' ? 'Home' : 'Away'} $position',
-            'fulls': 700,
-            'spares': 40,
-            'errors': 10,
-            'total': 1160,
-            'set_points': 4,
-            'team_points': side == 'home' ? 1 : 0,
-            'lanes': [
-              for (var lane = 1; lane <= 4; lane++)
-                {
-                  'lane': lane,
-                  'fulls': 175,
-                  'spares': 10,
-                  'errors': 2,
-                  'total': 290,
-                  'setPoints': 1,
-                },
-            ],
-          });
-      final bigPlayers = [
-        for (var pos = 1; pos <= 6; pos++) ...[
-          bigPlayer('home', pos),
-          bigPlayer('away', pos),
-        ],
-      ];
-      final bigSlot = PrioritySlot(
-        id: 'big',
-        date: Day(2026, 9, 20),
-        startsAt: const HourMinute(17, 30),
-        endsAt: const HourMinute(20, 30),
-        type: PrioritySlot.fallbackMatchType,
-        homeTeam: home,
-        awayTeam: away,
-      );
+      Future<Size> sizeAtAmbientScale(double ambientScale) async {
+        await tester.pumpWidget(
+          MediaQuery(
+            data: MediaQueryData(textScaler: TextScaler.linear(ambientScale)),
+            child: app(result: result, players: [homePlayer, awayPlayer]),
+          ),
+        );
+        await tester.pumpAndSettle();
+        return tester.renderObject<RenderParagraph>(find.text('1780')).size;
+      }
 
+      final atNormal = await sizeAtAmbientScale(1.0);
+      final atLargest = await sizeAtAmbientScale(1.3); // "Zvětšené" setting
+      expect(atLargest, atNormal);
+    },
+  );
+
+  MatchPlayerResult bigPlayer(String side, int position) =>
+      MatchPlayerResult.fromJson({
+        'id': '$side-$position',
+        'match_id': 'big',
+        'side': side,
+        'position': position,
+        'player_name': '${side == 'home' ? 'Home' : 'Away'} $position',
+        'fulls': 700,
+        'spares': 40,
+        'errors': 10,
+        'total': 1160,
+        'set_points': 4,
+        'team_points': side == 'home' ? 1 : 0,
+        'lanes': [
+          for (var lane = 1; lane <= 4; lane++)
+            {
+              'lane': lane,
+              'fulls': 175,
+              'spares': 10,
+              'errors': 2,
+              'total': 290,
+              'setPoints': 1,
+            },
+        ],
+      });
+  final bigPlayers = [
+    for (var pos = 1; pos <= 6; pos++) ...[
+      bigPlayer('home', pos),
+      bigPlayer('away', pos),
+    ],
+  ];
+  final bigSlot = PrioritySlot(
+    id: 'big',
+    date: Day(2026, 9, 20),
+    startsAt: const HourMinute(17, 30),
+    endsAt: const HourMinute(20, 30),
+    type: PrioritySlot.fallbackMatchType,
+    homeTeam: home,
+    awayTeam: away,
+  );
+
+  group('full-screen page: scale-to-fit, never scrolled (Fix round 2)', () {
+    testWidgets(
+      'a big lineup (6 pairings × 4 lanes) is scaled to fit, not scrolled '
+      'or clipped',
+      (tester) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: LegacyScoreSheetPage(
+              slot: bigSlot,
+              result: result,
+              players: bigPlayers,
+            ),
+          ),
+        );
+        await tester.pump();
+
+        expect(tester.takeException(), isNull);
+        expect(find.byType(SingleChildScrollView), findsNothing);
+        expect(find.byType(FittedBox), findsOneWidget);
+        // FittedBox lays its child out unconstrained then scales the
+        // result — the last pairing is fully built, just shrunk to fit.
+        expect(find.text('6. Away 6'), findsOneWidget);
+      },
+    );
+
+    testWidgets('a small lineup also renders with no scroll view', (
+      tester,
+    ) async {
       await tester.pumpWidget(
         MaterialApp(
           home: LegacyScoreSheetPage(
-            slot: bigSlot,
+            slot: slot,
             result: result,
-            players: bigPlayers,
+            players: [homePlayer, awayPlayer],
           ),
         ),
       );
       await tester.pump();
 
       expect(tester.takeException(), isNull);
-      // Still present in the tree (SingleChildScrollView builds eagerly),
-      // proving the last pairing actually rendered rather than being cut
-      // off by an unhandled overflow.
-      expect(find.text('6. Away 6'), findsOneWidget);
-    },
-  );
+      expect(find.byType(SingleChildScrollView), findsNothing);
+      expect(find.byType(FittedBox), findsOneWidget);
+      expect(find.text('1. Jan Novák'), findsOneWidget);
+    });
+  });
+
+  group('column widths against the real font (Fix round 2)', () {
+    // The table is sized for its OWN real content (Manrope, via
+    // buildTheme) at 1.0× — see `_ScoreTableBody`'s width constants. The
+    // test harness's fallback font has different metrics than Manrope, so
+    // without loading the real font this test would measure the wrong
+    // typeface and could pass even for widths too narrow for the real app
+    // (this is exactly what made fix round 1's own width test vacuous).
+    setUpAll(() async {
+      final loader = FontLoader('Manrope');
+      for (final weight in ['Regular', 'Medium', 'Bold', 'ExtraBold']) {
+        final bytes = File(
+          'assets/fonts/Manrope-$weight.ttf',
+        ).readAsBytesSync();
+        loader.addFont(Future.value(ByteData.view(bytes.buffer)));
+      }
+      await loader.load();
+    });
+
+    // The longest team name actually seen among this club's real synced
+    // opponents (see my_trainings_screen_test.dart/results_screen_test.dart
+    // fixtures) — the tightest real-world fit for the name column.
+    final longNameSlot = PrioritySlot(
+      id: 'm1',
+      date: Day(2026, 9, 20),
+      startsAt: const HourMinute(17, 30),
+      endsAt: const HourMinute(20, 30),
+      type: PrioritySlot.fallbackMatchType,
+      homeTeam: 'TJ Slovan Karlovy Vary',
+      awayTeam: away,
+    );
+
+    Widget realApp() => MaterialApp(
+      theme: buildTheme(Brightness.light),
+      home: Scaffold(
+        body: SingleChildScrollView(
+          child: LegacyScoreSheet(
+            slot: longNameSlot,
+            result: result,
+            players: [homePlayer, awayPlayer],
+          ),
+        ),
+      ),
+    );
+
+    testWidgets(
+      'every cell (name, numeric headers and data, the label column, '
+      'Rozdíl) fits its own actual laid-out width — no clipping or overflow',
+      (tester) async {
+        await tester.pumpWidget(realApp());
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+
+        void expectFits(Finder finder) {
+          final count = tester.widgetList<Text>(finder).length;
+          expect(count, greaterThan(0));
+          for (var i = 0; i < count; i++) {
+            final instance = finder.at(i);
+            final rp = tester.renderObject<RenderParagraph>(instance);
+            final natural = rp.getMaxIntrinsicWidth(double.infinity);
+            expect(
+              natural,
+              lessThanOrEqualTo(rp.size.width + 0.5),
+              reason:
+                  '"${tester.widget<Text>(instance).data}" needs '
+                  '$natural but its laid-out box is only ${rp.size.width}',
+            );
+          }
+        }
+
+        // Name column: the tightest real team name, plus the two header
+        // labels sharing that column.
+        expectFits(find.text('TJ Slovan Karlovy Vary'));
+        expectFits(find.text('Jméno a příjmení hráče'));
+        expectFits(find.text('Družstvo'));
+        // Label column: "Série" (header), lane numbers and the bold
+        // "Celkem" row-label — plus the "Celkem" HEADER label, which lives
+        // in a (narrower) numeric column instead.
+        expectFits(find.text('Série'));
+        expectFits(find.text('Celkem'));
+        // Numeric data: the widest real values in this fixture.
+        expectFits(find.text('1780'));
+        expectFits(find.text('3460'));
+        expectFits(find.text('350'));
+        // Rozdíl: header and a signed value.
+        expectFits(find.text('Rozdíl'));
+        expectFits(find.text('+30'));
+      },
+    );
+  });
 }

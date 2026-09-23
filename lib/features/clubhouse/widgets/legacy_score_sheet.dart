@@ -35,34 +35,15 @@ class LegacyScoreSheet extends StatelessWidget {
   final MatchResult? result;
   final List<MatchPlayerResult> players;
 
-  /// False on the full-screen page (`LegacyScoreSheetPage`) — the "Zápis" /
-  /// "Zvětšit" row belongs to the embedded card only; the full-screen page
-  /// already has its own AppBar title, and it has nowhere further to push
-  /// to (Fix round 1: was rendering — and pushing — itself again).
+  /// False when this is embedded somewhere that already has its own way to
+  /// present the sheet — the "Zápis" / "Zvětšit" row belongs to the
+  /// embedded card only.
   final bool showHeader;
-
-  // Wide enough for a 4-digit total ("1780") or the "Celkem"/"Série" labels
-  // at the app's largest text-size setting (1.3×, core/text_size.dart)
-  // without wrapping onto a second line (Fix round 1).
-  static const _nameWidth = 132.0;
-  static const _colWidth = 120.0;
-  static const _diffWidth = 64.0;
-  static const _sideWidth = _nameWidth + _colWidth * 6;
-
-  MatchPlayerResult? _forSide(String side, int position) {
-    for (final p in players) {
-      if (p.side == side && p.position == position) return p;
-    }
-    return null;
-  }
 
   @override
   Widget build(BuildContext context) {
     if (result == null && players.isEmpty) return const SizedBox.shrink();
     final theme = Theme.of(context);
-
-    final positions = <int>{for (final p in players) p.position}.toList()
-      ..sort();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -75,19 +56,23 @@ class LegacyScoreSheet extends StatelessWidget {
                 Expanded(
                   child: Text('Zápis', style: theme.textTheme.titleSmall),
                 ),
-                IconButton(
-                  icon: const Icon(Icons.open_in_full),
-                  tooltip: 'Zvětšit',
-                  onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => LegacyScoreSheetPage(
-                        slot: slot,
-                        result: result,
-                        players: players,
+                // Nothing to zoom into yet when there's no lineup — just
+                // the (already fully visible) team summary row (Fix
+                // round 2).
+                if (players.isNotEmpty)
+                  IconButton(
+                    icon: const Icon(Icons.open_in_full),
+                    tooltip: 'Zvětšit',
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => LegacyScoreSheetPage(
+                          slot: slot,
+                          result: result,
+                          players: players,
+                        ),
                       ),
                     ),
                   ),
-                ),
               ],
             ),
           ),
@@ -95,33 +80,110 @@ class LegacyScoreSheet extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _teamLabelRow(theme),
-                _teamSummaryRow(theme),
-                if (players.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  _columnHeaderRow(theme),
-                  for (final (i, pos) in positions.indexed)
-                    _pairingBlock(
-                      theme,
-                      pos,
-                      _forSide('home', pos),
-                      _forSide('away', pos),
-                      tinted: i.isOdd,
-                    ),
-                ],
-              ],
+            child: _ScoreTableBody(
+              slot: slot,
+              result: result,
+              players: players,
             ),
           ),
         ),
       ],
     );
   }
+}
 
-  Widget _cell(String text, {TextStyle? style}) => SizedBox(
-    width: _colWidth,
+/// The actual table — team-column labels, team summary, column header and
+/// pairing blocks — shared by the embedded [LegacyScoreSheet] (inside a
+/// horizontal [SingleChildScrollView]) and [LegacyScoreSheetPage] (scaled
+/// to fit via [FittedBox], never scrolled). A fixed-size widget by design:
+/// every column is a hard-coded width sized for THIS table's own real
+/// content at 1.0×, not for arbitrary layout.
+///
+/// Fix round 2: this table no longer follows the app's accessibility
+/// text-size setting (`core/text_size.dart`) — [MediaQuery]'s `textScaler`
+/// is pinned to [TextScaler.noScaling] here, the one place both call sites
+/// share, so a user's "larger text" choice can't blow the column widths out
+/// (that was fix round 1's problem: widening every column enough for 1.3×
+/// nearly doubled the table's width). Seeing this table BIGGER is instead
+/// what [LegacyScoreSheetPage]'s scale-to-fit view is for.
+class _ScoreTableBody extends StatelessWidget {
+  const _ScoreTableBody({
+    required this.slot,
+    required this.result,
+    required this.players,
+  });
+
+  final PrioritySlot slot;
+  final MatchResult? result;
+  final List<MatchPlayerResult> players;
+
+  // Measured against the real app font/theme (Manrope via buildTheme, see
+  // legacy_score_sheet_test.dart's `widths` group) at 1.0× — this table no
+  // longer needs 1.3×/2.0× headroom (see the class doc). Each width is the
+  // widest real content that column ever holds, plus a few dp of margin:
+  //   _nameWidth: bold team name, e.g. "TJ Slovan Karlovy Vary" (~154dp).
+  //   _labelColWidth: the lane/"Celkem" column — bold "Celkem" row label
+  //     is its widest content (~52dp), wider than any lane number.
+  //   _numColWidth: the 5 plain numeric columns — their own bold "Celkem"
+  //     HEADER label (~43dp) is wider than any 4-digit total they hold.
+  //   _diffWidth: "Rozdíl" header (~35dp) and a signed diff value.
+  static const _nameWidth = 158.0;
+  static const _labelColWidth = 58.0;
+  static const _numColWidth = 47.0;
+  static const _diffWidth = 40.0;
+  static const _sideWidth = _nameWidth + _labelColWidth + _numColWidth * 5;
+
+  MatchPlayerResult? _forSide(String side, int position) {
+    for (final p in players) {
+      if (p.side == side && p.position == position) return p;
+    }
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final positions = <int>{for (final p in players) p.position}.toList()
+      ..sort();
+
+    return MediaQuery(
+      data: MediaQuery.of(context).copyWith(textScaler: TextScaler.noScaling),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _teamLabelRow(theme),
+          _teamSummaryRow(theme),
+          if (players.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            _columnHeaderRow(theme),
+            for (final (i, pos) in positions.indexed)
+              _pairingBlock(
+                theme,
+                pos,
+                _forSide('home', pos),
+                _forSide('away', pos),
+                tinted: i.isOdd,
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _numCell(String text, {TextStyle? style}) => SizedBox(
+    width: _numColWidth,
+    child: Text(
+      text,
+      textAlign: TextAlign.center,
+      maxLines: 1,
+      softWrap: false,
+      overflow: TextOverflow.visible,
+      style: style,
+    ),
+  );
+
+  Widget _labelCell(String text, {TextStyle? style}) => SizedBox(
+    width: _labelColWidth,
     child: Text(
       text,
       textAlign: TextAlign.center,
@@ -142,14 +204,14 @@ class LegacyScoreSheet extends StatelessWidget {
         children: [
           SizedBox(
             width: _nameWidth,
-            child: Text('Družstvo', style: style),
+            child: Text('Družstvo', style: style, maxLines: 1, softWrap: false),
           ),
-          _cell('Body', style: style),
-          _cell('Plné', style: style),
-          _cell('Dor.', style: style),
-          _cell('Ch.', style: style),
-          _cell('Celkem', style: style),
-          _cell('Sady', style: style),
+          _labelCell('Body', style: style),
+          _numCell('Plné', style: style),
+          _numCell('Dor.', style: style),
+          _numCell('Ch.', style: style),
+          _numCell('Celkem', style: style),
+          _numCell('Sady', style: style),
         ],
       ),
     );
@@ -189,12 +251,12 @@ class LegacyScoreSheet extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          _cell(numLabel(body), style: style),
-          _cell(numLabel(fulls), style: style),
-          _cell(numLabel(spares), style: style),
-          _cell(numLabel(errors), style: style),
-          _cell(numLabel(total), style: style),
-          _cell(numLabel(setPoints), style: style),
+          _labelCell(numLabel(body), style: style),
+          _numCell(numLabel(fulls), style: style),
+          _numCell(numLabel(spares), style: style),
+          _numCell(numLabel(errors), style: style),
+          _numCell(numLabel(total), style: style),
+          _numCell(numLabel(setPoints), style: style),
         ],
       ),
     );
@@ -237,14 +299,19 @@ class LegacyScoreSheet extends StatelessWidget {
         children: [
           SizedBox(
             width: _nameWidth,
-            child: Text('Jméno a příjmení hráče', style: style),
+            child: Text(
+              'Jméno a příjmení hráče',
+              style: style,
+              maxLines: 1,
+              softWrap: false,
+            ),
           ),
-          _cell('Série', style: style),
-          _cell('Plné', style: style),
-          _cell('Dor.', style: style),
-          _cell('Ch.', style: style),
-          _cell('Celkem', style: style),
-          _cell('Dílčí', style: style),
+          _labelCell('Série', style: style),
+          _numCell('Plné', style: style),
+          _numCell('Dor.', style: style),
+          _numCell('Ch.', style: style),
+          _numCell('Celkem', style: style),
+          _numCell('Dílčí', style: style),
         ],
       ),
     );
@@ -259,7 +326,9 @@ class LegacyScoreSheet extends StatelessWidget {
         _headerSide(theme),
         SizedBox(
           width: _diffWidth,
-          child: Center(child: Text('Rozdíl', style: style)),
+          child: Center(
+            child: Text('Rozdíl', style: style, maxLines: 1, softWrap: false),
+          ),
         ),
         _headerSide(theme),
       ],
@@ -315,12 +384,12 @@ class LegacyScoreSheet extends StatelessWidget {
               ],
             ),
           ),
-          _cell(seriesLabel, style: style),
-          _cell(numLabel(fulls), style: style),
-          _cell(numLabel(spares), style: style),
-          _cell(numLabel(errors), style: style),
-          _cell(numLabel(total), style: style),
-          _cell(numLabel(setPoints), style: style),
+          _labelCell(seriesLabel, style: style),
+          _numCell(numLabel(fulls), style: style),
+          _numCell(numLabel(spares), style: style),
+          _numCell(numLabel(errors), style: style),
+          _numCell(numLabel(total), style: style),
+          _numCell(numLabel(setPoints), style: style),
         ],
       ),
     );
@@ -426,14 +495,18 @@ class LegacyScoreSheet extends StatelessWidget {
 /// carry their own minus, so only the positive case needs a prefix.
 String _signed(int v) => v > 0 ? '+$v' : '$v';
 
-/// Full-screen "Zápis" route (the "Zvětšit" tap target): the same
-/// [LegacyScoreSheet], its own header row suppressed (`showHeader: false`),
-/// generously padded, on its own [Scaffold] with a close button. Fix
-/// round 1: the body is wrapped in its own vertical scroll view
-/// — a big lineup (many pairings, several lanes each) can easily exceed the
-/// screen height, and unlike the embedded card (which sits inside
-/// `match_detail_screen.dart`'s own `ListView`), this page's `Scaffold` body
-/// has no ancestor scroll view of its own to absorb that.
+/// Full-screen "Zápis" route (the "Zvětšit" tap target): the same table
+/// content as [LegacyScoreSheet] ([_ScoreTableBody]), scaled with
+/// [FittedBox] to fill the available space exactly — never scrolled, in
+/// either axis. Fix round 2: this replaces fix round 1's vertical
+/// [SingleChildScrollView] (added because widening every column for 1.3×
+/// text scale nearly doubled the table's width and made a big lineup
+/// overflow vertically too). Now that the table has a small, fixed
+/// authored size (see [_ScoreTableBody]), [BoxFit.contain] scales the
+/// WHOLE table down (a small phone) or up (a wide screen) to exactly fill
+/// the screen at "100%, no scrollbars", regardless of how many pairings
+/// the match has — the overflow problem disappears rather than needing to
+/// be scrolled around.
 class LegacyScoreSheetPage extends StatelessWidget {
   const LegacyScoreSheetPage({
     super.key,
@@ -457,14 +530,16 @@ class LegacyScoreSheetPage extends StatelessWidget {
           onPressed: () => Navigator.of(context).pop(),
         ),
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(24),
-        child: SingleChildScrollView(
-          child: LegacyScoreSheet(
-            slot: slot,
-            result: result,
-            players: players,
-            showHeader: false,
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: FittedBox(
+            fit: BoxFit.contain,
+            child: _ScoreTableBody(
+              slot: slot,
+              result: result,
+              players: players,
+            ),
           ),
         ),
       ),
