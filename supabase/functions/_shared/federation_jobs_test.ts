@@ -100,6 +100,22 @@ Deno.test("matchJobsFor: live, backfill and the next 48 hours", () => {
   assertEquals(jobs.find((j) => j.site_match_id === 4)!.run_at, new Date("2026-10-10T08:00:00Z"));
 });
 
+Deno.test("matchJobsFor: a stored match without a venue is fetched now, once listed", () => {
+  const now = new Date("2026-10-10T06:00:00Z");
+  const jobs = matchJobsFor({
+    matches: [
+      match({ id: 1, status: "SCHEDULED", date: "2026-11-20" }),
+      match({ id: 2, status: "FINISHED", date: "2026-09-20" }),
+      match({ id: 3, status: "SCHEDULED", date: "2026-11-27" }),
+      match({ id: 4, status: "SCHEDULED", date: "2026-12-04" }),
+    ],
+    statusById: new Map([[1, null], [2, "finished"], [3, null]]),
+    venueless: new Set([1, 2, 4]),
+    now,
+  });
+  assertEquals(jobs.map((j) => [j.site_match_id, j.run_at]), [[1, now], [2, now]]);
+});
+
 Deno.test("planTeams: teams of venue clubs, names reused, clubs matched", () => {
   const teamsOut = planTeams({
     clubs: [{ slug: "tj-sokol-brno-iv", name: "TJ Sokol Brno IV" },

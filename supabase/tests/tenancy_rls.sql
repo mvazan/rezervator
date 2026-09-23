@@ -3864,6 +3864,57 @@ begin
   raise notice 'OK: p_keep_ids protects matches the edge function skipped (0045)';
 end $$;
 
+-- 5d. Home/away of a stored match without a venue is not the site's guess:
+-- a rekeyed legacy row keeps what the old import knew (away here, although
+-- the guess says home); only an insert takes the guess.
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+  v_legacy uuid;
+  r jsonb;
+  s priority_slots;
+begin
+  insert into priority_slots
+    (tenant_id, date, starts_at, ends_at, type_id, home_team, away_team,
+     prep_minutes, description, is_away, created_by, import_key)
+  values
+    (v_a, v_today + 35, '17:00', '20:00',
+     (select id from priority_slot_types where tenant_id = v_a and is_match and builtin),
+     'TJ Sokol Brno IV', 'KK Jiný', 0, 'JmD 12. kolo · Jinde', true,
+     '10000000-0000-0000-0000-000000000001', 'rozpis:JmD:12:TJ Sokol Brno IV – KK Jiný')
+  returning id into v_legacy;
+  r := apply_federation_matches(v_a, 'jihomoravska-divize-2026-2027', jsonb_build_array(
+         pg_temp.fed_match(101, true, 10, '18:00', '21:00', 5)
+           || '{"video_url":"https://youtu.be/x"}',
+         pg_temp.fed_match(103, true, 20, '17:00', '20:00', 7),
+         pg_temp.fed_match(112, true, 35, '17:00', '20:00', 12, v_legacy),
+         pg_temp.fed_match(113, false, 36, '17:00', '20:00', 13),
+         pg_temp.fed_match(114, true, 37, '17:00', '20:00', 14)));
+  if (r->>'rekeyed')::int <> 1 or (r->>'inserted')::int <> 2 then
+    raise exception 'FAIL: 5d fixture report: %', r;
+  end if;
+  select * into s from priority_slots where id = v_legacy;
+  if s.import_key <> 'cka:112' or not s.is_away or s.prep_minutes <> 0
+     or s.description <> 'Jihomoravská divize · 12. kolo' then
+    raise exception 'FAIL: the rekeyed away match took the home guess: %', to_jsonb(s);
+  end if;
+  if exists (select 1 from priority_slots where parent_id = v_legacy) then
+    raise exception 'FAIL: the rekeyed away match got a Úklid';
+  end if;
+  select * into s from priority_slots where tenant_id = v_a and import_key = 'cka:113';
+  if not s.is_away or s.prep_minutes <> 0 then
+    raise exception 'FAIL: an inserted match ignored the away guess: %', to_jsonb(s);
+  end if;
+  select * into s from priority_slots where tenant_id = v_a and import_key = 'cka:114';
+  if s.is_away or s.prep_minutes <> 30 then
+    raise exception 'FAIL: an inserted match ignored the home guess: %', to_jsonb(s);
+  end if;
+  delete from priority_slots
+   where tenant_id = v_a and import_key in ('cka:112', 'cka:113', 'cka:114');
+  raise notice 'OK: without a venue a stored match keeps home/away; inserts take the guess (0045)';
+end $$;
+
 -- 6. A match detail: result, players, and the venue decides home/away.
 do $$
 declare

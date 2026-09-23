@@ -73,8 +73,11 @@ export function planCompetition(args: {
   return { rows, skipped, keepIds };
 }
 
+/** `venueless`: stored matches whose venue no detail fetch has told us yet —
+ * until it does, home/away is a guess, so they are fetched right away. */
 export function matchJobsFor(args: {
   matches: SiteMatch[]; statusById: Map<number, string | null>; now: Date;
+  venueless?: Set<number>;
 }): { site_match_id: number; slug: string; run_at: Date }[] {
   const n = args.now.getTime();
   const jobs = [];
@@ -83,7 +86,8 @@ export function matchJobsFor(args: {
     const stored = args.statusById.get(m.id);
     const start = startOf(m).getTime();
     let runAt: Date | null = null;
-    if (m.status === "PREPARATION" || m.status === "IN_PROGRESS") runAt = args.now;
+    if (args.venueless?.has(m.id)) runAt = args.now;
+    else if (m.status === "PREPARATION" || m.status === "IN_PROGRESS") runAt = args.now;
     else if ((m.status === "FINISHED" || m.status === "FORFEIT") &&
       stored !== "finished" && stored !== "forfeit") runAt = args.now;
     else if (m.status === "SCHEDULED" && start - n <= 48 * 3600e3 && start + 6 * 3600e3 > n) {
@@ -215,14 +219,17 @@ export async function runCompetition(db: Db, get: Fetcher, tenantId: string, slu
     p_tenant: tenantId, p_competition_slug: slug, p_matches: rows, p_keep_ids: keepIds,
   })) as Record<string, unknown>;
   const stored = must(await db.from("priority_slots")
-    .select("site_match_id, match_results(status)")
-    .eq("tenant_id", tenantId).like("site_slug", `${slug}-kolo-%`)) as
-    { site_match_id: number; match_results: { status: string } | { status: string }[] | null }[];
+    .select("site_match_id, venue_slug, match_results(status)")
+    .eq("tenant_id", tenantId).like("site_slug", `${slug}-kolo-%`)) as {
+      site_match_id: number; venue_slug: string | null;
+      match_results: { status: string } | { status: string }[] | null;
+    }[];
   const statusById = new Map(stored.map((s) => {
     const r = Array.isArray(s.match_results) ? s.match_results[0] : s.match_results;
     return [s.site_match_id, r?.status ?? null] as [number, string | null];
   }));
-  const jobs = matchJobsFor({ matches, statusById, now });
+  const venueless = new Set(stored.filter((s) => !s.venue_slug).map((s) => s.site_match_id));
+  const jobs = matchJobsFor({ matches, statusById, now, venueless });
   for (const j of jobs) {
     must(await db.rpc("enqueue_federation_match", {
       p_tenant: tenantId, p_site_match_id: j.site_match_id, p_slug: j.slug,

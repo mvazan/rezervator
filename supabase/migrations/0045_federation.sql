@@ -239,10 +239,12 @@ begin
            (m->>'video_url', m->>'competition', (m->>'round')::smallint,
             m->>'site_slug', (m->>'site_match_id')::integer);
 
-    -- Once a detail fetch told us the venue, it decides home/away.
+    -- Once a detail fetch told us the venue, it decides home/away. Before
+    -- that the stored value stands: a legacy row knew it better than the
+    -- guess from the site's home team.
     v_is_away := case when v_row.venue_slug is not null
                       then v_row.venue_slug is distinct from v_venue
-                      else not (m->>'home_is_ours')::boolean end;
+                      else v_row.is_away end;
     v_prep := case when v_is_away then 0 else (m->>'prep')::smallint end;
     v_desc := federation_description(m->>'competition', (m->>'round')::integer,
                                      v_is_away, v_row.venue);
