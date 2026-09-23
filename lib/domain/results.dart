@@ -165,23 +165,25 @@ int todayIndex(List<({Day day, List<PrioritySlot> matches})> days, Day today) {
   return days.length - 1;
 }
 
-/// Where Výsledky opens: the day of the most recently DECIDED match
-/// (finished or forfeit) at or before [today], so scrolling down from
-/// there only reveals what's still ahead — scrolling up shows older
-/// results. Falls back to [todayIndex] when nothing has been decided yet.
-int recentResultsIndex(
+/// The match to scroll Výsledky's bottom edge to: the most recently
+/// DECIDED (finished/forfeit) match at or before [today], walking every
+/// match in chronological order and keeping the last one that qualifies.
+/// Null when nothing has been decided yet — the caller then falls back to
+/// [todayIndex]'s day, top-aligned, same as before this feature existed.
+String? mostRecentDecidedMatchId(
   List<({Day day, List<PrioritySlot> matches})> days,
   Map<String, MatchResult> results,
   Day today,
 ) {
-  var candidate = -1;
-  for (var i = 0; i < days.length; i++) {
-    if (days[i].day.isAfter(today)) break;
-    final decided = days[i].matches.any((m) {
-      final status = results[m.id]?.status;
-      return status == MatchStatus.finished || status == MatchStatus.forfeit;
-    });
-    if (decided) candidate = i;
+  String? found;
+  for (final day in days) {
+    if (day.day.isAfter(today)) break;
+    for (final slot in day.matches) {
+      final status = results[slot.id]?.status;
+      if (status == MatchStatus.finished || status == MatchStatus.forfeit) {
+        found = slot.id;
+      }
+    }
   }
-  return candidate >= 0 ? candidate : todayIndex(days, today);
+  return found;
 }

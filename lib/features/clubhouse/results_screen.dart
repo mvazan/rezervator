@@ -43,8 +43,18 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
   bool _scrolledToRecentResults = false;
   bool _didLiveRefreshCheck = false;
   final Map<Day, GlobalKey> _dayKeys = {};
+  final Map<String, GlobalKey> _matchKeys = {};
 
   GlobalKey _keyFor(Day day) => _dayKeys.putIfAbsent(day, GlobalKey.new);
+  GlobalKey _matchKeyFor(String matchId) =>
+      _matchKeys.putIfAbsent(matchId, GlobalKey.new);
+
+  /// The same key [_matchKeyFor] hands a match's `ListTile` — a public hook
+  /// on this otherwise-private State so a test can locate one match's row
+  /// by id via `find.byKey(...)` (rows have no other way to tell two
+  /// same-titled fixtures apart) without reaching into a private member.
+  @visibleForTesting
+  GlobalKey? debugMatchKey(String matchId) => _matchKeys[matchId];
 
   void _selectAll() => setState(() => _team = null);
 
@@ -143,6 +153,7 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
         : pinsLabel(result.homeTotal, result.awayTotal);
 
     return ListTile(
+      key: _matchKeyFor(slot.id),
       leading: MatchLeading(
         slot: slot,
         result: result,
@@ -223,23 +234,46 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
       }
     }
 
-    // Waits for resultsAsync.hasValue too (not just slots): recentResultsIndex
-    // reads `results`, so latching this on the pre-stream `{}` snapshot would
-    // scroll to todayIndex's fallback and never revisit once the real
-    // results (and any decided match) arrive.
-    final scrollIdx = recentResultsIndex(days, results, today);
-    if (!slotsLoading &&
-        resultsAsync.hasValue &&
-        !_scrolledToRecentResults &&
-        scrollIdx >= 0) {
-      _scrolledToRecentResults = true;
-      final key = _keyFor(days[scrollIdx].day);
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        final ctx = key.currentContext;
-        if (ctx != null) {
-          Scrollable.ensureVisible(ctx, alignment: 0, duration: Duration.zero);
-        }
-      });
+    // Waits for resultsAsync.hasValue too (not just slots):
+    // mostRecentDecidedMatchId reads `results`, so latching this on the
+    // pre-stream `{}` snapshot would scroll to todayIndex's fallback and
+    // never revisit once the real results (and any decided match) arrive.
+    if (!slotsLoading && resultsAsync.hasValue && !_scrolledToRecentResults) {
+      final recentMatchId = mostRecentDecidedMatchId(days, results, today);
+      final todayIdx = todayIndex(days, today);
+      if (recentMatchId != null) {
+        _scrolledToRecentResults = true;
+        // Bottom-aligned: the whole viewport fills with recent, decided
+        // results — only scrolling DOWN from here reveals what's still
+        // ahead, same idea as `alignment: 0` used to top-align the day
+        // header, just anchored at the match itself now instead of its day.
+        final key = _matchKeyFor(recentMatchId);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          final ctx = key.currentContext;
+          if (ctx != null) {
+            Scrollable.ensureVisible(
+              ctx,
+              alignment: 1,
+              duration: Duration.zero,
+            );
+          }
+        });
+      } else if (todayIdx >= 0) {
+        // Nothing decided yet — same top-aligned fallback as before this
+        // feature existed.
+        _scrolledToRecentResults = true;
+        final key = _keyFor(days[todayIdx].day);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          final ctx = key.currentContext;
+          if (ctx != null) {
+            Scrollable.ensureVisible(
+              ctx,
+              alignment: 0,
+              duration: Duration.zero,
+            );
+          }
+        });
+      }
     }
 
     return Scaffold(

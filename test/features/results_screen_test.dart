@@ -453,39 +453,74 @@ void main() {
     },
   );
 
-  testWidgets('with a decided past match, scrolls to ITS day, not today\'s', (
-    tester,
-  ) async {
-    // today-2 is decided (finished); today-1 and today itself are still
-    // undecided (scheduled) — recentResultsIndex must land on today-2's
-    // header, not on 'Dnes'.
-    final decidedDay = today.addDays(-2);
-    final pastMatches = [
-      for (var i = 2; i >= 1; i--) match(id: 'past$i', date: today.addDays(-i)),
-    ];
-    final futureMatches = [
-      for (var i = 1; i <= 10; i++)
-        match(id: 'future$i', date: today.addDays(i)),
-    ];
-    final decidedResult = MatchResult.fromJson(const {
-      'match_id': 'past2',
-      'status': 'finished',
-      'home_points': 5,
-      'away_points': 3,
-      'fetched_at': '2026-09-20T21:00:00+00:00',
-    });
-    await tester.pumpWidget(
-      app(
-        slots: [...pastMatches, liveToday, ...futureMatches],
-        results: {'past2': decidedResult},
-      ),
-    );
-    await tester.pumpAndSettle();
+  testWidgets(
+    'with a decided past match, scrolls so ITS row sits at the BOTTOM of '
+    'the viewport — the whole screen fills with recent results, only '
+    'scrolling down reveals what\'s still ahead',
+    (tester) async {
+      // Plenty of UNDECIDED days well before the decided one (today-12..-3)
+      // — enough content ABOVE the anchor for a genuine bottom-alignment
+      // scroll to have somewhere to scroll FROM (a decided match with
+      // nothing above it would clamp at scroll offset 0, same as any
+      // top-of-list target — this fixture rules that degenerate case out).
+      // today-2 is decided (finished); today-1 and today itself are still
+      // undecided — mostRecentDecidedMatchId must land on today-2's own
+      // row, bottom-aligned, not on any day header top-aligned.
+      final earlierMatches = [
+        for (var i = 12; i >= 3; i--)
+          match(id: 'earlier$i', date: today.addDays(-i)),
+      ];
+      final decided = match(id: 'decided', date: today.addDays(-2));
+      final undecidedYesterday = match(
+        id: 'undecided1',
+        date: today.addDays(-1),
+      );
+      final futureMatches = [
+        for (var i = 1; i <= 10; i++)
+          match(id: 'future$i', date: today.addDays(i)),
+      ];
+      final decidedResult = MatchResult.fromJson(const {
+        'match_id': 'decided',
+        'status': 'finished',
+        'home_points': 5,
+        'away_points': 3,
+        'fetched_at': '2026-09-20T21:00:00+00:00',
+      });
+      await tester.pumpWidget(
+        app(
+          slots: [
+            ...earlierMatches,
+            decided,
+            undecidedYesterday,
+            liveToday,
+            ...futureMatches,
+          ],
+          results: {'decided': decidedResult},
+        ),
+      );
+      await tester.pumpAndSettle();
 
-    final decidedHeader = tester.getTopLeft(find.text(dayFull(decidedDay)));
-    // Aligned to the top of the scrollable area, just below chips/app bar.
-    expect(decidedHeader.dy, inInclusiveRange(0, 200));
-  });
+      // The debugMatchKey hook is the only way to tell same-titled fixture
+      // rows (identical default home/away) apart — see its own doc comment.
+      final state = tester.state(find.byType(ResultsScreen)) as dynamic;
+      final GlobalKey key = state.debugMatchKey('decided') as GlobalKey;
+      final rowBottom = tester.getBottomLeft(find.byKey(key));
+      final viewportHeight = tester
+          .getSize(find.byKey(const Key('results-list')))
+          .height;
+
+      // Bottom-aligned: the row's own bottom edge sits at (or very near)
+      // the bottom of the scrollable viewport, not pinned near the top.
+      expect(rowBottom.dy, greaterThan(viewportHeight * 0.7));
+
+      // The earliest day (today-12) is scrolled well above the viewport —
+      // real scrolling happened, not a no-op left at the list's own top.
+      final earliestHeader = tester.getTopLeft(
+        find.text(dayFull(today.addDays(-12))),
+      );
+      expect(earliestHeader.dy, lessThan(0));
+    },
+  );
 
   testWidgets('tapping a row opens the match detail screen', (tester) async {
     await tester.pumpWidget(app(slots: [finishedYesterday]));

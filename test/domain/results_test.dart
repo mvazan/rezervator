@@ -334,7 +334,7 @@ void main() {
     });
   });
 
-  group('recentResultsIndex', () {
+  group('mostRecentDecidedMatchId', () {
     const matchType = PrioritySlotType(
       id: 'match-type',
       name: 'Zápas',
@@ -363,42 +363,70 @@ void main() {
       'fetched_at': '2026-09-20T09:00:00+00:00',
     });
 
-    test('a finished match before today wins over a later day that is '
-        'merely today with no result yet', () {
-      final days = [
-        dayOf('2026-09-20', ['a']),
-        dayOf('2026-09-27', ['b']),
-      ];
-      final results = {'a': resultOf('finished')};
-      expect(recentResultsIndex(days, results, Day.parse('2026-09-27')), 0);
-    });
-
-    test('the LAST decided day wins when several qualify', () {
+    test('picks the LAST decided match across multiple days, not just the '
+        'last day', () {
       final days = [
         dayOf('2026-09-13', ['a']),
         dayOf('2026-09-20', ['b']),
         dayOf('2026-09-27', ['c']),
       ];
       final results = {'a': resultOf('finished'), 'b': resultOf('forfeit')};
-      expect(recentResultsIndex(days, results, Day.parse('2026-09-27')), 1);
+      expect(
+        mostRecentDecidedMatchId(days, results, Day.parse('2026-09-27')),
+        'b',
+      );
     });
 
-    test('falls back to todayIndex when nothing is decided', () {
-      final days = [
-        dayOf('2026-09-20', ['a']),
-        dayOf('2026-09-27', ['b']),
-      ];
-      expect(recentResultsIndex(days, const {}, Day.parse('2026-09-25')), 1);
-    });
-
-    test('a decided match strictly after today is never picked', () {
+    test('ignores anything strictly after today', () {
       final days = [
         dayOf('2026-09-20', ['a']),
         dayOf('2026-10-04', ['b']),
       ];
-      final results = {'b': resultOf('finished')};
-      // Nothing decided at/before today, so this falls back to todayIndex.
-      expect(recentResultsIndex(days, results, Day.parse('2026-09-25')), 1);
+      final results = {'a': resultOf('finished'), 'b': resultOf('finished')};
+      expect(
+        mostRecentDecidedMatchId(days, results, Day.parse('2026-09-25')),
+        'a',
+      );
+    });
+
+    test(
+      'ignores non-decided statuses (scheduled/preparation/in_progress)',
+      () {
+        final days = [
+          dayOf('2026-09-20', ['a', 'b', 'c']),
+        ];
+        final results = {
+          'a': resultOf('scheduled'),
+          'b': resultOf('preparation'),
+          'c': resultOf('in_progress'),
+        };
+        expect(
+          mostRecentDecidedMatchId(days, results, Day.parse('2026-09-27')),
+          isNull,
+        );
+      },
+    );
+
+    test('null when nothing has been decided yet', () {
+      final days = [
+        dayOf('2026-09-20', ['a']),
+      ];
+      expect(
+        mostRecentDecidedMatchId(days, const {}, Day.parse('2026-09-27')),
+        isNull,
+      );
+    });
+
+    test('a tie within one day is resolved by list order (already '
+        'chronological)', () {
+      final days = [
+        dayOf('2026-09-20', ['a', 'b']),
+      ];
+      final results = {'a': resultOf('finished'), 'b': resultOf('forfeit')};
+      expect(
+        mostRecentDecidedMatchId(days, results, Day.parse('2026-09-27')),
+        'b',
+      );
     });
   });
 
