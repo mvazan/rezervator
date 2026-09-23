@@ -32,6 +32,7 @@ class WeekCalendarView extends StatefulWidget {
     required this.nameById,
     required this.clubColorById,
     required this.interactive,
+    required this.matchLinks,
     required this.slot,
     this.admin = CalendarAdminHooks.none,
   });
@@ -45,6 +46,10 @@ class WeekCalendarView extends StatefulWidget {
   final Map<String, String> nameById;
   final Map<String, int> clubColorById;
   final bool interactive;
+
+  /// Gates the header's video control and tap-through — see [WeekBoard]'s
+  /// own doc; independent of [interactive], which only governs booking.
+  final bool matchLinks;
   final SlotCallbacks slot;
 
   /// Admin gestures (none for non-admins). Click the card's time header (or
@@ -233,7 +238,7 @@ class _WeekCalendarViewState extends State<WeekCalendarView> {
               onAdd: widget.admin.onAddForDay == null
                   ? null
                   : () => widget.admin.onAddForDay!(day.date),
-              interactive: widget.interactive,
+              interactive: widget.matchLinks,
             ),
           ),
       ],

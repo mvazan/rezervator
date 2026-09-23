@@ -44,6 +44,7 @@ class DayPagerView extends StatefulWidget {
     required this.nameById,
     required this.clubColorById,
     required this.interactive,
+    required this.matchLinks,
     required this.slot,
     required this.onSelectDay,
     required this.onShiftWeek,
@@ -86,6 +87,11 @@ class DayPagerView extends StatefulWidget {
   final Map<String, String> nameById;
   final Map<String, int> clubColorById;
   final bool interactive;
+
+  /// Gates the day header's video control and tap-through — see
+  /// [WeekBoard]'s own doc; independent of [interactive], which only
+  /// governs booking.
+  final bool matchLinks;
   final SlotCallbacks slot;
 
   /// Chip tapped directly (no week change).
@@ -245,6 +251,9 @@ class _DayPagerViewState extends State<DayPagerView> {
               interactive: page >= _firstRealPage && page <= _lastRealPage
                   ? widget.interactive
                   : false,
+              matchLinks: page >= _firstRealPage && page <= _lastRealPage
+                  ? widget.matchLinks
+                  : false,
               slot: widget.slot,
             ),
           ),
@@ -292,6 +301,7 @@ class _DayPage extends StatelessWidget {
     required this.nameById,
     required this.clubColorById,
     required this.interactive,
+    required this.matchLinks,
     required this.slot,
   });
 
@@ -303,6 +313,7 @@ class _DayPage extends StatelessWidget {
   final Map<String, String> nameById;
   final Map<String, int> clubColorById;
   final bool interactive;
+  final bool matchLinks;
   final SlotCallbacks slot;
 
   @override
@@ -319,7 +330,7 @@ class _DayPage extends StatelessWidget {
                 date: day.date,
                 priority: headerEvents(day),
                 closedReason: reason,
-                interactive: interactive,
+                interactive: matchLinks,
               ),
             ),
           ),
@@ -349,7 +360,7 @@ class _DayPage extends StatelessWidget {
               date: day.date,
               priority: headerEvents(day),
               chipLabel: '$freeCount volných',
-              interactive: interactive,
+              interactive: matchLinks,
             ),
             const SizedBox(height: 10),
             // Lane header + block rows always stay column-aligned: lanes flex

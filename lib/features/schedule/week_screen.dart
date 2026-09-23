@@ -98,6 +98,10 @@ class _WeekScreenState extends ConsumerState<WeekScreen> with WeekNavigation {
     // while this week's reservations are loading; a signed-in profile is
     // the app's own extra condition.
     final interactive = wv.interactive && me != null;
+    // Match links (video + tap-through) must not wait on booking readiness
+    // — a kuželna with no db time blocks yet (still on the placeholder
+    // grid) should still let a signed-in player watch/open a match.
+    final matchLinks = me != null;
     final week = wv.week;
     final myCount = me == null
         ? 0
@@ -152,6 +156,7 @@ class _WeekScreenState extends ConsumerState<WeekScreen> with WeekNavigation {
             nameById: nameById,
             clubColorById: clubColorById,
             interactive: interactive,
+            matchLinks: matchLinks,
             slot: actions.slot,
             admin: actions.admin,
             onSelectDay: selectDay,
