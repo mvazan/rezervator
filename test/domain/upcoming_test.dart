@@ -68,11 +68,11 @@ void main() {
     );
   });
 
-  // The youth squad shares its club's name in the federation's schedule, so
-  // the import marks ours with a suffix (TEAM_SUFFIXES in
-  // tool/import_matches.py). Following one squad must then leave the other
-  // out — the overview matches a team by its exact name, which is what
-  // makes the split by competition work at all.
+  // The youth squad shares its club's name in the federation's schedule.
+  // The federation site doesn't list dorost yet, so the admin enters those
+  // matches by hand with a distinguishing suffix. Following one squad must
+  // then leave the other out — the overview matches a team by its exact
+  // name, which is what makes the split by competition work at all.
   test('a followed squad does not drag its namesake along', () {
     final slots = [
       match('a', today, const HourMinute(11, 30), home: 'TJ Sokol Husovice'),

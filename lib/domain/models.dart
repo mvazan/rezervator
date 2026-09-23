@@ -595,9 +595,9 @@ class PrioritySlot {
   final HourMinute endsAt;
   final PrioritySlotType type;
 
-  /// Set when the row came from the federation's schedule
-  /// (`tool/import_matches.py`); null = the admin entered the match by hand
-  /// and no import will ever touch it.
+  /// Set when the row came from the federation (`cka:<site id>`, 0045) or
+  /// the old xlsx import (`rozpis:…`); null = the admin entered the match
+  /// by hand and no sync will ever touch it.
   final String? importKey;
 
   /// An imported match the admin corrected in the app (0038): the next
