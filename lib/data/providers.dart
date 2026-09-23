@@ -215,6 +215,28 @@ final clubsProvider = StreamProvider<List<Club>>((ref) {
         ..sort((a, b) => compareCzech(a.name, b.name)));
 });
 
+/// The alley's teams on the federation's results site (0045), Czech-sorted.
+final teamsProvider = StreamProvider<List<Team>>((ref) {
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return Stream.value(const []);
+  return cachedRows(uid, cacheKeyTeams,
+          () => _db.from('teams').stream(primaryKey: ['id']))
+      .map((rows) => rows.map(Team.fromJson).toList()
+        ..sort((a, b) => compareCzech(a.name, b.name)));
+});
+
+/// The alley's federation sync settings (0045). [FederationSync.none] when
+/// there is no row — unconfigured, or the caller is not an admin (RLS hides
+/// the row rather than erroring).
+final federationSyncProvider = StreamProvider<FederationSync>((ref) {
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return Stream.value(FederationSync.none);
+  return cachedRows(uid, cacheKeyFederationSync,
+          () => _db.from('federation_sync').stream(primaryKey: ['tenant_id']))
+      .map((rows) =>
+          rows.isEmpty ? FederationSync.none : FederationSync.fromJson(rows.first));
+});
+
 final timeBlocksProvider = StreamProvider<List<TimeBlock>>((ref) {
   final uid = ref.watch(_authUidProvider);
   if (uid == null) return Stream.value(const []);
@@ -365,7 +387,12 @@ final calendarAvailableProvider =
 /// same. An alley that enters everything by hand still gets a list: without
 /// a single imported match, every match names teams again, or the feature
 /// would quietly vanish there.
+///
+/// Active `teams` (0045) come first; the schedule-derived names keep squads
+/// the site does not list yet, e.g. dorost.
 final ourTeamsProvider = Provider<List<String>>((ref) {
+  final teams = ref.watch(teamsProvider).value ?? const <Team>[];
+  final inactive = {for (final t in teams) if (!t.active) t.name};
   final matches = [
     for (final s in ref.watch(prioritySlotsProvider))
       if (s.type.isMatch && s.parentId == null) s,
@@ -374,11 +401,15 @@ final ourTeamsProvider = Provider<List<String>>((ref) {
     for (final s in matches)
       if (s.imported) s,
   ];
-  final teams = <String>{
+  final derived = <String>{
     for (final s in imported.isEmpty ? matches : imported)
       if (s.isAway) s.awayTeam else s.homeTeam,
   }..remove('');
-  return teams.toList()..sort(compareCzech);
+  return {
+    for (final t in teams) if (t.active) t.name,
+    for (final name in derived) if (!inactive.contains(name)) name,
+  }.toList()
+    ..sort(compareCzech);
 });
 
 /// The caller's Google Calendar link. No row = [CalendarLink.none]. Written
@@ -529,6 +560,33 @@ class Api {
 
   static Future<void> deleteClub(String id) =>
       _db.rpc('delete_club', params: {'p_id': id});
+
+  // --- admin: federation sync (0045) ---
+  static Future<void> setFederationSync({
+    required String venueSlug,
+    required bool enabled,
+  }) =>
+      _db.rpc('set_federation_sync',
+          params: {'p_venue_slug': venueSlug, 'p_enabled': enabled});
+
+  static Future<void> requestFederationDiscovery() =>
+      _db.rpc('request_federation_discovery');
+
+  static Future<void> requestFederationSync() =>
+      _db.rpc('request_federation_sync');
+
+  static Future<void> updateTeam({
+    required String id,
+    required String name,
+    String? clubId,
+    required bool active,
+  }) =>
+      _db.rpc('update_team', params: {
+        'p_id': id,
+        'p_name': name,
+        'p_club_id': clubId,
+        'p_active': active,
+      });
 
   static Future<void> updateFcmToken(String? token) async {
     final uid = currentUserId;
@@ -1466,6 +1524,8 @@ void resetTenantScopedProviders(WidgetRef ref) {
   ref.invalidate(profilesProvider);
   ref.invalidate(settingsProvider);
   ref.invalidate(clubsProvider);
+  ref.invalidate(teamsProvider);
+  ref.invalidate(federationSyncProvider);
   ref.invalidate(timeBlocksProvider);
   ref.invalidate(dayOverridesProvider);
   ref.invalidate(slotTypesProvider);

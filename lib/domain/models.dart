@@ -251,6 +251,74 @@ String clubNameOf(String? clubId, Iterable<Club> clubs) {
   return '';
 }
 
+/// One of the alley's teams on the federation's results site (0045). [name]
+/// is the string the app keys matches, follows and colours by.
+class Team {
+  const Team({
+    required this.id,
+    required this.name,
+    this.clubId,
+    this.siteSlug = '',
+    this.siteName = '',
+    this.competitionSlug = '',
+    this.competitionName = '',
+    this.active = true,
+  });
+
+  final String id;
+  final String name;
+  final String? clubId;
+  final String siteSlug;
+  final String siteName;
+  final String competitionSlug;
+  final String competitionName;
+  final bool active;
+
+  factory Team.fromJson(Map<String, dynamic> json) => Team(
+        id: json['id'] as String,
+        name: json['name'] as String,
+        clubId: json['club_id'] as String?,
+        siteSlug: json['site_slug'] as String? ?? '',
+        siteName: json['site_name'] as String? ?? '',
+        competitionSlug: json['competition_slug'] as String? ?? '',
+        competitionName: json['competition_name'] as String? ?? '',
+        active: json['active'] as bool? ?? true,
+      );
+}
+
+/// Správa → Oddíly: the alley on vysledky.kuzelky.cz and how the last
+/// synchronisation went (0045). Admin-only rows.
+class FederationSync {
+  const FederationSync({
+    this.venueSlug = '',
+    this.enabled = false,
+    this.lastRunAt,
+    this.lastSuccessAt,
+    this.lastError,
+  });
+
+  static const none = FederationSync();
+
+  final String venueSlug;
+  final bool enabled;
+  final DateTime? lastRunAt;
+  final DateTime? lastSuccessAt;
+  final String? lastError;
+
+  bool get configured => venueSlug.isNotEmpty;
+
+  static DateTime? _time(Object? v) =>
+      v == null ? null : DateTime.parse(v as String);
+
+  factory FederationSync.fromJson(Map<String, dynamic> json) => FederationSync(
+        venueSlug: json['venue_slug'] as String? ?? '',
+        enabled: json['enabled'] as bool? ?? false,
+        lastRunAt: _time(json['last_run_at']),
+        lastSuccessAt: _time(json['last_success_at']),
+        lastError: json['last_error'] as String?,
+      );
+}
+
 /// A row of the `players` view — the only profile data the kiosk sees.
 class PlayerName {
   const PlayerName({
