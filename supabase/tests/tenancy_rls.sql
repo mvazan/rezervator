@@ -4668,6 +4668,47 @@ begin
   raise notice 'OK: upsert_federation_venue inserts then updates; an unknown match venue is fetched once (0045)';
 end $$;
 
+-- 15b. A live match refreshed every few minutes must not re-arm a venue
+-- fetch that is backing off, nor recreate one that failed within a day.
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_res constant jsonb := '{"status":"finished","venue":{"slug":"chybna","name":"Chybná"},"home_prep":30,"home":null,"away":null,"players":[]}';
+  v_later constant timestamptz := now() + interval '10 minutes';
+begin
+  delete from notification_jobs where kind = 'federation_venue';
+  perform apply_federation_result(v_a, 103, v_res);
+  update notification_jobs set run_at = v_later, attempts = 2
+   where dedupe_key = 'federation_venue:' || v_a || ':chybna';
+  perform apply_federation_result(v_a, 103, v_res);
+  if (select run_at from notification_jobs
+       where dedupe_key = 'federation_venue:' || v_a || ':chybna') is distinct from v_later then
+    raise exception 'FAIL: a match refresh re-armed a pending venue job';
+  end if;
+
+  delete from notification_jobs where kind = 'federation_venue';
+  perform record_federation_run(v_a, 'venue:chybna', null, 'federation_venue: HTTP 404');
+  perform apply_federation_result(v_a, 103, v_res);
+  if exists (select 1 from notification_jobs where kind = 'federation_venue') then
+    raise exception 'FAIL: a venue that failed within a day was enqueued again';
+  end if;
+
+  update federation_sync
+     set last_report = jsonb_set(last_report, '{venue:chybna,at}',
+                                 to_jsonb(now() - interval '25 hours'))
+   where tenant_id = v_a;
+  perform apply_federation_result(v_a, 103, v_res);
+  if not exists (select 1 from notification_jobs
+                 where dedupe_key = 'federation_venue:' || v_a || ':chybna') then
+    raise exception 'FAIL: a venue whose error is over a day old was not enqueued';
+  end if;
+
+  perform apply_federation_result(v_a, 103, v_res || '{"venue":{"slug":"jinde","name":"Kuželna Jinde"}}');
+  update federation_sync set last_report = last_report - 'venue:chybna' where tenant_id = v_a;
+  delete from notification_jobs where kind = 'federation_venue';
+  raise notice 'OK: a match refresh leaves a pending or recently failed venue fetch alone (0045)';
+end $$;
+
 do $$
 declare
   v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
@@ -4750,8 +4791,8 @@ set local request.jwt.claims =
   '{"sub":"10000000-0000-0000-0000-000000000002","role":"authenticated"}';
 do $$
 begin
-  if exists (select 1 from venues where tenant_id = '00000000-0000-0000-0000-00000000000a') then
-    raise exception 'FAIL: another alley''s admin sees our venues';
+  if (select array_agg(slug) from venues) is distinct from array['kuzelna-b'] then
+    raise exception 'FAIL: another alley''s admin should see exactly their own venues';
   end if;
 end $$;
 reset role;

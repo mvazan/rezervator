@@ -284,7 +284,9 @@ superseded and retired.
   whatever happened last. Keys: `discover`, `competition:<slug>`,
   `federation_match` for a failed match fetch and `venue:<slug>` for a
   failed venue fetch (match and venue jobs record only failures, so such
-  an entry stays until overwritten).
+  an entry stays until overwritten). A job the runtime killed more than
+  5 times (leased, never finished) is dropped and recorded as
+  `dropped after N attempts`.
 - **Venues** (`federation_venue` job, dedupe key
   `federation_venue:<tenant>:<slug>`, payload `{tenant_id, slug}`): the
   venue page `/detail-kuzelny/<slug>` → `upsert_federation_venue(tenant,
@@ -293,11 +295,14 @@ superseded and retired.
   (via `enqueue_federation_venue`, due now) by `apply_federation_result`
   when a match detail names a venue the tenant has no row for yet, and by
   `request_federation_sync` for the alley's own `federation_sync.venue_slug`
-  when missing — so the home alley appears after the first sync. The
-  notify tick runs up to 3 per tick, after the match jobs, so live match
-  checks never wait behind venue pages. A job the runtime killed
-  more than 5 times (leased, never finished) is dropped and recorded as
-  `dropped after N attempts`.
+  when missing — so the home alley appears after the first sync.
+  `apply_federation_result` leaves alone a venue that already has a
+  pending job or whose `venue:<slug>` entry in `last_report` is an error
+  less than 24 hours old — live matches refresh every few minutes, and
+  re-arming would cancel the backoff or refetch a broken page forever;
+  the nightly pass is the daily retry. The notify tick runs up to 3 per
+  tick, after the match jobs, so live match checks never wait behind
+  venue pages.
 - **Nightly:** `cron.job` `federation-nightly` (`0 1 * * *` UTC) runs
   `enqueue_federation_jobs()` — one `federation_competition` job per
   distinct active competition of every enabled tenant with a venue slug,

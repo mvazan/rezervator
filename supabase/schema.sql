@@ -210,6 +210,7 @@ declare
   v_desc text;
   v_home jsonb := p_result->'home';
   v_away jsonb := p_result->'away';
+  v_vslug text := p_result#>>'{venue,slug}';
 begin
   select * into v_row from priority_slots
    where tenant_id = p_tenant and import_key = 'cka:' || p_site_match_id;
@@ -225,10 +226,20 @@ begin
      where id = v_row.id
        and (venue, venue_slug) is distinct from
            (p_result#>>'{venue,name}', p_result#>>'{venue,slug}');
-    if coalesce(p_result#>>'{venue,slug}', '') <> ''
-       and not exists (select 1 from venues
-                        where tenant_id = p_tenant and slug = p_result#>>'{venue,slug}') then
-      perform enqueue_federation_venue(p_tenant, p_result#>>'{venue,slug}');
+    -- Live matches refresh every few minutes: re-arming here would cancel a
+    -- failing fetch's backoff, and recreating a dropped one would fetch a
+    -- broken page forever — a pending job or a failure within a day stands
+    -- (the nightly pass is the daily retry).
+    if coalesce(v_vslug, '') <> ''
+       and not exists (select 1 from venues where tenant_id = p_tenant and slug = v_vslug)
+       and not exists (select 1 from notification_jobs
+                        where dedupe_key = 'federation_venue:' || p_tenant || ':' || v_vslug)
+       and not exists (select 1 from federation_sync
+                        where tenant_id = p_tenant
+                          and last_report->('venue:' || v_vslug) ? 'error'
+                          and (last_report->('venue:' || v_vslug)->>'at')::timestamptz
+                              > now() - interval '24 hours') then
+      perform enqueue_federation_venue(p_tenant, v_vslug);
     end if;
     v_is_away := (p_result#>>'{venue,slug}') is distinct from v_venue;
     v_prep := case when v_is_away then 0 else (p_result->>'home_prep')::smallint end;
