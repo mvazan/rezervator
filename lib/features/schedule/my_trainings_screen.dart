@@ -9,6 +9,7 @@ import '../../domain/palette.dart';
 import '../../domain/results.dart'
     show displayWinner, hasScoreData, pointsLabel;
 import '../../domain/upcoming.dart';
+import '../clubhouse/match_detail_screen.dart';
 import '../clubhouse/widgets/match_title.dart';
 import '../profile/profile_screen.dart';
 import 'cancel_own_reservation.dart';
@@ -95,7 +96,9 @@ Color? eventShadeOf(int? colorId, Brightness brightness) {
 /// The second view beside the calendar: what is coming for the player — the
 /// trainings they booked and the matches of the teams they follow, by day.
 /// A training can be cancelled here (own future reservation, the same
-/// confirm as the calendar); matches are read-only.
+/// confirm as the calendar); a match opens its detail once it has actually
+/// started — an upcoming one has nothing to show there yet, so it stays
+/// unclickable.
 class MyTrainingsScreen extends ConsumerStatefulWidget {
   const MyTrainingsScreen({
     super.key,
@@ -393,6 +396,22 @@ class _MyTrainingsScreenState extends ConsumerState<MyTrainingsScreen> {
                                   results[item.slot.id]?.awayPoints,
                                 ),
                                 style: theme.textTheme.bodyMedium,
+                              )
+                            : null,
+                        // Only once the match has actually started (the
+                        // same `hasScoreData` gate the trailing score
+                        // above uses) — an upcoming match has nothing to
+                        // show on the detail screen yet, so it stays
+                        // read-only like the doc comment above says.
+                        onTap:
+                            item.slot.fromFederation &&
+                                hasScoreData(results[item.slot.id])
+                            ? () => Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => MatchDetailScreen(
+                                    matchId: item.slot.id,
+                                  ),
+                                ),
                               )
                             : null,
                       ),

@@ -8,6 +8,7 @@ import 'package:rezervator/data/clock.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/domain/palette.dart';
+import 'package:rezervator/features/clubhouse/match_detail_screen.dart';
 import 'package:rezervator/features/schedule/my_trainings_screen.dart';
 
 void main() {
@@ -93,6 +94,12 @@ void main() {
           (ref) => exceptionsStream ?? Stream.value(exceptions),
         ),
         matchResultsProvider.overrideWith((ref) => Stream.value(results)),
+        // MatchDetailScreen (pushed on a played match's tap) watches these
+        // two as well.
+        matchPlayerResultsProvider.overrideWith(
+          (ref, id) => Stream.value(const []),
+        ),
+        venuesProvider.overrideWith((ref) => Stream.value(const [])),
         myCalendarLinkProvider.overrideWith(
           (ref) => Stream.value(
             trainingColorId == null
@@ -774,6 +781,55 @@ void main() {
         find.byIcon(Icons.emoji_events_outlined),
       );
       expect(icon.color, isNull);
+    });
+  });
+
+  group('tap-through to the match detail', () {
+    final playedMatch = PrioritySlot(
+      id: 'played',
+      date: today.addDays(-2),
+      startsAt: const HourMinute(18, 0),
+      endsAt: const HourMinute(20, 0),
+      type: PrioritySlot.fallbackMatchType,
+      homeTeam: 'SKK Veverky Brno A',
+      awayTeam: 'KK MS Brno D',
+      importKey: 'cka:1',
+    );
+    final finishedResult = MatchResult(
+      matchId: 'played',
+      status: MatchStatus.finished,
+      homePoints: 5,
+      awayPoints: 3,
+      fetchedAt: DateTime.utc(2026, 1, 1),
+    );
+
+    testWidgets('a played match opens its detail screen', (tester) async {
+      await tester.pumpWidget(
+        app(slots: [playedMatch], results: {'played': finishedResult}),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.text('SKK Veverky Brno A – KK MS Brno D'),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byType(MatchDetailScreen), findsOneWidget);
+    });
+
+    testWidgets('an upcoming match (no result yet) stays unclickable', (
+      tester,
+    ) async {
+      // `match` (top-level fixture): two days out, no result overridden.
+      await tester.pumpWidget(app(slots: [match]));
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.text('SKK Veverky Brno A – KK MS Brno D'),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byType(MatchDetailScreen), findsNothing);
     });
   });
 }
