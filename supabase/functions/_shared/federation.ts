@@ -1,0 +1,281 @@
+// Parser for https://vysledky.kuzelky.cz — pages are server-rendered Next.js
+// and carry their data as JSON inside the RSC flight chunks. No IO here.
+
+export type MatchStatus = "SCHEDULED" | "PREPARATION" | "IN_PROGRESS" | "FINISHED" | "FORFEIT";
+export type SiteTeam = { id: number; name: string; slug: string };
+export type SiteMatch = {
+  id: number; slug: string; date: string; time: string | null; round: number;
+  status: MatchStatus; matchType: string; discipline: string; videoUrl: string | null;
+  homeTeam: SiteTeam; awayTeam: SiteTeam; competition: { slug: string; name: string };
+};
+export type SiteLane = { lane: number; fulls: number | null; spares: number | null; errors: number | null; total: number | null; setPoints: number | null };
+export type SitePlayer = {
+  position: number; name: string; siteId: number | null; slug: string | null;
+  fulls: number | null; spares: number | null; errors: number | null; total: number | null;
+  setPoints: number | null; teamPoints: number | null; lanes: SiteLane[];
+};
+export type SiteSide = {
+  points: number | null; total: number | null; fulls: number | null; spares: number | null;
+  errors: number | null; setPoints: number | null; players: SitePlayer[];
+};
+export type SiteMatchDetail = SiteMatch & {
+  venue: { slug: string; name: string } | null; home: SiteSide | null; away: SiteSide | null;
+};
+export type SiteStanding = { teamSlug: string; teamName: string };
+export type SiteCompetition = {
+  name: string; roundIds: number[]; currentRound: number; matches: SiteMatch[]; standings: SiteStanding[];
+};
+export type VenueClub = { slug: string; name: string };
+export type LegacyRow = { id: string; import_key: string; date: string; home_team: string; away_team: string };
+export type PairCandidate = { siteId: number; date: string; round: number; home: string; away: string };
+
+export const HOME_PREP_MINUTES = 30;
+const STATUSES = new Set(["SCHEDULED", "PREPARATION", "IN_PROGRESS", "FINISHED", "FORFEIT"]);
+
+type Json = Record<string, unknown>;
+
+export function rscText(html: string): string {
+  const chunks = html.matchAll(/self\.__next_f\.push\(\[1,("(?:[^"\\]|\\.)*")\]\)/g);
+  return [...chunks].map((m) => JSON.parse(m[1]) as string).join("");
+}
+
+export function valueAfter(text: string, marker: string): unknown {
+  const at = text.indexOf(marker);
+  if (at < 0) throw new Error(`missing ${marker}`);
+  return readValue(text, at + marker.length);
+}
+
+function readValue(text: string, start: number): unknown {
+  const open = text[start];
+  if (open !== "{" && open !== "[") {
+    const m = /^(-?\d+(?:\.\d+)?|null|true|false|"(?:[^"\\]|\\.)*")/.exec(text.slice(start));
+    if (!m) throw new Error(`unreadable value at ${start}`);
+    return JSON.parse(m[1]);
+  }
+  let depth = 0;
+  let inString = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (ch === "\\") i++;
+      else if (ch === '"') inString = false;
+    } else if (ch === '"') inString = true;
+    else if (ch === "{" || ch === "[") depth++;
+    else if (ch === "}" || ch === "]") {
+      depth--;
+      if (depth === 0) return JSON.parse(text.slice(start, i + 1));
+    }
+  }
+  throw new Error(`unterminated value at ${start}`);
+}
+
+const num = (v: unknown): number | null => (typeof v === "number" ? v : null);
+const str = (v: unknown): string | null =>
+  typeof v === "string" && !v.startsWith("$") ? v : null;
+
+function team(v: unknown): SiteTeam {
+  const t = v as Json;
+  if (typeof t?.id !== "number" || typeof t.slug !== "string") throw new Error("bad team");
+  return { id: t.id, name: String(t.name), slug: t.slug };
+}
+
+function siteMatch(v: unknown): SiteMatch {
+  const m = v as Json;
+  const status = String(m.status);
+  if (typeof m.id !== "number" || !STATUSES.has(status)) throw new Error("bad match");
+  const c = m.competition as Json;
+  return {
+    id: m.id, slug: String(m.slug), date: String(m.date), time: str(m.time),
+    round: Number(m.round), status: status as MatchStatus,
+    matchType: String(m.matchType ?? ""), discipline: String(m.discipline ?? ""),
+    videoUrl: str(m.videoUrl), homeTeam: team(m.homeTeam), awayTeam: team(m.awayTeam),
+    competition: { slug: String(c?.slug ?? ""), name: String(c?.name ?? "") },
+  };
+}
+
+export function parseCompetition(html: string): SiteCompetition {
+  const text = rscText(html);
+  const at = text.indexOf('{"data":{"title":');
+  if (at < 0) throw new Error("competition data missing");
+  const data = (readValue(text, at) as Json).data as Json;
+  const rounds = data.rounds as Json[];
+  const current = data.currentRound as Json;
+  if (!Array.isArray(rounds) || !current || !Array.isArray(current.matches)) {
+    throw new Error("competition rounds missing");
+  }
+  const standings = ((data.standings as Json | undefined)?.total ?? []) as Json[];
+  return {
+    name: String(data.title),
+    roundIds: rounds.map((r) => Number(r.id)),
+    currentRound: Number(current.id),
+    matches: current.matches.map(siteMatch),
+    standings: standings
+      .filter((s) => typeof s.teamSlug === "string")
+      .map((s) => ({ teamSlug: String(s.teamSlug), teamName: String(s.teamName) })),
+  };
+}
+
+function side(v: Json | undefined): SiteSide | null {
+  if (!v) return null;
+  const players = ((v.playerResults ?? []) as Json[])
+    .filter((p) => p.player && typeof p.player === "object")
+    .map((p): SitePlayer => {
+      const who = p.player as Json;
+      return {
+        position: Number(p.position),
+        name: `${who.firstName ?? ""} ${who.lastName ?? ""}`.trim(),
+        siteId: num(who.id), slug: str(who.slug),
+        fulls: num(p.totalFull), spares: num(p.totalSpare), errors: num(p.totalErrors),
+        total: num(p.totalPerformance), setPoints: num(p.setPoints), teamPoints: num(p.teamPoints),
+        lanes: ((p.laneResults ?? []) as Json[]).map((l) => ({
+          lane: Number(l.laneNumber), fulls: num(l.full), spares: num(l.spare),
+          errors: num(l.errors), total: num(l.total), setPoints: num(l.setPoints),
+        })),
+      };
+    });
+  return {
+    points: num(v.teamPoints), total: num(v.totalPerformance), fulls: num(v.totalFull),
+    spares: num(v.totalSpare), errors: num(v.totalErrors), setPoints: num(v.totalSetPoints),
+    players,
+  };
+}
+
+export function parseMatch(html: string): SiteMatchDetail {
+  const text = rscText(html);
+  const at = text.indexOf('"match":{"id":');
+  if (at < 0) throw new Error("match data missing");
+  const raw = readValue(text, at + '"match":'.length) as Json;
+  const results = (raw.results ?? []) as Json[];
+  const venue = raw.venue as Json | null | undefined;
+  return {
+    ...siteMatch(raw),
+    venue: venue && typeof venue.slug === "string"
+      ? { slug: venue.slug, name: String(venue.name) }
+      : null,
+    home: side(results.find((r) => r.isHome === true)),
+    away: side(results.find((r) => r.isHome === false)),
+  };
+}
+
+export function parseVenueClubs(html: string): VenueClub[] {
+  const seen = new Map<string, string>();
+  for (const m of html.matchAll(/href="\/detail-klubu\/([a-z0-9-]+)"[^>]*>([\s\S]*?)<\/a>/g)) {
+    if (seen.has(m[1])) continue;
+    const spans = [...m[2].matchAll(/<span[^>]*>([^<]*)<\/span>/g)];
+    const name = spans.length ? decodeEntities(spans[spans.length - 1][1]).trim() : m[1];
+    seen.set(m[1], name || m[1]);
+  }
+  return [...seen].map(([slug, name]) => ({ slug, name }));
+}
+
+const decodeEntities = (s: string) =>
+  s.replaceAll("&amp;", "&").replaceAll("&quot;", '"').replaceAll("&#x27;", "'")
+    .replaceAll("&lt;", "<").replaceAll("&gt;", ">");
+
+export function parseSitemapLocs(xml: string): string[] {
+  return [...xml.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/g)].map((m) => m[1]);
+}
+
+export function competitionSlugsForClubs(matchLocs: string[], clubSlugs: string[]): string[] {
+  const found = new Set<string>();
+  for (const loc of matchLocs) {
+    const m = /\/detail-zapasu\/(.+?)-kolo-\d+-(.+)$/.exec(loc);
+    if (!m) continue;
+    const teams = `-${m[2]}`;
+    if (clubSlugs.some((c) => teams.includes(`-${c}-`))) found.add(m[1]);
+  }
+  return [...found].sort();
+}
+
+export function teamBelongsToClub(teamSlug: string, clubSlug: string): boolean {
+  if (!teamSlug.startsWith(`${clubSlug}-`)) return false;
+  return /^([a-z]-)?[a-z]+$/.test(teamSlug.slice(clubSlug.length + 1));
+}
+
+export function matchFormat(matchType: string, discipline: string) {
+  const players = matchType === "TEAMS_OF_4" ? 4 : 6;
+  const throws = discipline === "T120" ? 120 : 100;
+  const durationMin = matchType === "TEAMS_OF_4" && discipline === "T100"
+    ? 90
+    : matchType === "TEAMS_OF_6" && discipline === "T100"
+    ? 150
+    : 180;
+  return { players, throws, durationMin };
+}
+
+export function endTime(start: string, minutes: number): string {
+  const [h, m] = start.split(":").map(Number);
+  const total = Math.min(h * 60 + m + minutes, 23 * 60 + 59);
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
+export function normalizeTeam(name: string): string {
+  return name.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ").trim().replace(/ a$/, "");
+}
+
+export function pairLegacy(candidates: PairCandidate[], legacy: LegacyRow[]): Map<number, string> {
+  const free = new Map(legacy.map((l) => [l.id, l]));
+  const pairs = new Map<number, string>();
+  const keyed = (l: LegacyRow) => /^rozpis:.*:(\d+):(.*) – (.*)$/.exec(l.import_key);
+  const same = (a: string, b: string) => normalizeTeam(a) === normalizeTeam(b);
+  const rules: ((c: PairCandidate, l: LegacyRow) => boolean)[] = [
+    (c, l) => {
+      const k = keyed(l);
+      return !!k && Number(k[1]) === c.round && same(k[2], c.home) && same(k[3], c.away);
+    },
+    (c, l) => l.date === c.date && same(l.home_team, c.home) && same(l.away_team, c.away),
+  ];
+  for (const rule of rules) {
+    for (const c of candidates) {
+      if (pairs.has(c.siteId)) continue;
+      const hits = [...free.values()].filter((l) => rule(c, l));
+      if (hits.length !== 1) continue;
+      pairs.set(c.siteId, hits[0].id);
+      free.delete(hits[0].id);
+    }
+  }
+  return pairs;
+}
+
+export function nextCheckpoint(status: MatchStatus, start: Date, now: Date): Date | null {
+  const t = start.getTime();
+  const n = now.getTime();
+  const h = 3600e3;
+  const soon = new Date(n + 15 * 60e3);
+  if (status === "SCHEDULED") {
+    if (n < t - 24 * h) return new Date(t - 24 * h);
+    if (n < t - h) return new Date(t - h);
+    if (n < t + 6 * h) return soon;
+  }
+  if ((status === "PREPARATION" || status === "IN_PROGRESS") && n < t + 12 * h) return soon;
+  if (n < t + 24 * h) return new Date(t + 24 * h);
+  if (n < t + 72 * h) return new Date(t + 72 * h);
+  return null;
+}
+
+const sideTotals = (s: SiteSide | null) =>
+  s && {
+    points: s.points, total: s.total, fulls: s.fulls, spares: s.spares,
+    errors: s.errors, set_points: s.setPoints,
+  };
+
+export function resultPayload(d: SiteMatchDetail): Record<string, unknown> {
+  const players = (["home", "away"] as const).flatMap((key) =>
+    (d[key]?.players ?? []).map((p) => ({
+      side: key, position: p.position, player_name: p.name,
+      player_site_id: p.siteId, player_slug: p.slug,
+      fulls: p.fulls, spares: p.spares, errors: p.errors, total: p.total,
+      set_points: p.setPoints, team_points: p.teamPoints,
+      lanes: p.lanes.map((l) => ({
+        lane: l.lane, fulls: l.fulls, spares: l.spares, errors: l.errors,
+        total: l.total, setPoints: l.setPoints,
+      })),
+    }))
+  );
+  return {
+    status: d.status.toLowerCase(), match_type: d.matchType, discipline: d.discipline,
+    video_url: d.videoUrl, venue: d.venue, home_prep: HOME_PREP_MINUTES,
+    home: sideTotals(d.home), away: sideTotals(d.away), players,
+  };
+}
