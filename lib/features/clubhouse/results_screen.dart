@@ -86,6 +86,18 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
         if (isLive(slot, results[slot.id], now)) slot,
   ];
 
+  // The open-time auto-refresh is a background poke, not a user action, so
+  // its errors are logged and swallowed rather than shown — and a plain
+  // try/catch (unlike Future.catchError) never trips over the actual
+  // reified Future<T> not matching an onError handler's return type.
+  Future<void> _refreshQuietly(String matchId) async {
+    try {
+      await widget.refreshMatch(matchId);
+    } catch (e) {
+      debugPrint('Výsledky: auto-refresh of $matchId failed: $e');
+    }
+  }
+
   Future<void> _refresh(BuildContext context, List<PrioritySlot> live) async {
     if (live.isEmpty) {
       snack(context, 'Nic právě neprobíhá.');
@@ -215,6 +227,7 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
     final now = ref.watch(nowProvider).value ?? DateTime.now();
     final today = Day.fromDateTime(now);
     final slots = ref.watch(prioritySlotsProvider);
+    final slotsLoading = ref.watch(prioritySlotsLoadingProvider);
     final resultsAsync = ref.watch(matchResultsProvider);
     final results = resultsAsync.value ?? const <String, MatchResult>{};
     final ourTeams = ref.watch(ourTeamsProvider);
@@ -243,22 +256,25 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
       exceptions: exceptions,
     );
 
-    // Once per screen lifetime, past the first real snapshot: a later
-    // Realtime emission of the SAME (or updated) data must not re-fire this.
-    if (!_didLiveRefreshCheck && resultsAsync.hasValue) {
+    // Once per screen lifetime, past the first real snapshot of BOTH inputs
+    // — slots is a plain Provider that reads `[]` before its own stream
+    // (prioritySlotsLoadingProvider's own signal) has delivered, so gating
+    // on the results stream alone would let this latch on an empty list
+    // and never see a live match that only shows up once slots catches up.
+    if (!_didLiveRefreshCheck && !slotsLoading && resultsAsync.hasValue) {
       _didLiveRefreshCheck = true;
       final live = _liveMatches(days, results, now);
       if (live.isNotEmpty) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           for (final slot in live) {
-            unawaited(widget.refreshMatch(slot.id));
+            unawaited(_refreshQuietly(slot.id));
           }
         });
       }
     }
 
     final todayIdx = todayIndex(days, today);
-    if (!_scrolledToToday && todayIdx >= 0) {
+    if (!slotsLoading && !_scrolledToToday && todayIdx >= 0) {
       _scrolledToToday = true;
       final key = _keyFor(days[todayIdx].day);
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -275,7 +291,9 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
         children: [
           _filterChips(mineAvailable, effectiveMine, ourTeams),
           Expanded(
-            child: !anyFederationMatches
+            child: slotsLoading
+                ? const Center(child: CircularProgressIndicator())
+                : !anyFederationMatches
                 ? const Center(
                     child: Padding(
                       padding: EdgeInsets.all(24),

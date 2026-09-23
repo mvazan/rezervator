@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -81,9 +83,24 @@ void main() {
 
   final futureNoResult = match(id: 'm3', date: today.addDays(5), away: souperB);
 
+  MatchResult liveResultFor(String matchId) => MatchResult.fromJson({
+    'match_id': matchId,
+    'status': 'in_progress',
+    'fetched_at': '2026-09-23T17:40:00+00:00',
+  });
+
+  // A test-only StreamProvider our own prioritySlotsProvider/
+  // prioritySlotsLoadingProvider overrides can watch, so a test can flip
+  // "still loading" -> "loaded" mid-lifetime the same way the real
+  // _prioritySlotRowsProvider does — without touching Supabase.
+  final testSlotsStreamProvider = StreamProvider<List<PrioritySlot>>(
+    (ref) => const Stream.empty(),
+  );
+
   Widget app({
     Profile profile = meFollows,
     List<PrioritySlot> slots = const [],
+    Stream<List<PrioritySlot>>? slotsStream,
     Map<String, MatchResult> results = const {},
     List<String> teams = const [veverky, souperA],
     Map<String, int> teamColors = const {},
@@ -94,7 +111,19 @@ void main() {
     return ProviderScope(
       overrides: [
         myProfileProvider.overrideWith((ref) => Stream.value(profile)),
-        prioritySlotsProvider.overrideWithValue(slots),
+        if (slotsStream != null) ...[
+          testSlotsStreamProvider.overrideWith((ref) => slotsStream),
+          prioritySlotsProvider.overrideWith(
+            (ref) => ref.watch(testSlotsStreamProvider).value ?? const [],
+          ),
+          prioritySlotsLoadingProvider.overrideWith((ref) {
+            final v = ref.watch(testSlotsStreamProvider);
+            return v.isLoading && !v.hasValue;
+          }),
+        ] else ...[
+          prioritySlotsProvider.overrideWithValue(slots),
+          prioritySlotsLoadingProvider.overrideWithValue(false),
+        ],
         matchResultsProvider.overrideWith((ref) => Stream.value(results)),
         ourTeamsProvider.overrideWithValue(teams),
         myTeamColorsProvider.overrideWith((ref) => Stream.value(teamColors)),
@@ -383,4 +412,151 @@ void main() {
 
     expect(find.widgetWithText(AppBar, '$veverky – $souperA'), findsOneWidget);
   });
+
+  testWidgets(
+    'while slots are still loading shows a progress indicator, never the '
+    'no-matches empty state',
+    (tester) async {
+      final slotsCtrl = StreamController<List<PrioritySlot>>();
+      addTearDown(slotsCtrl.close);
+      // No pumpAndSettle: the indicator's animation never settles on its own —
+      // a single frame already flushes the other overridden streams, leaving
+      // only the slots stream genuinely stuck loading.
+      await tester.pumpWidget(app(slotsStream: slotsCtrl.stream));
+
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      expect(
+        find.text(
+          'Zatím žádné zápasy — správce zapne stahování v Správa → '
+          'Oddíly.',
+        ),
+        findsNothing,
+      );
+    },
+  );
+
+  testWidgets(
+    'the once-only live refresh waits for slots to finish loading, not '
+    'just for results to arrive',
+    (tester) async {
+      // Regression for a real bug: matchResultsProvider alone can settle
+      // before prioritySlotsProvider's own stream delivers its first
+      // snapshot (which still reads `[]` while loading) — gating the
+      // one-time check on results only would let it latch on an empty
+      // list and never see the live match once slots actually load.
+      final refreshed = <String>[];
+      final slotsCtrl = StreamController<List<PrioritySlot>>();
+      addTearDown(slotsCtrl.close);
+      await tester.pumpWidget(
+        app(
+          slotsStream: slotsCtrl.stream,
+          results: {'m2': liveResultFor('m2')},
+          refreshMatch: (id) async {
+            refreshed.add(id);
+            return 'queued';
+          },
+        ),
+      );
+      await tester.pump();
+      expect(refreshed, isEmpty);
+
+      slotsCtrl.add([liveToday]);
+      await tester.pumpAndSettle();
+
+      expect(refreshed, ['m2']);
+
+      // A later emission of the same data must not refresh again.
+      slotsCtrl.add([liveToday]);
+      await tester.pumpAndSettle();
+
+      expect(refreshed, ['m2']);
+    },
+  );
+
+  testWidgets(
+    'two simultaneous live matches are each refreshed exactly once on '
+    'open',
+    (tester) async {
+      final refreshed = <String>[];
+      final liveToday2 = match(
+        id: 'm5',
+        date: today,
+        home: souperA,
+        away: souperB,
+      );
+      await tester.pumpWidget(
+        app(
+          profile: meFollowsNothing,
+          slots: [liveToday, liveToday2],
+          results: {'m2': liveResultFor('m2'), 'm5': liveResultFor('m5')},
+          refreshMatch: (id) async {
+            refreshed.add(id);
+            return 'queued';
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+      // A later rebuild must not refresh either match again.
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      expect(refreshed..sort(), ['m2', 'm5']);
+    },
+  );
+
+  testWidgets(
+    'two simultaneous live matches are each refreshed exactly once on '
+    'pull-to-refresh',
+    (tester) async {
+      final refreshed = <String>[];
+      final liveToday2 = match(
+        id: 'm5',
+        date: today,
+        home: souperA,
+        away: souperB,
+      );
+      await tester.pumpWidget(
+        app(
+          profile: meFollowsNothing,
+          slots: [liveToday, liveToday2],
+          results: {'m2': liveResultFor('m2'), 'm5': liveResultFor('m5')},
+          refreshMatch: (id) async {
+            refreshed.add(id);
+            return 'queued';
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+      refreshed.clear(); // drop the open-time refresh, isolate the pull
+
+      await tester.fling(
+        find.byKey(const Key('results-list')),
+        const Offset(0, 300),
+        1000,
+      );
+      await tester.pumpAndSettle();
+
+      expect(refreshed..sort(), ['m2', 'm5']);
+    },
+  );
+
+  testWidgets(
+    'a failed open-time auto-refresh does not throw an unhandled error',
+    (tester) async {
+      // Regression: the fire-and-forget refresh call must swallow its own
+      // errors — a rejected Future left unawaited-and-unhandled would surface
+      // as a test failure (and in the real app, an ugly zone error) even
+      // though nothing here is a user action that should show a snackbar.
+      await tester.pumpWidget(
+        app(
+          slots: [liveToday],
+          results: {'m2': liveResultFor('m2')},
+          refreshMatch: (_) async => throw StateError('boom'),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+    },
+  );
 }
