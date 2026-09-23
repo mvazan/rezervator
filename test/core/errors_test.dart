@@ -29,10 +29,23 @@ void main() {
         startsWith('Něco se nepovedlo.'));
   });
 
-  test('public overview slug errors', () {
-    expect(friendlyDbError(Exception('invalid_slug')),
-        'Adresa smí mít 3–40 znaků: malá písmena, číslice a pomlčky.');
+  test('public overview / federation slug errors (shared code)', () {
+    expect(
+      friendlyDbError(Exception('invalid_slug')),
+      'Adresa kuželny smí mít jen malá písmena bez diakritiky, číslice '
+          'a pomlčky.',
+    );
     expect(friendlyDbError(Exception('slug_taken')), 'Tuhle adresu už má jiná kuželna.');
+  });
+
+  test('federation sync errors (0045)', () {
+    expect(friendlyDbError(Exception('federation_not_configured')),
+        'Nejdřív ulož kuželnu z výsledkového servisu.');
+    expect(friendlyDbError(Exception('federation_disabled')),
+        'Zapni nejdřív automatické stahování.');
+    expect(friendlyDbError(Exception('team_name_taken')),
+        'Tým s tímto názvem už existuje.');
+    expect(friendlyDbError(Exception('empty_name')), 'Název nesmí být prázdný.');
   });
 
   test('group errors (0044)', () {

@@ -125,8 +125,16 @@ String friendlyDbError(Object error) {
     'already_invited': 'Pozvánku už má — čeká se, až ji přijme.',
     'unknown_invite': 'Tahle pozvánka už neplatí.',
     'already_in_group': 'Už jsi v jiné skupině — nejdřív z ní odejdi.',
-    'invalid_slug': 'Adresa smí mít 3–40 znaků: malá písmena, číslice a pomlčky.',
+    // Shared by set_public_overview and set_federation_sync (0043/0045) —
+    // both check the same shape (lowercase, no diacritics, digits, hyphens).
+    'invalid_slug':
+        'Adresa kuželny smí mít jen malá písmena bez diakritiky, číslice '
+            'a pomlčky.',
     'slug_taken': 'Tuhle adresu už má jiná kuželna.',
+    'federation_not_configured': 'Nejdřív ulož kuželnu z výsledkového servisu.',
+    'federation_disabled': 'Zapni nejdřív automatické stahování.',
+    'team_name_taken': 'Tým s tímto názvem už existuje.',
+    'empty_name': 'Název nesmí být prázdný.',
   };
   for (final entry in messages.entries) {
     if (raw.contains(entry.key)) return entry.value;

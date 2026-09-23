@@ -34,11 +34,13 @@ class MatchesScreen extends ConsumerWidget {
         '${slot.title}',
       ),
       subtitle: switch ([
-        // Whose row this is: the schedule's, or the admin's own. A
-        // scheduled match the admin corrected says so — the next import
-        // skips it (0038).
+        // Whose row this is: the federation's own results service, the old
+        // Google-script schedule import, or the admin's own. A scheduled
+        // match the admin corrected says so — the next import skips it
+        // (0038).
         if (slot.imported)
-          slot.handEdited ? 'z rozpisu · upraveno ručně' : 'z rozpisu',
+          '${slot.importKey!.startsWith('cka:') ? 'ze svazu' : 'z rozpisu'}'
+          '${slot.handEdited ? ' · upraveno ručně' : ''}',
         if (slot.isAway) 'venku — neblokuje kuželnu',
         if (!slot.isAway && slot.prepMinutes > 0)
           'úklid ${slot.prepMinutes} min před',
