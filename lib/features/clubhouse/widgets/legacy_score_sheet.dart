@@ -4,6 +4,8 @@
 /// two ExpansionTile lists.
 library;
 
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../../../domain/models.dart';
@@ -28,17 +30,11 @@ class LegacyScoreSheet extends StatelessWidget {
     required this.slot,
     required this.result,
     required this.players,
-    this.showHeader = true,
   });
 
   final PrioritySlot slot;
   final MatchResult? result;
   final List<MatchPlayerResult> players;
-
-  /// False when this is embedded somewhere that already has its own way to
-  /// present the sheet — the "Zápis" / "Zvětšit" row belongs to the
-  /// embedded card only.
-  final bool showHeader;
 
   @override
   Widget build(BuildContext context) {
@@ -48,34 +44,31 @@ class LegacyScoreSheet extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (showHeader)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text('Zápis', style: theme.textTheme.titleSmall),
-                ),
-                // Nothing to zoom into yet when there's no lineup — just
-                // the (already fully visible) team summary row (Fix
-                // round 2).
-                if (players.isNotEmpty)
-                  IconButton(
-                    icon: const Icon(Icons.open_in_full),
-                    tooltip: 'Zvětšit',
-                    onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => LegacyScoreSheetPage(
-                          slot: slot,
-                          result: result,
-                          players: players,
-                        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+          child: Row(
+            children: [
+              Expanded(child: Text('Zápis', style: theme.textTheme.titleSmall)),
+              // Nothing to zoom into yet when there's no lineup — just
+              // the (already fully visible) team summary row (Fix
+              // round 2).
+              if (players.isNotEmpty)
+                IconButton(
+                  icon: const Icon(Icons.open_in_full),
+                  tooltip: 'Zvětšit',
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => LegacyScoreSheetPage(
+                        slot: slot,
+                        result: result,
+                        players: players,
                       ),
                     ),
                   ),
-              ],
-            ),
+                ),
+            ],
           ),
+        ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: SingleChildScrollView(
@@ -95,14 +88,15 @@ class LegacyScoreSheet extends StatelessWidget {
 /// The actual table — team-column labels, team summary, column header and
 /// pairing blocks — shared by the embedded [LegacyScoreSheet] (inside a
 /// horizontal [SingleChildScrollView]) and [LegacyScoreSheetPage] (scaled
-/// to fit via [FittedBox], never scrolled). A fixed-size widget by design:
+/// to fit via `_ScaleToFitViewer`, never scrolled). A fixed-size widget by
+/// design:
 /// every column is a hard-coded width sized for THIS table's own real
 /// content at 1.0×, not for arbitrary layout.
 ///
 /// Fix round 2: this table no longer follows the app's accessibility
-/// text-size setting (`core/text_size.dart`) — [MediaQuery]'s `textScaler`
-/// is pinned to [TextScaler.noScaling] here, the one place both call sites
-/// share, so a user's "larger text" choice can't blow the column widths out
+/// text-size setting (`core/text_size.dart`) — [MediaQuery.withNoTextScaling]
+/// pins text scaling off here, the one place both call sites share, so a
+/// user's "larger text" choice can't blow the column widths out
 /// (that was fix round 1's problem: widening every column enough for 1.3×
 /// nearly doubled the table's width). Seeing this table BIGGER is instead
 /// what [LegacyScoreSheetPage]'s scale-to-fit view is for.
@@ -146,8 +140,7 @@ class _ScoreTableBody extends StatelessWidget {
     final positions = <int>{for (final p in players) p.position}.toList()
       ..sort();
 
-    return MediaQuery(
-      data: MediaQuery.of(context).copyWith(textScaler: TextScaler.noScaling),
+    return MediaQuery.withNoTextScaling(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -496,17 +489,18 @@ class _ScoreTableBody extends StatelessWidget {
 String _signed(int v) => v > 0 ? '+$v' : '$v';
 
 /// Full-screen "Zápis" route (the "Zvětšit" tap target): the same table
-/// content as [LegacyScoreSheet] ([_ScoreTableBody]), scaled with
-/// [FittedBox] to fill the available space exactly — never scrolled, in
-/// either axis. Fix round 2: this replaces fix round 1's vertical
-/// [SingleChildScrollView] (added because widening every column for 1.3×
-/// text scale nearly doubled the table's width and made a big lineup
-/// overflow vertically too). Now that the table has a small, fixed
-/// authored size (see [_ScoreTableBody]), [BoxFit.contain] scales the
-/// WHOLE table down (a small phone) or up (a wide screen) to exactly fill
-/// the screen at "100%, no scrollbars", regardless of how many pairings
-/// the match has — the overflow problem disappears rather than needing to
-/// be scrolled around.
+/// content as [LegacyScoreSheet] ([_ScoreTableBody]), scaled to fit on
+/// open — never scrolled, in either axis — via [_ScaleToFitViewer]. Fix
+/// round 2: this replaces fix round 1's vertical [SingleChildScrollView]
+/// (added because widening every column for 1.3× text scale nearly doubled
+/// the table's width and made a big lineup overflow vertically too). Fix
+/// round 3: a plain [FittedBox] (round 2's own fix) shrinks the WHOLE table
+/// down to fit a phone screen and caps out at 1.0× on a wide one — on an
+/// ordinary phone, where the table is legitimately wider/taller than the
+/// screen, that shrinks real body text down to a few px with no way back to
+/// a readable size. [_ScaleToFitViewer] keeps the same initial "see it all
+/// at once" scale, but lets the user pinch in from there to read the
+/// detail and pan around.
 class LegacyScoreSheetPage extends StatelessWidget {
   const LegacyScoreSheetPage({
     super.key,
@@ -530,19 +524,95 @@ class LegacyScoreSheetPage extends StatelessWidget {
           onPressed: () => Navigator.of(context).pop(),
         ),
       ),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: FittedBox(
-            fit: BoxFit.contain,
-            child: _ScoreTableBody(
-              slot: slot,
-              result: result,
-              players: players,
-            ),
-          ),
+      body: Padding(
+        padding: const EdgeInsets.all(24),
+        child: _ScaleToFitViewer(
+          child: _ScoreTableBody(slot: slot, result: result, players: players),
         ),
       ),
+    );
+  }
+}
+
+/// Scales [child] to fit the available space on first layout — same "see
+/// the whole table at once" goal a plain [FittedBox] gives — but, unlike
+/// [FittedBox], lets the user then pinch past that initial scale to read
+/// the detail and pan around. [InteractiveViewer] has no scrollbar chrome
+/// of its own — it's a direct-manipulation gesture surface, not a
+/// scrollable — so "no scrollbars anywhere on this page" still holds.
+///
+/// [child] is measured once via [_contentKey] after its first layout (its
+/// own [RenderBox.size] is unaffected by [InteractiveViewer]'s pan/zoom
+/// [Transform], which only changes how it's painted, not its layout size),
+/// against the [LayoutBuilder] constraints this sits in — [minScale] is set
+/// to exactly that fit scale, so the page never opens more zoomed-in than
+/// "see it all at once", but [maxScale] leaves room to pinch in several
+/// times past that for readability.
+class _ScaleToFitViewer extends StatefulWidget {
+  const _ScaleToFitViewer({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_ScaleToFitViewer> createState() => _ScaleToFitViewerState();
+}
+
+class _ScaleToFitViewerState extends State<_ScaleToFitViewer> {
+  final _contentKey = GlobalKey();
+  final _controller = TransformationController();
+
+  /// Never lets a huge lineup shrink to the point of being useless, and is
+  /// this state's own fallback before the first real measurement lands.
+  static const _minFitScale = 0.15;
+  double _minScale = 1.0;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _fitToScreen(BoxConstraints constraints) {
+    final renderBox =
+        _contentKey.currentContext?.findRenderObject() as RenderBox?;
+    if (renderBox == null || !renderBox.hasSize) return;
+    final size = renderBox.size;
+    if (size.width <= 0 || size.height <= 0) return;
+    // Only a floor, deliberately no ceiling: on a screen wider/taller than
+    // the table's own natural size (a desktop window), this scales UP past
+    // 1.0 to fill it — the plain `FittedBox` this replaces capped at 1.0
+    // and left the table small in the middle of the screen there.
+    final fit = math.max(
+      math.min(
+        constraints.maxWidth / size.width,
+        constraints.maxHeight / size.height,
+      ),
+      _minFitScale,
+    );
+    if ((fit - _minScale).abs() < 0.001) return;
+    setState(() {
+      _minScale = fit;
+      _controller.value = Matrix4.diagonal3Values(fit, fit, 1.0);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Deferred to right after this frame's own layout — `renderBox`
+        // above needs `child`'s size, which isn't known during `build`.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _fitToScreen(constraints);
+        });
+        return InteractiveViewer(
+          transformationController: _controller,
+          constrained: false,
+          minScale: _minScale,
+          maxScale: math.max(_minScale * 4, 3.0),
+          child: KeyedSubtree(key: _contentKey, child: widget.child),
+        );
+      },
     );
   }
 }

@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -363,8 +364,9 @@ void main() {
       expect(find.widgetWithText(AppBar, 'Zápis'), findsOneWidget);
       expect(find.byIcon(Icons.close), findsOneWidget);
       expect(find.text('580'), findsWidgets);
-      // The pushed page has no zvětšit control of its own — showHeader is
-      // suppressed there (Fix round 1: it used to stack another identical
+      // The pushed page has no zvětšit control of its own — it renders the
+      // table directly, not another embedded `LegacyScoreSheet` with its
+      // own header row (Fix round 1: it used to stack another identical
       // page on tap).
       expect(
         find.descendant(of: page, matching: find.byIcon(Icons.open_in_full)),
@@ -376,9 +378,9 @@ void main() {
         find.descendant(of: page, matching: find.text('Zápis')),
         findsOneWidget,
       );
-      // Fix round 2: the full-screen page is never scrolled, in either
-      // axis — it scales the table to fit instead (see the FittedBox
-      // group below).
+      // Fix round 2/3: the full-screen page is never scrolled, in either
+      // axis — it scales the table to fit, and lets the user pinch in from
+      // there (see the InteractiveViewer group below).
       expect(
         find.descendant(of: page, matching: find.byType(SingleChildScrollView)),
         findsNothing,
@@ -464,34 +466,107 @@ void main() {
     awayTeam: away,
   );
 
-  group('full-screen page: scale-to-fit, never scrolled (Fix round 2)', () {
-    testWidgets(
-      'a big lineup (6 pairings × 4 lanes) is scaled to fit, not scrolled '
-      'or clipped',
-      (tester) async {
-        await tester.pumpWidget(
-          MaterialApp(
-            home: LegacyScoreSheetPage(
-              slot: bigSlot,
-              result: result,
-              players: bigPlayers,
-            ),
-          ),
-        );
-        await tester.pump();
+  group('full-screen page: scale-to-fit via pinch-zoom, never scrolled '
+      '(Fix round 3)', () {
+    // A real phone-ish logical size — the review measured the round-2
+    // FittedBox regression at 360×780/411×891; this repo's other tests
+    // set screen size the same way (see test/features/players_screen_
+    // test.dart).
+    void setPhoneScreen(WidgetTester tester) {
+      tester.view.physicalSize = const Size(360, 780);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+    }
 
-        expect(tester.takeException(), isNull);
-        expect(find.byType(SingleChildScrollView), findsNothing);
-        expect(find.byType(FittedBox), findsOneWidget);
-        // FittedBox lays its child out unconstrained then scales the
-        // result — the last pairing is fully built, just shrunk to fit.
-        expect(find.text('6. Away 6'), findsOneWidget);
-      },
+    Finder scoreTableBodyFinder() => find.byWidgetPredicate(
+      (w) => w.runtimeType.toString() == '_ScoreTableBody',
     );
+
+    testWidgets('a big lineup (6 pairings × 4 lanes) on a phone screen opens '
+        'scaled DOWN to fit — no scroll, no overflow — not hardcoded 1.0×', (
+      tester,
+    ) async {
+      setPhoneScreen(tester);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: LegacyScoreSheetPage(
+            slot: bigSlot,
+            result: result,
+            players: bigPlayers,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(find.byType(SingleChildScrollView), findsNothing);
+      expect(find.byType(Scrollable), findsNothing);
+      final viewerFinder = find.byType(InteractiveViewer);
+      expect(viewerFinder, findsOneWidget);
+      // `constrained: false` lays the table out at its natural size
+      // before scaling — the last pairing is fully built, just shrunk.
+      expect(find.text('6. Away 6'), findsOneWidget);
+
+      final viewer = tester.widget<InteractiveViewer>(viewerFinder);
+      final tableSize = tester.getSize(scoreTableBodyFinder());
+      final viewportSize = tester.getSize(viewerFinder);
+      final expectedFit = math.min(
+        viewportSize.width / tableSize.width,
+        viewportSize.height / tableSize.height,
+      );
+
+      // The table (942dp wide) is genuinely bigger than a phone screen
+      // here, so the real fit is well under 1.0 — this is the actual
+      // regression: round 2's `FittedBox` produced text a few px tall
+      // on exactly this scenario.
+      expect(expectedFit, lessThan(1.0));
+      expect(viewer.minScale, closeTo(expectedFit, 0.01));
+    });
+
+    testWidgets('pinching in past the initial fit scale actually enlarges the '
+        'rendered content, not just changes a number', (tester) async {
+      setPhoneScreen(tester);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: LegacyScoreSheetPage(
+            slot: bigSlot,
+            result: result,
+            players: bigPlayers,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final viewer = tester.widget<InteractiveViewer>(
+        find.byType(InteractiveViewer),
+      );
+      final controller = viewer.transformationController!;
+      final probe = find.text('6. Away 6');
+      Size onScreenSize() {
+        final delta = tester.getBottomRight(probe) - tester.getTopLeft(probe);
+        return Size(delta.dx, delta.dy);
+      }
+
+      final beforeZoom = onScreenSize();
+
+      // Simulate a pinch past the initial fit scale (not a gesture —
+      // directly driving the same TransformationController a real
+      // pinch would update; InteractiveViewer repaints on its own
+      // ChangeNotifier, no ancestor rebuild needed).
+      final zoomedScale = math.min(viewer.maxScale, viewer.minScale * 2);
+      controller.value = Matrix4.diagonal3Values(zoomedScale, zoomedScale, 1.0);
+      await tester.pump();
+
+      final afterZoom = onScreenSize();
+      expect(afterZoom.width, greaterThan(beforeZoom.width));
+      expect(afterZoom.height, greaterThan(beforeZoom.height));
+    });
 
     testWidgets('a small lineup also renders with no scroll view', (
       tester,
     ) async {
+      setPhoneScreen(tester);
       await tester.pumpWidget(
         MaterialApp(
           home: LegacyScoreSheetPage(
@@ -501,11 +576,12 @@ void main() {
           ),
         ),
       );
-      await tester.pump();
+      await tester.pumpAndSettle();
 
       expect(tester.takeException(), isNull);
       expect(find.byType(SingleChildScrollView), findsNothing);
-      expect(find.byType(FittedBox), findsOneWidget);
+      expect(find.byType(Scrollable), findsNothing);
+      expect(find.byType(InteractiveViewer), findsOneWidget);
       expect(find.text('1. Jan Novák'), findsOneWidget);
     });
   });
