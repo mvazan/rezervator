@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -28,6 +30,7 @@ void main() {
     List<Club> clubs, {
     List<Team> teams = const [],
     FederationSync sync = FederationSync.none,
+    Stream<FederationSync>? syncStream,
     Future<void> Function(String venueSlug, bool enabled)? saveFederation,
     Future<void> Function()? discoverTeams,
     Future<void> Function()? syncNow,
@@ -40,7 +43,8 @@ void main() {
           myProfileProvider.overrideWith((ref) => Stream.value(admin)),
           clubsProvider.overrideWith((ref) => Stream.value(clubs)),
           teamsProvider.overrideWith((ref) => Stream.value(teams)),
-          federationSyncProvider.overrideWith((ref) => Stream.value(sync)),
+          federationSyncProvider
+              .overrideWith((ref) => syncStream ?? Stream.value(sync)),
         ],
         child: MaterialApp(
           home: ClubsScreen(
@@ -203,6 +207,45 @@ void main() {
           find.widgetWithText(TextField, 'tj-sokol-brno-iv'),
           'ks-devitka-brno');
       await tester.tap(find.text('Stahovat automaticky'));
+      await tester.tap(find.text('Uložit'));
+      await tester.pumpAndSettle();
+
+      expect(savedSlug, 'ks-devitka-brno');
+      expect(savedEnabled, isTrue);
+    });
+
+    testWidgets(
+        'a sync row that arrives after the first frame seeds the form; '
+        'Uložit keeps it', (tester) async {
+      final rows = StreamController<FederationSync>();
+      addTearDown(rows.close);
+      String? savedSlug;
+      bool? savedEnabled;
+      await pumpApp(
+        tester,
+        app(
+          clubs,
+          syncStream: rows.stream,
+          saveFederation: (slug, enabled) async {
+            savedSlug = slug;
+            savedEnabled = enabled;
+          },
+        ),
+      );
+
+      final saveBefore = tester.widget<FilledButton>(
+          find.widgetWithText(FilledButton, 'Uložit'));
+      expect(saveBefore.onPressed, isNull);
+
+      rows.add(const FederationSync(
+          venueSlug: 'ks-devitka-brno', enabled: true));
+      await tester.pumpAndSettle();
+
+      expect(find.widgetWithText(TextField, 'ks-devitka-brno'), findsOneWidget);
+      final toggle = tester.widget<SwitchListTile>(
+          find.widgetWithText(SwitchListTile, 'Stahovat automaticky'));
+      expect(toggle.value, isTrue);
+
       await tester.tap(find.text('Uložit'));
       await tester.pumpAndSettle();
 

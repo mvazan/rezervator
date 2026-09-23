@@ -85,8 +85,12 @@ class _FederationCardState extends ConsumerState<FederationCard> {
 
   @override
   Widget build(BuildContext context) {
-    final sync = ref.watch(federationSyncProvider).value ?? FederationSync.none;
-    _seed(sync);
+    final loaded = ref.watch(federationSyncProvider);
+    // Until the row is here the form stays disabled and unseeded — seeding
+    // defaults would stick (_seeded) and Uložit would overwrite the real row.
+    final ready = loaded.hasValue;
+    final sync = loaded.value ?? FederationSync.none;
+    if (ready) _seed(sync);
     final theme = Theme.of(context);
     return Card(
       child: Padding(
@@ -103,6 +107,7 @@ class _FederationCardState extends ConsumerState<FederationCard> {
             const SizedBox(height: 16),
             TextField(
               controller: _slug,
+              enabled: ready,
               autocorrect: false,
               decoration: const InputDecoration(
                 labelText: 'Kuželna na webu',
@@ -113,14 +118,17 @@ class _FederationCardState extends ConsumerState<FederationCard> {
               contentPadding: EdgeInsets.zero,
               title: const Text('Stahovat automaticky'),
               value: _enabled,
-              onChanged: (v) => setState(() => _enabled = v),
+              onChanged: ready ? (v) => setState(() => _enabled = v) : null,
             ),
             const SizedBox(height: 8),
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
-                FilledButton(onPressed: _save, child: const Text('Uložit')),
+                FilledButton(
+                  onPressed: ready ? _save : null,
+                  child: const Text('Uložit'),
+                ),
                 OutlinedButton(
                   onPressed: sync.configured ? _discover : null,
                   child: const Text('Načíst týmy z webu'),
@@ -136,6 +144,11 @@ class _FederationCardState extends ConsumerState<FederationCard> {
               'Poslední synchronizace: '
               '${_lastSuccessLabel(sync.lastSuccessAt)}',
             ),
+            if (loaded.hasError && !ready)
+              Text(
+                friendlyDbError(loaded.error!),
+                style: TextStyle(color: theme.colorScheme.error),
+              ),
             if (sync.lastError != null)
               Text(
                 'Chyba: ${sync.lastError}',
