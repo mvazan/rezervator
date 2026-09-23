@@ -16,6 +16,7 @@ import '../../domain/results.dart';
 import '../../domain/upcoming.dart' show matchColorOf;
 import '../schedule/my_trainings_screen.dart' show MatchTrophy;
 import 'match_detail_screen.dart';
+import 'widgets/match_video_icon.dart';
 
 class ResultsScreen extends ConsumerStatefulWidget {
   const ResultsScreen({
@@ -175,48 +176,44 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
         : pinsLabel(result.homeTotal, result.awayTotal);
 
     return ListTile(
-      leading: MatchTrophy(
-        colorId: matchColorOf(
-          slot,
-          followedTeams,
-          teamColors,
-          exceptions: exceptions,
+      leading: MatchLeading(
+        slot: slot,
+        result: result,
+        now: now,
+        linksEnabled: true,
+        fallback: MatchTrophy(
+          colorId: matchColorOf(
+            slot,
+            followedTeams,
+            teamColors,
+            exceptions: exceptions,
+          ),
         ),
+        launch: widget.launch,
       ),
       title: Text(slot.title),
       subtitle: Text(subtitle),
-      trailing: Row(
+      trailing: Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (slot.videoUrl case final url?)
-            IconButton(
-              icon: const Icon(Icons.play_circle_outline),
-              tooltip: 'Video',
-              onPressed: () => widget.launch(url),
-            ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
+          Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    points,
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  if (live)
-                    Text(
-                      ' • probíhá',
-                      style: TextStyle(color: theme.colorScheme.error),
-                    ),
-                ],
+              Text(
+                points,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
               ),
-              if (pins.isNotEmpty) Text(pins, style: theme.textTheme.bodySmall),
+              if (live)
+                Text(
+                  ' • probíhá',
+                  style: TextStyle(color: theme.colorScheme.error),
+                ),
             ],
           ),
+          if (pins.isNotEmpty) Text(pins, style: theme.textTheme.bodySmall),
         ],
       ),
       onTap: () => _openMatch(context, slot),

@@ -203,20 +203,31 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     );
   }
 
-  Widget _buttonsRow(BuildContext context, PrioritySlot slot) {
+  Widget _buttonsRow(
+    BuildContext context,
+    PrioritySlot slot,
+    MatchResult? result,
+    DateTime now,
+  ) {
     final videoUrl = slot.videoUrl;
     final siteUrl = slot.siteUrl;
     if (videoUrl == null && siteUrl == null) return const SizedBox.shrink();
+    final live = isLive(slot, result, now);
+    final recorded = result?.status == MatchStatus.finished ||
+        result?.status == MatchStatus.forfeit;
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
       child: Wrap(
         spacing: 8,
         children: [
           if (videoUrl != null)
-            OutlinedButton.icon(
+            FilledButton.icon(
               onPressed: () => widget.launch(videoUrl),
-              icon: const Icon(Icons.play_circle_outline),
-              label: const Text('Video'),
+              icon: live
+                  ? Icon(Icons.circle,
+                      size: 12, color: Theme.of(context).colorScheme.error)
+                  : const Icon(Icons.play_circle_fill),
+              label: Text(live ? 'Sledovat živě' : (recorded ? 'Záznam' : 'Video')),
             ),
           if (siteUrl != null)
             OutlinedButton.icon(
@@ -360,7 +371,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ),
-                _buttonsRow(context, slot),
+                _buttonsRow(context, slot, result, now),
                 _statsTable(context, result),
                 if (players.isEmpty)
                   const Padding(

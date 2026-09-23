@@ -224,7 +224,7 @@ void main() {
       await tester.tap(find.text('open'));
       await tester.pumpAndSettle();
 
-      final button = find.widgetWithIcon(IconButton, Icons.play_circle_outline);
+      final button = find.widgetWithIcon(IconButton, Icons.play_circle_fill);
       expect(button, findsOneWidget);
       expect(tester.widget<IconButton>(button).tooltip, 'Video');
       await tester.tap(button);
@@ -273,10 +273,13 @@ void main() {
       await tester.tap(find.text('open'));
       await tester.pumpAndSettle();
 
-      // Score/pins still render — only the tap-through and video button
-      // are gated by [interactive].
+      // Score/pins still render — only the tap-through and video control
+      // are gated by [interactive]; the leading glyph falls back to the
+      // plain trophy/block icon instead.
       expect(find.text('5 : 3'), findsOneWidget);
-      expect(find.byIcon(Icons.play_circle_outline), findsNothing);
+      expect(find.byIcon(Icons.play_circle_fill), findsNothing);
+      expect(find.byIcon(Icons.videocam), findsNothing);
+      expect(find.byIcon(Icons.emoji_events_outlined), findsOneWidget);
 
       await tester.tap(
           find.text('TJ Sokol Husovice – TJ Slovan Karlovy Vary'));

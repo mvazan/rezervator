@@ -1755,7 +1755,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(AlertDialog), findsOneWidget);
-    expect(find.byIcon(Icons.play_circle_outline), findsOneWidget);
+    expect(find.byIcon(Icons.play_circle_fill), findsOneWidget);
 
     await tester.tap(find.text('Domácí Tým – KK Hosté'));
     await tester.pumpAndSettle();
@@ -1791,7 +1791,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(AlertDialog), findsOneWidget);
-    expect(find.byIcon(Icons.play_circle_outline), findsOneWidget);
+    expect(find.byIcon(Icons.play_circle_fill), findsOneWidget);
 
     await tester.tap(find.text('Domácí Tým – KK Hosté'));
     await tester.pumpAndSettle();

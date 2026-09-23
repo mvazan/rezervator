@@ -1155,8 +1155,9 @@ void main() {
       expect(find.byType(AlertDialog), findsOneWidget);
       // The score still renders non-interactively.
       expect(find.text('5 : 3'), findsOneWidget);
-      // No video button at all.
-      expect(find.byIcon(Icons.play_circle_outline), findsNothing);
+      // No video control at all — the fallback trophy/block icon instead.
+      expect(find.byIcon(Icons.play_circle_fill), findsNothing);
+      expect(find.byIcon(Icons.videocam), findsNothing);
 
       // Tapping the match row does nothing — no tap-through, dialog stays.
       await tester.tap(find.text('Naši – Soupeř'));

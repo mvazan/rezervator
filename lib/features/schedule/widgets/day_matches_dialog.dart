@@ -18,6 +18,7 @@ import '../../../data/providers.dart';
 import '../../../domain/models.dart';
 import '../../../domain/results.dart';
 import '../../clubhouse/match_detail_screen.dart';
+import '../../clubhouse/widgets/match_video_icon.dart';
 
 /// Lists [events] (the header's own `headerEvents` — matches and blockages,
 /// no úklid children) for [date] in full. No-op when [events] is empty.
@@ -110,10 +111,17 @@ Widget _eventRow(
   final row = Row(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      Icon(
-        m.type.isMatch ? Icons.emoji_events_outlined : Icons.block,
-        size: 20,
-        color: scheme.onSurfaceVariant,
+      MatchLeading(
+        slot: m,
+        result: result,
+        now: now,
+        linksEnabled: launch != null,
+        fallback: Icon(
+          m.type.isMatch ? Icons.emoji_events_outlined : Icons.block,
+          size: 20,
+          color: scheme.onSurfaceVariant,
+        ),
+        launch: launch ?? launchWeb,
       ),
       const SizedBox(width: 10),
       Expanded(
@@ -156,12 +164,6 @@ Widget _eventRow(
           ],
         ),
       ),
-      if (launch != null && m.videoUrl != null)
-        IconButton(
-          icon: const Icon(Icons.play_circle_outline),
-          tooltip: 'Video',
-          onPressed: () => launch(m.videoUrl!),
-        ),
     ],
   );
   return Padding(

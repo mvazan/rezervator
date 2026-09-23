@@ -138,10 +138,19 @@ void main() {
         ),
         nowProvider.overrideWith((ref) => Stream.value(now)),
       ],
+      // Disables MatchLeading's pulsing ring for a live match — a repeating
+      // AnimationController never settles on its own, which would hang
+      // every pumpAndSettle below; none of these tests exercise the pulse
+      // itself (that lives in match_video_icon_test.dart).
       child: MaterialApp(
-        home: ResultsScreen(
-          refreshMatch: refreshMatch ?? (_) async => 'not_live',
-          launch: launch ?? (_) {},
+        home: Builder(
+          builder: (context) => MediaQuery(
+            data: MediaQuery.of(context).copyWith(disableAnimations: true),
+            child: ResultsScreen(
+              refreshMatch: refreshMatch ?? (_) async => 'not_live',
+              launch: launch ?? (_) {},
+            ),
+          ),
         ),
       ),
     );
@@ -254,7 +263,9 @@ void main() {
     expect(find.text('17:30 · KP1 Sever, 5. kolo · doma'), findsOneWidget);
   });
 
-  testWidgets('a video icon button launches the video url', (tester) async {
+  testWidgets(
+      'a live match shows the videocam badge (tooltip Živý přenos), which '
+      'launches the video url', (tester) async {
     final launched = <String>[];
     await tester.pumpWidget(
       app(
@@ -265,13 +276,41 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    final button = find.widgetWithIcon(IconButton, Icons.play_circle_outline);
+    final button = find.widgetWithIcon(IconButton, Icons.videocam);
     expect(button, findsOneWidget);
-    expect(tester.widget<IconButton>(button).tooltip, 'Video');
+    expect(tester.widget<IconButton>(button).tooltip, 'Živý přenos');
     await tester.tap(button);
     await tester.pumpAndSettle();
 
     expect(launched, ['https://vysledky.kuzelky.cz/video/m2']);
+  });
+
+  testWidgets(
+      'a finished match with a video shows the play_circle_fill badge '
+      '(tooltip Záznam) in place of the trophy', (tester) async {
+    final finishedWithVideo = match(
+      id: 'm6',
+      date: today.addDays(-1),
+      videoUrl: 'https://vysledky.kuzelky.cz/video/m6',
+    );
+    final finishedResultWithVideo = MatchResult.fromJson(const {
+      'match_id': 'm6',
+      'status': 'finished',
+      'home_points': 5,
+      'away_points': 3,
+      'fetched_at': '2026-09-22T21:00:00+00:00',
+    });
+    await tester.pumpWidget(
+      app(
+        slots: [finishedWithVideo],
+        results: {'m6': finishedResultWithVideo},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final button = find.widgetWithIcon(IconButton, Icons.play_circle_fill);
+    expect(button, findsOneWidget);
+    expect(tester.widget<IconButton>(button).tooltip, 'Záznam');
   });
 
   testWidgets('opening the screen with a live match refreshes it once', (

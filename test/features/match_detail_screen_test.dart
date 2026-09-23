@@ -248,9 +248,11 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Video'), findsOneWidget);
+    // finishedResult's status is 'finished' — never live — so the button
+    // reads "Záznam" (a recording), not the plain "Video" label.
+    expect(find.text('Záznam'), findsOneWidget);
     expect(find.text('Na webu ČKA'), findsOneWidget);
-    expect(find.byIcon(Icons.play_circle_outline), findsOneWidget);
+    expect(find.byIcon(Icons.play_circle_fill), findsOneWidget);
     expect(find.byIcon(Icons.open_in_new), findsOneWidget);
   });
 
@@ -263,11 +265,12 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    expect(find.text('Záznam'), findsNothing);
     expect(find.text('Video'), findsNothing);
     expect(find.text('Na webu ČKA'), findsNothing);
   });
 
-  testWidgets('the Video button launches the video url', (tester) async {
+  testWidgets('the Záznam button launches the video url', (tester) async {
     final launched = <String>[];
     await tester.pumpWidget(
       app(
@@ -284,10 +287,53 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Video'));
+    await tester.tap(find.text('Záznam'));
     await tester.pumpAndSettle();
 
     expect(launched, ['https://vysledky.kuzelky.cz/video/m1']);
+  });
+
+  testWidgets(
+      'a scheduled match with a video (not yet live) reads the plain Video '
+      'label', (tester) async {
+    await tester.pumpWidget(
+      app(
+        slots: [
+          match(
+            id: 'm1',
+            date: today.addDays(5),
+            videoUrl: 'https://vysledky.kuzelky.cz/video/m1',
+          ),
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Video'), findsOneWidget);
+    expect(find.byIcon(Icons.play_circle_fill), findsOneWidget);
+  });
+
+  testWidgets(
+      'a live match reads Sledovat živě with a small red dot, not the play '
+      'icon', (tester) async {
+    await tester.pumpWidget(
+      app(
+        matchId: 'm2',
+        slots: [
+          match(
+            id: 'm2',
+            date: today,
+            videoUrl: 'https://vysledky.kuzelky.cz/video/m2',
+          ),
+        ],
+        results: {'m2': liveResultWith()},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Sledovat živě'), findsOneWidget);
+    expect(find.byIcon(Icons.circle), findsOneWidget);
+    expect(find.byIcon(Icons.play_circle_fill), findsNothing);
   });
 
   testWidgets('freshness line reads relative to nowProvider', (tester) async {
