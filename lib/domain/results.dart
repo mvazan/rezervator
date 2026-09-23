@@ -66,6 +66,15 @@ String formatLabel(String matchType, String discipline) {
   return [?players, ?hs].join(' · ');
 }
 
+/// "právě teď" / "před N min" / "před N h" — how long ago [fetchedAt] was,
+/// for the match detail's "Výsledky z webu:" line.
+String freshnessLabel(DateTime fetchedAt, DateTime now) {
+  final diff = now.difference(fetchedAt);
+  if (diff.inMinutes < 1) return 'právě teď';
+  if (diff.inMinutes < 60) return 'před ${diff.inMinutes} min';
+  return 'před ${diff.inHours} h';
+}
+
 /// The Czech-sorted [venues] whose name, address or a club matches [query]
 /// (accent- and case-insensitive); an empty query keeps everything.
 List<Venue> venuesMatching(List<Venue> venues, String query) {

@@ -15,6 +15,7 @@ import '../../domain/models.dart';
 import '../../domain/results.dart';
 import '../../domain/upcoming.dart' show matchColorOf;
 import '../schedule/my_trainings_screen.dart' show MatchTrophy;
+import 'match_detail_screen.dart';
 
 class ResultsScreen extends ConsumerStatefulWidget {
   const ResultsScreen({
@@ -72,7 +73,7 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
   static void _openMatch(BuildContext context, PrioritySlot slot) =>
       Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => Scaffold(appBar: AppBar(title: Text(slot.title))),
+          builder: (_) => MatchDetailScreen(matchId: slot.id),
         ),
       );
 

@@ -227,6 +227,28 @@ void main() {
     });
   });
 
+  group('freshnessLabel', () {
+    final fetched = DateTime.utc(2026, 9, 23, 10, 0);
+
+    test('under a minute reads as právě teď', () {
+      expect(freshnessLabel(fetched, fetched.add(const Duration(seconds: 30))),
+          'právě teď');
+    });
+
+    test('minutes', () {
+      expect(freshnessLabel(fetched, fetched.add(const Duration(minutes: 20))),
+          'před 20 min');
+    });
+
+    test('an hour or more shows hours', () {
+      expect(freshnessLabel(fetched, fetched.add(const Duration(hours: 3))),
+          'před 3 h');
+      expect(
+          freshnessLabel(fetched, fetched.add(const Duration(minutes: 60))),
+          'před 1 h');
+    });
+  });
+
   group('venuesMatching', () {
     Venue venue({required String name, String? address, List<String> clubs = const []}) =>
         Venue.fromJson({

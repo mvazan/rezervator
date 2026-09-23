@@ -7,6 +7,7 @@ import 'package:rezervator/core/ui.dart' show dayFull;
 import 'package:rezervator/data/clock.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
+import 'package:rezervator/features/clubhouse/match_detail_screen.dart';
 import 'package:rezervator/features/clubhouse/results_screen.dart';
 
 void main() {
@@ -125,6 +126,11 @@ void main() {
           prioritySlotsLoadingProvider.overrideWithValue(false),
         ],
         matchResultsProvider.overrideWith((ref) => Stream.value(results)),
+        // MatchDetailScreen (pushed on row tap) watches these two as well.
+        matchPlayerResultsProvider.overrideWith(
+          (ref, id) => Stream.value(const []),
+        ),
+        venuesProvider.overrideWith((ref) => Stream.value(const [])),
         ourTeamsProvider.overrideWithValue(teams),
         myTeamColorsProvider.overrideWith((ref) => Stream.value(teamColors)),
         myMatchExceptionsProvider.overrideWith(
@@ -401,15 +407,16 @@ void main() {
     },
   );
 
-  testWidgets('tapping a row pushes a placeholder titled after the match', (
-    tester,
-  ) async {
+  testWidgets('tapping a row opens the match detail screen', (tester) async {
     await tester.pumpWidget(app(slots: [finishedYesterday]));
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('$veverky – $souperA'));
     await tester.pumpAndSettle();
 
+    expect(find.byType(MatchDetailScreen), findsOneWidget);
+    // No competition/round on this fixture — the title falls back to the
+    // match's own title, same as the row it was opened from.
     expect(find.widgetWithText(AppBar, '$veverky – $souperA'), findsOneWidget);
   });
 
