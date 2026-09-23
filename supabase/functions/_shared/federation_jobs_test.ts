@@ -1,6 +1,13 @@
-import { assert, assertEquals } from "jsr:@std/assert@1";
+import { assert, assertEquals, assertRejects } from "jsr:@std/assert@1";
+import { pragueEpoch } from "./cancel_token.ts";
 import type { SiteMatch } from "./federation.ts";
-import { jobOutcome, matchJobsFor, planCompetition, planTeams } from "./federation_jobs.ts";
+import {
+  jobOutcome, matchJobsFor, planCompetition, planTeams,
+  processFederationJobs, runCompetition,
+} from "./federation_jobs.ts";
+
+const fixture = (name: string) =>
+  Deno.readTextFileSync(new URL(`./fixtures/federation/${name}`, import.meta.url));
 
 const match = (over: Partial<SiteMatch> & { id: number }): SiteMatch => ({
   slug: `jihomoravska-divize-2026-2027-kolo-1-m${over.id}`, date: "2026-10-10", time: "10:00",
@@ -115,5 +122,233 @@ Deno.test("jobOutcome: rearm, stop, back off, give up", () => {
   assertEquals(jobOutcome({ error: "x" }, 2, now),
     { action: "rearm", run_at: new Date(now.getTime() + 4 * 60e3), attempts: 3 });
   assertEquals(jobOutcome({ error: "x" }, 5, now), { action: "delete" });
-  assert(true);
+});
+
+// ------------------------------------------------------- processFederationJobs
+
+type FakeJob = {
+  id: number; kind: string; attempts: number; run_at: string;
+  payload: Record<string, unknown>;
+};
+type Call =
+  | { kind: "update"; id: unknown; set: Record<string, unknown> }
+  | { kind: "delete"; id: unknown }
+  | { kind: "rpc"; name: string; args: Record<string, unknown> };
+
+/** A minimal in-memory stand-in for the `notification_jobs` slice of the
+ * Supabase query builder — just the chains processFederationJobs actually
+ * issues: `select().eq().lte().order().limit()` (the due query),
+ * `update().eq().eq().select()` (the optimistic-lock lease),
+ * `update().eq()` (the outcome re-arm, no lock) and `delete().eq()`. Mutates
+ * `jobs` in place so a test can assert on it directly after the run. */
+function fakeJobsDb(
+  jobs: FakeJob[],
+  onRpc?: (name: string, args: Record<string, unknown>) => { data: unknown; error: unknown },
+) {
+  const calls: Call[] = [];
+  function chainFor(table: string) {
+    const eqs: [string, unknown][] = [];
+    let lte: [string, unknown] | undefined;
+    let limit: number | undefined;
+    let update: Record<string, unknown> | undefined;
+    let isDelete = false;
+    let isSelect = false;
+    // deno-lint-ignore no-explicit-any
+    const chain: any = {
+      select() {
+        isSelect = true;
+        return chain;
+      },
+      eq(col: string, val: unknown) {
+        eqs.push([col, val]);
+        return chain;
+      },
+      lte(col: string, val: unknown) {
+        lte = [col, val];
+        return chain;
+      },
+      order() {
+        return chain;
+      },
+      limit(n: number) {
+        limit = n;
+        return chain;
+      },
+      update(payload: Record<string, unknown>) {
+        update = payload;
+        return chain;
+      },
+      delete() {
+        isDelete = true;
+        return chain;
+      },
+      then(onFulfilled: (v: unknown) => unknown, onRejected: (e: unknown) => unknown) {
+        return resolve().then(onFulfilled, onRejected);
+      },
+    };
+    async function resolve() {
+      if (table !== "notification_jobs") return { data: [], error: null };
+      const idEq = eqs.find(([c]) => c === "id")?.[1];
+      if (isDelete) {
+        const at = jobs.findIndex((j) => j.id === idEq);
+        if (at >= 0) jobs.splice(at, 1);
+        calls.push({ kind: "delete", id: idEq });
+        return { data: null, error: null };
+      }
+      if (update) {
+        const job = jobs.find((j) => j.id === idEq);
+        if (!job) return { data: isSelect ? [] : null, error: null };
+        const runAtEq = eqs.find(([c]) => c === "run_at")?.[1];
+        if (runAtEq !== undefined && job.run_at !== runAtEq) {
+          return { data: isSelect ? [] : null, error: null }; // lost the optimistic lock
+        }
+        Object.assign(job, update);
+        calls.push({ kind: "update", id: idEq, set: update });
+        return { data: isSelect ? [{ id: job.id }] : null, error: null };
+      }
+      const kindEq = eqs.find(([c]) => c === "kind")?.[1];
+      let rows = jobs.filter((j) => j.kind === kindEq);
+      if (lte) rows = rows.filter((j) => j.run_at <= (lte![1] as string));
+      if (limit !== undefined) rows = rows.slice(0, limit);
+      return { data: rows.map((j) => ({ ...j })), error: null };
+    }
+    return chain;
+  }
+  const db = {
+    from(table: string) {
+      return chainFor(table);
+    },
+    async rpc(name: string, args: Record<string, unknown>) {
+      calls.push({ kind: "rpc", name, args });
+      return onRpc ? onRpc(name, args) : { data: {}, error: null };
+    },
+  };
+  return { db, calls };
+}
+
+Deno.test("processFederationJobs: a successful match job is re-armed — run_at/attempts only, payload untouched", async () => {
+  const html = fixture("match_finished.html"); // FINISHED, 2026-09-16 17:30 Prague, id 4859
+  const slug = "divize-as-2026-2027-kolo-1-tj-sokol-rudna-a-muzi-tj-sokol-vrsovice-a-muzi";
+  const start = pragueEpoch("2026-09-16", "17:30") * 1000;
+  const now = new Date(start + 3600e3); // 1h after kickoff — inside T+24h, so nextCheckpoint rearms
+  const jobs: FakeJob[] = [{
+    id: 1, kind: "federation_match", attempts: 0,
+    run_at: new Date(now.getTime() - 60e3).toISOString(),
+    payload: { tenant_id: "t1", site_match_id: 4859, slug, requested_at: "2026-09-16T10:00:00.000Z" },
+  }];
+  const { db, calls } = fakeJobsDb(jobs);
+  const fetched: string[] = [];
+  const get = async (path: string) => {
+    fetched.push(path);
+    return html;
+  };
+
+  await processFederationJobs(db, get, now);
+
+  assertEquals(fetched, [`/detail-zapasu/${slug}`]);
+  assertEquals(jobs[0].attempts, 0);
+  assertEquals(jobs[0].run_at, new Date(start + 24 * 3600e3).toISOString());
+  assertEquals(jobs[0].payload.requested_at, "2026-09-16T10:00:00.000Z"); // untouched
+  const writes = calls.filter((c) => c.kind === "update" && c.id === 1) as
+    { kind: "update"; id: unknown; set: Record<string, unknown> }[];
+  assert(writes.length > 0);
+  for (const w of writes) assertEquals(Object.keys(w.set).sort(), ["attempts", "run_at"]);
+});
+
+Deno.test("processFederationJobs: a job past MAX_ATTEMPTS is deleted without fetching", async () => {
+  const jobs: FakeJob[] = [{
+    id: 2, kind: "federation_match", attempts: 6, // > MAX_ATTEMPTS (5)
+    run_at: new Date(Date.now() - 60e3).toISOString(),
+    payload: { tenant_id: "t1", site_match_id: 1, slug: "x" },
+  }];
+  const { db } = fakeJobsDb(jobs);
+  let fetched = false;
+  const get = async () => {
+    fetched = true;
+    return "";
+  };
+
+  await processFederationJobs(db, get, new Date());
+
+  assert(!fetched);
+  assertEquals(jobs.length, 0);
+});
+
+Deno.test("processFederationJobs: a failing job backs off from its attempts and records the error", async () => {
+  const now = new Date("2026-10-10T06:00:00Z");
+  const jobs: FakeJob[] = [{
+    id: 3, kind: "federation_match", attempts: 2,
+    run_at: new Date(now.getTime() - 60e3).toISOString(),
+    payload: { tenant_id: "t1", site_match_id: 1, slug: "boom" },
+  }];
+  const { db, calls } = fakeJobsDb(jobs);
+  const get = async () => {
+    throw new Error("network down");
+  };
+
+  await processFederationJobs(db, get, now);
+
+  assertEquals(jobs[0].attempts, 3);
+  assertEquals(jobs[0].run_at, new Date(now.getTime() + 4 * 60e3).toISOString());
+  const recorded = calls.find((c) => c.kind === "rpc" && c.name === "record_federation_run") as
+    { kind: "rpc"; name: string; args: Record<string, unknown> } | undefined;
+  assert(recorded);
+  assertEquals(recorded!.args.p_error, "federation_match: network down");
+});
+
+Deno.test("processFederationJobs: a zero budget leases nothing", async () => {
+  const jobs: FakeJob[] = [{
+    id: 4, kind: "federation_match", attempts: 0,
+    run_at: new Date(Date.now() - 60e3).toISOString(),
+    payload: { tenant_id: "t1", site_match_id: 1, slug: "x" },
+  }];
+  const before = JSON.parse(JSON.stringify(jobs));
+  const { db, calls } = fakeJobsDb(jobs);
+  let fetched = false;
+  const get = async () => {
+    fetched = true;
+    return "";
+  };
+
+  await processFederationJobs(db, get, new Date(), 0);
+
+  assert(!fetched);
+  assertEquals(jobs, before);
+  assertEquals(calls.length, 0);
+});
+
+// ------------------------------------------------------------- runCompetition
+
+Deno.test("runCompetition: throws when the site ignores ?round= and re-serves the current round", async () => {
+  const html = fixture("competition_round_finished.html"); // currentRound 1, roundIds.length >= 20
+  // deno-lint-ignore no-explicit-any
+  const chain: any = {
+    select() {
+      return chain;
+    },
+    eq() {
+      return chain;
+    },
+    like() {
+      return chain;
+    },
+    then(onFulfilled: (v: unknown) => unknown) {
+      return Promise.resolve({ data: [], error: null }).then(onFulfilled);
+    },
+  };
+  const db = {
+    from() {
+      return chain;
+    },
+    async rpc() {
+      return { data: {}, error: null };
+    },
+  };
+  const get = async (_path: string) => html; // always the round-1 page, whatever ?round= asks for
+
+  await assertRejects(
+    () => runCompetition(db, get, "t1", "jihomoravska-divize-2026-2027", new Date()),
+    Error,
+    "round",
+  );
 });

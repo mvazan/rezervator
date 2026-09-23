@@ -195,7 +195,13 @@ export async function runCompetition(db: Db, get: Fetcher, tenantId: string, slu
   const pages = [first];
   for (const id of first.roundIds) {
     if (id !== first.currentRound) {
-      pages.push(parseCompetition(await get(`/detail-souteze/${slug}?round=${id}`)));
+      const page = parseCompetition(await get(`/detail-souteze/${slug}?round=${id}`));
+      // A site that ignores ?round= and always serves the current round would
+      // otherwise silently drop every other round from p_matches — and
+      // apply_federation_matches reads a missing round as "withdrawn", deleting
+      // its future slots. Fail the job instead.
+      if (page.currentRound !== id) throw new Error(`round ${id} not served`);
+      pages.push(page);
     }
   }
   const matches = pages.flatMap((p) => p.matches);
@@ -253,14 +259,55 @@ async function runJob(db: Db, get: Fetcher, kind: string, job: Job, now: Date): 
     String(job.payload.slug), now);
 }
 
-export async function processFederationJobs(db: Db, get: Fetcher, now = new Date()) {
+/** Runs a DB write that must not blow up the job it's cleaning up after: any
+ * thrown error or returned `{ error }` is logged and swallowed. Used for the
+ * three writes that happen once a job's outcome is already decided (delete,
+ * re-arm, record_federation_run on failure) — none of them should turn a
+ * handled job failure into an unhandled one. */
+async function logged(
+  label: string,
+  op: () => Promise<{ error?: unknown } | void | null | undefined>,
+): Promise<void> {
+  try {
+    const res = await op();
+    if (res && typeof res === "object" && "error" in res && res.error) {
+      console.error(`${label} failed:`, { error: res.error });
+    }
+  } catch (error) {
+    console.error(`${label} failed:`, { error });
+  }
+}
+
+/** Cron entry point. `budgetMs` (default 60s, the edge function's rough time
+ * budget for this part of the tick) stops LEASING new jobs — already-leased
+ * jobs in the current concurrency batch still run to completion. A budget of
+ * 0 leases nothing, which is what makes it testable: `Date.now() - started`
+ * is compared with `>=`, not `>`, so the very first check already stops the
+ * run rather than racing the clock's millisecond resolution. */
+export async function processFederationJobs(
+  db: Db, get: Fetcher, now = new Date(), budgetMs = 60_000,
+) {
+  const started = Date.now();
+  const overBudget = () => Date.now() - started >= budgetMs;
   for (const [kind, limit] of LIMITS) {
+    if (overBudget()) break;
     const due = must(await db.from("notification_jobs").select("id, payload, attempts, run_at")
       .eq("kind", kind).lte("run_at", now.toISOString()).order("run_at").limit(limit)) as Job[];
     const leased: Job[] = [];
     for (const job of due) {
+      if (overBudget()) break;
+      // A job that has been leased this many times without ever reaching
+      // jobOutcome's own give-up check (attempts >= MAX_ATTEMPTS, only seen
+      // on a caught failure) was killed mid-run by the runtime, repeatedly —
+      // leasing counts as an attempt precisely so this can't loop forever.
+      if (job.attempts > MAX_ATTEMPTS) {
+        console.error(`job ${kind}/${job.id} exceeded ${MAX_ATTEMPTS} attempts without finishing, deleting`);
+        await logged(`delete stale ${kind}/${job.id}`, () =>
+          db.from("notification_jobs").delete().eq("id", job.id));
+        continue;
+      }
       const { data } = await db.from("notification_jobs")
-        .update({ run_at: new Date(now.getTime() + LEASE_MS).toISOString() })
+        .update({ run_at: new Date(Date.now() + LEASE_MS).toISOString(), attempts: job.attempts + 1 })
         .eq("id", job.id).eq("run_at", job.run_at).select("id");
       if (data?.length) leased.push(job);
     }
@@ -273,17 +320,20 @@ export async function processFederationJobs(db: Db, get: Fetcher, now = new Date
           const message = error instanceof Error ? error.message : String(error);
           console.error(`job ${kind}/${job.id} failed:`, message);
           outcome = jobOutcome({ error: message }, job.attempts, now);
-          await db.rpc("record_federation_run", {
-            p_tenant: String(job.payload.tenant_id), p_key: kind, p_report: null,
-            p_error: `${kind}: ${message}`,
-          });
+          await logged(`record_federation_run ${kind}/${job.id}`, () =>
+            db.rpc("record_federation_run", {
+              p_tenant: String(job.payload.tenant_id), p_key: kind, p_report: null,
+              p_error: `${kind}: ${message}`,
+            }));
         }
         if (outcome.action === "delete") {
-          await db.from("notification_jobs").delete().eq("id", job.id);
+          await logged(`delete ${kind}/${job.id}`, () =>
+            db.from("notification_jobs").delete().eq("id", job.id));
         } else {
-          await db.from("notification_jobs")
-            .update({ run_at: outcome.run_at.toISOString(), attempts: outcome.attempts })
-            .eq("id", job.id);
+          await logged(`rearm ${kind}/${job.id}`, () =>
+            db.from("notification_jobs")
+              .update({ run_at: outcome.run_at.toISOString(), attempts: outcome.attempts })
+              .eq("id", job.id));
         }
       }));
     }
