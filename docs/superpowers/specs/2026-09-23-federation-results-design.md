@@ -78,7 +78,7 @@ KP2 `T100` × 4. Nikde se nezadává ručně.
 
 Unique `(tenant_id, name)` a `(tenant_id, site_slug)`. RLS: select
 schválení a kiosk tenantu; zápis jen RPC pro správce (`update_team` —
-název, oddíl, aktivita; `delete_team`). Přejmenování týmu **nepřepisuje**
+název, oddíl, aktivita; mazat netřeba — vypnutý tým se nesynchronizuje). Přejmenování týmu **nepřepisuje**
 stávající zápasy ani výběry hráčů; nový název se projeví od další
 synchronizace (správce to vidí v nápovědě dialogu).
 
@@ -86,13 +86,15 @@ synchronizace (správce to vidí v nápovědě dialogu).
 
 PK `tenant_id`; `venue_slug text`, `enabled bool default false`,
 `last_run_at`, `last_success_at`, `last_error text`, `last_report jsonb`.
-Select schválení; zápis RPC `set_federation_sync(venue_slug, enabled)`
+Select správce; zápis RPC `set_federation_sync(venue_slug, enabled)`
 (správce); ostatní sloupce jen server.
 
 ### `priority_slots` — nové sloupce
 
 `video_url text`, `competition text`, `round smallint`, `site_slug text`
-(odkaz „Na webu ČKA"), `site_match_id int`. Trigger `hand_edited` (0038)
+(odkaz „Na webu ČKA"), `site_match_id int`, `venue text`, `venue_slug text` (kuželna z detailu
+zápasu — jakmile je známá, rozhoduje o doma/venku a doplní se do popisu).
+Trigger `hand_edited` (0038)
 se nemění: nové sloupce v jeho porovnání nejsou, sync je smí přepsat
 vždy. Veřejný přehled (0043) je vydává dál (veřejná data svazu); hlídač
 klíčů v `tenancy_rls.sql` se rozšíří.
@@ -102,7 +104,7 @@ klíčů v `tenancy_rls.sql` se rozšíří.
 PK `match_id → priority_slots(id) on delete cascade`, `tenant_id`,
 `status` (`scheduled | preparation | in_progress | finished | forfeit`),
 `match_type`, `discipline`, a pro obě strany (`home_*`, `away_*`):
-`points numeric`, `total int`, `full int`, `spare int`, `errors int`,
+`points numeric`, `total int`, `fulls int`, `spares int`, `errors int`,
 `set_points numeric`; `fetched_at timestamptz`. Select schválení a kiosk;
 zápis jen server. V `supabase_realtime`.
 
@@ -110,9 +112,10 @@ zápis jen server. V `supabase_realtime`.
 
 `id`, `match_id → priority_slots cascade`, `tenant_id`, `side` (`home |
 away`), `position smallint`, `player_name`, `player_site_id int`,
-`player_slug`, `full`, `spare`, `errors`, `total`, `set_points numeric`,
-`team_points numeric`, `lanes jsonb` (`[{lane, full, spare, errors,
-total, setPoints}]`), `replaced_player_name text` (střídání). Při každém
+`player_slug`, `fulls`, `spares`, `errors`, `total`, `set_points numeric`,
+`team_points numeric`, `lanes jsonb` (`[{lane, fulls, spares, errors,
+total, setPoints}]`). Střídání web zatím nevyplňuje (tvar neznáme) —
+neukládá se. (`full` je v Postgresu rezervované slovo.) Při každém
 stažení se hráči zápasu nahradí celí (delete + insert v jedné transakci —
 tady to nevadí, nic na ně neodkazuje). RLS jako `match_results`,
 v `supabase_realtime`.
@@ -206,9 +209,8 @@ příchozí provoz, do egressu se nepočítá.
 
 ## Appka — PR A (Správa)
 
-- Modely `Team`, `FederationSync`, `MatchResult`, `MatchPlayerResult`;
-  `PrioritySlot` + `videoUrl`, `competition`, `round`, `siteSlug`,
-  `siteMatchId`.
+- Modely `Team`, `FederationSync` (`MatchResult`, `MatchPlayerResult` a
+  nová pole `PrioritySlot` přijdou s PR B, kde se čtou).
 - `teamsProvider`, `federationSyncProvider` (živé řádky jako ostatní),
   API pro RPC výše, reset při přepnutí tenantu. `ourTeamsProvider` bere
   aktivní týmy z `teams`; prázdná tabulka → dnešní odvození ze zápasů.
@@ -247,4 +249,5 @@ týmy“, zkontrolovat názvy, „Synchronizovat teď“ a ověřit report
 - Dorost Husovic na webu zatím není — jeho `rozpis:` řádky zůstávají,
   sync je nemaže, upravují se ručně.
 - Statistiky hráčů (data na ně jsou připravená).
+- Střídání hráčů v zápase.
 - Přejmenování týmu napříč výběry hráčů (`followed_teams` atd.).
