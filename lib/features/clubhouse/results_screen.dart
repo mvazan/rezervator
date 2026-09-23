@@ -39,32 +39,16 @@ class ResultsScreen extends ConsumerStatefulWidget {
 }
 
 class _ResultsScreenState extends ConsumerState<ResultsScreen> {
-  bool _mine = false;
   String? _team;
-  bool _filterTouched = false;
   bool _scrolledToToday = false;
   bool _didLiveRefreshCheck = false;
   final Map<Day, GlobalKey> _dayKeys = {};
 
   GlobalKey _keyFor(Day day) => _dayKeys.putIfAbsent(day, GlobalKey.new);
 
-  void _selectMine() => setState(() {
-    _filterTouched = true;
-    _mine = true;
-    _team = null;
-  });
+  void _selectAll() => setState(() => _team = null);
 
-  void _selectAll() => setState(() {
-    _filterTouched = true;
-    _mine = false;
-    _team = null;
-  });
-
-  void _selectTeam(String team) => setState(() {
-    _filterTouched = true;
-    _mine = false;
-    _team = team;
-  });
+  void _selectTeam(String team) => setState(() => _team = team);
 
   static String _dayLabel(Day date, Day today) {
     if (date == today) return 'Dnes';
@@ -113,27 +97,15 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
     );
   }
 
-  Widget _filterChips(
-    bool mineAvailable,
-    bool effectiveMine,
-    List<String> teams,
-  ) {
+  Widget _filterChips(List<String> teams) {
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       child: Row(
         children: [
-          if (mineAvailable) ...[
-            ChoiceChip(
-              label: const Text('Moje'),
-              selected: effectiveMine && _team == null,
-              onSelected: (_) => _selectMine(),
-            ),
-            const SizedBox(width: 8),
-          ],
           ChoiceChip(
             label: const Text('Vše'),
-            selected: !effectiveMine && _team == null,
+            selected: _team == null,
             onSelected: (_) => _selectAll(),
           ),
           for (final team in teams) ...[
@@ -233,9 +205,6 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
     final exceptions =
         ref.watch(myMatchExceptionsProvider).value ?? const <String, bool>{};
 
-    final mineAvailable = followedTeams.isNotEmpty;
-    final effectiveMine = _filterTouched ? _mine : mineAvailable;
-
     final anyFederationMatches = resultsTimeline(
       slots: slots,
       mineOnly: false,
@@ -246,9 +215,9 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
     final days = resultsTimeline(
       slots: slots,
       team: _team,
-      mineOnly: effectiveMine,
-      followedTeams: followedTeams,
-      exceptions: exceptions,
+      mineOnly: false,
+      followedTeams: const [],
+      exceptions: const {},
     );
 
     // Once per screen lifetime, past the first real snapshot of BOTH inputs
@@ -268,10 +237,17 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
       }
     }
 
-    final todayIdx = todayIndex(days, today);
-    if (!slotsLoading && !_scrolledToToday && todayIdx >= 0) {
+    // Waits for resultsAsync.hasValue too (not just slots): recentResultsIndex
+    // reads `results`, so latching this on the pre-stream `{}` snapshot would
+    // scroll to todayIndex's fallback and never revisit once the real
+    // results (and any decided match) arrive.
+    final scrollIdx = recentResultsIndex(days, results, today);
+    if (!slotsLoading &&
+        resultsAsync.hasValue &&
+        !_scrolledToToday &&
+        scrollIdx >= 0) {
       _scrolledToToday = true;
-      final key = _keyFor(days[todayIdx].day);
+      final key = _keyFor(days[scrollIdx].day);
       WidgetsBinding.instance.addPostFrameCallback((_) {
         final ctx = key.currentContext;
         if (ctx != null) {
@@ -284,7 +260,7 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
       appBar: AppBar(title: const Text('Výsledky')),
       body: Column(
         children: [
-          _filterChips(mineAvailable, effectiveMine, ourTeams),
+          _filterChips(ourTeams),
           Expanded(
             child: slotsLoading
                 ? const Center(child: CircularProgressIndicator())

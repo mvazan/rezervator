@@ -156,28 +156,10 @@ void main() {
     );
   }
 
-  testWidgets('Moje is selected by default when the player follows a team', (
+  testWidgets('Vše is selected by default, whatever the player follows', (
     tester,
   ) async {
     await tester.pumpWidget(app(slots: [finishedYesterday]));
-    await tester.pumpAndSettle();
-
-    final moje = tester.widget<ChoiceChip>(
-      find.widgetWithText(ChoiceChip, 'Moje'),
-    );
-    expect(moje.selected, isTrue);
-    final vse = tester.widget<ChoiceChip>(
-      find.widgetWithText(ChoiceChip, 'Vše'),
-    );
-    expect(vse.selected, isFalse);
-  });
-
-  testWidgets('Vše is selected by default when the player follows no team', (
-    tester,
-  ) async {
-    await tester.pumpWidget(
-      app(profile: meFollowsNothing, slots: [finishedYesterday]),
-    );
     await tester.pumpAndSettle();
 
     expect(find.widgetWithText(ChoiceChip, 'Moje'), findsNothing);
@@ -203,11 +185,8 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    // The default follows the player's own team (veverky), which hides
-    // otherTeamMatch — switch to Vše first to see the whole season.
-    await tester.tap(find.widgetWithText(ChoiceChip, 'Vše'));
-    await tester.pumpAndSettle();
-
+    // The default is already Vše — the whole season shows with no filter
+    // tap needed.
     expect(find.text('$veverky – $souperA'), findsOneWidget);
     expect(find.text('$souperA – $souperB'), findsOneWidget);
 
@@ -417,14 +396,14 @@ void main() {
   });
 
   testWidgets(
-    'scrolls so today\'s header is visible with earlier finished days '
+    'with nothing decided yet, scrolls to today\'s header with earlier days '
     'scrolled above',
     (tester) async {
-      // A couple of finished days behind today, and plenty of scheduled ones
-      // ahead — that way there is enough content BELOW today's row for the
-      // scroll to actually reach top alignment instead of clamping at the
-      // list's own end (which would leave today's header lower on screen,
-      // still visible but not pinned to the top).
+      // A couple of scheduled (undecided) days behind today, and plenty of
+      // scheduled ones ahead — that way there is enough content BELOW
+      // today's row for the scroll to actually reach top alignment instead
+      // of clamping at the list's own end (which would leave today's header
+      // lower on screen, still visible but not pinned to the top).
       final pastMatches = [
         for (var i = 2; i >= 1; i--)
           match(id: 'past$i', date: today.addDays(-i)),
@@ -446,6 +425,41 @@ void main() {
       expect(earliestHeader.dy, lessThan(0));
       // Aligned to the top of the scrollable area, just below chips/app bar.
       expect(todayHeader.dy, inInclusiveRange(0, 200));
+    },
+  );
+
+  testWidgets(
+    'with a decided past match, scrolls to ITS day, not today\'s',
+    (tester) async {
+      // today-2 is decided (finished); today-1 and today itself are still
+      // undecided (scheduled) — recentResultsIndex must land on today-2's
+      // header, not on 'Dnes'.
+      final decidedDay = today.addDays(-2);
+      final pastMatches = [
+        for (var i = 2; i >= 1; i--) match(id: 'past$i', date: today.addDays(-i)),
+      ];
+      final futureMatches = [
+        for (var i = 1; i <= 10; i++)
+          match(id: 'future$i', date: today.addDays(i)),
+      ];
+      final decidedResult = MatchResult.fromJson(const {
+        'match_id': 'past2',
+        'status': 'finished',
+        'home_points': 5,
+        'away_points': 3,
+        'fetched_at': '2026-09-20T21:00:00+00:00',
+      });
+      await tester.pumpWidget(
+        app(
+          slots: [...pastMatches, liveToday, ...futureMatches],
+          results: {'past2': decidedResult},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final decidedHeader = tester.getTopLeft(find.text(dayFull(decidedDay)));
+      // Aligned to the top of the scrollable area, just below chips/app bar.
+      expect(decidedHeader.dy, inInclusiveRange(0, 200));
     },
   );
 

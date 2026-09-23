@@ -257,6 +257,74 @@ void main() {
     });
   });
 
+  group('recentResultsIndex', () {
+    const matchType =
+        PrioritySlotType(id: 'match-type', name: 'Zápas', isMatch: true);
+    final typeById = {'match-type': matchType};
+
+    PrioritySlot slotOf(String id) => PrioritySlot.fromJson({
+          'id': id,
+          'date': '2026-09-20',
+          'starts_at': '10:00:00',
+          'ends_at': '10:00:00',
+          'type_id': 'match-type',
+          'home_team': 'A',
+          'away_team': 'B',
+          'description': '',
+          'import_key': 'cka:1',
+        }, typeById);
+
+    ({Day day, List<PrioritySlot> matches}) dayOf(String d, List<String> ids) =>
+        (day: Day.parse(d), matches: [for (final id in ids) slotOf(id)]);
+
+    MatchResult resultOf(String status) => MatchResult.fromJson({
+          'match_id': 'x',
+          'status': status,
+          'fetched_at': '2026-09-20T09:00:00+00:00',
+        });
+
+    test('a finished match before today wins over a later day that is '
+        'merely today with no result yet', () {
+      final days = [
+        dayOf('2026-09-20', ['a']),
+        dayOf('2026-09-27', ['b']),
+      ];
+      final results = {'a': resultOf('finished')};
+      expect(recentResultsIndex(days, results, Day.parse('2026-09-27')), 0);
+    });
+
+    test('the LAST decided day wins when several qualify', () {
+      final days = [
+        dayOf('2026-09-13', ['a']),
+        dayOf('2026-09-20', ['b']),
+        dayOf('2026-09-27', ['c']),
+      ];
+      final results = {
+        'a': resultOf('finished'),
+        'b': resultOf('forfeit'),
+      };
+      expect(recentResultsIndex(days, results, Day.parse('2026-09-27')), 1);
+    });
+
+    test('falls back to todayIndex when nothing is decided', () {
+      final days = [
+        dayOf('2026-09-20', ['a']),
+        dayOf('2026-09-27', ['b']),
+      ];
+      expect(recentResultsIndex(days, const {}, Day.parse('2026-09-25')), 1);
+    });
+
+    test('a decided match strictly after today is never picked', () {
+      final days = [
+        dayOf('2026-09-20', ['a']),
+        dayOf('2026-10-04', ['b']),
+      ];
+      final results = {'b': resultOf('finished')};
+      // Nothing decided at/before today, so this falls back to todayIndex.
+      expect(recentResultsIndex(days, results, Day.parse('2026-09-25')), 1);
+    });
+  });
+
   group('freshnessLabel', () {
     final fetched = DateTime.utc(2026, 9, 23, 10, 0);
 
