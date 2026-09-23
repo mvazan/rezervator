@@ -110,7 +110,7 @@ List<({Day day, List<PrioritySlot> matches})> resultsTimeline({
         matches: byDay[day]!
           ..sort((a, b) {
             final byStart = a.startsAt.compareTo(b.startsAt);
-            return byStart != 0 ? byStart : a.title.compareTo(b.title);
+            return byStart != 0 ? byStart : compareCzech(a.title, b.title);
           }),
       ),
   ];
