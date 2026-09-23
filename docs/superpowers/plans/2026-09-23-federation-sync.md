@@ -2022,6 +2022,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ## Deployment notes (not part of the tasks — for the PR description)
 
-1. Deploy `notify` first (old builds delete unknown job kinds), then `supabase db push`.
+1. Merge → `deploy-backend.yml` runs `supabase db push` and then deploys the functions. The minute in between (old `notify`, which logs and drops unknown job kinds, against 0045) is harmless: federation jobs only come from the admin RPCs or the 01:00 UTC nightly cron, both only for a tenant with the sync enabled. So: wait until the workflow has deployed `notify`, only then enable the sync.
 2. Správa → Oddíly: Uložit `tj-sokol-brno-iv` + zapnout, „Načíst týmy z webu“, zkontrolovat názvy/oddíly, „Synchronizovat teď“.
-3. Check `federation_sync.last_report` (rekeyed vs inserted) and that followers got no duplicate Google Calendar events.
+3. Check `federation_sync.last_report` with the SQL snippet in `docs/SCHEMA.md` (Výsledkový servis ČKA → "After the first run"): per competition `rekeyed` vs `inserted`, any `error`, and every `legacy_unpaired` entry (an old `rozpis:` row the sync did not take over — resolve by hand). Confirm followers got no duplicate Google Calendar events and played matches stayed in their calendars.
+4. Deactivating a team stops its sync; its future matches disappear on the next sync of its competition only while another active team keeps that competition synced — otherwise they stay.
