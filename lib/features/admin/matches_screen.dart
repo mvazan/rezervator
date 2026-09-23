@@ -35,9 +35,9 @@ class MatchesScreen extends ConsumerWidget {
       ),
       subtitle: switch ([
         // Whose row this is: the federation's own results service, the old
-        // Google-script schedule import, or the admin's own. A scheduled
-        // match the admin corrected says so — the next import skips it
-        // (0038).
+        // xlsx schedule import (tool/import_matches.py, since retired), or
+        // the admin's own. A scheduled match the admin corrected says so —
+        // the next import skips it (0038).
         if (slot.imported)
           '${slot.importKey!.startsWith('cka:') ? 'ze svazu' : 'z rozpisu'}'
           '${slot.handEdited ? ' · upraveno ručně' : ''}',
