@@ -18,8 +18,8 @@ import '../../../data/providers.dart';
 import '../../../domain/models.dart';
 import '../../../domain/results.dart';
 import '../../clubhouse/match_detail_screen.dart';
+import '../../clubhouse/widgets/match_title.dart';
 import '../../clubhouse/widgets/match_video_icon.dart';
-import '../../clubhouse/widgets/score_label.dart';
 
 /// Lists [events] (the header's own `headerEvents` — matches and blockages,
 /// no úklid children) for [date] in full. No-op when [events] is empty.
@@ -107,7 +107,7 @@ Widget _eventRow(
   VoidCallback? onOpen,
 ) {
   final showScore = hasScoreData(result);
-  final live = showScore && result!.status == MatchStatus.inProgress;
+  final winner = showScore ? winningSide(result!.homePoints, result.awayPoints) : null;
   final pins =
       result == null ? '' : pinsLabel(result.homeTotal, result.awayTotal);
   final row = Row(
@@ -131,25 +131,23 @@ Widget _eventRow(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (!showScore)
-              Text(m.title, style: theme.textTheme.titleSmall)
+              MatchTitle(slot: m, style: theme.textTheme.titleSmall)
             else
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(
-                    child: Text(m.title, style: theme.textTheme.titleSmall),
+                    child: MatchTitle(
+                      slot: m,
+                      winner: winner,
+                      style: theme.textTheme.titleSmall,
+                    ),
                   ),
                   const SizedBox(width: 8),
-                  ScoreLabel(
-                    home: result!.homePoints,
-                    away: result.awayPoints,
+                  Text(
+                    pointsLabel(result!.homePoints, result.awayPoints),
                     style: theme.textTheme.titleSmall,
                   ),
-                  if (live)
-                    Text(
-                      ' • probíhá',
-                      style: TextStyle(color: scheme.error),
-                    ),
                 ],
               ),
             Text(

@@ -15,7 +15,6 @@ import '../../domain/models.dart';
 import '../../domain/results.dart';
 import 'venue_detail_screen.dart';
 import 'widgets/match_players.dart';
-import 'widgets/score_label.dart';
 
 class MatchDetailScreen extends ConsumerStatefulWidget {
   const MatchDetailScreen({
@@ -128,8 +127,17 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
         : pointsLabel(result.homeSetPoints, result.awaySetPoints);
     final venue = slot.venue;
     final winner = winningSide(result?.homePoints, result?.awayPoints);
+    // Matches the SAME base style the plain (unwon) name renders in — the
+    // Card's own Material sets the ambient DefaultTextStyle to bodyMedium
+    // for this subtree, which is what an unstyled `Text(slot.awayTeam)`
+    // actually resolves to — rather than bodyLarge's bigger size, so the
+    // winner reads bold at the same baseline as the loser, not bigger. (Not
+    // `DefaultTextStyle.of(context)`: `context` here is `_headerCard`'s own
+    // parameter — this State's outer context, ABOVE the Scaffold/Card it
+    // builds — so it resolves to the app-root ambient style, not the one
+    // actually in effect where the Text widgets below render.)
     final teamNameStyle =
-        theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.bold);
+        theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold);
     return Card(
       margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
       child: Padding(
@@ -153,9 +161,8 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
                 ),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: ScoreLabel(
-                    home: result?.homePoints,
-                    away: result?.awayPoints,
+                  child: Text(
+                    pointsLabel(result?.homePoints, result?.awayPoints),
                     style: theme.textTheme.headlineSmall,
                   ),
                 ),

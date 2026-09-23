@@ -61,6 +61,8 @@ void main() {
     List<PrioritySlot> slots = const [],
     Map<String, int> teamColors = const <String, int>{},
     Stream<List<Reservation>>? reservationsStream,
+    Stream<Profile>? profileStream,
+    Stream<Map<String, bool>>? exceptionsStream,
     Future<void> Function(String id)? cancel,
     VoidCallback? onOpenCalendar,
     bool slotsLoading = false,
@@ -72,7 +74,8 @@ void main() {
   }) {
     return ProviderScope(
       overrides: [
-        myProfileProvider.overrideWith((ref) => Stream.value(profile)),
+        myProfileProvider.overrideWith(
+            (ref) => profileStream ?? Stream.value(profile)),
         myActiveReservationsProvider.overrideWith(
             (ref) => reservationsStream ?? Stream.value(reservations)),
         timeBlocksProvider.overrideWith((ref) => Stream.value(const [b1])),
@@ -84,7 +87,8 @@ void main() {
         prioritySlotsFailedProvider.overrideWithValue(slotsFailed),
         nowProvider.overrideWith((ref) => Stream.value(nowOverride ?? now)),
         myTeamColorsProvider.overrideWith((ref) => Stream.value(teamColors)),
-        myMatchExceptionsProvider.overrideWith((ref) => Stream.value(exceptions)),
+        myMatchExceptionsProvider.overrideWith(
+            (ref) => exceptionsStream ?? Stream.value(exceptions)),
         matchResultsProvider.overrideWith((ref) => Stream.value(results)),
         myCalendarLinkProvider.overrideWith((ref) => Stream.value(
               trainingColorId == null
@@ -200,6 +204,73 @@ void main() {
     expect(todayHeader.dy, inInclusiveRange(0, 200));
   });
 
+  testWidgets(
+      'the scroll waits for the profile stream too, not just slots — a '
+      'reservations-only partial list must not lock in the scroll target',
+      (tester) async {
+    // Matches need `teams` (from myProfileProvider) to be on the list at
+    // all — while the profile stream is still pending, `days` only has the
+    // reservation (today+5), a single day whose own "scroll" is a no-op
+    // (nothing to scroll past). If that no-op latches `_scrolledToUpcoming`
+    // regardless, the PAST matches below (today-10..-1, needing `teams`
+    // too — plenty of them, so an un-rescrolled offset leaves "Zítra" well
+    // outside the top of the viewport, not just a few px off) later arrive
+    // ABOVE it with no re-scroll to push them out of view — so "Zítra"
+    // (today+1, the real first upcoming day) ends up hidden below the fold
+    // instead of at the top.
+    final pastMatches = [
+      for (var i = 10; i >= 1; i--)
+        PrioritySlot(
+          id: 'past$i',
+          date: today.addDays(-i),
+          startsAt: const HourMinute(18, 30),
+          endsAt: const HourMinute(21, 30),
+          type: PrioritySlot.fallbackMatchType,
+          homeTeam: 'SKK Veverky Brno A',
+          awayTeam: 'KK MS Brno D',
+          importKey: 'cka:past$i',
+        ),
+    ];
+    final upcomingMatches = [
+      for (var i = 1; i <= 3; i++)
+        PrioritySlot(
+          id: 'upcoming$i',
+          date: today.addDays(i),
+          startsAt: const HourMinute(18, 30),
+          endsAt: const HourMinute(21, 30),
+          type: PrioritySlot.fallbackMatchType,
+          homeTeam: 'SKK Veverky Brno A',
+          awayTeam: 'KK MS Brno D',
+          importKey: 'cka:upcoming$i',
+        ),
+    ];
+    final profileCtrl = StreamController<Profile>();
+    addTearDown(profileCtrl.close);
+    await tester.pumpWidget(app(
+      reservations: [res('r1', today.addDays(5))],
+      slots: [...pastMatches, ...upcomingMatches],
+      profileStream: profileCtrl.stream,
+    ));
+    await tester.pump();
+
+    // Profile still pending: only the reservation's day is on the list.
+    expect(find.text(dayFull(today.addDays(5))), findsOneWidget);
+
+    profileCtrl.add(me); // delivers teams: ['SKK Veverky Brno A']
+    await tester.pumpAndSettle();
+
+    // Now the real, earlier upcoming day (today+1, labelled "Zítra") is the
+    // correct scroll target — proving the scroll waited for the profile
+    // stream instead of latching onto the reservation-only list (which
+    // would have left the ten PAST days' headers pinned at the top and
+    // "Zítra" scrolled far below the fold instead).
+    final earliestPastHeader =
+        tester.getTopLeft(find.text(dayFull(today.addDays(-10))));
+    final firstUpcomingHeader = tester.getTopLeft(find.text('Zítra'));
+    expect(firstUpcomingHeader.dy, inInclusiveRange(0, 200));
+    expect(earliestPastHeader.dy, lessThan(firstUpcomingHeader.dy));
+  });
+
   testWidgets('a past finished federation match shows its score', (
     tester,
   ) async {
@@ -227,6 +298,37 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('5 : 3'), findsOneWidget);
+  });
+
+  testWidgets(
+      'a federation match with a scheduled/null-points result row shows no '
+      'trailing score (no bare dash before kickoff)', (tester) async {
+    final upcoming = PrioritySlot(
+      id: 'upcoming',
+      date: today.addDays(2),
+      startsAt: const HourMinute(18, 30),
+      endsAt: const HourMinute(21, 30),
+      type: PrioritySlot.fallbackMatchType,
+      homeTeam: 'SKK Veverky Brno A',
+      awayTeam: 'KK MS Brno D',
+      importKey: 'cka:upcoming',
+    );
+    final result = MatchResult.fromJson(const {
+      'match_id': 'upcoming',
+      'status': 'scheduled',
+      'fetched_at': '2026-09-08T21:00:00+00:00',
+    });
+    await tester.pumpWidget(app(
+      slots: [upcoming],
+      results: {'upcoming': result},
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('SKK Veverky Brno A – KK MS Brno D'), findsOneWidget);
+    expect(find.text('–'), findsNothing);
+    final tile = tester.widget<ListTile>(find.widgetWithText(
+        ListTile, 'SKK Veverky Brno A – KK MS Brno D'));
+    expect(tile.trailing, isNull);
   });
 
   testWidgets('while reservations have not loaded yet shows a progress '

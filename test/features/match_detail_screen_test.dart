@@ -197,11 +197,9 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('5 : 3'), findsOneWidget);
+      // Plain, unweighted score — emphasis is on the winning team's NAME.
       final scoreText = tester.widget<Text>(find.text('5 : 3'));
-      final spans = (scoreText.textSpan! as TextSpan).children!.cast<TextSpan>();
-      expect(spans[0].style?.fontWeight, FontWeight.w800, reason: 'home won');
-      expect(spans[2].style?.fontWeight, isNot(FontWeight.w800));
+      expect(scoreText.style?.fontWeight, isNot(FontWeight.bold));
       final homeName = tester.widget<Text>(find.text(home));
       expect(homeName.style?.fontWeight, FontWeight.bold);
       final awayName = tester.widget<Text>(find.text(away));

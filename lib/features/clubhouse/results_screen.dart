@@ -16,8 +16,8 @@ import '../../domain/results.dart';
 import '../../domain/upcoming.dart' show matchColorOf;
 import '../schedule/my_trainings_screen.dart' show MatchTrophy;
 import 'match_detail_screen.dart';
+import 'widgets/match_title.dart';
 import 'widgets/match_video_icon.dart';
-import 'widgets/score_label.dart';
 
 class ResultsScreen extends ConsumerStatefulWidget {
   const ResultsScreen({
@@ -131,7 +131,6 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
     Map<String, bool> exceptions,
   ) {
     final theme = Theme.of(context);
-    final live = isLive(slot, result, now);
     final competitionPart = [
       if ((slot.competition ?? '').isNotEmpty) slot.competition!,
       if (slot.round != null) '${slot.round}. kolo',
@@ -161,26 +160,15 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
         ),
         launch: widget.launch,
       ),
-      title: Text(slot.title),
+      title: MatchTitle(slot: slot, winner: winningSide(result?.homePoints, result?.awayPoints)),
       subtitle: Text(subtitle),
       trailing: Column(
         crossAxisAlignment: CrossAxisAlignment.end,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ScoreLabel(
-                home: result?.homePoints,
-                away: result?.awayPoints,
-                style: theme.textTheme.titleMedium,
-              ),
-              if (live)
-                Text(
-                  ' • probíhá',
-                  style: TextStyle(color: theme.colorScheme.error),
-                ),
-            ],
+          Text(
+            pointsLabel(result?.homePoints, result?.awayPoints),
+            style: theme.textTheme.titleMedium,
           ),
           if (pins.isNotEmpty) Text(pins, style: theme.textTheme.bodySmall),
         ],

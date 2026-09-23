@@ -209,10 +209,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    final scoreText = tester.widget<Text>(find.text('5 : 3'));
-    final spans = (scoreText.textSpan! as TextSpan).children!.cast<TextSpan>();
-    expect(spans[0].style?.fontWeight, FontWeight.w800, reason: 'home won');
-    expect(spans[2].style?.fontWeight, isNot(FontWeight.w800));
+    expect(find.text('5 : 3'), findsOneWidget);
     expect(find.text('3460 : 3349'), findsOneWidget);
   });
 
@@ -223,15 +220,37 @@ void main() {
     expect(find.text('–'), findsOneWidget);
   });
 
-  testWidgets('a live match shows the probíhá marker next to the points', (
+  testWidgets('the winning side\'s team NAME is bold, the score stays plain', (
     tester,
   ) async {
     await tester.pumpWidget(
-      app(slots: [liveToday], results: {'m2': liveResult}),
+      app(slots: [finishedYesterday], results: {'m1': finishedResult}),
     );
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('probíhá'), findsOneWidget);
+    final scoreText = tester.widget<Text>(find.text('5 : 3'));
+    expect(scoreText.style?.fontWeight, isNot(FontWeight.bold));
+
+    final titleText =
+        tester.widget<Text>(find.text('$veverky – $souperA'));
+    final spans = (titleText.textSpan! as TextSpan).children!.cast<TextSpan>();
+    expect(spans[0].style?.fontWeight, FontWeight.bold, reason: 'home won');
+    expect(spans[2].style?.fontWeight, isNot(FontWeight.bold));
+  });
+
+  testWidgets(
+      'a draw or a match with no result renders with no bold winner name', (
+    tester,
+  ) async {
+    await tester.pumpWidget(app(slots: [futureNoResult]));
+    await tester.pumpAndSettle();
+
+    // No result at all — MatchTitle falls back to a plain Text, same as
+    // find.text always matched before this batch.
+    final titleText =
+        tester.widget<Text>(find.text('$veverky – $souperB'));
+    expect(titleText.textSpan, isNull);
+    expect(titleText.style?.fontWeight, isNot(FontWeight.bold));
   });
 
   testWidgets('subtitle shows time, competition, round and doma/venku', (

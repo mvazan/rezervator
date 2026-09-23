@@ -58,6 +58,13 @@ class _MatchLeadingState extends State<MatchLeading>
   // (and its Ticker) into existence just to immediately stop it.
   AnimationController? _pulse;
 
+  /// True once [_syncPulse] has actually built the controller — a real
+  /// regression guard for the lazy-creation fix (the private field itself
+  /// isn't reachable from another library, but a public member on this
+  /// otherwise-private State is, via `(state as dynamic)`).
+  @visibleForTesting
+  bool get debugHasPulseController => _pulse != null;
+
   bool get _live =>
       widget.slot.videoUrl != null &&
       widget.linksEnabled &&

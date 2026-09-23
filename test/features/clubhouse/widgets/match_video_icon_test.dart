@@ -189,14 +189,40 @@ void main() {
   });
 
   testWidgets(
-      'a non-live, non-video match never creates a running animation '
-      'controller (perf: no Ticker for the ~200 non-live rows Výsledky '
-      'builds eagerly)', (tester) async {
+      'a non-live, non-video match never CREATES a pulse AnimationController '
+      '(perf: no Ticker for the ~200 non-live rows Výsledky builds '
+      'eagerly) — a real regression guard, not just "nothing is running", '
+      'since the pre-fix code built-but-never-started the controller for '
+      'every row too', (tester) async {
     await tester.pumpWidget(wrap(slot: slot(videoUrl: null)));
     await tester.pumpAndSettle();
 
     expect(tester.hasRunningAnimations, isFalse);
     expect(tester.binding.transientCallbackCount, 0);
+    // debugHasPulseController is a @visibleForTesting public member on an
+    // otherwise-private State — `as dynamic` reaches it across libraries.
+    final state = tester.state(find.byType(MatchLeading)) as dynamic;
+    expect(state.debugHasPulseController, isFalse);
+  });
+
+  testWidgets(
+      'a live match DOES create the pulse controller (sanity check that '
+      'debugHasPulseController actually tracks creation) — not '
+      'disableAnimations here, since that itself skips creation', (
+    tester,
+  ) async {
+    await tester.pumpWidget(wrap(
+      slot: slot(videoUrl: 'https://vysledky.kuzelky.cz/video/m1'),
+      matchResult: result(MatchStatus.inProgress),
+    ));
+    await tester.pump();
+
+    final state = tester.state(find.byType(MatchLeading)) as dynamic;
+    expect(state.debugHasPulseController, isTrue);
+
+    // Stop the repeating animation before the test ends, or pumpAndSettle
+    // in a later test sharing the binding could hang.
+    await tester.pumpWidget(const SizedBox.shrink());
   });
 
   testWidgets('a live match WITHOUT disableAnimations does run the pulse',

@@ -164,40 +164,10 @@ void main() {
       expect(find.text('3460 : 3349'), findsOneWidget);
     });
 
-    testWidgets('a live federation match shows the probíhá marker',
-        (tester) async {
-      final live = match(
-        'TJ Sokol Husovice',
-        'TJ Slovan Karlovy Vary',
-        id: 'm2',
-        importKey: 'cka:m2',
-      );
-      final result = MatchResult.fromJson(const {
-        'match_id': 'm2',
-        'status': 'in_progress',
-        'fetched_at': '2026-09-18T11:40:00+00:00',
-      });
-      await tester.pumpWidget(wrap(
-        Scaffold(
-          body: Builder(
-            builder: (context) => TextButton(
-              onPressed: () => showDayMatchesDialog(context, date, [live]),
-              child: const Text('open'),
-            ),
-          ),
-        ),
-        results: {'m2': result},
-        slots: [live],
-      ));
-      await tester.tap(find.text('open'));
-      await tester.pumpAndSettle();
-
-      expect(find.textContaining('probíhá'), findsOneWidget);
-    });
-
     testWidgets(
-        'a scheduled result inside the "live" time window shows only the '
-        'title — no score, no probíhá', (tester) async {
+        'a scheduled result shows only the title — no score, hours before '
+        'kickoff (well outside isLive\'s own refresh window, which does not '
+        'gate this — hasScoreData does, on status alone)', (tester) async {
       final upcoming = match(
         'TJ Sokol Husovice',
         'TJ Slovan Karlovy Vary',
@@ -205,7 +175,7 @@ void main() {
         importKey: 'cka:m7',
       );
       // A row the sync created ahead of kickoff — status scheduled, all
-      // points null — inside isLive's own refresh window (1h before start).
+      // points null.
       final result = MatchResult.fromJson(const {
         'match_id': 'm7',
         'status': 'scheduled',
@@ -228,7 +198,6 @@ void main() {
 
       expect(find.text('TJ Sokol Husovice – TJ Slovan Karlovy Vary'),
           findsOneWidget);
-      expect(find.textContaining('probíhá'), findsNothing);
       expect(find.text('–'), findsNothing);
     });
 
@@ -262,12 +231,11 @@ void main() {
 
       expect(find.text('TJ Sokol Husovice – TJ Slovan Karlovy Vary'),
           findsOneWidget);
-      expect(find.textContaining('probíhá'), findsNothing);
     });
 
     testWidgets(
-        'an in_progress result with null points shows the score row and '
-        'probíhá', (tester) async {
+        'an in_progress result with null points still shows the score row '
+        '(a dash)', (tester) async {
       final live = match(
         'TJ Sokol Husovice',
         'TJ Slovan Karlovy Vary',
@@ -295,44 +263,9 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('–'), findsOneWidget);
-      expect(find.textContaining('probíhá'), findsOneWidget);
     });
 
-    testWidgets(
-        'a finished result shows the score, no probíhá', (tester) async {
-      final finished = match(
-        'TJ Sokol Husovice',
-        'TJ Slovan Karlovy Vary',
-        id: 'm10',
-        importKey: 'cka:m10',
-      );
-      final result = MatchResult.fromJson(const {
-        'match_id': 'm10',
-        'status': 'finished',
-        'home_points': 5,
-        'away_points': 3,
-        'fetched_at': '2026-09-18T11:40:00+00:00',
-      });
-      await tester.pumpWidget(wrap(
-        Scaffold(
-          body: Builder(
-            builder: (context) => TextButton(
-              onPressed: () => showDayMatchesDialog(context, date, [finished]),
-              child: const Text('open'),
-            ),
-          ),
-        ),
-        results: {'m10': result},
-        slots: [finished],
-      ));
-      await tester.tap(find.text('open'));
-      await tester.pumpAndSettle();
-
-      expect(find.text('5 : 3'), findsOneWidget);
-      expect(find.textContaining('probíhá'), findsNothing);
-    });
-
-    testWidgets('the winning side\'s number is bold in the day dialog',
+    testWidgets('the winning side\'s team NAME is bold in the day dialog',
         (tester) async {
       final finished = match(
         'TJ Sokol Husovice',
@@ -362,10 +295,15 @@ void main() {
       await tester.tap(find.text('open'));
       await tester.pumpAndSettle();
 
+      // Plain, unweighted score — emphasis moved to the winning name.
       final scoreText = tester.widget<Text>(find.text('5 : 3'));
-      final spans = (scoreText.textSpan! as TextSpan).children!.cast<TextSpan>();
-      expect(spans[0].style?.fontWeight, FontWeight.w800);
-      expect(spans[2].style?.fontWeight, isNot(FontWeight.w800));
+      expect(scoreText.style?.fontWeight, isNot(FontWeight.bold));
+
+      final titleText =
+          tester.widget<Text>(find.text('TJ Sokol Husovice – TJ Slovan Karlovy Vary'));
+      final spans = (titleText.textSpan! as TextSpan).children!.cast<TextSpan>();
+      expect(spans[0].style?.fontWeight, FontWeight.bold, reason: 'home won');
+      expect(spans[2].style?.fontWeight, isNot(FontWeight.bold));
     });
 
     testWidgets('a video button exists with tooltip Video and launches it',

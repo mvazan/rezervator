@@ -6,8 +6,8 @@ import '../../data/clock.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
 import '../../domain/palette.dart';
+import '../../domain/results.dart' show hasScoreData, pointsLabel;
 import '../../domain/upcoming.dart';
-import '../clubhouse/widgets/score_label.dart';
 import '../profile/profile_screen.dart';
 import 'cancel_own_reservation.dart';
 import 'widgets/home_header.dart';
@@ -190,14 +190,15 @@ class _MyTrainingsScreenState extends ConsumerState<MyTrainingsScreen> {
     final slots = ref.watch(prioritySlotsProvider);
     final slotsLoading = ref.watch(prioritySlotsLoadingProvider);
     final slotsFailed = ref.watch(prioritySlotsFailedProvider);
-    final profile = ref.watch(myProfileProvider).value;
+    final profileAsync = ref.watch(myProfileProvider);
+    final profile = profileAsync.value;
     final teams = profile?.followedTeams ?? const <String>[];
     final teamColors = ref.watch(myTeamColorsProvider).value ?? const {};
     // Matches played for somebody else's team (0039) belong on this list
     // like any other — nothing marks them out, they simply are the
     // player's.
-    final exceptions =
-        ref.watch(myMatchExceptionsProvider).value ?? const <String, bool>{};
+    final exceptionsAsync = ref.watch(myMatchExceptionsProvider);
+    final exceptions = exceptionsAsync.value ?? const <String, bool>{};
     // Score trailing on a federation match's row (Task 3) — read here since
     // Můj přehled did not watch it before.
     final results =
@@ -298,8 +299,18 @@ class _MyTrainingsScreenState extends ConsumerState<MyTrainingsScreen> {
       );
     }
 
+    // Waits for the profile and exceptions streams too (not just slots):
+    // upcomingTimeline's `days` also depends on `teams`/`exceptions`, so
+    // latching this on their pre-stream fallback values (`[]`/`{}`) would
+    // scroll to a partial list's index and never revisit once the real
+    // teams/exceptions arrive — same race class results_screen.dart's own
+    // recentResultsIndex gate was fixed for.
     final upcomingIdx = upcomingScrollIndex(days, today);
-    if (!_scrolledToUpcoming && upcomingIdx >= 0) {
+    if (!slotsLoading &&
+        profileAsync.hasValue &&
+        exceptionsAsync.hasValue &&
+        !_scrolledToUpcoming &&
+        upcomingIdx >= 0) {
       _scrolledToUpcoming = true;
       final key = _keyFor(days[upcomingIdx].date);
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -361,10 +372,12 @@ class _MyTrainingsScreenState extends ConsumerState<MyTrainingsScreen> {
                               item.slot.description,
                           ].join(' · ')),
                           trailing: item.slot.fromFederation &&
-                                  results[item.slot.id] != null
-                              ? ScoreLabel(
-                                  home: results[item.slot.id]?.homePoints,
-                                  away: results[item.slot.id]?.awayPoints,
+                                  hasScoreData(results[item.slot.id])
+                              ? Text(
+                                  pointsLabel(
+                                    results[item.slot.id]?.homePoints,
+                                    results[item.slot.id]?.awayPoints,
+                                  ),
                                   style: theme.textTheme.bodyMedium,
                                 )
                               : null,
