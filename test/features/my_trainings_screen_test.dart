@@ -351,7 +351,11 @@ void main() {
       final spans = (titleText.textSpan! as TextSpan).children!
           .cast<TextSpan>();
       expect(spans[0].style?.fontWeight, FontWeight.w800, reason: 'home won');
-      expect(spans[2].style?.fontWeight, isNot(FontWeight.w800));
+      // Explicitly w400 (not just "not w800") — a plain ambient/null style
+      // would also satisfy `isNot(w800)` without proving the loser was
+      // actually lightened (Fix round 1).
+      expect(spans[1].style?.fontWeight, FontWeight.w400, reason: 'separator');
+      expect(spans[2].style?.fontWeight, FontWeight.w400, reason: 'away lost');
     },
   );
 
@@ -385,6 +389,15 @@ void main() {
         find.widgetWithText(ListTile, 'SKK Veverky Brno A – KK MS Brno D'),
       );
       expect(tile.trailing, isNull);
+
+      // No winner yet (scheduled, no points on the board) — the title
+      // stays a plain, unstyled Text, not forced to w400 either (Fix
+      // round 1).
+      final titleText = tester.widget<Text>(
+        find.text('SKK Veverky Brno A – KK MS Brno D'),
+      );
+      expect(titleText.textSpan, isNull);
+      expect(titleText.style, isNull);
     },
   );
 
@@ -809,24 +822,47 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(
-        find.text('SKK Veverky Brno A – KK MS Brno D'),
-      );
+      await tester.tap(find.text('SKK Veverky Brno A – KK MS Brno D'));
       await tester.pumpAndSettle();
 
       expect(find.byType(MatchDetailScreen), findsOneWidget);
     });
 
-    testWidgets('an upcoming match (no result yet) stays unclickable', (
-      tester,
-    ) async {
-      // `match` (top-level fixture): two days out, no result overridden.
-      await tester.pumpWidget(app(slots: [match]));
+    testWidgets(
+      'a non-federation upcoming match (no result yet) stays unclickable',
+      (tester) async {
+        // `match` (top-level fixture): two days out, no `importKey` at all
+        // — `fromFederation` alone already blocks the tap here, so this
+        // case doesn't by itself prove the `hasScoreData` gate does
+        // anything (see the federation case below for that).
+        await tester.pumpWidget(app(slots: [match]));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('SKK Veverky Brno A – KK MS Brno D'));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(MatchDetailScreen), findsNothing);
+      },
+    );
+
+    testWidgets('a federation upcoming match with no score data yet stays '
+        'unclickable too (isolates the hasScoreData gate)', (tester) async {
+      final upcomingFederation = PrioritySlot(
+        id: 'upcoming-fed',
+        date: today.addDays(2),
+        startsAt: const HourMinute(18, 30),
+        endsAt: const HourMinute(21, 30),
+        type: PrioritySlot.fallbackMatchType,
+        homeTeam: 'SKK Veverky Brno A',
+        awayTeam: 'KK MS Brno D',
+        importKey: 'cka:upcoming-fed',
+      );
+      // No entry in `results` at all — `hasScoreData(null)` is false,
+      // same as a `scheduled` row would be.
+      await tester.pumpWidget(app(slots: [upcomingFederation]));
       await tester.pumpAndSettle();
 
-      await tester.tap(
-        find.text('SKK Veverky Brno A – KK MS Brno D'),
-      );
+      await tester.tap(find.text('SKK Veverky Brno A – KK MS Brno D'));
       await tester.pumpAndSettle();
 
       expect(find.byType(MatchDetailScreen), findsNothing);

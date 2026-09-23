@@ -384,13 +384,15 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
                   ),
                 ),
                 _buttonsRow(context, slot, result, now),
+                // LegacyScoreSheet shows its team summary row even with no
+                // lineup yet (as long as `result` has team-level data) —
+                // only the per-player section needs this fallback message.
+                LegacyScoreSheet(slot: slot, result: result, players: players),
                 if (players.isEmpty)
                   const Padding(
                     padding: EdgeInsets.all(16),
                     child: Text('Sestavy zatím nejsou k dispozici.'),
-                  )
-                else
-                  LegacyScoreSheet(slot: slot, result: result, players: players),
+                  ),
               ],
             ),
     );

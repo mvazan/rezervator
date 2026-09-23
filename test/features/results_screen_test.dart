@@ -242,7 +242,11 @@ void main() {
       final spans = (titleText.textSpan! as TextSpan).children!
           .cast<TextSpan>();
       expect(spans[0].style?.fontWeight, FontWeight.w800, reason: 'home won');
-      expect(spans[2].style?.fontWeight, isNot(FontWeight.w800));
+      // Explicitly w400 (not just "not w800") — a plain ambient/null style
+      // would also satisfy `isNot(w800)` without proving the loser was
+      // actually lightened (Fix round 1).
+      expect(spans[1].style?.fontWeight, FontWeight.w400, reason: 'separator');
+      expect(spans[2].style?.fontWeight, FontWeight.w400, reason: 'away lost');
     },
   );
 
@@ -254,10 +258,12 @@ void main() {
       await tester.pumpAndSettle();
 
       // No result at all — MatchTitle falls back to a plain Text, same as
-      // find.text always matched before this batch.
+      // find.text always matched before this batch. Style is exactly
+      // null (the ambient default), not forced to w400 either (Fix
+      // round 1: a "no winner" match must stay fully unstyled).
       final titleText = tester.widget<Text>(find.text('$veverky – $souperB'));
       expect(titleText.textSpan, isNull);
-      expect(titleText.style?.fontWeight, isNot(FontWeight.w800));
+      expect(titleText.style, isNull);
     },
   );
 

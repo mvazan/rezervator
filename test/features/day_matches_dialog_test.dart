@@ -259,10 +259,24 @@ void main() {
       await tester.tap(find.text('open'));
       await tester.pumpAndSettle();
 
-      expect(
+      final titleText = tester.widget<Text>(
         find.text('TJ Sokol Husovice – TJ Slovan Karlovy Vary'),
-        findsOneWidget,
       );
+      // No winner yet (preparation, no points on the board) — MatchTitle
+      // falls back to a PLAIN Text with the caller's own style untouched,
+      // not a Text.rich forcing the loser side to w400 (Fix round 1: this
+      // case is easy to break silently, since w400 and "no explicit
+      // weight" can look identical unless something actually checks it).
+      expect(titleText.textSpan, isNull);
+      expect(
+        titleText.style?.fontWeight,
+        Theme.of(
+          tester.element(
+            find.text('TJ Sokol Husovice – TJ Slovan Karlovy Vary'),
+          ),
+        ).textTheme.titleSmall?.fontWeight,
+      );
+      expect(titleText.style?.fontWeight, isNot(FontWeight.w400));
     });
 
     testWidgets(
@@ -354,7 +368,20 @@ void main() {
         final spans = (titleText.textSpan! as TextSpan).children!
             .cast<TextSpan>();
         expect(spans[0].style?.fontWeight, FontWeight.w800, reason: 'home won');
-        expect(spans[2].style?.fontWeight, isNot(FontWeight.w800));
+        // Explicitly w400, not just "anything other than w800" — a plain
+        // ambient/null style would also satisfy `isNot(w800)` without
+        // actually proving the loser was deliberately lightened (Fix
+        // round 1).
+        expect(
+          spans[1].style?.fontWeight,
+          FontWeight.w400,
+          reason: 'separator',
+        );
+        expect(
+          spans[2].style?.fontWeight,
+          FontWeight.w400,
+          reason: 'away lost',
+        );
       },
     );
 

@@ -218,7 +218,10 @@ void main() {
       final awayName = tester.widget<Text>(
         find.descendant(of: headerCard, matching: find.text(away)),
       );
-      expect(awayName.style?.fontWeight, isNot(FontWeight.w800));
+      // Explicitly w400 (not just "not w800") — a plain ambient style
+      // would also satisfy `isNot(w800)` without proving the loser was
+      // actually lightened (Fix round 1).
+      expect(awayName.style?.fontWeight, FontWeight.w400);
       expect(find.text('3460 : 3349'), findsOneWidget);
       expect(find.textContaining('SB 15 : 9'), findsOneWidget);
       // The joined format+status line, exactly (formatLabel + ' · ' + status).
@@ -235,19 +238,26 @@ void main() {
     },
   );
 
-  testWidgets('players section shows a message when there are none yet', (
-    tester,
-  ) async {
-    await tester.pumpWidget(
-      app(
-        slots: [match(id: 'm1', date: today.addDays(-1))],
-        results: {'m1': finishedResult},
-      ),
-    );
-    await tester.pumpAndSettle();
+  testWidgets(
+    'players section shows a message when there are none yet, but the '
+    'team summary (from the result) still shows',
+    (tester) async {
+      await tester.pumpWidget(
+        app(
+          slots: [match(id: 'm1', date: today.addDays(-1))],
+          results: {'m1': finishedResult},
+        ),
+      );
+      await tester.pumpAndSettle();
 
-    expect(find.text('Sestavy zatím nejsou k dispozici.'), findsOneWidget);
-  });
+      expect(find.text('Sestavy zatím nejsou k dispozici.'), findsOneWidget);
+      // The result has team-level data even with no lineup yet — Fix
+      // round 1: this used to disappear along with the per-player section.
+      expect(find.text('Zápis'), findsOneWidget);
+      expect(find.text('3460'), findsOneWidget);
+      expect(find.text('Jméno a příjmení hráče'), findsNothing);
+    },
+  );
 
   testWidgets('Video and Na webu ČKA buttons show only when the data exists', (
     tester,
@@ -331,6 +341,19 @@ void main() {
 
       expect(find.text('Video'), findsOneWidget);
       expect(find.byIcon(Icons.play_circle_fill), findsOneWidget);
+
+      // No result at all yet — no winner, so the header card's team names
+      // stay fully unstyled (null), not forced to w400 either (Fix
+      // round 1).
+      final headerCard = find.byType(Card);
+      final homeName = tester.widget<Text>(
+        find.descendant(of: headerCard, matching: find.text(home)),
+      );
+      expect(homeName.style, isNull);
+      final awayName = tester.widget<Text>(
+        find.descendant(of: headerCard, matching: find.text(away)),
+      );
+      expect(awayName.style, isNull);
     },
   );
 

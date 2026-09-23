@@ -46,7 +46,10 @@ class MatchTitle extends StatelessWidget {
             text: slot.homeTeam,
             style: winner == MatchSide.home ? winnerStyle : loserStyle,
           ),
-          TextSpan(text: ' – ', style: base),
+          // Matches the loser's w400, not `base` (w700 under e.g.
+          // titleSmall) — the separator sitting next to a w400 name at w700
+          // read heavier than the name itself (Fix round 1).
+          TextSpan(text: ' – ', style: loserStyle),
           TextSpan(
             text: slot.awayTeam,
             style: winner == MatchSide.away ? winnerStyle : loserStyle,

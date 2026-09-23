@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/clubhouse/widgets/legacy_score_sheet.dart';
@@ -35,6 +36,11 @@ void main() {
     'fetched_at': '2026-09-23T10:00:00+00:00',
   });
 
+  // Lane values deliberately DON'T sum to the player's own totals below —
+  // proves the Celkem row reads `player.fulls/…/setPoints` straight off the
+  // row, not by re-summing `player.lanes` (Fix round 1: the original
+  // fixture's lanes happened to sum exactly to the totals, so a re-summing
+  // implementation would have passed the old test too).
   final homePlayer = MatchPlayerResult.fromJson(const {
     'id': 'p1',
     'match_id': 'm1',
@@ -43,7 +49,7 @@ void main() {
     'player_name': 'Jan Novák',
     'fulls': 350,
     'spares': 20,
-    'errors': 5,
+    'errors': 6,
     'total': 580,
     'set_points': 2,
     'team_points': 1,
@@ -58,11 +64,11 @@ void main() {
       },
       {
         'lane': 2,
-        'fulls': 175,
-        'spares': 10,
+        'fulls': 170,
+        'spares': 11,
         'errors': 3,
-        'total': 290,
-        'setPoints': 1,
+        'total': 285,
+        'setPoints': 0,
       },
     ],
   });
@@ -113,9 +119,23 @@ void main() {
     },
   );
 
+  testWidgets('the team summary row has its own column labels', (tester) async {
+    await tester.pumpWidget(
+      app(result: result, players: [homePlayer, awayPlayer]),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Družstvo'), findsNWidgets(2));
+    expect(find.text('Body'), findsNWidgets(2));
+    // 2 team-summary Sady labels; the player section reuses 'Plné'/'Dor.'/
+    // 'Ch.'/'Celkem' too, so those alone aren't distinctive here.
+    expect(find.text('Sady'), findsNWidgets(2));
+  });
+
   testWidgets(
-    'a pairing block shows both players, lane and Celkem lines, the bod '
-    'badge only for the player with team points, and a signed Rozdíl',
+    'a pairing block shows both players, lane and Celkem lines (from the '
+    "player's own totals, not the lane sum), the bod badge only for the "
+    'player with team points, and a signed Rozdíl',
     (tester) async {
       await tester.pumpWidget(
         app(result: result, players: [homePlayer, awayPlayer]),
@@ -125,18 +145,21 @@ void main() {
       expect(find.text('1. Jan Novák'), findsOneWidget);
       expect(find.text('1. Petr Svoboda'), findsOneWidget);
 
-      // Lane lines (home player only): fulls/spares/errors/total/setPoints.
-      expect(find.text('175'), findsNWidgets(2));
-      expect(find.text('290'), findsNWidgets(2));
+      // Lane lines (home player only).
+      expect(find.text('175'), findsOneWidget);
+      expect(find.text('170'), findsOneWidget);
+      expect(find.text('290'), findsOneWidget);
+      expect(find.text('285'), findsOneWidget);
 
-      // Celkem line per player (summed values, taken straight from the
-      // player's own totals, not re-summed from lanes).
+      // Celkem line per player: the player's OWN fulls/spares/errors/total/
+      // setPoints, which deliberately differ from summing the lanes above.
       expect(find.text('350'), findsOneWidget);
       expect(find.text('580'), findsOneWidget);
       expect(find.text('340'), findsOneWidget);
       expect(find.text('550'), findsOneWidget);
-      // 2 column-header labels (one per side) + 2 per-player Celkem rows.
-      expect(find.text('Celkem'), findsNWidgets(4));
+      // 2 team-summary labels + 2 column-header labels + 2 per-player
+      // Celkem rows.
+      expect(find.text('Celkem'), findsNWidgets(6));
 
       // Only the home player has team_points > 0.
       expect(find.text('bod'), findsOneWidget);
@@ -146,7 +169,8 @@ void main() {
     },
   );
 
-  testWidgets('no registration-number text is shown anywhere', (
+  testWidgets('no stray digit-only text renders beyond the known stats (guards '
+      'against a registration number or similar ever appearing)', (
     tester,
   ) async {
     await tester.pumpWidget(
@@ -154,20 +178,171 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('egistra'), findsNothing);
+    const expectedNumbers = {
+      // Team summary (home/away) + pin differential.
+      '13', '7', '1780', '1700', '120', '110', '40', '35', '3460', '3349',
+      '15', '9', '+111',
+      // Home player: lane 1, lane 2, Celkem.
+      '175', '10', '2', '290', '1',
+      '170', '11', '3', '285', '0',
+      '350', '20', '6', '580',
+      // Away player: Celkem only (no lanes).
+      '340', '18', '8', '550',
+      // Rozdíl.
+      '+30',
+    };
+    final digitOnly = RegExp(r'^[+-]?\d+$');
+    final rendered = tester
+        .widgetList<Text>(find.byType(Text))
+        .map((t) => t.data)
+        .whereType<String>()
+        .where(digitOnly.hasMatch)
+        .toSet();
+
+    expect(rendered.difference(expectedNumbers), isEmpty);
   });
 
-  testWidgets('empty players renders nothing', (tester) async {
+  testWidgets(
+    'a position present on only one side renders that side alone, blank '
+    'on the other, without crashing',
+    (tester) async {
+      final raggedHome = MatchPlayerResult.fromJson(const {
+        'id': 'p3',
+        'match_id': 'm1',
+        'side': 'home',
+        'position': 2,
+        'player_name': 'Karel Dvořák',
+        'fulls': 300,
+        'spares': 15,
+        'errors': 9,
+        'total': 480,
+        'set_points': 1,
+        'team_points': 0,
+      });
+      await tester.pumpWidget(
+        app(result: result, players: [homePlayer, awayPlayer, raggedHome]),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('2. Karel Dvořák'), findsOneWidget);
+      // No away player at position 2, and no crash getting there.
+      expect(tester.takeException(), isNull);
+      // Ragged position's Rozdíl is blank (no away total to diff against) —
+      // no stray '+'/'-' beyond the position-1 pairing's own '+30'.
+      expect(find.textContaining('-'), findsNothing);
+      expect(find.text('+30'), findsOneWidget);
+    },
+  );
+
+  testWidgets('Rozdíl is negative and tinted when the away side scored more', (
+    tester,
+  ) async {
+    final home2 = MatchPlayerResult.fromJson(const {
+      'id': 'ph',
+      'match_id': 'm2',
+      'side': 'home',
+      'position': 1,
+      'player_name': 'Home Player',
+      'total': 500,
+    });
+    final away2 = MatchPlayerResult.fromJson(const {
+      'id': 'pa',
+      'match_id': 'm2',
+      'side': 'away',
+      'position': 1,
+      'player_name': 'Away Player',
+      'total': 520,
+    });
+    await tester.pumpWidget(app(players: [home2, away2]));
+    await tester.pumpAndSettle();
+
+    final diffText = tester.widget<Text>(find.text('-20'));
+    expect(
+      diffText.style?.color,
+      Theme.of(tester.element(find.text('-20'))).colorScheme.error,
+    );
+  });
+
+  testWidgets('Rozdíl on a tie renders 0, neutral (not tinted as a win)', (
+    tester,
+  ) async {
+    final home2 = MatchPlayerResult.fromJson(const {
+      'id': 'ph',
+      'match_id': 'm2',
+      'side': 'home',
+      'position': 1,
+      'player_name': 'Home Player',
+      'total': 500,
+    });
+    final away2 = MatchPlayerResult.fromJson(const {
+      'id': 'pa',
+      'match_id': 'm2',
+      'side': 'away',
+      'position': 1,
+      'player_name': 'Away Player',
+      'total': 500,
+    });
+    await tester.pumpWidget(app(players: [home2, away2]));
+    await tester.pumpAndSettle();
+
+    final diffText = tester.widget<Text>(find.text('0'));
+    final scheme = Theme.of(tester.element(find.text('0'))).colorScheme;
+    expect(diffText.style?.color, scheme.onSurface);
+    expect(diffText.style?.color, isNot(scheme.tertiary));
+    expect(diffText.style?.color, isNot(scheme.error));
+  });
+
+  testWidgets('Rozdíl renders blank, not a bogus number, when one total '
+      'is null', (tester) async {
+    final home2 = MatchPlayerResult.fromJson(const {
+      'id': 'ph',
+      'match_id': 'm2',
+      'side': 'home',
+      'position': 1,
+      'player_name': 'Home Player',
+      // total intentionally absent — the match is still live on this lane.
+    });
+    final away2 = MatchPlayerResult.fromJson(const {
+      'id': 'pa',
+      'match_id': 'm2',
+      'side': 'away',
+      'position': 1,
+      'player_name': 'Away Player',
+      'total': 500,
+    });
+    await tester.pumpWidget(app(players: [home2, away2]));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('+'), findsNothing);
+    expect(find.textContaining('-'), findsNothing);
+  });
+
+  testWidgets('a result with no lineup yet still shows the team summary row', (
+    tester,
+  ) async {
     await tester.pumpWidget(app(result: result, players: const []));
     await tester.pumpAndSettle();
 
+    expect(find.text('Zápis'), findsOneWidget);
+    expect(find.text(home), findsOneWidget);
+    expect(find.text(away), findsOneWidget);
+    expect(find.text('3460'), findsOneWidget);
+    // No lineup: no player section.
+    expect(find.text('Jméno a příjmení hráče'), findsNothing);
+  });
+
+  testWidgets('no result and no players renders nothing', (tester) async {
+    await tester.pumpWidget(app(result: null, players: const []));
+    await tester.pumpAndSettle();
+
     expect(find.text('Zápis'), findsNothing);
+    expect(find.text(home), findsNothing);
     expect(find.text('Jméno a příjmení hráče'), findsNothing);
   });
 
   testWidgets(
-    'tapping Zvětšit pushes a full-screen page with the same data; close '
-    'pops it back',
+    'tapping Zvětšit pushes a full-screen page with the same data and no '
+    'header row of its own; close pops it back',
     (tester) async {
       await tester.pumpWidget(
         app(result: result, players: [homePlayer, awayPlayer]),
@@ -179,16 +354,150 @@ void main() {
       await tester.tap(find.byIcon(Icons.open_in_full));
       await tester.pumpAndSettle();
 
-      expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
+      final page = find.byType(LegacyScoreSheetPage);
+      expect(page, findsOneWidget);
       expect(find.widgetWithText(AppBar, 'Zápis'), findsOneWidget);
       expect(find.byIcon(Icons.close), findsOneWidget);
       expect(find.text('580'), findsWidgets);
+      // The pushed page has no zvětšit control of its own — showHeader is
+      // suppressed there (Fix round 1: it used to stack another identical
+      // page on tap).
+      expect(
+        find.descendant(of: page, matching: find.byIcon(Icons.open_in_full)),
+        findsNothing,
+      );
+      // 'Zápis' appears exactly once inside the page — from its own AppBar
+      // title, not also from an embedded header row.
+      expect(
+        find.descendant(of: page, matching: find.text('Zápis')),
+        findsOneWidget,
+      );
 
       await tester.tap(find.byIcon(Icons.close));
       await tester.pumpAndSettle();
 
       expect(find.byType(LegacyScoreSheetPage), findsNothing);
       expect(find.text('580'), findsOneWidget);
+    },
+  );
+
+  group('text scale (core/text_size.dart, up to 1.3×)', () {
+    Widget scaledApp(double scale) => MediaQuery(
+      data: MediaQueryData(textScaler: TextScaler.linear(scale)),
+      child: app(result: result, players: [homePlayer, awayPlayer]),
+    );
+
+    // With `softWrap: false` (set on every cell — see `_cell`), a Text
+    // widget never actually wraps onto a second line — it just paints
+    // beyond its SizedBox's bounds into the neighbouring column instead, so
+    // `didExceedMaxLines`/rendered height are always "1 line" regardless of
+    // how narrow the column is and can't catch a too-narrow column. The
+    // real signal is the text's natural (unconstrained) width vs. the
+    // column's actual width — `getMaxIntrinsicWidth` gives exactly that,
+    // from the resolved `TextSpan` the RenderParagraph is really painting
+    // (fully merged with the ambient font/theme, unlike `Text.style`).
+    void expectFitsColumn(
+      WidgetTester tester,
+      Finder finder,
+      double columnWidth,
+    ) {
+      final count = tester.widgetList<Text>(finder).length;
+      expect(count, greaterThan(0));
+      for (var i = 0; i < count; i++) {
+        final instance = finder.at(i);
+        final rp = tester.renderObject<RenderParagraph>(instance);
+        final naturalWidth = rp.getMaxIntrinsicWidth(double.infinity);
+        expect(
+          naturalWidth,
+          lessThanOrEqualTo(columnWidth),
+          reason:
+              '"${tester.widget<Text>(instance).data}" needs '
+              '$naturalWidth but its column is only $columnWidth wide',
+        );
+      }
+    }
+
+    // Matches LegacyScoreSheet's own private `_colWidth` — there's no way
+    // to reference the private constant from here, so this is the contract
+    // this test actually pins.
+    const colWidth = 120.0;
+
+    for (final scale in [1.0, 1.3]) {
+      testWidgets('at ${scale}x, "Celkem", "Série" and a 4-digit total stay '
+          'single-line', (tester) async {
+        await tester.pumpWidget(scaledApp(scale));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+
+        expectFitsColumn(tester, find.text('Celkem'), colWidth);
+        expectFitsColumn(tester, find.text('Série'), colWidth);
+        expectFitsColumn(tester, find.text('1780'), colWidth);
+        expectFitsColumn(tester, find.text('3460'), colWidth);
+      });
+    }
+  });
+
+  testWidgets(
+    'the full-screen page scrolls vertically instead of overflowing on a '
+    'big lineup (6 pairings × 4 lanes)',
+    (tester) async {
+      MatchPlayerResult bigPlayer(String side, int position) =>
+          MatchPlayerResult.fromJson({
+            'id': '$side-$position',
+            'match_id': 'big',
+            'side': side,
+            'position': position,
+            'player_name': '${side == 'home' ? 'Home' : 'Away'} $position',
+            'fulls': 700,
+            'spares': 40,
+            'errors': 10,
+            'total': 1160,
+            'set_points': 4,
+            'team_points': side == 'home' ? 1 : 0,
+            'lanes': [
+              for (var lane = 1; lane <= 4; lane++)
+                {
+                  'lane': lane,
+                  'fulls': 175,
+                  'spares': 10,
+                  'errors': 2,
+                  'total': 290,
+                  'setPoints': 1,
+                },
+            ],
+          });
+      final bigPlayers = [
+        for (var pos = 1; pos <= 6; pos++) ...[
+          bigPlayer('home', pos),
+          bigPlayer('away', pos),
+        ],
+      ];
+      final bigSlot = PrioritySlot(
+        id: 'big',
+        date: Day(2026, 9, 20),
+        startsAt: const HourMinute(17, 30),
+        endsAt: const HourMinute(20, 30),
+        type: PrioritySlot.fallbackMatchType,
+        homeTeam: home,
+        awayTeam: away,
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: LegacyScoreSheetPage(
+            slot: bigSlot,
+            result: result,
+            players: bigPlayers,
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(tester.takeException(), isNull);
+      // Still present in the tree (SingleChildScrollView builds eagerly),
+      // proving the last pairing actually rendered rather than being cut
+      // off by an unhandled overflow.
+      expect(find.text('6. Away 6'), findsOneWidget);
     },
   );
 }
