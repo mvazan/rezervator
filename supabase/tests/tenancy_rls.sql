@@ -4227,6 +4227,12 @@ begin
   exception when others then
     if sqlerrm <> 'not_allowed' then raise; end if;
   end;
+  begin
+    perform request_federation_discovery();
+    raise exception 'FAIL: a player requested discovery';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
 end $$;
 reset role;
 set local role authenticated;
