@@ -710,9 +710,10 @@ and FCM is configured, e-mail otherwise.
   through a grant), its CHECK bounds, and `set_team_colors_for` (server-only,
   previous-state return, a null colour deletes the row), the 0038
   `hand_edited` rule (flags an app edit of an imported match, not the
-  import's own update, a no-op update or a manual match; `--force` clears
-  it) together with the assertion that an import-style update / delete /
-  insert on `priority_slots` leaves every user's team picks byte-identical,
+  import's own update, a no-op update or a manual match; an import-run
+  update that resets the flag clears it — the sync never does) together
+  with the assertion that an import-style update / delete / insert on
+  `priority_slots` leaves every user's team picks byte-identical,
   the 0040 reminders (the player's own lead times inside their checks and on
   their own row only, due at the lead time and only once, following Můj
   přehled through teams / added / hidden matches, the tick's gate awake for a
@@ -736,7 +737,26 @@ and FCM is configured, e-mail otherwise.
   invitable, a member books and cancels for a member under the member's cap
   and until the training starts, outsiders never, the group dies with its
   last member, admin prune and foreign-admin isolation, RLS and
-  privileges), and the 0035
+  privileges), the 0045 results sync (`apply_federation_matches`: home and
+  away matches inserted as `cka:<id>` by the alley's admin, idempotent with
+  a video link alone no update, a `rozpis:` row rekeyed in place, a
+  hand-edited match reported and never overwritten, only future matches
+  the site dropped deleted with their match job — never on an empty list,
+  a started match or `keep_ids` — and a stored match keeping home/away
+  until its venue is known; `apply_federation_result`: result, players and
+  the venue deciding home/away except on a hand-edited match, `false`
+  without a slot; discovery keeping the admin's name and switch and
+  `update_team` admin-only, per alley, unique and non-empty; the five
+  tables read-only for the app, per alley and in `supabase_realtime`,
+  `match_player_results` with replica identity full, the server functions
+  the service's; the sync settings admin-only with a validated slug and
+  the admin-only sync/discovery requests; the `refresh_match` gate; the
+  nightly producer; `record_federation_run` per key and its `last_error`
+  rule; the calendar-trigger rule — only a change of what the event shows
+  enqueues, and never for a match in the past before and after; and the
+  venues — upsert, one fetch for an unknown match venue, the nightly and
+  sync-request producers, no re-arm of a pending or recently failed
+  fetch), and the 0035
   assertion (now including `team_colors` and `match_exceptions`) that every table
   `lib/data/providers.dart` streams is in the `supabase_realtime`
   publication; run with `psql … -v ON_ERROR_STOP=1 -f` against the local
