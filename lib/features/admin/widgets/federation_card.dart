@@ -34,10 +34,16 @@ class _FederationCardState extends ConsumerState<FederationCard> {
   final _slug = TextEditingController();
   bool _enabled = false;
 
-  /// The form is filled from the server once; after that it is the admin's
-  /// until Uložit (a reload after saving must not undo their typing) — same
-  /// reasoning as PublicOverviewScreen's own seed.
-  bool _seeded = false;
+  /// The form follows the row until the admin touches it — the provider
+  /// replays the on-disk snapshot before the live row, so a one-shot seed
+  /// would pin a stale slug that Uložit then writes back. From the first
+  /// edit it is the admin's until a successful Uložit hands it back to the
+  /// (echoed) row.
+  bool _dirty = false;
+
+  /// The row values the form was last filled from — a rebuild with the same
+  /// row (a new lastRunAt, say) must not reset the text field.
+  (String, bool)? _seededFrom;
 
   @override
   void dispose() {
@@ -46,18 +52,22 @@ class _FederationCardState extends ConsumerState<FederationCard> {
   }
 
   void _seed(FederationSync sync) {
-    if (_seeded) return;
-    _seeded = true;
+    final from = (sync.venueSlug, sync.enabled);
+    if (_dirty || from == _seededFrom) return;
+    _seededFrom = from;
     _slug.text = sync.venueSlug.isEmpty ? 'tj-sokol-brno-iv' : sync.venueSlug;
     _enabled = sync.enabled;
   }
 
-  Future<void> _save() => tryAction(
-        context,
-        () => widget.saveFederation(_slug.text.trim(), _enabled),
-        success: 'Uloženo.',
-        errorText: friendlyDbError,
-      );
+  Future<void> _save() async {
+    final ok = await tryAction(
+      context,
+      () => widget.saveFederation(_slug.text.trim(), _enabled),
+      success: 'Uloženo.',
+      errorText: friendlyDbError,
+    );
+    if (ok) _dirty = false;
+  }
 
   Future<void> _discover() => tryAction(
         context,
@@ -86,8 +96,8 @@ class _FederationCardState extends ConsumerState<FederationCard> {
   @override
   Widget build(BuildContext context) {
     final loaded = ref.watch(federationSyncProvider);
-    // Until the row is here the form stays disabled and unseeded — seeding
-    // defaults would stick (_seeded) and Uložit would overwrite the real row.
+    // Until the row is here the form stays disabled and unseeded — Uložit
+    // on the defaults would overwrite the real row.
     final ready = loaded.hasValue;
     final sync = loaded.value ?? FederationSync.none;
     if (ready) _seed(sync);
@@ -109,6 +119,7 @@ class _FederationCardState extends ConsumerState<FederationCard> {
               controller: _slug,
               enabled: ready,
               autocorrect: false,
+              onChanged: (_) => _dirty = true,
               decoration: const InputDecoration(
                 labelText: 'Kuželna na webu',
                 prefixText: 'detail-kuzelny/',
@@ -118,7 +129,12 @@ class _FederationCardState extends ConsumerState<FederationCard> {
               contentPadding: EdgeInsets.zero,
               title: const Text('Stahovat automaticky'),
               value: _enabled,
-              onChanged: ready ? (v) => setState(() => _enabled = v) : null,
+              onChanged: ready
+                  ? (v) => setState(() {
+                        _enabled = v;
+                        _dirty = true;
+                      })
+                  : null,
             ),
             const SizedBox(height: 8),
             Wrap(

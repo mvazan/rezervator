@@ -254,6 +254,100 @@ void main() {
     });
 
     testWidgets(
+        'a newer row after the cached one re-seeds the untouched form; '
+        'Uložit keeps the newer values', (tester) async {
+      final rows = StreamController<FederationSync>();
+      addTearDown(rows.close);
+      String? savedSlug;
+      bool? savedEnabled;
+      await pumpApp(
+        tester,
+        app(
+          clubs,
+          syncStream: rows.stream,
+          saveFederation: (slug, enabled) async {
+            savedSlug = slug;
+            savedEnabled = enabled;
+          },
+        ),
+      );
+
+      // The cached snapshot first, then the live row changed elsewhere.
+      rows.add(const FederationSync(venueSlug: 'ks-devitka-brno'));
+      await tester.pumpAndSettle();
+      rows.add(const FederationSync(venueSlug: 'kk-slovan', enabled: true));
+      await tester.pumpAndSettle();
+
+      expect(find.widgetWithText(TextField, 'kk-slovan'), findsOneWidget);
+      final toggle = tester.widget<SwitchListTile>(
+          find.widgetWithText(SwitchListTile, 'Stahovat automaticky'));
+      expect(toggle.value, isTrue);
+
+      await tester.tap(find.text('Uložit'));
+      await tester.pumpAndSettle();
+
+      expect(savedSlug, 'kk-slovan');
+      expect(savedEnabled, isTrue);
+    });
+
+    testWidgets('a cached empty row does not pin the default slug over the '
+        'live one', (tester) async {
+      final rows = StreamController<FederationSync>();
+      addTearDown(rows.close);
+      await pumpApp(tester, app(clubs, syncStream: rows.stream));
+
+      rows.add(FederationSync.none);
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(TextField, 'tj-sokol-brno-iv'), findsOneWidget);
+
+      rows.add(const FederationSync(venueSlug: 'kk-slovan'));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(TextField, 'kk-slovan'), findsOneWidget);
+    });
+
+    testWidgets('a row arriving while the admin edits leaves their edits be',
+        (tester) async {
+      final rows = StreamController<FederationSync>();
+      addTearDown(rows.close);
+      String? savedSlug;
+      bool? savedEnabled;
+      await pumpApp(
+        tester,
+        app(
+          clubs,
+          syncStream: rows.stream,
+          saveFederation: (slug, enabled) async {
+            savedSlug = slug;
+            savedEnabled = enabled;
+          },
+        ),
+      );
+
+      rows.add(const FederationSync(venueSlug: 'ks-devitka-brno'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+          find.widgetWithText(TextField, 'ks-devitka-brno'), 'moje-kuzelna');
+      await tester.tap(find.text('Stahovat automaticky'));
+      await tester.pumpAndSettle();
+
+      rows.add(const FederationSync(venueSlug: 'kk-slovan'));
+      await tester.pumpAndSettle();
+
+      expect(find.widgetWithText(TextField, 'moje-kuzelna'), findsOneWidget);
+      await tester.tap(find.text('Uložit'));
+      await tester.pumpAndSettle();
+      expect(savedSlug, 'moje-kuzelna');
+      expect(savedEnabled, isTrue);
+
+      // Saved: the echoed row takes over the form again.
+      rows.add(const FederationSync(venueSlug: 'moje-kuzelna', enabled: true));
+      await tester.pumpAndSettle();
+      rows.add(const FederationSync(venueSlug: 'kk-slovan'));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(TextField, 'kk-slovan'), findsOneWidget);
+    });
+
+    testWidgets(
         'a configured+enabled sync enables both actions and shows the error',
         (tester) async {
       var discovered = false;
