@@ -402,8 +402,9 @@ class _ColumnMetrics {
 /// 1px). The 2px outer frame itself comes from the `Container` this
 /// widget returns, via `foregroundDecoration` — see [build]. Fix round 2:
 /// this table no longer follows the app's accessibility text-size setting
-/// (`core/text_size.dart`) — [MediaQuery.withNoTextScaling] pins text
-/// scaling off here, the one place both call sites share.
+/// (`core/text_size.dart`) — [build] pins text scaling off here, the one
+/// place both call sites share, and the platform's Bold text setting too:
+/// [Text] would render every cell bolder than [_ColumnMetrics] measured it.
 class _ScoreTableBody extends StatelessWidget {
   const _ScoreTableBody({
     required this.slot,
@@ -484,7 +485,10 @@ class _ScoreTableBody extends StatelessWidget {
     final positions = <int>{for (final p in players) p.position}.toList()
       ..sort();
 
-    return MediaQuery.withNoTextScaling(
+    return MediaQuery(
+      data: MediaQuery.of(
+        context,
+      ).copyWith(textScaler: TextScaler.noScaling, boldText: false),
       child: Container(
         // The 2px OUTER frame (Fix round 5) — every cell only paints its
         // own right/bottom 1px edge, so this is the table's only top/left

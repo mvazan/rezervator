@@ -943,102 +943,115 @@ void main() {
       },
     );
 
-    testWidgets(
-      'with realistic full-width data (4 lanes, totals ≈3460, "15,5", '
-      '"+211", Ch. "40"), no cell text is clipped or exceeds its line limit',
-      (tester) async {
-        await loadManrope();
+    for (final boldText in [false, true]) {
+      testWidgets(
+        'with realistic full-width data (4 lanes, totals ≈3460, "15,5", '
+        '"+211", Ch. "40"), no cell text is clipped or exceeds its line limit'
+        '${boldText ? ' — even with the platform Bold text setting on' : ''}',
+        (tester) async {
+          await loadManrope();
+          if (boldText) {
+            tester.platformDispatcher.accessibilityFeaturesTestValue =
+                const FakeAccessibilityFeatures(boldText: true);
+            addTearDown(
+              tester.platformDispatcher.clearAccessibilityFeaturesTestValue,
+            );
+          }
 
-        final realisticResult = MatchResult.fromJson(const {
-          'match_id': 'r1',
-          'status': 'finished',
-          'home_points': 6,
-          'away_points': 2,
-          'home_total': 3460,
-          'away_total': 3249, // team Rozdíl = +211
-          'home_fulls': 2280,
-          'away_fulls': 2100,
-          'home_spares': 1180,
-          'away_spares': 1049,
-          'home_errors': 40,
-          'away_errors': 38,
-          'home_set_points': 15.5,
-          'away_set_points': 8.5,
-          'fetched_at': '2026-09-23T10:00:00+00:00',
-        });
-        MatchPlayerResult fourLanePlayer(String side, String name) =>
-            MatchPlayerResult.fromJson({
-              'id': '$side-r1',
-              'match_id': 'r1',
-              'side': side,
-              'position': 1,
-              'player_name': name,
-              'fulls': 570,
-              'spares': 295,
-              'errors': 10,
-              'total': 865,
-              'set_points': 4,
-              'team_points': side == 'home' ? 1 : 0,
-              'lanes': [
-                for (var lane = 1; lane <= 4; lane++)
-                  {
-                    'lane': lane,
-                    'fulls': 142,
-                    'spares': 74,
-                    'errors': 3,
-                    'total': 217,
-                    'setPoints': 1,
-                  },
-              ],
-            });
-        final realisticHome = fourLanePlayer('home', 'Realistický Domácí');
-        final realisticAway = fourLanePlayer('away', 'Realistický Host');
+          final realisticResult = MatchResult.fromJson(const {
+            'match_id': 'r1',
+            'status': 'finished',
+            'home_points': 6,
+            'away_points': 2,
+            'home_total': 3460,
+            'away_total': 3249, // team Rozdíl = +211
+            'home_fulls': 2280,
+            'away_fulls': 2100,
+            'home_spares': 1180,
+            'away_spares': 1049,
+            'home_errors': 40,
+            'away_errors': 38,
+            'home_set_points': 15.5,
+            'away_set_points': 8.5,
+            'fetched_at': '2026-09-23T10:00:00+00:00',
+          });
+          MatchPlayerResult fourLanePlayer(String side, String name) =>
+              MatchPlayerResult.fromJson({
+                'id': '$side-r1',
+                'match_id': 'r1',
+                'side': side,
+                'position': 1,
+                'player_name': name,
+                'fulls': 570,
+                'spares': 295,
+                'errors': 10,
+                'total': 865,
+                'set_points': 4,
+                'team_points': side == 'home' ? 1 : 0,
+                'lanes': [
+                  for (var lane = 1; lane <= 4; lane++)
+                    {
+                      'lane': lane,
+                      'fulls': 142,
+                      'spares': 74,
+                      'errors': 3,
+                      'total': 217,
+                      'setPoints': 1,
+                    },
+                ],
+              });
+          final realisticHome = fourLanePlayer('home', 'Realistický Domácí');
+          final realisticAway = fourLanePlayer('away', 'Realistický Host');
 
-        await tester.pumpWidget(
-          app(result: realisticResult, players: [realisticHome, realisticAway]),
-        );
-        await tester.pumpAndSettle();
-        expect(tester.takeException(), isNull);
-
-        // The exact strings the bug report named as broken.
-        expect(find.text('2280'), findsOneWidget); // was "22…"
-        expect(find.text('1180'), findsOneWidget); // was "11…"
-        expect(find.text('3460'), findsOneWidget); // was "34…"
-        expect(find.text('15,5'), findsOneWidget); // was "1…"
-        expect(find.text('+211'), findsOneWidget); // was "+…"
-        expect(find.text('40'), findsOneWidget); // was blank
-
-        final tableFinder = find.byWidgetPredicate(
-          (w) => w.runtimeType.toString() == '_ScoreTableBody',
-        );
-        for (final element
-            in find
-                .descendant(of: tableFinder, matching: find.byType(RichText))
-                .evaluate()) {
-          final rp = element.renderObject! as RenderParagraph;
-          final text = rp.text.toPlainText();
-          expect(
-            rp.didExceedMaxLines,
-            isFalse,
-            reason: '"$text" wrapped past its line limit and got clipped',
+          await tester.pumpWidget(
+            app(
+              result: realisticResult,
+              players: [realisticHome, realisticAway],
+            ),
           );
-          // "Série hodů" is the one header deliberately allowed to wrap
-          // onto its own 2-row-tall cell (Fix round 5, item 3) — its
-          // single-line natural width is expected to exceed its (narrow,
-          // content-driven) column, that's the whole point of letting it
-          // wrap instead of forcing the column wide enough for one line.
-          if (text == 'Série hodů') continue;
-          final natural = rp.getMaxIntrinsicWidth(double.infinity);
-          expect(
-            natural,
-            lessThanOrEqualTo(rp.size.width + 0.5),
-            reason:
-                '"$text" needs $natural but its box is only '
-                '${rp.size.width}',
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull);
+
+          // The exact strings the bug report named as broken.
+          expect(find.text('2280'), findsOneWidget); // was "22…"
+          expect(find.text('1180'), findsOneWidget); // was "11…"
+          expect(find.text('3460'), findsOneWidget); // was "34…"
+          expect(find.text('15,5'), findsOneWidget); // was "1…"
+          expect(find.text('+211'), findsOneWidget); // was "+…"
+          expect(find.text('40'), findsOneWidget); // was blank
+
+          final tableFinder = find.byWidgetPredicate(
+            (w) => w.runtimeType.toString() == '_ScoreTableBody',
           );
-        }
-      },
-    );
+          for (final element
+              in find
+                  .descendant(of: tableFinder, matching: find.byType(RichText))
+                  .evaluate()) {
+            final rp = element.renderObject! as RenderParagraph;
+            final text = rp.text.toPlainText();
+            expect(
+              rp.didExceedMaxLines,
+              isFalse,
+              reason: '"$text" wrapped past its line limit and got clipped',
+            );
+            // "Série hodů" is the one header deliberately allowed to wrap
+            // onto its own 2-row-tall cell (Fix round 5, item 3) — its
+            // single-line natural width is expected to exceed its (narrow,
+            // content-driven) column, that's the whole point of letting it
+            // wrap instead of forcing the column wide enough for one line.
+            if (text == 'Série hodů') continue;
+            final natural = rp.getMaxIntrinsicWidth(double.infinity);
+            expect(
+              natural,
+              lessThanOrEqualTo(rp.size.width + 0.5),
+              reason:
+                  '"$text" needs $natural but its box is only '
+                  '${rp.size.width}',
+            );
+          }
+        },
+      );
+    }
 
     testWidgets(
       'uneven lane counts pad the shorter side with filler cells instead '
