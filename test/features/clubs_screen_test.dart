@@ -179,6 +179,54 @@ void main() {
       expect(find.text('OP II. třída'), findsOneWidget);
     });
 
+    testWidgets(
+        'a team whose club was deleted opens its dialog on Bez oddílu and '
+        'saves without a club', (tester) async {
+      const team = Team(
+        id: 't1',
+        name: 'Bývalí Nešemice',
+        clubId: 'gone', // no club in `clubs` has this id
+        competitionName: 'OP II. třída',
+      );
+      var saved = false;
+      String? capturedClubId = 'unset';
+      await pumpApp(
+        tester,
+        app(
+          clubs,
+          teams: const [team],
+          updateTeam: (t,
+              {required String name,
+              String? clubId,
+              required bool active}) async {
+            saved = true;
+            capturedClubId = clubId;
+          },
+        ),
+      );
+
+      await tester.tap(find.text('Bývalí Nešemice'));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('Tým'), findsOneWidget);
+      expect(
+          find.descendant(
+            of: find.byType(DropdownButtonFormField<String?>),
+            matching: find.text('Bez oddílu'),
+          ),
+          findsOneWidget);
+
+      await tester.tap(find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.text('Uložit'),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(saved, isTrue);
+      expect(capturedClubId, isNull);
+    });
+
     testWidgets('a failed teams stream shows its error with a retry, not an '
         'empty club list', (tester) async {
       var calls = 0;
