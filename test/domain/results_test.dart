@@ -192,6 +192,52 @@ void main() {
       );
     });
 
+    // The site shows preparation days before some matches: until an hour
+    // before the start it reads like scheduled.
+    test('preparation two weeks before the start is not live', () {
+      expect(
+        isLive(
+          slot(),
+          result('preparation'),
+          start.subtract(const Duration(days: 14)),
+        ),
+        isFalse,
+      );
+    });
+
+    test('preparation 2 hours before the start is not live yet', () {
+      expect(
+        isLive(
+          slot(),
+          result('preparation'),
+          start.subtract(const Duration(hours: 2)),
+        ),
+        isFalse,
+      );
+    });
+
+    test('preparation 30 minutes before the start is live', () {
+      expect(
+        isLive(
+          slot(),
+          result('preparation'),
+          start.subtract(const Duration(minutes: 30)),
+        ),
+        isTrue,
+      );
+    });
+
+    test('preparation 1 hour after the start is live', () {
+      expect(
+        isLive(
+          slot(),
+          result('preparation'),
+          start.add(const Duration(hours: 1)),
+        ),
+        isTrue,
+      );
+    });
+
     test(
       'in_progress the site never closed stops being live after 12 hours',
       () {

@@ -835,7 +835,11 @@ begin
     from match_results where match_id = p_match_id;
   v_status := coalesce(v_status, 'scheduled');
   v_start := (v_slot.date + v_slot.starts_at) at time zone 'Europe/Prague';
-  if not ((v_status in ('preparation', 'in_progress') and now() < v_start + interval '12 hours')
+  -- The site shows 'preparation' days before some matches: like
+  -- 'scheduled', it is live only from an hour before the start.
+  if not ((v_status = 'in_progress' and now() < v_start + interval '12 hours')
+          or (v_status = 'preparation'
+              and now() between v_start - interval '1 hour' and v_start + interval '12 hours')
           or (v_status = 'scheduled'
               and now() between v_start - interval '1 hour' and v_start + interval '6 hours')) then
     return 'not_live';

@@ -139,6 +139,25 @@ Deno.test("matchJobsFor: live, backfill and the next 48 hours", () => {
   assertEquals(jobs.find((j) => j.site_match_id === 4)!.run_at, new Date("2026-10-10T08:00:00Z"));
 });
 
+Deno.test("matchJobsFor: PREPARATION an hour or more before the start is armed like SCHEDULED", () => {
+  const now = new Date("2026-10-10T06:00:00Z"); // 08:00 Prague
+  const jobs = matchJobsFor({
+    matches: [
+      match({ id: 1, status: "PREPARATION", date: "2026-10-24", time: "10:00" }),
+      match({ id: 2, status: "PREPARATION", date: "2026-10-11", time: "10:00" }),
+      match({ id: 3, status: "PREPARATION", date: "2026-10-10", time: "10:00" }),
+      match({ id: 4, status: "PREPARATION", date: "2026-10-10", time: "08:30" }),
+    ],
+    statusById: new Map([[1, "preparation"], [2, "preparation"], [3, null], [4, "scheduled"]]),
+    now,
+  });
+  assertEquals(jobs.map((j) => [j.site_match_id, j.run_at]), [
+    [2, new Date("2026-10-10T08:00:00Z")],
+    [3, new Date("2026-10-10T07:00:00Z")],
+    [4, now],
+  ]);
+});
+
 Deno.test("matchJobsFor: a stored match without a venue is fetched now, once listed", () => {
   const now = new Date("2026-10-10T06:00:00Z");
   const jobs = matchJobsFor({

@@ -4562,6 +4562,55 @@ begin
 end $$;
 reset role;
 
+-- 10b. The site shows PREPARATION days before some matches: until an hour
+-- before the start it is not live, like SCHEDULED.
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_far constant timestamp := (now() at time zone 'Europe/Prague') + interval '14 days';
+  v_soon constant timestamp := (now() at time zone 'Europe/Prague') + interval '30 minutes';
+begin
+  insert into priority_slots
+    (tenant_id, date, starts_at, ends_at, type_id, home_team, away_team,
+     created_by, import_key, site_slug, site_match_id, is_away)
+  select v_a, v.at::date, v.at::time, '23:59:59.999',
+         (select id from priority_slot_types where tenant_id = v_a and is_match and builtin),
+         'KK Jiný', 'TJ Sokol Brno IV', '10000000-0000-0000-0000-000000000001',
+         'cka:' || v.id, 'jihomoravska-divize-2026-2027-kolo-12-x-' || v.id, v.id, true
+    from (values (120, v_far), (121, v_soon)) as v(id, at);
+  insert into match_results (match_id, tenant_id, status, fetched_at)
+  select id, v_a, 'preparation', now() - interval '10 minutes'
+    from priority_slots where tenant_id = v_a and import_key in ('cka:120', 'cka:121');
+  perform set_config('probe.fed_120', (select id::text from priority_slots
+    where import_key = 'cka:120' and tenant_id = v_a), true);
+  perform set_config('probe.fed_121', (select id::text from priority_slots
+    where import_key = 'cka:121' and tenant_id = v_a), true);
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+begin
+  if refresh_match(current_setting('probe.fed_120')::uuid) <> 'not_live' then
+    raise exception 'FAIL: a match in preparation two weeks out is live';
+  end if;
+  if refresh_match(current_setting('probe.fed_121')::uuid) <> 'queued' then
+    raise exception 'FAIL: a match in preparation starting in 30 minutes was not queued';
+  end if;
+end $$;
+reset role;
+do $$
+begin
+  if exists (select 1 from notification_jobs
+             where dedupe_key = 'federation_match:00000000-0000-0000-0000-00000000000a:120')
+     or not exists (select 1 from notification_jobs
+                    where dedupe_key = 'federation_match:00000000-0000-0000-0000-00000000000a:121'
+                      and payload->>'requested_at' is not null) then
+    raise exception 'FAIL: refresh_match queued the wrong preparation match';
+  end if;
+  raise notice 'OK: a match in preparation is live only from an hour before its start (0045)';
+end $$;
+
 -- 11. The nightly producer: one job per active competition of enabled alleys.
 do $$
 declare

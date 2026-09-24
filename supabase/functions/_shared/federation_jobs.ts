@@ -4,8 +4,8 @@ import { pragueEpoch } from "./cancel_token.ts";
 import {
   competitionSlugsForClubs, endTime, HOME_PREP_MINUTES, type LegacyRow, matchFormat,
   nextCheckpoint, normalizeTeam, pairLegacy, parseCompetition, parseMatch,
-  parseSitemapLocs, parseVenue, parseVenueClubs, resultPayload, type SiteCompetition,
-  type SiteMatch, teamBelongsToClub, type VenueClub,
+  parseSitemapLocs, parseVenue, parseVenueClubs, pollingStatus, resultPayload,
+  type SiteCompetition, type SiteMatch, teamBelongsToClub, type VenueClub,
 } from "./federation.ts";
 
 export const SITE = "https://vysledky.kuzelky.cz";
@@ -108,12 +108,13 @@ export function matchJobsFor(args: {
     if (!args.statusById.has(m.id)) continue;
     const stored = args.statusById.get(m.id);
     const start = startOf(m).getTime();
+    const status = pollingStatus(m.status, new Date(start), args.now);
     let runAt: Date | null = null;
     if (args.venueless?.has(m.id) || args.failing?.has(m.id)) runAt = args.now;
-    else if (m.status === "PREPARATION" || m.status === "IN_PROGRESS") runAt = args.now;
-    else if ((m.status === "FINISHED" || m.status === "FORFEIT") &&
+    else if (status === "PREPARATION" || status === "IN_PROGRESS") runAt = args.now;
+    else if ((status === "FINISHED" || status === "FORFEIT") &&
       stored !== "finished" && stored !== "forfeit") runAt = args.now;
-    else if (m.status === "SCHEDULED" && start - n <= 48 * 3600e3 && start + 6 * 3600e3 > n) {
+    else if (status === "SCHEDULED" && start - n <= 48 * 3600e3 && start + 6 * 3600e3 > n) {
       runAt = nextCheckpoint("SCHEDULED", new Date(start), args.now);
     }
     if (runAt) jobs.push({ site_match_id: m.id, slug: m.slug, run_at: runAt });

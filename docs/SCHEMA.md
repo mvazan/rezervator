@@ -133,7 +133,7 @@ EXECUTE revoked from the app roles (see below).
 | `set_federation_sync(venue_slug, enabled)` (0045) | admin | Upserts the caller's `federation_sync` (slug trimmed + lower-cased, must be non-empty) and drops the old kuželna's `venue:` key when no match of the alley is there either, re-deriving `last_error`. `not_allowed`, `invalid_venue_slug`. |
 | `request_federation_discovery()`, `request_federation_sync()` (0045) | admin | Enqueue a `federation_discover` job / one `federation_competition` job per active team's competition, due now, and kick the dispatcher. `not_allowed`; `federation_not_configured` (no venue slug) / `federation_disabled` (sync off or no slug). |
 | `update_team(id, name, club_id, active)` (0045) | admin | Renames (trimmed), assigns a club of the same alley, switches the team on/off; a team switched off takes its competition's and matches' errors off the admin card at once (the keys die — see **Runs** below). `not_allowed` (foreign team, not admin), `unknown_club` (not a club of this alley, e.g. deleted meanwhile), `empty_name`, `team_name_taken`. |
-| `refresh_match(match_id)` (0045) | approved member or kiosk | On-demand refresh of a live match → `queued` (a `federation_match` job due now, at most one request per 5 minutes — see below), `fresh` (fetched < 5 min ago) or `not_live` (not a federation match, foreign, played only by switched-off teams of ours — `federation_match_switched_off`, whose job would stop unwritten and leave no gate — or outside the window: `preparation`/`in_progress` until start + 12 h, `scheduled` from start − 1 h to start + 6 h). `not_allowed`. |
+| `refresh_match(match_id)` (0045) | approved member or kiosk | On-demand refresh of a live match → `queued` (a `federation_match` job due now, at most one request per 5 minutes — see below), `fresh` (fetched < 5 min ago) or `not_live` (not a federation match, foreign, played only by switched-off teams of ours — `federation_match_switched_off`, whose job would stop unwritten and leave no gate — or outside the window: `in_progress` until start + 12 h, `preparation` from start − 1 h to start + 12 h — the site shows it days before some matches — and `scheduled` from start − 1 h to start + 6 h; the same windows as the job's checkpoints and the app's `isLive`). `not_allowed`. |
 | `apply_federation_matches(tenant, competition_slug, matches, keep_ids)`, `apply_federation_result(tenant, site_match_id, result)`, `upsert_federation_teams(tenant, teams)`, `record_federation_run(tenant, key, report, error)`, `enqueue_federation_match(tenant, site_match_id, slug, run_at)`, `upsert_federation_venue(tenant, venue)`, `federation_last_error(tenant, report)` (0045) | service_role only (notify function) | The sync's writes — see **Výsledkový servis ČKA** below. `apply_federation_matches` raises `federation_tenant_not_ready` when the tenant has no approved admin or no builtin match type. |
 
 Internal, no EXECUTE for app roles: `current_tenant_id`, `is_*`,
@@ -299,6 +299,16 @@ superseded and retired.
   switched the team off polls no further. `refresh_match` queues no job
   for such a match at all — nothing would stamp `fetched_at`, so every
   request would fetch again.
+  After each fetch the job re-arms itself by the match's status:
+  `scheduled` at start − 24 h, then start − 1 h, then every 15 minutes
+  until start + 6 h; `in_progress` every 15 minutes until start + 12 h;
+  `preparation` like `scheduled` until start − 1 h (the site shows it
+  days before some matches), then every 15 minutes until start + 12 h;
+  after that, and for `finished`/`forfeit`, at start + 24 h and at
+  start + 72 h, then it stops. A competition run arms a job at once for
+  a live match (`in_progress`, or `preparation` from start − 1 h); a
+  `scheduled` or earlier `preparation` one only within 48 h of its
+  start, at its next checkpoint.
   `enqueue_federation_match` arms the job with dedupe key
   `federation_match:<tenant>:<site_match_id>`; an earlier
   `run_at` wins, so a later checkpoint never pushes back an earlier one,

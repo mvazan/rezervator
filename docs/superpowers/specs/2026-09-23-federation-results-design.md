@@ -151,8 +151,8 @@ v `supabase_realtime`.
   Poslední dvě zařadí job se zpožděním 0 a hned zavolají
   `trigger_notification_jobs()`.
 - `refresh_match(p_match_id) returns text` — kdokoli schválený v tenantu.
-  Když je zápas živý (`preparation`, `in_progress`, nebo `scheduled`
-  v okně T−1 h až T+6 h) a `fetched_at` je starší než 5 minut, zařadí
+  Když je zápas živý (`in_progress`, `preparation` od T−1 h, nebo
+  `scheduled` v okně T−1 h až T+6 h) a `fetched_at` je starší než 5 minut, zařadí
   `federation_match` se zpožděním 0, hned spustí tick a vrátí `queued`;
   jinak `fresh` nebo `not_live`. Brána je na serveru, klient ji neobejde.
 
@@ -191,7 +191,8 @@ v `supabase_realtime`.
   | `SCHEDULED`, víc než 24 h před | T−24 h |
   | `SCHEDULED`, 24 h – 1 h před | T−1 h |
   | `SCHEDULED`, T−1 h až T+6 h | +15 min (live stream se objeví) |
-  | `PREPARATION`, `IN_PROGRESS` (do T+12 h) | +15 min |
+  | `PREPARATION` víc než 1 h před (web ho někdy ukazuje dny dopředu) | jako `SCHEDULED` |
+  | `PREPARATION` od T−1 h, `IN_PROGRESS` (do T+12 h) | +15 min |
   | `FINISHED`, `FORFEIT` | T+24 h, pak T+3 d, pak konec |
   | cokoli jiného po oknu | T+24 h, po T+3 d konec |
 

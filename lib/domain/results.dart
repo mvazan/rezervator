@@ -23,9 +23,14 @@ bool isLive(PrioritySlot slot, MatchResult? result, DateTime now) {
   );
   return switch (result?.status ?? MatchStatus.scheduled) {
     MatchStatus.finished || MatchStatus.forfeit => false,
-    MatchStatus.preparation || MatchStatus.inProgress => now.isBefore(
+    MatchStatus.inProgress => now.isBefore(
       start.add(const Duration(hours: 12)),
     ),
+    // The site shows preparation days before some matches: like scheduled,
+    // it is live only from an hour before the start.
+    MatchStatus.preparation =>
+      now.isAfter(start.subtract(const Duration(hours: 1))) &&
+          now.isBefore(start.add(const Duration(hours: 12))),
     MatchStatus.scheduled =>
       now.isAfter(start.subtract(const Duration(hours: 1))) &&
           now.isBefore(start.add(const Duration(hours: 6))),

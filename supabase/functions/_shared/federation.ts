@@ -401,11 +401,21 @@ export function pairLegacy(candidates: PairCandidate[], legacy: LegacyRow[]): Ma
   return pairs;
 }
 
+/** The status a match is polled by. The site shows PREPARATION days before
+ * some matches, so until an hour before the start it counts as SCHEDULED:
+ * live (every 15 minutes) only from T−1 h. */
+export function pollingStatus(status: MatchStatus, start: Date, now: Date): MatchStatus {
+  return status === "PREPARATION" && now.getTime() < start.getTime() - 3600e3
+    ? "SCHEDULED"
+    : status;
+}
+
 export function nextCheckpoint(status: MatchStatus, start: Date, now: Date): Date | null {
   const t = start.getTime();
   const n = now.getTime();
   const h = 3600e3;
   const soon = new Date(n + 15 * 60e3);
+  status = pollingStatus(status, start, now);
   if (status === "SCHEDULED") {
     if (n < t - 24 * h) return new Date(t - 24 * h);
     if (n < t - h) return new Date(t - h);

@@ -470,6 +470,19 @@ Deno.test("checkpoints follow the table in the spec", () => {
   assertEquals(nextCheckpoint("FORFEIT", T, at(80)), null);
 });
 
+Deno.test("PREPARATION an hour or more before the start is checked like SCHEDULED, then live", () => {
+  // The site shows PREPARATION days ahead for some matches.
+  const T = new Date("2026-10-10T08:00:00Z");
+  const at = (h: number) => new Date(T.getTime() + h * 3600e3);
+  const min = (d: Date, m: number) => new Date(d.getTime() + m * 60e3);
+  assertEquals(nextCheckpoint("PREPARATION", T, at(-14 * 24)), at(-24));
+  assertEquals(nextCheckpoint("PREPARATION", T, at(-2)), at(-1));
+  assertEquals(nextCheckpoint("PREPARATION", T, at(-1)), min(at(-1), 15));
+  assertEquals(nextCheckpoint("PREPARATION", T, at(-0.5)), min(at(-0.5), 15));
+  assertEquals(nextCheckpoint("PREPARATION", T, at(1)), min(at(1), 15));
+  assertEquals(nextCheckpoint("PREPARATION", T, at(11)), min(at(11), 15));
+});
+
 Deno.test("resultPayload is what apply_federation_result reads", () => {
   const p = resultPayload(parseMatch(fixture("match_finished.html")));
   assertEquals(p.status, "finished");
