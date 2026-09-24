@@ -172,6 +172,70 @@ void main() {
         );
       },
     );
+
+    test('preparation is live until 12 hours after start', () {
+      expect(
+        isLive(
+          slot(),
+          result('preparation'),
+          start.add(const Duration(hours: 2)),
+        ),
+        isTrue,
+      );
+      expect(
+        isLive(
+          slot(),
+          result('preparation'),
+          start.add(const Duration(hours: 12, minutes: 1)),
+        ),
+        isFalse,
+      );
+    });
+
+    test(
+      'in_progress the site never closed stops being live after 12 hours',
+      () {
+        expect(
+          isLive(
+            slot(),
+            result('in_progress'),
+            start.add(const Duration(hours: 11, minutes: 59)),
+          ),
+          isTrue,
+        );
+        expect(
+          isLive(
+            slot(),
+            result('in_progress'),
+            start.add(const Duration(hours: 12, minutes: 1)),
+          ),
+          isFalse,
+        );
+      },
+    );
+
+    test('scheduled stays live until 6 hours after start', () {
+      expect(
+        isLive(
+          slot(),
+          result('scheduled'),
+          start.add(const Duration(hours: 5, minutes: 59)),
+        ),
+        isTrue,
+      );
+      expect(
+        isLive(
+          slot(),
+          result('scheduled'),
+          start.add(const Duration(hours: 6, minutes: 1)),
+        ),
+        isFalse,
+      );
+    });
+
+    test('forfeit is never live', () {
+      expect(isLive(slot(), result('forfeit'), start), isFalse);
+    });
   });
 
   group('resultsTimeline', () {
