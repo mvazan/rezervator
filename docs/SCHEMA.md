@@ -224,8 +224,11 @@ superseded and retired.
   - **Rekeying:** a match carrying `legacy_id` (a `rozpis:` row of the old
     importer, paired by the edge function) takes over that row in place —
     its `import_key` becomes `cka:<id>`, uuid and `match_exceptions` stay.
-    The edge function pairs in four passes, each only on a unique hit:
-    the `rozpis:` key's round + teams; date + teams; date + start time +
+    The edge function pairs in five passes, each only on a unique hit:
+    first date + the teams the other way round (home rights swapped — the
+    leg takes its own date's row, not the other leg's; only when that
+    pair is unique both ways and neither side has the straight match that
+    day); the `rozpis:` key's round + teams; date + teams; date + start time +
     one team in common (a renamed opponent — here the legacy row must also
     have just one candidate); last, for the rows still unpaired, the same
     home and the same away on any date (a match moved before the site

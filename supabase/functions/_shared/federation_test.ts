@@ -455,6 +455,50 @@ Deno.test("an abbreviated opponent with another team letter stays unpaired", () 
   assertEquals([...pairs], [[4017, "3806e9a4-56b4-4898-8492-90dc12679ce2"]]);
 });
 
+/** Both legs of two real derbies as the rozpis has them (KP2 Sever A and B). */
+const derbyLegacy = [
+  { id: "a0483dd5-854c-47f2-a031-d769601555d5", import_key: "rozpis:KP2 Sever B:1:SKK Veverky Brno C – SK Brno Žabovřesky B", date: "2026-09-14", starts_at: "19:00:00", home_team: "SKK Veverky Brno C", away_team: "SK Brno Žabovřesky B" },
+  { id: "33fffbdd-dd36-415e-8d40-daa2e1a6cd66", import_key: "rozpis:KP2 Sever B:3:SK Brno Žabovřesky B – SKK Veverky Brno C", date: "2026-10-07", starts_at: "17:00:00", home_team: "SK Brno Žabovřesky B", away_team: "SKK Veverky Brno C" },
+  { id: "7022cb6e-6379-4bd5-81e9-7cb37c981da6", import_key: "rozpis:KP2 Sever A:4:KK MS Brno H – SKK Veverky Brno B", date: "2026-10-12", starts_at: "17:00:00", home_team: "KK MS Brno H", away_team: "SKK Veverky Brno B" },
+  { id: "d5fc4391-574c-42da-850a-b7ef94d30a47", import_key: "rozpis:KP2 Sever A:5:SKK Veverky Brno B – KK MS Brno H", date: "2026-10-21", starts_at: "18:30:00", home_team: "SKK Veverky Brno B", away_team: "KK MS Brno H" },
+];
+
+Deno.test("a leg whose home rights were swapped pairs with the rozpis row on its own date", () => {
+  // Both legs swapped: the any-date rule would hand each leg the other's row.
+  const b = pairLegacy([
+    { siteId: 4189, date: "2026-09-14", startsAt: "19:00", round: 1, home: "SK Brno Žabovřesky B", away: "SKK Veverky Brno C" },
+    { siteId: 4217, date: "2026-10-07", startsAt: "17:00", round: 8, home: "SKK Veverky Brno C", away: "SK Brno Žabovřesky B" },
+  ], derbyLegacy);
+  assertEquals(b.get(4189), "a0483dd5-854c-47f2-a031-d769601555d5");
+  assertEquals(b.get(4217), "33fffbdd-dd36-415e-8d40-daa2e1a6cd66");
+  // Both legs swapped where the site's rounds do not follow the rozpis: site
+  // round 4 is the rozpis round 4 pairing, but on the other leg's date.
+  const a = pairLegacy([
+    { siteId: 4173, date: "2026-10-12", startsAt: "17:00", round: 11, home: "SKK Veverky Brno B", away: "KK Moravská Slávia Brno H" },
+    { siteId: 4145, date: "2026-10-21", startsAt: "18:30", round: 4, home: "KK Moravská Slávia Brno H", away: "SKK Veverky Brno B" },
+  ], derbyLegacy);
+  assertEquals(a.get(4173), "7022cb6e-6379-4bd5-81e9-7cb37c981da6");
+  assertEquals(a.get(4145), "d5fc4391-574c-42da-850a-b7ef94d30a47");
+  // One leg swapped: both legs have the same home on the site.
+  const one = pairLegacy([
+    { siteId: 4189, date: "2026-09-14", startsAt: "19:00", round: 1, home: "SKK Veverky Brno C", away: "SK Brno Žabovřesky B" },
+    { siteId: 4217, date: "2026-10-07", startsAt: "17:00", round: 8, home: "SKK Veverky Brno C", away: "SK Brno Žabovřesky B" },
+  ], derbyLegacy);
+  assertEquals(one.get(4189), "a0483dd5-854c-47f2-a031-d769601555d5");
+  assertEquals(one.get(4217), "33fffbdd-dd36-415e-8d40-daa2e1a6cd66");
+});
+
+Deno.test("two teams meeting both ways on one date pair as listed, not swapped", () => {
+  const [ab, ba] = [derbyLegacy[0], { ...derbyLegacy[1], date: derbyLegacy[0].date }];
+  const siteAB = { siteId: 1, date: ab.date, startsAt: "10:00", round: 20, home: ab.home_team, away: ab.away_team };
+  const siteBA = { siteId: 2, date: ab.date, startsAt: "14:00", round: 21, home: ab.away_team, away: ab.home_team };
+  assertEquals([...pairLegacy([siteAB, siteBA], [ab, ba])], [[1, ab.id], [2, ba.id]]);
+  // Only one of the two on the site: it is the straight one, the other waits.
+  assertEquals([...pairLegacy([siteAB], [ab, ba])], [[1, ab.id]]);
+  // Only one of the two in the rozpis: the reversed site match is a new one.
+  assertEquals([...pairLegacy([siteAB, siteBA], [ab])], [[1, ab.id]]);
+});
+
 Deno.test("checkpoints follow the table in the spec", () => {
   const T = new Date("2026-10-10T08:00:00Z");
   const at = (h: number) => new Date(T.getTime() + h * 3600e3);

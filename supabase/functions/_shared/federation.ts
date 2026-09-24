@@ -357,13 +357,24 @@ export function pairLegacy(candidates: PairCandidate[], legacy: LegacyRow[]): Ma
     if (hit === undefined) known.set(key, hit = sameTeamForPairing(a, b));
     return hit;
   };
-  // The third rule is the old importer's "renamed opponent": the same slot
-  // with one team in common. Loose enough that a legacy row must also have
-  // just one candidate. The last one catches a match the rozpis has on
+  // The rule after date + teams is the old importer's "renamed opponent": the
+  // same slot with one team in common. Loose enough that a legacy row must
+  // also have just one candidate. The last one catches a match the rozpis has on
   // another date and in another round (moved before the site listed it):
   // same home and same away on any date — only while that pair is unique
   // both ways among the rows still unpaired, since a league plays it once.
   const rules: { test: (c: PairCandidate, l: LegacyRow) => boolean; strict: boolean }[] = [
+    {
+      // Home rights swapped (výměna pořadatelství): the same date, the teams
+      // the other way round. First, so a swapped leg takes its own date's row
+      // before the round or the any-date rule hands it the other leg's. Not
+      // when either side also has the straight match that day.
+      test: (c, l) =>
+        l.date === c.date && same(l.home_team, c.away) && same(l.away_team, c.home) &&
+        !candidates.some((o) => o.date === l.date && same(l.home_team, o.home) && same(l.away_team, o.away)) &&
+        !legacy.some((o) => o.date === c.date && same(o.home_team, c.home) && same(o.away_team, c.away)),
+      strict: true,
+    },
     {
       test: (c, l) => {
         const k = keyed(l);
