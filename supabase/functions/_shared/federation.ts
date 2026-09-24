@@ -381,9 +381,12 @@ export function pairLegacy(candidates: PairCandidate[], legacy: LegacyRow[]): Ma
       strict: true,
     },
     {
+      // A postponed match: its round, any date within half a year — next
+      // season's same round of the same two teams is a year away.
       test: (c, l) => {
         const k = keyed(l);
-        return !!k && Number(k[1]) === c.round && same(k[2], c.home) && same(k[3], c.away);
+        return !!k && Number(k[1]) === c.round && daysApart(c, l) <= 183 &&
+          same(k[2], c.home) && same(k[3], c.away);
       },
       strict: false,
     },

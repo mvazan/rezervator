@@ -228,17 +228,19 @@ superseded and retired.
     first date + the teams the other way round (home rights swapped — the
     leg takes its own date's row, not the other leg's; only when that
     pair is unique both ways and neither side has the straight match that
-    day); the `rozpis:` key's round + teams; date + teams; date + start time +
-    one team in common (a renamed opponent — here the legacy row must also
-    have just one candidate); last, for the rows still unpaired, the same
-    home and the same away up to 60 days apart (a match moved before the
-    site listed it) — only when exactly one such pair exists each way
-    within that reach. A `rozpis:` row the site never lists stays free for
-    every later sync, so the bound keeps it off next season's match. Team
-    names compare without case, accents and a trailing ` A`, and a word
-    may stand for a run of the other name's words by their initials
-    (`KK MS Brno B` = `KK Moravská Slavia Brno B`, `Kamenice n.L.` =
-    `Kamenice nad Lipou`); the team letter and digits must match exactly.
+    day); the `rozpis:` key's round + teams up to 183 days apart (a
+    postponed match, never next season's same round); date + teams; date +
+    start time + one team in common (a renamed opponent — here the legacy
+    row must also have just one candidate); last, for the rows still
+    unpaired, the same home and the same away up to 60 days apart (a match
+    moved before the site listed it) — only when exactly one such pair
+    exists each way within that reach. A `rozpis:` row the site never
+    lists stays free for every later sync; both bounds keep it off next
+    season's match of the same two teams. Team names compare without
+    case, accents and a trailing ` A`, and a word may stand for a run of
+    the other name's words by their initials (`KK MS Brno B` =
+    `KK Moravská Slavia Brno B`, `Kamenice n.L.` = `Kamenice nad Lipou`);
+    the team letter and digits must match exactly.
   - **Update in place, only on a difference.** `video_url`, `competition`,
     `round`, `site_slug`, `site_match_id`, `home_team_slug`,
     `away_team_slug` are always rewritten and never count as `updated`; the match columns (date, times, teams,

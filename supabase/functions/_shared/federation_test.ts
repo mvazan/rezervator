@@ -507,6 +507,15 @@ Deno.test("the any-date rule reaches two months, never next season's match", () 
   assertEquals(pairLegacy(at("2027-09-19", 3), [dorostRow]).size, 0);
 });
 
+Deno.test("the round rule pairs a match postponed within half a year, never next season's", () => {
+  const at = (date: string) => [{
+    siteId: 7002, date, startsAt: "10:00", round: 1, home: "TJ Sokol Vracov B", away: "TJ Sokol Husovice (dorost)",
+  }];
+  assertEquals(pairLegacy(at("2027-02-10"), [dorostRow]).get(7002), dorostRow.id);
+  // Next season's round 1 between the same two teams.
+  assertEquals(pairLegacy(at("2027-09-12"), [dorostRow]).size, 0);
+});
+
 Deno.test("two teams meeting both ways on one date pair as listed, not swapped", () => {
   const [ab, ba] = [derbyLegacy[0], { ...derbyLegacy[1], date: derbyLegacy[0].date }];
   const siteAB = { siteId: 1, date: ab.date, startsAt: "10:00", round: 20, home: ab.home_team, away: ab.away_team };
