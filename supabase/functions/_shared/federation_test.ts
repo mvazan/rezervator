@@ -60,6 +60,23 @@ Deno.test("team placeholders: a missing name falls back to the slug, a missing s
   assertThrows(() => parseCompetition(page({ id: 1, name: "KK A", slug: "$L7" })));
 });
 
+Deno.test("a competition page whose rounds do not list the current round is refused", () => {
+  const page = (rounds: { id: number }[]) => {
+    const m = {
+      id: 1, slug: "x-kolo-1-a-b", date: "2026-10-10", time: "10:00", round: 1,
+      status: "SCHEDULED", matchType: "TEAMS_OF_6", discipline: "T120", videoUrl: "$undefined",
+      homeTeam: { id: 1, name: "KK A", slug: "kk-a-muzi" },
+      awayTeam: { id: 2, name: "KK B", slug: "kk-b-muzi" },
+      competition: { slug: "x", name: "X" },
+    };
+    const data = { data: { title: "X", rounds, currentRound: { id: 1, matches: [m] } } };
+    return `<script>self.__next_f.push([1,${JSON.stringify(`5:${JSON.stringify(data)}`)}])</script>`;
+  };
+  assertEquals(parseCompetition(page([{ id: 1 }, { id: 2 }])).roundIds, [1, 2]);
+  assertThrows(() => parseCompetition(page([])), Error, "competition rounds missing");
+  assertThrows(() => parseCompetition(page([{ id: 2 }])), Error, "competition rounds missing");
+});
+
 Deno.test("a finished match: venue, totals, players with lanes", () => {
   const d = parseMatch(fixture("match_finished.html"));
   assertEquals(d.id, 4859);

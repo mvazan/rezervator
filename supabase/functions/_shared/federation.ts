@@ -115,11 +115,14 @@ export function parseCompetition(html: string): SiteCompetition {
   if (!Array.isArray(rounds) || !current || !Array.isArray(current.matches)) {
     throw new Error("competition rounds missing");
   }
+  const roundIds = rounds.map((r) => Number(r.id));
+  const currentRound = Number(current.id);
+  if (!roundIds.includes(currentRound)) throw new Error("competition rounds missing");
   const standings = ((data.standings as Json | undefined)?.total ?? []) as Json[];
   return {
     name: String(data.title),
-    roundIds: rounds.map((r) => Number(r.id)),
-    currentRound: Number(current.id),
+    roundIds,
+    currentRound,
     matches: current.matches.map(siteMatch),
     standings: standings
       .filter((s) => typeof s.teamSlug === "string")
