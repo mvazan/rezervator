@@ -472,6 +472,8 @@ begin
             t->>'competition_name');
     v_new := v_new + 1;
   end loop;
+  -- A team rolled over to a new season leaves its old competition dead.
+  perform federation_refresh_error(p_tenant);
   return v_new;
 end;
 $$;
@@ -491,33 +493,115 @@ returns void language sql security definer set search_path = public as $$
     sections = excluded.sections, clubs = excluded.clubs, fetched_at = now();
 $$;
 
--- last_error is the newest error still standing in last_report: a key's
--- success replaces only its own entry, so one competition's (or match's)
--- success never hides another key's failure, and a retry that worked
--- leaves no stale error behind. The row lock orders concurrent jobs.
+-- last_report without its dead keys — the ones that can no longer run for
+-- the alley: a competition:<slug> no active team of the alley plays; a
+-- venue:<slug> that is neither federation_sync.venue_slug nor any of the
+-- alley's matches' venue; a match:<site_match_id> with no cka:<id> slot any
+-- more, or whose teams of ours (teams.name = home_team/away_team) are all
+-- switched off. A match that names no team of ours stays live — its job
+-- still runs. discover, and any other key, is always live.
+create or replace function federation_live_report(p_tenant uuid, p_report jsonb)
+returns jsonb language sql stable security definer set search_path = public as $$
+  select coalesce(jsonb_object_agg(e.key, e.value), '{}'::jsonb)
+    from jsonb_each(coalesce(p_report, '{}'::jsonb)) e
+   cross join lateral (select split_part(e.key, ':', 1) as kind,
+                              substr(e.key, strpos(e.key, ':') + 1) as id) k
+   where case k.kind
+     when 'competition' then exists (
+       select 1 from teams t
+        where t.tenant_id = p_tenant and t.active and t.competition_slug = k.id)
+     when 'venue' then exists (
+       select 1 from federation_sync s
+        where s.tenant_id = p_tenant and s.venue_slug = k.id)
+       or exists (
+       select 1 from priority_slots p
+        where p.tenant_id = p_tenant and p.venue_slug = k.id)
+     when 'match' then exists (
+       select 1 from priority_slots p
+        where p.tenant_id = p_tenant and p.import_key = 'cka:' || k.id
+          and (exists (select 1 from teams t
+                        where t.tenant_id = p_tenant and t.active
+                          and t.name in (p.home_team, p.away_team))
+               or not exists (select 1 from teams t
+                               where t.tenant_id = p_tenant
+                                 and t.name in (p.home_team, p.away_team))))
+     else true
+   end
+$$;
+
+-- The error the admin card shows: the newest live entry that has one.
+-- A dead key's error never counts, even before a write drops it.
+create or replace function federation_last_error(p_tenant uuid, p_report jsonb)
+returns text language sql stable security definer set search_path = public as $$
+  select e.value->>'error'
+    from jsonb_each(federation_live_report(p_tenant, p_report)) e
+   where e.value ? 'error'
+   order by (e.value->>'at')::timestamptz desc nulls last, e.key
+   limit 1
+$$;
+
+-- Drops the dead keys and re-derives last_error after a change that can
+-- kill keys (a team switched off or rolled over to a new competition, the
+-- alley's kuželna moved), so the card stops showing an error of something
+-- that no longer runs at once. Writes only when something changed.
+create or replace function federation_refresh_error(p_tenant uuid)
+returns void language plpgsql security definer set search_path = public as $$
+declare
+  v_report jsonb;
+  v_error text;
+begin
+  select last_report into v_report from federation_sync
+   where tenant_id = p_tenant for update;
+  if not found then
+    return;
+  end if;
+  v_report := federation_live_report(p_tenant, v_report);
+  v_error := federation_last_error(p_tenant, v_report);
+  update federation_sync set last_report = v_report, last_error = v_error
+   where tenant_id = p_tenant
+     and (last_report, last_error) is distinct from (v_report, v_error);
+end;
+$$;
+
+-- discover and competition:<slug> are the sync's runs: they stamp
+-- last_run_at (and, on success, last_success_at) and keep their report +
+-- at, or {error, at}, under their key. A match or venue job only reports
+-- trouble, under match:<site_match_id> / venue:<slug>: its failure writes
+-- {error, at}, its success removes that key — and with nothing to remove
+-- writes nothing at all (no row update, no Realtime event per fetched
+-- match), so last_report never grows by a key per match. Every write drops
+-- the dead keys and derives last_error from the live ones. The row lock
+-- orders concurrent jobs.
 create or replace function record_federation_run(
   p_tenant uuid, p_key text, p_report jsonb, p_error text)
 returns void language plpgsql security definer set search_path = public as $$
 declare
+  v_run constant boolean := p_key = 'discover' or p_key like 'competition:%';
   v_report jsonb;
 begin
-  insert into federation_sync (tenant_id) values (p_tenant) on conflict do nothing;
   select last_report into v_report from federation_sync
    where tenant_id = p_tenant for update;
-  v_report := v_report || jsonb_build_object(p_key,
-    case when p_error is null
-      then coalesce(p_report, '{}'::jsonb) || jsonb_build_object('at', now())
-      else jsonb_build_object('error', p_error, 'at', now()) end);
+  if p_error is null and not v_run and not coalesce(v_report ? p_key, false) then
+    return;
+  end if;
+  if v_report is null then
+    insert into federation_sync (tenant_id) values (p_tenant) on conflict do nothing;
+    select last_report into v_report from federation_sync
+     where tenant_id = p_tenant for update;
+  end if;
+  v_report := case
+    when p_error is not null then v_report || jsonb_build_object(p_key,
+      jsonb_build_object('error', p_error, 'at', now()))
+    when v_run then v_report || jsonb_build_object(p_key,
+      coalesce(p_report, '{}'::jsonb) || jsonb_build_object('at', now()))
+    else v_report - p_key end;
+  v_report := federation_live_report(p_tenant, v_report);
   update federation_sync
-     set last_run_at = now(),
-         last_success_at = case when p_error is null then now() else last_success_at end,
+     set last_run_at = case when v_run then now() else last_run_at end,
+         last_success_at = case when v_run and p_error is null then now()
+                                else last_success_at end,
          last_report = v_report,
-         -- Runs in one transaction share now(): the key just written wins a tie.
-         last_error = (select e.value->>'error' from jsonb_each(v_report) e
-                        where e.value ? 'error'
-                        order by (e.value->>'at')::timestamptz desc nulls last,
-                                 e.key = p_key desc, e.key
-                        limit 1)
+         last_error = federation_last_error(p_tenant, v_report)
    where tenant_id = p_tenant;
 end;
 $$;
@@ -587,12 +671,16 @@ revoke all on function enqueue_federation_match(uuid, integer, text, timestamptz
 revoke all on function enqueue_federation_jobs() from public, anon, authenticated;
 revoke all on function enqueue_federation_venue(uuid, text, interval) from public, anon, authenticated;
 revoke all on function upsert_federation_venue(uuid, jsonb) from public, anon, authenticated;
+revoke all on function federation_live_report(uuid, jsonb) from public, anon, authenticated;
+revoke all on function federation_last_error(uuid, jsonb) from public, anon, authenticated;
+revoke all on function federation_refresh_error(uuid) from public, anon, authenticated;
 grant execute on function apply_federation_matches(uuid, text, jsonb, integer[]) to service_role;
 grant execute on function apply_federation_result(uuid, integer, jsonb) to service_role;
 grant execute on function upsert_federation_teams(uuid, jsonb) to service_role;
 grant execute on function record_federation_run(uuid, text, jsonb, text) to service_role;
 grant execute on function enqueue_federation_match(uuid, integer, text, timestamptz) to service_role;
 grant execute on function upsert_federation_venue(uuid, jsonb) to service_role;
+grant execute on function federation_last_error(uuid, jsonb) to service_role;
 
 -- ---------------------------------------------------------------- RPCs
 create or replace function set_federation_sync(p_venue_slug text, p_enabled boolean)
@@ -610,6 +698,8 @@ begin
   values (current_tenant_id(), v_slug, p_enabled)
   on conflict (tenant_id) do update
     set venue_slug = excluded.venue_slug, enabled = excluded.enabled;
+  -- A moved kuželna leaves the old one's venue key dead.
+  perform federation_refresh_error(current_tenant_id());
 end;
 $$;
 
@@ -683,6 +773,8 @@ begin
   if not found then
     raise exception 'not_allowed';
   end if;
+  -- A team switched off can leave its competition and matches dead.
+  perform federation_refresh_error(current_tenant_id());
 end;
 $$;
 

@@ -60,7 +60,7 @@ and what cascades — and is updated with every migration.
 | `player_groups` | (0044) `tenant_id`, `created_by` | **server-only**: RLS on, zero policies, every grant revoked from `anon`/`authenticated`. Internal bookkeeping only — the app reads `player_group_members`. |
 | `player_group_members` | (0044) `group_id → player_groups` (cascade), `user_id → profiles` (cascade), `tenant_id` (denormalised so the admin policy never has to read `player_groups` — no policy cycle), `status` invited\|member, `invited_by`. PK (`group_id`, `user_id`). Partial unique index `player_group_one_membership` on `user_id where status = 'member'` — one group per player. In the Realtime publication. | select: own rows (`user_id = auth.uid()`), the caller's own group (`my_group_id()`), or the alley's admin (`tenant_id = current_tenant_id()`). No insert/update/delete for `authenticated`, nothing for `anon` — written only through the `group_*` RPCs below. |
 | `teams` | (0045) The alley's own teams as the federation lists them: `name` (unique per tenant, 1–80 chars — **the string the app keys by**: `priority_slots.home_team`/`away_team`, `followed_teams`, `calendar_teams`, `team_colors`; set at discovery, editable by the admin), `club_id → clubs` (set null), `site_team_id`, `site_slug` (unique per tenant — discovery's identity), `site_name`, `competition_slug`, `competition_name`, `active` (an inactive team's competition is not synced). In the Realtime publication. | select approved/kiosk. No insert/update/delete for `authenticated`, nothing for `anon` — discovery (`upsert_federation_teams`) and `update_team` write it. |
-| `federation_sync` | (0045) PK `tenant_id`: `venue_slug` (the alley's kuželna on the site, `''` = not configured, otherwise lower-case letters/digits/hyphens like `tenants.public_slug` but without its 3–40 length bound), `enabled` (default off), `last_run_at`, `last_success_at`, `last_error` (the newest error still in `last_report`), `last_report jsonb` (per job key — `discover`, `competition:<slug>`, `federation_match`, `venue:<slug>` — the last run's report + `at`, or `{error, at}` when it failed). In the Realtime publication. | select **admin** only. Written by `set_federation_sync` and `record_federation_run`. |
+| `federation_sync` | (0045) PK `tenant_id`: `venue_slug` (the alley's kuželna on the site, `''` = not configured, otherwise lower-case letters/digits/hyphens like `tenants.public_slug` but without its 3–40 length bound), `enabled` (default off), `last_run_at`, `last_success_at` (stamped only by `discover` and `competition:<slug>` runs — the nightly sync's; match and venue jobs never touch them), `last_error` (the error of the newest live `last_report` entry that has one), `last_report jsonb` (`discover` and `competition:<slug>` — the last run's report + `at`, or `{error, at}` when it failed; `match:<site_match_id>` and `venue:<slug>` — `{error, at}` only while that match's or venue's fetch is failing; keys that can no longer run are dropped on every write — see **Runs** below). In the Realtime publication. | select **admin** only. Written by `set_federation_sync` and `record_federation_run`; `update_team`, `upsert_federation_teams` and `set_federation_sync` re-derive `last_error` (`federation_refresh_error`). |
 | `match_results` | (0045) PK `match_id → priority_slots` (cascade), `tenant_id`, `status` scheduled \| preparation \| in_progress \| finished \| forfeit, `match_type`, `discipline`, per side `points`, `total`, `fulls`, `spares`, `errors`, `set_points` (`home_*`/`away_*`), `fetched_at`. In the Realtime publication. | select approved/kiosk; server-only writes (`apply_federation_result`). |
 | `match_player_results` | (0045) `match_id → priority_slots` (cascade), `tenant_id`, `side` home\|away, `position`, `player_name`, `player_site_id`, `player_slug`, `fulls`, `spares`, `errors`, `total`, `set_points`, `team_points`, `lanes jsonb` (`[{lane, fulls, spares, errors, total, setPoints}]`). Unique (`match_id`, `side`, `position`); index (`tenant_id`, `player_site_id`). Replaced whole on every fetch. In the Realtime publication, replica identity full (the app's stream is filtered by `match_id`, and Realtime checks a DELETE against the identity alone). | as `match_results`. |
 | `venues` | (0045) The alleys (kuželny) the tenant's matches are played at, from their page on vysledky.kuzelky.cz: `slug` (the site's `/detail-kuzelny/<slug>`, unique per tenant — matches `priority_slots.venue_slug` and `federation_sync.venue_slug`), `name`, `address`, `phone`, `email`, `lat`/`lng` (from the page's mapy.cz link), `sections jsonb` (`[{title, items: [{label, value}]}]` — the page's technical/contact blocks as shown), `clubs text[]` (club names at the alley), `fetched_at`. In the Realtime publication. | select approved/kiosk; server-only writes (`upsert_federation_venue`). |
@@ -130,11 +130,11 @@ EXECUTE revoked from the app roles (see below).
 | `my_future_reservations(user)` | service_role only (callback, calendar-manage) | `(reservation_id, date, starts_at, ends_at, lane, alley_name)` for the player's live reservations from Prague-today on — block times, tenant name — ordered by date, starts_at. The raw material of the calendar events. |
 | `public_week(slug, monday)` (0043) | **anon** i signed-in | Veřejný přehled: týden (`monday` se zarovná na pondělí) publikované a schválené kuželny — `tenant_name`, `settings`, `blocks`, `slot_types`, `overrides`/`priority_slots`/`rentals` za neděli před … pondělí po, `occupied` (`block_id, date, lane, club_color`) za týden. Žádná jména, `player_id`, `renter_name`, `note`, `created_by`. `unknown_tenant` pro neznámý, vypnutý i neschválený slug (stejně). |
 | `set_public_overview(slug, enabled)`, `my_public_overview()` (0043) | admin | Slug (trim + lower, `''` = žádný) a přepínač vlastní kuželny; čtení vrací `{public_slug, public_enabled, tenant_name}`. `not_allowed`, `invalid_slug` (formát / zapnutí bez slugu), `slug_taken`. |
-| `set_federation_sync(venue_slug, enabled)` (0045) | admin | Upserts the caller's `federation_sync` (slug trimmed + lower-cased, must be non-empty). `not_allowed`, `invalid_venue_slug`. |
+| `set_federation_sync(venue_slug, enabled)` (0045) | admin | Upserts the caller's `federation_sync` (slug trimmed + lower-cased, must be non-empty) and drops the old kuželna's `venue:` key when no match of the alley is there either, re-deriving `last_error`. `not_allowed`, `invalid_venue_slug`. |
 | `request_federation_discovery()`, `request_federation_sync()` (0045) | admin | Enqueue a `federation_discover` job / one `federation_competition` job per active team's competition, due now, and kick the dispatcher. `not_allowed`; `federation_not_configured` (no venue slug) / `federation_disabled` (sync off or no slug). |
-| `update_team(id, name, club_id, active)` (0045) | admin | Renames (trimmed), assigns a club of the same alley, switches the team on/off. `not_allowed` (foreign team, not admin), `unknown_club` (not a club of this alley, e.g. deleted meanwhile), `empty_name`, `team_name_taken`. |
+| `update_team(id, name, club_id, active)` (0045) | admin | Renames (trimmed), assigns a club of the same alley, switches the team on/off; a team switched off takes its competition's and matches' errors off the admin card at once (the keys die — see **Runs** below). `not_allowed` (foreign team, not admin), `unknown_club` (not a club of this alley, e.g. deleted meanwhile), `empty_name`, `team_name_taken`. |
 | `refresh_match(match_id)` (0045) | approved member or kiosk | On-demand refresh of a live match → `queued` (a `federation_match` job due now, at most one request per 5 minutes — see below), `fresh` (fetched < 5 min ago) or `not_live` (not a federation match, foreign, or outside the window: `preparation`/`in_progress` until start + 12 h, `scheduled` from start − 1 h to start + 6 h). `not_allowed`. |
-| `apply_federation_matches(tenant, competition_slug, matches, keep_ids)`, `apply_federation_result(tenant, site_match_id, result)`, `upsert_federation_teams(tenant, teams)`, `record_federation_run(tenant, key, report, error)`, `enqueue_federation_match(tenant, site_match_id, slug, run_at)`, `upsert_federation_venue(tenant, venue)` (0045) | service_role only (notify function) | The sync's writes — see **Výsledkový servis ČKA** below. `apply_federation_matches` raises `federation_tenant_not_ready` when the tenant has no approved admin or no builtin match type. |
+| `apply_federation_matches(tenant, competition_slug, matches, keep_ids)`, `apply_federation_result(tenant, site_match_id, result)`, `upsert_federation_teams(tenant, teams)`, `record_federation_run(tenant, key, report, error)`, `enqueue_federation_match(tenant, site_match_id, slug, run_at)`, `upsert_federation_venue(tenant, venue)`, `federation_last_error(tenant, report)` (0045) | service_role only (notify function) | The sync's writes — see **Výsledkový servis ČKA** below. `apply_federation_matches` raises `federation_tenant_not_ready` when the tenant has no approved admin or no builtin match type. |
 
 Internal, no EXECUTE for app roles: `current_tenant_id`, `is_*`,
 `block_day_status`, `cancel_stranded_reservations`, `rental_occurs`,
@@ -144,7 +144,8 @@ Internal, no EXECUTE for app roles: `current_tenant_id`, `is_*`,
 `seed_demo_member` (service_role only — Play-review demo account),
 `public_tenant_id`, `same_group`, `_group_drop_member` (0044),
 `federation_description`, `enqueue_federation_jobs` (called by cron),
-`enqueue_federation_venue` (0045).
+`enqueue_federation_venue`, `federation_live_report`,
+`federation_refresh_error` (0045).
 
 `block_day_status(tenant, date, block)` → `open` | `day_closed` |
 `invalid_block` | `unknown_block` is the one definition of "this block is
@@ -211,6 +212,9 @@ superseded and retired.
   gets ` (<competition>)` appended; if that is taken too,
   `<site_name> (<site_slug>)`); an existing one (same `site_slug`) keeps
   the admin's name, club and switch — only the site's facts are refreshed.
+  A team rolled over to the next season's competition leaves the past
+  season's `competition:` key dead, so its error leaves `last_error` at
+  once.
 - **Schedule** (`federation_competition` job per active team's
   competition): `apply_federation_matches` in one transaction with
   `set_config('import.run', 'on', true)`, so the 0038 hand-edit trigger
@@ -270,7 +274,8 @@ superseded and retired.
     arms no `federation_match` job for a match with no active team of
     ours in it (a job armed before the switch still runs out its
     checkpoints); when no active team is left in the competition, the
-    competition is not synced at all.
+    competition is not synced at all. The switch also clears that
+    competition's and those matches' errors from `last_error` at once.
 - **Match detail** (`federation_match` job): `apply_federation_result`
   upserts `match_results`, replaces `match_player_results`, writes
   `video_url` and, when the detail names the venue, `venue`/`venue_slug`
@@ -283,20 +288,36 @@ superseded and retired.
   `federation_match:<tenant>:<site_match_id>`; an earlier
   `run_at` wins, so a later checkpoint never pushes back an earlier one,
   and a re-arm keeps the payload's `requested_at`.
-- **Runs:** `record_federation_run(tenant, key, report, error)` stamps
-  `last_run_at`; a success sets `last_success_at` and merges
-  `{key: report + at}` into `last_report`, a failure merges
-  `{key: {error, at}}` — the key's entry is whatever happened last. Keys:
-  `discover`, `competition:<slug>`, `federation_match` (every match fetch
-  of the alley, with no report of its own) and `venue:<slug>` (likewise).
-  `last_error` is then the `error` of the newest `last_report` entry that
-  still has one, or null: a match or venue failure shows on the admin
-  card until that key succeeds again, a retry that worked leaves no stale
-  error, and one key's success never clears another key's error — a
-  competition that succeeds does not hide the failure of the competition
-  that ran a tick earlier. A job the runtime killed more than 5 times
-  (leased, never finished) is dropped and recorded as
-  `dropped after N attempts`.
+- **Runs:** `record_federation_run(tenant, key, report, error)` keeps one
+  `last_report` entry per thing that can fail on its own. Keys:
+  - `discover` and `competition:<slug>` are the sync's runs: they stamp
+    `last_run_at`, a success also `last_success_at` (the card's „Poslední
+    synchronizace“) and merges `{key: report + at}`, a failure merges
+    `{key: {error, at}}` — the key's entry is whatever happened last.
+  - `match:<site_match_id>` (one per match) and `venue:<slug>` only
+    report trouble and never touch the run timestamps: a failure writes `{error, at}`, a success removes the
+    key, and a success with no key to remove writes nothing at all — no
+    row update, no Realtime event — so `last_report` does not grow by an
+    entry per fetched match.
+  - **Dead keys** — ones that can no longer run — are dropped on every
+    write and never count (`federation_live_report`): a `competition:`
+    no active team of the alley plays; a `venue:` that is neither
+    `federation_sync.venue_slug` nor any of the alley's matches'
+    `venue_slug`; a `match:` with no `cka:<id>` slot any more, or whose
+    teams of ours (`teams.name` = `home_team`/`away_team`) are all
+    switched off (a match that names none of our teams stays live).
+  - `last_error` (`federation_last_error(tenant, report)`) is the `error`
+    of the newest live entry that has one, or null: a match or venue
+    failure shows until that key succeeds again, a retry that worked
+    leaves no stale error, one key's success never clears another key's
+    error, and an error of something that no longer runs never shows.
+    `update_team`, `upsert_federation_teams` and `set_federation_sync`
+    call `federation_refresh_error(tenant)` — drop the dead keys, re-derive
+    `last_error`, write only on a change — so switching a team off clears
+    its competition's error at once, not at the next run.
+
+  A job the runtime killed more than 5 times (leased, never finished) is
+  dropped and recorded as `dropped after N attempts`.
 - **Venues** (`federation_venue` job, dedupe key
   `federation_venue:<tenant>:<slug>`, payload `{tenant_id, slug}`): the
   venue page `/detail-kuzelny/<slug>` → `upsert_federation_venue(tenant,
@@ -754,8 +775,13 @@ and FCM is configured, e-mail otherwise.
   `match_player_results` with replica identity full, the server functions
   the service's; the sync settings admin-only with a validated slug and
   the admin-only sync/discovery requests; the `refresh_match` gate; the
-  nightly producer; `record_federation_run` per key and its `last_error`
-  rule; the calendar-trigger rule — only a change of what the event shows
+  nightly producer; `record_federation_run` per key — only discovery and
+  competitions stamping a run, a match or venue success removing just its
+  own key or writing nothing — and `last_error` as the newest error of a
+  live key, dead keys (a switched-off competition, a deleted or
+  switched-off match, a foreign venue) pruned on every write and at once
+  on `update_team`, `set_federation_sync` and a discovery rollover, per
+  alley; the calendar-trigger rule — only a change of what the event shows
   enqueues, and never for a match in the past before and after; and the
   venues — upsert, one fetch for an unknown match venue, the nightly and
   sync-request producers, no re-arm of a pending or recently failed

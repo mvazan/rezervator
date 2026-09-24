@@ -4500,7 +4500,10 @@ begin
                            'public.enqueue_federation_jobs()',
                            'public.federation_description(text, integer, boolean, text)',
                            'public.upsert_federation_venue(uuid, jsonb)',
-                           'public.enqueue_federation_venue(uuid, text, interval)'] loop
+                           'public.enqueue_federation_venue(uuid, text, interval)',
+                           'public.federation_live_report(uuid, jsonb)',
+                           'public.federation_last_error(uuid, jsonb)',
+                           'public.federation_refresh_error(uuid)'] loop
     if has_function_privilege('authenticated', f, 'execute')
        or has_function_privilege('anon', f, 'execute') then
       raise exception 'FAIL: % is callable from the app', f;
@@ -4511,7 +4514,8 @@ begin
                            'public.upsert_federation_teams(uuid, jsonb)',
                            'public.record_federation_run(uuid, text, jsonb, text)',
                            'public.enqueue_federation_match(uuid, integer, text, timestamptz)',
-                           'public.upsert_federation_venue(uuid, jsonb)'] loop
+                           'public.upsert_federation_venue(uuid, jsonb)',
+                           'public.federation_last_error(uuid, jsonb)'] loop
     if not has_function_privilege('service_role', f, 'execute') then
       raise exception 'FAIL: the service cannot call %', f;
     end if;
@@ -4555,7 +4559,7 @@ begin
      or s.last_report->'discover'->>'at' is null then
     raise exception 'FAIL: a successful run was not recorded: %', to_jsonb(s);
   end if;
-  perform record_federation_run(v_b, 'krajsky-prebor-2026-2027', '{"inserted":1}', null);
+  perform record_federation_run(v_b, 'competition:krajsky-prebor-2026-2027', '{"inserted":1}', null);
   update federation_sync set last_success_at = now() - interval '1 hour' where tenant_id = v_b;
   perform record_federation_run(v_b, 'discover', '{"teams":0}', 'site down');
   select * into s from federation_sync where tenant_id = v_b;
@@ -4563,75 +4567,330 @@ begin
      or s.last_report->'discover'->>'error' is distinct from 'site down'
      or s.last_report->'discover'->>'at' is null
      or s.last_report->'discover' ? 'teams'
-     or s.last_report->'krajsky-prebor-2026-2027'->>'inserted' <> '1' then
+     or s.last_report->'competition:krajsky-prebor-2026-2027'->>'inserted' is distinct from '1' then
     raise exception 'FAIL: a failed run is not recorded under its key: %', to_jsonb(s);
   end if;
   perform record_federation_run(v_b, 'discover', '{"teams":4}', null);
   select * into s from federation_sync where tenant_id = v_b;
   if s.last_error is not null or s.last_report->'discover'->>'teams' <> '4'
      or s.last_report->'discover' ? 'error'
-     or s.last_report->'krajsky-prebor-2026-2027'->>'inserted' <> '1' then
+     or s.last_report->'competition:krajsky-prebor-2026-2027'->>'inserted' is distinct from '1' then
     raise exception 'FAIL: a success did not replace the key''s error or clear last_error: %', to_jsonb(s);
   end if;
   raise notice 'OK: record_federation_run keeps a report or an error per key and the last error (0045)';
 end $$;
 
--- 13b. last_error is the newest error still standing in last_report: a
--- match or venue failure shows until its key succeeds again, and one key's
--- success never clears another key's error.
+-- Fixtures for 13b–13d. B's active Kuželna B (krajsky-prebor, from 11)
+-- plays away at 921 and 922; the switched-off Kuželna B rezerva
+-- (okresni-prebor) alone plays 923; 924 names no team of B's at all. A has
+-- an active team of the rezerva's name in okresni-prebor and a match 925,
+-- so a liveness check that forgot the tenant would keep B's dead keys.
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_b constant uuid := '00000000-0000-0000-0000-000000000002';
+begin
+  insert into teams (tenant_id, name, site_slug, competition_slug, active)
+  values (v_b, 'Kuželna B rezerva', 'kuzelna-b-b', 'okresni-prebor-2026-2027', false),
+         (v_a, 'Kuželna B rezerva', 'cizi-rezerva', 'okresni-prebor-2026-2027', true);
+  insert into priority_slots
+    (tenant_id, date, starts_at, ends_at, type_id, home_team, away_team,
+     prep_minutes, description, is_away, created_by, import_key, site_match_id, venue_slug)
+  select x.tenant_id, current_date + 60 + x.n - 921, '10:00', '13:00',
+         (select id from priority_slot_types
+           where tenant_id = x.tenant_id and is_match and builtin),
+         'KK Hosté', x.away, 0, 'Fixture 13b', true,
+         (select id from profiles where tenant_id = x.tenant_id and role = 'admin'
+           order by created_at, id limit 1),
+         'cka:' || x.n, x.n, 'hoste-' || x.n
+    from (values (v_b, 921, 'Kuželna B'), (v_b, 922, 'Kuželna B'),
+                 (v_b, 923, 'Kuželna B rezerva'), (v_b, 924, 'KK Jiní'),
+                 (v_a, 925, 'Kuželna B rezerva')) x(tenant_id, n, away);
+  perform set_config('probe.fed_a_sync',
+    (select to_jsonb(f)::text from federation_sync f where tenant_id = v_a), true);
+end $$;
+
+-- 13b. Only discovery and competition runs are the sync's runs: they
+-- stamp last_run_at and last_success_at. A match or venue job reports
+-- only trouble, under its own key (match:<site_match_id>, venue:<slug>):
+-- a failure is written there, a success removes just that entry, and a
+-- success with nothing to remove writes nothing — no row, no update, so no
+-- Realtime event for every fetched match.
 do $$
 declare
   v_b constant uuid := '00000000-0000-0000-0000-000000000002';
+  v_hour_ago constant timestamptz := now() - interval '1 hour';
+  v_comp constant text := 'competition:krajsky-prebor-2026-2027';
   s federation_sync;
+  v_ctid tid;
 begin
   delete from federation_sync where tenant_id = v_b;
-  perform record_federation_run(v_b, 'competition:kp1', '{"inserted":1}', null);
-  perform record_federation_run(v_b, 'federation_match', null, 'federation_match: match results missing');
-  select * into s from federation_sync where tenant_id = v_b;
-  if s.last_error is distinct from 'federation_match: match results missing'
-     or s.last_report->'federation_match'->>'error' is distinct from 'federation_match: match results missing' then
-    raise exception 'FAIL: a match failure did not reach last_error: %', to_jsonb(s);
-  end if;
-  perform record_federation_run(v_b, 'federation_match', null, null);
-  select * into s from federation_sync where tenant_id = v_b;
-  if s.last_error is not null or s.last_report->'federation_match' ? 'error'
-     or s.last_report->'federation_match'->>'at' is null
-     or s.last_report->'competition:kp1'->>'inserted' <> '1' then
-    raise exception 'FAIL: a match retry that succeeded left its error behind: %', to_jsonb(s);
+  perform record_federation_run(v_b, 'match:921', null, null);
+  perform record_federation_run(v_b, 'venue:kuzelna-b', null, null);
+  if exists (select 1 from federation_sync where tenant_id = v_b) then
+    raise exception 'FAIL: a match or venue success with nothing to remove wrote a row';
   end if;
 
-  -- An older venue error, then a newer match error: the newer one shows,
-  -- and the venue's comes back once the match succeeds.
-  perform record_federation_run(v_b, 'venue:jinde', null, 'federation_venue: HTTP 404');
-  update federation_sync
-     set last_report = jsonb_set(last_report, '{venue:jinde,at}',
-                                 to_jsonb(now() - interval '1 hour'))
-   where tenant_id = v_b;
-  perform record_federation_run(v_b, 'federation_match', null, 'federation_match: HTTP 503');
+  insert into federation_sync (tenant_id, venue_slug, last_run_at, last_success_at)
+  values (v_b, 'kuzelna-b', v_hour_ago, v_hour_ago);
+  perform record_federation_run(v_b, 'match:921', null, 'federation_match kolo-1-b: HTTP 503');
+  perform record_federation_run(v_b, 'match:922', null, 'federation_match kolo-2-b: HTTP 503');
+  perform record_federation_run(v_b, 'venue:kuzelna-b', null, 'federation_venue: HTTP 404');
   select * into s from federation_sync where tenant_id = v_b;
-  if s.last_error is distinct from 'federation_match: HTTP 503' then
-    raise exception 'FAIL: last_error is not the newest error: %', to_jsonb(s);
+  if s.last_run_at <> v_hour_ago or s.last_success_at <> v_hour_ago then
+    raise exception 'FAIL: a match or venue failure stamped the run timestamps: %', to_jsonb(s);
   end if;
-  perform record_federation_run(v_b, 'federation_match', null, null);
-  select * into s from federation_sync where tenant_id = v_b;
-  if s.last_error is distinct from 'federation_venue: HTTP 404' then
-    raise exception 'FAIL: a match success cleared a venue''s error: %', to_jsonb(s);
-  end if;
-  perform record_federation_run(v_b, 'venue:jinde', null, null);
-  select * into s from federation_sync where tenant_id = v_b;
-  if s.last_error is not null or s.last_report->'venue:jinde' ? 'error' then
-    raise exception 'FAIL: a venue retry that succeeded left its error behind: %', to_jsonb(s);
+  if s.last_report->'match:921'->>'error' is distinct from 'federation_match kolo-1-b: HTTP 503'
+     or s.last_report->'match:921'->>'at' is null
+     or s.last_report->'match:922'->>'error' is distinct from 'federation_match kolo-2-b: HTTP 503'
+     or s.last_report->'venue:kuzelna-b'->>'error' is distinct from 'federation_venue: HTTP 404' then
+    raise exception 'FAIL: a match or venue failure is not under its own key: %', to_jsonb(s);
   end if;
 
-  -- Competitions run one per tick: B's success must not hide A's failure.
-  perform record_federation_run(v_b, 'competition:kp1', null, 'federation_competition: rounds missing');
-  perform record_federation_run(v_b, 'competition:kp2', '{"inserted":0}', null);
+  perform record_federation_run(v_b, 'match:921', null, null);
+  select * into s from federation_sync where tenant_id = v_b;
+  if s.last_report ? 'match:921' or not s.last_report ? 'match:922'
+     or not s.last_report ? 'venue:kuzelna-b' then
+    raise exception 'FAIL: a match success did not remove just its own key: %', to_jsonb(s);
+  end if;
+  perform record_federation_run(v_b, 'venue:kuzelna-b', null, null);
+  select * into s from federation_sync where tenant_id = v_b;
+  if s.last_report ? 'venue:kuzelna-b' or not s.last_report ? 'match:922' then
+    raise exception 'FAIL: a venue success did not remove just its own key: %', to_jsonb(s);
+  end if;
+  if s.last_run_at <> v_hour_ago or s.last_success_at <> v_hour_ago then
+    raise exception 'FAIL: a match or venue success stamped the run timestamps: %', to_jsonb(s);
+  end if;
+
+  select ctid into v_ctid from federation_sync where tenant_id = v_b;
+  perform record_federation_run(v_b, 'match:921', null, null);
+  perform record_federation_run(v_b, 'venue:kuzelna-b', null, null);
+  if (select ctid from federation_sync where tenant_id = v_b) <> v_ctid then
+    raise exception 'FAIL: a match or venue success with nothing to remove updated the row';
+  end if;
+
+  perform record_federation_run(v_b, v_comp, null, 'federation_competition: HTTP 500');
+  select * into s from federation_sync where tenant_id = v_b;
+  if s.last_run_at <> now() or s.last_success_at <> v_hour_ago then
+    raise exception 'FAIL: a competition failure should stamp last_run_at alone: %', to_jsonb(s);
+  end if;
+  update federation_sync set last_run_at = v_hour_ago where tenant_id = v_b;
+  perform record_federation_run(v_b, v_comp, '{"inserted":2}', null);
+  select * into s from federation_sync where tenant_id = v_b;
+  if s.last_run_at <> now() or s.last_success_at <> now()
+     or s.last_report->v_comp->>'inserted' is distinct from '2'
+     or s.last_report->v_comp->>'at' is null or s.last_report->v_comp ? 'error' then
+    raise exception 'FAIL: a competition success should stamp both and keep its report: %', to_jsonb(s);
+  end if;
+  raise notice 'OK: only discovery and competitions stamp a run; a match or venue success removes its own key or writes nothing (0045)';
+end $$;
+
+-- 13c. last_error is the newest error among the keys that can still run,
+-- and every write drops the dead ones: a competition no active team of the
+-- alley plays, a venue neither the alley's nor any of its matches', a
+-- match whose slot is gone or whose teams of ours are all switched off.
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_b constant uuid := '00000000-0000-0000-0000-000000000002';
+  v_dead constant jsonb := jsonb_build_object(
+    'competition:okresni-prebor-2026-2027',
+      jsonb_build_object('error', 'okresní', 'at', now() - interval '3 hours'),
+    'venue:tj-sokol-brno-iv',
+      jsonb_build_object('error', 'kuželna A', 'at', now() - interval '2 hours'),
+    'match:923', jsonb_build_object('error', 'jen rezerva', 'at', now() - interval '1 hour'),
+    'match:925', jsonb_build_object('error', 'zápas A', 'at', now() - interval '4 hours'),
+    'discover', jsonb_build_object('at', now()));
+  s federation_sync;
+begin
+  -- For B every error above is dead; the same report is live for A, whose
+  -- newest live one is its own venue's (923 is not A's match either).
+  if federation_last_error(v_b, v_dead) is not null then
+    raise exception 'FAIL: a dead key''s error counted for B: %', federation_last_error(v_b, v_dead);
+  end if;
+  if federation_last_error(v_a, v_dead) is distinct from 'kuželna A' then
+    raise exception 'FAIL: A''s newest live error should be its venue''s: %',
+      federation_last_error(v_a, v_dead);
+  end if;
+
+  -- Errors written while their keys were live: the next write drops them.
+  perform record_federation_run(v_b, 'match:922', null, null);
+  update federation_sync set last_report = last_report || v_dead where tenant_id = v_b;
   perform record_federation_run(v_b, 'discover', '{"teams":2}', null);
   select * into s from federation_sync where tenant_id = v_b;
-  if s.last_error is distinct from 'federation_competition: rounds missing' then
-    raise exception 'FAIL: another key''s success cleared a competition''s error: %', to_jsonb(s);
+  if s.last_error is not null
+     or s.last_report ?| array['competition:okresni-prebor-2026-2027', 'venue:tj-sokol-brno-iv',
+                               'match:923', 'match:925']
+     or not s.last_report ?& array['discover', 'competition:krajsky-prebor-2026-2027'] then
+    raise exception 'FAIL: a write did not drop exactly the dead keys: %', to_jsonb(s);
   end if;
-  raise notice 'OK: last_error is the newest error still in last_report, cleared only by its own key (0045)';
+
+  -- Four live errors; the newest wins, whichever key it is.
+  perform record_federation_run(v_b, 'competition:krajsky-prebor-2026-2027', null, 'přebor');
+  perform record_federation_run(v_b, 'match:924', null, 'zápas bez týmu');
+  perform record_federation_run(v_b, 'venue:hoste-924', null, 'kuželna hostů');
+  perform record_federation_run(v_b, 'match:922', null, 'zápas 922');
+  update federation_sync
+     set last_report = jsonb_set(jsonb_set(jsonb_set(jsonb_set(last_report,
+           '{competition:krajsky-prebor-2026-2027,at}', to_jsonb(now() - interval '4 hours')),
+           '{match:924,at}', to_jsonb(now() - interval '3 hours')),
+           '{venue:hoste-924,at}', to_jsonb(now() - interval '2 hours')),
+           '{match:922,at}', to_jsonb(now() - interval '1 hour'))
+   where tenant_id = v_b;
+  perform record_federation_run(v_b, 'discover', '{"teams":2}', null);
+  if (select last_error from federation_sync where tenant_id = v_b) is distinct from 'zápas 922' then
+    raise exception 'FAIL: the newest live error did not win: %',
+      (select to_jsonb(f) from federation_sync f where tenant_id = v_b);
+  end if;
+  -- A newer error of a dead key is dropped and never shows.
+  perform record_federation_run(v_b, 'match:923', null, 'jen rezerva');
+  select * into s from federation_sync where tenant_id = v_b;
+  if s.last_error is distinct from 'zápas 922' or s.last_report ? 'match:923' then
+    raise exception 'FAIL: a dead key''s newer error showed or stayed: %', to_jsonb(s);
+  end if;
+  -- The admin deletes match 922 by hand: its stale key goes with the next write.
+  delete from priority_slots where tenant_id = v_b and import_key = 'cka:922';
+  perform record_federation_run(v_b, 'discover', '{"teams":2}', null);
+  select * into s from federation_sync where tenant_id = v_b;
+  if s.last_error is distinct from 'kuželna hostů' or s.last_report ? 'match:922' then
+    raise exception 'FAIL: a deleted match''s key was not pruned: %', to_jsonb(s);
+  end if;
+  perform record_federation_run(v_b, 'venue:hoste-924', null, null);
+  if (select last_error from federation_sync where tenant_id = v_b) is distinct from 'zápas bez týmu' then
+    raise exception 'FAIL: a match that names no team of ours should still count';
+  end if;
+  perform record_federation_run(v_b, 'match:924', null, null);
+  if (select last_error from federation_sync where tenant_id = v_b) is distinct from 'přebor' then
+    raise exception 'FAIL: the competition''s older error should show once the rest cleared';
+  end if;
+  perform record_federation_run(v_b, 'competition:krajsky-prebor-2026-2027', '{"inserted":0}', null);
+  if (select last_error from federation_sync where tenant_id = v_b) is not null then
+    raise exception 'FAIL: last_error outlived every error';
+  end if;
+
+  if (select to_jsonb(f) from federation_sync f where tenant_id = v_a)
+     is distinct from current_setting('probe.fed_a_sync')::jsonb then
+    raise exception 'FAIL: B''s runs changed A''s sync row';
+  end if;
+  raise notice 'OK: last_error is the newest error of a live key; dead keys never count and every write drops them, per alley (0045)';
+end $$;
+
+-- 13d. A configuration change that kills keys recomputes last_error at
+-- once: switching off a competition's only team (update_team), moving the
+-- alley's kuželna (set_federation_sync), a discovery that rolls a team
+-- over to the next season (upsert_federation_teams). Only that alley's row.
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_b constant uuid := '00000000-0000-0000-0000-000000000002';
+begin
+  perform record_federation_run(v_a, 'competition:okresni-prebor-2026-2027', null, 'A: okresní');
+  perform record_federation_run(v_b, 'match:921', null, 'B: zápas');
+  perform record_federation_run(v_b, 'competition:krajsky-prebor-2026-2027', null, 'B: přebor');
+  update federation_sync
+     set last_report = jsonb_set(last_report, '{match:921,at}', to_jsonb(now() - interval '1 hour'))
+   where tenant_id = v_b;
+  perform federation_refresh_error(v_b);
+  if (select last_error from federation_sync where tenant_id = v_b) is distinct from 'B: přebor'
+     or (select last_error from federation_sync where tenant_id = v_a) is distinct from 'A: okresní' then
+    raise exception 'FAIL: fixture — B should show its competition''s error, A its own';
+  end if;
+  perform set_config('probe.fed_a_sync',
+    (select to_jsonb(f)::text from federation_sync f where tenant_id = v_a), true);
+  perform set_config('probe.fed_team_b',
+    (select id::text from teams where tenant_id = v_b and site_slug = 'kuzelna-b-a'), true);
+  perform set_config('probe.fed_team_a_rezerva',
+    (select id::text from teams where tenant_id = v_a and site_slug = 'cizi-rezerva'), true);
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000002","role":"authenticated"}';
+do $$
+begin
+  perform update_team(current_setting('probe.fed_team_b')::uuid, 'Kuželna B', null, false);
+end $$;
+reset role;
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_b constant uuid := '00000000-0000-0000-0000-000000000002';
+  s federation_sync;
+begin
+  select * into s from federation_sync where tenant_id = v_b;
+  if s.last_error is not null
+     or s.last_report ?| array['competition:krajsky-prebor-2026-2027', 'match:921'] then
+    raise exception 'FAIL: switching off the only team left its competition''s or match''s error: %', to_jsonb(s);
+  end if;
+  perform record_federation_run(v_b, 'venue:kuzelna-b', null, 'B: kuželna');
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000002","role":"authenticated"}';
+do $$
+begin
+  perform update_team(current_setting('probe.fed_team_b')::uuid, 'Kuželna B', null, true);
+  perform set_federation_sync('kuzelna-b-nova', false);
+end $$;
+reset role;
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_b constant uuid := '00000000-0000-0000-0000-000000000002';
+  v_team constant jsonb := '{"site_slug":"kuzelna-b-a","site_team_id":9,"site_name":"Kuželna B","competition_slug":"krajsky-prebor-2027-2028","competition_name":"Krajský přebor","name":"Kuželna B","club_id":null}';
+  s federation_sync;
+begin
+  select * into s from federation_sync where tenant_id = v_b;
+  if s.last_error is not null or s.last_report ? 'venue:kuzelna-b' then
+    raise exception 'FAIL: moving the alley''s kuželna left the old one''s error: %', to_jsonb(s);
+  end if;
+  perform record_federation_run(v_b, 'competition:krajsky-prebor-2026-2027', null, 'B: přebor');
+  if (select last_error from federation_sync where tenant_id = v_b) is distinct from 'B: přebor' then
+    raise exception 'FAIL: fixture — the team is active again, its competition''s error should show';
+  end if;
+  perform upsert_federation_teams(v_b, jsonb_build_array(v_team));
+  select * into s from federation_sync where tenant_id = v_b;
+  if s.last_error is not null or s.last_report ? 'competition:krajsky-prebor-2026-2027' then
+    raise exception 'FAIL: a discovery rollover left the past season''s error: %', to_jsonb(s);
+  end if;
+  if (select to_jsonb(f) from federation_sync f where tenant_id = v_a)
+     is distinct from current_setting('probe.fed_a_sync')::jsonb then
+    raise exception 'FAIL: B''s configuration changes touched A''s sync row';
+  end if;
+  perform record_federation_run(v_b, 'match:921', null, 'B: zápas');
+  perform set_config('probe.fed_b_sync',
+    (select to_jsonb(f)::text from federation_sync f where tenant_id = v_b), true);
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+begin
+  perform update_team(current_setting('probe.fed_team_a_rezerva')::uuid,
+                      'Kuželna B rezerva', null, false);
+end $$;
+reset role;
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_b constant uuid := '00000000-0000-0000-0000-000000000002';
+begin
+  if (select last_error from federation_sync where tenant_id = v_a) is not null then
+    raise exception 'FAIL: switching off A''s only okresni-prebor team left its error';
+  end if;
+  if (select to_jsonb(f) from federation_sync f where tenant_id = v_b)
+     is distinct from current_setting('probe.fed_b_sync')::jsonb then
+    raise exception 'FAIL: A''s team switch touched B''s sync row';
+  end if;
+  raise notice 'OK: switching a team off, moving the kuželna and a season rollover clear the dead keys'' errors at once, per alley (0045)';
+
+  -- Back to the fixtures the later sections expect.
+  perform record_federation_run(v_b, 'match:921', null, null);
+  delete from priority_slots where import_key in ('cka:921', 'cka:923', 'cka:924', 'cka:925')
+                               and tenant_id in (v_a, v_b);
+  delete from teams where (tenant_id, site_slug) in ((v_b, 'kuzelna-b-b'), (v_a, 'cizi-rezerva'));
+  update teams set competition_slug = 'krajsky-prebor-2026-2027'
+   where tenant_id = v_b and site_slug = 'kuzelna-b-a';
+  update federation_sync set venue_slug = 'kuzelna-b' where tenant_id = v_b;
 end $$;
 
 -- 14. A sync-only column change (video link, venue, site ids, import key)
