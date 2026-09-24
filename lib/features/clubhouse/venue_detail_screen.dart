@@ -87,11 +87,20 @@ class VenueDetailScreen extends ConsumerWidget {
           for (final item in section.items)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 2),
-              child: Row(
-                children: [
-                  Expanded(child: Text(item.label)),
-                  Text(item.value),
-                ],
+              child: LayoutBuilder(
+                builder: (context, constraints) => Row(
+                  children: [
+                    Expanded(child: Text(item.label)),
+                    // A value wider than half the card wraps rather than
+                    // overflowing it (large text sizes, long dates).
+                    ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxWidth: constraints.maxWidth / 2,
+                      ),
+                      child: Text(item.value, textAlign: TextAlign.end),
+                    ),
+                  ],
+                ),
               ),
             ),
         ],

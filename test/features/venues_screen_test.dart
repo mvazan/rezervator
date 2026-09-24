@@ -285,6 +285,47 @@ void main() {
       expect(find.text('Pro-Tec K800'), findsOneWidget);
     });
 
+    testWidgets(
+      'a long section value wraps instead of overflowing the card at the '
+      'largest text size on a phone',
+      (tester) async {
+        tester.view.physicalSize = const Size(360, 780);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final kolaudace = Venue.fromJson(const {
+          'id': 'v4',
+          'slug': 'kolaudace',
+          'name': 'Kuželna s kolaudací',
+          'sections': [
+            {
+              'title': 'Kolaudační informace',
+              'items': [
+                {
+                  'label': 'Kolaudace / platnost',
+                  'value': '12. 9. 2025 / do 11. 9. 2028',
+                },
+              ],
+            },
+          ],
+          'fetched_at': '2026-09-20T10:00:00+00:00',
+        });
+        await tester.pumpWidget(
+          MediaQuery(
+            data: const MediaQueryData(textScaler: TextScaler.linear(2)),
+            child: app(
+              home: const VenueDetailScreen(slug: 'kolaudace'),
+              venues: [kolaudace],
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(tester.takeException(), isNull);
+        expect(find.text('12. 9. 2025 / do 11. 9. 2028'), findsOneWidget);
+      },
+    );
+
     testWidgets('Kluby lists the club names', (tester) async {
       await tester.pumpWidget(
         app(
