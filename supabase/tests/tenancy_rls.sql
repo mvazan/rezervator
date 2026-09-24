@@ -4308,6 +4308,32 @@ begin
   if exists (select 1 from notification_jobs where kind = 'federation_match') then
     raise exception 'FAIL: a federation_match job before any refresh';
   end if;
+  -- Only the switched-off Brno IV přebor plays 103 for now.
+  update priority_slots
+     set home_team_slug = 'tj-sokol-brno-iv-prebor', away_team_slug = 'kk-jiny'
+   where id = current_setting('probe.fed_103')::uuid;
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+begin
+  if refresh_match(current_setting('probe.fed_103')::uuid) <> 'not_live' then
+    raise exception 'FAIL: a match only switched-off teams of ours play was not refused';
+  end if;
+end $$;
+reset role;
+-- Its job would fetch the page and stop unwritten, leaving neither a fresh
+-- fetched_at nor a pending requested_at: every later request would fetch
+-- again. So no job at all.
+do $$
+begin
+  if exists (select 1 from notification_jobs where kind = 'federation_match') then
+    raise exception 'FAIL: refresh_match queued a fetch for a switched-off team''s match';
+  end if;
+  -- The active Brno IV A on the other side makes it live again.
+  update priority_slots set away_team_slug = 'tj-sokol-brno-iv-muzi'
+   where id = current_setting('probe.fed_103')::uuid;
 end $$;
 set local role authenticated;
 set local request.jwt.claims =

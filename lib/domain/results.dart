@@ -11,7 +11,8 @@ import 'upcoming.dart' show matchIsMine;
 /// Whether [slot]'s live score/video are worth polling right now — mirrors
 /// `refresh_match`'s own gate (0045) so the button and the background fetch
 /// agree on what "live" means. [result] null (nothing fetched yet) reads as
-/// [MatchStatus.scheduled].
+/// [MatchStatus.scheduled]. The server also answers `not_live` for a match
+/// only switched-off teams of ours play, which this cannot see.
 bool isLive(PrioritySlot slot, MatchResult? result, DateTime now) {
   final start = DateTime(
     slot.date.year,

@@ -2187,6 +2187,13 @@ begin
   if not found or v_slot.site_match_id is null then
     return 'not_live';
   end if;
+  -- Only switched-off teams of ours play it: its job would fetch the page
+  -- and stop unwritten, leaving neither a fresh fetched_at nor a pending
+  -- requested_at to gate the next request — so no job at all.
+  if federation_match_switched_off(v_slot.tenant_id, v_slot.home_team_slug,
+                                   v_slot.away_team_slug) then
+    return 'not_live';
+  end if;
   select status, fetched_at into v_status, v_fetched
     from match_results where match_id = p_match_id;
   v_status := coalesce(v_status, 'scheduled');

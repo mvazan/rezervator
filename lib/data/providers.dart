@@ -622,7 +622,8 @@ class Api {
   /// On-demand live refresh of one match's score (0045) — gated server-side
   /// to at most one fetch per match per 5 minutes. Returns 'queued' (a fetch
   /// was scheduled), 'fresh' (already refreshed within the last 5 minutes),
-  /// or 'not_live' (outside the match's live window).
+  /// or 'not_live' (outside the match's live window, or only switched-off
+  /// teams of ours play it).
   static Future<String> refreshMatch(String matchId) async =>
       await _db.rpc('refresh_match', params: {'p_match_id': matchId}) as String;
 
