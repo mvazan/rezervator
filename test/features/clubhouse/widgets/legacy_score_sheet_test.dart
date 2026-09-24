@@ -115,9 +115,32 @@ void main() {
     ),
   );
 
+  // The team summary row's two Družstvo cells (home, then away): the only
+  // Družstvo-blue cells exactly one team row (43px) tall.
+  List<String?> teamDruzstvo(WidgetTester tester) => [
+    for (final cell
+        in find
+            .byWidgetPredicate(
+              (w) =>
+                  w is Container &&
+                  (w.decoration as BoxDecoration?)?.color ==
+                      const Color(0xFFADD8E6) &&
+                  w.constraints?.maxHeight == 43.0,
+            )
+            .evaluate())
+      tester
+          .widget<Text>(
+            find.descendant(
+              of: find.byWidget(cell.widget),
+              matching: find.byType(Text),
+            ),
+          )
+          .data,
+  ];
+
   testWidgets(
     'team summary row shows both team names, Body (match points), team '
-    'stat totals and the Družstvo (team points) sum',
+    'stat totals and the Družstvo (pin-total bonus) points',
     (tester) async {
       await tester.pumpWidget(
         app(result: result, players: [homePlayer, awayPlayer]),
@@ -127,16 +150,74 @@ void main() {
       expect(find.text(home), findsOneWidget);
       expect(find.text(away), findsOneWidget);
       expect(find.text('13'), findsOneWidget); // Body (home match points)
-      expect(find.text('7'), findsOneWidget); // Body (away match points)
+      // Body (away match points), and Družstvo too (7 - 0 duel points).
+      expect(find.text('7'), findsNWidgets(2));
       expect(find.text('1780'), findsOneWidget); // Plné (home team total)
       expect(find.text('1700'), findsOneWidget); // Plné (away team total)
       expect(find.text('3460'), findsOneWidget); // Celkem (home team total)
       expect(find.text('3349'), findsOneWidget); // Celkem (away team total)
       expect(find.text('15'), findsOneWidget); // Dílčí (home set points)
       expect(find.text('9'), findsOneWidget); // Dílčí (away set points)
-      // Družstvo: sum of player.teamPoints on each side — only homePlayer
-      // (1) has any; awayPlayer's is 0.
+      // Družstvo: Body minus the side's duel points — 13 - 1 and 7 - 0.
+      expect(teamDruzstvo(tester), ['12', '7']);
       expect(find.text('+111'), findsOneWidget); // team Rozdíl
+    },
+  );
+
+  testWidgets(
+    'team-row Družstvo is the points for the higher pin total (Body minus '
+    'the duel points), as kuzelky prints it — not the duel-point sum',
+    (tester) async {
+      // Shaped like the federation fixture match_finished.html: Body 7 : 1,
+      // duels won 5 (home) and 1 (away) → 2 / 0 for the pin total.
+      MatchPlayerResult duelist(String side, int position, num teamPoints) =>
+          MatchPlayerResult.fromJson({
+            'id': '$side-$position',
+            'match_id': 'm1',
+            'side': side,
+            'position': position,
+            'player_name': '$side $position',
+            'team_points': teamPoints,
+          });
+      final sixVsSix = [
+        for (final (i, points) in [1, 1, 1, 1, 1, 0].indexed)
+          duelist('home', i + 1, points),
+        for (final (i, points) in [0, 0, 0, 0, 0, 1].indexed)
+          duelist('away', i + 1, points),
+      ];
+      final sevenToOne = MatchResult.fromJson(const {
+        'match_id': 'm1',
+        'status': 'finished',
+        'home_points': 7,
+        'away_points': 1,
+        'fetched_at': '2026-09-23T10:00:00+00:00',
+      });
+
+      await tester.pumpWidget(app(result: sevenToOne, players: sixVsSix));
+      await tester.pumpAndSettle();
+      expect(teamDruzstvo(tester), ['2', '0']);
+
+      // A duel still undecided on one side: that side's bonus is unknown.
+      await tester.pumpWidget(
+        app(
+          result: sevenToOne,
+          players: [
+            for (final p in sixVsSix)
+              if (p.side == 'away' && p.position == 6)
+                MatchPlayerResult.fromJson(const {
+                  'id': 'away-6',
+                  'match_id': 'm1',
+                  'side': 'away',
+                  'position': 6,
+                  'player_name': 'away 6',
+                })
+              else
+                p,
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(teamDruzstvo(tester), ['2', '–']);
     },
   );
 
@@ -186,7 +267,7 @@ void main() {
     const expectedNumbers = {
       // Team summary (home/away) + pin differential.
       '13', '7', '1780', '1700', '120', '110', '40', '35', '3460', '3349',
-      '15', '9', '+111',
+      '15', '9', '12', '+111',
       // Home player: lane 1, lane 2, Celkem.
       '175', '10', '2', '290', '1',
       '170', '11', '3', '285', '0',
@@ -274,9 +355,8 @@ void main() {
       'position': 1,
       'player_name': 'Home Player',
       'total': 500,
-      // Non-zero, so the team-level Družstvo sum (also '0' by default,
-      // since these fixtures have no result/other players) doesn't
-      // collide with the Rozdíl cell's own '0' below.
+      // Non-zero, so the players' own Družstvo cells don't collide with
+      // the Rozdíl cell's own '0' below.
       'team_points': 0.5,
     });
     final away2 = MatchPlayerResult.fromJson(const {
@@ -332,6 +412,8 @@ void main() {
     expect(find.text('3460'), findsOneWidget);
     // No lineup: no player-column header rows.
     expect(find.text('Jméno a příjmení hráče'), findsNothing);
+    // No duel points to subtract yet — unknown, not a made-up 0.
+    expect(teamDruzstvo(tester), ['–', '–']);
   });
 
   testWidgets('no result and no players renders nothing', (tester) async {
@@ -507,12 +589,9 @@ void main() {
         expect(bgOf(tester, bodyText), const Color(0xFFFDFDEC));
         expect(tester.widget<Text>(bodyText).style?.fontSize, 24);
 
-        // Team Družstvo (sum of player team points): blue #ADD8E6, 20dp.
-        // Two cells legitimately show '9' here — the team-level sum and
-        // the (single) player's own pairing-level value happen to be the
-        // same number — but both are styled identically per the brief, so
-        // either instance proves the assertion.
-        final druzstvoText = find.text('9').first;
+        // Team Družstvo (Body 9001 minus the duel points 9): blue #ADD8E6,
+        // 20dp.
+        final druzstvoText = find.text('8992');
         expect(bgOf(tester, druzstvoText), const Color(0xFFADD8E6));
         expect(tester.widget<Text>(druzstvoText).style?.fontSize, 20);
 

@@ -92,15 +92,26 @@ const _s24w700 = TextStyle(
 /// carry their own minus, so only the positive case needs a prefix.
 String _signed(int v) => v > 0 ? '+$v' : '$v';
 
-/// Sum of [MatchPlayerResult.teamPoints] for one side's players — the
-/// team-row "Družstvo" column (kuzelky's "team points won from duels";
-/// `MatchResult` carries no such stat of its own).
-num _teamPointsSum(List<MatchPlayerResult> players, String side) {
-  num sum = 0;
+/// The team-row "Družstvo" value: the points [side] got for the higher pin
+/// total (2 / 0, 1 / 1 on a tie) — kuzelky prints its Body ([sidePoints])
+/// minus the duel points its players won. Null (printed '–') until Body and
+/// every player's [MatchPlayerResult.teamPoints] of that side are known.
+num? _teamBonusPoints(
+  num? sidePoints,
+  List<MatchPlayerResult> players,
+  String side,
+) {
+  if (sidePoints == null) return null;
+  num duels = 0;
+  var any = false;
   for (final p in players) {
-    if (p.side == side) sum += p.teamPoints ?? 0;
+    if (p.side != side) continue;
+    final points = p.teamPoints;
+    if (points == null) return null;
+    duels += points;
+    any = true;
   }
-  return sum;
+  return any ? sidePoints - duels : null;
 }
 
 /// One pairing block per position (1..N): the home and away player who
@@ -334,8 +345,14 @@ class _ColumnMetrics {
     final druzstvoWidth = _widest([
       ('Body', _s10w400),
       ('Družstvo', _s10w400),
-      (numLabel(_teamPointsSum(players, 'home')), _s20w700),
-      (numLabel(_teamPointsSum(players, 'away')), _s20w700),
+      (
+        numLabel(_teamBonusPoints(result?.homePoints, players, 'home')),
+        _s20w700,
+      ),
+      (
+        numLabel(_teamBonusPoints(result?.awayPoints, players, 'away')),
+        _s20w700,
+      ),
       for (final p in players) (numLabel(p.teamPoints), _s20w700),
     ], 51.0);
 
@@ -607,7 +624,9 @@ class _ScoreTableBody extends StatelessWidget {
           width: m.druzstvoWidth,
           height: _teamRowHeight,
           bg: _kDruzstvoBlue,
-          text: numLabel(_teamPointsSum(players, isHome ? 'home' : 'away')),
+          text: numLabel(
+            _teamBonusPoints(body, players, isHome ? 'home' : 'away'),
+          ),
           style: _s20w700,
         ),
       ],
