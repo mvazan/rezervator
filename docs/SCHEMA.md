@@ -396,8 +396,12 @@ re-timed block) reach Google through `notification_jobs`:
   body `{"type":"CRON","table":"notification_jobs","record":null,
   "old_record":null}`. Without the Vault secrets it warns and the jobs
   wait (the local stack). The notify function's `processJobs` takes ≤ 100
-  due jobs, deletes a job on success, on failure sets `attempts + 1`,
-  `run_at = now() + 2^attempts minutes`, and drops it after 5 attempts;
+  due jobs (never a `federation_%` kind — since 0045 the same tick runs
+  `processFederationJobs` after the reminders: at most 1 discover,
+  1 competition, 10 match and 3 venue jobs per tick within a 60 s budget,
+  §Výsledkový servis ČKA), deletes a job on success, on failure sets
+  `attempts + 1`, `run_at = now() + 2^attempts minutes`, and drops it
+  after 5 attempts;
   a revoked token or a deleted PRIMARY calendar marks the link `broken` and
   notifies the player. A deleted SECONDARY calendar (0032/0035) does not: it
   is cleared (`clearSecondaryCalendar`) and the write falls back to the
@@ -651,7 +655,8 @@ and FCM is configured, e-mail otherwise.
   e-mail. Fails closed on a missing `WEBHOOK_SECRET` (401) or
   `CANCEL_TOKEN_SECRET` (500). Since 0023 it also takes the cron tick
   (`type = "CRON"`, `table = "notification_jobs"`) and works the due jobs
-  (§Google kalendář).
+  (§Google kalendář) and, since 0045, the federation jobs (§Výsledkový
+  servis ČKA).
 - **calendar-oauth-callback** — Google's redirect target (no JWT; the
   trust is the nonce): `consume_calendar_nonce`, code exchange, writes
   `google_calendar_tokens` + `google_calendar_links` with the service
@@ -679,7 +684,8 @@ and FCM is configured, e-mail otherwise.
   configuration, never in migrations; the 0023 cron tick reads the same
   two entries through `notify_webhook_config()`.
 - `pg_cron` is enabled by 0023 (`create extension if not exists`); the
-  `cron` schema and the job row `notification-jobs` live outside `public`,
+  `cron` schema and the job rows `notification-jobs` and
+  `federation-nightly` (0045) live outside `public`,
   so they are not in `supabase/schema.sql` — check with
   `select jobname from cron.job`.
 - Hosted default privileges grant `anon`/`authenticated` on every new
