@@ -155,6 +155,24 @@ Deno.test("matchJobsFor: a stored match without a venue is fetched now, once lis
   assertEquals(jobs.map((j) => [j.site_match_id, j.run_at]), [[1, now], [2, now]]);
 });
 
+Deno.test("matchJobsFor: a stored match whose last fetch failed is fetched now, finished or not", () => {
+  // Its job gave up (or was dropped), and a finished match has no checkpoint
+  // left: without this nothing would run it again to clear its error.
+  const now = new Date("2026-10-10T06:00:00Z");
+  const jobs = matchJobsFor({
+    matches: [
+      match({ id: 1, status: "FINISHED", date: "2026-09-20" }),
+      match({ id: 2, status: "FINISHED", date: "2026-09-20" }),
+      match({ id: 3, status: "SCHEDULED", date: "2026-11-20" }),
+      match({ id: 4, status: "FORFEIT", date: "2026-09-20" }),
+    ],
+    statusById: new Map([[1, "finished"], [2, "finished"], [3, null]]),
+    failing: new Set([1, 3, 4]),
+    now,
+  });
+  assertEquals(jobs.map((j) => [j.site_match_id, j.run_at]), [[1, now], [3, now]]);
+});
+
 Deno.test("planTeams: teams of venue clubs, names reused, clubs matched", () => {
   const teamsOut = planTeams({
     clubs: [{ slug: "tj-sokol-brno-iv", name: "TJ Sokol Brno IV" },
@@ -782,11 +800,15 @@ type Legacy = {
 };
 
 /** The reads and RPCs runCompetition issues. apply_federation_matches
- * "rekeys" the paired legacy rows, so the read after it sees them gone. */
+ * "rekeys" the paired legacy rows, so the read after it sees them gone.
+ * `lastReport`: the tenant's federation_sync.last_report (no row if absent). */
 function fakeCompetitionDb(state: {
   teams: { site_slug: string; name: string; active: boolean }[];
   legacy: Legacy[];
-  stored: { site_match_id: number; venue_slug: string | null; match_results: null }[];
+  stored: {
+    site_match_id: number; venue_slug: string | null; match_results: { status: string } | null;
+  }[];
+  lastReport?: Record<string, unknown>;
 }) {
   const rpcs: { name: string; args: Record<string, unknown> }[] = [];
   const selects: string[] = [];
@@ -808,9 +830,15 @@ function fakeCompetitionDb(state: {
           like = [col, pattern];
           return chain;
         },
+        maybeSingle() {
+          return chain;
+        },
         then(onFulfilled: (v: unknown) => unknown) {
           let data: unknown = [];
           if (table === "teams") data = state.teams;
+          else if (table === "federation_sync") {
+            data = state.lastReport ? { last_report: state.lastReport } : null;
+          }
           else if (like?.[0] === "import_key") data = state.legacy.map((l) => ({ ...l }));
           else if (like?.[0] === "site_slug") data = state.stored;
           void cols;
@@ -941,6 +969,38 @@ Deno.test("runCompetition: arms no match job for a stored match of an inactive t
   const enqueued = rpcs.filter((r) => r.name === "enqueue_federation_match");
   assertEquals(enqueued.map((r) => r.args.p_site_match_id), [1, 6]);
   assertEquals(report.match_jobs, 2);
+});
+
+Deno.test("runCompetition: re-arms now every stored match whose match:<id> key holds an error", async () => {
+  // Both matches are finished and stored so: only the failing one, whose
+  // job gave up at its T+24 h checkpoint, is fetched again — the nightly
+  // pass and „Synchronizovat teď“ are its daily retry.
+  const page = competitionPage([
+    match({ id: 1, status: "FINISHED", date: "2026-09-20", time: "10:00" }),
+    match({ id: 2, status: "FINISHED", date: "2026-09-27", time: "10:00" }),
+  ]);
+  const { db, rpcs, selects } = fakeCompetitionDb({
+    teams: [ourTeam],
+    legacy: [],
+    stored: [1, 2].map((id) => ({
+      site_match_id: id, venue_slug: "tj-sokol-brno-iv", match_results: { status: "finished" },
+    })),
+    lastReport: {
+      "match:1": { error: "federation_match x: HTTP 503", at: "2026-09-21T08:31:00Z" },
+      "match:77": { error: "federation_match y: HTTP 503", at: "2026-09-21T08:31:00Z" },
+      "venue:tj-sokol-brno-iv": { error: "federation_venue: HTTP 404", at: "2026-09-21T08:31:00Z" },
+      "competition:jihomoravska-divize-2026-2027": { at: "2026-09-30T01:00:00Z", inserted: 0 },
+    },
+  });
+  const now = new Date("2026-10-01T01:00:00Z");
+
+  const report = await runCompetition(db, async () => page, "t1", "jihomoravska-divize-2026-2027", now);
+
+  assert(selects.includes("federation_sync: last_report"));
+  const enqueued = rpcs.filter((r) => r.name === "enqueue_federation_match");
+  assertEquals(enqueued.map((r) => [r.args.p_site_match_id, r.args.p_run_at]),
+    [[1, now.toISOString()]]);
+  assertEquals(report.match_jobs, 1);
 });
 
 Deno.test("runCompetition: at most 20 unpaired legacy rows, in date order", async () => {

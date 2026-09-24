@@ -213,8 +213,8 @@ superseded and retired.
   `<site_name> (<site_slug>)`); an existing one (same `site_slug`) keeps
   the admin's name, club and switch — only the site's facts are refreshed.
   A team rolled over to the next season's competition leaves the past
-  season's `competition:` key dead, so its error leaves `last_error` at
-  once.
+  season's `competition:` and `match:` keys dead, so their errors leave
+  `last_error` at once.
 - **Schedule** (`federation_competition` job per active team's
   competition): `apply_federation_matches` in one transaction with
   `set_config('import.run', 'on', true)`, so the 0038 hand-edit trigger
@@ -239,7 +239,11 @@ superseded and retired.
     the venue decides), so a legacy row the old import had right is never
     flipped by the guess. Each competition run therefore queues an
     immediate `federation_match` for every listed stored match without a
-    `venue_slug`.
+    `venue_slug` — and for every one whose `match:<id>` entry in
+    `last_report` holds an error: its job may have given up (5 failures,
+    or dropped after the runtime killed it) and a finished match has no
+    checkpoint left, so the nightly pass and „Synchronizovat teď“ are its
+    daily retry, and the fetch that works clears the error.
   - **Calendar:** 0045 redefines `priority_slots_enqueue_calendar` so an
     UPDATE enqueues calendar jobs only when a column the event shows or
     its followers depend on changed (`tenant_id`, `date`, `starts_at`,
@@ -316,10 +320,13 @@ superseded and retired.
     by `teams.site_slug` = `home_team_slug`/`away_team_slug`, as the match
     job tells them — never by name, so renaming a team and switching it
     off in one save still kills its matches; a match none of our teams
-    plays stays live).
+    plays stays live), or whose competition no active team of the alley
+    plays (its `site_slug` is `<competition>-kolo-…` of a past season —
+    no competition run would ever retry it).
   - `last_error` (`federation_last_error(tenant, report)`) is the `error`
     of the newest live entry that has one, or null: a match or venue
-    failure shows until that key succeeds again, a retry that worked
+    failure shows until that key succeeds again (a failed match is retried
+    by every run of its competition), a retry that worked
     leaves no stale error, one key's success never clears another key's
     error, and an error of something that no longer runs never shows.
     `update_team`, `upsert_federation_teams` and `set_federation_sync`
@@ -328,7 +335,9 @@ superseded and retired.
     its competition's error at once, not at the next run.
 
   A job the runtime killed more than 5 times (leased, never finished) is
-  dropped and recorded as `dropped after N attempts`.
+  dropped and recorded as `dropped after N attempts`; a match's is
+  retried by the next run of its competition, like one that failed 5
+  times.
 - **Venues** (`federation_venue` job, dedupe key
   `federation_venue:<tenant>:<slug>`, payload `{tenant_id, slug}`): the
   venue page `/detail-kuzelny/<slug>` → `upsert_federation_venue(tenant,
@@ -791,7 +800,8 @@ and FCM is configured, e-mail otherwise.
   own key or writing nothing — and `last_error` as the newest error of a
   live key, dead keys (a switched-off competition, a deleted or
   switched-off match — told by team slug, so also when renamed in the
-  same save — a foreign venue) pruned on every write and at once
+  same save — a past season's match, a foreign venue) pruned on every
+  write and at once
   on `update_team`, `set_federation_sync` and a discovery rollover, per
   alley; the calendar-trigger rule — only a change of what the event shows
   enqueues, and never for a match in the past before and after; and the

@@ -1257,7 +1257,10 @@ CREATE OR REPLACE FUNCTION "public"."federation_live_report"("p_tenant" "uuid", 
      when 'match' then exists (
        select 1 from priority_slots p
         where p.tenant_id = p_tenant and p.import_key = 'cka:' || k.id
-          and not federation_match_switched_off(p_tenant, p.home_team_slug, p.away_team_slug))
+          and not federation_match_switched_off(p_tenant, p.home_team_slug, p.away_team_slug)
+          and exists (select 1 from teams t
+                       where t.tenant_id = p_tenant and t.active and t.competition_slug <> ''
+                         and p.site_slug like t.competition_slug || '-kolo-%'))
      else true
    end
 $$;

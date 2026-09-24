@@ -523,8 +523,11 @@ $$;
 -- the alley: a competition:<slug> no active team of the alley plays; a
 -- venue:<slug> that is neither federation_sync.venue_slug nor any of the
 -- alley's matches' venue; a match:<site_match_id> with no cka:<id> slot any
--- more, or switched off (federation_match_switched_off). A match no team
--- of ours plays stays live. discover, and any other key, is always live.
+-- more, switched off (federation_match_switched_off), or of a competition
+-- no active team of the alley plays (a past season): the competition run
+-- is what retries a failed match, so nothing would ever clear its error. A
+-- match no team of ours plays stays live. discover, and any other key, is
+-- always live.
 create or replace function federation_live_report(p_tenant uuid, p_report jsonb)
 returns jsonb language sql stable security definer set search_path = public as $$
   select coalesce(jsonb_object_agg(e.key, e.value), '{}'::jsonb)
@@ -544,7 +547,10 @@ returns jsonb language sql stable security definer set search_path = public as $
      when 'match' then exists (
        select 1 from priority_slots p
         where p.tenant_id = p_tenant and p.import_key = 'cka:' || k.id
-          and not federation_match_switched_off(p_tenant, p.home_team_slug, p.away_team_slug))
+          and not federation_match_switched_off(p_tenant, p.home_team_slug, p.away_team_slug)
+          and exists (select 1 from teams t
+                       where t.tenant_id = p_tenant and t.active and t.competition_slug <> ''
+                         and p.site_slug like t.competition_slug || '-kolo-%'))
      else true
    end
 $$;

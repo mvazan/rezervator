@@ -93,10 +93,14 @@ export function planCompetition(args: {
 }
 
 /** `venueless`: stored matches whose venue no detail fetch has told us yet —
- * until it does, home/away is a guess, so they are fetched right away. */
+ * until it does, home/away is a guess, so they are fetched right away.
+ * `failing`: stored matches whose last fetch failed (a `match:<id>` error in
+ * last_report) — their job may have given up, and a finished match has no
+ * checkpoint left, so they are fetched right away too: the nightly pass is
+ * their daily retry, and a fetch that works clears the error. */
 export function matchJobsFor(args: {
   matches: SiteMatch[]; statusById: Map<number, string | null>; now: Date;
-  venueless?: Set<number>;
+  venueless?: Set<number>; failing?: Set<number>;
 }): { site_match_id: number; slug: string; run_at: Date }[] {
   const n = args.now.getTime();
   const jobs = [];
@@ -105,7 +109,7 @@ export function matchJobsFor(args: {
     const stored = args.statusById.get(m.id);
     const start = startOf(m).getTime();
     let runAt: Date | null = null;
-    if (args.venueless?.has(m.id)) runAt = args.now;
+    if (args.venueless?.has(m.id) || args.failing?.has(m.id)) runAt = args.now;
     else if (m.status === "PREPARATION" || m.status === "IN_PROGRESS") runAt = args.now;
     else if ((m.status === "FINISHED" || m.status === "FORFEIT") &&
       stored !== "finished" && stored !== "forfeit") runAt = args.now;
@@ -254,7 +258,13 @@ export async function runCompetition(db: Db, get: Fetcher, tenantId: string, slu
   // A switched-off team is not synced: its stored matches stay as they are.
   for (const id of inactiveIds) statusById.delete(id);
   const venueless = new Set(stored.filter((s) => !s.venue_slug).map((s) => s.site_match_id));
-  const jobs = matchJobsFor({ matches, statusById, now, venueless });
+  const sync = must(await db.from("federation_sync").select("last_report")
+    .eq("tenant_id", tenantId).maybeSingle()) as
+    { last_report: Record<string, { error?: string } | null> | null } | null;
+  const failing = new Set(Object.entries(sync?.last_report ?? {})
+    .filter(([key, entry]) => key.startsWith("match:") && entry?.error)
+    .map(([key]) => Number(key.slice("match:".length))));
+  const jobs = matchJobsFor({ matches, statusById, now, venueless, failing });
   for (const j of jobs) {
     must(await db.rpc("enqueue_federation_match", {
       p_tenant: tenantId, p_site_match_id: j.site_match_id, p_slug: j.slug,
