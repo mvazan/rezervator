@@ -539,12 +539,16 @@ Deno.test("runCompetition: throws when the site ignores ?round= and re-serves th
   );
 });
 
-/** A one-round competition page as the site renders it (RSC flight chunk). */
-function competitionPage(matches: SiteMatch[]): string {
+/** A competition round page as the site renders it (RSC flight chunk). */
+function competitionPage(
+  matches: SiteMatch[], { roundIds = [1], current = 1 }: { roundIds?: number[]; current?: number } = {},
+): string {
   const data = {
     data: {
-      title: "Jihomoravská divize", rounds: [{ id: 1 }],
-      currentRound: { id: 1, matches: matches.map((m) => ({ ...m, time: m.time ?? "$undefined" })) },
+      title: "Jihomoravská divize", rounds: roundIds.map((id) => ({ id: String(id), name: `${id}. kolo` })),
+      currentRound: {
+        id: String(current), matches: matches.map((m) => ({ ...m, time: m.time ?? "$undefined" })),
+      },
     },
   };
   return `<script>self.__next_f.push([1,${JSON.stringify(`5:${JSON.stringify(data)}\n`)}])</script>`;
@@ -647,6 +651,24 @@ Deno.test("runCompetition: keeps time-less ids, fetches venue-less matches, repo
   assertEquals(enqueued.map((r) => [r.args.p_site_match_id, r.args.p_run_at]),
     [[1, now.toISOString()]]);
   assertEquals(report.legacy_unpaired, [{ date: "2026-10-24", title: "TJ Sokol Brno IV A – KK Starý" }]);
+});
+
+Deno.test("runCompetition: pages through every round once and sends all rounds' matches", async () => {
+  const roundIds = [1, 2, 3];
+  const fetched: string[] = [];
+  const get = async (path: string) => {
+    fetched.push(path);
+    const round = Number(/\?round=(\d+)$/.exec(path)?.[1] ?? 2);
+    return competitionPage([match({ id: round, round, date: `2026-10-${10 + round}` })],
+      { roundIds, current: round });
+  };
+  const { db, rpcs } = fakeCompetitionDb({ teams: [ourTeam], legacy: [], stored: [] });
+
+  await runCompetition(db, get, "t1", "jihomoravska-divize-2026-2027", new Date("2026-10-01T06:00:00Z"));
+
+  assertEquals(fetched, [1, 2, 3].map((r) => `/detail-souteze/jihomoravska-divize-2026-2027?round=${r}`));
+  const apply = rpcs.find((r) => r.name === "apply_federation_matches")!;
+  assertEquals((apply.args.p_matches as { site_match_id: number }[]).map((r) => r.site_match_id), [1, 2, 3]);
 });
 
 Deno.test("runCompetition: an inactive team's listed matches go to p_keep_ids, not p_matches", async () => {
