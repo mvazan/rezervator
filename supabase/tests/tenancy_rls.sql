@@ -3583,9 +3583,11 @@ update federation_sync set enabled = false
  where tenant_id not in ('00000000-0000-0000-0000-00000000000a',
                          '00000000-0000-0000-0000-000000000002');
 -- One match of the site's schedule as the edge function hands it over.
+-- The team slugs are optional: most sections store matches without them.
 create function pg_temp.fed_match(
   p_id integer, p_ours boolean, p_days integer, p_start text, p_end text,
-  p_round integer, p_legacy uuid default null)
+  p_round integer, p_legacy uuid default null,
+  p_home_slug text default null, p_away_slug text default null)
 returns jsonb language sql as $$
   select jsonb_build_object(
     'site_match_id', p_id,
@@ -3596,7 +3598,8 @@ returns jsonb language sql as $$
     'away', case when p_ours then 'KK Jiný' else 'TJ Sokol Brno IV' end,
     'home_is_ours', p_ours, 'prep', 30,
     'competition', 'Jihomoravská divize', 'round', p_round,
-    'video_url', null, 'legacy_id', p_legacy)
+    'video_url', null, 'legacy_id', p_legacy,
+    'home_slug', p_home_slug, 'away_slug', p_away_slug)
 $$;
 
 -- 1. A new competition's matches arrive as priority_slots.
@@ -3934,6 +3937,99 @@ begin
    where tenant_id = v_a and import_key in ('cka:112', 'cka:113', 'cka:114');
   perform set_config('import.run', '', true);
   raise notice 'OK: without a venue a stored match keeps home/away; inserts take the guess (0045)';
+end $$;
+
+-- 5e. The site's team slugs, not the names, tell our teams in a stored
+-- match (federation_match_switched_off, the match job), so every write
+-- keeps them: an insert takes them, a rekeyed legacy row gets them, and a
+-- stored match follows the site in place — a hand-edited one too, as with
+-- the video link. Slugs alone are no match update.
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+  v_legacy uuid;
+  v_115 uuid;
+  v_116 uuid;
+  r jsonb;
+  s priority_slots;
+begin
+  insert into priority_slots
+    (tenant_id, date, starts_at, ends_at, type_id, home_team, away_team,
+     prep_minutes, description, created_by, import_key)
+  values
+    (v_a, v_today + 42, '17:00', '20:00',
+     (select id from priority_slot_types where tenant_id = v_a and is_match and builtin),
+     'TJ Sokol Brno IV', 'KK Jiný', 30, 'JmD 17. kolo',
+     '10000000-0000-0000-0000-000000000001', 'rozpis:JmD:17:TJ Sokol Brno IV – KK Jiný')
+  returning id into v_legacy;
+  r := apply_federation_matches(v_a, 'jihomoravska-divize-2026-2027', jsonb_build_array(
+         pg_temp.fed_match(101, true, 10, '18:00', '21:00', 5)
+           || '{"video_url":"https://youtu.be/x"}',
+         pg_temp.fed_match(103, true, 20, '17:00', '20:00', 7),
+         pg_temp.fed_match(115, true, 40, '17:00', '20:00', 15, null,
+                           'tj-sokol-brno-iv-muzi', 'kk-jiny'),
+         pg_temp.fed_match(116, false, 41, '10:00', '13:00', 16),
+         pg_temp.fed_match(117, true, 42, '17:00', '20:00', 17, v_legacy,
+                           'tj-sokol-brno-iv-muzi', 'kk-jiny')));
+  if (r->>'inserted')::int <> 2 or (r->>'rekeyed')::int <> 1 then
+    raise exception 'FAIL: 5e fixture report: %', r;
+  end if;
+  select * into s from priority_slots where tenant_id = v_a and import_key = 'cka:115';
+  v_115 := s.id;
+  if (s.home_team_slug, s.away_team_slug)
+     is distinct from ('tj-sokol-brno-iv-muzi', 'kk-jiny') then
+    raise exception 'FAIL: an inserted match did not store its team slugs: %', to_jsonb(s);
+  end if;
+  select * into s from priority_slots where id = v_legacy;
+  if s.import_key <> 'cka:117'
+     or (s.home_team_slug, s.away_team_slug)
+        is distinct from ('tj-sokol-brno-iv-muzi', 'kk-jiny') then
+    raise exception 'FAIL: a rekeyed legacy row did not get the team slugs: %', to_jsonb(s);
+  end if;
+  select * into s from priority_slots where tenant_id = v_a and import_key = 'cka:116';
+  v_116 := s.id;
+  if s.home_team_slug is not null or s.away_team_slug is not null then
+    raise exception 'FAIL: fixture — 116 came without slugs: %', to_jsonb(s);
+  end if;
+  update priority_slots set hand_edited = true where id = v_116;
+
+  -- The site re-slugs 115's guests, and 116, stored before the slugs came,
+  -- gets them.
+  r := apply_federation_matches(v_a, 'jihomoravska-divize-2026-2027', jsonb_build_array(
+         pg_temp.fed_match(101, true, 10, '18:00', '21:00', 5)
+           || '{"video_url":"https://youtu.be/x"}',
+         pg_temp.fed_match(103, true, 20, '17:00', '20:00', 7),
+         pg_temp.fed_match(115, true, 40, '17:00', '20:00', 15, null,
+                           'tj-sokol-brno-iv-muzi', 'kk-jiny-a'),
+         pg_temp.fed_match(116, false, 41, '10:00', '13:00', 16, null,
+                           'kk-jiny', 'tj-sokol-brno-iv-muzi'),
+         pg_temp.fed_match(117, true, 42, '17:00', '20:00', 17, null,
+                           'tj-sokol-brno-iv-muzi', 'kk-jiny')));
+  if (r->>'inserted')::int <> 0 or (r->>'updated')::int <> 0
+     or (r->>'rekeyed')::int <> 0 or (r->>'deleted')::int <> 0 then
+    raise exception 'FAIL: new slugs counted as a match change: %', r;
+  end if;
+  select * into s from priority_slots where tenant_id = v_a and import_key = 'cka:115';
+  if s.id is distinct from v_115
+     or (s.home_team_slug, s.away_team_slug)
+        is distinct from ('tj-sokol-brno-iv-muzi', 'kk-jiny-a') then
+    raise exception 'FAIL: a stored match did not take the site''s new slug in place: %', to_jsonb(s);
+  end if;
+  select * into s from priority_slots where id = v_116;
+  if (s.home_team_slug, s.away_team_slug)
+     is distinct from ('kk-jiny', 'tj-sokol-brno-iv-muzi') then
+    raise exception 'FAIL: a hand-edited match stored without slugs did not get them: %', to_jsonb(s);
+  end if;
+  select * into s from priority_slots where id = v_legacy;
+  if (s.home_team_slug, s.away_team_slug)
+     is distinct from ('tj-sokol-brno-iv-muzi', 'kk-jiny') then
+    raise exception 'FAIL: the rekeyed row lost its team slugs: %', to_jsonb(s);
+  end if;
+  delete from priority_slots
+   where tenant_id = v_a and import_key in ('cka:115', 'cka:116', 'cka:117');
+  perform set_config('import.run', '', true);
+  raise notice 'OK: apply_federation_matches stores the site''s team slugs on insert, on a rekey and in place (0045)';
 end $$;
 
 -- 6. A match detail: result, players, and the venue decides home/away.
@@ -4613,11 +4709,14 @@ end $$;
 -- at all; 926 is a derby of the two where Kuželna B still carries a name
 -- it no longer has; 927 is Kuželna B's match in okresni-prebor, a
 -- competition no active team of B's plays any more (a past season); 928
--- names no team of B's, only A's switched-off Cizí tým. Our teams are told
--- apart by the site's team slugs, as runMatch does, never by the names. A
--- has an active team with the rezerva's slug in okresni-prebor and a match
--- 925, so a liveness check that forgot the tenant would keep B's dead keys
--- — or, through Cizí tým, kill B's live 928.
+-- names no team of B's, only A's switched-off Cizí tým; 929 is a derby of
+-- two switched-off teams of B's, Kuželna B D and E, in krajsky-prebor,
+-- which the active Kuželna B still plays: only the switch kills it. Our
+-- teams are told apart by the site's team slugs, as runMatch does, never
+-- by the names. A has an active team with the rezerva's slug in
+-- okresni-prebor and a match 925, and an active team with D's slug, so a
+-- liveness check that forgot the tenant would keep B's dead keys — or,
+-- through Cizí tým, kill B's live 928.
 do $$
 declare
   v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
@@ -4626,7 +4725,10 @@ begin
   insert into teams (tenant_id, name, site_slug, competition_slug, active)
   values (v_b, 'Kuželna B rezerva', 'kuzelna-b-b', 'okresni-prebor-2026-2027', false),
          (v_a, 'Kuželna B rezerva', 'kuzelna-b-b', 'okresni-prebor-2026-2027', true),
-         (v_a, 'Cizí tým', 'cizi-tym', 'cizi-soutez-2026-2027', false);
+         (v_a, 'Cizí tým', 'cizi-tym', 'cizi-soutez-2026-2027', false),
+         (v_b, 'Kuželna B D', 'kuzelna-b-d', 'krajsky-prebor-2026-2027', false),
+         (v_b, 'Kuželna B E', 'kuzelna-b-e', 'krajsky-prebor-2026-2027', false),
+         (v_a, 'Kuželna B D', 'kuzelna-b-d', 'krajsky-prebor-2026-2027', true);
   insert into priority_slots
     (tenant_id, date, starts_at, ends_at, type_id, home_team, away_team,
      home_team_slug, away_team_slug, site_slug,
@@ -4651,7 +4753,9 @@ begin
       (v_b, 926, 'krajsky-prebor-2026-2027', 'Kuželna B stará', 'kuzelna-b-a',
        'Kuželna B rezerva', 'kuzelna-b-b'),
       (v_b, 927, 'okresni-prebor-2026-2027', 'KK Hosté', 'kk-hoste', 'Kuželna B', 'kuzelna-b-a'),
-      (v_b, 928, 'krajsky-prebor-2026-2027', 'KK Hosté', 'kk-hoste', 'Cizí tým', 'cizi-tym'))
+      (v_b, 928, 'krajsky-prebor-2026-2027', 'KK Hosté', 'kk-hoste', 'Cizí tým', 'cizi-tym'),
+      (v_b, 929, 'krajsky-prebor-2026-2027', 'Kuželna B D', 'kuzelna-b-d',
+       'Kuželna B E', 'kuzelna-b-e'))
       x(tenant_id, n, comp, home, home_slug, away, away_slug);
   perform set_config('probe.fed_a_sync',
     (select to_jsonb(f)::text from federation_sync f where tenant_id = v_a), true);
@@ -4750,6 +4854,8 @@ declare
     'match:923', jsonb_build_object('error', 'jen rezerva', 'at', now() - interval '1 hour'),
     'match:925', jsonb_build_object('error', 'zápas A', 'at', now() - interval '4 hours'),
     'match:927', jsonb_build_object('error', 'loňská soutěž', 'at', now() - interval '30 minutes'),
+    -- Its competition is live for B; only the switch (B's, not A's) kills it.
+    'match:929', jsonb_build_object('error', 'vypnuté derby', 'at', now() - interval '10 minutes'),
     'discover', jsonb_build_object('at', now()));
   s federation_sync;
 begin
@@ -4782,7 +4888,7 @@ begin
   select * into s from federation_sync where tenant_id = v_b;
   if s.last_error is not null
      or s.last_report ?| array['competition:okresni-prebor-2026-2027', 'venue:tj-sokol-brno-iv',
-                               'match:923', 'match:925', 'match:927']
+                               'match:923', 'match:925', 'match:927', 'match:929']
      or not s.last_report ?& array['discover', 'competition:krajsky-prebor-2026-2027'] then
     raise exception 'FAIL: a write did not drop exactly the dead keys: %', to_jsonb(s);
   end if;
@@ -4974,10 +5080,12 @@ begin
   perform record_federation_run(v_b, 'competition:krajsky-prebor-2027-2028', '{"inserted":0}', null);
   delete from priority_slots
    where import_key in ('cka:921', 'cka:923', 'cka:924', 'cka:925', 'cka:926', 'cka:927',
-                        'cka:928')
+                        'cka:928', 'cka:929')
      and tenant_id in (v_a, v_b);
   delete from teams
-   where (tenant_id, site_slug) in ((v_b, 'kuzelna-b-b'), (v_a, 'kuzelna-b-b'), (v_a, 'cizi-tym'));
+   where (tenant_id, site_slug) in ((v_b, 'kuzelna-b-b'), (v_a, 'kuzelna-b-b'), (v_a, 'cizi-tym'),
+                                    (v_b, 'kuzelna-b-d'), (v_b, 'kuzelna-b-e'),
+                                    (v_a, 'kuzelna-b-d'));
   update teams set competition_slug = 'krajsky-prebor-2026-2027'
    where tenant_id = v_b and site_slug = 'kuzelna-b-a';
   update federation_sync set venue_slug = 'kuzelna-b' where tenant_id = v_b;
