@@ -203,11 +203,14 @@ type Call =
  * issues: `select().eq().lte().order().limit()` (the due query),
  * `update().eq().eq().select()` (the optimistic-lock lease),
  * `update().eq()` (the outcome re-arm, no lock) and `delete().eq()`. Mutates
- * `jobs` in place so a test can assert on it directly after the run. */
+ * `jobs` in place so a test can assert on it directly after the run.
+ * `onDue` gets the stored jobs a due query has just read — a stand-in for
+ * another tick touching them before this one leases. */
 function fakeJobsDb(
   jobs: FakeJob[],
   onRpc?: (name: string, args: Record<string, unknown>) => { data: unknown; error: unknown },
   leaseError?: { message: string },
+  onDue?: (due: FakeJob[]) => void,
 ) {
   const calls: Call[] = [];
   function chainFor(table: string) {
@@ -275,7 +278,9 @@ function fakeJobsDb(
       let rows = jobs.filter((j) => j.kind === kindEq);
       if (lte) rows = rows.filter((j) => j.run_at <= (lte![1] as string));
       if (limit !== undefined) rows = rows.slice(0, limit);
-      return { data: rows.map((j) => ({ ...j })), error: null };
+      const due = rows.map((j) => ({ ...j }));
+      onDue?.(rows);
+      return { data: due, error: null };
     }
     return chain;
   }
@@ -388,6 +393,67 @@ Deno.test("processFederationJobs: a failing lease is logged and the job left alo
   assert(!fetched);
   assertEquals(jobs, before);
   assert(errors.some((e) => JSON.stringify(e).includes("lease boom")));
+});
+
+Deno.test("processFederationJobs: a job whose run_at moved since the due query is not run", async () => {
+  const now = new Date("2026-10-10T06:00:00Z");
+  const jobs: FakeJob[] = [{
+    id: 1, kind: "federation_match", attempts: 0,
+    run_at: new Date(now.getTime() - 60e3).toISOString(),
+    payload: { tenant_id: "t1", site_match_id: 1, slug: "x" },
+  }];
+  const { db, calls } = fakeJobsDb(jobs, undefined, undefined, (due) => {
+    for (const job of due) {
+      job.run_at = new Date(now.getTime() + 10 * 60e3).toISOString();
+      job.attempts = 1;
+    }
+  });
+  let fetched = false;
+  const get = async () => {
+    fetched = true;
+    return "";
+  };
+
+  await processFederationJobs(db, get, now);
+
+  assert(!fetched);
+  assertEquals(jobs[0].attempts, 1);
+  assertEquals(jobs[0].run_at, new Date(now.getTime() + 10 * 60e3).toISOString());
+  assert(!calls.some((c) => (c.kind === "update" || c.kind === "delete") && c.id === 1));
+});
+
+Deno.test("processFederationJobs: a tick runs at most 10 match jobs, then at most 3 venue jobs", async () => {
+  const now = new Date("2026-10-10T06:00:00Z");
+  const due = new Date(now.getTime() - 60e3).toISOString();
+  const jobs: FakeJob[] = [
+    ...Array.from({ length: 4 }, (_, i): FakeJob => ({
+      id: 100 + i, kind: "federation_venue", attempts: 0, run_at: due,
+      payload: { tenant_id: "t1", slug: `v${i}` },
+    })),
+    ...Array.from({ length: 12 }, (_, i): FakeJob => ({
+      id: i + 1, kind: "federation_match", attempts: 0, run_at: due,
+      payload: { tenant_id: "t1", site_match_id: i + 1, slug: `m${i}` },
+    })),
+  ];
+  const { db } = fakeJobsDb(jobs);
+  const fetched: string[] = [];
+  const get = async (path: string) => {
+    fetched.push(path);
+    throw new Error("site down");
+  };
+  const original = console.error;
+  console.error = () => {};
+  try {
+    await processFederationJobs(db, get, now);
+  } finally {
+    console.error = original;
+  }
+
+  assertEquals(fetched.length, 13);
+  assert(fetched.slice(0, 10).every((p) => p.startsWith("/detail-zapasu/")));
+  assert(fetched.slice(10).every((p) => p.startsWith("/detail-kuzelny/")));
+  assertEquals(jobs.filter((j) => j.kind === "federation_match" && j.attempts === 0).length, 2);
+  assertEquals(jobs.filter((j) => j.kind === "federation_venue" && j.attempts === 0).length, 1);
 });
 
 Deno.test("processFederationJobs: a failing competition job records its error under its report key", async () => {
