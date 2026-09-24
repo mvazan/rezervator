@@ -2041,7 +2041,10 @@ begin
   update federation_sync
      set last_run_at = now(),
          last_success_at = case when p_error is null then now() else last_success_at end,
-         last_error = p_error,
+         -- Match and venue jobs record only failures, so only the keys whose
+         -- success clears last_error may set it.
+         last_error = case when p_key = 'discover' or p_key like 'competition:%'
+                           then p_error else last_error end,
          last_report = last_report || jsonb_build_object(p_key,
            case when p_error is null
              then coalesce(p_report, '{}'::jsonb) || jsonb_build_object('at', now())

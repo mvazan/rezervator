@@ -284,9 +284,12 @@ superseded and retired.
   whatever happened last. Keys: `discover`, `competition:<slug>`,
   `federation_match` for a failed match fetch and `venue:<slug>` for a
   failed venue fetch (match and venue jobs record only failures, so such
-  an entry stays until overwritten). A job the runtime killed more than
-  5 times (leased, never finished) is dropped and recorded as
-  `dropped after N attempts`.
+  an entry stays until overwritten). Only `discover` and `competition:*`
+  set `last_error` — the keys whose success clears it; a failed match or
+  venue fetch lands in its key alone, so a retry that succeeds leaves no
+  stale error on the admin card and never hides a competition's own
+  error. A job the runtime killed more than 5 times (leased, never
+  finished) is dropped and recorded as `dropped after N attempts`.
 - **Venues** (`federation_venue` job, dedupe key
   `federation_venue:<tenant>:<slug>`, payload `{tenant_id, slug}`): the
   venue page `/detail-kuzelny/<slug>` → `upsert_federation_venue(tenant,

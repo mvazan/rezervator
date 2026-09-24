@@ -4519,6 +4519,30 @@ begin
   raise notice 'OK: record_federation_run keeps a report or an error per key and the last error (0045)';
 end $$;
 
+-- 13b. A failed match or venue fetch retries by itself and records no
+-- success: it stays under its key and never touches last_error.
+do $$
+declare
+  v_b constant uuid := '00000000-0000-0000-0000-000000000002';
+  s federation_sync;
+begin
+  perform record_federation_run(v_b, 'federation_match', null, 'federation_match: HTTP 503');
+  perform record_federation_run(v_b, 'venue:jinde', null, 'federation_venue: HTTP 404');
+  select * into s from federation_sync where tenant_id = v_b;
+  if s.last_error is not null
+     or s.last_report->'federation_match'->>'error' is distinct from 'federation_match: HTTP 503'
+     or s.last_report->'venue:jinde'->>'error' is distinct from 'federation_venue: HTTP 404' then
+    raise exception 'FAIL: a match or venue failure should stay under its key only: %', to_jsonb(s);
+  end if;
+  perform record_federation_run(v_b, 'competition:kp1', null, 'federation_competition: rounds missing');
+  perform record_federation_run(v_b, 'federation_match', null, 'federation_match: HTTP 503');
+  select * into s from federation_sync where tenant_id = v_b;
+  if s.last_error is distinct from 'federation_competition: rounds missing' then
+    raise exception 'FAIL: a match failure replaced a competition''s error: %', to_jsonb(s);
+  end if;
+  raise notice 'OK: match and venue failures stay under their key and leave last_error alone (0045)';
+end $$;
+
 -- 14. A sync-only column change (video link, venue, site ids, import key)
 -- leaves followers' calendars alone: the calendar handler deletes events of
 -- past matches, so a needless job would wipe them. An event column still
