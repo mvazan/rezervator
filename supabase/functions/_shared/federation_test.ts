@@ -425,11 +425,12 @@ const divizePairs = [
 
 Deno.test("the any-date rule pairs nothing when the same home and away meet twice", () => {
   const moved = rehearsalLegacy[2];
-  // Two site matches of KK MS Brno E at home to Devítka A, neither on the rozpis date.
+  // Two site matches of KK MS Brno E at home to Devítka A within two months of
+  // the rozpis date, neither on it.
   const twoSite = pairLegacy([
     ...divizeMisses,
     { siteId: 4017, date: "2026-10-30", startsAt: "18:00", round: 4, home: "KK Moravská Slávia Brno E", away: "KS Devítka Brno A" },
-    { siteId: 4090, date: "2027-03-10", startsAt: "18:00", round: 13, home: "KK Moravská Slávia Brno E", away: "KS Devítka Brno A" },
+    { siteId: 4090, date: "2026-11-25", startsAt: "18:00", round: 8, home: "KK Moravská Slávia Brno E", away: "KS Devítka Brno A" },
   ], rehearsalLegacy.slice(0, 3));
   assertEquals([...twoSite], divizePairs);
   // Two rozpis rows for the one site match, neither on its date.
@@ -486,6 +487,24 @@ Deno.test("a leg whose home rights were swapped pairs with the rozpis row on its
   ], derbyLegacy);
   assertEquals(one.get(4189), "a0483dd5-854c-47f2-a031-d769601555d5");
   assertEquals(one.get(4217), "33fffbdd-dd36-415e-8d40-daa2e1a6cd66");
+});
+
+/** A KP dorostu row the site does not list this season: it stays a free
+ * rozpis: row and is offered to every later sync. */
+const dorostRow = {
+  id: "8b91bc32-a0a8-4b8a-8987-c56a9d060916", import_key: "rozpis:KP dorostu:1:TJ Sokol Vracov B – TJ Sokol Husovice (dorost)",
+  date: "2026-09-13", starts_at: "09:00:00", home_team: "TJ Sokol Vracov B", away_team: "TJ Sokol Husovice (dorost)",
+};
+
+Deno.test("the any-date rule reaches two months, never next season's match", () => {
+  const at = (date: string, round: number) => [{
+    siteId: 7001, date, startsAt: "10:00", round, home: "TJ Sokol Vracov B", away: "TJ Sokol Husovice (dorost)",
+  }];
+  assertEquals(pairLegacy(at("2026-11-12", 9), [dorostRow]).get(7001), dorostRow.id);
+  assertEquals(pairLegacy(at("2026-11-13", 9), [dorostRow]).size, 0);
+  assertEquals(pairLegacy(at("2026-07-14", 9), [dorostRow]).size, 0);
+  // Next season's fixture of the same two teams, in another round.
+  assertEquals(pairLegacy(at("2027-09-19", 3), [dorostRow]).size, 0);
 });
 
 Deno.test("two teams meeting both ways on one date pair as listed, not swapped", () => {

@@ -231,8 +231,10 @@ superseded and retired.
     day); the `rozpis:` key's round + teams; date + teams; date + start time +
     one team in common (a renamed opponent — here the legacy row must also
     have just one candidate); last, for the rows still unpaired, the same
-    home and the same away on any date (a match moved before the site
-    listed it) — only when exactly one such pair exists each way. Team
+    home and the same away up to 60 days apart (a match moved before the
+    site listed it) — only when exactly one such pair exists each way
+    within that reach. A `rozpis:` row the site never lists stays free for
+    every later sync, so the bound keeps it off next season's match. Team
     names compare without case, accents and a trailing ` A`, and a word
     may stand for a run of the other name's words by their initials
     (`KK MS Brno B` = `KK Moravská Slavia Brno B`, `Kamenice n.L.` =

@@ -359,10 +359,15 @@ export function pairLegacy(candidates: PairCandidate[], legacy: LegacyRow[]): Ma
   };
   // The rule after date + teams is the old importer's "renamed opponent": the
   // same slot with one team in common. Loose enough that a legacy row must
-  // also have just one candidate. The last one catches a match the rozpis has on
-  // another date and in another round (moved before the site listed it):
-  // same home and same away on any date — only while that pair is unique
-  // both ways among the rows still unpaired, since a league plays it once.
+  // also have just one candidate. The last one catches a match the rozpis
+  // has on another date and in another round (moved before the site listed
+  // it): same home and same away within two months — only while that pair
+  // is unique both ways among the rows still unpaired, since a league plays
+  // it once a season. A rozpis row the site never lists (a competition not
+  // on it) stays free for every later sync; unbounded, it would take over
+  // next season's match of the same two teams.
+  const daysApart = (c: PairCandidate, l: LegacyRow) =>
+    Math.abs(Date.parse(c.date) - Date.parse(l.date)) / 864e5;
   const rules: { test: (c: PairCandidate, l: LegacyRow) => boolean; strict: boolean }[] = [
     {
       // Home rights swapped (výměna pořadatelství): the same date, the teams
@@ -393,7 +398,7 @@ export function pairLegacy(candidates: PairCandidate[], legacy: LegacyRow[]): Ma
       strict: true,
     },
     {
-      test: (c, l) => same(l.home_team, c.home) && same(l.away_team, c.away),
+      test: (c, l) => daysApart(c, l) <= 60 && same(l.home_team, c.home) && same(l.away_team, c.away),
       strict: true,
     },
   ];
