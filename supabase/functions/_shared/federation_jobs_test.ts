@@ -3,7 +3,7 @@ import { pragueEpoch } from "./cancel_token.ts";
 import type { SiteMatch } from "./federation.ts";
 import {
   jobOutcome, matchJobsFor, planCompetition, planTeams,
-  processFederationJobs, runCompetition,
+  processFederationJobs, runCompetition, runDiscover, SITE,
 } from "./federation_jobs.ts";
 
 const fixture = (name: string) =>
@@ -773,4 +773,117 @@ Deno.test("runCompetition: at most 20 unpaired legacy rows, in date order", asyn
   assertEquals(out.length, 20);
   assertEquals(out[0].date, "2026-10-06");
   assertEquals(out.map((o) => o.date), [...out.map((o) => o.date)].sort());
+});
+
+// ---------------------------------------------------------------- runDiscover
+
+/** The reads and the RPC runDiscover issues. */
+function fakeDiscoverDb(sync: { venue_slug: string | null } | null) {
+  const rpcs: { name: string; args: Record<string, unknown> }[] = [];
+  const db = {
+    from(table: string) {
+      // deno-lint-ignore no-explicit-any
+      const chain: any = {
+        select() {
+          return chain;
+        },
+        eq() {
+          return chain;
+        },
+        not() {
+          return chain;
+        },
+        maybeSingle() {
+          return Promise.resolve({ data: table === "federation_sync" ? sync : null, error: null });
+        },
+        then(onFulfilled: (v: unknown) => unknown) {
+          const data = table === "clubs"
+            ? [{ id: "c1", name: "Sokol Brno IV" }]
+            : table === "priority_slots"
+            ? [{ home_team: "TJ Sokol Brno IV A", away_team: "KK Blansko" }]
+            : [];
+          return Promise.resolve({ data, error: null }).then(onFulfilled);
+        },
+      };
+      return chain;
+    },
+    async rpc(name: string, args: Record<string, unknown>) {
+      rpcs.push({ name, args });
+      return { data: 1, error: null };
+    },
+  };
+  return { db, rpcs };
+}
+
+/** A season's matches sitemap: one match of a venue club, two without. */
+const matchesSitemap = `<?xml version="1.0" encoding="UTF-8"?><urlset>${
+  [
+    "jihomoravska-divize-2026-2027-kolo-1-tj-sokol-brno-iv-muzi-sk-kuzelky-dubnany-muzi",
+    "jihomoravska-divize-2026-2027-kolo-1-kc-zlin-b-muzi-kk-moravska-slavia-brno-c-muzi",
+    "divize-as-2026-2027-kolo-1-tj-sokol-rudna-a-muzi-tj-sokol-vrsovice-a-muzi",
+  ].map((slug) => `<url><loc>${SITE}/detail-zapasu/${slug}</loc></url>`).join("")
+}</urlset>`;
+
+function discoverSite(pages: Record<string, string> = {}) {
+  const site: Record<string, string> = {
+    "/detail-kuzelny/tj-sokol-brno-iv": fixture("venue.html"),
+    // An older season listed first: discovery must take the newest.
+    "/sitemap.xml": fixture("sitemap_index.xml").replace("<sitemap>",
+      `<sitemap><loc>${SITE}/sitemap/matches-19.xml</loc></sitemap><sitemap>`),
+    "/sitemap/matches-20.xml": matchesSitemap,
+    "/detail-souteze/jihomoravska-divize-2026-2027": fixture("competition_round_finished.html"),
+    ...pages,
+  };
+  const fetched: string[] = [];
+  const get = async (path: string) => {
+    fetched.push(path);
+    if (!(path in site)) throw new Error(`unexpected GET ${path}`);
+    return site[path];
+  };
+  return { get, fetched };
+}
+
+Deno.test("runDiscover: venue clubs → season sitemap → competitions → teams", async () => {
+  const { db, rpcs } = fakeDiscoverDb({ venue_slug: "tj-sokol-brno-iv" });
+  const { get, fetched } = discoverSite();
+
+  const report = await runDiscover(db, get, "t1");
+
+  assertEquals(fetched, [
+    "/detail-kuzelny/tj-sokol-brno-iv", "/sitemap.xml", "/sitemap/matches-20.xml",
+    "/detail-souteze/jihomoravska-divize-2026-2027",
+  ]);
+  assertEquals(rpcs.map((r) => r.name), ["upsert_federation_teams"]);
+  assertEquals(rpcs[0].args, {
+    p_tenant: "t1",
+    p_teams: [{
+      site_slug: "tj-sokol-brno-iv-muzi", site_team_id: 243, site_name: "TJ Sokol Brno IV",
+      competition_slug: "jihomoravska-divize-2026-2027", competition_name: "Jihomoravská divize",
+      name: "TJ Sokol Brno IV A", club_id: "c1",
+    }],
+  });
+  assertEquals(report, { teams: 1, created: 1 });
+});
+
+Deno.test("runDiscover: no venue, no clubs on it, or no matches sitemap fails the job", async () => {
+  await assertRejects(
+    () => runDiscover(fakeDiscoverDb({ venue_slug: null }).db, discoverSite().get, "t1"),
+    Error, "kuželna není nastavená",
+  );
+  await assertRejects(
+    () => runDiscover(fakeDiscoverDb(null).db, discoverSite().get, "t1"),
+    Error, "kuželna není nastavená",
+  );
+  await assertRejects(
+    () => runDiscover(fakeDiscoverDb({ venue_slug: "tj-sokol-brno-iv" }).db,
+      discoverSite({ "/detail-kuzelny/tj-sokol-brno-iv": "<html></html>" }).get, "t1"),
+    Error, "na stránce kuželny nejsou žádné kluby",
+  );
+  const noMatches = fixture("sitemap_index.xml").replace(/<loc>[^<]*matches-\d+\.xml<\/loc>/g, "");
+  const { db, rpcs } = fakeDiscoverDb({ venue_slug: "tj-sokol-brno-iv" });
+  await assertRejects(
+    () => runDiscover(db, discoverSite({ "/sitemap.xml": noMatches }).get, "t1"),
+    Error, "sitemapa zápasů chybí",
+  );
+  assertEquals(rpcs, []);
 });
