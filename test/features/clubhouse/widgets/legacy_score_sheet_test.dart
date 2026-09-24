@@ -921,6 +921,29 @@ void main() {
       }
     });
 
+    testWidgets('a hyphenated surname narrows the name column only to its '
+        'widest part, since the line breaker also breaks after "-": the '
+        'other names on a portrait phone still wrap', (tester) async {
+      // "Nováková-Dvořáková" is one whitespace-free run, far wider than any
+      // other word here, but it renders as "Nováková-" / "Dvořáková".
+      const hyphenated = 'Eva Nováková-Dvořáková';
+      final players = [
+        for (final p in fourLanes)
+          p.side == 'away' && p.position == 6
+              ? bigPlayer('away', 6, name: hyphenated)
+              : p,
+      ];
+      setBodyArea(tester, portrait);
+      await openPage(tester, players);
+
+      expectFillsBodyArea(tester);
+      expectNothingTruncated(tester);
+      expect(linesOf(tester, hyphenated), greaterThan(1));
+      for (final name in [...homeNames, ...awayNames.take(5)]) {
+        expect(linesOf(tester, name), greaterThan(1), reason: name);
+      }
+    });
+
     testWidgets('on a landscape phone the names stay on one line', (
       tester,
     ) async {

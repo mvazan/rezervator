@@ -390,10 +390,10 @@ class _ColumnMetrics {
   }
 
   /// The narrowest name column the full-screen page may wrap names into
-  /// (never below a single word): the widest single word of any player or
-  /// team name in 16/w700, and each name-column header ("Jméno a příjmení
-  /// hráče", "Registrační číslo") at the width it needs on 2 lines — plus
-  /// [_cellChrome], rounded up like every other column.
+  /// (never below a single unbreakable run): the widest run of any player
+  /// or team name in 16/w700, and each name-column header ("Jméno a
+  /// příjmení hráče", "Registrační číslo") at the width it needs on 2 lines
+  /// — plus [_cellChrome], rounded up like every other column.
   static double compactNameWidth({
     required PrioritySlot slot,
     required List<MatchPlayerResult> players,
@@ -401,11 +401,18 @@ class _ColumnMetrics {
     List<String> words(String text) =>
         text.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
 
+    // The widest run the line breaker itself will not split — a word, or
+    // a part of a hyphenated one: "Nováková-Dvořáková" wraps after its
+    // "-", so it needs only "Nováková-" wide, not the whole surname.
     double widestWord(String text, TextStyle style) {
-      var widest = 0.0;
-      for (final word in words(text)) {
-        widest = math.max(widest, _measure(word, style));
-      }
+      if (text.isEmpty) return 0;
+      final painter = TextPainter(
+        text: TextSpan(text: text, style: style),
+        textDirection: TextDirection.ltr,
+        textScaler: TextScaler.noScaling,
+      )..layout();
+      final widest = painter.minIntrinsicWidth;
+      painter.dispose();
       return widest;
     }
 
