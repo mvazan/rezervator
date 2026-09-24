@@ -48,6 +48,8 @@ const appChangelog = <Release>[
         'správce je zapne v Správa → Oddíly.',
     'Nový tab Klubovna: výsledky zápasů našich týmů (i živě, s videem a '
         'výkony hráčů) a kuželny soupeřů s kontakty a navigací.',
+    'Detail zápasu má zápis jako na kuzelky.com — ikonou vpravo nahoře ho '
+        'otevřeš přes celou obrazovku, na výšku i na šířku.',
   ]),
   Release('1.2.8', '22. 9. 2026', [
     'Ve správě appky se tlačítko pro přidání (oddíl, hráč, pronájem…) už '
