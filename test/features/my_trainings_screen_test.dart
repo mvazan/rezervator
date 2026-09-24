@@ -293,6 +293,133 @@ void main() {
     expect(earliestPastHeader.dy, lessThan(firstUpcomingHeader.dy));
   });
 
+  group('scrolled to what is upcoming after the list changes', () {
+    PrioritySlot teamMatch(String id, int dayOffset, {String? home}) =>
+        PrioritySlot(
+          id: id,
+          date: today.addDays(dayOffset),
+          startsAt: const HourMinute(18, 30),
+          endsAt: const HourMinute(21, 30),
+          type: PrioritySlot.fallbackMatchType,
+          homeTeam: home ?? 'SKK Veverky Brno A',
+          awayTeam: 'KK MS Brno D',
+          importKey: 'cka:$id',
+        );
+    final season = [
+      for (var i = 12; i >= 1; i--) teamMatch('past$i', -i),
+      for (var i = 1; i <= 10; i++) teamMatch('future$i', i),
+    ];
+
+    double scrollPixels(WidgetTester tester) =>
+        tester.state<ScrollableState>(find.byType(Scrollable)).position.pixels;
+
+    testWidgets('following a team later re-scrolls past its played matches', (
+      tester,
+    ) async {
+      final profileCtrl = StreamController<Profile>();
+      addTearDown(profileCtrl.close);
+      await tester.pumpWidget(
+        app(
+          reservations: [res('r1', today)],
+          slots: season,
+          profileStream: profileCtrl.stream,
+        ),
+      );
+      profileCtrl.add(nobody);
+      await tester.pumpAndSettle();
+      // Only today's training: nothing to scroll past yet.
+      expect(find.text('Dnes'), findsOneWidget);
+      expect(find.text(dayFull(today.addDays(-12))), findsNothing);
+
+      profileCtrl.add(me); // the player picks their team in Moje týmy
+      await tester.pumpAndSettle();
+
+      expect(
+        tester.getTopLeft(find.text(dayFull(today.addDays(-12)))).dy,
+        lessThan(0),
+      );
+      expect(tester.getTopLeft(find.text('Dnes')).dy, inInclusiveRange(0, 200));
+    });
+
+    testWidgets(
+      'a list rebuilt after a spinner (tenant switch) scrolls again',
+      (tester) async {
+        await tester.pumpWidget(
+          app(reservations: [res('r1', today)], slots: season),
+        );
+        await tester.pumpAndSettle();
+        expect(scrollPixels(tester), greaterThan(0));
+
+        // The kuželna's streams restart: the spinner replaces the list.
+        await tester.pumpWidget(
+          app(
+            reservations: [res('r1', today)],
+            slots: season,
+            slotsLoading: true,
+          ),
+        );
+        await tester.pump();
+        expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+        // Same shape of list for the new kuželna — a brand-new scroll view.
+        await tester.pumpWidget(
+          app(reservations: [res('r1', today)], slots: season),
+        );
+        await tester.pumpAndSettle();
+
+        expect(
+          tester.getTopLeft(find.text(dayFull(today.addDays(-12)))).dy,
+          lessThan(0),
+        );
+        expect(
+          tester.getTopLeft(find.text('Dnes')).dy,
+          inInclusiveRange(0, 200),
+        );
+      },
+    );
+
+    testWidgets('once the player scrolls by hand, a later change leaves '
+        'the list where they put it', (tester) async {
+      final profileCtrl = StreamController<Profile>();
+      addTearDown(profileCtrl.close);
+      await tester.pumpWidget(
+        app(
+          reservations: [res('r1', today)],
+          slots: [
+            ...season,
+            for (var i = 12; i >= 1; i--)
+              teamMatch('otherPast$i', -12 - i, home: 'SKK Veverky Brno B'),
+          ],
+          profileStream: profileCtrl.stream,
+        ),
+      );
+      profileCtrl.add(me);
+      await tester.pumpAndSettle();
+
+      await tester.drag(
+        find.byType(SingleChildScrollView),
+        const Offset(0, -300),
+      );
+      await tester.pumpAndSettle();
+      final byHand = scrollPixels(tester);
+
+      // A second followed team brings its own played matches above today.
+      profileCtrl.add(
+        const Profile(
+          id: 'me',
+          displayName: 'Já Hráč',
+          email: 'me@example.com',
+          role: Role.player,
+          status: ProfileStatus.approved,
+          followedTeams: ['SKK Veverky Brno A', 'SKK Veverky Brno B'],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(scrollPixels(tester), byHand);
+    });
+  });
+
   testWidgets('a past finished federation match shows its score', (
     tester,
   ) async {
