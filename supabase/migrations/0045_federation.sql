@@ -198,8 +198,9 @@ $$;
 -- One competition's matches as the site lists them → priority_slots.
 -- import.run keeps the 0038 hand-edit trigger quiet; writes happen only
 -- when something differs.
--- p_keep_ids: our matches the edge function could not write (no time on
--- the site yet) — still listed, so never "dropped".
+-- p_keep_ids: our matches the edge function did not write (no time on the
+-- site yet, or only inactive teams of ours) — still listed, so never
+-- "dropped".
 create or replace function apply_federation_matches(
   p_tenant uuid, p_competition_slug text, p_matches jsonb,
   p_keep_ids integer[] default '{}')

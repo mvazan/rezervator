@@ -52,7 +52,10 @@ export function planCompetition(args: {
   const skipped: string[] = [];
   const keepIds: number[] = [];
   for (const m of unique) {
-    if (!active.has(m.homeTeam.slug) && !active.has(m.awayTeam.slug)) continue;
+    if (!active.has(m.homeTeam.slug) && !active.has(m.awayTeam.slug)) {
+      if (ours.has(m.homeTeam.slug) || ours.has(m.awayTeam.slug)) keepIds.push(m.id);
+      continue;
+    }
     if (!m.time) {
       skipped.push(`${m.homeTeam.name} – ${m.awayTeam.name} (${m.date}): bez času`);
       keepIds.push(m.id);

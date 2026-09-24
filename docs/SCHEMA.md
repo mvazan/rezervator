@@ -250,10 +250,10 @@ superseded and retired.
   - **Delete only the future:** a `cka:` match of this competition that
     has not started yet (`date + starts_at` after Prague now), that the
     site no longer lists and that is not hand-edited, is deleted; a match
-    already under way or played never is. `keep_ids` are matches the site
-    still lists but the edge function could not write (no start time yet)
-    — they are never "dropped". An empty list is a failed fetch and
-    deletes nothing.
+    already under way or played never is. `keep_ids` are matches of ours
+    the site still lists but the edge function did not write (no start
+    time yet, or none of our teams in it is active) — they are never
+    "dropped". An empty list is a failed fetch and deletes nothing.
   - Report: `{inserted, updated, rekeyed, deleted, skipped_hand_edited[]}`;
     the edge function adds `skipped_no_time[]`, `match_jobs` and
     `legacy_unpaired[]` — up to 20 `{date, title}` of `rozpis:` rows still
@@ -262,12 +262,12 @@ superseded and retired.
     rows to check by hand: a match that stays `rozpis:` next to a new
     `cka:` row is a duplicate.
   - **Deactivating a team** (`update_team(…, active := false)`) stops
-    syncing it: its matches are no longer written. Its future matches
-    disappear on the next sync of its competition **only if** that
-    competition is still synced for another active team of the alley
-    (they are then "no longer listed"); when no active team is left in the
-    competition, the competition is not synced at all and its matches stay
-    as they are.
+    syncing it: its matches are no longer written, and the ones already
+    stored stay as they are. When the competition is still synced for
+    another active team of the alley, the inactive team's listed matches
+    go as `keep_ids`, so they are never "no longer listed"; when no active
+    team is left in the competition, the competition is not synced at
+    all.
 - **Match detail** (`federation_match` job): `apply_federation_result`
   upserts `match_results`, replaces `match_player_results`, writes
   `video_url` and, when the detail names the venue, `venue`/`venue_slug`
