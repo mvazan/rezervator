@@ -332,6 +332,34 @@ void main() {
       },
     );
 
+    test('same-time matches of a day follow Czech order (H before Ch)', () {
+      final days = resultsTimeline(
+        slots: [
+          match(
+            id: 'ch',
+            date: '2026-10-04',
+            startsAt: '10:00:00',
+            home: 'Chrudim',
+            away: 'X',
+          ),
+          match(
+            id: 'h',
+            date: '2026-10-04',
+            startsAt: '10:00:00',
+            home: 'Hradec',
+            away: 'Y',
+          ),
+        ],
+        mineOnly: false,
+        followedTeams: const [],
+        exceptions: const {},
+      );
+      expect(days.single.matches.map((m) => m.title), [
+        'Hradec – Y',
+        'Chrudim – X',
+      ]);
+    });
+
     test('mineOnly honours followed teams', () {
       final days = resultsTimeline(
         slots: slots,
