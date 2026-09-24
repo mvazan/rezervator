@@ -142,6 +142,10 @@ create table match_player_results (
 );
 create index match_player_results_player_idx
   on match_player_results (tenant_id, player_site_id);
+-- The app streams one match's lines filtered by match_id and every fetch
+-- replaces them; Realtime checks a DELETE's filter against the replica
+-- identity alone, so the default (id only) would hide every delete.
+alter table match_player_results replica identity full;
 
 alter table match_results enable row level security;
 alter table match_player_results enable row level security;

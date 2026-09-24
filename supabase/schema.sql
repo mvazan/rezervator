@@ -3481,6 +3481,8 @@ CREATE TABLE IF NOT EXISTS "public"."match_player_results" (
     CONSTRAINT "match_player_results_side_check" CHECK (("side" = ANY (ARRAY['home'::"text", 'away'::"text"])))
 );
 
+ALTER TABLE ONLY "public"."match_player_results" REPLICA IDENTITY FULL;
+
 
 ALTER TABLE "public"."match_player_results" OWNER TO "postgres";
 

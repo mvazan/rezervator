@@ -4495,6 +4495,18 @@ begin
   raise notice 'OK: federation writes are server-only; the app reads and calls five RPCs, anon nothing (0045)';
 end $$;
 
+-- 12b. The app streams one match's lines filtered by match_id, and every
+-- fetch deletes and re-inserts them. Realtime matches a DELETE against the
+-- replica identity only, so it has to carry match_id.
+do $$
+begin
+  if (select relreplident from pg_class
+      where oid = 'public.match_player_results'::regclass) <> 'f' then
+    raise exception 'FAIL: match_player_results needs replica identity full, or a stream filtered by match_id never sees its deletes';
+  end if;
+  raise notice 'OK: match_player_results deletes reach a stream filtered by match_id (0045)';
+end $$;
+
 -- 13. record_federation_run keeps the last good report per key.
 do $$
 declare
