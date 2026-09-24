@@ -266,4 +266,50 @@ void main() {
 
     expect(tester.hasRunningAnimations, isTrue);
   });
+
+  testWidgets(
+      'a live match that finishes under a long-lived row stops pulsing and '
+      'turns into Záznam', (tester) async {
+    final live = slot(videoUrl: 'https://vysledky.kuzelky.cz/video/m1');
+    await tester.pumpWidget(wrap(
+      slot: live,
+      matchResult: result(MatchStatus.inProgress),
+    ));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(tester.hasRunningAnimations, isTrue);
+
+    await tester.pumpWidget(wrap(
+      slot: live,
+      matchResult: result(MatchStatus.finished),
+    ));
+    await tester.pump();
+
+    expect(tester.hasRunningAnimations, isFalse);
+    expect(find.byIcon(Icons.videocam), findsNothing);
+    final button = find.widgetWithIcon(IconButton, Icons.play_circle_fill);
+    expect(tester.widget<IconButton>(button).tooltip, 'Záznam');
+  });
+
+  testWidgets('a match that goes live under a long-lived row starts pulsing',
+      (tester) async {
+    final later = slot(
+      videoUrl: 'https://vysledky.kuzelky.cz/video/m1',
+      matchDate: date.addDays(5),
+    );
+    await tester.pumpWidget(wrap(
+      slot: later,
+      matchResult: result(MatchStatus.scheduled),
+    ));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(tester.hasRunningAnimations, isFalse);
+
+    await tester.pumpWidget(wrap(
+      slot: later,
+      matchResult: result(MatchStatus.inProgress),
+    ));
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(tester.hasRunningAnimations, isTrue);
+    expect(find.byIcon(Icons.videocam), findsOneWidget);
+  });
 }
