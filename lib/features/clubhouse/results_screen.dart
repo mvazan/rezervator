@@ -108,6 +108,7 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
       context,
       () =>
           Future.wait([for (final slot in live) widget.refreshMatch(slot.id)]),
+      errorText: friendlyDbError,
     );
   }
 

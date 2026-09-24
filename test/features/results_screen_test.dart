@@ -392,6 +392,28 @@ void main() {
     expect(find.text('Nic právě neprobíhá.'), findsOneWidget);
   });
 
+  testWidgets('a failed pull-to-refresh shows the Czech error copy', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(
+        slots: [liveToday],
+        results: {'m2': liveResult},
+        refreshMatch: (_) async => throw Exception('not_allowed'),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.fling(
+      find.byKey(const Key('results-list')),
+      const Offset(0, 300),
+      1000,
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Na tohle nemáš oprávnění.'), findsOneWidget);
+  });
+
   testWidgets('no federation matches at all shows the admin hint', (
     tester,
   ) async {
