@@ -5,6 +5,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../../../domain/limits.dart';
 import '../../../domain/models.dart';
 import 'form_dialog.dart';
 
@@ -61,10 +62,12 @@ class _TeamDialogState extends State<TeamDialog> {
         TextField(
           controller: _name,
           autofocus: true,
+          maxLength: Limits.teamNameLength,
           decoration: const InputDecoration(
             labelText: 'Název v appce',
             helperText: 'Podle názvu se řídí výběr týmů hráčů. Změna platí '
                 'od další synchronizace.',
+            counterText: '',
           ),
         ),
         const SizedBox(height: 8),

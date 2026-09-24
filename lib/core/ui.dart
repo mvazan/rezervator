@@ -133,6 +133,7 @@ String friendlyDbError(Object error) {
     'federation_not_configured': 'Nejdřív ulož kuželnu z výsledkového servisu.',
     'federation_disabled': 'Zapni nejdřív automatické stahování.',
     'team_name_taken': 'Tým s tímto názvem už existuje.',
+    'teams_name_check': 'Název týmu smí mít nejvýš 80 znaků.',
     'empty_name': 'Název nesmí být prázdný.',
   };
   for (final entry in messages.entries) {

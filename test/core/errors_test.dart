@@ -54,6 +54,11 @@ void main() {
     expect(friendlyDbError(Exception('team_name_taken')),
         'Tým s tímto názvem už existuje.');
     expect(friendlyDbError(Exception('empty_name')), 'Název nesmí být prázdný.');
+    expect(
+      friendlyDbError(Exception('new row for relation "teams" violates check '
+          'constraint "teams_name_check"')),
+      'Název týmu smí mít nejvýš 80 znaků.',
+    );
   });
 
   test('group errors (0044)', () {

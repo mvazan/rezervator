@@ -392,5 +392,42 @@ void main() {
       expect(capturedClubId, isNull);
       expect(capturedActive, isTrue);
     });
+
+    testWidgets('the team name stops at the 80 characters teams.name allows',
+        (tester) async {
+      const team = Team(
+        id: 't1',
+        name: 'Brno IV',
+        clubId: 'c1',
+        siteName: 'TJ Sokol Brno IV',
+        competitionName: 'OP I. třída',
+      );
+      String? capturedName;
+      await pumpApp(
+        tester,
+        app(
+          clubs,
+          teams: const [team],
+          updateTeam: (t,
+              {required String name,
+              String? clubId,
+              required bool active}) async {
+            capturedName = name;
+          },
+        ),
+      );
+
+      await tester.tap(find.text('Brno IV'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+          find.widgetWithText(TextField, 'Brno IV'), 'x' * 100);
+      await tester.tap(find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.text('Uložit'),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(capturedName, 'x' * 80);
+    });
   });
 }
