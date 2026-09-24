@@ -2,7 +2,7 @@ import { assert, assertEquals, assertThrows } from "jsr:@std/assert@1";
 import {
   competitionSlugsForClubs, endTime, matchFormat, nextCheckpoint, normalizeTeam,
   pairLegacy, parseCompetition, parseMatch, parseSitemapLocs, parseVenue, parseVenueClubs,
-  resultPayload, rscText, teamBelongsToClub, valueAfter,
+  resultPayload, rscText, sameTeamForPairing, teamBelongsToClub, valueAfter,
 } from "./federation.ts";
 
 const fixture = (name: string) =>
@@ -362,6 +362,97 @@ Deno.test("a legacy row pairs at most once", () => {
     { siteId: 2, date: "2026-09-01", startsAt: "10:00", round: 1, home: "A", away: "B" },
   ], legacy);
   assertEquals([...pairs.values()], ["L1"]);
+});
+
+Deno.test("pairing reads abbreviated club names as the site's full ones, team letter and digits exact", () => {
+  // "MS" is the initials of "Moravská Slavia" (the site spells it Slávia too).
+  assert(sameTeamForPairing("KK MS Brno B", "KK Moravská Slavia Brno B"));
+  assert(sameTeamForPairing("KK Moravská Slávia Brno E", "KK MS Brno E"));
+  // "n.L." is one-letter abbreviations of "nad Lipou".
+  assert(sameTeamForPairing("TJ Slovan Kamenice n.L.", "TJ Slovan Kamenice nad Lipou"));
+  assert(sameTeamForPairing("TJ Sokol Brno IV A", "TJ Sokol Brno IV"));
+  // Another squad of the same club is another team.
+  assert(!sameTeamForPairing("KK MS Brno B", "KK MS Brno C"));
+  assert(!sameTeamForPairing("KK MS Brno B", "KK Moravská Slavia Brno C"));
+  assert(!sameTeamForPairing("KK MS Brno B", "KK Moravská Slavia Brno"));
+  assert(!sameTeamForPairing("TJ Sokol Brno IV", "TJ Sokol Brno IV B"));
+  // Letters that are not initials of a run, and digits, never stretch.
+  assert(!sameTeamForPairing("SK Brno Žabovřesky", "SKK Brno Žabovřesky"));
+  assert(!sameTeamForPairing("SKK Brno Žabovřesky", "SK Brno Žabovřesky"));
+  assert(!sameTeamForPairing("KK MS Brno B", "KK Moravská Brno B"));
+  assert(!sameTeamForPairing("KK Brno 2 B", "KK Brno 3 B"));
+  assert(!sameTeamForPairing("TJ Sokol Brno I", "TJ Sokol Brno IV"));
+});
+
+/** The three rehearsal misses (TJ Sokol Brno IV's first sync) and the return
+ * leg that paired: legacy rows as the old importer stored them. */
+const rehearsalLegacy = [
+  { id: "44ac482c-1798-442e-95a3-c3a13e0564a1", import_key: "rozpis:JM divize:8:TJ Sokol Brno IV – KK MS Brno B", date: "2026-10-30", starts_at: "18:00:00", home_team: "TJ Sokol Brno IV", away_team: "KK MS Brno B" },
+  { id: "868a0938-131a-4858-ab68-c15c86a33e35", import_key: "rozpis:JM divize:14:TJ Sokol Brno IV – KK MS Brno C", date: "2026-12-11", starts_at: "18:00:00", home_team: "TJ Sokol Brno IV", away_team: "KK MS Brno C" },
+  { id: "3806e9a4-56b4-4898-8492-90dc12679ce2", import_key: "rozpis:KP1 Sever:3:KK MS Brno E – KS Devítka Brno A", date: "2026-09-30", starts_at: "18:00:00", home_team: "KK MS Brno E", away_team: "KS Devítka Brno A" },
+  { id: "f75c83bd-94df-4b6c-9a50-b42c25b03aaa", import_key: "rozpis:KP1 Sever:23:KS Devítka Brno A – KK MS Brno E", date: "2027-04-14", starts_at: "18:30:00", home_team: "KS Devítka Brno A", away_team: "KK MS Brno E" },
+];
+
+Deno.test("the rehearsal misses pair: the site's full club name, a new round, a match moved a month", () => {
+  const divize = pairLegacy([
+    // Same round, the site's start is half an hour later.
+    { siteId: 2297, date: "2026-10-30", startsAt: "18:30", round: 8, home: "TJ Sokol Brno IV", away: "KK Moravská Slavia Brno B" },
+    // Same date, the site numbers the round 15, the rozpis 14.
+    { siteId: 2344, date: "2026-12-11", startsAt: "18:30", round: 15, home: "TJ Sokol Brno IV", away: "KK Moravská Slavia Brno C" },
+  ], rehearsalLegacy);
+  assertEquals(divize.get(2297), "44ac482c-1798-442e-95a3-c3a13e0564a1");
+  assertEquals(divize.get(2344), "868a0938-131a-4858-ab68-c15c86a33e35");
+  const kp1 = pairLegacy([
+    // Moved from 30.9 (round 3) to 30.10 (round 4): no date, round or start in common.
+    { siteId: 4017, date: "2026-10-30", startsAt: "18:00", round: 4, home: "KK Moravská Slávia Brno E", away: "KS Devítka Brno A" },
+    // The return leg: the same two teams the other way round.
+    { siteId: 4083, date: "2027-04-14", startsAt: "18:30", round: 15, home: "KS Devítka Brno A", away: "KK Moravská Slávia Brno E" },
+  ], rehearsalLegacy);
+  assertEquals(kp1.get(4017), "3806e9a4-56b4-4898-8492-90dc12679ce2");
+  assertEquals(kp1.get(4083), "f75c83bd-94df-4b6c-9a50-b42c25b03aaa");
+});
+
+/** The two divize misses as the site lists them: they pair through the
+ * name equivalence alone, so they show the new rules are on. */
+const divizeMisses = [
+  { siteId: 2297, date: "2026-10-30", startsAt: "18:30", round: 8, home: "TJ Sokol Brno IV", away: "KK Moravská Slavia Brno B" },
+  { siteId: 2344, date: "2026-12-11", startsAt: "18:30", round: 15, home: "TJ Sokol Brno IV", away: "KK Moravská Slavia Brno C" },
+];
+const divizePairs = [
+  [2297, "44ac482c-1798-442e-95a3-c3a13e0564a1"],
+  [2344, "868a0938-131a-4858-ab68-c15c86a33e35"],
+];
+
+Deno.test("the any-date rule pairs nothing when the same home and away meet twice", () => {
+  const moved = rehearsalLegacy[2];
+  // Two site matches of KK MS Brno E at home to Devítka A, neither on the rozpis date.
+  const twoSite = pairLegacy([
+    ...divizeMisses,
+    { siteId: 4017, date: "2026-10-30", startsAt: "18:00", round: 4, home: "KK Moravská Slávia Brno E", away: "KS Devítka Brno A" },
+    { siteId: 4090, date: "2027-03-10", startsAt: "18:00", round: 13, home: "KK Moravská Slávia Brno E", away: "KS Devítka Brno A" },
+  ], rehearsalLegacy.slice(0, 3));
+  assertEquals([...twoSite], divizePairs);
+  // Two rozpis rows for the one site match, neither on its date.
+  const twoLegacy = pairLegacy([
+    ...divizeMisses,
+    { siteId: 4017, date: "2026-10-30", startsAt: "18:00", round: 4, home: "KK Moravská Slávia Brno E", away: "KS Devítka Brno A" },
+  ], [...rehearsalLegacy.slice(0, 3), {
+    ...moved, id: "L2", import_key: "rozpis:KP1 Sever:12:KK MS Brno E – KS Devítka Brno A",
+    date: "2026-12-02",
+  }]);
+  assertEquals([...twoLegacy], divizePairs);
+});
+
+Deno.test("an abbreviated opponent with another team letter stays unpaired", () => {
+  const pairs = pairLegacy([
+    // KK MS Brno C at the B squad's slot and round: another team.
+    { siteId: 9001, date: "2026-10-30", startsAt: "18:30", round: 8, home: "TJ Sokol Brno IV", away: "KK Moravská Slavia Brno C" },
+    // The F squad at home to Devítka A: not the E squad's moved match.
+    { siteId: 9002, date: "2026-10-30", startsAt: "18:00", round: 4, home: "KK Moravská Slávia Brno F", away: "KS Devítka Brno A" },
+    // The E squad's own moved match still pairs next to it.
+    { siteId: 4017, date: "2026-10-30", startsAt: "18:00", round: 4, home: "KK Moravská Slávia Brno E", away: "KS Devítka Brno A" },
+  ], [rehearsalLegacy[0], rehearsalLegacy[2]]);
+  assertEquals([...pairs], [[4017, "3806e9a4-56b4-4898-8492-90dc12679ce2"]]);
 });
 
 Deno.test("checkpoints follow the table in the spec", () => {

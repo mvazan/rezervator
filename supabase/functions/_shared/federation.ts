@@ -305,14 +305,64 @@ export function normalizeTeam(name: string): string {
     .replace(/[^a-z0-9]+/g, " ").trim().replace(/ a$/, "");
 }
 
+const isLetter = (t: string) => /^[a-z]$/.test(t);
+const isWord = (t: string) => /^[a-z]{2,}$/.test(t);
+
+/** Whether token `t` abbreviates the run of `t.length` words of `other` from
+ * `at`: its letters are their initials ("ms" = "moravska slavia"), and a
+ * one-letter token is a word's first letter ("n" = "nad"). */
+function abbreviates(t: string, other: string[], at: number): boolean {
+  if (!/^[a-z]+$/.test(t) || at + t.length > other.length) return false;
+  for (let m = 0; m < t.length; m++) {
+    if (!isWord(other[at + m]) || other[at + m][0] !== t[m]) return false;
+  }
+  return true;
+}
+
+function alignTokens(x: string[], i: number, y: string[], j: number): boolean {
+  if (i === x.length || j === y.length) return i === x.length && j === y.length;
+  return (x[i] === y[j] && alignTokens(x, i + 1, y, j + 1)) ||
+    (abbreviates(x[i], y, j) && alignTokens(x, i + 1, y, j + x[i].length)) ||
+    (abbreviates(y[j], x, i) && alignTokens(x, i + y[j].length, y, j + 1));
+}
+
+/** Legacy pairing only — normalizeTeam's other callers stay exact. Two names
+ * are one team when their normalized words line up, a word of one allowed to
+ * stand for a run of the other's by initials ("KK MS Brno B" = "KK Moravská
+ * Slavia Brno B", "Kamenice n.L." = "Kamenice nad Lipou"). The team letter
+ * and digits never stretch: a last single letter after a word is a squad
+ * ("… Brno B"), so it must be the other name's last letter too, and only a
+ * run of single letters ("n l") may end a name as an abbreviation. */
+export function sameTeamForPairing(a: string, b: string): boolean {
+  const x = normalizeTeam(a).split(" ").filter(Boolean);
+  const y = normalizeTeam(b).split(" ").filter(Boolean);
+  const lx = x[x.length - 1] ?? "";
+  const ly = y[y.length - 1] ?? "";
+  if (isLetter(lx) && isLetter(ly)) {
+    return lx === ly && alignTokens(x.slice(0, -1), 0, y.slice(0, -1), 0);
+  }
+  const squad = (t: string[]) => isLetter(t[t.length - 1] ?? "") && !isLetter(t[t.length - 2] ?? "");
+  if (squad(x) || squad(y)) return false;
+  return alignTokens(x, 0, y, 0);
+}
+
 export function pairLegacy(candidates: PairCandidate[], legacy: LegacyRow[]): Map<number, string> {
   const free = new Map(legacy.map((l) => [l.id, l]));
   const pairs = new Map<number, string>();
   const keyed = (l: LegacyRow) => /^rozpis:.*:(\d+):(.*) – (.*)$/.exec(l.import_key);
-  const same = (a: string, b: string) => normalizeTeam(a) === normalizeTeam(b);
-  // The last rule is the old importer's "renamed opponent": the same slot
+  const known = new Map<string, boolean>();
+  const same = (a: string, b: string) => {
+    const key = `${a}\n${b}`;
+    let hit = known.get(key);
+    if (hit === undefined) known.set(key, hit = sameTeamForPairing(a, b));
+    return hit;
+  };
+  // The third rule is the old importer's "renamed opponent": the same slot
   // with one team in common. Loose enough that a legacy row must also have
-  // just one candidate.
+  // just one candidate. The last one catches a match the rozpis has on
+  // another date and in another round (moved before the site listed it):
+  // same home and same away on any date — only while that pair is unique
+  // both ways among the rows still unpaired, since a league plays it once.
   const rules: { test: (c: PairCandidate, l: LegacyRow) => boolean; strict: boolean }[] = [
     {
       test: (c, l) => {
@@ -329,6 +379,10 @@ export function pairLegacy(candidates: PairCandidate[], legacy: LegacyRow[]): Ma
       test: (c, l) =>
         l.date === c.date && l.starts_at.slice(0, 5) === c.startsAt &&
         (same(l.home_team, c.home) || same(l.away_team, c.away)),
+      strict: true,
+    },
+    {
+      test: (c, l) => same(l.home_team, c.home) && same(l.away_team, c.away),
       strict: true,
     },
   ];
