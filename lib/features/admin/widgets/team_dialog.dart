@@ -5,18 +5,28 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../../../core/ui.dart';
 import '../../../domain/limits.dart';
 import '../../../domain/models.dart';
 import 'form_dialog.dart';
 
-/// Pops `(name, clubId, active)`; null on cancel.
+/// Saves through [updateTeam] and pops `true`; stays open when the save
+/// fails (a taken name) so the edits survive; null on cancel.
 class TeamDialog extends StatefulWidget {
-  const TeamDialog({super.key, required this.team, required this.clubs});
+  const TeamDialog({
+    super.key,
+    required this.team,
+    required this.clubs,
+    required this.updateTeam,
+  });
 
   final Team team;
 
   /// Czech-sorted, as the caller already holds it (clubsProvider).
   final List<Club> clubs;
+
+  final Future<void> Function(Team team,
+      {required String name, String? clubId, required bool active}) updateTeam;
 
   @override
   State<TeamDialog> createState() => _TeamDialogState();
@@ -45,16 +55,23 @@ class _TeamDialogState extends State<TeamDialog> {
     super.dispose();
   }
 
-  Future<(String, String?, bool)?> _save() async {
+  Future<bool?> _save() async {
     final name = _name.text.trim();
     if (name.isEmpty) return null;
-    return (name, _clubId, _active);
+    final ok = await tryAction(
+      context,
+      () => widget.updateTeam(widget.team,
+          name: name, clubId: _clubId, active: _active),
+      success: 'Uloženo.',
+      errorText: friendlyDbError,
+    );
+    return ok ? true : null;
   }
 
   @override
   Widget build(BuildContext context) {
     final team = widget.team;
-    return FormDialog<(String, String?, bool)>(
+    return FormDialog<bool>(
       title: 'Tým',
       onSave: _save,
       saveEnabled: _name.text.trim().isNotEmpty,

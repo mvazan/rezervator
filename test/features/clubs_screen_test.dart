@@ -516,6 +516,59 @@ void main() {
       expect(capturedActive, isTrue);
     });
 
+    testWidgets('a refused team save keeps the dialog open with the edits',
+        (tester) async {
+      const team = Team(
+        id: 't1',
+        name: 'TJ Sokol Brno IV B',
+        clubId: 'c1',
+        siteName: 'TJ Sokol Brno IV',
+        competitionName: 'OP I. třída',
+      );
+      var calls = 0;
+      await pumpApp(
+        tester,
+        app(
+          clubs,
+          teams: const [team],
+          updateTeam: (t,
+              {required String name,
+              String? clubId,
+              required bool active}) async {
+            calls++;
+            throw Exception('team_name_taken');
+          },
+        ),
+      );
+
+      await tester.tap(find.text('TJ Sokol Brno IV B'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+          find.widgetWithText(TextField, 'TJ Sokol Brno IV B'),
+          'TJ Sokol Brno IV');
+      await tester.tap(find.text('Stahovat zápasy'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.text('Uložit'),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(calls, 1);
+      expect(find.text('Tým s tímto názvem už existuje.'), findsOneWidget);
+      final dialog = find.byType(AlertDialog);
+      expect(dialog, findsOneWidget);
+      expect(
+        find.descendant(
+            of: dialog,
+            matching: find.widgetWithText(TextField, 'TJ Sokol Brno IV')),
+        findsOneWidget,
+      );
+      final toggle = tester.widget<SwitchListTile>(
+          find.widgetWithText(SwitchListTile, 'Stahovat zápasy'));
+      expect(toggle.value, isFalse);
+    });
+
     testWidgets('the team name stops at the 80 characters teams.name allows',
         (tester) async {
       const team = Team(

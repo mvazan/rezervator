@@ -72,21 +72,12 @@ class ClubsScreen extends ConsumerWidget {
         errorText: friendlyDbError,
       );
 
-  Future<void> _editTeam(
-      BuildContext context, Team team, List<Club> clubs) async {
-    final result = await showDialog<(String, String?, bool)>(
-      context: context,
-      builder: (_) => TeamDialog(team: team, clubs: clubs),
-    );
-    if (result == null || !context.mounted) return;
-    final (name, clubId, active) = result;
-    await tryAction(
-      context,
-      () => updateTeam(team, name: name, clubId: clubId, active: active),
-      success: 'Uloženo.',
-      errorText: friendlyDbError,
-    );
-  }
+  Future<void> _editTeam(BuildContext context, Team team, List<Club> clubs) =>
+      showDialog<bool>(
+        context: context,
+        builder: (_) =>
+            TeamDialog(team: team, clubs: clubs, updateTeam: updateTeam),
+      );
 
   Widget _teamTile(BuildContext context, Team team, List<Club> clubs) {
     return ListTile(
