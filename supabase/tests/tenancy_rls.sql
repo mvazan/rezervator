@@ -4612,11 +4612,12 @@ end $$;
 -- (kuzelna-b-b, okresni-prebor) alone plays 923; 924 names no team of B's
 -- at all; 926 is a derby of the two where Kuželna B still carries a name
 -- it no longer has; 927 is Kuželna B's match in okresni-prebor, a
--- competition no active team of B's plays any more (a past season). Our
--- teams are told apart by the site's team slugs, as runMatch does, never by
--- the names. A has an active team with the rezerva's slug in okresni-prebor
--- and a match 925, so a liveness check that forgot the tenant would keep
--- B's dead keys.
+-- competition no active team of B's plays any more (a past season); 928
+-- names no team of B's, only A's switched-off Cizí tým. Our teams are told
+-- apart by the site's team slugs, as runMatch does, never by the names. A
+-- has an active team with the rezerva's slug in okresni-prebor and a match
+-- 925, so a liveness check that forgot the tenant would keep B's dead keys
+-- — or, through Cizí tým, kill B's live 928.
 do $$
 declare
   v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
@@ -4624,7 +4625,8 @@ declare
 begin
   insert into teams (tenant_id, name, site_slug, competition_slug, active)
   values (v_b, 'Kuželna B rezerva', 'kuzelna-b-b', 'okresni-prebor-2026-2027', false),
-         (v_a, 'Kuželna B rezerva', 'kuzelna-b-b', 'okresni-prebor-2026-2027', true);
+         (v_a, 'Kuželna B rezerva', 'kuzelna-b-b', 'okresni-prebor-2026-2027', true),
+         (v_a, 'Cizí tým', 'cizi-tym', 'cizi-soutez-2026-2027', false);
   insert into priority_slots
     (tenant_id, date, starts_at, ends_at, type_id, home_team, away_team,
      home_team_slug, away_team_slug, site_slug,
@@ -4648,7 +4650,8 @@ begin
        'Kuželna B rezerva', 'kuzelna-b-b'),
       (v_b, 926, 'krajsky-prebor-2026-2027', 'Kuželna B stará', 'kuzelna-b-a',
        'Kuželna B rezerva', 'kuzelna-b-b'),
-      (v_b, 927, 'okresni-prebor-2026-2027', 'KK Hosté', 'kk-hoste', 'Kuželna B', 'kuzelna-b-a'))
+      (v_b, 927, 'okresni-prebor-2026-2027', 'KK Hosté', 'kk-hoste', 'Kuželna B', 'kuzelna-b-a'),
+      (v_b, 928, 'krajsky-prebor-2026-2027', 'KK Hosté', 'kk-hoste', 'Cizí tým', 'cizi-tym'))
       x(tenant_id, n, comp, home, home_slug, away, away_slug);
   perform set_config('probe.fed_a_sync',
     (select to_jsonb(f)::text from federation_sync f where tenant_id = v_a), true);
@@ -4764,6 +4767,12 @@ begin
   if federation_last_error(v_b, jsonb_build_object('match:926',
        jsonb_build_object('error', 'derby', 'at', now()))) is distinct from 'derby' then
     raise exception 'FAIL: a match an active team of ours plays under an old name was dead';
+  end if;
+  -- 928 is played by no team of B's: A's switched-off team of that slug is
+  -- not B's, so the match is not "switched off" for B and its error counts.
+  if federation_last_error(v_b, jsonb_build_object('match:928',
+       jsonb_build_object('error', 'cizí tým', 'at', now()))) is distinct from 'cizí tým' then
+    raise exception 'FAIL: another alley''s switched-off team killed B''s match';
   end if;
 
   -- Errors written while their keys were live: the next write drops them.
@@ -4946,9 +4955,11 @@ begin
   -- Back to the fixtures the later sections expect.
   perform record_federation_run(v_b, 'competition:krajsky-prebor-2027-2028', '{"inserted":0}', null);
   delete from priority_slots
-   where import_key in ('cka:921', 'cka:923', 'cka:924', 'cka:925', 'cka:926', 'cka:927')
+   where import_key in ('cka:921', 'cka:923', 'cka:924', 'cka:925', 'cka:926', 'cka:927',
+                        'cka:928')
      and tenant_id in (v_a, v_b);
-  delete from teams where (tenant_id, site_slug) in ((v_b, 'kuzelna-b-b'), (v_a, 'kuzelna-b-b'));
+  delete from teams
+   where (tenant_id, site_slug) in ((v_b, 'kuzelna-b-b'), (v_a, 'kuzelna-b-b'), (v_a, 'cizi-tym'));
   update teams set competition_slug = 'krajsky-prebor-2026-2027'
    where tenant_id = v_b and site_slug = 'kuzelna-b-a';
   update federation_sync set venue_slug = 'kuzelna-b' where tenant_id = v_b;
