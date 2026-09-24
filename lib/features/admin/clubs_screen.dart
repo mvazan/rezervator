@@ -54,11 +54,14 @@ class ClubsScreen extends ConsumerWidget {
     );
   }
 
-  Future<void> _delete(BuildContext context, Club club) => confirmDelete(
+  Future<void> _delete(BuildContext context, Club club, int teamCount) =>
+      confirmDelete(
         context,
         title: 'Smazat oddíl?',
-        message:
-            'Opravdu smazat oddíl „${club.name}"? Hráči zůstanou bez oddílu.',
+        message: teamCount == 0
+            ? 'Opravdu smazat oddíl „${club.name}"? Hráči zůstanou bez oddílu.'
+            : 'Opravdu smazat oddíl „${club.name}"? Hráči i týmy '
+                '($teamCount) zůstanou bez oddílu.',
         action: () => Api.deleteClub(club.id),
         success: 'Smazáno.',
       );
@@ -159,7 +162,11 @@ class ClubsScreen extends ConsumerWidget {
                         ),
                         IconButton(
                           icon: const Icon(Icons.delete_outline),
-                          onPressed: () => _delete(context, club),
+                          onPressed: () => _delete(
+                            context,
+                            club,
+                            teams.where((t) => t.clubId == club.id).length,
+                          ),
                         ),
                       ],
                     ),

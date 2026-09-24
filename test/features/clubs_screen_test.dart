@@ -206,6 +206,36 @@ void main() {
       expect(find.text('Veverky A'), findsOneWidget);
     });
 
+    testWidgets('deleting a club with teams says its teams lose it too',
+        (tester) async {
+      const teams = [
+        Team(id: 't1', name: 'Veverky A', clubId: 'c2'),
+        Team(id: 't2', name: 'Veverky B', clubId: 'c2'),
+      ];
+      await pumpApp(tester, app(clubs, teams: teams));
+
+      // Clubs are Czech-sorted: Sokol Dlouhá Lhota (no teams), Veverky.
+      await tester.tap(find.byIcon(Icons.delete_outline).last);
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Opravdu smazat oddíl „Veverky"? Hráči i týmy (2) '
+            'zůstanou bez oddílu.'),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('Zrušit'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.delete_outline).first);
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Opravdu smazat oddíl „Sokol Dlouhá Lhota"? Hráči '
+            'zůstanou bez oddílu.'),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('Zrušit'));
+      await tester.pumpAndSettle();
+    });
+
     testWidgets(
         'unconfigured sync seeds the default slug and disables Načíst týmy',
         (tester) async {
