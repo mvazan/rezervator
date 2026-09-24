@@ -40,6 +40,7 @@ Deno.test("video links and four-player teams come through", () => {
   assert(v.matches.some((m) => m.videoUrl?.startsWith("https://www.youtube.com/")));
   const k = parseCompetition(fixture("competition_current_teams_of_4.html"));
   assert(k.matches.every((m) => m.matchType === "TEAMS_OF_4"));
+  assertEquals(k.matches.map((m) => m.status).sort(), ["FINISHED", "FINISHED", "PREPARATION", "SCHEDULED"]);
   assert(k.standings.length > 0);
   assert(k.standings.some((s) => s.teamSlug === "tj-sokol-husovice-e-muzi"));
 });
@@ -184,6 +185,16 @@ Deno.test("a forfeit with no results parses to no sides", () => {
   const p = resultPayload(d);
   assertEquals(p.status, "forfeit");
   assertEquals(p.players, []);
+});
+
+Deno.test("live statuses reach apply_federation_result in the lower case its CHECK allows", () => {
+  for (const [status, stored] of [["PREPARATION", "preparation"], ["IN_PROGRESS", "in_progress"]]) {
+    const d = parseMatch(matchPage({ status }));
+    assertEquals(d.status, status);
+    const p = resultPayload(d);
+    assertEquals(p.status, stored);
+    assertEquals((p.players as unknown[]).length, 2);
+  }
 });
 
 Deno.test("venue clubs and sitemaps", () => {

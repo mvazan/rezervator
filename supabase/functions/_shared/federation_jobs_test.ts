@@ -117,11 +117,19 @@ Deno.test("matchJobsFor: live, backfill and the next 48 hours", () => {
       match({ id: 4, status: "SCHEDULED", date: "2026-10-11", time: "10:00" }),
       match({ id: 5, status: "SCHEDULED", date: "2026-10-20" }),
       match({ id: 6, status: "SCHEDULED", date: "2026-10-11", time: "10:00" }),
+      match({ id: 7, status: "FORFEIT", date: "2026-09-20" }),
+      match({ id: 8, status: "FORFEIT", date: "2026-09-20" }),
+      match({ id: 9, status: "FINISHED", date: "2026-10-09" }),
+      match({ id: 10, status: "PREPARATION", date: "2026-10-10", time: "09:00" }),
     ],
-    statusById: new Map([[1, "scheduled"], [2, "finished"], [3, null], [4, null], [5, null]]),
+    statusById: new Map([
+      [1, "scheduled"], [2, "finished"], [3, null], [4, null], [5, null],
+      [7, null], [8, "forfeit"], [9, "in_progress"], [10, "scheduled"],
+    ]),
     now,
   });
-  assertEquals(jobs.map((j) => j.site_match_id).sort(), [1, 3, 4]);
+  assertEquals(jobs.map((j) => j.site_match_id).sort((a, b) => a - b), [1, 3, 4, 7, 9, 10]);
+  for (const id of [7, 9, 10]) assertEquals(jobs.find((j) => j.site_match_id === id)!.run_at, now);
   assertEquals(jobs.find((j) => j.site_match_id === 1)!.run_at, now);
   assertEquals(jobs.find((j) => j.site_match_id === 4)!.run_at, new Date("2026-10-10T08:00:00Z"));
 });
