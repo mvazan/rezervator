@@ -396,13 +396,29 @@ void main() {
     testWidgets('the fetched-at day is the local day, not the UTC one', (
       tester,
     ) async {
-      // 22:30 UTC is already the next day in Czechia (00:30 CEST).
-      final lateSync = Venue.fromJson(const {
+      // A sync halfway into the local offset from UTC midnight on 21
+      // September falls on different UTC and local days: east of UTC the
+      // local day is the 21st (Czechia: 23:00 UTC on the 20th is 01:00 on
+      // the 21st), west of it the 20th. Both days are hard-coded, not
+      // derived the way the screen converts, so a lost toLocal() fails.
+      final midnight = DateTime.utc(2026, 9, 21);
+      final offset = midnight.toLocal().timeZoneOffset;
+      if (offset == Duration.zero) {
+        markTestSkipped(
+          'the test process runs in UTC, where a UTC and a local day are '
+          'the same; run it with TZ=Europe/Prague to cover the conversion',
+        );
+        return;
+      }
+      final east = offset > Duration.zero;
+      final lateSync = Venue.fromJson({
         'id': 'v4',
         'slug': 'pozdni',
         'name': 'Kuželna Pozdní',
-        'fetched_at': '2026-09-20T22:30:00+00:00',
+        'fetched_at': midnight.subtract(offset ~/ 2).toIso8601String(),
       });
+      final localDay = east ? Day(2026, 9, 21) : Day(2026, 9, 20);
+      final utcDay = east ? Day(2026, 9, 20) : Day(2026, 9, 21);
       await tester.pumpWidget(
         app(
           home: const VenueDetailScreen(slug: 'pozdni'),
@@ -411,13 +427,11 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      final localDay = Day.fromDateTime(
-        DateTime.utc(2026, 9, 20, 22, 30).toLocal(),
-      );
-      final footerText =
-          'Údaje z vysledky.kuzelky.cz · aktualizováno ${dayLabel(localDay)}';
-      await tester.scrollUntilVisible(find.text(footerText), 200);
-      expect(find.text(footerText), findsOneWidget);
+      String footer(Day day) =>
+          'Údaje z vysledky.kuzelky.cz · aktualizováno ${dayLabel(day)}';
+      await tester.scrollUntilVisible(find.text(footer(localDay)), 200);
+      expect(find.text(footer(localDay)), findsOneWidget);
+      expect(find.text(footer(utcDay)), findsNothing);
     });
   });
 }
