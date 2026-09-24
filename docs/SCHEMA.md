@@ -60,7 +60,7 @@ and what cascades — and is updated with every migration.
 | `player_groups` | (0044) `tenant_id`, `created_by` | **server-only**: RLS on, zero policies, every grant revoked from `anon`/`authenticated`. Internal bookkeeping only — the app reads `player_group_members`. |
 | `player_group_members` | (0044) `group_id → player_groups` (cascade), `user_id → profiles` (cascade), `tenant_id` (denormalised so the admin policy never has to read `player_groups` — no policy cycle), `status` invited\|member, `invited_by`. PK (`group_id`, `user_id`). Partial unique index `player_group_one_membership` on `user_id where status = 'member'` — one group per player. In the Realtime publication. | select: own rows (`user_id = auth.uid()`), the caller's own group (`my_group_id()`), or the alley's admin (`tenant_id = current_tenant_id()`). No insert/update/delete for `authenticated`, nothing for `anon` — written only through the `group_*` RPCs below. |
 | `teams` | (0045) The alley's own teams as the federation lists them: `name` (unique per tenant, 1–80 chars — **the string the app keys by**: `priority_slots.home_team`/`away_team`, `followed_teams`, `calendar_teams`, `team_colors`; set at discovery, editable by the admin), `club_id → clubs` (set null), `site_team_id`, `site_slug` (unique per tenant — discovery's identity), `site_name`, `competition_slug`, `competition_name`, `active` (an inactive team's competition is not synced). In the Realtime publication. | select approved/kiosk. No insert/update/delete for `authenticated`, nothing for `anon` — discovery (`upsert_federation_teams`) and `update_team` write it. |
-| `federation_sync` | (0045) PK `tenant_id`: `venue_slug` (the alley's kuželna on the site, `''` = not configured, otherwise lower-case letters/digits/hyphens like `tenants.public_slug` but without its 3–40 length bound), `enabled` (default off), `last_run_at`, `last_success_at`, `last_error`, `last_report jsonb` (per job key — `discover`, `competition:<slug>`, `federation_match`, `venue:<slug>` — the last run's report + `at`, or `{error, at}` when it failed). In the Realtime publication. | select **admin** only. Written by `set_federation_sync` and `record_federation_run`. |
+| `federation_sync` | (0045) PK `tenant_id`: `venue_slug` (the alley's kuželna on the site, `''` = not configured, otherwise lower-case letters/digits/hyphens like `tenants.public_slug` but without its 3–40 length bound), `enabled` (default off), `last_run_at`, `last_success_at`, `last_error` (the newest error still in `last_report`), `last_report jsonb` (per job key — `discover`, `competition:<slug>`, `federation_match`, `venue:<slug>` — the last run's report + `at`, or `{error, at}` when it failed). In the Realtime publication. | select **admin** only. Written by `set_federation_sync` and `record_federation_run`. |
 | `match_results` | (0045) PK `match_id → priority_slots` (cascade), `tenant_id`, `status` scheduled \| preparation \| in_progress \| finished \| forfeit, `match_type`, `discipline`, per side `points`, `total`, `fulls`, `spares`, `errors`, `set_points` (`home_*`/`away_*`), `fetched_at`. In the Realtime publication. | select approved/kiosk; server-only writes (`apply_federation_result`). |
 | `match_player_results` | (0045) `match_id → priority_slots` (cascade), `tenant_id`, `side` home\|away, `position`, `player_name`, `player_site_id`, `player_slug`, `fulls`, `spares`, `errors`, `total`, `set_points`, `team_points`, `lanes jsonb` (`[{lane, fulls, spares, errors, total, setPoints}]`). Unique (`match_id`, `side`, `position`); index (`tenant_id`, `player_site_id`). Replaced whole on every fetch. In the Realtime publication, replica identity full (the app's stream is filtered by `match_id`, and Realtime checks a DELETE against the identity alone). | as `match_results`. |
 | `venues` | (0045) The alleys (kuželny) the tenant's matches are played at, from their page on vysledky.kuzelky.cz: `slug` (the site's `/detail-kuzelny/<slug>`, unique per tenant — matches `priority_slots.venue_slug` and `federation_sync.venue_slug`), `name`, `address`, `phone`, `email`, `lat`/`lng` (from the page's mapy.cz link), `sections jsonb` (`[{title, items: [{label, value}]}]` — the page's technical/contact blocks as shown), `clubs text[]` (club names at the alley), `fetched_at`. In the Realtime publication. | select approved/kiosk; server-only writes (`upsert_federation_venue`). |
@@ -282,18 +282,19 @@ superseded and retired.
   `run_at` wins, so a later checkpoint never pushes back an earlier one,
   and a re-arm keeps the payload's `requested_at`.
 - **Runs:** `record_federation_run(tenant, key, report, error)` stamps
-  `last_run_at`; a success sets `last_success_at`, clears `last_error` and
-  merges `{key: report + at}` into `last_report`; a failure sets
-  `last_error` and merges `{key: {error, at}}` — the key's entry is
-  whatever happened last. Keys: `discover`, `competition:<slug>`,
-  `federation_match` for a failed match fetch and `venue:<slug>` for a
-  failed venue fetch (match and venue jobs record only failures, so such
-  an entry stays until overwritten). Only `discover` and `competition:*`
-  set `last_error` — the keys whose success clears it; a failed match or
-  venue fetch lands in its key alone, so a retry that succeeds leaves no
-  stale error on the admin card and never hides a competition's own
-  error. A job the runtime killed more than 5 times (leased, never
-  finished) is dropped and recorded as `dropped after N attempts`.
+  `last_run_at`; a success sets `last_success_at` and merges
+  `{key: report + at}` into `last_report`, a failure merges
+  `{key: {error, at}}` — the key's entry is whatever happened last. Keys:
+  `discover`, `competition:<slug>`, `federation_match` (every match fetch
+  of the alley, with no report of its own) and `venue:<slug>` (likewise).
+  `last_error` is then the `error` of the newest `last_report` entry that
+  still has one, or null: a match or venue failure shows on the admin
+  card until that key succeeds again, a retry that worked leaves no stale
+  error, and one key's success never clears another key's error — a
+  competition that succeeds does not hide the failure of the competition
+  that ran a tick earlier. A job the runtime killed more than 5 times
+  (leased, never finished) is dropped and recorded as
+  `dropped after N attempts`.
 - **Venues** (`federation_venue` job, dedupe key
   `federation_venue:<tenant>:<slug>`, payload `{tenant_id, slug}`): the
   venue page `/detail-kuzelny/<slug>` → `upsert_federation_venue(tenant,

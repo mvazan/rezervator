@@ -296,8 +296,8 @@ export async function runVenue(db: Db, get: Fetcher, tenantId: string, slug: str
 
 type Job = { id: number; payload: Record<string, unknown>; attempts: number; run_at: string };
 
-/** The last_report key a job's success is stored under, so its failure
- * replaces the same entry. Match and venue jobs record only failures. */
+/** The last_report key a job's run is stored under, so its success
+ * replaces its failure's entry and the other way round. */
 function reportKey(kind: string, job: Job): string {
   if (kind === "federation_discover") return "discover";
   if (kind === "federation_competition") return `competition:${job.payload.competition_slug}`;
@@ -330,17 +330,31 @@ async function runJob(db: Db, get: Fetcher, kind: string, job: Job, now: Date): 
   }
   if (kind === "federation_venue") {
     await runVenue(db, get, tenant, String(job.payload.slug));
+    await recordSuccess(db, kind, job);
     return null;
   }
-  return await runMatch(db, get, tenant, Number(job.payload.site_match_id),
+  const next = await runMatch(db, get, tenant, Number(job.payload.site_match_id),
     String(job.payload.slug), now);
+  await recordSuccess(db, kind, job);
+  return next;
+}
+
+/** A match or venue fetch has no report of its own; its success replaces the
+ * key's failure entry, so a retry that worked clears its "Chyba:". The
+ * result is already written, so a failed record never fails the job. */
+function recordSuccess(db: Db, kind: string, job: Job) {
+  return logged(`record_federation_run ${kind}/${job.id}`, () =>
+    db.rpc("record_federation_run", {
+      p_tenant: String(job.payload.tenant_id), p_key: reportKey(kind, job), p_report: null,
+      p_error: null,
+    }));
 }
 
 /** Runs a DB write that must not blow up the job it's cleaning up after: any
  * thrown error or returned `{ error }` is logged and swallowed. Used for the
- * three writes that happen once a job's outcome is already decided (delete,
- * re-arm, record_federation_run on failure) — none of them should turn a
- * handled job failure into an unhandled one. */
+ * writes that happen once a job's outcome is already decided (delete,
+ * re-arm, record_federation_run on failure, a match or venue success's
+ * record) — none of them should turn a handled job into a failed one. */
 async function logged(
   label: string,
   op: () => Promise<{ error?: unknown } | void | null | undefined>,

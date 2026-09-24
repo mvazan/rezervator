@@ -340,7 +340,56 @@ Deno.test("processFederationJobs: a match job whose slot is gone is deleted, not
 
   assertEquals(jobs.length, 0);
   assert(calls.some((c) => c.kind === "delete" && c.id === 9));
-  assert(!calls.some((c) => c.kind === "rpc" && c.name === "record_federation_run"));
+  assert(!calls.some((c) =>
+    c.kind === "rpc" && c.name === "record_federation_run" && c.args.p_error !== null
+  ));
+});
+
+Deno.test("processFederationJobs: a match fetch that succeeds records a success under federation_match", async () => {
+  // record_federation_run derives last_error from last_report, so this entry
+  // is what clears an earlier match failure's "Chyba:" on the admin card.
+  const slug = "divize-as-2026-2027-kolo-1-tj-sokol-rudna-a-muzi-tj-sokol-vrsovice-a-muzi";
+  const now = new Date(pragueEpoch("2026-09-16", "17:30") * 1000 + 3600e3);
+  const jobs: FakeJob[] = [{
+    id: 10, kind: "federation_match", attempts: 2,
+    run_at: new Date(now.getTime() - 60e3).toISOString(),
+    payload: { tenant_id: "t1", site_match_id: 4859, slug },
+  }];
+  const { db, calls } = fakeJobsDb(jobs);
+
+  await processFederationJobs(db, async () => fixture("match_finished.html"), now);
+
+  const recorded = calls.filter((c) => c.kind === "rpc" && c.name === "record_federation_run") as
+    { kind: "rpc"; name: string; args: Record<string, unknown> }[];
+  assertEquals(recorded.map((c) => c.args), [
+    { p_tenant: "t1", p_key: "federation_match", p_report: null, p_error: null },
+  ]);
+  assertEquals(jobs[0].attempts, 0);
+});
+
+Deno.test("processFederationJobs: a failed success record leaves a match job's re-arm alone", async () => {
+  const slug = "divize-as-2026-2027-kolo-1-tj-sokol-rudna-a-muzi-tj-sokol-vrsovice-a-muzi";
+  const start = pragueEpoch("2026-09-16", "17:30") * 1000;
+  const now = new Date(start + 3600e3);
+  const jobs: FakeJob[] = [{
+    id: 11, kind: "federation_match", attempts: 0,
+    run_at: new Date(now.getTime() - 60e3).toISOString(),
+    payload: { tenant_id: "t1", site_match_id: 4859, slug },
+  }];
+  const { db } = fakeJobsDb(jobs, (name) =>
+    name === "record_federation_run"
+      ? { data: null, error: { message: "db down" } }
+      : { data: {}, error: null });
+  const original = console.error;
+  console.error = () => {};
+  try {
+    await processFederationJobs(db, async () => fixture("match_finished.html"), now);
+  } finally {
+    console.error = original;
+  }
+
+  assertEquals(jobs[0].attempts, 0);
+  assertEquals(jobs[0].run_at, new Date(start + 24 * 3600e3).toISOString());
 });
 
 Deno.test("processFederationJobs: a job past MAX_ATTEMPTS is deleted without fetching", async () => {
@@ -498,7 +547,7 @@ Deno.test("processFederationJobs: a failing job backs off from its attempts and 
   assertEquals(recorded!.args.p_error, "federation_match: network down");
 });
 
-Deno.test("processFederationJobs: a venue job fetches the venue page, upserts it and is deleted", async () => {
+Deno.test("processFederationJobs: a venue job fetches the venue page, upserts it, records a success and is deleted", async () => {
   const now = new Date("2026-10-10T06:00:00Z");
   const jobs: FakeJob[] = [{
     id: 7, kind: "federation_venue", attempts: 0,
@@ -524,7 +573,11 @@ Deno.test("processFederationJobs: a venue job fetches the venue page, upserts it
   assertEquals(venue.phone, "736435492");
   assert(Array.isArray(venue.sections) && Array.isArray(venue.clubs));
   assertEquals(jobs.length, 0);
-  assert(!calls.some((c) => c.kind === "rpc" && c.name === "record_federation_run"));
+  const recorded = calls.filter((c) => c.kind === "rpc" && c.name === "record_federation_run") as
+    { kind: "rpc"; name: string; args: Record<string, unknown> }[];
+  assertEquals(recorded.map((c) => c.args), [
+    { p_tenant: "t1", p_key: "venue:tj-sokol-brno-iv", p_report: null, p_error: null },
+  ]);
 });
 
 Deno.test("processFederationJobs: a failing venue job records its error under venue:<slug>", async () => {

@@ -491,22 +491,33 @@ returns void language sql security definer set search_path = public as $$
     sections = excluded.sections, clubs = excluded.clubs, fetched_at = now();
 $$;
 
+-- last_error is the newest error still standing in last_report: a key's
+-- success replaces only its own entry, so one competition's (or match's)
+-- success never hides another key's failure, and a retry that worked
+-- leaves no stale error behind. The row lock orders concurrent jobs.
 create or replace function record_federation_run(
   p_tenant uuid, p_key text, p_report jsonb, p_error text)
 returns void language plpgsql security definer set search_path = public as $$
+declare
+  v_report jsonb;
 begin
   insert into federation_sync (tenant_id) values (p_tenant) on conflict do nothing;
+  select last_report into v_report from federation_sync
+   where tenant_id = p_tenant for update;
+  v_report := v_report || jsonb_build_object(p_key,
+    case when p_error is null
+      then coalesce(p_report, '{}'::jsonb) || jsonb_build_object('at', now())
+      else jsonb_build_object('error', p_error, 'at', now()) end);
   update federation_sync
      set last_run_at = now(),
          last_success_at = case when p_error is null then now() else last_success_at end,
-         -- Match and venue jobs record only failures, so only the keys whose
-         -- success clears last_error may set it.
-         last_error = case when p_key = 'discover' or p_key like 'competition:%'
-                           then p_error else last_error end,
-         last_report = last_report || jsonb_build_object(p_key,
-           case when p_error is null
-             then coalesce(p_report, '{}'::jsonb) || jsonb_build_object('at', now())
-             else jsonb_build_object('error', p_error, 'at', now()) end)
+         last_report = v_report,
+         -- Runs in one transaction share now(): the key just written wins a tie.
+         last_error = (select e.value->>'error' from jsonb_each(v_report) e
+                        where e.value ? 'error'
+                        order by (e.value->>'at')::timestamptz desc nulls last,
+                                 e.key = p_key desc, e.key
+                        limit 1)
    where tenant_id = p_tenant;
 end;
 $$;
