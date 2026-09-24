@@ -4830,6 +4830,24 @@ begin
     raise exception 'FAIL: last_error outlived every error';
   end if;
 
+  -- Competitions run one per tick: a second live competition's success,
+  -- and the discovery after it, leave the first one's error standing.
+  insert into teams (tenant_id, name, site_slug, competition_slug, active)
+  values (v_b, 'Kuželna B dorost', 'kuzelna-b-c', 'krajsky-prebor-dorost-2026-2027', true);
+  perform record_federation_run(v_b, 'competition:krajsky-prebor-2026-2027', null, 'přebor');
+  perform record_federation_run(v_b, 'competition:krajsky-prebor-dorost-2026-2027',
+                                '{"inserted":0}', null);
+  perform record_federation_run(v_b, 'discover', '{"teams":3}', null);
+  select * into s from federation_sync where tenant_id = v_b;
+  if s.last_error is distinct from 'přebor'
+     or not s.last_report ?& array['competition:krajsky-prebor-2026-2027',
+                                   'competition:krajsky-prebor-dorost-2026-2027'] then
+    raise exception 'FAIL: another competition''s success cleared a competition''s error: %',
+      to_jsonb(s);
+  end if;
+  perform record_federation_run(v_b, 'competition:krajsky-prebor-2026-2027', '{"inserted":0}', null);
+  delete from teams where tenant_id = v_b and site_slug = 'kuzelna-b-c';
+
   if (select to_jsonb(f) from federation_sync f where tenant_id = v_a)
      is distinct from current_setting('probe.fed_a_sync')::jsonb then
     raise exception 'FAIL: B''s runs changed A''s sync row';
