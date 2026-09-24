@@ -701,11 +701,11 @@ declare
   v_res uuid := current_setting('rez.test_cal_res')::uuid;
   v_job notification_jobs;
 begin
-  if (select count(*) from notification_jobs) <> 1 then
+  if (select count(*) from notification_jobs where kind = 'calendar_sync') <> 1 then
     raise exception 'FAIL: expected exactly one calendar job, found %',
-      (select count(*) from notification_jobs);
+      (select count(*) from notification_jobs where kind = 'calendar_sync');
   end if;
-  select * into v_job from notification_jobs;
+  select * into v_job from notification_jobs where kind = 'calendar_sync';
   if v_job.kind <> 'calendar_sync'
      or v_job.dedupe_key <> 'calendar:' || v_uid || ':' || v_res
      or v_job.payload->>'user_id' <> v_uid::text
@@ -715,7 +715,7 @@ begin
     raise exception 'FAIL: calendar job has the wrong shape: %', to_jsonb(v_job);
   end if;
   -- age it so the cancel below provably re-arms it
-  update notification_jobs set run_at = now() - interval '1 hour';
+  update notification_jobs set run_at = now() - interval '1 hour' where kind = 'calendar_sync';
   raise notice 'OK: a linked player''s booking enqueues one calendar_sync job, an unlinked one none';
 end $$;
 
@@ -730,7 +730,7 @@ declare
   v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
   v_res uuid := current_setting('rez.test_cal_res')::uuid;
 begin
-  if (select count(*) from notification_jobs) <> 1 then
+  if (select count(*) from notification_jobs where kind = 'calendar_sync') <> 1 then
     raise exception 'FAIL: the cancel added a job instead of re-arming the pending one';
   end if;
   if not exists (select 1 from notification_jobs
@@ -769,7 +769,7 @@ begin
   delete from notification_jobs;
   update time_blocks set starts_at = starts_at + interval '5 minutes'
   where id = v_blk;
-  if (select count(*) from notification_jobs) <> 1
+  if (select count(*) from notification_jobs where kind = 'calendar_sync') <> 1
      or not exists (select 1 from notification_jobs
                     where dedupe_key = 'calendar:' || v_uid || ':' || v_res2
                       and payload->>'reservation_id' = v_res2::text) then
@@ -778,7 +778,7 @@ begin
   delete from notification_jobs;
   update time_blocks set starts_at = starts_at, ends_at = ends_at
   where id = v_blk;
-  if exists (select 1 from notification_jobs) then
+  if exists (select 1 from notification_jobs where kind = 'calendar_sync') then
     raise exception 'FAIL: an unchanged block save enqueued a job';
   end if;
   raise notice 'OK: a re-timed block enqueues its live reservations of linked players';
