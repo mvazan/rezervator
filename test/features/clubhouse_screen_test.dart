@@ -1,9 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rezervator/data/clock.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/clubhouse/clubhouse_screen.dart';
+
+/// Records every provider that fails — a screen reaching past its test
+/// doubles to the uninitialised Supabase client shows up here.
+final class _Failures extends ProviderObserver {
+  final errors = <Object>[];
+
+  @override
+  void providerDidFail(
+    ProviderObserverContext context,
+    Object error,
+    StackTrace stackTrace,
+  ) => errors.add(error);
+}
 
 /// The Klubovna hub: its two entries, the shell's trailing icons riding
 /// along on the same header, and the shared HubMenu's list/grid breakpoint
@@ -12,12 +26,40 @@ void main() {
   // HomeShell always wraps its body in a Scaffold — reproduced here so the
   // hub's ListTiles/Cards find the Material ancestor they need, same as in
   // the real app.
-  Widget app({List<Widget> trailing = const []}) => ProviderScope(
-    overrides: [venuesProvider.overrideWith((ref) => Stream.value(const <Venue>[]))],
-    child: MaterialApp(
-      home: Scaffold(body: ClubhouseScreen(trailing: trailing)),
-    ),
+  // The pushed Výsledky screen watches these too — without them it would
+  // reach through to the real Supabase client.
+  const me = Profile(
+    id: 'me',
+    displayName: 'Já Hráč',
+    email: 'me@example.com',
+    role: Role.player,
+    status: ProfileStatus.approved,
   );
+  Widget app({List<Widget> trailing = const [], ProviderObserver? observer}) =>
+      ProviderScope(
+        observers: [?observer],
+        overrides: [
+          venuesProvider.overrideWith((ref) => Stream.value(const <Venue>[])),
+          prioritySlotsProvider.overrideWithValue(const []),
+          prioritySlotsLoadingProvider.overrideWithValue(false),
+          matchResultsProvider.overrideWith((ref) => Stream.value(const {})),
+          matchPlayerResultsProvider.overrideWith(
+            (ref, id) => Stream.value(const []),
+          ),
+          myProfileProvider.overrideWith((ref) => Stream.value(me)),
+          ourTeamsProvider.overrideWithValue(const []),
+          myTeamColorsProvider.overrideWith((ref) => Stream.value(const {})),
+          myMatchExceptionsProvider.overrideWith(
+            (ref) => Stream.value(const {}),
+          ),
+          nowProvider.overrideWith(
+            (ref) => Stream.value(DateTime(2026, 9, 23, 18, 0)),
+          ),
+        ],
+        child: MaterialApp(
+          home: Scaffold(body: ClubhouseScreen(trailing: trailing)),
+        ),
+      );
 
   void narrow(WidgetTester tester) {
     tester.view.physicalSize = const Size(800, 1600);
@@ -75,7 +117,8 @@ void main() {
     'real venues screen',
     (tester) async {
       narrow(tester);
-      await tester.pumpWidget(app());
+      final failures = _Failures();
+      await tester.pumpWidget(app(observer: failures));
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('Výsledky'));
@@ -88,6 +131,7 @@ void main() {
       await tester.tap(find.text('Kuželny'));
       await tester.pumpAndSettle();
       expect(find.widgetWithText(AppBar, 'Kuželny'), findsOneWidget);
+      expect(failures.errors, isEmpty);
     },
   );
 
