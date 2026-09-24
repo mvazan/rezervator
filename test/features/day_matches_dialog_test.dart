@@ -316,7 +316,7 @@ void main() {
     );
 
     testWidgets(
-      'the winning side\'s team NAME gets a fixed w900 weight under the '
+      'the winning side\'s team NAME gets a fixed w800 weight under the '
       'app\'s REAL theme, where titleSmall is already w700 — plain '
       '"bold" (also w700) would be a no-op here, which is exactly the '
       'bug this test guards against',

@@ -221,7 +221,7 @@ void main() {
   });
 
   testWidgets(
-    'the winning side\'s team NAME gets the fixed w900 weight, the score '
+    'the winning side\'s team NAME gets the fixed w800 weight, the score '
     'never gets winner-conditional styling',
     (tester) async {
       await tester.pumpWidget(
