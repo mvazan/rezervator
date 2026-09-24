@@ -136,7 +136,8 @@ export function parseCompetition(html: string): SiteCompetition {
 
 function side(v: Json | undefined): SiteSide | null {
   if (!v) return null;
-  const players = ((v.playerResults ?? []) as Json[])
+  if (!Array.isArray(v.playerResults)) throw new Error("match player results missing");
+  const players = (v.playerResults as Json[])
     .filter((p) => p.player && typeof p.player === "object")
     .map((p): SitePlayer => {
       const who = p.player as Json;
@@ -164,7 +165,9 @@ export function parseMatch(html: string): SiteMatchDetail {
   const at = text.indexOf('"match":{"id":');
   if (at < 0) throw new Error("match data missing");
   const raw = readValue(text, at + '"match":'.length) as Json;
-  const results = (raw.results ?? []) as Json[];
+  if (!Array.isArray(raw.results)) throw new Error("match results missing");
+  const results = raw.results as Json[];
+  if (!results.every((r) => typeof r?.isHome === "boolean")) throw new Error("match sides missing");
   const venue = raw.venue as Json | null | undefined;
   return {
     ...siteMatch(raw),

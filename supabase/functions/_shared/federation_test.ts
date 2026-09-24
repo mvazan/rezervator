@@ -134,6 +134,58 @@ Deno.test("parsers refuse a page without the data", () => {
   assertThrows(() => parseMatch("<html></html>"));
 });
 
+/** One side of a match detail page's `results`. */
+const matchSide = (isHome: boolean) => ({
+  isHome, teamPoints: isHome ? 6 : 2, totalPerformance: 3460, totalFull: 2300,
+  totalSpare: 1160, totalErrors: 12, totalSetPoints: 14,
+  playerResults: [{
+    position: 1, teamPoints: 1, setPoints: 3, totalFull: 390, totalSpare: 190,
+    totalErrors: 2, totalPerformance: 580,
+    player: { id: 7, firstName: "Jan", lastName: "Novák", slug: "jan-novak" },
+    laneResults: [{ laneNumber: 1, full: 98, spare: 47, errors: 0, total: 145, setPoints: 1 }],
+  }],
+  substitutions: [],
+});
+
+/** A match detail page as the site renders it (RSC flight chunk). */
+function matchPage(over: Record<string, unknown> = {}): string {
+  const m = {
+    id: 1, slug: "x-kolo-1-a-b", date: "2026-10-10", time: "10:00", round: 1,
+    status: "FINISHED", matchType: "TEAMS_OF_6", discipline: "T120", videoUrl: null,
+    homeTeam: { id: 1, name: "KK A", slug: "kk-a-muzi" },
+    awayTeam: { id: 2, name: "KK B", slug: "kk-b-muzi" },
+    competition: { slug: "x", name: "X" },
+    results: [matchSide(true), matchSide(false)],
+    venue: { slug: "kk-a", name: "KK A" },
+    ...over,
+  };
+  return `<script>self.__next_f.push([1,${JSON.stringify(`5:${JSON.stringify({ match: m })}`)}])</script>`;
+}
+
+Deno.test("parseMatch refuses a page whose results changed shape, so nothing gets overwritten", () => {
+  const d = parseMatch(matchPage());
+  assertEquals(d.home!.total, 3460);
+  assertEquals(d.away!.players.length, 1);
+  const home = matchSide(true);
+  const away = matchSide(false);
+  assertThrows(() => parseMatch(matchPage({ results: undefined })));
+  assertThrows(() => parseMatch(matchPage({ results: null })));
+  assertThrows(() => parseMatch(matchPage({
+    results: [{ ...home, playerResults: undefined, players: home.playerResults }, away],
+  })));
+  assertThrows(() => parseMatch(matchPage({ results: [{ ...home, isHome: undefined, home: true }, away] })));
+});
+
+Deno.test("a forfeit with no results parses to no sides", () => {
+  const d = parseMatch(matchPage({ status: "FORFEIT", results: [] }));
+  assertEquals(d.status, "FORFEIT");
+  assertEquals(d.home, null);
+  assertEquals(d.away, null);
+  const p = resultPayload(d);
+  assertEquals(p.status, "forfeit");
+  assertEquals(p.players, []);
+});
+
 Deno.test("venue clubs and sitemaps", () => {
   const clubs = parseVenueClubs(fixture("venue.html"));
   assertEquals(clubs.map((c) => c.slug).sort(), [
