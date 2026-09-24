@@ -133,7 +133,7 @@ class VenueDetailScreen extends ConsumerWidget {
       children: [
         Text(
           'Údaje z vysledky.kuzelky.cz · aktualizováno '
-          '${dayLabel(Day.fromDateTime(venue.fetchedAt))}',
+          '${dayLabel(Day.fromDateTime(venue.fetchedAt.toLocal()))}',
           style: Theme.of(context).textTheme.bodySmall,
         ),
         TextButton(

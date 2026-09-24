@@ -379,7 +379,7 @@ void main() {
       await tester.pumpAndSettle();
       final footerText =
           'Údaje z vysledky.kuzelky.cz · aktualizováno '
-          '${dayLabel(Day.fromDateTime(brnoIv.fetchedAt))}';
+          '${dayLabel(Day.fromDateTime(brnoIv.fetchedAt.toLocal()))}';
       await tester.scrollUntilVisible(find.text(footerText), 200);
       await tester.pumpAndSettle();
 
@@ -391,6 +391,33 @@ void main() {
       expect(launched, [
         'https://vysledky.kuzelky.cz/detail-kuzelny/tj-sokol-brno-iv',
       ]);
+    });
+
+    testWidgets('the fetched-at day is the local day, not the UTC one', (
+      tester,
+    ) async {
+      // 22:30 UTC is already the next day in Czechia (00:30 CEST).
+      final lateSync = Venue.fromJson(const {
+        'id': 'v4',
+        'slug': 'pozdni',
+        'name': 'Kuželna Pozdní',
+        'fetched_at': '2026-09-20T22:30:00+00:00',
+      });
+      await tester.pumpWidget(
+        app(
+          home: const VenueDetailScreen(slug: 'pozdni'),
+          venues: [lateSync],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final localDay = Day.fromDateTime(
+        DateTime.utc(2026, 9, 20, 22, 30).toLocal(),
+      );
+      final footerText =
+          'Údaje z vysledky.kuzelky.cz · aktualizováno ${dayLabel(localDay)}';
+      await tester.scrollUntilVisible(find.text(footerText), 200);
+      expect(find.text(footerText), findsOneWidget);
     });
   });
 }
