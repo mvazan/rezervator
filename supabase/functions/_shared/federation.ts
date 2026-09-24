@@ -270,7 +270,7 @@ export function competitionSlugsForClubs(matchLocs: string[], clubSlugs: string[
 
 export function teamBelongsToClub(teamSlug: string, clubSlug: string): boolean {
   if (!teamSlug.startsWith(`${clubSlug}-`)) return false;
-  return /^([a-z]-)?[a-z]+$/.test(teamSlug.slice(clubSlug.length + 1));
+  return /^([a-z]-)?[a-z]+(-\d+)?$/.test(teamSlug.slice(clubSlug.length + 1));
 }
 
 export function matchFormat(matchType: string, discipline: string) {

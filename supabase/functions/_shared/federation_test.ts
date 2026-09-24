@@ -194,6 +194,9 @@ Deno.test("a team belongs to the club whose slug it extends by one squad letter"
   assert(teamBelongsToClub("tj-sokol-brno-iv-b-muzi", "tj-sokol-brno-iv"));
   assert(!teamBelongsToClub("tj-sokol-brno-iv-b-muzi", "tj-sokol-brno"));
   assert(!teamBelongsToClub("kk-slovan-rosice-d-muzi", "tj-sokol-brno-iv"));
+  // The site de-duplicates a slug with a numeric suffix.
+  assert(teamBelongsToClub("tj-nova-vcelnice-a-muzi-2", "tj-nova-vcelnice"));
+  assert(!teamBelongsToClub("tj-nova-vcelnice-a-muzi-2", "tj-nova"));
 });
 
 Deno.test("format and duration", () => {
