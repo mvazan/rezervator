@@ -262,6 +262,49 @@ void main() {
     },
   );
 
+  testWidgets(
+    'a forfeit reads 8 : 0 · Kontumace, without pins, a refresh or a lineup',
+    (tester) async {
+      final forfeit = MatchResult.fromJson(const {
+        'match_id': 'm1',
+        'status': 'forfeit',
+        'match_type': 'TEAMS_OF_6',
+        'discipline': 'T120',
+        'home_points': 8,
+        'away_points': 0,
+        'fetched_at': '2026-09-23T10:00:00+00:00',
+      });
+      // Today, half an hour after kickoff: a scheduled match would be live
+      // here, so only the forfeit status keeps the refresh away.
+      await tester.pumpWidget(
+        app(
+          slots: [
+            match(
+              id: 'm1',
+              date: today,
+              videoUrl: 'https://vysledky.kuzelky.cz/video/m1',
+            ),
+          ],
+          results: {'m1': forfeit},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('8 : 0'), findsOneWidget);
+      expect(find.text('6 hráčů · 120 HS · Kontumace'), findsOneWidget);
+      expect(find.text('SB –'), findsOneWidget);
+      // No pin totals: the score is the only "x : y" on screen.
+      expect(find.textContaining(RegExp(r'^\S+ : \S+$')), findsOneWidget);
+      expect(find.byIcon(Icons.refresh), findsNothing);
+      expect(find.text('Záznam'), findsOneWidget);
+      expect(find.text('Zápis'), findsOneWidget);
+      expect(find.text(home), findsNWidgets(2));
+      expect(find.text(away), findsNWidgets(2));
+      expect(find.text('Sestavy zatím nejsou k dispozici.'), findsOneWidget);
+    },
+  );
+
   testWidgets('Video and Na webu ČKA buttons show only when the data exists', (
     tester,
   ) async {
