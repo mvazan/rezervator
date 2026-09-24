@@ -4142,7 +4142,13 @@ begin
     perform update_team(v_team, 'Brno IV A', current_setting('probe.fed_club_b')::uuid, true);
     raise exception 'FAIL: a foreign club was assigned';
   exception when others then
-    if sqlerrm <> 'not_allowed' then raise; end if;
+    if sqlerrm <> 'unknown_club' then raise; end if;
+  end;
+  begin
+    perform update_team(v_team, 'Brno IV A', gen_random_uuid(), true);
+    raise exception 'FAIL: a deleted club was assigned';
+  exception when others then
+    if sqlerrm <> 'unknown_club' then raise; end if;
   end;
   perform update_team(v_team, 'Brno IV A', null, true);
   perform update_team(current_setting('probe.fed_team_prebor')::uuid,

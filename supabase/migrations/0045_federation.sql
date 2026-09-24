@@ -661,7 +661,7 @@ begin
   end if;
   if p_club_id is not null and not exists (
       select 1 from clubs where id = p_club_id and tenant_id = current_tenant_id()) then
-    raise exception 'not_allowed';
+    raise exception 'unknown_club';
   end if;
   begin
     update teams set name = trim(p_name), club_id = p_club_id, active = p_active
