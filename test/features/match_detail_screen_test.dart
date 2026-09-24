@@ -131,6 +131,7 @@ void main() {
     bool slotsLoading = false,
     Stream<List<PrioritySlot>>? slotsStream,
     Map<String, MatchResult> results = const {},
+    Stream<Map<String, MatchResult>>? resultsStream,
     List<MatchPlayerResult> players = const [],
     List<Venue> venues = const [],
     Future<String> Function(String matchId)? refresh,
@@ -160,7 +161,9 @@ void main() {
           prioritySlotsProvider.overrideWithValue(slots),
           prioritySlotsLoadingProvider.overrideWithValue(slotsLoading),
         ],
-        matchResultsProvider.overrideWith((ref) => Stream.value(results)),
+        matchResultsProvider.overrideWith(
+          (ref) => resultsStream ?? Stream.value(results),
+        ),
         matchPlayerResultsProvider.overrideWith(
           (ref, id) => Stream.value(players),
         ),
@@ -531,6 +534,42 @@ void main() {
       expect(refreshed, ['m2', 'm2']);
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
       expect(find.byIcon(Icons.refresh), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'the progress indicator clears as soon as a newer result arrives',
+    (tester) async {
+      final resultsCtrl = StreamController<Map<String, MatchResult>>();
+      addTearDown(resultsCtrl.close);
+      var callCount = 0;
+      await tester.pumpWidget(
+        app(
+          matchId: 'm2',
+          slots: [match(id: 'm2', date: today)],
+          resultsStream: resultsCtrl.stream,
+          refresh: (id) {
+            callCount++;
+            if (callCount == 1) return Future.value('queued');
+            return Completer<String>().future;
+          },
+        ),
+      );
+      resultsCtrl.add({'m2': liveResultWith()});
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.refresh));
+      await tester.pump();
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+      resultsCtrl.add({
+        'm2': liveResultWith(fetchedAt: '2026-09-23T17:41:00+00:00'),
+      });
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(find.byIcon(Icons.refresh), findsOneWidget);
     },
   );
 
