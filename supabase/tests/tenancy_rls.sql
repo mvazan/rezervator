@@ -3640,6 +3640,7 @@ begin
   if exists (select 1 from priority_slots where parent_id = s.id) then
     raise exception 'FAIL: away match 102 got a Úklid';
   end if;
+  perform set_config('import.run', '', true);
   raise notice 'OK: apply_federation_matches inserts home and away matches keyed cka:<id>, created by the alley''s admin (0045)';
 end $$;
 
@@ -3678,6 +3679,7 @@ begin
       where tenant_id = v_a and import_key = 'cka:101') is distinct from 'https://youtu.be/x' then
     raise exception 'FAIL: video_url was not written';
   end if;
+  perform set_config('import.run', '', true);
   raise notice 'OK: apply_federation_matches is idempotent and writes video_url without an update (0045)';
 end $$;
 
@@ -3717,6 +3719,7 @@ begin
              where tenant_id = v_a and import_key = 'rozpis:JmD:6:A – B') then
     raise exception 'FAIL: the rozpis: key survived the rekey';
   end if;
+  perform set_config('import.run', '', true);
   raise notice 'OK: a rozpis: row is rekeyed to cka:<id> in place, same id (0045)';
 end $$;
 
@@ -3743,6 +3746,7 @@ begin
      or (r->>'updated')::int <> 0 then
     raise exception 'FAIL: the hand-edited skip is not reported: %', r;
   end if;
+  perform set_config('import.run', '', true);
   raise notice 'OK: a hand-edited match keeps its values and lands in skipped_hand_edited (0045)';
 end $$;
 
@@ -3795,6 +3799,7 @@ begin
         and import_key in ('cka:101', 'cka:103', 'cka:104', 'cka:105', 'cka:106')) <> 5 then
     raise exception 'FAIL: the sync deleted a played, hand-edited or other-competition match';
   end if;
+  perform set_config('import.run', '', true);
   raise notice 'OK: a future match the site dropped is deleted with its match job; played, hand-edited and other competitions stay (0045)';
 end $$;
 
@@ -3840,6 +3845,7 @@ begin
   if not exists (select 1 from priority_slots where tenant_id = v_a and import_key = 'cka:108') then
     raise exception 'FAIL: a match already under way was deleted';
   end if;
+  perform set_config('import.run', '', true);
   raise notice 'OK: an empty list deletes nothing; a started match survives, a later one today does not (0045)';
 end $$;
 
@@ -3874,6 +3880,7 @@ begin
   if (r->>'deleted')::int <> 1 then
     raise exception 'FAIL: without p_keep_ids the dropped match 111 should go: %', r;
   end if;
+  perform set_config('import.run', '', true);
   raise notice 'OK: p_keep_ids protects matches the edge function skipped (0045)';
 end $$;
 
@@ -3925,6 +3932,7 @@ begin
   end if;
   delete from priority_slots
    where tenant_id = v_a and import_key in ('cka:112', 'cka:113', 'cka:114');
+  perform set_config('import.run', '', true);
   raise notice 'OK: without a venue a stored match keeps home/away; inserts take the guess (0045)';
 end $$;
 
@@ -3965,6 +3973,7 @@ begin
   if apply_federation_result(v_a, 999, v_res) then
     raise exception 'FAIL: apply_federation_result should answer false for a match with no slot';
   end if;
+  perform set_config('import.run', '', true);
   raise notice 'OK: apply_federation_result upserts the result, replaces players, fixes home/away from the venue; false without a slot (0045)';
 end $$;
 
@@ -4046,6 +4055,7 @@ begin
      is distinct from (v_before.is_away, v_before.prep_minutes, v_before.description, true) then
     raise exception 'FAIL: apply_federation_result overwrote a hand-edited match: %', to_jsonb(s);
   end if;
+  perform set_config('import.run', '', true);
   raise notice 'OK: apply_federation_result records the venue of a hand-edited match without touching home/away (0045)';
 end $$;
 
@@ -4260,9 +4270,15 @@ do $$
 declare
   v_local constant timestamp := (now() at time zone 'Europe/Prague') - interval '30 minutes';
 begin
+  if current_setting('import.run', true) = 'on' then
+    raise exception 'FAIL: import.run outlived the federation calls, silencing the 0038 trigger';
+  end if;
+  -- Moving the match to now is fixture setup, not an admin's hand edit.
+  perform set_config('import.run', 'on', true);
   update priority_slots
      set date = v_local::date, starts_at = v_local::time, ends_at = '23:59:59.999'
    where tenant_id = '00000000-0000-0000-0000-00000000000a' and import_key = 'cka:103';
+  perform set_config('import.run', '', true);
   update match_results set status = 'in_progress', fetched_at = now() - interval '10 minutes'
    where match_id = (select id from priority_slots where import_key = 'cka:103');
 end $$;
@@ -4724,6 +4740,7 @@ begin
   if exists (select 1 from notification_jobs where kind = 'federation_venue') then
     raise exception 'FAIL: a match at a known venue enqueued a venue fetch';
   end if;
+  perform set_config('import.run', '', true);
   raise notice 'OK: upsert_federation_venue inserts then updates; an unknown match venue is fetched once (0045)';
 end $$;
 
@@ -4765,6 +4782,7 @@ begin
   perform apply_federation_result(v_a, 103, v_res || '{"venue":{"slug":"jinde","name":"Kuželna Jinde"}}');
   update federation_sync set last_report = last_report - 'venue:chybna' where tenant_id = v_a;
   delete from notification_jobs where kind = 'federation_venue';
+  perform set_config('import.run', '', true);
   raise notice 'OK: a match refresh leaves a pending or recently failed venue fetch alone (0045)';
 end $$;
 
