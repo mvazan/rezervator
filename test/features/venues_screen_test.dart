@@ -103,6 +103,19 @@ void main() {
       expect(find.text('TJ Sokol Husovice'), findsOneWidget);
     });
 
+    testWidgets('a search that matches nothing says so', (tester) async {
+      await tester.pumpWidget(
+        app(home: const VenuesScreen(), venues: [brnoIv, husovice]),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextField), 'Havířov');
+      await tester.pumpAndSettle();
+
+      expect(find.byType(ListTile), findsNothing);
+      expect(find.text('Žádná kuželna neodpovídá hledání.'), findsOneWidget);
+    });
+
     testWidgets('empty state shown when there are no venues yet', (
       tester,
     ) async {

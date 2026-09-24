@@ -55,6 +55,8 @@ class _VenuesScreenState extends ConsumerState<VenuesScreen> {
                       ),
                     ),
                   )
+                : filtered.isEmpty
+                ? const Center(child: Text('Žádná kuželna neodpovídá hledání.'))
                 : ListView.builder(
                     itemCount: filtered.length,
                     itemBuilder: (context, i) {
