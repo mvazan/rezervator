@@ -24,6 +24,10 @@ Future<void> loadManrope() async {
 }
 
 void main() {
+  // Every measurement in this file uses the real font, whatever order the
+  // tests run in.
+  setUpAll(loadManrope);
+
   const home = 'SKK Veverky Brno A';
   const away = 'KK MS Brno D';
 
@@ -617,11 +621,47 @@ void main() {
       },
     );
 
-    testWidgets('the table\'s total width is never narrower than the reference '
-        'site\'s own minimums (≈963dp) — auto-width only ever grows a '
+    testWidgets('content narrower than the brief keeps every column at the '
+        'reference site\'s own minimum — auto-width only ever grows a '
         'column, never shrinks it below the brief', (tester) async {
+      final tiny = PrioritySlot(
+        id: 'tiny',
+        date: Day(2026, 9, 20),
+        startsAt: const HourMinute(17, 30),
+        endsAt: const HourMinute(20, 30),
+        type: PrioritySlot.fallbackMatchType,
+        homeTeam: 'A',
+        awayTeam: 'B',
+      );
+      final tinyResult = MatchResult.fromJson(const {
+        'match_id': 'tiny',
+        'status': 'finished',
+        'home_points': 5,
+        'away_points': 3,
+        'home_total': 99,
+        'away_total': 97,
+        'home_fulls': 60,
+        'away_fulls': 60,
+        'home_spares': 39,
+        'away_spares': 37,
+        'home_errors': 1,
+        'away_errors': 2,
+        'home_set_points': 5,
+        'away_set_points': 3,
+        'fetched_at': '2026-09-23T10:00:00+00:00',
+      });
       await tester.pumpWidget(
-        app(result: result, players: [homePlayer, awayPlayer]),
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: LegacyScoreSheet(
+                slot: tiny,
+                result: tinyResult,
+                players: const [],
+              ),
+            ),
+          ),
+        ),
       );
       await tester.pumpAndSettle();
 
@@ -630,7 +670,13 @@ void main() {
           (w) => w.runtimeType.toString() == '_ScoreTableBody',
         ),
       );
-      expect(tableSize.width, greaterThanOrEqualTo(963.0));
+      // Per side: jméno 144, série 46 (its "Celkem" label, 45.4dp in
+      // Manrope, outgrows the 42 minimum), plné 55, dor. 46, ch. 33,
+      // celkem 58, dílčí 31, družstvo 51; then Rozdíl 46 and the 3dp frame.
+      expect(
+        tableSize.width,
+        2 * (144 + 46 + 55 + 46 + 33 + 58 + 31 + 51) + 46 + 3,
+      );
     });
   });
 
@@ -788,7 +834,6 @@ void main() {
       'the grid is a 2px outer frame with 1px collapsed internal seams — '
       'not the other way around',
       (tester) async {
-        await loadManrope();
         // Wide enough that the embedded card's own horizontal scroll
         // viewport shows the WHOLE table at once — otherwise
         // `RepaintBoundary.toImage()` only captures the visible viewport
@@ -949,7 +994,6 @@ void main() {
         '"+211", Ch. "40"), no cell text is clipped or exceeds its line limit'
         '${boldText ? ' — even with the platform Bold text setting on' : ''}',
         (tester) async {
-          await loadManrope();
           if (boldText) {
             tester.platformDispatcher.accessibilityFeaturesTestValue =
                 const FakeAccessibilityFeatures(boldText: true);
