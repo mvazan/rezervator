@@ -17,7 +17,10 @@ jobs:
           cache: true
       - run: flutter pub get
       - run: flutter analyze
+      # The app is used in Czechia. In a UTC process a UTC and a local day
+      # are the same, so the venue local-day test can only skip there.
       - run: flutter test
+        env: { TZ: Europe/Prague }
 
   # Android: the Gradle/AGP/Kotlin toolchain is otherwise only ever exercised
   # by release.yml, on a tag — so a toolchain that no longer builds is found
