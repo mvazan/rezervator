@@ -72,7 +72,7 @@ void main() {
       tester,
     ) async {
       await tester.pumpWidget(
-        app(home: const VenuesScreen(), venues: [brnoIv, husovice]),
+        app(home: const VenuesScreen(), venues: [husovice, brnoIv]),
       );
       await tester.pumpAndSettle();
 
