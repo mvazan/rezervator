@@ -591,7 +591,7 @@ void main() {
         address: 'Dukelská 1, Brno',
         clubs: const ['TJ Sokol Husovice'],
       ),
-      venue(name: 'Áčko Blansko'),
+      venue(name: 'Áčko Blansko', clubs: const ['SKK Veverky Brno']),
     ];
 
     test('empty query returns everything, Czech-sorted by name', () {
@@ -614,8 +614,8 @@ void main() {
     });
 
     test('matches clubs too', () {
-      final result = venuesMatching(venues, 'husovice');
-      expect(result.map((v) => v.name), ['TJ Sokol Husovice']);
+      final result = venuesMatching(venues, 'veverky');
+      expect(result.map((v) => v.name), ['Áčko Blansko']);
     });
 
     test('no hit → empty', () {
