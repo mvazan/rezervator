@@ -294,8 +294,10 @@ superseded and retired.
     `last_run_at`, a success also `last_success_at` (the card's „Poslední
     synchronizace“) and merges `{key: report + at}`, a failure merges
     `{key: {error, at}}` — the key's entry is whatever happened last.
-  - `match:<site_match_id>` (one per match) and `venue:<slug>` only
-    report trouble and never touch the run timestamps: a failure writes `{error, at}`, a success removes the
+  - `match:<site_match_id>` (one per match; the notify function puts the
+    match slug in the error text, `federation_match <slug>: …`) and
+    `venue:<slug>` only report trouble and never touch the run
+    timestamps: a failure writes `{error, at}`, a success removes the
     key, and a success with no key to remove writes nothing at all — no
     row update, no Realtime event — so `last_report` does not grow by an
     entry per fetched match.

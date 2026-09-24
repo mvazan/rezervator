@@ -347,9 +347,11 @@ Deno.test("processFederationJobs: a match job whose slot is gone is deleted, not
   ));
 });
 
-Deno.test("processFederationJobs: a match fetch that succeeds records a success under federation_match", async () => {
-  // record_federation_run derives last_error from last_report, so this entry
-  // is what clears an earlier match failure's "Chyba:" on the admin card.
+Deno.test("processFederationJobs: a match fetch that succeeds records one success under match:<site_match_id>", async () => {
+  // The success removes the match's own error entry, which is what clears
+  // its "Chyba:" on the admin card. With no entry to remove,
+  // record_federation_run returns before any write (tenancy_rls.sql 13b), so
+  // this one call per fetch costs no row update and no Realtime event.
   const slug = "divize-as-2026-2027-kolo-1-tj-sokol-rudna-a-muzi-tj-sokol-vrsovice-a-muzi";
   const now = new Date(pragueEpoch("2026-09-16", "17:30") * 1000 + 3600e3);
   const jobs: FakeJob[] = [{
@@ -364,9 +366,49 @@ Deno.test("processFederationJobs: a match fetch that succeeds records a success 
   const recorded = calls.filter((c) => c.kind === "rpc" && c.name === "record_federation_run") as
     { kind: "rpc"; name: string; args: Record<string, unknown> }[];
   assertEquals(recorded.map((c) => c.args), [
-    { p_tenant: "t1", p_key: "federation_match", p_report: null, p_error: null },
+    { p_tenant: "t1", p_key: "match:4859", p_report: null, p_error: null },
   ]);
   assertEquals(jobs[0].attempts, 0);
+});
+
+Deno.test("processFederationJobs: a match or venue success removes only its own key, a failure names the match", async () => {
+  // One tick: match 4859 and the venue fetch work, match 4860 fails. Each
+  // records under its own key, so neither success can clear 4860's error.
+  const ok = "divize-as-2026-2027-kolo-1-tj-sokol-rudna-a-muzi-tj-sokol-vrsovice-a-muzi";
+  const broken = "divize-as-2026-2027-kolo-2-tj-sokol-vrsovice-a-muzi-tj-sokol-rudna-a-muzi";
+  const now = new Date(pragueEpoch("2026-09-16", "17:30") * 1000 + 3600e3);
+  const due = new Date(now.getTime() - 60e3).toISOString();
+  const jobs: FakeJob[] = [
+    { id: 20, kind: "federation_match", attempts: 0, run_at: due,
+      payload: { tenant_id: "t1", site_match_id: 4859, slug: ok } },
+    { id: 21, kind: "federation_match", attempts: 0, run_at: due,
+      payload: { tenant_id: "t1", site_match_id: 4860, slug: broken } },
+    { id: 22, kind: "federation_venue", attempts: 0, run_at: due,
+      payload: { tenant_id: "t1", slug: "tj-sokol-brno-iv" } },
+  ];
+  const { db, calls } = fakeJobsDb(jobs);
+  const get = async (path: string) => {
+    if (path === `/detail-zapasu/${broken}`) throw new Error("HTTP 503");
+    return path.startsWith("/detail-kuzelny/") ? fixture("venue.html") : fixture("match_finished.html");
+  };
+  const original = console.error;
+  console.error = () => {};
+  try {
+    await processFederationJobs(db, get, now);
+  } finally {
+    console.error = original;
+  }
+
+  const recorded = (calls.filter((c) => c.kind === "rpc" && c.name === "record_federation_run") as
+    { kind: "rpc"; name: string; args: Record<string, unknown> }[])
+    .map((c) => c.args)
+    .sort((a, b) => String(a.p_key).localeCompare(String(b.p_key)));
+  assertEquals(recorded, [
+    { p_tenant: "t1", p_key: "match:4859", p_report: null, p_error: null },
+    { p_tenant: "t1", p_key: "match:4860", p_report: null,
+      p_error: `federation_match ${broken}: HTTP 503` },
+    { p_tenant: "t1", p_key: "venue:tj-sokol-brno-iv", p_report: null, p_error: null },
+  ]);
 });
 
 Deno.test("processFederationJobs: a failed success record leaves a match job's re-arm alone", async () => {
@@ -414,8 +456,8 @@ Deno.test("processFederationJobs: a job past MAX_ATTEMPTS is deleted without fet
   const recorded = calls.find((c) => c.kind === "rpc" && c.name === "record_federation_run") as
     { kind: "rpc"; name: string; args: Record<string, unknown> } | undefined;
   assertEquals(recorded?.args, {
-    p_tenant: "t1", p_key: "federation_match", p_report: null,
-    p_error: "federation_match: dropped after 6 attempts",
+    p_tenant: "t1", p_key: "match:1", p_report: null,
+    p_error: "federation_match x: dropped after 6 attempts",
   });
 });
 
@@ -546,7 +588,8 @@ Deno.test("processFederationJobs: a failing job backs off from its attempts and 
   const recorded = calls.find((c) => c.kind === "rpc" && c.name === "record_federation_run") as
     { kind: "rpc"; name: string; args: Record<string, unknown> } | undefined;
   assert(recorded);
-  assertEquals(recorded!.args.p_error, "federation_match: network down");
+  assertEquals(recorded!.args.p_key, "match:1");
+  assertEquals(recorded!.args.p_error, "federation_match boom: network down");
 });
 
 Deno.test("processFederationJobs: a venue job fetches the venue page, upserts it, records a success and is deleted", async () => {

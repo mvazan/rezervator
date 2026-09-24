@@ -305,20 +305,22 @@ export async function runVenue(db: Db, get: Fetcher, tenantId: string, slug: str
 
 type Job = { id: number; payload: Record<string, unknown>; attempts: number; run_at: string };
 
-/** The last_report key a job's run is stored under, so its success
- * replaces its failure's entry and the other way round. */
+/** The last_report key a job's run is stored under — one per thing that can
+ * fail on its own, so a success clears only its own failure. */
 function reportKey(kind: string, job: Job): string {
   if (kind === "federation_discover") return "discover";
   if (kind === "federation_competition") return `competition:${job.payload.competition_slug}`;
   if (kind === "federation_venue") return `venue:${job.payload.slug}`;
-  return kind;
+  return `match:${job.payload.site_match_id}`;
 }
 
+/** A match's key holds only its site id, so the text names the match. */
 function recordError(db: Db, kind: string, job: Job, message: string) {
+  const what = kind === "federation_match" ? `${kind} ${job.payload.slug}` : kind;
   return logged(`record_federation_run ${kind}/${job.id}`, () =>
     db.rpc("record_federation_run", {
       p_tenant: String(job.payload.tenant_id), p_key: reportKey(kind, job), p_report: null,
-      p_error: `${kind}: ${message}`,
+      p_error: `${what}: ${message}`,
     }));
 }
 
@@ -348,8 +350,9 @@ async function runJob(db: Db, get: Fetcher, kind: string, job: Job, now: Date): 
   return next;
 }
 
-/** A match or venue fetch has no report of its own; its success replaces the
- * key's failure entry, so a retry that worked clears its "Chyba:". The
+/** A match or venue fetch has no report of its own: its success removes the
+ * key's failure entry, so a retry that worked clears its "Chyba:", and with
+ * no entry there record_federation_run returns before any write. The
  * result is already written, so a failed record never fails the job. */
 function recordSuccess(db: Db, kind: string, job: Job) {
   return logged(`record_federation_run ${kind}/${job.id}`, () =>
