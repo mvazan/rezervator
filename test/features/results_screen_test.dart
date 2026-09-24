@@ -533,13 +533,13 @@ void main() {
       final state = tester.state(find.byType(ResultsScreen)) as dynamic;
       final GlobalKey key = state.debugMatchKey('decided') as GlobalKey;
       final rowBottom = tester.getBottomLeft(find.byKey(key));
-      final viewportHeight = tester
-          .getSize(find.byKey(const Key('results-list')))
-          .height;
+      final listBottom = tester
+          .getBottomLeft(find.byKey(const Key('results-list')))
+          .dy;
 
-      // Bottom-aligned: the row's own bottom edge sits at (or very near)
-      // the bottom of the scrollable viewport, not pinned near the top.
-      expect(rowBottom.dy, greaterThan(viewportHeight * 0.7));
+      // Bottom-aligned: the row's own bottom edge sits on the bottom of the
+      // scrollable viewport — not centred, not pinned near the top.
+      expect(rowBottom.dy, closeTo(listBottom, 1.0));
 
       // The earliest day (today-12) is scrolled well above the viewport —
       // real scrolling happened, not a no-op left at the list's own top.
