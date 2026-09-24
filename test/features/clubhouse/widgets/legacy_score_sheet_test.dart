@@ -1145,5 +1145,31 @@ void main() {
         expect(rp.didExceedMaxLines, isFalse);
       },
     );
+
+    testWidgets(
+      'a player with a single lane also gets the name in the 31px Celkem '
+      'row — a 23px lane row cannot hold the 16px name unclipped',
+      (tester) async {
+        final oneLaneHome = MatchPlayerResult.fromJson(const {
+          'id': 'ol',
+          'match_id': 'm4',
+          'side': 'home',
+          'position': 1,
+          'player_name': 'Jedna Dráha',
+          'total': 250,
+          'lanes': [
+            {'lane': 1, 'total': 250},
+          ],
+        });
+        await tester.pumpWidget(app(players: [oneLaneHome]));
+        await tester.pumpAndSettle();
+
+        final nameFinder = find.text('Jedna Dráha');
+        expect(nameFinder, findsOneWidget);
+        final rp = tester.renderObject<RenderParagraph>(nameFinder);
+        expect(rp.didExceedMaxLines, isFalse);
+        expect(rp.size.height, greaterThanOrEqualTo(16));
+      },
+    );
   });
 }

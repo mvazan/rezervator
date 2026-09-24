@@ -772,7 +772,9 @@ class _ScoreTableBody extends StatelessWidget {
     }
 
     final realLaneCount = player.lanes.length;
-    final hasLaneRows = laneRowCount > 0;
+    // A lone 23px lane row can't hold the 16px name — it goes into the Celkem
+    // row then, the same as with no lane rows at all.
+    final nameInLaneRows = laneRowCount >= 2;
     final nameText = player.playerName; // no "N. " prefix (Fix round 5).
 
     Widget laneRow(PlayerLane? lane) {
@@ -881,25 +883,25 @@ class _ScoreTableBody extends StatelessWidget {
       children: [
         Column(
           children: [
-            if (hasLaneRows)
+            if (laneRowCount > 0)
               _cell(
                 width: m.nameWidth,
                 height: laneRowCount * _laneRowHeight,
                 bg: _kNameCellGrey,
-                text: nameText,
+                text: nameInLaneRows ? nameText : '',
                 style: _s16w700,
                 align: TextAlign.left,
                 maxLines: 2,
               ),
             _cell(
               width: m.nameWidth,
-              // A player with zero lane rows at all (nothing to pad to
-              // either) puts their name straight into this cell instead —
-              // one line only, so a 31px-tall row can actually fit it
-              // without clipping (Fix round 5, item 6).
+              // A player with fewer than two lane rows puts their name
+              // straight into this cell instead — one line only, so a
+              // 31px-tall row can actually fit it without clipping (Fix
+              // round 5, item 6).
               height: _celkemRowHeight,
               bg: _kRegCellBlue,
-              text: hasLaneRows ? '' : nameText,
+              text: nameInLaneRows ? '' : nameText,
               style: _s16w700,
               align: TextAlign.left,
               maxLines: 1,
