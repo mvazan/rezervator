@@ -46,7 +46,7 @@ Deno.test("planCompetition keeps our active teams' matches, once, with app names
 });
 
 Deno.test("planCompetition keeps the ids of our matches it skipped for no time", () => {
-  const { rows, keepIds } = planCompetition({
+  const { rows, keepIds, inactiveIds } = planCompetition({
     matches: [
       match({ id: 1 }),
       match({ id: 4, time: null }),
@@ -56,10 +56,11 @@ Deno.test("planCompetition keeps the ids of our matches it skipped for no time",
   });
   assertEquals(rows.map((r) => r.site_match_id), [1]);
   assertEquals(keepIds, [4]);
+  assertEquals(inactiveIds, []); // an active team's time-less match is still polled
 });
 
 Deno.test("planCompetition keeps an inactive team's matches without writing them", () => {
-  const { rows, keepIds } = planCompetition({
+  const { rows, keepIds, inactiveIds } = planCompetition({
     matches: [
       match({ id: 1 }),
       match({ id: 3, homeTeam: { id: 3, name: "KK X", slug: "kk-x-muzi" },
@@ -70,6 +71,7 @@ Deno.test("planCompetition keeps an inactive team's matches without writing them
   });
   assertEquals(rows.map((r) => r.site_match_id), [1]);
   assertEquals(keepIds, [3]);
+  assertEquals(inactiveIds, [3]);
 });
 
 Deno.test("an away match of ours: home is not ours; inactive teams still count as ours for home", () => {
@@ -809,6 +811,34 @@ Deno.test("runCompetition: an inactive team's listed matches go to p_keep_ids, n
   const apply = rpcs.find((r) => r.name === "apply_federation_matches")!;
   assertEquals((apply.args.p_matches as { site_match_id: number }[]).map((r) => r.site_match_id), [1]);
   assertEquals(apply.args.p_keep_ids, [5]);
+});
+
+Deno.test("runCompetition: arms no match job for a stored match of an inactive team alone", async () => {
+  // Thursday night; Saturday's matches are within 48 h. The inactive team's
+  // match stays stored (p_keep_ids) but is not polled.
+  const page = competitionPage([
+    match({ id: 1, date: "2026-10-10", time: "10:00" }),
+    match({ id: 5, date: "2026-10-10", time: "14:00",
+      homeTeam: { id: 4, name: "TJ Sokol Husovice", slug: "tj-sokol-husovice-muzi" },
+      awayTeam: { id: 9, name: "KK Y", slug: "kk-y-muzi" } }),
+    match({ id: 6, date: "2026-10-10", time: "17:00",
+      homeTeam: { id: 4, name: "TJ Sokol Husovice", slug: "tj-sokol-husovice-muzi" },
+      awayTeam: { id: 1, name: "TJ Sokol Brno IV", slug: "tj-sokol-brno-iv-muzi" } }),
+  ]);
+  const { db, rpcs } = fakeCompetitionDb({
+    teams: [ourTeam, { site_slug: "tj-sokol-husovice-muzi", name: "TJ Sokol Husovice", active: false }],
+    legacy: [],
+    stored: [1, 5, 6].map((id) => ({ site_match_id: id, venue_slug: "tj-sokol-brno-iv", match_results: null })),
+  });
+
+  const report = await runCompetition(db, async () => page, "t1", "jihomoravska-divize-2026-2027",
+    new Date("2026-10-08T20:00:00Z"));
+
+  const apply = rpcs.find((r) => r.name === "apply_federation_matches")!;
+  assertEquals(apply.args.p_keep_ids, [5]);
+  const enqueued = rpcs.filter((r) => r.name === "enqueue_federation_match");
+  assertEquals(enqueued.map((r) => r.args.p_site_match_id), [1, 6]);
+  assertEquals(report.match_jobs, 2);
 });
 
 Deno.test("runCompetition: at most 20 unpaired legacy rows, in date order", async () => {

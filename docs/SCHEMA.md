@@ -266,9 +266,11 @@ superseded and retired.
     syncing it: its matches are no longer written, and the ones already
     stored stay as they are. When the competition is still synced for
     another active team of the alley, the inactive team's listed matches
-    go as `keep_ids`, so they are never "no longer listed"; when no active
-    team is left in the competition, the competition is not synced at
-    all.
+    go as `keep_ids`, so they are never "no longer listed", and the run
+    arms no `federation_match` job for a match with no active team of
+    ours in it (a job armed before the switch still runs out its
+    checkpoints); when no active team is left in the competition, the
+    competition is not synced at all.
 - **Match detail** (`federation_match` job): `apply_federation_result`
   upserts `match_results`, replaces `match_player_results`, writes
   `video_url` and, when the detail names the venue, `venue`/`venue_slug`

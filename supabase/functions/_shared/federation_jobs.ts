@@ -41,9 +41,12 @@ const MATCH_CONCURRENCY = 3;
 const startOf = (m: { date: string; time: string | null }) =>
   new Date(pragueEpoch(m.date, m.time ?? "12:00") * 1000);
 
+/** `keepIds`: our listed matches that are not written but must not read as
+ * withdrawn. `inactiveIds`, a subset, are the ones whose only teams of ours
+ * are switched off — stored, but never polled. */
 export function planCompetition(args: {
   matches: SiteMatch[]; teams: TeamRow[]; legacy: LegacyRow[];
-}): { rows: SlotRow[]; skipped: string[]; keepIds: number[] } {
+}): { rows: SlotRow[]; skipped: string[]; keepIds: number[]; inactiveIds: number[] } {
   const ours = new Set(args.teams.map((t) => t.site_slug));
   const active = new Set(args.teams.filter((t) => t.active).map((t) => t.site_slug));
   const nameOf = new Map(args.teams.map((t) => [t.site_slug, t.name]));
@@ -51,9 +54,13 @@ export function planCompetition(args: {
   const rows: SlotRow[] = [];
   const skipped: string[] = [];
   const keepIds: number[] = [];
+  const inactiveIds: number[] = [];
   for (const m of unique) {
     if (!active.has(m.homeTeam.slug) && !active.has(m.awayTeam.slug)) {
-      if (ours.has(m.homeTeam.slug) || ours.has(m.awayTeam.slug)) keepIds.push(m.id);
+      if (ours.has(m.homeTeam.slug) || ours.has(m.awayTeam.slug)) {
+        keepIds.push(m.id);
+        inactiveIds.push(m.id);
+      }
       continue;
     }
     if (!m.time) {
@@ -78,7 +85,7 @@ export function planCompetition(args: {
     args.legacy,
   );
   for (const r of rows) r.legacy_id = pairs.get(r.site_match_id) ?? null;
-  return { rows, skipped, keepIds };
+  return { rows, skipped, keepIds, inactiveIds };
 }
 
 /** `venueless`: stored matches whose venue no detail fetch has told us yet —
@@ -222,7 +229,7 @@ export async function runCompetition(db: Db, get: Fetcher, tenantId: string, slu
   const legacy = must(await db.from("priority_slots")
     .select("id, import_key, date, starts_at, home_team, away_team")
     .eq("tenant_id", tenantId).like("import_key", "rozpis:%")) as LegacyRow[];
-  const { rows, skipped, keepIds } = planCompetition({ matches, teams, legacy });
+  const { rows, skipped, keepIds, inactiveIds } = planCompetition({ matches, teams, legacy });
   const report = must(await db.rpc("apply_federation_matches", {
     p_tenant: tenantId, p_competition_slug: slug, p_matches: rows, p_keep_ids: keepIds,
   })) as Record<string, unknown>;
@@ -240,6 +247,8 @@ export async function runCompetition(db: Db, get: Fetcher, tenantId: string, slu
     const r = Array.isArray(s.match_results) ? s.match_results[0] : s.match_results;
     return [s.site_match_id, r?.status ?? null] as [number, string | null];
   }));
+  // A switched-off team is not synced: its stored matches stay as they are.
+  for (const id of inactiveIds) statusById.delete(id);
   const venueless = new Set(stored.filter((s) => !s.venue_slug).map((s) => s.site_match_id));
   const jobs = matchJobsFor({ matches, statusById, now, venueless });
   for (const j of jobs) {
