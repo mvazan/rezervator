@@ -115,9 +115,12 @@ class ClubsScreen extends ConsumerWidget {
       title: 'Oddíly',
       body: AsyncBody(
         value: ref.watch(clubsProvider),
-        onRetry: () => ref.invalidate(clubsProvider),
+        onRetry: () => ref
+          ..invalidate(clubsProvider)
+          ..invalidate(teamsProvider),
         builder: (clubs) {
-          final teams = ref.watch(teamsProvider).value ?? const <Team>[];
+          final loadedTeams = ref.watch(teamsProvider);
+          final teams = loadedTeams.value ?? const <Team>[];
           final unassigned = [
             for (final team in teams)
               if (team.clubId == null ||
@@ -133,6 +136,18 @@ class ClubsScreen extends ConsumerWidget {
                 syncNow: syncNow,
               ),
               const SizedBox(height: 12),
+              if (loadedTeams.hasError && !loadedTeams.hasValue)
+                ListTile(
+                  title: Text(
+                    friendlyDbError(loadedTeams.error!),
+                    style: TextStyle(
+                        color: Theme.of(context).colorScheme.error),
+                  ),
+                  trailing: TextButton(
+                    onPressed: () => ref.invalidate(teamsProvider),
+                    child: const Text('Zkusit znovu'),
+                  ),
+                ),
               if (clubs.isEmpty)
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 16),

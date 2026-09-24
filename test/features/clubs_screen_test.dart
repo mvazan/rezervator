@@ -29,6 +29,7 @@ void main() {
   Widget app(
     List<Club> clubs, {
     List<Team> teams = const [],
+    Stream<List<Team>> Function()? teamsStream,
     FederationSync sync = FederationSync.none,
     Stream<FederationSync>? syncStream,
     Future<void> Function(String venueSlug, bool enabled)? saveFederation,
@@ -42,7 +43,8 @@ void main() {
         overrides: [
           myProfileProvider.overrideWith((ref) => Stream.value(admin)),
           clubsProvider.overrideWith((ref) => Stream.value(clubs)),
-          teamsProvider.overrideWith((ref) => Stream.value(teams)),
+          teamsProvider.overrideWith(
+              (ref) => teamsStream?.call() ?? Stream.value(teams)),
           federationSyncProvider
               .overrideWith((ref) => syncStream ?? Stream.value(sync)),
         ],
@@ -175,6 +177,33 @@ void main() {
       expect(find.text('Nezařazené týmy'), findsOneWidget);
       expect(find.text('Bývalí Nešemice'), findsOneWidget);
       expect(find.text('OP II. třída'), findsOneWidget);
+    });
+
+    testWidgets('a failed teams stream shows its error with a retry, not an '
+        'empty club list', (tester) async {
+      var calls = 0;
+      await pumpApp(
+        tester,
+        app(
+          clubs,
+          // An Error, not an Exception: Riverpod's own retry gives up on it
+          // at once — the state a stream is left in after its retries ran out.
+          teamsStream: () => ++calls == 1
+              ? Stream.error(StateError('boom'))
+              : Stream.value(const [
+                  Team(id: 't1', name: 'Veverky A', clubId: 'c2'),
+                ]),
+        ),
+      );
+
+      expect(find.text('Něco se nepovedlo. (Bad state: boom)'), findsOneWidget);
+      expect(find.text('Veverky A'), findsNothing);
+
+      await tester.tap(find.widgetWithText(TextButton, 'Zkusit znovu'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Něco se nepovedlo. (Bad state: boom)'), findsNothing);
+      expect(find.text('Veverky A'), findsOneWidget);
     });
 
     testWidgets(
