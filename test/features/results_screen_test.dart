@@ -528,6 +528,76 @@ void main() {
     },
   );
 
+  testWidgets(
+    'choosing a team chip re-anchors on THAT team\'s most recent decided '
+    'match, bottom-aligned, instead of keeping the unfiltered offset',
+    (tester) async {
+      MatchResult finished(String id) => MatchResult.fromJson({
+        'match_id': id,
+        'status': 'finished',
+        'home_points': 5,
+        'away_points': 3,
+        'fetched_at': '2026-09-20T21:00:00+00:00',
+      });
+      final ourEarlier = [
+        for (var i = 45; i >= 36; i--)
+          match(id: 'ourEarlier$i', date: today.addDays(-i)),
+      ];
+      final others = [
+        for (var i = 35; i >= 3; i--)
+          match(
+            id: 'other$i',
+            date: today.addDays(-i),
+            home: souperA,
+            away: souperB,
+          ),
+      ];
+      final ourDecided = match(id: 'ourDecided', date: today.addDays(-2));
+      final otherLatest = match(
+        id: 'otherLatest',
+        date: today.addDays(-1),
+        home: souperA,
+        away: souperB,
+      );
+      final ourFuture = [
+        for (var i = 1; i <= 30; i++)
+          match(id: 'ourFuture$i', date: today.addDays(i)),
+      ];
+      await tester.pumpWidget(
+        app(
+          slots: [
+            ...ourEarlier,
+            ...others,
+            ourDecided,
+            otherLatest,
+            ...ourFuture,
+          ],
+          results: {
+            for (final s in [...ourEarlier, ...others, ourDecided, otherLatest])
+              s.id: finished(s.id),
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(ChoiceChip, veverky));
+      await tester.pumpAndSettle();
+
+      final state = tester.state(find.byType(ResultsScreen)) as dynamic;
+      final GlobalKey key = state.debugMatchKey('ourDecided') as GlobalKey;
+      final row = tester.getRect(find.byKey(key));
+      final viewport = tester.getRect(find.byKey(const Key('results-list')));
+
+      expect(row.top, greaterThanOrEqualTo(viewport.top));
+      expect(row.bottom, lessThanOrEqualTo(viewport.bottom));
+      expect(row.bottom, greaterThan(viewport.top + viewport.height * 0.7));
+      expect(
+        tester.getTopLeft(find.text(dayFull(today.addDays(-45)))).dy,
+        lessThan(viewport.top),
+      );
+    },
+  );
+
   testWidgets('tapping a row opens the match detail screen', (tester) async {
     await tester.pumpWidget(app(slots: [finishedYesterday]));
     await tester.pumpAndSettle();

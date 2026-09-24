@@ -56,9 +56,15 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
   @visibleForTesting
   GlobalKey? debugMatchKey(String matchId) => _matchKeys[matchId];
 
-  void _selectAll() => setState(() => _team = null);
+  void _selectAll() => setState(() {
+    _team = null;
+    _scrolledToRecentResults = false;
+  });
 
-  void _selectTeam(String team) => setState(() => _team = team);
+  void _selectTeam(String team) => setState(() {
+    _team = team;
+    _scrolledToRecentResults = false;
+  });
 
   static String _dayLabel(Day date, Day today) {
     if (date == today) return 'Dnes';
