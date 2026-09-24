@@ -249,11 +249,12 @@ superseded and retired.
     enqueues nothing; INSERT and DELETE are unchanged.
   - **Delete only the future:** a `cka:` match of this competition that
     has not started yet (`date + starts_at` after Prague now), that the
-    site no longer lists and that is not hand-edited, is deleted; a match
-    already under way or played never is. `keep_ids` are matches of ours
-    the site still lists but the edge function did not write (no start
-    time yet, or none of our teams in it is active) — they are never
-    "dropped". An empty list is a failed fetch and deletes nothing.
+    site no longer lists and that is not hand-edited, is deleted together
+    with its `federation_match` job; a match already under way or played
+    never is. `keep_ids` are matches of ours the site still lists but the
+    edge function did not write (no start time yet, or none of our teams
+    in it is active) — they are never "dropped". An empty list is a
+    failed fetch and deletes nothing.
   - Report: `{inserted, updated, rekeyed, deleted, skipped_hand_edited[]}`;
     the edge function adds `skipped_no_time[]`, `match_jobs` and
     `legacy_unpaired[]` — up to 20 `{date, title}` of `rozpis:` rows still
@@ -273,8 +274,11 @@ superseded and retired.
   `video_url` and, when the detail names the venue, `venue`/`venue_slug`
   and — unless hand-edited — `is_away` (venue ≠ `federation_sync.venue_slug`),
   `prep_minutes` (0 away) and the description (`<soutěž> · <n>. kolo`, plus
-  ` · <kuželna>` away). `enqueue_federation_match` arms the job with
-  dedupe key `federation_match:<tenant>:<site_match_id>`; an earlier
+  ` · <kuželna>` away). It answers `false` (and writes nothing) when the
+  tenant has no slot for the match any more — withdrawn, or deleted by
+  hand — and the job then stops instead of re-arming.
+  `enqueue_federation_match` arms the job with dedupe key
+  `federation_match:<tenant>:<site_match_id>`; an earlier
   `run_at` wins, so a later checkpoint never pushes back an earlier one,
   and a re-arm keeps the payload's `requested_at`.
 - **Runs:** `record_federation_run(tenant, key, report, error)` stamps

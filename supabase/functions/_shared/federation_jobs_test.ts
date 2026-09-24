@@ -312,6 +312,24 @@ Deno.test("processFederationJobs: a successful match job is re-armed — run_at/
   for (const w of writes) assertEquals(Object.keys(w.set).sort(), ["attempts", "run_at"]);
 });
 
+Deno.test("processFederationJobs: a match job whose slot is gone is deleted, not re-armed", async () => {
+  const slug = "divize-as-2026-2027-kolo-1-tj-sokol-rudna-a-muzi-tj-sokol-vrsovice-a-muzi";
+  const now = new Date(pragueEpoch("2026-09-16", "17:30") * 1000 + 3600e3);
+  const jobs: FakeJob[] = [{
+    id: 9, kind: "federation_match", attempts: 0,
+    run_at: new Date(now.getTime() - 60e3).toISOString(),
+    payload: { tenant_id: "t1", site_match_id: 4859, slug },
+  }];
+  const { db, calls } = fakeJobsDb(jobs, (name) =>
+    ({ data: name === "apply_federation_result" ? false : null, error: null }));
+
+  await processFederationJobs(db, async () => fixture("match_finished.html"), now);
+
+  assertEquals(jobs.length, 0);
+  assert(calls.some((c) => c.kind === "delete" && c.id === 9));
+  assert(!calls.some((c) => c.kind === "rpc" && c.name === "record_federation_run"));
+});
+
 Deno.test("processFederationJobs: a job past MAX_ATTEMPTS is deleted without fetching", async () => {
   const jobs: FakeJob[] = [{
     id: 2, kind: "federation_match", attempts: 6, // > MAX_ATTEMPTS (5)

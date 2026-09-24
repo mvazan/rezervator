@@ -3740,7 +3740,7 @@ begin
   raise notice 'OK: a hand-edited match keeps its values and lands in skipped_hand_edited (0045)';
 end $$;
 
--- 5. Only future matches the site dropped are deleted.
+-- 5. Only future matches the site dropped are deleted, with their match job.
 do $$
 declare
   v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
@@ -3767,6 +3767,8 @@ begin
     (v_a, v_today + 8, '17:00', '20:00', v_type, 'KK Jiný', 'TJ Sokol Brno IV',
      '10000000-0000-0000-0000-000000000001', 'cka:106',
      'jihomoravska-divize-2026-2027-kolo-3-x-y', 106, true, true);
+  perform enqueue_federation_match(v_a, 101, 'jihomoravska-divize-2026-2027-kolo-5-x-y', now() + interval '1 day');
+  perform enqueue_federation_match(v_a, 102, 'jihomoravska-divize-2026-2027-kolo-6-x-y', now() + interval '1 day');
   r := apply_federation_matches(v_a, 'jihomoravska-divize-2026-2027', jsonb_build_array(
          pg_temp.fed_match(101, true, 10, '18:00', '21:00', 5)
            || '{"video_url":"https://youtu.be/x"}',
@@ -3777,12 +3779,17 @@ begin
   if exists (select 1 from priority_slots where tenant_id = v_a and import_key = 'cka:102') then
     raise exception 'FAIL: the dropped future match 102 survived';
   end if;
+  if (select array_agg(payload->>'site_match_id') from notification_jobs
+      where kind = 'federation_match') is distinct from array['101'] then
+    raise exception 'FAIL: the dropped match 102 should lose its federation_match job, 101 keep it';
+  end if;
+  delete from notification_jobs where kind = 'federation_match';
   if (select count(*) from priority_slots
       where tenant_id = v_a
         and import_key in ('cka:101', 'cka:103', 'cka:104', 'cka:105', 'cka:106')) <> 5 then
     raise exception 'FAIL: the sync deleted a played, hand-edited or other-competition match';
   end if;
-  raise notice 'OK: a future match the site dropped is deleted; played, hand-edited and other competitions stay (0045)';
+  raise notice 'OK: a future match the site dropped is deleted with its match job; played, hand-edited and other competitions stay (0045)';
 end $$;
 
 -- 5b. An empty list (a failed fetch) deletes nothing; a match already
@@ -3923,7 +3930,9 @@ declare
   s priority_slots;
   mr match_results;
 begin
-  perform apply_federation_result(v_a, 103, v_res);
+  if not apply_federation_result(v_a, 103, v_res) then
+    raise exception 'FAIL: apply_federation_result should answer true for a stored match';
+  end if;
   select * into s from priority_slots where tenant_id = v_a and import_key = 'cka:103';
   select * into mr from match_results where match_id = s.id;
   if mr.match_id is null or mr.home_points <> 6 or mr.status <> 'finished'
@@ -3947,8 +3956,10 @@ begin
      or (select count(*) from match_results where match_id = s.id) <> 1 then
     raise exception 'FAIL: a repeated result duplicated rows';
   end if;
-  perform apply_federation_result(v_a, 999, v_res);
-  raise notice 'OK: apply_federation_result upserts the result, replaces players, fixes home/away from the venue (0045)';
+  if apply_federation_result(v_a, 999, v_res) then
+    raise exception 'FAIL: apply_federation_result should answer false for a match with no slot';
+  end if;
+  raise notice 'OK: apply_federation_result upserts the result, replaces players, fixes home/away from the venue; false without a slot (0045)';
 end $$;
 
 -- 7. RLS: own alley reads, the other alley sees nothing, nobody writes.

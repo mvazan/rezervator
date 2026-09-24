@@ -277,8 +277,9 @@ export async function runMatch(
   db: Db, get: Fetcher, tenantId: string, siteMatchId: number, slug: string, now: Date,
 ): Promise<Date | null> {
   const d = parseMatch(await get(`/detail-zapasu/${slug}`));
-  must(await db.rpc("apply_federation_result",
+  const applied = must(await db.rpc("apply_federation_result",
     { p_tenant: tenantId, p_site_match_id: siteMatchId, p_result: resultPayload(d) }));
+  if (applied === false) return null;
   return nextCheckpoint(d.status, startOf(d), now);
 }
 

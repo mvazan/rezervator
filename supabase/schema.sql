@@ -185,7 +185,11 @@ begin
          and (p.date + p.starts_at) > (now() at time zone 'Europe/Prague')
          and not p.hand_edited
          and not (p.site_match_id = any (v_seen || coalesce(p_keep_ids, '{}')))
-      returning 1)
+      returning p.site_match_id),
+    gone_jobs as (
+      delete from notification_jobs j
+       using gone g
+       where j.dedupe_key = 'federation_match:' || p_tenant || ':' || g.site_match_id)
     select count(*) into v_del from gone;
   end if;
 
@@ -198,7 +202,7 @@ $$;
 ALTER FUNCTION "public"."apply_federation_matches"("p_tenant" "uuid", "p_competition_slug" "text", "p_matches" "jsonb", "p_keep_ids" integer[]) OWNER TO "postgres";
 
 
-CREATE OR REPLACE FUNCTION "public"."apply_federation_result"("p_tenant" "uuid", "p_site_match_id" integer, "p_result" "jsonb") RETURNS "void"
+CREATE OR REPLACE FUNCTION "public"."apply_federation_result"("p_tenant" "uuid", "p_site_match_id" integer, "p_result" "jsonb") RETURNS boolean
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
     AS $$
@@ -215,7 +219,7 @@ begin
   select * into v_row from priority_slots
    where tenant_id = p_tenant and import_key = 'cka:' || p_site_match_id;
   if not found then
-    return;
+    return false;
   end if;
   perform set_config('import.run', 'on', true);
   select venue_slug into v_venue from federation_sync where tenant_id = p_tenant;
@@ -293,6 +297,7 @@ begin
          (p->>'total')::integer, (p->>'set_points')::numeric,
          (p->>'team_points')::numeric, coalesce(p->'lanes', '[]'::jsonb)
     from jsonb_array_elements(coalesce(p_result->'players', '[]'::jsonb)) p;
+  return true;
 end;
 $$;
 
