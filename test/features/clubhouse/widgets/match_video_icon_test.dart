@@ -1,0 +1,315 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:rezervator/core/contrast.dart';
+import 'package:rezervator/core/theme.dart';
+import 'package:rezervator/domain/models.dart';
+import 'package:rezervator/features/clubhouse/widgets/match_video_icon.dart';
+
+/// [MatchLeading] is pure Dart/Flutter state — no Riverpod, no Supabase — so
+/// every test here pumps it directly, no ProviderScope needed.
+void main() {
+  final date = Day(2026, 9, 23);
+  final now = DateTime(2026, 9, 23, 18, 0);
+
+  PrioritySlot slot({String? videoUrl, Day? matchDate}) => PrioritySlot(
+        id: 'm1',
+        date: matchDate ?? date,
+        startsAt: const HourMinute(17, 30),
+        endsAt: const HourMinute(20, 30),
+        type: PrioritySlot.fallbackMatchType,
+        homeTeam: 'Domácí',
+        awayTeam: 'Hosté',
+        videoUrl: videoUrl,
+      );
+
+  MatchResult result(MatchStatus status) => MatchResult(
+        matchId: 'm1',
+        status: status,
+        fetchedAt: now,
+      );
+
+  const fallback = Icon(Icons.emoji_events_outlined, key: Key('fallback'));
+
+  /// [onRowOpen] simulates the row's own tap-through — MatchLeading must
+  /// never trigger it, only its own [launch].
+  Widget wrap({
+    required PrioritySlot slot,
+    MatchResult? matchResult,
+    bool linksEnabled = true,
+    void Function(String url)? launch,
+    VoidCallback? onRowOpen,
+    bool disableAnimations = false,
+    ThemeData? theme,
+  }) {
+    final content = InkWell(
+      onTap: onRowOpen,
+      child: Row(
+        children: [
+          MatchLeading(
+            slot: slot,
+            result: matchResult,
+            now: now,
+            linksEnabled: linksEnabled,
+            fallback: fallback,
+            launch: launch ?? (_) {},
+          ),
+          const Text('Domácí – Hosté'),
+        ],
+      ),
+    );
+    return MaterialApp(
+      theme: theme,
+      home: Scaffold(
+        body: disableAnimations
+            ? MediaQuery(
+                data: const MediaQueryData(disableAnimations: true),
+                child: content,
+              )
+            : content,
+      ),
+    );
+  }
+
+  testWidgets(
+    'a live match shows the videocam badge with tooltip Živý přenos, and '
+    'tapping it launches the url without opening the row',
+    (tester) async {
+      final launched = <String>[];
+      var rowOpened = false;
+      await tester.pumpWidget(wrap(
+        slot: slot(videoUrl: 'https://vysledky.kuzelky.cz/video/m1'),
+        matchResult: result(MatchStatus.inProgress),
+        launch: launched.add,
+        onRowOpen: () => rowOpened = true,
+        disableAnimations: true, // avoid the repeating pulse in this test
+      ));
+      await tester.pump();
+
+      expect(find.byIcon(Icons.videocam), findsOneWidget);
+      expect(find.byWidgetPredicate((w) => w.key == const Key('fallback')),
+          findsNothing);
+      final button = find.widgetWithIcon(IconButton, Icons.videocam);
+      expect(tester.widget<IconButton>(button).tooltip, 'Živý přenos');
+
+      await tester.tap(button);
+      await tester.pump();
+
+      expect(launched, ['https://vysledky.kuzelky.cz/video/m1']);
+      expect(rowOpened, isFalse);
+
+      // Tapping elsewhere on the row still opens it.
+      await tester.tap(find.text('Domácí – Hosté'));
+      await tester.pump();
+      expect(rowOpened, isTrue);
+    },
+  );
+
+  testWidgets(
+      'the live badge glyph is onError on the error fill, legible in every '
+      'theme variant', (tester) async {
+    for (final (brightness, contrastLevel) in [
+      (Brightness.light, 0.0),
+      (Brightness.dark, 0.0),
+      (Brightness.light, 1.0),
+      (Brightness.dark, 1.0),
+    ]) {
+      final theme = buildTheme(brightness, contrastLevel: contrastLevel);
+      await tester.pumpWidget(wrap(
+        slot: slot(videoUrl: 'https://vysledky.kuzelky.cz/video/m1'),
+        matchResult: result(MatchStatus.inProgress),
+        disableAnimations: true,
+        theme: theme,
+      ));
+      await tester.pumpAndSettle(); // MaterialApp animates a theme change
+
+      final glyph = tester.widget<Icon>(find.byIcon(Icons.videocam)).color!;
+      final variant = '$brightness, contrast $contrastLevel';
+      expect(glyph, theme.colorScheme.onError, reason: variant);
+      expect(contrastRatio(glyph, theme.colorScheme.error),
+          greaterThanOrEqualTo(3.0),
+          reason: variant);
+    }
+  });
+
+  testWidgets('a finished match shows play_circle_fill with tooltip Záznam',
+      (tester) async {
+    await tester.pumpWidget(wrap(
+      slot: slot(videoUrl: 'https://vysledky.kuzelky.cz/video/m1'),
+      matchResult: result(MatchStatus.finished),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.byIcon(Icons.play_circle_fill), findsOneWidget);
+    expect(find.byIcon(Icons.videocam), findsNothing);
+    final button = find.widgetWithIcon(IconButton, Icons.play_circle_fill);
+    expect(tester.widget<IconButton>(button).tooltip, 'Záznam');
+  });
+
+  testWidgets(
+      'a forfeited match also reads Záznam (finished/forfeit both count as '
+      'recorded)', (tester) async {
+    await tester.pumpWidget(wrap(
+      slot: slot(videoUrl: 'https://vysledky.kuzelky.cz/video/m1'),
+      matchResult: result(MatchStatus.forfeit),
+    ));
+    await tester.pumpAndSettle();
+
+    final button = find.widgetWithIcon(IconButton, Icons.play_circle_fill);
+    expect(tester.widget<IconButton>(button).tooltip, 'Záznam');
+  });
+
+  testWidgets(
+      'a scheduled match with a video (not yet live) reads plain Video',
+      (tester) async {
+    await tester.pumpWidget(wrap(
+      // Five days out — well outside isLive's own scheduled window (1h
+      // before .. 6h after kickoff) — so this really is "not yet live",
+      // not an accidental live match from `now` landing near kickoff.
+      slot: slot(
+        videoUrl: 'https://vysledky.kuzelky.cz/video/m1',
+        matchDate: date.addDays(5),
+      ),
+      matchResult: null,
+    ));
+    await tester.pumpAndSettle();
+
+    final button = find.widgetWithIcon(IconButton, Icons.play_circle_fill);
+    expect(tester.widget<IconButton>(button).tooltip, 'Video');
+  });
+
+  testWidgets('no video url shows the fallback trophy, not a video control',
+      (tester) async {
+    await tester.pumpWidget(wrap(slot: slot(videoUrl: null)));
+    await tester.pumpAndSettle();
+
+    expect(find.byWidgetPredicate((w) => w.key == const Key('fallback')),
+        findsOneWidget);
+    expect(find.byIcon(Icons.play_circle_fill), findsNothing);
+    expect(find.byIcon(Icons.videocam), findsNothing);
+  });
+
+  testWidgets(
+      'links disabled shows the fallback even with a video url and a live '
+      'result', (tester) async {
+    await tester.pumpWidget(wrap(
+      slot: slot(videoUrl: 'https://vysledky.kuzelky.cz/video/m1'),
+      matchResult: result(MatchStatus.inProgress),
+      linksEnabled: false,
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.byWidgetPredicate((w) => w.key == const Key('fallback')),
+        findsOneWidget);
+    expect(find.byIcon(Icons.videocam), findsNothing);
+  });
+
+  testWidgets(
+      'disableAnimations on a live match renders with no running animation',
+      (tester) async {
+    await tester.pumpWidget(wrap(
+      slot: slot(videoUrl: 'https://vysledky.kuzelky.cz/video/m1'),
+      matchResult: result(MatchStatus.inProgress),
+      disableAnimations: true,
+    ));
+    // Not pumpAndSettle: a repeating pulse would never settle on its own if
+    // this regressed — pump a single frame and assert directly instead.
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(find.byIcon(Icons.videocam), findsOneWidget);
+    expect(tester.hasRunningAnimations, isFalse);
+  });
+
+  testWidgets(
+      'a non-live, non-video match never CREATES a pulse AnimationController '
+      '(perf: no Ticker for the ~200 non-live rows Výsledky builds '
+      'eagerly) — a real regression guard, not just "nothing is running", '
+      'since the pre-fix code built-but-never-started the controller for '
+      'every row too', (tester) async {
+    await tester.pumpWidget(wrap(slot: slot(videoUrl: null)));
+    await tester.pumpAndSettle();
+
+    expect(tester.hasRunningAnimations, isFalse);
+    expect(tester.binding.transientCallbackCount, 0);
+    // debugHasPulseController is a @visibleForTesting public member on an
+    // otherwise-private State — `as dynamic` reaches it across libraries.
+    final state = tester.state(find.byType(MatchLeading)) as dynamic;
+    expect(state.debugHasPulseController, isFalse);
+  });
+
+  testWidgets(
+      'a live match DOES create the pulse controller (sanity check that '
+      'debugHasPulseController actually tracks creation) — not '
+      'disableAnimations here, since that itself skips creation', (
+    tester,
+  ) async {
+    await tester.pumpWidget(wrap(
+      slot: slot(videoUrl: 'https://vysledky.kuzelky.cz/video/m1'),
+      matchResult: result(MatchStatus.inProgress),
+    ));
+    await tester.pump();
+
+    final state = tester.state(find.byType(MatchLeading)) as dynamic;
+    expect(state.debugHasPulseController, isTrue);
+
+    // Stop the repeating animation before the test ends, or pumpAndSettle
+    // in a later test sharing the binding could hang.
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('a live match WITHOUT disableAnimations does run the pulse',
+      (tester) async {
+    await tester.pumpWidget(wrap(
+      slot: slot(videoUrl: 'https://vysledky.kuzelky.cz/video/m1'),
+      matchResult: result(MatchStatus.inProgress),
+    ));
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(tester.hasRunningAnimations, isTrue);
+  });
+
+  testWidgets(
+      'a live match that finishes under a long-lived row stops pulsing and '
+      'turns into Záznam', (tester) async {
+    final live = slot(videoUrl: 'https://vysledky.kuzelky.cz/video/m1');
+    await tester.pumpWidget(wrap(
+      slot: live,
+      matchResult: result(MatchStatus.inProgress),
+    ));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(tester.hasRunningAnimations, isTrue);
+
+    await tester.pumpWidget(wrap(
+      slot: live,
+      matchResult: result(MatchStatus.finished),
+    ));
+    await tester.pump();
+
+    expect(tester.hasRunningAnimations, isFalse);
+    expect(find.byIcon(Icons.videocam), findsNothing);
+    final button = find.widgetWithIcon(IconButton, Icons.play_circle_fill);
+    expect(tester.widget<IconButton>(button).tooltip, 'Záznam');
+  });
+
+  testWidgets('a match that goes live under a long-lived row starts pulsing',
+      (tester) async {
+    final later = slot(
+      videoUrl: 'https://vysledky.kuzelky.cz/video/m1',
+      matchDate: date.addDays(5),
+    );
+    await tester.pumpWidget(wrap(
+      slot: later,
+      matchResult: result(MatchStatus.scheduled),
+    ));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(tester.hasRunningAnimations, isFalse);
+
+    await tester.pumpWidget(wrap(
+      slot: later,
+      matchResult: result(MatchStatus.inProgress),
+    ));
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(tester.hasRunningAnimations, isTrue);
+    expect(find.byIcon(Icons.videocam), findsOneWidget);
+  });
+}

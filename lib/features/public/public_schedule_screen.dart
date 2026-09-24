@@ -104,6 +104,7 @@ class _PublicScheduleScreenState extends ConsumerState<PublicScheduleScreen>
           nameById: pw.nameById,
           clubColorById: pw.clubColorById,
           interactive: false,
+          matchLinks: false,
           slot: _inert,
           onSelectDay: selectDay,
           onShiftWeek: shiftWeek,

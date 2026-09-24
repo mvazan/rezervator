@@ -136,10 +136,12 @@ List<PrioritySlot> upcomingMatches({
   ]..sort((a, b) => compareDayTime(a.date, a.startsAt, b.date, b.startsAt));
 }
 
-/// Live reservations from [today] on whose block still exists, plus match
-/// slots (no úklid children) of [teams] from [today] on; days ascending,
-/// within a day by start (chronological, `compareDayTime`), a training
-/// before a match at the same start, and two tied trainings by lane.
+/// Live reservations from [today] on whose block still exists, plus every
+/// match (no úklid children) of [teams], past or future — Můj přehled scrolls
+/// to what's upcoming ([upcomingScrollIndex]) rather than hiding what's
+/// already been played; days ascending, within a day by start (chronological,
+/// `compareDayTime`), a training before a match at the same start, and two
+/// tied trainings by lane.
 List<UpcomingDay> upcomingTimeline({
   required List<Reservation> reservations,
   required List<TimeBlock> blocks,
@@ -155,7 +157,7 @@ List<UpcomingDay> upcomingTimeline({
         if (blockById[r.blockId] case final block?)
           UpcomingTraining(r, block),
     for (final s in slots)
-      if (s.type.isMatch && s.parentId == null && !s.date.isBefore(today))
+      if (s.type.isMatch && s.parentId == null)
         // The teams say it, unless this one match says otherwise (0039).
         if (matchIsMine(s, teams, exceptions)) UpcomingMatch(s),
   ];
@@ -181,4 +183,14 @@ List<UpcomingDay> upcomingTimeline({
     }
   }
   return days;
+}
+
+/// The index to open Můj přehled scrolled to: the first day at or after
+/// [today], so a past match/training needs scrolling UP to see — same
+/// idea as `todayIndex` (`domain/results.dart`), over [UpcomingDay] instead.
+int upcomingScrollIndex(List<UpcomingDay> days, Day today) {
+  for (var i = 0; i < days.length; i++) {
+    if (!days[i].date.isBefore(today)) return i;
+  }
+  return days.isEmpty ? -1 : days.length - 1;
 }

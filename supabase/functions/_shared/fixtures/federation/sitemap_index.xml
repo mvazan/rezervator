@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+	<sitemap>
+		<loc>https://vysledky.kuzelky.cz/sitemap/static.xml</loc>
+	</sitemap>
+	<sitemap>
+		<loc>https://vysledky.kuzelky.cz/sitemap/clubs.xml</loc>
+	</sitemap>
+	<sitemap>
+		<loc>https://vysledky.kuzelky.cz/sitemap/venues.xml</loc>
+	</sitemap>
+	<sitemap>
+		<loc>https://vysledky.kuzelky.cz/sitemap/competitions.xml</loc>
+	</sitemap>
+	<sitemap>
+		<loc>https://vysledky.kuzelky.cz/sitemap/matches-20.xml</loc>
+	</sitemap>
+	<sitemap>
+		<loc>https://vysledky.kuzelky.cz/sitemap/players-20.xml</loc>
+	</sitemap>
+</sitemapindex>

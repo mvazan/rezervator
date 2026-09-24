@@ -68,11 +68,11 @@ void main() {
     );
   });
 
-  // The youth squad shares its club's name in the federation's schedule, so
-  // the import marks ours with a suffix (TEAM_SUFFIXES in
-  // tool/import_matches.py). Following one squad must then leave the other
-  // out — the overview matches a team by its exact name, which is what
-  // makes the split by competition work at all.
+  // The youth squad shares its club's name in the federation's schedule.
+  // The federation site doesn't list dorost yet, so the admin enters those
+  // matches by hand with a distinguishing suffix. Following one squad must
+  // then leave the other out — the overview matches a team by its exact
+  // name, which is what makes the split by competition work at all.
   test('a followed squad does not drag its namesake along', () {
     final slots = [
       match('a', today, const HourMinute(11, 30), home: 'TJ Sokol Husovice'),
@@ -200,6 +200,19 @@ void main() {
       today: today,
     );
     expect(days, isEmpty);
+  });
+
+  test('a past match of a followed team is included, ahead of today\'s '
+      'entries', () {
+    final days = upcomingTimeline(
+      reservations: [res('today', today)],
+      blocks: const [b1],
+      slots: [match('past', today.addDays(-3), const HourMinute(18, 0))],
+      teams: const ['SKK Veverky Brno A'],
+      today: today,
+    );
+    expect(days.map((d) => d.date), [today.addDays(-3), today]);
+    expect((days.first.items.single as UpcomingMatch).slot.id, 'past');
   });
 
   test('no followed teams means no matches; nothing at all means no days', () {
@@ -387,6 +400,29 @@ void main() {
       expect(matchIsMine(m, const [], const {'jiny': true}), isFalse);
       expect(matchIsMine(m, const ['SKK Veverky Brno A'], const {'jiny': false}),
           isTrue);
+    });
+  });
+
+  group('upcomingScrollIndex', () {
+    UpcomingDay dayOf(String d) => UpcomingDay(Day.parse(d), const []);
+
+    test('first day >= today', () {
+      final days = [dayOf('2026-09-06'), dayOf('2026-09-09'), dayOf('2026-09-13')];
+      expect(upcomingScrollIndex(days, Day.parse('2026-09-09')), 1);
+    });
+
+    test('past days need scrolling up: today itself is the anchor', () {
+      final days = [dayOf('2026-09-06'), dayOf('2026-09-07'), dayOf('2026-09-09')];
+      expect(upcomingScrollIndex(days, Day.parse('2026-09-09')), 2);
+    });
+
+    test('every day is in the past → last index', () {
+      final days = [dayOf('2026-09-06'), dayOf('2026-09-07')];
+      expect(upcomingScrollIndex(days, Day.parse('2026-09-09')), 1);
+    });
+
+    test('empty list → -1', () {
+      expect(upcomingScrollIndex(const [], Day.parse('2026-09-09')), -1);
     });
   });
 

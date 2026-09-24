@@ -159,6 +159,57 @@ void main() {
     expect(jsonDecode(rpc.body), {'p_tenant_id': 't-home'});
   });
 
+  /// At and above the hub's 840 dp breakpoint the hub is a card grid.
+  void wideSurface(WidgetTester tester) {
+    tester.view.physicalSize = const Size(1200, 1600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+  }
+
+  final tintedCard =
+      find.byWidgetPredicate((w) => w is Card && w.color != null);
+
+  testWidgets('on a wide screen the superadmin section is two tinted cards '
+      'in the grid, and Zpět domů switches back home', (tester) async {
+    wideSurface(tester);
+    await tester.pumpWidget(hub(visitingSuperadmin));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(GridView), findsOneWidget);
+    expect(tintedCard, findsNWidgets(2));
+    for (final text in [
+      'Kuželny',
+      'správce aplikace',
+      'Zpět domů',
+      'do kuželny TJ Sokol Brno IV',
+    ]) {
+      expect(find.descendant(of: tintedCard, matching: find.text(text)),
+          findsOneWidget,
+          reason: text);
+    }
+
+    await tester.tap(find.text('Zpět domů'));
+    await tester.pumpAndSettle();
+
+    final rpc = requests.firstWhere(
+      (r) => r.method == 'POST' && r.url.path.contains('switch_tenant'),
+    );
+    expect(jsonDecode(rpc.body), {'p_tenant_id': 't-home'});
+  });
+
+  testWidgets('on a wide screen a regular admin gets no tinted card',
+      (tester) async {
+    wideSurface(tester);
+    await tester.pumpWidget(hub(admin));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(GridView), findsOneWidget);
+    expect(find.text('Hráči'), findsOneWidget);
+    expect(tintedCard, findsNothing);
+    expect(find.text('Kuželny'), findsNothing);
+  });
+
   testWidgets('pending kuželna offers approve/reject; approving fires the '
       'approve_tenant RPC', (tester) async {
     await tester.pumpWidget(tenantsScreen(superadmin));

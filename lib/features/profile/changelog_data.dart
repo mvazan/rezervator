@@ -11,7 +11,7 @@
 /// One dated batch of user-facing changes, newest first — shown by tapping
 /// the version line in Můj profil.
 class Release {
-  const Release(this.version, this.date, this.changes);
+  const Release(this.version, this.date, this.changes, {this.store});
 
   /// The app version that carries these changes, or null while they are
   /// live on the web only. Null entries are the newest ones, so they sit at
@@ -23,6 +23,12 @@ class Release {
   final String date;
 
   final List<String> changes;
+
+  /// Shorter bullets for Google Play's 500-character "What's new", written
+  /// with the entry and reviewed in its PR. Needed only when [changes] do
+  /// not fit whole — the automatic condensation would drop bullets from the
+  /// end. The app always shows the full [changes].
+  final List<String>? store;
 }
 
 /// What to show: the web lists everything, the app only what a release
@@ -43,6 +49,14 @@ String changelogHeading(Release r, {required bool web}) {
 }
 
 const appChangelog = <Release>[
+  Release(null, '23. 9. 2026', [
+    'Zápasy a výsledky se nově stahují z výsledkového servisu ČKA — '
+        'správce je zapne v Správa → Oddíly.',
+    'Nový tab Klubovna: výsledky zápasů našich týmů (i živě, s videem a '
+        'výkony hráčů) a kuželny soupeřů s kontakty a navigací.',
+    'Detail zápasu má zápis jako na kuzelky.com — ikonou vpravo nahoře ho '
+        'otevřeš přes celou obrazovku, na výšku i na šířku.',
+  ]),
   Release('1.2.8', '22. 9. 2026', [
     'Ve správě appky se tlačítko pro přidání (oddíl, hráč, pronájem…) už '
         'nemůže zakrýt poslední položku v seznamu.',
@@ -58,6 +72,17 @@ const appChangelog = <Release>[
         'Odehrané zápasy mezi výjimkami nejsou.',
     'Skupiny: rodina nebo dvojice si může rezervovat a rušit tréninky '
         'navzájem — založíš ji v Můj profil.',
+  ], store: [
+    'Skupiny: rodina nebo dvojice si může rezervovat a rušit tréninky '
+        'navzájem — založíš ji v Můj profil.',
+    'Veřejný přehled: kuželna může mít vlastní adresu s rozvrhem bez '
+        'přihlášení — jen obsazenost, bez jmen.',
+    'Ťuknutí na cizí rezervaci ukáže celé jméno hráče.',
+    'Výjimky: seznam při zaškrtávání už neposkakuje, tvoje výjimky jsou '
+        'shrnuté nahoře.',
+    'Změny v profilu a u kalendáře se ukážou hned po uložení, i na pomalé '
+        'síti.',
+    'Tlačítko pro přidání ve správě už nezakryje poslední položku seznamu.',
   ]),
   Release('1.2.7', '15. 9. 2026', [
     'Po spuštění už neprobleskne „Offline" jen proto, že se appka teprve '

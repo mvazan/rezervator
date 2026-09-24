@@ -8,17 +8,19 @@ import '../../domain/labels.dart';
 import '../../domain/models.dart';
 import '../../domain/schedule.dart';
 import '../admin/admin_screen.dart';
+import '../clubhouse/clubhouse_screen.dart';
 import '../profile/profile_screen.dart';
 import 'my_trainings_screen.dart';
 import 'week_screen.dart';
 
-/// The signed-in home: two views — the calendar and Můj přehled — behind
-/// bottom tabs on a narrow screen and a rail on a wide one. Which one opens
-/// at launch is the profile's choice; a tap changes it for this run only.
-/// Both views stay mounted (an IndexedStack, not a switch) so paging the
-/// calendar forward and glancing at the list never loses the week/day
-/// position — the hidden view keeps rebuilding on the minute tick, which is
-/// cheap enough to leave running offstage.
+/// The signed-in home: three views — Můj přehled, the calendar and Klubovna
+/// — behind bottom tabs on a narrow screen and a rail on a wide one. Which
+/// one opens at launch is the profile's choice (between the first two only
+/// — Klubovna is a tab, not a launch target); a tap changes it for this run
+/// only. All three views stay mounted (an IndexedStack, not a switch) so
+/// paging the calendar forward and glancing at the list never loses the
+/// week/day position — the hidden views keep rebuilding on the minute tick,
+/// which is cheap enough to leave running offstage.
 class HomeShell extends ConsumerStatefulWidget {
   const HomeShell({super.key});
 
@@ -94,8 +96,8 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       ),
     ];
 
-    // IndexedStack (not a switch swapping widgets in and out): both views
-    // keep their State — WeekScreen's week offset and day index survive a
+    // IndexedStack (not a switch swapping widgets in and out): every view
+    // keeps its State — WeekScreen's week offset and day index survive a
     // glance at Můj přehled and back. children[i]'s index must line up
     // with HomeView's declaration order (see view.index below).
     final content = IndexedStack(
@@ -106,6 +108,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
           onOpenCalendar: () => setState(() => _chosen = HomeView.calendar),
         ),
         WeekScreen(trailing: actions),
+        ClubhouseScreen(trailing: actions),
       ],
     );
     final body = Column(
@@ -139,12 +142,12 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     );
 
     // Material's own adaptive-navigation breakpoint: below 600dp of WIDTH,
-    // bottom tabs; at or above it, a rail on the left — same two
+    // bottom tabs; at or above it, a rail on the left — same three
     // destinations either way. Width, not the shorter side, on purpose: a
     // phone turned to landscape has plenty of width but a short height, and
-    // a bottom bar stretched across that width leaves its two destinations
+    // a bottom bar stretched across that width leaves its destinations
     // stranded far apart, which is exactly the case this breakpoint exists
-    // to catch — a rail with the same 2 destinations is the compact fit.
+    // to catch — a rail with the same 3 destinations is the compact fit.
     final compact = MediaQuery.sizeOf(context).width < 600;
     void select(int index) => setState(() => _chosen = HomeView.values[index]);
 
@@ -169,9 +172,10 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                       selectedIndex: view.index,
                       onDestinationSelected: select,
                       labelType: NavigationRailLabelType.all,
-                      // The two destinations need ~150dp of height. Nothing
-                      // guarantees that once the rail keys off width alone,
-                      // so let them scroll rather than overflow.
+                      // The three destinations need ~220dp of height.
+                      // Nothing guarantees that once the rail keys off
+                      // width alone, so let them scroll rather than
+                      // overflow.
                       scrollable: true,
                       destinations: const [
                         NavigationRailDestination(
@@ -183,6 +187,11 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                           icon: Icon(Icons.calendar_month_outlined),
                           selectedIcon: Icon(Icons.calendar_month),
                           label: Text('Kalendář'),
+                        ),
+                        NavigationRailDestination(
+                          icon: Icon(Icons.groups_outlined),
+                          selectedIcon: Icon(Icons.groups),
+                          label: Text('Klubovna'),
                         ),
                       ],
                     ),
@@ -205,6 +214,11 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                     icon: Icon(Icons.calendar_month_outlined),
                     selectedIcon: Icon(Icons.calendar_month),
                     label: 'Kalendář',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.groups_outlined),
+                    selectedIcon: Icon(Icons.groups),
+                    label: 'Klubovna',
                   ),
                 ],
               )

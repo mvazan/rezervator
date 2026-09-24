@@ -112,16 +112,17 @@ git push origin main v1.1.1
 Za pár minut je na stránce **Releases** podepsané `rezervator-v1.1.0.apk`
 (sdílej odkaz) a v Play na internal tracku je vydaná verze pro testery.
 
-Délku „Co je nového" řešit nemusíš: Play bere 500 znaků na jazyk a
-`tool/whatsnew.dart` delší záznam **sám zkrátí** (`store_notes.dart`) — nejdřív
-nechá z každé odrážky první větu, pak odebírá odrážky od konce, a teprve
-kdyby jedna jediná byla delší než celý limit, ořízne ji na hranici slova.
-Vždycky tedy odejdou celé věty, ne půlka. V appce v Novinkách zůstává plný
-text; zkrácená je jen kopie pro store.
+„Co je nového" v Play bere 500 znaků na jazyk. Záznam v appce může být delší —
+v Novinkách je vždy celý. Když se do 500 znaků nevejde, dostane záznam
+v `changelog_data.dart` vlastní souhrn `store: [...]` s kratšími odrážkami
+(nejdůležitější první), který se píše spolu se záznamem a prochází review
+v PR. `tool/whatsnew.dart` pak do Play pošle přesně ten souhrn.
 
-Pokud chceš mít ve storu přesně to, co je v appce, drž záznam pod 500 znaků —
-test `store_notes_test.dart` upozorní, jakmile se nejnovější vydání začne
-krátit.
+Test `store_notes_test.dart` hlídá, že každá dávka „zatím jen na webu" i
+nejnovější vydání se buď vejde celé, nebo souhrn má — upozorní tedy už při
+psaní changelogu, ne až po vydání. Bez souhrnu by `store_notes.dart` záznam
+zkrátil sám: nechá z každé odrážky první větu a pak odebírá odrážky od konce
+— tak se u 1.2.8 do Play nedostaly Skupiny.
 
 ## Demo přístup pro recenzenty Google Play
 

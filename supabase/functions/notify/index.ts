@@ -25,6 +25,7 @@
 //                           also carries the due reminders (0040): "za 2
 //                           hodiny trénink", by the same push-or-e-mail
 //                           rule as everything else.
+//   CRON notification_jobs -> federation_* jobs (0045): vysledky.kuzelky.cz sync
 //
 // Channel per recipient: FCM push when profiles.fcm_token is set AND
 // FIREBASE_SERVICE_ACCOUNT is configured; otherwise e-mail via Resend.
@@ -38,6 +39,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { pragueEpoch, pragueToday, signCancelToken } from "../_shared/cancel_token.ts";
 import { firebaseConfigured, sendPush } from "../_shared/fcm.ts";
+import { processFederationJobs, siteFetcher } from "../_shared/federation_jobs.ts";
 import { dayLabel, escapeHtml, leadLabel, timeLabel } from "../_shared/format.ts";
 import {
   groupBookedMessage,
@@ -395,6 +397,7 @@ async function processJobs() {
   const { data: jobs } = await supabase.from("notification_jobs")
     .select("id, kind, payload, attempts")
     .lte("run_at", new Date().toISOString())
+    .not("kind", "like", "federation_%")
     .limit(100);
 
   const calendarJobs = (jobs ?? []).filter((job) =>
@@ -557,6 +560,11 @@ async function handle(payload: WebhookPayload) {
     // Its record is null, so it must never reach the row handlers below.
     await processJobs();
     await sendDueReminders();
+    try {
+      await processFederationJobs(supabase, siteFetcher());
+    } catch (error) {
+      console.error("federation jobs failed:", error);
+    }
     return;
   }
 

@@ -127,6 +127,14 @@ String friendlyDbError(Object error) {
     'already_in_group': 'Už jsi v jiné skupině — nejdřív z ní odejdi.',
     'invalid_slug': 'Adresa smí mít 3–40 znaků: malá písmena, číslice a pomlčky.',
     'slug_taken': 'Tuhle adresu už má jiná kuželna.',
+    'invalid_venue_slug':
+        'Adresa kuželny smí mít jen malá písmena bez diakritiky, číslice '
+            'a pomlčky.',
+    'federation_not_configured': 'Nejdřív ulož kuželnu z výsledkového servisu.',
+    'federation_disabled': 'Zapni nejdřív automatické stahování.',
+    'team_name_taken': 'Tým s tímto názvem už existuje.',
+    'teams_name_check': 'Název týmu smí mít nejvýš 80 znaků.',
+    'empty_name': 'Název nesmí být prázdný.',
   };
   for (final entry in messages.entries) {
     if (raw.contains(entry.key)) return entry.value;
