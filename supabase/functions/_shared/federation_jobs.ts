@@ -282,10 +282,17 @@ function unpairedLegacy(
     .map((l) => ({ date: l.date, title: `${l.home_team} – ${l.away_team}` }));
 }
 
+/** null: the job stops — no slot for the match any more, or neither side is
+ * an active team of ours (a job armed before the admin switched the team
+ * off, or refresh_match's): its stored match is left as it is. */
 export async function runMatch(
   db: Db, get: Fetcher, tenantId: string, siteMatchId: number, slug: string, now: Date,
 ): Promise<Date | null> {
   const d = parseMatch(await get(`/detail-zapasu/${slug}`));
+  const teams = must(await db.from("teams").select("site_slug, active")
+    .eq("tenant_id", tenantId)) as { site_slug: string; active: boolean }[];
+  const active = new Set(teams.filter((t) => t.active).map((t) => t.site_slug));
+  if (!active.has(d.homeTeam.slug) && !active.has(d.awayTeam.slug)) return null;
   const applied = must(await db.rpc("apply_federation_result",
     { p_tenant: tenantId, p_site_match_id: siteMatchId, p_result: resultPayload(d) }));
   if (applied === false) return null;

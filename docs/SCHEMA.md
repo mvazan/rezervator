@@ -272,8 +272,9 @@ superseded and retired.
     another active team of the alley, the inactive team's listed matches
     go as `keep_ids`, so they are never "no longer listed", and the run
     arms no `federation_match` job for a match with no active team of
-    ours in it (a job armed before the switch still runs out its
-    checkpoints); when no active team is left in the competition, the
+    ours in it; a job armed before the switch (or queued by
+    `refresh_match`) stops at its next run without writing — see **Match
+    detail**; when no active team is left in the competition, the
     competition is not synced at all. The switch also clears that
     competition's and those matches' errors from `last_error` at once.
 - **Match detail** (`federation_match` job): `apply_federation_result`
@@ -283,7 +284,10 @@ superseded and retired.
   `prep_minutes` (0 away) and the description (`<soutěž> · <n>. kolo`, plus
   ` · <kuželna>` away). It answers `false` (and writes nothing) when the
   tenant has no slot for the match any more — withdrawn, or deleted by
-  hand — and the job then stops instead of re-arming.
+  hand — and the job then stops instead of re-arming. The job also stops,
+  without calling it, when the fetched page shows neither side is an
+  active team of ours (`teams.site_slug`): a job armed before the admin
+  switched the team off, or one `refresh_match` queued, polls no further.
   `enqueue_federation_match` arms the job with dedupe key
   `federation_match:<tenant>:<site_match_id>`; an earlier
   `run_at` wins, so a later checkpoint never pushes back an earlier one,

@@ -198,7 +198,12 @@ type FakeJob = {
 type Call =
   | { kind: "update"; id: unknown; set: Record<string, unknown> }
   | { kind: "delete"; id: unknown }
-  | { kind: "rpc"; name: string; args: Record<string, unknown> };
+  | { kind: "rpc"; name: string; args: Record<string, unknown> }
+  | { kind: "read"; table: string; eqs: [string, unknown][] };
+
+/** The tenant's teams as runMatch reads them: the home side of
+ * match_finished.html (TJ Sokol Rudná A) is an active team of ours. */
+const fixtureTeams = [{ site_slug: "tj-sokol-rudna-a-muzi", active: true }];
 
 /** A minimal in-memory stand-in for the `notification_jobs` slice of the
  * Supabase query builder — just the chains processFederationJobs actually
@@ -207,12 +212,14 @@ type Call =
  * `update().eq()` (the outcome re-arm, no lock) and `delete().eq()`. Mutates
  * `jobs` in place so a test can assert on it directly after the run.
  * `onDue` gets the stored jobs a due query has just read — a stand-in for
- * another tick touching them before this one leases. */
+ * another tick touching them before this one leases. Any other table's
+ * read is logged as a `read` call; `teams` answers `teams`. */
 function fakeJobsDb(
   jobs: FakeJob[],
   onRpc?: (name: string, args: Record<string, unknown>) => { data: unknown; error: unknown },
   leaseError?: { message: string },
   onDue?: (due: FakeJob[]) => void,
+  teams: { site_slug: string; active: boolean }[] = fixtureTeams,
 ) {
   const calls: Call[] = [];
   function chainFor(table: string) {
@@ -256,7 +263,10 @@ function fakeJobsDb(
       },
     };
     async function resolve() {
-      if (table !== "notification_jobs") return { data: [], error: null };
+      if (table !== "notification_jobs") {
+        calls.push({ kind: "read", table, eqs });
+        return { data: table === "teams" ? teams.map((t) => ({ ...t })) : [], error: null };
+      }
       const idEq = eqs.find(([c]) => c === "id")?.[1];
       if (isDelete) {
         const at = jobs.findIndex((j) => j.id === idEq);
@@ -325,6 +335,52 @@ Deno.test("processFederationJobs: a successful match job is re-armed — run_at/
     { kind: "update"; id: unknown; set: Record<string, unknown> }[];
   assert(writes.length > 0);
   for (const w of writes) assertEquals(Object.keys(w.set).sort(), ["attempts", "run_at"]);
+});
+
+Deno.test("processFederationJobs: a match job whose teams of ours are all switched off is dropped unwritten", async () => {
+  // A job armed before the admin switched the team off, or by refresh_match:
+  // the page shows neither side is an active team of ours, so no result is
+  // written and the job stops instead of polling the match to its end.
+  const slug = "divize-as-2026-2027-kolo-1-tj-sokol-rudna-a-muzi-tj-sokol-vrsovice-a-muzi";
+  const now = new Date(pragueEpoch("2026-09-16", "17:30") * 1000 + 3600e3);
+  const jobs: FakeJob[] = [{
+    id: 30, kind: "federation_match", attempts: 0,
+    run_at: new Date(now.getTime() - 60e3).toISOString(),
+    payload: { tenant_id: "t1", site_match_id: 4859, slug },
+  }];
+  const { db, calls } = fakeJobsDb(jobs, undefined, undefined, undefined, [
+    { site_slug: "tj-sokol-rudna-a-muzi", active: false },
+    { site_slug: "tj-sokol-brno-iv-muzi", active: true },
+  ]);
+
+  await processFederationJobs(db, async () => fixture("match_finished.html"), now);
+
+  assertEquals(jobs.length, 0);
+  assert(calls.some((c) => c.kind === "delete" && c.id === 30));
+  assert(!calls.some((c) => c.kind === "rpc" && c.name === "apply_federation_result"));
+  const read = calls.find((c) => c.kind === "read" && c.table === "teams") as
+    { kind: "read"; table: string; eqs: [string, unknown][] } | undefined;
+  assertEquals(read?.eqs, [["tenant_id", "t1"]]);
+});
+
+Deno.test("processFederationJobs: a match job runs when either side is an active team of ours", async () => {
+  const slug = "divize-as-2026-2027-kolo-1-tj-sokol-rudna-a-muzi-tj-sokol-vrsovice-a-muzi";
+  const start = pragueEpoch("2026-09-16", "17:30") * 1000;
+  const now = new Date(start + 3600e3);
+  const jobs: FakeJob[] = [{
+    id: 31, kind: "federation_match", attempts: 0,
+    run_at: new Date(now.getTime() - 60e3).toISOString(),
+    payload: { tenant_id: "t1", site_match_id: 4859, slug },
+  }];
+  const { db, calls } = fakeJobsDb(jobs, undefined, undefined, undefined, [
+    { site_slug: "tj-sokol-rudna-a-muzi", active: false },
+    { site_slug: "tj-sokol-vrsovice-a-muzi", active: true },
+  ]);
+
+  await processFederationJobs(db, async () => fixture("match_finished.html"), now);
+
+  assert(calls.some((c) => c.kind === "rpc" && c.name === "apply_federation_result"));
+  assertEquals(jobs[0].run_at, new Date(start + 24 * 3600e3).toISOString());
 });
 
 Deno.test("processFederationJobs: a match job whose slot is gone is deleted, not re-armed", async () => {
