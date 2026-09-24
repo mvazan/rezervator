@@ -60,6 +60,31 @@ Deno.test("team placeholders: a missing name falls back to the slug, a missing s
   assertThrows(() => parseCompetition(page({ id: 1, name: "KK A", slug: "$L7" })));
 });
 
+Deno.test("match placeholders: a missing slug or date is refused, other texts fall back to empty", () => {
+  const page = (over: Record<string, unknown>, title: unknown = "X") => {
+    const m = {
+      id: 1, slug: "x-kolo-1-a-b", date: "2026-10-10", time: "10:00", round: 1,
+      status: "SCHEDULED", matchType: "TEAMS_OF_6", discipline: "T120", videoUrl: "$undefined",
+      homeTeam: { id: 1, name: "KK A", slug: "kk-a-muzi" },
+      awayTeam: { id: 2, name: "KK B", slug: "kk-b-muzi" },
+      competition: { slug: "x", name: "X" },
+      ...over,
+    };
+    const data = { data: { title, rounds: [{ id: 1 }], currentRound: { id: 1, matches: [m] } } };
+    return `<script>self.__next_f.push([1,${JSON.stringify(`5:${JSON.stringify(data)}`)}])</script>`;
+  };
+  assertThrows(() => parseCompetition(page({ slug: "$undefined" })), Error, "bad match");
+  assertThrows(() => parseCompetition(page({ date: "$undefined" })), Error, "bad match");
+  const c = parseCompetition(page({
+    matchType: "$undefined", discipline: "$undefined",
+    competition: { slug: "$undefined", name: "$undefined" },
+  }, "$undefined"));
+  assertEquals(c.name, "");
+  assertEquals(c.matches[0].matchType, "");
+  assertEquals(c.matches[0].discipline, "");
+  assertEquals(c.matches[0].competition, { slug: "", name: "" });
+});
+
 Deno.test("a competition page whose rounds do not list the current round is refused", () => {
   const page = (rounds: { id: number }[]) => {
     const m = {

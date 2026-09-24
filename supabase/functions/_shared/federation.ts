@@ -94,14 +94,18 @@ function team(v: unknown): SiteTeam {
 function siteMatch(v: unknown): SiteMatch {
   const m = v as Json;
   const status = String(m.status);
-  if (typeof m.id !== "number" || !STATUSES.has(status)) throw new Error("bad match");
+  const slug = str(m.slug);
+  const date = str(m.date);
+  if (typeof m.id !== "number" || !STATUSES.has(status) || !slug || !date) {
+    throw new Error("bad match");
+  }
   const c = m.competition as Json;
   return {
-    id: m.id, slug: String(m.slug), date: String(m.date), time: str(m.time),
+    id: m.id, slug, date, time: str(m.time),
     round: Number(m.round), status: status as MatchStatus,
-    matchType: String(m.matchType ?? ""), discipline: String(m.discipline ?? ""),
+    matchType: str(m.matchType) ?? "", discipline: str(m.discipline) ?? "",
     videoUrl: str(m.videoUrl), homeTeam: team(m.homeTeam), awayTeam: team(m.awayTeam),
-    competition: { slug: String(c?.slug ?? ""), name: String(c?.name ?? "") },
+    competition: { slug: str(c?.slug) ?? "", name: str(c?.name) ?? "" },
   };
 }
 
@@ -120,7 +124,7 @@ export function parseCompetition(html: string): SiteCompetition {
   if (!roundIds.includes(currentRound)) throw new Error("competition rounds missing");
   const standings = ((data.standings as Json | undefined)?.total ?? []) as Json[];
   return {
-    name: String(data.title),
+    name: str(data.title) ?? "",
     roundIds,
     currentRound,
     matches: current.matches.map(siteMatch),
