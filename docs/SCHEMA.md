@@ -52,7 +52,7 @@ and what cascades — and is updated with every migration.
 | `time_blocks` | `starts_at`, `ends_at`, `position`, `active`. `position = -1` marks a day-special block: inactive, reachable only through `day_overrides.block_ids` | select approved/kiosk; insert/update/delete admin. FK from `reservations` is RESTRICT — only never-used blocks can be deleted. |
 | `day_overrides` | PK (`tenant_id`, `date`); `closed`, `reason`, `block_ids uuid[]` (`null` = the default active set) | select approved/kiosk; write admin. Normally written through `set_day_override`. |
 | `priority_slot_types` | `name` unique per tenant, `color` (−1 = none), `lanes smallint[]` (`null` = whole alley), `is_match`, `builtin` ('Zápas', 'Úklid před zápasem' seeded per tenant) | select approved/kiosk; insert/update admin (**column grants: `name, color, lanes` only**); delete admin ∧ `not builtin`. |
-| `priority_slots` | `date`, `starts_at`, `ends_at`, `type_id`, `home_team`, `away_team`, `prep_minutes` 0–240, `description`, `parent_id` (the auto-managed úklid child), `is_away` (announced, blocks nothing), `import_key` (unique per tenant; `null` = entered by hand in the app, otherwise `rozpis:<soutěž>:<kolo>:<domácí> – <hosté>` set by the old xlsx importer (retired, see **Výsledkový servis ČKA** below) — date-free, so a postponed match is an update of the same row; rows keyed `xlsx:<date>:<teams>` by the 2026/27 grid workbook were re-keyed by the first run of the flat-list importer), `hand_edited` (0038: an imported row whose match columns changed outside an import run — the sync skips it; see **Výsledkový servis ČKA** below). Federation columns (0045, written only by the sync, never compared by the hand-edit trigger, all public in `public_week`): `video_url`, `competition`, `round`, `site_slug` (the match's page on vysledky.kuzelky.cz), `site_match_id`, `venue` / `venue_slug` (from the match detail — once known, they decide `is_away`). Since 0045 the sync keys its rows `cka:<site_match_id>`. | select approved/kiosk; write admin. |
+| `priority_slots` | `date`, `starts_at`, `ends_at`, `type_id`, `home_team`, `away_team`, `prep_minutes` 0–240, `description`, `parent_id` (the auto-managed úklid child), `is_away` (announced, blocks nothing), `import_key` (unique per tenant; `null` = entered by hand in the app, otherwise `rozpis:<soutěž>:<kolo>:<domácí> – <hosté>` set by the old xlsx importer (retired, see **Výsledkový servis ČKA** below) — date-free, so a postponed match is an update of the same row; rows keyed `xlsx:<date>:<teams>` by the 2026/27 grid workbook were re-keyed by the first run of the flat-list importer), `hand_edited` (0038: an imported row whose match columns changed outside an import run — the sync skips it; see **Výsledkový servis ČKA** below). Federation columns (0045, written only by the sync, never compared by the hand-edit trigger, all public in `public_week`): `video_url`, `competition`, `round`, `site_slug` (the match's page on vysledky.kuzelky.cz), `site_match_id`, `venue` / `venue_slug` (from the match detail — once known, they decide `is_away`), `home_team_slug` / `away_team_slug` (the site's team slugs, `teams.site_slug` for ours — how the sync tells our teams in a stored match, since `home_team`/`away_team` follow an admin's rename only at the next sync). Since 0045 the sync keys its rows `cka:<site_match_id>`. | select approved/kiosk; write admin. |
 | `rentals` | `renter_name`, `lanes`, exactly one of `date` / `weekday`, `starts_at`, `ends_at`, `valid_from/until`, `note`, `color` (−2 = default tint). **Grouped dates** (0041): `group_id` — see `rental_groups`. **Exception rows** (0021): `parent_id → rentals` (cascade delete) + `date` = the one occurrence of that weekly series they override, with their own `lanes`, `starts_at`, `ends_at`, `note`; `skipped` = the occurrence does not happen. One per (`parent_id`, `date`). `renter_name`/`color` are copied from the series by `rental_exception_guard`, which also rejects an off-series date, a one-time or child parent and a foreign tenant (`rental_exception_invalid`); `rental_series_changed` prunes children a series edit orphans and re-copies name/colour. | select approved/kiosk; write admin. |
 | `rental_groups` | `renter_name`, `color` (−2 = default tint; the same domain as `rentals.color`, hand-picked values included — `rental_groups_color_check`). One renter with several one-time dates (0041): `rentals.group_id → rental_groups` (cascade delete), allowed only on a row with `date` and no `parent_id` (`rentals_group_shape_check`). `rental_group_guard` copies name/colour onto a grouped row and refuses a foreign tenant (`rental_group_invalid`); `rental_group_changed` propagates a group edit; `rental_group_prune` deletes a group with its last date. A lone one-time rental has no group. **Not in the Realtime publication, on purpose**: the app derives groups from the `rentals` rows it already streams (`rentalGroupsOf`), and a rename reaches the client through `rental_group_changed` copying name/colour onto those rows — a second stream would carry nothing the client needs. | select approved/kiosk; write admin. |
 | `reservations` | `player_id`, `date`, `block_id`, `lane`, `created_via` app\|kiosk\|admin\|group (0044), `cancelled_at/via` app\|one_click\|admin\|group (0044), `cancelled_by` (0044: who actually cancelled it — the owner or a fellow group member, for "Petr ti zrušil trénink"), `cancel_note`, `notify_player`, `notify_message` (per-change intent for the notify function) | **select only** (approved/kiosk). Every write is an RPC, a trigger, or the `cancel` edge function. Live slots are unique: `(date, block_id, lane) where cancelled_at is null`. |
@@ -230,8 +230,8 @@ superseded and retired.
     have just one candidate). Team names compare without case, accents and
     a trailing ` A`.
   - **Update in place, only on a difference.** `video_url`, `competition`,
-    `round`, `site_slug`, `site_match_id` are always rewritten and never
-    count as `updated`; the match columns (date, times, teams,
+    `round`, `site_slug`, `site_match_id`, `home_team_slug`,
+    `away_team_slug` are always rewritten and never count as `updated`; the match columns (date, times, teams,
     `prep_minutes`, `description`, `is_away`) only when not `hand_edited` —
     a hand-edited row is listed in the report's `skipped_hand_edited`
     instead. Home/away: an insert takes the guess `home_is_ours`; a stored
@@ -310,8 +310,11 @@ superseded and retired.
     no active team of the alley plays; a `venue:` that is neither
     `federation_sync.venue_slug` nor any of the alley's matches'
     `venue_slug`; a `match:` with no `cka:<id>` slot any more, or whose
-    teams of ours (`teams.name` = `home_team`/`away_team`) are all
-    switched off (a match that names none of our teams stays live).
+    teams of ours are all switched off (`federation_match_switched_off`:
+    by `teams.site_slug` = `home_team_slug`/`away_team_slug`, as the match
+    job tells them — never by name, so renaming a team and switching it
+    off in one save still kills its matches; a match none of our teams
+    plays stays live).
   - `last_error` (`federation_last_error(tenant, report)`) is the `error`
     of the newest live entry that has one, or null: a match or venue
     failure shows until that key succeeds again, a retry that worked
@@ -785,7 +788,8 @@ and FCM is configured, e-mail otherwise.
   competitions stamping a run, a match or venue success removing just its
   own key or writing nothing — and `last_error` as the newest error of a
   live key, dead keys (a switched-off competition, a deleted or
-  switched-off match, a foreign venue) pruned on every write and at once
+  switched-off match — told by team slug, so also when renamed in the
+  same save — a foreign venue) pruned on every write and at once
   on `update_team`, `set_federation_sync` and a discovery rollover, per
   alley; the calendar-trigger rule — only a change of what the event shows
   enqueues, and never for a match in the past before and after; and the

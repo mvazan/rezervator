@@ -14,10 +14,13 @@ export type Fetcher = (path: string) => Promise<string>;
 export type Db = any;
 
 export type TeamRow = { site_slug: string; name: string; active: boolean };
+/** `home_slug`/`away_slug`: the site's team slugs — how the database tells
+ * our teams in a stored match, whatever the admin renamed them to. */
 export type SlotRow = {
   site_match_id: number; site_slug: string; date: string; starts_at: string; ends_at: string;
   home: string; away: string; home_is_ours: boolean; prep: number; competition: string;
   round: number; video_url: string | null; legacy_id: string | null;
+  home_slug: string; away_slug: string;
 };
 export type TeamUpsert = {
   site_slug: string; site_team_id: number | null; site_name: string;
@@ -75,6 +78,7 @@ export function planCompetition(args: {
       away: nameOf.get(m.awayTeam.slug) ?? m.awayTeam.name,
       home_is_ours: ours.has(m.homeTeam.slug), prep: HOME_PREP_MINUTES,
       competition: m.competition.name, round: m.round, video_url: m.videoUrl, legacy_id: null,
+      home_slug: m.homeTeam.slug, away_slug: m.awayTeam.slug,
     });
   }
   const pairs = pairLegacy(

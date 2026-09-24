@@ -42,6 +42,9 @@ Deno.test("planCompetition keeps our active teams' matches, once, with app names
     date: "2026-10-10", starts_at: "10:00", ends_at: "13:00",
     home: "TJ Sokol Brno IV A", away: "KC Zlín B", home_is_ours: true, prep: 30,
     competition: "Jihomoravská divize", round: 1, video_url: null, legacy_id: null,
+    // The site's team slugs, so the database can tell our teams apart the
+    // way runMatch does, whatever the admin renamed them to.
+    home_slug: "tj-sokol-brno-iv-muzi", away_slug: "kc-zlin-b-muzi",
   });
 });
 

@@ -51,7 +51,10 @@ alter publication supabase_realtime add table federation_sync;
 
 -- ------------------------------------------------ priority_slots columns
 -- Federation-only columns: the sync may always rewrite them, so the
--- hand_edited trigger (0038) does not compare them.
+-- hand_edited trigger (0038) does not compare them. home_team_slug /
+-- away_team_slug are the site's team slugs (teams.site_slug): the sync
+-- tells our teams by them, as the match job does, since the names in
+-- home_team/away_team follow an admin's rename only at the next sync.
 alter table priority_slots
   add column video_url text,
   add column competition text,
@@ -59,7 +62,9 @@ alter table priority_slots
   add column site_slug text,
   add column site_match_id integer,
   add column venue text,
-  add column venue_slug text;
+  add column venue_slug text,
+  add column home_team_slug text,
+  add column away_team_slug text;
 
 -- 0027/0039's calendar trigger enqueued on every UPDATE. The sync rewrites
 -- the columns above (video link a day later, venue, rekey) and the calendar
@@ -262,7 +267,8 @@ begin
       insert into priority_slots
         (tenant_id, date, starts_at, ends_at, type_id, home_team, away_team,
          prep_minutes, description, is_away, created_by, import_key,
-         video_url, competition, round, site_slug, site_match_id)
+         video_url, competition, round, site_slug, site_match_id,
+         home_team_slug, away_team_slug)
       values
         (p_tenant, (m->>'date')::date, (m->>'starts_at')::time, (m->>'ends_at')::time,
          v_type, m->>'home', m->>'away',
@@ -270,7 +276,8 @@ begin
          federation_description(m->>'competition', (m->>'round')::integer, v_is_away, null),
          v_is_away, v_admin, v_key,
          m->>'video_url', m->>'competition', (m->>'round')::smallint,
-         m->>'site_slug', (m->>'site_match_id')::integer);
+         m->>'site_slug', (m->>'site_match_id')::integer,
+         m->>'home_slug', m->>'away_slug');
       v_ins := v_ins + 1;
       continue;
     end if;
@@ -278,12 +285,15 @@ begin
     update priority_slots
        set video_url = m->>'video_url', competition = m->>'competition',
            round = (m->>'round')::smallint, site_slug = m->>'site_slug',
-           site_match_id = (m->>'site_match_id')::integer
+           site_match_id = (m->>'site_match_id')::integer,
+           home_team_slug = m->>'home_slug', away_team_slug = m->>'away_slug'
      where id = v_row.id
-       and (video_url, competition, round, site_slug, site_match_id)
+       and (video_url, competition, round, site_slug, site_match_id,
+            home_team_slug, away_team_slug)
            is distinct from
            (m->>'video_url', m->>'competition', (m->>'round')::smallint,
-            m->>'site_slug', (m->>'site_match_id')::integer);
+            m->>'site_slug', (m->>'site_match_id')::integer,
+            m->>'home_slug', m->>'away_slug');
 
     -- Once a detail fetch told us the venue, it decides home/away. Before
     -- that the stored value stands: a legacy row knew it better than the
@@ -493,13 +503,28 @@ returns void language sql security definer set search_path = public as $$
     sections = excluded.sections, clubs = excluded.clubs, fetched_at = now();
 $$;
 
+-- A stored match that teams of ours play, every one of them switched off:
+-- the sync no longer polls it, and a match job already armed stops
+-- unwritten. Our teams are told by the site's team slugs, as the match job
+-- tells them (teams.site_slug = home_team_slug/away_team_slug), never by
+-- the names, which follow an admin's rename only at the next sync. A match
+-- no team of ours plays is not switched off.
+create or replace function federation_match_switched_off(
+  p_tenant uuid, p_home_slug text, p_away_slug text)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from teams t
+                  where t.tenant_id = p_tenant and t.site_slug in (p_home_slug, p_away_slug))
+     and not exists (select 1 from teams t
+                      where t.tenant_id = p_tenant and t.active
+                        and t.site_slug in (p_home_slug, p_away_slug))
+$$;
+
 -- last_report without its dead keys — the ones that can no longer run for
 -- the alley: a competition:<slug> no active team of the alley plays; a
 -- venue:<slug> that is neither federation_sync.venue_slug nor any of the
 -- alley's matches' venue; a match:<site_match_id> with no cka:<id> slot any
--- more, or whose teams of ours (teams.name = home_team/away_team) are all
--- switched off. A match that names no team of ours stays live — its job
--- still runs. discover, and any other key, is always live.
+-- more, or switched off (federation_match_switched_off). A match no team
+-- of ours plays stays live. discover, and any other key, is always live.
 create or replace function federation_live_report(p_tenant uuid, p_report jsonb)
 returns jsonb language sql stable security definer set search_path = public as $$
   select coalesce(jsonb_object_agg(e.key, e.value), '{}'::jsonb)
@@ -519,12 +544,7 @@ returns jsonb language sql stable security definer set search_path = public as $
      when 'match' then exists (
        select 1 from priority_slots p
         where p.tenant_id = p_tenant and p.import_key = 'cka:' || k.id
-          and (exists (select 1 from teams t
-                        where t.tenant_id = p_tenant and t.active
-                          and t.name in (p.home_team, p.away_team))
-               or not exists (select 1 from teams t
-                               where t.tenant_id = p_tenant
-                                 and t.name in (p.home_team, p.away_team))))
+          and not federation_match_switched_off(p_tenant, p.home_team_slug, p.away_team_slug))
      else true
    end
 $$;
@@ -671,6 +691,7 @@ revoke all on function enqueue_federation_match(uuid, integer, text, timestamptz
 revoke all on function enqueue_federation_jobs() from public, anon, authenticated;
 revoke all on function enqueue_federation_venue(uuid, text, interval) from public, anon, authenticated;
 revoke all on function upsert_federation_venue(uuid, jsonb) from public, anon, authenticated;
+revoke all on function federation_match_switched_off(uuid, text, text) from public, anon, authenticated;
 revoke all on function federation_live_report(uuid, jsonb) from public, anon, authenticated;
 revoke all on function federation_last_error(uuid, jsonb) from public, anon, authenticated;
 revoke all on function federation_refresh_error(uuid) from public, anon, authenticated;

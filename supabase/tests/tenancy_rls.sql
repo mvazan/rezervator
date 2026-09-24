@@ -3145,11 +3145,11 @@ begin
   end if;
 
   v_keys := array(select jsonb_object_keys(v->'priority_slots'->0) order by 1);
-  if v_keys <> array['away_team', 'competition', 'date', 'description', 'ends_at',
-                      'hand_edited', 'home_team', 'id', 'import_key', 'is_away',
-                      'parent_id', 'prep_minutes', 'round', 'site_match_id',
-                      'site_slug', 'starts_at', 'type_id', 'venue', 'venue_slug',
-                      'video_url'] then
+  if v_keys <> array['away_team', 'away_team_slug', 'competition', 'date', 'description',
+                      'ends_at', 'hand_edited', 'home_team', 'home_team_slug', 'id',
+                      'import_key', 'is_away', 'parent_id', 'prep_minutes', 'round',
+                      'site_match_id', 'site_slug', 'starts_at', 'type_id', 'venue',
+                      'venue_slug', 'video_url'] then
     raise exception 'FAIL: public_week''s priority_slots keys changed — a new column may be reaching anon: %', v_keys;
   end if;
 
@@ -4503,7 +4503,8 @@ begin
                            'public.enqueue_federation_venue(uuid, text, interval)',
                            'public.federation_live_report(uuid, jsonb)',
                            'public.federation_last_error(uuid, jsonb)',
-                           'public.federation_refresh_error(uuid)'] loop
+                           'public.federation_refresh_error(uuid)',
+                           'public.federation_match_switched_off(uuid, text, text)'] loop
     if has_function_privilege('authenticated', f, 'execute')
        or has_function_privilege('anon', f, 'execute') then
       raise exception 'FAIL: % is callable from the app', f;
@@ -4580,11 +4581,14 @@ begin
   raise notice 'OK: record_federation_run keeps a report or an error per key and the last error (0045)';
 end $$;
 
--- Fixtures for 13b–13d. B's active Kuželna B (krajsky-prebor, from 11)
--- plays away at 921 and 922; the switched-off Kuželna B rezerva
--- (okresni-prebor) alone plays 923; 924 names no team of B's at all. A has
--- an active team of the rezerva's name in okresni-prebor and a match 925,
--- so a liveness check that forgot the tenant would keep B's dead keys.
+-- Fixtures for 13b–13d. B's active Kuželna B (kuzelna-b-a, krajsky-prebor,
+-- from 11) plays away at 921 and 922; the switched-off Kuželna B rezerva
+-- (kuzelna-b-b, okresni-prebor) alone plays 923; 924 names no team of B's
+-- at all; 926 is a derby of the two where Kuželna B still carries a name
+-- it no longer has. Our teams are told apart by the site's team slugs, as
+-- runMatch does, never by the names. A has an active team with the
+-- rezerva's slug in okresni-prebor and a match 925, so a liveness check
+-- that forgot the tenant would keep B's dead keys.
 do $$
 declare
   v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
@@ -4592,20 +4596,26 @@ declare
 begin
   insert into teams (tenant_id, name, site_slug, competition_slug, active)
   values (v_b, 'Kuželna B rezerva', 'kuzelna-b-b', 'okresni-prebor-2026-2027', false),
-         (v_a, 'Kuželna B rezerva', 'cizi-rezerva', 'okresni-prebor-2026-2027', true);
+         (v_a, 'Kuželna B rezerva', 'kuzelna-b-b', 'okresni-prebor-2026-2027', true);
   insert into priority_slots
     (tenant_id, date, starts_at, ends_at, type_id, home_team, away_team,
+     home_team_slug, away_team_slug,
      prep_minutes, description, is_away, created_by, import_key, site_match_id, venue_slug)
   select x.tenant_id, current_date + 60 + x.n - 921, '10:00', '13:00',
          (select id from priority_slot_types
            where tenant_id = x.tenant_id and is_match and builtin),
-         'KK Hosté', x.away, 0, 'Fixture 13b', true,
+         x.home, x.away, x.home_slug, x.away_slug, 0, 'Fixture 13b', true,
          (select id from profiles where tenant_id = x.tenant_id and role = 'admin'
            order by created_at, id limit 1),
          'cka:' || x.n, x.n, 'hoste-' || x.n
-    from (values (v_b, 921, 'Kuželna B'), (v_b, 922, 'Kuželna B'),
-                 (v_b, 923, 'Kuželna B rezerva'), (v_b, 924, 'KK Jiní'),
-                 (v_a, 925, 'Kuželna B rezerva')) x(tenant_id, n, away);
+    from (values
+      (v_b, 921, 'KK Hosté', 'kk-hoste', 'Kuželna B', 'kuzelna-b-a'),
+      (v_b, 922, 'KK Hosté', 'kk-hoste', 'Kuželna B', 'kuzelna-b-a'),
+      (v_b, 923, 'KK Hosté', 'kk-hoste', 'Kuželna B rezerva', 'kuzelna-b-b'),
+      (v_b, 924, 'KK Hosté', 'kk-hoste', 'KK Jiní', 'kk-jini'),
+      (v_a, 925, 'KK Hosté', 'kk-hoste', 'Kuželna B rezerva', 'kuzelna-b-b'),
+      (v_b, 926, 'Kuželna B stará', 'kuzelna-b-a', 'Kuželna B rezerva', 'kuzelna-b-b'))
+      x(tenant_id, n, home, home_slug, away, away_slug);
   perform set_config('probe.fed_a_sync',
     (select to_jsonb(f)::text from federation_sync f where tenant_id = v_a), true);
 end $$;
@@ -4712,6 +4722,12 @@ begin
     raise exception 'FAIL: A''s newest live error should be its venue''s: %',
       federation_last_error(v_a, v_dead);
   end if;
+  -- 926's names match only the switched-off rezerva, but its slugs say the
+  -- active Kuželna B plays it: its job still runs, so its error counts.
+  if federation_last_error(v_b, jsonb_build_object('match:926',
+       jsonb_build_object('error', 'derby', 'at', now()))) is distinct from 'derby' then
+    raise exception 'FAIL: a match an active team of ours plays under an old name was dead';
+  end if;
 
   -- Errors written while their keys were live: the next write drops them.
   perform record_federation_run(v_b, 'match:922', null, null);
@@ -4776,9 +4792,11 @@ begin
 end $$;
 
 -- 13d. A configuration change that kills keys recomputes last_error at
--- once: switching off a competition's only team (update_team), moving the
--- alley's kuželna (set_federation_sync), a discovery that rolls a team
--- over to the next season (upsert_federation_teams). Only that alley's row.
+-- once: switching off a competition's only team (update_team — renamed in
+-- the same save, which its slots do not follow until the next sync),
+-- moving the alley's kuželna (set_federation_sync), a discovery that rolls
+-- a team over to the next season (upsert_federation_teams). Only that
+-- alley's row.
 do $$
 declare
   v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
@@ -4800,14 +4818,14 @@ begin
   perform set_config('probe.fed_team_b',
     (select id::text from teams where tenant_id = v_b and site_slug = 'kuzelna-b-a'), true);
   perform set_config('probe.fed_team_a_rezerva',
-    (select id::text from teams where tenant_id = v_a and site_slug = 'cizi-rezerva'), true);
+    (select id::text from teams where tenant_id = v_a and site_slug = 'kuzelna-b-b'), true);
 end $$;
 set local role authenticated;
 set local request.jwt.claims =
   '{"sub":"10000000-0000-0000-0000-000000000002","role":"authenticated"}';
 do $$
 begin
-  perform update_team(current_setting('probe.fed_team_b')::uuid, 'Kuželna B', null, false);
+  perform update_team(current_setting('probe.fed_team_b')::uuid, 'Kuželna B muži', null, false);
 end $$;
 reset role;
 do $$
@@ -4885,9 +4903,10 @@ begin
 
   -- Back to the fixtures the later sections expect.
   perform record_federation_run(v_b, 'match:921', null, null);
-  delete from priority_slots where import_key in ('cka:921', 'cka:923', 'cka:924', 'cka:925')
-                               and tenant_id in (v_a, v_b);
-  delete from teams where (tenant_id, site_slug) in ((v_b, 'kuzelna-b-b'), (v_a, 'cizi-rezerva'));
+  delete from priority_slots
+   where import_key in ('cka:921', 'cka:923', 'cka:924', 'cka:925', 'cka:926')
+     and tenant_id in (v_a, v_b);
+  delete from teams where (tenant_id, site_slug) in ((v_b, 'kuzelna-b-b'), (v_a, 'kuzelna-b-b'));
   update teams set competition_slug = 'krajsky-prebor-2026-2027'
    where tenant_id = v_b and site_slug = 'kuzelna-b-a';
   update federation_sync set venue_slug = 'kuzelna-b' where tenant_id = v_b;

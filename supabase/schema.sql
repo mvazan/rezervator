@@ -120,7 +120,8 @@ begin
       insert into priority_slots
         (tenant_id, date, starts_at, ends_at, type_id, home_team, away_team,
          prep_minutes, description, is_away, created_by, import_key,
-         video_url, competition, round, site_slug, site_match_id)
+         video_url, competition, round, site_slug, site_match_id,
+         home_team_slug, away_team_slug)
       values
         (p_tenant, (m->>'date')::date, (m->>'starts_at')::time, (m->>'ends_at')::time,
          v_type, m->>'home', m->>'away',
@@ -128,7 +129,8 @@ begin
          federation_description(m->>'competition', (m->>'round')::integer, v_is_away, null),
          v_is_away, v_admin, v_key,
          m->>'video_url', m->>'competition', (m->>'round')::smallint,
-         m->>'site_slug', (m->>'site_match_id')::integer);
+         m->>'site_slug', (m->>'site_match_id')::integer,
+         m->>'home_slug', m->>'away_slug');
       v_ins := v_ins + 1;
       continue;
     end if;
@@ -136,12 +138,15 @@ begin
     update priority_slots
        set video_url = m->>'video_url', competition = m->>'competition',
            round = (m->>'round')::smallint, site_slug = m->>'site_slug',
-           site_match_id = (m->>'site_match_id')::integer
+           site_match_id = (m->>'site_match_id')::integer,
+           home_team_slug = m->>'home_slug', away_team_slug = m->>'away_slug'
      where id = v_row.id
-       and (video_url, competition, round, site_slug, site_match_id)
+       and (video_url, competition, round, site_slug, site_match_id,
+            home_team_slug, away_team_slug)
            is distinct from
            (m->>'video_url', m->>'competition', (m->>'round')::smallint,
-            m->>'site_slug', (m->>'site_match_id')::integer);
+            m->>'site_slug', (m->>'site_match_id')::integer,
+            m->>'home_slug', m->>'away_slug');
 
     -- Once a detail fetch told us the venue, it decides home/away. Before
     -- that the stored value stands: a legacy row knew it better than the
@@ -499,6 +504,8 @@ CREATE TABLE IF NOT EXISTS "public"."priority_slots" (
     "site_match_id" integer,
     "venue" "text",
     "venue_slug" "text",
+    "home_team_slug" "text",
+    "away_team_slug" "text",
     CONSTRAINT "matches_check" CHECK (("ends_at" > "starts_at")),
     CONSTRAINT "matches_prep_minutes_check" CHECK ((("prep_minutes" >= 0) AND ("prep_minutes" <= 240)))
 );
@@ -1250,18 +1257,28 @@ CREATE OR REPLACE FUNCTION "public"."federation_live_report"("p_tenant" "uuid", 
      when 'match' then exists (
        select 1 from priority_slots p
         where p.tenant_id = p_tenant and p.import_key = 'cka:' || k.id
-          and (exists (select 1 from teams t
-                        where t.tenant_id = p_tenant and t.active
-                          and t.name in (p.home_team, p.away_team))
-               or not exists (select 1 from teams t
-                               where t.tenant_id = p_tenant
-                                 and t.name in (p.home_team, p.away_team))))
+          and not federation_match_switched_off(p_tenant, p.home_team_slug, p.away_team_slug))
      else true
    end
 $$;
 
 
 ALTER FUNCTION "public"."federation_live_report"("p_tenant" "uuid", "p_report" "jsonb") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."federation_match_switched_off"("p_tenant" "uuid", "p_home_slug" "text", "p_away_slug" "text") RETURNS boolean
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  select exists (select 1 from teams t
+                  where t.tenant_id = p_tenant and t.site_slug in (p_home_slug, p_away_slug))
+     and not exists (select 1 from teams t
+                      where t.tenant_id = p_tenant and t.active
+                        and t.site_slug in (p_home_slug, p_away_slug))
+$$;
+
+
+ALTER FUNCTION "public"."federation_match_switched_off"("p_tenant" "uuid", "p_home_slug" "text", "p_away_slug" "text") OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."federation_refresh_error"("p_tenant" "uuid") RETURNS "void"
@@ -4820,6 +4837,11 @@ GRANT ALL ON FUNCTION "public"."federation_last_error"("p_tenant" "uuid", "p_rep
 
 REVOKE ALL ON FUNCTION "public"."federation_live_report"("p_tenant" "uuid", "p_report" "jsonb") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."federation_live_report"("p_tenant" "uuid", "p_report" "jsonb") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."federation_match_switched_off"("p_tenant" "uuid", "p_home_slug" "text", "p_away_slug" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."federation_match_switched_off"("p_tenant" "uuid", "p_home_slug" "text", "p_away_slug" "text") TO "service_role";
 
 
 
