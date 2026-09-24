@@ -74,13 +74,49 @@ void main() {
       }
     });
 
-    test('the newest release needs no shortening — the entry is written to '
-        'fit, and this is the reminder when it stops fitting', () {
+    test('every hand-written store summary fits', () {
+      for (final r in appChangelog.where((r) => r.store != null)) {
+        expect(storeText(r).length, lessThanOrEqualTo(500),
+            reason: 'souhrn pro store u ${r.version ?? r.date}');
+      }
+    });
+
+    test('the newest release and every web-only batch reach the store '
+        'whole — the entry fits, or it carries its own store summary', () {
       final newest = appChangelog.firstWhere((r) => r.version != null);
-      final full = newest.changes.map((c) => '• $c').join('\n');
-      expect(storeNotes(newest.changes), full,
-          reason: 'verze ${newest.version} by se ořezala; zkrať ji v '
-              'changelog_data.dart, ať je ve storu přesně to, co je v appce');
+      for (final r in [
+        ...appChangelog.where((r) => r.version == null),
+        newest,
+      ]) {
+        final full = r.changes.map((c) => '• $c').join('\n');
+        expect(r.store != null || storeNotes(r.changes) == full, isTrue,
+            reason: 'záznam ${r.version ?? r.date} se do 500 znaků pro '
+                'Google Play nevejde a automatické zkrácení by z něj '
+                'vypustilo odrážky — dopiš mu v changelog_data.dart '
+                'store: [...] s kratšími odrážkami');
+      }
+    });
+  });
+
+  group('storeText', () {
+    test('an entry without a store summary is condensed by storeNotes', () {
+      const r = Release('9.9.9', '1. 1. 2027', ['První věc.', 'Druhá věc.']);
+      expect(storeText(r), storeNotes(r.changes));
+    });
+
+    test('a store summary replaces the automatic condensation, bulleted '
+        'like the rest', () {
+      final long = [for (var i = 0; i < 12; i++) 'Novinka $i. ${'x' * 60}'];
+      final r = Release('9.9.9', '1. 1. 2027', long,
+          store: ['Krátce jedna.', 'Krátce dvě.']);
+      expect(storeText(r), '• Krátce jedna.\n• Krátce dvě.');
+    });
+
+    test('a store summary over the limit is refused, not shortened — a '
+        'hand-written text must reach Play exactly as reviewed', () {
+      final r = Release('9.9.9', '1. 1. 2027', ['Věc.'],
+          store: ['y' * 600]);
+      expect(() => storeText(r), throwsA(isA<StateError>()));
     });
   });
 }

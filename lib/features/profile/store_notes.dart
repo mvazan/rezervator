@@ -11,6 +11,26 @@
 /// be saved any other way.
 library;
 
+import 'changelog_data.dart';
+
+/// The store text of [release]: its hand-written [Release.store] summary
+/// when it has one, otherwise [storeNotes] of the full changes. A summary is
+/// never shortened — it goes to Play exactly as reviewed, so one over
+/// [limit] is an error, not something to trim.
+String storeText(Release release, {int limit = 500}) {
+  final store = release.store;
+  if (store == null) return storeNotes(release.changes, limit: limit);
+  final text = _bulleted(store);
+  if (text.length > limit) {
+    throw StateError('store summary of ${release.version ?? release.date} '
+        'is ${text.length} characters, over the $limit limit');
+  }
+  return text;
+}
+
+String _bulleted(Iterable<String> lines) =>
+    lines.map((c) => '• $c').join('\n');
+
 /// [changes] as a bulleted store text of at most [limit] characters.
 ///
 /// Whole text first; if it does not fit, each bullet drops to its first
@@ -19,21 +39,18 @@ library;
 /// most afford to lose); and if even the first bullet is too long on its own,
 /// it is cut at a word boundary with an ellipsis.
 String storeNotes(List<String> changes, {int limit = 500}) {
-  String bulleted(Iterable<String> lines) =>
-      lines.map((c) => '• $c').join('\n');
-
-  final full = bulleted(changes);
+  final full = _bulleted(changes);
   if (full.length <= limit) return full;
 
   final short = changes.map(firstSentence).toList();
-  if (bulleted(short).length <= limit) return bulleted(short);
+  if (_bulleted(short).length <= limit) return _bulleted(short);
 
   for (var take = short.length - 1; take >= 1; take--) {
-    final text = bulleted(short.take(take));
+    final text = _bulleted(short.take(take));
     if (text.length <= limit) return text;
   }
 
-  return _cutAtWord(bulleted([short.first]), limit);
+  return _cutAtWord(_bulleted([short.first]), limit);
 }
 
 /// The first sentence of [text] — up to and including the first `.`, `!` or

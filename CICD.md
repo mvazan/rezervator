@@ -112,9 +112,10 @@ One-time Play Console / signing-key / service-account setup lives in
 
   ```bash
   # 1. add the release to lib/features/profile/changelog_data.dart (newest
-  #    first) — that text becomes Play's "what's new", the GitHub Release
-  #    notes and the in-app Novinky; test/changelog_test.dart fails when
-  #    pubspec and the changelog disagree
+  #    first) — that text becomes Play's "what's new" (or its shorter
+  #    `store:` summary when it is over 500 chars, see PLAY.md) and the
+  #    in-app Novinky; test/changelog_test.dart fails when pubspec and the
+  #    changelog disagree
   # 2. bump version in pubspec.yaml, e.g. 1.1.1+4  (versionCode must grow)
   git commit -am "chore: release 1.1.1"
 
