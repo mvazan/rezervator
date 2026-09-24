@@ -95,13 +95,14 @@ bool hasScoreData(MatchResult? r) =>
 MatchSide? displayWinner(MatchResult? r) =>
     hasScoreData(r) ? winningSide(r!.homePoints, r.awayPoints) : null;
 
-/// "právě teď" / "před N min" / "před N h" — how long ago [fetchedAt] was,
-/// for the match detail's "Výsledky z webu:" line.
+/// "právě teď" / "před N min" / "před N h" / "před N dny" — how long ago
+/// [fetchedAt] was, for the match detail's "Výsledky z webu:" line.
 String freshnessLabel(DateTime fetchedAt, DateTime now) {
   final diff = now.difference(fetchedAt);
   if (diff.inMinutes < 1) return 'právě teď';
   if (diff.inMinutes < 60) return 'před ${diff.inMinutes} min';
-  return 'před ${diff.inHours} h';
+  if (diff.inHours < 24) return 'před ${diff.inHours} h';
+  return diff.inDays == 1 ? 'před 1 dnem' : 'před ${diff.inDays} dny';
 }
 
 /// The Czech-sorted [venues] whose name, address or a club matches [query]

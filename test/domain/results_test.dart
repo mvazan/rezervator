@@ -456,6 +456,25 @@ void main() {
         freshnessLabel(fetched, fetched.add(const Duration(minutes: 60))),
         'před 1 h',
       );
+      expect(
+        freshnessLabel(fetched, fetched.add(const Duration(hours: 23))),
+        'před 23 h',
+      );
+    });
+
+    test('a day or more shows days', () {
+      expect(
+        freshnessLabel(fetched, fetched.add(const Duration(hours: 25))),
+        'před 1 dnem',
+      );
+      expect(
+        freshnessLabel(fetched, fetched.add(const Duration(days: 3))),
+        'před 3 dny',
+      );
+      expect(
+        freshnessLabel(fetched, fetched.add(const Duration(days: 18))),
+        'před 18 dny',
+      );
     });
   });
 
