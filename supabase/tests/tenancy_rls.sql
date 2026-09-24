@@ -3576,6 +3576,12 @@ end $$;
 
 -- 0045 výsledkový servis ČKA ------------------------------------------------
 reset role;
+-- The nightly producer walks every enabled alley, so one already syncing in
+-- this database (a dev DB, prod inside BEGIN…ROLLBACK) would add its jobs to
+-- the counts below.
+update federation_sync set enabled = false
+ where tenant_id not in ('00000000-0000-0000-0000-00000000000a',
+                         '00000000-0000-0000-0000-000000000002');
 -- One match of the site's schedule as the edge function hands it over.
 create function pg_temp.fed_match(
   p_id integer, p_ours boolean, p_days integer, p_start text, p_end text,
