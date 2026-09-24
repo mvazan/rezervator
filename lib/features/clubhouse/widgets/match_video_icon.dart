@@ -159,7 +159,11 @@ class _MatchLeadingState extends State<MatchLeading>
                   shape: BoxShape.circle,
                   color: theme.colorScheme.error,
                 ),
-                child: const Icon(Icons.videocam, size: 20, color: Colors.white),
+                child: Icon(
+                  Icons.videocam,
+                  size: 20,
+                  color: theme.colorScheme.onError,
+                ),
               ),
             ],
           )

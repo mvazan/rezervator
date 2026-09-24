@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rezervator/core/contrast.dart';
+import 'package:rezervator/core/theme.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/clubhouse/widgets/match_video_icon.dart';
 
@@ -37,6 +39,7 @@ void main() {
     void Function(String url)? launch,
     VoidCallback? onRowOpen,
     bool disableAnimations = false,
+    ThemeData? theme,
   }) {
     final content = InkWell(
       onTap: onRowOpen,
@@ -55,6 +58,7 @@ void main() {
       ),
     );
     return MaterialApp(
+      theme: theme,
       home: Scaffold(
         body: disableAnimations
             ? MediaQuery(
@@ -99,6 +103,33 @@ void main() {
       expect(rowOpened, isTrue);
     },
   );
+
+  testWidgets(
+      'the live badge glyph is onError on the error fill, legible in every '
+      'theme variant', (tester) async {
+    for (final (brightness, contrastLevel) in [
+      (Brightness.light, 0.0),
+      (Brightness.dark, 0.0),
+      (Brightness.light, 1.0),
+      (Brightness.dark, 1.0),
+    ]) {
+      final theme = buildTheme(brightness, contrastLevel: contrastLevel);
+      await tester.pumpWidget(wrap(
+        slot: slot(videoUrl: 'https://vysledky.kuzelky.cz/video/m1'),
+        matchResult: result(MatchStatus.inProgress),
+        disableAnimations: true,
+        theme: theme,
+      ));
+      await tester.pumpAndSettle(); // MaterialApp animates a theme change
+
+      final glyph = tester.widget<Icon>(find.byIcon(Icons.videocam)).color!;
+      final variant = '$brightness, contrast $contrastLevel';
+      expect(glyph, theme.colorScheme.onError, reason: variant);
+      expect(contrastRatio(glyph, theme.colorScheme.error),
+          greaterThanOrEqualTo(3.0),
+          reason: variant);
+    }
+  });
 
   testWidgets('a finished match shows play_circle_fill with tooltip Záznam',
       (tester) async {
