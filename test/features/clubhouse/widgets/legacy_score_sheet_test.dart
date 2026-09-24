@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -680,31 +679,35 @@ void main() {
     });
   });
 
-  MatchPlayerResult bigPlayer(String side, int position) =>
-      MatchPlayerResult.fromJson({
-        'id': '$side-$position',
-        'match_id': 'big',
-        'side': side,
-        'position': position,
-        'player_name': '${side == 'home' ? 'Home' : 'Away'} $position',
-        'fulls': 700,
-        'spares': 40,
-        'errors': 10,
-        'total': 1160,
-        'set_points': 4,
-        'team_points': side == 'home' ? 1 : 0,
-        'lanes': [
-          for (var lane = 1; lane <= 4; lane++)
-            {
-              'lane': lane,
-              'fulls': 175,
-              'spares': 10,
-              'errors': 2,
-              'total': 290,
-              'setPoints': 1,
-            },
-        ],
-      });
+  MatchPlayerResult bigPlayer(
+    String side,
+    int position, {
+    String? name,
+    int lanes = 4,
+  }) => MatchPlayerResult.fromJson({
+    'id': '$side-$position',
+    'match_id': 'big',
+    'side': side,
+    'position': position,
+    'player_name': name ?? '${side == 'home' ? 'Home' : 'Away'} $position',
+    'fulls': 700,
+    'spares': 40,
+    'errors': 10,
+    'total': 1160,
+    'set_points': 4,
+    'team_points': side == 'home' ? 1 : 0,
+    'lanes': [
+      for (var lane = 1; lane <= lanes; lane++)
+        {
+          'lane': lane,
+          'fulls': 175,
+          'spares': 10,
+          'errors': 2,
+          'total': 290,
+          'setPoints': 1,
+        },
+    ],
+  });
   final bigPlayers = [
     for (var pos = 1; pos <= 6; pos++) ...[
       bigPlayer('home', pos),
@@ -721,111 +724,289 @@ void main() {
     awayTeam: away,
   );
 
-  group('full-screen page: scale-to-fit via pinch-zoom, never scrolled '
-      '(Fix round 3)', () {
-    // A real phone-ish logical size — this repo's other tests set screen
-    // size the same way (see test/features/players_screen_test.dart).
-    void setPhoneScreen(WidgetTester tester) {
-      tester.view.physicalSize = const Size(360, 780);
+  testWidgets('the embedded sheet keeps kuzelky\'s own natural row heights '
+      '(43 team, 2 × 23 header, 23 per lane, 31 Celkem, 9 separator, 3 '
+      'frame) — the full-screen fill never leaks into it', (tester) async {
+    tester.view.physicalSize = const Size(1600, 1200);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    Future<Size> embeddedSize(
+      PrioritySlot s,
+      List<MatchPlayerResult> players,
+    ) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: LegacyScoreSheet(
+                slot: s,
+                result: result,
+                players: players,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      return tester.getSize(
+        find.byWidgetPredicate(
+          (w) => w.runtimeType.toString() == '_ScoreTableBody',
+        ),
+      );
+    }
+
+    expect((await embeddedSize(slot, const [])).height, 43 + 3);
+    expect(
+      (await embeddedSize(slot, [homePlayer, awayPlayer])).height,
+      43 + 2 * 23 + (2 * 23 + 31) + 3,
+    );
+    final big = await embeddedSize(bigSlot, bigPlayers);
+    expect(big.height, 43 + 2 * 23 + 6 * (4 * 23 + 31) + 5 * 9 + 3);
+    // "SKK Veverky Brno A" in 16/w700 outgrows the 144 name minimum.
+    expect(
+      big.width,
+      greaterThan(2 * (144 + 42 + 55 + 46 + 33 + 58 + 31 + 51)),
+    );
+  });
+
+  group('full-screen page fills the whole body area, 100% width AND 100% '
+      'height, with pinch-zoom on top', () {
+    // Realistic two-word Czech names: each wraps once the name column is
+    // narrowed to its widest single word.
+    const homeNames = [
+      'Jaroslav Procházka',
+      'Miroslav Dvořák',
+      'Zdeněk Kučera',
+      'Vlastimil Horák',
+      'Bohumil Němec',
+      'Stanislav Veselý',
+    ];
+    const awayNames = [
+      'František Marek',
+      'Radoslav Pospíšil',
+      'Ladislav Hájek',
+      'Květoslav Jelínek',
+      'Svatopluk Král',
+      'Jaromír Růžička',
+    ];
+    List<MatchPlayerResult> lineup({required int size, required int lanes}) => [
+      for (var pos = 1; pos <= size; pos++) ...[
+        bigPlayer('home', pos, name: homeNames[pos - 1], lanes: lanes),
+        bigPlayer('away', pos, name: awayNames[pos - 1], lanes: lanes),
+      ],
+    ];
+    final fourLanes = lineup(size: 6, lanes: 4);
+    final twoLanes = lineup(size: 4, lanes: 2);
+
+    // The body area this page gets: the view minus the AppBar (the test
+    // view has no status bar) and minus whatever [padding] the view
+    // reports as unsafe.
+    const portrait = Size(390, 760);
+    const landscape = Size(844, 330);
+    const desktop = Size(1400, 900);
+
+    void setBodyArea(
+      WidgetTester tester,
+      Size body, {
+      FakeViewPadding padding = FakeViewPadding.zero,
+    }) {
       tester.view.devicePixelRatio = 1.0;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
+      tester.view.padding = padding;
+      tester.view.physicalSize = Size(
+        body.width + padding.left + padding.right,
+        body.height + kToolbarHeight + padding.bottom,
+      );
+      addTearDown(tester.view.reset);
+    }
+
+    Future<void> openPage(
+      WidgetTester tester,
+      List<MatchPlayerResult> players, {
+      PrioritySlot? matchSlot,
+    }) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: LegacyScoreSheetPage(
+            slot: matchSlot ?? bigSlot,
+            result: result,
+            players: players,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
     }
 
     Finder scoreTableBodyFinder() => find.byWidgetPredicate(
       (w) => w.runtimeType.toString() == '_ScoreTableBody',
     );
 
-    testWidgets('a big lineup (6 pairings × 4 lanes) on a phone screen opens '
-        'scaled DOWN to fit — no scroll, no overflow — not hardcoded 1.0×', (
-      tester,
-    ) async {
-      setPhoneScreen(tester);
-      await tester.pumpWidget(
-        MaterialApp(
-          home: LegacyScoreSheetPage(
-            slot: bigSlot,
-            result: result,
-            players: bigPlayers,
-          ),
-        ),
+    // Below the AppBar, inside the view's safe insets — computed from the
+    // view itself, never from this page's own widgets.
+    Rect expectedBodyArea(WidgetTester tester) {
+      final view = tester.view;
+      final screen = view.physicalSize / view.devicePixelRatio;
+      final pad = view.padding;
+      final dpr = view.devicePixelRatio;
+      return Rect.fromLTRB(
+        pad.left / dpr,
+        tester.getBottomLeft(find.byType(AppBar)).dy,
+        screen.width - pad.right / dpr,
+        screen.height - pad.bottom / dpr,
       );
-      await tester.pumpAndSettle();
+    }
 
-      expect(tester.takeException(), isNull);
-      expect(find.byType(SingleChildScrollView), findsNothing);
-      expect(find.byType(Scrollable), findsNothing);
-      final viewerFinder = find.byType(InteractiveViewer);
-      expect(viewerFinder, findsOneWidget);
-      expect(find.text('Away 6'), findsOneWidget);
+    void expectFillsBodyArea(WidgetTester tester) {
+      final area = expectedBodyArea(tester);
+      final table = tester.getRect(scoreTableBodyFinder());
+      expect(table.left, closeTo(area.left, 1), reason: 'left edge');
+      expect(table.top, closeTo(area.top, 1), reason: 'top edge');
+      expect(table.right, closeTo(area.right, 1), reason: 'right edge');
+      expect(table.bottom, closeTo(area.bottom, 1), reason: 'bottom edge');
+    }
 
-      final viewer = tester.widget<InteractiveViewer>(viewerFinder);
-      final tableSize = tester.getSize(scoreTableBodyFinder());
-      final viewportSize = tester.getSize(viewerFinder);
-      final expectedFit = math.min(
-        viewportSize.width / tableSize.width,
-        viewportSize.height / tableSize.height,
-      );
-
-      expect(expectedFit, lessThan(1.0));
-      expect(viewer.minScale, closeTo(expectedFit, 0.01));
-    });
-
-    testWidgets('pinching in past the initial fit scale actually enlarges the '
-        'rendered content, not just changes a number', (tester) async {
-      setPhoneScreen(tester);
-      await tester.pumpWidget(
-        MaterialApp(
-          home: LegacyScoreSheetPage(
-            slot: bigSlot,
-            result: result,
-            players: bigPlayers,
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      final viewer = tester.widget<InteractiveViewer>(
-        find.byType(InteractiveViewer),
-      );
-      final controller = viewer.transformationController!;
-      final probe = find.text('Away 6');
-      Size onScreenSize() {
-        final delta = tester.getBottomRight(probe) - tester.getTopLeft(probe);
-        return Size(delta.dx, delta.dy);
+    void expectNothingTruncated(WidgetTester tester) {
+      final paragraphs = find
+          .descendant(
+            of: scoreTableBodyFinder(),
+            matching: find.byType(RichText),
+          )
+          .evaluate();
+      expect(paragraphs, isNotEmpty);
+      for (final element in paragraphs) {
+        final rp = element.renderObject! as RenderParagraph;
+        expect(
+          rp.didExceedMaxLines,
+          isFalse,
+          reason: '"${rp.text.toPlainText()}" got cut off',
+        );
       }
+    }
 
-      final beforeZoom = onScreenSize();
+    // A 16px/height-1.0 name's line count, read off its laid-out height.
+    int linesOf(WidgetTester tester, String name) =>
+        (tester.renderObject<RenderParagraph>(find.text(name)).size.height / 16)
+            .round();
 
-      final zoomedScale = math.min(viewer.maxScale, viewer.minScale * 2);
-      controller.value = Matrix4.diagonal3Values(zoomedScale, zoomedScale, 1.0);
-      await tester.pump();
+    for (final (label, players) in [
+      ('6 players × 4 lanes', fourLanes),
+      ('4 players × 2 lanes', twoLanes),
+    ]) {
+      for (final (areaLabel, area) in [
+        ('portrait phone', portrait),
+        ('landscape phone', landscape),
+        ('desktop', desktop),
+      ]) {
+        testWidgets('$label on a $areaLabel ($area) fills the body area '
+            'within 1px on all 4 sides, nothing truncated', (tester) async {
+          setBodyArea(tester, area);
+          await openPage(tester, players);
 
-      final afterZoom = onScreenSize();
-      expect(afterZoom.width, greaterThan(beforeZoom.width));
-      expect(afterZoom.height, greaterThan(beforeZoom.height));
+          expectFillsBodyArea(tester);
+          expectNothingTruncated(tester);
+        });
+      }
+    }
+
+    testWidgets('on a portrait phone the player names wrap onto more than '
+        'one line (the narrow, wrapping name column wins)', (tester) async {
+      setBodyArea(tester, portrait);
+      await openPage(tester, fourLanes);
+
+      expectFillsBodyArea(tester);
+      expectNothingTruncated(tester);
+      for (final name in [...homeNames, ...awayNames]) {
+        expect(linesOf(tester, name), greaterThan(1), reason: name);
+      }
     });
 
-    testWidgets('a small lineup also renders with no scroll view', (
+    testWidgets('on a landscape phone the names stay on one line', (
       tester,
     ) async {
-      setPhoneScreen(tester);
-      await tester.pumpWidget(
-        MaterialApp(
-          home: LegacyScoreSheetPage(
-            slot: slot,
-            result: result,
-            players: [homePlayer, awayPlayer],
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
+      setBodyArea(tester, landscape);
+      await openPage(tester, fourLanes);
 
-      expect(tester.takeException(), isNull);
+      for (final name in [...homeNames, ...awayNames]) {
+        expect(linesOf(tester, name), 1, reason: name);
+      }
+    });
+
+    testWidgets('a small lineup (one pairing, one side without lanes) also '
+        'fills a portrait phone, with no scroll view', (tester) async {
+      setBodyArea(tester, portrait);
+      await openPage(tester, [homePlayer, awayPlayer], matchSlot: slot);
+
       expect(find.byType(SingleChildScrollView), findsNothing);
       expect(find.byType(Scrollable), findsNothing);
       expect(find.byType(InteractiveViewer), findsOneWidget);
       expect(find.text('Jan Novák'), findsOneWidget);
+      expectFillsBodyArea(tester);
+      expectNothingTruncated(tester);
+    });
+
+    testWidgets('a notched landscape phone: the table fills the SAFE area, '
+        'not the area under the notch or the home indicator', (tester) async {
+      setBodyArea(
+        tester,
+        landscape,
+        padding: const FakeViewPadding(left: 47, right: 47, bottom: 21),
+      );
+      await openPage(tester, fourLanes);
+
+      expect(expectedBodyArea(tester).left, 47);
+      expectFillsBodyArea(tester);
+      expectNothingTruncated(tester);
+    });
+
+    testWidgets('rotating from portrait to landscape re-fits: the new area is '
+        'filled and a pinch made before is reset', (tester) async {
+      setBodyArea(tester, portrait);
+      await openPage(tester, fourLanes);
+      expectFillsBodyArea(tester);
+
+      final controller = tester
+          .widget<InteractiveViewer>(find.byType(InteractiveViewer))
+          .transformationController!;
+      controller.value = Matrix4.diagonal3Values(2.5, 2.5, 1.0);
+      await tester.pump();
+
+      setBodyArea(tester, landscape);
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(controller.value, Matrix4.identity());
+      expectFillsBodyArea(tester);
+      expectNothingTruncated(tester);
+
+      // …and back again.
+      setBodyArea(tester, portrait);
+      await tester.pumpAndSettle();
+      expectFillsBodyArea(tester);
+      expectNothingTruncated(tester);
+    });
+
+    testWidgets('pinch-zoom: opens at 1.0 (the fit), zooms in up to 4×, and '
+        'zooming in actually enlarges the rendered content', (tester) async {
+      setBodyArea(tester, portrait);
+      await openPage(tester, fourLanes);
+
+      final viewer = tester.widget<InteractiveViewer>(
+        find.byType(InteractiveViewer),
+      );
+      expect(viewer.minScale, 1.0);
+      expect(viewer.maxScale, 4.0);
+      final controller = viewer.transformationController!;
+      expect(controller.value, Matrix4.identity());
+
+      final probe = find.text(awayNames.last);
+      final beforeZoom = tester.getRect(probe);
+      controller.value = Matrix4.diagonal3Values(2.0, 2.0, 1.0);
+      await tester.pump();
+      final afterZoom = tester.getRect(probe);
+
+      expect(afterZoom.width, closeTo(beforeZoom.width * 2, 0.5));
+      expect(afterZoom.height, closeTo(beforeZoom.height * 2, 0.5));
     });
   });
 

@@ -177,6 +177,11 @@ class LegacyScoreSheet extends StatelessWidget {
               slot: slot,
               result: result,
               players: players,
+              geometry: _SheetGeometry.natural(
+                slot: slot,
+                result: result,
+                players: players,
+              ),
             ),
           ),
         ),
@@ -383,14 +388,342 @@ class _ColumnMetrics {
       rozdilWidth: rozdilWidth,
     );
   }
+
+  /// The narrowest name column the full-screen page may wrap names into
+  /// (never below a single word): the widest single word of any player or
+  /// team name in 16/w700, and each name-column header ("Jméno a příjmení
+  /// hráče", "Registrační číslo") at the width it needs on 2 lines — plus
+  /// [_cellChrome], rounded up like every other column.
+  static double compactNameWidth({
+    required PrioritySlot slot,
+    required List<MatchPlayerResult> players,
+  }) {
+    List<String> words(String text) =>
+        text.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+
+    double widestWord(String text, TextStyle style) {
+      var widest = 0.0;
+      for (final word in words(text)) {
+        widest = math.max(widest, _measure(word, style));
+      }
+      return widest;
+    }
+
+    // The best split of [text] into two lines — what its wrapped cell
+    // needs to stay within 2 lines.
+    double twoLineWidth(String text, TextStyle style) {
+      final all = words(text);
+      if (all.length < 2) return _measure(text, style);
+      var best = double.infinity;
+      for (var i = 1; i < all.length; i++) {
+        best = math.min(
+          best,
+          math.max(
+            _measure(all.sublist(0, i).join(' '), style),
+            _measure(all.sublist(i).join(' '), style),
+          ),
+        );
+      }
+      return best;
+    }
+
+    var widest = math.max(
+      widestWord(slot.homeTeam, _s16w700),
+      widestWord(slot.awayTeam, _s16w700),
+    );
+    if (players.isNotEmpty) {
+      widest = math.max(
+        widest,
+        twoLineWidth('Jméno a příjmení hráče', _s10w400),
+      );
+      widest = math.max(widest, twoLineWidth('Registrační číslo', _s10w400));
+    }
+    for (final p in players) {
+      widest = math.max(widest, widestWord(p.playerName, _s16w700));
+    }
+    return (widest + _cellChrome).ceilToDouble();
+  }
+
+  /// The height [text] takes when wrapped at [maxWidth] — every line at
+  /// [style]'s real line height, no line limit.
+  static double wrappedHeight(String text, TextStyle style, double maxWidth) {
+    final painter = TextPainter(
+      text: TextSpan(text: text, style: style),
+      textDirection: TextDirection.ltr,
+      textScaler: TextScaler.noScaling,
+    )..layout(maxWidth: math.max(0, maxWidth));
+    final height = painter.height;
+    painter.dispose();
+    return height;
+  }
+
+  /// One line of [style], as the table lays it out.
+  static double lineHeight(TextStyle style) {
+    final painter = TextPainter(
+      text: TextSpan(text: ' ', style: style),
+      textDirection: TextDirection.ltr,
+      textScaler: TextScaler.noScaling,
+    )..layout();
+    final height = painter.preferredLineHeight;
+    painter.dispose();
+    return height;
+  }
+
+  /// These metrics with the (mirrored) name column at [width] instead.
+  _ColumnMetrics withNameWidth(double width) => _ColumnMetrics(
+    nameWidth: width,
+    serieWidth: serieWidth,
+    plneWidth: plneWidth,
+    dorWidth: dorWidth,
+    chWidth: chWidth,
+    celkemColWidth: celkemColWidth,
+    dilciWidth: dilciWidth,
+    druzstvoWidth: druzstvoWidth,
+    rozdilWidth: rozdilWidth,
+  );
+
+  /// Every column widened by the same [factor] — kuzelky's proportions kept.
+  _ColumnMetrics scaled(double factor) => _ColumnMetrics(
+    nameWidth: nameWidth * factor,
+    serieWidth: serieWidth * factor,
+    plneWidth: plneWidth * factor,
+    dorWidth: dorWidth * factor,
+    chWidth: chWidth * factor,
+    celkemColWidth: celkemColWidth * factor,
+    dilciWidth: dilciWidth * factor,
+    druzstvoWidth: druzstvoWidth * factor,
+    rozdilWidth: rozdilWidth * factor,
+  );
+}
+
+/// Every size [_ScoreTableBody] renders at: its column widths, its row
+/// heights and how many lines a name cell may use.
+///
+/// [_SheetGeometry.natural] is kuzelky's own table — the embedded sheet,
+/// which scrolls sideways. [_SheetGeometry.fill] is the full-screen page's:
+/// the same table stretched so that, scaled uniformly, it covers a body
+/// area exactly — 100% width AND 100% height, in portrait and landscape.
+class _SheetGeometry {
+  const _SheetGeometry._({
+    required this.columns,
+    required this.rowScale,
+    required this.wrapNames,
+  });
+
+  // Row heights (dp), copied 1:1 from kuzelky.com's own table.
+  static const _teamRowHeight = 43.0;
+  static const _headerRowHeight = 23.0;
+  static const _laneRowHeight = 23.0;
+  static const _celkemRowHeight = 31.0;
+  static const _separatorHeight = 9.0;
+
+  /// The outer 2px border frame's own padding (`fromLTRB(2, 2, 1, 1)`),
+  /// added to a content size to get the table's actual rendered size.
+  static const _frameWidth = 3.0; // left 2 + right 1
+  static const _frameHeight = 3.0; // top 2 + bottom 1
+
+  final _ColumnMetrics columns;
+
+  /// The one factor every row except the 9dp separators is stretched by:
+  /// team, header, lane and Celkem rows alike (1.0 = kuzelky's own).
+  final double rowScale;
+
+  /// Whether names may wrap onto as many lines as their cell's height
+  /// holds (the full-screen page) or keep the embedded sheet's fixed line
+  /// limits.
+  final bool wrapNames;
+
+  factory _SheetGeometry.natural({
+    required PrioritySlot slot,
+    required MatchResult? result,
+    required List<MatchPlayerResult> players,
+  }) => _SheetGeometry._(
+    columns: _ColumnMetrics.compute(
+      slot: slot,
+      result: result,
+      players: players,
+    ),
+    rowScale: 1.0,
+    wrapNames: false,
+  );
+
+  /// The geometry that fills [area] exactly once scaled by one uniform
+  /// factor `s`, with the biggest `s` (= the biggest text) this table
+  /// allows:
+  ///
+  /// 1. The name columns are the only ones that may narrow — from their
+  ///    natural single-line width down to [_ColumnMetrics.compactNameWidth]
+  ///    — with names (and the name-column headers) wrapping instead. A
+  ///    narrower name column needs taller rows wherever a name now takes
+  ///    more lines: [minRowScale].
+  /// 2. For every whole-dp name width `n` in that range the table's
+  ///    smallest unscaled size is `(w(n), h(n))` and it fits [area] at
+  ///    `s(n) = min(W / w(n), H / h(n))`. `W / w(n)` falls as `n` grows and
+  ///    `H / h(n)` never does, so the best `n` sits where the two cross —
+  ///    found by bisection, not by trying every width.
+  /// 3. The dimension with room left over is then stretched, unscaled, to
+  ///    exactly `(W / s, H / s)`: extra width goes to every column in
+  ///    proportion to its width, extra height to every row but the 9dp
+  ///    separators through the one common [rowScale]. Text sizes stay; only
+  ///    cells grow.
+  factory _SheetGeometry.fill({
+    required PrioritySlot slot,
+    required MatchResult? result,
+    required List<MatchPlayerResult> players,
+    required Size area,
+  }) {
+    final natural = _ColumnMetrics.compute(
+      slot: slot,
+      result: result,
+      players: players,
+    );
+    final laneRows = _laneRowCounts(players);
+    final baseRowsHeight = _rowsHeight(laneRows, players.isNotEmpty);
+    final fixedHeight =
+        _separatorHeight * math.max(0, laneRows.length - 1) + _frameHeight;
+    final otherWidth = natural.totalWidth - 2 * natural.nameWidth + _frameWidth;
+
+    // The smallest common row factor at which every name, team name and
+    // name-column header wrapped at [nameWidth] fits its cell unclipped.
+    double minRowScale(double nameWidth) {
+      final textWidth = nameWidth - _ColumnMetrics._cellChrome;
+      var scale = 1.0;
+      void fit(String text, TextStyle style, double baseCellHeight) {
+        final needed =
+            _ColumnMetrics.wrappedHeight(text, style, textWidth) +
+            _ColumnMetrics._cellChrome;
+        scale = math.max(scale, needed / baseCellHeight);
+      }
+
+      fit(slot.homeTeam, _s16w700, _teamRowHeight);
+      fit(slot.awayTeam, _s16w700, _teamRowHeight);
+      if (players.isNotEmpty) {
+        fit('Jméno a příjmení hráče', _s10w400, _headerRowHeight);
+        fit('Registrační číslo', _s10w400, _headerRowHeight);
+      }
+      for (final p in players) {
+        final laneRowCount = laneRows[p.position] ?? 0;
+        fit(
+          p.playerName,
+          _s16w700,
+          laneRowCount >= 2 ? laneRowCount * _laneRowHeight : _celkemRowHeight,
+        );
+      }
+      return scale;
+    }
+
+    double widthAt(double nameWidth) => 2 * nameWidth + otherWidth;
+    double heightAt(double rowScale) => rowScale * baseRowsHeight + fixedHeight;
+    double widthFit(double n) => area.width / widthAt(n);
+    double heightFit(double n) => area.height / heightAt(minRowScale(n));
+    // Whether the height, not the width, is what caps the scale at [n].
+    bool heightBound(double n) => heightFit(n) < widthFit(n);
+    double scaleAt(double n) => math.min(widthFit(n), heightFit(n));
+
+    var lo = math.min(
+      _ColumnMetrics.compactNameWidth(slot: slot, players: players),
+      natural.nameWidth,
+    );
+    var hi = natural.nameWidth;
+    final double nameWidth;
+    if (!heightBound(lo)) {
+      // Width-bound even fully wrapped: the narrowest column wins.
+      nameWidth = lo;
+    } else if (heightBound(hi)) {
+      // Height-bound even on single lines: nothing to gain by wrapping.
+      nameWidth = hi;
+    } else {
+      // heightBound(lo) && !heightBound(hi): bisect to adjacent widths.
+      while (hi - lo > 1) {
+        final mid = ((lo + hi) / 2).floorToDouble();
+        if (heightBound(mid)) {
+          lo = mid;
+        } else {
+          hi = mid;
+        }
+      }
+      nameWidth = scaleAt(lo) > scaleAt(hi) ? lo : hi;
+    }
+
+    final scale = scaleAt(nameWidth);
+    final fillWidth = area.width / scale;
+    final fillHeight = area.height / scale;
+    final widthFactor =
+        (fillWidth - _frameWidth) / (widthAt(nameWidth) - _frameWidth);
+    // Never below what the wrapped names need (rounding aside).
+    final rowScale = math.max(
+      minRowScale(nameWidth),
+      (fillHeight - fixedHeight) / baseRowsHeight,
+    );
+    return _SheetGeometry._(
+      columns: natural.withNameWidth(nameWidth).scaled(widthFactor),
+      rowScale: rowScale,
+      wrapNames: true,
+    );
+  }
+
+  /// Per position (1..N): how many lane rows its pairing block has — the
+  /// side that threw more lanes decides.
+  static Map<int, int> _laneRowCounts(List<MatchPlayerResult> players) {
+    final counts = <int, int>{};
+    for (final p in players) {
+      counts[p.position] = math.max(counts[p.position] ?? 0, p.lanes.length);
+    }
+    return counts;
+  }
+
+  /// The unscaled sum of every stretchable row (all but the separators).
+  static double _rowsHeight(Map<int, int> laneRows, bool hasPlayers) {
+    var height = _teamRowHeight;
+    if (!hasPlayers) return height;
+    height += _headerRowHeight * 2;
+    for (final laneRowCount in laneRows.values) {
+      height += laneRowCount * _laneRowHeight + _celkemRowHeight;
+    }
+    return height;
+  }
+
+  double get teamRowHeight => _teamRowHeight * rowScale;
+  double get headerRowHeight => _headerRowHeight * rowScale;
+  double get laneRowHeight => _laneRowHeight * rowScale;
+  double get celkemRowHeight => _celkemRowHeight * rowScale;
+  double get separatorHeight => _separatorHeight;
+
+  /// How many lines of [style] a cell [cellHeight] tall holds (at least 1).
+  static int _linesFitting(double cellHeight, TextStyle style) => math.max(
+    1,
+    // A hair of slack: a row stretched to exactly `lines × lineHeight +
+    // chrome` must not lose its last line to float rounding.
+    ((cellHeight - _ColumnMetrics._cellChrome + 1e-6) /
+            _ColumnMetrics.lineHeight(style))
+        .floor(),
+  );
+
+  /// The team-row name cell.
+  int get teamNameMaxLines =>
+      wrapNames ? _linesFitting(teamRowHeight, _s16w700) : 2;
+
+  /// The "Jméno a příjmení hráče" / "Registrační číslo" header cells.
+  int get nameHeaderMaxLines =>
+      wrapNames ? _linesFitting(headerRowHeight, _s10w400) : 1;
+
+  /// A player's name spanning [laneRowCount] (≥ 2) lane rows.
+  int laneNameMaxLines(int laneRowCount) =>
+      wrapNames ? _linesFitting(laneRowCount * laneRowHeight, _s16w700) : 2;
+
+  /// A player's name in the Celkem row (fewer than 2 lane rows).
+  int get celkemNameMaxLines =>
+      wrapNames ? _linesFitting(celkemRowHeight, _s16w700) : 1;
 }
 
 /// The actual table — a 1:1 replica of kuzelky.com's own `table#tabzap`
 /// grid, shared by the embedded [LegacyScoreSheet] (inside a horizontal
-/// [SingleChildScrollView]) and [LegacyScoreSheetPage] (scaled to fit via
-/// `_ScaleToFitViewer`, never scrolled). Row heights are hard-coded dp
-/// values copied from the reference site; column widths are computed per
-/// render by [_ColumnMetrics] (Fix round 5 — see its own doc comment).
+/// [SingleChildScrollView]) and [LegacyScoreSheetPage] (stretched and
+/// scaled to fill the screen via [_FillViewer], never scrolled). Every
+/// size comes from its [geometry]: row heights are the reference site's
+/// own dp values (stretched by one common factor full screen); column
+/// widths are computed per render by [_ColumnMetrics] (Fix round 5 — see
+/// its own doc comment).
 ///
 /// Built from plain [Container]s (not [Table], which has no rowspan) — the
 /// player name, "Družstvo" (team points) and "Rozdíl" cells each span
@@ -410,23 +743,23 @@ class _ScoreTableBody extends StatelessWidget {
     required this.slot,
     required this.result,
     required this.players,
+    required this.geometry,
   });
 
   final PrioritySlot slot;
   final MatchResult? result;
   final List<MatchPlayerResult> players;
 
-  // Row heights (dp), copied 1:1 from kuzelky.com's own table.
-  static const _teamRowHeight = 43.0;
-  static const _headerRowHeight = 23.0;
-  static const _laneRowHeight = 23.0;
-  static const _celkemRowHeight = 31.0;
-  static const _separatorHeight = 9.0;
+  /// Every column width, row height and name line limit this table renders
+  /// at — kuzelky's own ([_SheetGeometry.natural]) or the full-screen
+  /// page's stretched one ([_SheetGeometry.fill]).
+  final _SheetGeometry geometry;
 
-  /// The outer 2px border frame's own [padding] (`fromLTRB(2, 2, 1, 1)`),
-  /// added to a content size to get this widget's actual rendered size.
-  static const _frameWidth = 3.0; // left 2 + right 1
-  static const _frameHeight = 3.0; // top 2 + bottom 1
+  double get _teamRowHeight => geometry.teamRowHeight;
+  double get _headerRowHeight => geometry.headerRowHeight;
+  double get _laneRowHeight => geometry.laneRowHeight;
+  double get _celkemRowHeight => geometry.celkemRowHeight;
+  double get _separatorHeight => geometry.separatorHeight;
 
   MatchPlayerResult? _forSide(String side, int position) {
     for (final p in players) {
@@ -435,53 +768,9 @@ class _ScoreTableBody extends StatelessWidget {
     return null;
   }
 
-  /// This table's real rendered size, computed WITHOUT building it —
-  /// [_ColumnMetrics.compute] and the row-height arithmetic below are both
-  /// pure functions of [slot]/[result]/[players], so [LegacyScoreSheetPage]
-  /// can know the exact size to scale-to-fit synchronously, on the very
-  /// first frame (Fix round 5, item 7 — no more measure-then-correct
-  /// post-frame callback).
-  static Size naturalSize({
-    required PrioritySlot slot,
-    required MatchResult? result,
-    required List<MatchPlayerResult> players,
-  }) {
-    final metrics = _ColumnMetrics.compute(
-      slot: slot,
-      result: result,
-      players: players,
-    );
-    var height = _teamRowHeight;
-    if (players.isNotEmpty) {
-      height += _headerRowHeight * 2;
-      final positions = <int>{for (final p in players) p.position}.toList()
-        ..sort();
-      for (final (i, pos) in positions.indexed) {
-        int laneCountFor(String side) {
-          for (final p in players) {
-            if (p.side == side && p.position == pos) return p.lanes.length;
-          }
-          return 0;
-        }
-
-        final laneRowCount = math.max(
-          laneCountFor('home'),
-          laneCountFor('away'),
-        );
-        height += laneRowCount * _laneRowHeight + _celkemRowHeight;
-        if (i != positions.length - 1) height += _separatorHeight;
-      }
-    }
-    return Size(metrics.totalWidth + _frameWidth, height + _frameHeight);
-  }
-
   @override
   Widget build(BuildContext context) {
-    final metrics = _ColumnMetrics.compute(
-      slot: slot,
-      result: result,
-      players: players,
-    );
+    final metrics = geometry.columns;
     final positions = <int>{for (final p in players) p.position}.toList()
       ..sort();
 
@@ -580,7 +869,7 @@ class _ScoreTableBody extends StatelessWidget {
           bg: _kHeaderGrey,
           text: teamName,
           style: _s16w700,
-          maxLines: 2,
+          maxLines: geometry.teamNameMaxLines,
         ),
         _cell(
           width: m.serieWidth,
@@ -688,12 +977,14 @@ class _ScoreTableBody extends StatelessWidget {
               _headerRowHeight,
               'Jméno a příjmení hráče',
               align: TextAlign.left,
+              maxLines: geometry.nameHeaderMaxLines,
             ),
             _headerCell(
               m.nameWidth,
               _headerRowHeight,
               'Registrační číslo',
               align: TextAlign.left,
+              maxLines: geometry.nameHeaderMaxLines,
             ),
           ],
         ),
@@ -891,20 +1182,21 @@ class _ScoreTableBody extends StatelessWidget {
                 text: nameInLaneRows ? nameText : '',
                 style: _s16w700,
                 align: TextAlign.left,
-                maxLines: 2,
+                maxLines: geometry.laneNameMaxLines(laneRowCount),
               ),
             _cell(
               width: m.nameWidth,
               // A player with fewer than two lane rows puts their name
-              // straight into this cell instead — one line only, so a
-              // 31px-tall row can actually fit it without clipping (Fix
-              // round 5, item 6).
+              // straight into this cell instead — one line only in the
+              // embedded sheet, so a 31px-tall row can actually fit it
+              // without clipping (Fix round 5, item 6); as many as its
+              // stretched height holds full screen.
               height: _celkemRowHeight,
               bg: _kRegCellBlue,
               text: nameInLaneRows ? '' : nameText,
               style: _s16w700,
               align: TextAlign.left,
-              maxLines: 1,
+              maxLines: geometry.celkemNameMaxLines,
             ),
           ],
         ),
@@ -966,18 +1258,12 @@ class _ScoreTableBody extends StatelessWidget {
 }
 
 /// Full-screen "Zápis" route (the "Zvětšit" tap target): the same table
-/// content as [LegacyScoreSheet] ([_ScoreTableBody]), scaled to fit on
-/// open — never scrolled, in either axis — via [_ScaleToFitViewer]. Fix
-/// round 2: this replaces fix round 1's vertical [SingleChildScrollView]
-/// (added because widening every column for 1.3× text scale nearly doubled
-/// the table's width and made a big lineup overflow vertically too). Fix
-/// round 3: a plain [FittedBox] (round 2's own fix) shrinks the WHOLE table
-/// down to fit a phone screen and caps out at 1.0× on a wide one — on an
-/// ordinary phone, where the table is legitimately wider/taller than the
-/// screen, that shrinks real body text down to a few px with no way back to
-/// a readable size. [_ScaleToFitViewer] keeps the same initial "see it all
-/// at once" scale, but lets the user pinch in from there to read the
-/// detail and pan around.
+/// content as [LegacyScoreSheet] ([_ScoreTableBody]), never scrolled in
+/// either axis, filling the whole body area — below the AppBar, inside the
+/// safe area, with no padding — 100% width AND 100% height, portrait or
+/// landscape (see [_FillViewer]). Fix round 2 replaced fix round 1's
+/// vertical [SingleChildScrollView]; fix round 3 let the user pinch in past
+/// the initial "see it all at once" view to read the detail and pan around.
 class LegacyScoreSheetPage extends StatelessWidget {
   const LegacyScoreSheetPage({
     super.key,
@@ -992,11 +1278,6 @@ class LegacyScoreSheetPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final naturalSize = _ScoreTableBody.naturalSize(
-      slot: slot,
-      result: result,
-      players: players,
-    );
     return Scaffold(
       appBar: AppBar(
         title: const Text('Zápis'),
@@ -1006,47 +1287,45 @@ class LegacyScoreSheetPage extends StatelessWidget {
           onPressed: () => Navigator.of(context).pop(),
         ),
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(24),
-        child: _ScaleToFitViewer(
-          naturalSize: naturalSize,
-          child: _ScoreTableBody(slot: slot, result: result, players: players),
-        ),
+      body: SafeArea(
+        child: _FillViewer(slot: slot, result: result, players: players),
       ),
     );
   }
 }
 
-/// Scales [child] to fit the available space — same "see the whole table
-/// at once" goal a plain [FittedBox] gives — but, unlike [FittedBox], lets
-/// the user then pinch past that initial scale to read the detail and pan
-/// around. [InteractiveViewer] has no scrollbar chrome of its own — it's a
+/// Lays the table out to fill the available area exactly
+/// ([_SheetGeometry.fill]: rows taller, names wrapped where that gives
+/// bigger text), scales it uniformly onto that area, and puts it under an
+/// [InteractiveViewer] opening at that fit (scale 1.0) with pinch-zoom up to
+/// 4×. [InteractiveViewer] has no scrollbar chrome of its own — it's a
 /// direct-manipulation gesture surface, not a scrollable — so "no
 /// scrollbars anywhere on this page" still holds.
 ///
-/// Fix round 5: the fit scale is computed straight from [naturalSize] —
-/// [child]'s real size, known up front by [_ScoreTableBody.naturalSize]
-/// without building anything — so the very first frame already renders at
-/// the right scale. Round 3's approach (measure the built child via a
-/// [GlobalKey] in a post-frame callback, then correct) always painted one
-/// wrong-scale frame first.
-class _ScaleToFitViewer extends StatefulWidget {
-  const _ScaleToFitViewer({required this.naturalSize, required this.child});
+/// The layout is a pure, synchronous function of the data and the area —
+/// the very first frame is already right, no post-frame correction. A new
+/// area (rotation, window resize) is laid out afresh and resets any pinch
+/// made against the old one.
+class _FillViewer extends StatefulWidget {
+  const _FillViewer({
+    required this.slot,
+    required this.result,
+    required this.players,
+  });
 
-  final Size naturalSize;
-  final Widget child;
+  final PrioritySlot slot;
+  final MatchResult? result;
+  final List<MatchPlayerResult> players;
 
   @override
-  State<_ScaleToFitViewer> createState() => _ScaleToFitViewerState();
+  State<_FillViewer> createState() => _FillViewerState();
 }
 
-class _ScaleToFitViewerState extends State<_ScaleToFitViewer> {
+class _FillViewerState extends State<_FillViewer> {
   final _controller = TransformationController();
 
-  /// Never lets a huge lineup shrink to the point of being useless.
-  static const _minFitScale = 0.15;
-  double _minScale = 1.0;
-  bool _initialized = false;
+  /// The area the current fit (and any pinch on top of it) belongs to.
+  Size? _area;
 
   @override
   void dispose() {
@@ -1058,32 +1337,35 @@ class _ScaleToFitViewerState extends State<_ScaleToFitViewer> {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        // Only a floor, deliberately no ceiling: on a screen wider/taller
-        // than the table's own natural size (a desktop window), this
-        // scales UP past 1.0 to fill it — the plain `FittedBox` this
-        // replaces capped at 1.0 and left the table small in the middle
-        // of the screen there.
-        final fit = math.max(
-          math.min(
-            constraints.maxWidth / widget.naturalSize.width,
-            constraints.maxHeight / widget.naturalSize.height,
-          ),
-          _minFitScale,
-        );
-        // Applied once, synchronously, on this very first build — never
-        // re-applied on a later resize, so it can't fight a pinch the
-        // user has already made.
-        if (!_initialized) {
-          _initialized = true;
-          _minScale = fit;
-          _controller.value = Matrix4.diagonal3Values(fit, fit, 1.0);
+        final area = constraints.biggest;
+        if (!area.isFinite || area.isEmpty) return const SizedBox.shrink();
+        if (_area != null && _area != area) {
+          _controller.value = Matrix4.identity();
         }
-        return InteractiveViewer(
-          transformationController: _controller,
-          constrained: false,
-          minScale: _minScale,
-          maxScale: math.max(_minScale * 4, 3.0),
-          child: widget.child,
+        _area = area;
+        final geometry = _SheetGeometry.fill(
+          slot: widget.slot,
+          result: widget.result,
+          players: widget.players,
+          area: area,
+        );
+        return SizedBox.fromSize(
+          size: area,
+          child: InteractiveViewer(
+            transformationController: _controller,
+            minScale: 1.0,
+            maxScale: 4.0,
+            // The geometry already has [area]'s aspect ratio, so this
+            // uniform scale covers it edge to edge.
+            child: FittedBox(
+              child: _ScoreTableBody(
+                slot: widget.slot,
+                result: widget.result,
+                players: widget.players,
+                geometry: geometry,
+              ),
+            ),
+          ),
         );
       },
     );
