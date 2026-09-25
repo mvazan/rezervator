@@ -619,6 +619,12 @@ class Api {
   static Future<void> requestFederationSync() =>
       _db.rpc('request_federation_sync');
 
+  /// The alley's federation jobs due now or in flight (0046) — what the ČKA
+  /// card polls while a sync or discovery runs. Admin only (`not_allowed`).
+  static Future<FederationSyncProgress> federationSyncProgress() async =>
+      FederationSyncProgress.fromJson(Map<String, dynamic>.from(
+          await _db.rpc('federation_sync_progress') as Map));
+
   /// On-demand live refresh of one match's score (0045) — gated server-side
   /// to at most one fetch per match per 5 minutes. Returns 'queued' (a fetch
   /// was scheduled), 'fresh' (already refreshed within the last 5 minutes),

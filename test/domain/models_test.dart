@@ -171,6 +171,20 @@ void main() {
       final c = Club.fromJson({'id': 'club-2', 'name': 'KK Brno'});
       expect(c.colorIndex, -1);
     });
+
+    test('fromJson reads the ČKA identity; unlinked without it (0046)', () {
+      final c = Club.fromJson({
+        'id': 'club-3',
+        'name': 'Devítka',
+        'color': 3,
+        'site_slug': 'ks-devitka-brno',
+        'site_name': 'KS Devítka Brno',
+      });
+      expect(c.siteSlug, 'ks-devitka-brno');
+      expect(c.siteName, 'KS Devítka Brno');
+      expect(c.linked, isTrue);
+      expect(Club.fromJson({'id': 'club-2', 'name': 'KK Brno'}).linked, isFalse);
+    });
   });
 
   group('Match', () {
