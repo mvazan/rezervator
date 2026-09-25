@@ -9,6 +9,8 @@ import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/clubhouse/match_detail_screen.dart';
 import 'package:rezervator/features/clubhouse/results_screen.dart';
+import 'package:rezervator/features/schedule/my_trainings_screen.dart'
+    show MatchTrophy;
 
 void main() {
   final now = DateTime(2026, 9, 23, 18, 0); // středa
@@ -106,6 +108,7 @@ void main() {
     List<String> teams = const [veverky, souperA],
     Map<String, int> teamColors = const {},
     Map<String, bool> exceptions = const {},
+    List<CalendarTeam> calendarTeams = const [],
     Future<String> Function(String matchId)? refreshMatch,
     void Function(String url)? launch,
   }) {
@@ -136,6 +139,9 @@ void main() {
         myMatchExceptionsProvider.overrideWith(
           (ref) => Stream.value(exceptions),
         ),
+        myCalendarTeamsProvider.overrideWith(
+          (ref) => Stream.value(calendarTeams),
+        ),
         nowProvider.overrideWith((ref) => Stream.value(now)),
       ],
       // Disables MatchLeading's pulsing ring for a live match — a repeating
@@ -155,6 +161,28 @@ void main() {
       ),
     );
   }
+
+  testWidgets(
+      'an excepted derby of a Kalendář-only team wears that team\'s colour, '
+      'not the uncoloured home side\'s', (tester) async {
+    final derby = match(
+      id: 'derby',
+      date: today.addDays(-2),
+      home: 'KS Devítka Brno A',
+      away: veverky,
+    );
+    await tester.pumpWidget(app(
+      profile: meFollowsNothing,
+      slots: [derby],
+      teams: const ['KS Devítka Brno A', veverky],
+      teamColors: const {veverky: 9},
+      exceptions: const {'derby': true},
+      calendarTeams: const [CalendarTeam(team: veverky)],
+    ));
+    await tester.pumpAndSettle();
+
+    expect(tester.widget<MatchTrophy>(find.byType(MatchTrophy)).colorId, 9);
+  });
 
   testWidgets('Vše is selected by default, whatever the player follows', (
     tester,

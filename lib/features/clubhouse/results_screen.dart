@@ -142,6 +142,7 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
     MatchResult? result,
     DateTime now,
     List<String> followedTeams,
+    List<String> calendarTeams,
     Map<String, int> teamColors,
     Map<String, bool> exceptions,
   ) {
@@ -171,6 +172,7 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
             slot,
             followedTeams,
             teamColors,
+            calendarTeams: calendarTeams,
             exceptions: exceptions,
           ),
         ),
@@ -206,6 +208,11 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
     final followedTeams = profile?.followedTeams ?? const <String>[];
     final teamColors =
         ref.watch(myTeamColorsProvider).value ?? const <String, int>{};
+    final calendarTeams = <String>[
+      for (final c
+          in ref.watch(myCalendarTeamsProvider).value ?? const <CalendarTeam>[])
+        c.team,
+    ];
     final exceptions =
         ref.watch(myMatchExceptionsProvider).value ?? const <String, bool>{};
 
@@ -341,6 +348,7 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
                                 results[slot.id],
                                 now,
                                 followedTeams,
+                                calendarTeams,
                                 teamColors,
                                 exceptions,
                               ),

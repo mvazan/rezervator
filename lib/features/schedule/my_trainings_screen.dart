@@ -216,6 +216,13 @@ class _MyTrainingsScreenState extends ConsumerState<MyTrainingsScreen> {
     final profile = profileAsync.value;
     final teams = profile?.followedTeams ?? const <String>[];
     final teamColors = ref.watch(myTeamColorsProvider).value ?? const {};
+    // Kalendář-only teams are the player's too: their colour paints the
+    // trophy, as it does their Google events.
+    final calendarTeams = <String>[
+      for (final c
+          in ref.watch(myCalendarTeamsProvider).value ?? const <CalendarTeam>[])
+        c.team,
+    ];
     // Matches played for somebody else's team (0039) belong on this list
     // like any other — nothing marks them out, they simply are the
     // player's.
@@ -404,6 +411,7 @@ class _MyTrainingsScreenState extends ConsumerState<MyTrainingsScreen> {
                               item.slot,
                               teams,
                               teamColors,
+                              calendarTeams: calendarTeams,
                               exceptions: exceptions,
                             ),
                           ),

@@ -368,6 +368,46 @@ void main() {
       expect(matchColorOf(home, const [], colors), isNull);
     });
 
+    // A team in Moje týmy with only Kalendář ticked (not Přehled) is still
+    // the player's team — its colour paints its matches in the app, as it
+    // already paints their Google events.
+    test('a Kalendář-only team colours its matches', () {
+      final m = match('m1', today, const HourMinute(18, 0),
+          home: 'KK Orel Ivančice', away: 'SKK Veverky Brno A', isAway: true);
+      expect(
+        matchColorOf(m, const [], const {'SKK Veverky Brno A': 9},
+            calendarTeams: const ['SKK Veverky Brno A']),
+        9,
+      );
+    });
+
+    test('an excepted derby takes the colour of the player\'s own team, not '
+        'of the alley\'s home side', () {
+      final derby = match('m1', today, const HourMinute(18, 30),
+          home: 'KS Devítka Brno A', away: 'SKK Veverky Brno A');
+      expect(
+        matchColorOf(
+          derby,
+          const [],
+          const {'SKK Veverky Brno A': 9, 'SKK Veverky Brno C': 9},
+          calendarTeams: const ['SKK Veverky Brno A', 'SKK Veverky Brno C'],
+          exceptions: const {'m1': true},
+        ),
+        9,
+      );
+    });
+
+    test('a colour on a team in neither Přehled nor Kalendář still never '
+        'paints', () {
+      final derby = match('m1', today, const HourMinute(18, 0),
+          home: 'SKK Veverky Brno A', away: 'KS Devítka Brno B');
+      expect(
+        matchColorOf(derby, const [], const {'SKK Veverky Brno A': 11},
+            calendarTeams: const ['KS Devítka Brno B']),
+        isNull,
+      );
+    });
+
     test('a followed team still wins the colour over the exception', () {
       final m = match('m1', today, const HourMinute(10, 0),
           home: 'Cizí A', away: 'SKK Veverky Brno A');
