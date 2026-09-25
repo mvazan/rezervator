@@ -49,6 +49,9 @@ void main() {
           myProfileProvider.overrideWith((ref) => Stream.value(me)),
           ourTeamsProvider.overrideWithValue(const []),
           myTeamColorsProvider.overrideWith((ref) => Stream.value(const {})),
+          myCalendarTeamsProvider.overrideWith(
+            (ref) => Stream.value(const <CalendarTeam>[]),
+          ),
           myMatchExceptionsProvider.overrideWith(
             (ref) => Stream.value(const {}),
           ),
