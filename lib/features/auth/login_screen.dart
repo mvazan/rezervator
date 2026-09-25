@@ -24,13 +24,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   /// surfacing them the user just lands back on this screen with no clue.
   String? _authError;
 
+  /// The failure is the everyday kind (an expired, used or older link): it
+  /// reads as a calm hint, not an error.
+  bool _authErrorCalm = false;
+
   @override
   void initState() {
     super.initState();
     // A failed deep link may have errored before this screen was built
     // (cold start straight from the e-mail link).
     final auth = ref.read(authStateProvider);
-    if (auth.hasError) _authError = _friendlyAuthError(auth.error!);
+    if (auth.hasError) _showAuthError(auth.error!);
   }
 
   @override
@@ -39,21 +43,35 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     super.dispose();
   }
 
-  static String _friendlyAuthError(Object error) {
+  /// An expired, used or older magic link is everyday life — a calm hint
+  /// with what to do, and no technical text. Anything else is a real
+  /// failure and keeps its detail for support.
+  static ({String text, bool calm}) _friendlyAuthError(Object error) {
     final raw = error is AuthException
         ? [error.code, error.message].whereType<String>().join(': ')
         : '$error';
     final lower = raw.toLowerCase();
     if (lower.contains('expired') || lower.contains('invalid')) {
-      return 'Odkaz už neplatí — byl použit, vypršel, nebo je ze staršího '
-          'e-mailu. Pošli si nový a klikni na odkaz v nejnovějším e-mailu.'
-          '\n($raw)';
+      return (
+        text: 'Odkaz už neplatí — byl použit, vypršel, nebo je ze staršího '
+            'e-mailu. Pošli si nový a klikni na odkaz v nejnovějším e-mailu.',
+        calm: true,
+      );
     }
     if (lower.contains('flow') || lower.contains('verifier')) {
-      return 'Odkaz je ze staršího e-mailu. Pošli si nový a klikni na odkaz '
-          'v nejnovějším e-mailu.\n($raw)';
+      return (
+        text: 'Odkaz je ze staršího e-mailu. Pošli si nový a klikni na odkaz '
+            'v nejnovějším e-mailu.',
+        calm: true,
+      );
     }
-    return 'Přihlášení selhalo: $raw';
+    return (text: 'Přihlášení selhalo: $raw', calm: false);
+  }
+
+  void _showAuthError(Object error) {
+    final friendly = _friendlyAuthError(error);
+    _authError = friendly.text;
+    _authErrorCalm = friendly.calm;
   }
 
   /// Fallback when the mail app drops the code from the magic link
@@ -129,7 +147,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     ref.listen(authStateProvider, (_, next) {
       if (next.hasError) {
         setState(() {
-          _authError = _friendlyAuthError(next.error!);
+          _showAuthError(next.error!);
           _sent = false; // back to the form so a new link can be sent
         });
       }
@@ -160,24 +178,36 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.errorContainer,
+                      color: _authErrorCalm
+                          ? Theme.of(context).colorScheme.secondaryContainer
+                          : Theme.of(context).colorScheme.errorContainer,
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Icon(
-                          Icons.error_outline,
-                          color: Theme.of(context).colorScheme.onErrorContainer,
+                          _authErrorCalm
+                              ? Icons.info_outline
+                              : Icons.error_outline,
+                          color: _authErrorCalm
+                              ? Theme.of(context)
+                                  .colorScheme
+                                  .onSecondaryContainer
+                              : Theme.of(context).colorScheme.onErrorContainer,
                         ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             _authError!,
                             style: TextStyle(
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.onErrorContainer,
+                              color: _authErrorCalm
+                                  ? Theme.of(context)
+                                      .colorScheme
+                                      .onSecondaryContainer
+                                  : Theme.of(context)
+                                      .colorScheme
+                                      .onErrorContainer,
                             ),
                           ),
                         ),

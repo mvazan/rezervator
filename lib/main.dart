@@ -7,6 +7,7 @@ import 'package:sentry_flutter/sentry_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'config.dart';
+import 'core/auth_redirect.dart';
 import 'core/error_reporting.dart';
 import 'core/text_size.dart';
 import 'core/theme.dart';
@@ -65,6 +66,7 @@ Future<void> _bootstrap() async {
 }
 
 final _router = GoRouter(
+  redirect: (_, state) => authErrorRedirect(state.uri),
   routes: [
     GoRoute(
       path: '/',
