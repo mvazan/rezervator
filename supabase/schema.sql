@@ -63,6 +63,79 @@ $$;
 ALTER FUNCTION "public"."admin_list_tenants"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."apply_federation_discovery"("p_tenant" "uuid", "p_clubs" "jsonb", "p_teams" "jsonb") RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  c jsonb;
+  v_club uuid;
+  v_name text;
+  v_ids jsonb := '{}'::jsonb;
+  v_created text[] := '{}';
+  v_linked text[] := '{}';
+  v_teams jsonb;
+  v_had text[];
+  v_new integer;
+  v_new_names jsonb;
+begin
+  for c in select * from jsonb_array_elements(coalesce(p_clubs, '[]'::jsonb)) loop
+    select id, name into v_club, v_name from clubs
+     where tenant_id = p_tenant and site_slug = c->>'slug';
+    if v_club is not null then
+      update clubs set site_name = c->>'name'
+       where id = v_club and site_name is distinct from c->>'name';
+    else
+      update clubs set site_slug = c->>'slug', site_name = c->>'name'
+       where tenant_id = p_tenant and id = (c->>'match_id')::uuid and site_slug is null
+      returning id, name into v_club, v_name;
+    end if;
+    if v_club is not null then
+      v_linked := v_linked || v_name;
+    else
+      v_name := rtrim(left(coalesce(nullif(trim(c->>'name'), ''), c->>'slug'), 80));
+      -- Palette entries are 0–8 (clubs_color_check since 0031, ClubColors
+      -- in lib/domain/palette.dart); -1 and hand-picked colours use none.
+      insert into clubs (tenant_id, name, color, site_slug, site_name)
+      values (p_tenant, v_name,
+              (select i from generate_series(0, 8) i
+                order by (select count(*) from clubs k
+                           where k.tenant_id = p_tenant and k.color = i), i
+                limit 1),
+              c->>'slug', c->>'name')
+      on conflict do nothing
+      returning id into v_club;
+      if v_club is not null then
+        v_created := v_created || v_name;
+      end if;
+    end if;
+    if v_club is not null then
+      v_ids := v_ids || jsonb_build_object(c->>'slug', v_club);
+    end if;
+  end loop;
+  select coalesce(jsonb_agg(x || jsonb_build_object('club_id', v_ids->(x->>'club_slug'))
+                            order by o), '[]'::jsonb)
+    into v_teams
+    from jsonb_array_elements(coalesce(p_teams, '[]'::jsonb)) with ordinality e(x, o);
+  select coalesce(array_agg(site_slug), '{}') into v_had
+    from teams where tenant_id = p_tenant;
+  v_new := upsert_federation_teams(p_tenant, v_teams);
+  select coalesce(jsonb_agg(t.name order by t.name), '[]'::jsonb) into v_new_names
+    from teams t
+   where t.tenant_id = p_tenant and t.site_slug <> all (v_had)
+     and t.site_slug in (select x->>'site_slug' from jsonb_array_elements(v_teams) x);
+  return jsonb_build_object(
+    'created', v_new,
+    'teams_created', v_new_names,
+    'clubs_created', to_jsonb(v_created),
+    'clubs_linked', to_jsonb(v_linked));
+end;
+$$;
+
+
+ALTER FUNCTION "public"."apply_federation_discovery"("p_tenant" "uuid", "p_clubs" "jsonb", "p_teams" "jsonb") OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."apply_federation_matches"("p_tenant" "uuid", "p_competition_slug" "text", "p_matches" "jsonb", "p_keep_ids" integer[] DEFAULT '{}'::integer[]) RETURNS "jsonb"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -1309,6 +1382,37 @@ $$;
 ALTER FUNCTION "public"."federation_refresh_error"("p_tenant" "uuid") OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."federation_sync_progress"() RETURNS "jsonb"
+    LANGUAGE "plpgsql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_tenant constant uuid := current_tenant_id();
+  v jsonb;
+begin
+  if not is_admin() then
+    raise exception 'not_allowed';
+  end if;
+  select jsonb_build_object(
+           'discover', count(*) filter (where kind = 'federation_discover'),
+           'competitions', count(*) filter (where kind = 'federation_competition'),
+           'matches', count(*) filter (where kind = 'federation_match'),
+           'venues', count(*) filter (where kind = 'federation_venue'))
+    into v
+    from notification_jobs
+   where kind in ('federation_discover', 'federation_competition',
+                  'federation_match', 'federation_venue')
+     and split_part(dedupe_key, ':', 2) = v_tenant::text
+     and (run_at <= now()
+          or (attempts > 0 and run_at <= now() + interval '10 minutes'));
+  return v;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."federation_sync_progress"() OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."group_accept"("p_group" "uuid") RETURNS "void"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -2137,12 +2241,13 @@ CREATE OR REPLACE FUNCTION "public"."record_federation_run"("p_tenant" "uuid", "
     SET "search_path" TO 'public'
     AS $$
 declare
-  v_run constant boolean := p_key = 'discover' or p_key like 'competition:%';
+  v_run constant boolean := p_key like 'competition:%';
+  v_keep constant boolean := v_run or p_key = 'discover';
   v_report jsonb;
 begin
   select last_report into v_report from federation_sync
    where tenant_id = p_tenant for update;
-  if p_error is null and not v_run and not coalesce(v_report ? p_key, false) then
+  if p_error is null and not v_keep and not coalesce(v_report ? p_key, false) then
     return;
   end if;
   if v_report is null then
@@ -2153,7 +2258,7 @@ begin
   v_report := case
     when p_error is not null then v_report || jsonb_build_object(p_key,
       jsonb_build_object('error', p_error, 'at', now()))
-    when v_run then v_report || jsonb_build_object(p_key,
+    when v_keep then v_report || jsonb_build_object(p_key,
       coalesce(p_report, '{}'::jsonb) || jsonb_build_object('at', now()))
     else v_report - p_key end;
   v_report := federation_live_report(p_tenant, v_report);
@@ -2914,7 +3019,9 @@ CREATE OR REPLACE FUNCTION "public"."set_federation_sync"("p_venue_slug" "text",
     SET "search_path" TO 'public'
     AS $_$
 declare
+  v_tenant constant uuid := current_tenant_id();
   v_slug text := lower(trim(coalesce(p_venue_slug, '')));
+  v_old text;
 begin
   if not is_admin() then
     raise exception 'not_allowed';
@@ -2922,12 +3029,23 @@ begin
   if v_slug !~ '^[a-z0-9]+(-[a-z0-9]+)*$' then
     raise exception 'invalid_venue_slug';
   end if;
+  select venue_slug into v_old from federation_sync
+   where tenant_id = v_tenant for update;
   insert into federation_sync (tenant_id, venue_slug, enabled)
-  values (current_tenant_id(), v_slug, p_enabled)
+  values (v_tenant, v_slug, p_enabled)
   on conflict (tenant_id) do update
-    set venue_slug = excluded.venue_slug, enabled = excluded.enabled;
-  -- A moved kuželna leaves the old one's venue key dead.
-  perform federation_refresh_error(current_tenant_id());
+    set venue_slug = excluded.venue_slug, enabled = excluded.enabled,
+        last_report = case
+          when federation_sync.venue_slug = excluded.venue_slug
+            then federation_sync.last_report
+          else federation_sync.last_report - 'discover' end;
+  if v_old is distinct from v_slug then
+    delete from notification_jobs
+     where dedupe_key = 'federation_discover:' || v_tenant;
+  end if;
+  -- A moved kuželna leaves the old one's venue key dead, and its
+  -- discovery's error with the report.
+  perform federation_refresh_error(v_tenant);
 end;
 $_$;
 
@@ -3345,6 +3463,8 @@ CREATE TABLE IF NOT EXISTS "public"."clubs" (
     "color" integer DEFAULT '-1'::integer NOT NULL,
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "tenant_id" "uuid" DEFAULT "public"."current_tenant_id"() NOT NULL,
+    "site_slug" "text",
+    "site_name" "text",
     CONSTRAINT "clubs_color_check" CHECK (((("color" >= '-1'::integer) AND ("color" <= 8)) OR (("color" >= 16777216) AND ("color" <= 33554431))))
 );
 
@@ -3353,6 +3473,14 @@ ALTER TABLE "public"."clubs" OWNER TO "postgres";
 
 
 COMMENT ON COLUMN "public"."clubs"."color" IS 'Club colour: -1 = none, 0-11 a palette entry, 0x1000000|rgb a hand-picked colour.';
+
+
+
+COMMENT ON COLUMN "public"."clubs"."site_slug" IS 'The venue club on vysledky.kuzelky.cz (detail-klubu/<slug>) this club is linked to; null = not linked. Written by discovery only, so a rename in the app keeps the link.';
+
+
+
+COMMENT ON COLUMN "public"."clubs"."site_name" IS 'The linked club''s name on vysledky.kuzelky.cz, refreshed by every discovery.';
 
 
 
@@ -3385,13 +3513,17 @@ CREATE OR REPLACE FUNCTION "public"."upsert_federation_teams"("p_tenant" "uuid",
 declare
   t jsonb;
   v_name text;
+  v_club uuid;
   v_new integer := 0;
 begin
   for t in select * from jsonb_array_elements(p_teams) loop
+    select id into v_club from clubs
+     where id = (t->>'club_id')::uuid and tenant_id = p_tenant;
     update teams
        set site_team_id = (t->>'site_team_id')::integer, site_name = t->>'site_name',
            competition_slug = t->>'competition_slug',
-           competition_name = t->>'competition_name'
+           competition_name = t->>'competition_name',
+           club_id = coalesce(club_id, v_club)
      where tenant_id = p_tenant and site_slug = t->>'site_slug';
     if found then
       continue;
@@ -3405,7 +3537,7 @@ begin
     end if;
     insert into teams (tenant_id, name, club_id, site_team_id, site_slug, site_name,
                        competition_slug, competition_name)
-    values (p_tenant, v_name, (t->>'club_id')::uuid, (t->>'site_team_id')::integer,
+    values (p_tenant, v_name, v_club, (t->>'site_team_id')::integer,
             t->>'site_slug', t->>'site_name', t->>'competition_slug',
             t->>'competition_name');
     v_new := v_new + 1;
@@ -4075,6 +4207,10 @@ ALTER TABLE ONLY "public"."venues"
 
 
 
+CREATE UNIQUE INDEX "clubs_tenant_site_slug_key" ON "public"."clubs" USING "btree" ("tenant_id", "site_slug") WHERE ("site_slug" IS NOT NULL);
+
+
+
 CREATE INDEX "match_player_results_player_idx" ON "public"."match_player_results" USING "btree" ("tenant_id", "player_site_id");
 
 
@@ -4717,6 +4853,11 @@ GRANT ALL ON FUNCTION "public"."admin_list_tenants"() TO "service_role";
 
 
 
+REVOKE ALL ON FUNCTION "public"."apply_federation_discovery"("p_tenant" "uuid", "p_clubs" "jsonb", "p_teams" "jsonb") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."apply_federation_discovery"("p_tenant" "uuid", "p_clubs" "jsonb", "p_teams" "jsonb") TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."apply_federation_matches"("p_tenant" "uuid", "p_competition_slug" "text", "p_matches" "jsonb", "p_keep_ids" integer[]) FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."apply_federation_matches"("p_tenant" "uuid", "p_competition_slug" "text", "p_matches" "jsonb", "p_keep_ids" integer[]) TO "service_role";
 
@@ -4861,6 +5002,12 @@ GRANT ALL ON FUNCTION "public"."federation_match_switched_off"("p_tenant" "uuid"
 
 REVOKE ALL ON FUNCTION "public"."federation_refresh_error"("p_tenant" "uuid") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."federation_refresh_error"("p_tenant" "uuid") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."federation_sync_progress"() FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."federation_sync_progress"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."federation_sync_progress"() TO "service_role";
 
 
 

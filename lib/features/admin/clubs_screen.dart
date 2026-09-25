@@ -20,6 +20,7 @@ class ClubsScreen extends ConsumerWidget {
     this.saveFederation = _defaultSaveFederation,
     this.discoverTeams = Api.requestFederationDiscovery,
     this.syncNow = Api.requestFederationSync,
+    this.syncProgress = Api.federationSyncProgress,
     this.updateTeam = _defaultUpdateTeam,
   });
 
@@ -28,6 +29,7 @@ class ClubsScreen extends ConsumerWidget {
   final Future<void> Function(String venueSlug, bool enabled) saveFederation;
   final Future<void> Function() discoverTeams;
   final Future<void> Function() syncNow;
+  final Future<FederationSyncProgress> Function() syncProgress;
   final Future<void> Function(Team team,
       {required String name, String? clubId, required bool active}) updateTeam;
 
@@ -54,26 +56,24 @@ class ClubsScreen extends ConsumerWidget {
     );
   }
 
-  Future<void> _delete(BuildContext context, Club club, int teamCount) =>
-      confirmDelete(
-        context,
-        title: 'Smazat oddíl?',
-        message: teamCount == 0
-            ? 'Opravdu smazat oddíl „${club.name}"? Hráči zůstanou bez oddílu.'
-            : 'Opravdu smazat oddíl „${club.name}"? Hráči i týmy '
-                '($teamCount) zůstanou bez oddílu.',
-        action: () => Api.deleteClub(club.id),
-        success: 'Smazáno.',
-      );
-
-  Future<void> _toggleTeamActive(
-          BuildContext context, Team team, bool active) =>
-      tryAction(
-        context,
-        () => updateTeam(team,
-            name: team.name, clubId: team.clubId, active: active),
-        errorText: friendlyDbError,
-      );
+  Future<void> _delete(BuildContext context, Club club, int teamCount) {
+    final message = teamCount == 0
+        ? 'Opravdu smazat oddíl „${club.name}"? Hráči zůstanou bez oddílu.'
+        : 'Opravdu smazat oddíl „${club.name}"? Hráči i týmy '
+            '($teamCount) zůstanou bez oddílu.';
+    return confirmDelete(
+      context,
+      title: 'Smazat oddíl?',
+      // Discovery finds a linked club by its site_slug (0047): deleted, it
+      // is created again while it plays at the kuželna.
+      message: club.linked
+          ? '$message Oddíl je propojený s webem ČKA, takže ho příští '
+              '„Přenačíst týmy z webu“ založí znovu.'
+          : message,
+      action: () => Api.deleteClub(club.id),
+      success: 'Smazáno.',
+    );
+  }
 
   Future<void> _editTeam(BuildContext context, Team team, List<Club> clubs) =>
       showDialog<bool>(
@@ -83,6 +83,8 @@ class ClubsScreen extends ConsumerWidget {
       );
 
   Widget _teamTile(BuildContext context, Team team, List<Club> clubs) {
+    final competition =
+        team.competitionName.isEmpty ? 'bez soutěže' : team.competitionName;
     return ListTile(
       contentPadding: const EdgeInsets.only(left: 56, right: 16),
       dense: true,
@@ -92,12 +94,11 @@ class ClubsScreen extends ConsumerWidget {
             ? null
             : TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
       ),
-      subtitle: Text(
-        team.competitionName.isEmpty ? 'bez soutěže' : team.competitionName,
-      ),
-      trailing: Switch(
-        value: team.active,
-        onChanged: (active) => _toggleTeamActive(context, team, active),
+      subtitle: Text(team.active ? competition : '$competition · nestahuje se'),
+      trailing: IconButton(
+        icon: const Icon(Icons.edit_outlined),
+        tooltip: 'Upravit tým',
+        onPressed: () => _editTeam(context, team, clubs),
       ),
       onTap: () => _editTeam(context, team, clubs),
     );
@@ -128,6 +129,7 @@ class ClubsScreen extends ConsumerWidget {
                 saveFederation: saveFederation,
                 discoverTeams: discoverTeams,
                 syncNow: syncNow,
+                syncProgress: syncProgress,
               ),
               const SizedBox(height: 12),
               if (loadedTeams.hasError && !loadedTeams.hasValue)
@@ -157,11 +159,13 @@ class ClubsScreen extends ConsumerWidget {
                       children: [
                         IconButton(
                           icon: const Icon(Icons.edit_outlined),
+                          tooltip: 'Upravit oddíl',
                           onPressed: () =>
                               _addOrEdit(context, existing: club),
                         ),
                         IconButton(
                           icon: const Icon(Icons.delete_outline),
+                          tooltip: 'Smazat oddíl',
                           onPressed: () => _delete(
                             context,
                             club,

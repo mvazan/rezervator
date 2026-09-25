@@ -22,15 +22,27 @@ export type SlotRow = {
   round: number; video_url: string | null; legacy_id: string | null;
   home_slug: string; away_slug: string;
 };
+/** `club_slug`: the venue club the team plays for (`/detail-klubu/<slug>`);
+ * apply_federation_discovery (0047) turns it into the club of ours it links
+ * or creates. */
 export type TeamUpsert = {
   site_slug: string; site_team_id: number | null; site_name: string;
-  competition_slug: string; competition_name: string; name: string; club_id: string | null;
+  competition_slug: string; competition_name: string; name: string; club_slug: string;
 };
+/** A club of ours as discovery reads it; `site_slug` is the venue club it
+ * is linked to (0047), null until a discovery links it. */
+export type OurClub = { id: string; name: string; site_slug: string | null };
+/** One venue club for apply_federation_discovery: `match_id` is the club of
+ * ours linked to its slug, else the one unlinked club its name matches,
+ * else null (the database creates the club). */
+export type ClubPlan = { slug: string; name: string; match_id: string | null };
 export type Outcome =
   | { action: "delete" }
   | { action: "rearm"; run_at: Date; attempts: number };
 
 const MAX_ATTEMPTS = 5;
+// federation_sync_progress (0047) counts a job with attempts > 0 and run_at
+// within this lease as in flight — keep the two in step.
 const LEASE_MS = 10 * 60e3;
 const LIMITS: [string, number][] = [
   ["federation_discover", 1],
@@ -126,7 +138,6 @@ export function planTeams(args: {
   clubs: VenueClub[];
   competitions: { slug: string; competition: SiteCompetition }[];
   existingNames: string[];
-  ourClubs: { id: string; name: string }[];
 }): TeamUpsert[] {
   const out = new Map<string, TeamUpsert>();
   for (const { slug, competition } of args.competitions) {
@@ -143,11 +154,23 @@ export function planTeams(args: {
         competition_slug: slug, competition_name: competition.name,
         name: args.existingNames.find((n) => normalizeTeam(n) === normalizeTeam(s.teamName)) ??
           s.teamName,
-        club_id: clubIdFor(club, args.ourClubs),
+        club_slug: club.slug,
       });
     }
   }
   return [...out.values()];
+}
+
+/** Every venue club with the club of ours it is: the one linked to its slug
+ * (whatever the admin renamed it to), else the one unlinked club its name
+ * matches ([clubIdFor]), else none — apply_federation_discovery creates it.
+ * A club linked to another venue club is never matched by name. */
+export function planClubs(clubs: VenueClub[], ours: OurClub[]): ClubPlan[] {
+  const unlinked = ours.filter((c) => c.site_slug === null);
+  return clubs.map((c) => ({
+    slug: c.slug, name: c.name,
+    match_id: ours.find((o) => o.site_slug === c.slug)?.id ?? clubIdFor(c, unlinked),
+  }));
 }
 
 function clubIdFor(club: VenueClub, ours: { id: string; name: string }[]): string | null {
@@ -208,14 +231,29 @@ export async function runDiscover(db: Db, get: Fetcher, tenantId: string) {
   const slots = must(await db.from("priority_slots").select("home_team, away_team")
     .eq("tenant_id", tenantId).not("import_key", "is", null)) as
     { home_team: string; away_team: string }[];
-  const ourClubs = must(await db.from("clubs").select("id, name").eq("tenant_id", tenantId)) as
-    { id: string; name: string }[];
+  const ourClubs = must(await db.from("clubs").select("id, name, site_slug")
+    .eq("tenant_id", tenantId)) as OurClub[];
   const teams = planTeams({
-    clubs, competitions, ourClubs,
+    clubs, competitions,
     existingNames: [...new Set(slots.flatMap((s) => [s.home_team, s.away_team]))],
   });
-  const created = must(await db.rpc("upsert_federation_teams", { p_tenant: tenantId, p_teams: teams }));
-  return { teams: teams.length, created };
+  // One transaction (0047): the venue's clubs linked or created, then the
+  // teams with their clubs.
+  const applied = must(await db.rpc("apply_federation_discovery", {
+    p_tenant: tenantId, p_clubs: planClubs(clubs, ourClubs), p_teams: teams,
+  })) as {
+    created: number; teams_created?: string[]; clubs_created: string[]; clubs_linked: string[];
+  };
+  // teams_created: the new teams' names, for the card's „Poslední načtení
+  // týmů“. An apply_federation_discovery from before it answers none.
+  return {
+    teams: teams.length,
+    competitions: new Set(teams.map((t) => t.competition_slug)).size,
+    created: applied.created,
+    teams_created: applied.teams_created ?? [],
+    clubs_created: applied.clubs_created,
+    clubs_linked: applied.clubs_linked,
+  };
 }
 
 export async function runCompetition(db: Db, get: Fetcher, tenantId: string, slug: string, now: Date) {

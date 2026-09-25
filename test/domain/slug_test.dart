@@ -35,4 +35,55 @@ void main() {
       }
     });
   });
+
+  group('the kuželna on the ČKA site (0047)', () {
+    test('venueSlugPattern mirrors set_federation_sync\'s check', () {
+      for (final s in ['a', 'kk2', 'tj-sokol-brno-iv']) {
+        expect(venueSlugPattern.hasMatch(s), isTrue, reason: s);
+      }
+      for (final s in ['', 'A', 'a-', '-a', 'a--b', 'a_b', 'kuželna']) {
+        expect(venueSlugPattern.hasMatch(s), isFalse, reason: s);
+      }
+    });
+
+    test('takes the slug or the page\'s whole address, host optional', () {
+      for (final input in [
+        'tj-sokol-brno-iv',
+        '  TJ-Sokol-Brno-IV ',
+        'tj-sokol-brno-iv/',
+        'https://vysledky.kuzelky.cz/detail-kuzelny/tj-sokol-brno-iv',
+        'vysledky.kuzelky.cz/detail-kuzelny/tj-sokol-brno-iv/',
+        'https://vysledky.kuzelky.cz/detail-kuzelny/tj-sokol-brno-iv?tab=info#mapa',
+        '/detail-kuzelny/tj-sokol-brno-iv',
+      ]) {
+        expect(venueSlugFromInput(input), 'tj-sokol-brno-iv', reason: input);
+      }
+    });
+
+    test('null for anything that is no kuželna slug', () {
+      for (final input in [
+        '',
+        '   ',
+        'https://vysledky.kuzelky.cz/detail-klubu/ks-devitka-brno',
+        'https://vysledky.kuzelky.cz/detail-kuzelny/',
+        'vysledky.kuzelky.cz',
+        'detail-kuzelny/a/b',
+        'Kuželna Brno',
+        'tj--sokol',
+      ]) {
+        expect(venueSlugFromInput(input), isNull, reason: input);
+      }
+    });
+
+    test('the inline error: nothing typed, or no kuželna', () {
+      expect(venueSlugInputError('tj-sokol-brno-iv'), isNull);
+      expect(venueSlugInputError('  '), 'Vlož adresu stránky kuželny.');
+      expect(
+        venueSlugInputError(
+            'https://vysledky.kuzelky.cz/detail-klubu/ks-devitka-brno'),
+        'Tohle není adresa kuželny — zkopíruj adresu stránky, která '
+        'obsahuje /detail-kuzelny/.',
+      );
+    });
+  });
 }

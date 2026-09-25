@@ -229,6 +229,8 @@ class Club {
     required this.id,
     required this.name,
     this.colorIndex = -1,
+    this.siteSlug,
+    this.siteName,
   });
 
   final String id;
@@ -237,10 +239,21 @@ class Club {
   /// Palette index 0–11, or -1 for "no color assigned".
   final int colorIndex;
 
+  /// The venue club on vysledky.kuzelky.cz this club is linked to
+  /// (`detail-klubu/<slug>`) and its name there (0047). null until a
+  /// discovery links it; renaming the club in the app keeps both, so the
+  /// next discovery still finds it.
+  final String? siteSlug;
+  final String? siteName;
+
+  bool get linked => siteSlug != null;
+
   factory Club.fromJson(Map<String, dynamic> json) => Club(
         id: json['id'] as String,
         name: json['name'] as String,
         colorIndex: json['color'] as int? ?? -1,
+        siteSlug: json['site_slug'] as String?,
+        siteName: json['site_name'] as String?,
       );
 }
 
@@ -299,28 +312,134 @@ class FederationSync {
     this.lastRunAt,
     this.lastSuccessAt,
     this.lastError,
+    this.discover,
   });
 
   static const none = FederationSync();
 
   final String venueSlug;
   final bool enabled;
+
+  /// Stamped by the schedule's (competition) runs only — since 0047 not by
+  /// a discovery — so null means the alley was never synced.
   final DateTime? lastRunAt;
   final DateTime? lastSuccessAt;
   final String? lastError;
+
+  /// The last discovery (`last_report.discover`), null before the first.
+  final FederationDiscoverReport? discover;
 
   bool get configured => venueSlug.isNotEmpty;
 
   static DateTime? _time(Object? v) =>
       v == null ? null : DateTime.parse(v as String);
 
-  factory FederationSync.fromJson(Map<String, dynamic> json) => FederationSync(
-        venueSlug: json['venue_slug'] as String? ?? '',
-        enabled: json['enabled'] as bool? ?? false,
-        lastRunAt: _time(json['last_run_at']),
-        lastSuccessAt: _time(json['last_success_at']),
-        lastError: json['last_error'] as String?,
+  factory FederationSync.fromJson(Map<String, dynamic> json) {
+    final discover = (json['last_report'] as Map?)?['discover'];
+    return FederationSync(
+      venueSlug: json['venue_slug'] as String? ?? '',
+      enabled: json['enabled'] as bool? ?? false,
+      lastRunAt: _time(json['last_run_at']),
+      lastSuccessAt: _time(json['last_success_at']),
+      lastError: json['last_error'] as String?,
+      discover: discover is Map
+          ? FederationDiscoverReport.fromJson(
+              Map<String, dynamic>.from(discover))
+          : null,
+    );
+  }
+}
+
+/// What the last discovery did (0047): the venue's [teams] in how many
+/// [competitions], how many teams it [created] and their names here
+/// ([teamsCreated]), and the clubs of ours it matched ([clubsLinked], our
+/// names) or created ([clubsCreated]). A report from before 0047 named the
+/// teams has [created] but an empty [teamsCreated]. A failed discovery
+/// carries only [error] and [at].
+class FederationDiscoverReport {
+  const FederationDiscoverReport({
+    this.teams = 0,
+    this.competitions = 0,
+    this.created = 0,
+    this.teamsCreated = const [],
+    this.clubsCreated = const [],
+    this.clubsLinked = const [],
+    this.at,
+    this.error,
+  });
+
+  final int teams;
+  final int competitions;
+  final int created;
+  final List<String> teamsCreated;
+  final List<String> clubsCreated;
+  final List<String> clubsLinked;
+  final DateTime? at;
+  final String? error;
+
+  bool get failed => error != null;
+
+  static int _count(Object? v) => (v as num?)?.toInt() ?? 0;
+
+  static List<String> _names(Object? v) =>
+      [for (final name in v as List? ?? const []) name as String];
+
+  factory FederationDiscoverReport.fromJson(Map<String, dynamic> json) =>
+      FederationDiscoverReport(
+        teams: _count(json['teams']),
+        competitions: _count(json['competitions']),
+        created: _count(json['created']),
+        teamsCreated: _names(json['teams_created']),
+        clubsCreated: _names(json['clubs_created']),
+        clubsLinked: _names(json['clubs_linked']),
+        at: FederationSync._time(json['at']),
+        error: json['error'] as String?,
       );
+}
+
+/// The alley's federation jobs due now or in flight, per kind (0047
+/// `federation_sync_progress`) — what the ČKA card polls while a sync runs.
+class FederationSyncProgress {
+  const FederationSyncProgress({
+    this.discover = 0,
+    this.competitions = 0,
+    this.matches = 0,
+    this.venues = 0,
+  });
+
+  static const idle = FederationSyncProgress();
+
+  final int discover;
+  final int competitions;
+  final int matches;
+  final int venues;
+
+  bool get pending => discover + competitions + matches + venues > 0;
+
+  static int _count(Object? v) => (v as num?)?.toInt() ?? 0;
+
+  factory FederationSyncProgress.fromJson(Map<String, dynamic> json) =>
+      FederationSyncProgress(
+        discover: _count(json['discover']),
+        competitions: _count(json['competitions']),
+        matches: _count(json['matches']),
+        venues: _count(json['venues']),
+      );
+
+  @override
+  bool operator ==(Object other) =>
+      other is FederationSyncProgress &&
+      other.discover == discover &&
+      other.competitions == competitions &&
+      other.matches == matches &&
+      other.venues == venues;
+
+  @override
+  int get hashCode => Object.hash(discover, competitions, matches, venues);
+
+  @override
+  String toString() => 'FederationSyncProgress(discover: $discover, '
+      'competitions: $competitions, matches: $matches, venues: $venues)';
 }
 
 /// A row of the `players` view — the only profile data the kiosk sees.

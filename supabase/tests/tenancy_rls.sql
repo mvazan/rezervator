@@ -4765,16 +4765,20 @@ begin
   delete from federation_sync where tenant_id = v_b;
   perform record_federation_run(v_b, 'discover', '{"teams":3}', null);
   select * into s from federation_sync where tenant_id = v_b;
-  if s.last_success_at is null or s.last_error is not null
+  -- 0047: a discovery keeps its report but is no sync run.
+  if s.last_run_at is not null or s.last_success_at is not null or s.last_error is not null
      or s.last_report->'discover'->>'teams' <> '3'
      or s.last_report->'discover'->>'at' is null then
-    raise exception 'FAIL: a successful run was not recorded: %', to_jsonb(s);
+    raise exception 'FAIL: a discovery should keep its report without stamping a run: %', to_jsonb(s);
   end if;
   perform record_federation_run(v_b, 'competition:krajsky-prebor-2026-2027', '{"inserted":1}', null);
-  update federation_sync set last_success_at = now() - interval '1 hour' where tenant_id = v_b;
+  update federation_sync
+     set last_run_at = now() - interval '1 hour', last_success_at = now() - interval '1 hour'
+   where tenant_id = v_b;
   perform record_federation_run(v_b, 'discover', '{"teams":0}', 'site down');
   select * into s from federation_sync where tenant_id = v_b;
   if s.last_error <> 'site down' or s.last_success_at <> now() - interval '1 hour'
+     or s.last_run_at <> now() - interval '1 hour'
      or s.last_report->'discover'->>'error' is distinct from 'site down'
      or s.last_report->'discover'->>'at' is null
      or s.last_report->'discover' ? 'teams'
@@ -4849,12 +4853,12 @@ begin
     (select to_jsonb(f)::text from federation_sync f where tenant_id = v_a), true);
 end $$;
 
--- 13b. Only discovery and competition runs are the sync's runs: they
--- stamp last_run_at and last_success_at. A match or venue job reports
--- only trouble, under its own key (match:<site_match_id>, venue:<slug>):
--- a failure is written there, a success removes just that entry, and a
--- success with nothing to remove writes nothing — no row, no update, so no
--- Realtime event for every fetched match.
+-- 13b. Only competition runs are the sync's runs (discovery was one too
+-- until 0047): they stamp last_run_at and last_success_at. A match or
+-- venue job reports only trouble, under its own key (match:<site_match_id>,
+-- venue:<slug>): a failure is written there, a success removes just that
+-- entry, and a success with nothing to remove writes nothing — no row, no
+-- update, so no Realtime event for every fetched match.
 do $$
 declare
   v_b constant uuid := '00000000-0000-0000-0000-000000000002';
@@ -4921,7 +4925,7 @@ begin
      or s.last_report->v_comp->>'at' is null or s.last_report->v_comp ? 'error' then
     raise exception 'FAIL: a competition success should stamp both and keep its report: %', to_jsonb(s);
   end if;
-  raise notice 'OK: only discovery and competitions stamp a run; a match or venue success removes its own key or writes nothing (0045)';
+  raise notice 'OK: only competitions stamp a run; a match or venue success removes its own key or writes nothing (0045, 0047)';
 end $$;
 
 -- 13c. last_error is the newest error among the keys that can still run,
@@ -5498,5 +5502,366 @@ begin
   raise notice 'OK: with both alleys configured, each admin sees only their own sync settings (0045)';
 end $$;
 
+-- 0047 průvodce nastavením ČKA -----------------------------------------------
 reset role;
+
+-- 16. apply_federation_discovery matches every venue club to a club of
+-- ours — by site_slug, else by the edge function's name match, which it
+-- links — or creates it, and hands the teams their clubs. Its report lists
+-- the teams it created (teams_created), so a second run lists none. An
+-- alley of its own keeps the colour counts exact.
+insert into tenants (id, name)
+values ('00000000-0000-0000-0000-00000000000c', 'Kuželna C (0047)');
+do $$
+declare
+  v_c constant uuid := '00000000-0000-0000-0000-00000000000c';
+  v_teams constant jsonb := '[
+    {"site_slug":"tj-sokol-brno-iv-muzi","site_team_id":1,"site_name":"TJ Sokol Brno IV",
+     "competition_slug":"jihomoravska-divize-2026-2027","competition_name":"Jihomoravská divize",
+     "name":"TJ Sokol Brno IV A","club_slug":"tj-sokol-brno-iv"},
+    {"site_slug":"ks-devitka-brno-b-muzi","site_team_id":2,"site_name":"KS Devítka Brno B",
+     "competition_slug":"krajsky-prebor-2026-2027","competition_name":"Krajský přebor",
+     "name":"KS Devítka Brno B","club_slug":"ks-devitka-brno"}]';
+  v_sokol uuid;
+  v_veverky uuid;
+  v_devitka uuid;
+  v_clubs jsonb;
+  r jsonb;
+begin
+  insert into clubs (tenant_id, name, color) values (v_c, 'Sokol Brno IV', 0)
+  returning id into v_sokol;
+  insert into clubs (tenant_id, name, color) values (v_c, 'Veverky', 1)
+  returning id into v_veverky;
+  v_clubs := jsonb_build_array(
+    jsonb_build_object('slug', 'tj-sokol-brno-iv', 'name', 'TJ Sokol Brno IV',
+                       'match_id', v_sokol),
+    jsonb_build_object('slug', 'ks-devitka-brno', 'name', 'KS Devítka Brno',
+                       'match_id', null));
+
+  r := apply_federation_discovery(v_c, v_clubs, v_teams);
+  if r is distinct from
+     '{"created":2,"teams_created":["KS Devítka Brno B","TJ Sokol Brno IV A"],
+       "clubs_created":["KS Devítka Brno"],"clubs_linked":["Sokol Brno IV"]}'::jsonb then
+    raise exception 'FAIL: the first discovery reported %', r;
+  end if;
+  if not exists (select 1 from clubs
+                  where id = v_sokol and name = 'Sokol Brno IV' and color = 0
+                    and site_slug = 'tj-sokol-brno-iv' and site_name = 'TJ Sokol Brno IV') then
+    raise exception 'FAIL: the club matched by name was not linked, or lost its name or colour';
+  end if;
+  select id into v_devitka from clubs
+   where tenant_id = v_c and site_slug = 'ks-devitka-brno' and name = 'KS Devítka Brno'
+     and site_name = 'KS Devítka Brno' and color = 2;
+  if v_devitka is null then
+    raise exception 'FAIL: the missing club was not created, linked, in the first free colour: %',
+      (select jsonb_agg(to_jsonb(k)) from clubs k where k.tenant_id = v_c);
+  end if;
+  if (select club_id from teams where tenant_id = v_c and site_slug = 'tj-sokol-brno-iv-muzi')
+       is distinct from v_sokol
+     or (select club_id from teams where tenant_id = v_c and site_slug = 'ks-devitka-brno-b-muzi')
+       is distinct from v_devitka then
+    raise exception 'FAIL: the new teams did not get their clubs';
+  end if;
+
+  r := apply_federation_discovery(v_c, v_clubs, v_teams);
+  if r is distinct from
+     '{"created":0,"teams_created":[],"clubs_created":[],
+       "clubs_linked":["Sokol Brno IV","KS Devítka Brno"]}'::jsonb
+     or (select count(*) from clubs where tenant_id = v_c) <> 3 then
+    raise exception 'FAIL: a second discovery was not idempotent: %', r;
+  end if;
+
+  -- Renamed and recoloured in the app (upsert_club writes those two only).
+  update clubs set name = 'Devítka', color = 5 where id = v_devitka;
+  r := apply_federation_discovery(v_c, v_clubs, v_teams);
+  if r is distinct from
+     '{"created":0,"teams_created":[],"clubs_created":[],
+       "clubs_linked":["Sokol Brno IV","Devítka"]}'::jsonb
+     or not exists (select 1 from clubs
+                     where id = v_devitka and name = 'Devítka' and color = 5
+                       and site_slug = 'ks-devitka-brno') then
+    raise exception 'FAIL: a renamed club no longer matched its venue club: %', r;
+  end if;
+
+  -- The admin's club stands; a team left without one gets its venue club's.
+  update teams set club_id = v_veverky
+   where tenant_id = v_c and site_slug = 'ks-devitka-brno-b-muzi';
+  update teams set club_id = null
+   where tenant_id = v_c and site_slug = 'tj-sokol-brno-iv-muzi';
+  perform apply_federation_discovery(v_c, v_clubs, v_teams);
+  if (select club_id from teams where tenant_id = v_c and site_slug = 'ks-devitka-brno-b-muzi')
+       is distinct from v_veverky
+     or (select club_id from teams where tenant_id = v_c and site_slug = 'tj-sokol-brno-iv-muzi')
+       is distinct from v_sokol then
+    raise exception 'FAIL: discovery replaced the admin''s club or left a team without its club';
+  end if;
+
+  -- A linked club deleted in the app comes back with the next discovery.
+  delete from clubs where id = v_devitka;
+  r := apply_federation_discovery(v_c, v_clubs, v_teams);
+  if r->'clubs_created' is distinct from '["KS Devítka Brno"]'::jsonb
+     or not exists (select 1 from clubs
+                     where tenant_id = v_c and site_slug = 'ks-devitka-brno'
+                       and name = 'KS Devítka Brno') then
+    raise exception 'FAIL: a deleted linked club was not created again: %', r;
+  end if;
+  raise notice 'OK: discovery links clubs by site_slug, else by name, else creates them once; renames and the admin''s clubs hold (0047)';
+end $$;
+
+-- 16b. A created club takes the first palette colour (0–8) no club of the
+-- alley uses, else the least used one; a name another club has creates
+-- nothing.
+do $$
+declare
+  v_c constant uuid := '00000000-0000-0000-0000-00000000000c';
+  r jsonb;
+begin
+  delete from teams where tenant_id = v_c;
+  delete from clubs where tenant_id = v_c;
+  insert into clubs (tenant_id, name, color)
+  select v_c, 'Barva ' || i, i from generate_series(0, 8) i;
+  insert into clubs (tenant_id, name, color)
+  values (v_c, 'Barva 0 znovu', 0), (v_c, 'Bez barvy', -1), (v_c, 'Vlastní', 16777216);
+  perform apply_federation_discovery(v_c,
+    '[{"slug":"kk-novy","name":"KK Nový","match_id":null}]', '[]');
+  if (select color from clubs where tenant_id = v_c and site_slug = 'kk-novy')
+     is distinct from 1 then
+    raise exception 'FAIL: with the palette used up the new club should take the least used colour, 1';
+  end if;
+  r := apply_federation_discovery(v_c,
+    '[{"slug":"kk-barva","name":"Barva 3","match_id":null}]', '[]');
+  if r is distinct from
+     '{"created":0,"teams_created":[],"clubs_created":[],"clubs_linked":[]}'::jsonb
+     or exists (select 1 from clubs where tenant_id = v_c and site_slug = 'kk-barva') then
+    raise exception 'FAIL: a venue club whose name another club has was created or linked: %', r;
+  end if;
+  raise notice 'OK: a created club takes the first free palette colour, else the least used; a taken name creates nothing (0047)';
+end $$;
+
+-- 16c. Renaming or recolouring a club in the app keeps its ČKA identity.
+insert into clubs (tenant_id, name, color, site_slug, site_name)
+values ('00000000-0000-0000-0000-00000000000a', 'Propojený oddíl', 3,
+        'kk-propojeny', 'KK Propojený');
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+declare
+  v uuid;
+begin
+  select id into v from clubs where site_slug = 'kk-propojeny';
+  perform upsert_club(v, 'Přejmenovaný oddíl', 4);
+  if not exists (select 1 from clubs
+                  where id = v and name = 'Přejmenovaný oddíl' and color = 4
+                    and site_slug = 'kk-propojeny' and site_name = 'KK Propojený') then
+    raise exception 'FAIL: upsert_club touched the club''s ČKA identity';
+  end if;
+  raise notice 'OK: renaming or recolouring a club keeps its site_slug and site_name (0047)';
+end $$;
+reset role;
+
+-- 16d. Discovery's function is the service's alone.
+do $$
+declare
+  f constant text := 'public.apply_federation_discovery(uuid, jsonb, jsonb)';
+begin
+  if has_function_privilege('authenticated', f, 'execute')
+     or has_function_privilege('anon', f, 'execute')
+     or not has_function_privilege('service_role', f, 'execute') then
+    raise exception 'FAIL: apply_federation_discovery must be callable by the service only';
+  end if;
+  raise notice 'OK: apply_federation_discovery is callable by the service only (0047)';
+end $$;
+
+-- 16e. The report's teams_created (the card's „Poslední načtení týmů“):
+-- the teams this discovery created, by the names the alley has them under
+-- (a clash's suffixed one), sorted. A team that was there already is not
+-- one, refreshed or not, and a second discovery creates none.
+do $$
+declare
+  v_c constant uuid := '00000000-0000-0000-0000-00000000000c';
+  v_clubs constant jsonb := '[{"slug":"kk-blansko","name":"KK Blansko","match_id":null}]';
+  v_teams constant jsonb := '[
+    {"site_slug":"kk-blansko-c-muzi","site_team_id":5,"site_name":"KK Blansko C",
+     "competition_slug":"okresni-prebor-2026-2027","competition_name":"Okresní přebor",
+     "name":"KK Blansko C","club_slug":"kk-blansko"},
+    {"site_slug":"kk-blansko-b-muzi","site_team_id":4,"site_name":"KK Blansko B",
+     "competition_slug":"krajsky-prebor-2026-2027","competition_name":"Krajský přebor",
+     "name":"KK Blansko B","club_slug":"kk-blansko"},
+    {"site_slug":"kk-blansko-a-muzi","site_team_id":3,"site_name":"KK Blansko A",
+     "competition_slug":"krajsky-prebor-2026-2027","competition_name":"Krajský přebor",
+     "name":"KK Blansko A","club_slug":"kk-blansko"}]';
+  r jsonb;
+begin
+  delete from teams where tenant_id = v_c;
+  -- Last season's C team holds the name this season's comes with.
+  insert into teams (tenant_id, name, site_slug)
+  values (v_c, 'KK Blansko C', 'kk-blansko-c-muzi-2025');
+  -- Discovered before and renamed by the admin: refreshed, not created.
+  insert into teams (tenant_id, name, site_slug)
+  values (v_c, 'Blansko béčko', 'kk-blansko-b-muzi');
+
+  r := apply_federation_discovery(v_c, v_clubs, v_teams);
+  if r->'created' is distinct from '2'::jsonb
+     or r->'teams_created' is distinct from
+        '["KK Blansko A","KK Blansko C (Okresní přebor)"]'::jsonb then
+    raise exception 'FAIL: the first discovery''s teams_created: %', r;
+  end if;
+
+  r := apply_federation_discovery(v_c, v_clubs, v_teams);
+  if r->'created' is distinct from '0'::jsonb
+     or r->'teams_created' is distinct from '[]'::jsonb then
+    raise exception 'FAIL: a second discovery listed teams it did not create: %', r;
+  end if;
+  raise notice 'OK: teams_created lists the teams a discovery created, by their names here, and a second one none (0047)';
+end $$;
+
+-- 17. federation_sync_progress: the caller's federation jobs due now or
+-- leased, per kind — never a future checkpoint, never another alley's —
+-- and for admins only.
+do $$
+declare
+  v_a constant text := '00000000-0000-0000-0000-00000000000a';
+  v_b constant text := '00000000-0000-0000-0000-000000000002';
+begin
+  delete from notification_jobs
+   where kind in ('federation_discover', 'federation_competition',
+                  'federation_match', 'federation_venue');
+  insert into notification_jobs (kind, dedupe_key, payload, run_at, attempts) values
+    -- due
+    ('federation_discover', 'federation_discover:' || v_a, '{}', now() - interval '1 minute', 0),
+    ('federation_competition', 'federation_competition:' || v_a || ':okresni-prebor', '{}', now(), 0),
+    ('federation_venue', 'federation_venue:' || v_a || ':kuzelna-a', '{}', now(), 0),
+    -- leased: the lease pushed run_at ahead and counted an attempt
+    ('federation_match', 'federation_match:' || v_a || ':1', '{}', now() + interval '9 minutes', 1),
+    -- not yet due, never leased: a spaced nightly job, a match's checkpoint
+    ('federation_competition', 'federation_competition:' || v_a || ':krajsky-prebor', '{}',
+     now() + interval '1 minute', 0),
+    ('federation_match', 'federation_match:' || v_a || ':2', '{}', now() + interval '1 day', 0),
+    -- a retry backing off past the lease window
+    ('federation_match', 'federation_match:' || v_a || ':3', '{}', now() + interval '32 minutes', 5),
+    -- another alley's, and a job that is no federation job
+    ('federation_match', 'federation_match:' || v_b || ':9', '{}', now(), 0),
+    ('calendar_sync', 'calendar:' || v_a || ':progress-probe', '{}', now(), 0);
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+declare
+  v constant jsonb := federation_sync_progress();
+begin
+  if v is distinct from '{"discover":1,"competitions":1,"matches":1,"venues":1}'::jsonb then
+    raise exception 'FAIL: progress should count the alley''s due and leased jobs only: %', v;
+  end if;
+end $$;
+reset role;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000002","role":"authenticated"}';
+do $$
+declare
+  v constant jsonb := federation_sync_progress();
+begin
+  if v is distinct from '{"discover":0,"competitions":0,"matches":1,"venues":0}'::jsonb then
+    raise exception 'FAIL: another alley''s admin got our progress: %', v;
+  end if;
+end $$;
+reset role;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"20000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+begin
+  begin
+    perform federation_sync_progress();
+    raise exception 'FAIL: a player read the sync progress';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+end $$;
+reset role;
+do $$
+begin
+  if has_function_privilege('anon', 'public.federation_sync_progress()', 'execute')
+     or not has_function_privilege('authenticated', 'public.federation_sync_progress()', 'execute') then
+    raise exception 'FAIL: federation_sync_progress must be callable by the app only';
+  end if;
+  raise notice 'OK: federation_sync_progress counts the alley''s due and leased jobs, for admins only (0047)';
+end $$;
+
+-- 18. A moved kuželna drops the last discovery's report: it was the old
+-- kuželna's, and the setup wizard reads a successful report as "this
+-- kuželna's teams are loaded". Saving the same kuželna keeps it. B is not
+-- enabled; its kuželna goes back at the end.
+do $$
+begin
+  perform record_federation_run('00000000-0000-0000-0000-000000000002', 'discover',
+                                '{"teams":2}', null);
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000002","role":"authenticated"}';
+do $$
+declare
+  v_slug constant text := (select venue_slug from federation_sync);
+begin
+  perform set_federation_sync(v_slug, false);
+  if not (select last_report ? 'discover' from federation_sync) then
+    raise exception 'FAIL: saving the same kuželna dropped its discovery report';
+  end if;
+  perform set_federation_sync('kuzelna-b-jinde', false);
+  if (select last_report ? 'discover' from federation_sync) then
+    raise exception 'FAIL: a moved kuželna kept the old one''s discovery report';
+  end if;
+  perform set_federation_sync(v_slug, false);
+  raise notice 'OK: a moved kuželna drops the last discovery''s report; the same one keeps it (0047)';
+end $$;
+reset role;
+
+-- 18b. A moved kuželna drops the old one's discovery job too. A failed one
+-- backing off (HTTP 404 for a mistyped address) counts in
+-- federation_sync_progress for up to a quarter of an hour: the card would
+-- spin over a discovery nobody asked for, then run it for the new kuželna.
+-- Saving the same kuželna keeps the job; another alley's job stays.
+do $$
+declare
+  v_a constant text := '00000000-0000-0000-0000-00000000000a';
+  v_b constant text := '00000000-0000-0000-0000-000000000002';
+begin
+  delete from notification_jobs where kind = 'federation_discover';
+  -- Both failed twice and back off 4 minutes: attempts > 0, inside the lease.
+  insert into notification_jobs (kind, dedupe_key, payload, run_at, attempts) values
+    ('federation_discover', 'federation_discover:' || v_a,
+     jsonb_build_object('tenant_id', v_a), now() + interval '4 minutes', 2),
+    ('federation_discover', 'federation_discover:' || v_b,
+     jsonb_build_object('tenant_id', v_b), now() + interval '4 minutes', 2);
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000002","role":"authenticated"}';
+do $$
+declare
+  v_slug constant text := (select venue_slug from federation_sync);
+begin
+  perform set_federation_sync(v_slug, false);
+  if (federation_sync_progress()->>'discover')::integer <> 1 then
+    raise exception 'FAIL: saving the same kuželna dropped its discovery job';
+  end if;
+  perform set_federation_sync('kuzelna-b-jinde', false);
+  if (federation_sync_progress()->>'discover')::integer <> 0 then
+    raise exception 'FAIL: a moved kuželna kept the old one''s retrying discovery job';
+  end if;
+  perform set_federation_sync(v_slug, false);
+end $$;
+reset role;
+do $$
+begin
+  if not exists (select 1 from notification_jobs
+                  where dedupe_key = 'federation_discover:00000000-0000-0000-0000-00000000000a') then
+    raise exception 'FAIL: moving one alley''s kuželna dropped another alley''s discovery job';
+  end if;
+  raise notice 'OK: a moved kuželna drops the old one''s discovery job; the same one and other alleys keep theirs (0047)';
+end $$;
+
 rollback;

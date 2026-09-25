@@ -160,4 +160,158 @@ void main() {
       expect(rentalMoreDatesLabel(5), '…a dalších 5 termínů');
     });
   });
+
+  group('czechCount', () {
+    test('1, 2–4, and everything else', () {
+      expect(czechCount(1, 'zápas', 'zápasy', 'zápasů'), '1 zápas');
+      expect(czechCount(2, 'zápas', 'zápasy', 'zápasů'), '2 zápasy');
+      expect(czechCount(4, 'zápas', 'zápasy', 'zápasů'), '4 zápasy');
+      expect(czechCount(5, 'zápas', 'zápasy', 'zápasů'), '5 zápasů');
+      expect(czechCount(0, 'zápas', 'zápasy', 'zápasů'), '0 zápasů');
+      expect(czechCount(22, 'zápas', 'zápasy', 'zápasů'), '22 zápasů');
+    });
+  });
+
+  group('federationProgressLabel (0047)', () {
+    test('what is left, the non-zero counts only, the verb agreeing', () {
+      expect(
+        federationProgressLabel(const FederationSyncProgress(
+            matches: 12, competitions: 2, venues: 1)),
+        'Synchronizuje se… zbývá 12 zápasů, 2 soutěže a 1 kuželna',
+      );
+      expect(federationProgressLabel(const FederationSyncProgress(matches: 3)),
+          'Synchronizuje se… zbývají 3 zápasy');
+      expect(federationProgressLabel(const FederationSyncProgress(matches: 1)),
+          'Synchronizuje se… zbývá 1 zápas');
+      expect(
+        federationProgressLabel(
+            const FederationSyncProgress(competitions: 2, venues: 5)),
+        'Synchronizuje se… zbývají 2 soutěže a 5 kuželen',
+      );
+      expect(federationProgressLabel(const FederationSyncProgress(venues: 1)),
+          'Synchronizuje se… zbývá 1 kuželna');
+    });
+
+    test('a discovery reads as loading the teams', () {
+      expect(
+        federationProgressLabel(
+            const FederationSyncProgress(discover: 1, matches: 4)),
+        'Načítají se týmy z webu…',
+      );
+      expect(teamsLoadingLabel, 'Načítají se týmy z webu…');
+    });
+  });
+
+  group('discovery summary (0047)', () {
+    test('counts the oddíly and names the new ones, Czech-sorted', () {
+      expect(
+        discoveryClubsLabel(
+            const FederationDiscoverReport(clubsLinked: ['Sokol Brno IV'])),
+        '1 oddíl',
+      );
+      expect(
+        discoveryClubsLabel(const FederationDiscoverReport(
+          clubsLinked: ['Sokol Brno IV'],
+          clubsCreated: ['TJ Sokol Husovice', 'KS Devítka Brno'],
+        )),
+        '3 oddíly (2 nové: KS Devítka Brno, TJ Sokol Husovice)',
+      );
+      expect(
+        discoveryClubsLabel(const FederationDiscoverReport(
+          clubsLinked: ['A', 'B', 'C', 'D'],
+          clubsCreated: ['Čáslav'],
+        )),
+        '5 oddílů (1 nový: Čáslav)',
+      );
+    });
+
+    test('counts the teams in their soutěže — ve before dvou…čtyřech', () {
+      expect(
+        discoveryTeamsLabel(
+            const FederationDiscoverReport(teams: 1, competitions: 1)),
+        '1 tým v 1 soutěži',
+      );
+      expect(
+        discoveryTeamsLabel(
+            const FederationDiscoverReport(teams: 5, competitions: 2)),
+        '5 týmů ve 2 soutěžích',
+      );
+      expect(
+        discoveryTeamsLabel(
+            const FederationDiscoverReport(teams: 3, competitions: 5)),
+        '3 týmy v 5 soutěžích',
+      );
+      expect(
+        discoveryTeamsLabel(
+            const FederationDiscoverReport(teams: 12, competitions: 12)),
+        '12 týmů ve 12 soutěžích',
+      );
+    });
+  });
+
+  group('last discovery on the card (0047 teams_created)', () {
+    const when = 'pá 25.9. 10:05';
+    String line(FederationDiscoverReport r) => discoveryResultLabel(r, when);
+
+    test('nothing new reads žádná změna — linked clubs are no change', () {
+      expect(
+        line(const FederationDiscoverReport(
+            teams: 4, competitions: 2, clubsLinked: ['Sokol Brno IV'])),
+        'Poslední načtení týmů: pá 25.9. 10:05 · žádná změna',
+      );
+    });
+
+    test('names the new teams with their plural, Czech-sorted', () {
+      expect(
+        line(const FederationDiscoverReport(
+            created: 1, teamsCreated: ['TJ Sokol Brno IV C'])),
+        'Poslední načtení týmů: pá 25.9. 10:05 · nový tým: TJ Sokol Brno IV C',
+      );
+      expect(
+        line(const FederationDiscoverReport(
+            created: 3, teamsCreated: ['Dubňany', 'Čáslav B', 'Brno A'])),
+        'Poslední načtení týmů: pá 25.9. 10:05 · '
+        'nové týmy: Brno A, Čáslav B, Dubňany',
+      );
+    });
+
+    test('five or more lead with the count and cut the names', () {
+      expect(
+        line(const FederationDiscoverReport(
+            created: 5, teamsCreated: ['E', 'D', 'C', 'B', 'A'])),
+        'Poslední načtení týmů: pá 25.9. 10:05 · nových týmů: 5 (A, B, C, …)',
+      );
+    });
+
+    test('new oddíly follow the teams, joined by a dot', () {
+      expect(
+        line(const FederationDiscoverReport(
+          created: 2,
+          teamsCreated: ['TJ Sokol Husovice E', 'KS Devítka Brno B'],
+          clubsCreated: ['TJ Sokol Husovice'],
+        )),
+        'Poslední načtení týmů: pá 25.9. 10:05 · '
+        'nové týmy: KS Devítka Brno B, TJ Sokol Husovice E · '
+        'nový oddíl: TJ Sokol Husovice',
+      );
+      expect(
+        line(const FederationDiscoverReport(
+            clubsCreated: ['TJ Sokol Husovice', 'KS Devítka Brno'])),
+        'Poslední načtení týmů: pá 25.9. 10:05 · '
+        'nové oddíly: KS Devítka Brno, TJ Sokol Husovice',
+      );
+    });
+
+    test('a report from before the names counts the new teams', () {
+      expect(line(const FederationDiscoverReport(created: 3)),
+          'Poslední načtení týmů: pá 25.9. 10:05 · 3 nové týmy');
+      expect(line(const FederationDiscoverReport(created: 1)),
+          'Poslední načtení týmů: pá 25.9. 10:05 · 1 nový tým');
+    });
+
+    test('a failed one says so with its error', () {
+      expect(line(const FederationDiscoverReport(error: 'boom')),
+          'Poslední načtení týmů se nepovedlo: boom');
+    });
+  });
 }

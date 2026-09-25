@@ -2,6 +2,7 @@
 /// Pure Dart — widgets only render these strings.
 library;
 
+import 'collation.dart';
 import 'models.dart';
 import 'schedule.dart';
 
@@ -80,3 +81,102 @@ String reservationLimitAdminNote(String? player, int max) => player == null
         'vytvořit i tak.'
     : '$player už má maximální počet rezervací ($max). Jako správce ji můžeš '
         'vytvořit i tak.';
+
+/// [n] with its noun in the right Czech form: [one] for 1, [few] for 2–4,
+/// [many] for anything else (0, 5+, and 22 too — written in digits it takes
+/// the genitive).
+String czechCount(int n, String one, String few, String many) =>
+    '$n ${n == 1 ? one : n >= 2 && n <= 4 ? few : many}';
+
+/// The ČKA card's progress line while a discovery runs.
+const teamsLoadingLabel = 'Načítají se týmy z webu…';
+
+/// The ČKA card's progress line while federation jobs are still to run
+/// (0047 `federation_sync_progress`): „Synchronizuje se… zbývá 12 zápasů,
+/// 2 soutěže a 1 kuželna“ — only the non-zero counts, the verb agreeing
+/// with the first of them. A discovery reads [teamsLoadingLabel].
+String federationProgressLabel(FederationSyncProgress p) {
+  if (p.discover > 0) return teamsLoadingLabel;
+  final counts = [
+    if (p.matches > 0)
+      (p.matches, czechCount(p.matches, 'zápas', 'zápasy', 'zápasů')),
+    if (p.competitions > 0)
+      (
+        p.competitions,
+        czechCount(p.competitions, 'soutěž', 'soutěže', 'soutěží'),
+      ),
+    if (p.venues > 0)
+      (p.venues, czechCount(p.venues, 'kuželna', 'kuželny', 'kuželen')),
+  ];
+  if (counts.isEmpty) return 'Synchronizuje se…';
+  final first = counts.first.$1;
+  final verb = first >= 2 && first <= 4 ? 'zbývají' : 'zbývá';
+  final parts = [for (final (_, label) in counts) label];
+  final list = parts.length == 1
+      ? parts.single
+      : '${parts.sublist(0, parts.length - 1).join(', ')} a ${parts.last}';
+  return 'Synchronizuje se… $verb $list';
+}
+
+/// The setup wizard's summary of a discovery (0047): „3 oddíly (2 nové:
+/// KS Devítka Brno, TJ Sokol Husovice)“ — every venue club it found, and
+/// the ones it created, Czech-sorted.
+String discoveryClubsLabel(FederationDiscoverReport r) {
+  final all = czechCount(r.clubsLinked.length + r.clubsCreated.length,
+      'oddíl', 'oddíly', 'oddílů');
+  if (r.clubsCreated.isEmpty) return all;
+  final fresh =
+      czechCount(r.clubsCreated.length, 'nový', 'nové', 'nových');
+  final names = [...r.clubsCreated]..sort(compareCzech);
+  return '$all ($fresh: ${names.join(', ')})';
+}
+
+/// „5 týmů ve 2 soutěžích“.
+String discoveryTeamsLabel(FederationDiscoverReport r) =>
+    '${czechCount(r.teams, 'tým', 'týmy', 'týmů')} '
+    '${_inCompetitions(r.competitions)}';
+
+/// The locative after „v“, which turns „ve“ before a numeral read with two
+/// consonants up front: ve dvou/třech/čtyřech, ve dvanácti/třinácti/
+/// čtrnácti, ve dvaceti…čtyřiceti devíti.
+String _inCompetitions(int n) {
+  final ve = (n >= 2 && n <= 4) || (n >= 12 && n <= 14) || (n >= 20 && n <= 49);
+  return '${ve ? 've' : 'v'} $n ${n == 1 ? 'soutěži' : 'soutěžích'}';
+}
+
+/// The ČKA card's line about the last discovery (0047), [when] being its
+/// `at` as the card writes „Poslední synchronizace“: „Poslední načtení
+/// týmů: pá 25.9. 10:05 · nové týmy: A, B · nový oddíl: X“, „… · žádná
+/// změna“ when it created neither a team nor a club, or „Poslední načtení
+/// týmů se nepovedlo: …“ with its error.
+String discoveryResultLabel(FederationDiscoverReport r, String? when) {
+  if (r.failed) return 'Poslední načtení týmů se nepovedlo: ${r.error}';
+  final teams = _newOnes(
+      r.teamsCreated, r.created, 'nový tým', 'nové týmy', 'nových týmů');
+  final clubs = _newOnes(r.clubsCreated, r.clubsCreated.length, 'nový oddíl',
+      'nové oddíly', 'nových oddílů');
+  return 'Poslední načtení týmů: ${[
+    ?when,
+    if (teams == null && clubs == null) 'žádná změna',
+    ?teams,
+    ?clubs,
+  ].join(' · ')}';
+}
+
+/// Names past this many read „nových týmů: 12 (A, B, C, …)“: a first
+/// discovery creates every team of the kuželna.
+const _newNamesShown = 3;
+
+/// „nový tým: A“, „nové týmy: A, B“, „nových týmů: 5 (A, B, C, …)“ —
+/// Czech-sorted; null for none. A report from before 0047 named the teams
+/// has only their [count]: „3 nové týmy“.
+String? _newOnes(
+    List<String> names, int count, String one, String few, String many) {
+  final n = names.isEmpty ? count : names.length;
+  if (n == 0) return null;
+  if (names.isEmpty) return czechCount(n, one, few, many);
+  final sorted = [...names]..sort(compareCzech);
+  if (n == 1) return '$one: ${sorted.single}';
+  if (n <= 4) return '$few: ${sorted.join(', ')}';
+  return '$many: $n (${sorted.take(_newNamesShown).join(', ')}, …)';
+}

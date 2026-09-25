@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -9,8 +7,9 @@ import 'package:rezervator/features/admin/clubs_screen.dart';
 import 'package:rezervator/features/admin/widgets/form_fields.dart';
 
 /// Smoke test for the clubs admin list: renders for an admin, shows its
-/// empty state, the ČKA sync card (0045), teams grouped under their club,
-/// and the FAB opens the add dialog (never saved — that would hit the RPC).
+/// empty state, teams grouped under their club (0045), and the FAB opens
+/// the add dialog (never saved — that would hit the RPC). The ČKA card has
+/// its own tests in federation_card_test.dart.
 void main() {
   const admin = Profile(
     id: 'admin1',
@@ -53,6 +52,7 @@ void main() {
             saveFederation: saveFederation ?? (_, _) async {},
             discoverTeams: discoverTeams ?? () async {},
             syncNow: syncNow ?? () async {},
+            syncProgress: () async => FederationSyncProgress.idle,
             updateTeam: updateTeam ??
                 (_, {required String name, String? clubId, required bool active}) async {},
           ),
@@ -104,7 +104,7 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Název'), findsOneWidget);
-    // The ČKA card has its own Uložit button — scope to the dialog.
+    // Scope to the dialog: the ČKA card has buttons of its own.
     expect(
       find.descendant(of: dialog, matching: find.text('Uložit')),
       findsOneWidget,
@@ -121,7 +121,7 @@ void main() {
     await tester.tap(find.byType(FloatingActionButton));
     await tester.pumpAndSettle();
 
-    // The ČKA card has its own Uložit button — scope to the dialog.
+    // Scope to the dialog: the ČKA card has buttons of its own.
     await tester.tap(find.descendant(
       of: find.byType(AlertDialog),
       matching: find.text('Uložit'),
@@ -132,7 +132,7 @@ void main() {
     expect(find.byType(AlertDialog), findsOneWidget); // still open
   });
 
-  group('federation sync card (0045)', () {
+  group('teams under their clubs (0045)', () {
     testWidgets('teams render under their club; a team with no known club '
         'sits under Nezařazené týmy', (tester) async {
       const teams = [
@@ -284,214 +284,58 @@ void main() {
       await tester.pumpAndSettle();
     });
 
-    testWidgets(
-        'unconfigured sync seeds the default slug and disables Načíst týmy',
+    // Devítka is linked to the ČKA site (0047); Veverky is not.
+    const linkedClubs = [
+      Club(
+        id: 'c1',
+        name: 'Devítka',
+        colorIndex: 3,
+        siteSlug: 'ks-devitka-brno',
+        siteName: 'KS Devítka Brno',
+      ),
+      Club(id: 'c2', name: 'Veverky', colorIndex: 2),
+    ];
+
+    testWidgets('a linked club\'s dialog shows its name on the ČKA site',
         (tester) async {
-      await pumpApp(tester, app(clubs));
+      await pumpApp(tester, app(linkedClubs));
 
-      expect(find.text('tj-sokol-brno-iv'), findsOneWidget);
-      final button = tester.widget<OutlinedButton>(
-          find.widgetWithText(OutlinedButton, 'Načíst týmy z webu'));
-      expect(button.onPressed, isNull);
+      await tester.tap(find.byTooltip('Upravit oddíl').first);
+      await tester.pumpAndSettle();
+      expect(find.text('Na webu ČKA: KS Devítka Brno'), findsOneWidget);
+      await tester.tap(find.text('Zrušit'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Upravit oddíl').last);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Na webu ČKA'), findsNothing);
     });
 
-    testWidgets('saving the slug calls saveFederation with the typed value',
+    testWidgets('deleting a linked club warns that discovery brings it back',
         (tester) async {
-      String? savedSlug;
-      bool? savedEnabled;
-      await pumpApp(
-        tester,
-        app(
-          clubs,
-          saveFederation: (slug, enabled) async {
-            savedSlug = slug;
-            savedEnabled = enabled;
-          },
-        ),
+      await pumpApp(tester, app(linkedClubs));
+
+      await tester.tap(find.byTooltip('Smazat oddíl').first);
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Opravdu smazat oddíl „Devítka"? Hráči zůstanou bez '
+            'oddílu. Oddíl je propojený s webem ČKA, takže ho příští '
+            '„Přenačíst týmy z webu“ založí znovu.'),
+        findsOneWidget,
       );
-
-      await tester.enterText(
-          find.widgetWithText(TextField, 'tj-sokol-brno-iv'),
-          'ks-devitka-brno');
-      await tester.tap(find.text('Stahovat automaticky'));
-      await tester.tap(find.text('Uložit'));
+      await tester.tap(find.text('Zrušit'));
       await tester.pumpAndSettle();
 
-      expect(savedSlug, 'ks-devitka-brno');
-      expect(savedEnabled, isTrue);
-    });
-
-    testWidgets(
-        'a sync row that arrives after the first frame seeds the form; '
-        'Uložit keeps it', (tester) async {
-      final rows = StreamController<FederationSync>();
-      addTearDown(rows.close);
-      String? savedSlug;
-      bool? savedEnabled;
-      await pumpApp(
-        tester,
-        app(
-          clubs,
-          syncStream: rows.stream,
-          saveFederation: (slug, enabled) async {
-            savedSlug = slug;
-            savedEnabled = enabled;
-          },
-        ),
+      await tester.tap(find.byTooltip('Smazat oddíl').last);
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Opravdu smazat oddíl „Veverky"? Hráči zůstanou bez '
+            'oddílu.'),
+        findsOneWidget,
       );
-
-      final saveBefore = tester.widget<FilledButton>(
-          find.widgetWithText(FilledButton, 'Uložit'));
-      expect(saveBefore.onPressed, isNull);
-
-      rows.add(const FederationSync(
-          venueSlug: 'ks-devitka-brno', enabled: true));
-      await tester.pumpAndSettle();
-
-      expect(find.widgetWithText(TextField, 'ks-devitka-brno'), findsOneWidget);
-      final toggle = tester.widget<SwitchListTile>(
-          find.widgetWithText(SwitchListTile, 'Stahovat automaticky'));
-      expect(toggle.value, isTrue);
-
-      await tester.tap(find.text('Uložit'));
-      await tester.pumpAndSettle();
-
-      expect(savedSlug, 'ks-devitka-brno');
-      expect(savedEnabled, isTrue);
     });
 
-    testWidgets(
-        'a newer row after the cached one re-seeds the untouched form; '
-        'Uložit keeps the newer values', (tester) async {
-      final rows = StreamController<FederationSync>();
-      addTearDown(rows.close);
-      String? savedSlug;
-      bool? savedEnabled;
-      await pumpApp(
-        tester,
-        app(
-          clubs,
-          syncStream: rows.stream,
-          saveFederation: (slug, enabled) async {
-            savedSlug = slug;
-            savedEnabled = enabled;
-          },
-        ),
-      );
-
-      // The cached snapshot first, then the live row changed elsewhere.
-      rows.add(const FederationSync(venueSlug: 'ks-devitka-brno'));
-      await tester.pumpAndSettle();
-      rows.add(const FederationSync(venueSlug: 'kk-slovan', enabled: true));
-      await tester.pumpAndSettle();
-
-      expect(find.widgetWithText(TextField, 'kk-slovan'), findsOneWidget);
-      final toggle = tester.widget<SwitchListTile>(
-          find.widgetWithText(SwitchListTile, 'Stahovat automaticky'));
-      expect(toggle.value, isTrue);
-
-      await tester.tap(find.text('Uložit'));
-      await tester.pumpAndSettle();
-
-      expect(savedSlug, 'kk-slovan');
-      expect(savedEnabled, isTrue);
-    });
-
-    testWidgets('a cached empty row does not pin the default slug over the '
-        'live one', (tester) async {
-      final rows = StreamController<FederationSync>();
-      addTearDown(rows.close);
-      await pumpApp(tester, app(clubs, syncStream: rows.stream));
-
-      rows.add(FederationSync.none);
-      await tester.pumpAndSettle();
-      expect(find.widgetWithText(TextField, 'tj-sokol-brno-iv'), findsOneWidget);
-
-      rows.add(const FederationSync(venueSlug: 'kk-slovan'));
-      await tester.pumpAndSettle();
-      expect(find.widgetWithText(TextField, 'kk-slovan'), findsOneWidget);
-    });
-
-    testWidgets('a row arriving while the admin edits leaves their edits be',
-        (tester) async {
-      final rows = StreamController<FederationSync>();
-      addTearDown(rows.close);
-      String? savedSlug;
-      bool? savedEnabled;
-      await pumpApp(
-        tester,
-        app(
-          clubs,
-          syncStream: rows.stream,
-          saveFederation: (slug, enabled) async {
-            savedSlug = slug;
-            savedEnabled = enabled;
-          },
-        ),
-      );
-
-      rows.add(const FederationSync(venueSlug: 'ks-devitka-brno'));
-      await tester.pumpAndSettle();
-      await tester.enterText(
-          find.widgetWithText(TextField, 'ks-devitka-brno'), 'moje-kuzelna');
-      await tester.tap(find.text('Stahovat automaticky'));
-      await tester.pumpAndSettle();
-
-      rows.add(const FederationSync(venueSlug: 'kk-slovan'));
-      await tester.pumpAndSettle();
-
-      expect(find.widgetWithText(TextField, 'moje-kuzelna'), findsOneWidget);
-      await tester.tap(find.text('Uložit'));
-      await tester.pumpAndSettle();
-      expect(savedSlug, 'moje-kuzelna');
-      expect(savedEnabled, isTrue);
-
-      // Saved: the echoed row takes over the form again.
-      rows.add(const FederationSync(venueSlug: 'moje-kuzelna', enabled: true));
-      await tester.pumpAndSettle();
-      rows.add(const FederationSync(venueSlug: 'kk-slovan'));
-      await tester.pumpAndSettle();
-      expect(find.widgetWithText(TextField, 'kk-slovan'), findsOneWidget);
-    });
-
-    testWidgets(
-        'a configured+enabled sync enables both actions and shows the error',
-        (tester) async {
-      var discovered = false;
-      var synced = false;
-      await pumpApp(
-        tester,
-        app(
-          clubs,
-          sync: const FederationSync(
-            venueSlug: 'tj-sokol-brno-iv',
-            enabled: true,
-            lastError: 'boom',
-          ),
-          discoverTeams: () async => discovered = true,
-          syncNow: () async => synced = true,
-        ),
-      );
-
-      expect(find.text('Chyba: boom'), findsOneWidget);
-
-      final discoverButton = tester.widget<OutlinedButton>(
-          find.widgetWithText(OutlinedButton, 'Načíst týmy z webu'));
-      final syncButton = tester.widget<OutlinedButton>(
-          find.widgetWithText(OutlinedButton, 'Synchronizovat teď'));
-      expect(discoverButton.onPressed, isNotNull);
-      expect(syncButton.onPressed, isNotNull);
-
-      await tester.tap(find.widgetWithText(OutlinedButton, 'Načíst týmy z webu'));
-      await tester.pumpAndSettle();
-      expect(discovered, isTrue);
-
-      await tester.tap(find.widgetWithText(OutlinedButton, 'Synchronizovat teď'));
-      await tester.pumpAndSettle();
-      expect(synced, isTrue);
-    });
-
-    testWidgets('toggling a team switch calls updateTeam with the flip',
+    testWidgets('a team row edits through its pencil or a tap — no switch',
         (tester) async {
       const team = Team(
         id: 't1',
@@ -499,41 +343,41 @@ void main() {
         clubId: 'c2',
         competitionName: 'OP I. třída',
       );
-      Team? capturedTeam;
-      String? capturedName;
-      String? capturedClubId;
-      bool? capturedActive;
-      await pumpApp(
-        tester,
-        app(
-          clubs,
-          teams: const [team],
-          updateTeam: (t,
-              {required String name,
-              String? clubId,
-              required bool active}) async {
-            capturedTeam = t;
-            capturedName = name;
-            capturedClubId = clubId;
-            capturedActive = active;
-          },
-        ),
-      );
+      await pumpApp(tester, app(clubs, teams: const [team]));
 
-      // Two switches exist ("Stahovat automaticky" on the card and this
-      // team's own) — scope to the team's tile.
-      final teamSwitch = find.descendant(
-        of: find.ancestor(
-            of: find.text('Veverky A'), matching: find.byType(ListTile)),
-        matching: find.byType(Switch),
-      );
-      await tester.tap(teamSwitch);
+      final row = find.ancestor(
+          of: find.text('Veverky A'), matching: find.byType(ListTile));
+      expect(find.descendant(of: row, matching: find.byType(Switch)),
+          findsNothing);
+
+      await tester.tap(find.byTooltip('Upravit tým'));
       await tester.pumpAndSettle();
+      expect(find.text('Tým'), findsOneWidget);
+      await tester.tap(find.text('Zrušit'));
+      await tester.pumpAndSettle();
+      expect(find.text('Tým'), findsNothing);
 
-      expect(capturedTeam, team);
-      expect(capturedName, team.name);
-      expect(capturedClubId, team.clubId);
-      expect(capturedActive, isFalse);
+      await tester.tap(find.text('Veverky A'));
+      await tester.pumpAndSettle();
+      expect(find.text('Tým'), findsOneWidget);
+    });
+
+    testWidgets('a team that is not downloaded is greyed out and says so',
+        (tester) async {
+      const team = Team(
+        id: 't1',
+        name: 'Veverky B',
+        clubId: 'c2',
+        competitionName: 'OP II. třída',
+        active: false,
+      );
+      await pumpApp(tester, app(clubs, teams: const [team]));
+
+      expect(find.text('OP II. třída · nestahuje se'), findsOneWidget);
+      final title = tester.widget<Text>(find.text('Veverky B'));
+      final scheme =
+          Theme.of(tester.element(find.text('Veverky B'))).colorScheme;
+      expect(title.style?.color, scheme.onSurfaceVariant);
     });
 
     testWidgets(
@@ -581,7 +425,7 @@ void main() {
       await tester.tap(find.text('Bez oddílu').last);
       await tester.pumpAndSettle();
 
-      // The ČKA card has its own Uložit button — scope to the dialog.
+      // Scope to the dialog: the ČKA card has buttons of its own.
       await tester.tap(find.descendant(
         of: find.byType(AlertDialog),
         matching: find.text('Uložit'),

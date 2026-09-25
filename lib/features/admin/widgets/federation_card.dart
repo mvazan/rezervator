@@ -1,14 +1,22 @@
-/// Správa → Oddíly: the ČKA results-service card — where the admin sets the
-/// alley's slug on vysledky.kuzelky.cz, turns automatic sync on/off, and
-/// kicks off a one-off team discovery or sync run. See task-5-brief.md.
+/// Správa → Oddíly: the ČKA results-service card. Until the alley was first
+/// synced it is the setup wizard ([FederationWizard]); after that the
+/// kuželna on vysledky.kuzelky.cz (read-only, changed behind a pencil),
+/// automatic sync on/off (saved at once), a one-off team discovery or sync
+/// run, and while federation jobs are still to run, a spinning line that
+/// says what is left (0047 `federation_sync_progress`).
 library;
+
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/ui.dart';
 import '../../../data/providers.dart';
+import '../../../domain/labels.dart';
 import '../../../domain/models.dart';
+import 'federation_wizard.dart';
+import 'venue_slug_field.dart';
 
 class FederationCard extends ConsumerStatefulWidget {
   const FederationCard({
@@ -16,12 +24,14 @@ class FederationCard extends ConsumerStatefulWidget {
     this.saveFederation = _defaultSave,
     this.discoverTeams = Api.requestFederationDiscovery,
     this.syncNow = Api.requestFederationSync,
+    this.syncProgress = Api.federationSyncProgress,
   });
 
-  /// Injectable so a widget test can drive the buttons without the backend.
+  /// Injectable so a widget test can drive the card without the backend.
   final Future<void> Function(String venueSlug, bool enabled) saveFederation;
   final Future<void> Function() discoverTeams;
   final Future<void> Function() syncNow;
+  final Future<FederationSyncProgress> Function() syncProgress;
 
   static Future<void> _defaultSave(String venueSlug, bool enabled) =>
       Api.setFederationSync(venueSlug: venueSlug, enabled: enabled);
@@ -30,77 +40,275 @@ class FederationCard extends ConsumerStatefulWidget {
   ConsumerState<FederationCard> createState() => _FederationCardState();
 }
 
-class _FederationCardState extends ConsumerState<FederationCard> {
-  final _slug = TextEditingController();
-  bool _enabled = false;
+class _FederationCardState extends ConsumerState<FederationCard>
+    with WidgetsBindingObserver {
+  static const _pollEvery = Duration(seconds: 5);
 
-  /// The form follows the row until the admin touches it — the provider
-  /// replays the on-disk snapshot before the live row, so a one-shot seed
-  /// would pin a stale slug that Uložit then writes back. From the first
-  /// edit it is the admin's until a successful Uložit hands it back to the
-  /// (echoed) row.
-  bool _dirty = false;
+  /// Looks after a request even while nothing is pending yet — its jobs may
+  /// not be due, or be done before the first look: 12 × 5 s = 60 s.
+  static const _graceLooks = 12;
 
-  /// The row values the form was last filled from — a rebuild with the same
-  /// row (a new lastRunAt, say) must not reset the text field.
-  (String, bool)? _seededFrom;
+  /// Looks after a discovery's jobs are done, while its report is on its
+  /// way to the row: 2 × 5 s.
+  static const _reportLooks = 2;
+
+  FederationSyncProgress _progress = FederationSyncProgress.idle;
+  Timer? _timer;
+  bool _looking = false;
+  bool _foreground = true;
+  int _graceLeft = 0;
+
+  /// A request since the row was last fetched: it is fetched again at 0
+  /// even when no look saw the run pending.
+  bool _refreshAtZero = false;
+
+  /// A discovery ran since the last fetch: its teams and clubs are fetched
+  /// again with the row.
+  bool _discoveryRan = false;
+
+  /// A discovery was asked for and the row still holds the report from
+  /// before it ([_reportBefore] is that report's `at`).
+  bool _awaitingDiscovery = false;
+  DateTime? _reportBefore;
+
+  /// The discovery the looks count is a failed one waiting to retry, seen
+  /// next to its error in the row. It stays that after a move to another
+  /// kuželna drops the error (0047's set_federation_sync), until the count
+  /// is 0 or a new request.
+  bool _failedRetry = false;
+
+  /// The switch's value from a tap until the row echoes it — the save runs
+  /// at once, the echo comes over Realtime a moment later. null: the row's.
+  bool? _enabledWanted;
+  bool _savingEnabled = false;
+
+  /// A discovery or sync request is on its way to the server: the controls
+  /// rest from the tap, not from the first look that sees the run.
+  bool _requesting = false;
+
+  /// The wizard's last step switched the sync on: the normal view from now
+  /// on, without waiting for the row's echo.
+  bool _setupDone = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    // One look on opening: an admin coming back to a running first sync
+    // sees it still going.
+    _look();
+  }
 
   @override
   void dispose() {
-    _slug.dispose();
+    WidgetsBinding.instance.removeObserver(this);
+    _timer?.cancel();
     super.dispose();
   }
 
-  void _seed(FederationSync sync) {
-    final from = (sync.venueSlug, sync.enabled);
-    if (_dirty || from == _seededFrom) return;
-    _seededFrom = from;
-    _slug.text = sync.venueSlug.isEmpty ? 'tj-sokol-brno-iv' : sync.venueSlug;
-    _enabled = sync.enabled;
+  /// No looks behind the admin's back: the background stops them, the
+  /// foreground looks again at once.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.resumed:
+        if (_foreground) return;
+        _foreground = true;
+        _look();
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.paused:
+      case AppLifecycleState.detached:
+        _foreground = false;
+        _timer?.cancel();
+        _timer = null;
+      case AppLifecycleState.inactive:
+        break;
+    }
   }
 
-  Future<void> _save() async {
+  /// A run was just requested: look now, then every 5 s for up to a minute
+  /// even while nothing is pending yet.
+  void _afterRequest({bool discovery = false}) {
+    _graceLeft = _graceLooks;
+    _refreshAtZero = true;
+    if (discovery) {
+      _discoveryRan = true;
+      _failedRetry = false;
+      setState(() {
+        _awaitingDiscovery = true;
+        _reportBefore = ref.read(federationSyncProvider).value?.discover?.at;
+      });
+    }
+    _look();
+  }
+
+  Future<void> _look() async {
+    _timer?.cancel();
+    _timer = null;
+    // A look already under way schedules the next one itself.
+    if (_looking || !_foreground) return;
+    _looking = true;
+    FederationSyncProgress? next;
+    try {
+      next = await widget.syncProgress();
+    } catch (_) {
+      // Offline for a moment: the line stays, the next look asks again.
+    }
+    _looking = false;
+    if (!mounted) return;
+    if (_graceLeft > 0) _graceLeft--;
+    if (next != null) {
+      if (next.discover > 0) _discoveryRan = true;
+      if (next.pending) {
+        // Seen running: from here on the looks stop at 0.
+        _graceLeft = 0;
+      } else if (_progress.pending || _refreshAtZero) {
+        _refreshAtZero = false;
+        if (_awaitingDiscovery && _graceLeft < _reportLooks) {
+          _graceLeft = _reportLooks;
+        }
+        ref.invalidate(federationSyncProvider);
+        if (_discoveryRan) {
+          _discoveryRan = false;
+          ref
+            ..invalidate(teamsProvider)
+            ..invalidate(clubsProvider);
+        }
+      }
+      if (next != _progress) setState(() => _progress = next!);
+    }
+    if (_awaitingDiscovery && _graceLeft == 0 && !_progress.pending) {
+      setState(() => _awaitingDiscovery = false);
+    }
+    if (_foreground && (_progress.pending || _graceLeft > 0)) {
+      _timer = Timer(_pollEvery, _look);
+    }
+  }
+
+  /// A discovery is running, or its report is not in the row yet. A failed
+  /// discovery's job only waits to retry: jobOutcome re-arms it at +1, +2,
+  /// +4 and +8 min, and federation_sync_progress counts each as leased. So
+  /// once the row holds its error, that error shows, not a quarter of an
+  /// hour's loader. Nor does it once another kuželna drops that error
+  /// ([_failedRetry]): the count is still the old retry, not a request of
+  /// the admin's. A newer request still waits for its own report.
+  bool _discovering(FederationSync sync) {
+    final report = sync.discover;
+    if (_awaitingDiscovery && report?.at != _reportBefore) {
+      _awaitingDiscovery = false;
+    }
+    if (_awaitingDiscovery) return true;
+    final failed = report?.failed ?? false;
+    if (failed) _failedRetry = _progress.discover > 0;
+    if (_progress.discover == 0) _failedRetry = false;
+    return _progress.discover > 0 && !failed && !_failedRetry;
+  }
+
+  /// What the progress line counts: the discovery only while
+  /// [_discovering] — a failed one waiting to retry is left out.
+  FederationSyncProgress _shownProgress(bool discovering) =>
+      discovering || _progress.discover == 0
+          ? _progress
+          : FederationSyncProgress(
+              competitions: _progress.competitions,
+              matches: _progress.matches,
+              venues: _progress.venues,
+            );
+
+  Future<bool> _requestDiscovery() async {
+    setState(() => _requesting = true);
     final ok = await tryAction(
       context,
-      () => widget.saveFederation(_slug.text.trim(), _enabled),
-      success: 'Uloženo.',
+      widget.discoverTeams,
       errorText: friendlyDbError,
     );
-    if (ok) _dirty = false;
+    if (!mounted) return ok;
+    setState(() => _requesting = false);
+    if (ok) _afterRequest(discovery: true);
+    return ok;
   }
 
-  Future<void> _discover() => tryAction(
-        context,
-        widget.discoverTeams,
-        success: 'Týmy se načítají — za chvíli se objeví níže.',
-        errorText: friendlyDbError,
-      );
+  Future<void> _sync() async {
+    setState(() => _requesting = true);
+    final ok = await tryAction(
+      context,
+      widget.syncNow,
+      success: 'Synchronizace spuštěna.',
+      errorText: friendlyDbError,
+    );
+    if (!mounted) return;
+    setState(() => _requesting = false);
+    if (ok) _afterRequest();
+  }
 
-  Future<void> _sync() => tryAction(
-        context,
-        widget.syncNow,
-        success: 'Synchronizace spuštěna.',
-        errorText: friendlyDbError,
+  /// The wizard's last step: the sync on, then the first run.
+  Future<bool> _enable(FederationSync sync) async {
+    final ok = await tryAction(
+      context,
+      () async {
+        await widget.saveFederation(sync.venueSlug, true);
+        await widget.syncNow();
+      },
+      errorText: friendlyDbError,
+    );
+    if (ok && mounted) {
+      setState(() {
+        _setupDone = true;
+        _enabledWanted = true;
+      });
+      _afterRequest();
+    }
+    return ok;
+  }
+
+  /// Never synced and never switched on: the setup is not finished. Once
+  /// on, or ever synced, the normal view stays — even with the sync
+  /// switched off later.
+  bool _inSetup(FederationSync sync) =>
+      !_setupDone && !sync.enabled && sync.lastRunAt == null;
+
+  Future<void> _setEnabled(FederationSync sync, bool enabled) async {
+    setState(() {
+      _enabledWanted = enabled;
+      _savingEnabled = true;
+    });
+    final ok = await tryAction(
+      context,
+      () => widget.saveFederation(sync.venueSlug, enabled),
+      errorText: friendlyDbError,
+    );
+    if (!mounted) return;
+    setState(() {
+      _savingEnabled = false;
+      if (!ok) _enabledWanted = null;
+    });
+  }
+
+  Future<void> _editSlug(FederationSync sync, bool enabled) =>
+      showDialog<bool>(
+        context: context,
+        builder: (_) => VenueSlugDialog(
+          initial: sync.venueSlug,
+          save: (slug) => widget.saveFederation(slug, enabled),
+        ),
       );
 
   /// "čt 23.4. 9:05" — local time, reusing core/ui.dart's date label and
   /// [HourMinute]'s own display instead of hand-rolling another format.
-  String _lastSuccessLabel(DateTime? at) {
-    if (at == null) return 'Zatím neproběhla';
+  String _whenLabel(DateTime at) {
     final local = at.toLocal();
     final day = Day.fromDateTime(local);
     final time = HourMinute(local.hour, local.minute);
     return '${dayLabel(day)} ${time.display()}';
   }
 
+  String _lastSuccessLabel(DateTime? at) =>
+      at == null ? 'Zatím neproběhla' : _whenLabel(at);
+
   @override
   Widget build(BuildContext context) {
     final loaded = ref.watch(federationSyncProvider);
-    // Until the row is here the form stays disabled and unseeded — Uložit
-    // on the defaults would overwrite the real row.
-    final ready = loaded.hasValue;
-    final sync = loaded.value ?? FederationSync.none;
-    if (ready) _seed(sync);
+    final sync = loaded.value;
     final theme = Theme.of(context);
     return Card(
       child: Padding(
@@ -110,69 +318,141 @@ class _FederationCardState extends ConsumerState<FederationCard> {
           children: [
             Text('Výsledkový servis ČKA', style: theme.textTheme.titleMedium),
             const SizedBox(height: 8),
-            const Text(
-              'Zápasy a výsledky týmů, které hrají na této kuželně, se '
-              'stahují z vysledky.kuzelky.cz.',
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _slug,
-              enabled: ready,
-              autocorrect: false,
-              onChanged: (_) => _dirty = true,
-              decoration: const InputDecoration(
-                labelText: 'Kuželna na webu',
-                prefixText: 'detail-kuzelny/',
-              ),
-            ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Stahovat automaticky'),
-              value: _enabled,
-              onChanged: ready
-                  ? (v) => setState(() {
-                        _enabled = v;
-                        _dirty = true;
-                      })
-                  : null,
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                FilledButton(
-                  onPressed: ready ? _save : null,
-                  child: const Text('Uložit'),
-                ),
-                OutlinedButton(
-                  onPressed: sync.configured ? _discover : null,
-                  child: const Text('Načíst týmy z webu'),
-                ),
-                OutlinedButton(
-                  onPressed: sync.configured && sync.enabled ? _sync : null,
-                  child: const Text('Synchronizovat teď'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Poslední synchronizace: '
-              '${_lastSuccessLabel(sync.lastSuccessAt)}',
-            ),
-            if (loaded.hasError && !ready)
+            if (sync != null && _inSetup(sync))
+              _wizard(sync)
+            else if (sync != null)
+              ..._settings(sync)
+            else if (loaded.hasError)
               Text(
                 friendlyDbError(loaded.error!),
                 style: TextStyle(color: theme.colorScheme.error),
-              ),
-            if (sync.lastError != null)
-              Text(
-                'Chyba: ${sync.lastError}',
-                style: TextStyle(color: theme.colorScheme.error),
-              ),
+              )
+            else
+              const Text('Načítám…'),
           ],
         ),
       ),
     );
+  }
+
+  Widget _wizard(FederationSync sync) {
+    final teams = ref.watch(teamsProvider);
+    if (!teams.hasValue && !teams.hasError) return const Text('Načítám…');
+    return FederationWizard(
+      sync: sync,
+      teams: teams.value ?? const [],
+      discovering: _discovering(sync),
+      saveSlug: (slug) => tryAction(
+        context,
+        () => widget.saveFederation(slug, false),
+        errorText: friendlyDbError,
+      ),
+      discover: _requestDiscovery,
+      enable: () => _enable(sync),
+    );
+  }
+
+  List<Widget> _settings(FederationSync sync) {
+    // The tapped value stays until the row catches up with it.
+    if (_enabledWanted == sync.enabled) _enabledWanted = null;
+    final enabled = _enabledWanted ?? sync.enabled;
+    final discovering = _discovering(sync);
+    final progress = _shownProgress(discovering);
+    final busy = discovering || progress.pending;
+    final locked = busy || _requesting;
+    final theme = Theme.of(context);
+    final muted = busy
+        ? theme.textTheme.bodySmall
+            ?.copyWith(color: theme.colorScheme.onSurfaceVariant)
+        : null;
+    final errorStyle = TextStyle(color: theme.colorScheme.error);
+    // The last discovery's result — what „Přenačíst týmy z webu“ ends with
+    // once its loader goes, and still there on coming back. While one runs
+    // the loader stands in for it, failure included.
+    final last = sync.discover;
+    final report = discovering ? null : last;
+    // A failed discovery's line carries its error; „Chyba:“ would repeat it
+    // while that error is still the newest.
+    final lastError =
+        last != null && last.failed && sync.lastError == last.error
+            ? null
+            : sync.lastError;
+    return [
+      const Text(
+        'Zápasy a výsledky týmů, které hrají na této kuželně, se stahují '
+        'z vysledky.kuzelky.cz.',
+      ),
+      const SizedBox(height: 8),
+      Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Kuželna na webu', style: theme.textTheme.labelMedium),
+                Text(sync.configured
+                    ? 'detail-kuzelny/${sync.venueSlug}'
+                    : 'Zatím nenastavená'),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.edit_outlined),
+            tooltip: 'Změnit kuželnu',
+            onPressed: locked ? null : () => _editSlug(sync, enabled),
+          ),
+        ],
+      ),
+      SwitchListTile(
+        contentPadding: EdgeInsets.zero,
+        title: const Text('Stahovat automaticky'),
+        value: enabled,
+        onChanged: locked || _savingEnabled || !sync.configured
+            ? null
+            : (v) => _setEnabled(sync, v),
+      ),
+      const SizedBox(height: 8),
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          OutlinedButton(
+            onPressed: !locked && sync.configured ? _requestDiscovery : null,
+            child: const Text('Přenačíst týmy z webu'),
+          ),
+          OutlinedButton(
+            onPressed: !locked && sync.configured && enabled ? _sync : null,
+            child: const Text('Synchronizovat teď'),
+          ),
+        ],
+      ),
+      const SizedBox(height: 8),
+      if (busy)
+        Row(
+          children: [
+            const SizedBox.square(
+              dimension: 14,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(discovering
+                  ? teamsLoadingLabel
+                  : federationProgressLabel(progress)),
+            ),
+          ],
+        ),
+      Text(
+        'Poslední synchronizace: ${_lastSuccessLabel(sync.lastSuccessAt)}',
+        style: muted,
+      ),
+      if (report != null)
+        Text(
+          discoveryResultLabel(
+              report, report.at == null ? null : _whenLabel(report.at!)),
+          style: report.failed ? errorStyle : muted,
+        ),
+      if (lastError != null) Text('Chyba: $lastError', style: errorStyle),
+    ];
   }
 }
