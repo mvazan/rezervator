@@ -22,6 +22,30 @@ export function timeLabel(sqlTime: string): string {
   return `${Number(h)}:${m}`;
 }
 
+const pragueParts = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Europe/Prague",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+
+/// The Prague wall-clock date (`YYYY-MM-DD`) and time (`HH:MM`) of an
+/// instant. The database hands an event's start over as `timestamptz`, and
+/// PostgREST writes it in UTC ("2026-09-26T14:30:00+00:00"), so slicing the
+/// string reads the UTC clock — two hours early in summer, one in winter.
+export function pragueDateTime(instant: string): { date: string; time: string } {
+  const parts = Object.fromEntries(
+    pragueParts.formatToParts(new Date(instant)).map((p) => [p.type, p.value]),
+  );
+  return {
+    date: `${parts.year}-${parts.month}-${parts.day}`,
+    time: `${parts.hour}:${parts.minute}`,
+  };
+}
+
 /// "za 2 hodiny", "za 1 den" — how a reminder announces its own lead time
 /// (0040). Czech counts three ways and the unit changes at a day, so this
 /// is a table rather than a format string; whole days read as days, the
