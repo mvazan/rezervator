@@ -21,7 +21,7 @@
 - Club palette: indexes 0–8 (`ClubColors.count` = 9, `clubs_color_check`); -1 = none; values ≥ 0x1000000 are hand-picked colours.
 - The club pencil stays. A rename or recolour in the app changes only `name` and `color` (`upsert_club`); `site_slug` and `site_name` stay, so scraping keeps its original club identity.
 - No hint text explaining the team pencil or the row tap (user: „to je zrejmé“).
-- Discovery shows a loader in the wizard (step 2) and after „Přenačíst týmy z webu“ (the progress line), both driven by `federation_sync_progress`.
+- Discovery shows a loader in the wizard (step 2) and after „Přenačíst týmy z webu“ (the progress line), both driven by `federation_sync_progress`. A failed discovery's error in the row ends the loader (plan decision 7).
 - UI copy is Czech, code and comments English. Colours come from `Theme.of(context).colorScheme` (this repo has no SurfaceColors class); no hard-coded colours.
 - Lists are Czech-alphabetical (`compareCzech`) or chronological.
 - Wizard copy, verbatim from the spec:
@@ -39,7 +39,7 @@
   - „Poslední synchronizace: …“ stays as a second, muted line.
   - The spinner is 14 dp with stroke 2.
 - Clubs-screen copy, verbatim from the spec: club dialog „Na webu ČKA: <site_name>“; team pencil tooltip „Upravit tým“; an inactive team's subtitle ends „ · nestahuje se“.
-- The wizard shows while `!enabled && last_run_at == null`: step 1 without a slug, step 2 with a slug but no teams, step 3 with both.
+- The wizard shows while `!enabled && last_run_at == null`: step 1 without a slug, step 2 with a slug but no teams, step 3 with both. "Teams" means the teams of a successful discovery of the current kuželna (plan decision 14).
 - Polling runs every 5 s while anything is pending, plus a grace window of up to 60 s after a request button. It stops at 0, on dispose and in the background, and at 0 it fetches the sync row again.
 - A widget test with a spinner on screen uses `tester.pump(…)`, never `pumpAndSettle()` (a spinner never settles).
 - Gates: `flutter analyze` → `No issues found!`; `TZ=Europe/Prague flutter test`; `deno check --import-map supabase/functions/import_map.json supabase/functions/notify/index.ts`; `deno test --allow-read supabase/functions`; `supabase/tests/tenancy_rls.sql`; schema snapshot diff.
@@ -52,11 +52,11 @@
 4. `clubs_linked` holds our names of the clubs matched by slug or by name, so the summary's N = linked + created.
 5. A venue club whose site name another club of the alley already has (one linked to another venue club) creates nothing, and its teams stay without a club.
 6. The report gains `competitions` (distinct competitions among the discovered teams) for „T týmů v S soutěžích“.
-7. **„Leased“ means `attempts > 0` and `run_at` within the notify tick's 10-minute lease** (`LEASE_MS`). A retry backing off within that window counts too.
+7. **„Leased“ means `attempts > 0` and `run_at` within the notify tick's 10-minute lease** (`LEASE_MS`). A retry backing off within that window counts too. So a failed discovery (a well-formed slug of no kuželna → HTTP 404, or „na stránce kuželny nejsou žádné kluby“) stays counted for about a quarter of an hour: `jobOutcome` re-arms it at +1, +2, +4 and +8 min, with attempts 1–4. The card therefore trusts the row over the count. Once `last_report.discover` holds an error, and no newer request from the card is still waiting for its report, neither the wizard's loader nor „Načítají se týmy z webu…“ shows. The error shows instead, with „Načíst znovu“ (wizard) or as „Chyba: …“ (normal view). The looks go on while the job counts; only what the card shows leaves the discovery out.
 8. **Grace window**: 12 looks × 5 s. It ends early once a look sees the run pending. After a discovery's jobs are done, up to 2 more looks wait for its report to reach the row.
 9. When a discovery settles, the card also fetches teams and clubs again: the wizard's step and the list under the card depend on them.
 10. The progress line leaves out zero counts, and the verb agrees with the first count („zbývají 2 zápasy“). The summary's locative takes „ve“ before dvou–čtyřech, dvanácti–čtrnácti and dvaceti–čtyřiceti. New club names are Czech-sorted.
-11. **„Zpět“ on steps 2 and 3.** Without it a wrong kuželna would be a dead end: step 1 never opens once a slug exists.
+11. **„Zpět“ on steps 2 and 3.** Without it a wrong kuželna would be a dead end: step 1 never opens once a slug exists. Another kuželna saved after Zpět does not inherit the old one's discovery (decision 14).
 12. The wizard's field starts empty for a new alley; the old `tj-sokol-brno-iv` default is gone. The discovery success snackbar is replaced by the loader, and enabling the sync shows no snackbar.
 13. Copy the plan adds:
     - dialog title „Změnit kuželnu“, field label „Adresa kuželny“, hint `vysledky.kuzelky.cz/detail-kuzelny/…`;
@@ -64,13 +64,18 @@
     - „Zpět“, „Načtení se nepovedlo: <error>“, „Na kuželně se nenašel žádný tým. Zkontroluj adresu kuželny.“;
     - the delete warning „Oddíl je propojený s webem ČKA, takže ho příští „Přenačíst týmy z webu“ založí znovu.“;
     - tooltips „Upravit oddíl“ and „Smazat oddíl“, plus „Zatím nenastavená“ and „Načítám…“.
+14. **Step 3 needs a discovery of the current kuželna.** The spec's "step 3 when there is a slug and teams" assumes the teams belong to that kuželna. It covers two paths:
+    - **Leaving and coming back.** Since 0046, `set_federation_sync` drops `last_report.discover` when the kuželna changes. The wizard opens step 3 only when there are teams and a successful report.
+    - **The same visit.** After Zpět → another kuželna → Pokračovat, step 2 ignores the report the row held before the save (matched by its `at`) until the row's echo drops it. It shows „Načíst oddíly a týmy“, and has no Pokračovat, until the new kuželna's report arrives.
+
+    The old kuželna's teams, and any clubs its discovery created, stay. The app cannot delete a team, so the admin switches them off in the list under the card (team pencil → „Stahovat zápasy“) and deletes those clubs there before step 3. The wizard does not do this for them. Only a pasted address of another real kuželna leaves any behind; a wrong address fails the discovery (HTTP 404) and creates nothing.
 
 ## File structure
 
 | File | Responsibility |
 |---|---|
-| `supabase/migrations/0046_federation_setup.sql` (new) | clubs' ČKA identity, `apply_federation_discovery`, `upsert_federation_teams` v2, `record_federation_run` v2, `federation_sync_progress` |
-| `supabase/tests/tenancy_rls.sql` | sections 16–17 (0046); section 13/13b updated for "discovery is no run" |
+| `supabase/migrations/0046_federation_setup.sql` (new) | clubs' ČKA identity, `apply_federation_discovery`, `upsert_federation_teams` v2, `record_federation_run` v2, `set_federation_sync` v2, `federation_sync_progress` |
+| `supabase/tests/tenancy_rls.sql` | sections 16–18 (0046); section 13/13b updated for "discovery is no run" |
 | `supabase/schema.sql`, `docs/SCHEMA.md` | snapshot and docs |
 | `supabase/functions/_shared/federation_jobs.ts` (+ `_test.ts`) | `planClubs`, `planTeams` with `club_slug`, `runDiscover` → `apply_federation_discovery` |
 | `lib/domain/models.dart` | `Club.siteSlug/siteName/linked`, `FederationSync.discover`, `FederationDiscoverReport`, `FederationSyncProgress` |
@@ -966,20 +971,21 @@ EOF
 
 ---
 
-### Task 3: Discovery is no sync run; federation_sync_progress (SQL)
+### Task 3: Discovery is no sync run, a moved kuželna drops its report; federation_sync_progress (SQL)
 
 **Files:**
 - Modify: `supabase/migrations/0046_federation_setup.sql` (append)
-- Modify: `supabase/tests/tenancy_rls.sql` (sections 13 and 13b; new section 17)
+- Modify: `supabase/tests/tenancy_rls.sql` (sections 13 and 13b; new sections 17 and 18)
 - Modify: `supabase/functions/_shared/federation_jobs.ts` (a comment on `LEASE_MS`)
 - Modify: `supabase/schema.sql` (regenerated), `docs/SCHEMA.md`
 - Test: `supabase/tests/tenancy_rls.sql`
 
 **Interfaces:**
-- Consumes: 0045 `record_federation_run(uuid, text, jsonb, text)`, `federation_live_report(uuid, jsonb)`, `federation_last_error(uuid, jsonb)`, `notification_jobs(kind, dedupe_key, run_at, attempts)`, `current_tenant_id()`, `is_admin()`. Dedupe keys: `federation_discover:<tenant>`, `federation_competition:<tenant>:<slug>`, `federation_match:<tenant>:<id>`, `federation_venue:<tenant>:<slug>`. `LEASE_MS = 10 * 60e3` in `federation_jobs.ts`.
+- Consumes: 0045 `record_federation_run(uuid, text, jsonb, text)`, `set_federation_sync(text, boolean)`, `federation_live_report(uuid, jsonb)`, `federation_last_error(uuid, jsonb)`, `federation_refresh_error(uuid)`, `notification_jobs(kind, dedupe_key, run_at, attempts)`, `current_tenant_id()`, `is_admin()`. Dedupe keys: `federation_discover:<tenant>`, `federation_competition:<tenant>:<slug>`, `federation_match:<tenant>:<id>`, `federation_venue:<tenant>:<slug>`. `LEASE_MS = 10 * 60e3` in `federation_jobs.ts`.
 - Produces:
   - `federation_sync_progress() returns jsonb` → `{"discover": int, "competitions": int, "matches": int, "venues": int}`. It is granted to authenticated and raises `not_allowed` for non-admins.
   - `record_federation_run`: only `competition:%` keys stamp `last_run_at`/`last_success_at`. `discover` keeps `{report…, at}` or `{error, at}`.
+  - `set_federation_sync(p_venue_slug text, p_enabled boolean) returns void`, same signature and grants: a changed `venue_slug` also drops `last_report.discover`, which was the old kuželna's (plan decision 14). Saving the same slug keeps it.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1018,15 +1024,23 @@ with:
      or s.last_run_at <> now() - interval '1 hour'
 ```
 
-In section 13b replace the first two comment lines:
+In section 13b replace its whole leading comment (six lines; the second line runs on past `last_success_at.`):
 ```sql
 -- 13b. Only discovery and competition runs are the sync's runs: they
--- stamp last_run_at and last_success_at.
+-- stamp last_run_at and last_success_at. A match or venue job reports
+-- only trouble, under its own key (match:<site_match_id>, venue:<slug>):
+-- a failure is written there, a success removes just that entry, and a
+-- success with nothing to remove writes nothing — no row, no update, so no
+-- Realtime event for every fetched match.
 ```
 with:
 ```sql
 -- 13b. Only competition runs are the sync's runs (discovery was one too
--- until 0046): they stamp last_run_at and last_success_at.
+-- until 0046): they stamp last_run_at and last_success_at. A match or
+-- venue job reports only trouble, under its own key (match:<site_match_id>,
+-- venue:<slug>): a failure is written there, a success removes just that
+-- entry, and a success with nothing to remove writes nothing — no row, no
+-- update, so no Realtime event for every fetched match.
 ```
 and its notice:
 ```sql
@@ -1124,6 +1138,34 @@ begin
   raise notice 'OK: federation_sync_progress counts the alley''s due and leased jobs, for admins only (0046)';
 end $$;
 
+-- 18. A moved kuželna drops the last discovery's report: it was the old
+-- kuželna's, and the setup wizard reads a successful report as "this
+-- kuželna's teams are loaded". Saving the same kuželna keeps it. B is not
+-- enabled; its kuželna goes back at the end.
+do $$
+begin
+  perform record_federation_run('00000000-0000-0000-0000-000000000002', 'discover',
+                                '{"teams":2}', null);
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000002","role":"authenticated"}';
+do $$
+declare
+  v_slug constant text := (select venue_slug from federation_sync);
+begin
+  perform set_federation_sync(v_slug, false);
+  if not (select last_report ? 'discover' from federation_sync) then
+    raise exception 'FAIL: saving the same kuželna dropped its discovery report';
+  end if;
+  perform set_federation_sync('kuzelna-b-jinde', false);
+  if (select last_report ? 'discover' from federation_sync) then
+    raise exception 'FAIL: a moved kuželna kept the old one''s discovery report';
+  end if;
+  perform set_federation_sync(v_slug, false);
+  raise notice 'OK: a moved kuželna drops the last discovery''s report; the same one keeps it (0046)';
+end $$;
+
 reset role;
 rollback;
 ```
@@ -1217,6 +1259,38 @@ $$;
 
 revoke all on function federation_sync_progress() from public, anon;
 grant execute on function federation_sync_progress() to authenticated;
+
+-- ------------------------------------------ a moved kuželna's discovery
+-- 0045's set_federation_sync, except that moving the alley to another
+-- kuželna also drops the last discovery's report (last_report.discover):
+-- it was the old kuželna's. The setup wizard opens step 3 only on a
+-- successful report, so the old kuželna's teams never get it there.
+-- Saving the same slug (the switch, step 3) keeps the report. create or
+-- replace keeps 0045's grants.
+create or replace function set_federation_sync(p_venue_slug text, p_enabled boolean)
+returns void language plpgsql security definer set search_path = public as $$
+declare
+  v_slug text := lower(trim(coalesce(p_venue_slug, '')));
+begin
+  if not is_admin() then
+    raise exception 'not_allowed';
+  end if;
+  if v_slug !~ '^[a-z0-9]+(-[a-z0-9]+)*$' then
+    raise exception 'invalid_venue_slug';
+  end if;
+  insert into federation_sync (tenant_id, venue_slug, enabled)
+  values (current_tenant_id(), v_slug, p_enabled)
+  on conflict (tenant_id) do update
+    set venue_slug = excluded.venue_slug, enabled = excluded.enabled,
+        last_report = case
+          when federation_sync.venue_slug = excluded.venue_slug
+            then federation_sync.last_report
+          else federation_sync.last_report - 'discover' end;
+  -- A moved kuželna leaves the old one's venue key dead, and its
+  -- discovery's error with the report.
+  perform federation_refresh_error(current_tenant_id());
+end;
+$$;
 ```
 
 In `supabase/functions/_shared/federation_jobs.ts` replace:
@@ -1244,6 +1318,7 @@ Expected: no `ERROR`/`FAIL`; the four Task 1 lines plus
 ```
 NOTICE:  OK: only competitions stamp a run; a match or venue success removes its own key or writes nothing (0045, 0046)
 NOTICE:  OK: federation_sync_progress counts the alley's due and leased jobs, for admins only (0046)
+NOTICE:  OK: a moved kuželna drops the last discovery's report; the same one keeps it (0046)
 ```
 
 Run: `deno check --import-map supabase/functions/import_map.json supabase/functions/notify/index.ts`
@@ -1258,6 +1333,15 @@ In the `federation_sync` row replace:
 with:
 ```
 `last_success_at` (stamped only by `competition:<slug>` runs — the nightly sync's; since 0046 not by `discover`, so `last_run_at` null means never synced, which the setup wizard reads; match and venue jobs never touch them)
+```
+
+In the `set_federation_sync(venue_slug, enabled)` (0045) row replace:
+```
+drops the old kuželna's `venue:` key when no match of the alley is there either, re-deriving `last_error`.
+```
+with:
+```
+drops the old kuželna's `venue:` key when no match of the alley is there either, re-deriving `last_error`. Since 0046 a changed slug also drops `last_report.discover`, which was the old kuželna's, so the setup wizard never offers step 3 for its teams.
 ```
 
 After the `request_federation_discovery()`, `request_federation_sync()` (0045) row, add the row:
@@ -1285,7 +1369,7 @@ with:
 - [ ] **Step 7: Regenerate the schema snapshot and re-run the test on the rebuilt DB**
 
 Run: `tool/schema_snapshot.sh && git diff --stat supabase/schema.sql`
-Expected: `supabase/schema.sql regenerated`; the diff touches `record_federation_run` and adds `federation_sync_progress`.
+Expected: `supabase/schema.sql regenerated`; the diff touches `record_federation_run` and `set_federation_sync`, and adds `federation_sync_progress`.
 
 Run: `psql "$(supabase status -o env | sed -n 's/^DB_URL="\(.*\)"/\1/p')" -X -v ON_ERROR_STOP=1 -q -f supabase/tests/tenancy_rls.sql > /dev/null 2>&1; echo "exit $?"`
 Expected: `exit 0`.
@@ -1295,7 +1379,7 @@ Expected: `exit 0`.
 ```bash
 git add supabase/migrations/0046_federation_setup.sql supabase/tests/tenancy_rls.sql supabase/functions/_shared/federation_jobs.ts supabase/schema.sql docs/SCHEMA.md
 git commit -m "$(cat <<'EOF'
-feat(federation): federation_sync_progress for the ČKA card; discovery is no sync run
+feat(federation): federation_sync_progress for the ČKA card; discovery is no sync run, and a moved kuželna drops its report
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 EOF
@@ -2724,7 +2808,8 @@ EOF
   - In `labels.dart`: `String czechCount(int n, String one, String few, String many)`, `const String teamsLoadingLabel`, `String federationProgressLabel(FederationSyncProgress p)`.
   - `FederationCard({…, Future<FederationSyncProgress> Function() syncProgress = Api.federationSyncProgress})`.
   - `ClubsScreen({…, Future<FederationSyncProgress> Function() syncProgress = Api.federationSyncProgress})`.
-  - Card internals Task 8 uses: `_afterRequest({bool discovery = false})`, `Future<bool> _requestDiscovery()`, `bool _discovering(FederationSync sync)`, `bool? _enabledWanted`.
+  - Card internals Task 8 uses: `_afterRequest({bool discovery = false})`, `Future<bool> _requestDiscovery()`, `bool _discovering(FederationSync sync)` (false once the row's discovery report is a failure no request is waiting past), `bool? _enabledWanted`.
+  - In the test harness: `_Harness.push(FederationSync row)`, which delivers a row the way the Realtime stream does, without a refetch. Task 8 uses it.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -2784,7 +2869,17 @@ with:
 }
 ```
 
-In `test/features/federation_card_test.dart` replace the whole `_Harness` class (with its doc comment):
+In `test/features/federation_card_test.dart` replace the first line:
+```dart
+import 'package:flutter/material.dart';
+```
+with:
+```dart
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+```
+and replace the whole `_Harness` class (with its doc comment):
 ```dart
 /// The ČKA card on its own (Správa → Oddíly). Each (re)build of the sync
 /// row's or the teams' provider takes the next of [rows] / [teams], the
@@ -2840,6 +2935,7 @@ with:
 /// row's or the teams' provider takes the next of [rows] / [teams], and
 /// each look at the progress the next of [progress] — the last one
 /// repeating — so a test sees what the card fetches again, and when.
+/// [push] is the row's Realtime stream: a newer row without a refetch.
 class _Harness {
   _Harness({
     List<FederationSync>? rows,
@@ -2858,17 +2954,23 @@ class _Harness {
   final saved = <(String, bool)>[];
   int discoveries = 0;
   int syncs = 0;
+  final _live = StreamController<FederationSync>.broadcast();
 
   /// Thrown by the next saves instead of saving.
   Object? saveError;
+
+  /// Delivers [row] as Realtime does: the card sees it without a refetch.
+  void push(FederationSync row) => _live.add(row);
 
   static T _nth<T>(List<T> list, int i) =>
       list[i < list.length ? i : list.length - 1];
 
   Widget app() => ProviderScope(
         overrides: [
-          federationSyncProvider
-              .overrideWith((ref) => Stream.value(_nth(rows, rowBuilds++))),
+          federationSyncProvider.overrideWith((ref) async* {
+            yield _nth(rows, rowBuilds++);
+            yield* _live.stream;
+          }),
           teamsProvider
               .overrideWith((ref) => Stream.value(_nth(teams, teamBuilds++))),
           clubsProvider.overrideWith((ref) => Stream.value(const <Club>[])),
@@ -3048,6 +3150,42 @@ and add after the `group('normal view', …)` block, before `main()`'s closing `
       await tester.pump();
       expect(find.text('Načítají se týmy z webu…'), findsNothing);
       expect(find.byType(CircularProgressIndicator), findsNothing);
+    });
+
+    testWidgets(
+        'a failed discovery ends Načítají se týmy z webu… once its error is '
+        'in the row, though its job still counts while it waits to retry',
+        (tester) async {
+      final h = _Harness(rows: [
+        _on
+      ], progress: [
+        FederationSyncProgress.idle,
+        const FederationSyncProgress(discover: 1),
+      ]);
+      await _pump(tester, h);
+
+      await tester.tap(find.widgetWithText(OutlinedButton, 'Přenačíst týmy z webu'));
+      await tester.pump();
+      expect(find.text('Načítají se týmy z webu…'), findsOneWidget);
+
+      // A well-formed slug of no kuželna: HTTP 404. jobOutcome re-arms the
+      // job at +1, +2, +4 and +8 min, and every look still counts it.
+      const error =
+          'federation_discover: GET /detail-kuzelny/tj-sokol-brno-iv: HTTP 404';
+      h.push(FederationSync(
+        venueSlug: 'tj-sokol-brno-iv',
+        enabled: true,
+        lastError: error,
+        discover: FederationDiscoverReport(
+            error: error, at: DateTime.utc(2026, 9, 25, 8)),
+      ));
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 5));
+
+      expect(h.looks, 3);
+      expect(find.text('Načítají se týmy z webu…'), findsNothing);
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(find.text('Chyba: $error'), findsOneWidget);
     });
   });
 ```
@@ -3281,13 +3419,30 @@ class _FederationCardState extends ConsumerState<FederationCard>
     }
   }
 
-  /// A discovery is running, or its report is not in the row yet.
+  /// A discovery is running, or its report is not in the row yet. A failed
+  /// discovery's job only waits to retry: jobOutcome re-arms it at +1, +2,
+  /// +4 and +8 min, and federation_sync_progress counts each as leased. So
+  /// once the row holds its error, that error shows, not a quarter of an
+  /// hour's loader. A newer request still waits for its own report.
   bool _discovering(FederationSync sync) {
-    if (_awaitingDiscovery && sync.discover?.at != _reportBefore) {
+    final report = sync.discover;
+    if (_awaitingDiscovery && report?.at != _reportBefore) {
       _awaitingDiscovery = false;
     }
-    return _progress.discover > 0 || _awaitingDiscovery;
+    if (_awaitingDiscovery) return true;
+    return _progress.discover > 0 && !(report?.failed ?? false);
   }
+
+  /// What the progress line counts: the discovery only while
+  /// [_discovering] — a failed one waiting to retry is left out.
+  FederationSyncProgress _shownProgress(bool discovering) =>
+      discovering || _progress.discover == 0
+          ? _progress
+          : FederationSyncProgress(
+              competitions: _progress.competitions,
+              matches: _progress.matches,
+              venues: _progress.venues,
+            );
 
   Future<bool> _requestDiscovery() async {
     final ok = await tryAction(
@@ -3378,7 +3533,8 @@ class _FederationCardState extends ConsumerState<FederationCard>
     if (_enabledWanted == sync.enabled) _enabledWanted = null;
     final enabled = _enabledWanted ?? sync.enabled;
     final discovering = _discovering(sync);
-    final busy = discovering || _progress.pending;
+    final progress = _shownProgress(discovering);
+    final busy = discovering || progress.pending;
     final theme = Theme.of(context);
     return [
       const Text(
@@ -3441,7 +3597,7 @@ class _FederationCardState extends ConsumerState<FederationCard>
             Expanded(
               child: Text(discovering
                   ? teamsLoadingLabel
-                  : federationProgressLabel(_progress)),
+                  : federationProgressLabel(progress)),
             ),
           ],
         ),
@@ -3531,13 +3687,15 @@ EOF
 
 **Interfaces:**
 - Consumes:
-  - From Task 4: `FederationDiscoverReport`.
+  - From Task 3: `set_federation_sync` drops `last_report.discover` when the kuželna changes.
+  - From Task 4: `FederationDiscoverReport` (`at`, `failed`).
   - From Task 6: `venueSlugFromInput`, `venueSlugInputError`, `VenueSlugField`, `venueSlugHelp`.
-  - From Task 7: `czechCount`, and the card's `_afterRequest`, `_requestDiscovery`, `_discovering`, `_enabledWanted`.
+  - From Task 7: `czechCount`; the card's `_afterRequest`, `_requestDiscovery`, `_discovering`, `_enabledWanted`; the test harness's `_Harness.push`.
   - `compareCzech` from `lib/domain/collation.dart`.
 - Produces:
   - In `labels.dart`: `String discoveryClubsLabel(FederationDiscoverReport r)` and `String discoveryTeamsLabel(FederationDiscoverReport r)`.
-  - `FederationWizard({required FederationSync sync, required List<Team> teams, required bool discovering, required Future<bool> Function(String slug) saveSlug, required Future<bool> Function() discover, required Future<bool> Function() enable})`, with `static int stepFor(FederationSync sync, List<Team> teams)`.
+  - `FederationWizard({required FederationSync sync, required List<Team> teams, required bool discovering, required Future<bool> Function(String slug) saveSlug, required Future<bool> Function() discover, required Future<bool> Function() enable})`, with `static int stepFor(FederationSync sync, List<Team> teams)`. That is 0 without a slug; 1 without teams or without a successful discovery report; else 2.
+  - After step 1 saves another kuželna, step 2 ignores the report the row held at the save (matched by its `at`) until a newer one arrives (plan decision 14).
   - `FederationCard` shows the wizard while `!_setupDone && !sync.enabled && sync.lastRunAt == null`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -3608,6 +3766,19 @@ and add after the `group('progress (0046)', …)` block, before `main()`'s closi
       clubId: 'c1',
       competitionName: 'Jihomoravská divize',
     );
+    // This kuželna's teams are loaded: a successful discovery report.
+    final discovered = FederationSync(
+      venueSlug: 'tj-sokol-brno-iv',
+      discover: FederationDiscoverReport(
+        teams: 1,
+        competitions: 1,
+        created: 1,
+        clubsLinked: const ['Sokol Brno IV'],
+        at: DateTime.utc(2026, 9, 25, 8),
+      ),
+    );
+    const notFound =
+        'federation_discover: GET /detail-kuzelny/tj-sokol-brno-iv: HTTP 404';
 
     testWidgets('a new alley starts on step 1, the kuželna', (tester) async {
       await _pump(tester, _Harness());
@@ -3631,8 +3802,9 @@ and add after the `group('progress (0046)', …)` block, before `main()`'s closi
           findsOneWidget);
     });
 
-    testWidgets('a saved kuželna with teams opens step 3', (tester) async {
-      await _pump(tester, _Harness(rows: [slugOnly], teams: [[team]]));
+    testWidgets('a saved kuželna with its discovered teams opens step 3',
+        (tester) async {
+      await _pump(tester, _Harness(rows: [discovered], teams: [[team]]));
 
       expect(find.text('Zapnout stahování'), findsOneWidget);
       expect(
@@ -3641,6 +3813,17 @@ and add after the `group('progress (0046)', …)` block, before `main()`'s closi
             'hodiny, pak se vše aktualizuje samo.'),
         findsOneWidget,
       );
+    });
+
+    testWidgets(
+        'teams without a discovery of this kuželna open step 2 — a moved '
+        'kuželna drops the old report', (tester) async {
+      await _pump(tester, _Harness(rows: [slugOnly], teams: [[team]]));
+
+      expect(find.text('Oddíly a týmy'), findsOneWidget);
+      expect(find.widgetWithText(FilledButton, 'Načíst oddíly a týmy'),
+          findsOneWidget);
+      expect(find.text('Zapnout stahování'), findsNothing);
     });
 
     testWidgets(
@@ -3723,23 +3906,28 @@ and add after the `group('progress (0046)', …)` block, before `main()`'s closi
       expect(find.text('Zapnout stahování'), findsOneWidget);
     });
 
-    testWidgets('a failed discovery says why and offers Načíst znovu',
-        (tester) async {
-      final h = _Harness(rows: [
-        FederationSync(
-          venueSlug: 'tj-sokol-brno-iv',
-          discover: FederationDiscoverReport(
-            error: 'na stránce kuželny nejsou žádné kluby',
-            at: DateTime.utc(2026, 9, 25, 8),
+    testWidgets(
+        'reopened while a failed discovery waits to retry, step 2 says why '
+        'and offers Načíst znovu', (tester) async {
+      const error =
+          'federation_discover: na stránce kuželny nejsou žádné kluby';
+      final h = _Harness(
+        rows: [
+          FederationSync(
+            venueSlug: 'tj-sokol-brno-iv',
+            discover: FederationDiscoverReport(
+              error: error,
+              at: DateTime.utc(2026, 9, 25, 8),
+            ),
           ),
-        ),
-      ]);
+        ],
+        // The re-armed job still counts (plan decision 7).
+        progress: [const FederationSyncProgress(discover: 1)],
+      );
       await _pump(tester, h);
 
-      expect(
-        find.text('Načtení se nepovedlo: na stránce kuželny nejsou žádné kluby'),
-        findsOneWidget,
-      );
+      expect(find.text('Načítají se oddíly a týmy z webu…'), findsNothing);
+      expect(find.text('Načtení se nepovedlo: $error'), findsOneWidget);
       final next = tester.widget<FilledButton>(
           find.widgetWithText(FilledButton, 'Pokračovat'));
       expect(next.onPressed, isNull);
@@ -3747,6 +3935,44 @@ and add after the `group('progress (0046)', …)` block, before `main()`'s closi
       await tester.tap(find.widgetWithText(OutlinedButton, 'Načíst znovu'));
       await tester.pump();
       expect(h.discoveries, 1);
+      // A new request waits for its own report again.
+      expect(find.text('Načítají se oddíly a týmy z webu…'), findsOneWidget);
+    });
+
+    testWidgets(
+        'a discovery that fails ends the loader as soon as its error is in '
+        'the row, though its job still counts while it waits to retry',
+        (tester) async {
+      final h = _Harness(
+        rows: [slugOnly],
+        progress: [
+          FederationSyncProgress.idle,
+          const FederationSyncProgress(discover: 1),
+        ],
+      );
+      await _pump(tester, h);
+
+      await tester.tap(find.widgetWithText(FilledButton, 'Načíst oddíly a týmy'));
+      await tester.pump();
+      expect(find.text('Načítají se oddíly a týmy z webu…'), findsOneWidget);
+
+      // A well-formed slug of no kuželna: HTTP 404. jobOutcome re-arms the
+      // job at +1, +2, +4 and +8 min, and every look still counts it.
+      h.push(FederationSync(
+        venueSlug: 'tj-sokol-brno-iv',
+        discover: FederationDiscoverReport(
+          error: notFound,
+          at: DateTime.utc(2026, 9, 25, 8),
+        ),
+      ));
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 5));
+
+      expect(h.looks, 3);
+      expect(find.text('Načítají se oddíly a týmy z webu…'), findsNothing);
+      expect(find.text('Načtení se nepovedlo: $notFound'), findsOneWidget);
+      expect(find.widgetWithText(OutlinedButton, 'Načíst znovu'), findsOneWidget);
+      expect(find.widgetWithText(TextButton, 'Zpět'), findsOneWidget);
     });
 
     testWidgets('Zpět on step 2 goes back to the kuželna, its slug filled in',
@@ -3761,9 +3987,35 @@ and add after the `group('progress (0046)', …)` block, before `main()`'s closi
     });
 
     testWidgets(
+        'another kuželna saved after Zpět waits for its own discovery — the '
+        'old one\'s summary and teams do not carry over', (tester) async {
+      final h = _Harness(rows: [discovered], teams: [[team]]);
+      await _pump(tester, h);
+      expect(find.text('Zapnout stahování'), findsOneWidget);
+
+      await tester.tap(find.widgetWithText(TextButton, 'Zpět'));
+      await tester.pump();
+      expect(find.text('1 oddíl'), findsOneWidget);
+      await tester.tap(find.widgetWithText(TextButton, 'Zpět'));
+      await tester.pump();
+      await tester.enterText(find.byType(TextField),
+          'https://vysledky.kuzelky.cz/detail-kuzelny/ks-devitka-brno');
+      await tester.tap(find.widgetWithText(FilledButton, 'Pokračovat'));
+      await tester.pump();
+
+      expect(h.saved, [('ks-devitka-brno', false)]);
+      // The row still holds the old kuželna's report until its echo.
+      expect(find.text('Oddíly a týmy'), findsOneWidget);
+      expect(find.text('1 oddíl'), findsNothing);
+      expect(find.widgetWithText(FilledButton, 'Načíst oddíly a týmy'),
+          findsOneWidget);
+      expect(find.widgetWithText(FilledButton, 'Pokračovat'), findsNothing);
+    });
+
+    testWidgets(
         'step 3 switches the sync on, asks for the first run and leaves '
         'the wizard', (tester) async {
-      final h = _Harness(rows: [slugOnly], teams: [[team]]);
+      final h = _Harness(rows: [discovered], teams: [[team]]);
       await _pump(tester, h);
 
       await tester
@@ -3875,14 +4127,15 @@ class FederationWizard extends StatefulWidget {
   final Future<bool> Function() discover;
   final Future<bool> Function() enable;
 
-  /// The step the server state opens on, 0-based: no slug → the kuželna,
-  /// no team → the oddíly and teams, else switching the sync on.
-  static int stepFor(FederationSync sync, List<Team> teams) =>
-      !sync.configured
-          ? 0
-          : teams.isEmpty
-              ? 1
-              : 2;
+  /// The step the server state opens on, 0-based: no slug → the kuželna;
+  /// no team, or no successful discovery of this kuželna → the oddíly and
+  /// teams; else switching the sync on. A moved kuželna's teams are the old
+  /// one's: 0046's set_federation_sync drops the report with the move.
+  static int stepFor(FederationSync sync, List<Team> teams) {
+    if (!sync.configured) return 0;
+    final report = sync.discover;
+    return teams.isEmpty || report == null || report.failed ? 1 : 2;
+  }
 
   @override
   State<FederationWizard> createState() => _FederationWizardState();
@@ -3901,8 +4154,21 @@ class _FederationWizardState extends State<FederationWizard> {
   late final _input = TextEditingController(text: widget.sync.venueSlug);
   String? _inputError;
 
+  /// Step 1 saved another kuželna than the row had. The discovery report
+  /// the row held then ([_movedFrom] is its `at`) was the old kuželna's.
+  /// 0046's set_federation_sync drops it, but until that echo arrives step 2
+  /// must not show it, nor offer Pokračovat for the old kuželna's teams.
+  bool _moved = false;
+  DateTime? _movedFrom;
+
   int get _current =>
       _step ?? FederationWizard.stepFor(widget.sync, widget.teams);
+
+  /// The row's discovery report, unless it is the one from before a move.
+  FederationDiscoverReport? get _report {
+    final report = widget.sync.discover;
+    return _moved && report?.at == _movedFrom ? null : report;
+  }
 
   @override
   void dispose() {
@@ -3925,8 +4191,17 @@ class _FederationWizardState extends State<FederationWizard> {
           setState(() => _inputError = error);
           return;
         }
-        final ok = await widget.saveSlug(venueSlugFromInput(_input.text)!);
-        if (ok && mounted) setState(() => _step = 1);
+        final slug = venueSlugFromInput(_input.text)!;
+        final before = widget.sync;
+        final ok = await widget.saveSlug(slug);
+        if (!ok || !mounted) return;
+        setState(() {
+          if (slug != before.venueSlug) {
+            _moved = true;
+            _movedFrom = before.discover?.at;
+          }
+          _step = 1;
+        });
       });
 
   Future<void> _discover() => _run(() async {
@@ -3992,7 +4267,7 @@ class _FederationWizardState extends State<FederationWizard> {
 
   List<Widget> _clubsAndTeams() {
     final error = TextStyle(color: Theme.of(context).colorScheme.error);
-    final report = widget.sync.discover;
+    final report = _report;
     return [
       const Text(
         'Načteme oddíly, které na kuželně hrají, a jejich týmy. Chybějící '
@@ -4296,7 +4571,7 @@ Run: `psql "$(supabase status -o env | sed -n 's/^DB_URL="\(.*\)"/\1/p')" -X -v 
 Expected: `exit 0`.
 
 Run: `psql "$(supabase status -o env | sed -n 's/^DB_URL="\(.*\)"/\1/p')" -X -v ON_ERROR_STOP=1 -f supabase/tests/tenancy_rls.sql 2>&1 | grep -E 'ERROR|FAIL|0046\)'`
-Expected: no `ERROR`/`FAIL` line and six `NOTICE:  OK: …` lines — the five 0046 sections (16, 16b, 16c, 16d, 17) plus the 13b notice ending `(0045, 0046)`.
+Expected: no `ERROR`/`FAIL` line and seven `NOTICE:  OK: …` lines — the six 0046 sections (16, 16b, 16c, 16d, 17, 18) plus the 13b notice ending `(0045, 0046)`.
 
 - [ ] **Step 6: Clean tree**
 
