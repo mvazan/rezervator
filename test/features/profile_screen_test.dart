@@ -12,6 +12,7 @@ import 'package:rezervator/domain/palette.dart';
 import 'package:rezervator/features/profile/widgets/reservation_color_picker.dart';
 import 'package:rezervator/features/profile/match_exceptions_screen.dart';
 import 'package:rezervator/features/profile/widgets/calendar_link_card.dart';
+import 'package:rezervator/features/profile/widgets/contact_card.dart';
 import 'package:rezervator/features/profile/widgets/event_color_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -92,6 +93,8 @@ void main() {
     Future<void> Function(List<int> minutes)? setNotifyBefore,
     Future<void> Function(Map<String, int?> colors)? setTeamColors,
     Future<void> Function(HomeView view)? setDefaultView,
+    Future<void> Function({String? phone, bool? showEmail, bool? showPhone})?
+        updateMyContact,
     List<PrioritySlot> matches = const [],
     Map<String, bool> exceptions = const {},
   }) {
@@ -123,6 +126,9 @@ void main() {
               setTeamColors ?? (_) async => throw StateError('unexpected'),
           setDefaultView:
               setDefaultView ?? (_) async => throw StateError('unexpected'),
+          updateMyContact: updateMyContact ??
+              ({phone, showEmail, showPhone}) async =>
+                  throw StateError('unexpected'),
         ),
       ),
     );
@@ -1870,6 +1876,142 @@ void main() {
       await tester.tap(find.widgetWithText(FilledButton, 'Uložit'));
       await tester.pumpAndSettle();
       // setFollowedTeams/setTeamColors would have fail()ed had either fired.
+    });
+  });
+
+  group('Kontakt card (0048)', () {
+    // Tall enough that the whole list is built: the card sits between
+    // Google kalendář and Vzhled, below the default test viewport.
+    void tall(WidgetTester tester) {
+      tester.view.physicalSize = const Size(800, 2600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+    }
+
+    const withPhone = Profile(
+      id: 'me',
+      displayName: 'Já Hráč',
+      email: 'me@example.com',
+      role: Role.player,
+      status: ProfileStatus.approved,
+      phone: '+420777123456',
+      showEmail: false,
+    );
+    const phoneError = 'Telefon nemá správný tvar — třeba +420 777 123 456.';
+
+    late List<String> saved;
+    setUp(() => saved = []);
+    Future<void> record({String? phone, bool? showEmail, bool? showPhone}) async =>
+        saved.add('phone=$phone showEmail=$showEmail showPhone=$showPhone');
+
+    Finder inCard(Finder matching) =>
+        find.descendant(of: find.byType(ContactCard), matching: matching);
+    Finder inDialog(Finder matching) =>
+        find.descendant(of: find.byType(AlertDialog), matching: matching);
+    Finder switchTile(String title) =>
+        find.widgetWithText(SwitchListTile, title);
+
+    testWidgets('shows the phone formatted and both switches as saved',
+        (tester) async {
+      tall(tester);
+      await tester.pumpWidget(app(withPhone, updateMyContact: record));
+      await tester.pumpAndSettle();
+
+      expect(inCard(find.text('Kontakt')), findsOneWidget);
+      expect(inCard(find.text('Telefon')), findsOneWidget);
+      expect(inCard(find.text('+420 777 123 456')), findsOneWidget);
+      expect(
+        tester.widget<SwitchListTile>(switchTile('Ukázat e-mail v Kontaktech'))
+            .value,
+        isFalse,
+      );
+      expect(find.text('Ostatní hráči kuželny ti můžou napsat.'),
+          findsOneWidget);
+      expect(
+        tester.widget<SwitchListTile>(switchTile('Ukázat telefon v Kontaktech'))
+            .value,
+        isTrue,
+      );
+      expect(find.text('Zavolat nebo napsat přes WhatsApp.'), findsOneWidget);
+    });
+
+    testWidgets('without a phone it reads „nenastaven"', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(app(me, updateMyContact: record));
+      await tester.pumpAndSettle();
+
+      expect(inCard(find.text('nenastaven')), findsOneWidget);
+    });
+
+    testWidgets('Upravit: a bad number is refused in the dialog, a good one '
+        'is saved normalised', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(app(withPhone, updateMyContact: record));
+      await tester.pumpAndSettle();
+
+      await tester.tap(inCard(find.text('Upravit')));
+      await tester.pumpAndSettle();
+      expect(inDialog(find.text('Telefon')), findsOneWidget);
+      final field = inDialog(find.byType(TextField));
+      expect(tester.widget<TextField>(field).controller!.text,
+          '+420 777 123 456');
+      expect(tester.widget<TextField>(field).keyboardType,
+          TextInputType.phone);
+
+      await tester.enterText(field, '12345');
+      await tester.tap(inDialog(find.widgetWithText(FilledButton, 'Uložit')));
+      await tester.pumpAndSettle();
+      expect(inDialog(find.text(phoneError)), findsOneWidget);
+      expect(saved, isEmpty);
+
+      await tester.enterText(field, '00420 602 111 222');
+      await tester.pump();
+      expect(inDialog(find.text(phoneError)), findsNothing);
+      await tester.tap(inDialog(find.widgetWithText(FilledButton, 'Uložit')));
+      await tester.pumpAndSettle();
+
+      expect(saved, ['phone=+420602111222 showEmail=null showPhone=null']);
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.text('Uloženo.'), findsOneWidget);
+    });
+
+    testWidgets('an empty number removes the phone; Zrušit saves nothing',
+        (tester) async {
+      tall(tester);
+      await tester.pumpWidget(app(withPhone, updateMyContact: record));
+      await tester.pumpAndSettle();
+
+      await tester.tap(inCard(find.text('Upravit')));
+      await tester.pumpAndSettle();
+      await tester.enterText(inDialog(find.byType(TextField)), '');
+      await tester.tap(inDialog(find.widgetWithText(FilledButton, 'Uložit')));
+      await tester.pumpAndSettle();
+      expect(saved, ['phone= showEmail=null showPhone=null']);
+
+      await tester.tap(inCard(find.text('Upravit')));
+      await tester.pumpAndSettle();
+      await tester.tap(inDialog(find.widgetWithText(TextButton, 'Zrušit')));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(saved, hasLength(1));
+    });
+
+    testWidgets('the switches save at once — the phone one even without a '
+        'phone', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(app(me, updateMyContact: record));
+      await tester.pumpAndSettle();
+
+      await tester.tap(switchTile('Ukázat e-mail v Kontaktech'));
+      await tester.pumpAndSettle();
+      await tester.tap(switchTile('Ukázat telefon v Kontaktech'));
+      await tester.pumpAndSettle();
+
+      expect(saved, [
+        'phone=null showEmail=false showPhone=null',
+        'phone=null showEmail=null showPhone=false',
+      ]);
     });
   });
 }
