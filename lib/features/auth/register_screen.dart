@@ -200,6 +200,11 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                 keyboardType: TextInputType.phone,
                 decoration: InputDecoration(
                   labelText: 'Telefon (nepovinné)',
+                  // show_phone starts on (0048): say so where the number is
+                  // given, not only on the Kontakty page it lands on.
+                  helperText: 'Uvidí ho ostatní hráči kuželny v Kontaktech. '
+                      'Skrýt ho můžeš v Můj profil.',
+                  helperMaxLines: 2,
                   border: const OutlineInputBorder(),
                   errorText: _phoneError,
                 ),

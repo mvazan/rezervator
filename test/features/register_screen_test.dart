@@ -31,6 +31,14 @@ void main() {
     );
   }
 
+  /// Scrolls to „Zaregistrovat se" and taps it: the form is taller than the
+  /// test viewport.
+  Future<void> submit(WidgetTester tester) async {
+    await tester.ensureVisible(find.text('Zaregistrovat se'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Zaregistrovat se'));
+  }
+
   const phoneLabel = 'Telefon (nepovinné)';
   const phoneError = 'Telefon nemá správný tvar — třeba +420 777 123 456.';
 
@@ -49,7 +57,7 @@ void main() {
 
     await tester.enterText(
         find.widgetWithText(TextField, 'Jméno a příjmení'), 'Jan Novák');
-    await tester.tap(find.text('Zaregistrovat se'));
+    await submit(tester);
     await tester.pump();
 
     // Blocked before any RPC: no tenant picked yet.
@@ -88,9 +96,7 @@ void main() {
     await tester.enterText(
         find.widgetWithText(TextField, 'Jméno a příjmení'), 'Jan Novák');
     // The phone field pushed the button below the fold of the test screen.
-    await tester.ensureVisible(find.text('Zaregistrovat se'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Zaregistrovat se'));
+    await submit(tester);
     await tester.pump();
     expect(find.text('Napiš název nové kuželny.'), findsOneWidget);
   });
@@ -141,6 +147,21 @@ void main() {
     );
   });
 
+  testWidgets('the phone field says who sees the number and where to hide it',
+      (tester) async {
+    await tester.pumpWidget(app(const [Tenant(id: 't1', name: 'Kuželna č. 1')]));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.descendant(
+        of: find.widgetWithText(TextField, phoneLabel),
+        matching: find.text('Uvidí ho ostatní hráči kuželny v Kontaktech. '
+            'Skrýt ho můžeš v Můj profil.'),
+      ),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('the phone is optional: without one nothing is sent for it',
       (tester) async {
     await tester.pumpWidget(app(const [Tenant(id: 't1', name: 'Kuželna č. 1')]));
@@ -152,7 +173,7 @@ void main() {
 
     await tester.enterText(
         find.widgetWithText(TextField, 'Jméno a příjmení'), 'Jan Novák');
-    await tester.tap(find.text('Zaregistrovat se'));
+    await submit(tester);
     await tester.pumpAndSettle();
 
     expect(calls, ['register Jan Novák|t1|null||null']);
@@ -166,15 +187,18 @@ void main() {
     await tester.enterText(
         find.widgetWithText(TextField, 'Jméno a příjmení'), 'Jan Novák');
     await tester.enterText(find.widgetWithText(TextField, phoneLabel), '12345');
-    await tester.tap(find.text('Zaregistrovat se'));
+    await submit(tester);
     await tester.pumpAndSettle();
 
     expect(find.text(phoneError), findsOneWidget);
     expect(calls, isEmpty);
 
+    await tester.ensureVisible(find.widgetWithText(TextField, phoneLabel));
+    await tester.pumpAndSettle();
     await tester.enterText(
         find.widgetWithText(TextField, phoneLabel), '777 123 45');
-    await tester.pump();
+    // The error cross-fades back to the helper text.
+    await tester.pumpAndSettle();
     expect(find.text(phoneError), findsNothing);
   });
 
@@ -190,7 +214,7 @@ void main() {
         'Honza');
     await tester.enterText(
         find.widgetWithText(TextField, phoneLabel), '777 123 456');
-    await tester.tap(find.text('Zaregistrovat se'));
+    await submit(tester);
     await tester.pumpAndSettle();
 
     expect(calls, ['register Jan Novák|t1|null|Honza|+420777123456']);
