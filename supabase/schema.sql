@@ -829,6 +829,36 @@ $$;
 ALTER FUNCTION "public"."consume_calendar_nonce"("p_nonce" "text") OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."contacts"() RETURNS TABLE("id" "uuid", "display_name" "text", "nick" "text", "club_id" "uuid", "club_name" "text", "club_color" integer, "email" "text", "phone" "text")
+    LANGUAGE "plpgsql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  if not is_approved() or is_kiosk() then
+    raise exception 'not_allowed';
+  end if;
+  return query
+    select p.id, p.display_name, p.nick, p.club_id, c.name,
+           coalesce(c.color, -1),
+           case when p.show_email then nullif(p.email, '') end,
+           case when p.show_phone then p.phone end
+      from profiles p
+      left join clubs c on c.id = p.club_id
+     where p.tenant_id = current_tenant_id()
+       and p.status = 'approved'
+       and p.role <> 'kiosk'
+       and not p.placeholder
+       and not (p.superadmin
+                and p.home_tenant_id is not null
+                and p.tenant_id <> p.home_tenant_id)
+     order by p.display_name;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."contacts"() OWNER TO "postgres";
+
+
 CREATE TABLE IF NOT EXISTS "public"."reservations" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "player_id" "uuid" NOT NULL,
@@ -994,11 +1024,15 @@ CREATE TABLE IF NOT EXISTS "public"."profiles" (
     "followed_teams" "text"[] DEFAULT '{}'::"text"[] NOT NULL,
     "default_view" "text" DEFAULT 'calendar'::"text" NOT NULL,
     "notify_before_minutes" integer[] DEFAULT '{}'::integer[] NOT NULL,
+    "phone" "text",
+    "show_email" boolean DEFAULT true NOT NULL,
+    "show_phone" boolean DEFAULT true NOT NULL,
     CONSTRAINT "profiles_default_view_check" CHECK (("default_view" = ANY (ARRAY['calendar'::"text", 'trainings'::"text"]))),
     CONSTRAINT "profiles_followed_teams_check" CHECK ((COALESCE("array_length"("followed_teams", 1), 0) <= 20)),
     CONSTRAINT "profiles_nick_check" CHECK (("char_length"("nick") <= 14)),
     CONSTRAINT "profiles_notify_before_minutes_check" CHECK (((COALESCE("array_length"("notify_before_minutes", 1), 0) <= 5) AND (0 <= ALL ("notify_before_minutes")) AND (40320 >= ALL ("notify_before_minutes")))),
     CONSTRAINT "profiles_own_color_check" CHECK (((("own_color" >= '-1'::integer) AND ("own_color" <= 8)) OR (("own_color" >= 16777216) AND ("own_color" <= 33554431)))),
+    CONSTRAINT "profiles_phone_check" CHECK ((("phone" IS NULL) OR ("phone" ~ '^\+[1-9][0-9]{7,14}$'::"text"))),
     CONSTRAINT "profiles_placeholder_check" CHECK (((NOT "placeholder") OR (("role" = 'player'::"text") AND ("status" = 'approved'::"text") AND (NOT "superadmin")))),
     CONSTRAINT "profiles_role_check" CHECK (("role" = ANY (ARRAY['player'::"text", 'admin'::"text", 'kiosk'::"text"]))),
     CONSTRAINT "profiles_status_check" CHECK (("status" = ANY (ARRAY['pending'::"text", 'approved'::"text"])))
@@ -1025,6 +1059,18 @@ COMMENT ON COLUMN "public"."profiles"."default_view" IS 'View the app opens at l
 
 
 COMMENT ON COLUMN "public"."profiles"."notify_before_minutes" IS 'Minutes before a training or a match to send the player a reminder (0040) — up to five, each 0 to 40320 (four weeks), the same bounds google_calendar_links.reminder_minutes uses (deliberately a different name: that one tells GOOGLE when to ring, this one tells us). Empty = no reminders. The channel is the app''s usual one — push where there is a device, e-mail otherwise.';
+
+
+
+COMMENT ON COLUMN "public"."profiles"."phone" IS 'The player''s phone in international form (E.164, +<digits>, profiles_phone_check); null = none. The app normalises what the player types (lib/domain/phone.dart).';
+
+
+
+COMMENT ON COLUMN "public"."profiles"."show_email" IS 'Whether contacts() hands this player''s e-mail to the other players of the alley (0048). On by default, for existing players too.';
+
+
+
+COMMENT ON COLUMN "public"."profiles"."show_phone" IS 'Whether contacts() hands this player''s phone to the other players of the alley (0048). On by default, for existing players too.';
 
 
 
@@ -2344,15 +2390,16 @@ $$;
 ALTER FUNCTION "public"."refresh_match"("p_match_id" "uuid") OWNER TO "postgres";
 
 
-CREATE OR REPLACE FUNCTION "public"."register_profile"("p_display_name" "text", "p_tenant_id" "uuid", "p_club_id" "uuid" DEFAULT NULL::"uuid", "p_nick" "text" DEFAULT ''::"text") RETURNS "public"."profiles"
+CREATE OR REPLACE FUNCTION "public"."register_profile"("p_display_name" "text", "p_tenant_id" "uuid", "p_club_id" "uuid" DEFAULT NULL::"uuid", "p_nick" "text" DEFAULT ''::"text", "p_phone" "text" DEFAULT NULL::"text") RETURNS "public"."profiles"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
-    AS $$
+    AS $_$
 declare
   v_uid uuid := auth.uid();
   v_profile profiles;
   v_tenant tenants;
   v_first boolean;
+  v_phone constant text := nullif(trim(coalesce(p_phone, '')), '');
 begin
   if v_uid is null then
     raise exception 'not_authenticated';
@@ -2368,6 +2415,9 @@ begin
   end if;
   if char_length(trim(coalesce(p_nick, ''))) > 14 then
     raise exception 'nick_too_long';
+  end if;
+  if v_phone is not null and v_phone !~ '^\+[1-9][0-9]{7,14}$' then
+    raise exception 'invalid_phone';
   end if;
 
   select * into v_tenant from tenants where id = p_tenant_id;
@@ -2397,7 +2447,7 @@ begin
   end if;
 
   insert into profiles
-    (id, tenant_id, display_name, club_id, nick, email,
+    (id, tenant_id, display_name, club_id, nick, email, phone,
      role, status, approved_at)
   values (
     v_uid,
@@ -2406,6 +2456,7 @@ begin
     p_club_id,
     trim(coalesce(p_nick, '')),
     coalesce(auth.email(), ''),
+    v_phone,
     case when v_first then 'admin' else 'player' end,
     case when v_first then 'approved' else 'pending' end,
     case when v_first then now() end
@@ -2414,10 +2465,10 @@ begin
 
   return v_profile;
 end;
-$$;
+$_$;
 
 
-ALTER FUNCTION "public"."register_profile"("p_display_name" "text", "p_tenant_id" "uuid", "p_club_id" "uuid", "p_nick" "text") OWNER TO "postgres";
+ALTER FUNCTION "public"."register_profile"("p_display_name" "text", "p_tenant_id" "uuid", "p_club_id" "uuid", "p_nick" "text", "p_phone" "text") OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."registration_clubs"("p_tenant_id" "uuid") RETURNS TABLE("id" "uuid", "name" "text")
@@ -4905,6 +4956,12 @@ GRANT ALL ON FUNCTION "public"."consume_calendar_nonce"("p_nonce" "text") TO "se
 
 
 
+REVOKE ALL ON FUNCTION "public"."contacts"() FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."contacts"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."contacts"() TO "service_role";
+
+
+
 GRANT ALL ON TABLE "public"."reservations" TO "authenticated";
 GRANT ALL ON TABLE "public"."reservations" TO "service_role";
 
@@ -4936,6 +4993,18 @@ GRANT UPDATE("default_view") ON TABLE "public"."profiles" TO "authenticated";
 
 
 GRANT UPDATE("notify_before_minutes") ON TABLE "public"."profiles" TO "authenticated";
+
+
+
+GRANT UPDATE("phone") ON TABLE "public"."profiles" TO "authenticated";
+
+
+
+GRANT UPDATE("show_email") ON TABLE "public"."profiles" TO "authenticated";
+
+
+
+GRANT UPDATE("show_phone") ON TABLE "public"."profiles" TO "authenticated";
 
 
 
@@ -5144,6 +5213,12 @@ GRANT ALL ON FUNCTION "public"."record_federation_run"("p_tenant" "uuid", "p_key
 REVOKE ALL ON FUNCTION "public"."refresh_match"("p_match_id" "uuid") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."refresh_match"("p_match_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."refresh_match"("p_match_id" "uuid") TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."register_profile"("p_display_name" "text", "p_tenant_id" "uuid", "p_club_id" "uuid", "p_nick" "text", "p_phone" "text") TO "anon";
+GRANT ALL ON FUNCTION "public"."register_profile"("p_display_name" "text", "p_tenant_id" "uuid", "p_club_id" "uuid", "p_nick" "text", "p_phone" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."register_profile"("p_display_name" "text", "p_tenant_id" "uuid", "p_club_id" "uuid", "p_nick" "text", "p_phone" "text") TO "service_role";
 
 
 

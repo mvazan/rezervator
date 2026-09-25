@@ -5864,4 +5864,291 @@ begin
   raise notice 'OK: a moved kuželna drops the old one''s discovery job; the same one and other alleys keep theirs (0047)';
 end $$;
 
+-- 0048 Klubovna → Kontakty ---------------------------------------------------
+reset role;
+
+-- 19. contacts(): the alley's registered players — approved, not the kiosk,
+-- not a placeholder, not a visiting superadmin — each with the e-mail and
+-- phone they chose to show. Alleys of its own (E, and F next door) keep
+-- the lists exact.
+insert into tenants (id, name, status) values
+  ('00000000-0000-0000-0000-00000000000e', 'Kuželna E (0048)', 'approved'),
+  ('00000000-0000-0000-0000-00000000000f', 'Kuželna F (0048)', 'approved');
+insert into clubs (id, tenant_id, name, color) values
+  ('40000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-00000000000e',
+   'Oddíl E', 3);
+insert into profiles (id, tenant_id, display_name, nick, email, phone, club_id,
+                      role, status, show_email, show_phone, placeholder)
+values
+  ('40000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-00000000000e',
+   'Adam Admin', 'Áďa', 'adam@example.com', '+420777000001',
+   '40000000-0000-0000-0000-0000000000c1', 'admin', 'approved', true, true, false),
+  ('40000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-00000000000e',
+   'Běla Skrytá', '', 'bela@example.com', '+420777000002',
+   null, 'player', 'approved', false, true, false),
+  ('40000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-00000000000e',
+   'Cyril Tichý', '', 'cyril@example.com', '+420777000003',
+   null, 'player', 'approved', true, false, false),
+  ('40000000-0000-0000-0000-000000000004', '00000000-0000-0000-0000-00000000000e',
+   'Dana Čekající', '', 'dana@example.com', null,
+   null, 'player', 'pending', true, true, false),
+  ('40000000-0000-0000-0000-000000000005', '00000000-0000-0000-0000-00000000000e',
+   'Kiosk E', '', 'kiosk-e@example.com', null,
+   null, 'kiosk', 'approved', true, true, false),
+  ('40000000-0000-0000-0000-000000000006', '00000000-0000-0000-0000-00000000000e',
+   'Bez účtu E', '', '', null,
+   null, 'player', 'approved', true, true, true),
+  ('40000000-0000-0000-0000-000000000008', '00000000-0000-0000-0000-00000000000e',
+   'Eva Bez Mailu', '', '', null,
+   null, 'player', 'approved', true, true, false),
+  ('40000000-0000-0000-0000-000000000011', '00000000-0000-0000-0000-00000000000f',
+   'Filip Cizí', '', 'filip@example.com', '+420777000011',
+   null, 'player', 'approved', true, true, false);
+-- A superadmin at home in A, visiting E.
+insert into profiles (id, tenant_id, display_name, email, role, status,
+                      superadmin, home_tenant_id)
+values ('40000000-0000-0000-0000-000000000007', '00000000-0000-0000-0000-00000000000e',
+        'Super Návštěva', 'super-e@example.com', 'admin', 'approved',
+        true, '00000000-0000-0000-0000-00000000000a');
+
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"40000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+declare
+  v_names text[];
+  v jsonb;
+begin
+  select array_agg(t.display_name order by t.o) into v_names
+    from contacts() with ordinality
+         as t(id, display_name, nick, club_id, club_name, club_color, email, phone, o);
+  if v_names is distinct from
+     array['Adam Admin', 'Běla Skrytá', 'Cyril Tichý', 'Eva Bez Mailu'] then
+    raise exception 'FAIL: contacts should list the alley''s registered players by name, nobody else: %',
+      v_names;
+  end if;
+  select jsonb_object_agg(c.display_name, jsonb_build_object(
+           'nick', c.nick, 'club_id', c.club_id, 'club', c.club_name,
+           'color', c.club_color, 'email', c.email, 'phone', c.phone))
+    into v from contacts() c;
+  if v is distinct from '{
+       "Adam Admin": {"nick": "Áďa", "club_id": "40000000-0000-0000-0000-0000000000c1",
+                      "club": "Oddíl E", "color": 3,
+                      "email": "adam@example.com", "phone": "+420777000001"},
+       "Běla Skrytá": {"nick": "", "club_id": null, "club": null, "color": -1,
+                       "email": null, "phone": "+420777000002"},
+       "Cyril Tichý": {"nick": "", "club_id": null, "club": null, "color": -1,
+                       "email": "cyril@example.com", "phone": null},
+       "Eva Bez Mailu": {"nick": "", "club_id": null, "club": null, "color": -1,
+                         "email": null, "phone": null}}'::jsonb then
+    raise exception 'FAIL: contacts returned the wrong fields, or a hidden e-mail or phone: %', v;
+  end if;
+  raise notice 'OK: contacts lists the alley''s registered players; a hidden e-mail or phone is null, the other still shows (0048)';
+end $$;
+reset role;
+
+-- 19b. A visiting superadmin reads the alley they are in (and is not in
+-- it); a player of another alley sees only their own.
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"40000000-0000-0000-0000-000000000007","role":"authenticated"}';
+do $$
+begin
+  if (select array_agg(display_name order by display_name) from contacts())
+     is distinct from array['Adam Admin', 'Běla Skrytá', 'Cyril Tichý', 'Eva Bez Mailu'] then
+    raise exception 'FAIL: a visiting superadmin should read the visited alley''s contacts';
+  end if;
+end $$;
+set local request.jwt.claims =
+  '{"sub":"40000000-0000-0000-0000-000000000011","role":"authenticated"}';
+do $$
+begin
+  if (select array_agg(display_name) from contacts()) is distinct from array['Filip Cizí'] then
+    raise exception 'FAIL: another alley''s player saw foreign contacts: %',
+      (select array_agg(display_name) from contacts());
+  end if;
+  raise notice 'OK: a visiting superadmin reads the visited alley; another alley is invisible (0048)';
+end $$;
+reset role;
+
+-- 19c. The pending player and the kiosk are refused; anon cannot call it.
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"40000000-0000-0000-0000-000000000004","role":"authenticated"}';
+do $$
+begin
+  perform contacts();
+  raise exception 'FAIL: a pending player read the contacts';
+exception when others then
+  if sqlerrm <> 'not_allowed' then raise; end if;
+end $$;
+set local request.jwt.claims =
+  '{"sub":"40000000-0000-0000-0000-000000000005","role":"authenticated"}';
+do $$
+begin
+  perform contacts();
+  raise exception 'FAIL: the kiosk read the contacts';
+exception when others then
+  if sqlerrm <> 'not_allowed' then raise; end if;
+end $$;
+reset role;
+set local role anon;
+set local request.jwt.claims = '{"role":"anon"}';
+do $$
+begin
+  perform contacts();
+  raise exception 'FAIL: anon read the contacts';
+exception when insufficient_privilege then null;
+end $$;
+reset role;
+do $$
+begin
+  if has_function_privilege('anon', 'public.contacts()', 'execute')
+     or not has_function_privilege('authenticated', 'public.contacts()', 'execute') then
+    raise exception 'FAIL: contacts must be callable by signed-in users only';
+  end if;
+  raise notice 'OK: the pending player and the kiosk get not_allowed; anon cannot call contacts (0048)';
+end $$;
+
+-- 19d. A player writes their own phone and switches — nobody else's, not
+-- even the alley's admin — and the phone must be E.164.
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"40000000-0000-0000-0000-000000000002","role":"authenticated"}';
+do $$
+declare
+  n integer;
+begin
+  update profiles set phone = '+420777999002', show_email = true, show_phone = false
+   where id = auth.uid();
+  if not exists (select 1 from profiles
+                  where id = auth.uid() and phone = '+420777999002'
+                    and show_email and not show_phone) then
+    raise exception 'FAIL: a player could not update their own phone and switches';
+  end if;
+  update profiles set phone = '+420777999001', show_email = false
+   where id = '40000000-0000-0000-0000-000000000001';
+  get diagnostics n = row_count;
+  if n <> 0 then
+    raise exception 'FAIL: a player updated another player''s contact';
+  end if;
+  begin
+    update profiles set phone = '777123456' where id = auth.uid();
+    raise exception 'FAIL: a phone without the country code was stored';
+  exception when check_violation then null;
+  end;
+  begin
+    update profiles set phone = '+0777123456' where id = auth.uid();
+    raise exception 'FAIL: a phone starting +0 was stored';
+  exception when check_violation then null;
+  end;
+  begin
+    update profiles set phone = '+4207771234567890' where id = auth.uid();
+    raise exception 'FAIL: a 16-digit phone was stored';
+  exception when check_violation then null;
+  end;
+end $$;
+set local request.jwt.claims =
+  '{"sub":"40000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+declare
+  n integer;
+begin
+  update profiles set phone = null, show_phone = true
+   where id = '40000000-0000-0000-0000-000000000002';
+  get diagnostics n = row_count;
+  if n <> 0 or not exists (select 1 from profiles
+                            where id = '40000000-0000-0000-0000-000000000002'
+                              and phone = '+420777999002' and not show_phone) then
+    raise exception 'FAIL: the admin changed a player''s phone or switch';
+  end if;
+  raise notice 'OK: a player updates only their own phone and switches; the phone must be E.164 (0048)';
+end $$;
+reset role;
+
+-- 19e. register_profile takes the phone (E.164 or blank) and refuses any
+-- other; an old-style call without p_phone still resolves, and so does
+-- create_tenant_and_register's four positional arguments.
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"40000000-0000-0000-0000-000000000021","role":"authenticated"}';
+do $$
+declare
+  v_p profiles;
+begin
+  v_p := register_profile('Nováček s telefonem', '00000000-0000-0000-0000-00000000000e',
+                          null, '', '+420777000021');
+  if v_p.phone is distinct from '+420777000021' or v_p.status <> 'pending'
+     or not v_p.show_email or not v_p.show_phone then
+    raise exception 'FAIL: register_profile did not store the phone: %', to_jsonb(v_p);
+  end if;
+end $$;
+set local request.jwt.claims =
+  '{"sub":"40000000-0000-0000-0000-000000000022","role":"authenticated"}';
+do $$
+begin
+  begin
+    perform register_profile('Špatné číslo', '00000000-0000-0000-0000-00000000000e',
+                             null, '', '777000022');
+    raise exception 'FAIL: register_profile stored a phone without the country code';
+  exception when others then
+    if sqlerrm <> 'invalid_phone' then raise; end if;
+  end;
+  if exists (select 1 from profiles where id = auth.uid()) then
+    raise exception 'FAIL: a refused registration left a profile behind';
+  end if;
+end $$;
+set local request.jwt.claims =
+  '{"sub":"40000000-0000-0000-0000-000000000023","role":"authenticated"}';
+do $$
+declare
+  v_p profiles;
+begin
+  v_p := register_profile(p_display_name => 'Starý klient',
+                          p_tenant_id => '00000000-0000-0000-0000-00000000000e',
+                          p_club_id => null, p_nick => 'Starý');
+  if v_p.id is null or v_p.phone is not null then
+    raise exception 'FAIL: a call without p_phone did not register: %', to_jsonb(v_p);
+  end if;
+end $$;
+set local request.jwt.claims =
+  '{"sub":"40000000-0000-0000-0000-000000000024","role":"authenticated"}';
+do $$
+declare
+  v_p profiles;
+begin
+  v_p := register_profile('Prázdný telefon', '00000000-0000-0000-0000-00000000000e',
+                          null, '', '   ');
+  if v_p.phone is not null then
+    raise exception 'FAIL: a blank phone was stored as %', v_p.phone;
+  end if;
+end $$;
+set local request.jwt.claims =
+  '{"sub":"40000000-0000-0000-0000-000000000025","role":"authenticated"}';
+do $$
+declare
+  v_p profiles;
+begin
+  v_p := create_tenant_and_register('Kuželna G (0048)', 'Zakladatel G');
+  if v_p.role <> 'admin' or v_p.status <> 'approved' or v_p.phone is not null then
+    raise exception 'FAIL: create_tenant_and_register broke with the new register_profile: %',
+      to_jsonb(v_p);
+  end if;
+end $$;
+reset role;
+do $$
+begin
+  if to_regprocedure('public.register_profile(text, uuid, uuid, text)') is not null then
+    raise exception 'FAIL: the four-argument register_profile is still there';
+  end if;
+  if not has_function_privilege('authenticated',
+       'public.register_profile(text, uuid, uuid, text, text)', 'execute')
+     or not has_column_privilege('authenticated', 'public.profiles', 'phone', 'update')
+     or not has_column_privilege('authenticated', 'public.profiles', 'show_email', 'update')
+     or not has_column_privilege('authenticated', 'public.profiles', 'show_phone', 'update') then
+    raise exception 'FAIL: the app lost register_profile or the contact columns';
+  end if;
+  raise notice 'OK: register_profile stores a phone and refuses a bad one; calls without p_phone still work (0048)';
+end $$;
+
 rollback;

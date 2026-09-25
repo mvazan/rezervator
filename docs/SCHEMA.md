@@ -47,7 +47,7 @@ and what cascades — and is updated with every migration.
 | Table | Purpose / key columns | RLS (all `tenant_id = current_tenant_id()` unless noted) |
 |---|---|---|
 | `tenants` | `name` unique, `founder_email` (only the founder can become the first admin), `status`, `approved_at`. **Public overview** (0043): `public_slug` unique, 3–40 lower-case letters/digits/hyphens (`tenants_public_slug_format`), `public_enabled` default off, `tenants_public_needs_slug` (can't enable without a slug) | select for `authenticated` `using (true)` **but column grants expose only `id, name, status`** — `founder_email` never leaves the server; `public_slug`/`public_enabled` are likewise outside the `authenticated` grant, read only by `public_tenant_id`/`my_public_overview`. Writes: RPC only. |
-| `profiles` | `id` (= `auth.uid()` for real accounts; no FK to `auth.users` since 0022), `display_name`, `nick` ≤ 14, `email` ('' for placeholders), `role`, `status`, `club_id → clubs`, `fcm_token`, `superadmin`, `home_tenant_id`, `approved_by/at`, `placeholder` (hand-made row: player ∧ approved ∧ not superadmin), `own_color` (0024: the colour the player picked for their own reservations in their own view, −1 = club colour, else a packed RGB — 0042 moved the picker to the Google palette + wheel, both stored as `0x1000000\|rgb`; a legacy palette index 0-11 from the 1.2.6 app still renders), `followed_teams` (≤ 20 names, the Můj přehled list — separate from the calendar's `calendar_teams`), `default_view` (`calendar` | `trainings`, what the app opens at launch); both own-row updatable (0029) | select: own row, or admin of the same tenant. update: own row, columns `display_name`, `fcm_token`, `own_color`, `followed_teams`, `default_view` only. insert/delete: RPC only. |
+| `profiles` | `id` (= `auth.uid()` for real accounts; no FK to `auth.users` since 0022), `display_name`, `nick` ≤ 14, `email` ('' for placeholders), `role`, `status`, `club_id → clubs`, `fcm_token`, `superadmin`, `home_tenant_id`, `approved_by/at`, `placeholder` (hand-made row: player ∧ approved ∧ not superadmin), `own_color` (0024: the colour the player picked for their own reservations in their own view, −1 = club colour, else a packed RGB — 0042 moved the picker to the Google palette + wheel, both stored as `0x1000000\|rgb`; a legacy palette index 0-11 from the 1.2.6 app still renders), `followed_teams` (≤ 20 names, the Můj přehled list — separate from the calendar's `calendar_teams`), `default_view` (`calendar` | `trainings`, what the app opens at launch); both own-row updatable (0029); `phone` (0048: E.164 `+<digits>`, `profiles_phone_check` = `^\+[1-9][0-9]{7,14}$`, null = none), `show_email` / `show_phone` (0048: default true, for existing rows too — whether `contacts()` hands the e-mail / phone to the alley's players) | select: own row, or admin of the same tenant. update: own row, columns `display_name`, `fcm_token`, `own_color`, `followed_teams`, `default_view`, `notify_before_minutes`, `phone`, `show_email`, `show_phone` only. insert/delete: RPC only. |
 | `schedule_settings` | PK `tenant_id`; `lane_count` 1–12, `training_weekdays smallint[]` (ISO 1–7), `booking_horizon_days` 1–90, `max_active_reservations` 1–50, `kiosk_dark`, `kiosk_fit_day` | select approved/kiosk; update admin. |
 | `time_blocks` | `starts_at`, `ends_at`, `position`, `active`. `position = -1` marks a day-special block: inactive, reachable only through `day_overrides.block_ids` | select approved/kiosk; insert/update/delete admin. FK from `reservations` is RESTRICT — only never-used blocks can be deleted. |
 | `day_overrides` | PK (`tenant_id`, `date`); `closed`, `reason`, `block_ids uuid[]` (`null` = the default active set) | select approved/kiosk; write admin. Normally written through `set_day_override`. |
@@ -83,6 +83,10 @@ superadmins — `id, display_name, nick, club_id, club_color, placeholder`
 ACL). This is the only profile data the kiosk account can read. SELECT for
 `authenticated` only.
 
+`contacts()` (0048) is the one other way to another player's profile: the
+players' own switches decide whether their e-mail and phone leave the
+database at all (see RPCs).
+
 ## Privileges (0017, 0046)
 
 `authenticated` has select/insert/update/delete on the app tables (policies
@@ -111,13 +115,14 @@ reappears, when `service_role` lacks DML on any table or view, or when
 
 | Function | Who | Effect / raises |
 |---|---|---|
-| `register_profile(display_name, tenant_id, club_id?, nick?)` | signed-in user without a profile | First approved member of a tenant (or the `founder_email` match) becomes approved admin, everyone else pending; placeholders never count as the first member. `empty_display_name`, `nick_too_long`, `unknown_tenant`, `unknown_club`. |
+| `register_profile(display_name, tenant_id, club_id?, nick?, phone?)` | signed-in user without a profile | First approved member of a tenant (or the `founder_email` match) becomes approved admin, everyone else pending; placeholders never count as the first member. `phone` (0048) is stored as given when E.164, blank = none — the app normalises it first (`lib/domain/phone.dart`). 0048 dropped the four-argument signature: a call without `p_phone` (the 1.2.x app, `create_tenant_and_register`) resolves to this one through the default. `empty_display_name`, `nick_too_long`, `invalid_phone`, `unknown_tenant`, `unknown_club`. |
 | `create_tenant_and_register(tenant_name, display_name, nick?)` | signed-in user | Creates a pending tenant with the caller as founder, then registers. `empty_tenant_name`, `tenant_exists`. |
 | `registration_clubs(tenant_id)` | signed-in, pre-profile | Club list for the register screen. |
 | `approve_player(user_id)`, `set_role(user_id, role)`, `set_player_club(user_id, club_id)`, `upsert_club(...)`, `delete_club(id)` | admin | Member and club administration. `cannot_demote_self`, `placeholder_no_account` (a hand-made profile stays a player), `unknown_club`. |
 | `kiosk_password_target(user_id)` (0028) | admin | The gate behind the `kiosk-password` edge function: returns the id of a kiosk of the caller's OWN alley, so the function sets a password only where the caller may. Called with the CALLER's JWT (the function then uses the service role). `not_allowed`, `unknown_kiosk`. |
 | `save_placeholder_player(id?, display_name, nick, club_id)`, `delete_placeholder_player(id)`, `merge_placeholder_player(placeholder_id, target_id, display_name, nick, club_id)` | admin | Players without an account. Save: `id = null` inserts an approved placeholder of the caller's tenant, otherwise edits one (`unknown_player`); `empty_display_name`, `nick_too_long`, `unknown_club`. Delete: `player_has_history` when any reservation references it. Merge: the source must be a placeholder, the target any non-placeholder non-kiosk profile of the tenant (`invalid_merge`); repoints the reservations, writes the chosen fields, approves a pending target, deletes the source. |
 | `set_nick(user_id, nick)` | self or admin | `nick_too_long`. |
+| `contacts()` (0048) | approved member, not the kiosk (a visiting superadmin counts, for the alley they are in) | Klubovna → Kontakty: the caller's alley's registered players — approved, not the kiosk, not a placeholder, not a visiting superadmin (the `players` view's rule) — as `(id, display_name, nick, club_id, club_name, club_color, email, phone)`, ordered by `display_name` (the app re-sorts Czech). `email` is null unless `show_email` (and for an empty one), `phone` null unless `show_phone`: a hidden one never leaves the database. Admin screens keep reading `profiles` as before; the switches do not apply there. `not_allowed`; anon has no EXECUTE. |
 | `create_reservation(player_id, date, block_id, lane)` | player for self, kiosk for any approved member, admin for anyone, **member of the same group for a fellow member (0044)** | Admin skips past/horizon/limit. A group booking follows the target player's own rules and the target's own cap (`same_group` from `same_group(caller, player_id)`), not the caller's. Raises `player_not_approved`, `unknown_block`, `invalid_lane`, `day_closed` / `invalid_block` (via `block_day_status`), `date_past`, `beyond_horizon`, `limit_reached` (own cap) / `member_at_limit` (0044: a group booking against the target's cap — the same limit, an honest message), `blocked_by_priority`, `blocked_by_rental` (via `rental_occurrences`), `slot_taken`. |
 | `cancel_reservation(id, note?, notify?)` | owner before the block starts, admin anytime, **member of the same group before the block starts (0044)** | `too_late`, `not_allowed`; sets `cancelled_via` app / admin / group (0044) and `cancelled_by` to the caller. |
 | `group_invite(user)` (0044) | approved player, not kiosk | Invites `user` (an approved, non-kiosk, non-placeholder account of the same alley, not the caller) into the caller's group, founding one if the caller has none. `not_allowed`, `unknown_player`, `already_member`, `already_invited`. |
@@ -856,7 +861,14 @@ and FCM is configured, e-mail otherwise.
   enqueues, and never for a match in the past before and after; and the
   venues — upsert, one fetch for an unknown match venue, the nightly and
   sync-request producers, no re-arm of a pending or recently failed
-  fetch), and the 0035
+  fetch), the 0048 contacts (`contacts()` lists the alley's registered
+  players only — no placeholder, kiosk, pending member or visiting
+  superadmin, who may still read it — with a hidden e-mail or phone null
+  and the other still shown; the kiosk and a pending member refused, anon
+  without EXECUTE, another alley invisible; phone and switches own-row
+  only, even against the admin; the E.164 check; `register_profile` with a
+  phone, a refused one, a blank one, a named call without `p_phone`, and
+  `create_tenant_and_register` on top of it), and the 0035
   assertion (now including `team_colors` and `match_exceptions`) that every table
   `lib/data/providers.dart` streams is in the `supabase_realtime`
   publication; run with `psql … -v ON_ERROR_STOP=1 -f` against the local
