@@ -61,6 +61,27 @@ void main() {
     expect(failed.error, 'boom');
     expect(failed.teams, 0);
     expect(failed.clubsCreated, isEmpty);
+    expect(failed.teamsCreated, isEmpty);
+  });
+
+  test('FederationDiscoverReport reads teams_created, none when absent (0046)',
+      () {
+    final r = FederationDiscoverReport.fromJson({
+      'teams': 5, 'competitions': 2, 'created': 2,
+      'teams_created': ['KS Devítka Brno B', 'TJ Sokol Brno IV C'],
+      'clubs_created': const [], 'clubs_linked': ['Sokol Brno IV'],
+      'at': '2026-09-25T08:00:00+00:00',
+    });
+    expect(r.created, 2);
+    expect(r.teamsCreated, ['KS Devítka Brno B', 'TJ Sokol Brno IV C']);
+
+    // A report written before 0046 named the teams: counted, not named.
+    final older = FederationDiscoverReport.fromJson({
+      'teams': 5, 'created': 5, 'at': '2026-09-24T08:00:00+00:00',
+    });
+    expect(older.created, 5);
+    expect(older.teamsCreated, isEmpty);
+    expect(const FederationDiscoverReport().teamsCreated, isEmpty);
   });
 
   test('FederationSyncProgress.fromJson, pending and idle (0046)', () {

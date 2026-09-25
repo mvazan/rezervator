@@ -351,14 +351,17 @@ class FederationSync {
 }
 
 /// What the last discovery did (0046): the venue's [teams] in how many
-/// [competitions], how many teams it [created], and the clubs of ours it
-/// matched ([clubsLinked], our names) or created ([clubsCreated]). A failed
-/// discovery carries only [error] and [at].
+/// [competitions], how many teams it [created] and their names here
+/// ([teamsCreated]), and the clubs of ours it matched ([clubsLinked], our
+/// names) or created ([clubsCreated]). A report from before 0046 named the
+/// teams has [created] but an empty [teamsCreated]. A failed discovery
+/// carries only [error] and [at].
 class FederationDiscoverReport {
   const FederationDiscoverReport({
     this.teams = 0,
     this.competitions = 0,
     this.created = 0,
+    this.teamsCreated = const [],
     this.clubsCreated = const [],
     this.clubsLinked = const [],
     this.at,
@@ -368,6 +371,7 @@ class FederationDiscoverReport {
   final int teams;
   final int competitions;
   final int created;
+  final List<String> teamsCreated;
   final List<String> clubsCreated;
   final List<String> clubsLinked;
   final DateTime? at;
@@ -385,6 +389,7 @@ class FederationDiscoverReport {
         teams: _count(json['teams']),
         competitions: _count(json['competitions']),
         created: _count(json['created']),
+        teamsCreated: _names(json['teams_created']),
         clubsCreated: _names(json['clubs_created']),
         clubsLinked: _names(json['clubs_linked']),
         at: FederationSync._time(json['at']),
