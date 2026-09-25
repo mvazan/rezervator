@@ -1,5 +1,11 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { dayLabel, escapeHtml, leadLabel, timeLabel } from "./format.ts";
+import {
+  dayLabel,
+  escapeHtml,
+  leadLabel,
+  pragueDateTime,
+  timeLabel,
+} from "./format.ts";
 
 Deno.test("escapeHtml escapes & < > \" and leaves ' alone", () => {
   assertEquals(
@@ -52,4 +58,48 @@ Deno.test("leadLabel: anything that is not a whole hour stays in minutes", () =>
 
 Deno.test("leadLabel: no lead time at all is not 'za 0 minut'", () => {
   assertEquals(leadLabel(0), "právě teď");
+});
+
+// The database hands an event's start over as an instant, and PostgREST
+// writes instants in UTC ("…T14:30:00+00:00"). The text must read Prague
+// wall-clock time, summer or winter, and the Prague date around midnight.
+Deno.test("pragueDateTime reads a summer instant as CEST (UTC+2)", () => {
+  assertEquals(pragueDateTime("2026-09-26T14:30:00+00:00"), {
+    date: "2026-09-26",
+    time: "16:30",
+  });
+});
+
+Deno.test("pragueDateTime reads a winter instant as CET (UTC+1)", () => {
+  assertEquals(pragueDateTime("2026-12-12T15:30:00+00:00"), {
+    date: "2026-12-12",
+    time: "16:30",
+  });
+});
+
+Deno.test("pragueDateTime moves past midnight to the Prague day", () => {
+  assertEquals(pragueDateTime("2026-09-26T22:30:00+00:00"), {
+    date: "2026-09-27",
+    time: "00:30",
+  });
+});
+
+Deno.test("pragueDateTime follows both clock changes", () => {
+  // Spring forward: 29. 3. 2026 at 01:00 UTC, 02:00 CET → 03:00 CEST.
+  assertEquals(pragueDateTime("2026-03-29T00:30:00Z").time, "01:30");
+  assertEquals(pragueDateTime("2026-03-29T01:30:00Z").time, "03:30");
+  // Fall back: 25. 10. 2026 at 01:00 UTC, 03:00 CEST → 02:00 CET.
+  assertEquals(pragueDateTime("2026-10-25T00:30:00Z").time, "02:30");
+  assertEquals(pragueDateTime("2026-10-25T01:30:00Z").time, "02:30");
+});
+
+Deno.test("pragueDateTime reads midnight as 00:00, never 24:00", () => {
+  assertEquals(pragueDateTime("2026-09-25T22:00:00+00:00"), {
+    date: "2026-09-26",
+    time: "00:00",
+  });
+});
+
+Deno.test("pragueDateTime takes the fractional seconds PostgREST may send", () => {
+  assertEquals(pragueDateTime("2026-09-26T14:30:00.123456+00:00").time, "16:30");
 });

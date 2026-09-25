@@ -41,6 +41,7 @@ import { pragueEpoch, pragueToday, signCancelToken } from "../_shared/cancel_tok
 import { firebaseConfigured, sendPush } from "../_shared/fcm.ts";
 import { processFederationJobs, siteFetcher } from "../_shared/federation_jobs.ts";
 import { dayLabel, escapeHtml, leadLabel, timeLabel } from "../_shared/format.ts";
+import { type DueReminder, reminderBody } from "../_shared/reminders.ts";
 import {
   groupBookedMessage,
   groupCancelledMessage,
@@ -443,36 +444,6 @@ async function processJobs() {
 // ---------------------------------------------------------------------------
 // Reminders before a training or a match (0040)
 // ---------------------------------------------------------------------------
-
-type DueReminder = {
-  user_id: string;
-  email: string;
-  fcm_token: string | null;
-  event_key: string;
-  offset_minutes: number;
-  kind: "training" | "match";
-  starts_at: string;
-  ends_at: string;
-  lane: number | null;
-  alley_name: string | null;
-  home_team: string | null;
-  away_team: string | null;
-  is_away: boolean | null;
-};
-
-/// "st 17.9. 18:30–19:30, dráha 2" / "SKK Veverky A – KK Blansko, 18:00,
-/// doma" — what the reminder is about, under a title that says when.
-function reminderBody(row: DueReminder): string {
-  const date = row.starts_at.slice(0, 10);
-  const from = timeLabel(row.starts_at.slice(11, 16));
-  const to = timeLabel(row.ends_at);
-  if (row.kind === "training") {
-    const where = row.lane === null ? "" : `, dráha ${row.lane}`;
-    return `${dayLabel(date)} ${from}–${to}${where}`;
-  }
-  return `${row.home_team} – ${row.away_team}, ${dayLabel(date)} ${from}, ` +
-    `${row.is_away ? "venku" : "doma"}`;
-}
 
 /// Everything whose moment has come, sent through the same push-or-e-mail
 /// door as every other message. The ledger is written per reminder AFTER it
