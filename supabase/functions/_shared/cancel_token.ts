@@ -92,8 +92,8 @@ export function pragueEpoch(sqlDate: string, sqlTime: string): number {
   return Math.floor(utcGuess / 1000) - offsetMinutes * 60;
 }
 
-/// Today (`YYYY-MM-DD`) in Europe/Prague.
-export function pragueToday(): string {
+/// Today (`YYYY-MM-DD`) in Europe/Prague — [now] only for tests.
+export function pragueToday(now: Date = new Date()): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Prague" })
-    .format(new Date());
+    .format(now);
 }
