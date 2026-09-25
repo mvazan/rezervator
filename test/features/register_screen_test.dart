@@ -6,6 +6,10 @@ import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/auth/register_screen.dart';
 
 void main() {
+  /// What the screen sent, one line per backend call.
+  late List<String> calls;
+  setUp(() => calls = []);
+
   Widget app(List<Tenant> tenants,
       {Map<String, List<Club>> clubs = const {}}) {
     return ProviderScope(
@@ -14,9 +18,21 @@ void main() {
         registrationClubsProvider.overrideWith(
             (ref, tenantId) async => clubs[tenantId] ?? const <Club>[]),
       ],
-      child: const MaterialApp(home: RegisterScreen()),
+      child: MaterialApp(
+        home: RegisterScreen(
+          registerProfile: (name, tenantId, {clubId, nick = '', phone}) async =>
+              calls.add('register $name|$tenantId|$clubId|$nick|$phone'),
+          createTenantAndRegister: (tenantName, name, {nick = ''}) async =>
+              calls.add('found $tenantName|$name|$nick'),
+          updateMyContact: ({phone, showEmail, showPhone}) async =>
+              calls.add('contact $phone|$showEmail|$showPhone'),
+        ),
+      ),
     );
   }
+
+  const phoneLabel = 'Telefon (nepovinné)';
+  const phoneError = 'Telefon nemá správný tvar — třeba +420 777 123 456.';
 
   const two = [
     Tenant(id: 't1', name: 'Kuželna č. 1'),
@@ -71,6 +87,9 @@ void main() {
 
     await tester.enterText(
         find.widgetWithText(TextField, 'Jméno a příjmení'), 'Jan Novák');
+    // The phone field pushed the button below the fold of the test screen.
+    await tester.ensureVisible(find.text('Zaregistrovat se'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Zaregistrovat se'));
     await tester.pump();
     expect(find.text('Napiš název nové kuželny.'), findsOneWidget);
@@ -120,5 +139,87 @@ void main() {
       tester.widget<TextField>(nickField).controller!.text.length,
       lessThanOrEqualTo(14),
     );
+  });
+
+  testWidgets('the phone is optional: without one nothing is sent for it',
+      (tester) async {
+    await tester.pumpWidget(app(const [Tenant(id: 't1', name: 'Kuželna č. 1')]));
+    await tester.pumpAndSettle();
+
+    final field = find.widgetWithText(TextField, phoneLabel);
+    expect(field, findsOneWidget);
+    expect(tester.widget<TextField>(field).keyboardType, TextInputType.phone);
+
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Jméno a příjmení'), 'Jan Novák');
+    await tester.tap(find.text('Zaregistrovat se'));
+    await tester.pumpAndSettle();
+
+    expect(calls, ['register Jan Novák|t1|null||null']);
+  });
+
+  testWidgets('an invalid phone is refused inline and nothing is sent; '
+      'typing again clears the message', (tester) async {
+    await tester.pumpWidget(app(const [Tenant(id: 't1', name: 'Kuželna č. 1')]));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Jméno a příjmení'), 'Jan Novák');
+    await tester.enterText(find.widgetWithText(TextField, phoneLabel), '12345');
+    await tester.tap(find.text('Zaregistrovat se'));
+    await tester.pumpAndSettle();
+
+    expect(find.text(phoneError), findsOneWidget);
+    expect(calls, isEmpty);
+
+    await tester.enterText(
+        find.widgetWithText(TextField, phoneLabel), '777 123 45');
+    await tester.pump();
+    expect(find.text(phoneError), findsNothing);
+  });
+
+  testWidgets('a valid phone is sent normalised to register_profile',
+      (tester) async {
+    await tester.pumpWidget(app(const [Tenant(id: 't1', name: 'Kuželna č. 1')]));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Jméno a příjmení'), 'Jan Novák');
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Přezdívka na tabuli (nepovinné)'),
+        'Honza');
+    await tester.enterText(
+        find.widgetWithText(TextField, phoneLabel), '777 123 456');
+    await tester.tap(find.text('Zaregistrovat se'));
+    await tester.pumpAndSettle();
+
+    expect(calls, ['register Jan Novák|t1|null|Honza|+420777123456']);
+  });
+
+  testWidgets('a founder\'s phone is saved on their new profile right after '
+      'the alley is founded', (tester) async {
+    await tester.pumpWidget(app(two));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Kuželna'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('➕ Založit novou kuželnu').last);
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Název nové kuželny'), 'Kuželna Nová');
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Jméno a příjmení'), 'Jan Novák');
+    await tester.enterText(
+        find.widgetWithText(TextField, phoneLabel), '+49 30 1234567');
+    await tester.ensureVisible(find.text('Zaregistrovat se'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Zaregistrovat se'));
+    await tester.pumpAndSettle();
+
+    expect(calls, [
+      'found Kuželna Nová|Jan Novák|',
+      'contact +49301234567|null|null',
+    ]);
   });
 }
