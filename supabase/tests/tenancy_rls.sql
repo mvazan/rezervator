@@ -59,6 +59,45 @@ begin
   raise notice 'OK: privileges match 0017/0020';
 end $$;
 
+-- 0046: nothing is granted by default, so every table grants itself — and
+-- whatever a migration forgets shows up here, not first in production.
+do $$
+declare
+  v_bad text;
+begin
+  if exists (
+    select 1 from pg_default_acl d, aclexplode(d.defaclacl) a
+     where d.defaclrole = 'postgres'::regrole
+       and d.defaclnamespace = 'public'::regnamespace
+       and d.defaclobjtype in ('r', 'S')
+       and a.grantee in ('anon'::regrole, 'authenticated'::regrole,
+                         'service_role'::regrole)) then
+    raise exception 'FAIL: new public tables/sequences are granted by default again (0046)';
+  end if;
+  -- Edge functions run as service_role: every table and view is theirs.
+  select string_agg(c.relname, ', ' order by c.relname) into v_bad
+    from pg_class c
+   where c.relnamespace = 'public'::regnamespace
+     and c.relkind in ('r', 'p', 'v', 'm')
+     and not (has_table_privilege('service_role', c.oid, 'select')
+          and has_table_privilege('service_role', c.oid, 'insert')
+          and has_table_privilege('service_role', c.oid, 'update')
+          and has_table_privilege('service_role', c.oid, 'delete'));
+  if v_bad is not null then
+    raise exception 'FAIL: service_role lacks DML on %', v_bad;
+  end if;
+  select string_agg(c.relname, ', ' order by c.relname) into v_bad
+    from pg_class c
+   where c.relnamespace = 'public'::regnamespace
+     and c.relkind in ('r', 'p', 'v', 'm')
+     and has_table_privilege('anon', c.oid,
+           'select,insert,update,delete,truncate,references,trigger');
+  if v_bad is not null then
+    raise exception 'FAIL: anon has a privilege on %', v_bad;
+  end if;
+  raise notice 'OK: no default table grants; service_role everywhere, anon nowhere (0046)';
+end $$;
+
 -- Tenant A creates a block; tenant B must not see it.
 set local role authenticated;
 set local request.jwt.claims =
