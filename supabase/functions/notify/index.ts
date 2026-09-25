@@ -40,8 +40,13 @@ import { createClient } from "@supabase/supabase-js";
 import { pragueEpoch, pragueToday, signCancelToken } from "../_shared/cancel_token.ts";
 import { firebaseConfigured, sendPush } from "../_shared/fcm.ts";
 import { processFederationJobs, siteFetcher } from "../_shared/federation_jobs.ts";
-import { dayLabel, escapeHtml, leadLabel, timeLabel } from "../_shared/format.ts";
-import { type DueReminder, reminderBody } from "../_shared/reminders.ts";
+import { dayLabel, escapeHtml, timeLabel } from "../_shared/format.ts";
+import {
+  type DueReminder,
+  oneReminderPerEvent,
+  reminderBody,
+  reminderTitle,
+} from "../_shared/reminders.ts";
 import {
   groupBookedMessage,
   groupCancelledMessage,
@@ -455,23 +460,27 @@ async function sendDueReminders() {
     console.error("due_reminders failed:", error);
     return;
   }
-  for (const row of (data ?? []) as DueReminder[]) {
-    const title = row.kind === "training"
-      ? `Trénink ${leadLabel(row.offset_minutes)}`
-      : `Zápas ${leadLabel(row.offset_minutes)}`;
-    const body = reminderBody(row);
+  const now = new Date();
+  for (const { send: row, alsoDue } of oneReminderPerEvent((data ?? []) as DueReminder[])) {
     try {
       await notifyRecipient(
         { id: row.user_id, email: row.email, fcm_token: row.fcm_token },
-        title,
-        body,
+        reminderTitle(row, now),
+        reminderBody(row),
         { data: { kind: "reminder" } },
       );
-      await supabase.rpc("mark_reminder_sent", {
-        p_user: row.user_id,
-        p_event_key: row.event_key,
-        p_offset: row.offset_minutes,
-      });
+      // The sent one and the lead times it stands in for: none of them is
+      // due again.
+      for (const done of [row, ...alsoDue]) {
+        const { error: markError } = await supabase.rpc("mark_reminder_sent", {
+          p_user: done.user_id,
+          p_event_key: done.event_key,
+          p_offset: done.offset_minutes,
+        });
+        if (markError) {
+          console.error(`reminder ${done.event_key} not marked:`, markError);
+        }
+      }
     } catch (error) {
       console.error(`reminder ${row.event_key} failed:`, error);
     }
