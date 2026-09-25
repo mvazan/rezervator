@@ -1624,11 +1624,18 @@ Map<String, dynamic> contactFields({
 /// Klubovna → Kontakty (0048). Fetched when the screen opens (autoDispose)
 /// and again on pull-to-refresh; the screen sorts and filters it
 /// (`contactsMatching`).
-final contactsProvider =
-    FutureProvider.autoDispose<List<Contact>>((ref) async {
-  if (ref.watch(_authUidProvider) == null) return const [];
-  return Api.contacts();
-});
+///
+/// No retry, as for [authStateProvider]: while Riverpod's default retries
+/// (10, ~40 s) are pending, `.future` never completes, so an offline
+/// pull-to-refresh spun that long before its message — and a `not_allowed`
+/// went out ten more times.
+final contactsProvider = FutureProvider.autoDispose<List<Contact>>(
+  (ref) async {
+    if (ref.watch(_authUidProvider) == null) return const [];
+    return Api.contacts();
+  },
+  retry: (_, _) => null,
+);
 
 /// After a superadmin tenant switch (Api.switchTenant): every tenant-scoped
 /// stream fetched its rows under the OLD kuželna's RLS scope, so re-create

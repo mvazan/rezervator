@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -5,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/clubhouse/contacts_screen.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' show PostgrestException;
 
 /// Klubovna → Kontakty (0048): the rows, the actions each visibility
 /// allows, the note's way to Můj profil, and the list's states.
@@ -186,6 +189,34 @@ void main() {
     expect(fetches, 2);
   });
 
+  testWidgets('an offline pull-to-refresh says so at once and keeps the list',
+      (tester) async {
+    var offline = false;
+    await tester.pumpWidget(app(() async {
+      if (offline) throw const SocketException('Failed host lookup');
+      return [adam, bela];
+    }));
+    await tester.pumpAndSettle();
+    expect(fetches, 1);
+
+    offline = true;
+    await tester.fling(
+      find.byKey(const Key('contacts-list')),
+      const Offset(0, 300),
+      1000,
+    );
+    // One second: Riverpod's default retry kept the spinner going ~40 s.
+    for (var i = 0; i < 10; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    expect(find.text('Jsi offline — zkus to znovu po připojení.'),
+        findsOneWidget);
+    expect(fetches, 2);
+    expect(rowOf('Adam Admin'), findsOneWidget);
+    await tester.pumpAndSettle();
+  });
+
   testWidgets('an empty alley says so', (tester) async {
     await tester.pumpWidget(app(() async => const []));
     await tester.pumpAndSettle();
@@ -193,19 +224,20 @@ void main() {
     expect(find.text('Zatím tu nikdo není.'), findsOneWidget);
   });
 
-  testWidgets('a failed load shows the friendly message and „Zkusit znovu"',
-      (tester) async {
+  testWidgets('a failed load shows the friendly message and „Zkusit znovu", '
+      'and is not re-sent behind the user\'s back', (tester) async {
     var fail = true;
-    // An Error, not an Exception: Riverpod's own retry gives up on it at
-    // once — the state a request is left in after its retries ran out.
     await tester.pumpWidget(app(() async {
-      if (fail) throw StateError('not_allowed');
+      if (fail) throw const PostgrestException(message: 'not_allowed');
       return [adam];
     }));
     await tester.pumpAndSettle();
 
     expect(find.text('Na tohle nemáš oprávnění.'), findsOneWidget);
     expect(rowOf('Adam Admin'), findsNothing);
+    // Riverpod's default retry would have fetched ~6 more times by now.
+    await tester.pump(const Duration(seconds: 10));
+    expect(fetches, 1);
 
     fail = false;
     await tester.tap(find.widgetWithText(OutlinedButton, 'Zkusit znovu'));
