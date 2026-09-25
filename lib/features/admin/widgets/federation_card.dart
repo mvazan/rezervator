@@ -71,6 +71,12 @@ class _FederationCardState extends ConsumerState<FederationCard>
   bool _awaitingDiscovery = false;
   DateTime? _reportBefore;
 
+  /// The discovery the looks count is a failed one waiting to retry, seen
+  /// next to its error in the row. It stays that after a move to another
+  /// kuželna drops the error (0046's set_federation_sync), until the count
+  /// is 0 or a new request.
+  bool _failedRetry = false;
+
   /// The switch's value from a tap until the row echoes it — the save runs
   /// at once, the echo comes over Realtime a moment later. null: the row's.
   bool? _enabledWanted;
@@ -123,6 +129,7 @@ class _FederationCardState extends ConsumerState<FederationCard>
     _refreshAtZero = true;
     if (discovery) {
       _discoveryRan = true;
+      _failedRetry = false;
       setState(() {
         _awaitingDiscovery = true;
         _reportBefore = ref.read(federationSyncProvider).value?.discover?.at;
@@ -178,14 +185,19 @@ class _FederationCardState extends ConsumerState<FederationCard>
   /// discovery's job only waits to retry: jobOutcome re-arms it at +1, +2,
   /// +4 and +8 min, and federation_sync_progress counts each as leased. So
   /// once the row holds its error, that error shows, not a quarter of an
-  /// hour's loader. A newer request still waits for its own report.
+  /// hour's loader. Nor does it once another kuželna drops that error
+  /// ([_failedRetry]): the count is still the old retry, not a request of
+  /// the admin's. A newer request still waits for its own report.
   bool _discovering(FederationSync sync) {
     final report = sync.discover;
     if (_awaitingDiscovery && report?.at != _reportBefore) {
       _awaitingDiscovery = false;
     }
     if (_awaitingDiscovery) return true;
-    return _progress.discover > 0 && !(report?.failed ?? false);
+    final failed = report?.failed ?? false;
+    if (failed) _failedRetry = _progress.discover > 0;
+    if (_progress.discover == 0) _failedRetry = false;
+    return _progress.discover > 0 && !failed && !_failedRetry;
   }
 
   /// What the progress line counts: the discovery only while
