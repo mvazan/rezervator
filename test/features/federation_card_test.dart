@@ -701,6 +701,60 @@ void main() {
       expect(find.widgetWithText(TextButton, 'Zpět'), findsOneWidget);
     });
 
+    testWidgets(
+        'after a failed discovery another kuželna offers its own discovery: '
+        'the move dropped the old one\'s retrying job, and Zpět never goes',
+        (tester) async {
+      const typo = 'tj-sokol-brno-4';
+      const typoNotFound =
+          'federation_discover: GET /detail-kuzelny/$typo: HTTP 404';
+      final h = _Harness(
+        rows: [
+          FederationSync(
+            venueSlug: typo,
+            discover: FederationDiscoverReport(
+              error: typoNotFound,
+              at: DateTime.utc(2026, 9, 25, 8),
+            ),
+          ),
+          slugOnly,
+        ],
+        progress: [
+          // The failed job backs off to retry and still counts (decision 7).
+          const FederationSyncProgress(discover: 1),
+          // The next look comes after the move: set_federation_sync deleted
+          // the old kuželna's job with its report (0046).
+          FederationSyncProgress.idle,
+        ],
+      );
+      await _pump(tester, h);
+      expect(find.text('Načtení se nepovedlo: $typoNotFound'), findsOneWidget);
+
+      await tester.tap(find.widgetWithText(TextButton, 'Zpět'));
+      await tester.pump();
+      await tester.enterText(find.byType(TextField),
+          'https://vysledky.kuzelky.cz/detail-kuzelny/tj-sokol-brno-iv');
+      await tester.tap(find.widgetWithText(FilledButton, 'Pokračovat'));
+      await tester.pump();
+      expect(h.saved, [('tj-sokol-brno-iv', false)]);
+
+      // The save's echo, without the report, before the card looks again:
+      // whatever it counted last, step 2 keeps a way back.
+      h.push(slugOnly);
+      await tester.pump();
+      expect(find.text('Oddíly a týmy'), findsOneWidget);
+      expect(find.widgetWithText(TextButton, 'Zpět'), findsOneWidget);
+
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('Načítají se oddíly a týmy z webu…'), findsNothing);
+      expect(find.widgetWithText(FilledButton, 'Načíst oddíly a týmy'),
+          findsOneWidget);
+      expect(find.widgetWithText(TextButton, 'Zpět'), findsOneWidget);
+      expect(h.discoveries, 0);
+    });
+
     testWidgets('Zpět on step 2 goes back to the kuželna, its slug filled in',
         (tester) async {
       await _pump(tester, _Harness(rows: [slugOnly]));

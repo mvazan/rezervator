@@ -3008,7 +3008,9 @@ CREATE OR REPLACE FUNCTION "public"."set_federation_sync"("p_venue_slug" "text",
     SET "search_path" TO 'public'
     AS $_$
 declare
+  v_tenant constant uuid := current_tenant_id();
   v_slug text := lower(trim(coalesce(p_venue_slug, '')));
+  v_old text;
 begin
   if not is_admin() then
     raise exception 'not_allowed';
@@ -3016,17 +3018,23 @@ begin
   if v_slug !~ '^[a-z0-9]+(-[a-z0-9]+)*$' then
     raise exception 'invalid_venue_slug';
   end if;
+  select venue_slug into v_old from federation_sync
+   where tenant_id = v_tenant for update;
   insert into federation_sync (tenant_id, venue_slug, enabled)
-  values (current_tenant_id(), v_slug, p_enabled)
+  values (v_tenant, v_slug, p_enabled)
   on conflict (tenant_id) do update
     set venue_slug = excluded.venue_slug, enabled = excluded.enabled,
         last_report = case
           when federation_sync.venue_slug = excluded.venue_slug
             then federation_sync.last_report
           else federation_sync.last_report - 'discover' end;
+  if v_old is distinct from v_slug then
+    delete from notification_jobs
+     where dedupe_key = 'federation_discover:' || v_tenant;
+  end if;
   -- A moved kuželna leaves the old one's venue key dead, and its
   -- discovery's error with the report.
-  perform federation_refresh_error(current_tenant_id());
+  perform federation_refresh_error(v_tenant);
 end;
 $_$;
 

@@ -5730,6 +5730,51 @@ begin
   perform set_federation_sync(v_slug, false);
   raise notice 'OK: a moved kuželna drops the last discovery''s report; the same one keeps it (0046)';
 end $$;
-
 reset role;
+
+-- 18b. A moved kuželna drops the old one's discovery job too. A failed one
+-- backing off (HTTP 404 for a mistyped address) counts in
+-- federation_sync_progress for up to a quarter of an hour: the card would
+-- spin over a discovery nobody asked for, then run it for the new kuželna.
+-- Saving the same kuželna keeps the job; another alley's job stays.
+do $$
+declare
+  v_a constant text := '00000000-0000-0000-0000-00000000000a';
+  v_b constant text := '00000000-0000-0000-0000-000000000002';
+begin
+  delete from notification_jobs where kind = 'federation_discover';
+  -- Both failed twice and back off 4 minutes: attempts > 0, inside the lease.
+  insert into notification_jobs (kind, dedupe_key, payload, run_at, attempts) values
+    ('federation_discover', 'federation_discover:' || v_a,
+     jsonb_build_object('tenant_id', v_a), now() + interval '4 minutes', 2),
+    ('federation_discover', 'federation_discover:' || v_b,
+     jsonb_build_object('tenant_id', v_b), now() + interval '4 minutes', 2);
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000002","role":"authenticated"}';
+do $$
+declare
+  v_slug constant text := (select venue_slug from federation_sync);
+begin
+  perform set_federation_sync(v_slug, false);
+  if (federation_sync_progress()->>'discover')::integer <> 1 then
+    raise exception 'FAIL: saving the same kuželna dropped its discovery job';
+  end if;
+  perform set_federation_sync('kuzelna-b-jinde', false);
+  if (federation_sync_progress()->>'discover')::integer <> 0 then
+    raise exception 'FAIL: a moved kuželna kept the old one''s retrying discovery job';
+  end if;
+  perform set_federation_sync(v_slug, false);
+end $$;
+reset role;
+do $$
+begin
+  if not exists (select 1 from notification_jobs
+                  where dedupe_key = 'federation_discover:00000000-0000-0000-0000-00000000000a') then
+    raise exception 'FAIL: moving one alley''s kuželna dropped another alley''s discovery job';
+  end if;
+  raise notice 'OK: a moved kuželna drops the old one''s discovery job; the same one and other alleys keep theirs (0046)';
+end $$;
+
 rollback;

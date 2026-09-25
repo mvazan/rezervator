@@ -216,15 +216,20 @@ grant execute on function federation_sync_progress() to authenticated;
 
 -- ------------------------------------------ a moved kuželna's discovery
 -- 0045's set_federation_sync, except that moving the alley to another
--- kuželna also drops the last discovery's report (last_report.discover):
--- it was the old kuželna's. The setup wizard opens step 3 only on a
--- successful report, so the old kuželna's teams never get it there.
--- Saving the same slug (the switch, step 3) keeps the report. create or
--- replace keeps 0045's grants.
+-- kuželna also drops the last discovery's report (last_report.discover)
+-- and its job: both were the old kuželna's. The setup wizard opens step 3
+-- only on a successful report, so the old kuželna's teams never get it
+-- there. A failed discovery's job backing off to retry (+1, +2, +4, +8 min)
+-- counts in federation_sync_progress, so the card would spin over it with
+-- no request of the admin's, then run it for the new kuželna. Saving the
+-- same slug (the switch, step 3) keeps both. create or replace keeps
+-- 0045's grants.
 create or replace function set_federation_sync(p_venue_slug text, p_enabled boolean)
 returns void language plpgsql security definer set search_path = public as $$
 declare
+  v_tenant constant uuid := current_tenant_id();
   v_slug text := lower(trim(coalesce(p_venue_slug, '')));
+  v_old text;
 begin
   if not is_admin() then
     raise exception 'not_allowed';
@@ -232,16 +237,22 @@ begin
   if v_slug !~ '^[a-z0-9]+(-[a-z0-9]+)*$' then
     raise exception 'invalid_venue_slug';
   end if;
+  select venue_slug into v_old from federation_sync
+   where tenant_id = v_tenant for update;
   insert into federation_sync (tenant_id, venue_slug, enabled)
-  values (current_tenant_id(), v_slug, p_enabled)
+  values (v_tenant, v_slug, p_enabled)
   on conflict (tenant_id) do update
     set venue_slug = excluded.venue_slug, enabled = excluded.enabled,
         last_report = case
           when federation_sync.venue_slug = excluded.venue_slug
             then federation_sync.last_report
           else federation_sync.last_report - 'discover' end;
+  if v_old is distinct from v_slug then
+    delete from notification_jobs
+     where dedupe_key = 'federation_discover:' || v_tenant;
+  end if;
   -- A moved kuželna leaves the old one's venue key dead, and its
   -- discovery's error with the report.
-  perform federation_refresh_error(current_tenant_id());
+  perform federation_refresh_error(v_tenant);
 end;
 $$;

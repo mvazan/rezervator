@@ -187,7 +187,7 @@ class _FederationWizardState extends State<FederationWizard> {
         'oddíly založíme.',
       ),
       const SizedBox(height: 8),
-      if (widget.discovering)
+      if (widget.discovering) ...[
         const Row(
           children: [
             SizedBox.square(
@@ -197,8 +197,11 @@ class _FederationWizardState extends State<FederationWizard> {
             SizedBox(width: 8),
             Expanded(child: Text('Načítají se oddíly a týmy z webu…')),
           ],
-        )
-      else if (report == null)
+        ),
+        // A long or stuck discovery (a wrong address retries for minutes)
+        // is never a dead end: the kuželna can still be changed.
+        _buttons([_back()]),
+      ] else if (report == null)
         _buttons([
           _back(),
           FilledButton(
