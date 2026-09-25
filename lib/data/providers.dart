@@ -23,8 +23,14 @@ import '../domain/public_week.dart';
 
 SupabaseClient get _db => Supabase.instance.client;
 
+/// No retry: a failed magic link (expired or used) is an error on this
+/// stream, and onAuthStateChange replays it to every new listener — each of
+/// Riverpod's automatic retries (10, ~38 s) only got the same error back,
+/// while AuthGate showed the splash instead of the sign-in screen that
+/// explains it. The subscription stays open, so a later sign-in still lands.
 final authStateProvider = StreamProvider<AuthState>(
   (ref) => _db.auth.onAuthStateChange,
+  retry: (_, _) => null,
 );
 
 String? get currentUserId => _db.auth.currentUser?.id;
