@@ -120,12 +120,12 @@ It is `security definer`, `stable`, `set search_path = public`.
   - „Telefon“ shows the formatted number or „nenastaven“, with „Upravit“ opening a dialog. The dialog has a field, validation, Zrušit / Uložit, and an empty value removes the phone.
   - A switch „Ukázat e-mail v Kontaktech“ with subtitle „Ostatní hráči kuželny ti můžou napsat.“
   - A switch „Ukázat telefon v Kontaktech“ with subtitle „Zavolat nebo napsat přes WhatsApp.“ The phone switch still works when no phone is set; there is just nothing to show.
-- Both switches save immediately with the app's optimistic write pattern, as the other profile settings do. Every contact write carries the phone and both switches as shown, with one of them changed: `optimisticWrite` keeps one pending patch per key, so a patch naming only its own field would show a quick earlier change to another as undone.
+- Both switches save immediately with the app's optimistic write pattern, as the other profile settings do. Each write sends only its own field. `optimisticWrite` composes a newer patch over a still-pending one on the same key (added after review), so a switch flipped right after the other does not show the first one as undone. Sending the whole contact instead was tried and dropped: a device with a stale view would overwrite newer values, e.g. wipe a phone added elsewhere.
 - Colours come from `Theme.of(context).colorScheme`, and every string is Czech.
 
 **Changelog.** The web batch at the top of `changelog_data.dart` gets a line: „Klubovna → Kontakty: e-mail a telefon hráčů kuželny. Svůj e-mail i telefon můžeš skrýt v Můj profil.“ Add a `store:` summary only if the batch goes over 500 characters. The batch's Klubovna line says the Kuželny have „adresou, telefonem a navigací“ rather than „kontakty“, so the word means only the new entry.
 
-**Legal pages.** `web/privacy.html` (the Play privacy-policy URL) says who sees the e-mail and the optional phone in Kontakty, that both show by default and where to hide them. `web/delete-account.html` lists the phone among the deleted data. The Play Console data-safety form must say the same: the phone number is collected, and the e-mail and phone are shown to other users of the alley.
+**Legal pages.** `web/privacy.html` (the Play privacy-policy URL) says who sees the e-mail and the optional phone in Kontakty, that both show by default and where to hide them. It also says the alley's admins and the operator have every player's e-mail and phone regardless of the switches. `web/delete-account.html` lists the phone among the deleted data. The Play Console data-safety form must say the same: the phone number is collected, and the e-mail and phone are shown to other users of the alley.
 
 ## Tests (app)
 
