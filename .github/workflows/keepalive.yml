@@ -2,6 +2,12 @@ name: Supabase keep-alive
 
 # The Supabase free tier pauses projects after ~7 days without API activity.
 # Two pings a week keep Rezervátor awake.
+#
+# This hits the GoTrue health endpoint, which only checks the apikey header
+# and touches no application table. anon has had no privileges on any app
+# table since 0017_table_grants.sql — pinging time_blocks (or any other
+# table) would need a new anon grant just for this ping, which we don't
+# want to add. Auth activity keeps the project alive just as well.
 on:
   schedule:
     - cron: '0 6 * * 1,4' # Monday and Thursday 06:00 UTC
@@ -14,8 +20,7 @@ jobs:
       - name: Ping database
         run: |
           curl --fail --silent --show-error \
-            "${{ secrets.SUPABASE_URL }}/rest/v1/time_blocks?select=id&limit=1" \
+            "${{ secrets.SUPABASE_URL }}/auth/v1/health" \
             -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
-            -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}" \
             > /dev/null
           echo "Supabase pinged."
