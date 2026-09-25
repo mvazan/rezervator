@@ -121,4 +121,58 @@ void main() {
       expect(find.text('Zadat kód z e-mailu'), findsOneWidget);
     },
   );
+
+  Widget appWithAuthError(Object error) => ProviderScope(
+        overrides: [
+          authStateProvider.overrideWith((ref) => Stream.error(error)),
+        ],
+        child: const MaterialApp(
+          localizationsDelegates: GlobalMaterialLocalizations.delegates,
+          supportedLocales: [Locale('cs'), Locale('en')],
+          home: LoginScreen(),
+        ),
+      );
+
+  Color? boxColor(WidgetTester tester, Finder text) {
+    final box = tester.widget<Container>(find
+        .ancestor(of: text, matching: find.byType(Container))
+        .first);
+    return (box.decoration as BoxDecoration?)?.color;
+  }
+
+  testWidgets(
+      'an expired or used magic link reads calmly: what to do, no error '
+      'colours, no technical text', (tester) async {
+    await tester.pumpWidget(appWithAuthError(const AuthException(
+      'Email link is invalid or has expired',
+      statusCode: 'otp_expired',
+      code: 'access_denied',
+    )));
+    await tester.pump();
+
+    final text = find.textContaining('Odkaz už neplatí');
+    expect(text, findsOneWidget);
+    expect(find.textContaining('access_denied'), findsNothing);
+    expect(find.textContaining('Email link'), findsNothing);
+    expect(find.byIcon(Icons.info_outline), findsOneWidget);
+    expect(find.byIcon(Icons.error_outline), findsNothing);
+    final scheme = Theme.of(tester.element(text)).colorScheme;
+    expect(boxColor(tester, text), scheme.secondaryContainer);
+  });
+
+  testWidgets('an unknown sign-in failure still says what broke, as an error',
+      (tester) async {
+    await tester.pumpWidget(appWithAuthError(const AuthException(
+      'Something broke',
+      code: 'unexpected_failure',
+    )));
+    await tester.pump();
+
+    final text =
+        find.text('Přihlášení selhalo: unexpected_failure: Something broke');
+    expect(text, findsOneWidget);
+    expect(find.byIcon(Icons.error_outline), findsOneWidget);
+    final scheme = Theme.of(tester.element(text)).colorScheme;
+    expect(boxColor(tester, text), scheme.errorContainer);
+  });
 }
