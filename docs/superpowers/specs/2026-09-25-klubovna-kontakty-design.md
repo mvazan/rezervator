@@ -39,6 +39,8 @@ The migration is additive and idempotent. 0047 is the latest one.
 - Keep the grants.
 - It validates the phone with the same pattern and raises `invalid_phone`.
 
+**`create_tenant_and_register`** gets `p_phone text default null` the same way (drop the three-argument signature, create, grant) and hands it to `register_profile`. A founder's phone is then stored in the same transaction as the tenant and the profile; an `invalid_phone` founds no tenant. (Added after review: a separate write after the founding could be lost while the app had already moved on.)
+
 **`contacts()`** returns a table with:
 - `id`, `display_name`, `nick`, `club_id`, `club_name`, `club_color`;
 - `email` (null unless `show_email`);
@@ -58,7 +60,9 @@ It is `security definer`, `stable`, `set search_path = public`.
 - a player can update only their own phone and switches;
 - the phone constraint refuses a bad format;
 - `register_profile` stores the phone and refuses an invalid one;
-- an old-style call without `p_phone` still works.
+- an old-style call without `p_phone` still works;
+- `create_tenant_and_register` stores the founder's phone, and a bad one founds no tenant;
+- the E.164 bounds: 8 and 15 digits stored, 7 and 16 refused.
 
 **Artefacts.** Regenerate `supabase/schema.sql` and update `docs/SCHEMA.md`.
 
@@ -84,6 +88,7 @@ It is `security definer`, `stable`, `set search_path = public`.
 
 **Klubovna hub** (`lib/features/clubhouse/clubhouse_screen.dart`)
 - A new entry „Kontakty“ with icon `Icons.contacts_outlined` and subtitle „Hráči kuželny — e-mail a telefon“.
+- The entries are in Czech alphabetical order, Kontakty, Kuželny, Výsledky (the user's call after the first build). The hub sorts them with `compareCzech`.
 - The Kuželny subtitle changes to „Adresy a vybavení kuželen“, so the two entries are not confused.
 
 **`ContactsScreen`** (`lib/features/clubhouse/contacts_screen.dart`)
@@ -106,19 +111,21 @@ It is `security definer`, `stable`, `set search_path = public`.
 - The actions use the existing `launchEmail`, `launchPhone` and `launchWeb` (wa.me) from `core/ui.dart`, injectable for tests like `VenueDetailScreen`.
 
 **Registration** (`register_screen.dart`)
-- An optional field „Telefon (nepovinné)“ with a phone keyboard.
+- An optional field „Telefon (nepovinné)“ with a phone keyboard and the helper text „Uvidí ho ostatní hráči kuželny v Kontaktech. Skrýt ho můžeš v Můj profil.“ (added after review: the switch starts on, so the player learns it where the number is given).
 - An invalid value is refused inline with the same text as `invalid_phone`.
-- A valid one is normalised and passed to `register_profile`.
+- A valid one is normalised and passed to `register_profile`, or to `create_tenant_and_register` for a founder.
 
 **Můj profil** (`profile_screen.dart`)
 - No card of its own (the user's call after the first build): the contact rows join the **first card**, which reads top to bottom Jméno, E-mail, Telefon, Oddíl, then the two switches, then the existing note.
   - „Telefon“ shows the formatted number or „nenastaven“, with „Upravit“ opening a dialog. The dialog has a field, validation, Zrušit / Uložit, and an empty value removes the phone.
   - A switch „Ukázat e-mail v Kontaktech“ with subtitle „Ostatní hráči kuželny ti můžou napsat.“
   - A switch „Ukázat telefon v Kontaktech“ with subtitle „Zavolat nebo napsat přes WhatsApp.“ The phone switch still works when no phone is set; there is just nothing to show.
-- Both switches save immediately with the app's optimistic write pattern, as the other profile settings do.
+- Both switches save immediately with the app's optimistic write pattern, as the other profile settings do. Every contact write carries the phone and both switches as shown, with one of them changed: `optimisticWrite` keeps one pending patch per key, so a patch naming only its own field would show a quick earlier change to another as undone.
 - Colours come from `Theme.of(context).colorScheme`, and every string is Czech.
 
-**Changelog.** The web batch at the top of `changelog_data.dart` gets a line: „Klubovna → Kontakty: e-mail a telefon hráčů kuželny. Svůj e-mail i telefon můžeš skrýt v Můj profil.“ Add a `store:` summary only if the batch goes over 500 characters.
+**Changelog.** The web batch at the top of `changelog_data.dart` gets a line: „Klubovna → Kontakty: e-mail a telefon hráčů kuželny. Svůj e-mail i telefon můžeš skrýt v Můj profil.“ Add a `store:` summary only if the batch goes over 500 characters. The batch's Klubovna line says the Kuželny have „adresou, telefonem a navigací“ rather than „kontakty“, so the word means only the new entry.
+
+**Legal pages.** `web/privacy.html` (the Play privacy-policy URL) says who sees the e-mail and the optional phone in Kontakty, that both show by default and where to hide them. `web/delete-account.html` lists the phone among the deleted data. The Play Console data-safety form must say the same: the phone number is collected, and the e-mail and phone are shown to other users of the alley.
 
 ## Tests (app)
 
