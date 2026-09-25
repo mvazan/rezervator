@@ -44,7 +44,11 @@ class VenueSlugField extends StatelessWidget {
           labelText: 'Adresa kuželny',
           hintText: 'vysledky.kuzelky.cz/detail-kuzelny/…',
           errorText: errorText,
-          errorMaxLines: 3,
+          // Never cut: the wrong-address error ends in its key hint
+          // („/detail-kuzelny/.“) and takes 5 lines in the dialog on a
+          // 360 dp phone at the app's largest text (2.0), 6 at 320 dp.
+          // Both the dialog and the card scroll; null would mean 1 line.
+          errorMaxLines: 10,
         ),
       );
 }
