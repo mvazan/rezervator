@@ -73,7 +73,7 @@ Every `color` column above is one `integer` (0030): the negative values are the 
 | `calendar_teams` | (0032) One row per player **+** followed team — replaces `google_calendar_links.match_teams`, because a team now needs to say more than its name: `user_id → profiles` (cascade), `team` (a `priority_slots.home_team`/`away_team` string), `calendar` (`primary` \| `secondary`, default `primary` — which of the player's two Google calendars this team's matches go to). PK (`user_id`, `team`). In the Realtime publication (0035) — the profile card streams it. Colour (`color_id`) lived here until 0036 moved it to `team_colors` below, independent of this table. | select own rows only (`user_id = auth.uid()`); `authenticated` has SELECT and nothing else (0035) — every write is the server's, through `calendar-manage`/`set_calendar_teams_for`, which also keeps `google_calendar_links.match_teams` mirrored for the 1.2.1 app. |
 | `team_colors` | (0036) One row per player **+** team the player has coloured — `user_id → profiles` (cascade), `team`, `color_id` (Google event `colorId` 1–11, `not null` — no row at all means no colour). PK (`user_id`, `team`). Independent of **both** team lists (`profiles.followed_teams` and `calendar_teams`) and of whether a calendar is even linked: the one colour shown for a team in Můj přehled and in its Google Calendar event alike. In the Realtime publication. | select own rows only (`user_id = auth.uid()`); `authenticated` has SELECT and nothing else (0037) — every write is the server's, through `calendar-manage`/`set_team_colors_for`, which saves a colour and immediately repaints the affected future Google Calendar events in the same request. |
 | `match_exceptions` | (0039) One row per player **+** match where the player disagrees with their teams — `user_id → profiles` (cascade), `match_id → priority_slots` (cascade), `shown` (`true` adds a match no team gives them, `false` hides one a team does), `calendar` (`primary` \| `secondary`, default `primary`; only ever consulted for an added match, and the app offers no choice — the column is there for the day it does). PK (`user_id`, `match_id`). Agreeing with the teams stores nothing: the row is deleted instead, so "back to what the team says" is the absence of a row rather than a third state. In the Realtime publication. | select own rows only (`user_id = auth.uid()`); `authenticated` has SELECT and nothing else — the one way in is `set_match_exception`, callable by the app. |
-| `reminders_sent` | (0040) The receipt for a reminder already delivered — `user_id → profiles` (cascade), `event_key` (`r:<uuid>` for a reservation, `m:<uuid>` for a match — one column instead of two nullable foreign keys and a CHECK to police them), `offset_minutes`, `sent_at`. PK all three. A receipt also covers the event's longer lead times (0049). Nothing schedules reminders; `due_reminders()` asks every minute what is due *now* from the data as it stands, and this table is the only state that carries over, so a repeated tick or a retried send does not ring twice. No foreign key to the event and therefore no cascade: the tick prunes anything older than 30 days. | **server-only**: RLS on, zero policies, every grant revoked. |
+| `reminders_sent` | (0040) The receipt for a reminder already delivered — `user_id → profiles` (cascade), `event_key` (`r:<uuid>` for a reservation, `m:<uuid>` for a match — one column instead of two nullable foreign keys and a CHECK to police them), `offset_minutes`, `sent_at`, `starts_at` (0049: the start the reminder announced; null = written before 0049, counts for any). PK the first three. A receipt covers the event's longer lead times for the same start, and a moved event rings again at its new time (0049). Nothing schedules reminders; `due_reminders()` asks every minute what is due *now* from the data as it stands, and this table is the only state that carries over, so a repeated tick or a retried send does not ring twice. No foreign key to the event and therefore no cascade: the tick prunes anything older than 30 days. | **server-only**: RLS on, zero policies, every grant revoked. |
 | `oauth_nonces` | The OAuth `state`: `nonce` (48 hex chars from `gen_random_bytes(24)`), `user_id → profiles` (cascade), `created_at`, `consumed_at`. One-shot with a 10-minute TTL — the callback function runs without a JWT, so this is what binds Google's redirect to a signed-in player. | **server-only** like the tokens. |
 
 View `players` (owned by postgres → bypasses `profiles` RLS on purpose):
@@ -729,22 +729,28 @@ and FCM is configured, e-mail otherwise.
   and returns nothing without a link. A reminder is due when
   `starts − lead <= now()` and the event has not started yet: after an
   outage a late reminder ("za 20 minut") is worth sending, one for a training
-  already under way is not. A receipt at that lead time or a closer one
-  covers it (0049): a longer lead time added after a closer reminder went
-  out does not ring on its own, while a closer one still rings after a
-  longer one.
+  already under way is not. A receipt at that lead time or a closer one,
+  for the same start, covers it (0049): a longer lead time added after a
+  closer reminder went out does not ring on its own, a closer one still
+  rings after a longer one, and an event moved since rings again.
 - **One push per event.** When several lead times of one event are due at
   once (booked, moved or followed inside them, reminders switched on, an
   outage), notify sends only the closest and marks the rest
   (`oneReminderPerEvent`, `_shared/reminders.ts`). The title names the
   chosen lead time when sent on its minute and the time actually left when
-  late; whole days count Prague calendar dates.
+  late; whole days count Prague calendar dates. A reminder FCM or Resend
+  could not take just now (429, 5xx, a dead push token — e-mail next time)
+  is not marked and is due again next minute (`deliverDueReminders`,
+  `_shared/delivery.ts`).
 - **`notifications_due()`** is the gate the minutely tick reads, a function
   of its own so a test can ask it directly — without Vault configured the
   tick returns before posting, so calling it proves nothing.
-- **`mark_reminder_sent()`** writes the receipt after a successful send and
-  prunes the table. A send that throws is simply due again next minute, which
-  is what one wants from a reminder: late beats never.
+- **`mark_reminder_sent(user, event_key, offset, starts_at)`** writes the
+  receipt after a successful send, with the start it was for (0049; marking
+  the same lead time for a new start moves the receipt there), and prunes
+  the table. A send that throws or that FCM or Resend could not take just now
+  is simply due again next minute, which is what one wants from a reminder:
+  late beats never.
 
 ## Edge functions
 

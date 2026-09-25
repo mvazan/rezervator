@@ -2455,7 +2455,7 @@ begin
   end if;
 
   -- Sent once, never again.
-  perform mark_reminder_sent(v_uid, r.event_key, r.offset_minutes)
+  perform mark_reminder_sent(v_uid, r.event_key, r.offset_minutes, r.starts_at)
     from due_reminders() r where r.user_id = v_uid;
   if exists (select 1 from due_reminders() where user_id = v_uid) then
     raise exception 'FAIL: a reminder rang twice';
@@ -2471,7 +2471,7 @@ begin
   -- A closer one still rings after a longer one went out (the day-before
   -- reminder, then the two-hours-before one).
   delete from reminders_sent where user_id = v_uid;
-  perform mark_reminder_sent(v_uid, r.event_key, 240)
+  perform mark_reminder_sent(v_uid, r.event_key, 240, r.starts_at)
     from due_reminders() r where r.user_id = v_uid and r.offset_minutes = 240;
   if (select count(*) from due_reminders()
         where user_id = v_uid and offset_minutes = 180) <> 2
@@ -2480,9 +2480,37 @@ begin
     raise exception 'FAIL: a longer lead time sent first silenced the closer one, or rang again';
   end if;
   update profiles set notify_before_minutes = v_before where id = v_uid;
-  perform mark_reminder_sent(v_uid, r.event_key, r.offset_minutes)
+  perform mark_reminder_sent(v_uid, r.event_key, r.offset_minutes, r.starts_at)
     from due_reminders() r where r.user_id = v_uid;
-  raise notice 'OK: a reminder is due at its lead time, once, for the player''s own trainings and matches (0040); a closer one sent covers the longer ones (0049)';
+
+  -- A receipt is for the start it was sent for (0049): it keeps that start…
+  if exists (select 1 from reminders_sent s
+               where s.user_id = v_uid and s.offset_minutes = 180
+                 and s.starts_at is null) then
+    raise exception 'FAIL: mark_reminder_sent dropped the start';
+  end if;
+  -- …so an event moved since rings again at its new time…
+  update reminders_sent set starts_at = starts_at - interval '1 day'
+   where user_id = v_uid;
+  if (select count(*) from due_reminders()
+        where user_id = v_uid and offset_minutes = 180) <> 2 then
+    raise exception 'FAIL: a moved event did not ring again at its new time';
+  end if;
+  -- …and marking it again records the new start.
+  perform mark_reminder_sent(v_uid, r.event_key, r.offset_minutes, r.starts_at)
+    from due_reminders() r where r.user_id = v_uid;
+  if exists (select 1 from due_reminders() where user_id = v_uid) then
+    raise exception 'FAIL: a moved event rang twice at its new time';
+  end if;
+  -- A receipt from before 0049 has no start and still counts for any, so
+  -- the deploy does not ring everything again; so does an old-style call.
+  update reminders_sent set starts_at = null where user_id = v_uid;
+  if exists (select 1 from due_reminders() where user_id = v_uid) then
+    raise exception 'FAIL: a receipt without a start stopped counting';
+  end if;
+  perform mark_reminder_sent(p_user => v_uid, p_event_key => 'r:none',
+                             p_offset => 60);
+  raise notice 'OK: a reminder is due at its lead time, once, for the player''s own trainings and matches (0040); a closer one sent covers the longer ones, and a moved event rings again (0049)';
 end $$;
 
 -- A match nobody's team plays is nobody's reminder; an exception makes it
@@ -2563,8 +2591,13 @@ begin
   end if;
   if has_function_privilege('authenticated', 'due_reminders()', 'execute')
      or has_function_privilege('authenticated',
-          'mark_reminder_sent(uuid, text, integer)', 'execute') then
+          'mark_reminder_sent(uuid, text, integer, timestamptz)', 'execute') then
     raise exception 'FAIL: the client can drive the reminder machinery';
+  end if;
+  if to_regprocedure('public.mark_reminder_sent(uuid, text, integer)') is not null
+     or not has_function_privilege('service_role',
+          'mark_reminder_sent(uuid, text, integer, timestamptz)', 'execute') then
+    raise exception 'FAIL: notify cannot mark a reminder, or the old signature is still there';
   end if;
   raise notice 'OK: the reminder ledger and its functions are server-only (0040)';
 end $$;
