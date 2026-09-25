@@ -83,21 +83,29 @@ superadmins — `id, display_name, nick, club_id, club_color, placeholder`
 ACL). This is the only profile data the kiosk account can read. SELECT for
 `authenticated` only.
 
-## Privileges (0017)
+## Privileges (0017, 0046)
 
 `authenticated` has select/insert/update/delete on the app tables (policies
 decide rows), the column-restricted exceptions above, SELECT on `players`
 and `tenants(id, name, status)`. `anon` has nothing (the one exception:
 `execute` on `public_week`, 0043). `service_role`
-(edge functions) has everything. Default privileges are pinned (0017,
-0020) so new tables get exactly that shape on hosted and local stacks —
-note that a `drop … create` of a view re-applies the defaults, so a
-recreated read-only view must revoke again (that is what 0020 fixes for
-`players`). The 0023 calendar tables opt out of those defaults explicitly:
+(edge functions) has everything. The 0023 calendar tables are server-only:
 `notification_jobs`, `google_calendar_tokens` and `oauth_nonces` revoke
-everything from `anon`/`authenticated` (RLS on, no policy — server-only),
+everything from `anon`/`authenticated` (RLS on, no policy),
 `google_calendar_links` keeps SELECT only. Internal helper functions have
 EXECUTE revoked from the app roles (see below).
+
+**Since 0046 nothing is granted by default** — the same behaviour Supabase
+enforces on every project from 2026-10-30. A migration that creates a table
+grants it itself, next to the `create table`:
+`grant select, insert, update, delete on <t> to authenticated` (or less),
+`grant all on <t> to service_role`, nothing for `anon`. A `drop … create`
+of a view comes back with no grants and must re-grant. A serial /
+standalone sequence needs `grant usage` for a role that inserts; an
+identity column does not. `tenancy_rls.sql` fails when a default grant
+reappears, when `service_role` lacks DML on any table or view, or when
+`anon` holds anything. (0017/0020 had pinned defaults instead; 0035 and
+0037 show why a default grant was never the safe side anyway.)
 
 ## RPCs
 
@@ -754,8 +762,8 @@ and FCM is configured, e-mail otherwise.
   `federation-nightly` (0045) live outside `public`,
   so they are not in `supabase/schema.sql` — check with
   `select jobname from cron.job`.
-- Hosted default privileges grant `anon`/`authenticated` on every new
-  object; 0017 pins explicit defaults so a git-built database matches.
+- No default table/sequence grants (0046): every new table grants itself,
+  so a git-built database and prod match without relying on the platform.
 - `supabase db dump` does not emit publications — `supabase_realtime`
   membership (below) is invisible to both `supabase/schema.sql` and a plain
   migration read; only `tenancy_rls.sql`'s own query against
