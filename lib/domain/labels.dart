@@ -80,3 +80,39 @@ String reservationLimitAdminNote(String? player, int max) => player == null
         'vytvořit i tak.'
     : '$player už má maximální počet rezervací ($max). Jako správce ji můžeš '
         'vytvořit i tak.';
+
+/// [n] with its noun in the right Czech form: [one] for 1, [few] for 2–4,
+/// [many] for anything else (0, 5+, and 22 too — written in digits it takes
+/// the genitive).
+String czechCount(int n, String one, String few, String many) =>
+    '$n ${n == 1 ? one : n >= 2 && n <= 4 ? few : many}';
+
+/// The ČKA card's progress line while a discovery runs.
+const teamsLoadingLabel = 'Načítají se týmy z webu…';
+
+/// The ČKA card's progress line while federation jobs are still to run
+/// (0046 `federation_sync_progress`): „Synchronizuje se… zbývá 12 zápasů,
+/// 2 soutěže a 1 kuželna“ — only the non-zero counts, the verb agreeing
+/// with the first of them. A discovery reads [teamsLoadingLabel].
+String federationProgressLabel(FederationSyncProgress p) {
+  if (p.discover > 0) return teamsLoadingLabel;
+  final counts = [
+    if (p.matches > 0)
+      (p.matches, czechCount(p.matches, 'zápas', 'zápasy', 'zápasů')),
+    if (p.competitions > 0)
+      (
+        p.competitions,
+        czechCount(p.competitions, 'soutěž', 'soutěže', 'soutěží'),
+      ),
+    if (p.venues > 0)
+      (p.venues, czechCount(p.venues, 'kuželna', 'kuželny', 'kuželen')),
+  ];
+  if (counts.isEmpty) return 'Synchronizuje se…';
+  final first = counts.first.$1;
+  final verb = first >= 2 && first <= 4 ? 'zbývají' : 'zbývá';
+  final parts = [for (final (_, label) in counts) label];
+  final list = parts.length == 1
+      ? parts.single
+      : '${parts.sublist(0, parts.length - 1).join(', ')} a ${parts.last}';
+  return 'Synchronizuje se… $verb $list';
+}

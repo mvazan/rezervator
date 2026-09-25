@@ -20,6 +20,7 @@ class ClubsScreen extends ConsumerWidget {
     this.saveFederation = _defaultSaveFederation,
     this.discoverTeams = Api.requestFederationDiscovery,
     this.syncNow = Api.requestFederationSync,
+    this.syncProgress = Api.federationSyncProgress,
     this.updateTeam = _defaultUpdateTeam,
   });
 
@@ -28,6 +29,7 @@ class ClubsScreen extends ConsumerWidget {
   final Future<void> Function(String venueSlug, bool enabled) saveFederation;
   final Future<void> Function() discoverTeams;
   final Future<void> Function() syncNow;
+  final Future<FederationSyncProgress> Function() syncProgress;
   final Future<void> Function(Team team,
       {required String name, String? clubId, required bool active}) updateTeam;
 
@@ -127,6 +129,7 @@ class ClubsScreen extends ConsumerWidget {
                 saveFederation: saveFederation,
                 discoverTeams: discoverTeams,
                 syncNow: syncNow,
+                syncProgress: syncProgress,
               ),
               const SizedBox(height: 12),
               if (loadedTeams.hasError && !loadedTeams.hasValue)

@@ -160,4 +160,45 @@ void main() {
       expect(rentalMoreDatesLabel(5), '…a dalších 5 termínů');
     });
   });
+
+  group('czechCount', () {
+    test('1, 2–4, and everything else', () {
+      expect(czechCount(1, 'zápas', 'zápasy', 'zápasů'), '1 zápas');
+      expect(czechCount(2, 'zápas', 'zápasy', 'zápasů'), '2 zápasy');
+      expect(czechCount(4, 'zápas', 'zápasy', 'zápasů'), '4 zápasy');
+      expect(czechCount(5, 'zápas', 'zápasy', 'zápasů'), '5 zápasů');
+      expect(czechCount(0, 'zápas', 'zápasy', 'zápasů'), '0 zápasů');
+      expect(czechCount(22, 'zápas', 'zápasy', 'zápasů'), '22 zápasů');
+    });
+  });
+
+  group('federationProgressLabel (0046)', () {
+    test('what is left, the non-zero counts only, the verb agreeing', () {
+      expect(
+        federationProgressLabel(const FederationSyncProgress(
+            matches: 12, competitions: 2, venues: 1)),
+        'Synchronizuje se… zbývá 12 zápasů, 2 soutěže a 1 kuželna',
+      );
+      expect(federationProgressLabel(const FederationSyncProgress(matches: 3)),
+          'Synchronizuje se… zbývají 3 zápasy');
+      expect(federationProgressLabel(const FederationSyncProgress(matches: 1)),
+          'Synchronizuje se… zbývá 1 zápas');
+      expect(
+        federationProgressLabel(
+            const FederationSyncProgress(competitions: 2, venues: 5)),
+        'Synchronizuje se… zbývají 2 soutěže a 5 kuželen',
+      );
+      expect(federationProgressLabel(const FederationSyncProgress(venues: 1)),
+          'Synchronizuje se… zbývá 1 kuželna');
+    });
+
+    test('a discovery reads as loading the teams', () {
+      expect(
+        federationProgressLabel(
+            const FederationSyncProgress(discover: 1, matches: 4)),
+        'Načítají se týmy z webu…',
+      );
+      expect(teamsLoadingLabel, 'Načítají se týmy z webu…');
+    });
+  });
 }

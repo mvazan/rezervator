@@ -52,6 +52,7 @@ void main() {
             saveFederation: saveFederation ?? (_, _) async {},
             discoverTeams: discoverTeams ?? () async {},
             syncNow: syncNow ?? () async {},
+            syncProgress: () async => FederationSyncProgress.idle,
             updateTeam: updateTeam ??
                 (_, {required String name, String? clubId, required bool active}) async {},
           ),
