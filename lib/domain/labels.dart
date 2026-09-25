@@ -143,3 +143,40 @@ String _inCompetitions(int n) {
   final ve = (n >= 2 && n <= 4) || (n >= 12 && n <= 14) || (n >= 20 && n <= 49);
   return '${ve ? 've' : 'v'} $n ${n == 1 ? 'soutěži' : 'soutěžích'}';
 }
+
+/// The ČKA card's line about the last discovery (0046), [when] being its
+/// `at` as the card writes „Poslední synchronizace“: „Poslední načtení
+/// týmů: pá 25.9. 10:05 · nové týmy: A, B · nový oddíl: X“, „… · žádná
+/// změna“ when it created neither a team nor a club, or „Poslední načtení
+/// týmů se nepovedlo: …“ with its error.
+String discoveryResultLabel(FederationDiscoverReport r, String? when) {
+  if (r.failed) return 'Poslední načtení týmů se nepovedlo: ${r.error}';
+  final teams = _newOnes(
+      r.teamsCreated, r.created, 'nový tým', 'nové týmy', 'nových týmů');
+  final clubs = _newOnes(r.clubsCreated, r.clubsCreated.length, 'nový oddíl',
+      'nové oddíly', 'nových oddílů');
+  return 'Poslední načtení týmů: ${[
+    ?when,
+    if (teams == null && clubs == null) 'žádná změna',
+    ?teams,
+    ?clubs,
+  ].join(' · ')}';
+}
+
+/// Names past this many read „nových týmů: 12 (A, B, C, …)“: a first
+/// discovery creates every team of the kuželna.
+const _newNamesShown = 3;
+
+/// „nový tým: A“, „nové týmy: A, B“, „nových týmů: 5 (A, B, C, …)“ —
+/// Czech-sorted; null for none. A report from before 0046 named the teams
+/// has only their [count]: „3 nové týmy“.
+String? _newOnes(
+    List<String> names, int count, String one, String few, String many) {
+  final n = names.isEmpty ? count : names.length;
+  if (n == 0) return null;
+  if (names.isEmpty) return czechCount(n, one, few, many);
+  final sorted = [...names]..sort(compareCzech);
+  if (n == 1) return '$one: ${sorted.single}';
+  if (n <= 4) return '$few: ${sorted.join(', ')}';
+  return '$many: $n (${sorted.take(_newNamesShown).join(', ')}, …)';
+}

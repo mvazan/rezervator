@@ -38,8 +38,9 @@ Zápasy a výsledky týmů kuželny se stahují z
 joby `federation_*`, noční cron `federation-nightly`, migrace `0045`
 a `0046`). Nastavení je ve Správa → Oddíly: poprvé průvodce ve třech
 krocích (kuželna, oddíly a týmy — chybějící oddíly založí —, zapnutí
-stahování), potom „Přenačíst týmy z webu", ruční „Synchronizovat teď"
-a řádek s průběhem synchronizace. Ruční úprava zápasu v appce se při
+stahování), potom „Přenačíst týmy z webu", ruční „Synchronizovat teď",
+řádek s průběhem synchronizace a výsledek posledního načtení týmů (nové
+týmy a oddíly, nebo „žádná změna"). Ruční úprava zápasu v appce se při
 synchronizaci nepřepíše (`hand_edited`); zápas bez `import_key` je čistě
 správcův — svaz o něm neví a nikdy ho nezmění. Zápasy dorostu, které svaz
 na webu zatím nevede, zůstávají jako dřív — správce je zadává a upravuje

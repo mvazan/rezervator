@@ -462,7 +462,10 @@ void main() {
       expect(h.looks, 3);
       expect(find.text('Načítají se týmy z webu…'), findsNothing);
       expect(find.byType(CircularProgressIndicator), findsNothing);
-      expect(find.text('Chyba: $error'), findsOneWidget);
+      // The discovery's own line says it; „Chyba:“ would repeat it.
+      expect(find.text('Poslední načtení týmů se nepovedlo: $error'),
+          findsOneWidget);
+      expect(find.text('Chyba: $error'), findsNothing);
     });
 
     testWidgets(
@@ -507,6 +510,198 @@ void main() {
       expect(find.text('detail-kuzelny/ks-devitka-brno'), findsOneWidget);
       expect(find.text('Načítají se týmy z webu…'), findsNothing);
       expect(find.byType(CircularProgressIndicator), findsNothing);
+    });
+  });
+
+  group('last discovery (0046 teams_created)', () {
+    // Local time, so the label reads the same in any time zone.
+    final at = DateTime(2026, 9, 25, 10, 5);
+    const when = 'pá 25.9. 10:05';
+    FederationSync withReport(FederationDiscoverReport report,
+            {String? lastError}) =>
+        FederationSync(
+          venueSlug: 'tj-sokol-brno-iv',
+          enabled: true,
+          lastError: lastError,
+          discover: report,
+        );
+
+    testWidgets('nothing new reads žádná změna, below the buttons',
+        (tester) async {
+      await _pump(
+        tester,
+        _Harness(rows: [
+          withReport(FederationDiscoverReport(
+              teams: 4,
+              competitions: 2,
+              clubsLinked: const ['Sokol Brno IV'],
+              at: at)),
+        ]),
+      );
+
+      final line = find.text('Poslední načtení týmů: $when · žádná změna');
+      expect(line, findsOneWidget);
+      expect(
+          tester.getTopLeft(line).dy,
+          greaterThan(tester
+              .getBottomLeft(
+                  find.widgetWithText(OutlinedButton, 'Přenačíst týmy z webu'))
+              .dy));
+    });
+
+    testWidgets('one new team is named', (tester) async {
+      await _pump(
+        tester,
+        _Harness(rows: [
+          withReport(FederationDiscoverReport(
+              teams: 5,
+              created: 1,
+              teamsCreated: const ['TJ Sokol Brno IV C'],
+              at: at)),
+        ]),
+      );
+
+      expect(
+          find.text('Poslední načtení týmů: $when · nový tým: TJ Sokol Brno IV C'),
+          findsOneWidget);
+    });
+
+    testWidgets('several new teams and a new oddíl, each with its plural',
+        (tester) async {
+      await _pump(
+        tester,
+        _Harness(rows: [
+          withReport(FederationDiscoverReport(
+              teams: 5,
+              created: 2,
+              teamsCreated: const ['TJ Sokol Husovice E', 'KS Devítka Brno B'],
+              clubsCreated: const ['TJ Sokol Husovice'],
+              at: at)),
+        ]),
+      );
+
+      expect(
+        find.text('Poslední načtení týmů: $when · '
+            'nové týmy: KS Devítka Brno B, TJ Sokol Husovice E · '
+            'nový oddíl: TJ Sokol Husovice'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets(
+        'a failed one says so in the error colour, and „Chyba:“ does not '
+        'repeat it', (tester) async {
+      const error =
+          'federation_discover: GET /detail-kuzelny/tj-sokol-brno-iv: HTTP 404';
+      await _pump(
+        tester,
+        _Harness(rows: [
+          withReport(FederationDiscoverReport(error: error, at: at),
+              lastError: error),
+        ]),
+      );
+
+      final line = find.text('Poslední načtení týmů se nepovedlo: $error');
+      expect(line, findsOneWidget);
+      final scheme =
+          Theme.of(tester.element(find.byType(FederationCard))).colorScheme;
+      expect(tester.widget<Text>(line).style?.color, scheme.error);
+      expect(find.text('Chyba: $error'), findsNothing);
+    });
+
+    testWidgets('another error than the discovery\'s still reads Chyba:',
+        (tester) async {
+      const error = 'federation_discover: HTTP 404';
+      await _pump(
+        tester,
+        _Harness(rows: [
+          withReport(FederationDiscoverReport(error: error, at: at),
+              lastError: 'federation_competition: HTTP 500'),
+        ]),
+      );
+
+      expect(find.text('Poslední načtení týmů se nepovedlo: $error'),
+          findsOneWidget);
+      expect(find.text('Chyba: federation_competition: HTTP 500'),
+          findsOneWidget);
+    });
+
+    testWidgets('hidden while a discovery runs: the loader shows then',
+        (tester) async {
+      await _pump(
+        tester,
+        _Harness(rows: [
+          withReport(FederationDiscoverReport(teams: 4, at: at)),
+        ], progress: [
+          const FederationSyncProgress(discover: 1),
+        ]),
+      );
+
+      expect(find.text('Načítají se týmy z webu…'), findsOneWidget);
+      expect(find.textContaining('Poslední načtení týmů'), findsNothing);
+    });
+
+    testWidgets(
+        'Přenačíst týmy z webu after a failed one: its error gives way to the '
+        'loader too', (tester) async {
+      const error = 'federation_discover: HTTP 404';
+      final h = _Harness(rows: [
+        withReport(FederationDiscoverReport(error: error, at: at),
+            lastError: error),
+      ]);
+      await _pump(tester, h);
+      expect(find.text('Poslední načtení týmů se nepovedlo: $error'),
+          findsOneWidget);
+
+      await tester.tap(find.widgetWithText(OutlinedButton, 'Přenačíst týmy z webu'));
+      await tester.pump();
+
+      expect(find.text('Načítají se týmy z webu…'), findsOneWidget);
+      expect(find.textContaining('Poslední načtení týmů'), findsNothing);
+      expect(find.textContaining('Chyba:'), findsNothing);
+    });
+
+    testWidgets('absent before any discovery', (tester) async {
+      await _pump(tester, _Harness(rows: [_on]));
+
+      expect(find.textContaining('Poslední načtení týmů'), findsNothing);
+    });
+
+    testWidgets(
+        'after Přenačíst týmy z webu the loader gives way to the new result',
+        (tester) async {
+      final h = _Harness(
+        rows: [
+          withReport(FederationDiscoverReport(
+              teams: 4, at: DateTime(2026, 9, 24, 9))),
+          withReport(FederationDiscoverReport(
+              teams: 5,
+              created: 1,
+              teamsCreated: const ['KS Devítka Brno B'],
+              at: at)),
+        ],
+        progress: [
+          FederationSyncProgress.idle,
+          const FederationSyncProgress(discover: 1),
+          FederationSyncProgress.idle,
+        ],
+      );
+      await _pump(tester, h);
+      expect(find.text('Poslední načtení týmů: čt 24.9. 9:00 · žádná změna'),
+          findsOneWidget);
+
+      await tester.tap(find.widgetWithText(OutlinedButton, 'Přenačíst týmy z webu'));
+      await tester.pump();
+      expect(find.text('Načítají se týmy z webu…'), findsOneWidget);
+      expect(find.textContaining('Poslední načtení týmů'), findsNothing);
+
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('Načítají se týmy z webu…'), findsNothing);
+      expect(
+          find.text('Poslední načtení týmů: $when · nový tým: KS Devítka Brno B'),
+          findsOneWidget);
     });
   });
 

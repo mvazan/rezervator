@@ -285,13 +285,15 @@ class _FederationCardState extends ConsumerState<FederationCard>
 
   /// "čt 23.4. 9:05" — local time, reusing core/ui.dart's date label and
   /// [HourMinute]'s own display instead of hand-rolling another format.
-  String _lastSuccessLabel(DateTime? at) {
-    if (at == null) return 'Zatím neproběhla';
+  String _whenLabel(DateTime at) {
     final local = at.toLocal();
     final day = Day.fromDateTime(local);
     final time = HourMinute(local.hour, local.minute);
     return '${dayLabel(day)} ${time.display()}';
   }
+
+  String _lastSuccessLabel(DateTime? at) =>
+      at == null ? 'Zatím neproběhla' : _whenLabel(at);
 
   @override
   Widget build(BuildContext context) {
@@ -348,6 +350,22 @@ class _FederationCardState extends ConsumerState<FederationCard>
     final progress = _shownProgress(discovering);
     final busy = discovering || progress.pending;
     final theme = Theme.of(context);
+    final muted = busy
+        ? theme.textTheme.bodySmall
+            ?.copyWith(color: theme.colorScheme.onSurfaceVariant)
+        : null;
+    final errorStyle = TextStyle(color: theme.colorScheme.error);
+    // The last discovery's result — what „Přenačíst týmy z webu“ ends with
+    // once its loader goes, and still there on coming back. While one runs
+    // the loader stands in for it, failure included.
+    final last = sync.discover;
+    final report = discovering ? null : last;
+    // A failed discovery's line carries its error; „Chyba:“ would repeat it
+    // while that error is still the newest.
+    final lastError =
+        last != null && last.failed && sync.lastError == last.error
+            ? null
+            : sync.lastError;
     return [
       const Text(
         'Zápasy a výsledky týmů, které hrají na této kuželně, se stahují '
@@ -415,16 +433,15 @@ class _FederationCardState extends ConsumerState<FederationCard>
         ),
       Text(
         'Poslední synchronizace: ${_lastSuccessLabel(sync.lastSuccessAt)}',
-        style: busy
-            ? theme.textTheme.bodySmall
-                ?.copyWith(color: theme.colorScheme.onSurfaceVariant)
-            : null,
+        style: muted,
       ),
-      if (sync.lastError != null)
+      if (report != null)
         Text(
-          'Chyba: ${sync.lastError}',
-          style: TextStyle(color: theme.colorScheme.error),
+          discoveryResultLabel(
+              report, report.at == null ? null : _whenLabel(report.at!)),
+          style: report.failed ? errorStyle : muted,
         ),
+      if (lastError != null) Text('Chyba: $lastError', style: errorStyle),
     ];
   }
 }

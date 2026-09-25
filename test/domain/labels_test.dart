@@ -248,4 +248,70 @@ void main() {
       );
     });
   });
+
+  group('last discovery on the card (0046 teams_created)', () {
+    const when = 'pá 25.9. 10:05';
+    String line(FederationDiscoverReport r) => discoveryResultLabel(r, when);
+
+    test('nothing new reads žádná změna — linked clubs are no change', () {
+      expect(
+        line(const FederationDiscoverReport(
+            teams: 4, competitions: 2, clubsLinked: ['Sokol Brno IV'])),
+        'Poslední načtení týmů: pá 25.9. 10:05 · žádná změna',
+      );
+    });
+
+    test('names the new teams with their plural, Czech-sorted', () {
+      expect(
+        line(const FederationDiscoverReport(
+            created: 1, teamsCreated: ['TJ Sokol Brno IV C'])),
+        'Poslední načtení týmů: pá 25.9. 10:05 · nový tým: TJ Sokol Brno IV C',
+      );
+      expect(
+        line(const FederationDiscoverReport(
+            created: 3, teamsCreated: ['Dubňany', 'Čáslav B', 'Brno A'])),
+        'Poslední načtení týmů: pá 25.9. 10:05 · '
+        'nové týmy: Brno A, Čáslav B, Dubňany',
+      );
+    });
+
+    test('five or more lead with the count and cut the names', () {
+      expect(
+        line(const FederationDiscoverReport(
+            created: 5, teamsCreated: ['E', 'D', 'C', 'B', 'A'])),
+        'Poslední načtení týmů: pá 25.9. 10:05 · nových týmů: 5 (A, B, C, …)',
+      );
+    });
+
+    test('new oddíly follow the teams, joined by a dot', () {
+      expect(
+        line(const FederationDiscoverReport(
+          created: 2,
+          teamsCreated: ['TJ Sokol Husovice E', 'KS Devítka Brno B'],
+          clubsCreated: ['TJ Sokol Husovice'],
+        )),
+        'Poslední načtení týmů: pá 25.9. 10:05 · '
+        'nové týmy: KS Devítka Brno B, TJ Sokol Husovice E · '
+        'nový oddíl: TJ Sokol Husovice',
+      );
+      expect(
+        line(const FederationDiscoverReport(
+            clubsCreated: ['TJ Sokol Husovice', 'KS Devítka Brno'])),
+        'Poslední načtení týmů: pá 25.9. 10:05 · '
+        'nové oddíly: KS Devítka Brno, TJ Sokol Husovice',
+      );
+    });
+
+    test('a report from before the names counts the new teams', () {
+      expect(line(const FederationDiscoverReport(created: 3)),
+          'Poslední načtení týmů: pá 25.9. 10:05 · 3 nové týmy');
+      expect(line(const FederationDiscoverReport(created: 1)),
+          'Poslední načtení týmů: pá 25.9. 10:05 · 1 nový tým');
+    });
+
+    test('a failed one says so with its error', () {
+      expect(line(const FederationDiscoverReport(error: 'boom')),
+          'Poslední načtení týmů se nepovedlo: boom');
+    });
+  });
 }
