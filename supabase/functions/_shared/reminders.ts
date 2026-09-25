@@ -1,6 +1,7 @@
 /// Reminders before a training or a match (0040): the text notify sends.
 /// Kept apart from notify/index.ts so it can be tested.
 
+import type { Delivery } from "./delivery.ts";
 import { dayLabel, leadLabel, pragueDateTime, timeLabel } from "./format.ts";
 
 /// One row of due_reminders(). `starts_at` is an instant (timestamptz,
@@ -87,4 +88,39 @@ export function oneReminderPerEvent(
       .sort((a, b) => a.offset_minutes - b.offset_minutes);
     return { send, alsoDue };
   });
+}
+
+/// Sends what [rows] (due_reminders) make due, one push per event
+/// ([oneReminderPerEvent]), and marks it with the lead times it stood in
+/// for — when it was delivered, or could not be (no address, refused for
+/// good): trying again would not help. A retry (FCM or Resend busy or down,
+/// a dead push token) or a send that throws leaves it unmarked, so it is
+/// due again on the next tick: late beats never. [mark] records the start
+/// each reminder was for (0049).
+export async function deliverDueReminders(
+  rows: DueReminder[],
+  now: Date,
+  send: (row: DueReminder, title: string, body: string) => Promise<Delivery>,
+  mark: (row: DueReminder) => Promise<void>,
+): Promise<void> {
+  for (const { send: row, alsoDue } of oneReminderPerEvent(rows)) {
+    let delivery: Delivery;
+    try {
+      delivery = await send(row, reminderTitle(row, now), reminderBody(row));
+    } catch (error) {
+      console.error(`reminder ${row.event_key} failed:`, error);
+      continue;
+    }
+    if (delivery === "retry") {
+      console.error(`reminder ${row.event_key} not delivered, due again next tick`);
+      continue;
+    }
+    for (const done of [row, ...alsoDue]) {
+      try {
+        await mark(done);
+      } catch (error) {
+        console.error(`reminder ${done.event_key} not marked:`, error);
+      }
+    }
+  }
 }

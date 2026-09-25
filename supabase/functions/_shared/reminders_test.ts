@@ -1,5 +1,7 @@
 import { assertEquals } from "jsr:@std/assert@1";
+import type { Delivery } from "./delivery.ts";
 import {
+  deliverDueReminders,
   type DueReminder,
   oneReminderPerEvent,
   reminderBody,
@@ -164,4 +166,78 @@ Deno.test("several lead times due at once for one event send one push, the "
   ]);
   assertEquals(picked[0].alsoDue.map((r) => r.offset_minutes), [1440]);
   assertEquals(picked[1].alsoDue, []);
+});
+
+// --- delivering: what is marked, what is due again ----------------------
+
+Deno.test("a reminder is marked, with the lead times it stood in for, when it "
+  + "was delivered or cannot be; a retry or a throw leaves it due", async () => {
+  const outcome: Record<string, Delivery | "throw"> = {
+    "m:1": "delivered",
+    "m:2": "retry",
+    "m:3": "undeliverable",
+    "m:4": "throw",
+  };
+  const rows = [
+    { ...base, offset_minutes: 1440 },
+    { ...base, offset_minutes: 120 },
+    { ...base, event_key: "m:2" },
+    { ...base, event_key: "m:3" },
+    { ...base, event_key: "m:4" },
+  ];
+  const sent: string[] = [];
+  const marked: string[] = [];
+  const error = console.error;
+  console.error = () => {};
+  try {
+    await deliverDueReminders(
+      rows,
+      at("2026-09-26T13:00:00Z"),
+      (row, title, body) => {
+        sent.push(`${row.event_key} ${title} | ${body}`);
+        const o = outcome[row.event_key];
+        return o === "throw" ? Promise.reject(new Error("network")) : Promise.resolve(o);
+      },
+      (row) => {
+        marked.push(`${row.event_key}/${row.offset_minutes}@${row.starts_at}`);
+        return Promise.resolve();
+      },
+    );
+  } finally {
+    console.error = error;
+  }
+  assertEquals(sent, [
+    "m:1 Zápas za 90 minut | SKK Veverky Brno A – KK Blansko B, so 26.9. 16:30, doma",
+    "m:2 Zápas za 90 minut | SKK Veverky Brno A – KK Blansko B, so 26.9. 16:30, doma",
+    "m:3 Zápas za 90 minut | SKK Veverky Brno A – KK Blansko B, so 26.9. 16:30, doma",
+    "m:4 Zápas za 90 minut | SKK Veverky Brno A – KK Blansko B, so 26.9. 16:30, doma",
+  ]);
+  assertEquals(marked, [
+    "m:1/120@2026-09-26T14:30:00+00:00",
+    "m:1/1440@2026-09-26T14:30:00+00:00",
+    "m:3/120@2026-09-26T14:30:00+00:00",
+  ]);
+});
+
+Deno.test("a mark that fails does not stop the others", async () => {
+  const marked: string[] = [];
+  const error = console.error;
+  console.error = () => {};
+  try {
+    await deliverDueReminders(
+      [{ ...base, offset_minutes: 1440 }, base, { ...base, event_key: "m:2" }],
+      at("2026-09-26T13:00:00Z"),
+      () => Promise.resolve("delivered"),
+      (row) => {
+        if (row.offset_minutes === 120 && row.event_key === "m:1") {
+          return Promise.reject(new Error("db"));
+        }
+        marked.push(`${row.event_key}/${row.offset_minutes}`);
+        return Promise.resolve();
+      },
+    );
+  } finally {
+    console.error = error;
+  }
+  assertEquals(marked, ["m:1/1440", "m:2/120"]);
 });
