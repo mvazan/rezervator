@@ -18,25 +18,6 @@ typedef UpdateMyContact = Future<void> Function({
   bool? showPhone,
 });
 
-/// Every contact write carries the whole contact as shown — the phone and
-/// both switches — with one of them changed. optimisticWrite keeps one
-/// pending patch per key and a newer write replaces the older one, so a
-/// patch naming only its own field would show a still-unconfirmed change
-/// to another as undone: the e-mail switch snapping back when the phone
-/// one is flipped right after it. A [phone] of '' removes the number.
-Future<void> _writeContact(
-  UpdateMyContact update,
-  Profile profile, {
-  String? phone,
-  bool? showEmail,
-  bool? showPhone,
-}) =>
-    update(
-      phone: phone ?? profile.phone ?? '',
-      showEmail: showEmail ?? profile.showEmail,
-      showPhone: showPhone ?? profile.showPhone,
-    );
-
 /// Telefon, with „Upravit" opening the phone dialog.
 class ContactPhoneTile extends StatelessWidget {
   const ContactPhoneTile({
@@ -58,7 +39,7 @@ class ContactPhoneTile extends StatelessWidget {
     if (phone == null || !context.mounted) return;
     await tryAction(
       context,
-      () => _writeContact(updateMyContact, profile, phone: phone),
+      () => updateMyContact(phone: phone),
       success: 'Uloženo.',
       errorText: friendlyDbError,
     );
@@ -99,7 +80,7 @@ class ContactVisibilityTiles extends StatelessWidget {
           value: profile.showEmail,
           onChanged: (v) => tryAction(
             context,
-            () => _writeContact(updateMyContact, profile, showEmail: v),
+            () => updateMyContact(showEmail: v),
             errorText: friendlyDbError,
           ),
         ),
@@ -110,7 +91,7 @@ class ContactVisibilityTiles extends StatelessWidget {
           value: profile.showPhone,
           onChanged: (v) => tryAction(
             context,
-            () => _writeContact(updateMyContact, profile, showPhone: v),
+            () => updateMyContact(showPhone: v),
             errorText: friendlyDbError,
           ),
         ),

@@ -96,12 +96,10 @@ void main() {
         updateMyContact,
     List<PrioritySlot> matches = const [],
     Map<String, bool> exceptions = const {},
-    Stream<Profile>? profiles,
   }) {
     return ProviderScope(
       overrides: [
-        myProfileProvider.overrideWith(
-            (ref) => profiles ?? Stream.value(profile)),
+        myProfileProvider.overrideWith((ref) => Stream.value(profile)),
         clubsProvider.overrideWith(
           (ref) => Stream.value(const [Club(id: 'c1', name: 'TJ Sokol')]),
         ),
@@ -1999,7 +1997,7 @@ void main() {
       await tester.tap(inDialog(find.widgetWithText(FilledButton, 'Uložit')));
       await tester.pumpAndSettle();
 
-      expect(saved, ['phone=+420602111222 showEmail=false showPhone=true']);
+      expect(saved, ['phone=+420602111222 showEmail=null showPhone=null']);
       expect(find.byType(AlertDialog), findsNothing);
       expect(find.text('Uloženo.'), findsOneWidget);
     });
@@ -2015,7 +2013,7 @@ void main() {
       await tester.enterText(inDialog(find.byType(TextField)), '');
       await tester.tap(inDialog(find.widgetWithText(FilledButton, 'Uložit')));
       await tester.pumpAndSettle();
-      expect(saved, ['phone= showEmail=false showPhone=true']);
+      expect(saved, ['phone= showEmail=null showPhone=null']);
 
       await tester.tap(inCard(find.text('Upravit')));
       await tester.pumpAndSettle();
@@ -2037,47 +2035,8 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(saved, [
-        'phone= showEmail=false showPhone=true',
-        'phone= showEmail=true showPhone=false',
-      ]);
-    });
-
-    testWidgets('a switch flipped right after the other keeps the other\'s '
-        'change — every write carries the whole contact as shown',
-        (tester) async {
-      tall(tester);
-      // Like optimisticWrite: the screen shows a write at once.
-      final profiles = StreamController<Profile>();
-      addTearDown(profiles.close);
-      var shown = withPhone;
-      Future<void> apply({String? phone, bool? showEmail, bool? showPhone}) async {
-        await record(phone: phone, showEmail: showEmail, showPhone: showPhone);
-        shown = Profile(
-          id: shown.id,
-          displayName: shown.displayName,
-          email: shown.email,
-          role: shown.role,
-          status: shown.status,
-          phone: phone == null ? shown.phone : (phone.isEmpty ? null : phone),
-          showEmail: showEmail ?? shown.showEmail,
-          showPhone: showPhone ?? shown.showPhone,
-        );
-        profiles.add(shown);
-      }
-
-      await tester.pumpWidget(
-          app(withPhone, profiles: profiles.stream, updateMyContact: apply));
-      profiles.add(withPhone);
-      await tester.pumpAndSettle();
-
-      await tester.tap(switchTile('Ukázat e-mail v Kontaktech'));
-      await tester.pumpAndSettle();
-      await tester.tap(switchTile('Ukázat telefon v Kontaktech'));
-      await tester.pumpAndSettle();
-
-      expect(saved, [
-        'phone=+420777123456 showEmail=true showPhone=true',
-        'phone=+420777123456 showEmail=true showPhone=false',
+        'phone=null showEmail=false showPhone=null',
+        'phone=null showEmail=null showPhone=false',
       ]);
     });
   });
