@@ -158,6 +158,54 @@ void main() {
     await raw.close();
   });
 
+  test('a newer write on another field keeps the older one\'s change on '
+      'screen until both are through', () async {
+    final (raw, out, sub) = overlay('fields');
+    const row = [
+      {'id': 'u1', 'show_email': true, 'show_phone': true},
+    ];
+    raw.add(row);
+    await tick();
+
+    final first = Completer<void>();
+    final second = Completer<void>();
+    final firstDone = optimisticWrite(uid, 'fields',
+        patchRow('id', uid, {'show_email': false}), () => first.future);
+    final secondDone = optimisticWrite(uid, 'fields',
+        patchRow('id', uid, {'show_phone': false}), () => second.future);
+    await tick();
+    expect(out.last, [
+      {'id': 'u1', 'show_email': false, 'show_phone': false},
+    ]);
+
+    // The older one's echo arrives first: still both, the newer is pending.
+    first.complete();
+    await firstDone;
+    raw.add([
+      {'id': 'u1', 'show_email': false, 'show_phone': true},
+    ]);
+    await tick();
+    expect(out.last, [
+      {'id': 'u1', 'show_email': false, 'show_phone': false},
+    ]);
+
+    // The newer one is through; its echo takes over.
+    second.complete();
+    await secondDone;
+    raw.add([
+      {'id': 'u1', 'show_email': false, 'show_phone': false},
+    ]);
+    await tick();
+    expect(out.last, [
+      {'id': 'u1', 'show_email': false, 'show_phone': false},
+    ]);
+    expect(applyPending(uid, 'fields', row), row,
+        reason: 'nothing left pending once the echo came');
+
+    await sub.cancel();
+    await raw.close();
+  });
+
   test('signals stay on their own key', () async {
     final changes = <void>[];
     final refreshes = <void>[];

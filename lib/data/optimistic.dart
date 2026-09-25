@@ -79,12 +79,17 @@ void settlePending(String uid, String name) {
 /// duplicity). Selže-li, patch mizí hned a chyba jde dál — volající
 /// (`tryAction`) ji odchytí jako dnes.
 ///
-/// Druhý zápis na STEJNÝ klíč dřív, než první doběhne (rychlé přidání dvou
-/// připomínek za sebou), přebírá viditelnost: patch vidí appka vždycky ten
-/// z posledního volání. Dokončení staršího volání proto zasáhne `_pending`
-/// jen tehdy, když mezitím nepřevzalo novější — jinak by na okamžik
-/// shodilo ještě neuloženou novější změnu. Chyba staršího volání jde jeho
-/// volajícímu dál bez ohledu na to.
+/// Druhý zápis na STEJNÝ klíč dřív, než první doběhne nebo se vrátí jeho
+/// ozvěna (rychlé přidání dvou připomínek, dva přepínače v profilu za
+/// sebou), se skládá NAD ten čekající: appka vidí obě změny, i když každý
+/// zápis posílá na server jen své pole. (Dřív novější patch starší
+/// nahradil a starší změna jiného pole na okamžik zmizela, než dorazila
+/// její ozvěna.) Složený patch drží novější zápis. Dokončení staršího
+/// volání proto zasáhne `_pending` jen tehdy, když mezitím nepřevzalo
+/// novější — jinak by na okamžik shodilo ještě neuloženou novější změnu.
+/// Chyba staršího volání jde jeho volajícímu dál bez ohledu na to; jeho
+/// změna pak zůstane vidět ve složeném patchi, dokud novější zápis neskončí
+/// a první další doručení neukáže, co server skutečně má.
 Future<void> optimisticWrite(
   String uid,
   String name,
@@ -92,7 +97,9 @@ Future<void> optimisticWrite(
   Future<void> Function() write,
 ) async {
   final key = _key(uid, name);
-  final entry = _Pending(apply);
+  final previous = _pending[key];
+  final entry = _Pending(
+      previous == null ? apply : (rows) => apply(previous.apply(rows)));
   _pending[key] = entry;
   _changed.add(key);
   try {
