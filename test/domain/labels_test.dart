@@ -201,4 +201,51 @@ void main() {
       expect(teamsLoadingLabel, 'Načítají se týmy z webu…');
     });
   });
+
+  group('discovery summary (0046)', () {
+    test('counts the oddíly and names the new ones, Czech-sorted', () {
+      expect(
+        discoveryClubsLabel(
+            const FederationDiscoverReport(clubsLinked: ['Sokol Brno IV'])),
+        '1 oddíl',
+      );
+      expect(
+        discoveryClubsLabel(const FederationDiscoverReport(
+          clubsLinked: ['Sokol Brno IV'],
+          clubsCreated: ['TJ Sokol Husovice', 'KS Devítka Brno'],
+        )),
+        '3 oddíly (2 nové: KS Devítka Brno, TJ Sokol Husovice)',
+      );
+      expect(
+        discoveryClubsLabel(const FederationDiscoverReport(
+          clubsLinked: ['A', 'B', 'C', 'D'],
+          clubsCreated: ['Čáslav'],
+        )),
+        '5 oddílů (1 nový: Čáslav)',
+      );
+    });
+
+    test('counts the teams in their soutěže — ve before dvou…čtyřech', () {
+      expect(
+        discoveryTeamsLabel(
+            const FederationDiscoverReport(teams: 1, competitions: 1)),
+        '1 tým v 1 soutěži',
+      );
+      expect(
+        discoveryTeamsLabel(
+            const FederationDiscoverReport(teams: 5, competitions: 2)),
+        '5 týmů ve 2 soutěžích',
+      );
+      expect(
+        discoveryTeamsLabel(
+            const FederationDiscoverReport(teams: 3, competitions: 5)),
+        '3 týmy v 5 soutěžích',
+      );
+      expect(
+        discoveryTeamsLabel(
+            const FederationDiscoverReport(teams: 12, competitions: 12)),
+        '12 týmů ve 12 soutěžích',
+      );
+    });
+  });
 }

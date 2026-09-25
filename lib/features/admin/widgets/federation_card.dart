@@ -1,8 +1,9 @@
-/// Správa → Oddíly: the ČKA results-service card — the alley's kuželna on
-/// vysledky.kuzelky.cz (read-only, changed behind a pencil), automatic sync
-/// on/off (saved at once), a one-off team discovery or sync run, and while
-/// federation jobs are still to run, a spinning line that says what is
-/// left (0046 `federation_sync_progress`).
+/// Správa → Oddíly: the ČKA results-service card. Until the alley was first
+/// synced it is the setup wizard ([FederationWizard]); after that the
+/// kuželna on vysledky.kuzelky.cz (read-only, changed behind a pencil),
+/// automatic sync on/off (saved at once), a one-off team discovery or sync
+/// run, and while federation jobs are still to run, a spinning line that
+/// says what is left (0046 `federation_sync_progress`).
 library;
 
 import 'dart:async';
@@ -14,6 +15,7 @@ import '../../../core/ui.dart';
 import '../../../data/providers.dart';
 import '../../../domain/labels.dart';
 import '../../../domain/models.dart';
+import 'federation_wizard.dart';
 import 'venue_slug_field.dart';
 
 class FederationCard extends ConsumerStatefulWidget {
@@ -73,6 +75,10 @@ class _FederationCardState extends ConsumerState<FederationCard>
   /// at once, the echo comes over Realtime a moment later. null: the row's.
   bool? _enabledWanted;
   bool _savingEnabled = false;
+
+  /// The wizard's last step switched the sync on: the normal view from now
+  /// on, without waiting for the row's echo.
+  bool _setupDone = false;
 
   @override
   void initState() {
@@ -213,6 +219,32 @@ class _FederationCardState extends ConsumerState<FederationCard>
     if (ok && mounted) _afterRequest();
   }
 
+  /// The wizard's last step: the sync on, then the first run.
+  Future<bool> _enable(FederationSync sync) async {
+    final ok = await tryAction(
+      context,
+      () async {
+        await widget.saveFederation(sync.venueSlug, true);
+        await widget.syncNow();
+      },
+      errorText: friendlyDbError,
+    );
+    if (ok && mounted) {
+      setState(() {
+        _setupDone = true;
+        _enabledWanted = true;
+      });
+      _afterRequest();
+    }
+    return ok;
+  }
+
+  /// Never synced and never switched on: the setup is not finished. Once
+  /// on, or ever synced, the normal view stays — even with the sync
+  /// switched off later.
+  bool _inSetup(FederationSync sync) =>
+      !_setupDone && !sync.enabled && sync.lastRunAt == null;
+
   Future<void> _setEnabled(FederationSync sync, bool enabled) async {
     setState(() {
       _enabledWanted = enabled;
@@ -262,7 +294,9 @@ class _FederationCardState extends ConsumerState<FederationCard>
           children: [
             Text('Výsledkový servis ČKA', style: theme.textTheme.titleMedium),
             const SizedBox(height: 8),
-            if (sync != null)
+            if (sync != null && _inSetup(sync))
+              _wizard(sync)
+            else if (sync != null)
               ..._settings(sync)
             else if (loaded.hasError)
               Text(
@@ -274,6 +308,23 @@ class _FederationCardState extends ConsumerState<FederationCard>
           ],
         ),
       ),
+    );
+  }
+
+  Widget _wizard(FederationSync sync) {
+    final teams = ref.watch(teamsProvider);
+    if (!teams.hasValue && !teams.hasError) return const Text('Načítám…');
+    return FederationWizard(
+      sync: sync,
+      teams: teams.value ?? const [],
+      discovering: _discovering(sync),
+      saveSlug: (slug) => tryAction(
+        context,
+        () => widget.saveFederation(slug, false),
+        errorText: friendlyDbError,
+      ),
+      discover: _requestDiscovery,
+      enable: () => _enable(sync),
     );
   }
 

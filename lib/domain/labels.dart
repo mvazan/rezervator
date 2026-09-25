@@ -2,6 +2,7 @@
 /// Pure Dart — widgets only render these strings.
 library;
 
+import 'collation.dart';
 import 'models.dart';
 import 'schedule.dart';
 
@@ -115,4 +116,30 @@ String federationProgressLabel(FederationSyncProgress p) {
       ? parts.single
       : '${parts.sublist(0, parts.length - 1).join(', ')} a ${parts.last}';
   return 'Synchronizuje se… $verb $list';
+}
+
+/// The setup wizard's summary of a discovery (0046): „3 oddíly (2 nové:
+/// KS Devítka Brno, TJ Sokol Husovice)“ — every venue club it found, and
+/// the ones it created, Czech-sorted.
+String discoveryClubsLabel(FederationDiscoverReport r) {
+  final all = czechCount(r.clubsLinked.length + r.clubsCreated.length,
+      'oddíl', 'oddíly', 'oddílů');
+  if (r.clubsCreated.isEmpty) return all;
+  final fresh =
+      czechCount(r.clubsCreated.length, 'nový', 'nové', 'nových');
+  final names = [...r.clubsCreated]..sort(compareCzech);
+  return '$all ($fresh: ${names.join(', ')})';
+}
+
+/// „5 týmů ve 2 soutěžích“.
+String discoveryTeamsLabel(FederationDiscoverReport r) =>
+    '${czechCount(r.teams, 'tým', 'týmy', 'týmů')} '
+    '${_inCompetitions(r.competitions)}';
+
+/// The locative after „v“, which turns „ve“ before a numeral read with two
+/// consonants up front: ve dvou/třech/čtyřech, ve dvanácti/třinácti/
+/// čtrnácti, ve dvaceti…čtyřiceti devíti.
+String _inCompetitions(int n) {
+  final ve = (n >= 2 && n <= 4) || (n >= 12 && n <= 14) || (n >= 20 && n <= 49);
+  return '${ve ? 've' : 'v'} $n ${n == 1 ? 'soutěži' : 'soutěžích'}';
 }

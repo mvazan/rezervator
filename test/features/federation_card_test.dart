@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/admin/widgets/federation_card.dart';
+import 'package:rezervator/features/admin/widgets/venue_slug_field.dart';
 
 /// The ČKA card on its own (Správa → Oddíly). Each (re)build of the sync
 /// row's or the teams' provider takes the next of [rows] / [teams], and
@@ -400,6 +401,287 @@ void main() {
       expect(find.text('Načítají se týmy z webu…'), findsNothing);
       expect(find.byType(CircularProgressIndicator), findsNothing);
       expect(find.text('Chyba: $error'), findsOneWidget);
+    });
+  });
+
+  group('setup wizard (0046)', () {
+    const slugOnly = FederationSync(venueSlug: 'tj-sokol-brno-iv');
+    const team = Team(
+      id: 't1',
+      name: 'TJ Sokol Brno IV A',
+      clubId: 'c1',
+      competitionName: 'Jihomoravská divize',
+    );
+    // This kuželna's teams are loaded: a successful discovery report.
+    final discovered = FederationSync(
+      venueSlug: 'tj-sokol-brno-iv',
+      discover: FederationDiscoverReport(
+        teams: 1,
+        competitions: 1,
+        created: 1,
+        clubsLinked: const ['Sokol Brno IV'],
+        at: DateTime.utc(2026, 9, 25, 8),
+      ),
+    );
+    const notFound =
+        'federation_discover: GET /detail-kuzelny/tj-sokol-brno-iv: HTTP 404';
+
+    testWidgets('a new alley starts on step 1, the kuželna', (tester) async {
+      await _pump(tester, _Harness());
+
+      expect(find.text('Kuželna na webu ČKA'), findsOneWidget);
+      expect(find.text(venueSlugHelp), findsOneWidget);
+      expect(find.widgetWithText(FilledButton, 'Pokračovat'), findsOneWidget);
+      expect(find.text('Stahovat automaticky'), findsNothing);
+    });
+
+    testWidgets('a saved kuželna without teams opens step 2', (tester) async {
+      await _pump(tester, _Harness(rows: [slugOnly]));
+
+      expect(find.text('Oddíly a týmy'), findsOneWidget);
+      expect(
+        find.text('Načteme oddíly, které na kuželně hrají, a jejich týmy. '
+            'Chybějící oddíly založíme.'),
+        findsOneWidget,
+      );
+      expect(find.widgetWithText(FilledButton, 'Načíst oddíly a týmy'),
+          findsOneWidget);
+    });
+
+    testWidgets('a saved kuželna with its discovered teams opens step 3',
+        (tester) async {
+      await _pump(tester, _Harness(rows: [discovered], teams: [[team]]));
+
+      expect(find.text('Zapnout stahování'), findsOneWidget);
+      expect(
+        find.text('Stáhnou se všechny zápasy a výsledky těchto týmů. Zápasy '
+            'z rozpisu se spárují a zůstanou. První stažení trvá asi půl '
+            'hodiny, pak se vše aktualizuje samo.'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets(
+        'teams without a discovery of this kuželna open step 2 — a moved '
+        'kuželna drops the old report', (tester) async {
+      await _pump(tester, _Harness(rows: [slugOnly], teams: [[team]]));
+
+      expect(find.text('Oddíly a týmy'), findsOneWidget);
+      expect(find.widgetWithText(FilledButton, 'Načíst oddíly a týmy'),
+          findsOneWidget);
+      expect(find.text('Zapnout stahování'), findsNothing);
+    });
+
+    testWidgets(
+        'step 1 saves the slug of a pasted address, the sync still off, '
+        'and moves on', (tester) async {
+      final h = _Harness();
+      await _pump(tester, h);
+
+      await tester.enterText(find.byType(TextField),
+          ' https://vysledky.kuzelky.cz/detail-kuzelny/TJ-Sokol-Brno-IV/?tab=info#mapa ');
+      await tester.tap(find.widgetWithText(FilledButton, 'Pokračovat'));
+      await tester.pump();
+
+      expect(h.saved, [('tj-sokol-brno-iv', false)]);
+      expect(find.text('Oddíly a týmy'), findsOneWidget);
+    });
+
+    testWidgets('step 1 refuses the address of another page, inline',
+        (tester) async {
+      final h = _Harness();
+      await _pump(tester, h);
+
+      await tester.enterText(find.byType(TextField),
+          'https://vysledky.kuzelky.cz/detail-klubu/ks-devitka-brno');
+      await tester.tap(find.widgetWithText(FilledButton, 'Pokračovat'));
+      await tester.pump();
+
+      expect(h.saved, isEmpty);
+      expect(
+        find.text('Tohle není adresa kuželny — zkopíruj adresu stránky, která '
+            'obsahuje /detail-kuzelny/.'),
+        findsOneWidget,
+      );
+      expect(find.text('Kuželna na webu ČKA'), findsOneWidget);
+    });
+
+    testWidgets(
+        'step 2 spins while the discovery runs, then sums up what it found',
+        (tester) async {
+      final report = FederationDiscoverReport(
+        teams: 5,
+        competitions: 2,
+        created: 5,
+        clubsLinked: const ['Sokol Brno IV'],
+        clubsCreated: const ['TJ Sokol Husovice', 'KS Devítka Brno'],
+        at: DateTime.utc(2026, 9, 25, 8),
+      );
+      final h = _Harness(
+        rows: [
+          slugOnly,
+          FederationSync(venueSlug: 'tj-sokol-brno-iv', discover: report),
+        ],
+        teams: [const [], const [team]],
+        progress: [
+          FederationSyncProgress.idle,
+          const FederationSyncProgress(discover: 1),
+          FederationSyncProgress.idle,
+        ],
+      );
+      await _pump(tester, h);
+
+      await tester.tap(find.widgetWithText(FilledButton, 'Načíst oddíly a týmy'));
+      await tester.pump();
+      expect(h.discoveries, 1);
+      expect(find.text('Načítají se oddíly a týmy z webu…'), findsOneWidget);
+      expect(find.widgetWithText(FilledButton, 'Načíst oddíly a týmy'),
+          findsNothing);
+
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('Načítají se oddíly a týmy z webu…'), findsNothing);
+      expect(find.text('3 oddíly (2 nové: KS Devítka Brno, TJ Sokol Husovice)'),
+          findsOneWidget);
+      expect(find.text('5 týmů ve 2 soutěžích'), findsOneWidget);
+      expect(find.widgetWithText(OutlinedButton, 'Načíst znovu'), findsOneWidget);
+
+      await tester.tap(find.widgetWithText(FilledButton, 'Pokračovat'));
+      await tester.pump();
+      expect(find.text('Zapnout stahování'), findsOneWidget);
+    });
+
+    testWidgets(
+        'reopened while a failed discovery waits to retry, step 2 says why '
+        'and offers Načíst znovu', (tester) async {
+      const error =
+          'federation_discover: na stránce kuželny nejsou žádné kluby';
+      final h = _Harness(
+        rows: [
+          FederationSync(
+            venueSlug: 'tj-sokol-brno-iv',
+            discover: FederationDiscoverReport(
+              error: error,
+              at: DateTime.utc(2026, 9, 25, 8),
+            ),
+          ),
+        ],
+        // The re-armed job still counts (plan decision 7).
+        progress: [const FederationSyncProgress(discover: 1)],
+      );
+      await _pump(tester, h);
+
+      expect(find.text('Načítají se oddíly a týmy z webu…'), findsNothing);
+      expect(find.text('Načtení se nepovedlo: $error'), findsOneWidget);
+      final next = tester.widget<FilledButton>(
+          find.widgetWithText(FilledButton, 'Pokračovat'));
+      expect(next.onPressed, isNull);
+
+      await tester.tap(find.widgetWithText(OutlinedButton, 'Načíst znovu'));
+      await tester.pump();
+      expect(h.discoveries, 1);
+      // A new request waits for its own report again.
+      expect(find.text('Načítají se oddíly a týmy z webu…'), findsOneWidget);
+    });
+
+    testWidgets(
+        'a discovery that fails ends the loader as soon as its error is in '
+        'the row, though its job still counts while it waits to retry',
+        (tester) async {
+      final h = _Harness(
+        rows: [slugOnly],
+        progress: [
+          FederationSyncProgress.idle,
+          const FederationSyncProgress(discover: 1),
+        ],
+      );
+      await _pump(tester, h);
+
+      await tester.tap(find.widgetWithText(FilledButton, 'Načíst oddíly a týmy'));
+      await tester.pump();
+      expect(find.text('Načítají se oddíly a týmy z webu…'), findsOneWidget);
+
+      // A well-formed slug of no kuželna: HTTP 404. jobOutcome re-arms the
+      // job at +1, +2, +4 and +8 min, and every look still counts it.
+      h.push(FederationSync(
+        venueSlug: 'tj-sokol-brno-iv',
+        discover: FederationDiscoverReport(
+          error: notFound,
+          at: DateTime.utc(2026, 9, 25, 8),
+        ),
+      ));
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 5));
+
+      expect(h.looks, 3);
+      expect(find.text('Načítají se oddíly a týmy z webu…'), findsNothing);
+      expect(find.text('Načtení se nepovedlo: $notFound'), findsOneWidget);
+      expect(find.widgetWithText(OutlinedButton, 'Načíst znovu'), findsOneWidget);
+      expect(find.widgetWithText(TextButton, 'Zpět'), findsOneWidget);
+    });
+
+    testWidgets('Zpět on step 2 goes back to the kuželna, its slug filled in',
+        (tester) async {
+      await _pump(tester, _Harness(rows: [slugOnly]));
+
+      await tester.tap(find.widgetWithText(TextButton, 'Zpět'));
+      await tester.pump();
+
+      expect(find.text('Kuželna na webu ČKA'), findsOneWidget);
+      expect(find.widgetWithText(TextField, 'tj-sokol-brno-iv'), findsOneWidget);
+    });
+
+    testWidgets(
+        'another kuželna saved after Zpět waits for its own discovery — the '
+        'old one\'s summary and teams do not carry over', (tester) async {
+      final h = _Harness(rows: [discovered], teams: [[team]]);
+      await _pump(tester, h);
+      expect(find.text('Zapnout stahování'), findsOneWidget);
+
+      await tester.tap(find.widgetWithText(TextButton, 'Zpět'));
+      await tester.pump();
+      expect(find.text('1 oddíl'), findsOneWidget);
+      await tester.tap(find.widgetWithText(TextButton, 'Zpět'));
+      await tester.pump();
+      await tester.enterText(find.byType(TextField),
+          'https://vysledky.kuzelky.cz/detail-kuzelny/ks-devitka-brno');
+      await tester.tap(find.widgetWithText(FilledButton, 'Pokračovat'));
+      await tester.pump();
+
+      expect(h.saved, [('ks-devitka-brno', false)]);
+      // The row still holds the old kuželna's report until its echo.
+      expect(find.text('Oddíly a týmy'), findsOneWidget);
+      expect(find.text('1 oddíl'), findsNothing);
+      expect(find.widgetWithText(FilledButton, 'Načíst oddíly a týmy'),
+          findsOneWidget);
+      expect(find.widgetWithText(FilledButton, 'Pokračovat'), findsNothing);
+    });
+
+    testWidgets(
+        'step 3 switches the sync on, asks for the first run and leaves '
+        'the wizard', (tester) async {
+      final h = _Harness(rows: [discovered], teams: [[team]]);
+      await _pump(tester, h);
+
+      await tester
+          .tap(find.widgetWithText(FilledButton, 'Zapnout a stáhnout zápasy'));
+      await tester.pump();
+
+      expect(h.saved, [('tj-sokol-brno-iv', true)]);
+      expect(h.syncs, 1);
+      expect(find.text('Zapnout stahování'), findsNothing);
+      final toggle = tester.widget<SwitchListTile>(
+          find.widgetWithText(SwitchListTile, 'Stahovat automaticky'));
+      expect(toggle.value, isTrue);
+    });
+
+    testWidgets('a sync that ever ran shows the normal view, even switched off',
+        (tester) async {
+      await _pump(tester, _Harness(rows: [_off]));
+
+      expect(find.text('Kuželna na webu ČKA'), findsNothing);
+      expect(find.text('Stahovat automaticky'), findsOneWidget);
     });
   });
 }
