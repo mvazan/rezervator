@@ -69,6 +69,7 @@ class WeekBoard extends StatelessWidget {
     required this.nameById,
     required this.clubColorById,
     required this.interactive,
+    required this.matchLinks,
     required this.slot,
     this.admin = CalendarAdminHooks.none,
     required this.onSelectDay,
@@ -94,6 +95,13 @@ class WeekBoard extends StatelessWidget {
   final Map<String, String> nameById;
   final Map<String, int> clubColorById;
   final bool interactive;
+
+  /// Gates the video control and tap-through in the day-matches dialog —
+  /// independent of [interactive] (booking readiness): true whenever a
+  /// profile is signed in, whether or not db time blocks/reservations have
+  /// loaded yet. False on the public overview; the kiosk board never goes
+  /// through [WeekBoard] and hard-codes its own header's `interactive`.
+  final bool matchLinks;
   final SlotCallbacks slot;
 
   /// Calendar-only (landscape): the pager has no admin gestures.
@@ -116,6 +124,7 @@ class WeekBoard extends StatelessWidget {
         nameById: nameById,
         clubColorById: clubColorById,
         interactive: interactive,
+        matchLinks: matchLinks,
         slot: slot,
         admin: admin,
       );
@@ -137,6 +146,7 @@ class WeekBoard extends StatelessWidget {
       nameById: nameById,
       clubColorById: clubColorById,
       interactive: interactive,
+      matchLinks: matchLinks,
       slot: slot,
       onSelectDay: onSelectDay,
       onShiftWeek: onShiftWeek,

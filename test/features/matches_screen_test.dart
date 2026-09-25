@@ -173,6 +173,39 @@ void main() {
     );
   });
 
+  testWidgets(
+      'a match imported from the ČKA results service reads "ze svazu", one '
+      'from the old schedule import still reads "z rozpisu"', (tester) async {
+    final d1 = today().addDays(1);
+    final d2 = today().addDays(2);
+    await tester.pumpWidget(app(slots: [
+      PrioritySlot(
+        id: 'cka',
+        date: d1,
+        startsAt: const HourMinute(18, 0),
+        endsAt: const HourMinute(21, 0),
+        type: PrioritySlot.fallbackMatchType,
+        homeTeam: 'TJ Sokol Brno IV',
+        awayTeam: 'SK Kuželky Dubňany',
+        importKey: 'cka:12',
+      ),
+      PrioritySlot(
+        id: 'rozpis',
+        date: d2,
+        startsAt: const HourMinute(18, 0),
+        endsAt: const HourMinute(20, 0),
+        type: PrioritySlot.fallbackMatchType,
+        homeTeam: 'A',
+        awayTeam: 'B',
+        importKey: 'rozpis:X:1:A – B',
+      ),
+    ]));
+    await tester.pumpAndSettle();
+
+    expect(find.text('ze svazu'), findsOneWidget);
+    expect(find.text('z rozpisu'), findsOneWidget);
+  });
+
   testWidgets('played matches sit collapsed under Odehrané, most recent first',
       (tester) async {
     PrioritySlot match(String id, Day date, String away, HourMinute start) =>

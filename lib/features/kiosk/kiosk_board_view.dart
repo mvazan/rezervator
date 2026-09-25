@@ -350,6 +350,12 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
                             isToday: index == 0,
                             priority: headerEvents(days[index]),
                             height: headerHeight,
+                            // Never a tap-through to MatchDetailScreen or a
+                            // video button here: the kiosk's own 60 s
+                            // idle-reset Listener doesn't see touches on a
+                            // pushed route, and an external video browser on
+                            // a kiosk tablet is undesirable.
+                            interactive: false,
                           ),
                         ),
                       ),

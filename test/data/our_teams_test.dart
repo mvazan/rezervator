@@ -25,17 +25,25 @@ void main() {
         importKey: importKey,
       );
 
-  List<String> teamsOf(List<PrioritySlot> slots) {
+  Future<List<String>> teamsOf(
+    List<PrioritySlot> slots, {
+    List<Team> teams = const [],
+  }) async {
     final container = ProviderContainer(
-      overrides: [prioritySlotsProvider.overrideWithValue(slots)],
+      overrides: [
+        prioritySlotsProvider.overrideWithValue(slots),
+        teamsProvider.overrideWith((ref) => Stream.value(teams)),
+      ],
     );
     addTearDown(container.dispose);
+    container.listen(teamsProvider, (_, _) {});
+    await container.read(teamsProvider.future);
     return container.read(ourTeamsProvider);
   }
 
-  test('our side of every imported match, Czech-sorted', () {
+  test('our side of every imported match, Czech-sorted', () async {
     expect(
-      teamsOf([
+      await teamsOf([
         match(
             id: 'm1',
             home: 'SKK Veverky Brno A',
@@ -62,8 +70,8 @@ void main() {
   // "PMN – 1.turnaj" are events the admin typed in, not fixtures, and their
   // halves are not teams anybody follows.
   test('a match entered by hand names no teams while the schedule is there',
-      () {
-    final teams = teamsOf([
+      () async {
+    final teams = await teamsOf([
       match(
           id: 'm1',
           home: 'TJ Sokol Brno IV',
@@ -76,9 +84,10 @@ void main() {
     expect(teams, ['TJ Sokol Brno IV']);
   });
 
-  test('…but an alley with no imported match at all still gets a list', () {
+  test('…but an alley with no imported match at all still gets a list',
+      () async {
     expect(
-      teamsOf([
+      await teamsOf([
         match(id: 'h', home: 'Husky', away: 'přátelák'),
         match(id: 'a', home: 'KK Cizí', away: 'Naši', isAway: true),
       ]),
@@ -87,8 +96,8 @@ void main() {
     );
   });
 
-  test('the youth squad is its own team once the import marks it', () {
-    final teams = teamsOf([
+  test('the youth squad is its own team once the import marks it', () async {
+    final teams = await teamsOf([
       match(
           id: 'a',
           home: 'TJ Sokol Husovice',
@@ -105,9 +114,9 @@ void main() {
   });
 
   test('úklid children and blockages are not matches, empty names are not '
-      'teams', () {
+      'teams', () async {
     const blockage = PrioritySlotType(id: 't-uklid', name: 'Úklid', builtin: true);
-    final teams = teamsOf([
+    final teams = await teamsOf([
       match(
           id: 'm1',
           home: 'SKK Veverky Brno A',
@@ -117,5 +126,30 @@ void main() {
       match(id: 'e1', home: '', away: 'Kdosi', importKey: 'rozpis:y'),
     ]);
     expect(teams, ['SKK Veverky Brno A']);
+  });
+
+  test(
+      'active teams from the federation site join the schedule-derived '
+      'ones, Czech-sorted, inactive dropped from both', () async {
+    final teams = await teamsOf(
+      [
+        match(
+            id: 'd',
+            home: 'TJ Sokol Husovice (dorost)',
+            away: 'TJ Sokol Šanov',
+            importKey: 'rozpis:KP dorostu:5:TJ Sokol Husovice (dorost) – '
+                'TJ Sokol Šanov'),
+        match(
+            id: 'v',
+            home: 'SKK Veverky Brno C',
+            away: 'Jiný oddíl',
+            importKey: 'rozpis:KP1 Sever:1:SKK Veverky Brno C – Jiný oddíl'),
+      ],
+      teams: const [
+        Team(id: 't1', name: 'KS Devítka Brno A'),
+        Team(id: 't2', name: 'SKK Veverky Brno C', active: false),
+      ],
+    );
+    expect(teams, ['KS Devítka Brno A', 'TJ Sokol Husovice (dorost)']);
   });
 }

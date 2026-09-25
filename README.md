@@ -31,37 +31,14 @@ nepřišel, a měsíční docházku si stáhne jako CSV.
   [`PLAY.md`](PLAY.md) — vydání na Google Play.
 - [`docs/superpowers/specs/2026-07-07-rezervator-design.md`](docs/superpowers/specs/2026-07-07-rezervator-design.md) —
   návrh appky (funkce, datový model, fáze vývoje).
-- `tool/import_matches.py` — import zápasů ze svazového rozpisu (plochý
-  seznam, jeden řádek = jeden zápas: Kuželna, Datum, Čas, Soutěž, Kolo,
-  Domácí, Hosté; `.xls` i `.xlsx`, bez závislostí). Domácí zápasy jsou řádky
-  s naší kuželnou, venkovní zápasy našich týmů ostatní řádky. Rozpis se
-  během sezóny mění, proto nástroj **porovnává a mění jen rozdíly**: zápas
-  má klíč `rozpis:<soutěž>:<kolo>:<domácí> – <hosté>` bez data, takže
-  přeložený zápas je úprava téhož řádku (a hráčům se přepíše tatáž událost
-  v Google kalendáři), nový se vloží, zrušený se smaže. Čeho se nikdy
-  nedotkne: zápasu zadaného ručně v appce (bez klíče), zápasu z rozpisu,
-  který správce v appce upravil (`hand_edited`, v Zápasech „upraveno ručně“
-  — přepíše ho jen `--force`), a toho, kdo které týmy sleduje; sledovaný
-  tým, který v rozpise chybí, zápis zastaví (`--allow-missing-teams`).
+## Zápasy ze svazu
 
-  ```bash
-  python3 tool/import_matches.py ~/Downloads/rozpis.xls            # náhled
-  python3 tool/import_matches.py ~/Downloads/rozpis.xls --apply    # zápis do produkce
-  ```
-
-  První příkaz vypíše, co v souboru našel, uloží SQL do
-  `build/import_matches.sql` a ukáže **náhled** — jeden dotaz do databáze
-  (produkce, s `--local` lokální stack), který vypíše každý plánovaný krok:
-  `rekey` / `rename` (staré klíče z mřížkového sešitu 2026/27 a
-  přejmenovaní soupeři), `update` (s tím, co se mění), `insert`, `delete`,
-  `skip` (ručně upravené) a sledované týmy, které v rozpise nejsou. Druhý
-  ukáže totéž a po napsaném „ano“ (`--yes` to přeskočí) zapíše jako jednu
-  transakci správce kuželny (RLS, zrušené rezervace a upozornění jako v
-  appce) — transakce si tentýž plán spočítá znovu a provede ho. Kuželnu
-  vybereš `--tenant` jménem nebo `--tenant-id` uuid. Délka zápasu je pevná
-  podle soutěže (KP2 90 min, KP1 150 min, dorost 90 min, jinak — divize a
-  ligy — `--duration`, výchozí 180 min); `--length "KP1 Sever=210"` přebije
-  jednu soutěž ručně. V soutěžích, kde by náš tým splynul s áčkem, dostane
-  jméno příponu (`TEAM_SUFFIXES`, dnes `dorost` → „TJ Sokol Husovice
-  (dorost)“) — appka drží týmy podle jména, takže se tím dorost stane
-  vlastním týmem v Moje týmy i v kalendáři. Soupeř si nechává jméno holé.
+Zápasy a výsledky týmů kuželny se stahují z
+[vysledky.kuzelky.cz](https://vysledky.kuzelky.cz) (edge funkce `notify`,
+joby `federation_*`, noční cron `federation-nightly`, migrace `0045`).
+Nastavení je ve Správa → Oddíly: výběr kuželny, zapnutí synchronizace,
+ruční „Synchronizovat teď". Ruční úprava zápasu v appce se při
+synchronizaci nepřepíše (`hand_edited`); zápas bez `import_key` je čistě
+správcův — svaz o něm neví a nikdy ho nezmění. Zápasy dorostu, které svaz
+na webu zatím nevede, zůstávají jako dřív — správce je zadává a upravuje
+ručně.

@@ -35,6 +35,32 @@ void main() {
     expect(friendlyDbError(Exception('slug_taken')), 'Tuhle adresu už má jiná kuželna.');
   });
 
+  test('federation sync errors (0045) — invalid_venue_slug has its own copy, '
+      'distinct from the unrelated invalid_slug (0043) despite the shared '
+      'substring', () {
+    expect(
+      friendlyDbError(Exception('invalid_venue_slug')),
+      'Adresa kuželny smí mít jen malá písmena bez diakritiky, číslice '
+          'a pomlčky.',
+    );
+    expect(
+      friendlyDbError(Exception('invalid_slug')),
+      isNot(contains('diakritiky')),
+    );
+    expect(friendlyDbError(Exception('federation_not_configured')),
+        'Nejdřív ulož kuželnu z výsledkového servisu.');
+    expect(friendlyDbError(Exception('federation_disabled')),
+        'Zapni nejdřív automatické stahování.');
+    expect(friendlyDbError(Exception('team_name_taken')),
+        'Tým s tímto názvem už existuje.');
+    expect(friendlyDbError(Exception('empty_name')), 'Název nesmí být prázdný.');
+    expect(
+      friendlyDbError(Exception('new row for relation "teams" violates check '
+          'constraint "teams_name_check"')),
+      'Název týmu smí mít nejvýš 80 znaků.',
+    );
+  });
+
   test('group errors (0044)', () {
     expect(friendlyDbError(Exception('member_at_limit')),
         'Člen skupiny už má maximální počet rezervací.');

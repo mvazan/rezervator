@@ -533,4 +533,95 @@ void main() {
       expect(find.byType(MyTrainingsScreen), findsNothing);
     });
   });
+
+  group('Klubovna tab', () {
+    testWidgets('a phone sees all three destinations, in order', (tester) async {
+      phone(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+
+      expect(find.byType(NavigationBar), findsOneWidget);
+      final bar = tester.widget<NavigationBar>(find.byType(NavigationBar));
+      expect(bar.destinations, hasLength(3));
+      expect(find.text('Můj přehled'), findsOneWidget);
+      expect(find.text('Kalendář'), findsOneWidget);
+      expect(find.text('Klubovna'), findsOneWidget);
+      expect(
+        tester.getCenter(find.text('Kalendář')).dx,
+        lessThan(tester.getCenter(find.text('Klubovna')).dx),
+      );
+    });
+
+    testWidgets('…and so does the rail on a wide screen', (tester) async {
+      wide(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+
+      expect(find.byType(NavigationRail), findsOneWidget);
+      final rail = tester.widget<NavigationRail>(find.byType(NavigationRail));
+      expect(rail.destinations, hasLength(3));
+      expect(find.text('Klubovna'), findsOneWidget);
+    });
+
+    testWidgets('tapping Klubovna shows the Výsledky and Kuželny hub entries',
+        (tester) async {
+      phone(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Klubovna'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Výsledky'), findsOneWidget);
+      expect(find.text('Kuželny'), findsOneWidget);
+      expect(find.byType(WeekScreen), findsNothing);
+      expect(find.byType(MyTrainingsScreen), findsNothing);
+    });
+
+    testWidgets(
+        'a back gesture away from Klubovna returns to the calendar too',
+        (tester) async {
+      phone(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Klubovna'));
+      await tester.pumpAndSettle();
+      expect(find.text('Výsledky'), findsOneWidget);
+
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+
+      expect(find.byType(HomeShell), findsOneWidget);
+      expect(find.byType(WeekScreen), findsOneWidget);
+    });
+
+    testWidgets('the header holds still when switching into Klubovna too',
+        (tester) async {
+      phone(tester);
+      const admin = Profile(
+        id: 'me',
+        displayName: 'Já Správce',
+        email: 'me@example.com',
+        role: Role.admin,
+        status: ProfileStatus.approved,
+      );
+      await tester.pumpWidget(app(profile: admin));
+      await tester.pumpAndSettle();
+
+      Rect iconAt(IconData icon) => tester.getRect(find.byIcon(icon));
+      final onCalendar = [
+        iconAt(Icons.admin_panel_settings_outlined),
+        iconAt(Icons.account_circle_outlined),
+      ];
+
+      await tester.tap(find.text('Klubovna'));
+      await tester.pumpAndSettle();
+
+      expect([
+        iconAt(Icons.admin_panel_settings_outlined),
+        iconAt(Icons.account_circle_outlined),
+      ], onCalendar);
+    });
+  });
 }

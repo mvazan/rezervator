@@ -215,6 +215,72 @@ final clubsProvider = StreamProvider<List<Club>>((ref) {
         ..sort((a, b) => compareCzech(a.name, b.name)));
 });
 
+/// The alley's teams on the federation's results site (0045), Czech-sorted.
+final teamsProvider = StreamProvider<List<Team>>((ref) {
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return Stream.value(const []);
+  return cachedRows(uid, cacheKeyTeams,
+          () => _db.from('teams').stream(primaryKey: ['id']))
+      .map((rows) => rows.map(Team.fromJson).toList()
+        ..sort((a, b) => compareCzech(a.name, b.name)));
+});
+
+/// The alley's federation sync settings (0045). [FederationSync.none] when
+/// there is no row — unconfigured, or the caller is not an admin (RLS hides
+/// the row rather than erroring).
+final federationSyncProvider = StreamProvider<FederationSync>((ref) {
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return Stream.value(FederationSync.none);
+  return cachedRows(uid, cacheKeyFederationSync,
+          () => _db.from('federation_sync').stream(primaryKey: ['tenant_id']))
+      .map((rows) =>
+          rows.isEmpty ? FederationSync.none : FederationSync.fromJson(rows.first));
+});
+
+/// All of the tenant's `match_results` rows (0045), keyed by match id — every
+/// federation match that has been fetched at least once.
+final matchResultsProvider = StreamProvider<Map<String, MatchResult>>((ref) {
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return Stream.value(const {});
+  return cachedRows(uid, cacheKeyMatchResults,
+          () => _db.from('match_results').stream(primaryKey: ['match_id']))
+      .map((rows) => {
+            for (final row in rows)
+              row['match_id'] as String: MatchResult.fromJson(row),
+          });
+});
+
+/// One match's `match_player_results` rows (0045), home side first then by
+/// position. autoDispose: each match detail otherwise leaks a permanent
+/// realtime channel, same reasoning as [weekReservationsProvider].
+final matchPlayerResultsProvider = StreamProvider.autoDispose
+    .family<List<MatchPlayerResult>, String>((ref, matchId) {
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return Stream.value(const []);
+  return cachedRows(
+          uid,
+          'match_player_results:$matchId',
+          () => _db
+              .from('match_player_results')
+              .stream(primaryKey: ['id'])
+              .eq('match_id', matchId))
+      .map((rows) => rows.map(MatchPlayerResult.fromJson).toList()
+        ..sort((a, b) {
+          final bySide = (a.side == 'home' ? 0 : 1) - (b.side == 'home' ? 0 : 1);
+          return bySide != 0 ? bySide : a.position.compareTo(b.position);
+        }));
+});
+
+/// The alleys our teams play at (0045), Czech-sorted by name.
+final venuesProvider = StreamProvider<List<Venue>>((ref) {
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return Stream.value(const []);
+  return cachedRows(uid, cacheKeyVenues,
+          () => _db.from('venues').stream(primaryKey: ['id']))
+      .map((rows) => rows.map(Venue.fromJson).toList()
+        ..sort((a, b) => compareCzech(a.name, b.name)));
+});
+
 final timeBlocksProvider = StreamProvider<List<TimeBlock>>((ref) {
   final uid = ref.watch(_authUidProvider);
   if (uid == null) return Stream.value(const []);
@@ -365,7 +431,12 @@ final calendarAvailableProvider =
 /// same. An alley that enters everything by hand still gets a list: without
 /// a single imported match, every match names teams again, or the feature
 /// would quietly vanish there.
+///
+/// Active `teams` (0045) come first; the schedule-derived names keep squads
+/// the site does not list yet, e.g. dorost.
 final ourTeamsProvider = Provider<List<String>>((ref) {
+  final teams = ref.watch(teamsProvider).value ?? const <Team>[];
+  final inactive = {for (final t in teams) if (!t.active) t.name};
   final matches = [
     for (final s in ref.watch(prioritySlotsProvider))
       if (s.type.isMatch && s.parentId == null) s,
@@ -374,11 +445,15 @@ final ourTeamsProvider = Provider<List<String>>((ref) {
     for (final s in matches)
       if (s.imported) s,
   ];
-  final teams = <String>{
+  final derived = <String>{
     for (final s in imported.isEmpty ? matches : imported)
       if (s.isAway) s.awayTeam else s.homeTeam,
   }..remove('');
-  return teams.toList()..sort(compareCzech);
+  return {
+    for (final t in teams) if (t.active) t.name,
+    for (final name in derived) if (!inactive.contains(name)) name,
+  }.toList()
+    ..sort(compareCzech);
 });
 
 /// The caller's Google Calendar link. No row = [CalendarLink.none]. Written
@@ -529,6 +604,41 @@ class Api {
 
   static Future<void> deleteClub(String id) =>
       _db.rpc('delete_club', params: {'p_id': id});
+
+  // --- admin: federation sync (0045) ---
+  static Future<void> setFederationSync({
+    required String venueSlug,
+    required bool enabled,
+  }) =>
+      _db.rpc('set_federation_sync',
+          params: {'p_venue_slug': venueSlug, 'p_enabled': enabled});
+
+  static Future<void> requestFederationDiscovery() =>
+      _db.rpc('request_federation_discovery');
+
+  static Future<void> requestFederationSync() =>
+      _db.rpc('request_federation_sync');
+
+  /// On-demand live refresh of one match's score (0045) — gated server-side
+  /// to at most one fetch per match per 5 minutes. Returns 'queued' (a fetch
+  /// was scheduled), 'fresh' (already refreshed within the last 5 minutes),
+  /// or 'not_live' (outside the match's live window, or only switched-off
+  /// teams of ours play it).
+  static Future<String> refreshMatch(String matchId) async =>
+      await _db.rpc('refresh_match', params: {'p_match_id': matchId}) as String;
+
+  static Future<void> updateTeam({
+    required String id,
+    required String name,
+    String? clubId,
+    required bool active,
+  }) =>
+      _db.rpc('update_team', params: {
+        'p_id': id,
+        'p_name': name,
+        'p_club_id': clubId,
+        'p_active': active,
+      });
 
   static Future<void> updateFcmToken(String? token) async {
     final uid = currentUserId;
@@ -1466,6 +1576,10 @@ void resetTenantScopedProviders(WidgetRef ref) {
   ref.invalidate(profilesProvider);
   ref.invalidate(settingsProvider);
   ref.invalidate(clubsProvider);
+  ref.invalidate(teamsProvider);
+  ref.invalidate(federationSyncProvider);
+  ref.invalidate(matchResultsProvider);
+  ref.invalidate(venuesProvider);
   ref.invalidate(timeBlocksProvider);
   ref.invalidate(dayOverridesProvider);
   ref.invalidate(slotTypesProvider);

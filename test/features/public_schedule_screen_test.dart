@@ -35,6 +35,8 @@ void main() {
       {
         'id': 'm1', 'date': '2026-09-11', 'starts_at': '10:00:00', 'ends_at': '11:00:00',
         'type_id': 't-match', 'home_team': 'Sokol', 'away_team': 'Slavia',
+        'import_key': 'cka:m1',
+        'video_url': 'https://vysledky.kuzelky.cz/video/m1',
       },
     ],
     'rentals': [
@@ -58,6 +60,7 @@ void main() {
   Widget app({
     List<(String, Day)>? requested,
     Object? error,
+    Map<String, MatchResult> matchResults = const {},
   }) =>
       ProviderScope(
         overrides: [
@@ -67,6 +70,10 @@ void main() {
             if (error != null) throw error;
             return week;
           }),
+          // The day dialog's Consumer watches this — overridden even when
+          // empty so no test reaches real Supabase auth.
+          matchResultsProvider
+              .overrideWith((ref) => Stream.value(matchResults)),
         ],
         child: const MaterialApp(home: PublicScheduleScreen(slug: 'test')),
       );
@@ -129,4 +136,40 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Tahle kuželna veřejný přehled nemá.'), findsOneWidget);
   });
+
+  testWidgets(
+    'the day dialog opens non-interactively — score shows, but no video '
+    'button and no tap-through (PR B fix round 1: an unauthenticated '
+    'visitor has no session, so the detail screen would be a dead end)',
+    (tester) async {
+      surface(tester, const Size(1600, 1200));
+      final result = MatchResult.fromJson(const {
+        'match_id': 'm1',
+        'status': 'finished',
+        'home_points': 5,
+        'away_points': 3,
+        'fetched_at': '2026-09-10T21:00:00+00:00',
+      });
+      await tester.pumpWidget(app(matchResults: {'m1': result}));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.textContaining('Sokol').first);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(AlertDialog), findsOneWidget);
+      // The score still renders non-interactively.
+      expect(find.text('5 : 3'), findsOneWidget);
+      // No video control at all, though the slot has a videoUrl — the
+      // fallback trophy/block icon shows instead.
+      expect(find.byIcon(Icons.play_circle_fill), findsNothing);
+      expect(find.byIcon(Icons.videocam), findsNothing);
+      expect(find.byIcon(Icons.emoji_events_outlined), findsOneWidget);
+
+      // Tapping the match row does nothing — no tap-through, dialog stays.
+      await tester.tap(find.text('Sokol – Slavia'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(AlertDialog), findsOneWidget);
+    },
+  );
 }

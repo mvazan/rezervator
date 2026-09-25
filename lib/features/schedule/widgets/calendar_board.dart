@@ -354,6 +354,7 @@ class BoardColumnHeader extends StatelessWidget {
     this.collapsed = false,
     this.subtitle,
     this.onAdd,
+    this.interactive = true,
   });
 
   final Day date;
@@ -374,6 +375,10 @@ class BoardColumnHeader extends StatelessWidget {
   /// Admin-only (week view): tapping the header opens the add-slot dialog
   /// for this day — a packed column may have no empty space left to tap.
   final VoidCallback? onAdd;
+
+  /// Passed straight through to [showDayMatchesDialog]: false on the kiosk
+  /// board and the public overview (see its own doc for why).
+  final bool interactive;
 
   @override
   Widget build(BuildContext context) {
@@ -423,7 +428,12 @@ class BoardColumnHeader extends StatelessWidget {
                     behavior: HitTestBehavior.opaque,
                     onTap: collapsed
                         ? null
-                        : () => showDayMatchesDialog(context, date, priority),
+                        : () => showDayMatchesDialog(
+                              context,
+                              date,
+                              priority,
+                              interactive: interactive,
+                            ),
                     child: Column(
                       children: [
                         for (final m in priority)

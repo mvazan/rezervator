@@ -106,11 +106,15 @@ enum ProfileStatus { pending, approved }
 /// `profiles_default_view_check` allows ('calendar', 'trainings'), and
 /// `Api.setDefaultView` sends them verbatim (`view.name`) — renaming a
 /// value here still compiles, but breaks the write at runtime only.
+/// [clubhouse] is NOT one of them — the launch-view picker only ever offers
+/// [trainings]/[calendar] (a tab, not something to open straight to), so it
+/// never reaches `default_view` and [Profile.fromJson] can never read it
+/// back from the DB either.
 ///
 /// Declaration ORDER is the order of the tabs (and of the rail's
 /// destinations): the shell indexes both by `.index`. Reordering is safe
 /// precisely because the profile stores the choice by name, not position.
-enum HomeView { trainings, calendar }
+enum HomeView { trainings, calendar, clubhouse }
 
 class Profile {
   const Profile({
@@ -249,6 +253,74 @@ String clubNameOf(String? clubId, Iterable<Club> clubs) {
     if (club.id == clubId) return club.name;
   }
   return '';
+}
+
+/// One of the alley's teams on the federation's results site (0045). [name]
+/// is the string the app keys matches, follows and colours by.
+class Team {
+  const Team({
+    required this.id,
+    required this.name,
+    this.clubId,
+    this.siteSlug = '',
+    this.siteName = '',
+    this.competitionSlug = '',
+    this.competitionName = '',
+    this.active = true,
+  });
+
+  final String id;
+  final String name;
+  final String? clubId;
+  final String siteSlug;
+  final String siteName;
+  final String competitionSlug;
+  final String competitionName;
+  final bool active;
+
+  factory Team.fromJson(Map<String, dynamic> json) => Team(
+        id: json['id'] as String,
+        name: json['name'] as String,
+        clubId: json['club_id'] as String?,
+        siteSlug: json['site_slug'] as String? ?? '',
+        siteName: json['site_name'] as String? ?? '',
+        competitionSlug: json['competition_slug'] as String? ?? '',
+        competitionName: json['competition_name'] as String? ?? '',
+        active: json['active'] as bool? ?? true,
+      );
+}
+
+/// Správa → Oddíly: the alley on vysledky.kuzelky.cz and how the last
+/// synchronisation went (0045). Admin-only rows.
+class FederationSync {
+  const FederationSync({
+    this.venueSlug = '',
+    this.enabled = false,
+    this.lastRunAt,
+    this.lastSuccessAt,
+    this.lastError,
+  });
+
+  static const none = FederationSync();
+
+  final String venueSlug;
+  final bool enabled;
+  final DateTime? lastRunAt;
+  final DateTime? lastSuccessAt;
+  final String? lastError;
+
+  bool get configured => venueSlug.isNotEmpty;
+
+  static DateTime? _time(Object? v) =>
+      v == null ? null : DateTime.parse(v as String);
+
+  factory FederationSync.fromJson(Map<String, dynamic> json) => FederationSync(
+        venueSlug: json['venue_slug'] as String? ?? '',
+        enabled: json['enabled'] as bool? ?? false,
+        lastRunAt: _time(json['last_run_at']),
+        lastSuccessAt: _time(json['last_success_at']),
+        lastError: json['last_error'] as String?,
+      );
 }
 
 /// A row of the `players` view — the only profile data the kiosk sees.
@@ -519,6 +591,13 @@ class PrioritySlot {
     this.isAway = false,
     this.importKey,
     this.handEdited = false,
+    this.videoUrl,
+    this.competition,
+    this.round,
+    this.siteSlug,
+    this.siteMatchId,
+    this.venue,
+    this.venueSlug,
   });
 
   final String id;
@@ -527,9 +606,9 @@ class PrioritySlot {
   final HourMinute endsAt;
   final PrioritySlotType type;
 
-  /// Set when the row came from the federation's schedule
-  /// (`tool/import_matches.py`); null = the admin entered the match by hand
-  /// and no import will ever touch it.
+  /// Set when the row came from the federation (`cka:<site id>`, 0045) or
+  /// the old xlsx import (`rozpis:…`); null = the admin entered the match
+  /// by hand and no sync will ever touch it.
   final String? importKey;
 
   /// An imported match the admin corrected in the app (0038): the next
@@ -537,6 +616,35 @@ class PrioritySlot {
   final bool handEdited;
 
   bool get imported => importKey != null;
+
+  /// Link to the match's video on vysledky.kuzelky.cz, once the site has one.
+  final String? videoUrl;
+
+  /// The competition's name, as the site names it (0045).
+  final String? competition;
+
+  /// Round number within [competition].
+  final int? round;
+
+  /// The match's slug on the site — [siteUrl] is built from it.
+  final String? siteSlug;
+
+  /// The match's stable id on the site (`cka:<siteMatchId>` is [importKey]).
+  final int? siteMatchId;
+
+  /// The alley's name, once the site's match detail knows it (decides
+  /// home/away and feeds [description]).
+  final String? venue;
+
+  /// The alley's slug on the site — keys into `venues`.
+  final String? venueSlug;
+
+  /// Whether the site (not the old xlsx import) is the source of this row.
+  bool get fromFederation => importKey?.startsWith('cka:') ?? false;
+
+  /// "Na webu ČKA" — the match's own page, when the site knows it.
+  String? get siteUrl =>
+      siteSlug == null ? null : 'https://vysledky.kuzelky.cz/detail-zapasu/$siteSlug';
 
   /// Team fields are only meaningful when [type.isMatch].
   final String homeTeam;
@@ -584,6 +692,13 @@ class PrioritySlot {
         isAway: json['is_away'] as bool? ?? false,
         importKey: json['import_key'] as String?,
         handEdited: json['hand_edited'] as bool? ?? false,
+        videoUrl: json['video_url'] as String?,
+        competition: json['competition'] as String?,
+        round: (json['round'] as num?)?.toInt(),
+        siteSlug: json['site_slug'] as String?,
+        siteMatchId: (json['site_match_id'] as num?)?.toInt(),
+        venue: json['venue'] as String?,
+        venueSlug: json['venue_slug'] as String?,
       );
 
   /// A fully-powered stand-in match type for tests and previews.
@@ -605,6 +720,250 @@ class PrioritySlot {
     unresolved: true,
   );
 
+}
+
+// ---------------------------------------------------------------------------
+// Match results and venues (0045, PR B: `match_results`, `match_player_
+// results`, `venues`) — read-only, filled by the federation sync.
+// ---------------------------------------------------------------------------
+
+enum MatchStatus { scheduled, preparation, inProgress, finished, forfeit }
+
+MatchStatus _matchStatusFrom(String? value) => switch (value) {
+      'preparation' => MatchStatus.preparation,
+      'in_progress' => MatchStatus.inProgress,
+      'finished' => MatchStatus.finished,
+      'forfeit' => MatchStatus.forfeit,
+      _ => MatchStatus.scheduled,
+    };
+
+/// One `match_results` row — the team-level score of a federation match.
+/// Absent (no row at all) means the match hasn't been fetched yet, which
+/// `results.dart`'s `isLive` treats the same as [MatchStatus.scheduled].
+class MatchResult {
+  const MatchResult({
+    required this.matchId,
+    required this.status,
+    this.matchType = '',
+    this.discipline = '',
+    this.homePoints,
+    this.awayPoints,
+    this.homeTotal,
+    this.awayTotal,
+    this.homeFulls,
+    this.awayFulls,
+    this.homeSpares,
+    this.awaySpares,
+    this.homeErrors,
+    this.awayErrors,
+    this.homeSetPoints,
+    this.awaySetPoints,
+    required this.fetchedAt,
+  });
+
+  final String matchId;
+  final MatchStatus status;
+  final String matchType;
+  final String discipline;
+  final num? homePoints;
+  final num? awayPoints;
+  final int? homeTotal;
+  final int? awayTotal;
+  final int? homeFulls;
+  final int? awayFulls;
+  final int? homeSpares;
+  final int? awaySpares;
+  final int? homeErrors;
+  final int? awayErrors;
+  final num? homeSetPoints;
+  final num? awaySetPoints;
+  final DateTime fetchedAt;
+
+  factory MatchResult.fromJson(Map<String, dynamic> json) => MatchResult(
+        matchId: json['match_id'] as String,
+        status: _matchStatusFrom(json['status'] as String?),
+        matchType: json['match_type'] as String? ?? '',
+        discipline: json['discipline'] as String? ?? '',
+        homePoints: json['home_points'] as num?,
+        awayPoints: json['away_points'] as num?,
+        homeTotal: (json['home_total'] as num?)?.toInt(),
+        awayTotal: (json['away_total'] as num?)?.toInt(),
+        homeFulls: (json['home_fulls'] as num?)?.toInt(),
+        awayFulls: (json['away_fulls'] as num?)?.toInt(),
+        homeSpares: (json['home_spares'] as num?)?.toInt(),
+        awaySpares: (json['away_spares'] as num?)?.toInt(),
+        homeErrors: (json['home_errors'] as num?)?.toInt(),
+        awayErrors: (json['away_errors'] as num?)?.toInt(),
+        homeSetPoints: json['home_set_points'] as num?,
+        awaySetPoints: json['away_set_points'] as num?,
+        fetchedAt: DateTime.parse(json['fetched_at'] as String),
+      );
+}
+
+/// One player's line on one lane, from `match_player_results.lanes` jsonb
+/// (`[{lane, fulls, spares, errors, total, setPoints}]` — camelCase inside
+/// the jsonb, unlike the table's own snake_case columns). Null totals mean
+/// the player hasn't bowled that lane yet (a live, in-progress match).
+class PlayerLane {
+  const PlayerLane({
+    required this.lane,
+    this.fulls,
+    this.spares,
+    this.errors,
+    this.total,
+    this.setPoints,
+  });
+
+  final int lane;
+  final int? fulls;
+  final int? spares;
+  final int? errors;
+  final int? total;
+  final num? setPoints;
+
+  factory PlayerLane.fromJson(Map<String, dynamic> json) => PlayerLane(
+        lane: json['lane'] as int,
+        fulls: (json['fulls'] as num?)?.toInt(),
+        spares: (json['spares'] as num?)?.toInt(),
+        errors: (json['errors'] as num?)?.toInt(),
+        total: (json['total'] as num?)?.toInt(),
+        setPoints: json['setPoints'] as num?,
+      );
+}
+
+/// One `match_player_results` row — one player's line in one match.
+class MatchPlayerResult {
+  const MatchPlayerResult({
+    required this.id,
+    required this.matchId,
+    required this.side,
+    required this.position,
+    required this.playerName,
+    this.playerSlug,
+    this.fulls,
+    this.spares,
+    this.errors,
+    this.total,
+    this.setPoints,
+    this.teamPoints,
+    this.lanes = const [],
+  });
+
+  final String id;
+  final String matchId;
+
+  /// 'home' or 'away'.
+  final String side;
+  final int position;
+  final String playerName;
+  final String? playerSlug;
+  final int? fulls;
+  final int? spares;
+  final int? errors;
+  final int? total;
+  final num? setPoints;
+  final num? teamPoints;
+  final List<PlayerLane> lanes;
+
+  factory MatchPlayerResult.fromJson(Map<String, dynamic> json) =>
+      MatchPlayerResult(
+        id: json['id'] as String,
+        matchId: json['match_id'] as String,
+        side: json['side'] as String,
+        position: (json['position'] as num).toInt(),
+        playerName: json['player_name'] as String,
+        playerSlug: json['player_slug'] as String?,
+        fulls: (json['fulls'] as num?)?.toInt(),
+        spares: (json['spares'] as num?)?.toInt(),
+        errors: (json['errors'] as num?)?.toInt(),
+        total: (json['total'] as num?)?.toInt(),
+        setPoints: json['set_points'] as num?,
+        teamPoints: json['team_points'] as num?,
+        lanes: [
+          for (final lane in json['lanes'] as List? ?? const [])
+            PlayerLane.fromJson((lane as Map).cast<String, dynamic>()),
+        ],
+      );
+}
+
+/// One `[{title, items: [{label, value}]}]` group of `venues.sections` — the
+/// site's own technical-info layout, rendered as-is (no per-field columns).
+class VenueSection {
+  const VenueSection({required this.title, this.items = const []});
+
+  final String title;
+  final List<({String label, String value})> items;
+
+  factory VenueSection.fromJson(Map<String, dynamic> json) => VenueSection(
+        title: json['title'] as String? ?? '',
+        items: [
+          for (final item in json['items'] as List? ?? const [])
+            (
+              label: (item as Map)['label'] as String? ?? '',
+              value: item['value'] as String? ?? '',
+            ),
+        ],
+      );
+}
+
+/// One `venues` row — an alley our teams play at, as the site's venue page
+/// describes it (0045).
+class Venue {
+  const Venue({
+    required this.id,
+    required this.slug,
+    required this.name,
+    this.address,
+    this.phone,
+    this.email,
+    this.lat,
+    this.lng,
+    this.sections = const [],
+    this.clubs = const [],
+    required this.fetchedAt,
+  });
+
+  final String id;
+  final String slug;
+  final String name;
+  final String? address;
+  final String? phone;
+  final String? email;
+  final double? lat;
+  final double? lng;
+  final List<VenueSection> sections;
+  final List<String> clubs;
+  final DateTime fetchedAt;
+
+  /// Opens the venue on Google Maps: coordinates when the site's link had
+  /// them, else a text search on the address, else null (nothing to show).
+  String? get mapsUrl {
+    if (lat != null && lng != null) {
+      return 'https://www.google.com/maps/search/?api=1&query=$lat,$lng';
+    }
+    if (address != null && address!.isNotEmpty) {
+      return 'https://www.google.com/maps/search/?api=1&query='
+          '${Uri.encodeComponent(address!)}';
+    }
+    return null;
+  }
+
+  factory Venue.fromJson(Map<String, dynamic> json) => Venue(
+        id: json['id'] as String,
+        slug: json['slug'] as String,
+        name: json['name'] as String,
+        address: json['address'] as String?,
+        phone: json['phone'] as String?,
+        email: json['email'] as String?,
+        lat: (json['lat'] as num?)?.toDouble(),
+        lng: (json['lng'] as num?)?.toDouble(),
+        sections: [
+          for (final section in json['sections'] as List? ?? const [])
+            VenueSection.fromJson((section as Map).cast<String, dynamic>()),
+        ],
+        clubs: (json['clubs'] as List?)?.cast<String>() ?? const [],
+        fetchedAt: DateTime.parse(json['fetched_at'] as String),
+      );
 }
 
 class Rental {

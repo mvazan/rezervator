@@ -16,6 +16,9 @@ abstract final class Limits {
 
   /// Board nick cap (mirrors the `profiles.nick` length check).
   static const nickLength = 14;
+
+  /// Team name cap (mirrors the `teams.name` length check).
+  static const teamNameLength = 80;
 }
 
 bool _within(int value, ({int min, int max}) range) =>

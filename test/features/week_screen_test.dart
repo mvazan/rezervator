@@ -8,6 +8,7 @@ import 'package:rezervator/data/clock.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/groups.dart';
 import 'package:rezervator/domain/models.dart';
+import 'package:rezervator/features/clubhouse/match_detail_screen.dart';
 import 'package:rezervator/features/schedule/widgets/slot_tile.dart';
 import 'package:rezervator/features/schedule/week_calendar_view.dart';
 import 'package:rezervator/features/schedule/week_screen.dart';
@@ -127,6 +128,7 @@ void main() {
     List<PlayerName> roster = players,
     Map<String, int> activeCounts = const {},
     MyGroup group = MyGroup.none,
+    Map<String, MatchResult> matchResults = const {},
   }) {
     return ProviderScope(
       overrides: [
@@ -138,6 +140,15 @@ void main() {
         timeBlocksProvider.overrideWith((ref) => Stream.value(blocks)),
         dayOverridesProvider.overrideWith((ref) => Stream.value(overrides)),
         prioritySlotsProvider.overrideWithValue(matches),
+        // Never watched by WeekScreen itself, but MatchDetailScreen (pushed
+        // from the day-matches dialog's tap-through) does — without these,
+        // its own defaults would reach through to real Supabase.
+        prioritySlotsLoadingProvider.overrideWithValue(false),
+        matchResultsProvider.overrideWith((ref) => Stream.value(matchResults)),
+        matchPlayerResultsProvider.overrideWith(
+          (ref, id) => Stream.value(const []),
+        ),
+        venuesProvider.overrideWith((ref) => Stream.value(const [])),
         rentalsProvider.overrideWith(
             (ref) => rentalsStream ?? Stream.value(rentals)),
         weekReservationsProvider.overrideWith(
@@ -1707,5 +1718,84 @@ void main() {
     await holdDragBy(Offset(0, (21.5 + 0.5 - 20.5) * 60 * pxPerMinute));
     expect(find.text('Tady není volné místo.'), findsNothing);
     expect(find.byType(SnackBar), findsOneWidget);
+  });
+
+  // Regression: match links (video + tap-through) must not depend on
+  // booking readiness (db time blocks configured, reservations loaded) —
+  // only on being signed in. Before the fix, a kuželna with no db blocks
+  // yet fell back to the placeholder grid (`blocksFromDb == false`), which
+  // also zeroed the dialog's own `interactive` and silently dropped the
+  // video button and tap-through for a signed-in player.
+  testWidgets('signed-in day pager with NO db time blocks still opens the '
+      'match dialog with the video control and tap-through', (tester) async {
+    portraitSurface(tester);
+    final withVideo = PrioritySlot(
+      type: PrioritySlot.fallbackMatchType,
+      id: 'm-video',
+      date: tomorrow,
+      startsAt: const HourMinute(17, 0),
+      endsAt: const HourMinute(19, 0),
+      homeTeam: 'Domácí Tým',
+      awayTeam: 'KK Hosté',
+      importKey: 'cka:m-video',
+      videoUrl: 'https://vysledky.kuzelky.cz/video/m-video',
+    );
+    await tester.pumpWidget(app(blocks: const [], matches: [withVideo]));
+    await tester.pumpAndSettle();
+    expect(find.byType(DayChipStrip), findsOneWidget);
+
+    final chips = find.descendant(
+      of: find.byType(DayChipStrip),
+      matching: find.byType(InkWell),
+    );
+    await tester.tap(chips.at(t.weekday));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.textContaining('KK Hosté').first);
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AlertDialog), findsOneWidget);
+    expect(find.byIcon(Icons.play_circle_fill), findsOneWidget);
+
+    await tester.tap(find.text('Domácí Tým – KK Hosté'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(MatchDetailScreen), findsOneWidget);
+  });
+
+  testWidgets(
+      'the same fix applies to the landscape calendar header (signed-in, '
+      'NO db time blocks): video control and tap-through both present',
+      (tester) async {
+    wideSurface(tester);
+    final withVideo = PrioritySlot(
+      type: PrioritySlot.fallbackMatchType,
+      id: 'm-video-cal',
+      date: tomorrow,
+      startsAt: const HourMinute(17, 0),
+      endsAt: const HourMinute(19, 0),
+      homeTeam: 'Domácí Tým',
+      awayTeam: 'KK Hosté',
+      importKey: 'cka:m-video-cal',
+      videoUrl: 'https://vysledky.kuzelky.cz/video/m-video-cal',
+    );
+    await tester.pumpWidget(app(blocks: const [], matches: [withVideo]));
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.descendant(
+        of: headerOf(tomorrow),
+        matching: find.textContaining('KK Hosté'),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AlertDialog), findsOneWidget);
+    expect(find.byIcon(Icons.play_circle_fill), findsOneWidget);
+
+    await tester.tap(find.text('Domácí Tým – KK Hosté'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(MatchDetailScreen), findsOneWidget);
   });
 }
