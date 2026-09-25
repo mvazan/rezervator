@@ -20,16 +20,13 @@ class RegisterScreen extends ConsumerStatefulWidget {
     super.key,
     this.registerProfile = Api.registerProfile,
     this.createTenantAndRegister = Api.createTenantAndRegister,
-    this.updateMyContact = Api.updateMyContact,
   });
 
   /// Injectable for widget tests (the Api ones need a live Supabase client).
   final Future<void> Function(String displayName, String tenantId,
       {String? clubId, String nick, String? phone}) registerProfile;
   final Future<void> Function(String tenantName, String displayName,
-      {String nick}) createTenantAndRegister;
-  final Future<void> Function({String? phone, bool? showEmail, bool? showPhone})
-      updateMyContact;
+      {String nick, String? phone}) createTenantAndRegister;
 
   @override
   ConsumerState<RegisterScreen> createState() => _RegisterScreenState();
@@ -97,10 +94,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       () async {
         if (tenantId == _newTenant) {
           await widget.createTenantAndRegister(_tenantName.text.trim(), name,
-              nick: _nick.text.trim());
-          // create_tenant_and_register takes no phone: the founder's own
-          // row takes it right after.
-          if (phone != null) await widget.updateMyContact(phone: phone);
+              nick: _nick.text.trim(), phone: phone);
         } else {
           await widget.registerProfile(name, tenantId,
               clubId: _clubId, nick: _nick.text.trim(), phone: phone);

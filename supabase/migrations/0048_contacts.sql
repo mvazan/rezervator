@@ -22,9 +22,9 @@ grant update (phone, show_email, show_phone) on profiles to authenticated;
 
 -- ------------------------------------------------- register_profile
 -- 0022's register_profile plus p_phone. The old four-argument signature is
--- dropped, not overloaded: a call without p_phone (the 1.2.x app, and
--- create_tenant_and_register, which passes four positional arguments) then
--- resolves to this one through the default. Both resolve at call time —
+-- dropped, not overloaded: a call without p_phone (the 1.2.x app) then
+-- resolves to this one through the default. create_tenant_and_register is
+-- re-created below to pass the founder's phone. Calls resolve at call time —
 -- PL/pgSQL records no dependency, so the drop does not cascade.
 drop function if exists register_profile(text, uuid, uuid, text);
 
@@ -112,6 +112,62 @@ $$;
 -- PUBLIC); the new one gets the same through Postgres' own default plus
 -- 0017's default privileges. Spelled out for the app and the service.
 grant execute on function register_profile(text, uuid, uuid, text, text)
+  to authenticated, service_role;
+
+-- ------------------------------------------------- create_tenant_and_register
+-- 0006's create_tenant_and_register plus p_phone, handed on to
+-- register_profile: a founder's phone is stored in the same transaction as
+-- the tenant and the profile. (Written separately afterwards, it could be
+-- lost while the app had already moved on to the next screen.) An invalid
+-- phone raises invalid_phone and rolls the new tenant back with it. Same
+-- drop-and-create as register_profile: a three-argument call (the 1.2.x
+-- app) resolves to this one through the default.
+drop function if exists create_tenant_and_register(text, text, text);
+
+create or replace function create_tenant_and_register(
+  p_tenant_name text,
+  p_display_name text,
+  p_nick text default '',
+  p_phone text default null
+)
+returns profiles
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_profile profiles;
+  v_tenant_id uuid;
+begin
+  if v_uid is null then
+    raise exception 'not_authenticated';
+  end if;
+
+  -- An existing profile means the caller already belongs to an alley; bail
+  -- out before creating a tenant nobody would live in.
+  select * into v_profile from profiles where id = v_uid;
+  if found then
+    return v_profile;
+  end if;
+
+  if trim(p_tenant_name) = '' then
+    raise exception 'empty_tenant_name';
+  end if;
+
+  begin
+    insert into tenants (name, founder_email)
+    values (trim(p_tenant_name), nullif(lower(coalesce(auth.email(), '')), ''))
+    returning id into v_tenant_id;
+  exception when unique_violation then
+    raise exception 'tenant_exists';
+  end;
+
+  return register_profile(p_display_name, v_tenant_id, null, p_nick, p_phone);
+end;
+$$;
+
+-- The dropped function kept the default ACL (PUBLIC); spelled out as for
+-- register_profile above.
+grant execute on function create_tenant_and_register(text, text, text, text)
   to authenticated, service_role;
 
 -- ------------------------------------------------------- contacts()

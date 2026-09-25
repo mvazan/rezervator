@@ -115,8 +115,8 @@ reappears, when `service_role` lacks DML on any table or view, or when
 
 | Function | Who | Effect / raises |
 |---|---|---|
-| `register_profile(display_name, tenant_id, club_id?, nick?, phone?)` | signed-in user without a profile | First approved member of a tenant (or the `founder_email` match) becomes approved admin, everyone else pending; placeholders never count as the first member. `phone` (0048) is stored as given when E.164, blank = none — the app normalises it first (`lib/domain/phone.dart`). 0048 dropped the four-argument signature: a call without `p_phone` (the 1.2.x app, `create_tenant_and_register`) resolves to this one through the default. `empty_display_name`, `nick_too_long`, `invalid_phone`, `unknown_tenant`, `unknown_club`. |
-| `create_tenant_and_register(tenant_name, display_name, nick?)` | signed-in user | Creates a pending tenant with the caller as founder, then registers. `empty_tenant_name`, `tenant_exists`. |
+| `register_profile(display_name, tenant_id, club_id?, nick?, phone?)` | signed-in user without a profile | First approved member of a tenant (or the `founder_email` match) becomes approved admin, everyone else pending; placeholders never count as the first member. `phone` (0048) is stored as given when E.164, blank = none — the app normalises it first (`lib/domain/phone.dart`). 0048 dropped the four-argument signature: a call without `p_phone` (the 1.2.x app) resolves to this one through the default. `empty_display_name`, `nick_too_long`, `invalid_phone`, `unknown_tenant`, `unknown_club`. |
+| `create_tenant_and_register(tenant_name, display_name, nick?, phone?)` | signed-in user | Creates a pending tenant with the caller as founder, then registers through `register_profile`, the founder's `phone` (0048) included, all in one transaction: an `invalid_phone` founds no tenant. 0048 dropped the three-argument signature; a call without `p_phone` resolves through the default. `empty_tenant_name`, `tenant_exists`, `invalid_phone`. |
 | `registration_clubs(tenant_id)` | signed-in, pre-profile | Club list for the register screen. |
 | `approve_player(user_id)`, `set_role(user_id, role)`, `set_player_club(user_id, club_id)`, `upsert_club(...)`, `delete_club(id)` | admin | Member and club administration. `cannot_demote_self`, `placeholder_no_account` (a hand-made profile stays a player), `unknown_club`. |
 | `kiosk_password_target(user_id)` (0028) | admin | The gate behind the `kiosk-password` edge function: returns the id of a kiosk of the caller's OWN alley, so the function sets a password only where the caller may. Called with the CALLER's JWT (the function then uses the service role). `not_allowed`, `unknown_kiosk`. |
@@ -866,9 +866,11 @@ and FCM is configured, e-mail otherwise.
   superadmin, who may still read it — with a hidden e-mail or phone null
   and the other still shown; the kiosk and a pending member refused, anon
   without EXECUTE, another alley invisible; phone and switches own-row
-  only, even against the admin; the E.164 check; `register_profile` with a
-  phone, a refused one, a blank one, a named call without `p_phone`, and
-  `create_tenant_and_register` on top of it), and the 0035
+  only, even against the admin; the E.164 check and its 8- and 15-digit
+  bounds; `register_profile` with a phone, a refused one, a blank one, a
+  named call without `p_phone`; `create_tenant_and_register` without a
+  phone, with the founder's phone, and with a bad one that founds no
+  tenant), and the 0035
   assertion (now including `team_colors` and `match_exceptions`) that every table
   `lib/data/providers.dart` streams is in the `supabase_realtime`
   publication; run with `psql … -v ON_ERROR_STOP=1 -f` against the local

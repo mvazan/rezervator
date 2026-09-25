@@ -22,10 +22,9 @@ void main() {
         home: RegisterScreen(
           registerProfile: (name, tenantId, {clubId, nick = '', phone}) async =>
               calls.add('register $name|$tenantId|$clubId|$nick|$phone'),
-          createTenantAndRegister: (tenantName, name, {nick = ''}) async =>
-              calls.add('found $tenantName|$name|$nick'),
-          updateMyContact: ({phone, showEmail, showPhone}) async =>
-              calls.add('contact $phone|$showEmail|$showPhone'),
+          createTenantAndRegister: (tenantName, name,
+                  {nick = '', phone}) async =>
+              calls.add('found $tenantName|$name|$nick|$phone'),
         ),
       ),
     );
@@ -220,8 +219,8 @@ void main() {
     expect(calls, ['register Jan Novák|t1|null|Honza|+420777123456']);
   });
 
-  testWidgets('a founder\'s phone is saved on their new profile right after '
-      'the alley is founded', (tester) async {
+  testWidgets('a founder\'s phone goes normalised with the founding, in the '
+      'same call', (tester) async {
     await tester.pumpWidget(app(two));
     await tester.pumpAndSettle();
 
@@ -236,14 +235,9 @@ void main() {
         find.widgetWithText(TextField, 'Jméno a příjmení'), 'Jan Novák');
     await tester.enterText(
         find.widgetWithText(TextField, phoneLabel), '+49 30 1234567');
-    await tester.ensureVisible(find.text('Zaregistrovat se'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Zaregistrovat se'));
+    await submit(tester);
     await tester.pumpAndSettle();
 
-    expect(calls, [
-      'found Kuželna Nová|Jan Novák|',
-      'contact +49301234567|null|null',
-    ]);
+    expect(calls, ['found Kuželna Nová|Jan Novák||+49301234567']);
   });
 }

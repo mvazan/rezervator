@@ -6067,8 +6067,9 @@ end $$;
 reset role;
 
 -- 19e. register_profile takes the phone (E.164 or blank) and refuses any
--- other; an old-style call without p_phone still resolves, and so does
--- create_tenant_and_register's four positional arguments.
+-- other; an old-style call without p_phone still resolves. So does
+-- create_tenant_and_register, which also takes the founder's phone and,
+-- when it is bad, creates no tenant.
 set local role authenticated;
 set local request.jwt.claims =
   '{"sub":"40000000-0000-0000-0000-000000000021","role":"authenticated"}';
@@ -6135,7 +6136,50 @@ begin
       to_jsonb(v_p);
   end if;
 end $$;
+set local request.jwt.claims =
+  '{"sub":"40000000-0000-0000-0000-000000000026","role":"authenticated"}';
+do $$
+declare
+  v_p profiles;
+begin
+  v_p := create_tenant_and_register('Kuželna H (0048)', 'Zakladatel H', 'Zak',
+                                    '+420777000026');
+  if v_p.role <> 'admin' or v_p.status <> 'approved'
+     or v_p.phone is distinct from '+420777000026' or v_p.nick <> 'Zak' then
+    raise exception 'FAIL: create_tenant_and_register did not store the founder''s phone: %',
+      to_jsonb(v_p);
+  end if;
+end $$;
+set local request.jwt.claims =
+  '{"sub":"40000000-0000-0000-0000-000000000027","role":"authenticated"}';
+do $$
+begin
+  begin
+    perform create_tenant_and_register('Kuželna I (0048)', 'Zakladatel I', '',
+                                       '777000027');
+    raise exception 'FAIL: create_tenant_and_register took a phone without the country code';
+  exception when others then
+    if sqlerrm <> 'invalid_phone' then raise; end if;
+  end;
+  if exists (select 1 from profiles where id = auth.uid()) then
+    raise exception 'FAIL: a refused founding left a profile behind';
+  end if;
+end $$;
 reset role;
+do $$
+begin
+  if exists (select 1 from tenants where name = 'Kuželna I (0048)') then
+    raise exception 'FAIL: a refused founding left its tenant behind';
+  end if;
+  if to_regprocedure('public.create_tenant_and_register(text, text, text)') is not null then
+    raise exception 'FAIL: the three-argument create_tenant_and_register is still there';
+  end if;
+  if not has_function_privilege('authenticated',
+       'public.create_tenant_and_register(text, text, text, text)', 'execute') then
+    raise exception 'FAIL: the app lost create_tenant_and_register';
+  end if;
+  raise notice 'OK: create_tenant_and_register stores the founder''s phone in the same transaction; a bad one founds nothing (0048)';
+end $$;
 do $$
 begin
   if to_regprocedure('public.register_profile(text, uuid, uuid, text)') is not null then

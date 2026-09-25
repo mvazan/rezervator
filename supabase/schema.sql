@@ -1074,7 +1074,7 @@ COMMENT ON COLUMN "public"."profiles"."show_phone" IS 'Whether contacts() hands 
 
 
 
-CREATE OR REPLACE FUNCTION "public"."create_tenant_and_register"("p_tenant_name" "text", "p_display_name" "text", "p_nick" "text" DEFAULT ''::"text") RETURNS "public"."profiles"
+CREATE OR REPLACE FUNCTION "public"."create_tenant_and_register"("p_tenant_name" "text", "p_display_name" "text", "p_nick" "text" DEFAULT ''::"text", "p_phone" "text" DEFAULT NULL::"text") RETURNS "public"."profiles"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
     AS $$
@@ -1106,12 +1106,12 @@ begin
     raise exception 'tenant_exists';
   end;
 
-  return register_profile(p_display_name, v_tenant_id, null, p_nick);
+  return register_profile(p_display_name, v_tenant_id, null, p_nick, p_phone);
 end;
 $$;
 
 
-ALTER FUNCTION "public"."create_tenant_and_register"("p_tenant_name" "text", "p_display_name" "text", "p_nick" "text") OWNER TO "postgres";
+ALTER FUNCTION "public"."create_tenant_and_register"("p_tenant_name" "text", "p_display_name" "text", "p_nick" "text", "p_phone" "text") OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."delete_club"("p_id" "uuid") RETURNS "void"
@@ -5005,6 +5005,12 @@ GRANT UPDATE("show_email") ON TABLE "public"."profiles" TO "authenticated";
 
 
 GRANT UPDATE("show_phone") ON TABLE "public"."profiles" TO "authenticated";
+
+
+
+GRANT ALL ON FUNCTION "public"."create_tenant_and_register"("p_tenant_name" "text", "p_display_name" "text", "p_nick" "text", "p_phone" "text") TO "anon";
+GRANT ALL ON FUNCTION "public"."create_tenant_and_register"("p_tenant_name" "text", "p_display_name" "text", "p_nick" "text", "p_phone" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."create_tenant_and_register"("p_tenant_name" "text", "p_display_name" "text", "p_nick" "text", "p_phone" "text") TO "service_role";
 
 
 

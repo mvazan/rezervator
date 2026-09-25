@@ -581,12 +581,16 @@ class Api {
       });
 
   /// Founds a brand-new alley and registers the caller as its admin.
+  /// The founder's phone goes in the same call (0048), so it is stored in
+  /// the same transaction as the profile.
   static Future<void> createTenantAndRegister(
-          String tenantName, String displayName, {String nick = ''}) =>
+          String tenantName, String displayName,
+          {String nick = '', String? phone}) =>
       _db.rpc('create_tenant_and_register', params: {
         'p_tenant_name': tenantName,
         'p_display_name': displayName,
         'p_nick': nick,
+        'p_phone': phone,
       });
 
   static Future<void> approvePlayer(String userId) =>
