@@ -89,7 +89,7 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                     ),
                     recognizer: _profileLink,
                   ),
-                  const TextSpan(text: ' → Kontakt.'),
+                  const TextSpan(text: '.'),
                 ],
               ),
               style: theme.textTheme.bodySmall

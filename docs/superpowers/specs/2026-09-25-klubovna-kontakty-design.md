@@ -88,7 +88,7 @@ It is `security definer`, `stable`, `set search_path = public`.
 
 **`ContactsScreen`** (`lib/features/clubhouse/contacts_screen.dart`)
 - AppBar „Kontakty“.
-- **Note at the top**, a quiet info line, not an error: „Svůj e-mail a telefon můžeš v Kontaktech skrýt v Můj profil → Kontakt.“ The words „Můj profil“ are a tappable link that opens the profile screen, the same way the shell's profile icon does.
+- **Note at the top**, a quiet info line, not an error: „Svůj e-mail a telefon můžeš v Kontaktech skrýt v Můj profil.“ The words „Můj profil“ are a tappable link that opens the profile screen, the same way the shell's profile icon does.
 - **Search field**, placeholder „Hledat jméno, přezdívku nebo oddíl“. It ignores diacritics and case, reusing the app's existing search normalisation, for example the one `upcomingMatches` uses.
 - **One row per contact**, in Czech alphabetical order:
   - a leading dot in the club colour, or neutral without a club;
@@ -111,14 +111,14 @@ It is `security definer`, `stable`, `set search_path = public`.
 - A valid one is normalised and passed to `register_profile`.
 
 **Můj profil** (`profile_screen.dart`)
-- A new card „Kontakt“:
+- No card of its own (the user's call after the first build): the contact rows join the **first card**, which reads top to bottom Jméno, E-mail, Telefon, Oddíl, then the two switches, then the existing note.
   - „Telefon“ shows the formatted number or „nenastaven“, with „Upravit“ opening a dialog. The dialog has a field, validation, Zrušit / Uložit, and an empty value removes the phone.
   - A switch „Ukázat e-mail v Kontaktech“ with subtitle „Ostatní hráči kuželny ti můžou napsat.“
   - A switch „Ukázat telefon v Kontaktech“ with subtitle „Zavolat nebo napsat přes WhatsApp.“ The phone switch still works when no phone is set; there is just nothing to show.
 - Both switches save immediately with the app's optimistic write pattern, as the other profile settings do.
 - Colours come from `Theme.of(context).colorScheme`, and every string is Czech.
 
-**Changelog.** The web batch at the top of `changelog_data.dart` gets a line: „Klubovna → Kontakty: e-mail a telefon hráčů kuželny. Svůj e-mail i telefon můžeš skrýt v Můj profil → Kontakt.“ Add a `store:` summary only if the batch goes over 500 characters.
+**Changelog.** The web batch at the top of `changelog_data.dart` gets a line: „Klubovna → Kontakty: e-mail a telefon hráčů kuželny. Svůj e-mail i telefon můžeš skrýt v Můj profil.“ Add a `store:` summary only if the batch goes over 500 characters.
 
 ## Tests (app)
 
@@ -135,4 +135,4 @@ It is `security definer`, `stable`, `set search_path = public`.
   - the empty and error states.
 - **Hub:** the new entry and the renamed Kuželny subtitle.
 - **Registration:** an optional phone, invalid input refused inline, a valid one passed normalised.
-- **Profile:** the Kontakt card shows the phone, the edit dialog validates and saves, and the switches save at once.
+- **Profile:** the first card holds the phone and the switches in that order, shows the phone, the edit dialog validates and saves, and the switches save at once.

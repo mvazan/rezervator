@@ -12,7 +12,6 @@ import 'package:rezervator/domain/palette.dart';
 import 'package:rezervator/features/profile/widgets/reservation_color_picker.dart';
 import 'package:rezervator/features/profile/match_exceptions_screen.dart';
 import 'package:rezervator/features/profile/widgets/calendar_link_card.dart';
-import 'package:rezervator/features/profile/widgets/contact_card.dart';
 import 'package:rezervator/features/profile/widgets/event_color_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -134,6 +133,12 @@ void main() {
     );
   }
 
+  // The Přezdívka row's own „Upravit" — the phone row has one too (0048).
+  final nickEdit = find.descendant(
+    of: find.widgetWithText(ListTile, 'Přezdívka'),
+    matching: find.text('Upravit'),
+  );
+
   testWidgets('shows display name, club, current nick and the edit '
       'affordance', (tester) async {
     await tester.pumpWidget(app(me));
@@ -143,7 +148,7 @@ void main() {
     expect(find.text('Já Hráč'), findsOneWidget);
     expect(find.text('TJ Sokol'), findsOneWidget);
     expect(find.text('Já H.'), findsOneWidget);
-    expect(find.text('Upravit'), findsOneWidget);
+    expect(nickEdit, findsOneWidget);
   });
 
   testWidgets('shows "nenastavena" when nick is empty', (tester) async {
@@ -168,7 +173,10 @@ void main() {
     await tester.pumpWidget(app(me));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Upravit'));
+    // The first card's phone and Kontakty rows push Tabule below the fold.
+    await tester.ensureVisible(nickEdit);
+    await tester.pumpAndSettle();
+    await tester.tap(nickEdit);
     await tester.pumpAndSettle();
 
     expect(find.text('Přezdívka na tabuli'), findsWidgets);
@@ -357,7 +365,7 @@ void main() {
     testWidgets('not linked: explains the calendar and offers to connect', (
       tester,
     ) async {
-      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.physicalSize = const Size(800, 1900);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -374,7 +382,7 @@ void main() {
 
     testWidgets('pending: shows progress; a retry stays available in case '
         'the backend never finishes', (tester) async {
-      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.physicalSize = const Size(800, 1900);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -400,7 +408,7 @@ void main() {
     testWidgets('pending with a failure: shows the reason and a retry', (
       tester,
     ) async {
-      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.physicalSize = const Size(800, 1900);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -423,7 +431,7 @@ void main() {
 
     testWidgets('linked: shows the Google account, the reminders summary '
         'and Odpojit', (tester) async {
-      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.physicalSize = const Size(800, 1900);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -445,7 +453,7 @@ void main() {
         'the app shows and what Google gets', (
       tester,
     ) async {
-      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.physicalSize = const Size(800, 1900);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -474,7 +482,7 @@ void main() {
     // not got.
     testWidgets('without a calendar, Moje týmy sums up the overview alone',
         (tester) async {
-      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.physicalSize = const Size(800, 1900);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -494,7 +502,7 @@ void main() {
     });
 
     testWidgets('linked without reminders reads "Žádné"', (tester) async {
-      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.physicalSize = const Size(800, 1900);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -516,7 +524,7 @@ void main() {
 
     testWidgets('broken: shows the reason, asks for a re-link and offers '
         'the connect button', (tester) async {
-      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.physicalSize = const Size(800, 1900);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -547,7 +555,7 @@ void main() {
 
     testWidgets('Druhý kalendář switch is off by default, with a subtitle '
         'naming the second calendar', (tester) async {
-      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.physicalSize = const Size(800, 1900);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -565,7 +573,7 @@ void main() {
     testWidgets('with the second calendar on, the switch is on and the '
         'reminders row doubles into hlavního / druhého, each with its own '
         'summary', (tester) async {
-      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.physicalSize = const Size(800, 1900);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -597,7 +605,7 @@ void main() {
 
     testWidgets('without the second calendar there is a single Připomínky '
         'row, unchanged from before 0032', (tester) async {
-      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.physicalSize = const Size(800, 1900);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -612,7 +620,7 @@ void main() {
     testWidgets('Barva tréninků row shows Bez barvy by default', (
       tester,
     ) async {
-      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.physicalSize = const Size(800, 1900);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -624,7 +632,7 @@ void main() {
     });
 
     testWidgets('Barva tréninků row names the chosen colour', (tester) async {
-      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.physicalSize = const Size(800, 1900);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -645,7 +653,7 @@ void main() {
 
     testWidgets('Odpojit asks for confirmation with the delete warning; '
         'Zrušit keeps the link', (tester) async {
-      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.physicalSize = const Size(800, 1900);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -1879,9 +1887,9 @@ void main() {
     });
   });
 
-  group('Kontakt card (0048)', () {
-    // Tall enough that the whole list is built: the card sits between
-    // Google kalendář and Vzhled, below the default test viewport.
+  group('Kontakt rows in the first card (0048)', () {
+    // Tall enough that the whole first card, switches included, is on
+    // screen at once.
     void tall(WidgetTester tester) {
       tester.view.physicalSize = const Size(800, 2600);
       tester.view.devicePixelRatio = 1.0;
@@ -1905,8 +1913,14 @@ void main() {
     Future<void> record({String? phone, bool? showEmail, bool? showPhone}) async =>
         saved.add('phone=$phone showEmail=$showEmail showPhone=$showPhone');
 
-    Finder inCard(Finder matching) =>
-        find.descendant(of: find.byType(ContactCard), matching: matching);
+    /// The first card — Jméno, E-mail, Oddíl — now also holds the phone and
+    /// the two Kontakty switches.
+    Finder inCard(Finder matching) => find.descendant(
+          of: find
+              .ancestor(of: find.text('Jméno'), matching: find.byType(Card))
+              .first,
+          matching: matching,
+        );
     Finder inDialog(Finder matching) =>
         find.descendant(of: find.byType(AlertDialog), matching: matching);
     Finder switchTile(String title) =>
@@ -1918,8 +1932,20 @@ void main() {
       await tester.pumpWidget(app(withPhone, updateMyContact: record));
       await tester.pumpAndSettle();
 
-      expect(inCard(find.text('Kontakt')), findsOneWidget);
+      expect(find.text('Kontakt'), findsNothing, reason: 'no card of its own');
       expect(inCard(find.text('Telefon')), findsOneWidget);
+      expect(inCard(switchTile('Ukázat e-mail v Kontaktech')), findsOneWidget);
+      expect(inCard(switchTile('Ukázat telefon v Kontaktech')), findsOneWidget);
+      double top(Finder f) => tester.getTopLeft(f).dy;
+      final order = [
+        inCard(find.text('Jméno')),
+        inCard(find.text('E-mail')),
+        inCard(find.text('Telefon')),
+        inCard(find.text('Oddíl')),
+        inCard(switchTile('Ukázat e-mail v Kontaktech')),
+        inCard(switchTile('Ukázat telefon v Kontaktech')),
+      ].map(top).toList();
+      expect(order, [...order]..sort(), reason: 'top to bottom in this order');
       expect(inCard(find.text('+420 777 123 456')), findsOneWidget);
       expect(
         tester.widget<SwitchListTile>(switchTile('Ukázat e-mail v Kontaktech'))

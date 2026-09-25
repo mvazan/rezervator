@@ -64,8 +64,7 @@ void main() {
         ),
       );
 
-  const note = 'Svůj e-mail a telefon můžeš v Kontaktech skrýt v Můj profil → '
-      'Kontakt.';
+  const note = 'Svůj e-mail a telefon můžeš v Kontaktech skrýt v Můj profil.';
 
   /// The recognizer on the note's „Můj profil" words — tapped directly, as
   /// tapOnText lands on a glyph edge under the test font's letter spacing.

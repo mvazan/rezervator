@@ -1,5 +1,7 @@
-/// Můj profil → Kontakt (0048): the player's phone, and whether Klubovna →
-/// Kontakty shows their e-mail and phone to the other players of the alley.
+/// Můj profil's contact tiles (0048): the player's phone, and whether
+/// Klubovna → Kontakty shows their e-mail and phone to the other players of
+/// the alley. They sit in the profile's first card, next to Jméno, E-mail
+/// and Oddíl.
 library;
 
 import 'package:flutter/material.dart';
@@ -8,19 +10,24 @@ import '../../../core/ui.dart';
 import '../../../domain/models.dart';
 import '../../../domain/phone.dart';
 
-class ContactCard extends StatelessWidget {
-  const ContactCard({
+/// `Api.updateMyContact` in the app — optimistic, so a switch flips at
+/// once; a fake in widget tests.
+typedef UpdateMyContact = Future<void> Function({
+  String? phone,
+  bool? showEmail,
+  bool? showPhone,
+});
+
+/// Telefon, with „Upravit" opening the phone dialog.
+class ContactPhoneTile extends StatelessWidget {
+  const ContactPhoneTile({
     super.key,
     required this.profile,
     required this.updateMyContact,
   });
 
   final Profile profile;
-
-  /// `Api.updateMyContact` in the app — optimistic, so a switch flips at
-  /// once; a fake in widget tests.
-  final Future<void> Function({String? phone, bool? showEmail, bool? showPhone})
-      updateMyContact;
+  final UpdateMyContact updateMyContact;
 
   Future<void> _editPhone(BuildContext context) async {
     final current = profile.phone;
@@ -41,42 +48,54 @@ class ContactCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final phone = profile.phone;
-    return Card(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const ListTile(title: Text('Kontakt')),
-          ListTile(
-            title: const Text('Telefon'),
-            subtitle: Text(phone == null ? 'nenastaven' : formatPhone(phone)),
-            trailing: TextButton(
-              onPressed: () => _editPhone(context),
-              child: const Text('Upravit'),
-            ),
-          ),
-          SwitchListTile(
-            title: const Text('Ukázat e-mail v Kontaktech'),
-            subtitle: const Text('Ostatní hráči kuželny ti můžou napsat.'),
-            value: profile.showEmail,
-            onChanged: (v) => tryAction(
-              context,
-              () => updateMyContact(showEmail: v),
-              errorText: friendlyDbError,
-            ),
-          ),
-          // Works without a phone too — there is just nothing to show yet.
-          SwitchListTile(
-            title: const Text('Ukázat telefon v Kontaktech'),
-            subtitle: const Text('Zavolat nebo napsat přes WhatsApp.'),
-            value: profile.showPhone,
-            onChanged: (v) => tryAction(
-              context,
-              () => updateMyContact(showPhone: v),
-              errorText: friendlyDbError,
-            ),
-          ),
-        ],
+    return ListTile(
+      title: const Text('Telefon'),
+      subtitle: Text(phone == null ? 'nenastaven' : formatPhone(phone)),
+      trailing: TextButton(
+        onPressed: () => _editPhone(context),
+        child: const Text('Upravit'),
       ),
+    );
+  }
+}
+
+/// The two Kontakty switches — what the other players of the alley see.
+class ContactVisibilityTiles extends StatelessWidget {
+  const ContactVisibilityTiles({
+    super.key,
+    required this.profile,
+    required this.updateMyContact,
+  });
+
+  final Profile profile;
+  final UpdateMyContact updateMyContact;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        SwitchListTile(
+          title: const Text('Ukázat e-mail v Kontaktech'),
+          subtitle: const Text('Ostatní hráči kuželny ti můžou napsat.'),
+          value: profile.showEmail,
+          onChanged: (v) => tryAction(
+            context,
+            () => updateMyContact(showEmail: v),
+            errorText: friendlyDbError,
+          ),
+        ),
+        // Works without a phone too — there is just nothing to show yet.
+        SwitchListTile(
+          title: const Text('Ukázat telefon v Kontaktech'),
+          subtitle: const Text('Zavolat nebo napsat přes WhatsApp.'),
+          value: profile.showPhone,
+          onChanged: (v) => tryAction(
+            context,
+            () => updateMyContact(showPhone: v),
+            errorText: friendlyDbError,
+          ),
+        ),
+      ],
     );
   }
 }

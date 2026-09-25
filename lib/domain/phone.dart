@@ -1,5 +1,5 @@
 /// A player's phone number (0048): what they type at registration or in
-/// Můj profil → Kontakt, stored the one way the database accepts —
+/// Můj profil, stored the one way the database accepts —
 /// international E.164, `+<digits>` (`profiles_phone_check`) — and shown
 /// back readable. Pure Dart, unit-tested.
 library;

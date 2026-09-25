@@ -106,6 +106,10 @@ class ProfileScreen extends ConsumerWidget {
                         title: const Text('E-mail'),
                         subtitle: Text(profile.email),
                       ),
+                      ContactPhoneTile(
+                        profile: profile,
+                        updateMyContact: updateMyContact,
+                      ),
                       ListTile(
                         title: const Text('Oddíl'),
                         subtitle: Text(
@@ -113,6 +117,12 @@ class ProfileScreen extends ConsumerWidget {
                               ? '—'
                               : clubNameOf(profile.clubId, clubs),
                         ),
+                      ),
+                      // What Klubovna → Kontakty shows of the e-mail and
+                      // the phone above (0048).
+                      ContactVisibilityTiles(
+                        profile: profile,
+                        updateMyContact: updateMyContact,
                       ),
                       const Padding(
                         padding: EdgeInsets.fromLTRB(16, 0, 16, 12),
@@ -287,10 +297,6 @@ class ProfileScreen extends ConsumerWidget {
                   const CalendarLinkCard(),
                   const SizedBox(height: 16),
                 ],
-                // Kontakt (0048): the phone, and what Klubovna → Kontakty
-                // shows of it and of the e-mail.
-                ContactCard(profile: profile, updateMyContact: updateMyContact),
-                const SizedBox(height: 16),
                 // Appearance (theme, text size) last: it is about the app
                 // rather than about the player's kuželky, and nothing above
                 // it depends on it.

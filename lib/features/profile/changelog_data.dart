@@ -57,7 +57,7 @@ const appChangelog = <Release>[
     'Detail zápasu má zápis jako na kuzelky.com — ikonou vpravo nahoře ho '
         'otevřeš přes celou obrazovku, na výšku i na šířku.',
     'Klubovna → Kontakty: e-mail a telefon hráčů kuželny. Svůj e-mail i '
-        'telefon můžeš skrýt v Můj profil → Kontakt.',
+        'telefon můžeš skrýt v Můj profil.',
   ]),
   Release('1.2.8', '22. 9. 2026', [
     'Ve správě appky se tlačítko pro přidání (oddíl, hráč, pronájem…) už '
