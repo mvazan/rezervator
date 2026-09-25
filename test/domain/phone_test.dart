@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/domain/phone.dart';
 
@@ -37,10 +39,25 @@ void main() {
       expect(normalizePhone('+0777123456'), isNull, reason: 'E.164 never +0');
     });
 
-    test('every result passes the database rule', () {
-      for (final input in ['777123456', '+49 30 1234567', '00420777123456']) {
-        expect(e164Pattern.hasMatch(normalizePhone(input)!), isTrue);
-      }
+    test('keeps the E.164 bounds: 8 to 15 digits after the plus', () {
+      expect(normalizePhone('+1234567'), isNull, reason: '7 digits');
+      expect(normalizePhone('+12345678'), '+12345678', reason: '8 digits');
+      expect(normalizePhone('+123456789012345'), '+123456789012345',
+          reason: '15 digits');
+      expect(normalizePhone('+1234567890123456'), isNull, reason: '16 digits');
+    });
+
+    test('its rule is the database\'s own, letter for letter', () {
+      // profiles_phone_check and register_profile (0048) refuse what
+      // e164Pattern refuses — so a number the app accepts is never bounced
+      // by the server. Read from the migration, so a change on either side
+      // fails here.
+      final sql =
+          File('supabase/migrations/0048_contacts.sql').readAsStringSync();
+      final check = RegExp(r"phone ~ '([^']+)'").firstMatch(sql)!.group(1);
+      final register = RegExp(r"v_phone !~ '([^']+)'").firstMatch(sql)!.group(1);
+      expect(check, e164Pattern.pattern);
+      expect(register, e164Pattern.pattern);
     });
   });
 

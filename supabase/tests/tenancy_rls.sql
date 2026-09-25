@@ -6047,6 +6047,15 @@ begin
     raise exception 'FAIL: a 16-digit phone was stored';
   exception when check_violation then null;
   end;
+  begin
+    update profiles set phone = '+1234567' where id = auth.uid();
+    raise exception 'FAIL: a 7-digit phone was stored';
+  exception when check_violation then null;
+  end;
+  -- The bounds the app's e164Pattern (lib/domain/phone.dart) also keeps.
+  update profiles set phone = '+12345678' where id = auth.uid();
+  update profiles set phone = '+123456789012345' where id = auth.uid();
+  update profiles set phone = '+420777999002' where id = auth.uid();
 end $$;
 set local request.jwt.claims =
   '{"sub":"40000000-0000-0000-0000-000000000001","role":"authenticated"}';
