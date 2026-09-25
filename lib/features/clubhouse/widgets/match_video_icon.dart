@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/ui.dart';
 import '../../../domain/models.dart';
+import '../../../domain/palette.dart';
 import '../../../domain/results.dart';
 
 const double _slotSize = 40;
@@ -30,6 +31,7 @@ class MatchLeading extends StatefulWidget {
     required this.now,
     required this.linksEnabled,
     required this.fallback,
+    this.colorId,
     this.launch = launchWeb,
   });
 
@@ -44,6 +46,11 @@ class MatchLeading extends StatefulWidget {
 
   /// The row's own "nothing to show" glyph.
   final Widget fallback;
+
+  /// The match's team colour (a Google event colour id, as the row's
+  /// trophy has it): a recording's play button wears it, like the trophy.
+  /// Null keeps the plain play button; a live stream stays red either way.
+  final int? colorId;
 
   final void Function(String url) launch;
 
@@ -103,6 +110,28 @@ class _MatchLeadingState extends State<MatchLeading>
   void dispose() {
     _pulse?.dispose();
     super.dispose();
+  }
+
+  Widget _recordingBadge(ThemeData theme) {
+    final color = googleEventColorOf(widget.colorId);
+    if (color == null) {
+      return Icon(
+        Icons.play_circle_fill,
+        size: _badgeSize,
+        color: theme.colorScheme.primary,
+      );
+    }
+    return Container(
+      width: _badgeSize,
+      height: _badgeSize,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: color,
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Icon(Icons.play_arrow, size: 22, color: legibleGlyphOn(color)),
+    );
   }
 
   @override
@@ -167,11 +196,7 @@ class _MatchLeadingState extends State<MatchLeading>
               ),
             ],
           )
-        : Icon(
-            Icons.play_circle_fill,
-            size: _badgeSize,
-            color: theme.colorScheme.primary,
-          );
+        : _recordingBadge(theme);
 
     // IconButton's own tooltip already carries the accessible name (Tooltip
     // wraps its child in Semantics with that message) — no extra wrapper

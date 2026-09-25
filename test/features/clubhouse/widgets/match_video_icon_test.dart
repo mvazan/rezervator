@@ -40,6 +40,7 @@ void main() {
     VoidCallback? onRowOpen,
     bool disableAnimations = false,
     ThemeData? theme,
+    int? colorId,
   }) {
     final content = InkWell(
       onTap: onRowOpen,
@@ -51,6 +52,7 @@ void main() {
             now: now,
             linksEnabled: linksEnabled,
             fallback: fallback,
+            colorId: colorId,
             launch: launch ?? (_) {},
           ),
           const Text('Domácí – Hosté'),
@@ -129,6 +131,43 @@ void main() {
           greaterThanOrEqualTo(3.0),
           reason: variant);
     }
+  });
+
+  testWidgets(
+      'a recording wears the team colour: a filled circle with a legible '
+      'play glyph', (tester) async {
+    await tester.pumpWidget(wrap(
+      slot: slot(videoUrl: 'https://vysledky.kuzelky.cz/video/m1'),
+      matchResult: result(MatchStatus.finished),
+      colorId: 1, // Levandulová, #7986CB — dark enough for a white glyph
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.byIcon(Icons.play_circle_fill), findsNothing);
+    final glyph = find.byIcon(Icons.play_arrow);
+    expect(glyph, findsOneWidget);
+    expect(tester.widget<Icon>(glyph).color, Colors.white);
+    final circle = tester.widget<Container>(find
+        .ancestor(of: glyph, matching: find.byType(Container))
+        .first);
+    expect((circle.decoration! as BoxDecoration).color,
+        const Color(0xFF7986CB));
+    final button = find.widgetWithIcon(IconButton, Icons.play_arrow);
+    expect(tester.widget<IconButton>(button).tooltip, 'Záznam');
+  });
+
+  testWidgets('a live stream stays the red camera, team colour or not',
+      (tester) async {
+    await tester.pumpWidget(wrap(
+      slot: slot(videoUrl: 'https://vysledky.kuzelky.cz/video/m1'),
+      matchResult: result(MatchStatus.inProgress),
+      colorId: 1,
+      disableAnimations: true,
+    ));
+    await tester.pump();
+
+    expect(find.byIcon(Icons.videocam), findsOneWidget);
+    expect(find.byIcon(Icons.play_arrow), findsNothing);
   });
 
   testWidgets('a finished match shows play_circle_fill with tooltip Záznam',

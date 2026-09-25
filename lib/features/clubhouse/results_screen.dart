@@ -160,6 +160,13 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
         ? ''
         : pinsLabel(result.homeTotal, result.awayTotal);
 
+    final colorId = matchColorOf(
+      slot,
+      followedTeams,
+      teamColors,
+      calendarTeams: calendarTeams,
+      exceptions: exceptions,
+    );
     return ListTile(
       key: _matchKeyFor(slot.id),
       leading: MatchLeading(
@@ -167,15 +174,8 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
         result: result,
         now: now,
         linksEnabled: true,
-        fallback: MatchTrophy(
-          colorId: matchColorOf(
-            slot,
-            followedTeams,
-            teamColors,
-            calendarTeams: calendarTeams,
-            exceptions: exceptions,
-          ),
-        ),
+        fallback: MatchTrophy(colorId: colorId),
+        colorId: colorId,
         launch: widget.launch,
       ),
       title: MatchTitle(slot: slot, winner: displayWinner(result)),

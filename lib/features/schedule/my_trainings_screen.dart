@@ -45,7 +45,7 @@ class MatchTrophy extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final raw = _rawEventColor(colorId);
+    final raw = googleEventColorOf(colorId);
     if (raw == null) {
       return const _LeadingSlot(child: Icon(Icons.emoji_events_outlined));
     }
@@ -61,26 +61,11 @@ class MatchTrophy extends StatelessWidget {
             color: Theme.of(context).colorScheme.outlineVariant,
           ),
         ),
-        child: Icon(Icons.emoji_events, size: 20, color: _legibleOn(raw)),
+        child: Icon(Icons.emoji_events, size: 20, color: legibleGlyphOn(raw)),
       ),
     );
   }
 }
-
-/// The raw Google RGB for [colorId] (the dot fill), or null for "no colour"
-/// and any id that is none of the eleven.
-Color? _rawEventColor(int? colorId) {
-  if (colorId == null) return null;
-  for (final (id, _, color) in googleEventColors) {
-    if (id == colorId) return color;
-  }
-  return null;
-}
-
-/// Black or white glyph, whichever reads on [color] — the eleven are fixed
-/// RGBs, so contrast goes by luminance (as `EventColorPicker` does).
-Color _legibleOn(Color color) =>
-    color.computeLuminance() > 0.5 ? Colors.black87 : Colors.white;
 
 /// One Google event colour id as a shade legible on [brightness]'s surface,
 /// or null for "no colour" — the plain icon. Shared by the match trophy and

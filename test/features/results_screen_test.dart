@@ -9,6 +9,7 @@ import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/clubhouse/match_detail_screen.dart';
 import 'package:rezervator/features/clubhouse/results_screen.dart';
+import 'package:rezervator/features/clubhouse/widgets/match_video_icon.dart';
 import 'package:rezervator/features/schedule/my_trainings_screen.dart'
     show MatchTrophy;
 
@@ -182,6 +183,24 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(tester.widget<MatchTrophy>(find.byType(MatchTrophy)).colorId, 9);
+  });
+
+  testWidgets('a recorded match\'s play button wears the same team colour',
+      (tester) async {
+    final played = match(
+      id: 'm1',
+      date: today.addDays(-1),
+      videoUrl: 'https://www.youtube.com/watch?v=x',
+    );
+    await tester.pumpWidget(app(
+      slots: [played],
+      results: {'m1': finishedResult},
+      teamColors: const {veverky: 9},
+    ));
+    await tester.pumpAndSettle();
+
+    expect(tester.widget<MatchLeading>(find.byType(MatchLeading)).colorId, 9);
+    expect(find.byIcon(Icons.play_arrow), findsOneWidget);
   });
 
   testWidgets('Vše is selected by default, whatever the player follows', (
