@@ -30,7 +30,11 @@ class _Pending {
   bool confirmed = false;
 }
 
-final _pending = <String, _Pending>{};
+/// Every write on a key that has not yet settled, oldest first. Each keeps
+/// its own [_Pending.confirmed], so writes that overlap on one key (two
+/// switches in the profile, reminders and the training colour) succeed,
+/// fail and settle each on their own.
+final _pending = <String, List<_Pending>>{};
 
 /// „Pro tenhle klíč se něco změnilo" — [withOptimisticOverlay] na to
 /// reaguje okamžitým přemapováním posledních známých řádků, BEZ nového
@@ -48,8 +52,13 @@ String _key(String uid, String name) => '$uid.$name';
 /// vztahuje probíhající nebo potvrzený optimistický zápis — jinak beze
 /// změny.
 List<Map<String, dynamic>> applyPending(
-        String uid, String name, List<Map<String, dynamic>> rows) =>
-    _pending[_key(uid, name)]?.apply(rows) ?? rows;
+    String uid, String name, List<Map<String, dynamic>> rows) {
+  var out = rows;
+  for (final entry in _pending[_key(uid, name)] ?? const <_Pending>[]) {
+    out = entry.apply(out);
+  }
+  return out;
+}
 
 /// Poslouchá se v [withOptimisticOverlay]: „přemapuj znovu, pro tenhle
 /// klíč se něco stalo" (nový zápis začal, byl potvrzen, nebo skončil).
@@ -61,14 +70,17 @@ Stream<void> pendingChanges(String uid, String name) =>
 Stream<void> refreshRequests(String uid, String name) =>
     _refresh.stream.where((k) => k == _key(uid, name));
 
-/// Odstraní potvrzený patch pro (uid, name) — voláno z
+/// Odstraní potvrzené patche pro (uid, name) — voláno z
 /// [withOptimisticOverlay] při KAŽDÉM skutečném doručení, aby po potvrzení
 /// první další ozvěna (server ji mohl protřídit/odduplikovat) definitivně
-/// převzala pravdu. Zápis, který ještě čeká na odpověď (`!confirmed`),
-/// zůstává — nesouvisející doručení ho nesmí zahodit.
+/// převzala pravdu. Zápisy, které ještě čekají na odpověď (`!confirmed`),
+/// zůstávají — nesouvisející doručení je nesmí zahodit.
 void settlePending(String uid, String name) {
   final key = _key(uid, name);
-  if (_pending[key]?.confirmed ?? false) _pending.remove(key);
+  final entries = _pending[key];
+  if (entries == null) return;
+  entries.removeWhere((e) => e.confirmed);
+  if (entries.isEmpty) _pending.remove(key);
 }
 
 /// Spustí [write] na pozadí; UI vidí efekt [apply] OKAMŽITĚ, ne až po
@@ -79,17 +91,16 @@ void settlePending(String uid, String name) {
 /// duplicity). Selže-li, patch mizí hned a chyba jde dál — volající
 /// (`tryAction`) ji odchytí jako dnes.
 ///
-/// Druhý zápis na STEJNÝ klíč dřív, než první doběhne nebo se vrátí jeho
-/// ozvěna (rychlé přidání dvou připomínek, dva přepínače v profilu za
-/// sebou), se skládá NAD ten čekající: appka vidí obě změny, i když každý
-/// zápis posílá na server jen své pole. (Dřív novější patch starší
-/// nahradil a starší změna jiného pole na okamžik zmizela, než dorazila
-/// její ozvěna.) Složený patch drží novější zápis. Dokončení staršího
-/// volání proto zasáhne `_pending` jen tehdy, když mezitím nepřevzalo
-/// novější — jinak by na okamžik shodilo ještě neuloženou novější změnu.
-/// Chyba staršího volání jde jeho volajícímu dál bez ohledu na to; jeho
-/// změna pak zůstane vidět ve složeném patchi, dokud novější zápis neskončí
-/// a první další doručení neukáže, co server skutečně má.
+/// Zápisy na STEJNÝ klíč, které se překrývají (rychlé přidání dvou
+/// připomínek, dva přepínače v profilu za sebou, připomínky a barva
+/// tréninků), stojí v pořadí za sebou a appka vidí všechny: každý patch se
+/// aplikuje nad ten předchozí, novější tedy u stejného pole vyhrává, jak to
+/// skončí i na serveru. Každý zápis posílá na server jen svá pole. (Dřív
+/// novější patch starší nahradil a starší změna jiného pole na okamžik
+/// zmizela, než dorazila její ozvěna.) Každý zápis si svůj výsledek řeší
+/// sám: úspěch ho označí za potvrzený a vyžádá ozvěnu, chyba odstraní jen
+/// jeho patch a jde jeho volajícímu dál — ostatní zápisy na klíči tím
+/// nejsou dotčené, ať skončí v jakémkoli pořadí.
 Future<void> optimisticWrite(
   String uid,
   String name,
@@ -97,22 +108,20 @@ Future<void> optimisticWrite(
   Future<void> Function() write,
 ) async {
   final key = _key(uid, name);
-  final previous = _pending[key];
-  final entry = _Pending(
-      previous == null ? apply : (rows) => apply(previous.apply(rows)));
-  _pending[key] = entry;
+  final entry = _Pending(apply);
+  (_pending[key] ??= []).add(entry);
   _changed.add(key);
   try {
     await write();
-    if (identical(_pending[key], entry)) {
-      entry.confirmed = true;
-      _refresh.add(key);
-    }
+    entry.confirmed = true;
+    _refresh.add(key);
   } catch (_) {
-    if (identical(_pending[key], entry)) {
-      _pending.remove(key);
-      _changed.add(key);
+    final entries = _pending[key];
+    if (entries != null) {
+      entries.remove(entry);
+      if (entries.isEmpty) _pending.remove(key);
     }
+    _changed.add(key);
     rethrow;
   }
 }
