@@ -1076,7 +1076,7 @@ function fakeDiscoverDb(
   clubs: { id: string; name: string; site_slug: string | null }[] =
     [{ id: "c1", name: "Sokol Brno IV", site_slug: null }],
   result: unknown = {
-    created: 1, clubs_linked: ["Sokol Brno IV"],
+    created: 1, teams_created: ["TJ Sokol Brno IV A"], clubs_linked: ["Sokol Brno IV"],
     clubs_created: ["TJ Sokol Husovice", "KS Devítka Brno", "SKK Veverky Brno"],
   },
 ) {
@@ -1170,8 +1170,29 @@ Deno.test("runDiscover: venue clubs → season sitemap → competitions → team
     }],
   });
   assertEquals(report, {
-    teams: 1, competitions: 1, created: 1, clubs_linked: ["Sokol Brno IV"],
+    teams: 1, competitions: 1, created: 1, teams_created: ["TJ Sokol Brno IV A"],
+    clubs_linked: ["Sokol Brno IV"],
     clubs_created: ["TJ Sokol Husovice", "KS Devítka Brno", "SKK Veverky Brno"],
+  });
+});
+
+Deno.test("runDiscover: the report names the teams the database created, none when it names none", async () => {
+  const run = (result: unknown) =>
+    runDiscover(fakeDiscoverDb({ venue_slug: "tj-sokol-brno-iv" }, undefined, result).db,
+      discoverSite().get, "t1");
+
+  const again = await run({
+    created: 0, teams_created: [], clubs_created: [], clubs_linked: ["Sokol Brno IV"],
+  });
+  assertEquals(again.created, 0);
+  assertEquals(again.teams_created, []);
+
+  // An apply_federation_discovery from before teams_created: the report
+  // still carries the key, empty — the app reads a missing one the same.
+  const older = await run({ created: 1, clubs_created: [], clubs_linked: ["Sokol Brno IV"] });
+  assertEquals(older, {
+    teams: 1, competitions: 1, created: 1, teams_created: [], clubs_created: [],
+    clubs_linked: ["Sokol Brno IV"],
   });
 });
 
@@ -1185,7 +1206,8 @@ Deno.test("runDiscover: a renamed club by its slug, a club by its name, a missin
     { id: "c3", name: "Veverky", site_slug: null },
   ];
   const { db, rpcs } = fakeDiscoverDb({ venue_slug: "tj-sokol-brno-iv" }, ours, {
-    created: 5, clubs_created: ["TJ Sokol Husovice"],
+    created: 2, teams_created: ["KS Devítka Brno B", "TJ Sokol Husovice E"],
+    clubs_created: ["TJ Sokol Husovice"],
     clubs_linked: ["Sokol Brno IV", "Devítka", "Veverky"],
   });
   const { get } = discoverSite({
@@ -1211,7 +1233,9 @@ Deno.test("runDiscover: a renamed club by its slug, a club by its name, a missin
     ["ks-devitka-brno-b-muzi", "ks-devitka-brno"],
   ]);
   assertEquals(report, {
-    teams: 5, competitions: 2, created: 5, clubs_created: ["TJ Sokol Husovice"],
+    teams: 5, competitions: 2, created: 2,
+    teams_created: ["KS Devítka Brno B", "TJ Sokol Husovice E"],
+    clubs_created: ["TJ Sokol Husovice"],
     clubs_linked: ["Sokol Brno IV", "Devítka", "Veverky"],
   });
 });

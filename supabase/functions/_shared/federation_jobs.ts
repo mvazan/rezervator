@@ -241,11 +241,16 @@ export async function runDiscover(db: Db, get: Fetcher, tenantId: string) {
   // teams with their clubs.
   const applied = must(await db.rpc("apply_federation_discovery", {
     p_tenant: tenantId, p_clubs: planClubs(clubs, ourClubs), p_teams: teams,
-  })) as { created: number; clubs_created: string[]; clubs_linked: string[] };
+  })) as {
+    created: number; teams_created?: string[]; clubs_created: string[]; clubs_linked: string[];
+  };
+  // teams_created: the new teams' names, for the card's „Poslední načtení
+  // týmů“. An apply_federation_discovery from before it answers none.
   return {
     teams: teams.length,
     competitions: new Set(teams.map((t) => t.competition_slug)).size,
     created: applied.created,
+    teams_created: applied.teams_created ?? [],
     clubs_created: applied.clubs_created,
     clubs_linked: applied.clubs_linked,
   };
