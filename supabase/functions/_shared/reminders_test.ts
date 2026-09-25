@@ -115,14 +115,36 @@ Deno.test("late by days, the title counts Prague calendar days", () => {
     reminderTitle({ ...base, offset_minutes: 10080 }, at("2026-09-24T22:30:00Z")),
     "Zápas zítra",
   );
-  // 14:00 Prague on the 24th, 26.5 h before: the day after tomorrow.
+  // 23:00 Prague on the 24th, 41.5 h before: the day after tomorrow,
+  // though not two whole days away.
   assertEquals(
-    reminderTitle({ ...base, offset_minutes: 10080 }, at("2026-09-24T12:00:00Z")),
+    reminderTitle({ ...base, offset_minutes: 10080 }, at("2026-09-24T21:00:00Z")),
     "Zápas za 2 dny",
   );
   assertEquals(
     reminderTitle({ ...base, offset_minutes: 40320 }, at("2026-09-20T10:00:00Z")),
     "Zápas za 6 dnů",
+  );
+});
+
+Deno.test("across a clock change, whole days are still Prague calendar days", () => {
+  // 25. 10. 2026 the clocks go back at 03:00 CEST. A match at 23:30 CET
+  // (22:30Z): its 1-day reminder fires at 00:30 CEST the same date.
+  const tonight = { ...base, starts_at: "2026-10-25T22:30:00+00:00", offset_minutes: 1440 };
+  assertEquals(reminderTitle(tonight, at("2026-10-24T22:30:00Z")), "Zápas za 24 hodin");
+  // Late with a 2-day lead, 00:20 CEST: still tonight, not "zítra".
+  assertEquals(
+    reminderTitle({ ...tonight, offset_minutes: 2880 }, at("2026-10-24T22:20:00Z")),
+    "Zápas za 24 hodin",
+  );
+  // 29. 3. 2026 the clocks go forward. A match on Monday 30. 3. 00:30 CEST
+  // (29. 3. 22:30Z): its 1-day reminder fires on Saturday at 23:30 CET.
+  const monday = { ...base, starts_at: "2026-03-29T22:30:00+00:00", offset_minutes: 1440 };
+  assertEquals(reminderTitle(monday, at("2026-03-28T22:30:00Z")), "Zápas za 2 dny");
+  // An ordinary day: the 1-day reminder is "zítra".
+  assertEquals(
+    reminderTitle({ ...base, offset_minutes: 1440 }, at("2026-09-25T14:30:00Z")),
+    "Zápas zítra",
   );
 });
 

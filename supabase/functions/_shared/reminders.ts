@@ -50,16 +50,21 @@ export function reminderTitle(row: DueReminder, now: Date): string {
 }
 
 function reminderLead(row: DueReminder, now: Date): string {
-  const start = new Date(row.starts_at);
-  const left = Math.ceil((start.getTime() - now.getTime()) / 60000);
-  if (left >= row.offset_minutes - ON_TIME_SLACK_MINUTES) {
-    return leadLabel(row.offset_minutes);
+  const left = Math.ceil((Date.parse(row.starts_at) - now.getTime()) / 60000);
+  const onTime = left >= row.offset_minutes - ON_TIME_SLACK_MINUTES;
+  if (!onTime && left < 120) return leadLabel(Math.max(left, 0));
+  // Whole days read as Prague calendar days ("zítra" = the next date), so
+  // a clock change cannot make 24 hours read as the wrong day.
+  if (onTime ? row.offset_minutes % 1440 === 0 : left >= 1440) {
+    const days = (Date.parse(`${pragueDateTime(row.starts_at).date}T00:00:00Z`) -
+      Date.parse(`${pragueDateTime(now.toISOString()).date}T00:00:00Z`)) /
+      86400000;
+    // The 25-hour day when the clocks go back: 24 hours on is still today.
+    if (days < 1) return `za ${Math.round(left / 60)} hodin`;
+    return leadLabel(days * 1440);
   }
-  if (left < 120) return leadLabel(Math.max(left, 0));
-  if (left < 1440) return leadLabel(Math.min(Math.round(left / 60), 23) * 60);
-  const days = (Date.parse(`${pragueDateTime(row.starts_at).date}T00:00:00Z`) -
-    Date.parse(`${pragueDateTime(now.toISOString()).date}T00:00:00Z`)) / 86400000;
-  return leadLabel(Math.max(days, 1) * 1440);
+  if (onTime) return leadLabel(row.offset_minutes);
+  return leadLabel(Math.min(Math.round(left / 60), 23) * 60);
 }
 
 /// One push per player and event. Several of their lead times fall due at
