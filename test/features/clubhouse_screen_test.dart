@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/data/clock.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
+import 'package:rezervator/core/hub_menu.dart';
 import 'package:rezervator/features/clubhouse/clubhouse_screen.dart';
 
 /// Records every provider that fails — a screen reaching past its test
@@ -96,6 +97,42 @@ void main() {
     expect(find.byIcon(Icons.scoreboard_outlined), findsOneWidget);
     expect(find.byIcon(Icons.location_on_outlined), findsOneWidget);
     expect(find.byIcon(Icons.contacts_outlined), findsOneWidget);
+  });
+
+  /// Hub labels top to bottom (list) or in reading order (grid).
+  List<String> labels(WidgetTester tester) {
+    final found = find.descendant(
+      of: find.byType(HubMenu),
+      matching: find.byWidgetPredicate(
+        (w) => w is Text && const {'Kontakty', 'Kuželny', 'Výsledky'}
+            .contains(w.data),
+      ),
+    );
+    final texts = found.evaluate().toList()
+      ..sort((a, b) {
+        final pa = tester.getTopLeft(find.byWidget(a.widget));
+        final pb = tester.getTopLeft(find.byWidget(b.widget));
+        return pa.dy != pb.dy ? pa.dy.compareTo(pb.dy) : pa.dx.compareTo(pb.dx);
+      });
+    return [for (final e in texts) (e.widget as Text).data!];
+  }
+
+  testWidgets('the entries are in Czech alphabetical order, in the list',
+      (tester) async {
+    narrow(tester);
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+
+    expect(labels(tester), ['Kontakty', 'Kuželny', 'Výsledky']);
+  });
+
+  testWidgets('the entries are in Czech alphabetical order, in the grid',
+      (tester) async {
+    wide(tester);
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+
+    expect(labels(tester), ['Kontakty', 'Kuželny', 'Výsledky']);
   });
 
   testWidgets('below 840 dp the hub renders a list', (tester) async {

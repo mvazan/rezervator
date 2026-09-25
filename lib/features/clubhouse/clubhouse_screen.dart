@@ -1,10 +1,12 @@
-/// Klubovna — the third home tab: a hub of team-facing screens (results,
-/// venues, contacts), the same [HubMenu] Správa kuželny uses.
+/// Klubovna — the third home tab: a hub of team-facing screens (contacts,
+/// venues, results — in Czech alphabetical order), the same [HubMenu]
+/// Správa kuželny uses.
 library;
 
 import 'package:flutter/material.dart';
 
 import '../../core/hub_menu.dart';
+import '../../domain/collation.dart';
 import '../schedule/widgets/home_header.dart';
 import 'contacts_screen.dart';
 import 'results_screen.dart';
@@ -24,6 +26,7 @@ class ClubhouseScreen extends StatelessWidget {
         HomeHeader(trailing: trailing),
         Expanded(
           child: HubMenu(
+            // Czech alphabetical, so a new entry finds its own place.
             entries: [
               (
                 label: 'Výsledky',
@@ -49,7 +52,7 @@ class ClubhouseScreen extends StatelessWidget {
                   MaterialPageRoute(builder: (_) => const ContactsScreen()),
                 ),
               ),
-            ],
+            ]..sort((a, b) => compareCzech(a.label, b.label)),
           ),
         ),
       ],
