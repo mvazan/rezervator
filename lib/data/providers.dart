@@ -569,13 +569,15 @@ class Api {
     if (uid != null) await RowCache.clear(uid);
   }
 
+  /// [phone] in E.164 (`normalizePhone`), or null for none (0048).
   static Future<void> registerProfile(String displayName, String tenantId,
-          {String? clubId, String nick = ''}) =>
+          {String? clubId, String nick = '', String? phone}) =>
       _db.rpc('register_profile', params: {
         'p_display_name': displayName,
         'p_tenant_id': tenantId,
         'p_club_id': clubId,
         'p_nick': nick,
+        'p_phone': phone,
       });
 
   /// Founds a brand-new alley and registers the caller as its admin.
@@ -1167,6 +1169,34 @@ class Api {
             .eq('id', currentUserId!),
       );
 
+  /// The caller's own phone and Kontakty switches (0048). Only what is
+  /// passed changes: [phone] null leaves the number alone, '' removes it,
+  /// otherwise it is E.164 (`normalizePhone`). Optimistic, like the other
+  /// profile settings: [myProfileProvider] shows it at once.
+  static Future<void> updateMyContact({
+    String? phone,
+    bool? showEmail,
+    bool? showPhone,
+  }) {
+    final uid = currentUserId!;
+    final fields = contactFields(
+        phone: phone, showEmail: showEmail, showPhone: showPhone);
+    return optimisticWrite(
+      uid,
+      cacheKeyProfile,
+      patchRow('id', uid, fields),
+      () => _db.from('profiles').update(fields).eq('id', uid),
+    );
+  }
+
+  /// The alley's contacts (0048 `contacts()`): registered players with the
+  /// e-mail and phone they chose to show. `not_allowed` for the kiosk and
+  /// a pending player.
+  static Future<List<Contact>> contacts() async => [
+        for (final row in await _db.rpc('contacts') as List)
+          Contact.fromJson((row as Map).cast<String, dynamic>()),
+      ];
+
   /// The view the app opens at launch (0029).
   static Future<void> setDefaultView(HomeView view) => optimisticWrite(
         currentUserId!,
@@ -1578,6 +1608,28 @@ final attendanceProvider =
   (ref, ym) => Api.monthlyAttendance(ym.$1, ym.$2),
 );
 
+/// The `profiles` columns [Api.updateMyContact] writes: only the ones
+/// passed; a [phone] of '' clears the number (null in the database).
+Map<String, dynamic> contactFields({
+  String? phone,
+  bool? showEmail,
+  bool? showPhone,
+}) =>
+    {
+      if (phone != null) 'phone': phone.isEmpty ? null : phone,
+      'show_email': ?showEmail,
+      'show_phone': ?showPhone,
+    };
+
+/// Klubovna → Kontakty (0048). Fetched when the screen opens (autoDispose)
+/// and again on pull-to-refresh; the screen sorts and filters it
+/// (`contactsMatching`).
+final contactsProvider =
+    FutureProvider.autoDispose<List<Contact>>((ref) async {
+  if (ref.watch(_authUidProvider) == null) return const [];
+  return Api.contacts();
+});
+
 /// After a superadmin tenant switch (Api.switchTenant): every tenant-scoped
 /// stream fetched its rows under the OLD kuželna's RLS scope, so re-create
 /// them all — the fresh subscriptions read as the new kuželna.
@@ -1605,6 +1657,7 @@ void resetTenantScopedProviders(WidgetRef ref) {
   ref.invalidate(myMatchExceptionsProvider);
   ref.invalidate(groupRowsProvider);
   ref.invalidate(playersProvider);
+  ref.invalidate(contactsProvider);
   ref.invalidate(tenantsProvider);
   ref.invalidate(myTenantStatusProvider);
   ref.invalidate(tenantNameProvider);
