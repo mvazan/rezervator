@@ -72,8 +72,12 @@ $$;
 --      has no bound of its own), linked, in the first palette colour no
 --      club of the alley uses, else the least used one. A name another club
 --      already has creates nothing: its teams stay without a club.
--- Returns {created: new teams, clubs_created: [names], clubs_linked: [our
--- names of the clubs found in 1 or 2]}, both in p_clubs order.
+-- Returns {created: new teams, teams_created: [their names here — a
+-- clash's suffixed one — by name], clubs_created: [names], clubs_linked:
+-- [our names of the clubs found in 1 or 2]}, the clubs in p_clubs order.
+-- upsert_federation_teams keeps 0045's signature (deployed), so the new
+-- teams are told here: the discovered site_slugs no team of the alley had
+-- before it ran. The card's „Poslední načtení týmů“ names them.
 create or replace function apply_federation_discovery(
   p_tenant uuid, p_clubs jsonb, p_teams jsonb)
 returns jsonb language plpgsql security definer set search_path = public as $$
@@ -85,6 +89,9 @@ declare
   v_created text[] := '{}';
   v_linked text[] := '{}';
   v_teams jsonb;
+  v_had text[];
+  v_new integer;
+  v_new_names jsonb;
 begin
   for c in select * from jsonb_array_elements(coalesce(p_clubs, '[]'::jsonb)) loop
     select id, name into v_club, v_name from clubs
@@ -124,8 +131,16 @@ begin
                             order by o), '[]'::jsonb)
     into v_teams
     from jsonb_array_elements(coalesce(p_teams, '[]'::jsonb)) with ordinality e(x, o);
+  select coalesce(array_agg(site_slug), '{}') into v_had
+    from teams where tenant_id = p_tenant;
+  v_new := upsert_federation_teams(p_tenant, v_teams);
+  select coalesce(jsonb_agg(t.name order by t.name), '[]'::jsonb) into v_new_names
+    from teams t
+   where t.tenant_id = p_tenant and t.site_slug <> all (v_had)
+     and t.site_slug in (select x->>'site_slug' from jsonb_array_elements(v_teams) x);
   return jsonb_build_object(
-    'created', upsert_federation_teams(p_tenant, v_teams),
+    'created', v_new,
+    'teams_created', v_new_names,
     'clubs_created', to_jsonb(v_created),
     'clubs_linked', to_jsonb(v_linked));
 end;

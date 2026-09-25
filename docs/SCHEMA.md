@@ -226,7 +226,12 @@ superseded and retired.
   club's. A team rolled over to the next season's competition leaves the
   past season's `competition:` and `match:` keys dead, so their errors
   leave `last_error` at once. Its report (`last_report.discover`):
-  `{teams, competitions, created, clubs_created, clubs_linked, at}`.
+  `{teams, competitions, created, teams_created, clubs_created,
+  clubs_linked, at}` — `teams_created` (0046) names the teams this run
+  created, as the alley has them (a clash's suffixed name), sorted by name:
+  the discovered `site_slug`s no team of the alley had before
+  `upsert_federation_teams` ran. A report written before it has no
+  `teams_created`, which the app reads as none named.
 - **Schedule** (`federation_competition` job per active team's
   competition): `apply_federation_matches` in one transaction with
   `set_config('import.run', 'on', true)`, so the 0038 hand-edit trigger

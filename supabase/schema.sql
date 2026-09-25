@@ -75,6 +75,9 @@ declare
   v_created text[] := '{}';
   v_linked text[] := '{}';
   v_teams jsonb;
+  v_had text[];
+  v_new integer;
+  v_new_names jsonb;
 begin
   for c in select * from jsonb_array_elements(coalesce(p_clubs, '[]'::jsonb)) loop
     select id, name into v_club, v_name from clubs
@@ -114,8 +117,16 @@ begin
                             order by o), '[]'::jsonb)
     into v_teams
     from jsonb_array_elements(coalesce(p_teams, '[]'::jsonb)) with ordinality e(x, o);
+  select coalesce(array_agg(site_slug), '{}') into v_had
+    from teams where tenant_id = p_tenant;
+  v_new := upsert_federation_teams(p_tenant, v_teams);
+  select coalesce(jsonb_agg(t.name order by t.name), '[]'::jsonb) into v_new_names
+    from teams t
+   where t.tenant_id = p_tenant and t.site_slug <> all (v_had)
+     and t.site_slug in (select x->>'site_slug' from jsonb_array_elements(v_teams) x);
   return jsonb_build_object(
-    'created', upsert_federation_teams(p_tenant, v_teams),
+    'created', v_new,
+    'teams_created', v_new_names,
     'clubs_created', to_jsonb(v_created),
     'clubs_linked', to_jsonb(v_linked));
 end;

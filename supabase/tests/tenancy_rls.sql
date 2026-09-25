@@ -5468,8 +5468,9 @@ reset role;
 
 -- 16. apply_federation_discovery matches every venue club to a club of
 -- ours — by site_slug, else by the edge function's name match, which it
--- links — or creates it, and hands the teams their clubs. An alley of its
--- own keeps the colour counts exact.
+-- links — or creates it, and hands the teams their clubs. Its report lists
+-- the teams it created (teams_created), so a second run lists none. An
+-- alley of its own keeps the colour counts exact.
 insert into tenants (id, name)
 values ('00000000-0000-0000-0000-00000000000c', 'Kuželna C (0046)');
 do $$
@@ -5500,7 +5501,8 @@ begin
 
   r := apply_federation_discovery(v_c, v_clubs, v_teams);
   if r is distinct from
-     '{"created":2,"clubs_created":["KS Devítka Brno"],"clubs_linked":["Sokol Brno IV"]}'::jsonb then
+     '{"created":2,"teams_created":["KS Devítka Brno B","TJ Sokol Brno IV A"],
+       "clubs_created":["KS Devítka Brno"],"clubs_linked":["Sokol Brno IV"]}'::jsonb then
     raise exception 'FAIL: the first discovery reported %', r;
   end if;
   if not exists (select 1 from clubs
@@ -5524,7 +5526,8 @@ begin
 
   r := apply_federation_discovery(v_c, v_clubs, v_teams);
   if r is distinct from
-     '{"created":0,"clubs_created":[],"clubs_linked":["Sokol Brno IV","KS Devítka Brno"]}'::jsonb
+     '{"created":0,"teams_created":[],"clubs_created":[],
+       "clubs_linked":["Sokol Brno IV","KS Devítka Brno"]}'::jsonb
      or (select count(*) from clubs where tenant_id = v_c) <> 3 then
     raise exception 'FAIL: a second discovery was not idempotent: %', r;
   end if;
@@ -5533,7 +5536,8 @@ begin
   update clubs set name = 'Devítka', color = 5 where id = v_devitka;
   r := apply_federation_discovery(v_c, v_clubs, v_teams);
   if r is distinct from
-     '{"created":0,"clubs_created":[],"clubs_linked":["Sokol Brno IV","Devítka"]}'::jsonb
+     '{"created":0,"teams_created":[],"clubs_created":[],
+       "clubs_linked":["Sokol Brno IV","Devítka"]}'::jsonb
      or not exists (select 1 from clubs
                      where id = v_devitka and name = 'Devítka' and color = 5
                        and site_slug = 'ks-devitka-brno') then
@@ -5587,7 +5591,8 @@ begin
   end if;
   r := apply_federation_discovery(v_c,
     '[{"slug":"kk-barva","name":"Barva 3","match_id":null}]', '[]');
-  if r is distinct from '{"created":0,"clubs_created":[],"clubs_linked":[]}'::jsonb
+  if r is distinct from
+     '{"created":0,"teams_created":[],"clubs_created":[],"clubs_linked":[]}'::jsonb
      or exists (select 1 from clubs where tenant_id = v_c and site_slug = 'kk-barva') then
     raise exception 'FAIL: a venue club whose name another club has was created or linked: %', r;
   end if;
@@ -5627,6 +5632,49 @@ begin
     raise exception 'FAIL: apply_federation_discovery must be callable by the service only';
   end if;
   raise notice 'OK: apply_federation_discovery is callable by the service only (0046)';
+end $$;
+
+-- 16e. The report's teams_created (the card's „Poslední načtení týmů“):
+-- the teams this discovery created, by the names the alley has them under
+-- (a clash's suffixed one), sorted. A team that was there already is not
+-- one, refreshed or not, and a second discovery creates none.
+do $$
+declare
+  v_c constant uuid := '00000000-0000-0000-0000-00000000000c';
+  v_clubs constant jsonb := '[{"slug":"kk-blansko","name":"KK Blansko","match_id":null}]';
+  v_teams constant jsonb := '[
+    {"site_slug":"kk-blansko-c-muzi","site_team_id":5,"site_name":"KK Blansko C",
+     "competition_slug":"okresni-prebor-2026-2027","competition_name":"Okresní přebor",
+     "name":"KK Blansko C","club_slug":"kk-blansko"},
+    {"site_slug":"kk-blansko-b-muzi","site_team_id":4,"site_name":"KK Blansko B",
+     "competition_slug":"krajsky-prebor-2026-2027","competition_name":"Krajský přebor",
+     "name":"KK Blansko B","club_slug":"kk-blansko"},
+    {"site_slug":"kk-blansko-a-muzi","site_team_id":3,"site_name":"KK Blansko A",
+     "competition_slug":"krajsky-prebor-2026-2027","competition_name":"Krajský přebor",
+     "name":"KK Blansko A","club_slug":"kk-blansko"}]';
+  r jsonb;
+begin
+  delete from teams where tenant_id = v_c;
+  -- Last season's C team holds the name this season's comes with.
+  insert into teams (tenant_id, name, site_slug)
+  values (v_c, 'KK Blansko C', 'kk-blansko-c-muzi-2025');
+  -- Discovered before and renamed by the admin: refreshed, not created.
+  insert into teams (tenant_id, name, site_slug)
+  values (v_c, 'Blansko béčko', 'kk-blansko-b-muzi');
+
+  r := apply_federation_discovery(v_c, v_clubs, v_teams);
+  if r->'created' is distinct from '2'::jsonb
+     or r->'teams_created' is distinct from
+        '["KK Blansko A","KK Blansko C (Okresní přebor)"]'::jsonb then
+    raise exception 'FAIL: the first discovery''s teams_created: %', r;
+  end if;
+
+  r := apply_federation_discovery(v_c, v_clubs, v_teams);
+  if r->'created' is distinct from '0'::jsonb
+     or r->'teams_created' is distinct from '[]'::jsonb then
+    raise exception 'FAIL: a second discovery listed teams it did not create: %', r;
+  end if;
+  raise notice 'OK: teams_created lists the teams a discovery created, by their names here, and a second one none (0046)';
 end $$;
 
 -- 17. federation_sync_progress: the caller's federation jobs due now or
