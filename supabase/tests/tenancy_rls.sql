@@ -6139,7 +6139,10 @@ do $$
 declare
   v_p profiles;
 begin
-  v_p := create_tenant_and_register('Kuželna G (0048)', 'Zakladatel G');
+  -- Named, exactly as the 1.2.x app sends it through PostgREST.
+  v_p := create_tenant_and_register(p_tenant_name => 'Kuželna G (0048)',
+                                    p_display_name => 'Zakladatel G',
+                                    p_nick => '');
   if v_p.role <> 'admin' or v_p.status <> 'approved' or v_p.phone is not null then
     raise exception 'FAIL: create_tenant_and_register broke with the new register_profile: %',
       to_jsonb(v_p);
