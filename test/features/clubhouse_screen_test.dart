@@ -19,7 +19,7 @@ final class _Failures extends ProviderObserver {
   ) => errors.add(error);
 }
 
-/// The Klubovna hub: its two entries, the shell's trailing icons riding
+/// The Klubovna hub: its three entries, the shell's trailing icons riding
 /// along on the same header, and the shared HubMenu's list/grid breakpoint
 /// (below vs at/above 840 dp).
 void main() {
@@ -55,6 +55,7 @@ void main() {
           nowProvider.overrideWith(
             (ref) => Stream.value(DateTime(2026, 9, 23, 18, 0)),
           ),
+          contactsProvider.overrideWith((ref) async => const <Contact>[]),
         ],
         child: MaterialApp(
           home: Scaffold(body: ClubhouseScreen(trailing: trailing)),
@@ -75,9 +76,8 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
   }
 
-  testWidgets('shows the Výsledky and Kuželny entries with their subtitles', (
-    tester,
-  ) async {
+  testWidgets('shows the Výsledky, Kuželny and Kontakty entries with their '
+      'subtitles', (tester) async {
     narrow(tester);
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
@@ -85,9 +85,14 @@ void main() {
     expect(find.text('Výsledky'), findsOneWidget);
     expect(find.text('Zápasy a výsledky našich týmů'), findsOneWidget);
     expect(find.text('Kuželny'), findsOneWidget);
-    expect(find.text('Kontakty a vybavení kuželen'), findsOneWidget);
+    // Kuželny no longer says „Kontakty" — that is the new entry's word.
+    expect(find.text('Adresy a vybavení kuželen'), findsOneWidget);
+    expect(find.text('Kontakty a vybavení kuželen'), findsNothing);
+    expect(find.text('Kontakty'), findsOneWidget);
+    expect(find.text('Hráči kuželny — e-mail a telefon'), findsOneWidget);
     expect(find.byIcon(Icons.scoreboard_outlined), findsOneWidget);
     expect(find.byIcon(Icons.location_on_outlined), findsOneWidget);
+    expect(find.byIcon(Icons.contacts_outlined), findsOneWidget);
   });
 
   testWidgets('below 840 dp the hub renders a list', (tester) async {
@@ -97,7 +102,7 @@ void main() {
 
     expect(find.byType(ListView), findsOneWidget);
     expect(find.byType(GridView), findsNothing);
-    expect(find.byType(ListTile), findsNWidgets(2));
+    expect(find.byType(ListTile), findsNWidgets(3));
   });
 
   testWidgets('at 840 dp and above the hub renders a card grid', (
@@ -109,12 +114,12 @@ void main() {
 
     expect(find.byType(GridView), findsOneWidget);
     expect(find.byType(ListView), findsNothing);
-    expect(find.byType(Card), findsNWidgets(2));
+    expect(find.byType(Card), findsNWidgets(3));
   });
 
   testWidgets(
-    'tapping Výsledky opens the real results screen, Kuželny opens the '
-    'real venues screen',
+    'tapping Výsledky opens the real results screen, Kuželny the real '
+    'venues screen, Kontakty the real contacts screen',
     (tester) async {
       narrow(tester);
       final failures = _Failures();
@@ -131,6 +136,14 @@ void main() {
       await tester.tap(find.text('Kuželny'));
       await tester.pumpAndSettle();
       expect(find.widgetWithText(AppBar, 'Kuželny'), findsOneWidget);
+
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Kontakty'));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(AppBar, 'Kontakty'), findsOneWidget);
+      expect(find.text('Zatím tu nikdo není.'), findsOneWidget);
       expect(failures.errors, isEmpty);
     },
   );
