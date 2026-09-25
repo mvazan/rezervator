@@ -4,7 +4,7 @@
 
 **Goal:** A new admin sets up the ČKA results service in Správa → Oddíly through a 3-step wizard; clubs remember their ČKA identity, so discovery links or creates them and a rename in the app never breaks the pairing; the card shows a running sync's progress; team rows edit through a pencil.
 
-**Architecture:** One additive migration `0046_federation_setup.sql` gives `clubs` a `site_slug`/`site_name`, adds `apply_federation_discovery` (links or creates every venue club, then upserts the teams, in one transaction), makes discovery no longer a sync run, and adds the admin RPC `federation_sync_progress`. The notify edge function's `runDiscover` matches venue clubs to ours (by slug, else by name) and calls the new function. In the app, `FederationCard` becomes wizard-or-normal-view derived from the sync row, polls the progress RPC while jobs are pending, and the clubs screen swaps the team switch for a pencil.
+**Architecture:** One additive migration `0047_federation_setup.sql` gives `clubs` a `site_slug`/`site_name`, adds `apply_federation_discovery` (links or creates every venue club, then upserts the teams, in one transaction), makes discovery no longer a sync run, and adds the admin RPC `federation_sync_progress`. The notify edge function's `runDiscover` matches venue clubs to ours (by slug, else by name) and calls the new function. In the app, `FederationCard` becomes wizard-or-normal-view derived from the sync row, polls the progress RPC while jobs are pending, and the clubs screen swaps the team switch for a pencil.
 
 **Tech Stack:** Supabase (Postgres 15, PL/pgSQL, RLS), Deno edge functions (TypeScript, `jsr:@std/assert@1`), Flutter 3.38 + Riverpod 3, `flutter_test` fake async.
 
@@ -15,7 +15,7 @@
 - Repo `/Users/mvazan/Home/rezervator`, branch `federation-setup-wizard`; run every command from the repo root.
 - One commit per task; never `git push`, never deploy.
 - Every commit message ends with the trailer line `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
-- `supabase/migrations/0046_federation_setup.sql` is additive and idempotent — `add column if not exists`, `create unique index if not exists`, `create or replace function`, re-runnable `revoke`/`grant` — and running the whole file twice must succeed. `0045_federation.sql` is deployed and never edited.
+- `supabase/migrations/0047_federation_setup.sql` is additive and idempotent — `add column if not exists`, `create unique index if not exists`, `create or replace function`, re-runnable `revoke`/`grant` — and running the whole file twice must succeed. `0045_federation.sql` is deployed and never edited.
 - The local DB holds seed data only, so `tool/schema_snapshot.sh` (it runs `supabase db reset`) is fine to run; commit the regenerated `supabase/schema.sql` with the migration change.
 - Server-only functions: `revoke all … from public, anon, authenticated; grant execute … to service_role`. App RPCs: `revoke all … from public, anon; grant execute … to authenticated`.
 - Club palette: indexes 0–8 (`ClubColors.count` = 9, `clubs_color_check`); -1 = none; values ≥ 0x1000000 are hand-picked colours.
@@ -46,7 +46,7 @@
 
 ## Plan decisions (where the spec is silent)
 
-1. **Discovery is no longer a sync run.** 0045's `record_federation_run` stamps `last_run_at` for `discover` too, which would end the wizard at step 2 and make the spec's "step 3 when there is a slug and teams" unreachable. 0046 replaces it: only `competition:<slug>` runs stamp `last_run_at`/`last_success_at`, and `discover` keeps its report under its key.
+1. **Discovery is no longer a sync run.** 0045's `record_federation_run` stamps `last_run_at` for `discover` too, which would end the wizard at step 2 and make the spec's "step 3 when there is a slug and teams" unreachable. 0047 replaces it: only `competition:<slug>` runs stamp `last_run_at`/`last_success_at`, and `discover` keeps its report under its key.
 2. **Every venue club is linked or created**, even one without a team this season (spec: "Discovery matches every venue club").
 3. `clubs.name` has no length check; a created club's name is cut to 80 characters, like `teams.name`.
 4. `clubs_linked` holds our names of the clubs matched by slug or by name, so the summary's N = linked + created.
@@ -65,7 +65,7 @@
     - the delete warning „Oddíl je propojený s webem ČKA, takže ho příští „Přenačíst týmy z webu“ založí znovu.“;
     - tooltips „Upravit oddíl“ and „Smazat oddíl“, plus „Zatím nenastavená“ and „Načítám…“.
 14. **Step 3 needs a discovery of the current kuželna.** The spec's "step 3 when there is a slug and teams" assumes the teams belong to that kuželna. It covers two paths:
-    - **Leaving and coming back.** Since 0046, `set_federation_sync` drops `last_report.discover` when the kuželna changes. The wizard opens step 3 only when there are teams and a successful report.
+    - **Leaving and coming back.** Since 0047, `set_federation_sync` drops `last_report.discover` when the kuželna changes. The wizard opens step 3 only when there are teams and a successful report.
     - **The same visit.** After Zpět → another kuželna → Pokračovat, step 2 ignores the report the row held before the save (matched by its `at`) until the row's echo drops it. It shows „Načíst oddíly a týmy“, and has no Pokračovat, until the new kuželna's report arrives.
 
     The old kuželna's teams, and any clubs its discovery created, stay. The app cannot delete a team, so the admin switches them off in the list under the card (team pencil → „Stahovat zápasy“) and deletes those clubs there before step 3. The wizard does not do this for them. Only a pasted address of another real kuželna leaves any behind; a wrong address fails the discovery (HTTP 404) and creates nothing.
@@ -74,8 +74,8 @@
 
 | File | Responsibility |
 |---|---|
-| `supabase/migrations/0046_federation_setup.sql` (new) | clubs' ČKA identity, `apply_federation_discovery`, `upsert_federation_teams` v2, `record_federation_run` v2, `set_federation_sync` v2, `federation_sync_progress` |
-| `supabase/tests/tenancy_rls.sql` | sections 16–18 (0046); section 13/13b updated for "discovery is no run" |
+| `supabase/migrations/0047_federation_setup.sql` (new) | clubs' ČKA identity, `apply_federation_discovery`, `upsert_federation_teams` v2, `record_federation_run` v2, `set_federation_sync` v2, `federation_sync_progress` |
+| `supabase/tests/tenancy_rls.sql` | sections 16–18 (0047); section 13/13b updated for "discovery is no run" |
 | `supabase/schema.sql`, `docs/SCHEMA.md` | snapshot and docs |
 | `supabase/functions/_shared/federation_jobs.ts` (+ `_test.ts`) | `planClubs`, `planTeams` with `club_slug`, `runDiscover` → `apply_federation_discovery` |
 | `lib/domain/models.dart` | `Club.siteSlug/siteName/linked`, `FederationSync.discover`, `FederationDiscoverReport`, `FederationSyncProgress` |
@@ -94,7 +94,7 @@
 ### Task 1: Clubs remember their ČKA identity; discovery links or creates them (SQL)
 
 **Files:**
-- Create: `supabase/migrations/0046_federation_setup.sql`
+- Create: `supabase/migrations/0047_federation_setup.sql`
 - Modify: `supabase/tests/tenancy_rls.sql` (new section 16 before the file's final `reset role;` / `rollback;`)
 - Modify: `supabase/schema.sql` (regenerated), `docs/SCHEMA.md`
 - Test: `supabase/tests/tenancy_rls.sql`
@@ -127,7 +127,7 @@ with:
   raise notice 'OK: with both alleys configured, each admin sees only their own sync settings (0045)';
 end $$;
 
--- 0046 průvodce nastavením ČKA -----------------------------------------------
+-- 0047 průvodce nastavením ČKA -----------------------------------------------
 reset role;
 
 -- 16. apply_federation_discovery matches every venue club to a club of
@@ -135,7 +135,7 @@ reset role;
 -- links — or creates it, and hands the teams their clubs. An alley of its
 -- own keeps the colour counts exact.
 insert into tenants (id, name)
-values ('00000000-0000-0000-0000-00000000000c', 'Kuželna C (0046)');
+values ('00000000-0000-0000-0000-00000000000c', 'Kuželna C (0047)');
 do $$
 declare
   v_c constant uuid := '00000000-0000-0000-0000-00000000000c';
@@ -226,7 +226,7 @@ begin
                        and name = 'KS Devítka Brno') then
     raise exception 'FAIL: a deleted linked club was not created again: %', r;
   end if;
-  raise notice 'OK: discovery links clubs by site_slug, else by name, else creates them once; renames and the admin''s clubs hold (0046)';
+  raise notice 'OK: discovery links clubs by site_slug, else by name, else creates them once; renames and the admin''s clubs hold (0047)';
 end $$;
 
 -- 16b. A created club takes the first palette colour (0–8) no club of the
@@ -255,7 +255,7 @@ begin
      or exists (select 1 from clubs where tenant_id = v_c and site_slug = 'kk-barva') then
     raise exception 'FAIL: a venue club whose name another club has was created or linked: %', r;
   end if;
-  raise notice 'OK: a created club takes the first free palette colour, else the least used; a taken name creates nothing (0046)';
+  raise notice 'OK: a created club takes the first free palette colour, else the least used; a taken name creates nothing (0047)';
 end $$;
 
 -- 16c. Renaming or recolouring a club in the app keeps its ČKA identity.
@@ -276,7 +276,7 @@ begin
                     and site_slug = 'kk-propojeny' and site_name = 'KK Propojený') then
     raise exception 'FAIL: upsert_club touched the club''s ČKA identity';
   end if;
-  raise notice 'OK: renaming or recolouring a club keeps its site_slug and site_name (0046)';
+  raise notice 'OK: renaming or recolouring a club keeps its site_slug and site_name (0047)';
 end $$;
 reset role;
 
@@ -290,7 +290,7 @@ begin
      or not has_function_privilege('service_role', f, 'execute') then
     raise exception 'FAIL: apply_federation_discovery must be callable by the service only';
   end if;
-  raise notice 'OK: apply_federation_discovery is callable by the service only (0046)';
+  raise notice 'OK: apply_federation_discovery is callable by the service only (0047)';
 end $$;
 
 reset role;
@@ -304,10 +304,10 @@ Expected: `ERROR:  function apply_federation_discovery(uuid, jsonb, jsonb) does 
 
 - [ ] **Step 3: Write the migration**
 
-Create `supabase/migrations/0046_federation_setup.sql`:
+Create `supabase/migrations/0047_federation_setup.sql`:
 
 ```sql
--- 0046 — průvodce nastavením ČKA (Správa → Oddíly): clubs remember the
+-- 0047 — průvodce nastavením ČKA (Správa → Oddíly): clubs remember the
 -- venue club they are on vysledky.kuzelky.cz, and discovery links the
 -- venue's clubs to ours or creates them, in one transaction. Spec:
 -- docs/superpowers/specs/2026-09-25-federation-setup-wizard-design.md
@@ -448,20 +448,20 @@ grant execute on function apply_federation_discovery(uuid, jsonb, jsonb) to serv
 - [ ] **Step 4: Apply it, twice**
 
 Run: `supabase migration up --local`
-Expected: `Applying migration 0046_federation_setup.sql...` then `Local database is up to date.`
+Expected: `Applying migration 0047_federation_setup.sql...` then `Local database is up to date.`
 
-Run: `psql "$(supabase status -o env | sed -n 's/^DB_URL="\(.*\)"/\1/p')" -X -v ON_ERROR_STOP=1 -q -f supabase/migrations/0046_federation_setup.sql; echo "exit $?"`
+Run: `psql "$(supabase status -o env | sed -n 's/^DB_URL="\(.*\)"/\1/p')" -X -v ON_ERROR_STOP=1 -q -f supabase/migrations/0047_federation_setup.sql; echo "exit $?"`
 Expected: `NOTICE`s like `column "site_slug" of relation "clubs" already exists, skipping`, then `exit 0`.
 
 - [ ] **Step 5: Run the test to verify it passes**
 
-Run: `psql "$(supabase status -o env | sed -n 's/^DB_URL="\(.*\)"/\1/p')" -X -v ON_ERROR_STOP=1 -f supabase/tests/tenancy_rls.sql 2>&1 | grep -E 'ERROR|FAIL|0046\)'`
+Run: `psql "$(supabase status -o env | sed -n 's/^DB_URL="\(.*\)"/\1/p')" -X -v ON_ERROR_STOP=1 -f supabase/tests/tenancy_rls.sql 2>&1 | grep -E 'ERROR|FAIL|0047\)'`
 Expected: no `ERROR`/`FAIL`, and exactly these four lines:
 ```
-NOTICE:  OK: discovery links clubs by site_slug, else by name, else creates them once; renames and the admin's clubs hold (0046)
-NOTICE:  OK: a created club takes the first free palette colour, else the least used; a taken name creates nothing (0046)
-NOTICE:  OK: renaming or recolouring a club keeps its site_slug and site_name (0046)
-NOTICE:  OK: apply_federation_discovery is callable by the service only (0046)
+NOTICE:  OK: discovery links clubs by site_slug, else by name, else creates them once; renames and the admin's clubs hold (0047)
+NOTICE:  OK: a created club takes the first free palette colour, else the least used; a taken name creates nothing (0047)
+NOTICE:  OK: renaming or recolouring a club keeps its site_slug and site_name (0047)
+NOTICE:  OK: apply_federation_discovery is callable by the service only (0047)
 ```
 
 - [ ] **Step 6: Document it in `docs/SCHEMA.md`**
@@ -472,7 +472,7 @@ Replace the `clubs` row:
 ```
 with:
 ```
-| `clubs` | `name` unique per tenant, `color` (−1 = none), `site_slug` / `site_name` (0046: the venue club on vysledky.kuzelky.cz this club is linked to — its `detail-klubu/<slug>`, unique per tenant when set — and its name there; null = not linked. Only discovery writes them (`apply_federation_discovery`), so a rename or recolour in the app keeps the link) | select approved/kiosk; all admin. |
+| `clubs` | `name` unique per tenant, `color` (−1 = none), `site_slug` / `site_name` (0047: the venue club on vysledky.kuzelky.cz this club is linked to — its `detail-klubu/<slug>`, unique per tenant when set — and its name there; null = not linked. Only discovery writes them (`apply_federation_discovery`), so a rename or recolour in the app keeps the link) | select approved/kiosk; all admin. |
 ```
 
 In the service-role functions row, replace:
@@ -481,7 +481,7 @@ In the service-role functions row, replace:
 ```
 with:
 ```
-`federation_last_error(tenant, report)` (0045), `apply_federation_discovery(tenant, clubs, teams)` (0046) | service_role only (notify function) |
+`federation_last_error(tenant, report)` (0045), `apply_federation_discovery(tenant, clubs, teams)` (0047) | service_role only (notify function) |
 ```
 
 Replace the **Discovery** bullet:
@@ -499,7 +499,7 @@ Replace the **Discovery** bullet:
 with:
 ```
 - **Discovery** (`federation_discover` job, `request_federation_discovery`):
-  the venue's clubs and their teams → `apply_federation_discovery` (0046),
+  the venue's clubs and their teams → `apply_federation_discovery` (0047),
   one transaction. Every venue club (`detail-klubu/<slug>` on the venue
   page) becomes a club of ours: the one linked to its slug
   (`clubs.site_slug`, whatever the admin renamed it to; `site_name`
@@ -531,7 +531,7 @@ Expected: `exit 0`.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add supabase/migrations/0046_federation_setup.sql supabase/tests/tenancy_rls.sql supabase/schema.sql docs/SCHEMA.md
+git add supabase/migrations/0047_federation_setup.sql supabase/tests/tenancy_rls.sql supabase/schema.sql docs/SCHEMA.md
 git commit -m "$(cat <<'EOF'
 feat(federation): clubs remember their ČKA identity; discovery links or creates them
 
@@ -850,14 +850,14 @@ export type TeamUpsert = {
 with:
 ```ts
 /** `club_slug`: the venue club the team plays for (`/detail-klubu/<slug>`);
- * apply_federation_discovery (0046) turns it into the club of ours it links
+ * apply_federation_discovery (0047) turns it into the club of ours it links
  * or creates. */
 export type TeamUpsert = {
   site_slug: string; site_team_id: number | null; site_name: string;
   competition_slug: string; competition_name: string; name: string; club_slug: string;
 };
 /** A club of ours as discovery reads it; `site_slug` is the venue club it
- * is linked to (0046), null until a discovery links it. */
+ * is linked to (0047), null until a discovery links it. */
 export type OurClub = { id: string; name: string; site_slug: string | null };
 /** One venue club for apply_federation_discovery: `match_id` is the club of
  * ours linked to its slug, else the one unlinked club its name matches,
@@ -934,7 +934,7 @@ with:
     clubs, competitions,
     existingNames: [...new Set(slots.flatMap((s) => [s.home_team, s.away_team]))],
   });
-  // One transaction (0046): the venue's clubs linked or created, then the
+  // One transaction (0047): the venue's clubs linked or created, then the
   // teams with their clubs.
   const applied = must(await db.rpc("apply_federation_discovery", {
     p_tenant: tenantId, p_clubs: planClubs(clubs, ourClubs), p_teams: teams,
@@ -974,7 +974,7 @@ EOF
 ### Task 3: Discovery is no sync run, a moved kuželna drops its report; federation_sync_progress (SQL)
 
 **Files:**
-- Modify: `supabase/migrations/0046_federation_setup.sql` (append)
+- Modify: `supabase/migrations/0047_federation_setup.sql` (append)
 - Modify: `supabase/tests/tenancy_rls.sql` (sections 13 and 13b; new sections 17 and 18)
 - Modify: `supabase/functions/_shared/federation_jobs.ts` (a comment on `LEASE_MS`)
 - Modify: `supabase/schema.sql` (regenerated), `docs/SCHEMA.md`
@@ -1008,7 +1008,7 @@ with:
 ```sql
   perform record_federation_run(v_b, 'discover', '{"teams":3}', null);
   select * into s from federation_sync where tenant_id = v_b;
-  -- 0046: a discovery keeps its report but is no sync run.
+  -- 0047: a discovery keeps its report but is no sync run.
   if s.last_run_at is not null or s.last_success_at is not null or s.last_error is not null
      or s.last_report->'discover'->>'teams' <> '3'
      or s.last_report->'discover'->>'at' is null then
@@ -1036,7 +1036,7 @@ In section 13b replace its whole leading comment (six lines; the second line run
 with:
 ```sql
 -- 13b. Only competition runs are the sync's runs (discovery was one too
--- until 0046): they stamp last_run_at and last_success_at. A match or
+-- until 0047): they stamp last_run_at and last_success_at. A match or
 -- venue job reports only trouble, under its own key (match:<site_match_id>,
 -- venue:<slug>): a failure is written there, a success removes just that
 -- entry, and a success with nothing to remove writes nothing — no row, no
@@ -1048,12 +1048,12 @@ and its notice:
 ```
 with:
 ```sql
-  raise notice 'OK: only competitions stamp a run; a match or venue success removes its own key or writes nothing (0045, 0046)';
+  raise notice 'OK: only competitions stamp a run; a match or venue success removes its own key or writes nothing (0045, 0047)';
 ```
 
 At the end of the file replace:
 ```sql
-  raise notice 'OK: apply_federation_discovery is callable by the service only (0046)';
+  raise notice 'OK: apply_federation_discovery is callable by the service only (0047)';
 end $$;
 
 reset role;
@@ -1061,7 +1061,7 @@ rollback;
 ```
 with:
 ```sql
-  raise notice 'OK: apply_federation_discovery is callable by the service only (0046)';
+  raise notice 'OK: apply_federation_discovery is callable by the service only (0047)';
 end $$;
 
 -- 17. federation_sync_progress: the caller's federation jobs due now or
@@ -1135,7 +1135,7 @@ begin
      or not has_function_privilege('authenticated', 'public.federation_sync_progress()', 'execute') then
     raise exception 'FAIL: federation_sync_progress must be callable by the app only';
   end if;
-  raise notice 'OK: federation_sync_progress counts the alley''s due and leased jobs, for admins only (0046)';
+  raise notice 'OK: federation_sync_progress counts the alley''s due and leased jobs, for admins only (0047)';
 end $$;
 
 -- 18. A moved kuželna drops the last discovery's report: it was the old
@@ -1163,7 +1163,7 @@ begin
     raise exception 'FAIL: a moved kuželna kept the old one''s discovery report';
   end if;
   perform set_federation_sync(v_slug, false);
-  raise notice 'OK: a moved kuželna drops the last discovery''s report; the same one keeps it (0046)';
+  raise notice 'OK: a moved kuželna drops the last discovery''s report; the same one keeps it (0047)';
 end $$;
 
 reset role;
@@ -1177,7 +1177,7 @@ Expected: `ERROR:  FAIL: a discovery should keep its report without stamping a r
 
 - [ ] **Step 3: Implement**
 
-Append to `supabase/migrations/0046_federation_setup.sql`:
+Append to `supabase/migrations/0047_federation_setup.sql`:
 
 ```sql
 
@@ -1301,24 +1301,24 @@ const LEASE_MS = 10 * 60e3;
 with:
 ```ts
 const MAX_ATTEMPTS = 5;
-// federation_sync_progress (0046) counts a job with attempts > 0 and run_at
+// federation_sync_progress (0047) counts a job with attempts > 0 and run_at
 // within this lease as in flight — keep the two in step.
 const LEASE_MS = 10 * 60e3;
 ```
 
-- [ ] **Step 4: Apply it (0046 is already recorded locally, so through psql), twice**
+- [ ] **Step 4: Apply it (0047 is already recorded locally, so through psql), twice**
 
-Run: `for i in 1 2; do psql "$(supabase status -o env | sed -n 's/^DB_URL="\(.*\)"/\1/p')" -X -v ON_ERROR_STOP=1 -q -f supabase/migrations/0046_federation_setup.sql || echo FAILED; done`
+Run: `for i in 1 2; do psql "$(supabase status -o env | sed -n 's/^DB_URL="\(.*\)"/\1/p')" -X -v ON_ERROR_STOP=1 -q -f supabase/migrations/0047_federation_setup.sql || echo FAILED; done`
 Expected: only `NOTICE … already exists, skipping` lines, no `FAILED`.
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `psql "$(supabase status -o env | sed -n 's/^DB_URL="\(.*\)"/\1/p')" -X -v ON_ERROR_STOP=1 -f supabase/tests/tenancy_rls.sql 2>&1 | grep -E 'ERROR|FAIL|0046\)'`
+Run: `psql "$(supabase status -o env | sed -n 's/^DB_URL="\(.*\)"/\1/p')" -X -v ON_ERROR_STOP=1 -f supabase/tests/tenancy_rls.sql 2>&1 | grep -E 'ERROR|FAIL|0047\)'`
 Expected: no `ERROR`/`FAIL`; the four Task 1 lines plus
 ```
-NOTICE:  OK: only competitions stamp a run; a match or venue success removes its own key or writes nothing (0045, 0046)
-NOTICE:  OK: federation_sync_progress counts the alley's due and leased jobs, for admins only (0046)
-NOTICE:  OK: a moved kuželna drops the last discovery's report; the same one keeps it (0046)
+NOTICE:  OK: only competitions stamp a run; a match or venue success removes its own key or writes nothing (0045, 0047)
+NOTICE:  OK: federation_sync_progress counts the alley's due and leased jobs, for admins only (0047)
+NOTICE:  OK: a moved kuželna drops the last discovery's report; the same one keeps it (0047)
 ```
 
 Run: `deno check --import-map supabase/functions/import_map.json supabase/functions/notify/index.ts`
@@ -1332,7 +1332,7 @@ In the `federation_sync` row replace:
 ```
 with:
 ```
-`last_success_at` (stamped only by `competition:<slug>` runs — the nightly sync's; since 0046 not by `discover`, so `last_run_at` null means never synced, which the setup wizard reads; match and venue jobs never touch them)
+`last_success_at` (stamped only by `competition:<slug>` runs — the nightly sync's; since 0047 not by `discover`, so `last_run_at` null means never synced, which the setup wizard reads; match and venue jobs never touch them)
 ```
 
 In the `set_federation_sync(venue_slug, enabled)` (0045) row replace:
@@ -1341,12 +1341,12 @@ drops the old kuželna's `venue:` key when no match of the alley is there either
 ```
 with:
 ```
-drops the old kuželna's `venue:` key when no match of the alley is there either, re-deriving `last_error`. Since 0046 a changed slug also drops `last_report.discover`, which was the old kuželna's, so the setup wizard never offers step 3 for its teams.
+drops the old kuželna's `venue:` key when no match of the alley is there either, re-deriving `last_error`. Since 0047 a changed slug also drops `last_report.discover`, which was the old kuželna's, so the setup wizard never offers step 3 for its teams.
 ```
 
 After the `request_federation_discovery()`, `request_federation_sync()` (0045) row, add the row:
 ```
-| `federation_sync_progress()` (0046) | admin | The caller's federation jobs due now (`run_at <= now()`) or leased (`attempts > 0` and `run_at` within the notify tick's 10-minute lease), per kind → `{discover, competitions, matches, venues}`; a match's future checkpoint never counts. The ČKA card polls it. `not_allowed`. |
+| `federation_sync_progress()` (0047) | admin | The caller's federation jobs due now (`run_at <= now()`) or leased (`attempts > 0` and `run_at` within the notify tick's 10-minute lease), per kind → `{discover, competitions, matches, venues}`; a match's future checkpoint never counts. The ČKA card polls it. `not_allowed`. |
 ```
 
 In **Runs** replace:
@@ -1361,7 +1361,7 @@ with:
   - `discover` and `competition:<slug>` keep their last run: a success
     merges `{key: report + at}`, a failure `{key: {error, at}}` — the
     key's entry is whatever happened last. Only `competition:<slug>` runs
-    are the sync's runs (0046; `discover` was one too until then): they
+    are the sync's runs (0047; `discover` was one too until then): they
     stamp `last_run_at`, a success also `last_success_at` (the card's
     „Poslední synchronizace“).
 ```
@@ -1377,7 +1377,7 @@ Expected: `exit 0`.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add supabase/migrations/0046_federation_setup.sql supabase/tests/tenancy_rls.sql supabase/functions/_shared/federation_jobs.ts supabase/schema.sql docs/SCHEMA.md
+git add supabase/migrations/0047_federation_setup.sql supabase/tests/tenancy_rls.sql supabase/functions/_shared/federation_jobs.ts supabase/schema.sql docs/SCHEMA.md
 git commit -m "$(cat <<'EOF'
 feat(federation): federation_sync_progress for the ČKA card; discovery is no sync run, and a moved kuželna drops its report
 
@@ -1417,7 +1417,7 @@ with:
     expect(s.lastError, 'competition: HTTP 500');
   });
 
-  test('FederationSync.fromJson reads the last discovery report (0046)', () {
+  test('FederationSync.fromJson reads the last discovery report (0047)', () {
     final s = FederationSync.fromJson({
       'venue_slug': 'tj-sokol-brno-iv',
       'last_report': {
@@ -1451,7 +1451,7 @@ with:
     expect(failed.clubsCreated, isEmpty);
   });
 
-  test('FederationSyncProgress.fromJson, pending and idle (0046)', () {
+  test('FederationSyncProgress.fromJson, pending and idle (0047)', () {
     final p = FederationSyncProgress.fromJson(
         {'discover': 0, 'competitions': 2, 'matches': 12, 'venues': 1});
     expect(p.discover, 0);
@@ -1481,7 +1481,7 @@ with:
       expect(c.colorIndex, -1);
     });
 
-    test('fromJson reads the ČKA identity; unlinked without it (0046)', () {
+    test('fromJson reads the ČKA identity; unlinked without it (0047)', () {
       final c = Club.fromJson({
         'id': 'club-3',
         'name': 'Devítka',
@@ -1545,7 +1545,7 @@ class Club {
   final int colorIndex;
 
   /// The venue club on vysledky.kuzelky.cz this club is linked to
-  /// (`detail-klubu/<slug>`) and its name there (0046). null until a
+  /// (`detail-klubu/<slug>`) and its name there (0047). null until a
   /// discovery links it; renaming the club in the app keeps both, so the
   /// next discovery still finds it.
   final String? siteSlug;
@@ -1613,7 +1613,7 @@ class FederationSync {
   final String venueSlug;
   final bool enabled;
 
-  /// Stamped by the schedule's (competition) runs only — since 0046 not by
+  /// Stamped by the schedule's (competition) runs only — since 0047 not by
   /// a discovery — so null means the alley was never synced.
   final DateTime? lastRunAt;
   final DateTime? lastSuccessAt;
@@ -1643,7 +1643,7 @@ class FederationSync {
   }
 }
 
-/// What the last discovery did (0046): the venue's [teams] in how many
+/// What the last discovery did (0047): the venue's [teams] in how many
 /// [competitions], how many teams it [created], and the clubs of ours it
 /// matched ([clubsLinked], our names) or created ([clubsCreated]). A failed
 /// discovery carries only [error] and [at].
@@ -1685,7 +1685,7 @@ class FederationDiscoverReport {
       );
 }
 
-/// The alley's federation jobs due now or in flight, per kind (0046
+/// The alley's federation jobs due now or in flight, per kind (0047
 /// `federation_sync_progress`) — what the ČKA card polls while a sync runs.
 class FederationSyncProgress {
   const FederationSyncProgress({
@@ -1741,7 +1741,7 @@ with:
   static Future<void> requestFederationSync() =>
       _db.rpc('request_federation_sync');
 
-  /// The alley's federation jobs due now or in flight (0046) — what the ČKA
+  /// The alley's federation jobs due now or in flight (0047) — what the ČKA
   /// card polls while a sync or discovery runs. Admin only (`not_allowed`).
   static Future<FederationSyncProgress> federationSyncProgress() async =>
       FederationSyncProgress.fromJson(Map<String, dynamic>.from(
@@ -1836,7 +1836,7 @@ Right after the test `'deleting a club with teams says its teams lose it too'` (
 
 ```dart
 
-    // Devítka is linked to the ČKA site (0046); Veverky is not.
+    // Devítka is linked to the ČKA site (0047); Veverky is not.
     const linkedClubs = [
       Club(
         id: 'c1',
@@ -1928,7 +1928,7 @@ with:
     return confirmDelete(
       context,
       title: 'Smazat oddíl?',
-      // Discovery finds a linked club by its site_slug (0046): deleted, it
+      // Discovery finds a linked club by its site_slug (0047): deleted, it
       // is created again while it plays at the kuželna.
       message: club.linked
           ? '$message Oddíl je propojený s webem ČKA, takže ho příští '
@@ -2024,7 +2024,7 @@ import 'form_dialog.dart';
 
 /// Add/edit dialog for a club: name field + [ColorPickerGrid]. Pops with
 /// `(name, colorIndex)` — the screen runs the RPC, so a failed save can be
-/// retried from the list. A club linked to the ČKA site (0046) shows its
+/// retried from the list. A club linked to the ČKA site (0047) shows its
 /// name there under the field: the link survives any rename.
 class ClubDialog extends StatefulWidget {
   const ClubDialog({super.key, this.existing});
@@ -2146,7 +2146,7 @@ with:
     });
   });
 
-  group('the kuželna on the ČKA site (0046)', () {
+  group('the kuželna on the ČKA site (0047)', () {
     test('venueSlugPattern mirrors set_federation_sync\'s check', () {
       for (final s in ['a', 'kk2', 'tj-sokol-brno-iv']) {
         expect(venueSlugPattern.hasMatch(s), isTrue, reason: s);
@@ -2437,7 +2437,7 @@ with:
 ```dart
 /// Slugs an admin types: the public overview's address part (0043), what
 /// comes after `#/prehled/`, and the kuželna's page on the ČKA results site
-/// (0045/0046). Pure Dart, unit-tested.
+/// (0045/0047). Pure Dart, unit-tested.
 library;
 ```
 and append at the end of the file:
@@ -2837,7 +2837,7 @@ with:
     });
   });
 
-  group('federationProgressLabel (0046)', () {
+  group('federationProgressLabel (0047)', () {
     test('what is left, the non-zero counts only, the verb agreeing', () {
       expect(
         federationProgressLabel(const FederationSyncProgress(
@@ -2998,7 +2998,7 @@ class _Harness {
 and add after the `group('normal view', …)` block, before `main()`'s closing `}`:
 ```dart
 
-  group('progress (0046)', () {
+  group('progress (0047)', () {
     testWidgets(
         'a running sync spins with what is left; Poslední synchronizace '
         'stays below, muted', (tester) async {
@@ -3220,7 +3220,7 @@ String czechCount(int n, String one, String few, String many) =>
 const teamsLoadingLabel = 'Načítají se týmy z webu…';
 
 /// The ČKA card's progress line while federation jobs are still to run
-/// (0046 `federation_sync_progress`): „Synchronizuje se… zbývá 12 zápasů,
+/// (0047 `federation_sync_progress`): „Synchronizuje se… zbývá 12 zápasů,
 /// 2 soutěže a 1 kuželna“ — only the non-zero counts, the verb agreeing
 /// with the first of them. A discovery reads [teamsLoadingLabel].
 String federationProgressLabel(FederationSyncProgress p) {
@@ -3253,7 +3253,7 @@ Replace the whole of `lib/features/admin/widgets/federation_card.dart` with:
 /// vysledky.kuzelky.cz (read-only, changed behind a pencil), automatic sync
 /// on/off (saved at once), a one-off team discovery or sync run, and while
 /// federation jobs are still to run, a spinning line that says what is
-/// left (0046 `federation_sync_progress`).
+/// left (0047 `federation_sync_progress`).
 library;
 
 import 'dart:async';
@@ -3700,10 +3700,10 @@ EOF
 
 - [ ] **Step 1: Write the failing tests**
 
-In `test/domain/labels_test.dart` add before `main()`'s closing `}` (after the `federationProgressLabel (0046)` group):
+In `test/domain/labels_test.dart` add before `main()`'s closing `}` (after the `federationProgressLabel (0047)` group):
 ```dart
 
-  group('discovery summary (0046)', () {
+  group('discovery summary (0047)', () {
     test('counts the oddíly and names the new ones, Czech-sorted', () {
       expect(
         discoveryClubsLabel(
@@ -3755,10 +3755,10 @@ In `test/features/federation_card_test.dart` add the import after the `federatio
 ```dart
 import 'package:rezervator/features/admin/widgets/venue_slug_field.dart';
 ```
-and add after the `group('progress (0046)', …)` block, before `main()`'s closing `}`:
+and add after the `group('progress (0047)', …)` block, before `main()`'s closing `}`:
 ```dart
 
-  group('setup wizard (0046)', () {
+  group('setup wizard (0047)', () {
     const slugOnly = FederationSync(venueSlug: 'tj-sokol-brno-iv');
     const team = Team(
       id: 't1',
@@ -4061,7 +4061,7 @@ import 'schedule.dart';
 and append at the end:
 ```dart
 
-/// The setup wizard's summary of a discovery (0046): „3 oddíly (2 nové:
+/// The setup wizard's summary of a discovery (0047): „3 oddíly (2 nové:
 /// KS Devítka Brno, TJ Sokol Husovice)“ — every venue club it found, and
 /// the ones it created, Czech-sorted.
 String discoveryClubsLabel(FederationDiscoverReport r) {
@@ -4092,7 +4092,7 @@ Create `lib/features/admin/widgets/federation_wizard.dart`:
 ```dart
 /// Správa → Oddíly: the ČKA card's first setup — 1. the kuželna on
 /// vysledky.kuzelky.cz, 2. its oddíly and their teams (a discovery, which
-/// links the venue's clubs to ours or creates them, 0046), 3. automatic
+/// links the venue's clubs to ours or creates them, 0047), 3. automatic
 /// sync on and the first run. The step it opens on comes from the server
 /// state ([FederationWizard.stepFor]), so an admin who leaves half-way
 /// comes back where they left; Pokračovat and Zpět move on or back.
@@ -4130,7 +4130,7 @@ class FederationWizard extends StatefulWidget {
   /// The step the server state opens on, 0-based: no slug → the kuželna;
   /// no team, or no successful discovery of this kuželna → the oddíly and
   /// teams; else switching the sync on. A moved kuželna's teams are the old
-  /// one's: 0046's set_federation_sync drops the report with the move.
+  /// one's: 0047's set_federation_sync drops the report with the move.
   static int stepFor(FederationSync sync, List<Team> teams) {
     if (!sync.configured) return 0;
     final report = sync.discover;
@@ -4156,7 +4156,7 @@ class _FederationWizardState extends State<FederationWizard> {
 
   /// Step 1 saved another kuželna than the row had. The discovery report
   /// the row held then ([_movedFrom] is its `at`) was the old kuželna's.
-  /// 0046's set_federation_sync drops it, but until that echo arrives step 2
+  /// 0047's set_federation_sync drops it, but until that echo arrives step 2
   /// must not show it, nor offer Pokračovat for the old kuželna's teams.
   bool _moved = false;
   DateTime? _movedFrom;
@@ -4375,7 +4375,7 @@ In `lib/features/admin/widgets/federation_card.dart` make six replacements.
 /// vysledky.kuzelky.cz (read-only, changed behind a pencil), automatic sync
 /// on/off (saved at once), a one-off team discovery or sync run, and while
 /// federation jobs are still to run, a spinning line that says what is
-/// left (0046 `federation_sync_progress`).
+/// left (0047 `federation_sync_progress`).
 ```
 with:
 ```dart
@@ -4384,7 +4384,7 @@ with:
 /// kuželna on vysledky.kuzelky.cz (read-only, changed behind a pencil),
 /// automatic sync on/off (saved at once), a one-off team discovery or sync
 /// run, and while federation jobs are still to run, a spinning line that
-/// says what is left (0046 `federation_sync_progress`).
+/// says what is left (0047 `federation_sync_progress`).
 ```
 
 2. The imports — replace:
@@ -4505,7 +4505,7 @@ ruční „Synchronizovat teď". Ruční úprava zápasu v appce se při
 with:
 ```
 joby `federation_*`, noční cron `federation-nightly`, migrace `0045`
-a `0046`). Nastavení je ve Správa → Oddíly: poprvé průvodce ve třech
+a `0047`). Nastavení je ve Správa → Oddíly: poprvé průvodce ve třech
 krocích (kuželna, oddíly a týmy — chybějící oddíly založí —, zapnutí
 stahování), potom „Přenačíst týmy z webu", ruční „Synchronizovat teď"
 a řádek s průběhem synchronizace. Ruční úprava zápasu v appce se při
@@ -4570,8 +4570,8 @@ Expected: `supabase/schema.sql regenerated` then `snapshot current`.
 Run: `psql "$(supabase status -o env | sed -n 's/^DB_URL="\(.*\)"/\1/p')" -X -v ON_ERROR_STOP=1 -q -f supabase/tests/tenancy_rls.sql > /dev/null 2>&1; echo "exit $?"`
 Expected: `exit 0`.
 
-Run: `psql "$(supabase status -o env | sed -n 's/^DB_URL="\(.*\)"/\1/p')" -X -v ON_ERROR_STOP=1 -f supabase/tests/tenancy_rls.sql 2>&1 | grep -E 'ERROR|FAIL|0046\)'`
-Expected: no `ERROR`/`FAIL` line and seven `NOTICE:  OK: …` lines — the six 0046 sections (16, 16b, 16c, 16d, 17, 18) plus the 13b notice ending `(0045, 0046)`.
+Run: `psql "$(supabase status -o env | sed -n 's/^DB_URL="\(.*\)"/\1/p')" -X -v ON_ERROR_STOP=1 -f supabase/tests/tenancy_rls.sql 2>&1 | grep -E 'ERROR|FAIL|0047\)'`
+Expected: no `ERROR`/`FAIL` line and seven `NOTICE:  OK: …` lines — the six 0047 sections (16, 16b, 16c, 16d, 17, 18) plus the 13b notice ending `(0045, 0047)`.
 
 - [ ] **Step 6: Clean tree**
 

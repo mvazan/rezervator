@@ -3,7 +3,7 @@
 /// kuželna on vysledky.kuzelky.cz (read-only, changed behind a pencil),
 /// automatic sync on/off (saved at once), a one-off team discovery or sync
 /// run, and while federation jobs are still to run, a spinning line that
-/// says what is left (0046 `federation_sync_progress`).
+/// says what is left (0047 `federation_sync_progress`).
 library;
 
 import 'dart:async';
@@ -73,7 +73,7 @@ class _FederationCardState extends ConsumerState<FederationCard>
 
   /// The discovery the looks count is a failed one waiting to retry, seen
   /// next to its error in the row. It stays that after a move to another
-  /// kuželna drops the error (0046's set_federation_sync), until the count
+  /// kuželna drops the error (0047's set_federation_sync), until the count
   /// is 0 or a new request.
   bool _failedRetry = false;
 

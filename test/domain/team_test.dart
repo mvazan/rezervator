@@ -29,7 +29,7 @@ void main() {
     expect(s.lastError, 'competition: HTTP 500');
   });
 
-  test('FederationSync.fromJson reads the last discovery report (0046)', () {
+  test('FederationSync.fromJson reads the last discovery report (0047)', () {
     final s = FederationSync.fromJson({
       'venue_slug': 'tj-sokol-brno-iv',
       'last_report': {
@@ -64,7 +64,7 @@ void main() {
     expect(failed.teamsCreated, isEmpty);
   });
 
-  test('FederationDiscoverReport reads teams_created, none when absent (0046)',
+  test('FederationDiscoverReport reads teams_created, none when absent (0047)',
       () {
     final r = FederationDiscoverReport.fromJson({
       'teams': 5, 'competitions': 2, 'created': 2,
@@ -75,7 +75,7 @@ void main() {
     expect(r.created, 2);
     expect(r.teamsCreated, ['KS Devítka Brno B', 'TJ Sokol Brno IV C']);
 
-    // A report written before 0046 named the teams: counted, not named.
+    // A report written before 0047 named the teams: counted, not named.
     final older = FederationDiscoverReport.fromJson({
       'teams': 5, 'created': 5, 'at': '2026-09-24T08:00:00+00:00',
     });
@@ -84,7 +84,7 @@ void main() {
     expect(const FederationDiscoverReport().teamsCreated, isEmpty);
   });
 
-  test('FederationSyncProgress.fromJson, pending and idle (0046)', () {
+  test('FederationSyncProgress.fromJson, pending and idle (0047)', () {
     final p = FederationSyncProgress.fromJson(
         {'discover': 0, 'competitions': 2, 'matches': 12, 'venues': 1});
     expect(p.discover, 0);

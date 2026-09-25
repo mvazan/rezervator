@@ -1,6 +1,6 @@
 /// Správa → Oddíly: the ČKA card's first setup — 1. the kuželna on
 /// vysledky.kuzelky.cz, 2. its oddíly and their teams (a discovery, which
-/// links the venue's clubs to ours or creates them, 0046), 3. automatic
+/// links the venue's clubs to ours or creates them, 0047), 3. automatic
 /// sync on and the first run. The step it opens on comes from the server
 /// state ([FederationWizard.stepFor]), so an admin who leaves half-way
 /// comes back where they left; Pokračovat and Zpět move on or back.
@@ -37,7 +37,7 @@ class FederationWizard extends StatefulWidget {
 
   /// The step the server state opens on, 0-based: no slug → the kuželna;
   /// not [ready] → the oddíly and teams; else switching the sync on. A
-  /// moved kuželna's teams are the old one's: 0046's set_federation_sync
+  /// moved kuželna's teams are the old one's: 0047's set_federation_sync
   /// drops the report with the move.
   static int stepFor(FederationSync sync, List<Team> teams) {
     if (!sync.configured) return 0;
@@ -69,7 +69,7 @@ class _FederationWizardState extends State<FederationWizard> {
 
   /// Step 1 saved another kuželna than the row had. The discovery report
   /// the row held then ([_movedFrom] is its `at`) was the old kuželna's.
-  /// 0046's set_federation_sync drops it, but until that echo arrives step 2
+  /// 0047's set_federation_sync drops it, but until that echo arrives step 2
   /// must not show it, nor offer Pokračovat for the old kuželna's teams.
   bool _moved = false;
   DateTime? _movedFrom;

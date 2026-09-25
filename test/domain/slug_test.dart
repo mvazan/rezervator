@@ -36,7 +36,7 @@ void main() {
     });
   });
 
-  group('the kuželna on the ČKA site (0046)', () {
+  group('the kuželna on the ČKA site (0047)', () {
     test('venueSlugPattern mirrors set_federation_sync\'s check', () {
       for (final s in ['a', 'kk2', 'tj-sokol-brno-iv']) {
         expect(venueSlugPattern.hasMatch(s), isTrue, reason: s);

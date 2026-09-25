@@ -92,7 +92,7 @@ String czechCount(int n, String one, String few, String many) =>
 const teamsLoadingLabel = 'Načítají se týmy z webu…';
 
 /// The ČKA card's progress line while federation jobs are still to run
-/// (0046 `federation_sync_progress`): „Synchronizuje se… zbývá 12 zápasů,
+/// (0047 `federation_sync_progress`): „Synchronizuje se… zbývá 12 zápasů,
 /// 2 soutěže a 1 kuželna“ — only the non-zero counts, the verb agreeing
 /// with the first of them. A discovery reads [teamsLoadingLabel].
 String federationProgressLabel(FederationSyncProgress p) {
@@ -118,7 +118,7 @@ String federationProgressLabel(FederationSyncProgress p) {
   return 'Synchronizuje se… $verb $list';
 }
 
-/// The setup wizard's summary of a discovery (0046): „3 oddíly (2 nové:
+/// The setup wizard's summary of a discovery (0047): „3 oddíly (2 nové:
 /// KS Devítka Brno, TJ Sokol Husovice)“ — every venue club it found, and
 /// the ones it created, Czech-sorted.
 String discoveryClubsLabel(FederationDiscoverReport r) {
@@ -144,7 +144,7 @@ String _inCompetitions(int n) {
   return '${ve ? 've' : 'v'} $n ${n == 1 ? 'soutěži' : 'soutěžích'}';
 }
 
-/// The ČKA card's line about the last discovery (0046), [when] being its
+/// The ČKA card's line about the last discovery (0047), [when] being its
 /// `at` as the card writes „Poslední synchronizace“: „Poslední načtení
 /// týmů: pá 25.9. 10:05 · nové týmy: A, B · nový oddíl: X“, „… · žádná
 /// změna“ when it created neither a team nor a club, or „Poslední načtení
@@ -168,7 +168,7 @@ String discoveryResultLabel(FederationDiscoverReport r, String? when) {
 const _newNamesShown = 3;
 
 /// „nový tým: A“, „nové týmy: A, B“, „nových týmů: 5 (A, B, C, …)“ —
-/// Czech-sorted; null for none. A report from before 0046 named the teams
+/// Czech-sorted; null for none. A report from before 0047 named the teams
 /// has only their [count]: „3 nové týmy“.
 String? _newOnes(
     List<String> names, int count, String one, String few, String many) {

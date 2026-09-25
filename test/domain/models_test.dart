@@ -172,7 +172,7 @@ void main() {
       expect(c.colorIndex, -1);
     });
 
-    test('fromJson reads the ČKA identity; unlinked without it (0046)', () {
+    test('fromJson reads the ČKA identity; unlinked without it (0047)', () {
       final c = Club.fromJson({
         'id': 'club-3',
         'name': 'Devítka',

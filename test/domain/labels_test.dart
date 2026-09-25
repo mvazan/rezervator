@@ -172,7 +172,7 @@ void main() {
     });
   });
 
-  group('federationProgressLabel (0046)', () {
+  group('federationProgressLabel (0047)', () {
     test('what is left, the non-zero counts only, the verb agreeing', () {
       expect(
         federationProgressLabel(const FederationSyncProgress(
@@ -202,7 +202,7 @@ void main() {
     });
   });
 
-  group('discovery summary (0046)', () {
+  group('discovery summary (0047)', () {
     test('counts the oddíly and names the new ones, Czech-sorted', () {
       expect(
         discoveryClubsLabel(
@@ -249,7 +249,7 @@ void main() {
     });
   });
 
-  group('last discovery on the card (0046 teams_created)', () {
+  group('last discovery on the card (0047 teams_created)', () {
     const when = 'pá 25.9. 10:05';
     String line(FederationDiscoverReport r) => discoveryResultLabel(r, when);
 

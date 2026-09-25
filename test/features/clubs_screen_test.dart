@@ -284,7 +284,7 @@ void main() {
       await tester.pumpAndSettle();
     });
 
-    // Devítka is linked to the ČKA site (0046); Veverky is not.
+    // Devítka is linked to the ČKA site (0047); Veverky is not.
     const linkedClubs = [
       Club(
         id: 'c1',

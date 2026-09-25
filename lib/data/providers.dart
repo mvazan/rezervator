@@ -619,7 +619,7 @@ class Api {
   static Future<void> requestFederationSync() =>
       _db.rpc('request_federation_sync');
 
-  /// The alley's federation jobs due now or in flight (0046) — what the ČKA
+  /// The alley's federation jobs due now or in flight (0047) — what the ČKA
   /// card polls while a sync or discovery runs. Admin only (`not_allowed`).
   static Future<FederationSyncProgress> federationSyncProgress() async =>
       FederationSyncProgress.fromJson(Map<String, dynamic>.from(

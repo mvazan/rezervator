@@ -20,7 +20,7 @@ When the ČKA sync was first enabled in production (24. 9. 2026), four problems 
 
 Out of scope: registration numbers, statistics, and any change to the pairing of matches.
 
-## Backend: migration `0046_federation_setup.sql`
+## Backend: migration `0047_federation_setup.sql`
 
 0045 is deployed, so every change goes in a new migration, idempotent and additive.
 

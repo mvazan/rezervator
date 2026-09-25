@@ -7,7 +7,7 @@ import 'form_dialog.dart';
 
 /// Add/edit dialog for a club: name field + [ColorPickerGrid]. Pops with
 /// `(name, colorIndex)` — the screen runs the RPC, so a failed save can be
-/// retried from the list. A club linked to the ČKA site (0046) shows its
+/// retried from the list. A club linked to the ČKA site (0047) shows its
 /// name there under the field: the link survives any rename.
 class ClubDialog extends StatefulWidget {
   const ClubDialog({super.key, this.existing});

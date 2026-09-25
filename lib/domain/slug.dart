@@ -1,6 +1,6 @@
 /// Slugs an admin types: the public overview's address part (0043), what
 /// comes after `#/prehled/`, and the kuželna's page on the ČKA results site
-/// (0045/0046). Pure Dart, unit-tested.
+/// (0045/0047). Pure Dart, unit-tested.
 library;
 
 import 'collation.dart';

@@ -4765,7 +4765,7 @@ begin
   delete from federation_sync where tenant_id = v_b;
   perform record_federation_run(v_b, 'discover', '{"teams":3}', null);
   select * into s from federation_sync where tenant_id = v_b;
-  -- 0046: a discovery keeps its report but is no sync run.
+  -- 0047: a discovery keeps its report but is no sync run.
   if s.last_run_at is not null or s.last_success_at is not null or s.last_error is not null
      or s.last_report->'discover'->>'teams' <> '3'
      or s.last_report->'discover'->>'at' is null then
@@ -4854,7 +4854,7 @@ begin
 end $$;
 
 -- 13b. Only competition runs are the sync's runs (discovery was one too
--- until 0046): they stamp last_run_at and last_success_at. A match or
+-- until 0047): they stamp last_run_at and last_success_at. A match or
 -- venue job reports only trouble, under its own key (match:<site_match_id>,
 -- venue:<slug>): a failure is written there, a success removes just that
 -- entry, and a success with nothing to remove writes nothing — no row, no
@@ -4925,7 +4925,7 @@ begin
      or s.last_report->v_comp->>'at' is null or s.last_report->v_comp ? 'error' then
     raise exception 'FAIL: a competition success should stamp both and keep its report: %', to_jsonb(s);
   end if;
-  raise notice 'OK: only competitions stamp a run; a match or venue success removes its own key or writes nothing (0045, 0046)';
+  raise notice 'OK: only competitions stamp a run; a match or venue success removes its own key or writes nothing (0045, 0047)';
 end $$;
 
 -- 13c. last_error is the newest error among the keys that can still run,
@@ -5502,7 +5502,7 @@ begin
   raise notice 'OK: with both alleys configured, each admin sees only their own sync settings (0045)';
 end $$;
 
--- 0046 průvodce nastavením ČKA -----------------------------------------------
+-- 0047 průvodce nastavením ČKA -----------------------------------------------
 reset role;
 
 -- 16. apply_federation_discovery matches every venue club to a club of
@@ -5511,7 +5511,7 @@ reset role;
 -- the teams it created (teams_created), so a second run lists none. An
 -- alley of its own keeps the colour counts exact.
 insert into tenants (id, name)
-values ('00000000-0000-0000-0000-00000000000c', 'Kuželna C (0046)');
+values ('00000000-0000-0000-0000-00000000000c', 'Kuželna C (0047)');
 do $$
 declare
   v_c constant uuid := '00000000-0000-0000-0000-00000000000c';
@@ -5605,7 +5605,7 @@ begin
                        and name = 'KS Devítka Brno') then
     raise exception 'FAIL: a deleted linked club was not created again: %', r;
   end if;
-  raise notice 'OK: discovery links clubs by site_slug, else by name, else creates them once; renames and the admin''s clubs hold (0046)';
+  raise notice 'OK: discovery links clubs by site_slug, else by name, else creates them once; renames and the admin''s clubs hold (0047)';
 end $$;
 
 -- 16b. A created club takes the first palette colour (0–8) no club of the
@@ -5635,7 +5635,7 @@ begin
      or exists (select 1 from clubs where tenant_id = v_c and site_slug = 'kk-barva') then
     raise exception 'FAIL: a venue club whose name another club has was created or linked: %', r;
   end if;
-  raise notice 'OK: a created club takes the first free palette colour, else the least used; a taken name creates nothing (0046)';
+  raise notice 'OK: a created club takes the first free palette colour, else the least used; a taken name creates nothing (0047)';
 end $$;
 
 -- 16c. Renaming or recolouring a club in the app keeps its ČKA identity.
@@ -5656,7 +5656,7 @@ begin
                     and site_slug = 'kk-propojeny' and site_name = 'KK Propojený') then
     raise exception 'FAIL: upsert_club touched the club''s ČKA identity';
   end if;
-  raise notice 'OK: renaming or recolouring a club keeps its site_slug and site_name (0046)';
+  raise notice 'OK: renaming or recolouring a club keeps its site_slug and site_name (0047)';
 end $$;
 reset role;
 
@@ -5670,7 +5670,7 @@ begin
      or not has_function_privilege('service_role', f, 'execute') then
     raise exception 'FAIL: apply_federation_discovery must be callable by the service only';
   end if;
-  raise notice 'OK: apply_federation_discovery is callable by the service only (0046)';
+  raise notice 'OK: apply_federation_discovery is callable by the service only (0047)';
 end $$;
 
 -- 16e. The report's teams_created (the card's „Poslední načtení týmů“):
@@ -5713,7 +5713,7 @@ begin
      or r->'teams_created' is distinct from '[]'::jsonb then
     raise exception 'FAIL: a second discovery listed teams it did not create: %', r;
   end if;
-  raise notice 'OK: teams_created lists the teams a discovery created, by their names here, and a second one none (0046)';
+  raise notice 'OK: teams_created lists the teams a discovery created, by their names here, and a second one none (0047)';
 end $$;
 
 -- 17. federation_sync_progress: the caller's federation jobs due now or
@@ -5787,7 +5787,7 @@ begin
      or not has_function_privilege('authenticated', 'public.federation_sync_progress()', 'execute') then
     raise exception 'FAIL: federation_sync_progress must be callable by the app only';
   end if;
-  raise notice 'OK: federation_sync_progress counts the alley''s due and leased jobs, for admins only (0046)';
+  raise notice 'OK: federation_sync_progress counts the alley''s due and leased jobs, for admins only (0047)';
 end $$;
 
 -- 18. A moved kuželna drops the last discovery's report: it was the old
@@ -5815,7 +5815,7 @@ begin
     raise exception 'FAIL: a moved kuželna kept the old one''s discovery report';
   end if;
   perform set_federation_sync(v_slug, false);
-  raise notice 'OK: a moved kuželna drops the last discovery''s report; the same one keeps it (0046)';
+  raise notice 'OK: a moved kuželna drops the last discovery''s report; the same one keeps it (0047)';
 end $$;
 reset role;
 
@@ -5861,7 +5861,7 @@ begin
                   where dedupe_key = 'federation_discover:00000000-0000-0000-0000-00000000000a') then
     raise exception 'FAIL: moving one alley''s kuželna dropped another alley''s discovery job';
   end if;
-  raise notice 'OK: a moved kuželna drops the old one''s discovery job; the same one and other alleys keep theirs (0046)';
+  raise notice 'OK: a moved kuželna drops the old one''s discovery job; the same one and other alleys keep theirs (0047)';
 end $$;
 
 rollback;

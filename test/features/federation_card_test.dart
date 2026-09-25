@@ -223,7 +223,7 @@ void main() {
     });
   });
 
-  group('progress (0046)', () {
+  group('progress (0047)', () {
     testWidgets(
         'a running sync spins with what is left; Poslední synchronizace '
         'stays below, muted', (tester) async {
@@ -560,7 +560,7 @@ void main() {
     });
   });
 
-  group('last discovery (0046 teams_created)', () {
+  group('last discovery (0047 teams_created)', () {
     // Local time, so the label reads the same in any time zone.
     final at = DateTime(2026, 9, 25, 10, 5);
     const when = 'pá 25.9. 10:05';
@@ -752,7 +752,7 @@ void main() {
     });
   });
 
-  group('setup wizard (0046)', () {
+  group('setup wizard (0047)', () {
     const slugOnly = FederationSync(venueSlug: 'tj-sokol-brno-iv');
     const team = Team(
       id: 't1',
@@ -1071,7 +1071,7 @@ void main() {
           // The failed job backs off to retry and still counts (decision 7).
           const FederationSyncProgress(discover: 1),
           // The next look comes after the move: set_federation_sync deleted
-          // the old kuželna's job with its report (0046).
+          // the old kuželna's job with its report (0047).
           FederationSyncProgress.idle,
         ],
       );

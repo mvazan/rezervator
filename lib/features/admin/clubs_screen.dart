@@ -64,7 +64,7 @@ class ClubsScreen extends ConsumerWidget {
     return confirmDelete(
       context,
       title: 'Smazat oddíl?',
-      // Discovery finds a linked club by its site_slug (0046): deleted, it
+      // Discovery finds a linked club by its site_slug (0047): deleted, it
       // is created again while it plays at the kuželna.
       message: club.linked
           ? '$message Oddíl je propojený s webem ČKA, takže ho příští '

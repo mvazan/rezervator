@@ -240,7 +240,7 @@ class Club {
   final int colorIndex;
 
   /// The venue club on vysledky.kuzelky.cz this club is linked to
-  /// (`detail-klubu/<slug>`) and its name there (0046). null until a
+  /// (`detail-klubu/<slug>`) and its name there (0047). null until a
   /// discovery links it; renaming the club in the app keeps both, so the
   /// next discovery still finds it.
   final String? siteSlug;
@@ -320,7 +320,7 @@ class FederationSync {
   final String venueSlug;
   final bool enabled;
 
-  /// Stamped by the schedule's (competition) runs only — since 0046 not by
+  /// Stamped by the schedule's (competition) runs only — since 0047 not by
   /// a discovery — so null means the alley was never synced.
   final DateTime? lastRunAt;
   final DateTime? lastSuccessAt;
@@ -350,10 +350,10 @@ class FederationSync {
   }
 }
 
-/// What the last discovery did (0046): the venue's [teams] in how many
+/// What the last discovery did (0047): the venue's [teams] in how many
 /// [competitions], how many teams it [created] and their names here
 /// ([teamsCreated]), and the clubs of ours it matched ([clubsLinked], our
-/// names) or created ([clubsCreated]). A report from before 0046 named the
+/// names) or created ([clubsCreated]). A report from before 0047 named the
 /// teams has [created] but an empty [teamsCreated]. A failed discovery
 /// carries only [error] and [at].
 class FederationDiscoverReport {
@@ -397,7 +397,7 @@ class FederationDiscoverReport {
       );
 }
 
-/// The alley's federation jobs due now or in flight, per kind (0046
+/// The alley's federation jobs due now or in flight, per kind (0047
 /// `federation_sync_progress`) — what the ČKA card polls while a sync runs.
 class FederationSyncProgress {
   const FederationSyncProgress({

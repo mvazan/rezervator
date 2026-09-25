@@ -1,4 +1,4 @@
--- 0046 — průvodce nastavením ČKA (Správa → Oddíly): clubs remember the
+-- 0047 — průvodce nastavením ČKA (Správa → Oddíly): clubs remember the
 -- venue club they are on vysledky.kuzelky.cz, and discovery links the
 -- venue's clubs to ours or creates them, in one transaction. Spec:
 -- docs/superpowers/specs/2026-09-25-federation-setup-wizard-design.md

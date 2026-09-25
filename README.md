@@ -36,7 +36,7 @@ nepřišel, a měsíční docházku si stáhne jako CSV.
 Zápasy a výsledky týmů kuželny se stahují z
 [vysledky.kuzelky.cz](https://vysledky.kuzelky.cz) (edge funkce `notify`,
 joby `federation_*`, noční cron `federation-nightly`, migrace `0045`
-a `0046`). Nastavení je ve Správa → Oddíly: poprvé průvodce ve třech
+a `0047`). Nastavení je ve Správa → Oddíly: poprvé průvodce ve třech
 krocích (kuželna, oddíly a týmy — chybějící oddíly založí —, zapnutí
 stahování), potom „Přenačíst týmy z webu", ruční „Synchronizovat teď",
 řádek s průběhem synchronizace a výsledek posledního načtení týmů (nové

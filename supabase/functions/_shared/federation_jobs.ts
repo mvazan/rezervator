@@ -23,14 +23,14 @@ export type SlotRow = {
   home_slug: string; away_slug: string;
 };
 /** `club_slug`: the venue club the team plays for (`/detail-klubu/<slug>`);
- * apply_federation_discovery (0046) turns it into the club of ours it links
+ * apply_federation_discovery (0047) turns it into the club of ours it links
  * or creates. */
 export type TeamUpsert = {
   site_slug: string; site_team_id: number | null; site_name: string;
   competition_slug: string; competition_name: string; name: string; club_slug: string;
 };
 /** A club of ours as discovery reads it; `site_slug` is the venue club it
- * is linked to (0046), null until a discovery links it. */
+ * is linked to (0047), null until a discovery links it. */
 export type OurClub = { id: string; name: string; site_slug: string | null };
 /** One venue club for apply_federation_discovery: `match_id` is the club of
  * ours linked to its slug, else the one unlinked club its name matches,
@@ -41,7 +41,7 @@ export type Outcome =
   | { action: "rearm"; run_at: Date; attempts: number };
 
 const MAX_ATTEMPTS = 5;
-// federation_sync_progress (0046) counts a job with attempts > 0 and run_at
+// federation_sync_progress (0047) counts a job with attempts > 0 and run_at
 // within this lease as in flight — keep the two in step.
 const LEASE_MS = 10 * 60e3;
 const LIMITS: [string, number][] = [
@@ -237,7 +237,7 @@ export async function runDiscover(db: Db, get: Fetcher, tenantId: string) {
     clubs, competitions,
     existingNames: [...new Set(slots.flatMap((s) => [s.home_team, s.away_team]))],
   });
-  // One transaction (0046): the venue's clubs linked or created, then the
+  // One transaction (0047): the venue's clubs linked or created, then the
   // teams with their clubs.
   const applied = must(await db.rpc("apply_federation_discovery", {
     p_tenant: tenantId, p_clubs: planClubs(clubs, ourClubs), p_teams: teams,
