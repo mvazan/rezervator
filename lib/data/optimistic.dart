@@ -75,11 +75,19 @@ Stream<void> refreshRequests(String uid, String name) =>
 /// první další ozvěna (server ji mohl protřídit/odduplikovat) definitivně
 /// převzala pravdu. Zápisy, které ještě čekají na odpověď (`!confirmed`),
 /// zůstávají — nesouvisející doručení je nesmí zahodit.
+///
+/// Jen potvrzené ZE ZAČÁTKU fronty, po první nepotvrzený: potvrzený novější
+/// zápis za ním musí zůstat. Server ukládá zápisy v pořadí odeslání, ale
+/// odpovědi (calendar-manage po přepsání událostí v Googlu) chodí v
+/// libovolném; kdyby novější zmizel dřív, starší by nad ozvěnou, která už
+/// má novější hodnotu, na obrazovku vrátil tu svou (smazanou připomínku).
 void settlePending(String uid, String name) {
   final key = _key(uid, name);
   final entries = _pending[key];
   if (entries == null) return;
-  entries.removeWhere((e) => e.confirmed);
+  while (entries.isNotEmpty && entries.first.confirmed) {
+    entries.removeAt(0);
+  }
   if (entries.isEmpty) _pending.remove(key);
 }
 

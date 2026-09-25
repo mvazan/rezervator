@@ -278,6 +278,35 @@ void main() {
     await raw.close();
   });
 
+  test('on the same field, a newer write settling first does not let the '
+      'older, still running, bring its value back', () async {
+    final (raw, out, sub) = overlay('sameField');
+    raw.add(withMinutes([120]));
+    await tick();
+
+    // Add 60, then remove 120: the server stores [60] last.
+    final older = Completer<void>();
+    final olderDone = optimisticWrite(uid, 'sameField',
+        patchRow('id', uid, {'notify_before_minutes': [120, 60]}),
+        () => older.future);
+    await optimisticWrite(uid, 'sameField',
+        patchRow('id', uid, {'notify_before_minutes': [60]}), () async {});
+    raw.add(withMinutes([60]));
+    await tick();
+    expect(out.last, withMinutes([60]),
+        reason: 'the removed 120 must not come back');
+
+    older.complete();
+    await olderDone;
+    raw.add(withMinutes([60]));
+    await tick();
+    expect(out.last, withMinutes([60]));
+    expect(applyPending(uid, 'sameField', me), me);
+
+    await sub.cancel();
+    await raw.close();
+  });
+
   test('a failed older write leaves the screen at once, while the newer '
       'stays', () async {
     final (raw, out, sub) = overlay('olderFails');
