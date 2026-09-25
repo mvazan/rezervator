@@ -142,6 +142,7 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
     MatchResult? result,
     DateTime now,
     List<String> followedTeams,
+    List<String> calendarTeams,
     Map<String, int> teamColors,
     Map<String, bool> exceptions,
   ) {
@@ -159,6 +160,13 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
         ? ''
         : pinsLabel(result.homeTotal, result.awayTotal);
 
+    final colorId = matchColorOf(
+      slot,
+      followedTeams,
+      teamColors,
+      calendarTeams: calendarTeams,
+      exceptions: exceptions,
+    );
     return ListTile(
       key: _matchKeyFor(slot.id),
       leading: MatchLeading(
@@ -166,14 +174,8 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
         result: result,
         now: now,
         linksEnabled: true,
-        fallback: MatchTrophy(
-          colorId: matchColorOf(
-            slot,
-            followedTeams,
-            teamColors,
-            exceptions: exceptions,
-          ),
-        ),
+        fallback: MatchTrophy(colorId: colorId),
+        colorId: colorId,
         launch: widget.launch,
       ),
       title: MatchTitle(slot: slot, winner: displayWinner(result)),
@@ -206,6 +208,11 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
     final followedTeams = profile?.followedTeams ?? const <String>[];
     final teamColors =
         ref.watch(myTeamColorsProvider).value ?? const <String, int>{};
+    final calendarTeams = <String>[
+      for (final c
+          in ref.watch(myCalendarTeamsProvider).value ?? const <CalendarTeam>[])
+        c.team,
+    ];
     final exceptions =
         ref.watch(myMatchExceptionsProvider).value ?? const <String, bool>{};
 
@@ -341,6 +348,7 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
                                 results[slot.id],
                                 now,
                                 followedTeams,
+                                calendarTeams,
                                 teamColors,
                                 exceptions,
                               ),

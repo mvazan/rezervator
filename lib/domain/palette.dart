@@ -135,3 +135,18 @@ const googleEventColors = <(int id, String name, Color color)>[
   (10, 'Bazalková', Color(0xFF0B8043)),
   (11, 'Rajčatová', Color(0xFFD50000)),
 ];
+
+/// The raw Google RGB for [colorId] (the dot fill), or null for "no colour"
+/// and any id that is none of the eleven.
+Color? googleEventColorOf(int? colorId) {
+  if (colorId == null) return null;
+  for (final (id, _, color) in googleEventColors) {
+    if (id == colorId) return color;
+  }
+  return null;
+}
+
+/// Black or white glyph, whichever reads on [color] — the eleven are fixed
+/// RGBs, so contrast goes by luminance (as `EventColorPicker` does).
+Color legibleGlyphOn(Color color) =>
+    color.computeLuminance() > 0.5 ? Colors.black87 : Colors.white;

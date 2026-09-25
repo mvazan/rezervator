@@ -47,9 +47,9 @@ class UpcomingDay {
 }
 
 /// The colour to tint [slot]'s trophy in Můj přehled (0036, `team_colors`):
-/// first pick WHICH of its two teams is [followedTeams]' own — home wins
-/// when both are followed, same as `upcomingTimeline` already did to decide
-/// the match belongs on this list at all — then take THAT team's shared
+/// first pick WHICH of its two teams is the player's own — in
+/// [followedTeams] (Přehled) or [calendarTeams] (Kalendář), both columns of
+/// Moje týmy; home wins when both are — then take THAT team's shared
 /// colour, or null if it has none. No fall-through to the other team's
 /// colour: a colour set on a team the player does not follow must never
 /// paint a match that is only showing because of the OTHER team (e.g. the
@@ -70,11 +70,14 @@ int? matchColorOf(
   PrioritySlot slot,
   List<String> followedTeams,
   Map<String, int> teamColors, {
+  List<String> calendarTeams = const [],
   Map<String, bool> exceptions = const {},
 }) {
-  final team = followedTeams.contains(slot.homeTeam)
+  bool mine(String team) =>
+      followedTeams.contains(team) || calendarTeams.contains(team);
+  final team = mine(slot.homeTeam)
       ? slot.homeTeam
-      : followedTeams.contains(slot.awayTeam)
+      : mine(slot.awayTeam)
           ? slot.awayTeam
           : exceptions[slot.id] == true
               ? (slot.isAway ? slot.awayTeam : slot.homeTeam)
