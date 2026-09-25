@@ -198,7 +198,10 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   // given, not only on the Kontakty page it lands on.
                   helperText: 'Uvidí ho ostatní hráči kuželny v Kontaktech. '
                       'Skrýt ho můžeš v Můj profil.',
-                  helperMaxLines: 2,
+                  // Room for the whole text at 200 % (AppTextScaler's cap)
+                  // on a narrow phone — cut short, it would lose where to
+                  // hide the number.
+                  helperMaxLines: 10,
                   border: const OutlineInputBorder(),
                   errorText: _phoneError,
                 ),

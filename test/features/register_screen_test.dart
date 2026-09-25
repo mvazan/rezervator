@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/data/providers.dart';
@@ -116,6 +117,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Oddíl / klub'), findsOneWidget);
+    await tester.ensureVisible(find.text('Oddíl / klub'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Oddíl / klub'));
     await tester.pumpAndSettle();
     expect(find.text('Bez oddílu'), findsWidgets);
@@ -159,6 +162,23 @@ void main() {
       ),
       findsOneWidget,
     );
+  });
+
+  testWidgets('at 200 % text on a phone the helper text is not cut off',
+      (tester) async {
+    tester.view.physicalSize = const Size(360, 1600);
+    tester.view.devicePixelRatio = 1.0;
+    tester.platformDispatcher.textScaleFactorTestValue = 2.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    await tester.pumpWidget(app(const [Tenant(id: 't1', name: 'Kuželna č. 1')]));
+    await tester.pumpAndSettle();
+
+    final helper = tester.renderObject<RenderParagraph>(find.text(
+        'Uvidí ho ostatní hráči kuželny v Kontaktech. '
+        'Skrýt ho můžeš v Můj profil.'));
+    expect(helper.didExceedMaxLines, isFalse);
   });
 
   testWidgets('the phone is optional: without one nothing is sent for it',
