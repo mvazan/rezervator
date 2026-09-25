@@ -2,7 +2,8 @@ import 'dart:async';
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
+import 'package:flutter/foundation.dart'
+    show debugPrint, kIsWeb, visibleForTesting;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart'
     hide Day;
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -51,9 +52,8 @@ class Push {
       // Save the token now (if signed in), on every sign-in, and on refresh.
       _ready = true;
       unawaited(_saveToken());
-      Supabase.instance.client.auth.onAuthStateChange.listen((state) {
-        if (state.event == AuthChangeEvent.signedIn) unawaited(_saveToken());
-      });
+      listenForSignIn(Supabase.instance.client.auth.onAuthStateChange,
+          () => unawaited(_saveToken()));
       FirebaseMessaging.instance.onTokenRefresh.listen((_) => _saveToken());
 
       // Foreground messages: show them via a local notification.
@@ -62,6 +62,22 @@ class Push {
       debugPrint('Push init failed (continuing without push): $e');
     }
   }
+
+  /// supabase_flutter puts a failed magic link (expired or used —
+  /// `otp_expired`) on onAuthStateChange as a stream error. Without an
+  /// onError here that error became uncaught and reached Sentry as a fatal
+  /// crash (REZERVATOR-7), though the login screen already explains it.
+  @visibleForTesting
+  static StreamSubscription<AuthState> listenForSignIn(
+    Stream<AuthState> changes,
+    void Function() onSignedIn,
+  ) =>
+      changes.listen(
+        (state) {
+          if (state.event == AuthChangeEvent.signedIn) onSignedIn();
+        },
+        onError: (Object _) {},
+      );
 
   static Future<void> _saveToken() async {
     if (!_ready) return;
