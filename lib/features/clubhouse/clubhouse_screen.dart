@@ -1,11 +1,14 @@
-/// Klubovna — the third home tab: a hub of team-facing screens (results,
-/// venues), the same [HubMenu] Správa kuželny uses.
+/// Klubovna — the third home tab: a hub of team-facing screens (contacts,
+/// venues, results — in Czech alphabetical order), the same [HubMenu]
+/// Správa kuželny uses.
 library;
 
 import 'package:flutter/material.dart';
 
 import '../../core/hub_menu.dart';
+import '../../domain/collation.dart';
 import '../schedule/widgets/home_header.dart';
+import 'contacts_screen.dart';
 import 'results_screen.dart';
 import 'venues_screen.dart';
 
@@ -23,6 +26,7 @@ class ClubhouseScreen extends StatelessWidget {
         HomeHeader(trailing: trailing),
         Expanded(
           child: HubMenu(
+            // Czech alphabetical, so a new entry finds its own place.
             entries: [
               (
                 label: 'Výsledky',
@@ -35,12 +39,20 @@ class ClubhouseScreen extends StatelessWidget {
               (
                 label: 'Kuželny',
                 icon: Icons.location_on_outlined,
-                subtitle: 'Kontakty a vybavení kuželen',
+                subtitle: 'Adresy a vybavení kuželen',
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const VenuesScreen()),
                 ),
               ),
-            ],
+              (
+                label: 'Kontakty',
+                icon: Icons.contacts_outlined,
+                subtitle: 'Hráči kuželny — e-mail a telefon',
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const ContactsScreen()),
+                ),
+              ),
+            ]..sort((a, b) => compareCzech(a.label, b.label)),
           ),
         ),
       ],

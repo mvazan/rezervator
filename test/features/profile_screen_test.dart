@@ -92,6 +92,8 @@ void main() {
     Future<void> Function(List<int> minutes)? setNotifyBefore,
     Future<void> Function(Map<String, int?> colors)? setTeamColors,
     Future<void> Function(HomeView view)? setDefaultView,
+    Future<void> Function({String? phone, bool? showEmail, bool? showPhone})?
+        updateMyContact,
     List<PrioritySlot> matches = const [],
     Map<String, bool> exceptions = const {},
   }) {
@@ -123,10 +125,19 @@ void main() {
               setTeamColors ?? (_) async => throw StateError('unexpected'),
           setDefaultView:
               setDefaultView ?? (_) async => throw StateError('unexpected'),
+          updateMyContact: updateMyContact ??
+              ({phone, showEmail, showPhone}) async =>
+                  throw StateError('unexpected'),
         ),
       ),
     );
   }
+
+  // The Přezdívka row's own „Upravit" — the phone row has one too (0048).
+  final nickEdit = find.descendant(
+    of: find.widgetWithText(ListTile, 'Přezdívka'),
+    matching: find.text('Upravit'),
+  );
 
   testWidgets('shows display name, club, current nick and the edit '
       'affordance', (tester) async {
@@ -137,7 +148,7 @@ void main() {
     expect(find.text('Já Hráč'), findsOneWidget);
     expect(find.text('TJ Sokol'), findsOneWidget);
     expect(find.text('Já H.'), findsOneWidget);
-    expect(find.text('Upravit'), findsOneWidget);
+    expect(nickEdit, findsOneWidget);
   });
 
   testWidgets('shows "nenastavena" when nick is empty', (tester) async {
@@ -162,7 +173,10 @@ void main() {
     await tester.pumpWidget(app(me));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Upravit'));
+    // The first card's phone and Kontakty rows push Tabule below the fold.
+    await tester.ensureVisible(nickEdit);
+    await tester.pumpAndSettle();
+    await tester.tap(nickEdit);
     await tester.pumpAndSettle();
 
     expect(find.text('Přezdívka na tabuli'), findsWidgets);
@@ -351,7 +365,7 @@ void main() {
     testWidgets('not linked: explains the calendar and offers to connect', (
       tester,
     ) async {
-      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.physicalSize = const Size(800, 1900);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -368,7 +382,7 @@ void main() {
 
     testWidgets('pending: shows progress; a retry stays available in case '
         'the backend never finishes', (tester) async {
-      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.physicalSize = const Size(800, 1900);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -394,7 +408,7 @@ void main() {
     testWidgets('pending with a failure: shows the reason and a retry', (
       tester,
     ) async {
-      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.physicalSize = const Size(800, 1900);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -417,7 +431,7 @@ void main() {
 
     testWidgets('linked: shows the Google account, the reminders summary '
         'and Odpojit', (tester) async {
-      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.physicalSize = const Size(800, 1900);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -439,7 +453,7 @@ void main() {
         'the app shows and what Google gets', (
       tester,
     ) async {
-      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.physicalSize = const Size(800, 1900);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -468,7 +482,7 @@ void main() {
     // not got.
     testWidgets('without a calendar, Moje týmy sums up the overview alone',
         (tester) async {
-      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.physicalSize = const Size(800, 1900);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -488,7 +502,7 @@ void main() {
     });
 
     testWidgets('linked without reminders reads "Žádné"', (tester) async {
-      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.physicalSize = const Size(800, 1900);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -510,7 +524,7 @@ void main() {
 
     testWidgets('broken: shows the reason, asks for a re-link and offers '
         'the connect button', (tester) async {
-      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.physicalSize = const Size(800, 1900);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -541,7 +555,7 @@ void main() {
 
     testWidgets('Druhý kalendář switch is off by default, with a subtitle '
         'naming the second calendar', (tester) async {
-      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.physicalSize = const Size(800, 1900);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -559,7 +573,7 @@ void main() {
     testWidgets('with the second calendar on, the switch is on and the '
         'reminders row doubles into hlavního / druhého, each with its own '
         'summary', (tester) async {
-      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.physicalSize = const Size(800, 1900);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -591,7 +605,7 @@ void main() {
 
     testWidgets('without the second calendar there is a single Připomínky '
         'row, unchanged from before 0032', (tester) async {
-      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.physicalSize = const Size(800, 1900);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -606,7 +620,7 @@ void main() {
     testWidgets('Barva tréninků row shows Bez barvy by default', (
       tester,
     ) async {
-      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.physicalSize = const Size(800, 1900);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -618,7 +632,7 @@ void main() {
     });
 
     testWidgets('Barva tréninků row names the chosen colour', (tester) async {
-      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.physicalSize = const Size(800, 1900);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -639,7 +653,7 @@ void main() {
 
     testWidgets('Odpojit asks for confirmation with the delete warning; '
         'Zrušit keeps the link', (tester) async {
-      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.physicalSize = const Size(800, 1900);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -1870,6 +1884,160 @@ void main() {
       await tester.tap(find.widgetWithText(FilledButton, 'Uložit'));
       await tester.pumpAndSettle();
       // setFollowedTeams/setTeamColors would have fail()ed had either fired.
+    });
+  });
+
+  group('Kontakt rows in the first card (0048)', () {
+    // Tall enough that the whole first card, switches included, is on
+    // screen at once.
+    void tall(WidgetTester tester) {
+      tester.view.physicalSize = const Size(800, 2600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+    }
+
+    const withPhone = Profile(
+      id: 'me',
+      displayName: 'Já Hráč',
+      email: 'me@example.com',
+      role: Role.player,
+      status: ProfileStatus.approved,
+      phone: '+420777123456',
+      showEmail: false,
+    );
+    const phoneError = 'Telefon nemá správný tvar — třeba +420 777 123 456.';
+
+    late List<String> saved;
+    setUp(() => saved = []);
+    Future<void> record({String? phone, bool? showEmail, bool? showPhone}) async =>
+        saved.add('phone=$phone showEmail=$showEmail showPhone=$showPhone');
+
+    /// The first card — Jméno, E-mail, Oddíl — now also holds the phone and
+    /// the two Kontakty switches.
+    Finder inCard(Finder matching) => find.descendant(
+          of: find
+              .ancestor(of: find.text('Jméno'), matching: find.byType(Card))
+              .first,
+          matching: matching,
+        );
+    Finder inDialog(Finder matching) =>
+        find.descendant(of: find.byType(AlertDialog), matching: matching);
+    Finder switchTile(String title) =>
+        find.widgetWithText(SwitchListTile, title);
+
+    testWidgets('shows the phone formatted and both switches as saved',
+        (tester) async {
+      tall(tester);
+      await tester.pumpWidget(app(withPhone, updateMyContact: record));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Kontakt'), findsNothing, reason: 'no card of its own');
+      expect(inCard(find.text('Telefon')), findsOneWidget);
+      expect(inCard(switchTile('Ukázat e-mail v Kontaktech')), findsOneWidget);
+      expect(inCard(switchTile('Ukázat telefon v Kontaktech')), findsOneWidget);
+      double top(Finder f) => tester.getTopLeft(f).dy;
+      final order = [
+        inCard(find.text('Jméno')),
+        inCard(find.text('E-mail')),
+        inCard(find.text('Telefon')),
+        inCard(find.text('Oddíl')),
+        inCard(switchTile('Ukázat e-mail v Kontaktech')),
+        inCard(switchTile('Ukázat telefon v Kontaktech')),
+      ].map(top).toList();
+      expect(order, [...order]..sort(), reason: 'top to bottom in this order');
+      expect(inCard(find.text('+420 777 123 456')), findsOneWidget);
+      expect(
+        tester.widget<SwitchListTile>(switchTile('Ukázat e-mail v Kontaktech'))
+            .value,
+        isFalse,
+      );
+      expect(find.text('Ostatní hráči kuželny ti můžou napsat.'),
+          findsOneWidget);
+      expect(
+        tester.widget<SwitchListTile>(switchTile('Ukázat telefon v Kontaktech'))
+            .value,
+        isTrue,
+      );
+      expect(find.text('Zavolat nebo napsat přes WhatsApp.'), findsOneWidget);
+    });
+
+    testWidgets('without a phone it reads „nenastaven"', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(app(me, updateMyContact: record));
+      await tester.pumpAndSettle();
+
+      expect(inCard(find.text('nenastaven')), findsOneWidget);
+    });
+
+    testWidgets('Upravit: a bad number is refused in the dialog, a good one '
+        'is saved normalised', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(app(withPhone, updateMyContact: record));
+      await tester.pumpAndSettle();
+
+      await tester.tap(inCard(find.text('Upravit')));
+      await tester.pumpAndSettle();
+      expect(inDialog(find.text('Telefon')), findsOneWidget);
+      final field = inDialog(find.byType(TextField));
+      expect(tester.widget<TextField>(field).controller!.text,
+          '+420 777 123 456');
+      expect(tester.widget<TextField>(field).keyboardType,
+          TextInputType.phone);
+
+      await tester.enterText(field, '12345');
+      await tester.tap(inDialog(find.widgetWithText(FilledButton, 'Uložit')));
+      await tester.pumpAndSettle();
+      expect(inDialog(find.text(phoneError)), findsOneWidget);
+      expect(saved, isEmpty);
+
+      await tester.enterText(field, '00420 602 111 222');
+      await tester.pump();
+      expect(inDialog(find.text(phoneError)), findsNothing);
+      await tester.tap(inDialog(find.widgetWithText(FilledButton, 'Uložit')));
+      await tester.pumpAndSettle();
+
+      expect(saved, ['phone=+420602111222 showEmail=null showPhone=null']);
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.text('Uloženo.'), findsOneWidget);
+    });
+
+    testWidgets('an empty number removes the phone; Zrušit saves nothing',
+        (tester) async {
+      tall(tester);
+      await tester.pumpWidget(app(withPhone, updateMyContact: record));
+      await tester.pumpAndSettle();
+
+      await tester.tap(inCard(find.text('Upravit')));
+      await tester.pumpAndSettle();
+      await tester.enterText(inDialog(find.byType(TextField)), '');
+      await tester.tap(inDialog(find.widgetWithText(FilledButton, 'Uložit')));
+      await tester.pumpAndSettle();
+      expect(saved, ['phone= showEmail=null showPhone=null']);
+
+      await tester.tap(inCard(find.text('Upravit')));
+      await tester.pumpAndSettle();
+      await tester.tap(inDialog(find.widgetWithText(TextButton, 'Zrušit')));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(saved, hasLength(1));
+    });
+
+    testWidgets('the switches save at once — the phone one even without a '
+        'phone', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(app(me, updateMyContact: record));
+      await tester.pumpAndSettle();
+
+      await tester.tap(switchTile('Ukázat e-mail v Kontaktech'));
+      await tester.pumpAndSettle();
+      await tester.tap(switchTile('Ukázat telefon v Kontaktech'));
+      await tester.pumpAndSettle();
+
+      expect(saved, [
+        'phone=null showEmail=false showPhone=null',
+        'phone=null showEmail=null showPhone=false',
+      ]);
     });
   });
 }

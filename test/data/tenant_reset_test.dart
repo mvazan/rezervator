@@ -74,4 +74,37 @@ void main() {
       });
     },
   );
+
+  testWidgets('resetTenantScopedProviders re-fetches the Kontakty list (0048)',
+      (tester) async {
+    var fetches = 0;
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          contactsProvider.overrideWith((ref) async {
+            fetches++;
+            return const <Contact>[];
+          }),
+        ],
+        child: MaterialApp(
+          home: Consumer(
+            builder: (context, ref, _) {
+              ref.watch(contactsProvider);
+              return TextButton(
+                onPressed: () => resetTenantScopedProviders(ref),
+                child: const Text('Přepnout kuželnu'),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(fetches, 1);
+
+    await tester.tap(find.text('Přepnout kuželnu'));
+    await tester.pump();
+
+    expect(fetches, 2);
+  });
 }

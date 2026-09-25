@@ -6,16 +6,27 @@ import '../../core/widgets/auth_background.dart';
 import '../../data/providers.dart';
 import '../../domain/limits.dart';
 import '../../domain/models.dart';
+import '../../domain/phone.dart';
 
 /// Sentinel dropdown value for "found a brand-new alley".
 const _newTenant = '+new';
 
 /// First sign-in: pick an existing alley (kuželna) — or found a new one —
-/// plus a display name, optional board nick and, for an existing alley, a
-/// club from its actual club list. A new alley's founder becomes its admin
-/// right away; everyone else waits for the admin's approval.
+/// plus a display name, optional board nick and phone and, for an existing
+/// alley, a club from its actual club list. A new alley's founder becomes
+/// its admin right away; everyone else waits for the admin's approval.
 class RegisterScreen extends ConsumerStatefulWidget {
-  const RegisterScreen({super.key});
+  const RegisterScreen({
+    super.key,
+    this.registerProfile = Api.registerProfile,
+    this.createTenantAndRegister = Api.createTenantAndRegister,
+  });
+
+  /// Injectable for widget tests (the Api ones need a live Supabase client).
+  final Future<void> Function(String displayName, String tenantId,
+      {String? clubId, String nick, String? phone}) registerProfile;
+  final Future<void> Function(String tenantName, String displayName,
+      {String nick, String? phone}) createTenantAndRegister;
 
   @override
   ConsumerState<RegisterScreen> createState() => _RegisterScreenState();
@@ -25,6 +36,8 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   final _tenantName = TextEditingController();
   final _name = TextEditingController();
   final _nick = TextEditingController();
+  final _phone = TextEditingController();
+  String? _phoneError;
   String? _tenantId;
   String? _clubId;
   bool _saving = false;
@@ -43,6 +56,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     _tenantName.dispose();
     _name.dispose();
     _nick.dispose();
+    _phone.dispose();
     super.dispose();
   }
 
@@ -68,14 +82,24 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       snack(context, 'Napiš název nové kuželny.');
       return;
     }
+    final typedPhone = _phone.text.trim();
+    final phone = typedPhone.isEmpty ? null : normalizePhone(typedPhone);
+    if (typedPhone.isNotEmpty && phone == null) {
+      setState(() => _phoneError = invalidPhoneMessage);
+      return;
+    }
     setState(() => _saving = true);
     await tryAction(
       context,
-      () => tenantId == _newTenant
-          ? Api.createTenantAndRegister(_tenantName.text.trim(), name,
-              nick: _nick.text.trim())
-          : Api.registerProfile(name, tenantId,
-              clubId: _clubId, nick: _nick.text.trim()),
+      () async {
+        if (tenantId == _newTenant) {
+          await widget.createTenantAndRegister(_tenantName.text.trim(), name,
+              nick: _nick.text.trim(), phone: phone);
+        } else {
+          await widget.registerProfile(name, tenantId,
+              clubId: _clubId, nick: _nick.text.trim(), phone: phone);
+        }
+      },
       errorText: friendlyDbError,
     );
     // AuthGate re-routes automatically via the profile stream.
@@ -163,6 +187,27 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   border: OutlineInputBorder(),
                   counterText: '',
                 ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _phone,
+                keyboardType: TextInputType.phone,
+                decoration: InputDecoration(
+                  labelText: 'Telefon (nepovinné)',
+                  // show_phone starts on (0048): say so where the number is
+                  // given, not only on the Kontakty page it lands on.
+                  helperText: 'Uvidí ho ostatní hráči kuželny v Kontaktech. '
+                      'Skrýt ho můžeš v Můj profil.',
+                  // Room for the whole text at 200 % (AppTextScaler's cap)
+                  // on a narrow phone — cut short, it would lose where to
+                  // hide the number.
+                  helperMaxLines: 10,
+                  border: const OutlineInputBorder(),
+                  errorText: _phoneError,
+                ),
+                onChanged: (_) {
+                  if (_phoneError != null) setState(() => _phoneError = null);
+                },
               ),
               if (clubs.isNotEmpty) ...[
                 const SizedBox(height: 16),

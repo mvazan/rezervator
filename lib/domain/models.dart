@@ -134,11 +134,23 @@ class Profile {
     this.followedTeams = const [],
     this.notifyBefore = const [],
     this.defaultView = HomeView.calendar,
+    this.phone,
+    this.showEmail = true,
+    this.showPhone = true,
   });
 
   final String id;
   final String displayName;
   final String email;
+
+  /// The player's phone in E.164 (`+420777123456`, 0048), null when they
+  /// gave none. Shown formatted (`formatPhone`).
+  final String? phone;
+
+  /// Whether Klubovna → Kontakty shows this player's e-mail / phone to the
+  /// other players of the alley (0048). On unless the player hides it.
+  final bool showEmail;
+  final bool showPhone;
   final Role role;
   final ProfileStatus status;
   final String? fcmToken;
@@ -220,6 +232,9 @@ class Profile {
         ]..sort((a, b) => b.compareTo(a)),
         defaultView: HomeView.values.asNameMap()[json['default_view']] ??
             HomeView.calendar,
+        phone: json['phone'] as String?,
+        showEmail: json['show_email'] as bool? ?? true,
+        showPhone: json['show_phone'] as bool? ?? true,
       );
 }
 
@@ -482,6 +497,48 @@ class PlayerName {
         clubId: json['club_id'] as String?,
         clubColor: json['club_color'] as int? ?? -1,
         hasAccount: !(json['placeholder'] as bool? ?? false),
+      );
+}
+
+/// One row of `contacts()` (0048) — a registered player of the alley as
+/// Klubovna → Kontakty shows them. [email] and [phone] are null when the
+/// player hid them (or has none): the server never sends a hidden one.
+class Contact {
+  const Contact({
+    required this.id,
+    required this.displayName,
+    this.nick = '',
+    this.clubId,
+    this.clubName,
+    this.clubColor = -1,
+    this.email,
+    this.phone,
+  });
+
+  final String id;
+  final String displayName;
+
+  /// Short board name (<=14 chars); empty when the player set none.
+  final String nick;
+  final String? clubId;
+  final String? clubName;
+
+  /// The club's palette index or packed colour, -1 without a club.
+  final int clubColor;
+  final String? email;
+
+  /// E.164, as stored.
+  final String? phone;
+
+  factory Contact.fromJson(Map<String, dynamic> json) => Contact(
+        id: json['id'] as String,
+        displayName: json['display_name'] as String,
+        nick: json['nick'] as String? ?? '',
+        clubId: json['club_id'] as String?,
+        clubName: json['club_name'] as String?,
+        clubColor: json['club_color'] as int? ?? -1,
+        email: json['email'] as String?,
+        phone: json['phone'] as String?,
       );
 }
 

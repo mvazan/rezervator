@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../domain/models.dart';
+import '../domain/phone.dart';
 import 'messages.dart';
 
 const weekdaysShort = ['po', 'út', 'st', 'čt', 'pá', 'so', 'ne'];
@@ -135,6 +136,8 @@ String friendlyDbError(Object error) {
     'team_name_taken': 'Tým s tímto názvem už existuje.',
     'teams_name_check': 'Název týmu smí mít nejvýš 80 znaků.',
     'empty_name': 'Název nesmí být prázdný.',
+    'invalid_phone': invalidPhoneMessage,
+    'profiles_phone_check': invalidPhoneMessage,
   };
   for (final entry in messages.entries) {
     if (raw.contains(entry.key)) return entry.value;

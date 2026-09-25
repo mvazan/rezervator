@@ -10,6 +10,7 @@ import 'changelog.dart';
 import 'widgets/reservation_color_picker.dart';
 import 'widgets/appearance_card.dart';
 import 'widgets/calendar_link_card.dart';
+import 'widgets/contact_card.dart';
 import 'widgets/my_group_card.dart';
 import 'widgets/my_teams_card.dart';
 import 'widgets/reminders_sheet.dart';
@@ -32,6 +33,7 @@ class ProfileScreen extends ConsumerWidget {
     this.setNotifyBefore = Api.setNotifyBefore,
     this.setTeamColors = Api.setTeamColors,
     this.setDefaultView = Api.setDefaultView,
+    this.updateMyContact = Api.updateMyContact,
   });
 
   /// Injectable for widget tests (the Api ones need a live Supabase client).
@@ -42,6 +44,8 @@ class ProfileScreen extends ConsumerWidget {
   final Future<void> Function(List<int> minutes) setNotifyBefore;
   final Future<void> Function(Map<String, int?> colors) setTeamColors;
   final Future<void> Function(HomeView view) setDefaultView;
+  final Future<void> Function({String? phone, bool? showEmail, bool? showPhone})
+      updateMyContact;
 
   Future<void> _editNick(BuildContext context, String currentNick) async {
     final input = await promptText(
@@ -102,6 +106,10 @@ class ProfileScreen extends ConsumerWidget {
                         title: const Text('E-mail'),
                         subtitle: Text(profile.email),
                       ),
+                      ContactPhoneTile(
+                        profile: profile,
+                        updateMyContact: updateMyContact,
+                      ),
                       ListTile(
                         title: const Text('Oddíl'),
                         subtitle: Text(
@@ -109,6 +117,12 @@ class ProfileScreen extends ConsumerWidget {
                               ? '—'
                               : clubNameOf(profile.clubId, clubs),
                         ),
+                      ),
+                      // What Klubovna → Kontakty shows of the e-mail and
+                      // the phone above (0048).
+                      ContactVisibilityTiles(
+                        profile: profile,
+                        updateMyContact: updateMyContact,
                       ),
                       const Padding(
                         padding: EdgeInsets.fromLTRB(16, 0, 16, 12),

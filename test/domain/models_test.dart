@@ -116,6 +116,73 @@ void main() {
       expect(odd.defaultView, HomeView.calendar,
           reason: 'an unknown value falls back to the calendar');
     });
+
+    test('fromJson reads phone, show_email and show_phone (0048)', () {
+      final p = Profile.fromJson({
+        'id': 'u1',
+        'display_name': 'Já',
+        'role': 'player',
+        'status': 'approved',
+        'phone': '+420777123456',
+        'show_email': false,
+        'show_phone': true,
+      });
+      expect(p.phone, '+420777123456');
+      expect(p.showEmail, isFalse);
+      expect(p.showPhone, isTrue);
+
+      final bare = Profile.fromJson({
+        'id': 'u2',
+        'display_name': 'Ty',
+        'role': 'player',
+        'status': 'approved',
+      });
+      expect(bare.phone, isNull);
+      expect(bare.showEmail, isTrue, reason: 'shown unless the player hides it');
+      expect(bare.showPhone, isTrue);
+    });
+  });
+
+  group('Contact', () {
+    test('fromJson reads a contacts() row', () {
+      final c = Contact.fromJson({
+        'id': 'p1',
+        'display_name': 'Adam Admin',
+        'nick': 'Áďa',
+        'club_id': 'c1',
+        'club_name': 'Oddíl E',
+        'club_color': 3,
+        'email': 'adam@example.com',
+        'phone': '+420777000001',
+      });
+      expect(c.id, 'p1');
+      expect(c.displayName, 'Adam Admin');
+      expect(c.nick, 'Áďa');
+      expect(c.clubId, 'c1');
+      expect(c.clubName, 'Oddíl E');
+      expect(c.clubColor, 3);
+      expect(c.email, 'adam@example.com');
+      expect(c.phone, '+420777000001');
+    });
+
+    test('a hidden e-mail or phone, no club and no nick', () {
+      final c = Contact.fromJson({
+        'id': 'p2',
+        'display_name': 'Běla Skrytá',
+        'nick': null,
+        'club_id': null,
+        'club_name': null,
+        'club_color': -1,
+        'email': null,
+        'phone': null,
+      });
+      expect(c.nick, '');
+      expect(c.clubId, isNull);
+      expect(c.clubName, isNull);
+      expect(c.clubColor, -1);
+      expect(c.email, isNull);
+      expect(c.phone, isNull);
+    });
   });
 
   group('PlayerName', () {

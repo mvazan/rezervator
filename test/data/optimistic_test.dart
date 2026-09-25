@@ -158,6 +158,180 @@ void main() {
     await raw.close();
   });
 
+  test('a newer write on another field keeps the older one\'s change on '
+      'screen until both are through', () async {
+    final (raw, out, sub) = overlay('fields');
+    const row = [
+      {'id': 'u1', 'show_email': true, 'show_phone': true},
+    ];
+    raw.add(row);
+    await tick();
+
+    final first = Completer<void>();
+    final second = Completer<void>();
+    final firstDone = optimisticWrite(uid, 'fields',
+        patchRow('id', uid, {'show_email': false}), () => first.future);
+    final secondDone = optimisticWrite(uid, 'fields',
+        patchRow('id', uid, {'show_phone': false}), () => second.future);
+    await tick();
+    expect(out.last, [
+      {'id': 'u1', 'show_email': false, 'show_phone': false},
+    ]);
+
+    // The older one's echo arrives first: still both, the newer is pending.
+    first.complete();
+    await firstDone;
+    raw.add([
+      {'id': 'u1', 'show_email': false, 'show_phone': true},
+    ]);
+    await tick();
+    expect(out.last, [
+      {'id': 'u1', 'show_email': false, 'show_phone': false},
+    ]);
+
+    // The newer one is through; its echo takes over.
+    second.complete();
+    await secondDone;
+    raw.add([
+      {'id': 'u1', 'show_email': false, 'show_phone': false},
+    ]);
+    await tick();
+    expect(out.last, [
+      {'id': 'u1', 'show_email': false, 'show_phone': false},
+    ]);
+    expect(applyPending(uid, 'fields', row), row,
+        reason: 'nothing left pending once the echo came');
+
+    await sub.cancel();
+    await raw.close();
+  });
+
+  const both = [
+    {'id': 'u1', 'show_email': true, 'show_phone': true},
+  ];
+  Rows row({required bool email, required bool phone}) => [
+        {'id': 'u1', 'show_email': email, 'show_phone': phone},
+      ];
+
+  test('the newer write failing does not take the older one\'s change with '
+      'it; the older, once through, still asks for its echo', () async {
+    final (raw, out, sub) = overlay('newerFails');
+    final refreshes = <void>[];
+    final refreshSub =
+        refreshRequests(uid, 'newerFails').listen(refreshes.add);
+    raw.add(both);
+    await tick();
+
+    final older = Completer<void>();
+    final newer = Completer<void>();
+    final olderDone = optimisticWrite(uid, 'newerFails',
+        patchRow('id', uid, {'show_email': false}), () => older.future);
+    final newerDone = optimisticWrite(uid, 'newerFails',
+        patchRow('id', uid, {'show_phone': false}), () => newer.future);
+    await tick();
+    expect(out.last, row(email: false, phone: false));
+
+    newer.completeError(Exception('offline'));
+    await expectLater(newerDone, throwsException);
+    await tick();
+    expect(out.last, row(email: false, phone: true),
+        reason: 'only the failed change goes');
+
+    older.complete();
+    await olderDone;
+    await tick();
+    expect(refreshes, hasLength(1), reason: 'the older asks for its echo');
+    raw.add(row(email: false, phone: true));
+    await tick();
+    expect(out.last, row(email: false, phone: true));
+    expect(applyPending(uid, 'newerFails', both), both);
+
+    await refreshSub.cancel();
+    await sub.cancel();
+    await raw.close();
+  });
+
+  test('the newer write settling first leaves the older, still running, on '
+      'screen', () async {
+    final (raw, out, sub) = overlay('newerFirst');
+    raw.add(both);
+    await tick();
+
+    final older = Completer<void>();
+    final olderDone = optimisticWrite(uid, 'newerFirst',
+        patchRow('id', uid, {'show_email': false}), () => older.future);
+    await optimisticWrite(uid, 'newerFirst',
+        patchRow('id', uid, {'show_phone': false}), () async {});
+    // The newer one's echo, before the older one reached the server.
+    raw.add(row(email: true, phone: false));
+    await tick();
+    expect(out.last, row(email: false, phone: false));
+
+    older.complete();
+    await olderDone;
+    raw.add(row(email: false, phone: false));
+    await tick();
+    expect(out.last, row(email: false, phone: false));
+    expect(applyPending(uid, 'newerFirst', both), both);
+
+    await sub.cancel();
+    await raw.close();
+  });
+
+  test('on the same field, a newer write settling first does not let the '
+      'older, still running, bring its value back', () async {
+    final (raw, out, sub) = overlay('sameField');
+    raw.add(withMinutes([120]));
+    await tick();
+
+    // Add 60, then remove 120: the server stores [60] last.
+    final older = Completer<void>();
+    final olderDone = optimisticWrite(uid, 'sameField',
+        patchRow('id', uid, {'notify_before_minutes': [120, 60]}),
+        () => older.future);
+    await optimisticWrite(uid, 'sameField',
+        patchRow('id', uid, {'notify_before_minutes': [60]}), () async {});
+    raw.add(withMinutes([60]));
+    await tick();
+    expect(out.last, withMinutes([60]),
+        reason: 'the removed 120 must not come back');
+
+    older.complete();
+    await olderDone;
+    raw.add(withMinutes([60]));
+    await tick();
+    expect(out.last, withMinutes([60]));
+    expect(applyPending(uid, 'sameField', me), me);
+
+    await sub.cancel();
+    await raw.close();
+  });
+
+  test('a failed older write leaves the screen at once, while the newer '
+      'stays', () async {
+    final (raw, out, sub) = overlay('olderFails');
+    raw.add(both);
+    await tick();
+
+    final older = Completer<void>();
+    final newer = Completer<void>();
+    final olderDone = optimisticWrite(uid, 'olderFails',
+        patchRow('id', uid, {'show_email': false}), () => older.future);
+    final newerDone = optimisticWrite(uid, 'olderFails',
+        patchRow('id', uid, {'show_phone': false}), () => newer.future);
+    await tick();
+
+    older.completeError(Exception('offline'));
+    await expectLater(olderDone, throwsException);
+    await tick();
+    expect(out.last, row(email: true, phone: false));
+
+    newer.complete();
+    await newerDone;
+    await sub.cancel();
+    await raw.close();
+  });
+
   test('signals stay on their own key', () async {
     final changes = <void>[];
     final refreshes = <void>[];

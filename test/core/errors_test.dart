@@ -74,6 +74,18 @@ void main() {
         isNot('Máš už maximální počet rezervací.'));
   });
 
+  test('phone errors (0048) — the server code and the table constraint', () {
+    const copy = 'Telefon nemá správný tvar — třeba +420 777 123 456.';
+    expect(friendlyDbError(Exception('invalid_phone')), copy);
+    expect(
+      friendlyDbError(Exception('new row for relation "profiles" violates '
+          'check constraint "profiles_phone_check"')),
+      copy,
+    );
+    expect(friendlyDbError(Exception('not_allowed')),
+        'Na tohle nemáš oprávnění.');
+  });
+
   test('initialsOf takes first letters of the first two words, uppercased',
       () {
     expect(initialsOf('Ján Novák'), 'JN');
