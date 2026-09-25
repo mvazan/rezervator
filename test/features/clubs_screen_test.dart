@@ -284,6 +284,57 @@ void main() {
       await tester.pumpAndSettle();
     });
 
+    // Devítka is linked to the ČKA site (0046); Veverky is not.
+    const linkedClubs = [
+      Club(
+        id: 'c1',
+        name: 'Devítka',
+        colorIndex: 3,
+        siteSlug: 'ks-devitka-brno',
+        siteName: 'KS Devítka Brno',
+      ),
+      Club(id: 'c2', name: 'Veverky', colorIndex: 2),
+    ];
+
+    testWidgets('a linked club\'s dialog shows its name on the ČKA site',
+        (tester) async {
+      await pumpApp(tester, app(linkedClubs));
+
+      await tester.tap(find.byTooltip('Upravit oddíl').first);
+      await tester.pumpAndSettle();
+      expect(find.text('Na webu ČKA: KS Devítka Brno'), findsOneWidget);
+      await tester.tap(find.text('Zrušit'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Upravit oddíl').last);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Na webu ČKA'), findsNothing);
+    });
+
+    testWidgets('deleting a linked club warns that discovery brings it back',
+        (tester) async {
+      await pumpApp(tester, app(linkedClubs));
+
+      await tester.tap(find.byTooltip('Smazat oddíl').first);
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Opravdu smazat oddíl „Devítka"? Hráči zůstanou bez '
+            'oddílu. Oddíl je propojený s webem ČKA, takže ho příští '
+            '„Přenačíst týmy z webu“ založí znovu.'),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('Zrušit'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Smazat oddíl').last);
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Opravdu smazat oddíl „Veverky"? Hráči zůstanou bez '
+            'oddílu.'),
+        findsOneWidget,
+      );
+    });
+
     testWidgets(
         'unconfigured sync seeds the default slug and disables Načíst týmy',
         (tester) async {
@@ -491,7 +542,7 @@ void main() {
       expect(synced, isTrue);
     });
 
-    testWidgets('toggling a team switch calls updateTeam with the flip',
+    testWidgets('a team row edits through its pencil or a tap — no switch',
         (tester) async {
       const team = Team(
         id: 't1',
@@ -499,41 +550,41 @@ void main() {
         clubId: 'c2',
         competitionName: 'OP I. třída',
       );
-      Team? capturedTeam;
-      String? capturedName;
-      String? capturedClubId;
-      bool? capturedActive;
-      await pumpApp(
-        tester,
-        app(
-          clubs,
-          teams: const [team],
-          updateTeam: (t,
-              {required String name,
-              String? clubId,
-              required bool active}) async {
-            capturedTeam = t;
-            capturedName = name;
-            capturedClubId = clubId;
-            capturedActive = active;
-          },
-        ),
-      );
+      await pumpApp(tester, app(clubs, teams: const [team]));
 
-      // Two switches exist ("Stahovat automaticky" on the card and this
-      // team's own) — scope to the team's tile.
-      final teamSwitch = find.descendant(
-        of: find.ancestor(
-            of: find.text('Veverky A'), matching: find.byType(ListTile)),
-        matching: find.byType(Switch),
-      );
-      await tester.tap(teamSwitch);
+      final row = find.ancestor(
+          of: find.text('Veverky A'), matching: find.byType(ListTile));
+      expect(find.descendant(of: row, matching: find.byType(Switch)),
+          findsNothing);
+
+      await tester.tap(find.byTooltip('Upravit tým'));
       await tester.pumpAndSettle();
+      expect(find.text('Tým'), findsOneWidget);
+      await tester.tap(find.text('Zrušit'));
+      await tester.pumpAndSettle();
+      expect(find.text('Tým'), findsNothing);
 
-      expect(capturedTeam, team);
-      expect(capturedName, team.name);
-      expect(capturedClubId, team.clubId);
-      expect(capturedActive, isFalse);
+      await tester.tap(find.text('Veverky A'));
+      await tester.pumpAndSettle();
+      expect(find.text('Tým'), findsOneWidget);
+    });
+
+    testWidgets('a team that is not downloaded is greyed out and says so',
+        (tester) async {
+      const team = Team(
+        id: 't1',
+        name: 'Veverky B',
+        clubId: 'c2',
+        competitionName: 'OP II. třída',
+        active: false,
+      );
+      await pumpApp(tester, app(clubs, teams: const [team]));
+
+      expect(find.text('OP II. třída · nestahuje se'), findsOneWidget);
+      final title = tester.widget<Text>(find.text('Veverky B'));
+      final scheme =
+          Theme.of(tester.element(find.text('Veverky B'))).colorScheme;
+      expect(title.style?.color, scheme.onSurfaceVariant);
     });
 
     testWidgets(
