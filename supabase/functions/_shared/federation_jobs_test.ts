@@ -2,7 +2,7 @@ import { assert, assertEquals, assertRejects } from "jsr:@std/assert@1";
 import { pragueEpoch } from "./cancel_token.ts";
 import type { SiteMatch } from "./federation.ts";
 import {
-  jobOutcome, matchJobsFor, planCompetition, planTeams,
+  jobOutcome, matchJobsFor, planClubs, planCompetition, planTeams,
   processFederationJobs, runCompetition, runDiscover, SITE,
 } from "./federation_jobs.ts";
 
@@ -192,7 +192,7 @@ Deno.test("matchJobsFor: a stored match whose last fetch failed is fetched now, 
   assertEquals(jobs.map((j) => [j.site_match_id, j.run_at]), [[1, now], [3, now]]);
 });
 
-Deno.test("planTeams: teams of venue clubs, names reused, clubs matched", () => {
+Deno.test("planTeams: teams of venue clubs with their venue club, names reused", () => {
   const teamsOut = planTeams({
     clubs: [{ slug: "tj-sokol-brno-iv", name: "TJ Sokol Brno IV" },
       { slug: "tj-sokol-husovice", name: "TJ Sokol Husovice" }],
@@ -207,16 +207,44 @@ Deno.test("planTeams: teams of venue clubs, names reused, clubs matched", () => 
         ] },
     }],
     existingNames: ["TJ Sokol Brno IV A", "KC Zlín B"],
-    ourClubs: [{ id: "c1", name: "Sokol Brno IV" }, { id: "c2", name: "Veverky" }],
   });
   assertEquals(teamsOut, [
     { site_slug: "tj-sokol-brno-iv-muzi", site_team_id: 1, site_name: "TJ Sokol Brno IV",
       competition_slug: "jihomoravska-divize-2026-2027", competition_name: "Jihomoravská divize",
-      name: "TJ Sokol Brno IV A", club_id: "c1" },
+      name: "TJ Sokol Brno IV A", club_slug: "tj-sokol-brno-iv" },
     { site_slug: "tj-sokol-husovice-b-muzi", site_team_id: null, site_name: "TJ Sokol Husovice B",
       competition_slug: "jihomoravska-divize-2026-2027", competition_name: "Jihomoravská divize",
-      name: "TJ Sokol Husovice B", club_id: null },
+      name: "TJ Sokol Husovice B", club_slug: "tj-sokol-husovice" },
   ]);
+});
+
+Deno.test("planClubs: a renamed club by its slug, else one unlinked club by name, else none", () => {
+  const venue = [
+    { slug: "tj-sokol-brno-iv", name: "TJ Sokol Brno IV" },
+    { slug: "tj-sokol-husovice", name: "TJ Sokol Husovice" },
+    { slug: "ks-devitka-brno", name: "KS Devítka Brno" },
+    { slug: "skk-veverky-brno", name: "SKK Veverky Brno" },
+  ];
+  const ours = [
+    { id: "c1", name: "Sokol Brno IV", site_slug: null },
+    // Renamed in the app after a discovery linked it: its slug still wins,
+    // even over an unlinked club with the site's very name.
+    { id: "c2", name: "Devítka", site_slug: "ks-devitka-brno" },
+    { id: "c4", name: "KS Devítka Brno", site_slug: null },
+    { id: "c3", name: "Veverky", site_slug: null },
+  ];
+  assertEquals(planClubs(venue, ours), [
+    { slug: "tj-sokol-brno-iv", name: "TJ Sokol Brno IV", match_id: "c1" },
+    { slug: "tj-sokol-husovice", name: "TJ Sokol Husovice", match_id: null },
+    { slug: "ks-devitka-brno", name: "KS Devítka Brno", match_id: "c2" },
+    { slug: "skk-veverky-brno", name: "SKK Veverky Brno", match_id: "c3" },
+  ]);
+  // A club linked to another venue club is never matched by name.
+  assertEquals(
+    planClubs([{ slug: "tj-sokol-brno-iv-b", name: "Sokol Brno IV" }],
+      [{ id: "c1", name: "Sokol Brno IV", site_slug: "tj-sokol-brno-iv" }]),
+    [{ slug: "tj-sokol-brno-iv-b", name: "Sokol Brno IV", match_id: null }],
+  );
 });
 
 Deno.test("jobOutcome: rearm, stop, back off, give up", () => {
@@ -1041,8 +1069,17 @@ Deno.test("runCompetition: at most 20 unpaired legacy rows, in date order", asyn
 
 // ---------------------------------------------------------------- runDiscover
 
-/** The reads and the RPC runDiscover issues. */
-function fakeDiscoverDb(sync: { venue_slug: string | null } | null) {
+/** The reads and the RPC runDiscover issues. `clubs`: the alley's clubs;
+ * `result`: what apply_federation_discovery answers. */
+function fakeDiscoverDb(
+  sync: { venue_slug: string | null } | null,
+  clubs: { id: string; name: string; site_slug: string | null }[] =
+    [{ id: "c1", name: "Sokol Brno IV", site_slug: null }],
+  result: unknown = {
+    created: 1, clubs_linked: ["Sokol Brno IV"],
+    clubs_created: ["TJ Sokol Husovice", "KS Devítka Brno", "SKK Veverky Brno"],
+  },
+) {
   const rpcs: { name: string; args: Record<string, unknown> }[] = [];
   const db = {
     from(table: string) {
@@ -1062,7 +1099,7 @@ function fakeDiscoverDb(sync: { venue_slug: string | null } | null) {
         },
         then(onFulfilled: (v: unknown) => unknown) {
           const data = table === "clubs"
-            ? [{ id: "c1", name: "Sokol Brno IV" }]
+            ? clubs
             : table === "priority_slots"
             ? [{ home_team: "TJ Sokol Brno IV A", away_team: "KK Blansko" }]
             : [];
@@ -1073,7 +1110,7 @@ function fakeDiscoverDb(sync: { venue_slug: string | null } | null) {
     },
     async rpc(name: string, args: Record<string, unknown>) {
       rpcs.push({ name, args });
-      return { data: 1, error: null };
+      return { data: result, error: null };
     },
   };
   return { db, rpcs };
@@ -1117,16 +1154,66 @@ Deno.test("runDiscover: venue clubs → season sitemap → competitions → team
     "/detail-kuzelny/tj-sokol-brno-iv", "/sitemap.xml", "/sitemap/matches-20.xml",
     "/detail-souteze/jihomoravska-divize-2026-2027",
   ]);
-  assertEquals(rpcs.map((r) => r.name), ["upsert_federation_teams"]);
+  assertEquals(rpcs.map((r) => r.name), ["apply_federation_discovery"]);
   assertEquals(rpcs[0].args, {
     p_tenant: "t1",
+    p_clubs: [
+      { slug: "tj-sokol-brno-iv", name: "TJ Sokol Brno IV", match_id: "c1" },
+      { slug: "tj-sokol-husovice", name: "TJ Sokol Husovice", match_id: null },
+      { slug: "ks-devitka-brno", name: "KS Devítka Brno", match_id: null },
+      { slug: "skk-veverky-brno", name: "SKK Veverky Brno", match_id: null },
+    ],
     p_teams: [{
       site_slug: "tj-sokol-brno-iv-muzi", site_team_id: 243, site_name: "TJ Sokol Brno IV",
       competition_slug: "jihomoravska-divize-2026-2027", competition_name: "Jihomoravská divize",
-      name: "TJ Sokol Brno IV A", club_id: "c1",
+      name: "TJ Sokol Brno IV A", club_slug: "tj-sokol-brno-iv",
     }],
   });
-  assertEquals(report, { teams: 1, created: 1 });
+  assertEquals(report, {
+    teams: 1, competitions: 1, created: 1, clubs_linked: ["Sokol Brno IV"],
+    clubs_created: ["TJ Sokol Husovice", "KS Devítka Brno", "SKK Veverky Brno"],
+  });
+});
+
+Deno.test("runDiscover: a renamed club by its slug, a club by its name, a missing one to create", async () => {
+  const prebor = "krajsky-prebor-jmk-2-tridy-sever-a-2026-2027";
+  const sitemap = matchesSitemap.replace("</urlset>",
+    `<url><loc>${SITE}/detail-zapasu/${prebor}-kolo-1-ks-devitka-brno-b-muzi-kk-slovan-rosice-d-muzi</loc></url></urlset>`);
+  const ours = [
+    { id: "c1", name: "Sokol Brno IV", site_slug: null },
+    { id: "c2", name: "Devítka", site_slug: "ks-devitka-brno" },
+    { id: "c3", name: "Veverky", site_slug: null },
+  ];
+  const { db, rpcs } = fakeDiscoverDb({ venue_slug: "tj-sokol-brno-iv" }, ours, {
+    created: 5, clubs_created: ["TJ Sokol Husovice"],
+    clubs_linked: ["Sokol Brno IV", "Devítka", "Veverky"],
+  });
+  const { get } = discoverSite({
+    "/sitemap/matches-20.xml": sitemap,
+    [`/detail-souteze/${prebor}`]: fixture("competition_current_teams_of_4.html"),
+  });
+
+  const report = await runDiscover(db, get, "t1");
+
+  assertEquals(rpcs.map((r) => r.name), ["apply_federation_discovery"]);
+  assertEquals(rpcs[0].args.p_clubs, [
+    { slug: "tj-sokol-brno-iv", name: "TJ Sokol Brno IV", match_id: "c1" },
+    { slug: "tj-sokol-husovice", name: "TJ Sokol Husovice", match_id: null },
+    { slug: "ks-devitka-brno", name: "KS Devítka Brno", match_id: "c2" },
+    { slug: "skk-veverky-brno", name: "SKK Veverky Brno", match_id: "c3" },
+  ]);
+  const teams = rpcs[0].args.p_teams as { site_slug: string; club_slug: string }[];
+  assertEquals(teams.map((t) => [t.site_slug, t.club_slug]), [
+    ["tj-sokol-brno-iv-muzi", "tj-sokol-brno-iv"],
+    ["skk-veverky-brno-b-muzi", "skk-veverky-brno"],
+    ["tj-sokol-husovice-e-muzi", "tj-sokol-husovice"],
+    ["tj-sokol-brno-iv-b-muzi", "tj-sokol-brno-iv"],
+    ["ks-devitka-brno-b-muzi", "ks-devitka-brno"],
+  ]);
+  assertEquals(report, {
+    teams: 5, competitions: 2, created: 5, clubs_created: ["TJ Sokol Husovice"],
+    clubs_linked: ["Sokol Brno IV", "Devítka", "Veverky"],
+  });
 });
 
 Deno.test("runDiscover: no venue, no clubs on it, or no matches sitemap fails the job", async () => {
