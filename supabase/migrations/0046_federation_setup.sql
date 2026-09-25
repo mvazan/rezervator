@@ -134,3 +134,114 @@ $$;
 revoke all on function apply_federation_discovery(uuid, jsonb, jsonb)
   from public, anon, authenticated;
 grant execute on function apply_federation_discovery(uuid, jsonb, jsonb) to service_role;
+
+-- ------------------------------------------------ discovery is no run
+-- 0045's record_federation_run, except that only competition:<slug> runs
+-- are the sync's runs and stamp last_run_at / last_success_at. discover
+-- still keeps its report + at, or {error, at}, under its key. The setup
+-- wizard reads "never synced" as last_run_at is null, and its own
+-- discovery (step 2) must not end it.
+create or replace function record_federation_run(
+  p_tenant uuid, p_key text, p_report jsonb, p_error text)
+returns void language plpgsql security definer set search_path = public as $$
+declare
+  v_run constant boolean := p_key like 'competition:%';
+  v_keep constant boolean := v_run or p_key = 'discover';
+  v_report jsonb;
+begin
+  select last_report into v_report from federation_sync
+   where tenant_id = p_tenant for update;
+  if p_error is null and not v_keep and not coalesce(v_report ? p_key, false) then
+    return;
+  end if;
+  if v_report is null then
+    insert into federation_sync (tenant_id) values (p_tenant) on conflict do nothing;
+    select last_report into v_report from federation_sync
+     where tenant_id = p_tenant for update;
+  end if;
+  v_report := case
+    when p_error is not null then v_report || jsonb_build_object(p_key,
+      jsonb_build_object('error', p_error, 'at', now()))
+    when v_keep then v_report || jsonb_build_object(p_key,
+      coalesce(p_report, '{}'::jsonb) || jsonb_build_object('at', now()))
+    else v_report - p_key end;
+  v_report := federation_live_report(p_tenant, v_report);
+  update federation_sync
+     set last_run_at = case when v_run then now() else last_run_at end,
+         last_success_at = case when v_run and p_error is null then now()
+                                else last_success_at end,
+         last_report = v_report,
+         last_error = federation_last_error(p_tenant, v_report)
+   where tenant_id = p_tenant;
+end;
+$$;
+
+-- ----------------------------------------------------- sync progress
+-- The admin card's „Synchronizuje se… zbývá …“: the caller's federation
+-- jobs due now or leased, per kind. The notify tick's lease counts an
+-- attempt and pushes run_at up to 10 minutes ahead (LEASE_MS in
+-- federation_jobs.ts), so attempts > 0 with run_at inside that window is a
+-- job in flight (or retrying within it). A run that finishes deletes its
+-- job or re-arms it with attempts 0, so a match's future checkpoint
+-- (T−24 h, T+24 h …) never counts. The tenant is the dedupe key's second
+-- part: federation_discover:<tenant>, federation_competition:<tenant>:<slug>,
+-- federation_match:<tenant>:<id>, federation_venue:<tenant>:<slug>.
+create or replace function federation_sync_progress()
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare
+  v_tenant constant uuid := current_tenant_id();
+  v jsonb;
+begin
+  if not is_admin() then
+    raise exception 'not_allowed';
+  end if;
+  select jsonb_build_object(
+           'discover', count(*) filter (where kind = 'federation_discover'),
+           'competitions', count(*) filter (where kind = 'federation_competition'),
+           'matches', count(*) filter (where kind = 'federation_match'),
+           'venues', count(*) filter (where kind = 'federation_venue'))
+    into v
+    from notification_jobs
+   where kind in ('federation_discover', 'federation_competition',
+                  'federation_match', 'federation_venue')
+     and split_part(dedupe_key, ':', 2) = v_tenant::text
+     and (run_at <= now()
+          or (attempts > 0 and run_at <= now() + interval '10 minutes'));
+  return v;
+end;
+$$;
+
+revoke all on function federation_sync_progress() from public, anon;
+grant execute on function federation_sync_progress() to authenticated;
+
+-- ------------------------------------------ a moved kuželna's discovery
+-- 0045's set_federation_sync, except that moving the alley to another
+-- kuželna also drops the last discovery's report (last_report.discover):
+-- it was the old kuželna's. The setup wizard opens step 3 only on a
+-- successful report, so the old kuželna's teams never get it there.
+-- Saving the same slug (the switch, step 3) keeps the report. create or
+-- replace keeps 0045's grants.
+create or replace function set_federation_sync(p_venue_slug text, p_enabled boolean)
+returns void language plpgsql security definer set search_path = public as $$
+declare
+  v_slug text := lower(trim(coalesce(p_venue_slug, '')));
+begin
+  if not is_admin() then
+    raise exception 'not_allowed';
+  end if;
+  if v_slug !~ '^[a-z0-9]+(-[a-z0-9]+)*$' then
+    raise exception 'invalid_venue_slug';
+  end if;
+  insert into federation_sync (tenant_id, venue_slug, enabled)
+  values (current_tenant_id(), v_slug, p_enabled)
+  on conflict (tenant_id) do update
+    set venue_slug = excluded.venue_slug, enabled = excluded.enabled,
+        last_report = case
+          when federation_sync.venue_slug = excluded.venue_slug
+            then federation_sync.last_report
+          else federation_sync.last_report - 'discover' end;
+  -- A moved kuželna leaves the old one's venue key dead, and its
+  -- discovery's error with the report.
+  perform federation_refresh_error(current_tenant_id());
+end;
+$$;

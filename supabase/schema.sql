@@ -1371,6 +1371,37 @@ $$;
 ALTER FUNCTION "public"."federation_refresh_error"("p_tenant" "uuid") OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."federation_sync_progress"() RETURNS "jsonb"
+    LANGUAGE "plpgsql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_tenant constant uuid := current_tenant_id();
+  v jsonb;
+begin
+  if not is_admin() then
+    raise exception 'not_allowed';
+  end if;
+  select jsonb_build_object(
+           'discover', count(*) filter (where kind = 'federation_discover'),
+           'competitions', count(*) filter (where kind = 'federation_competition'),
+           'matches', count(*) filter (where kind = 'federation_match'),
+           'venues', count(*) filter (where kind = 'federation_venue'))
+    into v
+    from notification_jobs
+   where kind in ('federation_discover', 'federation_competition',
+                  'federation_match', 'federation_venue')
+     and split_part(dedupe_key, ':', 2) = v_tenant::text
+     and (run_at <= now()
+          or (attempts > 0 and run_at <= now() + interval '10 minutes'));
+  return v;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."federation_sync_progress"() OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."group_accept"("p_group" "uuid") RETURNS "void"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -2199,12 +2230,13 @@ CREATE OR REPLACE FUNCTION "public"."record_federation_run"("p_tenant" "uuid", "
     SET "search_path" TO 'public'
     AS $$
 declare
-  v_run constant boolean := p_key = 'discover' or p_key like 'competition:%';
+  v_run constant boolean := p_key like 'competition:%';
+  v_keep constant boolean := v_run or p_key = 'discover';
   v_report jsonb;
 begin
   select last_report into v_report from federation_sync
    where tenant_id = p_tenant for update;
-  if p_error is null and not v_run and not coalesce(v_report ? p_key, false) then
+  if p_error is null and not v_keep and not coalesce(v_report ? p_key, false) then
     return;
   end if;
   if v_report is null then
@@ -2215,7 +2247,7 @@ begin
   v_report := case
     when p_error is not null then v_report || jsonb_build_object(p_key,
       jsonb_build_object('error', p_error, 'at', now()))
-    when v_run then v_report || jsonb_build_object(p_key,
+    when v_keep then v_report || jsonb_build_object(p_key,
       coalesce(p_report, '{}'::jsonb) || jsonb_build_object('at', now()))
     else v_report - p_key end;
   v_report := federation_live_report(p_tenant, v_report);
@@ -2987,8 +3019,13 @@ begin
   insert into federation_sync (tenant_id, venue_slug, enabled)
   values (current_tenant_id(), v_slug, p_enabled)
   on conflict (tenant_id) do update
-    set venue_slug = excluded.venue_slug, enabled = excluded.enabled;
-  -- A moved kuželna leaves the old one's venue key dead.
+    set venue_slug = excluded.venue_slug, enabled = excluded.enabled,
+        last_report = case
+          when federation_sync.venue_slug = excluded.venue_slug
+            then federation_sync.last_report
+          else federation_sync.last_report - 'discover' end;
+  -- A moved kuželna leaves the old one's venue key dead, and its
+  -- discovery's error with the report.
   perform federation_refresh_error(current_tenant_id());
 end;
 $_$;
@@ -4946,6 +4983,12 @@ GRANT ALL ON FUNCTION "public"."federation_match_switched_off"("p_tenant" "uuid"
 
 REVOKE ALL ON FUNCTION "public"."federation_refresh_error"("p_tenant" "uuid") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."federation_refresh_error"("p_tenant" "uuid") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."federation_sync_progress"() FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."federation_sync_progress"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."federation_sync_progress"() TO "service_role";
 
 
 

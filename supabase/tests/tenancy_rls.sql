@@ -4726,16 +4726,20 @@ begin
   delete from federation_sync where tenant_id = v_b;
   perform record_federation_run(v_b, 'discover', '{"teams":3}', null);
   select * into s from federation_sync where tenant_id = v_b;
-  if s.last_success_at is null or s.last_error is not null
+  -- 0046: a discovery keeps its report but is no sync run.
+  if s.last_run_at is not null or s.last_success_at is not null or s.last_error is not null
      or s.last_report->'discover'->>'teams' <> '3'
      or s.last_report->'discover'->>'at' is null then
-    raise exception 'FAIL: a successful run was not recorded: %', to_jsonb(s);
+    raise exception 'FAIL: a discovery should keep its report without stamping a run: %', to_jsonb(s);
   end if;
   perform record_federation_run(v_b, 'competition:krajsky-prebor-2026-2027', '{"inserted":1}', null);
-  update federation_sync set last_success_at = now() - interval '1 hour' where tenant_id = v_b;
+  update federation_sync
+     set last_run_at = now() - interval '1 hour', last_success_at = now() - interval '1 hour'
+   where tenant_id = v_b;
   perform record_federation_run(v_b, 'discover', '{"teams":0}', 'site down');
   select * into s from federation_sync where tenant_id = v_b;
   if s.last_error <> 'site down' or s.last_success_at <> now() - interval '1 hour'
+     or s.last_run_at <> now() - interval '1 hour'
      or s.last_report->'discover'->>'error' is distinct from 'site down'
      or s.last_report->'discover'->>'at' is null
      or s.last_report->'discover' ? 'teams'
@@ -4810,12 +4814,12 @@ begin
     (select to_jsonb(f)::text from federation_sync f where tenant_id = v_a), true);
 end $$;
 
--- 13b. Only discovery and competition runs are the sync's runs: they
--- stamp last_run_at and last_success_at. A match or venue job reports
--- only trouble, under its own key (match:<site_match_id>, venue:<slug>):
--- a failure is written there, a success removes just that entry, and a
--- success with nothing to remove writes nothing — no row, no update, so no
--- Realtime event for every fetched match.
+-- 13b. Only competition runs are the sync's runs (discovery was one too
+-- until 0046): they stamp last_run_at and last_success_at. A match or
+-- venue job reports only trouble, under its own key (match:<site_match_id>,
+-- venue:<slug>): a failure is written there, a success removes just that
+-- entry, and a success with nothing to remove writes nothing — no row, no
+-- update, so no Realtime event for every fetched match.
 do $$
 declare
   v_b constant uuid := '00000000-0000-0000-0000-000000000002';
@@ -4882,7 +4886,7 @@ begin
      or s.last_report->v_comp->>'at' is null or s.last_report->v_comp ? 'error' then
     raise exception 'FAIL: a competition success should stamp both and keep its report: %', to_jsonb(s);
   end if;
-  raise notice 'OK: only discovery and competitions stamp a run; a match or venue success removes its own key or writes nothing (0045)';
+  raise notice 'OK: only competitions stamp a run; a match or venue success removes its own key or writes nothing (0045, 0046)';
 end $$;
 
 -- 13c. last_error is the newest error among the keys that can still run,
@@ -5623,6 +5627,108 @@ begin
     raise exception 'FAIL: apply_federation_discovery must be callable by the service only';
   end if;
   raise notice 'OK: apply_federation_discovery is callable by the service only (0046)';
+end $$;
+
+-- 17. federation_sync_progress: the caller's federation jobs due now or
+-- leased, per kind — never a future checkpoint, never another alley's —
+-- and for admins only.
+do $$
+declare
+  v_a constant text := '00000000-0000-0000-0000-00000000000a';
+  v_b constant text := '00000000-0000-0000-0000-000000000002';
+begin
+  delete from notification_jobs
+   where kind in ('federation_discover', 'federation_competition',
+                  'federation_match', 'federation_venue');
+  insert into notification_jobs (kind, dedupe_key, payload, run_at, attempts) values
+    -- due
+    ('federation_discover', 'federation_discover:' || v_a, '{}', now() - interval '1 minute', 0),
+    ('federation_competition', 'federation_competition:' || v_a || ':okresni-prebor', '{}', now(), 0),
+    ('federation_venue', 'federation_venue:' || v_a || ':kuzelna-a', '{}', now(), 0),
+    -- leased: the lease pushed run_at ahead and counted an attempt
+    ('federation_match', 'federation_match:' || v_a || ':1', '{}', now() + interval '9 minutes', 1),
+    -- not yet due, never leased: a spaced nightly job, a match's checkpoint
+    ('federation_competition', 'federation_competition:' || v_a || ':krajsky-prebor', '{}',
+     now() + interval '1 minute', 0),
+    ('federation_match', 'federation_match:' || v_a || ':2', '{}', now() + interval '1 day', 0),
+    -- a retry backing off past the lease window
+    ('federation_match', 'federation_match:' || v_a || ':3', '{}', now() + interval '32 minutes', 5),
+    -- another alley's, and a job that is no federation job
+    ('federation_match', 'federation_match:' || v_b || ':9', '{}', now(), 0),
+    ('calendar_sync', 'calendar:' || v_a || ':progress-probe', '{}', now(), 0);
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+declare
+  v constant jsonb := federation_sync_progress();
+begin
+  if v is distinct from '{"discover":1,"competitions":1,"matches":1,"venues":1}'::jsonb then
+    raise exception 'FAIL: progress should count the alley''s due and leased jobs only: %', v;
+  end if;
+end $$;
+reset role;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000002","role":"authenticated"}';
+do $$
+declare
+  v constant jsonb := federation_sync_progress();
+begin
+  if v is distinct from '{"discover":0,"competitions":0,"matches":1,"venues":0}'::jsonb then
+    raise exception 'FAIL: another alley''s admin got our progress: %', v;
+  end if;
+end $$;
+reset role;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"20000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+begin
+  begin
+    perform federation_sync_progress();
+    raise exception 'FAIL: a player read the sync progress';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+end $$;
+reset role;
+do $$
+begin
+  if has_function_privilege('anon', 'public.federation_sync_progress()', 'execute')
+     or not has_function_privilege('authenticated', 'public.federation_sync_progress()', 'execute') then
+    raise exception 'FAIL: federation_sync_progress must be callable by the app only';
+  end if;
+  raise notice 'OK: federation_sync_progress counts the alley''s due and leased jobs, for admins only (0046)';
+end $$;
+
+-- 18. A moved kuželna drops the last discovery's report: it was the old
+-- kuželna's, and the setup wizard reads a successful report as "this
+-- kuželna's teams are loaded". Saving the same kuželna keeps it. B is not
+-- enabled; its kuželna goes back at the end.
+do $$
+begin
+  perform record_federation_run('00000000-0000-0000-0000-000000000002', 'discover',
+                                '{"teams":2}', null);
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000002","role":"authenticated"}';
+do $$
+declare
+  v_slug constant text := (select venue_slug from federation_sync);
+begin
+  perform set_federation_sync(v_slug, false);
+  if not (select last_report ? 'discover' from federation_sync) then
+    raise exception 'FAIL: saving the same kuželna dropped its discovery report';
+  end if;
+  perform set_federation_sync('kuzelna-b-jinde', false);
+  if (select last_report ? 'discover' from federation_sync) then
+    raise exception 'FAIL: a moved kuželna kept the old one''s discovery report';
+  end if;
+  perform set_federation_sync(v_slug, false);
+  raise notice 'OK: a moved kuželna drops the last discovery''s report; the same one keeps it (0046)';
 end $$;
 
 reset role;

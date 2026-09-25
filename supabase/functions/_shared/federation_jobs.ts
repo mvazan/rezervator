@@ -41,6 +41,8 @@ export type Outcome =
   | { action: "rearm"; run_at: Date; attempts: number };
 
 const MAX_ATTEMPTS = 5;
+// federation_sync_progress (0046) counts a job with attempts > 0 and run_at
+// within this lease as in flight — keep the two in step.
 const LEASE_MS = 10 * 60e3;
 const LIMITS: [string, number][] = [
   ["federation_discover", 1],
