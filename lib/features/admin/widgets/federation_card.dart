@@ -370,7 +370,7 @@ class _FederationCardState extends ConsumerState<FederationCard>
           IconButton(
             icon: const Icon(Icons.edit_outlined),
             tooltip: 'Změnit kuželnu',
-            onPressed: () => _editSlug(sync, enabled),
+            onPressed: busy ? null : () => _editSlug(sync, enabled),
           ),
         ],
       ),
@@ -378,7 +378,7 @@ class _FederationCardState extends ConsumerState<FederationCard>
         contentPadding: EdgeInsets.zero,
         title: const Text('Stahovat automaticky'),
         value: enabled,
-        onChanged: _savingEnabled || !sync.configured
+        onChanged: busy || _savingEnabled || !sync.configured
             ? null
             : (v) => _setEnabled(sync, v),
       ),
@@ -388,11 +388,11 @@ class _FederationCardState extends ConsumerState<FederationCard>
         runSpacing: 8,
         children: [
           OutlinedButton(
-            onPressed: sync.configured ? _requestDiscovery : null,
+            onPressed: !busy && sync.configured ? _requestDiscovery : null,
             child: const Text('Přenačíst týmy z webu'),
           ),
           OutlinedButton(
-            onPressed: sync.configured && enabled ? _sync : null,
+            onPressed: !busy && sync.configured && enabled ? _sync : null,
             child: const Text('Synchronizovat teď'),
           ),
         ],

@@ -252,6 +252,68 @@ void main() {
       expect(find.text('Načítají se týmy z webu…'), findsOneWidget);
     });
 
+    void expectControls(WidgetTester tester, {required bool enabled}) {
+      final matcher = enabled ? isNotNull : isNull;
+      expect(
+          tester
+              .widget<IconButton>(find.widgetWithIcon(IconButton, Icons.edit_outlined))
+              .onPressed,
+          matcher,
+          reason: 'Změnit kuželnu');
+      expect(tester.widget<SwitchListTile>(find.byType(SwitchListTile)).onChanged,
+          matcher,
+          reason: 'Stahovat automaticky');
+      for (final label in ['Přenačíst týmy z webu', 'Synchronizovat teď']) {
+        expect(
+            tester
+                .widget<OutlinedButton>(find.widgetWithText(OutlinedButton, label))
+                .onPressed,
+            matcher,
+            reason: label);
+      }
+    }
+
+    testWidgets(
+        'while a sync runs, the kuželna pencil, the switch and both buttons '
+        'are off', (tester) async {
+      await _pump(
+        tester,
+        _Harness(
+            rows: [_on], progress: [const FederationSyncProgress(matches: 12)]),
+      );
+
+      expectControls(tester, enabled: false);
+    });
+
+    testWidgets('a running discovery turns them off too', (tester) async {
+      await _pump(
+        tester,
+        _Harness(
+            rows: [_on], progress: [const FederationSyncProgress(discover: 1)]),
+      );
+
+      expectControls(tester, enabled: false);
+    });
+
+    testWidgets('they come back once nothing is left to run', (tester) async {
+      await _pump(
+        tester,
+        _Harness(rows: [
+          _on
+        ], progress: [
+          const FederationSyncProgress(matches: 1),
+          FederationSyncProgress.idle,
+        ]),
+      );
+      expectControls(tester, enabled: false);
+
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pump();
+      await tester.pump();
+
+      expectControls(tester, enabled: true);
+    });
+
     testWidgets(
         'looks every 5 s while anything is pending, stops at 0 and fetches '
         'the row again', (tester) async {
