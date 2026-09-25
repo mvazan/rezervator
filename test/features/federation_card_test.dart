@@ -36,6 +36,10 @@ class _Harness {
   /// Thrown by the next saves instead of saving.
   Object? saveError;
 
+  /// Holds a discovery or sync request open until completed — the server
+  /// answering it takes a moment.
+  Completer<void>? hold;
+
   /// Delivers [row] as Realtime does: the card sees it without a refetch.
   void push(FederationSync row) => _live.add(row);
 
@@ -61,8 +65,14 @@ class _Harness {
                   if (error != null) throw error;
                   saved.add((slug, enabled));
                 },
-                discoverTeams: () async => discoveries++,
-                syncNow: () async => syncs++,
+                discoverTeams: () async {
+                  discoveries++;
+                  await hold?.future;
+                },
+                syncNow: () async {
+                  syncs++;
+                  await hold?.future;
+                },
                 syncProgress: () async => _nth(progress, looks++),
               ),
             ),
@@ -312,6 +322,43 @@ void main() {
       await tester.pump();
 
       expectControls(tester, enabled: true);
+    });
+
+    for (final label in ['Přenačíst týmy z webu', 'Synchronizovat teď']) {
+      testWidgets('$label turns them off while the server takes the request',
+          (tester) async {
+        final h = _Harness(rows: [_on])..hold = Completer<void>();
+        await _pump(tester, h);
+
+        await tester.tap(find.widgetWithText(OutlinedButton, label));
+        await tester.pump();
+
+        expectControls(tester, enabled: false);
+        await tester.tap(find.widgetWithText(OutlinedButton, label),
+            warnIfMissed: false);
+        await tester.pump();
+        expect(h.discoveries + h.syncs, 1, reason: 'no second request');
+
+        h.hold!.complete();
+        await tester.pump();
+        await tester.pump();
+      });
+    }
+
+    testWidgets(
+        'Přenačíst týmy z webu turns them off at once, before any look sees '
+        'the discovery run', (tester) async {
+      final h = _Harness(rows: [_on]);
+      await _pump(tester, h);
+      expectControls(tester, enabled: true);
+
+      await tester.tap(find.widgetWithText(OutlinedButton, 'Přenačíst týmy z webu'));
+      await tester.pump();
+      await tester.pump();
+
+      expect(h.discoveries, 1);
+      expect(find.text('Načítají se týmy z webu…'), findsOneWidget);
+      expectControls(tester, enabled: false);
     });
 
     testWidgets(

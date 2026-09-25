@@ -82,6 +82,10 @@ class _FederationCardState extends ConsumerState<FederationCard>
   bool? _enabledWanted;
   bool _savingEnabled = false;
 
+  /// A discovery or sync request is on its way to the server: the controls
+  /// rest from the tap, not from the first look that sees the run.
+  bool _requesting = false;
+
   /// The wizard's last step switched the sync on: the normal view from now
   /// on, without waiting for the row's echo.
   bool _setupDone = false;
@@ -212,23 +216,29 @@ class _FederationCardState extends ConsumerState<FederationCard>
             );
 
   Future<bool> _requestDiscovery() async {
+    setState(() => _requesting = true);
     final ok = await tryAction(
       context,
       widget.discoverTeams,
       errorText: friendlyDbError,
     );
-    if (ok && mounted) _afterRequest(discovery: true);
+    if (!mounted) return ok;
+    setState(() => _requesting = false);
+    if (ok) _afterRequest(discovery: true);
     return ok;
   }
 
   Future<void> _sync() async {
+    setState(() => _requesting = true);
     final ok = await tryAction(
       context,
       widget.syncNow,
       success: 'Synchronizace spuštěna.',
       errorText: friendlyDbError,
     );
-    if (ok && mounted) _afterRequest();
+    if (!mounted) return;
+    setState(() => _requesting = false);
+    if (ok) _afterRequest();
   }
 
   /// The wizard's last step: the sync on, then the first run.
@@ -349,6 +359,7 @@ class _FederationCardState extends ConsumerState<FederationCard>
     final discovering = _discovering(sync);
     final progress = _shownProgress(discovering);
     final busy = discovering || progress.pending;
+    final locked = busy || _requesting;
     final theme = Theme.of(context);
     final muted = busy
         ? theme.textTheme.bodySmall
@@ -388,7 +399,7 @@ class _FederationCardState extends ConsumerState<FederationCard>
           IconButton(
             icon: const Icon(Icons.edit_outlined),
             tooltip: 'Změnit kuželnu',
-            onPressed: busy ? null : () => _editSlug(sync, enabled),
+            onPressed: locked ? null : () => _editSlug(sync, enabled),
           ),
         ],
       ),
@@ -396,7 +407,7 @@ class _FederationCardState extends ConsumerState<FederationCard>
         contentPadding: EdgeInsets.zero,
         title: const Text('Stahovat automaticky'),
         value: enabled,
-        onChanged: busy || _savingEnabled || !sync.configured
+        onChanged: locked || _savingEnabled || !sync.configured
             ? null
             : (v) => _setEnabled(sync, v),
       ),
@@ -406,11 +417,11 @@ class _FederationCardState extends ConsumerState<FederationCard>
         runSpacing: 8,
         children: [
           OutlinedButton(
-            onPressed: !busy && sync.configured ? _requestDiscovery : null,
+            onPressed: !locked && sync.configured ? _requestDiscovery : null,
             child: const Text('Přenačíst týmy z webu'),
           ),
           OutlinedButton(
-            onPressed: !busy && sync.configured && enabled ? _sync : null,
+            onPressed: !locked && sync.configured && enabled ? _sync : null,
             child: const Text('Synchronizovat teď'),
           ),
         ],
