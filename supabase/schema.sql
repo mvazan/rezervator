@@ -63,6 +63,68 @@ $$;
 ALTER FUNCTION "public"."admin_list_tenants"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."apply_federation_discovery"("p_tenant" "uuid", "p_clubs" "jsonb", "p_teams" "jsonb") RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  c jsonb;
+  v_club uuid;
+  v_name text;
+  v_ids jsonb := '{}'::jsonb;
+  v_created text[] := '{}';
+  v_linked text[] := '{}';
+  v_teams jsonb;
+begin
+  for c in select * from jsonb_array_elements(coalesce(p_clubs, '[]'::jsonb)) loop
+    select id, name into v_club, v_name from clubs
+     where tenant_id = p_tenant and site_slug = c->>'slug';
+    if v_club is not null then
+      update clubs set site_name = c->>'name'
+       where id = v_club and site_name is distinct from c->>'name';
+    else
+      update clubs set site_slug = c->>'slug', site_name = c->>'name'
+       where tenant_id = p_tenant and id = (c->>'match_id')::uuid and site_slug is null
+      returning id, name into v_club, v_name;
+    end if;
+    if v_club is not null then
+      v_linked := v_linked || v_name;
+    else
+      v_name := rtrim(left(coalesce(nullif(trim(c->>'name'), ''), c->>'slug'), 80));
+      -- Palette entries are 0–8 (clubs_color_check since 0031, ClubColors
+      -- in lib/domain/palette.dart); -1 and hand-picked colours use none.
+      insert into clubs (tenant_id, name, color, site_slug, site_name)
+      values (p_tenant, v_name,
+              (select i from generate_series(0, 8) i
+                order by (select count(*) from clubs k
+                           where k.tenant_id = p_tenant and k.color = i), i
+                limit 1),
+              c->>'slug', c->>'name')
+      on conflict do nothing
+      returning id into v_club;
+      if v_club is not null then
+        v_created := v_created || v_name;
+      end if;
+    end if;
+    if v_club is not null then
+      v_ids := v_ids || jsonb_build_object(c->>'slug', v_club);
+    end if;
+  end loop;
+  select coalesce(jsonb_agg(x || jsonb_build_object('club_id', v_ids->(x->>'club_slug'))
+                            order by o), '[]'::jsonb)
+    into v_teams
+    from jsonb_array_elements(coalesce(p_teams, '[]'::jsonb)) with ordinality e(x, o);
+  return jsonb_build_object(
+    'created', upsert_federation_teams(p_tenant, v_teams),
+    'clubs_created', to_jsonb(v_created),
+    'clubs_linked', to_jsonb(v_linked));
+end;
+$$;
+
+
+ALTER FUNCTION "public"."apply_federation_discovery"("p_tenant" "uuid", "p_clubs" "jsonb", "p_teams" "jsonb") OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."apply_federation_matches"("p_tenant" "uuid", "p_competition_slug" "text", "p_matches" "jsonb", "p_keep_ids" integer[] DEFAULT '{}'::integer[]) RETURNS "jsonb"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -3345,6 +3407,8 @@ CREATE TABLE IF NOT EXISTS "public"."clubs" (
     "color" integer DEFAULT '-1'::integer NOT NULL,
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "tenant_id" "uuid" DEFAULT "public"."current_tenant_id"() NOT NULL,
+    "site_slug" "text",
+    "site_name" "text",
     CONSTRAINT "clubs_color_check" CHECK (((("color" >= '-1'::integer) AND ("color" <= 8)) OR (("color" >= 16777216) AND ("color" <= 33554431))))
 );
 
@@ -3353,6 +3417,14 @@ ALTER TABLE "public"."clubs" OWNER TO "postgres";
 
 
 COMMENT ON COLUMN "public"."clubs"."color" IS 'Club colour: -1 = none, 0-11 a palette entry, 0x1000000|rgb a hand-picked colour.';
+
+
+
+COMMENT ON COLUMN "public"."clubs"."site_slug" IS 'The venue club on vysledky.kuzelky.cz (detail-klubu/<slug>) this club is linked to; null = not linked. Written by discovery only, so a rename in the app keeps the link.';
+
+
+
+COMMENT ON COLUMN "public"."clubs"."site_name" IS 'The linked club''s name on vysledky.kuzelky.cz, refreshed by every discovery.';
 
 
 
@@ -3385,13 +3457,17 @@ CREATE OR REPLACE FUNCTION "public"."upsert_federation_teams"("p_tenant" "uuid",
 declare
   t jsonb;
   v_name text;
+  v_club uuid;
   v_new integer := 0;
 begin
   for t in select * from jsonb_array_elements(p_teams) loop
+    select id into v_club from clubs
+     where id = (t->>'club_id')::uuid and tenant_id = p_tenant;
     update teams
        set site_team_id = (t->>'site_team_id')::integer, site_name = t->>'site_name',
            competition_slug = t->>'competition_slug',
-           competition_name = t->>'competition_name'
+           competition_name = t->>'competition_name',
+           club_id = coalesce(club_id, v_club)
      where tenant_id = p_tenant and site_slug = t->>'site_slug';
     if found then
       continue;
@@ -3405,7 +3481,7 @@ begin
     end if;
     insert into teams (tenant_id, name, club_id, site_team_id, site_slug, site_name,
                        competition_slug, competition_name)
-    values (p_tenant, v_name, (t->>'club_id')::uuid, (t->>'site_team_id')::integer,
+    values (p_tenant, v_name, v_club, (t->>'site_team_id')::integer,
             t->>'site_slug', t->>'site_name', t->>'competition_slug',
             t->>'competition_name');
     v_new := v_new + 1;
@@ -4075,6 +4151,10 @@ ALTER TABLE ONLY "public"."venues"
 
 
 
+CREATE UNIQUE INDEX "clubs_tenant_site_slug_key" ON "public"."clubs" USING "btree" ("tenant_id", "site_slug") WHERE ("site_slug" IS NOT NULL);
+
+
+
 CREATE INDEX "match_player_results_player_idx" ON "public"."match_player_results" USING "btree" ("tenant_id", "player_site_id");
 
 
@@ -4714,6 +4794,11 @@ GRANT ALL ON FUNCTION "public"."_group_drop_member"("p_group" "uuid", "p_user" "
 REVOKE ALL ON FUNCTION "public"."admin_list_tenants"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."admin_list_tenants"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."admin_list_tenants"() TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."apply_federation_discovery"("p_tenant" "uuid", "p_clubs" "jsonb", "p_teams" "jsonb") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."apply_federation_discovery"("p_tenant" "uuid", "p_clubs" "jsonb", "p_teams" "jsonb") TO "service_role";
 
 
 

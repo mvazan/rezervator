@@ -5459,5 +5459,171 @@ begin
   raise notice 'OK: with both alleys configured, each admin sees only their own sync settings (0045)';
 end $$;
 
+-- 0046 průvodce nastavením ČKA -----------------------------------------------
+reset role;
+
+-- 16. apply_federation_discovery matches every venue club to a club of
+-- ours — by site_slug, else by the edge function's name match, which it
+-- links — or creates it, and hands the teams their clubs. An alley of its
+-- own keeps the colour counts exact.
+insert into tenants (id, name)
+values ('00000000-0000-0000-0000-00000000000c', 'Kuželna C (0046)');
+do $$
+declare
+  v_c constant uuid := '00000000-0000-0000-0000-00000000000c';
+  v_teams constant jsonb := '[
+    {"site_slug":"tj-sokol-brno-iv-muzi","site_team_id":1,"site_name":"TJ Sokol Brno IV",
+     "competition_slug":"jihomoravska-divize-2026-2027","competition_name":"Jihomoravská divize",
+     "name":"TJ Sokol Brno IV A","club_slug":"tj-sokol-brno-iv"},
+    {"site_slug":"ks-devitka-brno-b-muzi","site_team_id":2,"site_name":"KS Devítka Brno B",
+     "competition_slug":"krajsky-prebor-2026-2027","competition_name":"Krajský přebor",
+     "name":"KS Devítka Brno B","club_slug":"ks-devitka-brno"}]';
+  v_sokol uuid;
+  v_veverky uuid;
+  v_devitka uuid;
+  v_clubs jsonb;
+  r jsonb;
+begin
+  insert into clubs (tenant_id, name, color) values (v_c, 'Sokol Brno IV', 0)
+  returning id into v_sokol;
+  insert into clubs (tenant_id, name, color) values (v_c, 'Veverky', 1)
+  returning id into v_veverky;
+  v_clubs := jsonb_build_array(
+    jsonb_build_object('slug', 'tj-sokol-brno-iv', 'name', 'TJ Sokol Brno IV',
+                       'match_id', v_sokol),
+    jsonb_build_object('slug', 'ks-devitka-brno', 'name', 'KS Devítka Brno',
+                       'match_id', null));
+
+  r := apply_federation_discovery(v_c, v_clubs, v_teams);
+  if r is distinct from
+     '{"created":2,"clubs_created":["KS Devítka Brno"],"clubs_linked":["Sokol Brno IV"]}'::jsonb then
+    raise exception 'FAIL: the first discovery reported %', r;
+  end if;
+  if not exists (select 1 from clubs
+                  where id = v_sokol and name = 'Sokol Brno IV' and color = 0
+                    and site_slug = 'tj-sokol-brno-iv' and site_name = 'TJ Sokol Brno IV') then
+    raise exception 'FAIL: the club matched by name was not linked, or lost its name or colour';
+  end if;
+  select id into v_devitka from clubs
+   where tenant_id = v_c and site_slug = 'ks-devitka-brno' and name = 'KS Devítka Brno'
+     and site_name = 'KS Devítka Brno' and color = 2;
+  if v_devitka is null then
+    raise exception 'FAIL: the missing club was not created, linked, in the first free colour: %',
+      (select jsonb_agg(to_jsonb(k)) from clubs k where k.tenant_id = v_c);
+  end if;
+  if (select club_id from teams where tenant_id = v_c and site_slug = 'tj-sokol-brno-iv-muzi')
+       is distinct from v_sokol
+     or (select club_id from teams where tenant_id = v_c and site_slug = 'ks-devitka-brno-b-muzi')
+       is distinct from v_devitka then
+    raise exception 'FAIL: the new teams did not get their clubs';
+  end if;
+
+  r := apply_federation_discovery(v_c, v_clubs, v_teams);
+  if r is distinct from
+     '{"created":0,"clubs_created":[],"clubs_linked":["Sokol Brno IV","KS Devítka Brno"]}'::jsonb
+     or (select count(*) from clubs where tenant_id = v_c) <> 3 then
+    raise exception 'FAIL: a second discovery was not idempotent: %', r;
+  end if;
+
+  -- Renamed and recoloured in the app (upsert_club writes those two only).
+  update clubs set name = 'Devítka', color = 5 where id = v_devitka;
+  r := apply_federation_discovery(v_c, v_clubs, v_teams);
+  if r is distinct from
+     '{"created":0,"clubs_created":[],"clubs_linked":["Sokol Brno IV","Devítka"]}'::jsonb
+     or not exists (select 1 from clubs
+                     where id = v_devitka and name = 'Devítka' and color = 5
+                       and site_slug = 'ks-devitka-brno') then
+    raise exception 'FAIL: a renamed club no longer matched its venue club: %', r;
+  end if;
+
+  -- The admin's club stands; a team left without one gets its venue club's.
+  update teams set club_id = v_veverky
+   where tenant_id = v_c and site_slug = 'ks-devitka-brno-b-muzi';
+  update teams set club_id = null
+   where tenant_id = v_c and site_slug = 'tj-sokol-brno-iv-muzi';
+  perform apply_federation_discovery(v_c, v_clubs, v_teams);
+  if (select club_id from teams where tenant_id = v_c and site_slug = 'ks-devitka-brno-b-muzi')
+       is distinct from v_veverky
+     or (select club_id from teams where tenant_id = v_c and site_slug = 'tj-sokol-brno-iv-muzi')
+       is distinct from v_sokol then
+    raise exception 'FAIL: discovery replaced the admin''s club or left a team without its club';
+  end if;
+
+  -- A linked club deleted in the app comes back with the next discovery.
+  delete from clubs where id = v_devitka;
+  r := apply_federation_discovery(v_c, v_clubs, v_teams);
+  if r->'clubs_created' is distinct from '["KS Devítka Brno"]'::jsonb
+     or not exists (select 1 from clubs
+                     where tenant_id = v_c and site_slug = 'ks-devitka-brno'
+                       and name = 'KS Devítka Brno') then
+    raise exception 'FAIL: a deleted linked club was not created again: %', r;
+  end if;
+  raise notice 'OK: discovery links clubs by site_slug, else by name, else creates them once; renames and the admin''s clubs hold (0046)';
+end $$;
+
+-- 16b. A created club takes the first palette colour (0–8) no club of the
+-- alley uses, else the least used one; a name another club has creates
+-- nothing.
+do $$
+declare
+  v_c constant uuid := '00000000-0000-0000-0000-00000000000c';
+  r jsonb;
+begin
+  delete from teams where tenant_id = v_c;
+  delete from clubs where tenant_id = v_c;
+  insert into clubs (tenant_id, name, color)
+  select v_c, 'Barva ' || i, i from generate_series(0, 8) i;
+  insert into clubs (tenant_id, name, color)
+  values (v_c, 'Barva 0 znovu', 0), (v_c, 'Bez barvy', -1), (v_c, 'Vlastní', 16777216);
+  perform apply_federation_discovery(v_c,
+    '[{"slug":"kk-novy","name":"KK Nový","match_id":null}]', '[]');
+  if (select color from clubs where tenant_id = v_c and site_slug = 'kk-novy')
+     is distinct from 1 then
+    raise exception 'FAIL: with the palette used up the new club should take the least used colour, 1';
+  end if;
+  r := apply_federation_discovery(v_c,
+    '[{"slug":"kk-barva","name":"Barva 3","match_id":null}]', '[]');
+  if r is distinct from '{"created":0,"clubs_created":[],"clubs_linked":[]}'::jsonb
+     or exists (select 1 from clubs where tenant_id = v_c and site_slug = 'kk-barva') then
+    raise exception 'FAIL: a venue club whose name another club has was created or linked: %', r;
+  end if;
+  raise notice 'OK: a created club takes the first free palette colour, else the least used; a taken name creates nothing (0046)';
+end $$;
+
+-- 16c. Renaming or recolouring a club in the app keeps its ČKA identity.
+insert into clubs (tenant_id, name, color, site_slug, site_name)
+values ('00000000-0000-0000-0000-00000000000a', 'Propojený oddíl', 3,
+        'kk-propojeny', 'KK Propojený');
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+declare
+  v uuid;
+begin
+  select id into v from clubs where site_slug = 'kk-propojeny';
+  perform upsert_club(v, 'Přejmenovaný oddíl', 4);
+  if not exists (select 1 from clubs
+                  where id = v and name = 'Přejmenovaný oddíl' and color = 4
+                    and site_slug = 'kk-propojeny' and site_name = 'KK Propojený') then
+    raise exception 'FAIL: upsert_club touched the club''s ČKA identity';
+  end if;
+  raise notice 'OK: renaming or recolouring a club keeps its site_slug and site_name (0046)';
+end $$;
+reset role;
+
+-- 16d. Discovery's function is the service's alone.
+do $$
+declare
+  f constant text := 'public.apply_federation_discovery(uuid, jsonb, jsonb)';
+begin
+  if has_function_privilege('authenticated', f, 'execute')
+     or has_function_privilege('anon', f, 'execute')
+     or not has_function_privilege('service_role', f, 'execute') then
+    raise exception 'FAIL: apply_federation_discovery must be callable by the service only';
+  end if;
+  raise notice 'OK: apply_federation_discovery is callable by the service only (0046)';
+end $$;
+
 reset role;
 rollback;

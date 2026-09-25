@@ -56,7 +56,7 @@ and what cascades — and is updated with every migration.
 | `rentals` | `renter_name`, `lanes`, exactly one of `date` / `weekday`, `starts_at`, `ends_at`, `valid_from/until`, `note`, `color` (−2 = default tint). **Grouped dates** (0041): `group_id` — see `rental_groups`. **Exception rows** (0021): `parent_id → rentals` (cascade delete) + `date` = the one occurrence of that weekly series they override, with their own `lanes`, `starts_at`, `ends_at`, `note`; `skipped` = the occurrence does not happen. One per (`parent_id`, `date`). `renter_name`/`color` are copied from the series by `rental_exception_guard`, which also rejects an off-series date, a one-time or child parent and a foreign tenant (`rental_exception_invalid`); `rental_series_changed` prunes children a series edit orphans and re-copies name/colour. | select approved/kiosk; write admin. |
 | `rental_groups` | `renter_name`, `color` (−2 = default tint; the same domain as `rentals.color`, hand-picked values included — `rental_groups_color_check`). One renter with several one-time dates (0041): `rentals.group_id → rental_groups` (cascade delete), allowed only on a row with `date` and no `parent_id` (`rentals_group_shape_check`). `rental_group_guard` copies name/colour onto a grouped row and refuses a foreign tenant (`rental_group_invalid`); `rental_group_changed` propagates a group edit; `rental_group_prune` deletes a group with its last date. A lone one-time rental has no group. **Not in the Realtime publication, on purpose**: the app derives groups from the `rentals` rows it already streams (`rentalGroupsOf`), and a rename reaches the client through `rental_group_changed` copying name/colour onto those rows — a second stream would carry nothing the client needs. | select approved/kiosk; write admin. |
 | `reservations` | `player_id`, `date`, `block_id`, `lane`, `created_via` app\|kiosk\|admin\|group (0044), `cancelled_at/via` app\|one_click\|admin\|group (0044), `cancelled_by` (0044: who actually cancelled it — the owner or a fellow group member, for "Petr ti zrušil trénink"), `cancel_note`, `notify_player`, `notify_message` (per-change intent for the notify function) | **select only** (approved/kiosk). Every write is an RPC, a trigger, or the `cancel` edge function. Live slots are unique: `(date, block_id, lane) where cancelled_at is null`. |
-| `clubs` | `name` unique per tenant, `color` (−1 = none) | select approved/kiosk; all admin. |
+| `clubs` | `name` unique per tenant, `color` (−1 = none), `site_slug` / `site_name` (0046: the venue club on vysledky.kuzelky.cz this club is linked to — its `detail-klubu/<slug>`, unique per tenant when set — and its name there; null = not linked. Only discovery writes them (`apply_federation_discovery`), so a rename or recolour in the app keeps the link) | select approved/kiosk; all admin. |
 | `player_groups` | (0044) `tenant_id`, `created_by` | **server-only**: RLS on, zero policies, every grant revoked from `anon`/`authenticated`. Internal bookkeeping only — the app reads `player_group_members`. |
 | `player_group_members` | (0044) `group_id → player_groups` (cascade), `user_id → profiles` (cascade), `tenant_id` (denormalised so the admin policy never has to read `player_groups` — no policy cycle), `status` invited\|member, `invited_by`. PK (`group_id`, `user_id`). Partial unique index `player_group_one_membership` on `user_id where status = 'member'` — one group per player. In the Realtime publication. | select: own rows (`user_id = auth.uid()`), the caller's own group (`my_group_id()`), or the alley's admin (`tenant_id = current_tenant_id()`). No insert/update/delete for `authenticated`, nothing for `anon` — written only through the `group_*` RPCs below. |
 | `teams` | (0045) The alley's own teams as the federation lists them: `name` (unique per tenant, 1–80 chars — **the string the app keys by**: `priority_slots.home_team`/`away_team`, `followed_teams`, `calendar_teams`, `team_colors`; set at discovery, editable by the admin), `club_id → clubs` (set null), `site_team_id`, `site_slug` (unique per tenant — discovery's identity), `site_name`, `competition_slug`, `competition_name`, `active` (an inactive team's competition is not synced). In the Realtime publication. | select approved/kiosk. No insert/update/delete for `authenticated`, nothing for `anon` — discovery (`upsert_federation_teams`) and `update_team` write it. |
@@ -134,7 +134,7 @@ EXECUTE revoked from the app roles (see below).
 | `request_federation_discovery()`, `request_federation_sync()` (0045) | admin | Enqueue a `federation_discover` job / one `federation_competition` job per active team's competition, due now, and kick the dispatcher. `not_allowed`; `federation_not_configured` (no venue slug) / `federation_disabled` (sync off or no slug). |
 | `update_team(id, name, club_id, active)` (0045) | admin | Renames (trimmed), assigns a club of the same alley, switches the team on/off; a team switched off takes its competition's and matches' errors off the admin card at once (the keys die — see **Runs** below). `not_allowed` (foreign team, not admin), `unknown_club` (not a club of this alley, e.g. deleted meanwhile), `empty_name`, `team_name_taken`. |
 | `refresh_match(match_id)` (0045) | approved member or kiosk | On-demand refresh of a live match → `queued` (a `federation_match` job due now, at most one request per 5 minutes — see below), `fresh` (fetched < 5 min ago) or `not_live` (not a federation match, foreign, played only by switched-off teams of ours — `federation_match_switched_off`, whose job would stop unwritten and leave no gate — or outside the window: `in_progress` until start + 12 h, `preparation` from start − 1 h to start + 12 h — the site shows it days before some matches — and `scheduled` from start − 1 h to start + 6 h; the same windows as the job's checkpoints and the app's `isLive`). `not_allowed`. |
-| `apply_federation_matches(tenant, competition_slug, matches, keep_ids)`, `apply_federation_result(tenant, site_match_id, result)`, `upsert_federation_teams(tenant, teams)`, `record_federation_run(tenant, key, report, error)`, `enqueue_federation_match(tenant, site_match_id, slug, run_at)`, `upsert_federation_venue(tenant, venue)`, `federation_last_error(tenant, report)` (0045) | service_role only (notify function) | The sync's writes — see **Výsledkový servis ČKA** below. `apply_federation_matches` raises `federation_tenant_not_ready` when the tenant has no approved admin or no builtin match type. |
+| `apply_federation_matches(tenant, competition_slug, matches, keep_ids)`, `apply_federation_result(tenant, site_match_id, result)`, `upsert_federation_teams(tenant, teams)`, `record_federation_run(tenant, key, report, error)`, `enqueue_federation_match(tenant, site_match_id, slug, run_at)`, `upsert_federation_venue(tenant, venue)`, `federation_last_error(tenant, report)` (0045), `apply_federation_discovery(tenant, clubs, teams)` (0046) | service_role only (notify function) | The sync's writes — see **Výsledkový servis ČKA** below. `apply_federation_matches` raises `federation_tenant_not_ready` when the tenant has no approved admin or no builtin match type. |
 
 Internal, no EXECUTE for app roles: `current_tenant_id`, `is_*`,
 `block_day_status`, `cancel_stranded_reservations`, `rental_occurs`,
@@ -207,14 +207,25 @@ tables and calls the RPCs above. The old xlsx importer (0038) is
 superseded and retired.
 
 - **Discovery** (`federation_discover` job, `request_federation_discovery`):
-  the venue's teams → `upsert_federation_teams`. A new team arrives active
-  under the site's name, cut to 80 chars (a clash with an existing name
-  gets ` (<competition>)` appended; if that is taken too,
-  `<site_name> (<site_slug>)`); an existing one (same `site_slug`) keeps
-  the admin's name, club and switch — only the site's facts are refreshed.
-  A team rolled over to the next season's competition leaves the past
-  season's `competition:` and `match:` keys dead, so their errors leave
-  `last_error` at once.
+  the venue's clubs and their teams → `apply_federation_discovery` (0046),
+  one transaction. Every venue club (`detail-klubu/<slug>` on the venue
+  page) becomes a club of ours: the one linked to its slug
+  (`clubs.site_slug`, whatever the admin renamed it to; `site_name`
+  follows the site), else the unlinked club the edge function matched by
+  name (it gets linked), else a new one — the site's name cut to 80, in
+  the first palette colour no club of the alley uses, else the least used
+  one. A name another club already has creates nothing. A deleted club
+  that still plays at the venue is created again. Then
+  `upsert_federation_teams`: a new team arrives active under the site's
+  name, cut to 80 chars (a clash with an existing name gets
+  ` (<competition>)` appended; if that is taken too,
+  `<site_name> (<site_slug>)`), with its venue club's club; an existing
+  one (same `site_slug`) keeps the admin's name, club and switch — only
+  the site's facts are refreshed, and one without a club gets its venue
+  club's. A team rolled over to the next season's competition leaves the
+  past season's `competition:` and `match:` keys dead, so their errors
+  leave `last_error` at once. Its report (`last_report.discover`):
+  `{teams, competitions, created, clubs_created, clubs_linked, at}`.
 - **Schedule** (`federation_competition` job per active team's
   competition): `apply_federation_matches` in one transaction with
   `set_config('import.run', 'on', true)`, so the 0038 hand-edit trigger
