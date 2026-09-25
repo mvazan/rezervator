@@ -1193,8 +1193,8 @@ CREATE OR REPLACE FUNCTION "public"."due_reminders"() RETURNS TABLE("user_id" "u
     cross join lateral unnest(e.notify_before_minutes) as o(offset_minutes)
     where e.starts_ts > now()
       and e.starts_ts - make_interval(mins => o.offset_minutes) <= now()
-      -- Sent at this lead time or a closer one, for this start (or before
-      -- 0049, for any): the event was announced.
+      -- Sent at this lead time or a closer one, for this start (or, with no
+      -- known start, for any): the event was announced.
       and not exists (
         select 1 from reminders_sent s
         where s.user_id = e.user_id
@@ -3951,7 +3951,7 @@ COMMENT ON TABLE "public"."reminders_sent" IS 'Which reminders have already gone
 
 
 
-COMMENT ON COLUMN "public"."reminders_sent"."starts_at" IS 'The start of the event this reminder announced (0049). A moved event rings again at its new time. Null = written before 0049, counts for any start.';
+COMMENT ON COLUMN "public"."reminders_sent"."starts_at" IS 'The start of the event this reminder announced (0049). A moved event rings again at its new time. Null = an old receipt without a known start, counts for any start.';
 
 
 

@@ -16,16 +16,31 @@
 --    moved reservation keeps its id, so a receipt keyed only by event and
 --    lead time silenced the event at its new time too. reminders_sent gets
 --    starts_at; mark_reminder_sent stores it, and marking the same lead time
---    for a new start moves the receipt there. A receipt written before 0049
---    has no start and counts for any, so this deploy rings nothing twice;
---    such rows age out with the 30-day prune.
+--    for a new start moves the receipt there. Receipts written before 0049
+--    get the start their event has now: they counted for it until now, so
+--    this deploy rings nothing twice, and an event that moves afterwards
+--    rings again. A receipt whose event is gone, or one the notify deployed
+--    before this migration writes in the minute or two until the new notify
+--    is live, stays null and counts for any start.
 --
 -- Safe to run twice.
 
 -- ------------------------------------------------- reminders_sent.starts_at
 alter table reminders_sent add column if not exists starts_at timestamptz;
 comment on column reminders_sent.starts_at is
-  'The start of the event this reminder announced (0049). A moved event rings again at its new time. Null = written before 0049, counts for any start.';
+  'The start of the event this reminder announced (0049). A moved event rings again at its new time. Null = an old receipt without a known start, counts for any start.';
+
+-- The start each old receipt's event has now, computed as due_reminders
+-- does. Only nulls are touched, so this is safe to run twice.
+update reminders_sent s
+   set starts_at = (r.date + b.starts_at) at time zone 'Europe/Prague'
+  from reservations r
+  join time_blocks b on b.id = r.block_id
+ where s.starts_at is null and s.event_key = 'r:' || r.id;
+update reminders_sent s
+   set starts_at = (p.date + p.starts_at) at time zone 'Europe/Prague'
+  from priority_slots p
+ where s.starts_at is null and s.event_key = 'm:' || p.id;
 
 -- ------------------------------------------------- mark_reminder_sent
 -- 0040's plus p_starts_at. The three-argument signature is dropped, not
@@ -101,8 +116,8 @@ as $$
     cross join lateral unnest(e.notify_before_minutes) as o(offset_minutes)
     where e.starts_ts > now()
       and e.starts_ts - make_interval(mins => o.offset_minutes) <= now()
-      -- Sent at this lead time or a closer one, for this start (or before
-      -- 0049, for any): the event was announced.
+      -- Sent at this lead time or a closer one, for this start (or, with no
+      -- known start, for any): the event was announced.
       and not exists (
         select 1 from reminders_sent s
         where s.user_id = e.user_id
