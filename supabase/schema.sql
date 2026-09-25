@@ -1193,11 +1193,12 @@ CREATE OR REPLACE FUNCTION "public"."due_reminders"() RETURNS TABLE("user_id" "u
     cross join lateral unnest(e.notify_before_minutes) as o(offset_minutes)
     where e.starts_ts > now()
       and e.starts_ts - make_interval(mins => o.offset_minutes) <= now()
+      -- Sent at this lead time or at a closer one: the event was announced.
       and not exists (
         select 1 from reminders_sent s
         where s.user_id = e.user_id
           and s.event_key = e.event_key
-          and s.offset_minutes = o.offset_minutes
+          and s.offset_minutes <= o.offset_minutes
       )
     order by e.starts_ts;
 $$;

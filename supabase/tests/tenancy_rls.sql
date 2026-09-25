@@ -2423,6 +2423,7 @@ declare
   v_uid constant uuid := '10000000-0000-0000-0000-000000000001';
   v_rows record;
   v_count int;
+  v_before integer[];
 begin
   -- 3 h before a training that starts in 2 h: due, and so is the match's
   -- 3 h reminder (it starts in 3 h). The 1 h ones are not — their moment
@@ -2459,7 +2460,29 @@ begin
   if exists (select 1 from due_reminders() where user_id = v_uid) then
     raise exception 'FAIL: a reminder rang twice';
   end if;
-  raise notice 'OK: a reminder is due at its lead time, once, for the player''s own trainings and matches (0040)';
+
+  -- A longer lead time added after a closer one went out does not ring on
+  -- its own afterwards: the event was already announced (0049).
+  select notify_before_minutes into v_before from profiles where id = v_uid;
+  update profiles set notify_before_minutes = v_before || 240 where id = v_uid;
+  if exists (select 1 from due_reminders() where user_id = v_uid) then
+    raise exception 'FAIL: a longer lead time added later rang after a closer one';
+  end if;
+  -- A closer one still rings after a longer one went out (the day-before
+  -- reminder, then the two-hours-before one).
+  delete from reminders_sent where user_id = v_uid;
+  perform mark_reminder_sent(v_uid, r.event_key, 240)
+    from due_reminders() r where r.user_id = v_uid and r.offset_minutes = 240;
+  if (select count(*) from due_reminders()
+        where user_id = v_uid and offset_minutes = 180) <> 2
+     or exists (select 1 from due_reminders()
+                  where user_id = v_uid and offset_minutes = 240) then
+    raise exception 'FAIL: a longer lead time sent first silenced the closer one, or rang again';
+  end if;
+  update profiles set notify_before_minutes = v_before where id = v_uid;
+  perform mark_reminder_sent(v_uid, r.event_key, r.offset_minutes)
+    from due_reminders() r where r.user_id = v_uid;
+  raise notice 'OK: a reminder is due at its lead time, once, for the player''s own trainings and matches (0040); a closer one sent covers the longer ones (0049)';
 end $$;
 
 -- A match nobody's team plays is nobody's reminder; an exception makes it
