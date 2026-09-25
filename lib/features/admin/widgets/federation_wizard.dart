@@ -36,14 +36,19 @@ class FederationWizard extends StatefulWidget {
   final Future<bool> Function() enable;
 
   /// The step the server state opens on, 0-based: no slug → the kuželna;
-  /// no team, or no successful discovery of this kuželna → the oddíly and
-  /// teams; else switching the sync on. A moved kuželna's teams are the old
-  /// one's: 0046's set_federation_sync drops the report with the move.
+  /// not [ready] → the oddíly and teams; else switching the sync on. A
+  /// moved kuželna's teams are the old one's: 0046's set_federation_sync
+  /// drops the report with the move.
   static int stepFor(FederationSync sync, List<Team> teams) {
     if (!sync.configured) return 0;
-    final report = sync.discover;
-    return teams.isEmpty || report == null || report.failed ? 1 : 2;
+    return ready(sync.discover, teams) ? 2 : 1;
   }
+
+  /// Step 3 may open: a discovery of this kuželna that worked and found
+  /// teams (plan decision 14). The alley's teams alone do not do — hand-made,
+  /// imported or another kuželna's teams are there whatever the report says.
+  static bool ready(FederationDiscoverReport? report, List<Team> teams) =>
+      teams.isNotEmpty && report != null && !report.failed && report.teams > 0;
 
   @override
   State<FederationWizard> createState() => _FederationWizardState();
@@ -220,7 +225,9 @@ class _FederationWizardState extends State<FederationWizard> {
             child: const Text('Načíst znovu'),
           ),
           FilledButton(
-            onPressed: _busy || widget.teams.isEmpty ? null : () => _go(2),
+            onPressed: _busy || !FederationWizard.ready(report, widget.teams)
+                ? null
+                : () => _go(2),
             child: const Text('Pokračovat'),
           ),
         ]),

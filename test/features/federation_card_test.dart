@@ -567,6 +567,9 @@ void main() {
             ),
           ),
         ],
+        // The alley has teams already (made by hand or imported): Pokračovat
+        // stays off for the failed report, not for an empty team list.
+        teams: [[team]],
         // The re-armed job still counts (plan decision 7).
         progress: [const FederationSyncProgress(discover: 1)],
       );
@@ -583,6 +586,83 @@ void main() {
       expect(h.discoveries, 1);
       // A new request waits for its own report again.
       expect(find.text('Načítají se oddíly a týmy z webu…'), findsOneWidget);
+    });
+
+    testWidgets(
+        'a discovery that found no team keeps step 2 and its Pokračovat off, '
+        'though the alley has other teams', (tester) async {
+      await _pump(
+        tester,
+        _Harness(
+          rows: [
+            FederationSync(
+              venueSlug: 'tj-sokol-brno-iv',
+              discover: FederationDiscoverReport(
+                clubsLinked: const ['Sokol Brno IV'],
+                at: DateTime.utc(2026, 9, 25, 8),
+              ),
+            ),
+          ],
+          teams: [[team]],
+        ),
+      );
+
+      expect(find.text('Oddíly a týmy'), findsOneWidget);
+      expect(
+        find.text('Na kuželně se nenašel žádný tým. Zkontroluj adresu kuželny.'),
+        findsOneWidget,
+      );
+      final next = tester.widget<FilledButton>(
+          find.widgetWithText(FilledButton, 'Pokračovat'));
+      expect(next.onPressed, isNull);
+      expect(find.text('Zapnout stahování'), findsNothing);
+    });
+
+    testWidgets(
+        'another kuželna whose discovery fails keeps Pokračovat off, though '
+        'the old one\'s teams stay', (tester) async {
+      const typo = 'ks-devitka-brn';
+      const typoNotFound =
+          'federation_discover: GET /detail-kuzelny/$typo: HTTP 404';
+      final h = _Harness(
+        // The refetch after the discovery request reads the moved row.
+        rows: [discovered, const FederationSync(venueSlug: typo)],
+        teams: [[team]],
+      );
+      await _pump(tester, h);
+
+      await tester.tap(find.widgetWithText(TextButton, 'Zpět'));
+      await tester.pump();
+      await tester.tap(find.widgetWithText(TextButton, 'Zpět'));
+      await tester.pump();
+      await tester.enterText(find.byType(TextField),
+          'https://vysledky.kuzelky.cz/detail-kuzelny/$typo');
+      await tester.tap(find.widgetWithText(FilledButton, 'Pokračovat'));
+      await tester.pump();
+      expect(h.saved, [(typo, false)]);
+
+      // The save's echo: set_federation_sync dropped the old report.
+      h.push(const FederationSync(venueSlug: typo));
+      await tester.pump();
+      await tester.tap(find.widgetWithText(FilledButton, 'Načíst oddíly a týmy'));
+      await tester.pump();
+      expect(h.discoveries, 1);
+
+      h.push(FederationSync(
+        venueSlug: typo,
+        discover: FederationDiscoverReport(
+          error: typoNotFound,
+          at: DateTime.utc(2026, 9, 25, 9),
+        ),
+      ));
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.text('Načtení se nepovedlo: $typoNotFound'), findsOneWidget);
+      final next = tester.widget<FilledButton>(
+          find.widgetWithText(FilledButton, 'Pokračovat'));
+      expect(next.onPressed, isNull);
+      expect(find.text('Zapnout stahování'), findsNothing);
     });
 
     testWidgets(
