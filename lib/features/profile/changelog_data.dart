@@ -53,7 +53,7 @@ const appChangelog = <Release>[
     'Zápasy a výsledky se nově stahují z výsledkového servisu ČKA — '
         'správce je zapne v Správa → Oddíly.',
     'Nový tab Klubovna: výsledky zápasů našich týmů (i živě, s videem a '
-        'výkony hráčů) a kuželny soupeřů s kontakty a navigací.',
+        'výkony hráčů) a kuželny soupeřů s adresou, telefonem a navigací.',
     'Detail zápasu má zápis jako na kuzelky.com — ikonou vpravo nahoře ho '
         'otevřeš přes celou obrazovku, na výšku i na šířku.',
     'Klubovna → Kontakty: e-mail a telefon hráčů kuželny. Svůj e-mail i '
