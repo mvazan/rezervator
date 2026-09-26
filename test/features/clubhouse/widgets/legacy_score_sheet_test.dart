@@ -482,7 +482,7 @@ void main() {
 
   testWidgets(
     'full screen prints the pairing numbers bigger than the embedded 1:1 '
-    'sheet: lane values 15 instead of 10, the player total 20 instead of 16',
+    'sheet: lane values 15 or more instead of 10, the player total 5 more',
     (tester) async {
       double sizeOf(Finder text) =>
           tester.renderObject<RenderParagraph>(text).text.style!.fontSize!;
@@ -496,10 +496,13 @@ void main() {
       await tester.tap(find.byIcon(Icons.open_in_full));
       await tester.pumpAndSettle();
       final page = find.byType(LegacyScoreSheetPage);
-      expect(sizeOf(find.descendant(of: page, matching: find.text('175'))), 15);
-      expect(sizeOf(find.descendant(of: page, matching: find.text('580'))), 20);
-      // The team summary row keeps its own sizes.
-      expect(sizeOf(find.descendant(of: page, matching: find.text('3460'))), 20);
+      final lane = sizeOf(find.descendant(of: page, matching: find.text('175')));
+      expect(lane, greaterThanOrEqualTo(15));
+      expect(sizeOf(find.descendant(of: page, matching: find.text('580'))),
+          lane + 5);
+      // The team row never smaller than the player's total.
+      expect(sizeOf(find.descendant(of: page, matching: find.text('3460'))),
+          greaterThanOrEqualTo(lane + 5));
     },
   );
 
@@ -1028,6 +1031,49 @@ void main() {
         });
       }
     }
+
+    // A lane value ('290') and a player name, as drawn on screen: the
+    // font size the page chose, and the glyph box's height after the
+    // uniform fit (FittedBox) — what the eye actually gets.
+    (double, double, double) shown(WidgetTester tester, String name) {
+      final lane = find
+          .descendant(of: scoreTableBodyFinder(), matching: find.text('290'))
+          .first;
+      final size = tester.renderObject<RenderParagraph>(lane).text.style!
+          .fontSize!;
+      return (
+        size,
+        tester.getRect(lane).height,
+        tester.getRect(find.text(name)).height /
+            linesOf(tester, name),
+      );
+    }
+
+    testWidgets('a landscape phone keeps lane values at 15: the height caps '
+        'the table there, and every point more would shrink all of it', (
+      tester,
+    ) async {
+      setBodyArea(tester, landscape);
+      await openPage(tester, twoLanes);
+      final (size, _, _) = shown(tester, homeNames[0]);
+      expect(size, 15);
+      expectFillsBodyArea(tester);
+      expectNothingTruncated(tester);
+    });
+
+    testWidgets('a portrait phone, where the width caps the table and the '
+        'rows are stretched anyway, prints the numbers bigger — they show '
+        'at 8dp or more instead of under 7', (tester) async {
+      for (final players in [fourLanes, twoLanes]) {
+        setBodyArea(tester, portrait);
+        await openPage(tester, players);
+        final (size, laneShown, _) = shown(tester, homeNames[0]);
+        expect(size, greaterThan(15));
+        expect(laneShown, greaterThanOrEqualTo(8));
+        expectFillsBodyArea(tester);
+        expectNothingTruncated(tester);
+      }
+    });
 
     testWidgets('on a portrait phone the player names wrap onto more than '
         'one line (the narrow, wrapping name column wins)', (tester) async {
