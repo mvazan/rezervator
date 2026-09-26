@@ -1,0 +1,189 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:rezervator/domain/duels.dart';
+import 'package:rezervator/domain/models.dart';
+import 'package:rezervator/domain/results.dart';
+
+import '../support/rudna_vrsovice.dart';
+
+MatchPlayerResult player(
+  String side,
+  int pos,
+  List<Map<String, Object?>> lanes, {
+  int? total,
+  num? sb,
+  num? tb,
+}) => MatchPlayerResult.fromJson({
+  'id': '$side$pos',
+  'match_id': 'x',
+  'side': side,
+  'position': pos,
+  'player_name': '$side $pos',
+  'total': total,
+  'set_points': sb,
+  'team_points': tb,
+  'lanes': lanes,
+});
+Map<String, Object?> lane(int n, int? total, [num? sp]) => {
+  'lane': n,
+  'fulls': null,
+  'spares': null,
+  'errors': null,
+  'total': total,
+  'setPoints': sp,
+};
+
+void main() {
+  group('the real Rudná A 7 : 1 Vršovice A', () {
+    final duels = duelsOf(rudnaPlayers);
+
+    test('six duels in position order, all done', () {
+      expect(duels.map((d) => d.position), [1, 2, 3, 4, 5, 6]);
+      expect(duels.every((d) => d.state == DuelState.done), isTrue);
+    });
+    test('differences from the player totals', () {
+      expect(duels.map((d) => d.diff), [22, 57, 4, 55, 99, -3]);
+    });
+    test('point winners, and which duels pins decided', () {
+      expect(duels.map((d) => d.pointWinner), [
+        MatchSide.home,
+        MatchSide.home,
+        MatchSide.home,
+        MatchSide.home,
+        MatchSide.home,
+        MatchSide.away,
+      ]);
+      expect(duels.map((d) => d.decidedByPins), [
+        true,
+        false,
+        true,
+        false,
+        false,
+        false,
+      ]);
+    });
+    test('lane winners, and duel 6 has a tied first lane', () {
+      expect(duels[0].lanes.map((l) => l.winner), [
+        MatchSide.away,
+        MatchSide.home,
+      ]);
+      expect(duels[5].lanes[0].tie, isTrue);
+      expect(duels[5].lanes[0].winner, isNull);
+      expect(duels[5].lanes[1].winner, MatchSide.away);
+    });
+    test('the shared bar scale is the biggest difference, at least 50', () {
+      expect(diffScale(duels), 99);
+      expect(diffScale(const []), 50);
+    });
+    test('5 duels + 2 for pins = 7, 1 duel + 0 = 1', () {
+      final b = matchPointsBreakdown(rudnaResult, rudnaPlayers)!;
+      expect([b.duelsHome, b.duelsAway, b.pinsHome, b.pinsAway], [5, 1, 2, 0]);
+    });
+    test('the TalkBack text of duel 1', () {
+      expect(
+        duelSemantics(duels[0]),
+        '1. souboj: Lucie Mičanová 407, Lukáš Pelánek 385, o 22, bod domácím',
+      );
+    });
+  });
+
+  test('leadLabel points at the leader', () {
+    expect(leadLabel(22), '◂ 22');
+    expect(leadLabel(-3), '3 ▸');
+    expect(leadLabel(0), '=');
+    expect(leadLabel(null), '');
+  });
+
+  group('live', () {
+    test('a duel with no lane thrown is waiting, with no difference', () {
+      final d = duelsOf([
+        player('home', 1, [lane(1, null), lane(2, null)]),
+        player('away', 1, [lane(1, null), lane(2, null)]),
+      ]).single;
+      expect(d.state, DuelState.waiting);
+      expect(d.diff, isNull);
+      expect(duelSemantics(d), endsWith(', čeká'));
+    });
+    test('the difference counts only lanes both players threw', () {
+      final d = duelsOf([
+        player('home', 1, [lane(1, 213), lane(2, 150)], total: 363),
+        player('away', 1, [lane(1, 216), lane(2, null)], total: 216),
+      ]).single;
+      expect(d.state, DuelState.playing);
+      expect(d.playedLanes, 1);
+      expect(d.diff, -3);
+      expect(d.pointWinner, isNull);
+    });
+    test('T120: four lanes, done when all four are thrown', () {
+      final d = duelsOf([
+        player(
+          'home',
+          1,
+          [for (var i = 1; i <= 4; i++) lane(i, 150, 1)],
+          total: 600,
+          sb: 4,
+          tb: 1,
+        ),
+        player(
+          'away',
+          1,
+          [for (var i = 1; i <= 4; i++) lane(i, 140, 0)],
+          total: 560,
+          sb: 0,
+          tb: 0,
+        ),
+      ]).single;
+      expect(d.laneCount, 4);
+      expect(d.state, DuelState.done);
+      expect(d.diff, 40);
+      expect(d.decidedByPins, isFalse);
+    });
+    test('a split point (0.5 each) has no winner', () {
+      final d = duelsOf([
+        player('home', 1, [lane(1, 200, 0.5)], total: 200, sb: 0.5, tb: 0.5),
+        player('away', 1, [lane(1, 200, 0.5)], total: 200, sb: 0.5, tb: 0.5),
+      ]).single;
+      expect(d.pointWinner, isNull);
+      expect(d.pointSplit, isTrue);
+      expect(duelSemantics(d), endsWith(', body napůl'));
+    });
+  });
+
+  group('incomplete data', () {
+    test('no lanes at all: done once both player totals are known', () {
+      final d = duelsOf([
+        player('home', 1, const [], total: 400, sb: 0, tb: 1),
+        player('away', 1, const [], total: 380, sb: 0, tb: 0),
+      ]).single;
+      expect(d.laneCount, 0);
+      expect(d.state, DuelState.done);
+      expect(d.diff, 20);
+      expect(d.pointWinner, MatchSide.home);
+      expect(d.decidedByPins, isTrue);
+    });
+    test('a position only one side has is never done, and has no diff', () {
+      final d = duelsOf([
+        player('home', 1, [lane(1, 200), lane(2, 190)], total: 390),
+      ]).single;
+      expect(d.away, isNull);
+      expect(d.state, DuelState.playing);
+      expect(d.diff, isNull);
+      expect(duelSemantics(d), '1. souboj: home 1 390, – –, hraje se');
+    });
+    test('no result, or a duel point not known yet: no breakdown', () {
+      expect(matchPointsBreakdown(null, rudnaPlayers), isNull);
+      expect(
+        matchPointsBreakdown(rudnaResult, [
+          player('home', 1, [lane(1, 200)], total: 200),
+          player('away', 1, [lane(1, 190)], total: 190),
+        ]),
+        isNull,
+      );
+    });
+  });
+
+  test('teamBonusPoints: Body minus the duel points of that side', () {
+    expect(teamBonusPoints(7, rudnaPlayers, 'home'), 2);
+    expect(teamBonusPoints(1, rudnaPlayers, 'away'), 0);
+    expect(teamBonusPoints(null, rudnaPlayers, 'home'), isNull);
+  });
+}

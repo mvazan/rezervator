@@ -67,6 +67,28 @@ MatchSide? winningSide(num? home, num? away) {
   return home > away ? MatchSide.home : MatchSide.away;
 }
 
+/// The team-row "Družstvo" value: the points [side] got for the higher pin
+/// total (2 / 0, 1 / 1 on a tie) — kuzelky prints its Body ([sidePoints])
+/// minus the duel points its players won. Null (printed '–') until Body and
+/// every player's [MatchPlayerResult.teamPoints] of that side are known.
+num? teamBonusPoints(
+  num? sidePoints,
+  List<MatchPlayerResult> players,
+  String side,
+) {
+  if (sidePoints == null) return null;
+  num duels = 0;
+  var any = false;
+  for (final p in players) {
+    if (p.side != side) continue;
+    final points = p.teamPoints;
+    if (points == null) return null;
+    duels += points;
+    any = true;
+  }
+  return any ? sidePoints - duels : null;
+}
+
 /// "6 hráčů · 120 HS" from the site's own codes (`TEAMS_OF_6`/`TEAMS_OF_4`,
 /// `T100`/`T120`) — Czech numeral agreement (2–4 "hráči", else "hráčů").
 /// Either half is simply omitted when its code is empty or unrecognised.
