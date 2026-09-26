@@ -7958,10 +7958,16 @@ delete from duty_periods
 -- directly, so everything else that could wake it is cleared first (the
 -- job queue, every player's own reminders, every other alley's duty
 -- reminder); the transaction's rollback puts it all back.
+-- And a control in tenant B, off, with a two-day lead of its own:
+--   b1  today + 1           Cizí                lead day yesterday: due once B is on
+--   b3  today + 3           Cizí                lead day tomorrow: not yet
+--                                               (S's four days would ring it)
+-- Each alley answers with its own switch (22c) and its own lead (22g).
 reset role;
 do $$
 declare
   v_s constant uuid := '00000000-0000-0000-0000-000000000050';
+  v_b constant uuid := '00000000-0000-0000-0000-000000000002';
   v_today constant date := (now() at time zone 'Europe/Prague')::date;
   v_id uuid;
 begin
@@ -8003,9 +8009,23 @@ begin
     (v_id, '50000000-0000-0000-0000-000000000016', v_s);
   perform set_config('probe.rem_p4', v_id::text, true);
 
+  insert into duty_periods (tenant_id, starts_on, ends_on)
+    values (v_b, v_today + 1, v_today + 1) returning id into v_id;
+  insert into duty_assignments (period_id, user_id, tenant_id) values
+    (v_id, '20000000-0000-0000-0000-0000000000b1', v_b);
+  perform set_config('probe.rem_b1', v_id::text, true);
+  insert into duty_periods (tenant_id, starts_on, ends_on)
+    values (v_b, v_today + 3, v_today + 3) returning id into v_id;
+  insert into duty_assignments (period_id, user_id, tenant_id) values
+    (v_id, '20000000-0000-0000-0000-0000000000b1', v_b);
+  perform set_config('probe.rem_b3', v_id::text, true);
+
   update schedule_settings
      set duty_reminder_enabled = false, duty_reminder_days = 4
    where tenant_id = v_s;
+  update schedule_settings
+     set duty_reminder_enabled = false, duty_reminder_days = 2
+   where tenant_id = v_b;
   delete from notification_jobs;
   update profiles set notify_before_minutes = '{}'
    where notify_before_minutes <> '{}';
@@ -8056,6 +8076,8 @@ end $$;
 -- passed and which has not started — never a placeholder, a pending
 -- player or the kiosk. Today's 18:00 is the one boundary a run can land on
 -- either side of: p3 is due exactly when the Prague clock is past it.
+-- S's switch is S's alone: B, still off, reminds nobody, though at S's
+-- four days both of B's duties would be due.
 do $$
 declare
   v_today constant date := (now() at time zone 'Europe/Prague')::date;
@@ -8070,6 +8092,13 @@ declare
 begin
   update schedule_settings set duty_reminder_enabled = true
    where tenant_id = '00000000-0000-0000-0000-000000000050';
+
+  if exists (select 1 from due_duty_reminders()
+              where period_id in (current_setting('probe.rem_b1')::uuid,
+                                  current_setting('probe.rem_b3')::uuid)
+                 or user_id = '20000000-0000-0000-0000-0000000000b1') then
+    raise exception 'FAIL: alley B reminds its duty with its own reminder off, because S has it on';
+  end if;
 
   select string_agg(g, ' ' order by g) into v_got
     from (select d.period_id::text || '/' || d.user_id::text as g
@@ -8192,8 +8221,37 @@ begin
   raise notice 'OK: switched off, no duty reminder is due (0050)';
 end $$;
 
+-- 22g. The other way round, each alley with its own switch and lead: B on
+-- at two days and S off remind B's duty tomorrow alone, told as two days
+-- ahead; B's duty in three days waits for tomorrow's 18:00, and S's
+-- duties stay silent.
+do $$
+declare
+  v_b1 constant uuid := current_setting('probe.rem_b1')::uuid;
+  v_got text;
+  v_want text;
+begin
+  update schedule_settings set duty_reminder_enabled = true
+   where tenant_id = '00000000-0000-0000-0000-000000000002';
+
+  select string_agg(d.period_id::text || '/' || d.user_id::text || '/' || d.days,
+                    ' ' order by d.period_id::text, d.user_id::text)
+    into v_got
+    from due_duty_reminders() d;
+  v_want := v_b1::text || '/20000000-0000-0000-0000-0000000000b1/2';
+  if v_got is distinct from v_want then
+    raise exception 'FAIL: with B on at two days and S off, due %, expected %',
+      v_got, v_want;
+  end if;
+  if not notifications_due() then
+    raise exception 'FAIL: the tick would sleep through B''s due duty reminder';
+  end if;
+  raise notice 'OK: each alley''s duty reminder follows its own switch and its own lead (0050)';
+end $$;
+
 reset role;
 delete from duty_periods
- where tenant_id = '00000000-0000-0000-0000-000000000050';
+ where tenant_id in ('00000000-0000-0000-0000-000000000050',
+                     '00000000-0000-0000-0000-000000000002');
 
 rollback;
