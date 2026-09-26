@@ -1266,6 +1266,23 @@ void main() {
       expect(card.right, board.right - 12);
     });
 
+    testWidgets(
+      'on a wide window the Zápis sheet keeps the full width while the '
+      'scoreboard stays at 720dp',
+      (tester) async {
+        _tall(tester, width: 1400);
+        await tester.pumpWidget(rudna(view: MatchDetailView.zapis));
+        await tester.pumpAndSettle();
+
+        // The sheet is about 1000dp at its natural width: capped at 720 it
+        // would hide a third of itself behind a sideways scroll.
+        final sheet = tester.getRect(find.byType(LegacyScoreSheet));
+        expect(sheet.left, 0);
+        expect(sheet.width, 1400);
+        expect(tester.getRect(find.byType(MatchScoreboard)).width, 720);
+      },
+    );
+
     testWidgets('at 360dp every duel opens without an overflow', (
       tester,
     ) async {

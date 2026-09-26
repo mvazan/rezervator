@@ -264,7 +264,8 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
   );
 
   /// [child] as wide as the list but at most 720dp, centred — the Souboje
-  /// column until the wide layouts land.
+  /// column until the wide layouts land. Every row but the Zápis sheet,
+  /// which keeps the full width.
   static Widget _centred(Widget child) => Center(
     child: ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 720),
@@ -398,45 +399,54 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     final duels = duelsOf(players);
 
     final children = <Widget>[
-      MatchScoreboard(
-        slot: slot,
-        result: result,
-        players: players,
-        now: now,
-        onVenueTap: venueMatch == null
-            ? null
-            : () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => VenueDetailScreen(slug: venueMatch.slug),
-                ),
-              ),
-      ),
-      // While live the freshness sits in the scoreboard's „Živě“ chip.
-      if (result == null || !live)
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-          child: Text(
-            result == null
-                ? 'Výsledky zatím nejsou.'
-                : 'Výsledky z webu: ${freshnessLabel(result.fetchedAt, now)}',
-            style: theme.textTheme.bodySmall,
-          ),
-        ),
-      _buttonsRow(context, slot, result, now),
-      _switchRow(view, duels),
-      ...switch (view) {
-        MatchDetailView.souboje => _souboje(
-          duels: duels,
+      for (final child in [
+        MatchScoreboard(
+          slot: slot,
           result: result,
-          homeColor: homeColor,
-          awayColor: awayColor,
+          players: players,
+          now: now,
+          onVenueTap: venueMatch == null
+              ? null
+              : () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => VenueDetailScreen(slug: venueMatch.slug),
+                  ),
+                ),
         ),
+        // While live the freshness sits in the scoreboard's „Živě“ chip.
+        if (result == null || !live)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: Text(
+              result == null
+                  ? 'Výsledky zatím nejsou.'
+                  : 'Výsledky z webu: ${freshnessLabel(result.fetchedAt, now)}',
+              style: theme.textTheme.bodySmall,
+            ),
+          ),
+        _buttonsRow(context, slot, result, now),
+        _switchRow(view, duels),
+      ])
+        _centred(child),
+      ...switch (view) {
+        MatchDetailView.souboje => [
+          for (final child in _souboje(
+            duels: duels,
+            result: result,
+            homeColor: homeColor,
+            awayColor: awayColor,
+          ))
+            _centred(child),
+        ],
         MatchDetailView.zapis => [
-          // LegacyScoreSheet shows its team summary row even with no
-          // lineup yet (as long as `result` has team-level data) — only
+          // Not centred: the sheet keeps the whole width, as before
+          // Souboje. At its natural size (about 1000dp) it fits a wide
+          // window whole instead of hiding a third behind a sideways
+          // scroll. LegacyScoreSheet shows its team summary row even with
+          // no lineup yet (as long as `result` has team-level data) — only
           // the per-player section needs this fallback message.
           LegacyScoreSheet(slot: slot, result: result, players: players),
-          if (players.isEmpty) _noLineup,
+          if (players.isEmpty) _centred(_noLineup),
         ],
       },
     ];
@@ -449,7 +459,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
       // A short list (no lineup yet) still has to pull.
       physics: pullToRefresh ? const AlwaysScrollableScrollPhysics() : null,
       padding: const EdgeInsets.only(bottom: 24),
-      children: [for (final child in children) _centred(child)],
+      children: children,
     );
     if (!pullToRefresh) return list;
     return RefreshIndicator(
