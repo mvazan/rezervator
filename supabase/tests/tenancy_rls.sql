@@ -1760,7 +1760,8 @@ declare
     'profiles', 'schedule_settings', 'clubs', 'time_blocks', 'app_config',
     'google_calendar_links', 'calendar_teams', 'team_colors', 'reservations',
     'day_overrides', 'priority_slot_types', 'priority_slots', 'rentals',
-    'match_exceptions', 'player_group_members'
+    'match_exceptions', 'player_group_members', 'duty_periods',
+    'duty_assignments'
   ];
   v_missing text[];
 begin
@@ -6262,5 +6263,725 @@ begin
   end if;
   raise notice 'OK: register_profile stores a phone and refuses a bad one; calls without p_phone still work (0048)';
 end $$;
+
+-- 0050 služby na kantýně — data a správa -------------------------------------
+reset role;
+
+-- 20. Fixtures in tenant A, next to the 0044 players (Petr, Jana, Karel) and
+-- the kiosk: a pending player, a placeholder and the account it later
+-- merges into. Every date hangs off Prague today + 100, clear of the other
+-- sections; the section deletes its duty rows at the end.
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+begin
+  insert into profiles (id, tenant_id, display_name, email, role, status)
+  values
+    ('50000000-0000-0000-0000-000000000001', v_a, 'Pavla Čekající',
+     'duty-pending@example.com', 'player', 'pending'),
+    ('50000000-0000-0000-0000-000000000003', v_a, 'Dušan Účet',
+     'duty-dusan@example.com', 'player', 'approved');
+  insert into profiles (id, tenant_id, display_name, role, status, placeholder)
+  values ('50000000-0000-0000-0000-000000000002', v_a, 'Dušan bez účtu',
+          'player', 'approved', true);
+  perform set_config('probe.duty_d0',
+    ((now() at time zone 'Europe/Prague')::date + 100)::text, true);
+end $$;
+
+-- 20a. Shape and privileges: three tables the app may only read (RLS on,
+-- select for authenticated, nothing for anon), the admin's seven RPCs
+-- callable by the app and not by anon, the overlap guard, the reminder
+-- settings off with a one-day lead by default.
+do $$
+declare
+  v_t text;
+  v_f text;
+begin
+  foreach v_t in array array['duty_periods', 'duty_assignments', 'duty_seasons'] loop
+    if not (select relrowsecurity from pg_class
+             where oid = ('public.' || v_t)::regclass) then
+      raise exception 'FAIL: RLS is off on %', v_t;
+    end if;
+    if not has_table_privilege('authenticated', 'public.' || v_t, 'select')
+       or has_table_privilege('authenticated', 'public.' || v_t, 'insert')
+       or has_table_privilege('authenticated', 'public.' || v_t, 'update')
+       or has_table_privilege('authenticated', 'public.' || v_t, 'delete')
+       or has_table_privilege('anon', 'public.' || v_t, 'select') then
+      raise exception 'FAIL: % must be select-only for the app and closed to anon', v_t;
+    end if;
+  end loop;
+  foreach v_f in array array[
+      'duty_generate(date, smallint, date)',
+      'duty_period_save(uuid, date, date, text)',
+      'duty_period_delete(uuid)',
+      'duty_periods_delete_unassigned(date)',
+      'duty_set_assignees(uuid, uuid[])',
+      'duty_season_start(date, text)',
+      'duty_season_delete(date)'] loop
+    if has_function_privilege('anon', 'public.' || v_f, 'execute') then
+      raise exception 'FAIL: anon may execute %', v_f;
+    end if;
+    if not has_function_privilege('authenticated', 'public.' || v_f, 'execute') then
+      raise exception 'FAIL: the app cannot call %', v_f;
+    end if;
+    if not (select prosecdef from pg_proc
+             where oid = ('public.' || v_f)::regprocedure) then
+      raise exception 'FAIL: % is not security definer', v_f;
+    end if;
+  end loop;
+  if not exists (select 1 from pg_constraint
+                 where conname = 'duty_periods_no_overlap' and contype = 'x') then
+    raise exception 'FAIL: duty_periods has no exclusion constraint against overlaps';
+  end if;
+  if exists (select 1 from schedule_settings
+             where duty_reminder_enabled or duty_reminder_days <> 1) then
+    raise exception 'FAIL: the duty reminder must start off, with a one-day lead';
+  end if;
+  raise notice 'OK: duty tables are read-only for the app, the admin RPCs are the app''s and not anon''s (0050)';
+end $$;
+
+-- 20b. The generator: periods [s, s + days − 1] from p_from on, the last
+-- one clipped to p_until; a period overlapping an existing one is skipped
+-- whole, so running it again creates nothing.
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+declare
+  v_d0 constant date := current_setting('probe.duty_d0')::date;
+  v jsonb;
+  v_got text;
+  v_id uuid;
+begin
+  v := duty_generate(v_d0, 7::smallint, v_d0 + 19);
+  if v is distinct from '{"created": 3, "skipped": 0}'::jsonb then
+    raise exception 'FAIL: three weeks of 7-day duties should create 3: %', v;
+  end if;
+  select string_agg(format('%s..%s', starts_on - v_d0, ends_on - v_d0), ' '
+                    order by starts_on)
+    into v_got from duty_periods;
+  if v_got is distinct from '0..6 7..13 14..19' then
+    raise exception 'FAIL: the generated periods are wrong (the last one clipped to p_until): %', v_got;
+  end if;
+  if exists (select 1 from duty_periods
+             where tenant_id <> current_tenant_id()
+                or created_by is distinct from auth.uid() or note <> '') then
+    raise exception 'FAIL: a generated period has the wrong tenant, author or note';
+  end if;
+  v := duty_generate(v_d0, 7::smallint, v_d0 + 19);
+  if v is distinct from '{"created": 0, "skipped": 3}'::jsonb then
+    raise exception 'FAIL: generating the same range again should skip all 3: %', v;
+  end if;
+  v := duty_generate(v_d0 + 14, 7::smallint, v_d0 + 30);
+  if v is distinct from '{"created": 2, "skipped": 1}'::jsonb then
+    raise exception 'FAIL: a partly overlapping period should be skipped, the rest created: %', v;
+  end if;
+  select string_agg(format('%s..%s', starts_on - v_d0, ends_on - v_d0), ' '
+                    order by starts_on)
+    into v_got from duty_periods;
+  if v_got is distinct from '0..6 7..13 14..19 21..27 28..30' then
+    raise exception 'FAIL: the periods after the second run are wrong: %', v_got;
+  end if;
+
+  begin
+    perform duty_generate(v_d0, 0::smallint, v_d0 + 7);
+    raise exception 'FAIL: a 0-day rhythm was accepted';
+  exception when others then
+    if sqlerrm <> 'invalid_days' then raise; end if;
+  end;
+  begin
+    perform duty_generate(v_d0, 32::smallint, v_d0 + 70);
+    raise exception 'FAIL: a 32-day rhythm was accepted';
+  exception when others then
+    if sqlerrm <> 'invalid_days' then raise; end if;
+  end;
+  begin
+    perform duty_generate(v_d0, null, v_d0 + 7);
+    raise exception 'FAIL: a rhythm without a length was accepted';
+  exception when others then
+    if sqlerrm <> 'invalid_days' then raise; end if;
+  end;
+  begin
+    perform duty_generate(v_d0 + 7, 7::smallint, v_d0 + 6);
+    raise exception 'FAIL: an end before the start was accepted';
+  exception when others then
+    if sqlerrm <> 'invalid_range' then raise; end if;
+  end;
+  begin
+    perform duty_generate(v_d0 + 3000, 31::smallint, v_d0 + 3400);
+    raise exception 'FAIL: a range of 401 days was accepted';
+  exception when others then
+    if sqlerrm <> 'invalid_range' then raise; end if;
+  end;
+  -- 400 days, both ends counted, is the most.
+  v := duty_generate(v_d0 + 3000, 31::smallint, v_d0 + 3399);
+  if v is distinct from '{"created": 13, "skipped": 0}'::jsonb
+     or (select max(ends_on) from duty_periods) <> v_d0 + 3399 then
+    raise exception 'FAIL: a 400-day range should give 13 periods ending on p_until: %', v;
+  end if;
+  if duty_periods_delete_unassigned(v_d0 + 3000) <> 13 then
+    raise exception 'FAIL: the 13 unassigned far periods were not deleted';
+  end if;
+
+  select id into strict v_id from duty_periods where starts_on = v_d0;
+  perform set_config('probe.duty_p1', v_id::text, true);
+  select id into strict v_id from duty_periods where starts_on = v_d0 + 7;
+  perform set_config('probe.duty_p2', v_id::text, true);
+  raise notice 'OK: the generator creates, clips the last period and skips overlaps; days 1–31, at most 400 days (0050)';
+end $$;
+
+-- 20c. One period by hand: insert, edit, the overlap guard (touching is
+-- fine), at most 62 days, the order of the dates, a note of 80 characters
+-- at most, an unknown id; delete.
+do $$
+declare
+  v_d0 constant date := current_setting('probe.duty_d0')::date;
+  v_id uuid;
+  v_other uuid;
+begin
+  v_id := duty_period_save(null, v_d0 + 40, v_d0 + 46, '  Pouť  ');
+  if not exists (select 1 from duty_periods
+                 where id = v_id and starts_on = v_d0 + 40 and ends_on = v_d0 + 46
+                   and note = 'Pouť' and created_by = auth.uid()
+                   and tenant_id = current_tenant_id()) then
+    raise exception 'FAIL: duty_period_save did not insert the period as given';
+  end if;
+  -- Two statements: one would read the table as it was before the call.
+  v_other := duty_period_save(v_id, v_d0 + 41, v_d0 + 47, null);
+  if v_other <> v_id
+     or not exists (select 1 from duty_periods
+                    where id = v_id and starts_on = v_d0 + 41
+                      and ends_on = v_d0 + 47 and note = '') then
+    raise exception 'FAIL: duty_period_save did not edit the period in place';
+  end if;
+  begin
+    perform duty_period_save(null, v_d0 + 5, v_d0 + 8, '');
+    raise exception 'FAIL: an overlapping period was inserted';
+  exception when others then
+    if sqlerrm <> 'duty_overlap' then raise; end if;
+  end;
+  begin
+    perform duty_period_save(v_id, v_d0 + 28, v_d0 + 35, '');
+    raise exception 'FAIL: a period was moved onto another';
+  exception when others then
+    if sqlerrm <> 'duty_overlap' then raise; end if;
+  end;
+  -- Between 28..30 and 41..47, touching both: no overlap.
+  v_other := duty_period_save(null, v_d0 + 31, v_d0 + 40, '');
+  perform duty_period_delete(v_other);
+  if exists (select 1 from duty_periods where id = v_other) then
+    raise exception 'FAIL: duty_period_delete left the period';
+  end if;
+  begin
+    perform duty_period_delete(v_other);
+    raise exception 'FAIL: a deleted period was deleted again';
+  exception when others then
+    if sqlerrm <> 'unknown_period' then raise; end if;
+  end;
+  begin
+    perform duty_period_save(null, v_d0 + 100, v_d0 + 169, '');
+    raise exception 'FAIL: a 70-day duty was accepted';
+  exception when others then
+    if sqlerrm <> 'duty_too_long' then raise; end if;
+  end;
+  begin
+    perform duty_period_save(null, v_d0 + 100, v_d0 + 162, '');
+    raise exception 'FAIL: a 63-day duty was accepted';
+  exception when others then
+    if sqlerrm <> 'duty_too_long' then raise; end if;
+  end;
+  v_other := duty_period_save(null, v_d0 + 100, v_d0 + 161, '');  -- 62 days
+  perform duty_period_delete(v_other);
+  begin
+    perform duty_period_save(null, v_d0 + 50, v_d0 + 49, '');
+    raise exception 'FAIL: a duty ending before it starts was accepted';
+  exception when others then
+    if sqlerrm <> 'invalid_range' then raise; end if;
+  end;
+  begin
+    perform duty_period_save(null, null, v_d0 + 49, '');
+    raise exception 'FAIL: a duty without a start was accepted';
+  exception when others then
+    if sqlerrm <> 'invalid_range' then raise; end if;
+  end;
+  begin
+    perform duty_period_save(gen_random_uuid(), v_d0 + 50, v_d0 + 51, '');
+    raise exception 'FAIL: an unknown period was edited';
+  exception when others then
+    if sqlerrm <> 'unknown_period' then raise; end if;
+  end;
+  begin
+    perform duty_period_save(null, v_d0 + 50, v_d0 + 51, repeat('x', 81));
+    raise exception 'FAIL: an 81-character note was accepted';
+  exception when check_violation then null;
+  end;
+  v_other := duty_period_save(null, v_d0 + 50, v_d0 + 51, repeat('x', 80));
+  perform duty_period_delete(v_other);
+  -- Not even the admin writes the tables directly.
+  begin
+    insert into duty_periods (tenant_id, starts_on, ends_on)
+      values (current_tenant_id(), v_d0 + 60, v_d0 + 61);
+    raise exception 'FAIL: the admin inserted a period past the RPCs';
+  exception when insufficient_privilege then null;
+  end;
+  raise notice 'OK: duty_period_save inserts and edits; overlap, length, order and unknown id refused; delete works (0050)';
+end $$;
+
+-- 20d. Tenant B plans the very same week — overlaps are per alley — and
+-- reaches none of tenant A's periods or players.
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000002","role":"authenticated"}';
+do $$
+declare
+  v_d0 constant date := current_setting('probe.duty_d0')::date;
+  v_p1 constant uuid := current_setting('probe.duty_p1')::uuid;
+  v_b uuid;
+begin
+  v_b := duty_period_save(null, v_d0, v_d0 + 6, 'B');
+  perform duty_set_assignees(v_b, array['20000000-0000-0000-0000-0000000000b1']::uuid[]);
+  if (select count(*) from duty_periods) <> 1
+     or (select count(*) from duty_assignments) <> 1 then
+    raise exception 'FAIL: tenant B should see its own duty only';
+  end if;
+  begin
+    perform duty_set_assignees(v_b, array['20000000-0000-0000-0000-000000000001']::uuid[]);
+    raise exception 'FAIL: tenant B assigned a player of tenant A';
+  exception when others then
+    if sqlerrm <> 'unknown_player' then raise; end if;
+  end;
+  begin
+    perform duty_set_assignees(v_p1, array['20000000-0000-0000-0000-0000000000b1']::uuid[]);
+    raise exception 'FAIL: tenant B assigned to a period of tenant A';
+  exception when others then
+    if sqlerrm <> 'unknown_period' then raise; end if;
+  end;
+  begin
+    perform duty_period_save(v_p1, v_d0, v_d0 + 5, 'únos');
+    raise exception 'FAIL: tenant B edited a period of tenant A';
+  exception when others then
+    if sqlerrm <> 'unknown_period' then raise; end if;
+  end;
+  begin
+    perform duty_period_delete(v_p1);
+    raise exception 'FAIL: tenant B deleted a period of tenant A';
+  exception when others then
+    if sqlerrm <> 'unknown_period' then raise; end if;
+  end;
+  if duty_periods_delete_unassigned(v_d0 - 1000) <> 0 then
+    raise exception 'FAIL: tenant B''s bulk delete reached tenant A';
+  end if;
+  raise notice 'OK: another alley may plan the same dates and reaches nothing of ours (0050)';
+end $$;
+
+-- 20e. Assignees: a player and a placeholder together, the set replaced
+-- whole; the kiosk, a pending player, another alley's player and nobody at
+-- all refused without touching the set; unassigned periods from a date on
+-- deleted in one step, a deleted period taking its assignees with it.
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+declare
+  v_d0 constant date := current_setting('probe.duty_d0')::date;
+  v_p1 constant uuid := current_setting('probe.duty_p1')::uuid;
+  v_p2 constant uuid := current_setting('probe.duty_p2')::uuid;
+  v_petr constant uuid := '20000000-0000-0000-0000-000000000001';
+  v_jana constant uuid := '20000000-0000-0000-0000-000000000002';
+  v_karel constant uuid := '20000000-0000-0000-0000-000000000003';
+  v_ph constant uuid := '50000000-0000-0000-0000-000000000002';
+  v_dusan constant uuid := '50000000-0000-0000-0000-000000000003';
+  v_bad uuid;
+  v_p3 uuid;
+  v_got text;
+begin
+  perform duty_set_assignees(v_p1, array[v_petr, v_ph, v_petr]);
+  if (select array_agg(user_id order by user_id) from duty_assignments
+       where period_id = v_p1) is distinct from array[v_petr, v_ph] then
+    raise exception 'FAIL: a player and a placeholder should both be assigned, once each';
+  end if;
+  if exists (select 1 from duty_assignments
+             where period_id = v_p1
+               and (tenant_id <> current_tenant_id()
+                    or assigned_by is distinct from auth.uid())) then
+    raise exception 'FAIL: an assignment has the wrong tenant or author';
+  end if;
+  perform duty_set_assignees(v_p2, array[v_jana, v_karel]);
+  perform duty_set_assignees(v_p2, array[v_karel, v_dusan]);
+  if (select array_agg(user_id order by user_id) from duty_assignments
+       where period_id = v_p2) is distinct from array[v_karel, v_dusan] then
+    raise exception 'FAIL: duty_set_assignees did not replace the set';
+  end if;
+  foreach v_bad in array array[
+      '10000000-0000-0000-0000-000000000006',   -- the kiosk
+      '50000000-0000-0000-0000-000000000001',   -- pending
+      '20000000-0000-0000-0000-0000000000b1',   -- tenant B
+      gen_random_uuid()]::uuid[] loop
+    begin
+      perform duty_set_assignees(v_p1, array[v_jana, v_bad]);
+      raise exception 'FAIL: % was assigned', v_bad;
+    exception when others then
+      if sqlerrm <> 'unknown_player' then raise; end if;
+    end;
+  end loop;
+  begin
+    perform duty_set_assignees(v_p1, array[v_jana, null]);
+    raise exception 'FAIL: a null player was assigned';
+  exception when others then
+    if sqlerrm <> 'unknown_player' then raise; end if;
+  end;
+  if (select array_agg(user_id order by user_id) from duty_assignments
+       where period_id = v_p1) is distinct from array[v_petr, v_ph] then
+    raise exception 'FAIL: a refused duty_set_assignees changed the set';
+  end if;
+  begin
+    perform duty_set_assignees(gen_random_uuid(), array[v_jana]);
+    raise exception 'FAIL: assigned to an unknown period';
+  exception when others then
+    if sqlerrm <> 'unknown_period' then raise; end if;
+  end;
+
+  -- 14..19 is the only unassigned period before d0 + 20; everything
+  -- unassigned from d0 + 20 on (21..27, 28..30, 41..47) goes.
+  if duty_periods_delete_unassigned(v_d0 + 20) <> 3 then
+    raise exception 'FAIL: duty_periods_delete_unassigned should delete 3';
+  end if;
+  select string_agg(format('%s..%s', starts_on - v_d0, ends_on - v_d0), ' '
+                    order by starts_on)
+    into v_got from duty_periods;
+  if v_got is distinct from '0..6 7..13 14..19' then
+    raise exception 'FAIL: the wrong periods survived the bulk delete: %', v_got;
+  end if;
+  select id into v_p3 from duty_periods where starts_on = v_d0 + 14;
+  perform duty_set_assignees(v_p3, array[v_jana]);
+  if duty_periods_delete_unassigned(v_d0) <> 0 then
+    raise exception 'FAIL: the bulk delete took an assigned period';
+  end if;
+  perform duty_set_assignees(v_p3, '{}');
+  if exists (select 1 from duty_assignments where period_id = v_p3) then
+    raise exception 'FAIL: an empty list did not clear the period';
+  end if;
+  perform duty_set_assignees(v_p3, array[v_jana]);
+  perform duty_period_delete(v_p3);
+  if exists (select 1 from duty_assignments where period_id = v_p3) then
+    raise exception 'FAIL: deleting a period left its assignees';
+  end if;
+  raise notice 'OK: assignees are replaced whole; kiosk, pending, foreign and unknown players refused; unassigned periods deleted in bulk (0050)';
+end $$;
+
+-- 20f. Seasons: a boundary per start, each after the newest; only the
+-- newest can be taken back.
+do $$
+declare
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+begin
+  perform duty_season_start(v_today - 30, '  2026/27 ');
+  if not exists (select 1 from duty_seasons
+                 where tenant_id = current_tenant_id() and started_on = v_today - 30
+                   and name = '2026/27' and created_by = auth.uid()) then
+    raise exception 'FAIL: duty_season_start did not store the boundary';
+  end if;
+  begin
+    perform duty_season_start(v_today, '   ');
+    raise exception 'FAIL: a season without a name was started';
+  exception when others then
+    if sqlerrm <> 'empty_name' then raise; end if;
+  end;
+  begin
+    perform duty_season_start(v_today, null);
+    raise exception 'FAIL: a season with a null name was started';
+  exception when others then
+    if sqlerrm <> 'empty_name' then raise; end if;
+  end;
+  begin
+    perform duty_season_start(v_today, repeat('x', 41));
+    raise exception 'FAIL: a 41-character season name was accepted';
+  exception when check_violation then null;
+  end;
+  begin
+    perform duty_season_start(v_today - 30, 'Znovu');
+    raise exception 'FAIL: a second season on the same day was started';
+  exception when others then
+    if sqlerrm <> 'season_order' then raise; end if;
+  end;
+  begin
+    perform duty_season_start(v_today - 31, 'Dřív');
+    raise exception 'FAIL: a season before the newest one was started';
+  exception when others then
+    if sqlerrm <> 'season_order' then raise; end if;
+  end;
+  perform duty_season_start(v_today + 10, '2027/28');
+  begin
+    perform duty_season_delete(v_today - 30);
+    raise exception 'FAIL: an older season was deleted';
+  exception when others then
+    if sqlerrm <> 'not_newest' then raise; end if;
+  end;
+  begin
+    perform duty_season_delete(v_today + 11);
+    raise exception 'FAIL: a date that is no boundary was deleted';
+  exception when others then
+    if sqlerrm <> 'not_newest' then raise; end if;
+  end;
+  perform duty_season_delete(v_today + 10);
+  perform duty_season_delete(v_today - 30);
+  if exists (select 1 from duty_seasons) then
+    raise exception 'FAIL: undoing both seasons left a boundary';
+  end if;
+  begin
+    perform duty_season_delete(v_today - 30);
+    raise exception 'FAIL: a season was deleted from an empty history';
+  exception when others then
+    if sqlerrm <> 'not_newest' then raise; end if;
+  end;
+  perform duty_season_start(v_today - 30, '2026/27');
+  raise notice 'OK: seasons start in order and only the newest can be undone (0050)';
+end $$;
+
+-- 20g. The reminder settings: the admin writes both columns through the
+-- existing settings_update policy; the lead is 1–14 days.
+do $$
+declare
+  n integer;
+begin
+  update schedule_settings set duty_reminder_enabled = true, duty_reminder_days = 3
+   where tenant_id = current_tenant_id();
+  get diagnostics n = row_count;
+  if n <> 1 then
+    raise exception 'FAIL: the admin could not switch the duty reminder on';
+  end if;
+  begin
+    update schedule_settings set duty_reminder_days = 0
+     where tenant_id = current_tenant_id();
+    raise exception 'FAIL: a 0-day lead was accepted';
+  exception when check_violation then null;
+  end;
+  begin
+    update schedule_settings set duty_reminder_days = 15
+     where tenant_id = current_tenant_id();
+    raise exception 'FAIL: a 15-day lead was accepted';
+  exception when check_violation then null;
+  end;
+  update schedule_settings set duty_reminder_days = 14
+   where tenant_id = current_tenant_id();
+  update schedule_settings set duty_reminder_enabled = false
+   where tenant_id = current_tenant_id();
+  if not exists (select 1 from schedule_settings
+                 where tenant_id = current_tenant_id()
+                   and not duty_reminder_enabled and duty_reminder_days = 14) then
+    raise exception 'FAIL: switching the reminder off should keep the lead';
+  end if;
+  raise notice 'OK: the admin sets the duty reminder, 1–14 days ahead (0050)';
+end $$;
+
+-- 20h. The placeholder's duties are history: no delete while it has one;
+-- a merge hands them to the account and drops a period both were on twice.
+do $$
+declare
+  v_p1 constant uuid := current_setting('probe.duty_p1')::uuid;
+  v_p2 constant uuid := current_setting('probe.duty_p2')::uuid;
+  v_petr constant uuid := '20000000-0000-0000-0000-000000000001';
+  v_karel constant uuid := '20000000-0000-0000-0000-000000000003';
+  v_ph constant uuid := '50000000-0000-0000-0000-000000000002';
+  v_dusan constant uuid := '50000000-0000-0000-0000-000000000003';
+begin
+  perform duty_set_assignees(v_p1, array[v_petr, v_ph, v_dusan]);
+  perform duty_set_assignees(v_p2, array[v_karel, v_ph]);
+  begin
+    perform delete_placeholder_player(v_ph);
+    raise exception 'FAIL: a placeholder with duties was deleted';
+  exception when others then
+    if sqlerrm <> 'player_has_history' then raise; end if;
+  end;
+  perform merge_placeholder_player(v_ph, v_dusan, 'Dušan Účet', '', null);
+  if exists (select 1 from profiles where id = v_ph)
+     or exists (select 1 from duty_assignments where user_id = v_ph) then
+    raise exception 'FAIL: the placeholder or its duties survived the merge';
+  end if;
+  if (select array_agg(user_id order by user_id) from duty_assignments
+       where period_id = v_p1) is distinct from array[v_petr, v_dusan]
+     or (select array_agg(user_id order by user_id) from duty_assignments
+          where period_id = v_p2) is distinct from array[v_karel, v_dusan] then
+    raise exception 'FAIL: the merge did not move the duties to the account';
+  end if;
+  raise notice 'OK: a placeholder''s duties block its delete and move with the merge (0050)';
+end $$;
+
+-- 20i. A player of the alley reads its periods, assignees and seasons —
+-- not tenant B's — writes none of them and calls none of the admin RPCs.
+set local request.jwt.claims =
+  '{"sub":"20000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+declare
+  v_d0 constant date := current_setting('probe.duty_d0')::date;
+  v_p1 constant uuid := current_setting('probe.duty_p1')::uuid;
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+begin
+  if (select count(*) from duty_periods) <> 2
+     or (select count(*) from duty_assignments) <> 4
+     or (select count(*) from duty_seasons) <> 1
+     or exists (select 1 from duty_periods where tenant_id <> current_tenant_id())
+     or exists (select 1 from duty_assignments where tenant_id <> current_tenant_id())
+     or exists (select 1 from duty_seasons where tenant_id <> current_tenant_id()) then
+    raise exception 'FAIL: a player should read the alley''s duties, and only those';
+  end if;
+  begin
+    perform duty_generate(v_d0 + 200, 7::smallint, v_d0 + 210);
+    raise exception 'FAIL: a player generated duties';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  begin
+    perform duty_period_save(null, v_d0 + 200, v_d0 + 201, '');
+    raise exception 'FAIL: a player saved a duty';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  begin
+    perform duty_period_delete(v_p1);
+    raise exception 'FAIL: a player deleted a duty';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  begin
+    perform duty_periods_delete_unassigned(v_d0);
+    raise exception 'FAIL: a player bulk-deleted duties';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  begin
+    perform duty_set_assignees(v_p1, array[auth.uid()]);
+    raise exception 'FAIL: a player assigned a duty';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  begin
+    perform duty_season_start(v_today + 20, 'Moje');
+    raise exception 'FAIL: a player started a season';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  begin
+    perform duty_season_delete(v_today - 30);
+    raise exception 'FAIL: a player undid a season';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  begin
+    insert into duty_periods (tenant_id, starts_on, ends_on)
+      values (current_tenant_id(), v_d0 + 200, v_d0 + 201);
+    raise exception 'FAIL: a player inserted a period';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    update duty_periods set note = 'moje';
+    raise exception 'FAIL: a player updated a period';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    delete from duty_periods;
+    raise exception 'FAIL: a player deleted a period';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    insert into duty_assignments (period_id, user_id, tenant_id)
+      values (v_p1, auth.uid(), current_tenant_id());
+    raise exception 'FAIL: a player assigned themselves';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    update duty_assignments set user_id = auth.uid();
+    raise exception 'FAIL: a player rewrote an assignment';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    delete from duty_assignments;
+    raise exception 'FAIL: a player deleted an assignment';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    insert into duty_seasons (tenant_id, started_on, name)
+      values (current_tenant_id(), v_today + 20, 'Moje');
+    raise exception 'FAIL: a player inserted a season';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    delete from duty_seasons;
+    raise exception 'FAIL: a player deleted a season';
+  exception when insufficient_privilege then null;
+  end;
+  if exists (select 1 from schedule_settings where duty_reminder_enabled) then
+    raise exception 'FAIL: the reminder should be off here';
+  end if;
+  update schedule_settings set duty_reminder_enabled = true;
+  if exists (select 1 from schedule_settings where duty_reminder_enabled) then
+    raise exception 'FAIL: a player switched the duty reminder on';
+  end if;
+  raise notice 'OK: a player reads the alley''s duties and seasons, writes nothing and calls no admin RPC (0050)';
+end $$;
+
+-- 20j. The kiosk reads the roster too; a pending player reads nothing and,
+-- like the kiosk, calls nothing.
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000006","role":"authenticated"}';
+do $$
+begin
+  if (select count(*) from duty_periods) <> 2
+     or (select count(*) from duty_assignments) <> 4 then
+    raise exception 'FAIL: the kiosk should read the alley''s duties';
+  end if;
+  begin
+    perform duty_generate(current_setting('probe.duty_d0')::date + 200,
+                          7::smallint, current_setting('probe.duty_d0')::date + 210);
+    raise exception 'FAIL: the kiosk generated duties';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+end $$;
+set local request.jwt.claims =
+  '{"sub":"50000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+begin
+  if exists (select 1 from duty_periods) or exists (select 1 from duty_assignments)
+     or exists (select 1 from duty_seasons) then
+    raise exception 'FAIL: a pending player reads the duties';
+  end if;
+  begin
+    perform duty_set_assignees(current_setting('probe.duty_p1')::uuid,
+                               array[auth.uid()]);
+    raise exception 'FAIL: a pending player assigned a duty';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  raise notice 'OK: the kiosk reads the roster; a pending player reads nothing; neither plans (0050)';
+end $$;
+
+-- 20k. anon: no table, no RPC.
+reset role;
+set local role anon;
+set local request.jwt.claims = '{"role":"anon"}';
+do $$
+begin
+  begin
+    perform duty_generate(current_date, 7::smallint, current_date + 6);
+    raise exception 'FAIL: anon generated duties';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform 1 from duty_periods;
+    raise exception 'FAIL: anon read the duties';
+  exception when insufficient_privilege then null;
+  end;
+  raise notice 'OK: anon reaches no duty table or RPC (0050)';
+end $$;
+
+-- The next sections start without duties.
+reset role;
+delete from duty_periods
+ where tenant_id in ('00000000-0000-0000-0000-00000000000a',
+                     '00000000-0000-0000-0000-000000000002');
+delete from duty_seasons
+ where tenant_id in ('00000000-0000-0000-0000-00000000000a',
+                     '00000000-0000-0000-0000-000000000002');
+update schedule_settings set duty_reminder_enabled = false, duty_reminder_days = 1
+ where tenant_id = '00000000-0000-0000-0000-00000000000a';
 
 rollback;

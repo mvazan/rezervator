@@ -1142,7 +1142,8 @@ begin
   ) then
     raise exception 'unknown_player';
   end if;
-  if exists (select 1 from reservations where player_id = p_id) then
+  if exists (select 1 from reservations where player_id = p_id)
+     or exists (select 1 from duty_assignments where user_id = p_id) then
     raise exception 'player_has_history';
   end if;
   delete from profiles where id = p_id;
@@ -1207,6 +1208,241 @@ $$;
 
 
 ALTER FUNCTION "public"."due_reminders"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."duty_generate"("p_from" "date", "p_days" smallint, "p_until" "date") RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_tenant constant uuid := current_tenant_id();
+  v_start date := p_from;
+  v_end date;
+  v_created integer := 0;
+  v_skipped integer := 0;
+begin
+  if not is_admin() then
+    raise exception 'not_allowed';
+  end if;
+  if p_days is null or p_days < 1 or p_days > 31 then
+    raise exception 'invalid_days';
+  end if;
+  if p_from is null or p_until is null or p_until < p_from
+     or p_until - p_from + 1 > 400 then
+    raise exception 'invalid_range';
+  end if;
+
+  while v_start <= p_until loop
+    v_end := least(v_start + p_days - 1, p_until);
+    if exists (select 1 from duty_periods
+                where tenant_id = v_tenant
+                  and daterange(starts_on, ends_on, '[]')
+                      && daterange(v_start, v_end, '[]')) then
+      v_skipped := v_skipped + 1;
+    else
+      -- Another admin's period may land between the check and the insert.
+      begin
+        insert into duty_periods (tenant_id, starts_on, ends_on, created_by)
+          values (v_tenant, v_start, v_end, auth.uid());
+        v_created := v_created + 1;
+      exception when exclusion_violation then
+        v_skipped := v_skipped + 1;
+      end;
+    end if;
+    v_start := v_start + p_days;
+  end loop;
+
+  return jsonb_build_object('created', v_created, 'skipped', v_skipped);
+end;
+$$;
+
+
+ALTER FUNCTION "public"."duty_generate"("p_from" "date", "p_days" smallint, "p_until" "date") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."duty_period_delete"("p_id" "uuid") RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  if not is_admin() then
+    raise exception 'not_allowed';
+  end if;
+  delete from duty_periods where id = p_id and tenant_id = current_tenant_id();
+  if not found then
+    raise exception 'unknown_period';
+  end if;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."duty_period_delete"("p_id" "uuid") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."duty_period_save"("p_id" "uuid", "p_starts_on" "date", "p_ends_on" "date", "p_note" "text") RETURNS "uuid"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_tenant constant uuid := current_tenant_id();
+  v_note constant text := trim(coalesce(p_note, ''));
+  v_id uuid;
+begin
+  if not is_admin() then
+    raise exception 'not_allowed';
+  end if;
+  if p_starts_on is null or p_ends_on is null or p_ends_on < p_starts_on then
+    raise exception 'invalid_range';
+  end if;
+  if p_ends_on - p_starts_on >= 62 then
+    raise exception 'duty_too_long';
+  end if;
+
+  begin
+    if p_id is null then
+      insert into duty_periods (tenant_id, starts_on, ends_on, note, created_by)
+        values (v_tenant, p_starts_on, p_ends_on, v_note, auth.uid())
+        returning id into v_id;
+    else
+      update duty_periods
+         set starts_on = p_starts_on, ends_on = p_ends_on, note = v_note
+       where id = p_id and tenant_id = v_tenant
+       returning id into v_id;
+      if v_id is null then
+        raise exception 'unknown_period';
+      end if;
+    end if;
+  exception when exclusion_violation then
+    raise exception 'duty_overlap';
+  end;
+  return v_id;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."duty_period_save"("p_id" "uuid", "p_starts_on" "date", "p_ends_on" "date", "p_note" "text") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."duty_periods_delete_unassigned"("p_from" "date") RETURNS integer
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_count integer;
+begin
+  if not is_admin() then
+    raise exception 'not_allowed';
+  end if;
+  if p_from is null then
+    raise exception 'invalid_range';
+  end if;
+  delete from duty_periods d
+   where d.tenant_id = current_tenant_id()
+     and d.starts_on >= p_from
+     and not exists (select 1 from duty_assignments a where a.period_id = d.id);
+  get diagnostics v_count = row_count;
+  return v_count;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."duty_periods_delete_unassigned"("p_from" "date") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."duty_season_delete"("p_started_on" "date") RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_tenant constant uuid := current_tenant_id();
+  v_newest date;
+begin
+  if not is_admin() then
+    raise exception 'not_allowed';
+  end if;
+  perform pg_advisory_xact_lock(hashtext('duty_season'), hashtext(v_tenant::text));
+  select max(started_on) into v_newest from duty_seasons where tenant_id = v_tenant;
+  if v_newest is null or p_started_on is distinct from v_newest then
+    raise exception 'not_newest';
+  end if;
+  delete from duty_seasons where tenant_id = v_tenant and started_on = v_newest;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."duty_season_delete"("p_started_on" "date") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."duty_season_start"("p_started_on" "date", "p_name" "text") RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_tenant constant uuid := current_tenant_id();
+  v_name constant text := trim(coalesce(p_name, ''));
+begin
+  if not is_admin() then
+    raise exception 'not_allowed';
+  end if;
+  if v_name = '' then
+    raise exception 'empty_name';
+  end if;
+  -- One season change at a time per alley, so "after the newest" holds.
+  perform pg_advisory_xact_lock(hashtext('duty_season'), hashtext(v_tenant::text));
+  if exists (select 1 from duty_seasons
+              where tenant_id = v_tenant and started_on >= p_started_on) then
+    raise exception 'season_order';
+  end if;
+  insert into duty_seasons (tenant_id, started_on, name, created_by)
+    values (v_tenant, p_started_on, v_name, auth.uid());
+end;
+$$;
+
+
+ALTER FUNCTION "public"."duty_season_start"("p_started_on" "date", "p_name" "text") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."duty_set_assignees"("p_period" "uuid", "p_users" "uuid"[]) RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_tenant constant uuid := current_tenant_id();
+  v_users constant uuid[] :=
+    array(select distinct u from unnest(coalesce(p_users, '{}')) u);
+begin
+  if not is_admin() then
+    raise exception 'not_allowed';
+  end if;
+  -- Two admins saving the same period end with one of their sets, not a mix.
+  perform 1 from duty_periods
+   where id = p_period and tenant_id = v_tenant
+     for update;
+  if not found then
+    raise exception 'unknown_period';
+  end if;
+  if exists (
+    select 1 from unnest(v_users) u
+     where u is null or not exists (
+       select 1 from profiles p
+        where p.id = u and p.tenant_id = v_tenant
+          and p.status = 'approved' and p.role <> 'kiosk'
+          and not (p.superadmin and p.home_tenant_id is not null
+                   and p.tenant_id <> p.home_tenant_id))
+  ) then
+    raise exception 'unknown_player';
+  end if;
+
+  delete from duty_assignments
+   where period_id = p_period and user_id <> all (v_users);
+  insert into duty_assignments (period_id, user_id, tenant_id, assigned_by)
+  select p_period, u, v_tenant, auth.uid() from unnest(v_users) u
+  on conflict (period_id, user_id) do nothing;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."duty_set_assignees"("p_period" "uuid", "p_users" "uuid"[]) OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."enqueue_calendar_sync"("p_user" "uuid", "p_reservation" "uuid") RETURNS "void"
@@ -1813,6 +2049,14 @@ begin
   update reservations set player_id = p_target_id
   where player_id = p_placeholder_id;
 
+  -- Duties too (0050), except where the account is on the same period
+  -- already: that row is the one kept. What stays on the placeholder goes
+  -- with it (the FK cascades).
+  update duty_assignments a set user_id = p_target_id
+  where a.user_id = p_placeholder_id
+    and not exists (select 1 from duty_assignments b
+                    where b.period_id = a.period_id and b.user_id = p_target_id);
+
   update profiles
   set display_name = trim(p_display_name),
       nick = trim(coalesce(p_nick, '')),
@@ -2239,6 +2483,7 @@ begin
   return jsonb_build_object(
     'tenant_name', (select name from tenants where id = v_tenant),
     'settings', (select to_jsonb(s) - 'tenant_id'
+                          - 'duty_reminder_enabled' - 'duty_reminder_days'
                    from schedule_settings s where s.tenant_id = v_tenant),
     'blocks', coalesce((
       select jsonb_agg(to_jsonb(b) - 'tenant_id')
@@ -3677,6 +3922,64 @@ CREATE TABLE IF NOT EXISTS "public"."day_overrides" (
 ALTER TABLE "public"."day_overrides" OWNER TO "postgres";
 
 
+CREATE TABLE IF NOT EXISTS "public"."duty_assignments" (
+    "period_id" "uuid" NOT NULL,
+    "user_id" "uuid" NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "assigned_by" "uuid",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."duty_assignments" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."duty_assignments" IS 'Who works a duty_periods row (0050): approved players of the alley, placeholders included (they count, but never get the duty''s rights); never the kiosk. tenant_id is the period''s, denormalised like player_group_members. Written only through duty_set_assignees; a merge moves a placeholder''s rows to the account.';
+
+
+
+CREATE TABLE IF NOT EXISTS "public"."duty_periods" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "starts_on" "date" NOT NULL,
+    "ends_on" "date" NOT NULL,
+    "note" "text" DEFAULT ''::"text" NOT NULL,
+    "created_by" "uuid",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "duty_periods_length_check" CHECK ((("ends_on" - "starts_on") < 62)),
+    CONSTRAINT "duty_periods_note_check" CHECK (("char_length"("note") <= 80)),
+    CONSTRAINT "duty_periods_order_check" CHECK (("ends_on" >= "starts_on"))
+);
+
+
+ALTER TABLE "public"."duty_periods" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."duty_periods" IS 'A canteen duty (0050): the days [starts_on, ends_on], both included, at most 62 of them, that the players in duty_assignments work the canteen. Periods of one alley never overlap (duty_periods_no_overlap). Written only through the admin''s duty_* RPCs.';
+
+
+
+COMMENT ON COLUMN "public"."duty_periods"."note" IS 'The admin''s note shown next to the dates, trimmed, at most 80 characters; '''' = none.';
+
+
+
+CREATE TABLE IF NOT EXISTS "public"."duty_seasons" (
+    "tenant_id" "uuid" NOT NULL,
+    "started_on" "date" NOT NULL,
+    "name" "text" NOT NULL,
+    "created_by" "uuid",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "duty_seasons_name_check" CHECK ((("char_length"("name") >= 1) AND ("char_length"("name") <= 40)))
+);
+
+
+ALTER TABLE "public"."duty_seasons" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."duty_seasons" IS 'Season boundaries for the duty counts (0050). A period belongs to the season with the greatest started_on <= its starts_on; the periods before the first boundary form the implicit first season. Starting a season inserts a row and moves nothing; undoing it deletes the newest row (duty_season_start / duty_season_delete).';
+
+
+
 CREATE TABLE IF NOT EXISTS "public"."federation_sync" (
     "tenant_id" "uuid" NOT NULL,
     "venue_slug" "text" DEFAULT ''::"text" NOT NULL,
@@ -3985,13 +4288,24 @@ CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     "kiosk_dark" boolean DEFAULT true NOT NULL,
     "tenant_id" "uuid" NOT NULL,
     "kiosk_fit_day" boolean DEFAULT true NOT NULL,
+    "duty_reminder_enabled" boolean DEFAULT false NOT NULL,
+    "duty_reminder_days" smallint DEFAULT 1 NOT NULL,
     CONSTRAINT "schedule_settings_booking_horizon_days_check" CHECK ((("booking_horizon_days" >= 1) AND ("booking_horizon_days" <= 90))),
+    CONSTRAINT "schedule_settings_duty_reminder_days_check" CHECK ((("duty_reminder_days" >= 1) AND ("duty_reminder_days" <= 14))),
     CONSTRAINT "schedule_settings_lane_count_check" CHECK ((("lane_count" >= 1) AND ("lane_count" <= 12))),
     CONSTRAINT "schedule_settings_max_active_reservations_check" CHECK ((("max_active_reservations" >= 1) AND ("max_active_reservations" <= 50)))
 );
 
 
 ALTER TABLE "public"."schedule_settings" OWNER TO "postgres";
+
+
+COMMENT ON COLUMN "public"."schedule_settings"."duty_reminder_enabled" IS 'Whether the players on a canteen duty get a reminder before it (0050). Off by default; switching it off keeps duty_reminder_days.';
+
+
+
+COMMENT ON COLUMN "public"."schedule_settings"."duty_reminder_days" IS 'How many days before a canteen duty the reminder goes out, at 18:00 Prague (0050), 1–14.';
+
 
 
 CREATE TABLE IF NOT EXISTS "public"."team_colors" (
@@ -4109,6 +4423,26 @@ ALTER TABLE ONLY "public"."clubs"
 
 ALTER TABLE ONLY "public"."day_overrides"
     ADD CONSTRAINT "day_overrides_pkey" PRIMARY KEY ("tenant_id", "date");
+
+
+
+ALTER TABLE ONLY "public"."duty_assignments"
+    ADD CONSTRAINT "duty_assignments_pkey" PRIMARY KEY ("period_id", "user_id");
+
+
+
+ALTER TABLE ONLY "public"."duty_periods"
+    ADD CONSTRAINT "duty_periods_no_overlap" EXCLUDE USING "gist" ("tenant_id" WITH =, "daterange"("starts_on", "ends_on", '[]'::"text") WITH &&);
+
+
+
+ALTER TABLE ONLY "public"."duty_periods"
+    ADD CONSTRAINT "duty_periods_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."duty_seasons"
+    ADD CONSTRAINT "duty_seasons_pkey" PRIMARY KEY ("tenant_id", "started_on");
 
 
 
@@ -4271,6 +4605,14 @@ CREATE UNIQUE INDEX "clubs_tenant_site_slug_key" ON "public"."clubs" USING "btre
 
 
 
+CREATE INDEX "duty_assignments_tenant_user" ON "public"."duty_assignments" USING "btree" ("tenant_id", "user_id");
+
+
+
+CREATE INDEX "duty_periods_tenant_starts_on" ON "public"."duty_periods" USING "btree" ("tenant_id", "starts_on");
+
+
+
 CREATE INDEX "match_player_results_player_idx" ON "public"."match_player_results" USING "btree" ("tenant_id", "player_site_id");
 
 
@@ -4424,6 +4766,46 @@ ALTER TABLE ONLY "public"."day_overrides"
 
 ALTER TABLE ONLY "public"."day_overrides"
     ADD CONSTRAINT "day_overrides_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
+
+
+
+ALTER TABLE ONLY "public"."duty_assignments"
+    ADD CONSTRAINT "duty_assignments_assigned_by_fkey" FOREIGN KEY ("assigned_by") REFERENCES "public"."profiles"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."duty_assignments"
+    ADD CONSTRAINT "duty_assignments_period_id_fkey" FOREIGN KEY ("period_id") REFERENCES "public"."duty_periods"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."duty_assignments"
+    ADD CONSTRAINT "duty_assignments_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."duty_assignments"
+    ADD CONSTRAINT "duty_assignments_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "public"."profiles"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."duty_periods"
+    ADD CONSTRAINT "duty_periods_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "public"."profiles"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."duty_periods"
+    ADD CONSTRAINT "duty_periods_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."duty_seasons"
+    ADD CONSTRAINT "duty_seasons_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "public"."profiles"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."duty_seasons"
+    ADD CONSTRAINT "duty_seasons_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE CASCADE;
 
 
 
@@ -4684,6 +5066,27 @@ CREATE POLICY "clubs_write" ON "public"."clubs" USING ((("tenant_id" = "public".
 
 
 ALTER TABLE "public"."day_overrides" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."duty_assignments" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "duty_assignments_select" ON "public"."duty_assignments" FOR SELECT USING ((("tenant_id" = "public"."current_tenant_id"()) AND "public"."is_approved_or_kiosk"()));
+
+
+
+ALTER TABLE "public"."duty_periods" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "duty_periods_select" ON "public"."duty_periods" FOR SELECT USING ((("tenant_id" = "public"."current_tenant_id"()) AND "public"."is_approved_or_kiosk"()));
+
+
+
+ALTER TABLE "public"."duty_seasons" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "duty_seasons_select" ON "public"."duty_seasons" FOR SELECT USING ((("tenant_id" = "public"."current_tenant_id"()) AND "public"."is_approved_or_kiosk"()));
+
 
 
 ALTER TABLE "public"."federation_sync" ENABLE ROW LEVEL SECURITY;
@@ -5031,6 +5434,48 @@ GRANT ALL ON FUNCTION "public"."delete_placeholder_player"("p_id" "uuid") TO "se
 
 REVOKE ALL ON FUNCTION "public"."due_reminders"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."due_reminders"() TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."duty_generate"("p_from" "date", "p_days" smallint, "p_until" "date") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."duty_generate"("p_from" "date", "p_days" smallint, "p_until" "date") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."duty_generate"("p_from" "date", "p_days" smallint, "p_until" "date") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."duty_period_delete"("p_id" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."duty_period_delete"("p_id" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."duty_period_delete"("p_id" "uuid") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."duty_period_save"("p_id" "uuid", "p_starts_on" "date", "p_ends_on" "date", "p_note" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."duty_period_save"("p_id" "uuid", "p_starts_on" "date", "p_ends_on" "date", "p_note" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."duty_period_save"("p_id" "uuid", "p_starts_on" "date", "p_ends_on" "date", "p_note" "text") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."duty_periods_delete_unassigned"("p_from" "date") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."duty_periods_delete_unassigned"("p_from" "date") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."duty_periods_delete_unassigned"("p_from" "date") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."duty_season_delete"("p_started_on" "date") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."duty_season_delete"("p_started_on" "date") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."duty_season_delete"("p_started_on" "date") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."duty_season_start"("p_started_on" "date", "p_name" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."duty_season_start"("p_started_on" "date", "p_name" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."duty_season_start"("p_started_on" "date", "p_name" "text") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."duty_set_assignees"("p_period" "uuid", "p_users" "uuid"[]) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."duty_set_assignees"("p_period" "uuid", "p_users" "uuid"[]) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."duty_set_assignees"("p_period" "uuid", "p_users" "uuid"[]) TO "service_role";
 
 
 
@@ -5428,6 +5873,21 @@ GRANT ALL ON TABLE "public"."calendar_teams" TO "service_role";
 
 GRANT ALL ON TABLE "public"."day_overrides" TO "authenticated";
 GRANT ALL ON TABLE "public"."day_overrides" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."duty_assignments" TO "service_role";
+GRANT SELECT ON TABLE "public"."duty_assignments" TO "authenticated";
+
+
+
+GRANT ALL ON TABLE "public"."duty_periods" TO "service_role";
+GRANT SELECT ON TABLE "public"."duty_periods" TO "authenticated";
+
+
+
+GRANT ALL ON TABLE "public"."duty_seasons" TO "service_role";
+GRANT SELECT ON TABLE "public"."duty_seasons" TO "authenticated";
 
 
 
