@@ -222,8 +222,8 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
   }
 
   /// The Souboje view: one card per duel (12dp from the edges, 8dp apart),
-  /// then the Družstva card. Without a lineup the no-lineup line stands in
-  /// for the duel cards; the Družstva card still shows the team sums.
+  /// then the Družstva card. Without a lineup there are no duel cards (the
+  /// scoreboard says why); the Družstva card still shows the team sums.
   List<Widget> _souboje({
     required List<Duel> duels,
     required MatchResult? result,
@@ -232,27 +232,26 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
   }) {
     final scale = diffScale(duels);
     return [
-      // No lineup: the scoreboard already says so.
       for (final duel in duels)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-            child: DuelCard(
-              duel: duel,
-              scale: scale,
-              expanded: _expanded.contains(duel.position),
-              // A waiting duel has nothing to open; remembering the tap
-              // would open it by surprise once it starts.
-              onTap: duel.state == DuelState.waiting
-                  ? () {}
-                  : () => setState(() {
-                      if (!_expanded.remove(duel.position)) {
-                        _expanded.add(duel.position);
-                      }
-                    }),
-              homeColor: homeColor,
-              awayColor: awayColor,
-            ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+          child: DuelCard(
+            duel: duel,
+            scale: scale,
+            expanded: _expanded.contains(duel.position),
+            // A waiting duel has nothing to open; remembering the tap
+            // would open it by surprise once it starts.
+            onTap: duel.state == DuelState.waiting
+                ? () {}
+                : () => setState(() {
+                    if (!_expanded.remove(duel.position)) {
+                      _expanded.add(duel.position);
+                    }
+                  }),
+            homeColor: homeColor,
+            awayColor: awayColor,
           ),
+        ),
       if (result != null)
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
@@ -260,7 +259,6 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
         ),
     ];
   }
-
 
   /// [child] as wide as the list but at most 720dp, centred — the Souboje
   /// column until the wide layouts land. Every row but the Zápis sheet,
@@ -443,9 +441,8 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
           // Not centred: the sheet keeps the whole width, as before
           // Souboje. At its natural size (about 1000dp) it fits a wide
           // window whole instead of hiding a third behind a sideways
-          // scroll. LegacyScoreSheet shows its team summary row even with
-          // no lineup yet (as long as `result` has team-level data) — only
-          // the per-player section needs this fallback message.
+          // scroll. Without a lineup it still shows its team summary row
+          // (as long as `result` has team-level data).
           LegacyScoreSheet(slot: slot, result: result, players: players),
         ],
       },

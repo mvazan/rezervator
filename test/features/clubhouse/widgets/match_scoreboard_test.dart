@@ -389,10 +389,7 @@ void main() {
     });
 
     // Czech agreement: 1 rozehraný, 2–4 rozehrané, 5 and more rozehraných.
-    for (final (playing, words) in [
-      (3, '3 rozehrané'),
-      (5, '5 rozehraných'),
-    ]) {
+    for (final (playing, words) in [(3, '3 rozehrané'), (5, '5 rozehraných')]) {
       testWidgets('$playing duels being played read „$words“', (tester) async {
         await tester.pumpWidget(
           _host(

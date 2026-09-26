@@ -483,8 +483,7 @@ void main() {
                 'position': 1,
                 'player_name': p.playerName,
                 'lanes': [
-                  for (final l in p.lanes)
-                    {'lane': l.lane, 'total': null},
+                  for (final l in p.lanes) {'lane': l.lane, 'total': null},
                 ],
               }),
     ];
@@ -823,52 +822,49 @@ void main() {
     },
   );
 
-  testWidgets(
-    'a match that ends while watched keeps its scroll offset as the '
-    'pull-to-refresh goes away',
-    (tester) async {
-      final resultsCtrl = StreamController<Map<String, MatchResult>>();
-      addTearDown(resultsCtrl.close);
-      await tester.pumpWidget(
-        app(
-          matchId: 'm2',
-          slots: [match(id: 'm2', date: today)],
-          resultsStream: resultsCtrl.stream,
-          players: rudnaPlayers,
-        ),
-      );
-      resultsCtrl.add({'m2': liveResultWith()});
-      await tester.pumpAndSettle();
-      expect(find.byType(RefreshIndicator), findsOneWidget);
+  testWidgets('a match that ends while watched keeps its scroll offset as the '
+      'pull-to-refresh goes away', (tester) async {
+    final resultsCtrl = StreamController<Map<String, MatchResult>>();
+    addTearDown(resultsCtrl.close);
+    await tester.pumpWidget(
+      app(
+        matchId: 'm2',
+        slots: [match(id: 'm2', date: today)],
+        resultsStream: resultsCtrl.stream,
+        players: rudnaPlayers,
+      ),
+    );
+    resultsCtrl.add({'m2': liveResultWith()});
+    await tester.pumpAndSettle();
+    expect(find.byType(RefreshIndicator), findsOneWidget);
 
-      double offset() => tester
-          .state<ScrollableState>(
-            find
-                .descendant(
-                  of: find.byType(ListView),
-                  matching: find.byType(Scrollable),
-                )
-                .first,
-          )
-          .position
-          .pixels;
-      await tester.drag(find.byType(ListView), const Offset(0, -400));
-      await tester.pumpAndSettle();
-      final scrolled = offset();
-      expect(scrolled, greaterThan(300));
+    double offset() => tester
+        .state<ScrollableState>(
+          find
+              .descendant(
+                of: find.byType(ListView),
+                matching: find.byType(Scrollable),
+              )
+              .first,
+        )
+        .position
+        .pixels;
+    await tester.drag(find.byType(ListView), const Offset(0, -400));
+    await tester.pumpAndSettle();
+    final scrolled = offset();
+    expect(scrolled, greaterThan(300));
 
-      resultsCtrl.add({
-        'm2': liveResultWith(
-          status: 'finished',
-          fetchedAt: '2026-09-23T17:55:00+00:00',
-        ),
-      });
-      await tester.pumpAndSettle();
+    resultsCtrl.add({
+      'm2': liveResultWith(
+        status: 'finished',
+        fetchedAt: '2026-09-23T17:55:00+00:00',
+      ),
+    });
+    await tester.pumpAndSettle();
 
-      expect(find.byType(RefreshIndicator), findsNothing);
-      expect(offset(), scrolled);
-    },
-  );
+    expect(find.byType(RefreshIndicator), findsNothing);
+    expect(offset(), scrolled);
+  });
 
   testWidgets(
     'tapping refresh calls it again and shows a progress indicator until '

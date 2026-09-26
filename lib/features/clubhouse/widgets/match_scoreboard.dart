@@ -606,11 +606,7 @@ class _PointsStrip extends StatelessWidget {
           children: [
             for (final (i, duel) in duels.indexed) ...[
               if (i > 0) const SizedBox(width: 6),
-              _DuelTile(
-                duel: duel,
-                homeColor: homeColor,
-                awayColor: awayColor,
-              ),
+              _DuelTile(duel: duel, homeColor: homeColor, awayColor: awayColor),
             ],
             for (final pin in pins) ...[
               const SizedBox(width: 8),
