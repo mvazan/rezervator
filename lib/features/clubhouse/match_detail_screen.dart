@@ -169,9 +169,11 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
   }
 
   /// [Souboje | Zápis] on the left, bound to [matchDetailViewProvider]; in
-  /// Souboje „Rozbalit vše“ / „Sbalit vše“ on the right. With large text on
-  /// a narrow phone the button drops under the switch instead of
-  /// overflowing.
+  /// Souboje „Rozbalit vše“ / „Sbalit vše“ on the right, on the same row —
+  /// the switch has no check icon, so on a 360dp phone both fit up to text
+  /// scale 1.3. With larger text the button drops under the switch instead
+  /// of overflowing (OverflowBar: a row pushed apart when both fit, else a
+  /// column).
   Widget _switchRow(MatchDetailView view, List<Duel> duels) {
     // A duel nobody has started never opens: it neither needs the button
     // nor keeps it from reading „Sbalit vše“ once the rest are open.
@@ -182,13 +184,13 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     final allOpen = openable.isNotEmpty && openable.every(_expanded.contains);
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 16, 12, 0),
-      child: Wrap(
-        alignment: WrapAlignment.spaceBetween,
-        crossAxisAlignment: WrapCrossAlignment.center,
+      child: OverflowBar(
+        alignment: MainAxisAlignment.spaceBetween,
         spacing: 8,
-        runSpacing: 4,
+        overflowSpacing: 4,
         children: [
           SegmentedButton<MatchDetailView>(
+            showSelectedIcon: false,
             segments: const [
               ButtonSegment(
                 value: MatchDetailView.souboje,

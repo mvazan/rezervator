@@ -1,8 +1,11 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rezervator/core/theme.dart';
 import 'package:rezervator/data/clock.dart';
 import 'package:rezervator/data/local_prefs.dart';
 import 'package:rezervator/data/providers.dart';
@@ -45,6 +48,17 @@ Finder _inBoard(String text) => find.descendant(
   of: find.byType(MatchScoreboard),
   matching: find.text(text),
 );
+
+/// Loads the real Manrope into the test binding: with the harness's fallback
+/// font the switch and its button measure far wider than in the app.
+Future<void> _loadManrope() async {
+  final loader = FontLoader(appFontFamily);
+  for (final weight in ['Regular', 'Medium', 'Bold', 'ExtraBold']) {
+    final bytes = File('assets/fonts/Manrope-$weight.ttf').readAsBytesSync();
+    loader.addFont(Future.value(ByteData.view(bytes.buffer)));
+  }
+  await loader.load();
+}
 
 /// A window [width] wide and tall enough for the whole Rudná match — six
 /// expanded duel cards and the Družstva card — so the list builds all of it.
@@ -191,6 +205,9 @@ void main() {
     // button tap) instead of being the app's own `home` — lets a test pop
     // it back off while a refresh is outstanding.
     bool pushable = false,
+    // The app's own theme (Manrope) for a test that measures real widths;
+    // null = MaterialApp's default.
+    ThemeData? theme,
   }) {
     final screen = MatchDetailScreen(
       matchId: matchId,
@@ -225,6 +242,7 @@ void main() {
           matchDetailViewProvider.overrideWith(() => _FixedView(view)),
       ],
       child: MaterialApp(
+        theme: theme,
         home: pushable
             ? Scaffold(
                 body: Builder(
@@ -1328,6 +1346,66 @@ void main() {
         expect(tester.getRect(find.byType(MatchScoreboard)).width, 720);
       },
     );
+
+    group('the switch row, in the app\'s theme', () {
+      setUpAll(_loadManrope);
+
+      final segments = find.byType(SegmentedButton<MatchDetailView>);
+      final button = find.widgetWithText(TextButton, 'Rozbalit vše');
+
+      testWidgets('at 360dp the switch and „Rozbalit vše“ share one row, '
+          'the button at the right', (tester) async {
+        _tall(tester, width: 360);
+        await tester.pumpWidget(
+          app(
+            matchId: 'rv',
+            slots: [rudnaSlot],
+            results: {'rv': rudnaResult},
+            players: rudnaPlayers,
+            theme: buildTheme(Brightness.light),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(tester.takeException(), isNull);
+        expect(
+          tester
+              .widget<SegmentedButton<MatchDetailView>>(segments)
+              .showSelectedIcon,
+          isFalse,
+        );
+        expect(
+          tester.getCenter(button).dy,
+          closeTo(tester.getCenter(segments).dy, 4),
+        );
+        expect(tester.getRect(segments).left, 12);
+        expect(tester.getRect(button).right, 360 - 12);
+      });
+
+      testWidgets('at 360dp and text scale 2.0 the button drops under the '
+          'switch instead of overflowing', (tester) async {
+        _tall(tester, width: 360);
+        tester.platformDispatcher.textScaleFactorTestValue = 2.0;
+        addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+        await tester.pumpWidget(
+          app(
+            matchId: 'rv',
+            slots: [rudnaSlot],
+            results: {'rv': rudnaResult},
+            players: rudnaPlayers,
+            theme: buildTheme(Brightness.light),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(tester.takeException(), isNull);
+        expect(
+          tester.getRect(button).top,
+          greaterThanOrEqualTo(tester.getRect(segments).bottom),
+        );
+        expect(tester.getRect(button).right, lessThanOrEqualTo(360 - 12));
+      });
+    });
 
     testWidgets('at 360dp every duel opens without an overflow', (
       tester,
