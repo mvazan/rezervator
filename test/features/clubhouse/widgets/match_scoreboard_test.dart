@@ -1,10 +1,27 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rezervator/core/theme.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/domain/palette.dart';
 import 'package:rezervator/features/clubhouse/widgets/match_scoreboard.dart';
 
 import '../../../support/rudna_vrsovice.dart';
+
+/// Loads the real Manrope into the test binding (as the Zápis sheet's test
+/// does): with the harness's fallback font a name's line breaks — and so
+/// whether it fits 2 lines — would not be the app's.
+Future<void> _loadManrope() async {
+  final loader = FontLoader(appFontFamily);
+  for (final weight in ['Regular', 'Medium', 'Bold', 'ExtraBold']) {
+    final bytes = File('assets/fonts/Manrope-$weight.ttf').readAsBytesSync();
+    loader.addFont(Future.value(ByteData.view(bytes.buffer)));
+  }
+  await loader.load();
+}
 
 /// The morning after the Rudná match (Thursday 17. 9. 2026, 10:00).
 final _now = DateTime(2026, 9, 17, 10);
@@ -506,6 +523,112 @@ void main() {
     expect(find.textContaining('Živě'), findsNothing);
     // Without a result there is no format, only the venue.
     expect(find.text('TJ Sokol Rudná'), findsOneWidget);
+  });
+
+  group('team names that do not fit 2 lines beside the score', () {
+    setUpAll(_loadManrope);
+
+    const kostelec = 'TJ Sokol Kostelec nad Černými lesy A';
+
+    /// [rudnaSlot] with [homeTeam] at home.
+    PrioritySlot slotWith(String homeTeam) => PrioritySlot(
+      id: rudnaSlot.id,
+      date: rudnaSlot.date,
+      startsAt: rudnaSlot.startsAt,
+      endsAt: rudnaSlot.endsAt,
+      type: rudnaSlot.type,
+      homeTeam: homeTeam,
+      awayTeam: rudnaSlot.awayTeam,
+      venue: rudnaSlot.venue,
+    );
+
+    /// The finished Rudná result for [slot], 360dp wide at text [scale], in
+    /// the app's own theme (Manrope).
+    Future<void> pump(
+      WidgetTester tester,
+      PrioritySlot slot, {
+      double scale = 1.3,
+    }) async {
+      tester.view.physicalSize = const Size(360, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildTheme(Brightness.light),
+          home: MediaQuery(
+            data: MediaQueryData(
+              size: const Size(360, 800),
+              textScaler: TextScaler.linear(scale),
+            ),
+            child: Scaffold(
+              body: SingleChildScrollView(
+                child: MatchScoreboard(
+                  slot: slot,
+                  result: rudnaResult,
+                  players: rudnaPlayers,
+                  now: _now,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    final stacked = find.byKey(const Key('scoreboard-stacked'));
+
+    testWidgets('stack: each name on its own row with its score at the '
+        'right, and nothing cut short', (tester) async {
+      await pump(tester, slotWith(kostelec));
+      expect(tester.takeException(), isNull);
+      expect(stacked, findsOneWidget);
+
+      final home = tester.getRect(find.text(kostelec));
+      final away = tester.getRect(find.text('TJ Sokol Vršovice A'));
+      final homeScore = find.descendant(of: stacked, matching: find.text('7'));
+      final awayScore = find.descendant(of: stacked, matching: find.text('1'));
+      expect(away.top, greaterThanOrEqualTo(home.bottom));
+      expect(tester.getRect(homeScore).left, greaterThan(home.right));
+      expect(tester.getRect(awayScore).left, greaterThan(away.right));
+      expect(
+        tester.getCenter(homeScore).dy,
+        inInclusiveRange(home.top, home.bottom),
+      );
+      expect(
+        tester.getCenter(awayScore).dy,
+        inInclusiveRange(away.top, away.bottom),
+      );
+      // 36dp, the winner's w800 and the loser's w400, tabular digits.
+      final winner = tester.widget<Text>(homeScore).style!;
+      final loser = tester.widget<Text>(awayScore).style!;
+      expect([winner.fontSize, loser.fontSize], [36, 36]);
+      expect(winner.fontWeight, FontWeight.w800);
+      expect(loser.fontWeight, FontWeight.w400);
+      expect(winner.fontFeatures, contains(const FontFeature.tabularFigures()));
+
+      for (final paragraph in tester.renderObjectList<RenderParagraph>(
+        find.descendant(
+          of: find.byType(MatchScoreboard),
+          matching: find.byType(RichText),
+        ),
+      )) {
+        expect(
+          paragraph.didExceedMaxLines,
+          isFalse,
+          reason: paragraph.text.toPlainText(),
+        );
+      }
+    });
+
+    testWidgets('names that fit keep the side-by-side layout', (tester) async {
+      // At 1.3 even „TJ Sokol Vršovice A“ would need a third line on 360dp;
+      // at 1.0 both fit 2.
+      await pump(tester, rudnaSlot, scale: 1.0);
+      expect(tester.takeException(), isNull);
+      expect(stacked, findsNothing);
+      expect(_text(tester, '7').style?.fontSize, 44);
+    });
   });
 
   final states = {

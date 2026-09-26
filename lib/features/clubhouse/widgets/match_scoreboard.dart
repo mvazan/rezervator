@@ -1,6 +1,7 @@
 /// The match detail's scoreboard (Souboje, Task 3): who won and how the
 /// score came about. The date and a status chip; the team names around a big
-/// score; the pin totals with the lead between them; one tile per duel with
+/// score (each over its own score when a name needs more than 2 lines); the
+/// pin totals with the lead between them; one tile per duel with
 /// a bar on the side that took its point; and a line that adds the score up
 /// („Souboje 5 : 1 · Kuželky 2 : 0 · SB 8,5 : 3,5“). Both views of the match
 /// detail share it, so the score never jumps when the view switches.
@@ -272,6 +273,11 @@ class _TopLine extends StatelessWidget {
 /// „TJ Sokol Rudná A  7 : 1  TJ Sokol Vršovice A“: the names around the
 /// score, home always on the left. The winner's name is w800 and the
 /// loser's w400; with no winner (a tie, or no points yet) both are w500.
+///
+/// When a name would need more than 2 lines beside the score (a long club
+/// name, large text on a narrow phone), the line stacks instead: the home
+/// name with its score at the right, the away name under it with its own —
+/// the scores 36dp, the winner's w800 and the loser's w400.
 class _ScoreLine extends StatelessWidget {
   const _ScoreLine({
     required this.slot,
@@ -312,6 +318,12 @@ class _ScoreLine extends StatelessWidget {
     );
     final colon = digits?.copyWith(fontSize: 32, fontWeight: FontWeight.w500);
     final noPoints = home == null && away == null;
+    final showProgress = running && !noPoints;
+    final progress = text.labelSmall?.copyWith(
+      fontSize: 12,
+      fontWeight: FontWeight.w500,
+      color: scheme.onSurfaceVariant,
+    );
 
     final score = Column(
       mainAxisSize: MainAxisSize.min,
@@ -333,51 +345,164 @@ class _ScoreLine extends StatelessWidget {
                   ],
                 ),
         ),
-        if (running && !noPoints)
-          Text(
-            'průběžně',
-            style: text.labelSmall?.copyWith(
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-              color: scheme.onSurfaceVariant,
-            ),
-          ),
+        if (showProgress) Text('průběžně', style: progress),
       ],
     );
 
-    // The score takes at most half the line and shrinks to fit it (large
-    // text on a narrow phone), so the names always keep room for 2 lines.
     return LayoutBuilder(
-      builder: (context, constraints) => Row(
-        children: [
-          Expanded(
-            child: Text(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        // Side by side the score takes its natural width, at most half the
+        // line (it shrinks to fit that), and the names share the rest.
+        final naturalScore = noPoints
+            ? _textWidth(context, '–', digits)
+            : math.max(
+                _textWidth(context, numLabel(home), digits) +
+                    _textWidth(context, ' : ', colon) +
+                    _textWidth(context, numLabel(away), digits),
+                showProgress ? _textWidth(context, 'průběžně', progress) : 0.0,
+              );
+        final nameWidth = (width - 24 - math.min(naturalScore, width / 2)) / 2;
+        final sideBySide =
+            nameWidth > 0 &&
+            _fitsTwoLines(
+              context,
               slot.homeTeam,
-              textAlign: TextAlign.end,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: nameStyle(MatchSide.home),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: constraints.maxWidth / 2),
-              child: FittedBox(fit: BoxFit.scaleDown, child: score),
-            ),
-          ),
-          Expanded(
-            child: Text(
+              nameStyle(MatchSide.home),
+              nameWidth,
+            ) &&
+            _fitsTwoLines(
+              context,
               slot.awayTeam,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: nameStyle(MatchSide.away),
-            ),
+              nameStyle(MatchSide.away),
+              nameWidth,
+            );
+
+        if (sideBySide) {
+          return Row(
+            children: [
+              Expanded(
+                child: Text(
+                  slot.homeTeam,
+                  textAlign: TextAlign.end,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: nameStyle(MatchSide.home),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: width / 2),
+                  child: FittedBox(fit: BoxFit.scaleDown, child: score),
+                ),
+              ),
+              Expanded(
+                child: Text(
+                  slot.awayTeam,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: nameStyle(MatchSide.away),
+                ),
+              ),
+            ],
+          );
+        }
+
+        // Stacked: one row per team, its score at the right.
+        Widget row(MatchSide side, String name, num? points) => MergeSemantics(
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  name,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: nameStyle(side),
+                ),
+              ),
+              const SizedBox(width: 12),
+              ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: width / 2),
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    numLabel(points),
+                    style: digits?.copyWith(
+                      fontSize: 36,
+                      // No winner (a tie, no points yet): both stay w800,
+                      // as the side-by-side score is.
+                      fontWeight: winner != null && winner != side
+                          ? FontWeight.w400
+                          : FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        );
+        return Column(
+          key: const Key('scoreboard-stacked'),
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            row(MatchSide.home, slot.homeTeam, home),
+            const SizedBox(height: 4),
+            row(MatchSide.away, slot.awayTeam, away),
+            if (showProgress)
+              Align(
+                alignment: Alignment.centerRight,
+                child: Text('průběžně', style: progress),
+              ),
+          ],
+        );
+      },
     );
   }
+}
+
+/// A painter for [text] in [style] as a [Text] in [context] would lay it
+/// out: the ambient default style (and bold text) merged in, the text
+/// scaler, the direction and the locale. The caller disposes it.
+TextPainter _painter(
+  BuildContext context,
+  String text,
+  TextStyle? style, {
+  int? maxLines,
+}) {
+  var resolved = DefaultTextStyle.of(context).style.merge(style);
+  if (MediaQuery.boldTextOf(context)) {
+    resolved = resolved.merge(const TextStyle(fontWeight: FontWeight.bold));
+  }
+  return TextPainter(
+    text: TextSpan(text: text, style: resolved),
+    textDirection: Directionality.of(context),
+    textScaler: MediaQuery.textScalerOf(context),
+    locale: Localizations.maybeLocaleOf(context),
+    maxLines: maxLines,
+  );
+}
+
+/// The width of [text] in [style] on one line.
+double _textWidth(BuildContext context, String text, TextStyle? style) {
+  final painter = _painter(context, text, style)..layout();
+  final width = painter.width;
+  painter.dispose();
+  return width;
+}
+
+/// Whether [text] in [style] fits [width] in at most 2 lines.
+bool _fitsTwoLines(
+  BuildContext context,
+  String text,
+  TextStyle? style,
+  double width,
+) {
+  final painter = _painter(context, text, style, maxLines: 2)
+    ..layout(maxWidth: width);
+  final fits = !painter.didExceedMaxLines;
+  painter.dispose();
+  return fits;
 }
 
 /// „2555  ← 234  2321“: the pin totals and, between them, the lead with its
