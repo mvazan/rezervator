@@ -176,18 +176,14 @@ void main() {
     ) async {
       final handle = tester.ensureSemantics();
       await pump(tester);
-      expect(
-        tester.getSemantics(find.byKey(const Key('team-totals-kuzelky'))),
-        containsSemantics(label: 'Kuželky 2555 : 2321'),
-      );
-      expect(
-        tester.getSemantics(find.byKey(const Key('team-totals-chyby'))),
-        containsSemantics(label: 'Chyby (méně = lépe) 44 : 74'),
-      );
-      expect(
-        tester.getSemantics(find.byKey(const Key('team-totals-sb'))),
-        containsSemantics(label: 'SB 8,5 : 3,5'),
-      );
+      // Labels read off the nodes: `containsSemantics` is deprecated on the
+      // newest Flutter and `isSemantics` is not on the oldest one this repo
+      // builds with.
+      String labelOf(String key) =>
+          tester.getSemantics(find.byKey(Key(key))).getSemanticsData().label;
+      expect(labelOf('team-totals-kuzelky'), 'Kuželky 2555 : 2321');
+      expect(labelOf('team-totals-chyby'), 'Chyby (méně = lépe) 44 : 74');
+      expect(labelOf('team-totals-sb'), 'SB 8,5 : 3,5');
       expect(find.bySemanticsLabel('Kuželky 2555 : 2321'), findsOneWidget);
       expect(find.bySemanticsLabel(RegExp('←')), findsNothing);
       handle.dispose();

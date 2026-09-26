@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/domain/duels.dart';
 import 'package:rezervator/domain/models.dart';
@@ -396,14 +397,13 @@ void main() {
   testWidgets('one semantics label for the whole card', (tester) async {
     final semantics = tester.ensureSemantics();
     await tester.pumpWidget(_host(_card(_rudna[0])));
-    expect(
-      tester.getSemantics(find.byType(DuelCard)),
-      containsSemantics(
-        label: duelSemantics(_rudna[0]),
-        isButton: true,
-        hasTapAction: true,
-      ),
-    );
+    // Read off the node itself: `containsSemantics` is deprecated on the
+    // newest Flutter and its successor `isSemantics` is not on the oldest
+    // one this repo builds with.
+    final node = tester.getSemantics(find.byType(DuelCard)).getSemanticsData();
+    expect(node.label, duelSemantics(_rudna[0]));
+    expect(node.flagsCollection.isButton, isTrue);
+    expect(node.hasAction(SemanticsAction.tap), isTrue);
     expect(find.bySemanticsLabel(duelSemantics(_rudna[0])), findsOneWidget);
     semantics.dispose();
   });
