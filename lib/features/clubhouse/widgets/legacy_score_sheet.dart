@@ -6,9 +6,12 @@
 /// `MatchPlayerSection`'s two ExpansionTile lists.
 library;
 
+import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../../core/theme.dart' show appFontFamily;
 import '../../../domain/models.dart';
@@ -52,6 +55,20 @@ const _s10w700 = TextStyle(
   height: 1.0,
   letterSpacing: 0,
 );
+const _s15w400 = TextStyle(
+  fontFamily: appFontFamily,
+  fontSize: 15,
+  fontWeight: FontWeight.w400,
+  height: 1.0,
+  letterSpacing: 0,
+);
+const _s15w700 = TextStyle(
+  fontFamily: appFontFamily,
+  fontSize: 15,
+  fontWeight: FontWeight.w700,
+  height: 1.0,
+  letterSpacing: 0,
+);
 const _s16w400 = TextStyle(
   fontFamily: appFontFamily,
   fontSize: 16,
@@ -87,6 +104,51 @@ const _s24w700 = TextStyle(
   height: 1.0,
   letterSpacing: 0,
 );
+
+/// The numbers of a pairing block — per lane and per player — which the
+/// full-screen page prints bigger than kuzelky's own 10/16px, so they read
+/// on a phone. Labels, names and the team summary row keep their sizes in
+/// both; the embedded sheet stays a 1:1 replica ([natural]).
+class _SheetStyles {
+  const _SheetStyles({
+    required this.laneValue,
+    required this.playerSum,
+    required this.playerSetPoints,
+    required this.playerTotal,
+    required this.pairDiff,
+  });
+
+  /// A lane row: the lane number, Plné, Dor., Ch., Celkem and Dílčí.
+  final TextStyle laneValue;
+
+  /// A player's Celkem row: Plné, Dor. and Ch.
+  final TextStyle playerSum;
+
+  /// A player's Celkem row: Dílčí (the player's set points).
+  final TextStyle playerSetPoints;
+
+  /// A player's Celkem row: the red pin total.
+  final TextStyle playerTotal;
+
+  /// A pairing's Rozdíl.
+  final TextStyle pairDiff;
+
+  static const natural = _SheetStyles(
+    laneValue: _s10w400,
+    playerSum: _s10w700,
+    playerSetPoints: _s10w400,
+    playerTotal: _s16w700,
+    pairDiff: _s16w400,
+  );
+
+  static const fill = _SheetStyles(
+    laneValue: _s15w400,
+    playerSum: _s15w700,
+    playerSetPoints: _s15w400,
+    playerTotal: _s20w700,
+    pairDiff: _s20w400,
+  );
+}
 
 /// "+13" / "-2" / "0" — a signed pin difference; negative values already
 /// carry their own minus, so only the positive case needs a prefix.
@@ -274,6 +336,7 @@ class _ColumnMetrics {
     required PrioritySlot slot,
     required MatchResult? result,
     required List<MatchPlayerResult> players,
+    _SheetStyles styles = _SheetStyles.natural,
   }) {
     final positions = <int>{for (final p in players) p.position}.toList();
     MatchPlayerResult? forSide(String side, int position) {
@@ -299,52 +362,53 @@ class _ColumnMetrics {
       (numLabel(result?.awayPoints), _s24w700),
       ('Celkem', _s10w700),
       for (final p in players)
-        for (final lane in p.lanes) ('${lane.lane}', _s10w400),
+        for (final lane in p.lanes) ('${lane.lane}', styles.laneValue),
     ], 42.0);
 
     final plneWidth = _widest([
       ('Plné', _s10w400),
       (numLabel(result?.homeFulls), _s20w400),
       (numLabel(result?.awayFulls), _s20w400),
-      for (final p in players) (numLabel(p.fulls), _s10w700),
+      for (final p in players) (numLabel(p.fulls), styles.playerSum),
       for (final p in players)
-        for (final lane in p.lanes) (numLabel(lane.fulls), _s10w400),
+        for (final lane in p.lanes) (numLabel(lane.fulls), styles.laneValue),
     ], 55.0);
 
     final dorWidth = _widest([
       ('Dor.', _s10w400),
       (numLabel(result?.homeSpares), _s20w400),
       (numLabel(result?.awaySpares), _s20w400),
-      for (final p in players) (numLabel(p.spares), _s10w700),
+      for (final p in players) (numLabel(p.spares), styles.playerSum),
       for (final p in players)
-        for (final lane in p.lanes) (numLabel(lane.spares), _s10w400),
+        for (final lane in p.lanes) (numLabel(lane.spares), styles.laneValue),
     ], 46.0);
 
     final chWidth = _widest([
       ('Ch.', _s10w400),
       (numLabel(result?.homeErrors), _s20w400),
       (numLabel(result?.awayErrors), _s20w400),
-      for (final p in players) (numLabel(p.errors), _s10w700),
+      for (final p in players) (numLabel(p.errors), styles.playerSum),
       for (final p in players)
-        for (final lane in p.lanes) (numLabel(lane.errors), _s10w400),
+        for (final lane in p.lanes) (numLabel(lane.errors), styles.laneValue),
     ], 33.0);
 
     final celkemColWidth = _widest([
       ('Celkem', _s10w400),
       (numLabel(result?.homeTotal), _s20w700),
       (numLabel(result?.awayTotal), _s20w700),
-      for (final p in players) (numLabel(p.total), _s16w700),
+      for (final p in players) (numLabel(p.total), styles.playerTotal),
       for (final p in players)
-        for (final lane in p.lanes) (numLabel(lane.total), _s10w400),
+        for (final lane in p.lanes) (numLabel(lane.total), styles.laneValue),
     ], 58.0);
 
     final dilciWidth = _widest([
       ('Dílčí', _s10w400),
       (numLabel(result?.homeSetPoints), _s20w400),
       (numLabel(result?.awaySetPoints), _s20w400),
-      for (final p in players) (numLabel(p.setPoints), _s10w400),
+      for (final p in players) (numLabel(p.setPoints), styles.playerSetPoints),
       for (final p in players)
-        for (final lane in p.lanes) (numLabel(lane.setPoints), _s10w400),
+        for (final lane in p.lanes)
+          (numLabel(lane.setPoints), styles.laneValue),
     ], 31.0);
 
     final druzstvoWidth = _widest([
@@ -371,7 +435,7 @@ class _ColumnMetrics {
       final h = forSide('home', pos);
       final a = forSide('away', pos);
       if (h?.total != null && a?.total != null) {
-        rozdilCells.add((_signed(h!.total! - a!.total!), _s16w400));
+        rozdilCells.add((_signed(h!.total! - a!.total!), styles.pairDiff));
       }
     }
     final rozdilWidth = _widest(rozdilCells, 46.0);
@@ -515,6 +579,9 @@ class _SheetGeometry {
     required this.columns,
     required this.rowScale,
     required this.wrapNames,
+    required this.styles,
+    required this.laneRowBase,
+    required this.celkemRowBase,
   });
 
   // Row heights (dp), copied 1:1 from kuzelky.com's own table.
@@ -523,6 +590,22 @@ class _SheetGeometry {
   static const _laneRowHeight = 23.0;
   static const _celkemRowHeight = 31.0;
   static const _separatorHeight = 9.0;
+
+  /// The unscaled height of a lane row and of a Celkem row: kuzelky's own
+  /// 23 / 31dp, or taller where [styles]' numbers need it (full screen).
+  final double laneRowBase;
+  final double celkemRowBase;
+
+  /// The pairing blocks' numbers — kuzelky's own sizes, or bigger full
+  /// screen.
+  final _SheetStyles styles;
+
+  /// A row tall enough for one line of [style], never below [base].
+  static double _rowFor(TextStyle style, double base) => math.max(
+    base,
+    (_ColumnMetrics.lineHeight(style) + _ColumnMetrics._cellChrome)
+        .ceilToDouble(),
+  );
 
   /// The outer 2px border frame's own padding (`fromLTRB(2, 2, 1, 1)`),
   /// added to a content size to get the table's actual rendered size.
@@ -552,6 +635,9 @@ class _SheetGeometry {
     ),
     rowScale: 1.0,
     wrapNames: false,
+    styles: _SheetStyles.natural,
+    laneRowBase: _laneRowHeight,
+    celkemRowBase: _celkemRowHeight,
   );
 
   /// The geometry that fills [area] exactly once scaled by one uniform
@@ -579,13 +665,22 @@ class _SheetGeometry {
     required List<MatchPlayerResult> players,
     required Size area,
   }) {
+    const styles = _SheetStyles.fill;
+    final laneRowBase = _rowFor(styles.laneValue, _laneRowHeight);
+    final celkemRowBase = _rowFor(styles.playerTotal, _celkemRowHeight);
     final natural = _ColumnMetrics.compute(
       slot: slot,
       result: result,
       players: players,
+      styles: styles,
     );
     final laneRows = _laneRowCounts(players);
-    final baseRowsHeight = _rowsHeight(laneRows, players.isNotEmpty);
+    final baseRowsHeight = _rowsHeight(
+      laneRows,
+      players.isNotEmpty,
+      laneRowBase,
+      celkemRowBase,
+    );
     final fixedHeight =
         _separatorHeight * math.max(0, laneRows.length - 1) + _frameHeight;
     final otherWidth = natural.totalWidth - 2 * natural.nameWidth + _frameWidth;
@@ -613,7 +708,7 @@ class _SheetGeometry {
         fit(
           p.playerName,
           _s16w700,
-          laneRowCount >= 2 ? laneRowCount * _laneRowHeight : _celkemRowHeight,
+          laneRowCount >= 2 ? laneRowCount * laneRowBase : celkemRowBase,
         );
       }
       return scale;
@@ -666,6 +761,9 @@ class _SheetGeometry {
       columns: natural.withNameWidth(nameWidth).scaled(widthFactor),
       rowScale: rowScale,
       wrapNames: true,
+      styles: styles,
+      laneRowBase: laneRowBase,
+      celkemRowBase: celkemRowBase,
     );
   }
 
@@ -680,20 +778,25 @@ class _SheetGeometry {
   }
 
   /// The unscaled sum of every stretchable row (all but the separators).
-  static double _rowsHeight(Map<int, int> laneRows, bool hasPlayers) {
+  static double _rowsHeight(
+    Map<int, int> laneRows,
+    bool hasPlayers,
+    double laneRowBase,
+    double celkemRowBase,
+  ) {
     var height = _teamRowHeight;
     if (!hasPlayers) return height;
     height += _headerRowHeight * 2;
     for (final laneRowCount in laneRows.values) {
-      height += laneRowCount * _laneRowHeight + _celkemRowHeight;
+      height += laneRowCount * laneRowBase + celkemRowBase;
     }
     return height;
   }
 
   double get teamRowHeight => _teamRowHeight * rowScale;
   double get headerRowHeight => _headerRowHeight * rowScale;
-  double get laneRowHeight => _laneRowHeight * rowScale;
-  double get celkemRowHeight => _celkemRowHeight * rowScale;
+  double get laneRowHeight => laneRowBase * rowScale;
+  double get celkemRowHeight => celkemRowBase * rowScale;
   double get separatorHeight => _separatorHeight;
 
   /// How many lines of [style] a cell [cellHeight] tall holds (at least 1).
@@ -1087,42 +1190,42 @@ class _ScoreTableBody extends StatelessWidget {
             height: _laneRowHeight,
             bg: _kBodyYellow,
             text: lane == null ? '' : '${lane.lane}',
-            style: _s10w400,
+            style: geometry.styles.laneValue,
           ),
           _cell(
             width: m.plneWidth,
             height: _laneRowHeight,
             bg: _kLaneStatsGreen,
             text: lane == null ? '' : numLabel(lane.fulls),
-            style: _s10w400,
+            style: geometry.styles.laneValue,
           ),
           _cell(
             width: m.dorWidth,
             height: _laneRowHeight,
             bg: _kLaneStatsGreen,
             text: lane == null ? '' : numLabel(lane.spares),
-            style: _s10w400,
+            style: geometry.styles.laneValue,
           ),
           _cell(
             width: m.chWidth,
             height: _laneRowHeight,
             bg: _kLaneStatsGreen,
             text: lane == null ? '' : numLabel(lane.errors),
-            style: _s10w400,
+            style: geometry.styles.laneValue,
           ),
           _cell(
             width: m.celkemColWidth,
             height: _laneRowHeight,
             bg: _kStatsPurple,
             text: lane == null ? '' : numLabel(lane.total),
-            style: _s10w400,
+            style: geometry.styles.laneValue,
           ),
           _cell(
             width: m.dilciWidth,
             height: _laneRowHeight,
             bg: _kStatsPurple,
             text: lane == null ? '' : numLabel(lane.setPoints),
-            style: _s10w400,
+            style: geometry.styles.laneValue,
           ),
         ],
       );
@@ -1142,28 +1245,28 @@ class _ScoreTableBody extends StatelessWidget {
           height: _celkemRowHeight,
           bg: _kStatsPurple,
           text: numLabel(player.fulls),
-          style: _s10w700,
+          style: geometry.styles.playerSum,
         ),
         _cell(
           width: m.dorWidth,
           height: _celkemRowHeight,
           bg: _kStatsPurple,
           text: numLabel(player.spares),
-          style: _s10w700,
+          style: geometry.styles.playerSum,
         ),
         _cell(
           width: m.chWidth,
           height: _celkemRowHeight,
           bg: _kStatsPurple,
           text: numLabel(player.errors),
-          style: _s10w700,
+          style: geometry.styles.playerSum,
         ),
         _cell(
           width: m.celkemColWidth,
           height: _celkemRowHeight,
           bg: _kRegCellBlue,
           text: numLabel(player.total),
-          style: _s16w700,
+          style: geometry.styles.playerTotal,
           color: _kCelkemTotalRed,
         ),
         _cell(
@@ -1171,7 +1274,7 @@ class _ScoreTableBody extends StatelessWidget {
           height: _celkemRowHeight,
           bg: _kRegCellBlue,
           text: numLabel(player.setPoints),
-          style: _s10w400,
+          style: geometry.styles.playerSetPoints,
         ),
       ],
     );
@@ -1247,7 +1350,7 @@ class _ScoreTableBody extends StatelessWidget {
           height: blockHeight,
           bg: _kBodyYellow,
           text: diff == null ? '' : _signed(diff),
-          style: _s16w400,
+          style: geometry.styles.pairDiff,
           color: _diffColor(diff),
         ),
         _pairingSide(m, away, laneRowCount, blockHeight),
@@ -1265,37 +1368,115 @@ class _ScoreTableBody extends StatelessWidget {
 }
 
 /// Full-screen "Zápis" route (the "Zvětšit" tap target): the same table
-/// content as [LegacyScoreSheet] ([_ScoreTableBody]), never scrolled in
-/// either axis, filling the whole body area — below the AppBar, inside the
-/// safe area, with no padding — 100% width AND 100% height, portrait or
-/// landscape (see [_FillViewer]). Fix round 2 replaced fix round 1's
-/// vertical [SingleChildScrollView]; fix round 3 let the user pinch in past
-/// the initial "see it all at once" view to read the detail and pan around.
-class LegacyScoreSheetPage extends StatelessWidget {
+/// content as [LegacyScoreSheet] ([_ScoreTableBody]), with the pairing
+/// blocks' numbers bigger ([_SheetStyles.fill]), never scrolled in either
+/// axis, filling the whole display — no AppBar, the status and navigation
+/// bars hidden on Android (a swipe from an edge shows them for a moment),
+/// inside the safe area only so a notch never covers a cell — 100% width
+/// AND 100% height, portrait or landscape (see [_FillViewer]). System back
+/// closes it; there is no close button to take room. The web has no system
+/// back (the browser's leaves the app's page stack), so there a small back
+/// button floats in the corner for 3 s and comes back on a tap on the
+/// sheet ([showBackButton]). Fix round 3 let the user pinch in past the
+/// initial "see it all at once" view.
+class LegacyScoreSheetPage extends StatefulWidget {
   const LegacyScoreSheetPage({
     super.key,
     required this.slot,
     required this.result,
     required this.players,
+    this.showBackButton = kIsWeb,
   });
 
   final PrioritySlot slot;
   final MatchResult? result;
   final List<MatchPlayerResult> players;
 
+  /// The floating back button — where there is no system back (the web).
+  final bool showBackButton;
+
+  @override
+  State<LegacyScoreSheetPage> createState() => _LegacyScoreSheetPageState();
+}
+
+class _LegacyScoreSheetPageState extends State<LegacyScoreSheetPage> {
+  static const _backButtonShownFor = Duration(seconds: 3);
+
+  bool _backButtonVisible = true;
+  Timer? _hideBackButton;
+
+  @override
+  void initState() {
+    super.initState();
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    if (widget.showBackButton) _scheduleHide();
+  }
+
+  void _scheduleHide() {
+    _hideBackButton?.cancel();
+    _hideBackButton = Timer(_backButtonShownFor, () {
+      if (mounted) setState(() => _backButtonVisible = false);
+    });
+  }
+
+  void _showBackButton() {
+    setState(() => _backButtonVisible = true);
+    _scheduleHide();
+  }
+
+  @override
+  void dispose() {
+    _hideBackButton?.cancel();
+    // Flutter's own default: both bars shown.
+    SystemChrome.setEnabledSystemUIMode(
+      SystemUiMode.manual,
+      overlays: SystemUiOverlay.values,
+    );
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Zápis'),
-        leading: IconButton(
-          icon: const Icon(Icons.close),
-          tooltip: 'Zavřít',
-          onPressed: () => Navigator.of(context).pop(),
-        ),
+    final sheet = SafeArea(
+      child: _FillViewer(
+        slot: widget.slot,
+        result: widget.result,
+        players: widget.players,
       ),
-      body: SafeArea(
-        child: _FillViewer(slot: slot, result: result, players: players),
+    );
+    if (!widget.showBackButton) return Scaffold(body: sheet);
+    final scheme = Theme.of(context).colorScheme;
+    return Scaffold(
+      body: Stack(
+        children: [
+          GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onTap: _showBackButton,
+            child: sheet,
+          ),
+          SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(8),
+              child: AnimatedOpacity(
+                opacity: _backButtonVisible ? 1 : 0,
+                duration: const Duration(milliseconds: 200),
+                child: IgnorePointer(
+                  ignoring: !_backButtonVisible,
+                  child: Material(
+                    shape: const CircleBorder(),
+                    color: scheme.surface.withValues(alpha: 0.85),
+                    elevation: 2,
+                    child: IconButton(
+                      icon: const Icon(Icons.arrow_back),
+                      tooltip: 'Zpět',
+                      onPressed: () => Navigator.of(context).maybePop(),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

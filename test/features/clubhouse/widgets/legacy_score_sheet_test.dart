@@ -439,8 +439,8 @@ void main() {
   });
 
   testWidgets(
-    'tapping Zvětšit pushes a full-screen page with the same data and no '
-    'header row of its own; close pops it back',
+    'tapping Zvětšit pushes a full-screen page with the same data, no '
+    'header of its own and no close button; system back pops it',
     (tester) async {
       await tester.pumpWidget(
         app(result: result, players: [homePlayer, awayPlayer]),
@@ -454,8 +454,9 @@ void main() {
 
       final page = find.byType(LegacyScoreSheetPage);
       expect(page, findsOneWidget);
-      expect(find.widgetWithText(AppBar, 'Zápis'), findsOneWidget);
-      expect(find.byIcon(Icons.close), findsOneWidget);
+      expect(find.byType(AppBar), findsNothing);
+      expect(find.byIcon(Icons.close), findsNothing);
+      expect(find.byTooltip('Zpět'), findsNothing, reason: 'Android: system back');
       expect(find.text('580'), findsWidgets);
       expect(
         find.descendant(of: page, matching: find.byIcon(Icons.open_in_full)),
@@ -463,18 +464,137 @@ void main() {
       );
       expect(
         find.descendant(of: page, matching: find.text('Zápis')),
-        findsOneWidget,
+        findsNothing,
       );
       expect(
         find.descendant(of: page, matching: find.byType(SingleChildScrollView)),
         findsNothing,
       );
 
-      await tester.tap(find.byIcon(Icons.close));
+      // Android's back button / gesture.
+      await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
 
       expect(find.byType(LegacyScoreSheetPage), findsNothing);
       expect(find.text('580'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'full screen prints the pairing numbers bigger than the embedded 1:1 '
+    'sheet: lane values 15 instead of 10, the player total 20 instead of 16',
+    (tester) async {
+      double sizeOf(Finder text) =>
+          tester.renderObject<RenderParagraph>(text).text.style!.fontSize!;
+      await tester.pumpWidget(
+        app(result: result, players: [homePlayer, awayPlayer]),
+      );
+      await tester.pumpAndSettle();
+      expect(sizeOf(find.text('175')), 10);
+      expect(sizeOf(find.text('580')), 16);
+
+      await tester.tap(find.byIcon(Icons.open_in_full));
+      await tester.pumpAndSettle();
+      final page = find.byType(LegacyScoreSheetPage);
+      expect(sizeOf(find.descendant(of: page, matching: find.text('175'))), 15);
+      expect(sizeOf(find.descendant(of: page, matching: find.text('580'))), 20);
+      // The team summary row keeps its own sizes.
+      expect(sizeOf(find.descendant(of: page, matching: find.text('3460'))), 20);
+    },
+  );
+
+  testWidgets(
+    'on the web (no system back) a small back button shows for 3 s, a tap '
+    'on the sheet brings it back, and it closes the page; Android gets none',
+    (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: TextButton(
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => LegacyScoreSheetPage(
+                      slot: slot,
+                      result: result,
+                      players: [homePlayer, awayPlayer],
+                      showBackButton: true,
+                    ),
+                  ),
+                ),
+                child: const Text('otevřít'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('otevřít'));
+      await tester.pumpAndSettle();
+
+      double opacity() => tester
+          .widget<AnimatedOpacity>(
+            find.ancestor(
+              of: find.byTooltip('Zpět'),
+              matching: find.byType(AnimatedOpacity),
+            ),
+          )
+          .opacity;
+      expect(find.byTooltip('Zpět'), findsOneWidget);
+      expect(opacity(), 1);
+
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pumpAndSettle();
+      expect(opacity(), 0);
+
+      await tester.tap(find.text('580'), warnIfMissed: false);
+      await tester.pumpAndSettle();
+      expect(opacity(), 1);
+
+      await tester.tap(find.byTooltip('Zpět'));
+      await tester.pumpAndSettle();
+      expect(find.byType(LegacyScoreSheetPage), findsNothing);
+      expect(find.text('otevřít'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'full screen hides the system bars while open and brings them back on '
+    'the way out',
+    (tester) async {
+      final calls = <MethodCall>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async {
+          if (call.method.startsWith('SystemChrome.setEnabledSystemUI')) {
+            calls.add(call);
+          }
+          return null;
+        },
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          null,
+        ),
+      );
+      await tester.pumpWidget(
+        app(result: result, players: [homePlayer, awayPlayer]),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.open_in_full));
+      await tester.pumpAndSettle();
+      expect(calls.map((c) => '${c.method} ${c.arguments}'), [
+        'SystemChrome.setEnabledSystemUIMode SystemUiMode.immersiveSticky',
+      ]);
+
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(calls.last.method, 'SystemChrome.setEnabledSystemUIOverlays');
+      expect(calls.last.arguments, [
+        'SystemUiOverlay.top',
+        'SystemUiOverlay.bottom',
+      ]);
     },
   );
 
@@ -799,9 +919,9 @@ void main() {
     final fourLanes = lineup(size: 6, lanes: 4);
     final twoLanes = lineup(size: 4, lanes: 2);
 
-    // The body area this page gets: the view minus the AppBar (the test
-    // view has no status bar) and minus whatever [padding] the view
-    // reports as unsafe.
+    // The body area this page gets: the whole view (no AppBar; the test
+    // view has no status bar) minus whatever [padding] the view reports as
+    // unsafe.
     const portrait = Size(390, 760);
     const landscape = Size(844, 330);
     const desktop = Size(1400, 900);
@@ -815,7 +935,7 @@ void main() {
       tester.view.padding = padding;
       tester.view.physicalSize = Size(
         body.width + padding.left + padding.right,
-        body.height + kToolbarHeight + padding.bottom,
+        body.height + padding.top + padding.bottom,
       );
       addTearDown(tester.view.reset);
     }
@@ -842,8 +962,8 @@ void main() {
       (w) => w.runtimeType.toString() == '_ScoreTableBody',
     );
 
-    // Below the AppBar, inside the view's safe insets — computed from the
-    // view itself, never from this page's own widgets.
+    // The whole view inside its safe insets — computed from the view
+    // itself, never from this page's own widgets.
     Rect expectedBodyArea(WidgetTester tester) {
       final view = tester.view;
       final screen = view.physicalSize / view.devicePixelRatio;
@@ -851,7 +971,7 @@ void main() {
       final dpr = view.devicePixelRatio;
       return Rect.fromLTRB(
         pad.left / dpr,
-        tester.getBottomLeft(find.byType(AppBar)).dy,
+        pad.top / dpr,
         screen.width - pad.right / dpr,
         screen.height - pad.bottom / dpr,
       );
