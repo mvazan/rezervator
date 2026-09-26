@@ -148,9 +148,9 @@ reappears, when `service_role` lacks DML on any table or view, or when
 | `duty_set_assignees(period, users uuid[])` (0050) | admin | Replaces the period's assignees with `users` (duplicates collapse, `{}` clears; rows that stay are kept, not re-inserted). Each must be an approved non-kiosk member of the alley that is not a visiting superadmin — the `players` view's rule, placeholders allowed — or nothing changes: `unknown_player` (a null too). The period row is locked, so two admins saving it at once end with one set. `not_allowed`, `unknown_period`. |
 | `duty_season_start(started_on, name)` (0050) | admin | „Nová sezóna…“: inserts a boundary; nothing else moves. The name is trimmed — `empty_name` when blank, `duty_seasons_name_check` past 40 chars. `season_order` unless it starts after the newest boundary (serialised per alley by an advisory lock). `not_allowed`. |
 | `duty_season_delete(started_on)` (0050) | admin | „Vrátit poslední sezónu“: deletes that boundary, which must be the newest (`not_newest` otherwise, and when there is none). `not_allowed`. |
-| `move_reservation(...)`, `move_day_reservations(...)` | admin; the player on duty from today on (0050, `duty_gate`) | Re-seat one / all reservations of a day; same collision rules as create (rentals resolved by `rental_occurrences`). `move_reservation` passes the gate with Prague today before it reads the row (`not_allowed` before a word about it), then with the reservation's date — a move keeps the date, so source and target are one. `not_allowed`, `date_past`, `slot_taken`, `blocked_by_*`. |
-| `cancel_block_day_reservations(date, block, note?)` | admin; the player on duty from today on (0050) | Bulk cancel before hiding a template block for one day. `not_allowed`, `date_past`, `unknown_block`. |
-| `set_day_override(date, closed, reason?, block_ids?)` | admin; the player on duty from today on (0050) | Upsert the override and cancel the reservations it displaces. `not_allowed`, `date_past`. |
+| `move_reservation(...)`, `move_day_reservations(...)` | admin; the player on duty from today on (0050, `duty_gate`) | Re-seat one / all reservations of a day; same collision rules as create (rentals resolved by `rental_occurrences`). `move_reservation` passes the gate with Prague today before it reads the row (`not_allowed` before a word about it), then with the reservation's date — a move keeps the date, so source and target are one. On today the duty moves nothing out of or into a block that has started (`too_late`); the admin may. `not_allowed`, `date_past`, `too_late`, `slot_taken`, `blocked_by_*`. |
+| `cancel_block_day_reservations(date, block, note?)` | admin; the player on duty from today on (0050) | Bulk cancel before hiding a template block for one day. The duty's call spares the trainings of a block that has started today (like `cancel_stranded_reservations`); the admin's cancels them too. `not_allowed`, `date_past`, `unknown_block`. |
+| `set_day_override(date, closed, reason?, block_ids?)` | admin; the player on duty from today on (0050) | Upsert the override and cancel the reservations it displaces — the duty's call not those whose block has started today (like `cancel_stranded_reservations`), the admin's all of them. `not_allowed`, `date_past`. |
 | `add_special_block(starts_at, ends_at)` (0050) | admin; the player on duty | Inserts an inactive day-only block of the caller's alley (`position -1` — the SPECIAL sentinel the Rozvrh list hides — `active false`, so the weekly template ignores it) that a day override then points at; returns its id. Behind `Api.addSpecialBlock` instead of a direct insert, so the duty needs no wider `time_blocks` policy. `not_allowed`; `time_blocks_check` when the end is not after the start. |
 | `delete_day_override(date)` (0050) | admin; the player on duty from today on | Deletes the day's override: the day returns to the weekly template (`override_changed` cancels what no longer fits). No override is no error. Behind `Api.deleteDayOverride` instead of a direct delete. `not_allowed`, `date_past`. |
 | `rental_add_date(rental, date, starts_at, ends_at, lanes, note)` | admin | Adds a one-time date next to `rental` (a one-time row of the caller's tenant): creates its `rental_groups` row from the rental's name/colour and adopts it when it has none, then inserts the date with its own lanes/times/note. The source row is read `for update`, so two admins adding a date to the same groupless rental at once cannot each create a group and split it in half. Returns the new row id. Raises `not_authenticated`, `not_allowed`, `unknown_rental` (foreign, exception or weekly row). |
@@ -208,7 +208,11 @@ days — nothing else, and only through RPCs:
   `move_day_reservations`, `move_reservation`, `delete_day_override`,
   `add_special_block`: gated by `duty_gate(date)` — the admin passes on any
   date; anyone else needs `is_on_duty()` (`not_allowed`) and a date of
-  Prague today or later (`date_past`).
+  Prague today or later (`date_past`). A block that has started today is
+  the duty's limit too: the moves refuse to take a training out of it or
+  into it (`too_late`), and closing the day or cancelling a block spares
+  its trainings, as the override cascade does — they are played, and
+  `monthly_attendance` counts them. The admin's calls do all of it.
 - Still the admin's alone, because no policy got wider: the weekly
   template (`time_blocks` writes), `priority_slots`, rentals, slot types,
   clubs, settings, profiles, attendance and every other admin RPC. A direct
@@ -227,6 +231,8 @@ Every cascade sets `cancelled_via = 'admin'`, `notify_player = true`, and
 the notify function mails "Trénink zrušen" with the note as the reason
 (past dates stay silent). That holds when the player on duty closes or
 edits a day, too (0050): only `cancel_reservation` marks a cancel `'duty'`.
+The duty's `set_day_override` / `cancel_block_day_reservations` spare what
+has started today, like the triggers; the admin's cancel it as well.
 
 | Event | Mechanism | Which reservations | Note |
 |---|---|---|---|
@@ -968,7 +974,13 @@ and FCM is configured, e-mail otherwise.
   `'app'` and a group mate's `'group'`; a duty cancel as `'duty'` keeping
   the note and notify choice, a null choice notifying, `too_late` for a
   started training, `not_allowed` for another alley's; every day RPC from
-  today on and `date_past` for yesterday; a player whose duty ended refused
+  today on and `date_past` for yesterday; a started block of today (the
+  00:00 one) neither left nor entered by the duty's moves (`too_late`) and
+  spared by the duty's block cancel and day close, while tomorrow's 00:00
+  moves freely; the admin through the same RPCs on yesterday (move,
+  block move, block cancel, close, override delete) and on a started block
+  today (out, in, cancelled by the block list and as a block), and adding a
+  day-only block; a player whose duty ended refused
   with `not_allowed` everywhere — an unknown reservation too — changing
   nothing, while their own booking still works; and on duty, no direct
   write to blocks, matches, rentals, settings or overrides), and the 0035

@@ -642,17 +642,26 @@ grant execute on function delete_day_override(date) to authenticated;
 
 -- ------------------------------------------ the day RPCs: admin or duty
 -- The current bodies (0011, move_reservation 0021; copied from
--- supabase/schema.sql) with one change each: the is_admin() gate became
--- duty_gate(date) (move_reservation gates twice, see there). Signatures,
--- defaults and grants stay (create or replace).
+-- supabase/schema.sql): the is_admin() gate became duty_gate(date)
+-- (move_reservation gates twice, see there), and a started block of today
+-- is the duty's limit, as it is every player's: a cancel spares its
+-- trainings (like cancel_stranded_reservations — they are played, and
+-- attendance is the admin's), a move neither leaves nor enters it
+-- (`too_late`). The admin's path is unchanged. Signatures, defaults and
+-- grants stay (create or replace).
 
--- Upsert the day's override and cancel the reservations it displaces.
+-- Upsert the day's override and cancel the reservations it displaces
+-- (the duty's: not those under way today).
 create or replace function set_day_override(
   p_date date, p_closed boolean, p_reason text default '',
   p_block_ids uuid[] default null)
 returns void
 language plpgsql security definer set search_path = public
 as $$
+declare
+  v_admin boolean := is_admin();
+  v_today date := (now() at time zone 'Europe/Prague')::date;
+  v_now time := (now() at time zone 'Europe/Prague')::time;
 begin
   perform duty_gate(p_date);
 
@@ -672,19 +681,27 @@ begin
       cancel_note = coalesce(nullif(trim(p_reason), ''), 'změna rozvrhu'),
       notify_player = true,
       notify_message = null
-  where r.date = p_date
+  from time_blocks b
+  where b.id = r.block_id
+    and r.date = p_date
     and r.tenant_id = current_tenant_id()
     and r.cancelled_at is null
-    and (p_closed or (p_block_ids is not null and not (r.block_id = any (p_block_ids))));
+    and (p_closed or (p_block_ids is not null and not (r.block_id = any (p_block_ids))))
+    and (v_admin or not (r.date = v_today and b.starts_at <= v_now));
 end;
 $$;
 
--- Bulk cancel before hiding a template block for one day.
+-- Bulk cancel before hiding a template block for one day (the duty's:
+-- nothing once the block has started today).
 create or replace function cancel_block_day_reservations(
   p_date date, p_block uuid, p_note text default 'změna rozvrhu')
 returns void
 language plpgsql security definer set search_path = public
 as $$
+declare
+  v_admin boolean := is_admin();
+  v_today date := (now() at time zone 'Europe/Prague')::date;
+  v_now time := (now() at time zone 'Europe/Prague')::time;
 begin
   perform duty_gate(p_date);
   if not exists (
@@ -694,20 +711,24 @@ begin
     raise exception 'unknown_block';
   end if;
 
-  update reservations
+  update reservations r
   set cancelled_at = now(),
       cancelled_via = 'admin',
       cancel_note = coalesce(nullif(trim(p_note), ''), 'změna rozvrhu'),
       notify_player = true,
       notify_message = null
-  where date = p_date
-    and block_id = p_block
-    and cancelled_at is null
-    and tenant_id = current_tenant_id();
+  from time_blocks b
+  where b.id = r.block_id
+    and r.date = p_date
+    and r.block_id = p_block
+    and r.cancelled_at is null
+    and r.tenant_id = current_tenant_id()
+    and (v_admin or not (r.date = v_today and b.starts_at <= v_now));
 end;
 $$;
 
--- Re-seat all reservations of a day's block into another block.
+-- Re-seat all reservations of a day's block into another block (the
+-- duty's: neither block started today, else `too_late`).
 create or replace function move_day_reservations(
   p_date date, p_from_block uuid, p_to_block uuid,
   p_notify boolean default true, p_message text default null)
@@ -727,6 +748,15 @@ begin
     raise exception 'unknown_block';
   end if;
 
+  if not is_admin()
+     and p_date = (now() at time zone 'Europe/Prague')::date
+     and exists (
+       select 1 from time_blocks
+       where id in (p_from_block, p_to_block)
+         and starts_at <= (now() at time zone 'Europe/Prague')::time) then
+    raise exception 'too_late';
+  end if;
+
   update reservations
   set block_id = p_to_block,
       notify_player = coalesce(p_notify, true),
@@ -742,7 +772,8 @@ $$;
 
 -- Re-seat one reservation. A move keeps its date, so the source and the
 -- target date are one: the duty is refused before a word about the
--- reservation (Prague today), then held to the reservation's date.
+-- reservation (Prague today), then held to the reservation's date, and on
+-- today neither its block nor the target may have started (`too_late`).
 create or replace function move_reservation(
   p_reservation uuid, p_to_block uuid, p_lane integer,
   p_notify boolean default true, p_message text default null)
@@ -767,6 +798,14 @@ begin
   where id = p_to_block and tenant_id = current_tenant_id();
   if not found then
     raise exception 'unknown_block';
+  end if;
+
+  if not is_admin()
+     and v_res.date = (now() at time zone 'Europe/Prague')::date
+     and (v_block.starts_at <= (now() at time zone 'Europe/Prague')::time
+          or (select starts_at from time_blocks where id = v_res.block_id)
+             <= (now() at time zone 'Europe/Prague')::time) then
+    raise exception 'too_late';
   end if;
 
   select lane_count into v_lanes from schedule_settings

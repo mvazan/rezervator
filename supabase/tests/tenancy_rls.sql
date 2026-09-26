@@ -7386,30 +7386,49 @@ begin
 end $$;
 
 -- 21e. Pavel edits days from today on: moves one reservation and a whole
--- block of today, cancels a block of today, sets and deletes overrides for
--- today and tomorrow, adds a day-only block; yesterday is date_past for
--- every one of them.
+-- block of today, cancels a block of today, closes today, sets and deletes
+-- overrides for today and tomorrow, adds a day-only block; yesterday is
+-- date_past for every one of them. A started block is the players' own
+-- rule too: the duty moves nothing out of it or into it (`too_late`), and
+-- a day or block cancel spares its trainings, as the override cascade does
+-- — they are played, and attendance is the admin's. Today's "not started"
+-- blocks sit in the day's last seconds (now() is the suite's transaction
+-- start, so they hold unless the suite starts right before midnight); the
+-- 00:00 block has always started today.
 reset role;
 do $$
 declare
   v_s constant uuid := '00000000-0000-0000-0000-000000000050';
   v_today constant date := (now() at time zone 'Europe/Prague')::date;
+  v_l1 uuid;
+  v_l2 uuid;
   v_id uuid;
 begin
+  insert into time_blocks (tenant_id, starts_at, ends_at, position)
+    values (v_s, '23:59:57', '23:59:58', 97) returning id into v_l1;
+  insert into time_blocks (tenant_id, starts_at, ends_at, position)
+    values (v_s, '23:59:58', '23:59:59', 98) returning id into v_l2;
+  perform set_config('probe.duty_l1', v_l1::text, true);
+  perform set_config('probe.duty_l2', v_l2::text, true);
   insert into reservations (tenant_id, player_id, date, block_id, lane,
                             created_via, created_by)
-  values (v_s, '50000000-0000-0000-0000-000000000013', v_today,
-          current_setting('probe.duty_b1')::uuid, 1, 'app',
-          '50000000-0000-0000-0000-000000000013')
+  values (v_s, '50000000-0000-0000-0000-000000000013', v_today, v_l1, 1,
+          'app', '50000000-0000-0000-0000-000000000013')
   returning id into v_id;
   perform set_config('probe.duty_res_today1', v_id::text, true);
   insert into reservations (tenant_id, player_id, date, block_id, lane,
                             created_via, created_by)
-  values (v_s, '50000000-0000-0000-0000-000000000013', v_today,
-          current_setting('probe.duty_b2')::uuid, 1, 'app',
-          '50000000-0000-0000-0000-000000000013')
+  values (v_s, '50000000-0000-0000-0000-000000000013', v_today, v_l2, 1,
+          'app', '50000000-0000-0000-0000-000000000013')
   returning id into v_id;
   perform set_config('probe.duty_res_today2', v_id::text, true);
+  insert into reservations (tenant_id, player_id, date, block_id, lane,
+                            created_via, created_by)
+  values (v_s, '50000000-0000-0000-0000-000000000013', v_today,
+          current_setting('probe.duty_b0')::uuid, 1, 'app',
+          '50000000-0000-0000-0000-000000000013')
+  returning id into v_id;
+  perform set_config('probe.duty_res_played', v_id::text, true);
 end $$;
 set local role authenticated;
 set local request.jwt.claims =
@@ -7417,42 +7436,103 @@ set local request.jwt.claims =
 do $$
 declare
   v_today constant date := (now() at time zone 'Europe/Prague')::date;
+  v_b0 constant uuid := current_setting('probe.duty_b0')::uuid;
   v_b1 constant uuid := current_setting('probe.duty_b1')::uuid;
   v_b2 constant uuid := current_setting('probe.duty_b2')::uuid;
+  v_l1 constant uuid := current_setting('probe.duty_l1')::uuid;
+  v_l2 constant uuid := current_setting('probe.duty_l2')::uuid;
   v_r1 constant uuid := current_setting('probe.duty_res_today1')::uuid;
   v_r2 constant uuid := current_setting('probe.duty_res_today2')::uuid;
+  v_r0 constant uuid := current_setting('probe.duty_res_played')::uuid;
+  v_tomorrow uuid;
   v_id uuid;
+  v_res reservations;
   v_o day_overrides;
   v_blk time_blocks;
 begin
-  perform move_reservation(v_r1, v_b2, 2);
+  -- One reservation: today, between blocks that have not started.
+  perform move_reservation(v_r1, v_l2, 2);
   if not exists (select 1 from reservations
-                 where id = v_r1 and block_id = v_b2 and lane = 2) then
+                 where id = v_r1 and block_id = v_l2 and lane = 2) then
     raise exception 'FAIL: the duty could not move a reservation of today';
   end if;
+  begin
+    perform move_reservation(v_r0, v_l1, 2);
+    raise exception 'FAIL: the duty moved a training out of a started block';
+  exception when others then
+    if sqlerrm <> 'too_late' then raise; end if;
+  end;
+  begin
+    perform move_reservation(v_r1, v_b0, 2);
+    raise exception 'FAIL: the duty moved a training into a started block';
+  exception when others then
+    if sqlerrm <> 'too_late' then raise; end if;
+  end;
   begin
     perform move_reservation(current_setting('probe.duty_res_past')::uuid, v_b2, 3);
     raise exception 'FAIL: the duty moved a reservation of yesterday';
   exception when others then
     if sqlerrm <> 'date_past' then raise; end if;
   end;
+  -- The 00:00 block of tomorrow has not started: that move is the duty's.
+  select id into v_tomorrow from reservations
+   where player_id = '50000000-0000-0000-0000-000000000015'
+     and date = v_today + 1 and cancelled_at is null;
+  perform move_reservation(v_tomorrow, v_b0, 1);
+  if not exists (select 1 from reservations
+                 where id = v_tomorrow and block_id = v_b0 and lane = 1) then
+    raise exception 'FAIL: the duty could not move tomorrow''s training to 00:00';
+  end if;
 
-  perform move_day_reservations(v_today, v_b2, v_b1);
+  -- A whole block: today between blocks that have not started, not out of
+  -- or into a started one; tomorrow's 00:00 is fine.
+  perform move_day_reservations(v_today, v_l2, v_l1);
   if (select count(*) from reservations
-       where id in (v_r1, v_r2) and block_id = v_b1) <> 2 then
+       where id in (v_r1, v_r2) and block_id = v_l1) <> 2 then
     raise exception 'FAIL: the duty could not move today''s block';
   end if;
+  begin
+    perform move_day_reservations(v_today, v_b0, v_l2);
+    raise exception 'FAIL: the duty moved a started block';
+  exception when others then
+    if sqlerrm <> 'too_late' then raise; end if;
+  end;
+  begin
+    perform move_day_reservations(v_today, v_l1, v_b0);
+    raise exception 'FAIL: the duty moved a block into a started one';
+  exception when others then
+    if sqlerrm <> 'too_late' then raise; end if;
+  end;
   begin
     perform move_day_reservations(v_today - 1, v_b1, v_b2);
     raise exception 'FAIL: the duty moved yesterday''s block';
   exception when others then
     if sqlerrm <> 'date_past' then raise; end if;
   end;
+  perform move_day_reservations(v_today + 1, v_b0, v_b2);
+  if not exists (select 1 from reservations
+                 where id = v_tomorrow and block_id = v_b2 and lane = 1) then
+    raise exception 'FAIL: the duty could not move tomorrow''s 00:00 block';
+  end if;
+  if not exists (select 1 from reservations
+                 where id = v_r0 and block_id = v_b0 and lane = 1
+                   and cancelled_at is null)
+     or (select count(*) from reservations
+          where id in (v_r1, v_r2) and block_id = v_l1) <> 2 then
+    raise exception 'FAIL: a refused move by the duty moved something';
+  end if;
 
-  perform cancel_block_day_reservations(v_today, v_b1, 'blok zrušen');
+  -- Cancelling a block of today: what has not started goes, a started
+  -- block's trainings stay.
+  perform cancel_block_day_reservations(v_today, v_l1, 'blok zrušen');
   if exists (select 1 from reservations
              where id in (v_r1, v_r2) and cancelled_at is null) then
     raise exception 'FAIL: the duty could not cancel today''s block';
+  end if;
+  perform cancel_block_day_reservations(v_today, v_b0, 'blok zrušen');
+  if not exists (select 1 from reservations
+                 where id = v_r0 and cancelled_at is null) then
+    raise exception 'FAIL: the duty cancelled a started block''s training';
   end if;
   begin
     perform cancel_block_day_reservations(v_today - 1, v_b1, 'blok zrušen');
@@ -7461,11 +7541,30 @@ begin
     if sqlerrm <> 'date_past' then raise; end if;
   end;
 
+  -- Closing today: the rest of the day goes, the training under way stays.
+  select * into v_res from create_reservation(
+    '50000000-0000-0000-0000-000000000015', v_today, v_l2, 3::smallint);
+  if v_res.created_via <> 'duty' then
+    raise exception 'FAIL: the duty could not book later today: %', v_res;
+  end if;
+  perform set_day_override(v_today, true, 'Zavřeno');
+  if not exists (select 1 from day_overrides where date = v_today and closed)
+     or not exists (select 1 from reservations
+                    where id = v_res.id and cancelled_at is not null)
+     or not exists (select 1 from reservations
+                    where id = v_r0 and cancelled_at is null) then
+    raise exception 'FAIL: closing today by the duty should cancel the rest of the day and spare the started training';
+  end if;
+
   perform set_day_override(v_today, false, '', array[v_b1, v_b2]);
   select * into v_o from day_overrides where date = v_today;
   if v_o.block_ids is distinct from array[v_b1, v_b2] or v_o.closed
      or v_o.created_by is distinct from '50000000-0000-0000-0000-000000000011' then
     raise exception 'FAIL: the duty could not set today''s blocks: %', v_o;
+  end if;
+  if not exists (select 1 from reservations
+                 where id = v_r0 and cancelled_at is null) then
+    raise exception 'FAIL: the duty''s block list for today cancelled a started training';
   end if;
   perform set_day_override(v_today + 1, true, 'Zavřeno kvůli akci');
   if not exists (select 1 from day_overrides
@@ -7500,6 +7599,7 @@ begin
   end if;
   perform set_config('probe.duty_special', v_id::text, true);
   raise notice 'OK: the duty edits days from today on, never yesterday (0050)';
+  raise notice 'OK: the duty leaves a started block alone: no move out or in (too_late), a day or block cancel spares it (0050)';
 end $$;
 
 -- 21f. Quido, whose duty is over, is a plain player again: every one of
@@ -7692,6 +7792,143 @@ begin
     raise exception 'FAIL: the template block is not what it was';
   end if;
   raise notice 'OK: on duty, the template, matches, rentals, settings and overrides stay behind the admin''s policies (0050)';
+end $$;
+
+-- 21h. Alena, S's admin, goes past the duty's rules through the same RPCs:
+-- yesterday is hers to move, cancel, close and return to the template
+-- (Správa → Výjimky deletes past overrides through delete_day_override),
+-- and so is a started block today — out of it, into it, cancelled with the
+-- day's block list or on its own. Her day-only block is added like the
+-- duty's. (She is on Pavel's period too, but an admin is never on duty:
+-- without the admin path every one of these would be not_allowed.)
+reset role;
+do $$
+declare
+  v_s constant uuid := '00000000-0000-0000-0000-000000000050';
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+  v_id uuid;
+begin
+  insert into reservations (tenant_id, player_id, date, block_id, lane,
+                            created_via, created_by)
+  values (v_s, '50000000-0000-0000-0000-000000000013', v_today - 1,
+          current_setting('probe.duty_b1')::uuid, 1, 'app',
+          '50000000-0000-0000-0000-000000000013')
+  returning id into v_id;
+  perform set_config('probe.duty_res_past2', v_id::text, true);
+  insert into reservations (tenant_id, player_id, date, block_id, lane,
+                            created_via, created_by)
+  values (v_s, '50000000-0000-0000-0000-000000000015', v_today - 1,
+          current_setting('probe.duty_b0')::uuid, 1, 'app',
+          '50000000-0000-0000-0000-000000000015')
+  returning id into v_id;
+  perform set_config('probe.duty_res_past3', v_id::text, true);
+  insert into reservations (tenant_id, player_id, date, block_id, lane,
+                            created_via, created_by)
+  values (v_s, '50000000-0000-0000-0000-000000000015', v_today,
+          current_setting('probe.duty_b0')::uuid, 3, 'app',
+          '50000000-0000-0000-0000-000000000015')
+  returning id into v_id;
+  perform set_config('probe.duty_res_played2', v_id::text, true);
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"50000000-0000-0000-0000-000000000010","role":"authenticated"}';
+do $$
+declare
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+  v_b0 constant uuid := current_setting('probe.duty_b0')::uuid;
+  v_b1 constant uuid := current_setting('probe.duty_b1')::uuid;
+  v_b2 constant uuid := current_setting('probe.duty_b2')::uuid;
+  v_y1 constant uuid := current_setting('probe.duty_res_past')::uuid;
+  v_y2 constant uuid := current_setting('probe.duty_res_past2')::uuid;
+  v_y3 constant uuid := current_setting('probe.duty_res_past3')::uuid;
+  v_t0 constant uuid := current_setting('probe.duty_res_played')::uuid;
+  v_t1 constant uuid := current_setting('probe.duty_res_played2')::uuid;
+  v_o day_overrides;
+  v_id uuid;
+  v_blk time_blocks;
+begin
+  -- Yesterday.
+  perform move_reservation(v_y1, v_b2, 3);
+  if not exists (select 1 from reservations
+                 where id = v_y1 and block_id = v_b2 and lane = 3
+                   and cancelled_at is null) then
+    raise exception 'FAIL: the admin could not move a reservation of yesterday';
+  end if;
+  perform move_day_reservations(v_today - 1, v_b1, v_b2);
+  if not exists (select 1 from reservations
+                 where id = v_y2 and block_id = v_b2 and lane = 1
+                   and cancelled_at is null) then
+    raise exception 'FAIL: the admin could not move yesterday''s block';
+  end if;
+  perform cancel_block_day_reservations(v_today - 1, v_b2, 'blok zrušen');
+  if (select count(*) from reservations
+       where id in (v_y1, v_y2) and cancelled_at is not null
+         and cancelled_via = 'admin' and cancel_note = 'blok zrušen') <> 2
+     or not exists (select 1 from reservations
+                    where id = v_y3 and cancelled_at is null) then
+    raise exception 'FAIL: the admin could not cancel yesterday''s block alone';
+  end if;
+  perform set_day_override(v_today - 1, true, 'x');
+  select * into v_o from day_overrides where date = v_today - 1;
+  if v_o.date is null or not v_o.closed or v_o.reason <> 'x'
+     or v_o.created_by is distinct from '50000000-0000-0000-0000-000000000010'
+     or not exists (select 1 from reservations
+                    where id = v_y3 and cancelled_at is not null
+                      and cancelled_via = 'admin' and cancel_note = 'x') then
+    raise exception 'FAIL: the admin could not close yesterday: %', v_o;
+  end if;
+  perform delete_day_override(v_today - 1);
+  if exists (select 1 from day_overrides where date = v_today - 1) then
+    raise exception 'FAIL: the admin could not delete yesterday''s override';
+  end if;
+
+  -- A started block today: out, in, cancelled by the block list, cancelled
+  -- as a block.
+  perform move_reservation(v_t0, v_b0, 2);
+  if not exists (select 1 from reservations
+                 where id = v_t0 and block_id = v_b0 and lane = 2) then
+    raise exception 'FAIL: the admin could not move a started training';
+  end if;
+  perform move_day_reservations(v_today, v_b0, v_b1);
+  if (select count(*) from reservations
+       where id in (v_t0, v_t1) and block_id = v_b1
+         and cancelled_at is null) <> 2 then
+    raise exception 'FAIL: the admin could not move a started block';
+  end if;
+  perform move_reservation(v_t1, v_b0, 3);
+  if not exists (select 1 from reservations
+                 where id = v_t1 and block_id = v_b0 and lane = 3) then
+    raise exception 'FAIL: the admin could not move a training into a started block';
+  end if;
+  perform set_day_override(v_today, false, 'x', array[v_b1, v_b2]);
+  if not exists (select 1 from reservations
+                 where id = v_t1 and cancelled_at is not null
+                   and cancelled_via = 'admin' and cancel_note = 'x')
+     or not exists (select 1 from reservations
+                    where id = v_t0 and cancelled_at is null) then
+    raise exception 'FAIL: the admin''s block list for today should cancel the started training outside it';
+  end if;
+  perform move_day_reservations(v_today, v_b1, v_b0);
+  if not exists (select 1 from reservations
+                 where id = v_t0 and block_id = v_b0 and lane = 2) then
+    raise exception 'FAIL: the admin could not move a block into a started one';
+  end if;
+  perform cancel_block_day_reservations(v_today, v_b0, 'blok zrušen');
+  if not exists (select 1 from reservations
+                 where id = v_t0 and cancelled_at is not null
+                   and cancelled_via = 'admin') then
+    raise exception 'FAIL: the admin could not cancel a started block';
+  end if;
+
+  v_id := add_special_block('06:10', '06:20');
+  select * into v_blk from time_blocks where id = v_id;
+  if v_blk.id is null or v_blk.position <> -1 or v_blk.active
+     or v_blk.tenant_id <> '00000000-0000-0000-0000-000000000050'
+     or v_blk.starts_at <> '06:10' or v_blk.ends_at <> '06:20' then
+    raise exception 'FAIL: the admin could not add a day-only block: %', v_blk;
+  end if;
+  raise notice 'OK: the admin edits any day, yesterday and started blocks too, through the duty''s RPCs (0050)';
 end $$;
 
 -- The next sections start without duties.
