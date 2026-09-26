@@ -14,6 +14,15 @@ void main() {
       expect(authErrorRedirect(Uri.parse('/error_code=otp_expired')), '/');
     });
 
+    test('a successful magic link leaves "#sb" behind — supabase_flutter '
+        'strips the tokens but not GoTrue\'s own sb marker — and that goes '
+        'home too, not to "Page Not Found"', () {
+      for (final location in ['/sb', '/sb=', '/sb&x=1', '/access_token=abc',
+          '/type=magiclink']) {
+        expect(authErrorRedirect(Uri.parse(location)), '/', reason: location);
+      }
+    });
+
     test('real routes stay where they are', () {
       for (final location in [
         '/',
@@ -21,6 +30,7 @@ void main() {
         '/prehled/tj-sokol-brno-iv',
         '/?code=abc',
         '/?error=access_denied&error_code=otp_expired',
+        '/sbirka',
       ]) {
         expect(authErrorRedirect(Uri.parse(location)), isNull,
             reason: location);
