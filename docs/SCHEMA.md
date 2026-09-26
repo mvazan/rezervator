@@ -84,7 +84,7 @@ Every `color` column above is one `integer` (0030): the negative values are the 
 | `calendar_teams` | (0032) One row per player **+** followed team — replaces `google_calendar_links.match_teams`, because a team now needs to say more than its name: `user_id → profiles` (cascade), `team` (a `priority_slots.home_team`/`away_team` string), `calendar` (`primary` \| `secondary`, default `primary` — which of the player's two Google calendars this team's matches go to). PK (`user_id`, `team`). In the Realtime publication (0035) — the profile card streams it. Colour (`color_id`) lived here until 0036 moved it to `team_colors` below, independent of this table. | select own rows only (`user_id = auth.uid()`); `authenticated` has SELECT and nothing else (0035) — every write is the server's, through `calendar-manage`/`set_calendar_teams_for`, which also keeps `google_calendar_links.match_teams` mirrored for the 1.2.1 app. |
 | `team_colors` | (0036) One row per player **+** team the player has coloured — `user_id → profiles` (cascade), `team`, `color_id` (Google event `colorId` 1–11, `not null` — no row at all means no colour). PK (`user_id`, `team`). Independent of **both** team lists (`profiles.followed_teams` and `calendar_teams`) and of whether a calendar is even linked: the one colour shown for a team in Můj přehled and in its Google Calendar event alike. In the Realtime publication. | select own rows only (`user_id = auth.uid()`); `authenticated` has SELECT and nothing else (0037) — every write is the server's, through `calendar-manage`/`set_team_colors_for`, which saves a colour and immediately repaints the affected future Google Calendar events in the same request. |
 | `match_exceptions` | (0039) One row per player **+** match where the player disagrees with their teams — `user_id → profiles` (cascade), `match_id → priority_slots` (cascade), `shown` (`true` adds a match no team gives them, `false` hides one a team does), `calendar` (`primary` \| `secondary`, default `primary`; only ever consulted for an added match, and the app offers no choice — the column is there for the day it does). PK (`user_id`, `match_id`). Agreeing with the teams stores nothing: the row is deleted instead, so "back to what the team says" is the absence of a row rather than a third state. In the Realtime publication. | select own rows only (`user_id = auth.uid()`); `authenticated` has SELECT and nothing else — the one way in is `set_match_exception`, callable by the app. |
-| `reminders_sent` | (0040) The receipt for a reminder already delivered — `user_id → profiles` (cascade), `event_key` (`r:<uuid>` for a reservation, `m:<uuid>` for a match — one column instead of two nullable foreign keys and a CHECK to police them), `offset_minutes`, `sent_at`, `starts_at` (0049: the start the reminder announced; null = no known start, counts for any). PK the first three. A receipt covers the event's longer lead times for the same start, and a moved event rings again at its new time (0049). Nothing schedules reminders; `due_reminders()` asks every minute what is due *now* from the data as it stands, and this table is the only state that carries over, so a repeated tick or a retried send does not ring twice. No foreign key to the event and therefore no cascade: the tick prunes anything older than 30 days. | **server-only**: RLS on, zero policies, every grant revoked. |
+| `reminders_sent` | (0040) The receipt for a reminder already delivered — `user_id → profiles` (cascade), `event_key` (`r:<uuid>` for a reservation, `m:<uuid>` for a match, `d:<uuid>` for a canteen duty period (0050) — one column instead of nullable foreign keys and a CHECK to police them), `offset_minutes`, `sent_at`, `starts_at` (0049: the start the reminder announced; null = no known start, counts for any). PK the first three. A receipt covers the event's longer lead times for the same start, and a moved event rings again at its new time (0049). Nothing schedules reminders; `due_reminders()` asks every minute what is due *now* from the data as it stands, and this table is the only state that carries over, so a repeated tick or a retried send does not ring twice. No foreign key to the event and therefore no cascade: the tick prunes anything older than 30 days. | **server-only**: RLS on, zero policies, every grant revoked. |
 | `oauth_nonces` | The OAuth `state`: `nonce` (48 hex chars from `gen_random_bytes(24)`), `user_id → profiles` (cascade), `created_at`, `consumed_at`. One-shot with a 10-minute TTL — the callback function runs without a JWT, so this is what binds Google's redirect to a signed-in player. | **server-only** like the tokens. |
 
 View `players` (owned by postgres → bypasses `profiles` RLS on purpose):
@@ -800,6 +800,46 @@ and FCM is configured, e-mail otherwise.
   0049 gave the receipts written before it the start their event had then;
   one without a known start counts for any.
 
+### Připomínka služby na kantýně (0050)
+
+The alley's admin switches the reminder before a canteen duty on or off and
+picks its lead (`schedule_settings.duty_reminder_enabled` /
+`duty_reminder_days`, 1–14 days; off keeps the lead). Like 0040, nothing is
+scheduled: the minutely tick asks what is due now, so a moved or deleted
+period, a changed roster or a changed lead simply answers differently.
+
+- **`due_duty_reminders()`** (security definer, stable, `service_role`
+  only) returns (`user_id`, `email`, `fcm_token`, `period_id`, `starts_on`,
+  `ends_on`, `days`, `co_assignees text[]`) — one row per assigned account
+  and period where the period's alley has the reminder on, 18:00 Prague on
+  `starts_on − days` has passed (a period planned or a player assigned
+  inside the lead is reminded at once, late), the duty has not started
+  (`starts_on` after Prague today) and there is no receipt. Accounts only:
+  approved, no placeholder (no login, nowhere to send), never the kiosk;
+  an admin on the duty is reminded too. No tenant match, unlike
+  `is_on_duty()`: a superadmin visiting another alley still serves in their
+  own. `co_assignees` are the others on the roster, placeholders included
+  (they serve too). A function of its own, so `due_reminders()` and its
+  tests stay as they were.
+- **The receipt** is `reminders_sent` with `event_key = 'd:<period id>'`,
+  `offset_minutes = days × 1440` and `starts_at` = Prague midnight of
+  `starts_on`, read with 0049's meaning: a receipt at this lead or a closer
+  one, for this start, covers it — a lead lengthened after the reminder went
+  out does not ring again, and a period moved to other dates does. The tick
+  prunes it after 30 days like every receipt; by then the duty has long
+  started, and a started duty is never due.
+- **`notifications_due()`** also wakes for a due duty reminder.
+- **notify** sends them in the CRON branch after the other reminders
+  (`sendDueDutyReminders`, `_shared/duty_reminders.ts`), through the same
+  push-or-e-mail door and the same delivery contract as
+  `deliverDueReminders`: marked when delivered or undeliverable, due again
+  next minute after a retry or a throw. Title „Zítra sloužíš na kantýně“ /
+  „Za 2 dny sloužíš na kantýně“, counting the Prague calendar days actually
+  left (never „Dnes“; a duty that began between the query and the send is
+  skipped); body „po 5. 10. – ne 11. 10.“ (a one-day duty names its day
+  once) plus „, spolu s: …“ sorted Czech-alphabetically; the e-mail adds
+  what the duty may do. Push data `kind = duty_reminder`.
+
 ## Edge functions
 
 - **notify** — called by `notify_webhook()` (pg_net POST; URL and
@@ -810,7 +850,14 @@ and FCM is configured, e-mail otherwise.
   token signed with `CANCEL_TOKEN_SECRET`, valid until the block starts);
   reservation update: admin cancel of an upcoming date → the player
   (honours `notify_player`, `cancel_note` as the reason), move → the player
-  ("Termín přesunut", `notify_message` overrides the wording); tenant
+  ("Termín přesunut", `notify_message` overrides the wording); a booking by
+  a group mate (0044) or by the player on duty (0050, `created_via = 'duty'`,
+  push kind `duty_booking`) → the player, „X ti zarezervoval(a) trénink: …“;
+  a cancel by the player on duty (`cancelled_via = 'duty'`, 0050) → like the
+  admin's (honours `notify_player`, silent for past dates), the default
+  reason „zrušil(a) X (služba na kantýně)“ instead of „zrušeno správcem“
+  (the duty's day-level cancels are `'admin'` with a non-empty note);
+  tenant
   insert (pending) → superadmins. Channel: FCM push when the profile has an
   `fcm_token` and `FIREBASE_SERVICE_ACCOUNT` is set, otherwise Resend
   e-mail. Fails closed on a missing `WEBHOOK_SECRET` (401) or
@@ -983,7 +1030,17 @@ and FCM is configured, e-mail otherwise.
   day-only block; a player whose duty ended refused
   with `not_allowed` everywhere — an unknown reservation too — changing
   nothing, while their own booking still works; and on duty, no direct
-  write to blocks, matches, rentals, settings or overrides), and the 0035
+  write to blocks, matches, rentals, settings or overrides), the 0050 duty
+  reminder (`due_duty_reminders()` stable, security definer and the
+  service's alone, `notifications_due()` still the service's; nothing due
+  and the tick asleep while the reminder is off; on, due from 18:00 Prague
+  on the lead day — yesterday's passed, tomorrow's not, today's by the
+  clock — until the duty starts, not on its first day; for the period's
+  accounts and the admin, never a placeholder, a pending player or the
+  kiosk, with the others as `co_assignees`; a demoted player not reminded
+  until approved again; a receipt silencing only its player, a closer lead
+  covering a longer one, a moved period ringing again and its receipt
+  moving with it; switched off, nothing due and the lead kept), and the 0035
   assertion (now including `team_colors`, `match_exceptions` and 0050's
   `duty_periods` / `duty_assignments`) that every table
   `lib/data/providers.dart` streams is in the `supabase_realtime`

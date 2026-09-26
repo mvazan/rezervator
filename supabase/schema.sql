@@ -1206,6 +1206,40 @@ $$;
 ALTER FUNCTION "public"."delete_placeholder_player"("p_id" "uuid") OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."due_duty_reminders"() RETURNS TABLE("user_id" "uuid", "email" "text", "fcm_token" "text", "period_id" "uuid", "starts_on" "date", "ends_on" "date", "days" smallint, "co_assignees" "text"[])
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  select p.id, p.email, p.fcm_token, d.id, d.starts_on, d.ends_on,
+         s.duty_reminder_days,
+         array(select o.display_name
+                 from duty_assignments oa
+                 join profiles o on o.id = oa.user_id
+                where oa.period_id = d.id and oa.user_id <> p.id
+                order by o.display_name)
+    from duty_periods d
+    join schedule_settings s on s.tenant_id = d.tenant_id
+    join duty_assignments a on a.period_id = d.id
+    join profiles p on p.id = a.user_id
+   where s.duty_reminder_enabled
+     and p.status = 'approved' and not p.placeholder and p.role <> 'kiosk'
+     and d.starts_on > (now() at time zone 'Europe/Prague')::date
+     and ((d.starts_on - s.duty_reminder_days) + time '18:00')
+           at time zone 'Europe/Prague' <= now()
+     and not exists (
+       select 1 from reminders_sent r
+        where r.user_id = p.id
+          and r.event_key = 'd:' || d.id
+          and r.offset_minutes <= s.duty_reminder_days * 1440
+          and (r.starts_at is null
+               or r.starts_at = d.starts_on::timestamp at time zone 'Europe/Prague'))
+   order by d.starts_on, p.id;
+$$;
+
+
+ALTER FUNCTION "public"."due_duty_reminders"() OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."due_reminders"() RETURNS TABLE("user_id" "uuid", "email" "text", "fcm_token" "text", "event_key" "text", "offset_minutes" integer, "kind" "text", "starts_at" timestamp with time zone, "ends_at" time without time zone, "lane" smallint, "alley_name" "text", "home_team" "text", "away_team" "text", "is_away" boolean)
     LANGUAGE "sql" STABLE SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -2422,7 +2456,8 @@ CREATE OR REPLACE FUNCTION "public"."notifications_due"() RETURNS boolean
     SET "search_path" TO 'public'
     AS $$
   select exists (select 1 from notification_jobs where run_at <= now())
-      or exists (select 1 from due_reminders());
+      or exists (select 1 from due_reminders())
+      or exists (select 1 from due_duty_reminders());
 $$;
 
 
@@ -5548,6 +5583,11 @@ GRANT ALL ON FUNCTION "public"."delete_day_override"("p_date" "date") TO "servic
 GRANT ALL ON FUNCTION "public"."delete_placeholder_player"("p_id" "uuid") TO "anon";
 GRANT ALL ON FUNCTION "public"."delete_placeholder_player"("p_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."delete_placeholder_player"("p_id" "uuid") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."due_duty_reminders"() FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."due_duty_reminders"() TO "service_role";
 
 
 

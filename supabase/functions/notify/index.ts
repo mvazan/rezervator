@@ -4,12 +4,16 @@
 //   INSERT profiles      -> "new player waiting for approval" (to admins)
 //   INSERT reservations  -> kiosk booking confirmation (to the player;
 //                           the e-mail variant carries a one-click cancel link);
-//                           or, created_via = 'group' (0044), "X ti
-//                           zarezervoval(a) trénink" to the player it's for
+//                           or, created_via = 'group' (0044) or 'duty' (0050,
+//                           the player on duty), "X ti zarezervoval(a)
+//                           trénink" to the player it's for
 //   UPDATE reservations  -> admin cancelled an upcoming reservation, or an
 //                           admin MOVED it ("termín přesunut z X na Y") —
 //                           both honour the per-change notify_player flag +
 //                           optional notify_message the RPCs stamp (0011);
+//                           a cancel by the player on duty (cancelled_via
+//                           'duty', 0050) the same way, with "zrušil(a) X
+//                           (služba na kantýně)" as the default reason;
 //                           or, cancelled_via = 'group' (0044), "X ti zrušil(a)
 //                           trénink" to the player it was for
 //   INSERT tenants       -> "new kuželna waiting for approval" (to the
@@ -24,7 +28,9 @@
 //                           webhook (URL + x-webhook-secret). The same tick
 //                           also carries the due reminders (0040): "za 2
 //                           hodiny trénink", by the same push-or-e-mail
-//                           rule as everything else.
+//                           rule as everything else — and, after them, the
+//                           reminder before a canteen duty (0050): "Zítra
+//                           sloužíš na kantýně".
 //   CRON notification_jobs -> federation_* jobs (0045): vysledky.kuzelky.cz sync
 //
 // Channel per recipient: FCM push when profiles.fcm_token is set AND
@@ -43,6 +49,13 @@ import { processFederationJobs, siteFetcher } from "../_shared/federation_jobs.t
 import { dayLabel, escapeHtml, timeLabel } from "../_shared/format.ts";
 import { type Delivery, deliveryOf } from "../_shared/delivery.ts";
 import { deliverDueReminders, type DueReminder } from "../_shared/reminders.ts";
+import {
+  deliverDueDutyReminders,
+  dutyCancelReason,
+  type DueDutyReminder,
+  dutyReminderHtml,
+  dutyReminderReceipt,
+} from "../_shared/duty_reminders.ts";
 import {
   groupBookedMessage,
   groupCancelledMessage,
@@ -486,6 +499,37 @@ async function sendDueReminders() {
   );
 }
 
+/// The reminder before a canteen duty (0050), by the same rules as the
+/// ones above: sent through the usual door (the e-mail adds what the duty
+/// may do), marked once delivered or undeliverable, due again next tick
+/// otherwise. The receipt is 'd:<period>' at the alley's lead for the
+/// duty's first day, so a period moved to other dates rings again.
+async function sendDueDutyReminders() {
+  const { data, error } = await supabase.rpc("due_duty_reminders");
+  if (error) {
+    console.error("due_duty_reminders failed:", error);
+    return;
+  }
+  await deliverDueDutyReminders(
+    (data ?? []) as DueDutyReminder[],
+    new Date(),
+    (row, title, body) =>
+      notifyRecipient(
+        { id: row.user_id, email: row.email, fcm_token: row.fcm_token },
+        title,
+        body,
+        { data: { kind: "duty_reminder" }, html: dutyReminderHtml(row) },
+      ),
+    async (row) => {
+      const { error: markError } = await supabase.rpc(
+        "mark_reminder_sent",
+        dutyReminderReceipt(row),
+      );
+      if (markError) throw markError;
+    },
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Event handlers
 // ---------------------------------------------------------------------------
@@ -535,10 +579,12 @@ async function whenLabel(record: Record<string, unknown>): Promise<string | null
 async function handle(payload: WebhookPayload) {
   if (payload.type === "CRON" && payload.table === "notification_jobs") {
     // The minutely pg_cron tick (0023): process everything that's due — the
-    // calendar jobs, and then the reminders whose moment has come (0040).
-    // Its record is null, so it must never reach the row handlers below.
+    // calendar jobs, and then the reminders whose moment has come (0040),
+    // the canteen duty's last (0050). Its record is null, so it must never
+    // reach the row handlers below.
     await processJobs();
     await sendDueReminders();
+    await sendDueDutyReminders();
     try {
       await processFederationJobs(supabase, siteFetcher());
     } catch (error) {
@@ -603,7 +649,9 @@ async function handle(payload: WebhookPayload) {
 
     case "reservations": {
       if (payload.type === "INSERT") {
-        if (record.created_via === "group") {
+        // A booking made for the player by a group mate (0044) or by the
+        // player on duty (0050) reads the same: who booked it, and when.
+        if (record.created_via === "group" || record.created_via === "duty") {
           const [ctx, by] = await Promise.all([
             reservationContext(record),
             profileOf(record.created_by),
@@ -611,7 +659,10 @@ async function handle(payload: WebhookPayload) {
           if (!ctx || !by) return;
           const m = groupBookedMessage(by.display_name, ctx.when);
           await notifyRecipient(ctx.player, m.title, m.body, {
-            data: { kind: "group_booking", reservation_id: String(record.id) },
+            data: {
+              kind: record.created_via === "duty" ? "duty_booking" : "group_booking",
+              reservation_id: String(record.id),
+            },
           });
           return;
         }
@@ -676,20 +727,31 @@ async function handle(payload: WebhookPayload) {
             });
             return;
           }
-          if (record.cancelled_via !== "admin") return;
+          // The player on duty (0050) cancels like the admin: the same
+          // notify choice and the same silence for past dates, but the
+          // default reason names who it was, not the admin.
+          const byDuty = record.cancelled_via === "duty";
+          if (record.cancelled_via !== "admin" && !byDuty) return;
           if (!wantsNotify) return;
           // Retro no-show cancels (past dates) stay silent.
           if ((record.date as string) < pragueToday()) return;
-          const ctx = await reservationContext(record);
+          const [ctx, by] = await Promise.all([
+            reservationContext(record),
+            byDuty ? profileOf(record.cancelled_by) : null,
+          ]);
           if (!ctx) return;
           const note = String(record.cancel_note ?? "").trim();
-          const reason = note.length > 0 ? note : "zrušeno správcem";
+          let reason = note.length > 0 ? note : "zrušeno správcem";
+          if (byDuty) {
+            if (!by) return;
+            reason = dutyCancelReason(note, by.display_name);
+          }
           await notifyRecipient(
             ctx.player,
             "Trénink zrušen",
             `${ctx.when} — ${reason}.`,
             {
-              data: { kind: "admin_cancelled" },
+              data: { kind: byDuty ? "duty_cancelled" : "admin_cancelled" },
               html: `<p>Tvoje rezervace byla zrušena:</p>` +
                 `<p><b>${escapeHtml(ctx.when)}</b></p>` +
                 `<p>Důvod: ${escapeHtml(reason)}.</p>`,

@@ -7938,4 +7938,262 @@ delete from duty_periods
                      '00000000-0000-0000-0000-000000000002',
                      '00000000-0000-0000-0000-000000000050');
 
+-- 0050 — připomínka služby ------------------------------------------------------
+-- The reminder before a canteen duty: due_duty_reminders() answers every
+-- minute, like due_reminders(), which duty is worth a reminder right now
+-- (the alley switched it on, 18:00 Prague on the lead day has passed, the
+-- duty has not started, no receipt for this start). Accounts only.
+
+-- 22. Fixtures in S (21's alley and players), a four-day lead:
+--   p0  today               Quido               started today: never
+--   p1  today + 1           Pavel, Alena (the admin), Vilém (placeholder)
+--                           lead day today − 3: due
+--   p2  today + 2           Tereza, Petra (pending), the kiosk
+--                           lead day today − 2: due, for Tereza only
+--   p3  today + 4           Urban               lead day today: due from 18:00
+--   p4  today + 5 … + 8     Wanda               lead day tomorrow: not yet
+-- today + 3 stays free for moving p1 (22e). The pending player and the
+-- kiosk are assigned directly: duty_set_assignees refuses both, and the
+-- reminder must hold that line on its own. The tick's gate is asked
+-- directly, so everything else that could wake it is cleared first (the
+-- job queue, every player's own reminders, every other alley's duty
+-- reminder); the transaction's rollback puts it all back.
+reset role;
+do $$
+declare
+  v_s constant uuid := '00000000-0000-0000-0000-000000000050';
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+  v_id uuid;
+begin
+  insert into profiles (id, tenant_id, display_name, email, role, status)
+  values
+    ('50000000-0000-0000-0000-000000000017', v_s, 'Petra Čekající',
+     'duty-petra@example.com', 'player', 'pending'),
+    ('50000000-0000-0000-0000-000000000018', v_s, 'Kiosk S',
+     'duty-kiosk@example.com', 'kiosk', 'approved');
+  update profiles set fcm_token = 'tok-pavel'
+   where id = '50000000-0000-0000-0000-000000000011';
+
+  insert into duty_periods (tenant_id, starts_on, ends_on)
+    values (v_s, v_today, v_today) returning id into v_id;
+  insert into duty_assignments (period_id, user_id, tenant_id) values
+    (v_id, '50000000-0000-0000-0000-000000000012', v_s);
+  insert into duty_periods (tenant_id, starts_on, ends_on)
+    values (v_s, v_today + 1, v_today + 1) returning id into v_id;
+  insert into duty_assignments (period_id, user_id, tenant_id) values
+    (v_id, '50000000-0000-0000-0000-000000000011', v_s),
+    (v_id, '50000000-0000-0000-0000-000000000010', v_s),
+    (v_id, '50000000-0000-0000-0000-000000000015', v_s);
+  perform set_config('probe.rem_p1', v_id::text, true);
+  insert into duty_periods (tenant_id, starts_on, ends_on)
+    values (v_s, v_today + 2, v_today + 2) returning id into v_id;
+  insert into duty_assignments (period_id, user_id, tenant_id) values
+    (v_id, '50000000-0000-0000-0000-000000000013', v_s),
+    (v_id, '50000000-0000-0000-0000-000000000017', v_s),
+    (v_id, '50000000-0000-0000-0000-000000000018', v_s);
+  perform set_config('probe.rem_p2', v_id::text, true);
+  insert into duty_periods (tenant_id, starts_on, ends_on)
+    values (v_s, v_today + 4, v_today + 4) returning id into v_id;
+  insert into duty_assignments (period_id, user_id, tenant_id) values
+    (v_id, '50000000-0000-0000-0000-000000000014', v_s);
+  perform set_config('probe.rem_p3', v_id::text, true);
+  insert into duty_periods (tenant_id, starts_on, ends_on)
+    values (v_s, v_today + 5, v_today + 8) returning id into v_id;
+  insert into duty_assignments (period_id, user_id, tenant_id) values
+    (v_id, '50000000-0000-0000-0000-000000000016', v_s);
+  perform set_config('probe.rem_p4', v_id::text, true);
+
+  update schedule_settings
+     set duty_reminder_enabled = false, duty_reminder_days = 4
+   where tenant_id = v_s;
+  delete from notification_jobs;
+  update profiles set notify_before_minutes = '{}'
+   where notify_before_minutes <> '{}';
+  update schedule_settings set duty_reminder_enabled = false
+   where duty_reminder_enabled;
+end $$;
+
+-- 22a. The machinery is the server's: only the service may ask what is
+-- due, and the tick's gate stays the service's too.
+do $$
+begin
+  if has_function_privilege('authenticated', 'public.due_duty_reminders()', 'execute')
+     or has_function_privilege('anon', 'public.due_duty_reminders()', 'execute') then
+    raise exception 'FAIL: the app can ask for the due duty reminders';
+  end if;
+  if not has_function_privilege('service_role', 'public.due_duty_reminders()', 'execute') then
+    raise exception 'FAIL: notify cannot ask for the due duty reminders';
+  end if;
+  if not (select prosecdef and provolatile = 's' from pg_proc
+           where oid = 'public.due_duty_reminders()'::regprocedure) then
+    raise exception 'FAIL: due_duty_reminders must be security definer and stable';
+  end if;
+  if has_function_privilege('authenticated', 'public.notifications_due()', 'execute')
+     or has_function_privilege('anon', 'public.notifications_due()', 'execute')
+     or not has_function_privilege('service_role', 'public.notifications_due()', 'execute') then
+    raise exception 'FAIL: notifications_due() is no longer the service''s alone';
+  end if;
+  raise notice 'OK: only the service asks which duty reminders are due (0050)';
+end $$;
+
+-- 22b. Off (the default), nothing is due, and the tick sleeps.
+do $$
+begin
+  if exists (select 1 from due_duty_reminders()) then
+    raise exception 'FAIL: a duty reminder is due with the reminder off';
+  end if;
+  if exists (select 1 from due_reminders())
+     or exists (select 1 from notification_jobs) then
+    raise exception 'FAIL: the fixtures left something else due';
+  end if;
+  if notifications_due() then
+    raise exception 'FAIL: the tick would wake with nothing due';
+  end if;
+  raise notice 'OK: with the duty reminder off nothing is due (0050)';
+end $$;
+
+-- 22c. On: one row per account and period whose lead day's 18:00 has
+-- passed and which has not started — never a placeholder, a pending
+-- player or the kiosk. Today's 18:00 is the one boundary a run can land on
+-- either side of: p3 is due exactly when the Prague clock is past it.
+do $$
+declare
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+  v_p1 constant uuid := current_setting('probe.rem_p1')::uuid;
+  v_p2 constant uuid := current_setting('probe.rem_p2')::uuid;
+  v_p3 constant uuid := current_setting('probe.rem_p3')::uuid;
+  v_evening constant boolean :=
+    (now() at time zone 'Europe/Prague')::time >= time '18:00';
+  v_row record;
+  v_got text;
+  v_want text;
+begin
+  update schedule_settings set duty_reminder_enabled = true
+   where tenant_id = '00000000-0000-0000-0000-000000000050';
+
+  select string_agg(g, ' ' order by g) into v_got
+    from (select d.period_id::text || '/' || d.user_id::text as g
+            from due_duty_reminders() d) x;
+  select string_agg(w, ' ' order by w) into v_want
+    from unnest(array[
+      v_p1::text || '/50000000-0000-0000-0000-000000000010',
+      v_p1::text || '/50000000-0000-0000-0000-000000000011',
+      v_p2::text || '/50000000-0000-0000-0000-000000000013']
+      || case when v_evening
+              then array[v_p3::text || '/50000000-0000-0000-0000-000000000014']
+              else '{}'::text[] end) w;
+  if v_got is distinct from v_want then
+    raise exception 'FAIL: due duty reminders % (evening %), expected %',
+      v_got, v_evening, v_want;
+  end if;
+
+  select * into v_row from due_duty_reminders()
+   where user_id = '50000000-0000-0000-0000-000000000011';
+  if v_row.email <> 'duty-pavel@example.com'
+     or v_row.fcm_token is distinct from 'tok-pavel'
+     or v_row.starts_on <> v_today + 1 or v_row.ends_on <> v_today + 1
+     or v_row.days <> 4
+     or v_row.co_assignees <> array['Alena Správcová', 'Vilém bez účtu'] then
+    raise exception 'FAIL: Pavel''s reminder row is wrong: %', v_row;
+  end if;
+  -- The placeholder is named among the others: they serve too.
+  select * into v_row from due_duty_reminders()
+   where user_id = '50000000-0000-0000-0000-000000000010';
+  if v_row.co_assignees <> array['Pavel Kantýnský', 'Vilém bez účtu'] then
+    raise exception 'FAIL: the admin''s co-assignees are wrong: %', v_row.co_assignees;
+  end if;
+
+  if not notifications_due() then
+    raise exception 'FAIL: the tick would sleep through a due duty reminder';
+  end if;
+  raise notice 'OK: a duty reminder is due from 18:00 on the lead day until the duty starts, for its accounts only (0050)';
+end $$;
+
+-- 22d. The account's standing decides, as it does for the rights: a
+-- player demoted to pending is not reminded, and is again once approved.
+do $$
+begin
+  update profiles set status = 'pending'
+   where id = '50000000-0000-0000-0000-000000000011';
+  if exists (select 1 from due_duty_reminders()
+              where user_id = '50000000-0000-0000-0000-000000000011') then
+    raise exception 'FAIL: a pending player is reminded of a duty';
+  end if;
+  update profiles set status = 'approved'
+   where id = '50000000-0000-0000-0000-000000000011';
+  if not exists (select 1 from due_duty_reminders()
+                  where user_id = '50000000-0000-0000-0000-000000000011') then
+    raise exception 'FAIL: the re-approved player lost the reminder';
+  end if;
+  raise notice 'OK: a pending player gets no duty reminder until approved again (0050)';
+end $$;
+
+-- 22e. The ledger, with 0049's meaning: the receipt notify writes
+-- ('d:<period>', the lead in minutes, Prague midnight of the first day)
+-- silences that duty for that player; a receipt at a closer lead covers a
+-- longer one; a period moved to another date rings again, and is silenced
+-- again by a receipt for its new start.
+do $$
+declare
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+  v_p1 constant uuid := current_setting('probe.rem_p1')::uuid;
+  v_pavel constant uuid := '50000000-0000-0000-0000-000000000011';
+  v_alena constant uuid := '50000000-0000-0000-0000-000000000010';
+begin
+  perform mark_reminder_sent(v_pavel, 'd:' || v_p1, 4 * 1440,
+    (v_today + 1)::timestamp at time zone 'Europe/Prague');
+  if exists (select 1 from due_duty_reminders() where user_id = v_pavel) then
+    raise exception 'FAIL: a marked duty reminder is still due';
+  end if;
+  if not exists (select 1 from due_duty_reminders() where user_id = v_alena)
+     or not exists (select 1 from due_duty_reminders()
+                     where user_id = '50000000-0000-0000-0000-000000000013') then
+    raise exception 'FAIL: one player''s receipt silenced the others';
+  end if;
+
+  perform mark_reminder_sent(v_alena, 'd:' || v_p1, 1440,
+    (v_today + 1)::timestamp at time zone 'Europe/Prague');
+  if exists (select 1 from due_duty_reminders() where user_id = v_alena) then
+    raise exception 'FAIL: a receipt at a closer lead did not cover the longer one';
+  end if;
+
+  update duty_periods set starts_on = v_today + 3, ends_on = v_today + 3
+   where id = v_p1;
+  if (select count(*) from due_duty_reminders()
+       where period_id = v_p1 and starts_on = v_today + 3
+         and user_id in (v_pavel, v_alena)) <> 2 then
+    raise exception 'FAIL: a moved duty did not ring again';
+  end if;
+  perform mark_reminder_sent(v_pavel, 'd:' || v_p1, 4 * 1440,
+    (v_today + 3)::timestamp at time zone 'Europe/Prague');
+  if exists (select 1 from due_duty_reminders() where user_id = v_pavel)
+     or (select count(*) from reminders_sent
+          where user_id = v_pavel and event_key = 'd:' || v_p1) <> 1 then
+    raise exception 'FAIL: the receipt did not move to the new start';
+  end if;
+  raise notice 'OK: a receipt silences the duty for its start; a moved duty rings again (0050)';
+end $$;
+
+-- 22f. Switched off, nothing is due and the tick sleeps; the lead stays.
+do $$
+begin
+  update schedule_settings set duty_reminder_enabled = false
+   where tenant_id = '00000000-0000-0000-0000-000000000050';
+  if exists (select 1 from due_duty_reminders()) then
+    raise exception 'FAIL: switching the reminder off left one due';
+  end if;
+  if notifications_due() then
+    raise exception 'FAIL: the tick wakes for a reminder that is off';
+  end if;
+  if (select duty_reminder_days from schedule_settings
+       where tenant_id = '00000000-0000-0000-0000-000000000050') <> 4 then
+    raise exception 'FAIL: switching off lost the lead';
+  end if;
+  raise notice 'OK: switched off, no duty reminder is due (0050)';
+end $$;
+
+reset role;
+delete from duty_periods
+ where tenant_id = '00000000-0000-0000-0000-000000000050';
+
 rollback;

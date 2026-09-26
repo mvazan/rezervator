@@ -1037,3 +1037,73 @@ begin
   where id = p_id;
 end;
 $$;
+
+-- ============================================== the reminder before a duty
+-- The alley's admin switches it on and picks the lead (schedule_settings,
+-- above). Nothing is scheduled, as for 0040's reminders: every minute the
+-- tick asks what is due now, from the data as it stands, so a moved or
+-- deleted period, a changed roster or a changed lead simply answers
+-- differently. A separate function: due_reminders() and its tests stay as
+-- they are.
+
+-- One row per (account, period) worth a reminder right now:
+--   * the period's alley has the reminder on;
+--   * 18:00 Prague on (starts_on − lead) has passed — a period planned or
+--     a player assigned inside the lead is reminded at once, late;
+--   * the duty has not started (starts_on after Prague today): nothing
+--     reminds of a duty already under way;
+--   * an account: approved, no placeholder (no login, nowhere to send),
+--     never the kiosk. The admin on a duty serves too. No tenant match,
+--     unlike is_on_duty(): a superadmin visiting another alley still
+--     serves in their own;
+--   * no receipt in reminders_sent under 'd:<period id>' at this lead or a
+--     closer one, for this start (Prague midnight of starts_on) — 0049's
+--     ledger: a period moved to other dates rings again.
+-- co_assignees: the others on the roster, placeholders included (they
+-- serve too); notify sorts them Czech-alphabetically for the text.
+create or replace function due_duty_reminders()
+returns table (
+  user_id uuid, email text, fcm_token text, period_id uuid,
+  starts_on date, ends_on date, days smallint, co_assignees text[])
+language sql stable security definer set search_path = public
+as $$
+  select p.id, p.email, p.fcm_token, d.id, d.starts_on, d.ends_on,
+         s.duty_reminder_days,
+         array(select o.display_name
+                 from duty_assignments oa
+                 join profiles o on o.id = oa.user_id
+                where oa.period_id = d.id and oa.user_id <> p.id
+                order by o.display_name)
+    from duty_periods d
+    join schedule_settings s on s.tenant_id = d.tenant_id
+    join duty_assignments a on a.period_id = d.id
+    join profiles p on p.id = a.user_id
+   where s.duty_reminder_enabled
+     and p.status = 'approved' and not p.placeholder and p.role <> 'kiosk'
+     and d.starts_on > (now() at time zone 'Europe/Prague')::date
+     and ((d.starts_on - s.duty_reminder_days) + time '18:00')
+           at time zone 'Europe/Prague' <= now()
+     and not exists (
+       select 1 from reminders_sent r
+        where r.user_id = p.id
+          and r.event_key = 'd:' || d.id
+          and r.offset_minutes <= s.duty_reminder_days * 1440
+          and (r.starts_at is null
+               or r.starts_at = d.starts_on::timestamp at time zone 'Europe/Prague'))
+   order by d.starts_on, p.id;
+$$;
+revoke all on function due_duty_reminders() from public, anon, authenticated;
+grant execute on function due_duty_reminders() to service_role;
+
+-- The tick's gate (0040) wakes for a due duty reminder too; otherwise the
+-- same body. notify's CRON branch sends them after the other reminders.
+create or replace function notifications_due()
+returns boolean
+language sql stable security definer set search_path = public
+as $$
+  select exists (select 1 from notification_jobs where run_at <= now())
+      or exists (select 1 from due_reminders())
+      or exists (select 1 from due_duty_reminders());
+$$;
+revoke all on function notifications_due() from public, anon, authenticated;
+grant execute on function notifications_due() to service_role;
