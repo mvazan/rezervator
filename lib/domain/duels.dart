@@ -54,6 +54,8 @@ class Duel {
     required this.state,
     required this.playedLanes,
     required this.diff,
+    required this.shownHome,
+    required this.shownAway,
     required this.pointWinner,
     required this.pointSplit,
     required this.decidedByPins,
@@ -83,6 +85,15 @@ class Duel {
   /// home − away. done: player totals; playing: sum over lanes both threw;
   /// waiting: null. Also null when a needed total is missing.
   final int? diff;
+
+  /// The home total every view prints (the card and its TalkBack text).
+  /// done: the player's own total; playing: the sum over the lanes both
+  /// players threw — the lanes [diff] counts — or null before there is one;
+  /// waiting: null.
+  final int? shownHome;
+
+  /// The away total every view prints — see [shownHome].
+  final int? shownAway;
 
   /// done only: the side whose teamPoints is 1; null on a split (0.5 each)
   /// or unknown.
@@ -149,19 +160,25 @@ Duel _duel(int position, MatchPlayerResult? home, MatchPlayerResult? away) {
     state = DuelState.playing;
   }
 
-  final int? diff = switch (state) {
-    DuelState.waiting => null,
+  // The totals every view prints: a lane only one side has thrown never
+  // counts while the duel is played, so it can never show as a lead.
+  final (int?, int?) shown = switch (state) {
+    DuelState.waiting => (null, null),
     DuelState.playing =>
       played.isEmpty
-          ? null
-          : played.fold<int>(
-              0,
-              (sum, l) => sum + l.home!.total! - l.away!.total!,
+          ? (null, null)
+          : (
+              played.fold<int>(0, (sum, l) => sum + l.home!.total!),
+              played.fold<int>(0, (sum, l) => sum + l.away!.total!),
             ),
-    DuelState.done =>
-      home!.total == null || away!.total == null
-          ? null
-          : home.total! - away.total!,
+    DuelState.done => (home!.total, away!.total),
+  };
+  final (shownHome, shownAway) = shown;
+
+  final int? diff = switch (state) {
+    DuelState.waiting => null,
+    DuelState.playing || DuelState.done =>
+      shownHome == null || shownAway == null ? null : shownHome - shownAway,
   };
 
   final done = state == DuelState.done;
@@ -181,6 +198,8 @@ Duel _duel(int position, MatchPlayerResult? home, MatchPlayerResult? away) {
     state: state,
     playedLanes: played.length,
     diff: diff,
+    shownHome: shownHome,
+    shownAway: shownAway,
     pointWinner: pointWinner,
     pointSplit: done && homePoint == 0.5 && awayPoint == 0.5,
     decidedByPins: pointWinner != null && homeSet != null && homeSet == awaySet,
@@ -250,23 +269,32 @@ num? _duelPoints(List<MatchPlayerResult> players, String side) {
   return any ? sum : null;
 }
 
+/// The last word of [name] („Lucie Mičanová“ → „Mičanová“); '–' when
+/// there is no name.
+String surnameOf(String? name) {
+  final trimmed = name?.trim() ?? '';
+  return trimmed.isEmpty ? '–' : trimmed.split(RegExp(r'\s+')).last;
+}
+
 /// TalkBack text for one duel, e.g.
 /// '1. souboj: Lucie Mičanová 407, Lukáš Pelánek 385, o 22, bod domácím'.
 ///
-/// Missing names and totals read '–'; the tail says the duel's state:
-/// „bod domácím“ / „bod hostům“ / „body napůl“ when done, „čeká“ while
-/// waiting, „hraje se“ while playing.
+/// The totals are the shown ones ([Duel.shownHome], [Duel.shownAway]), the
+/// same the card prints. Missing names and totals read '–'; the tail says
+/// the duel's state: „bod domácím“ / „bod hostům“ / „body napůl“ when
+/// done, „čeká“ while waiting, and while playing „hraje se, vede Pelánek
+/// o 3“ („hraje se, nerozhodně“ when level, just „hraje se“ before a lane
+/// both players threw).
 String duelSemantics(Duel duel) {
-  String line(MatchPlayerResult? p) =>
-      '${p?.playerName ?? '–'} ${numLabel(p?.total)}';
-
   final text = StringBuffer(
-    '${duel.position}. souboj: ${line(duel.home)}, ${line(duel.away)}',
+    '${duel.position}. souboj: '
+    '${duel.home?.playerName ?? '–'} ${numLabel(duel.shownHome)}, '
+    '${duel.away?.playerName ?? '–'} ${numLabel(duel.shownAway)}',
   );
   final diff = duel.diff;
-  if (diff != null && diff != 0) text.write(', o ${diff.abs()}');
   switch (duel.state) {
     case DuelState.done:
+      if (diff != null && diff != 0) text.write(', o ${diff.abs()}');
       if (duel.pointWinner == MatchSide.home) {
         text.write(', bod domácím');
       } else if (duel.pointWinner == MatchSide.away) {
@@ -278,6 +306,12 @@ String duelSemantics(Duel duel) {
       text.write(', čeká');
     case DuelState.playing:
       text.write(', hraje se');
+      if (diff == 0) {
+        text.write(', nerozhodně');
+      } else if (diff != null) {
+        final leader = diff > 0 ? duel.home : duel.away;
+        text.write(', vede ${surnameOf(leader?.playerName)} o ${diff.abs()}');
+      }
   }
   return text.toString();
 }

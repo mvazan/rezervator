@@ -12,12 +12,13 @@ MatchPlayerResult player(
   int? total,
   num? sb,
   num? tb,
+  String? name,
 }) => MatchPlayerResult.fromJson({
   'id': '$side$pos',
   'match_id': 'x',
   'side': side,
   'position': pos,
-  'player_name': '$side $pos',
+  'player_name': name ?? '$side $pos',
   'total': total,
   'set_points': sb,
   'team_points': tb,
@@ -42,6 +43,10 @@ void main() {
     });
     test('differences from the player totals', () {
       expect(duels.map((d) => d.diff), [22, 57, 4, 55, 99, -3]);
+    });
+    test('a done duel shows the players\' own totals', () {
+      expect(duels.map((d) => d.shownHome), [407, 435, 395, 437, 450, 431]);
+      expect(duels.map((d) => d.shownAway), [385, 378, 391, 382, 351, 434]);
     });
     test('point winners, and which duels pins decided', () {
       expect(duels.map((d) => d.pointWinner), [
@@ -101,6 +106,8 @@ void main() {
       ]).single;
       expect(d.state, DuelState.waiting);
       expect(d.diff, isNull);
+      expect(d.shownHome, isNull);
+      expect(d.shownAway, isNull);
       expect(duelSemantics(d), endsWith(', čeká'));
     });
     test('the difference counts only lanes both players threw', () {
@@ -112,6 +119,54 @@ void main() {
       expect(d.playedLanes, 1);
       expect(d.diff, -3);
       expect(d.pointWinner, isNull);
+    });
+    test('the shown totals count the same lanes as the difference, and '
+        'TalkBack names the leader', () {
+      final d = duelsOf([
+        player(
+          'home',
+          1,
+          [lane(1, 213), lane(2, 150)],
+          total: 363,
+          name: 'Lucie Mičanová',
+        ),
+        player(
+          'away',
+          1,
+          [lane(1, 216), lane(2, null)],
+          total: 216,
+          name: 'Lukáš Pelánek',
+        ),
+      ]).single;
+      expect(d.shownHome, 213);
+      expect(d.shownAway, 216);
+      expect(
+        duelSemantics(d),
+        '1. souboj: Lucie Mičanová 213, Lukáš Pelánek 216, hraje se, '
+        'vede Pelánek o 3',
+      );
+    });
+    test('a level duel while playing reads „nerozhodně“', () {
+      final d = duelsOf([
+        player('home', 1, [lane(1, 200), lane(2, 150)], total: 350),
+        player('away', 1, [lane(1, 200), lane(2, null)], total: 200),
+      ]).single;
+      expect(d.shownHome, 200);
+      expect(d.shownAway, 200);
+      expect(
+        duelSemantics(d),
+        '1. souboj: home 1 200, away 1 200, hraje se, nerozhodně',
+      );
+    });
+    test('playing, but no lane both threw: no totals and no leader yet', () {
+      final d = duelsOf([
+        player('home', 1, [lane(1, 213), lane(2, null)], total: 213),
+        player('away', 1, [lane(1, null), lane(2, null)]),
+      ]).single;
+      expect(d.state, DuelState.playing);
+      expect(d.shownHome, isNull);
+      expect(d.shownAway, isNull);
+      expect(duelSemantics(d), '1. souboj: home 1 –, away 1 –, hraje se');
     });
     test('T120: four lanes, done when all four are thrown', () {
       final d = duelsOf([
@@ -167,7 +222,9 @@ void main() {
       expect(d.away, isNull);
       expect(d.state, DuelState.playing);
       expect(d.diff, isNull);
-      expect(duelSemantics(d), '1. souboj: home 1 390, – –, hraje se');
+      // No lane both threw: the card prints „– : –“, and TalkBack agrees.
+      expect(d.shownHome, isNull);
+      expect(duelSemantics(d), '1. souboj: home 1 –, – –, hraje se');
     });
     test('no result, or a duel point not known yet: no breakdown', () {
       expect(matchPointsBreakdown(null, rudnaPlayers), isNull);

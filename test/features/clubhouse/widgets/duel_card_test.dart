@@ -357,6 +357,20 @@ void main() {
       expect(find.byKey(const Key('duel-1-stripe')), findsNothing);
     });
 
+    testWidgets('TalkBack reads the totals the card prints, and the leader', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+      await tester.pumpWidget(_host(_card(_playing)));
+      expect(
+        find.bySemanticsLabel(
+          '1. souboj: home 1 213, away 1 216, hraje se, vede 1 o 3',
+        ),
+        findsOneWidget,
+      );
+      semantics.dispose();
+    });
+
     testWidgets('the bar is at half strength', (tester) async {
       await tester.pumpWidget(_host(_card(_playing)));
       final fill = tester.widget<DecoratedBox>(

@@ -292,10 +292,9 @@ class _DuelBody extends StatelessWidget {
     if (duel.pointSplit) return '$sb → body napůl';
     final winner = duel.pointWinner;
     if (winner == null) return null;
-    final name = (winner == MatchSide.home ? duel.home : duel.away)?.playerName;
-    final surname = name == null || name.trim().isEmpty
-        ? '–'
-        : name.trim().split(RegExp(r'\s+')).last;
+    final surname = surnameOf(
+      (winner == MatchSide.home ? duel.home : duel.away)?.playerName,
+    );
     final pins = duel.decidedByPins
         ? ' → rozhodly kuželky ${numLabel(duel.home?.total)} : '
               '${numLabel(duel.away?.total)}'
@@ -373,8 +372,9 @@ class _Names extends StatelessWidget {
 
 /// „407 [bod]   ◂ 22   385“: the totals at 32dp around the lead. Done: the
 /// point winner's total is w800 with a „bod“ pill beside it (a split: „½“ on
-/// both). Played: both w500, no pill, and the totals count only the lanes
-/// both players threw, so they agree with the lead.
+/// both). Played: both w500, no pill, and the totals are the duel's shown
+/// ones ([Duel.shownHome], [Duel.shownAway]): only the lanes both players
+/// threw, so they agree with the lead.
 class _Totals extends StatelessWidget {
   const _Totals({
     required this.duel,
@@ -393,7 +393,8 @@ class _Totals extends StatelessWidget {
     final done = duel.state == DuelState.done;
     final winner = done ? duel.pointWinner : null;
     final split = done && duel.pointSplit;
-    final (homeTotal, awayTotal) = _shownTotals(duel);
+    final homeTotal = numLabel(duel.shownHome);
+    final awayTotal = numLabel(duel.shownAway);
 
     TextStyle? totalStyle(MatchSide side) => text.displaySmall?.copyWith(
       fontSize: 32,
@@ -459,25 +460,6 @@ class _Totals extends StatelessWidget {
         ),
       ],
     );
-  }
-
-  /// The two totals as printed. Done: the players' own totals. Played: the
-  /// sums over the lanes both threw („–“ before there is one), so a lane
-  /// only one side has finished never shows as a lead; with no lane data at
-  /// all, the players' totals.
-  static (String, String) _shownTotals(Duel duel) {
-    if (duel.state == DuelState.done || duel.lanes.isEmpty) {
-      return (numLabel(duel.home?.total), numLabel(duel.away?.total));
-    }
-    if (duel.playedLanes == 0) return ('–', '–');
-    var home = 0;
-    var away = 0;
-    for (final lane in duel.lanes) {
-      if (!lane.played) continue;
-      home += lane.home!.total!;
-      away += lane.away!.total!;
-    }
-    return ('$home', '$away');
   }
 }
 
