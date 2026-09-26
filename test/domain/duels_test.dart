@@ -203,6 +203,37 @@ void main() {
     });
   });
 
+  group('liveTeamTotals', () {
+    test('sums the shown totals: a lane only one side threw never counts', () {
+      final totals = liveTeamTotals(
+        duelsOf([
+          player('home', 1, [lane(1, 213), lane(2, 194)], total: 407),
+          player('away', 1, [lane(1, 216), lane(2, 169)], total: 385),
+          player('home', 2, [lane(1, 209), lane(2, 226)], total: 435),
+          player('away', 2, [lane(1, 194), lane(2, null)], total: 194),
+          player('home', 3, [lane(1, null), lane(2, null)]),
+          player('away', 3, [lane(1, null), lane(2, null)]),
+        ]),
+      );
+      expect(totals, (home: 407 + 209, away: 385 + 194));
+    });
+    test('the finished match: the players\' totals', () {
+      expect(liveTeamTotals(duelsOf(rudnaPlayers)), (home: 2555, away: 2321));
+    });
+    test('null while no duel has a shown total', () {
+      expect(liveTeamTotals(const []), isNull);
+      expect(
+        liveTeamTotals(
+          duelsOf([
+            player('home', 1, [lane(1, 213), lane(2, null)], total: 213),
+            player('away', 1, [lane(1, null), lane(2, null)]),
+          ]),
+        ),
+        isNull,
+      );
+    });
+  });
+
   group('incomplete data', () {
     test('no lanes at all: done once both player totals are known', () {
       final d = duelsOf([

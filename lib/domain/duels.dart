@@ -86,7 +86,8 @@ class Duel {
   /// waiting: null. Also null when a needed total is missing.
   final int? diff;
 
-  /// The home total every view prints (the card and its TalkBack text).
+  /// The home total every view prints (the card, its TalkBack text and,
+  /// summed by [liveTeamTotals], the scoreboard's live pins).
   /// done: the player's own total; playing: the sum over the lanes both
   /// players threw — the lanes [diff] counts — or null before there is one;
   /// waiting: null.
@@ -217,6 +218,26 @@ int diffScale(List<Duel> duels) {
     if (diff != null) scale = math.max(scale, diff.abs());
   }
   return scale;
+}
+
+/// The team pin totals while a match is played: the sums of every duel's
+/// [Duel.shownHome] and [Duel.shownAway] (duels without both are left
+/// out); null when no duel has them yet.
+///
+/// Unlike the result's totals, a lane only one side has thrown never
+/// counts, so a late update from one lane never shows a false lead.
+({int home, int away})? liveTeamTotals(List<Duel> duels) {
+  var home = 0;
+  var away = 0;
+  var any = false;
+  for (final duel in duels) {
+    final (h, a) = (duel.shownHome, duel.shownAway);
+    if (h == null || a == null) continue;
+    home += h;
+    away += a;
+    any = true;
+  }
+  return any ? (home: home, away: away) : null;
 }
 
 /// '◂ 22' (home leads), '3 ▸' (away leads), '=' (0), '' (null).

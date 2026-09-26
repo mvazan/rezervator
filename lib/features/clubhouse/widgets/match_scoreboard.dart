@@ -85,8 +85,12 @@ class MatchScoreboard extends StatelessWidget {
     // Only a decided match adds up: until every duel is done its players'
     // teamPoints are incomplete.
     final breakdown = decided ? matchPointsBreakdown(result, players) : null;
-    final homeTotal = result?.homeTotal;
-    final awayTotal = result?.awayTotal;
+    // While the match runs the pins count only the lanes both players of a
+    // duel threw — the result's totals already count a lane one side has
+    // finished, which would show a false lead.
+    final liveTotals = running ? liveTeamTotals(duels) : null;
+    final homeTotal = running ? liveTotals?.home : result?.homeTotal;
+    final awayTotal = running ? liveTotals?.away : result?.awayTotal;
     final explanation = decided
         ? _decidedExplanation(breakdown, result!)
         : running
@@ -373,7 +377,7 @@ class _ScoreLine extends StatelessWidget {
 
 /// „2555  ◂ 234  2321“: the pin totals and, between them, the lead with its
 /// arrow pointing at the leader. While the match runs the pill is hollow
-/// and reads „Kuželky zatím ◂ 87“.
+/// and reads „Kuželky zatím ◂ 87“, and the totals are [liveTeamTotals].
 class _PinsLine extends StatelessWidget {
   const _PinsLine({
     required this.homeTotal,

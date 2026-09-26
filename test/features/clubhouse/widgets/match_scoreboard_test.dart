@@ -290,6 +290,40 @@ void main() {
       expect(find.text('Kuželky zatím ◂ 37'), findsOneWidget);
     });
 
+    testWidgets('the live pins count only lanes both players threw, not the '
+        'result\'s totals', (tester) async {
+      // Home has thrown duel 2's second lane (226), away has not: the
+      // result's totals already count it (842 : 579, a false lead of 263).
+      final players = [
+        for (final p in _livePlayers)
+          if (p.side == 'home' && p.position == 2)
+            _player('home', 2, [_lane(1, 209), _lane(2, 226)], total: 435)
+          else
+            p,
+      ];
+      await tester.pumpWidget(
+        _host(
+          MatchScoreboard(
+            slot: _liveSlot,
+            result: _result(
+              'in_progress',
+              homePoints: 1,
+              awayPoints: 0,
+              homeTotal: 842,
+              awayTotal: 579,
+              fetchedAt: _now.subtract(const Duration(minutes: 2)),
+            ),
+            players: players,
+            now: _now,
+          ),
+        ),
+      );
+      expect(find.text('616'), findsOneWidget);
+      expect(find.text('579'), findsOneWidget);
+      expect(find.text('842'), findsNothing);
+      expect(find.text('Kuželky zatím ◂ 37'), findsOneWidget);
+    });
+
     testWidgets('the explanation counts the done and the running duels', (
       tester,
     ) async {
