@@ -6291,7 +6291,8 @@ end $$;
 -- 20a. Shape and privileges: three tables the app may only read (RLS on,
 -- select for authenticated, nothing for anon), the admin's seven RPCs
 -- callable by the app and not by anon, the overlap guard, the reminder
--- settings off with a one-day lead by default.
+-- settings off with a one-day lead by default (the column defaults and the
+-- suite's own alleys, never a real alley's row).
 do $$
 declare
   v_t text;
@@ -6333,8 +6334,17 @@ begin
                  where conname = 'duty_periods_no_overlap' and contype = 'x') then
     raise exception 'FAIL: duty_periods has no exclusion constraint against overlaps';
   end if;
-  if exists (select 1 from schedule_settings
-             where duty_reminder_enabled or duty_reminder_days <> 1) then
+  -- A real alley (on dev, or on prod inside BEGIN…ROLLBACK) may well have
+  -- switched its reminder on.
+  if (select array_agg(column_name || '=' || column_default order by column_name)
+        from information_schema.columns
+       where table_schema = 'public' and table_name = 'schedule_settings'
+         and column_name in ('duty_reminder_enabled', 'duty_reminder_days'))
+     is distinct from array['duty_reminder_days=1', 'duty_reminder_enabled=false']
+     or (select count(*) from schedule_settings
+          where tenant_id in ('00000000-0000-0000-0000-00000000000a',
+                              '00000000-0000-0000-0000-000000000002')
+            and not duty_reminder_enabled and duty_reminder_days = 1) <> 2 then
     raise exception 'FAIL: the duty reminder must start off, with a one-day lead';
   end if;
   raise notice 'OK: duty tables are read-only for the app, the admin RPCs are the app''s and not anon''s (0050)';
