@@ -246,6 +246,42 @@ void main() {
       expect(d.pointWinner, MatchSide.home);
       expect(d.decidedByPins, isTrue);
     });
+    test('both duel points known: done, though a lane total is missing', () {
+      // The site awards a duel's points only once the duel is over.
+      final d = duelsOf([
+        player(
+          'home',
+          1,
+          [lane(1, 213, 0), lane(2, null)],
+          total: 407,
+          sb: 1,
+          tb: 1,
+        ),
+        player(
+          'away',
+          1,
+          [lane(1, 216, 1), lane(2, 169, 0)],
+          total: 385,
+          sb: 1,
+          tb: 0,
+        ),
+      ]).single;
+      expect(d.playedLanes, 1);
+      expect(d.state, DuelState.done);
+      expect(d.shownHome, 407);
+      expect(d.shownAway, 385);
+      expect(d.diff, 22);
+      expect(d.pointWinner, MatchSide.home);
+      expect(d.decidedByPins, isTrue);
+    });
+    test('one side\'s duel point alone does not end the duel', () {
+      final d = duelsOf([
+        player('home', 1, [lane(1, 213), lane(2, null)], total: 213, tb: 1),
+        player('away', 1, [lane(1, 216), lane(2, 169)], total: 385),
+      ]).single;
+      expect(d.state, DuelState.playing);
+      expect(d.pointWinner, isNull);
+    });
     test('a position only one side has is never done, and has no diff', () {
       final d = duelsOf([
         player('home', 1, [lane(1, 200), lane(2, 190)], total: 390),

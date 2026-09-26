@@ -14,8 +14,8 @@ import 'dart:math' as math;
 import 'models.dart';
 import 'results.dart';
 
-/// Where a duel stands: no lane thrown yet, some lanes thrown, or every lane
-/// of both players thrown.
+/// Where a duel stands: no lane thrown yet, some lanes thrown, or over
+/// (every lane of both players thrown, or both duel points awarded).
 enum DuelState { waiting, playing, done }
 
 /// The home and away player's line on one lane number.
@@ -109,9 +109,12 @@ class Duel {
 
 /// One Duel per position present in [players], sorted by position.
 ///
-/// A duel is *waiting* while neither player has a thrown lane or a total;
-/// *done* once both players are there and every lane pair is played (or,
-/// with no lanes at all, both totals are known); *playing* otherwise.
+/// A duel is *done* once both players are there and either both their duel
+/// points (teamPoints) are known — the site awards them only after the
+/// duel, so a lane total it is missing does not keep the duel open — or
+/// every lane pair is played (with no lanes at all: both totals are known).
+/// Otherwise it is *waiting* while neither player has a thrown lane or a
+/// total, and *playing* after that.
 List<Duel> duelsOf(List<MatchPlayerResult> players) {
   final homes = <int, MatchPlayerResult>{};
   final aways = <int, MatchPlayerResult>{};
@@ -149,14 +152,15 @@ Duel _duel(int position, MatchPlayerResult? home, MatchPlayerResult? away) {
       p != null && (p.total != null || p.lanes.any((l) => l.total != null));
 
   final DuelState state;
-  if (!threwAnything(home) && !threwAnything(away)) {
-    state = DuelState.waiting;
-  } else if (home != null &&
+  if (home != null &&
       away != null &&
-      (lanes.isEmpty
-          ? home.total != null && away.total != null
-          : played.length == lanes.length)) {
+      ((home.teamPoints != null && away.teamPoints != null) ||
+          (lanes.isEmpty
+              ? home.total != null && away.total != null
+              : played.length == lanes.length))) {
     state = DuelState.done;
+  } else if (!threwAnything(home) && !threwAnything(away)) {
+    state = DuelState.waiting;
   } else {
     state = DuelState.playing;
   }
