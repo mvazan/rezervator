@@ -279,7 +279,7 @@ void main() {
     // explanation, the status chip and the format line.
     expect(_inBoard('3460'), findsOneWidget);
     expect(_inBoard('3349'), findsOneWidget);
-    expect(_inBoard('◂ 111'), findsOneWidget);
+    expect(_inBoard('← 111'), findsOneWidget);
     expect(
       find.descendant(
         of: find.byType(MatchScoreboard),
@@ -418,8 +418,8 @@ void main() {
         findsOneWidget,
       );
       // No pin totals: no lead, no set points, no Družstva card.
-      expect(find.textContaining('◂'), findsNothing);
-      expect(find.textContaining('▸'), findsNothing);
+      expect(find.textContaining('←'), findsNothing);
+      expect(find.textContaining('→'), findsNothing);
       expect(
         find.descendant(
           of: find.byType(MatchScoreboard),
@@ -607,7 +607,14 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Sledovat živě'), findsOneWidget);
-      expect(find.byIcon(Icons.circle), findsOneWidget);
+      // Scoped to the button: the scoreboard's Živě chip has a dot too.
+      expect(
+        find.descendant(
+          of: find.bySubtype<FilledButton>(),
+          matching: find.byIcon(Icons.circle),
+        ),
+        findsOneWidget,
+      );
       expect(find.byIcon(Icons.play_circle_fill), findsNothing);
     },
   );
@@ -643,7 +650,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(_inBoard('● Živě · před 20 min'), findsOneWidget);
+      expect(_inBoard('Živě · před 20 min'), findsOneWidget);
       expect(find.textContaining('Výsledky z webu'), findsNothing);
       expect(find.text('Výsledky zatím nejsou.'), findsNothing);
     },

@@ -1,6 +1,6 @@
 /// The match detail's Družstva card (Souboje, Task 5): the two teams' sums
 /// side by side, below the duels — Kuželky, Plné, Dorážka, Chyby and SB, one
-/// mirrored row each with the lead between the values („Kuželky ◂ 234“).
+/// mirrored row each with the lead between the values („Kuželky ← 234“).
 ///
 /// Home is always on the left. Every number is set in tabular figures, and
 /// the leader is never told by colour alone: its value is w800 (the other
@@ -100,7 +100,7 @@ class TeamTotalsCard extends StatelessWidget {
     );
   }
 
-  /// [leadLabel] of home − away („◂ 234“, „100 ▸“, „=“); '' when either
+  /// [leadLabel] of home − away („← 234“, „100 →“, „=“); '' when either
   /// side is unknown.
   static String _lead(int? home, int? away) =>
       home == null || away == null ? '' : leadLabel(home - away);

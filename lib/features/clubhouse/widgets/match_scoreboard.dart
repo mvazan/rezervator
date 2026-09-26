@@ -115,7 +115,7 @@ class MatchScoreboard extends StatelessWidget {
               chip: result == null
                   ? null
                   : live
-                  ? '● Živě · ${freshnessLabel(result.fetchedAt, now)}'
+                  ? 'Živě · ${freshnessLabel(result.fetchedAt, now)}'
                   : _statusLabel(result.status),
               live: live,
             ),
@@ -228,7 +228,8 @@ class _TopLine extends StatelessWidget {
   /// The chip's text; null = no chip (nothing fetched yet).
   final String? chip;
 
-  /// A live chip sits on errorContainer, so it stands out.
+  /// A live chip sits on errorContainer, so it stands out, with an 8dp dot
+  /// before its text (an icon: Manrope has no „●“).
   final bool live;
 
   @override
@@ -252,6 +253,9 @@ class _TopLine extends StatelessWidget {
         if (chip != null)
           _Pill(
             label: chip,
+            leading: live
+                ? Icon(Icons.circle, size: 8, color: scheme.onErrorContainer)
+                : null,
             fill: live ? scheme.errorContainer : scheme.surfaceContainerHighest,
             style: text.labelMedium?.copyWith(
               fontSize: 12,
@@ -376,9 +380,9 @@ class _ScoreLine extends StatelessWidget {
   }
 }
 
-/// „2555  ◂ 234  2321“: the pin totals and, between them, the lead with its
+/// „2555  ← 234  2321“: the pin totals and, between them, the lead with its
 /// arrow pointing at the leader. While the match runs the pill is hollow
-/// and reads „Kuželky zatím ◂ 87“, and the totals are [liveTeamTotals].
+/// and reads „Kuželky zatím ← 87“, and the totals are [liveTeamTotals].
 class _PinsLine extends StatelessWidget {
   const _PinsLine({
     required this.homeTotal,
@@ -653,6 +657,7 @@ class _Pill extends StatelessWidget {
     required this.style,
     this.fill,
     this.border,
+    this.leading,
   });
 
   final String label;
@@ -662,6 +667,9 @@ class _Pill extends StatelessWidget {
   /// An outline instead of (or on top of) the fill.
   final BorderSide? border;
 
+  /// Before [label], 4dp apart: the live chip's dot.
+  final Widget? leading;
+
   @override
   Widget build(BuildContext context) => DecoratedBox(
     decoration: ShapeDecoration(
@@ -670,7 +678,16 @@ class _Pill extends StatelessWidget {
     ),
     child: Padding(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      child: Text(label, style: style),
+      child: leading == null
+          ? Text(label, style: style)
+          : Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                leading!,
+                const SizedBox(width: 4),
+                Flexible(child: Text(label, style: style)),
+              ],
+            ),
     ),
   );
 }

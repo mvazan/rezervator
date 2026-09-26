@@ -141,7 +141,7 @@ void main() {
       await pump(tester);
       expect(find.text('bod'), findsOneWidget);
       expect(find.text('½'), findsNothing);
-      expect(find.text('◂ 22'), findsOneWidget);
+      expect(find.text('← 22'), findsOneWidget);
       expect(find.text('Dr. 1'), findsOneWidget);
       expect(find.text('Dr. 2'), findsOneWidget);
       expect(find.text('213 : 216'), findsOneWidget);
@@ -152,7 +152,7 @@ void main() {
       await pump(tester);
       final pill = tester.getCenter(find.text('bod'));
       expect(pill.dx, greaterThan(tester.getCenter(find.text('407')).dx));
-      expect(pill.dx, lessThan(tester.getCenter(find.text('◂ 22')).dx));
+      expect(pill.dx, lessThan(tester.getCenter(find.text('← 22')).dx));
     });
 
     testWidgets('the verdict line and a closed chevron; no table', (
@@ -218,7 +218,7 @@ void main() {
 
     testWidgets('numbers use tabular figures', (tester) async {
       await pump(tester);
-      for (final number in ['407', '385', '◂ 22', '213 : 216']) {
+      for (final number in ['407', '385', '← 22', '213 : 216']) {
         expect(
           _text(tester, number).style?.fontFeatures,
           contains(const FontFeature.tabularFigures()),
@@ -274,7 +274,7 @@ void main() {
       tester,
     ) async {
       await tester.pumpWidget(_host(_card(_rudna[5])));
-      expect(find.text('3 ▸'), findsOneWidget);
+      expect(find.text('3 →'), findsOneWidget);
       expect(_text(tester, '434').style?.fontWeight, FontWeight.w800);
       expect(_text(tester, '431').style?.fontWeight, FontWeight.w500);
       expect(find.text('215 = 215'), findsOneWidget);
@@ -292,7 +292,7 @@ void main() {
     ) async {
       await tester.pumpWidget(_host(_card(_rudna[5])));
       final pill = tester.getCenter(find.text('bod'));
-      expect(pill.dx, greaterThan(tester.getCenter(find.text('3 ▸')).dx));
+      expect(pill.dx, greaterThan(tester.getCenter(find.text('3 →')).dx));
       expect(pill.dx, lessThan(tester.getCenter(find.text('434')).dx));
 
       final track = _rect(tester, 'duel-6-bar');
@@ -419,7 +419,7 @@ void main() {
       expect(_text(tester, '213').style?.fontWeight, FontWeight.w500);
       expect(_text(tester, '216').style?.fontWeight, FontWeight.w500);
       expect(find.text('363'), findsNothing);
-      expect(find.text('3 ▸'), findsOneWidget);
+      expect(find.text('3 →'), findsOneWidget);
       expect(find.textContaining('SB'), findsNothing);
       expect(find.byKey(const Key('duel-1-stripe')), findsNothing);
     });
@@ -453,7 +453,8 @@ void main() {
     testWidgets('expanded: the table, but no sentence yet', (tester) async {
       await tester.pumpWidget(_host(_card(_playing, expanded: true)));
       expect(find.text('Plné'), findsNWidgets(2));
-      expect(find.textContaining('→'), findsNothing);
+      // Neither the verdict line nor the sentence („SB 1 : 1 → …“).
+      expect(find.textContaining('SB'), findsNothing);
     });
   });
 

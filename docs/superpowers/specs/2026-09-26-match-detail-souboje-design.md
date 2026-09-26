@@ -171,7 +171,7 @@ Pure functions, unit-tested, used by the scoreboard, the cards, the TV table, th
 - `duelsOf(players) → List<Duel>` — per position: home, away, state (waiting / playing / done), lanes paired with their winner, the difference over lanes both have thrown, the set points, the point winner and „decided by pins“.
 - `matchPointsBreakdown(result, duels)` — duel points and the +2 for pins, for „Souboje 5 : 1 · Kuželky 2 : 0“.
 - `diffScale(duels)` — `max(50, the biggest |difference|)`.
-- `leadLabel(diff)` — „◂ 22“, „3 ▸“, „=“.
+- `leadLabel(diff)` — „← 22“, „3 →“, „=“ (arrows Manrope has; ◂ ▸ in this spec's prose read as ← →).
 - `duelSemantics(duel)` and `resultCopyText(slot, result, duels)`.
 
 `_teamBonusPoints` moves from `legacy_score_sheet.dart` to `lib/domain/results.dart` as public `teamBonusPoints`.

@@ -382,7 +382,7 @@ class _Names extends StatelessWidget {
   }
 }
 
-/// „407 [bod]   ◂ 22   385“: the totals at 32dp around the lead. Done: the
+/// „407 [bod]   ← 22   385“: the totals at 32dp around the lead. Done: the
 /// point winner's total is w800 with a „bod“ pill beside it (a split: „½“ on
 /// both). Played: both w500, no pill, and the totals are the duel's shown
 /// ones ([Duel.shownHome], [Duel.shownAway]): only the lanes both players

@@ -63,13 +63,13 @@ void main() {
       for (final text in [
         '2555',
         '2321',
-        'Kuželky ◂ 234',
+        'Kuželky ← 234',
         '1809',
         '1653',
-        'Plné ◂ 156',
+        'Plné ← 156',
         '746',
         '668',
-        'Dorážka ◂ 78',
+        'Dorážka ← 78',
         '44',
         '74',
         'Chyby (méně = lépe)',
@@ -108,7 +108,7 @@ void main() {
     ) async {
       await pump(tester);
       for (final (home, label, away) in [
-        ('2555', 'Kuželky ◂ 234', '2321'),
+        ('2555', 'Kuželky ← 234', '2321'),
         ('44', 'Chyby (méně = lépe)', '74'),
         ('8,5', 'SB', '3,5'),
       ]) {
@@ -140,7 +140,7 @@ void main() {
     ) async {
       await pump(tester);
       final scheme = Theme.of(tester.element(find.text('SB'))).colorScheme;
-      for (final label in ['Kuželky ◂ 234', 'Chyby (méně = lépe)', 'SB']) {
+      for (final label in ['Kuželky ← 234', 'Chyby (méně = lépe)', 'SB']) {
         final style = _text(tester, label).style;
         expect(style?.fontSize, 13, reason: label);
         expect(style?.color, scheme.onSurfaceVariant, reason: label);
@@ -161,7 +161,7 @@ void main() {
         '74',
         '8,5',
         '3,5',
-        'Kuželky ◂ 234',
+        'Kuželky ← 234',
       ]) {
         expect(
           _text(tester, number).style?.fontFeatures,
@@ -189,7 +189,7 @@ void main() {
         containsSemantics(label: 'SB 8,5 : 3,5'),
       );
       expect(find.bySemanticsLabel('Kuželky 2555 : 2321'), findsOneWidget);
-      expect(find.bySemanticsLabel(RegExp('◂')), findsNothing);
+      expect(find.bySemanticsLabel(RegExp('←')), findsNothing);
       handle.dispose();
     });
   });
@@ -215,7 +215,7 @@ void main() {
         ),
       ),
     );
-    expect(find.text('Kuželky 100 ▸'), findsOneWidget);
+    expect(find.text('Kuželky 100 →'), findsOneWidget);
     expect(_weight(tester, '2400'), FontWeight.w800);
     expect(_weight(tester, '2300'), FontWeight.w500);
     // Equal fulls and equal set points: nobody leads, both w500.

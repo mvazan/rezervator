@@ -92,8 +92,8 @@ void main() {
   });
 
   test('leadLabel points at the leader', () {
-    expect(leadLabel(22), '◂ 22');
-    expect(leadLabel(-3), '3 ▸');
+    expect(leadLabel(22), '← 22');
+    expect(leadLabel(-3), '3 →');
     expect(leadLabel(0), '=');
     expect(leadLabel(null), '');
   });

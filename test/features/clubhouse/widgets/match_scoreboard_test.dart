@@ -145,7 +145,7 @@ void main() {
       expect(find.text('1'), findsNWidgets(2));
       expect(find.text('2555'), findsOneWidget);
       expect(find.text('2321'), findsOneWidget);
-      expect(find.text('◂ 234'), findsOneWidget);
+      expect(find.text('← 234'), findsOneWidget);
       expect(find.text('průběžně'), findsNothing);
     });
 
@@ -285,7 +285,7 @@ void main() {
 
     testWidgets('numbers use tabular figures', (tester) async {
       await pump(tester);
-      for (final number in ['2555', '2321', '7', '◂ 234']) {
+      for (final number in ['2555', '2321', '7', '← 234']) {
         expect(
           _text(tester, number).style?.fontFeatures,
           contains(const FontFeature.tabularFigures()),
@@ -307,16 +307,19 @@ void main() {
       ),
     );
 
-    testWidgets('the chip says Živě with the freshness', (tester) async {
+    testWidgets('the chip says Živě with the freshness, after an 8dp dot', (
+      tester,
+    ) async {
       await pump(tester);
-      expect(
-        find.byWidgetPredicate(
-          (w) => w is Text && (w.data ?? '').startsWith('● Živě'),
-        ),
-        findsOneWidget,
-      );
-      expect(find.text('● Živě · před 2 min'), findsOneWidget);
+      expect(find.text('Živě · před 2 min'), findsOneWidget);
       expect(find.text('Dokončeno'), findsNothing);
+      // The dot is an icon, not a „●“ Manrope lacks.
+      expect(find.textContaining('●'), findsNothing);
+      final dot = find.byIcon(Icons.circle);
+      expect(tester.widget<Icon>(dot).size, 8);
+      final label = tester.getRect(find.text('Živě · před 2 min'));
+      expect(tester.getRect(dot).right, lessThanOrEqualTo(label.left));
+      expect(tester.getCenter(dot).dy, closeTo(label.center.dy, 2));
     });
 
     testWidgets('the score is průběžně and the pins are „zatím“', (
@@ -324,7 +327,7 @@ void main() {
     ) async {
       await pump(tester);
       expect(find.text('průběžně'), findsOneWidget);
-      expect(find.text('Kuželky zatím ◂ 37'), findsOneWidget);
+      expect(find.text('Kuželky zatím ← 37'), findsOneWidget);
     });
 
     testWidgets('the live pins count only lanes both players threw, not the '
@@ -358,7 +361,7 @@ void main() {
       expect(find.text('616'), findsOneWidget);
       expect(find.text('579'), findsOneWidget);
       expect(find.text('842'), findsNothing);
-      expect(find.text('Kuželky zatím ◂ 37'), findsOneWidget);
+      expect(find.text('Kuželky zatím ← 37'), findsOneWidget);
     });
 
     testWidgets('the explanation counts the done and the running duels', (
