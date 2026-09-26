@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/domain/duels.dart';
 import 'package:rezervator/domain/models.dart';
+import 'package:rezervator/domain/palette.dart';
 import 'package:rezervator/features/clubhouse/widgets/duel_card.dart';
 
 import '../../../support/rudna_vrsovice.dart';
@@ -317,6 +318,72 @@ void main() {
       expect(fill.left, closeTo(track.left, 0.01));
       expect(fill.right, closeTo(track.center.dx, 0.01));
     });
+  });
+
+  group('side-colour marks: a legible shade of the side colour', () {
+    for (final brightness in Brightness.values) {
+      Future<void> pump(WidgetTester tester, Duel duel) => tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData(brightness: brightness),
+          home: Scaffold(body: SingleChildScrollView(child: _card(duel))),
+        ),
+      );
+      Color? fillIn(WidgetTester tester, String key) {
+        final box = tester.widget<DecoratedBox>(
+          find.descendant(
+            of: find.byKey(Key(key)),
+            matching: find.byType(DecoratedBox),
+          ),
+        );
+        return (box.decoration as BoxDecoration).color;
+      }
+
+      final home = legibleShadeOf(Colors.teal, brightness);
+      final away = legibleShadeOf(Colors.purple, brightness);
+
+      testWidgets('${brightness.name}: the stripe, the lane dots and the bar', (
+        tester,
+      ) async {
+        await pump(tester, _rudna[0]);
+        expect(
+          tester
+              .widget<ColoredBox>(find.byKey(const Key('duel-1-stripe')))
+              .color,
+          home,
+        );
+        // Lane 1 went away, lane 2 home.
+        expect(fillIn(tester, 'duel-1-lane-1-dot'), away);
+        expect(fillIn(tester, 'duel-1-lane-2-dot'), home);
+        expect(fillIn(tester, 'duel-1-bar-fill'), home);
+        // The „bod“ pill keeps the side colour itself, at 16 %.
+        final pill = tester.widget<DecoratedBox>(
+          find
+              .ancestor(
+                of: find.text('bod'),
+                matching: find.byType(DecoratedBox),
+              )
+              .first,
+        );
+        expect(
+          (pill.decoration as ShapeDecoration).color,
+          Colors.teal.withValues(alpha: 0.16),
+        );
+      });
+
+      testWidgets('${brightness.name}: a live bar is half strength inside a '
+          'full-strength 1dp edge', (tester) async {
+        await pump(tester, _playing);
+        final box = tester.widget<DecoratedBox>(
+          find.descendant(
+            of: find.byKey(const Key('duel-1-bar-fill')),
+            matching: find.byType(DecoratedBox),
+          ),
+        );
+        final decoration = box.decoration as BoxDecoration;
+        expect(decoration.color, away.withValues(alpha: 0.5));
+        expect(decoration.border, Border.all(color: away));
+      });
+    }
   });
 
   testWidgets('tapping the card calls onTap once', (tester) async {

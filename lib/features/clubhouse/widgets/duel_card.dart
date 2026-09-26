@@ -20,10 +20,19 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../../domain/duels.dart';
+import '../../../domain/palette.dart';
 import '../../../domain/results.dart';
 
 /// Digits of one width, so a number doesn't jump when a live value changes.
 const _tabular = [FontFeature.tabularFigures()];
+
+/// A side's colour as a mark painted straight on the card (the stripe, a
+/// lane dot, the bar): its legible shade, which keeps at least 3:1 against
+/// the card in light and dark for every team colour a viewer can pick
+/// (test/core/theme_contrast_test.dart). The pills keep the colour itself,
+/// at 16 % under onSurface text.
+Color _mark(BuildContext context, Color side) =>
+    legibleShadeOf(side, Theme.of(context).brightness);
 
 /// One duel of a match — see the library comment.
 ///
@@ -54,10 +63,12 @@ class DuelCard extends StatelessWidget {
   /// too (harmless: it never opens).
   final VoidCallback onTap;
 
-  /// The home side's colour: its stripe, bar, lane dots and pill.
+  /// The home side's colour: its stripe, bar, lane dots (all in its
+  /// legible shade) and pill.
   final Color homeColor;
 
-  /// The away side's colour: its stripe, bar, lane dots and pill.
+  /// The away side's colour: its stripe, bar, lane dots (all in its
+  /// legible shade) and pill.
   final Color awayColor;
 
   @override
@@ -100,9 +111,10 @@ class DuelCard extends StatelessWidget {
                         width: 4,
                         child: ColoredBox(
                           key: Key('duel-${duel.position}-stripe'),
-                          color: winner == MatchSide.home
-                              ? homeColor
-                              : awayColor,
+                          color: _mark(
+                            context,
+                            winner == MatchSide.home ? homeColor : awayColor,
+                          ),
                         ),
                       ),
                   ],
@@ -497,7 +509,8 @@ class _PointPill extends StatelessWidget {
 
 /// The 6dp difference bar: a track with a 1dp tick in the centre, and a fill
 /// that grows from the centre towards the leader, `|diff| / scale` of the
-/// half, in the leader's colour ([faded] = half strength).
+/// half, in the leader's legible shade ([faded] = half strength inside a
+/// full-strength 1dp edge, so the provisional bar still reads 3:1).
 class _DiffBar extends StatelessWidget {
   const _DiffBar({
     required this.position,
@@ -523,7 +536,7 @@ class _DiffBar extends StatelessWidget {
         ? 0.0
         : math.min(diff.abs() / math.max(scale, 1), 1.0);
     final homeLeads = diff > 0;
-    final color = homeLeads ? homeColor : awayColor;
+    final color = _mark(context, homeLeads ? homeColor : awayColor);
     return SizedBox(
       key: Key('duel-$position-bar'),
       height: 6,
@@ -550,6 +563,7 @@ class _DiffBar extends StatelessWidget {
                         color: faded
                             ? color.withValues(alpha: color.a * 0.5)
                             : color,
+                        border: faded ? Border.all(color: color) : null,
                       ),
                     ),
                   ),
@@ -669,7 +683,10 @@ class _LaneEntry extends StatelessWidget {
         child: winner == side
             ? DecoratedBox(
                 decoration: BoxDecoration(
-                  color: side == MatchSide.home ? homeColor : awayColor,
+                  color: _mark(
+                    context,
+                    side == MatchSide.home ? homeColor : awayColor,
+                  ),
                   shape: BoxShape.circle,
                 ),
               )

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/domain/models.dart';
+import 'package:rezervator/domain/palette.dart';
 import 'package:rezervator/features/clubhouse/widgets/match_scoreboard.dart';
 
 import '../../../support/rudna_vrsovice.dart';
@@ -191,34 +192,70 @@ void main() {
       expect(bar.width, closeTo(tile.width / 2, 0.01));
     });
 
-    testWidgets('the point bars and „+2 kuž.“ take the sides\' colours when '
-        'given — the same the duel cards use', (tester) async {
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: SingleChildScrollView(
-              child: MatchScoreboard(
-                slot: rudnaSlot,
-                result: rudnaResult,
-                players: rudnaPlayers,
-                now: _now,
-                homeColor: const Color(0xFF0B8043),
-                awayColor: const Color(0xFF8E24AA),
+    for (final brightness in Brightness.values) {
+      testWidgets('${brightness.name}: the point bars and „+2 kuž.“ take the '
+          'sides\' colours when given — the same the duel cards use', (
+        tester,
+      ) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: ThemeData(brightness: brightness),
+            home: Scaffold(
+              body: SingleChildScrollView(
+                child: MatchScoreboard(
+                  slot: rudnaSlot,
+                  result: rudnaResult,
+                  players: rudnaPlayers,
+                  now: _now,
+                  homeColor: const Color(0xFF0B8043),
+                  awayColor: const Color(0xFF8E24AA),
+                ),
               ),
             ),
           ),
-        ),
-      );
-      Color? fillOf(Finder f) => (tester
-              .widget<DecoratedBox>(find.descendant(
-                  of: f, matching: find.byType(DecoratedBox)).first)
-              .decoration as BoxDecoration)
-          .color;
-      expect(fillOf(find.byKey(const Key('scoreboard-bar-1'))),
-          const Color(0xFF0B8043));
-      expect(fillOf(find.byKey(const Key('scoreboard-bar-6'))),
-          const Color(0xFF8E24AA));
-    });
+        );
+        Color? fillOf(Finder f) =>
+            (tester
+                        .widget<DecoratedBox>(
+                          find
+                              .descendant(
+                                of: f,
+                                matching: find.byType(DecoratedBox),
+                              )
+                              .first,
+                        )
+                        .decoration
+                    as BoxDecoration)
+                .color;
+        // The bars are marks on the card: a legible shade of the colour.
+        expect(
+          fillOf(find.byKey(const Key('scoreboard-bar-1'))),
+          legibleShadeOf(const Color(0xFF0B8043), brightness),
+        );
+        expect(
+          fillOf(find.byKey(const Key('scoreboard-bar-6'))),
+          legibleShadeOf(const Color(0xFF8E24AA), brightness),
+        );
+        // „+2 kuž.“ is styled like the duel card's „bod“: the side colour
+        // at 16 % under onSurface text.
+        final pill = tester.widget<DecoratedBox>(
+          find
+              .ancestor(
+                of: find.text('+2 kuž.'),
+                matching: find.byType(DecoratedBox),
+              )
+              .first,
+        );
+        expect(
+          (pill.decoration as ShapeDecoration).color,
+          const Color(0xFF0B8043).withValues(alpha: 0.16),
+        );
+        final scheme = Theme.of(
+          tester.element(find.text('+2 kuž.')),
+        ).colorScheme;
+        expect(_text(tester, '+2 kuž.').style?.color, scheme.onSurface);
+      });
+    }
 
     testWidgets('the format and the venue, as plain text', (tester) async {
       await pump(tester);

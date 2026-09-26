@@ -17,6 +17,7 @@ import 'package:flutter/material.dart';
 import '../../../core/ui.dart';
 import '../../../domain/duels.dart';
 import '../../../domain/models.dart';
+import '../../../domain/palette.dart';
 import '../../../domain/results.dart';
 
 /// Digits of one width, so a number doesn't jump when a live value changes.
@@ -51,9 +52,9 @@ class MatchScoreboard extends StatelessWidget {
   /// Null = the venue is plain text (no known venue page).
   final VoidCallback? onVenueTap;
 
-  /// Each side's colour for the point bars and the „+2 kuž.“ pill — the
-  /// same the duel cards use; null = the theme's primary (home) or
-  /// tertiary (away).
+  /// Each side's colour for the point bars (in its legible shade) and the
+  /// „+2 kuž.“ pill — the same the duel cards use; null = the theme's
+  /// primary (home) or tertiary (away).
   final Color? homeColor;
   final Color? awayColor;
 
@@ -579,9 +580,10 @@ class _DuelTile extends StatelessWidget {
   }
 }
 
-/// „+2 kuž.“ on the pins winner's side colour, with the same 4dp bar under
-/// it as a duel tile has — so its side reads from the bar's position too,
-/// not from the colour alone.
+/// „+2 kuž.“ styled like a duel card's „bod“ (the pins winner's side colour
+/// at 16 % under onSurface text), with the same 4dp bar under it as a duel
+/// tile has — so its side reads from the bar's position too, not from the
+/// colour alone.
 class _PinPoints extends StatelessWidget {
   const _PinPoints({
     required this.side,
@@ -597,10 +599,9 @@ class _PinPoints extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final text = Theme.of(context).textTheme;
-    final home = side == MatchSide.home;
     return Column(
       mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: home
+      crossAxisAlignment: side == MatchSide.home
           ? CrossAxisAlignment.start
           : CrossAxisAlignment.end,
       children: [
@@ -609,11 +610,11 @@ class _PinPoints extends StatelessWidget {
           child: Center(
             child: _Pill(
               label: '+${numLabel(points)} kuž.',
-              fill: color,
+              fill: color.withValues(alpha: 0.16),
               style: text.labelMedium?.copyWith(
                 fontSize: 13,
                 fontWeight: FontWeight.w800,
-                color: home ? scheme.onPrimary : scheme.onTertiary,
+                color: scheme.onSurface,
                 fontFeatures: _tabular,
               ),
             ),
@@ -626,16 +627,19 @@ class _PinPoints extends StatelessWidget {
   }
 }
 
-/// A 4dp rounded bar of [color]; its parent sets the size.
+/// A 4dp rounded bar in [color]'s legible shade — a mark straight on the
+/// card, at least 3:1 against it in light and dark for every team colour
+/// (test/core/theme_contrast_test.dart). Its parent sets the size.
 class _Bar extends StatelessWidget {
   const _Bar({required this.color});
 
+  /// The side's colour; the bar paints its legible shade.
   final Color color;
 
   @override
   Widget build(BuildContext context) => DecoratedBox(
     decoration: BoxDecoration(
-      color: color,
+      color: legibleShadeOf(color, Theme.of(context).brightness),
       borderRadius: BorderRadius.circular(2),
     ),
     child: const SizedBox(height: 4),
