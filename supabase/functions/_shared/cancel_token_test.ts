@@ -1,6 +1,7 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import {
   pragueEpoch,
+  pragueToday,
   signCancelToken,
   verifyCancelToken,
 } from "./cancel_token.ts";
@@ -64,4 +65,13 @@ Deno.test("pragueEpoch accepts SQL time with seconds", () => {
     pragueEpoch("2026-07-13", "17:30:00"),
     pragueEpoch("2026-07-13", "17:30"),
   );
+});
+
+// calendar-manage decides which of a dropped team's matches are still to
+// come by today's date; between midnight and 02:00 Prague (01:00 in winter)
+// the UTC date is still yesterday.
+Deno.test("pragueToday is the Prague date, not the UTC one, after midnight", () => {
+  assertEquals(pragueToday(new Date("2026-09-25T22:30:00Z")), "2026-09-26");
+  assertEquals(pragueToday(new Date("2026-12-12T23:30:00Z")), "2026-12-13");
+  assertEquals(pragueToday(new Date("2026-09-26T10:00:00Z")), "2026-09-26");
 });

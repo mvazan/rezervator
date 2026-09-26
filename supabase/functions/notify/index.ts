@@ -40,8 +40,9 @@ import { createClient } from "@supabase/supabase-js";
 import { pragueEpoch, pragueToday, signCancelToken } from "../_shared/cancel_token.ts";
 import { firebaseConfigured, sendPush } from "../_shared/fcm.ts";
 import { processFederationJobs, siteFetcher } from "../_shared/federation_jobs.ts";
-import { dayLabel, escapeHtml, leadLabel, timeLabel } from "../_shared/format.ts";
-import { type DueReminder, reminderBody } from "../_shared/reminders.ts";
+import { dayLabel, escapeHtml, timeLabel } from "../_shared/format.ts";
+import { type Delivery, deliveryOf } from "../_shared/delivery.ts";
+import { deliverDueReminders, type DueReminder } from "../_shared/reminders.ts";
 import {
   groupBookedMessage,
   groupCancelledMessage,
@@ -74,11 +75,15 @@ const supabase = createClient(
 // E-mail via Resend
 // ---------------------------------------------------------------------------
 
-async function sendEmail(to: string, subject: string, html: string) {
+async function sendEmail(
+  to: string,
+  subject: string,
+  html: string,
+): Promise<Delivery> {
   const key = Deno.env.get("RESEND_API_KEY");
   if (!key || !to) {
     console.error(`e-mail skipped for '${to}' (missing RESEND_API_KEY or address)`);
-    return;
+    return "undeliverable";
   }
   const from = Deno.env.get("RESEND_FROM") ?? "Rezervátor <onboarding@resend.dev>";
   const response = await fetch("https://api.resend.com/emails", {
@@ -92,6 +97,7 @@ async function sendEmail(to: string, subject: string, html: string) {
   if (!response.ok) {
     console.error(`Resend failed for ${to}: ${await response.text()}`);
   }
+  return deliveryOf(response.status);
 }
 
 type Recipient = {
@@ -100,15 +106,17 @@ type Recipient = {
   fcm_token: string | null;
 };
 
-/// Push when possible, e-mail otherwise.
+/// Push when possible, e-mail otherwise. Says what became of it; only the
+/// reminders act on that (a retry stays due), every other message is sent
+/// once, as before.
 async function notifyRecipient(
   recipient: Recipient,
   title: string,
   body: string,
   options: { data?: Record<string, string>; html?: string } = {},
-) {
+): Promise<Delivery> {
   if (firebaseConfigured() && recipient.fcm_token) {
-    await sendPush(
+    return await sendPush(
       supabase,
       recipient.id,
       recipient.fcm_token,
@@ -116,13 +124,12 @@ async function notifyRecipient(
       body,
       options.data,
     );
-  } else {
-    await sendEmail(
-      recipient.email,
-      title,
-      options.html ?? `<p>${escapeHtml(body)}</p>`,
-    );
   }
+  return await sendEmail(
+    recipient.email,
+    title,
+    options.html ?? `<p>${escapeHtml(body)}</p>`,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -446,36 +453,37 @@ async function processJobs() {
 // ---------------------------------------------------------------------------
 
 /// Everything whose moment has come, sent through the same push-or-e-mail
-/// door as every other message. The ledger is written per reminder AFTER it
-/// goes out: a send that throws is simply due again on the next tick, which
-/// is the behaviour one wants from a reminder — late beats never.
+/// door as every other message, one per event (deliverDueReminders). The
+/// ledger is written AFTER it goes out, with the start it was for: a send
+/// that throws, or that FCM or Resend could not take just now (busy, down,
+/// a dead push token — e-mail then), is simply due again on the next tick,
+/// which is the behaviour one wants from a reminder — late beats never.
 async function sendDueReminders() {
   const { data, error } = await supabase.rpc("due_reminders");
   if (error) {
     console.error("due_reminders failed:", error);
     return;
   }
-  for (const row of (data ?? []) as DueReminder[]) {
-    const title = row.kind === "training"
-      ? `Trénink ${leadLabel(row.offset_minutes)}`
-      : `Zápas ${leadLabel(row.offset_minutes)}`;
-    const body = reminderBody(row);
-    try {
-      await notifyRecipient(
+  await deliverDueReminders(
+    (data ?? []) as DueReminder[],
+    new Date(),
+    (row, title, body) =>
+      notifyRecipient(
         { id: row.user_id, email: row.email, fcm_token: row.fcm_token },
         title,
         body,
         { data: { kind: "reminder" } },
-      );
-      await supabase.rpc("mark_reminder_sent", {
+      ),
+    async (row) => {
+      const { error: markError } = await supabase.rpc("mark_reminder_sent", {
         p_user: row.user_id,
         p_event_key: row.event_key,
         p_offset: row.offset_minutes,
+        p_starts_at: row.starts_at,
       });
-    } catch (error) {
-      console.error(`reminder ${row.event_key} failed:`, error);
-    }
-  }
+      if (markError) throw markError;
+    },
+  );
 }
 
 // ---------------------------------------------------------------------------

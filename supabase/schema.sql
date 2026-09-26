@@ -1193,11 +1193,14 @@ CREATE OR REPLACE FUNCTION "public"."due_reminders"() RETURNS TABLE("user_id" "u
     cross join lateral unnest(e.notify_before_minutes) as o(offset_minutes)
     where e.starts_ts > now()
       and e.starts_ts - make_interval(mins => o.offset_minutes) <= now()
+      -- Sent at this lead time or a closer one, for this start (or, with no
+      -- known start, for any): the event was announced.
       and not exists (
         select 1 from reminders_sent s
         where s.user_id = e.user_id
           and s.event_key = e.event_key
-          and s.offset_minutes = o.offset_minutes
+          and s.offset_minutes <= o.offset_minutes
+          and (s.starts_at is null or s.starts_at = e.starts_ts)
       )
     order by e.starts_ts;
 $$;
@@ -1716,20 +1719,21 @@ COMMENT ON FUNCTION "public"."kiosk_password_target"("p_user_id" "uuid") IS 'Kio
 
 
 
-CREATE OR REPLACE FUNCTION "public"."mark_reminder_sent"("p_user" "uuid", "p_event_key" "text", "p_offset" integer) RETURNS "void"
+CREATE OR REPLACE FUNCTION "public"."mark_reminder_sent"("p_user" "uuid", "p_event_key" "text", "p_offset" integer, "p_starts_at" timestamp with time zone DEFAULT NULL::timestamp with time zone) RETURNS "void"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
     AS $$
 begin
-  insert into reminders_sent (user_id, event_key, offset_minutes)
-  values (p_user, p_event_key, p_offset)
-  on conflict (user_id, event_key, offset_minutes) do nothing;
+  insert into reminders_sent (user_id, event_key, offset_minutes, starts_at)
+  values (p_user, p_event_key, p_offset, p_starts_at)
+  on conflict (user_id, event_key, offset_minutes) do update
+    set starts_at = excluded.starts_at, sent_at = now();
   delete from reminders_sent where sent_at < now() - interval '30 days';
 end;
 $$;
 
 
-ALTER FUNCTION "public"."mark_reminder_sent"("p_user" "uuid", "p_event_key" "text", "p_offset" integer) OWNER TO "postgres";
+ALTER FUNCTION "public"."mark_reminder_sent"("p_user" "uuid", "p_event_key" "text", "p_offset" integer, "p_starts_at" timestamp with time zone) OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."match_calendar_followers"("p_tenant" "uuid", "p_home" "text", "p_away" "text") RETURNS SETOF "uuid"
@@ -3935,7 +3939,8 @@ CREATE TABLE IF NOT EXISTS "public"."reminders_sent" (
     "user_id" "uuid" NOT NULL,
     "event_key" "text" NOT NULL,
     "offset_minutes" integer NOT NULL,
-    "sent_at" timestamp with time zone DEFAULT "now"() NOT NULL
+    "sent_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "starts_at" timestamp with time zone
 );
 
 
@@ -3943,6 +3948,10 @@ ALTER TABLE "public"."reminders_sent" OWNER TO "postgres";
 
 
 COMMENT ON TABLE "public"."reminders_sent" IS 'Which reminders have already gone out (0040), so a repeated tick or a retried send does not ring twice. Server-only; pruned after 30 days by the tick itself.';
+
+
+
+COMMENT ON COLUMN "public"."reminders_sent"."starts_at" IS 'The start of the event this reminder announced (0049). A moved event rings again at its new time. Null = an old receipt without a known start, counts for any start.';
 
 
 
@@ -5128,8 +5137,8 @@ GRANT ALL ON FUNCTION "public"."kiosk_password_target"("p_user_id" "uuid") TO "s
 
 
 
-REVOKE ALL ON FUNCTION "public"."mark_reminder_sent"("p_user" "uuid", "p_event_key" "text", "p_offset" integer) FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."mark_reminder_sent"("p_user" "uuid", "p_event_key" "text", "p_offset" integer) TO "service_role";
+REVOKE ALL ON FUNCTION "public"."mark_reminder_sent"("p_user" "uuid", "p_event_key" "text", "p_offset" integer, "p_starts_at" timestamp with time zone) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."mark_reminder_sent"("p_user" "uuid", "p_event_key" "text", "p_offset" integer, "p_starts_at" timestamp with time zone) TO "service_role";
 
 
 

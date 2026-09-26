@@ -8,6 +8,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { base64urlEncode } from "./cancel_token.ts";
+import { type Delivery, pushOutcome } from "./delivery.ts";
 
 type ServiceAccount = {
   project_id: string;
@@ -103,7 +104,7 @@ export async function sendPush(
   title: string,
   body: string,
   data: Record<string, string> = {},
-): Promise<void> {
+): Promise<Delivery> {
   const account = loadServiceAccount();
   if (!account) throw new Error("FIREBASE_SERVICE_ACCOUNT is not configured");
   const accessToken = await getAccessToken(account);
@@ -124,12 +125,13 @@ export async function sendPush(
       },
     }),
   });
-  if (!response.ok) {
-    const text = await response.text();
-    console.error(`FCM send failed for ${userId}: ${text}`);
-    if (text.includes("UNREGISTERED") || text.includes("INVALID_ARGUMENT")) {
-      await supabase.from("profiles").update({ fcm_token: null })
-        .eq("id", userId);
-    }
+  if (response.ok) return "delivered";
+  const text = await response.text();
+  console.error(`FCM send failed for ${userId}: ${text}`);
+  const { delivery, deadToken } = pushOutcome(response.status, text);
+  if (deadToken) {
+    await supabase.from("profiles").update({ fcm_token: null })
+      .eq("id", userId);
   }
+  return delivery;
 }
