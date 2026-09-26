@@ -9,7 +9,8 @@ Requested by the user on 2026-09-26; the design came out of three independent pr
 - **Who sees the roster:** every player of the alley — Klubovna → Služby and a „Slouží: …“ line in the Kalendář week header. The admin plans, counts and keeps history in Správa → Služby.
 - **Reminder before a duty:** yes; the admin switches it on or off for the alley and picks the lead (1 day, 2 days, …).
 - **Booking rules for the duty:** the booked player's usual rules apply — their active-reservation limit, the booking horizon, no block that has already started. Only the admin may go past them.
-- **No message on assignment:** the reminder before the duty is enough; the roster shows in Klubovna and in Můj profil.
+- **No message on assignment:** the reminder before the duty is enough; the roster shows in Klubovna → Služby.
+- **My duty lives in Klubovna → Služby, not in Můj profil** (the user's call after the first draft): a card for my current or next duty on top, and my periods highlighted in the list.
 
 ## Why
 Each week one or more club members work in the canteen. That person has to book trainings for walk-ins, cancel them, and adjust the day (add or remove a block, close the day), but must not become an admin. The admin plans a fair rotation, sees who served how often, and resets the counts each season without losing history.
@@ -142,8 +143,13 @@ The hub entry „Služby“ (`Icons.local_cafe_outlined`) goes after „Docházk
 
 ## Player UI
 - **Klubovna → Služby.** The hub sorts entries Czech-alphabetically: Kontakty, Kuželny, Služby, Výsledky. The entry's subtitle is „Kdo slouží na kantýně“, and the screen is read-only.
-  - A top card „Teď slouží: …“ with „do ne 11. 10.“. My own name reads „ty“.
+  - **My duty on top**, only when I have a current or upcoming duty: a card tinted `secondaryContainer`:
+    - „Právě sloužíš — do ne 11. 10.“, with the co-assignees „spolu s: Jana Nováková“;
+    - otherwise „Tvoje příští služba: po 19. 10. – ne 25. 10.“;
+    - when the reminder is on, a line „Připomínku dostaneš 1 den předem.“ (the lead the admin set).
+  - Then a card „Teď slouží: …“ with „do ne 11. 10.“ (hidden when I am the only one serving now, as my card already says it).
   - Below it, the upcoming periods in chronological order, then „Minulé služby“ collapsed.
+  - **My periods are highlighted** in the list: a 4dp `primary` stripe on the leading edge, my name as „ty“ in w700, and a chip „Tvoje služba“; everyone else stays plain.
   - Empty state: „Služby zatím nejsou naplánované.“
   - Footer: „Během služby můžeš rezervovat a rušit tréninky ostatním a upravovat bloky v jednotlivých dnech.“
   - Admins also get a „Spravovat“ action.
@@ -161,9 +167,6 @@ The hub entry „Služby“ (`Icons.local_cafe_outlined`) goes after „Docházk
 - **Closing a day.**
   - The day-mode BlockDialog opened from the header ＋ gains „Zavřít den“ for admin and duty: prompt „Důvod zavření“, then the standard count confirm, then `set_day_override(closed)`.
   - In portrait, `DayHeader` gets a ⋮ menu: „Přidat blok…“, „Zavřít den…“, „Obnovit týdenní rozvrh“.
-- **Můj profil.** A card „Služby na kantýně“:
-  - Subtitle by state: „Právě sloužíš — do ne 11. 10.“, „Příští služba: po 19. 10. – ne 25. 10.“ or „Žádná naplánovaná služba.“
-  - When the reminder is on: „Připomínku posílá správce 1 den předem.“
 
 ## Reminders
 - `due_duty_reminders()` is security definer and executable by `service_role` only. It returns one row per (assigned account, period) where:
@@ -225,5 +228,5 @@ A reset is `duty_season_start`: it inserts a boundary row and nothing else.
   - Week header line.
   - On-duty `ScheduleActions`: priority and rental hooks are null.
   - BlockDialog „Zavřít den“.
-  - Profile card.
+  - Služby: my card (current / next / none, reminder line) and my periods highlighted.
 - **Deno test**: `duty_reminders_test.ts`.
