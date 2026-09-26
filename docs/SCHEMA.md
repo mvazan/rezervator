@@ -41,6 +41,14 @@ and what cascades — and is updated with every migration.
   reservation history onto the account (`profiles.id = auth.uid()` is the
   identity, so the account row is the one that survives), writes the
   admin-chosen name/nick/club, approves it and deletes the placeholder.
+- The player on duty (služba na kantýně, 0050) is no role: `is_on_duty()`
+  is true for an approved `player` account — not a placeholder — assigned
+  (`duty_assignments`) to a `duty_periods` row of the alley they are in
+  that covers Prague today. A pending or demoted player, a placeholder, the
+  kiosk, an admin (who has the admin path anyway) and a visiting superadmin
+  (the tenant match) never are; at midnight every call is judged again. The
+  duty's rights live only in security-definer RPCs — no table policy is
+  wider — see **The player on duty** under RPCs.
 
 ## Tables
 
@@ -49,13 +57,13 @@ and what cascades — and is updated with every migration.
 | `tenants` | `name` unique, `founder_email` (only the founder can become the first admin), `status`, `approved_at`. **Public overview** (0043): `public_slug` unique, 3–40 lower-case letters/digits/hyphens (`tenants_public_slug_format`), `public_enabled` default off, `tenants_public_needs_slug` (can't enable without a slug) | select for `authenticated` `using (true)` **but column grants expose only `id, name, status`** — `founder_email` never leaves the server; `public_slug`/`public_enabled` are likewise outside the `authenticated` grant, read only by `public_tenant_id`/`my_public_overview`. Writes: RPC only. |
 | `profiles` | `id` (= `auth.uid()` for real accounts; no FK to `auth.users` since 0022), `display_name`, `nick` ≤ 14, `email` ('' for placeholders), `role`, `status`, `club_id → clubs`, `fcm_token`, `superadmin`, `home_tenant_id`, `approved_by/at`, `placeholder` (hand-made row: player ∧ approved ∧ not superadmin), `own_color` (0024: the colour the player picked for their own reservations in their own view, −1 = club colour, else a packed RGB — 0042 moved the picker to the Google palette + wheel, both stored as `0x1000000\|rgb`; a legacy palette index 0-11 from the 1.2.6 app still renders), `followed_teams` (≤ 20 names, the Můj přehled list — separate from the calendar's `calendar_teams`), `default_view` (`calendar` | `trainings`, what the app opens at launch); both own-row updatable (0029); `phone` (0048: E.164 `+<digits>`, `profiles_phone_check` = `^\+[1-9][0-9]{7,14}$`, null = none), `show_email` / `show_phone` (0048: default true, for existing rows too — whether `contacts()` hands the e-mail / phone to the alley's players) | select: own row, or admin of the same tenant. update: own row, columns `display_name`, `fcm_token`, `own_color`, `followed_teams`, `default_view`, `notify_before_minutes`, `phone`, `show_email`, `show_phone` only. insert/delete: RPC only. |
 | `schedule_settings` | PK `tenant_id`; `lane_count` 1–12, `training_weekdays smallint[]` (ISO 1–7), `booking_horizon_days` 1–90, `max_active_reservations` 1–50, `kiosk_dark`, `kiosk_fit_day`, `duty_reminder_enabled` (0050: the reminder before a canteen duty, default off) and `duty_reminder_days` (0050: its lead, 1–14 days, default 1, `schedule_settings_duty_reminder_days_check`; switching the reminder off keeps it) | select approved/kiosk; update admin — the duty reminder columns too, through the same `settings_update` policy and 0017's table-wide UPDATE grant. `public_week` masks the two duty columns (0050), so the public settings stay what 0043 handed out. |
-| `time_blocks` | `starts_at`, `ends_at`, `position`, `active`. `position = -1` marks a day-special block: inactive, reachable only through `day_overrides.block_ids` | select approved/kiosk; insert/update/delete admin. FK from `reservations` is RESTRICT — only never-used blocks can be deleted. |
-| `day_overrides` | PK (`tenant_id`, `date`); `closed`, `reason`, `block_ids uuid[]` (`null` = the default active set) | select approved/kiosk; write admin. Normally written through `set_day_override`. |
+| `time_blocks` | `starts_at`, `ends_at`, `position`, `active`. `position = -1` marks a day-special block: inactive, reachable only through `day_overrides.block_ids` | select approved/kiosk; insert/update/delete admin. A day-special block is added through `add_special_block` (0050: the admin or the player on duty). FK from `reservations` is RESTRICT — only never-used blocks can be deleted. |
+| `day_overrides` | PK (`tenant_id`, `date`); `closed`, `reason`, `block_ids uuid[]` (`null` = the default active set) | select approved/kiosk; write admin. Normally written through `set_day_override` and deleted through `delete_day_override` (0050), which the player on duty may call too, from today on. |
 | `priority_slot_types` | `name` unique per tenant, `color` (−1 = none), `lanes smallint[]` (`null` = whole alley), `is_match`, `builtin` ('Zápas', 'Úklid před zápasem' seeded per tenant) | select approved/kiosk; insert/update admin (**column grants: `name, color, lanes` only**); delete admin ∧ `not builtin`. |
 | `priority_slots` | `date`, `starts_at`, `ends_at`, `type_id`, `home_team`, `away_team`, `prep_minutes` 0–240, `description`, `parent_id` (the auto-managed úklid child), `is_away` (announced, blocks nothing), `import_key` (unique per tenant; `null` = entered by hand in the app, otherwise `rozpis:<soutěž>:<kolo>:<domácí> – <hosté>` set by the old xlsx importer (retired, see **Výsledkový servis ČKA** below) — date-free, so a postponed match is an update of the same row; rows keyed `xlsx:<date>:<teams>` by the 2026/27 grid workbook were re-keyed by the first run of the flat-list importer), `hand_edited` (0038: an imported row whose match columns changed outside an import run — the sync skips it; see **Výsledkový servis ČKA** below). Federation columns (0045, written only by the sync, never compared by the hand-edit trigger, all public in `public_week`): `video_url`, `competition`, `round`, `site_slug` (the match's page on vysledky.kuzelky.cz), `site_match_id`, `venue` / `venue_slug` (from the match detail — once known, they decide `is_away`), `home_team_slug` / `away_team_slug` (the site's team slugs, `teams.site_slug` for ours — how the sync tells our teams in a stored match, since `home_team`/`away_team` follow an admin's rename only at the next sync). Since 0045 the sync keys its rows `cka:<site_match_id>`. | select approved/kiosk; write admin. |
 | `rentals` | `renter_name`, `lanes`, exactly one of `date` / `weekday`, `starts_at`, `ends_at`, `valid_from/until`, `note`, `color` (−2 = default tint). **Grouped dates** (0041): `group_id` — see `rental_groups`. **Exception rows** (0021): `parent_id → rentals` (cascade delete) + `date` = the one occurrence of that weekly series they override, with their own `lanes`, `starts_at`, `ends_at`, `note`; `skipped` = the occurrence does not happen. One per (`parent_id`, `date`). `renter_name`/`color` are copied from the series by `rental_exception_guard`, which also rejects an off-series date, a one-time or child parent and a foreign tenant (`rental_exception_invalid`); `rental_series_changed` prunes children a series edit orphans and re-copies name/colour. | select approved/kiosk; write admin. |
 | `rental_groups` | `renter_name`, `color` (−2 = default tint; the same domain as `rentals.color`, hand-picked values included — `rental_groups_color_check`). One renter with several one-time dates (0041): `rentals.group_id → rental_groups` (cascade delete), allowed only on a row with `date` and no `parent_id` (`rentals_group_shape_check`). `rental_group_guard` copies name/colour onto a grouped row and refuses a foreign tenant (`rental_group_invalid`); `rental_group_changed` propagates a group edit; `rental_group_prune` deletes a group with its last date. A lone one-time rental has no group. **Not in the Realtime publication, on purpose**: the app derives groups from the `rentals` rows it already streams (`rentalGroupsOf`), and a rename reaches the client through `rental_group_changed` copying name/colour onto those rows — a second stream would carry nothing the client needs. | select approved/kiosk; write admin. |
-| `reservations` | `player_id`, `date`, `block_id`, `lane`, `created_via` app\|kiosk\|admin\|group (0044), `cancelled_at/via` app\|one_click\|admin\|group (0044), `cancelled_by` (0044: who actually cancelled it — the owner or a fellow group member, for "Petr ti zrušil trénink"), `cancel_note`, `notify_player`, `notify_message` (per-change intent for the notify function) | **select only** (approved/kiosk). Every write is an RPC, a trigger, or the `cancel` edge function. Live slots are unique: `(date, block_id, lane) where cancelled_at is null`. |
+| `reservations` | `player_id`, `date`, `block_id`, `lane`, `created_via` app\|kiosk\|admin\|group (0044)\|duty (0050), `cancelled_at/via` app\|one_click\|admin\|group (0044)\|duty (0050), `cancelled_by` (0044: who actually cancelled it — the owner, a fellow group member or (0050) the player on duty, for "Petr ti zrušil trénink"), `cancel_note`, `notify_player`, `notify_message` (per-change intent for the notify function) | **select only** (approved/kiosk). Every write is an RPC, a trigger, or the `cancel` edge function. Live slots are unique: `(date, block_id, lane) where cancelled_at is null`. |
 | `clubs` | `name` unique per tenant, `color` (−1 = none), `site_slug` / `site_name` (0047: the venue club on vysledky.kuzelky.cz this club is linked to — its `detail-klubu/<slug>`, unique per tenant when set — and its name there; null = not linked. Only discovery writes them (`apply_federation_discovery`), so a rename or recolour in the app keeps the link) | select approved/kiosk; all admin. |
 | `player_groups` | (0044) `tenant_id`, `created_by` | **server-only**: RLS on, zero policies, every grant revoked from `anon`/`authenticated`. Internal bookkeeping only — the app reads `player_group_members`. |
 | `player_group_members` | (0044) `group_id → player_groups` (cascade), `user_id → profiles` (cascade), `tenant_id` (denormalised so the admin policy never has to read `player_groups` — no policy cycle), `status` invited\|member, `invited_by`. PK (`group_id`, `user_id`). Partial unique index `player_group_one_membership` on `user_id where status = 'member'` — one group per player. In the Realtime publication. | select: own rows (`user_id = auth.uid()`), the caller's own group (`my_group_id()`), or the alley's admin (`tenant_id = current_tenant_id()`). No insert/update/delete for `authenticated`, nothing for `anon` — written only through the `group_*` RPCs below. |
@@ -126,8 +134,8 @@ reappears, when `service_role` lacks DML on any table or view, or when
 | `save_placeholder_player(id?, display_name, nick, club_id)`, `delete_placeholder_player(id)`, `merge_placeholder_player(placeholder_id, target_id, display_name, nick, club_id)` | admin | Players without an account. Save: `id = null` inserts an approved placeholder of the caller's tenant, otherwise edits one (`unknown_player`); `empty_display_name`, `nick_too_long`, `unknown_club`. Delete: `player_has_history` when any reservation or (0050) canteen duty references it. Merge: the source must be a placeholder, the target any non-placeholder non-kiosk profile of the tenant (`invalid_merge`); repoints the reservations and (0050) the duty assignments — a period the target is on already keeps the target's row once — writes the chosen fields, approves a pending target, deletes the source. |
 | `set_nick(user_id, nick)` | self or admin | `nick_too_long`. |
 | `contacts()` (0048) | approved member, not the kiosk (a visiting superadmin counts, for the alley they are in) | Klubovna → Kontakty: the caller's alley's registered players — approved, not the kiosk, not a placeholder, not a visiting superadmin (the `players` view's rule) — as `(id, display_name, nick, club_id, club_name, club_color, email, phone)`, ordered by `display_name` (the app re-sorts Czech). `email` is null unless `show_email` (and for an empty one), `phone` null unless `show_phone`: a hidden one never leaves the database. Admin screens keep reading `profiles` as before; the switches do not apply there. `not_allowed`; anon has no EXECUTE. |
-| `create_reservation(player_id, date, block_id, lane)` | player for self, kiosk for any approved member, admin for anyone, **member of the same group for a fellow member (0044)** | Admin skips past/horizon/limit. A group booking follows the target player's own rules and the target's own cap (`same_group` from `same_group(caller, player_id)`), not the caller's. Raises `player_not_approved`, `unknown_block`, `invalid_lane`, `day_closed` / `invalid_block` (via `block_day_status`), `date_past`, `beyond_horizon`, `limit_reached` (own cap) / `member_at_limit` (0044: a group booking against the target's cap — the same limit, an honest message), `blocked_by_priority`, `blocked_by_rental` (via `rental_occurrences`), `slot_taken`. |
-| `cancel_reservation(id, note?, notify?)` | owner before the block starts, admin anytime, **member of the same group before the block starts (0044)** | `too_late`, `not_allowed`; sets `cancelled_via` app / admin / group (0044) and `cancelled_by` to the caller. |
+| `create_reservation(player_id, date, block_id, lane)` | player for self, kiosk for any approved member, admin for anyone, **member of the same group for a fellow member (0044)**, **the player on duty for another member of the alley (0050)** | Admin skips past/horizon/limit. A group booking follows the target player's own rules and the target's own cap (`same_group` from `same_group(caller, player_id)`), not the caller's; so does a duty booking (0050, `created_via = 'duty'`, `is_on_duty()`). Branch order admin → kiosk → self → group → duty: the duty booking a group mate books as `group`, their own booking stays `app`. Raises `player_not_approved`, `unknown_block`, `invalid_lane`, `day_closed` / `invalid_block` (via `block_day_status`), `date_past` (also a block that has started today), `beyond_horizon`, `limit_reached` (own cap) / `member_at_limit` (0044: a group booking against the target's cap — the same limit, an honest message) / `player_at_limit` (0050: the same for a duty booking), `blocked_by_priority`, `blocked_by_rental` (via `rental_occurrences`), `slot_taken`. |
+| `cancel_reservation(id, note?, notify?)` | owner before the block starts, admin anytime, **member of the same group before the block starts (0044)**, **the player on duty for another member's training of the alley before the block starts (0050)** | `too_late`, `not_allowed`; sets `cancelled_via` app / admin / group (0044) / duty (0050) and `cancelled_by` to the caller; the note (trimmed) and `notify_player` (null = true) are the caller's. Branch order admin → owner/group → duty. |
 | `group_invite(user)` (0044) | approved player, not kiosk | Invites `user` (an approved, non-kiosk, non-placeholder account of the same alley, not the caller) into the caller's group, founding one if the caller has none. `not_allowed`, `unknown_player`, `already_member`, `already_invited`. |
 | `group_accept(group)`, `group_decline(group)` (0044) | the invited player | Accept joins (one group per player — `already_in_group` if already in one); decline removes the invite. Both: `not_authenticated`, `unknown_invite`. |
 | `group_leave()` (0044) | any member | Leaves the caller's group; the group (and its pending invites) is deleted once its last member leaves. No-op outside a group. |
@@ -140,9 +148,11 @@ reappears, when `service_role` lacks DML on any table or view, or when
 | `duty_set_assignees(period, users uuid[])` (0050) | admin | Replaces the period's assignees with `users` (duplicates collapse, `{}` clears; rows that stay are kept, not re-inserted). Each must be an approved non-kiosk member of the alley that is not a visiting superadmin — the `players` view's rule, placeholders allowed — or nothing changes: `unknown_player` (a null too). The period row is locked, so two admins saving it at once end with one set. `not_allowed`, `unknown_period`. |
 | `duty_season_start(started_on, name)` (0050) | admin | „Nová sezóna…“: inserts a boundary; nothing else moves. The name is trimmed — `empty_name` when blank, `duty_seasons_name_check` past 40 chars. `season_order` unless it starts after the newest boundary (serialised per alley by an advisory lock). `not_allowed`. |
 | `duty_season_delete(started_on)` (0050) | admin | „Vrátit poslední sezónu“: deletes that boundary, which must be the newest (`not_newest` otherwise, and when there is none). `not_allowed`. |
-| `move_reservation(...)`, `move_day_reservations(...)` | admin | Re-seat one / all reservations of a day; same collision rules as create (rentals resolved by `rental_occurrences`). `slot_taken`, `blocked_by_*`. |
-| `cancel_block_day_reservations(date, block, note?)` | admin | Bulk cancel before hiding a template block for one day. |
-| `set_day_override(date, closed, reason?, block_ids?)` | admin | Upsert the override and cancel the reservations it displaces. |
+| `move_reservation(...)`, `move_day_reservations(...)` | admin; the player on duty from today on (0050, `duty_gate`) | Re-seat one / all reservations of a day; same collision rules as create (rentals resolved by `rental_occurrences`). `move_reservation` passes the gate with Prague today before it reads the row (`not_allowed` before a word about it), then with the reservation's date — a move keeps the date, so source and target are one. `not_allowed`, `date_past`, `slot_taken`, `blocked_by_*`. |
+| `cancel_block_day_reservations(date, block, note?)` | admin; the player on duty from today on (0050) | Bulk cancel before hiding a template block for one day. `not_allowed`, `date_past`, `unknown_block`. |
+| `set_day_override(date, closed, reason?, block_ids?)` | admin; the player on duty from today on (0050) | Upsert the override and cancel the reservations it displaces. `not_allowed`, `date_past`. |
+| `add_special_block(starts_at, ends_at)` (0050) | admin; the player on duty | Inserts an inactive day-only block of the caller's alley (`position -1` — the SPECIAL sentinel the Rozvrh list hides — `active false`, so the weekly template ignores it) that a day override then points at; returns its id. Behind `Api.addSpecialBlock` instead of a direct insert, so the duty needs no wider `time_blocks` policy. `not_allowed`; `time_blocks_check` when the end is not after the start. |
+| `delete_day_override(date)` (0050) | admin; the player on duty from today on | Deletes the day's override: the day returns to the weekly template (`override_changed` cancels what no longer fits). No override is no error. Behind `Api.deleteDayOverride` instead of a direct delete. `not_allowed`, `date_past`. |
 | `rental_add_date(rental, date, starts_at, ends_at, lanes, note)` | admin | Adds a one-time date next to `rental` (a one-time row of the caller's tenant): creates its `rental_groups` row from the rental's name/colour and adopts it when it has none, then inserts the date with its own lanes/times/note. The source row is read `for update`, so two admins adding a date to the same groupless rental at once cannot each create a group and split it in half. Returns the new row id. Raises `not_authenticated`, `not_allowed`, `unknown_rental` (foreign, exception or weekly row). |
 | `monthly_attendance(year, month)` | admin | Rows (player, club name, attended) — uncancelled reservation = attendance. |
 | `admin_list_tenants()`, `approve_tenant(id)`, `reject_tenant(id)`, `switch_tenant(id)` | superadmin (`not_allowed` otherwise) | `reject_tenant`: pending only (`not_pending`), refuses while the caller is switched into it (`switch_home_first`), deletes the whole tenant. |
@@ -169,7 +179,9 @@ Internal, no EXECUTE for app roles: `current_tenant_id`, `is_*`,
 `public_tenant_id`, `same_group`, `_group_drop_member` (0044),
 `federation_description`, `enqueue_federation_jobs` (called by cron),
 `enqueue_federation_venue`, `federation_live_report`,
-`federation_refresh_error` (0045).
+`federation_refresh_error` (0045), `is_on_duty`, `duty_gate` (0050).
+(`is_admin()` is the exception to `is_*`: policies call it, so it stays
+PUBLIC-executable.)
 
 `block_day_status(tenant, date, block)` → `open` | `day_closed` |
 `invalid_block` | `unknown_block` is the one definition of "this block is
@@ -185,6 +197,23 @@ with the date's exception row overriding lanes/times and a `skipped` one
 removing the occurrence. `create_reservation`, `move_reservation` and the
 rental cascade all use it; the client mirrors it in `rentalsOn`.
 
+**The player on duty (0050).** For the duration of the duty the player
+books and cancels trainings for the alley's other players and edits single
+days — nothing else, and only through RPCs:
+- `create_reservation` / `cancel_reservation`: the duty branch (via
+  `'duty'`), with the booked player's rules — their cap
+  (`player_at_limit`), the horizon, no past day, no started block
+  (`date_past`, `too_late`). Only the admin goes past them.
+- `set_day_override`, `cancel_block_day_reservations`,
+  `move_day_reservations`, `move_reservation`, `delete_day_override`,
+  `add_special_block`: gated by `duty_gate(date)` — the admin passes on any
+  date; anyone else needs `is_on_duty()` (`not_allowed`) and a date of
+  Prague today or later (`date_past`).
+- Still the admin's alone, because no policy got wider: the weekly
+  template (`time_blocks` writes), `priority_slots`, rentals, slot types,
+  clubs, settings, profiles, attendance and every other admin RPC. A direct
+  INSERT is refused (42501); an UPDATE or DELETE finds no row.
+
 **`public_week` skládá týden znovu, na serveri (0043).** Anon nemá na
 tabulky žádný grant a jména se musí maskovat na serveru, takže veřejný
 přehled nečte streamy appky. Nový vstup do `buildWeekSchedule` (nový
@@ -196,7 +225,8 @@ kompilátor (parametry jsou povinné), SQL stranu ne.
 
 Every cascade sets `cancelled_via = 'admin'`, `notify_player = true`, and
 the notify function mails "Trénink zrušen" with the note as the reason
-(past dates stay silent).
+(past dates stay silent). That holds when the player on duty closes or
+edits a day, too (0050): only `cancel_reservation` marks a cancel `'duty'`.
 
 | Event | Mechanism | Which reservations | Note |
 |---|---|---|---|
@@ -925,7 +955,23 @@ and FCM is configured, e-mail otherwise.
   placeholder's duties refusing its delete and moving with the merge,
   duplicates dropped; a player, the kiosk and a pending member reading
   the roster or not, writing nothing and calling no admin RPC; anon
-  reaching neither), and the 0035
+  reaching neither), the 0050 duty's rights (in an alley of its own, clear
+  of A's time-relative matches: `is_on_duty` / `duty_gate` internal, the
+  two new day RPCs the app's and not anon's, `is_admin()` still
+  PUBLIC-executable, both via CHECKs allowing `'duty'` and validated;
+  `is_on_duty()` true inside the period only — not after, not before, not
+  for a placeholder or an admin on the period, not once demoted to pending,
+  not for a superadmin visiting another alley, and back when home; a duty
+  booking as `'duty'` under the target's cap (`player_at_limit`), no
+  yesterday and no started block (`date_past`), the horizon
+  (`beyond_horizon`), no player of another alley, the duty's own booking
+  `'app'` and a group mate's `'group'`; a duty cancel as `'duty'` keeping
+  the note and notify choice, a null choice notifying, `too_late` for a
+  started training, `not_allowed` for another alley's; every day RPC from
+  today on and `date_past` for yesterday; a player whose duty ended refused
+  with `not_allowed` everywhere — an unknown reservation too — changing
+  nothing, while their own booking still works; and on duty, no direct
+  write to blocks, matches, rentals, settings or overrides), and the 0035
   assertion (now including `team_colors`, `match_exceptions` and 0050's
   `duty_periods` / `duty_assignments`) that every table
   `lib/data/providers.dart` streams is in the `supabase_realtime`

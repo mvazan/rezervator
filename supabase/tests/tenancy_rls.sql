@@ -6994,4 +6994,711 @@ delete from duty_seasons
 update schedule_settings set duty_reminder_enabled = false, duty_reminder_days = 1
  where tenant_id = '00000000-0000-0000-0000-00000000000a';
 
+-- 0050 — práva služby ---------------------------------------------------------
+-- The player on duty (an approved player assigned to a period that covers
+-- Prague today) books and cancels for the alley's players under THEIR
+-- rules and edits single days from today on, through the RPCs only; the
+-- weekly template, matches, rentals and settings stay the admin's.
+reset role;
+
+-- 21. Fixtures in an alley of its own, S: tenant A carries matches placed
+-- relative to now() (0040, 0045) and a Saturday 05:00 one (0043), which
+-- would block a fixed block time on some runs. Pavel serves from yesterday
+-- to today + 5, with Vilém (a placeholder) and Alena (S's admin); Quido's
+-- duty ended ten days ago; Tereza serves in ten days and is the player
+-- Pavel books for; Urban is at his cap of 2; Wanda joins Pavel's group
+-- (21c). Blocks at 05:00 and 05:30,
+-- and one at midnight that has always started today. Every day is a
+-- training day, 4 lanes.
+insert into tenants (id, name, status) values
+  ('00000000-0000-0000-0000-000000000050', 'Kuželna S (0050)', 'approved');
+do $$
+declare
+  v_s constant uuid := '00000000-0000-0000-0000-000000000050';
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+  v_horizon integer;
+  v_now uuid;
+  v_past uuid;
+  v_next uuid;
+  v_b1 uuid;
+  v_b2 uuid;
+  v_b0 uuid;
+begin
+  insert into profiles (id, tenant_id, display_name, email, role, status)
+  values
+    ('50000000-0000-0000-0000-000000000010', v_s, 'Alena Správcová',
+     'duty-alena@example.com', 'admin', 'approved'),
+    ('50000000-0000-0000-0000-000000000011', v_s, 'Pavel Kantýnský',
+     'duty-pavel@example.com', 'player', 'approved'),
+    ('50000000-0000-0000-0000-000000000012', v_s, 'Quido Po Službě',
+     'duty-quido@example.com', 'player', 'approved'),
+    ('50000000-0000-0000-0000-000000000013', v_s, 'Tereza Hostová',
+     'duty-tereza@example.com', 'player', 'approved'),
+    ('50000000-0000-0000-0000-000000000014', v_s, 'Urban Plný',
+     'duty-urban@example.com', 'player', 'approved'),
+    ('50000000-0000-0000-0000-000000000016', v_s, 'Wanda Skupinová',
+     'duty-wanda@example.com', 'player', 'approved');
+  insert into profiles (id, tenant_id, display_name, role, status, placeholder)
+  values ('50000000-0000-0000-0000-000000000015', v_s, 'Vilém bez účtu',
+          'player', 'approved', true);
+  update schedule_settings
+     set training_weekdays = '{1,2,3,4,5,6,7}', max_active_reservations = 2,
+         lane_count = 4
+   where tenant_id = v_s
+  returning booking_horizon_days into v_horizon;
+  if v_horizon is null then
+    raise exception 'FAIL: the new alley got no settings row';
+  end if;
+  insert into time_blocks (tenant_id, starts_at, ends_at, position)
+    values (v_s, '05:00', '05:30', 95) returning id into v_b1;
+  insert into time_blocks (tenant_id, starts_at, ends_at, position)
+    values (v_s, '05:30', '06:00', 96) returning id into v_b2;
+  insert into time_blocks (tenant_id, starts_at, ends_at, position)
+    values (v_s, '00:00', '00:30', 94) returning id into v_b0;
+
+  insert into duty_periods (tenant_id, starts_on, ends_on)
+    values (v_s, v_today - 1, v_today + 5) returning id into v_now;
+  insert into duty_periods (tenant_id, starts_on, ends_on)
+    values (v_s, v_today - 20, v_today - 10) returning id into v_past;
+  insert into duty_periods (tenant_id, starts_on, ends_on)
+    values (v_s, v_today + 10, v_today + 16) returning id into v_next;
+  insert into duty_assignments (period_id, user_id, tenant_id) values
+    (v_now, '50000000-0000-0000-0000-000000000010', v_s),
+    (v_now, '50000000-0000-0000-0000-000000000011', v_s),
+    (v_now, '50000000-0000-0000-0000-000000000015', v_s),
+    (v_past, '50000000-0000-0000-0000-000000000012', v_s),
+    (v_next, '50000000-0000-0000-0000-000000000013', v_s);
+
+  insert into reservations (tenant_id, player_id, date, block_id, lane,
+                            created_via, created_by)
+  values
+    (v_s, '50000000-0000-0000-0000-000000000014', v_today + 2, v_b1, 1,
+     'app', '50000000-0000-0000-0000-000000000014'),
+    (v_s, '50000000-0000-0000-0000-000000000014', v_today + 3, v_b1, 1,
+     'app', '50000000-0000-0000-0000-000000000014');
+
+  perform set_config('probe.duty_b1', v_b1::text, true);
+  perform set_config('probe.duty_b2', v_b2::text, true);
+  perform set_config('probe.duty_b0', v_b0::text, true);
+  perform set_config('probe.duty_horizon', v_horizon::text, true);
+end $$;
+
+-- 21a. is_on_duty() and duty_gate() are internal: only security-definer
+-- bodies call them. The two new day RPCs are the app's and not anon's; the
+-- replaced RPCs keep their callers; is_admin() stays PUBLIC-executable
+-- (policies call it). Both via CHECKs know 'duty' and hold for every row.
+do $$
+declare
+  v_f text;
+begin
+  foreach v_f in array array['is_on_duty()', 'duty_gate(date)'] loop
+    if has_function_privilege('authenticated', 'public.' || v_f, 'execute')
+       or has_function_privilege('anon', 'public.' || v_f, 'execute') then
+      raise exception 'FAIL: % is callable from the app', v_f;
+    end if;
+    if not (select prosecdef from pg_proc
+             where oid = ('public.' || v_f)::regprocedure) then
+      raise exception 'FAIL: % is not security definer', v_f;
+    end if;
+  end loop;
+  foreach v_f in array array[
+      'add_special_block(time, time)', 'delete_day_override(date)'] loop
+    if has_function_privilege('anon', 'public.' || v_f, 'execute') then
+      raise exception 'FAIL: anon may execute %', v_f;
+    end if;
+    if not has_function_privilege('authenticated', 'public.' || v_f, 'execute') then
+      raise exception 'FAIL: the app cannot call %', v_f;
+    end if;
+    if not (select prosecdef from pg_proc
+             where oid = ('public.' || v_f)::regprocedure) then
+      raise exception 'FAIL: % is not security definer', v_f;
+    end if;
+  end loop;
+  foreach v_f in array array[
+      'create_reservation(uuid, date, uuid, smallint)',
+      'cancel_reservation(uuid, text, boolean)',
+      'set_day_override(date, boolean, text, uuid[])',
+      'cancel_block_day_reservations(date, uuid, text)',
+      'move_day_reservations(date, uuid, uuid, boolean, text)',
+      'move_reservation(uuid, uuid, integer, boolean, text)'] loop
+    if not has_function_privilege('authenticated', 'public.' || v_f, 'execute') then
+      raise exception 'FAIL: the app can no longer call %', v_f;
+    end if;
+  end loop;
+  if not has_function_privilege('anon', 'public.is_admin()', 'execute') then
+    raise exception 'FAIL: is_admin() must stay PUBLIC-executable, policies call it';
+  end if;
+  if (select count(*) from pg_constraint
+       where conrelid = 'public.reservations'::regclass
+         and conname in ('reservations_created_via_check',
+                         'reservations_cancelled_via_check')
+         and convalidated
+         and pg_get_constraintdef(oid) like '%''duty''%') <> 2 then
+    raise exception 'FAIL: both via CHECKs must allow ''duty'' and be validated';
+  end if;
+  raise notice 'OK: the duty helpers are internal, the new day RPCs the app''s and not anon''s, ''duty'' a valid via (0050)';
+end $$;
+
+-- 21b. is_on_duty(): Pavel inside his period — not Quido after his, not
+-- Tereza before hers, not the placeholder or the admin on Pavel's (the
+-- admin has the admin path), not Pavel demoted to pending, not Pavel as a
+-- superadmin visiting tenant B.
+do $$
+declare
+  v_pavel constant uuid := '50000000-0000-0000-0000-000000000011';
+begin
+  perform set_config('request.jwt.claims',
+    '{"sub":"50000000-0000-0000-0000-000000000011","role":"authenticated"}', true);
+  if not is_on_duty() then
+    raise exception 'FAIL: Pavel is not on duty inside his period';
+  end if;
+  perform set_config('request.jwt.claims',
+    '{"sub":"50000000-0000-0000-0000-000000000012","role":"authenticated"}', true);
+  if is_on_duty() then
+    raise exception 'FAIL: Quido is still on duty after his period ended';
+  end if;
+  perform set_config('request.jwt.claims',
+    '{"sub":"50000000-0000-0000-0000-000000000013","role":"authenticated"}', true);
+  if is_on_duty() then
+    raise exception 'FAIL: Tereza is on duty before her period starts';
+  end if;
+  perform set_config('request.jwt.claims',
+    '{"sub":"50000000-0000-0000-0000-000000000015","role":"authenticated"}', true);
+  if is_on_duty() then
+    raise exception 'FAIL: a placeholder got the duty''s rights';
+  end if;
+  perform set_config('request.jwt.claims',
+    '{"sub":"50000000-0000-0000-0000-000000000010","role":"authenticated"}', true);
+  if is_on_duty() then
+    raise exception 'FAIL: an admin on the period took the duty path, not the admin''s';
+  end if;
+
+  perform set_config('request.jwt.claims',
+    '{"sub":"50000000-0000-0000-0000-000000000011","role":"authenticated"}', true);
+  update profiles set status = 'pending' where id = v_pavel;
+  if is_on_duty() then
+    raise exception 'FAIL: a player demoted to pending kept the duty''s rights';
+  end if;
+  update profiles set status = 'approved' where id = v_pavel;
+  if not is_on_duty() then
+    raise exception 'FAIL: Pavel did not get his rights back once approved again';
+  end if;
+  update profiles
+     set superadmin = true, home_tenant_id = '00000000-0000-0000-0000-000000000050'
+   where id = v_pavel;
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"50000000-0000-0000-0000-000000000011","role":"authenticated"}';
+select switch_tenant('00000000-0000-0000-0000-000000000002');
+do $$
+begin
+  begin
+    perform set_day_override((now() at time zone 'Europe/Prague')::date, true,
+                             'návštěva');
+    raise exception 'FAIL: a visiting superadmin edited the other alley''s day as its duty';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+end $$;
+reset role;
+do $$
+begin
+  if is_on_duty() then
+    raise exception 'FAIL: Pavel kept his duty while visiting another alley';
+  end if;
+end $$;
+set local role authenticated;
+select switch_tenant('00000000-0000-0000-0000-000000000050');
+reset role;
+update profiles set superadmin = false, home_tenant_id = null
+ where id = '50000000-0000-0000-0000-000000000011';
+do $$
+begin
+  if not is_on_duty() then
+    raise exception 'FAIL: back home, Pavel is not on duty';
+  end if;
+  raise notice 'OK: on duty = an approved account player of the alley inside the period, nobody else (0050)';
+end $$;
+
+-- 21c. Pavel books for Tereza as the duty, under her rules: her cap
+-- (Urban's refused with player_at_limit), no past day, no started block,
+-- the horizon. His own booking stays 'app'; a player of another alley is
+-- not his to book; the placeholder is bookable like any member.
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"50000000-0000-0000-0000-000000000011","role":"authenticated"}';
+do $$
+declare
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+  v_b1 constant uuid := current_setting('probe.duty_b1')::uuid;
+  v_b2 constant uuid := current_setting('probe.duty_b2')::uuid;
+  v_b0 constant uuid := current_setting('probe.duty_b0')::uuid;
+  v_horizon constant integer := current_setting('probe.duty_horizon')::integer;
+  v_res reservations;
+begin
+  select * into v_res from create_reservation(
+    '50000000-0000-0000-0000-000000000013', v_today + 1, v_b1, 1::smallint);
+  if v_res.created_via <> 'duty'
+     or v_res.created_by <> '50000000-0000-0000-0000-000000000011' then
+    raise exception 'FAIL: a booking by the duty is not marked as one: %', v_res;
+  end if;
+  perform set_config('probe.duty_res_t', v_res.id::text, true);
+  begin
+    perform create_reservation(
+      '50000000-0000-0000-0000-000000000014', v_today + 1, v_b1, 2::smallint);
+    raise exception 'FAIL: the duty booked past Urban''s cap';
+  exception when others then
+    if sqlerrm <> 'player_at_limit' then raise; end if;
+  end;
+  begin
+    perform create_reservation(
+      '50000000-0000-0000-0000-000000000013', v_today - 1, v_b1, 2::smallint);
+    raise exception 'FAIL: the duty booked yesterday';
+  exception when others then
+    if sqlerrm <> 'date_past' then raise; end if;
+  end;
+  begin
+    perform create_reservation(
+      '50000000-0000-0000-0000-000000000013', v_today, v_b0, 1::smallint);
+    raise exception 'FAIL: the duty booked a block that has started';
+  exception when others then
+    if sqlerrm <> 'date_past' then raise; end if;
+  end;
+  begin
+    perform create_reservation(
+      '50000000-0000-0000-0000-000000000013', v_today + v_horizon + 1, v_b1,
+      1::smallint);
+    raise exception 'FAIL: the duty booked beyond the horizon';
+  exception when others then
+    if sqlerrm <> 'beyond_horizon' then raise; end if;
+  end;
+  begin
+    perform create_reservation(
+      '20000000-0000-0000-0000-0000000000b1', v_today + 1, v_b1, 2::smallint);
+    raise exception 'FAIL: the duty booked a player of another alley';
+  exception when others then
+    if sqlerrm <> 'player_not_approved' then raise; end if;
+  end;
+  select * into v_res from create_reservation(
+    '50000000-0000-0000-0000-000000000011', v_today + 1, v_b1, 3::smallint);
+  if v_res.created_via <> 'app' then
+    raise exception 'FAIL: the duty''s own booking is not ''app'': %', v_res;
+  end if;
+  select * into v_res from create_reservation(
+    '50000000-0000-0000-0000-000000000015', v_today + 1, v_b2, 1::smallint);
+  if v_res.created_via <> 'duty' then
+    raise exception 'FAIL: a booking by the duty for a placeholder is not ''duty'': %', v_res;
+  end if;
+  raise notice 'OK: the duty books for others as ''duty'' under their cap, horizon and start, for himself as ''app'' (0050)';
+end $$;
+
+-- The group branch comes before the duty's: Pavel booking Wanda, his group
+-- mate, books as 'group'.
+select group_invite('50000000-0000-0000-0000-000000000016');
+set local request.jwt.claims =
+  '{"sub":"50000000-0000-0000-0000-000000000016","role":"authenticated"}';
+select group_accept((select group_id from player_group_members
+                     where user_id = '50000000-0000-0000-0000-000000000016'));
+set local request.jwt.claims =
+  '{"sub":"50000000-0000-0000-0000-000000000011","role":"authenticated"}';
+do $$
+declare
+  v_res reservations;
+begin
+  select * into v_res from create_reservation(
+    '50000000-0000-0000-0000-000000000016',
+    (now() at time zone 'Europe/Prague')::date + 1,
+    current_setting('probe.duty_b2')::uuid, 2::smallint);
+  if v_res.created_via <> 'group' then
+    raise exception 'FAIL: the duty booking a group mate should book as ''group'': %', v_res;
+  end if;
+  perform group_leave();
+  raise notice 'OK: a group mate booked by the duty is a group booking (0050)';
+end $$;
+
+-- 21d. Pavel cancels as the duty: Tereza's future training (his note and
+-- notify choice kept; the default notifies), not her started one, not
+-- another alley's.
+reset role;
+do $$
+declare
+  v_s constant uuid := '00000000-0000-0000-0000-000000000050';
+  v_b constant uuid := '00000000-0000-0000-0000-000000000002';
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+  v_id uuid;
+  v_block uuid;
+begin
+  insert into reservations (tenant_id, player_id, date, block_id, lane,
+                            created_via, created_by)
+  values (v_s, '50000000-0000-0000-0000-000000000013', v_today - 1,
+          current_setting('probe.duty_b1')::uuid, 2, 'app',
+          '50000000-0000-0000-0000-000000000013')
+  returning id into v_id;
+  perform set_config('probe.duty_res_past', v_id::text, true);
+  insert into time_blocks (tenant_id, starts_at, ends_at, position)
+    values (v_b, '05:00', '05:30', 95) returning id into v_block;
+  insert into reservations (tenant_id, player_id, date, block_id, lane,
+                            created_via, created_by)
+  values (v_b, '20000000-0000-0000-0000-0000000000b1', v_today + 1, v_block, 1,
+          'app', '20000000-0000-0000-0000-0000000000b1')
+  returning id into v_id;
+  perform set_config('probe.duty_res_foreign', v_id::text, true);
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"50000000-0000-0000-0000-000000000011","role":"authenticated"}';
+do $$
+declare
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+  v_res reservations;
+begin
+  perform cancel_reservation(current_setting('probe.duty_res_t')::uuid,
+                             '  odešla domů  ', false);
+  select * into v_res from reservations
+   where id = current_setting('probe.duty_res_t')::uuid;
+  if v_res.cancelled_at is null or v_res.cancelled_via is distinct from 'duty'
+     or v_res.cancelled_by is distinct from '50000000-0000-0000-0000-000000000011'
+     or v_res.cancel_note <> 'odešla domů' or v_res.notify_player then
+    raise exception 'FAIL: a cancel by the duty is not marked as one: %', v_res;
+  end if;
+  perform cancel_reservation((select id from reservations
+    where player_id = '50000000-0000-0000-0000-000000000014'
+      and date = v_today + 3 and cancelled_at is null), '', null);
+  select * into v_res from reservations
+   where player_id = '50000000-0000-0000-0000-000000000014' and date = v_today + 3;
+  if v_res.cancelled_via is distinct from 'duty' or not v_res.notify_player then
+    raise exception 'FAIL: a cancel by the duty without a choice should notify: %', v_res;
+  end if;
+  begin
+    perform cancel_reservation(current_setting('probe.duty_res_past')::uuid);
+    raise exception 'FAIL: the duty cancelled a started training';
+  exception when others then
+    if sqlerrm <> 'too_late' then raise; end if;
+  end;
+  begin
+    perform cancel_reservation(current_setting('probe.duty_res_foreign')::uuid);
+    raise exception 'FAIL: the duty cancelled another alley''s training';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  raise notice 'OK: the duty cancels others'' trainings until they start, as ''duty'', in his alley only (0050)';
+end $$;
+
+-- 21e. Pavel edits days from today on: moves one reservation and a whole
+-- block of today, cancels a block of today, sets and deletes overrides for
+-- today and tomorrow, adds a day-only block; yesterday is date_past for
+-- every one of them.
+reset role;
+do $$
+declare
+  v_s constant uuid := '00000000-0000-0000-0000-000000000050';
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+  v_id uuid;
+begin
+  insert into reservations (tenant_id, player_id, date, block_id, lane,
+                            created_via, created_by)
+  values (v_s, '50000000-0000-0000-0000-000000000013', v_today,
+          current_setting('probe.duty_b1')::uuid, 1, 'app',
+          '50000000-0000-0000-0000-000000000013')
+  returning id into v_id;
+  perform set_config('probe.duty_res_today1', v_id::text, true);
+  insert into reservations (tenant_id, player_id, date, block_id, lane,
+                            created_via, created_by)
+  values (v_s, '50000000-0000-0000-0000-000000000013', v_today,
+          current_setting('probe.duty_b2')::uuid, 1, 'app',
+          '50000000-0000-0000-0000-000000000013')
+  returning id into v_id;
+  perform set_config('probe.duty_res_today2', v_id::text, true);
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"50000000-0000-0000-0000-000000000011","role":"authenticated"}';
+do $$
+declare
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+  v_b1 constant uuid := current_setting('probe.duty_b1')::uuid;
+  v_b2 constant uuid := current_setting('probe.duty_b2')::uuid;
+  v_r1 constant uuid := current_setting('probe.duty_res_today1')::uuid;
+  v_r2 constant uuid := current_setting('probe.duty_res_today2')::uuid;
+  v_id uuid;
+  v_o day_overrides;
+  v_blk time_blocks;
+begin
+  perform move_reservation(v_r1, v_b2, 2);
+  if not exists (select 1 from reservations
+                 where id = v_r1 and block_id = v_b2 and lane = 2) then
+    raise exception 'FAIL: the duty could not move a reservation of today';
+  end if;
+  begin
+    perform move_reservation(current_setting('probe.duty_res_past')::uuid, v_b2, 3);
+    raise exception 'FAIL: the duty moved a reservation of yesterday';
+  exception when others then
+    if sqlerrm <> 'date_past' then raise; end if;
+  end;
+
+  perform move_day_reservations(v_today, v_b2, v_b1);
+  if (select count(*) from reservations
+       where id in (v_r1, v_r2) and block_id = v_b1) <> 2 then
+    raise exception 'FAIL: the duty could not move today''s block';
+  end if;
+  begin
+    perform move_day_reservations(v_today - 1, v_b1, v_b2);
+    raise exception 'FAIL: the duty moved yesterday''s block';
+  exception when others then
+    if sqlerrm <> 'date_past' then raise; end if;
+  end;
+
+  perform cancel_block_day_reservations(v_today, v_b1, 'blok zrušen');
+  if exists (select 1 from reservations
+             where id in (v_r1, v_r2) and cancelled_at is null) then
+    raise exception 'FAIL: the duty could not cancel today''s block';
+  end if;
+  begin
+    perform cancel_block_day_reservations(v_today - 1, v_b1, 'blok zrušen');
+    raise exception 'FAIL: the duty cancelled yesterday''s block';
+  exception when others then
+    if sqlerrm <> 'date_past' then raise; end if;
+  end;
+
+  perform set_day_override(v_today, false, '', array[v_b1, v_b2]);
+  select * into v_o from day_overrides where date = v_today;
+  if v_o.block_ids is distinct from array[v_b1, v_b2] or v_o.closed
+     or v_o.created_by is distinct from '50000000-0000-0000-0000-000000000011' then
+    raise exception 'FAIL: the duty could not set today''s blocks: %', v_o;
+  end if;
+  perform set_day_override(v_today + 1, true, 'Zavřeno kvůli akci');
+  if not exists (select 1 from day_overrides
+                 where date = v_today + 1 and closed
+                   and reason = 'Zavřeno kvůli akci') then
+    raise exception 'FAIL: the duty could not close tomorrow';
+  end if;
+  begin
+    perform set_day_override(v_today - 1, true, 'pozdě');
+    raise exception 'FAIL: the duty closed yesterday';
+  exception when others then
+    if sqlerrm <> 'date_past' then raise; end if;
+  end;
+
+  perform delete_day_override(v_today + 1);
+  if exists (select 1 from day_overrides where date = v_today + 1) then
+    raise exception 'FAIL: the duty could not return tomorrow to the template';
+  end if;
+  begin
+    perform delete_day_override(v_today - 1);
+    raise exception 'FAIL: the duty deleted yesterday''s override';
+  exception when others then
+    if sqlerrm <> 'date_past' then raise; end if;
+  end;
+
+  v_id := add_special_block('05:40', '05:50');
+  select * into v_blk from time_blocks where id = v_id;
+  if v_blk.id is null or v_blk.position <> -1 or v_blk.active
+     or v_blk.tenant_id <> current_tenant_id()
+     or v_blk.starts_at <> '05:40' or v_blk.ends_at <> '05:50' then
+    raise exception 'FAIL: add_special_block did not add an inactive day-only block: %', v_blk;
+  end if;
+  perform set_config('probe.duty_special', v_id::text, true);
+  raise notice 'OK: the duty edits days from today on, never yesterday (0050)';
+end $$;
+
+-- 21f. Quido, whose duty is over, is a plain player again: every one of
+-- these is not_allowed — for an unknown reservation too, before a word
+-- about it — and none of them changed anything. His own booking works.
+reset role;
+do $$
+declare
+  v_s constant uuid := '00000000-0000-0000-0000-000000000050';
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+  v_id uuid;
+begin
+  insert into reservations (tenant_id, player_id, date, block_id, lane,
+                            created_via, created_by)
+  values (v_s, '50000000-0000-0000-0000-000000000013', v_today + 2,
+          current_setting('probe.duty_b2')::uuid, 1, 'app',
+          '50000000-0000-0000-0000-000000000013')
+  returning id into v_id;
+  perform set_config('probe.duty_res_future', v_id::text, true);
+  insert into reservations (tenant_id, player_id, date, block_id, lane,
+                            created_via, created_by)
+  values (v_s, '50000000-0000-0000-0000-000000000013', v_today,
+          current_setting('probe.duty_b2')::uuid, 3, 'app',
+          '50000000-0000-0000-0000-000000000013')
+  returning id into v_id;
+  perform set_config('probe.duty_res_today3', v_id::text, true);
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"50000000-0000-0000-0000-000000000012","role":"authenticated"}';
+do $$
+declare
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+  v_b1 constant uuid := current_setting('probe.duty_b1')::uuid;
+  v_b2 constant uuid := current_setting('probe.duty_b2')::uuid;
+  v_res reservations;
+begin
+  begin
+    perform create_reservation(
+      '50000000-0000-0000-0000-000000000013', v_today + 2, v_b1, 3::smallint);
+    raise exception 'FAIL: a player off duty booked for another';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  begin
+    perform cancel_reservation(current_setting('probe.duty_res_future')::uuid);
+    raise exception 'FAIL: a player off duty cancelled another''s training';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  begin
+    perform set_day_override(v_today + 2, true, 'po službě');
+    raise exception 'FAIL: a player off duty closed a day';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  begin
+    perform delete_day_override(v_today);
+    raise exception 'FAIL: a player off duty deleted an override';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  begin
+    perform add_special_block('05:40', '05:50');
+    raise exception 'FAIL: a player off duty added a block';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  begin
+    perform cancel_block_day_reservations(v_today, v_b2);
+    raise exception 'FAIL: a player off duty cancelled a block';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  begin
+    perform move_day_reservations(v_today, v_b2, v_b1);
+    raise exception 'FAIL: a player off duty moved a block';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  begin
+    perform move_reservation(current_setting('probe.duty_res_today3')::uuid,
+                             v_b1, 3);
+    raise exception 'FAIL: a player off duty moved a reservation';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  begin
+    perform move_reservation(gen_random_uuid(), v_b1, 3);
+    raise exception 'FAIL: a player off duty moved an unknown reservation';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  select * into v_res from create_reservation(
+    '50000000-0000-0000-0000-000000000012', v_today + 4, v_b2, 2::smallint);
+  if v_res.created_via <> 'app' then
+    raise exception 'FAIL: a player off duty lost his own booking: %', v_res;
+  end if;
+end $$;
+reset role;
+do $$
+declare
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+  v_b1 constant uuid := current_setting('probe.duty_b1')::uuid;
+  v_b2 constant uuid := current_setting('probe.duty_b2')::uuid;
+begin
+  if exists (select 1 from reservations
+             where id = current_setting('probe.duty_res_future')::uuid
+               and cancelled_at is not null)
+     or not exists (select 1 from reservations
+                    where id = current_setting('probe.duty_res_today3')::uuid
+                      and block_id = v_b2 and lane = 3 and cancelled_at is null)
+     or exists (select 1 from day_overrides
+                where tenant_id = '00000000-0000-0000-0000-000000000050'
+                  and date = v_today + 2)
+     or (select block_ids from day_overrides
+          where tenant_id = '00000000-0000-0000-0000-000000000050'
+            and date = v_today) is distinct from array[v_b1, v_b2]
+     or (select count(*) from time_blocks
+          where tenant_id = '00000000-0000-0000-0000-000000000050'
+            and position = -1 and starts_at = '05:40') <> 1 then
+    raise exception 'FAIL: a refused call by a player off duty changed something';
+  end if;
+  raise notice 'OK: off duty, a player books, cancels and edits nothing of others (0050)';
+end $$;
+
+-- 21g. On duty, Pavel still writes no table directly: the weekly template,
+-- matches, rentals, settings and overrides stay behind the admin's
+-- policies (an INSERT is refused with 42501, an UPDATE or DELETE finds no
+-- row — RLS hides it — and changes nothing).
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"50000000-0000-0000-0000-000000000011","role":"authenticated"}';
+do $$
+declare
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+  v_b1 constant uuid := current_setting('probe.duty_b1')::uuid;
+  v_type uuid;
+  v_rows integer;
+begin
+  begin
+    insert into time_blocks (starts_at, ends_at, position, active)
+      values ('05:40', '05:50', -1, false);
+    raise exception 'FAIL: the duty inserted a block directly';
+  exception when insufficient_privilege then null;
+  end;
+  select id into v_type from priority_slot_types limit 1;
+  begin
+    insert into priority_slots (date, starts_at, ends_at, type_id, created_by)
+      values (v_today + 1, '05:00', '05:30', v_type, auth.uid());
+    raise exception 'FAIL: the duty inserted a match or priority slot';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    insert into rentals (tenant_id, renter_name, lanes, date, starts_at, ends_at,
+                         created_by)
+      values (current_tenant_id(), 'Firma Služba', '{1}', v_today + 1,
+              '05:00', '05:30', auth.uid());
+    raise exception 'FAIL: the duty inserted a rental';
+  exception when insufficient_privilege then null;
+  end;
+  update time_blocks set starts_at = '04:30' where id = v_b1;
+  get diagnostics v_rows = row_count;
+  if v_rows <> 0 then
+    raise exception 'FAIL: the duty changed the weekly template';
+  end if;
+  delete from time_blocks where id = v_b1;
+  get diagnostics v_rows = row_count;
+  if v_rows <> 0 then
+    raise exception 'FAIL: the duty deleted a template block';
+  end if;
+  update schedule_settings set max_active_reservations = 9;
+  get diagnostics v_rows = row_count;
+  if v_rows <> 0 then
+    raise exception 'FAIL: the duty changed the alley''s settings';
+  end if;
+  begin
+    insert into day_overrides (tenant_id, date, closed, created_by)
+      values (current_tenant_id(), v_today + 3, true, auth.uid());
+    raise exception 'FAIL: the duty inserted an override directly';
+  exception when insufficient_privilege then null;
+  end;
+  delete from day_overrides where date = v_today;
+  get diagnostics v_rows = row_count;
+  if v_rows <> 0 then
+    raise exception 'FAIL: the duty deleted an override directly';
+  end if;
+  if not exists (select 1 from time_blocks
+                 where id = v_b1 and starts_at = '05:00') then
+    raise exception 'FAIL: the template block is not what it was';
+  end if;
+  raise notice 'OK: on duty, the template, matches, rentals, settings and overrides stay behind the admin''s policies (0050)';
+end $$;
+
+-- The next sections start without duties.
+reset role;
+delete from duty_periods
+ where tenant_id in ('00000000-0000-0000-0000-00000000000a',
+                     '00000000-0000-0000-0000-000000000002',
+                     '00000000-0000-0000-0000-000000000050');
+
 rollback;

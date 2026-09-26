@@ -41,6 +41,25 @@ $$;
 ALTER FUNCTION "public"."_group_drop_member"("p_group" "uuid", "p_user" "uuid") OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."add_special_block"("p_starts_at" time without time zone, "p_ends_at" time without time zone) RETURNS "uuid"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_id uuid;
+begin
+  perform duty_gate((now() at time zone 'Europe/Prague')::date);
+  insert into time_blocks (tenant_id, starts_at, ends_at, position, active)
+    values (current_tenant_id(), p_starts_at, p_ends_at, -1, false)
+    returning id into v_id;
+  return v_id;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."add_special_block"("p_starts_at" time without time zone, "p_ends_at" time without time zone) OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."admin_list_tenants"() RETURNS TABLE("id" "uuid", "name" "text", "status" "text", "founder_email" "text", "created_at" timestamp with time zone, "approved_at" timestamp with time zone, "member_count" bigint)
     LANGUAGE "plpgsql" STABLE SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -499,9 +518,7 @@ CREATE OR REPLACE FUNCTION "public"."cancel_block_day_reservations"("p_date" "da
     SET "search_path" TO 'public'
     AS $$
 begin
-  if not is_admin() then
-    raise exception 'not_allowed';
-  end if;
+  perform duty_gate(p_date);
   if not exists (
     select 1 from time_blocks
     where id = p_block and tenant_id = current_tenant_id()
@@ -739,6 +756,14 @@ begin
       raise exception 'too_late';
     end if;
     v_via := case when v_res.player_id = v_uid then 'app' else 'group' end;
+  elsif v_caller.status = 'approved' and v_caller.role = 'player'
+        and v_res.tenant_id = v_caller.tenant_id and is_on_duty() then
+    select * into v_block from time_blocks where id = v_res.block_id;
+    v_starts := (v_res.date + v_block.starts_at) at time zone 'Europe/Prague';
+    if v_now >= v_starts then
+      raise exception 'too_late';
+    end if;
+    v_via := 'duty';
   else
     raise exception 'not_allowed';
   end if;
@@ -875,8 +900,8 @@ CREATE TABLE IF NOT EXISTS "public"."reservations" (
     "notify_player" boolean DEFAULT true NOT NULL,
     "notify_message" "text",
     "cancelled_by" "uuid",
-    CONSTRAINT "reservations_cancelled_via_check" CHECK (("cancelled_via" = ANY (ARRAY['app'::"text", 'one_click'::"text", 'admin'::"text", 'group'::"text"]))),
-    CONSTRAINT "reservations_created_via_check" CHECK (("created_via" = ANY (ARRAY['app'::"text", 'kiosk'::"text", 'admin'::"text", 'group'::"text"]))),
+    CONSTRAINT "reservations_cancelled_via_check" CHECK (("cancelled_via" = ANY (ARRAY['app'::"text", 'one_click'::"text", 'admin'::"text", 'group'::"text", 'duty'::"text"]))),
+    CONSTRAINT "reservations_created_via_check" CHECK (("created_via" = ANY (ARRAY['app'::"text", 'kiosk'::"text", 'admin'::"text", 'group'::"text", 'duty'::"text"]))),
     CONSTRAINT "reservations_lane_check" CHECK (("lane" >= 1))
 );
 
@@ -917,6 +942,9 @@ begin
   elsif v_caller.status = 'approved' and v_caller.role = 'player'
         and same_group(v_uid, p_player_id) then
     v_via := 'group';
+  elsif v_caller.status = 'approved' and v_caller.role = 'player'
+        and p_player_id <> v_uid and is_on_duty() then
+    v_via := 'duty';
   else
     raise exception 'not_allowed';
   end if;
@@ -961,7 +989,9 @@ begin
     if v_active_count >= v_settings.max_active_reservations then
       -- "Máš už…" would be a lie about a member's cap.
       raise exception '%',
-        case when v_via = 'group' then 'member_at_limit' else 'limit_reached' end;
+        case when v_via = 'group' then 'member_at_limit'
+             when v_via = 'duty' then 'player_at_limit'
+             else 'limit_reached' end;
     end if;
   end if;
 
@@ -1128,6 +1158,21 @@ end; $$;
 ALTER FUNCTION "public"."delete_club"("p_id" "uuid") OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."delete_day_override"("p_date" "date") RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  perform duty_gate(p_date);
+  delete from day_overrides
+   where tenant_id = current_tenant_id() and date = p_date;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."delete_day_override"("p_date" "date") OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."delete_placeholder_player"("p_id" "uuid") RETURNS "void"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -1208,6 +1253,27 @@ $$;
 
 
 ALTER FUNCTION "public"."due_reminders"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."duty_gate"("p_date" "date") RETURNS "void"
+    LANGUAGE "plpgsql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  if is_admin() then
+    return;
+  end if;
+  if not is_on_duty() then
+    raise exception 'not_allowed';
+  end if;
+  if p_date < (now() at time zone 'Europe/Prague')::date then
+    raise exception 'date_past';
+  end if;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."duty_gate"("p_date" "date") OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."duty_generate"("p_from" "date", "p_days" smallint, "p_until" "date") RETURNS "jsonb"
@@ -1913,6 +1979,21 @@ $$;
 ALTER FUNCTION "public"."is_kiosk"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."is_on_duty"() RETURNS boolean
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  select exists (select 1 from duty_assignments a
+    join duty_periods d on d.id = a.period_id
+    join profiles me on me.id = auth.uid()
+   where a.user_id = me.id and d.tenant_id = me.tenant_id
+     and me.status = 'approved' and me.role = 'player' and not me.placeholder
+     and (now() at time zone 'Europe/Prague')::date between d.starts_on and d.ends_on) $$;
+
+
+ALTER FUNCTION "public"."is_on_duty"() OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."is_superadmin"() RETURNS boolean
     LANGUAGE "sql" STABLE SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -2110,9 +2191,7 @@ CREATE OR REPLACE FUNCTION "public"."move_day_reservations"("p_date" "date", "p_
     SET "search_path" TO 'public'
     AS $$
 begin
-  if not is_admin() then
-    raise exception 'not_allowed';
-  end if;
+  perform duty_gate(p_date);
 
   if not exists (
     select 1 from time_blocks
@@ -2150,15 +2229,14 @@ declare
   v_block time_blocks;
   v_lanes int;
 begin
-  if not is_admin() then
-    raise exception 'not_allowed';
-  end if;
+  perform duty_gate((now() at time zone 'Europe/Prague')::date);
 
   select * into v_res from reservations
   where id = p_reservation and tenant_id = current_tenant_id();
   if not found or v_res.cancelled_at is not null then
     raise exception 'unknown_reservation';
   end if;
+  perform duty_gate(v_res.date);
 
   select * into v_block from time_blocks
   where id = p_to_block and tenant_id = current_tenant_id();
@@ -3283,9 +3361,7 @@ CREATE OR REPLACE FUNCTION "public"."set_day_override"("p_date" "date", "p_close
     SET "search_path" TO 'public'
     AS $$
 begin
-  if not is_admin() then
-    raise exception 'not_allowed';
-  end if;
+  perform duty_gate(p_date);
 
   insert into day_overrides (tenant_id, date, closed, reason, block_ids, created_by)
   values (current_tenant_id(), p_date, p_closed, trim(coalesce(p_reason, '')),
@@ -5310,6 +5386,12 @@ GRANT ALL ON FUNCTION "public"."_group_drop_member"("p_group" "uuid", "p_user" "
 
 
 
+REVOKE ALL ON FUNCTION "public"."add_special_block"("p_starts_at" time without time zone, "p_ends_at" time without time zone) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."add_special_block"("p_starts_at" time without time zone, "p_ends_at" time without time zone) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."add_special_block"("p_starts_at" time without time zone, "p_ends_at" time without time zone) TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."admin_list_tenants"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."admin_list_tenants"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."admin_list_tenants"() TO "service_role";
@@ -5426,6 +5508,12 @@ GRANT ALL ON FUNCTION "public"."create_tenant_and_register"("p_tenant_name" "tex
 
 
 
+REVOKE ALL ON FUNCTION "public"."delete_day_override"("p_date" "date") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."delete_day_override"("p_date" "date") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."delete_day_override"("p_date" "date") TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."delete_placeholder_player"("p_id" "uuid") TO "anon";
 GRANT ALL ON FUNCTION "public"."delete_placeholder_player"("p_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."delete_placeholder_player"("p_id" "uuid") TO "service_role";
@@ -5434,6 +5522,11 @@ GRANT ALL ON FUNCTION "public"."delete_placeholder_player"("p_id" "uuid") TO "se
 
 REVOKE ALL ON FUNCTION "public"."due_reminders"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."due_reminders"() TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."duty_gate"("p_date" "date") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."duty_gate"("p_date" "date") TO "service_role";
 
 
 
@@ -5573,6 +5666,11 @@ GRANT ALL ON FUNCTION "public"."group_leave"() TO "service_role";
 REVOKE ALL ON FUNCTION "public"."group_remove_member"("p_user" "uuid") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."group_remove_member"("p_user" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."group_remove_member"("p_user" "uuid") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."is_on_duty"() FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."is_on_duty"() TO "service_role";
 
 
 

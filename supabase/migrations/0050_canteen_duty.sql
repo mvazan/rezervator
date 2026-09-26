@@ -534,3 +534,467 @@ begin
   delete from profiles where id = p_placeholder_id;
 end;
 $$;
+
+-- =================================================== the rights of the duty
+-- The player on duty books and cancels trainings for the alley's players
+-- and edits single days (add or cancel a block, close a day) from today on.
+-- Only the security-definer RPCs below grant it: no table policy gets
+-- wider, so the weekly template, matches, rentals, slot types, clubs and
+-- settings stay the admin's. The duty keeps the booked player's rules (their
+-- cap, the horizon, no past day, no started block); only the admin goes
+-- past them. Branch order in the booking RPCs: admin → kiosk → self → group
+-- → duty, so a duty booking a group mate books as 'group'.
+
+-- ------------------------------------------------------ reservations: via
+-- 'duty' instead of 'admin': the booked player learns who it was and the
+-- audit trail stays honest. Dropped and re-added NOT VALID, then validated.
+alter table reservations drop constraint if exists reservations_created_via_check;
+alter table reservations add constraint reservations_created_via_check
+  check (created_via in ('app', 'kiosk', 'admin', 'group', 'duty')) not valid;
+alter table reservations validate constraint reservations_created_via_check;
+alter table reservations drop constraint if exists reservations_cancelled_via_check;
+alter table reservations add constraint reservations_cancelled_via_check
+  check (cancelled_via in ('app', 'one_click', 'admin', 'group', 'duty')) not valid;
+alter table reservations validate constraint reservations_cancelled_via_check;
+
+-- ----------------------------------------------------------- the helpers
+-- On duty = an approved account player (no placeholder; the kiosk and the
+-- admin never — the admin has the admin path) assigned to a period of the
+-- alley they are in that covers Prague today. The tenant match keeps a
+-- visiting superadmin out; a pending or demoted player loses it at once;
+-- at midnight every call is judged again. Internal like same_group: only
+-- security-definer bodies call it. (Unlike is_admin(), which policies call
+-- and which therefore stays PUBLIC-executable.)
+create or replace function is_on_duty() returns boolean language sql stable
+security definer set search_path = public as $$
+  select exists (select 1 from duty_assignments a
+    join duty_periods d on d.id = a.period_id
+    join profiles me on me.id = auth.uid()
+   where a.user_id = me.id and d.tenant_id = me.tenant_id
+     and me.status = 'approved' and me.role = 'player' and not me.placeholder
+     and (now() at time zone 'Europe/Prague')::date between d.starts_on and d.ends_on) $$;
+
+-- The gate of the day RPCs: the admin passes on any date; anyone else must
+-- be on duty (`not_allowed`) and touch only Prague today or later
+-- (`date_past`). Internal, like is_on_duty().
+create or replace function duty_gate(p_date date) returns void
+language plpgsql stable security definer set search_path = public
+as $$
+begin
+  if is_admin() then
+    return;
+  end if;
+  if not is_on_duty() then
+    raise exception 'not_allowed';
+  end if;
+  if p_date < (now() at time zone 'Europe/Prague')::date then
+    raise exception 'date_past';
+  end if;
+end;
+$$;
+
+revoke all on function is_on_duty() from public, anon, authenticated;
+revoke all on function duty_gate(date) from public, anon, authenticated;
+
+-- --------------------------------------------------- two new day RPCs
+-- The app wrote these two straight into the tables (Api.addSpecialBlock,
+-- Api.deleteDayOverride), which only the admin's policies allow. Behind
+-- RPCs the duty gets them without a wider policy.
+
+-- An INACTIVE day-only block of the caller's alley: position -1 is the
+-- SPECIAL sentinel the Rozvrh list hides, active = false keeps it out of
+-- the weekly template; a day override then points at it. Returns its id.
+-- The admin, or the duty: there is no date, so the gate checks Prague
+-- today, which a running duty always covers.
+create or replace function add_special_block(p_starts_at time, p_ends_at time)
+returns uuid
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_id uuid;
+begin
+  perform duty_gate((now() at time zone 'Europe/Prague')::date);
+  insert into time_blocks (tenant_id, starts_at, ends_at, position, active)
+    values (current_tenant_id(), p_starts_at, p_ends_at, -1, false)
+    returning id into v_id;
+  return v_id;
+end;
+$$;
+
+-- Returns p_date to the weekly template: deletes its override (the
+-- override_changed cascade cancels what no longer fits). The admin on any
+-- date, the duty from today on. No override is no error.
+create or replace function delete_day_override(p_date date)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+begin
+  perform duty_gate(p_date);
+  delete from day_overrides
+   where tenant_id = current_tenant_id() and date = p_date;
+end;
+$$;
+
+revoke all on function add_special_block(time, time) from public, anon;
+revoke all on function delete_day_override(date) from public, anon;
+grant execute on function add_special_block(time, time) to authenticated;
+grant execute on function delete_day_override(date) to authenticated;
+
+-- ------------------------------------------ the day RPCs: admin or duty
+-- The current bodies (0011, move_reservation 0021; copied from
+-- supabase/schema.sql) with one change each: the is_admin() gate became
+-- duty_gate(date) (move_reservation gates twice, see there). Signatures,
+-- defaults and grants stay (create or replace).
+
+-- Upsert the day's override and cancel the reservations it displaces.
+create or replace function set_day_override(
+  p_date date, p_closed boolean, p_reason text default '',
+  p_block_ids uuid[] default null)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+begin
+  perform duty_gate(p_date);
+
+  insert into day_overrides (tenant_id, date, closed, reason, block_ids, created_by)
+  values (current_tenant_id(), p_date, p_closed, trim(coalesce(p_reason, '')),
+          p_block_ids, auth.uid())
+  on conflict (tenant_id, date) do update
+    set closed = excluded.closed,
+        reason = excluded.reason,
+        block_ids = excluded.block_ids,
+        created_by = excluded.created_by,
+        created_at = now();
+
+  update reservations r
+  set cancelled_at = now(),
+      cancelled_via = 'admin',
+      cancel_note = coalesce(nullif(trim(p_reason), ''), 'změna rozvrhu'),
+      notify_player = true,
+      notify_message = null
+  where r.date = p_date
+    and r.tenant_id = current_tenant_id()
+    and r.cancelled_at is null
+    and (p_closed or (p_block_ids is not null and not (r.block_id = any (p_block_ids))));
+end;
+$$;
+
+-- Bulk cancel before hiding a template block for one day.
+create or replace function cancel_block_day_reservations(
+  p_date date, p_block uuid, p_note text default 'změna rozvrhu')
+returns void
+language plpgsql security definer set search_path = public
+as $$
+begin
+  perform duty_gate(p_date);
+  if not exists (
+    select 1 from time_blocks
+    where id = p_block and tenant_id = current_tenant_id()
+  ) then
+    raise exception 'unknown_block';
+  end if;
+
+  update reservations
+  set cancelled_at = now(),
+      cancelled_via = 'admin',
+      cancel_note = coalesce(nullif(trim(p_note), ''), 'změna rozvrhu'),
+      notify_player = true,
+      notify_message = null
+  where date = p_date
+    and block_id = p_block
+    and cancelled_at is null
+    and tenant_id = current_tenant_id();
+end;
+$$;
+
+-- Re-seat all reservations of a day's block into another block.
+create or replace function move_day_reservations(
+  p_date date, p_from_block uuid, p_to_block uuid,
+  p_notify boolean default true, p_message text default null)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+begin
+  perform duty_gate(p_date);
+
+  if not exists (
+    select 1 from time_blocks
+    where id = p_from_block and tenant_id = current_tenant_id()
+  ) or not exists (
+    select 1 from time_blocks
+    where id = p_to_block and tenant_id = current_tenant_id()
+  ) then
+    raise exception 'unknown_block';
+  end if;
+
+  update reservations
+  set block_id = p_to_block,
+      notify_player = coalesce(p_notify, true),
+      notify_message = nullif(trim(coalesce(p_message, '')), '')
+  where date = p_date
+    and block_id = p_from_block
+    and cancelled_at is null
+    and tenant_id = current_tenant_id();
+exception when unique_violation then
+  raise exception 'slot_taken';
+end;
+$$;
+
+-- Re-seat one reservation. A move keeps its date, so the source and the
+-- target date are one: the duty is refused before a word about the
+-- reservation (Prague today), then held to the reservation's date.
+create or replace function move_reservation(
+  p_reservation uuid, p_to_block uuid, p_lane integer,
+  p_notify boolean default true, p_message text default null)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_res reservations;
+  v_block time_blocks;
+  v_lanes int;
+begin
+  perform duty_gate((now() at time zone 'Europe/Prague')::date);
+
+  select * into v_res from reservations
+  where id = p_reservation and tenant_id = current_tenant_id();
+  if not found or v_res.cancelled_at is not null then
+    raise exception 'unknown_reservation';
+  end if;
+  perform duty_gate(v_res.date);
+
+  select * into v_block from time_blocks
+  where id = p_to_block and tenant_id = current_tenant_id();
+  if not found then
+    raise exception 'unknown_block';
+  end if;
+
+  select lane_count into v_lanes from schedule_settings
+  where tenant_id = current_tenant_id();
+  if p_lane < 1 or p_lane > v_lanes then
+    raise exception 'invalid_lane';
+  end if;
+
+  if exists (
+    select 1 from priority_slots s
+    join priority_slot_types t on t.id = s.type_id
+    where s.date = v_res.date
+      and s.tenant_id = current_tenant_id()
+      and not s.is_away
+      and (t.lanes is null or p_lane = any (t.lanes))
+      and s.starts_at < v_block.ends_at
+      and s.ends_at > v_block.starts_at
+  ) then
+    raise exception 'blocked_by_priority';
+  end if;
+
+  if exists (
+    select 1 from rental_occurrences(current_tenant_id(), v_res.date) o
+    where p_lane = any (o.lanes)
+      and o.starts_at < v_block.ends_at and o.ends_at > v_block.starts_at
+  ) then
+    raise exception 'blocked_by_rental';
+  end if;
+
+  update reservations
+  set block_id = p_to_block, lane = p_lane,
+      notify_player = coalesce(p_notify, true),
+      notify_message = nullif(trim(coalesce(p_message, '')), '')
+  where id = p_reservation;
+exception when unique_violation then
+  raise exception 'slot_taken';
+end;
+$$;
+
+-- ------------------------------------------- booking and cancelling: duty
+-- create_reservation (0044's body): a duty branch after the group branch.
+-- A duty booking follows the booked player's rules and cap, like a group
+-- one, and says so when that cap is hit: `player_at_limit`.
+create or replace function create_reservation(
+  p_player_id uuid, p_date date, p_block_id uuid, p_lane smallint)
+returns reservations
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_caller profiles;
+  v_settings schedule_settings;
+  v_block time_blocks;
+  v_status text;
+  v_via text;
+  v_today date := (now() at time zone 'Europe/Prague')::date;
+  v_now time := (now() at time zone 'Europe/Prague')::time;
+  v_active_count int;
+  v_res reservations;
+begin
+  if v_uid is null then
+    raise exception 'not_authenticated';
+  end if;
+  select * into v_caller from profiles where id = v_uid;
+  if not found then
+    raise exception 'no_profile';
+  end if;
+
+  if v_caller.role = 'admin' and v_caller.status = 'approved' then
+    v_via := case when p_player_id = v_uid then 'app' else 'admin' end;
+  elsif v_caller.role = 'kiosk' then
+    v_via := 'kiosk';
+  elsif v_caller.status = 'approved' and p_player_id = v_uid then
+    v_via := 'app';
+  elsif v_caller.status = 'approved' and v_caller.role = 'player'
+        and same_group(v_uid, p_player_id) then
+    v_via := 'group';
+  elsif v_caller.status = 'approved' and v_caller.role = 'player'
+        and p_player_id <> v_uid and is_on_duty() then
+    v_via := 'duty';
+  else
+    raise exception 'not_allowed';
+  end if;
+
+  if not exists (
+    select 1 from profiles
+    where id = p_player_id and status = 'approved' and role <> 'kiosk'
+      and tenant_id = v_caller.tenant_id
+  ) then
+    raise exception 'player_not_approved';
+  end if;
+
+  select * into v_settings from schedule_settings
+  where tenant_id = v_caller.tenant_id;
+  select * into v_block from time_blocks
+  where id = p_block_id and tenant_id = v_caller.tenant_id;
+  if not found then
+    raise exception 'unknown_block';
+  end if;
+  if p_lane < 1 or p_lane > v_settings.lane_count then
+    raise exception 'invalid_lane';
+  end if;
+
+  v_status := block_day_status(v_caller.tenant_id, p_date, p_block_id);
+  if v_status is distinct from 'open' then
+    raise exception '%', coalesce(v_status, 'unknown_block');
+  end if;
+
+  if v_caller.role <> 'admin' then
+    if p_date < v_today then
+      raise exception 'date_past';
+    end if;
+    if p_date = v_today and v_block.starts_at <= v_now then
+      raise exception 'date_past';
+    end if;
+    if p_date > v_today + v_settings.booking_horizon_days then
+      raise exception 'beyond_horizon';
+    end if;
+    select count(*) into v_active_count
+    from reservations
+    where player_id = p_player_id and cancelled_at is null and date >= v_today;
+    if v_active_count >= v_settings.max_active_reservations then
+      -- "Máš už…" would be a lie about a member's cap.
+      raise exception '%',
+        case when v_via = 'group' then 'member_at_limit'
+             when v_via = 'duty' then 'player_at_limit'
+             else 'limit_reached' end;
+    end if;
+  end if;
+
+  if exists (
+    select 1 from priority_slots s
+    join priority_slot_types t on t.id = s.type_id
+    where s.date = p_date
+      and s.tenant_id = v_caller.tenant_id
+      and not s.is_away
+      and (t.lanes is null or p_lane = any (t.lanes))
+      and s.starts_at < v_block.ends_at
+      and s.ends_at > v_block.starts_at
+  ) then
+    raise exception 'blocked_by_priority';
+  end if;
+
+  if exists (
+    select 1 from rental_occurrences(v_caller.tenant_id, p_date) o
+    where p_lane = any (o.lanes)
+      and o.starts_at < v_block.ends_at and o.ends_at > v_block.starts_at
+  ) then
+    raise exception 'blocked_by_rental';
+  end if;
+
+  begin
+    insert into reservations
+      (tenant_id, player_id, date, block_id, lane, created_via, created_by)
+    values
+      (v_caller.tenant_id, p_player_id, p_date, p_block_id, p_lane, v_via, v_uid)
+    returning * into v_res;
+  exception when unique_violation then
+    raise exception 'slot_taken';
+  end;
+
+  return v_res;
+end;
+$$;
+
+-- cancel_reservation (0044's body): a duty branch after the owner/group
+-- branch — another player's training of the duty's alley, until its block
+-- starts (`too_late`). The note and the notify choice are the duty's, as
+-- for everyone.
+create or replace function cancel_reservation(
+  p_id uuid, p_note text default '', p_notify boolean default true)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_caller profiles;
+  v_res reservations;
+  v_block time_blocks;
+  v_via text;
+  v_now timestamptz := now();
+  v_starts timestamptz;
+begin
+  if v_uid is null then
+    raise exception 'not_authenticated';
+  end if;
+  select * into v_caller from profiles where id = v_uid;
+  if not found then
+    raise exception 'no_profile';
+  end if;
+
+  select * into v_res from reservations where id = p_id;
+  if not found then
+    raise exception 'not_found';
+  end if;
+  if v_res.cancelled_at is not null then
+    return;  -- already cancelled, idempotent
+  end if;
+
+  if v_caller.role = 'admin' and v_caller.status = 'approved'
+     and v_res.tenant_id = v_caller.tenant_id then
+    v_via := 'admin';
+  elsif v_caller.status = 'approved'
+        and (v_res.player_id = v_uid
+             or (v_caller.role = 'player' and same_group(v_uid, v_res.player_id))) then
+    select * into v_block from time_blocks where id = v_res.block_id;
+    v_starts := (v_res.date + v_block.starts_at) at time zone 'Europe/Prague';
+    if v_now >= v_starts then
+      raise exception 'too_late';
+    end if;
+    v_via := case when v_res.player_id = v_uid then 'app' else 'group' end;
+  elsif v_caller.status = 'approved' and v_caller.role = 'player'
+        and v_res.tenant_id = v_caller.tenant_id and is_on_duty() then
+    select * into v_block from time_blocks where id = v_res.block_id;
+    v_starts := (v_res.date + v_block.starts_at) at time zone 'Europe/Prague';
+    if v_now >= v_starts then
+      raise exception 'too_late';
+    end if;
+    v_via := 'duty';
+  else
+    raise exception 'not_allowed';
+  end if;
+
+  update reservations
+  set cancelled_at = v_now, cancelled_via = v_via, cancelled_by = v_uid,
+      cancel_note = trim(coalesce(p_note, '')),
+      notify_player = coalesce(p_notify, true),
+      notify_message = null
+  where id = p_id;
+end;
+$$;
