@@ -189,7 +189,7 @@ class MatchScoreboard extends StatelessWidget {
     ].join(' · ');
   }
 
-  /// „Souboje 1 : 0 · 1 rozehrané“ while the match runs, from the duels
+  /// „Souboje 1 : 0 · 2 rozehrané“ while the match runs, from the duels
   /// themselves: [matchPointsBreakdown] stays null until every duel is done.
   /// The points are those of the done duels; the count is the duels being
   /// played. Null while no duel has started.
@@ -213,9 +213,17 @@ class MatchScoreboard extends StatelessWidget {
     if (done == 0 && playing == 0) return null;
     return [
       'Souboje ${numLabel(home)} : ${numLabel(away)}',
-      if (playing > 0) '$playing rozehrané',
+      if (playing > 0) _inPlay(playing),
     ].join(' · ');
   }
+
+  /// „1 rozehraný“, „2 rozehrané“ … „4 rozehrané“, „5 rozehraných“ (and
+  /// „0 rozehraných“): the adjective agrees with the count.
+  static String _inPlay(int count) => switch (count) {
+    1 => '1 rozehraný',
+    2 || 3 || 4 => '$count rozehrané',
+    _ => '$count rozehraných',
+  };
 }
 
 /// The date and start on the left, the status chip on the right (it drops

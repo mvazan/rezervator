@@ -385,9 +385,35 @@ void main() {
       tester,
     ) async {
       await pump(tester);
-      expect(find.textContaining('1 rozehrané'), findsOneWidget);
-      expect(find.text('Souboje 1 : 0 · 1 rozehrané'), findsOneWidget);
+      expect(find.text('Souboje 1 : 0 · 1 rozehraný'), findsOneWidget);
     });
+
+    // Czech agreement: 1 rozehraný, 2–4 rozehrané, 5 and more rozehraných.
+    for (final (playing, words) in [
+      (3, '3 rozehrané'),
+      (5, '5 rozehraných'),
+    ]) {
+      testWidgets('$playing duels being played read „$words“', (tester) async {
+        await tester.pumpWidget(
+          _host(
+            MatchScoreboard(
+              slot: _liveSlot,
+              result: _liveResult,
+              players: [
+                for (var pos = 1; pos <= 6; pos++)
+                  for (final side in ['home', 'away'])
+                    _player(side, pos, [
+                      _lane(1, pos <= playing ? 200 : null),
+                      _lane(2, null),
+                    ]),
+              ],
+              now: _now,
+            ),
+          ),
+        );
+        expect(find.text('Souboje 0 : 0 · $words'), findsOneWidget);
+      });
+    }
 
     testWidgets('only a done duel has a bar; no pin points yet', (
       tester,
