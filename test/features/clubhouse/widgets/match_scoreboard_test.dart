@@ -191,6 +191,35 @@ void main() {
       expect(bar.width, closeTo(tile.width / 2, 0.01));
     });
 
+    testWidgets('the point bars and „+2 kuž.“ take the sides\' colours when '
+        'given — the same the duel cards use', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: MatchScoreboard(
+                slot: rudnaSlot,
+                result: rudnaResult,
+                players: rudnaPlayers,
+                now: _now,
+                homeColor: const Color(0xFF0B8043),
+                awayColor: const Color(0xFF8E24AA),
+              ),
+            ),
+          ),
+        ),
+      );
+      Color? fillOf(Finder f) => (tester
+              .widget<DecoratedBox>(find.descendant(
+                  of: f, matching: find.byType(DecoratedBox)).first)
+              .decoration as BoxDecoration)
+          .color;
+      expect(fillOf(find.byKey(const Key('scoreboard-bar-1'))),
+          const Color(0xFF0B8043));
+      expect(fillOf(find.byKey(const Key('scoreboard-bar-6'))),
+          const Color(0xFF8E24AA));
+    });
+
     testWidgets('the format and the venue, as plain text', (tester) async {
       await pump(tester);
       expect(find.text('6 hráčů · 100 HS · TJ Sokol Rudná'), findsOneWidget);

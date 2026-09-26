@@ -31,6 +31,8 @@ class MatchScoreboard extends StatelessWidget {
     required this.players,
     required this.now,
     this.onVenueTap,
+    this.homeColor,
+    this.awayColor,
   });
 
   /// The match: its date and start, the teams and the venue.
@@ -48,6 +50,12 @@ class MatchScoreboard extends StatelessWidget {
 
   /// Null = the venue is plain text (no known venue page).
   final VoidCallback? onVenueTap;
+
+  /// Each side's colour for the point bars and the „+2 kuž.“ pill — the
+  /// same the duel cards use; null = the theme's primary (home) or
+  /// tertiary (away).
+  final Color? homeColor;
+  final Color? awayColor;
 
   /// The chip's word for a match that is not live.
   static String _statusLabel(MatchStatus status) => switch (status) {
@@ -122,7 +130,12 @@ class MatchScoreboard extends StatelessWidget {
             ],
             if (duels.isNotEmpty) ...[
               const SizedBox(height: 16),
-              _PointsStrip(duels: duels, breakdown: breakdown),
+              _PointsStrip(
+                duels: duels,
+                breakdown: breakdown,
+                homeColor: homeColor ?? scheme.primary,
+                awayColor: awayColor ?? scheme.tertiary,
+              ),
             ],
             if (explanation != null) ...[
               const SizedBox(height: 12),
@@ -419,9 +432,16 @@ class _PinsLine extends StatelessWidget {
 /// One tile per duel, then a „+2 kuž.“ pill for the pin points. Scales
 /// down as a whole when a narrow phone can't fit it on one line.
 class _PointsStrip extends StatelessWidget {
-  const _PointsStrip({required this.duels, required this.breakdown});
+  const _PointsStrip({
+    required this.duels,
+    required this.breakdown,
+    required this.homeColor,
+    required this.awayColor,
+  });
 
   final List<Duel> duels;
+  final Color homeColor;
+  final Color awayColor;
 
   /// The decided match's points; null = no pin pill (not decided yet).
   final ({num duelsHome, num duelsAway, num pinsHome, num pinsAway})? breakdown;
@@ -444,11 +464,19 @@ class _PointsStrip extends StatelessWidget {
           children: [
             for (final (i, duel) in duels.indexed) ...[
               if (i > 0) const SizedBox(width: 6),
-              _DuelTile(duel: duel),
+              _DuelTile(
+                duel: duel,
+                homeColor: homeColor,
+                awayColor: awayColor,
+              ),
             ],
             for (final pin in pins) ...[
               const SizedBox(width: 8),
-              _PinPoints(side: pin.side, points: pin.points),
+              _PinPoints(
+                side: pin.side,
+                points: pin.points,
+                color: pin.side == MatchSide.home ? homeColor : awayColor,
+              ),
             ],
           ],
         ),
@@ -462,9 +490,15 @@ class _PointsStrip extends StatelessWidget {
 /// (half each) for a split. A duel not done yet has a dashed tile and no
 /// bar.
 class _DuelTile extends StatelessWidget {
-  const _DuelTile({required this.duel});
+  const _DuelTile({
+    required this.duel,
+    required this.homeColor,
+    required this.awayColor,
+  });
 
   final Duel duel;
+  final Color homeColor;
+  final Color awayColor;
 
   @override
   Widget build(BuildContext context) {
@@ -490,8 +524,8 @@ class _DuelTile extends StatelessWidget {
         ? Row(
             key: barKey,
             children: [
-              Expanded(child: _Bar(color: scheme.primary)),
-              Expanded(child: _Bar(color: scheme.tertiary)),
+              Expanded(child: _Bar(color: homeColor)),
+              Expanded(child: _Bar(color: awayColor)),
             ],
           )
         : duel.pointWinner == null
@@ -505,8 +539,8 @@ class _DuelTile extends StatelessWidget {
               width: 20,
               child: _Bar(
                 color: duel.pointWinner == MatchSide.home
-                    ? scheme.primary
-                    : scheme.tertiary,
+                    ? homeColor
+                    : awayColor,
               ),
             ),
           );
@@ -545,17 +579,21 @@ class _DuelTile extends StatelessWidget {
 /// it as a duel tile has — so its side reads from the bar's position too,
 /// not from the colour alone.
 class _PinPoints extends StatelessWidget {
-  const _PinPoints({required this.side, required this.points});
+  const _PinPoints({
+    required this.side,
+    required this.points,
+    required this.color,
+  });
 
   final MatchSide side;
   final num points;
+  final Color color;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final text = Theme.of(context).textTheme;
     final home = side == MatchSide.home;
-    final color = home ? scheme.primary : scheme.tertiary;
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: home

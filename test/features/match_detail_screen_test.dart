@@ -179,6 +179,7 @@ void main() {
     Map<String, MatchResult> results = const {},
     Stream<Map<String, MatchResult>>? resultsStream,
     List<MatchPlayerResult> players = const [],
+    Stream<List<MatchPlayerResult>>? playersStream,
     List<Venue> venues = const [],
     Map<String, int> teamColors = const {},
     // The view the screen opens on, pinned by _FixedView; null leaves the
@@ -215,7 +216,7 @@ void main() {
           (ref) => resultsStream ?? Stream.value(results),
         ),
         matchPlayerResultsProvider.overrideWith(
-          (ref, id) => Stream.value(players),
+          (ref, id) => playersStream ?? Stream.value(players),
         ),
         venuesProvider.overrideWith((ref) => Stream.value(venues)),
         nowProvider.overrideWith((ref) => Stream.value(now)),
@@ -365,11 +366,10 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // Souboje: the list says it instead of the duel cards; the
-    // scoreboard says it under the score as well.
+    // Souboje: no duel cards; the scoreboard says it, once.
     expect(find.byType(DuelCard), findsNothing);
     expect(_inBoard(noLineup), findsOneWidget);
-    expect(find.text(noLineup), findsNWidgets(2));
+    expect(find.text(noLineup), findsOneWidget);
     expect(find.text('Rozbalit vše'), findsNothing);
 
     await tester.tap(_zapisSegment);
@@ -377,7 +377,7 @@ void main() {
 
     expect(find.byType(LegacyScoreSheet), findsOneWidget);
     expect(_inBoard(noLineup), findsOneWidget);
-    expect(find.text(noLineup), findsNWidgets(2));
+    expect(find.text(noLineup), findsOneWidget);
   });
 
   testWidgets(
@@ -431,9 +431,8 @@ void main() {
       expect(find.byIcon(Icons.refresh), findsNothing);
       expect(find.byType(RefreshIndicator), findsNothing);
       expect(find.text('Záznam'), findsOneWidget);
-      // The scoreboard tells the forfeit instead, so the list's line is
-      // the only one.
-      expect(find.text('Sestavy zatím nejsou k dispozici.'), findsOneWidget);
+      // The scoreboard tells the forfeit instead of the missing lineup.
+      expect(find.text('Sestavy zatím nejsou k dispozici.'), findsNothing);
 
       await tester.tap(_zapisSegment);
       await tester.pumpAndSettle();
@@ -447,9 +446,49 @@ void main() {
       );
       expect(find.text(home), findsNWidgets(2));
       expect(find.text(away), findsNWidgets(2));
-      expect(find.text('Sestavy zatím nejsou k dispozici.'), findsOneWidget);
+      expect(find.text('Sestavy zatím nejsou k dispozici.'), findsNothing);
     },
   );
+
+  testWidgets('a tap on a waiting duel does nothing: once it is played it '
+      'opens collapsed, not by surprise', (tester) async {
+    final players = StreamController<List<MatchPlayerResult>>();
+    addTearDown(players.close);
+    List<MatchPlayerResult> duel1({required bool played}) => [
+      for (final p in rudnaPlayers.where((p) => p.position == 1))
+        played
+            ? p
+            : MatchPlayerResult.fromJson({
+                'id': p.id,
+                'match_id': p.matchId,
+                'side': p.side,
+                'position': 1,
+                'player_name': p.playerName,
+                'lanes': [
+                  for (final l in p.lanes)
+                    {'lane': l.lane, 'total': null},
+                ],
+              }),
+    ];
+    await tester.pumpWidget(
+      app(
+        slots: [match(id: 'm1', date: today.addDays(-1))],
+        results: {'m1': finishedResult},
+        playersStream: players.stream,
+      ),
+    );
+    players.add(duel1(played: false));
+    await tester.pumpAndSettle();
+    expect(find.text('čeká'), findsOneWidget);
+
+    await tester.tap(find.text('čeká'));
+    await tester.pumpAndSettle();
+    players.add(duel1(played: true));
+    await tester.pumpAndSettle();
+
+    expect(find.text('407'), findsOneWidget);
+    expect(find.text('156'), findsNothing, reason: 'still collapsed');
+  });
 
   testWidgets('Video and Na webu ČKA buttons show only when the data exists', (
     tester,

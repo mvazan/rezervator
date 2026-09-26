@@ -230,21 +230,23 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
   }) {
     final scale = diffScale(duels);
     return [
-      if (duels.isEmpty)
-        _noLineup
-      else
-        for (final duel in duels)
+      // No lineup: the scoreboard already says so.
+      for (final duel in duels)
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
             child: DuelCard(
               duel: duel,
               scale: scale,
               expanded: _expanded.contains(duel.position),
-              onTap: () => setState(() {
-                if (!_expanded.remove(duel.position)) {
-                  _expanded.add(duel.position);
-                }
-              }),
+              // A waiting duel has nothing to open; remembering the tap
+              // would open it by surprise once it starts.
+              onTap: duel.state == DuelState.waiting
+                  ? () {}
+                  : () => setState(() {
+                      if (!_expanded.remove(duel.position)) {
+                        _expanded.add(duel.position);
+                      }
+                    }),
               homeColor: homeColor,
               awayColor: awayColor,
             ),
@@ -257,11 +259,6 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     ];
   }
 
-  /// The line that stands in for the players while the lineups are not out.
-  static const _noLineup = Padding(
-    padding: EdgeInsets.all(16),
-    child: Text('Sestavy zatím nejsou k dispozici.'),
-  );
 
   /// [child] as wide as the list but at most 720dp, centred — the Souboje
   /// column until the wide layouts land. Every row but the Zápis sheet,
@@ -412,6 +409,8 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
                     builder: (_) => VenueDetailScreen(slug: venueMatch.slug),
                   ),
                 ),
+          homeColor: homeColor,
+          awayColor: awayColor,
         ),
         // While live the freshness sits in the scoreboard's „Živě“ chip.
         if (result == null || !live)
@@ -446,7 +445,6 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
           // no lineup yet (as long as `result` has team-level data) — only
           // the per-player section needs this fallback message.
           LegacyScoreSheet(slot: slot, result: result, players: players),
-          if (players.isEmpty) _centred(_noLineup),
         ],
       },
     ];
