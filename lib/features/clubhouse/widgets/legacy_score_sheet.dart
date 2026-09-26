@@ -171,28 +171,6 @@ class _SheetStyles {
 /// carry their own minus, so only the positive case needs a prefix.
 String _signed(int v) => v > 0 ? '+$v' : '$v';
 
-/// The team-row "Družstvo" value: the points [side] got for the higher pin
-/// total (2 / 0, 1 / 1 on a tie) — kuzelky prints its Body ([sidePoints])
-/// minus the duel points its players won. Null (printed '–') until Body and
-/// every player's [MatchPlayerResult.teamPoints] of that side are known.
-num? _teamBonusPoints(
-  num? sidePoints,
-  List<MatchPlayerResult> players,
-  String side,
-) {
-  if (sidePoints == null) return null;
-  num duels = 0;
-  var any = false;
-  for (final p in players) {
-    if (p.side != side) continue;
-    final points = p.teamPoints;
-    if (points == null) return null;
-    duels += points;
-    any = true;
-  }
-  return any ? sidePoints - duels : null;
-}
-
 /// One pairing block per position (1..N): the home and away player who
 /// faced each other, each with a line per lane thrown plus a Celkem total,
 /// and the pin difference between them. Above the blocks, a team summary
@@ -432,11 +410,11 @@ class _ColumnMetrics {
       ('Body', _s10w400),
       ('Družstvo', _s10w400),
       (
-        numLabel(_teamBonusPoints(result?.homePoints, players, 'home')),
+        numLabel(teamBonusPoints(result?.homePoints, players, 'home')),
         styles.summaryBold,
       ),
       (
-        numLabel(_teamBonusPoints(result?.awayPoints, players, 'away')),
+        numLabel(teamBonusPoints(result?.awayPoints, players, 'away')),
         styles.summaryBold,
       ),
       for (final p in players) (numLabel(p.teamPoints), styles.summaryBold),
@@ -1108,7 +1086,7 @@ class _ScoreTableBody extends StatelessWidget {
           height: _teamRowHeight,
           bg: _kDruzstvoBlue,
           text: numLabel(
-            _teamBonusPoints(body, players, isHome ? 'home' : 'away'),
+            teamBonusPoints(body, players, isHome ? 'home' : 'away'),
           ),
           style: geometry.styles.summaryBold,
         ),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/core/contrast.dart';
 import 'package:rezervator/core/theme.dart';
+import 'package:rezervator/domain/palette.dart';
 
 /// WCAG 2.1 AA: normal text 4.5:1, shapes and UI elements 3:1.
 const _textAA = 4.5;
@@ -135,6 +136,29 @@ void main() {
         expect(visible, greaterThanOrEqualTo(shapeBar),
             reason: '$variant: card blends into the page — fill and border '
                 'both under $shapeBar:1 (best ${visible.toStringAsFixed(2)}:1)');
+      });
+
+      // The match detail's side-colour marks (a duel's winner stripe, lane
+      // dots and difference bar, the scoreboard's point bars) sit straight
+      // on the card, painted in legibleShadeOf the side's colour: one of the
+      // eleven Google event colours the viewer gave a team, else primary
+      // (home) or tertiary (away). A mark is a shape: 3:1 in every variant
+      // (Banánová's raw yellow measures 1.45:1 on the light card; the
+      // shades' worst is Bazalková, 3.93:1 in light high contrast).
+      test('the Souboje side-colour marks are visible on the card', () {
+        final card = theme.cardTheme.color!;
+        for (final (name, color) in <(String, Color)>[
+          for (final (_, name, color) in googleEventColors) (name, color),
+          ('primary', scheme.primary),
+          ('tertiary', scheme.tertiary),
+        ]) {
+          _expectShape(
+            contrastRatio(legibleShadeOf(color, brightness), card),
+            '$name mark on the card',
+            variant,
+            _shapeAA,
+          );
+        }
       });
 
       test('text on the card and in an input field is legible', () {

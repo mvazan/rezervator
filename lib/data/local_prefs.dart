@@ -1,6 +1,6 @@
 /// On-device UI preferences that persist across app restarts — appearance
-/// choices, device-local like the rest of this file's future siblings
-/// (nothing here belongs to a team or lives in Supabase).
+/// choices and remembered views, device-local like the rest of this file's
+/// future siblings (nothing here belongs to a team or lives in Supabase).
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -12,6 +12,7 @@ import '../core/theme_choice.dart';
 
 const _themeChoiceKey = 'theme_choice';
 const _textSizeKey = 'text_size';
+const _matchDetailViewKey = 'match_detail_view';
 
 /// The appearance chosen in Settings. Device-local: it's about how the
 /// screen looks, not about the team.
@@ -123,4 +124,53 @@ Future<List<Override>> loadPersistedAppearance() async {
         .overrideWith(() => _PreloadedThemeChoice(themeChoice)),
     textSizeProvider.overrideWith(() => _PreloadedTextSize(textSize)),
   ];
+}
+
+/// How the match detail shows a match: [souboje] is the duel cards, [zapis]
+/// the kuzelky.com-style score sheet (`LegacyScoreSheet`).
+///
+/// These names are persisted (SharedPreferences) — do not rename a value, or
+/// every user with that view saved silently falls back to
+/// [MatchDetailView.souboje] via [parseMatchDetailView]'s fallback.
+enum MatchDetailView { souboje, zapis }
+
+/// Persisted name → view; anything unknown falls back to
+/// [MatchDetailView.souboje].
+MatchDetailView parseMatchDetailView(String? name) => MatchDetailView.values
+    .firstWhere((v) => v.name == name, orElse: () => MatchDetailView.souboje);
+
+/// The last view picked on the match detail (Souboje or Zápis), remembered
+/// on the device so the next match opens the same way. Defaults to Souboje.
+final matchDetailViewProvider =
+    NotifierProvider<MatchDetailViewNotifier, MatchDetailView>(
+        MatchDetailViewNotifier.new);
+
+class MatchDetailViewNotifier extends Notifier<MatchDetailView> {
+  @override
+  MatchDetailView build() {
+    _load();
+    return MatchDetailView.souboje;
+  }
+
+  Future<void> _load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (!ref.mounted) return; // disposed while awaiting — nothing to set
+      state = parseMatchDetailView(prefs.getString(_matchDetailViewKey));
+    } catch (_) {
+      // Best effort only (like data/cache.dart) — e.g. web with storage
+      // blocked. The default already returned by build() still applies.
+    }
+  }
+
+  /// Switches to [view] now and remembers it for the next match.
+  Future<void> set(MatchDetailView view) async {
+    state = view;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_matchDetailViewKey, view.name);
+    } catch (_) {
+      // Best effort only — the in-memory choice still applies this session.
+    }
+  }
 }

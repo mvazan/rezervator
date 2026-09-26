@@ -1,6 +1,11 @@
 /// Klubovna's match detail (Task 4): one federation match's score, team
 /// stats, players with a per-lane breakdown, video/web links and a live
 /// refresh — pushed from `results_screen.dart`'s row tap.
+///
+/// Top to bottom: the scoreboard (shared by both views, so the score never
+/// jumps), the video and web buttons, a [Souboje | Zápis] switch remembered
+/// on the device, and the chosen view — one card per duel and the Družstva
+/// card, or the kuzelky.com-style score sheet.
 library;
 
 import 'dart:async';
@@ -10,11 +15,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/ui.dart';
 import '../../data/clock.dart';
+import '../../data/local_prefs.dart';
 import '../../data/providers.dart';
+import '../../domain/duels.dart';
 import '../../domain/models.dart';
+import '../../domain/palette.dart';
 import '../../domain/results.dart';
 import 'venue_detail_screen.dart';
+import 'widgets/duel_card.dart';
 import 'widgets/legacy_score_sheet.dart';
+import 'widgets/match_scoreboard.dart';
+import 'widgets/team_totals_card.dart';
 
 class MatchDetailScreen extends ConsumerStatefulWidget {
   const MatchDetailScreen({
@@ -52,6 +63,11 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
   /// hidden for the rest of this screen's lifetime even though [isLive]
   /// itself does not know that yet.
   bool _hiddenByNotLive = false;
+
+  /// The positions of the duel cards opened to their lane tables. Keyed by
+  /// position, not by card, so an opened duel stays open through a live
+  /// refresh and a trip to Zápis and back.
+  final Set<int> _expanded = {};
 
   @override
   void dispose() {
@@ -109,145 +125,6 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     return parts.isEmpty ? slot.title : parts.join(' · ');
   }
 
-  static String _statusLabel(MatchStatus status) => switch (status) {
-    MatchStatus.scheduled => 'Naplánováno',
-    MatchStatus.preparation => 'Příprava',
-    MatchStatus.inProgress => 'Probíhá',
-    MatchStatus.finished => 'Dokončeno',
-    MatchStatus.forfeit => 'Kontumace',
-  };
-
-  Widget _headerCard(
-    PrioritySlot slot,
-    MatchResult? result,
-    Venue? venueMatch,
-  ) {
-    final theme = Theme.of(context);
-    final format = formatLabel(
-      result?.matchType ?? '',
-      result?.discipline ?? '',
-    );
-    final status = _statusLabel(result?.status ?? MatchStatus.scheduled);
-    final pins = result == null
-        ? ''
-        : pinsLabel(result.homeTotal, result.awayTotal);
-    final setPoints = result == null
-        ? '–'
-        : pointsLabel(result.homeSetPoints, result.awaySetPoints);
-    final venue = slot.venue;
-    final winner = winningSide(result?.homePoints, result?.awayPoints);
-    // Matches the SAME base style the plain (unwon) name renders in — the
-    // Card's own Material sets the ambient DefaultTextStyle to bodyMedium
-    // for this subtree, which is what an unstyled `Text(slot.awayTeam)`
-    // actually resolves to — rather than bodyLarge's bigger size, so the
-    // winner reads heavier at the same baseline as the loser, not bigger.
-    // (Not `DefaultTextStyle.of(context)`: `context` here is
-    // `_headerCard`'s own parameter — this State's outer context, ABOVE the
-    // Scaffold/Card it builds — so it resolves to the app-root ambient
-    // style, not the one actually in effect where the Text widgets below
-    // render.) FIXED weights on both sides — see MatchTitle's own comment
-    // (`widgets/match_title.dart`) for why the loser is explicitly
-    // lightened too, not left at bold/w700: w800 alone next to an
-    // already-bold base reads as barely-there. w800 is the heaviest
-    // Manrope cut this app actually bundles (pubspec.yaml).
-    final winnerNameStyle = theme.textTheme.bodyMedium?.copyWith(
-      fontWeight: FontWeight.w800,
-    );
-    final loserNameStyle = theme.textTheme.bodyMedium?.copyWith(
-      fontWeight: FontWeight.w400,
-    );
-    return Card(
-      margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              '${dayFull(slot.date)} · ${slot.startsAt.display()}',
-              style: theme.textTheme.bodyMedium,
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    slot.homeTeam,
-                    textAlign: TextAlign.end,
-                    style: winner == null
-                        ? null
-                        : winner == MatchSide.home
-                        ? winnerNameStyle
-                        : loserNameStyle,
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: Text(
-                    pointsLabel(result?.homePoints, result?.awayPoints),
-                    style: theme.textTheme.headlineSmall,
-                  ),
-                ),
-                Expanded(
-                  child: Text(
-                    slot.awayTeam,
-                    style: winner == null
-                        ? null
-                        : winner == MatchSide.away
-                        ? winnerNameStyle
-                        : loserNameStyle,
-                  ),
-                ),
-              ],
-            ),
-            if (pins.isNotEmpty || result != null) ...[
-              const SizedBox(height: 4),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  if (pins.isNotEmpty) ...[
-                    Text(pins, style: theme.textTheme.bodySmall),
-                    const SizedBox(width: 12),
-                  ],
-                  Text('SB $setPoints', style: theme.textTheme.bodySmall),
-                ],
-              ),
-            ],
-            const SizedBox(height: 8),
-            Text(
-              [if (format.isNotEmpty) format, status].join(' · '),
-              style: theme.textTheme.bodySmall,
-            ),
-            if (venue != null && venue.isNotEmpty) ...[
-              const SizedBox(height: 4),
-              if (venueMatch == null)
-                Text('Kuželna: $venue', style: theme.textTheme.bodySmall)
-              else
-                InkWell(
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => VenueDetailScreen(slug: venueMatch.slug),
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text('Kuželna: $venue', style: theme.textTheme.bodySmall),
-                      Icon(
-                        Icons.chevron_right,
-                        size: 16,
-                        color: theme.textTheme.bodySmall?.color,
-                      ),
-                    ],
-                  ),
-                ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _buttonsRow(
     BuildContext context,
     PrioritySlot slot,
@@ -291,6 +168,111 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     );
   }
 
+  /// [Souboje | Zápis] on the left, bound to [matchDetailViewProvider]; in
+  /// Souboje „Rozbalit vše“ / „Sbalit vše“ on the right, on the same row —
+  /// the switch has no check icon, so on a 360dp phone both fit up to text
+  /// scale 1.3. With larger text the button drops under the switch instead
+  /// of overflowing (OverflowBar: a row pushed apart when both fit, else a
+  /// column).
+  Widget _switchRow(MatchDetailView view, List<Duel> duels) {
+    // A duel nobody has started never opens: it neither needs the button
+    // nor keeps it from reading „Sbalit vše“ once the rest are open.
+    final openable = [
+      for (final duel in duels)
+        if (duel.state != DuelState.waiting) duel.position,
+    ];
+    final allOpen = openable.isNotEmpty && openable.every(_expanded.contains);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 16, 12, 0),
+      child: OverflowBar(
+        alignment: MainAxisAlignment.spaceBetween,
+        spacing: 8,
+        overflowSpacing: 4,
+        children: [
+          SegmentedButton<MatchDetailView>(
+            showSelectedIcon: false,
+            segments: const [
+              ButtonSegment(
+                value: MatchDetailView.souboje,
+                label: Text('Souboje'),
+              ),
+              ButtonSegment(value: MatchDetailView.zapis, label: Text('Zápis')),
+            ],
+            selected: {view},
+            onSelectionChanged: (chosen) => unawaited(
+              ref.read(matchDetailViewProvider.notifier).set(chosen.first),
+            ),
+          ),
+          if (view == MatchDetailView.souboje && openable.isNotEmpty)
+            TextButton(
+              onPressed: () => setState(() {
+                if (allOpen) {
+                  _expanded.clear();
+                } else {
+                  // Every position, the waiting ones too: a duel that
+                  // starts later opens already expanded, as asked.
+                  _expanded.addAll(duels.map((duel) => duel.position));
+                }
+              }),
+              child: Text(allOpen ? 'Sbalit vše' : 'Rozbalit vše'),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// The Souboje view: one card per duel (12dp from the edges, 8dp apart),
+  /// then the Družstva card. Without a lineup there are no duel cards (the
+  /// scoreboard says why); the Družstva card still shows the team sums.
+  List<Widget> _souboje({
+    required List<Duel> duels,
+    required MatchResult? result,
+    required Color homeColor,
+    required Color awayColor,
+  }) {
+    final scale = diffScale(duels);
+    return [
+      for (final duel in duels)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+          child: DuelCard(
+            duel: duel,
+            scale: scale,
+            expanded: _expanded.contains(duel.position),
+            // A waiting duel has nothing to open; remembering the tap
+            // would open it by surprise once it starts.
+            onTap: duel.state == DuelState.waiting
+                ? () {}
+                : () => setState(() {
+                    if (!_expanded.remove(duel.position)) {
+                      _expanded.add(duel.position);
+                    }
+                  }),
+            homeColor: homeColor,
+            awayColor: awayColor,
+          ),
+        ),
+      if (result != null)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+          child: TeamTotalsCard(result: result),
+        ),
+    ];
+  }
+
+  /// [child] as wide as the list but at most 720dp, centred — the Souboje
+  /// column until the wide layouts land. Every row but the Zápis sheet,
+  /// which keeps the full width.
+  static Widget _centred(Widget child) => Center(
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 720),
+      // Center loosens the list's full-width constraint; the SizedBox takes
+      // the whole (capped) width back, so every row lays out as before
+      // instead of shrinking to its content.
+      child: SizedBox(width: double.infinity, child: child),
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
     final now = ref.watch(nowProvider).value ?? DateTime.now();
@@ -303,6 +285,9 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
         ref.watch(matchPlayerResultsProvider(widget.matchId)).value ??
         const <MatchPlayerResult>[];
     final venues = ref.watch(venuesProvider).value ?? const <Venue>[];
+    final view = ref.watch(matchDetailViewProvider);
+    final teamColors =
+        ref.watch(myTeamColorsProvider).value ?? const <String, int>{};
 
     PrioritySlot? slot;
     for (final s in slots) {
@@ -370,31 +355,115 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
           ? const Center(child: CircularProgressIndicator())
           : slot == null
           ? const Center(child: Text('Zápas už v rozpisu není.'))
-          : ListView(
-              padding: const EdgeInsets.only(bottom: 24),
-              children: [
-                _headerCard(slot, result, venueMatch),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                  child: Text(
-                    result == null
-                        ? 'Výsledky zatím nejsou.'
-                        : 'Výsledky z webu: ${freshnessLabel(result.fetchedAt, now)}',
-                    style: Theme.of(context).textTheme.bodySmall,
+          : _body(
+              context,
+              slot: slot,
+              result: result,
+              players: players,
+              venueMatch: venueMatch,
+              view: view,
+              teamColors: teamColors,
+              now: now,
+              live: live,
+              // Pulling is the ⟳ button's twin: gone together once a
+              // refresh has answered not_live.
+              pullToRefresh: showRefreshButton,
+            ),
+    );
+  }
+
+  /// The scrolling column under the AppBar — see the library comment.
+  Widget _body(
+    BuildContext context, {
+    required PrioritySlot slot,
+    required MatchResult? result,
+    required List<MatchPlayerResult> players,
+    required Venue? venueMatch,
+    required MatchDetailView view,
+    required Map<String, int> teamColors,
+    required DateTime now,
+    required bool live,
+    required bool pullToRefresh,
+  }) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    // The viewer's own colour for a team (the one Výsledky and the calendar
+    // use), else primary for home and tertiary for away.
+    final homeColor =
+        googleEventColorOf(teamColors[slot.homeTeam]) ?? scheme.primary;
+    final awayColor =
+        googleEventColorOf(teamColors[slot.awayTeam]) ?? scheme.tertiary;
+    final duels = duelsOf(players);
+
+    final children = <Widget>[
+      for (final child in [
+        MatchScoreboard(
+          slot: slot,
+          result: result,
+          players: players,
+          now: now,
+          onVenueTap: venueMatch == null
+              ? null
+              : () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => VenueDetailScreen(slug: venueMatch.slug),
                   ),
                 ),
-                _buttonsRow(context, slot, result, now),
-                // LegacyScoreSheet shows its team summary row even with no
-                // lineup yet (as long as `result` has team-level data) —
-                // only the per-player section needs this fallback message.
-                LegacyScoreSheet(slot: slot, result: result, players: players),
-                if (players.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.all(16),
-                    child: Text('Sestavy zatím nejsou k dispozici.'),
-                  ),
-              ],
+          homeColor: homeColor,
+          awayColor: awayColor,
+        ),
+        // While live the freshness sits in the scoreboard's „Živě“ chip.
+        if (result == null || !live)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: Text(
+              result == null
+                  ? 'Výsledky zatím nejsou.'
+                  : 'Výsledky z webu: ${freshnessLabel(result.fetchedAt, now)}',
+              style: theme.textTheme.bodySmall,
             ),
+          ),
+        _buttonsRow(context, slot, result, now),
+        _switchRow(view, duels),
+      ])
+        _centred(child),
+      ...switch (view) {
+        MatchDetailView.souboje => [
+          for (final child in _souboje(
+            duels: duels,
+            result: result,
+            homeColor: homeColor,
+            awayColor: awayColor,
+          ))
+            _centred(child),
+        ],
+        MatchDetailView.zapis => [
+          // Not centred: the sheet keeps the whole width, as before
+          // Souboje. At its natural size (about 1000dp) it fits a wide
+          // window whole instead of hiding a third behind a sideways
+          // scroll. Without a lineup it still shows its team summary row
+          // (as long as `result` has team-level data).
+          LegacyScoreSheet(slot: slot, result: result, players: players),
+        ],
+      },
+    ];
+
+    final list = ListView(
+      // Keeps the scroll offset when the pull-to-refresh around the list
+      // comes or goes (a match that ends while watched): the list is then
+      // rebuilt under a new parent and would start from the top again.
+      key: const PageStorageKey('match-detail'),
+      // A short list (no lineup yet) still has to pull.
+      physics: pullToRefresh ? const AlwaysScrollableScrollPhysics() : null,
+      padding: const EdgeInsets.only(bottom: 24),
+      children: children,
+    );
+    if (!pullToRefresh) return list;
+    return RefreshIndicator(
+      onRefresh: () async {
+        await _refreshQuietly();
+      },
+      child: list,
     );
   }
 }
