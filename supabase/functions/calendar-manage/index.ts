@@ -48,6 +48,7 @@ import {
   writeFutureMatches,
   writeFutureReservations,
 } from "../_shared/google_calendar.ts";
+import { pragueToday } from "../_shared/cancel_token.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 
@@ -421,7 +422,9 @@ async function setTeams(
       .select("id, home_team, away_team")
       .eq("tenant_id", profile?.tenant_id)
       .is("parent_id", null)
-      .gte("date", new Date().toISOString().slice(0, 10));
+      // Prague's today: between midnight and 02:00 the UTC date is still
+      // yesterday, and yesterday's played matches would count as to come.
+      .gte("date", pragueToday());
     for (const row of (gone ?? []) as { id: string; home_team: string; away_team: string }[]) {
       const stillFollowed = savedNames.has(row.home_team) || savedNames.has(row.away_team);
       const wasFollowed = droppedNames.has(row.home_team) || droppedNames.has(row.away_team);
