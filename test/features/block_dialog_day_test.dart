@@ -10,8 +10,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Pins the DAY-SCOPED BlockDialog save path at the HTTP layer: editing a
-/// block from the calendar must NOT touch the weekly template — it inserts
-/// an inactive "special" block and points the day's override at it.
+/// block from the calendar must NOT touch the weekly template — it adds an
+/// inactive "special" block (add_special_block, 0050) and points the day's
+/// override at it. Both day writes go through RPCs, never the tables: the
+/// player on duty may call those, not write the tables.
 void main() {
   const b1 = TimeBlock(
     id: 'b1',
@@ -41,8 +43,8 @@ void main() {
       if (request.method == 'GET' && request.url.path.contains('reservations')) {
         body = reservationsBody;
       } else if (request.method == 'POST' &&
-          request.url.path.contains('time_blocks')) {
-        body = '{"id":"sb1"}';
+          request.url.path.endsWith('/rpc/add_special_block')) {
+        body = '"sb1"';
       }
       // postgrest reads response.request — MockClient doesn't attach it
       // unless we do.
@@ -88,15 +90,13 @@ void main() {
     await tester.tap(find.text('Uložit'));
     await tester.pumpAndSettle();
 
-    // 1) The special block insert: inactive, with the picked times.
+    // 1) The special block: the RPC makes it inactive at position -1; the
+    //    app sends the picked times.
     final insert = requests.firstWhere(
-      (r) => r.method == 'POST' && r.url.path.contains('time_blocks'),
+      (r) => r.method == 'POST' && r.url.path.endsWith('/rpc/add_special_block'),
     );
     final insertBody = jsonDecode(insert.body) as Map<String, dynamic>;
-    expect(insertBody['active'], false);
-    expect(insertBody['position'], -1);
-    expect(insertBody['starts_at'], '17:30:00');
-    expect(insertBody['ends_at'], '18:30:00');
+    expect(insertBody, {'p_starts_at': '17:30:00', 'p_ends_at': '18:30:00'});
 
     // 2) The edited block's sign-ups MOVE to the special (never cancel).
     final move = requests.firstWhere(
@@ -116,10 +116,10 @@ void main() {
     expect(rpcBody['p_closed'], false);
     expect(rpcBody['p_block_ids'], ['b1', 'sb1']);
 
-    // 4) No PATCH ever hits the weekly time_blocks row.
+    // 4) Nothing hits the time_blocks table itself: no PATCH of the weekly
+    //    row, no direct insert.
     expect(
-      requests.any(
-          (r) => r.method == 'PATCH' && r.url.path.contains('time_blocks')),
+      requests.any((r) => r.url.path.endsWith('/rest/v1/time_blocks')),
       isFalse,
     );
   });
@@ -159,8 +159,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(
-      requests.any(
-          (r) => r.method == 'POST' && r.url.path.contains('time_blocks')),
+      requests.any((r) => r.url.path.endsWith('/rpc/add_special_block')),
       isFalse,
     );
     final rpc = requests.firstWhere(
@@ -236,10 +235,12 @@ void main() {
       (r) => r.method == 'POST' && r.url.path.contains('set_day_override'),
     );
     expect((jsonDecode(rpc.body) as Map)['p_block_ids'], ['b1', 'b2']);
+    final delete = requests.firstWhere(
+        (r) => r.url.path.endsWith('/rpc/delete_day_override'));
+    expect(jsonDecode(delete.body), {'p_date': thursday.toSql()});
     expect(
-      requests.any((r) =>
-          r.method == 'DELETE' && r.url.path.contains('day_overrides')),
-      isTrue,
+      requests.any((r) => r.url.path.endsWith('/rest/v1/day_overrides')),
+      isFalse,
     );
   });
 
@@ -307,14 +308,12 @@ void main() {
     );
     expect((jsonDecode(rpc.body) as Map)['p_block_ids'], ['b1', 'b2']);
     expect(
-      requests.any((r) =>
-          r.method == 'DELETE' && r.url.path.contains('day_overrides')),
+      requests.any((r) => r.url.path.endsWith('/rpc/delete_day_override')),
       isTrue,
     );
-    // 3) No new special was inserted.
+    // 3) No new special was added.
     expect(
-      requests.any(
-          (r) => r.method == 'POST' && r.url.path.contains('time_blocks')),
+      requests.any((r) => r.url.path.endsWith('/rpc/add_special_block')),
       isFalse,
     );
   });

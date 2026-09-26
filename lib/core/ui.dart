@@ -83,9 +83,20 @@ void snack(BuildContext context, String message) {
   ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
 }
 
+/// What a player on a canteen duty is told when a call comes back
+/// `not_allowed`: the duty ended while the dialog was open (0050).
+const dutyEndedMessage = 'Služba skončila — tohle teď může jen správce.';
+
 /// Maps the schema's `raise exception` codes to Czech user copy.
-String friendlyDbError(Object error) {
+///
+/// [wasOnDuty]: the action was offered because the caller was on a canteen
+/// duty (0050) when it started. The server judges every call anew, so a
+/// `not_allowed` then means the duty has ended meanwhile (at midnight), and
+/// the message says that instead of the plain refusal. Everywhere else
+/// `not_allowed` keeps its own copy.
+String friendlyDbError(Object error, {bool wasOnDuty = false}) {
   final raw = '$error';
+  if (wasOnDuty && raw.contains('not_allowed')) return dutyEndedMessage;
   const messages = {
     'slot_taken': 'Termín je už obsazený.',
     'limit_reached': 'Máš už maximální počet rezervací.',
@@ -138,6 +149,17 @@ String friendlyDbError(Object error) {
     'empty_name': 'Název nesmí být prázdný.',
     'invalid_phone': invalidPhoneMessage,
     'profiles_phone_check': invalidPhoneMessage,
+    // Canteen duty (0050).
+    'player_at_limit': 'Hráč už má maximální počet rezervací.',
+    'duty_overlap': 'Služba se překrývá s jinou.',
+    'invalid_range': '„Do“ musí být po „Od“.',
+    'invalid_days': 'Počet dní musí být 1–31.',
+    'duty_too_long': 'Služba může mít nejvýše 62 dní.',
+    'unknown_period': 'Tahle služba už neexistuje.',
+    'season_order': 'Nová sezóna musí začínat po té současné.',
+    'not_newest': 'Vrátit jde jen poslední sezónu.',
+    'duty_periods_note_check': 'Poznámka smí mít nejvýš 80 znaků.',
+    'duty_seasons_name_check': 'Název sezóny smí mít nejvýš 40 znaků.',
   };
   for (final entry in messages.entries) {
     if (raw.contains(entry.key)) return entry.value;

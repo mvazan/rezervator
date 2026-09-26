@@ -86,6 +86,57 @@ void main() {
         'Na tohle nemáš oprávnění.');
   });
 
+  test('canteen duty errors (0050)', () {
+    expect(friendlyDbError(Exception('duty_overlap')),
+        'Služba se překrývá s jinou.');
+    expect(friendlyDbError(Exception('invalid_range')),
+        '„Do“ musí být po „Od“.');
+    expect(friendlyDbError(Exception('duty_too_long')),
+        'Služba může mít nejvýše 62 dní.');
+    expect(friendlyDbError(Exception('unknown_period')),
+        'Tahle služba už neexistuje.');
+    expect(friendlyDbError(Exception('season_order')),
+        'Nová sezóna musí začínat po té současné.');
+    expect(friendlyDbError(Exception('not_newest')),
+        'Vrátit jde jen poslední sezónu.');
+    expect(friendlyDbError(Exception('player_at_limit')),
+        'Hráč už má maximální počet rezervací.');
+    expect(friendlyDbError(Exception('invalid_days')),
+        'Počet dní musí být 1–31.');
+    expect(friendlyDbError(Exception('player_has_history')),
+        'Hráč už má rezervace — sluč ho s účtem, nebo ho nech být.');
+    expect(friendlyDbError(Exception('empty_name')), 'Název nesmí být prázdný.');
+    expect(
+      friendlyDbError(Exception('new row for relation "duty_periods" violates '
+          'check constraint "duty_periods_note_check"')),
+      'Poznámka smí mít nejvýš 80 znaků.',
+    );
+    expect(
+      friendlyDbError(Exception('new row for relation "duty_seasons" violates '
+          'check constraint "duty_seasons_name_check"')),
+      'Název sezóny smí mít nejvýš 40 znaků.',
+    );
+  });
+
+  test('not_allowed after the duty ended reads as the end of the duty', () {
+    const ended = 'Služba skončila — tohle teď může jen správce.';
+    final refused = Exception('PostgrestException(message: not_allowed, '
+        'code: P0001)');
+    expect(friendlyDbError(refused, wasOnDuty: true), ended);
+    // Everywhere else the plain refusal stays.
+    expect(friendlyDbError(refused), 'Na tohle nemáš oprávnění.');
+    expect(friendlyDbError(refused, wasOnDuty: false),
+        'Na tohle nemáš oprávnění.');
+    // Only not_allowed changes; the duty's other refusals keep their copy.
+    expect(friendlyDbError(Exception('date_past'), wasOnDuty: true),
+        'Tenhle termín už je v minulosti.');
+    expect(friendlyDbError(Exception('player_at_limit'), wasOnDuty: true),
+        'Hráč už má maximální počet rezervací.');
+    // Still a plain `String Function(Object)` for tryAction's errorText.
+    final String Function(Object) errorText = friendlyDbError;
+    expect(errorText(refused), 'Na tohle nemáš oprávnění.');
+  });
+
   test('initialsOf takes first letters of the first two words, uppercased',
       () {
     expect(initialsOf('Ján Novák'), 'JN');
