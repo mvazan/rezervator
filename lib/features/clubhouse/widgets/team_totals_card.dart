@@ -57,7 +57,7 @@ class TeamTotalsCard extends StatelessWidget {
               lead: _lead(homeTotal, awayTotal),
               home: homeTotal,
               away: awayTotal,
-              leader: _leader(homeTotal, awayTotal),
+              leader: winningSide(homeTotal, awayTotal),
             ),
             if (known(result.homeFulls, result.awayFulls))
               _Row(
@@ -66,7 +66,7 @@ class TeamTotalsCard extends StatelessWidget {
                 lead: _lead(result.homeFulls, result.awayFulls),
                 home: result.homeFulls,
                 away: result.awayFulls,
-                leader: _leader(result.homeFulls, result.awayFulls),
+                leader: winningSide(result.homeFulls, result.awayFulls),
               ),
             if (known(result.homeSpares, result.awaySpares))
               _Row(
@@ -75,7 +75,7 @@ class TeamTotalsCard extends StatelessWidget {
                 lead: _lead(result.homeSpares, result.awaySpares),
                 home: result.homeSpares,
                 away: result.awaySpares,
-                leader: _leader(result.homeSpares, result.awaySpares),
+                leader: winningSide(result.homeSpares, result.awaySpares),
               ),
             if (known(result.homeErrors, result.awayErrors))
               _Row(
@@ -83,11 +83,8 @@ class TeamTotalsCard extends StatelessWidget {
                 name: 'Chyby (méně = lépe)',
                 home: result.homeErrors,
                 away: result.awayErrors,
-                leader: _leader(
-                  result.homeErrors,
-                  result.awayErrors,
-                  fewerLeads: true,
-                ),
+                // Fewer errors lead: the arguments are swapped.
+                leader: winningSide(result.awayErrors, result.homeErrors),
               ),
             if (known(result.homeSetPoints, result.awaySetPoints))
               _Row(
@@ -95,7 +92,7 @@ class TeamTotalsCard extends StatelessWidget {
                 name: 'SB',
                 home: result.homeSetPoints,
                 away: result.awaySetPoints,
-                leader: _leader(result.homeSetPoints, result.awaySetPoints),
+                leader: winningSide(result.homeSetPoints, result.awaySetPoints),
               ),
           ],
         ),
@@ -107,13 +104,6 @@ class TeamTotalsCard extends StatelessWidget {
   /// side is unknown.
   static String _lead(int? home, int? away) =>
       home == null || away == null ? '' : leadLabel(home - away);
-
-  /// The side whose value leads: the higher one, or with [fewerLeads] (the
-  /// errors) the lower one. Null on a tie or when either side is unknown.
-  static MatchSide? _leader(num? home, num? away, {bool fewerLeads = false}) {
-    if (home == null || away == null || home == away) return null;
-    return (home > away) != fewerLeads ? MatchSide.home : MatchSide.away;
-  }
 }
 
 /// One mirrored row, at least 44dp tall: the home value on the left, „name
