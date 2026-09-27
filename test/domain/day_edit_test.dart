@@ -282,6 +282,20 @@ void main() {
           rows: const []);
       expect(hiddenByMatch.targets, isEmpty);
     });
+
+    test('for the duty on today a block already under way takes no moves '
+        '(the server refuses them with too_late)', () {
+      final plan = planBlockRemoval(
+          existing: s3,
+          day: DayEditContext(date: date, baseIds: const ['b1', 'b2', 's3']),
+          blocks: all,
+          rows: [row(date, 's3')],
+          startedBy: const HourMinute(16, 30));
+      // Nothing overlaps 19–20 → fallback to every rendering block, minus
+      // b1 (16:00, started by 16:30).
+      expect(plan.targets, [b2]);
+      expect(plan.offersMove, isTrue);
+    });
   });
 
   group('planRestoreTemplate', () {

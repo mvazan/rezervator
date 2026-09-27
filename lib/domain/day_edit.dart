@@ -389,11 +389,15 @@ class DayRemovalPlan {
       offersMove ? {...idsAfter, existing.id} : idsAfter.toSet();
 }
 
+/// [startedBy]: the player on duty's current time on today (0050) — a
+/// block that has started by then takes no moves (move_reservation refuses
+/// them with `too_late`), so it is no target. Null (the admin) = no limit.
 DayRemovalPlan planBlockRemoval({
   required TimeBlock existing,
   required DayEditContext day,
   required List<TimeBlock> blocks,
   required List<StrandableReservation> rows,
+  HourMinute? startedBy,
 }) {
   final ids = [
     for (final id in day.baseIds)
@@ -418,12 +422,15 @@ DayRemovalPlan planBlockRemoval({
           m.type.lanes == null &&
           !m.type.unresolved &&
           timesOverlap(b.startsAt, b.endsAt, m.startsAt, m.endsAt));
+  bool takesMoves(TimeBlock b) =>
+      willRender(b) &&
+      (startedBy == null || !_startedBy(b.startsAt, startedBy));
   var targets = [
     for (final id in ids)
       if (blockById[id] != null &&
           timesOverlap(existing.startsAt, existing.endsAt,
               blockById[id]!.startsAt, blockById[id]!.endsAt) &&
-          willRender(blockById[id]!))
+          takesMoves(blockById[id]!))
         blockById[id]!,
   ];
   if (targets.isEmpty) {
@@ -431,7 +438,7 @@ DayRemovalPlan planBlockRemoval({
     // rather than forcing a cancellation.
     targets = [
       for (final id in ids)
-        if (blockById[id] != null && willRender(blockById[id]!))
+        if (blockById[id] != null && takesMoves(blockById[id]!))
           blockById[id]!,
     ];
   }
