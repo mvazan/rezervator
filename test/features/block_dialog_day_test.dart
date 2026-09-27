@@ -713,6 +713,32 @@ void main() {
       }
     });
 
+    testWidgets('„Zavřít den“ a minute before a block: the count leaves it '
+        'out, as the clause says it stays', (tester) async {
+      // b1 (16:00) starts one minute after the duty clock: by the write it
+      // is under way, so the count and the clause must agree on that.
+      reservationsBody = rows(['b1', 'b2']);
+      await tester.pumpWidget(app(BlockDialog(
+        existing: null,
+        blocks: const [b1, b2],
+        dayContext: thursday,
+        dayBaseIds: const ['b1', 'b2'],
+        offerCloseDay: true,
+        dutyClock: () => const HourMinute(15, 59),
+      )));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Zavřít den'));
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('(tréninky, které už začaly, zůstanou)'),
+        findsOneWidget,
+      );
+      await tester.tap(find.widgetWithText(FilledButton, 'Zavřít den'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('1 rezervací'), findsOneWidget);
+      expect(find.textContaining('2 rezervací'), findsNothing);
+    });
+
     testWidgets('„Obnovit týdenní rozvrh“ of a closing day counts only what '
         'the server cancels', (tester) async {
       reservationsBody = rows(['b1', 'b2']);
