@@ -1988,6 +1988,87 @@ void main() {
       expect(find.text('Zavřít den'), findsOneWidget);
     });
 
+    testWidgets('the admin gets „Zavřít den“ too: header ＋ and portrait ⋮', (
+      tester,
+    ) async {
+      wideSurface(tester);
+      await tester.pumpWidget(
+        app(profile: admin, dutyPeriods: [week], dutyAssignments: onPetr),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(headerOf(tomorrow));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Nový blok — jen'), findsOneWidget);
+      expect(find.text('Zavřít den'), findsOneWidget);
+
+      await tester.pumpWidget(const SizedBox());
+      portraitSurface(tester);
+      await tester.pumpWidget(
+        app(profile: admin, dutyPeriods: [week], dutyAssignments: onPetr),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find
+            .descendant(
+              of: find.byType(DayChipStrip),
+              matching: find.byType(InkWell),
+            )
+            .at(t.weekday), // tomorrow
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.more_vert));
+      await tester.pumpAndSettle();
+      expect(find.text('Zavřít den…'), findsOneWidget);
+    });
+
+    testWidgets('no „Zavřít den“ from a gap tap, nor on a closed day reopened '
+        'through „Otevřít den“', (tester) async {
+      wideSurface(tester);
+      // bEarly 20:00–21:00 and b1 22:58–23:59 leave the 21:00–22:58 gap.
+      await tester.pumpWidget(
+        app(
+          blocks: const [bEarly, b1],
+          dutyPeriods: [week],
+          dutyAssignments: onMe,
+        ),
+      );
+      await tester.pumpAndSettle();
+      // Tomorrow's column at ~21:30; px/min is laneCount(2) * 40 / 60.
+      const pxPerMinute = 2 * 40.0 / 60;
+      final columnTop = tester.getTopLeft(
+        find.descendant(
+          of: find.byKey(ValueKey(tomorrow)),
+          matching: find.byType(CalendarColumn),
+        ),
+      );
+      await tester.tapAt(
+        columnTop + Offset(40, (21.5 - 20) * 60 * pxPerMinute),
+      );
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Nový blok — jen'), findsOneWidget);
+      expect(find.text('22:58'), findsWidgets);
+      expect(find.text('Zavřít den'), findsNothing);
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpWidget(
+        app(
+          dutyPeriods: [week],
+          dutyAssignments: onMe,
+          overrides: [
+            DayOverride(date: tomorrow, closed: true, reason: 'Malování'),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(headerOf(tomorrow));
+      await tester.pumpAndSettle();
+      expect(find.text('Den je zavřený'), findsOneWidget);
+      await tester.tap(find.text('Otevřít den'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Nový blok — jen'), findsOneWidget);
+      expect(find.text('Zavřít den'), findsNothing);
+    });
+
     testWidgets('a free cell opens the player search; a player at the cap '
         'greys „Rezervovat“', (tester) async {
       wideSurface(tester);
