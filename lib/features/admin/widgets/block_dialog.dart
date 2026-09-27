@@ -8,21 +8,6 @@ import 'day_flows.dart';
 import 'move_reservations_dialog.dart';
 import 'notify_choice_dialog.dart';
 
-/// What the player on duty is told about a block of today that has
-/// already started (0050): the server keeps it — and its trainings — the
-/// admin's.
-const blockStartedMessage = 'Blok už začal — upravit ho může jen správce.';
-
-/// What the player on duty is told when a day edit of today would hide a
-/// block that has already started — not the block being edited (0050: a
-/// started block stays the admin's).
-const hideStartedMessage =
-    'Nový čas by skryl blok, který už začal — to může jen správce.';
-
-/// What the player on duty is told when a day edit of today would start a
-/// block at a time that has already passed (0050: the server refuses it).
-const startPassedMessage = 'Začátek už dnes minul — vyber pozdější čas.';
-
 /// How a refusal of a DAY edit (a block, not a reservation) reads. For the
 /// player on duty a `too_late` means a block of today has started meanwhile
 /// — the plain copy would talk about cancelling a reservation.
@@ -317,8 +302,10 @@ class _BlockDialogState extends State<BlockDialog> {
     // Moves the dialog above already committed stay if the block starts
     // before this check and the removal is refused: the block remains with
     // fewer sign-ups, each moved reservation lives on another block of the
-    // day — nothing is orphaned or cancelled. Harmless, and the server
-    // would refuse the override write anyway (too_late, see dayEditError).
+    // day — nothing is orphaned or cancelled. The check itself must stay:
+    // set_day_override does NOT refuse the duty here, it would hide the
+    // started block and leave its trainings live on a block the calendar no
+    // longer shows.
     if (!ok || !mounted || _refuseStarted(existing, atWrite: true)) {
       _bail();
       return;

@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/core/ui.dart' show dayFull;
 import 'package:rezervator/data/clock.dart';
 import 'package:rezervator/data/providers.dart';
+import 'package:rezervator/domain/day_edit.dart';
 import 'package:rezervator/domain/groups.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/domain/schedule.dart' show FreeSlot;

@@ -8,10 +8,9 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:rezervator/data/clock.dart';
 import 'package:rezervator/data/providers.dart';
+import 'package:rezervator/domain/day_edit.dart' show blockStartedMessage;
 import 'package:rezervator/domain/groups.dart';
 import 'package:rezervator/domain/models.dart';
-import 'package:rezervator/features/admin/widgets/block_dialog.dart'
-    show blockStartedMessage;
 import 'package:rezervator/features/schedule/week_calendar_view.dart';
 import 'package:rezervator/features/schedule/week_screen.dart';
 import 'package:rezervator/features/schedule/widgets/day_chip_strip.dart';

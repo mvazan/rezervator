@@ -10,7 +10,6 @@ import '../../../core/ui.dart';
 import '../../../data/providers.dart';
 import '../../../domain/day_edit.dart';
 import '../../../domain/models.dart';
-import 'block_dialog.dart' show blockStartedMessage;
 
 /// Confirms that [hit] reservations on [date] will be cancelled with [note]
 /// — the note the write will actually carry. Nothing to cancel is a yes.
@@ -39,9 +38,10 @@ Future<bool> confirmDayCancellations(
 /// The reservation picture a day write needs; null (after a snack saying
 /// why) when it cannot be read — then nobody can promise what the write
 /// would cancel, so the flow stops. With [dutyClock] (the player on duty on
-/// today, 0050) the rows on [date] whose block has started by now — read
-/// here, right before the count — are left out: the server spares them, so
-/// the count must too.
+/// today, 0050) the rows on [date] whose block has started — read here,
+/// right before the count, one minute ahead like the prompt's clause
+/// ([clockAtWrite]), so the two never disagree — are left out: the server
+/// spares them, so the count must too.
 Future<List<StrandableReservation>?> _futureRows(
   BuildContext context,
   String Function(Object error) errorText, {
@@ -54,7 +54,12 @@ Future<List<StrandableReservation>?> _futureRows(
     final dutyNow = dutyClock?.call();
     return dutyNow == null
         ? rows
-        : withoutStarted(rows, date: date, now: dutyNow, blocks: blocks);
+        : withoutStarted(
+            rows,
+            date: date,
+            now: clockAtWrite(dutyNow),
+            blocks: blocks,
+          );
   } catch (e) {
     if (context.mounted) snack(context, errorText(e));
     return null;

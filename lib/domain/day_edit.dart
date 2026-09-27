@@ -9,6 +9,21 @@ library;
 import 'models.dart';
 import 'schedule.dart' show timesOverlap;
 
+/// What the player on duty is told about a block of today that has
+/// already started (0050): the server keeps it — and its trainings — the
+/// admin's.
+const blockStartedMessage = 'Blok už začal — upravit ho může jen správce.';
+
+/// What the player on duty is told when a day edit of today would hide a
+/// block that has already started — not the block being edited (0050: a
+/// started block stays the admin's).
+const hideStartedMessage =
+    'Nový čas by skryl blok, který už začal — to může jen správce.';
+
+/// What the player on duty is told when a day edit of today would start a
+/// block at a time that has already passed (0050: the server refuses it).
+const startPassedMessage = 'Začátek už dnes minul — vyber pozdější čas.';
+
 /// The note every day-scoped write falls back to (set_day_override and the
 /// 0018 cascade use the same wording).
 const scheduleChangeNote = 'změna rozvrhu';

@@ -7,9 +7,10 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:rezervator/core/ui.dart' show dayFull;
 import 'package:rezervator/data/providers.dart';
+import 'package:rezervator/domain/day_edit.dart' show blockStartedMessage;
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/admin/widgets/block_dialog.dart'
-    show blockStartedMessage, dayEditError;
+    show dayEditError;
 import 'package:rezervator/features/admin/widgets/move_reservations_dialog.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';

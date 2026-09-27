@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:rezervator/core/ui.dart' show dayFull;
+import 'package:rezervator/domain/day_edit.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/admin/widgets/block_dialog.dart';
 import 'package:shared_preferences/shared_preferences.dart';
