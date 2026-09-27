@@ -1933,9 +1933,28 @@ void main() {
 
       final admin = hooks(tester);
       expect(admin.onEditBlock, isNull);
+      expect(admin.onAddBlockInGap, isNull);
       expect(admin.onAddForDay, isNull);
+      expect(admin.onMoveBlock, isNull);
       expect(admin.onCloseDay, isNull);
+      expect(admin.onRestoreDay, isNull);
+      expect(admin.onEditPrioritySlot, isNull);
+      expect(admin.onMovePrioritySlot, isNull);
+      expect(admin.onEditRental, isNull);
+      expect(slots(tester).onRental, isNull);
       expect(slots(tester).onDuty, isFalse);
+
+      // A free cell asks the plain question — no player search.
+      final addInTomorrow = find.descendant(
+        of: find.byKey(ValueKey(tomorrow)),
+        matching: find.byIcon(Icons.add),
+      );
+      await tester.ensureVisible(addInTomorrow.first);
+      await tester.pumpAndSettle();
+      await tester.tap(addInTomorrow.first);
+      await tester.pumpAndSettle();
+      expect(find.text('Rezervovat termín?'), findsOneWidget);
+      expect(find.textContaining('Vybráno:'), findsNothing);
     });
 
     testWidgets('an admin keeps every hook and is not "on duty"', (
