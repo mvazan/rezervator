@@ -623,6 +623,97 @@ void main() {
     expect(find.text('Petr Novák'), findsOneWidget);
   });
 
+  // The group dialog knows the cap (0044): create_reservation holds every
+  // booked player to their own, so offering someone at it only earns a
+  // refusal. Two mates, so the preselection has one to skip.
+  group('the group booking dialog at the cap', () {
+    const trio = MyGroup(groupId: 'g', memberIds: ['me', 'p2', 'p3']);
+    const roster = [
+      ...players,
+      PlayerName(id: 'p3', displayName: 'Žofie Adamová'),
+    ];
+
+    Future<void> openDialog(
+      WidgetTester tester,
+      Map<String, int> activeCounts,
+    ) async {
+      wideSurface(tester);
+      await tester.pumpWidget(app(
+        group: trio,
+        roster: roster,
+        activeCounts: activeCounts,
+      ));
+      await tester.pumpAndSettle();
+      final addInTomorrow = find.descendant(
+        of: find.byKey(ValueKey(tomorrow)),
+        matching: find.byIcon(Icons.add),
+      );
+      await tester.ensureVisible(addInTomorrow.first);
+      await tester.pumpAndSettle();
+      await tester.tap(addInTomorrow.first);
+      await tester.pumpAndSettle();
+      expect(find.text('Pro koho'), findsOneWidget);
+    }
+
+    RadioListTile<String> option(WidgetTester tester, String name) =>
+        tester.widget<RadioListTile<String>>(
+          find.widgetWithText(RadioListTile<String>, name),
+        );
+    String? chosen(WidgetTester tester) => tester
+        .widget<RadioGroup<String>>(find.byType(RadioGroup<String>))
+        .groupValue;
+    VoidCallback? book(WidgetTester tester) => tester
+        .widget<FilledButton>(find.widgetWithText(FilledButton, 'Rezervovat'))
+        .onPressed;
+
+    testWidgets('under the cap nothing changes: Já first and chosen',
+        (tester) async {
+      await openDialog(tester, const {});
+      expect(option(tester, 'Já').enabled, isNot(false));
+      expect(option(tester, 'Petr Novák').enabled, isNot(false));
+      expect(option(tester, 'Žofie Adamová').enabled, isNot(false));
+      expect(chosen(tester), 'me');
+      expect(book(tester), isNotNull);
+      expect(find.textContaining('maximální počet'), findsNothing);
+    });
+
+    testWidgets('me at my cap: Já is disabled, the first mate is chosen',
+        (tester) async {
+      await openDialog(tester, const {'me': 3});
+      expect(option(tester, 'Já').enabled, isFalse);
+      expect(
+        find.widgetWithText(
+            RadioListTile<String>, 'Máš maximální počet rezervací.'),
+        findsOneWidget,
+      );
+      expect(chosen(tester), 'p2');
+      expect(book(tester), isNotNull);
+    });
+
+    testWidgets('a mate at their cap is disabled and skipped',
+        (tester) async {
+      await openDialog(tester, const {'me': 3, 'p2': 3});
+      expect(option(tester, 'Petr Novák').enabled, isFalse);
+      expect(
+        find.widgetWithText(
+            RadioListTile<String>, 'Má maximální počet rezervací.'),
+        findsOneWidget,
+      );
+      expect(option(tester, 'Žofie Adamová').enabled, isNot(false));
+      expect(chosen(tester), 'p3');
+      expect(book(tester), isNotNull);
+    });
+
+    testWidgets('everybody at the cap: Rezervovat is disabled',
+        (tester) async {
+      await openDialog(tester, const {'me': 3, 'p2': 4, 'p3': 3});
+      expect(option(tester, 'Já').enabled, isFalse);
+      expect(option(tester, 'Petr Novák').enabled, isFalse);
+      expect(option(tester, 'Žofie Adamová').enabled, isFalse);
+      expect(book(tester), isNull);
+    });
+  });
+
   testWidgets('without a group the plain confirm stays', (tester) async {
     wideSurface(tester);
     await tester.pumpWidget(app());

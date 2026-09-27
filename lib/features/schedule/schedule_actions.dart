@@ -242,6 +242,7 @@ class ScheduleActions {
         message: message,
         meId: me.id,
         mates: mates,
+        settings: ref.read(settingsProvider).value,
       );
     } else {
       final confirmed = await confirmDialog(
