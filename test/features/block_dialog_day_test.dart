@@ -1029,28 +1029,45 @@ void main() {
         expect(wrote(), isFalse);
       });
 
-      testWidgets('„Zavřít den“ counts at the time it asks, not when the '
-          'dialog opened', (tester) async {
-        clock = now;
-        reservationsBody = rows(['b1', 'b2']);
-        await tester.pumpWidget(app(BlockDialog(
-          existing: null,
-          blocks: const [b1, b2],
-          dayContext: thursday,
-          dayBaseIds: const ['b1', 'b2'],
-          offerCloseDay: true,
-          dutyClock: () => clock,
-        )));
-        await tester.pumpAndSettle();
-        await tester.tap(find.text('Zavřít den'));
-        await tester.pumpAndSettle();
+      // The clock left alone: b2 is still ahead, the count confirm asks.
+      // Moved on: both blocks under way, the server cancels nothing — no
+      // count, the day closes straight away. Either way it closes.
+      for (final (later, confirm) in [
+        (now, '1 rezervací'),
+        (const HourMinute(17, 0), null),
+      ]) {
+        testWidgets('„Zavřít den“ counts at the time it asks, not when the '
+            'dialog opened (clock at $later)', (tester) async {
+          clock = now;
+          reservationsBody = rows(['b1', 'b2']);
+          await tester.pumpWidget(app(BlockDialog(
+            existing: null,
+            blocks: const [b1, b2],
+            dayContext: thursday,
+            dayBaseIds: const ['b1', 'b2'],
+            offerCloseDay: true,
+            dutyClock: () => clock,
+          )));
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('Zavřít den'));
+          await tester.pumpAndSettle();
 
-        // Both blocks under way by now: the server cancels nothing.
-        clock = const HourMinute(17, 0);
-        await tester.tap(find.widgetWithText(FilledButton, 'Zavřít den'));
-        await tester.pumpAndSettle();
-        expect(find.textContaining('rezervací'), findsNothing);
-      });
+          clock = later;
+          await tester.tap(find.widgetWithText(FilledButton, 'Zavřít den'));
+          await tester.pumpAndSettle();
+          if (confirm != null) {
+            expect(find.textContaining(confirm), findsOneWidget);
+            await tester.tap(find.text('Pokračovat'));
+            await tester.pumpAndSettle();
+          } else {
+            expect(find.textContaining('rezervací'), findsNothing);
+          }
+
+          final closed = requests.singleWhere(
+              (r) => r.url.path.endsWith('/rpc/set_day_override'));
+          expect((jsonDecode(closed.body) as Map)['p_closed'], isTrue);
+        });
+      }
 
       // Right before a write a block starting within the next minute counts
       // as started: the minute clock may lag by seconds, and the server's
