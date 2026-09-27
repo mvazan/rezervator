@@ -501,6 +501,7 @@ class ScheduleActions {
       date: date,
       errorText: _errorText,
       blocks: dbBlocks,
+      renderedIds: _dayRenderedIds(date),
       dutyClock: _dutyClockOn(date),
     );
   }

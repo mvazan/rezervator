@@ -679,13 +679,16 @@ void main() {
 
     testWidgets('„Důvod zavření“ tells the duty on today that trainings '
         'under way stay; the admin reads the plain line', (tester) async {
+      final withClause = '${dayFull(thursday)} — rezervace v tento den se '
+          'zruší (tréninky, které už začaly, zůstanou).';
+      final plain = '${dayFull(thursday)} — rezervace v tento den se zruší.';
       for (final (dutyClock, message) in [
-        (
-          () => now,
-          '${dayFull(thursday)} — rezervace v tento den se zruší '
-              '(tréninky, které už začaly, zůstanou).',
-        ),
-        (null, '${dayFull(thursday)} — rezervace v tento den se zruší.'),
+        (() => now, withClause),
+        // b1 (16:00) starts within the minute: it counts as under way.
+        (() => const HourMinute(15, 59), withClause),
+        // Before any block of the day has started nothing stays.
+        (() => const HourMinute(15, 0), plain),
+        (null, plain),
       ]) {
         await tester.pumpWidget(app(BlockDialog(
           key: UniqueKey(),

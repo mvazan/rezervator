@@ -56,6 +56,27 @@ Future<List<StrandableReservation>?> _futureRows(
   }
 }
 
+/// What the duty's close prompts add when a training of today is under way
+/// (0050: the server keeps it).
+const _startedStayClause = ' (tréninky, které už začaly, zůstanou)';
+
+/// The duty's today: whether a block [date] shows ([renderedIds]; null =
+/// any of [blocks]) starts by [dutyClock] or within the next minute
+/// ([clockAtWrite] — the write follows the prompt). Always false for the
+/// admin and any other day ([dutyClock] null).
+bool _someStarted(
+  List<TimeBlock> blocks,
+  Set<String>? renderedIds,
+  HourMinute Function()? dutyClock,
+) {
+  final now = dutyClock?.call();
+  if (now == null) return false;
+  final by = clockAtWrite(now);
+  return blocks.any((b) =>
+      (renderedIds == null || renderedIds.contains(b.id)) &&
+      b.startsAt.compareTo(by) <= 0);
+}
+
 /// Closes [date]: „Důvod zavření“, then the count of that day's live
 /// reservations the closure cancels (the reason is their note), then
 /// `set_day_override(closed)`. True once the day is closed; false when
@@ -64,21 +85,23 @@ Future<List<StrandableReservation>?> _futureRows(
 /// [dutyClock]: the player on duty closing TODAY (0050) — reads the current
 /// time; trainings already under way stay, so they are not counted
 /// ([blocks] tells their start). Null for the admin and any other day.
+/// [renderedIds]: the blocks the day shows — the prompt says trainings
+/// under way stay only when one of them has started (null = any block).
 Future<bool> closeDayFlow(
   BuildContext context, {
   required Day date,
   String Function(Object error) errorText = friendlyDbError,
   List<TimeBlock> blocks = const [],
+  Set<String>? renderedIds,
   HourMinute Function()? dutyClock,
 }) async {
+  // The duty's today: the server keeps the trainings already under way.
+  final stay = _someStarted(blocks, renderedIds, dutyClock);
   final reason = await promptText(
     context,
     title: 'Důvod zavření',
-    // The duty's today: the server keeps the trainings already under way.
-    message: dutyClock == null
-        ? '${dayFull(date)} — rezervace v tento den se zruší.'
-        : '${dayFull(date)} — rezervace v tento den se zruší '
-            '(tréninky, které už začaly, zůstanou).',
+    message: '${dayFull(date)} — rezervace v tento den se zruší'
+        '${stay ? _startedStayClause : ''}.',
     confirmLabel: 'Zavřít den',
   );
   if (reason == null || !context.mounted) return false;
