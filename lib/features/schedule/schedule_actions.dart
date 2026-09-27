@@ -24,7 +24,9 @@ import 'widgets/group_booking_dialog.dart';
 /// WeekScreen build from the current data. The callbacks keep exactly the
 /// signatures the views already take; admin ones are null for non-admins
 /// or while the placeholder grid shows (canEditBlocks false) — except the
-/// rental edit, which never touches blocks and only needs an admin.
+/// rental edit, which never touches blocks and only needs an admin. The
+/// player on canteen duty (0050) gets the day-block ones and the day menu,
+/// never the matches, blockages or rentals.
 ///
 /// Calendar edits are DAY-SCOPED: they compose a day override around an
 /// inactive "special" block instead of touching the weekly template (that
