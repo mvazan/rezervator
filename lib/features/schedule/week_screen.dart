@@ -135,6 +135,7 @@ class _WeekScreenState extends ConsumerState<WeekScreen> with WeekNavigation {
       slotTypes: slotTypes,
       settings: settings,
       today: todayDay,
+      now: now,
       reservations: reservations,
       rentals: rentals,
       me: me,

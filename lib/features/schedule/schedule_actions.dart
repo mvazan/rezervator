@@ -42,6 +42,7 @@ class ScheduleActions {
     required this.slotTypes,
     required this.settings,
     required this.today,
+    required this.now,
     required this.reservations,
     required this.rentals,
     required this.me,
@@ -69,6 +70,10 @@ class ScheduleActions {
   final List<PrioritySlotType> slotTypes;
   final ScheduleSettings settings;
   final Day today;
+
+  /// The current time of [today] — the player on duty is held to blocks
+  /// that have not started yet (0050).
+  final HourMinute now;
 
   /// This week's live reservations.
   final List<Reservation> reservations;
@@ -111,6 +116,16 @@ class ScheduleActions {
   /// How a refusal reads: „Služba skončila…“ when a duty just ended.
   String _errorText(Object error) =>
       friendlyDbError(error, wasOnDuty: _asDuty);
+
+  /// How a refusal of a day edit reads: a duty's `too_late` is about the
+  /// block, not a reservation.
+  String _dayEditErrorText(Object error) =>
+      dayEditError(error, wasOnDuty: _asDuty);
+
+  /// The duty on [today] (0050): the current time, else null. The server
+  /// refuses the duty's moves of blocks that have started by then and
+  /// spares their reservations — the dialogs and flows hold to it.
+  HourMinute? _dutyNowOn(Day date) => _asDuty && date == today ? now : null;
 
   /// The two bundles the views take (see schedule_callbacks.dart).
   SlotCallbacks get slot => SlotCallbacks(
@@ -374,8 +389,19 @@ class ScheduleActions {
     return true;
   }
 
+  // The duty's today: a block already under way stays the admin's (the
+  // server refuses to move it and keeps its trainings).
+  bool _guardStarted(Day date, TimeBlock block) {
+    final dutyNow = _dutyNowOn(date);
+    if (dutyNow == null || block.startsAt.compareTo(dutyNow) > 0) {
+      return false;
+    }
+    snack(context, blockStartedMessage);
+    return true;
+  }
+
   void _editBlock(Day date, TimeBlock block) {
-    if (_guardPast(date)) return;
+    if (_guardPast(date) || _guardStarted(date, block)) return;
     showDialog<void>(
       context: context,
       builder: (_) => BlockDialog(
@@ -390,6 +416,7 @@ class ScheduleActions {
         dayPriority: week.days[date.weekday - 1].priority,
         dayReason: _overrideByDate[date]?.reason ?? '',
         wasOnDuty: _asDuty,
+        dutyNow: _dutyNowOn(date),
       ),
     );
   }
@@ -433,13 +460,20 @@ class ScheduleActions {
         // The header ＋ (no gap picked) on an open day may close it too.
         offerCloseDay: !closed && start == null && end == null,
         wasOnDuty: _asDuty,
+        dutyNow: _dutyNowOn(date),
       ),
     );
   }
 
   Future<void> _closeDay(Day date) async {
     if (_guardPast(date)) return;
-    await closeDayFlow(context, date: date, errorText: _errorText);
+    await closeDayFlow(
+      context,
+      date: date,
+      errorText: _errorText,
+      blocks: dbBlocks,
+      dutyNow: _dutyNowOn(date),
+    );
   }
 
   Future<void> _restoreDay(Day date) async {
@@ -450,6 +484,7 @@ class ScheduleActions {
       isTraining: settings.trainingWeekdays.contains(date.weekday),
       blocks: dbBlocks,
       errorText: _errorText,
+      dutyNow: _dutyNowOn(date),
     );
   }
 
@@ -516,7 +551,14 @@ class ScheduleActions {
 
   Future<void> _moveBlock(
       Day date, TimeBlock block, HourMinute newStart) async {
-    if (_guardPast(date)) return;
+    if (_guardPast(date) || _guardStarted(date, block)) return;
+    // Checked before the special is inserted: the server's refusal would
+    // come only after it.
+    final dutyNow = _dutyNowOn(date);
+    if (dutyNow != null && newStart.compareTo(dutyNow) <= 0) {
+      snack(context, startPassedMessage);
+      return;
+    }
     final endMinutes = newStart.minutesFromMidnight + block.durationMinutes;
     if (endMinutes > 24 * 60 - 1) {
       snack(context, 'Blok se nevejde do dne.');
@@ -579,7 +621,7 @@ class ScheduleActions {
         );
       },
       success: 'Přesunuto (jen tento den).',
-      errorText: _errorText,
+      errorText: _dayEditErrorText,
     );
   }
 

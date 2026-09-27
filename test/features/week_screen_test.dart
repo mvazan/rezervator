@@ -8,6 +8,7 @@ import 'package:rezervator/data/clock.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/groups.dart';
 import 'package:rezervator/domain/models.dart';
+import 'package:rezervator/features/admin/widgets/block_dialog.dart';
 import 'package:rezervator/features/clubhouse/match_detail_screen.dart';
 import 'package:rezervator/features/schedule/widgets/slot_tile.dart';
 import 'package:rezervator/features/schedule/week_calendar_view.dart';
@@ -2040,6 +2041,106 @@ void main() {
       await tester.pumpAndSettle();
       await openTomorrow();
       expect(find.byIcon(Icons.more_vert), findsNothing);
+    });
+
+    // Today (Wed 10:00): bMorning 9:00–11:00 is under way, bEarly (20:00)
+    // is still ahead. The server holds the duty to blocks not yet started.
+    const bMorning = TimeBlock(
+      id: 'bMorning',
+      startsAt: HourMinute(9, 0),
+      endsAt: HourMinute(11, 0),
+      position: 2,
+      active: true,
+    );
+
+    Future<void> dismissSnack(WidgetTester tester) async {
+      ScaffoldMessenger.of(tester.element(find.byType(WeekScreen)))
+          .removeCurrentSnackBar();
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('today: a block under way is neither edited nor moved, and '
+        'nothing moves onto a start that has passed', (tester) async {
+      wideSurface(tester);
+      await tester.pumpWidget(app(
+        blocks: const [bMorning, bEarly, b1],
+        dutyPeriods: [week],
+        dutyAssignments: onMe,
+      ));
+      await tester.pumpAndSettle();
+
+      hooks(tester).onEditBlock!(t, bMorning);
+      await tester.pumpAndSettle();
+      expect(find.text(blockStartedMessage), findsOneWidget);
+      expect(find.byType(BlockDialog), findsNothing);
+      await dismissSnack(tester);
+
+      hooks(tester).onMoveBlock!(t, bMorning, const HourMinute(12, 0));
+      await tester.pumpAndSettle();
+      expect(find.text(blockStartedMessage), findsOneWidget);
+      await dismissSnack(tester);
+
+      hooks(tester).onMoveBlock!(t, bEarly, const HourMinute(9, 30));
+      await tester.pumpAndSettle();
+      expect(find.text(startPassedMessage), findsOneWidget);
+      await dismissSnack(tester);
+
+      // A block still ahead opens, held to starts after now.
+      hooks(tester).onEditBlock!(t, bEarly);
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<BlockDialog>(find.byType(BlockDialog)).dutyNow,
+        const HourMinute(10, 0),
+      );
+    });
+
+    testWidgets('no limit tomorrow, nor for the admin today', (tester) async {
+      wideSurface(tester);
+      await tester.pumpWidget(app(
+        blocks: const [bMorning, bEarly, b1],
+        dutyPeriods: [week],
+        dutyAssignments: onMe,
+      ));
+      await tester.pumpAndSettle();
+      hooks(tester).onEditBlock!(tomorrow, bMorning);
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<BlockDialog>(find.byType(BlockDialog)).dutyNow,
+        isNull,
+      );
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpWidget(app(
+        profile: admin,
+        blocks: const [bMorning, bEarly, b1],
+        dutyPeriods: [week],
+        dutyAssignments: onMe,
+      ));
+      await tester.pumpAndSettle();
+      hooks(tester).onEditBlock!(t, bMorning);
+      await tester.pumpAndSettle();
+      expect(find.text(blockStartedMessage), findsNothing);
+      expect(
+        tester.widget<BlockDialog>(find.byType(BlockDialog)).dutyNow,
+        isNull,
+      );
+    });
+
+    testWidgets('the header ＋ on today hands the dialog the current time', (
+      tester,
+    ) async {
+      wideSurface(tester);
+      await tester.pumpWidget(app(
+        blocks: const [bMorning, bEarly, b1],
+        dutyPeriods: [week],
+        dutyAssignments: onMe,
+      ));
+      await tester.pumpAndSettle();
+      hooks(tester).onAddForDay!(t);
+      await tester.pumpAndSettle();
+      final dialog = tester.widget<BlockDialog>(find.byType(BlockDialog));
+      expect(dialog.dutyNow, const HourMinute(10, 0));
+      expect(dialog.offerCloseDay, isTrue);
     });
   });
 }
