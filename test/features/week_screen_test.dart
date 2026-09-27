@@ -2180,6 +2180,77 @@ void main() {
       expect(find.byIcon(Icons.more_vert), findsNothing);
     });
 
+    // Picks a day of the pinned week through the chip strip (Mon = 0) —
+    // the pager's own first page follows the real clock.
+    Future<void> openChip(WidgetTester tester, int index) async {
+      await tester.tap(
+        find
+            .descendant(
+              of: find.byType(DayChipStrip),
+              matching: find.byType(InkWell),
+            )
+            .at(index),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> pickFromMenu(WidgetTester tester, String label) async {
+      await tester.tap(find.byIcon(Icons.more_vert));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(label));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('portrait: each ⋮ item opens its own flow; no ⋮ on '
+        'yesterday, no „Zavřít den…“ on a closed day', (tester) async {
+      portraitSurface(tester);
+      await tester.pumpWidget(
+        app(dutyPeriods: [week], dutyAssignments: onMe),
+      );
+      await tester.pumpAndSettle();
+      await openChip(tester, t.weekday); // tomorrow
+
+      await pickFromMenu(tester, 'Zavřít den…');
+      expect(find.text('Důvod zavření'), findsOneWidget);
+      expect(find.byType(BlockDialog), findsNothing);
+      await tester.tap(find.text('Zrušit'));
+      await tester.pumpAndSettle();
+
+      await pickFromMenu(tester, 'Přidat blok…');
+      expect(find.textContaining('Nový blok — jen'), findsOneWidget);
+      expect(find.text('Důvod zavření'), findsNothing);
+      expect(find.text('Zavřít den…'), findsNothing);
+      await tester.tap(find.text('Zrušit'));
+      await tester.pumpAndSettle();
+
+      await openChip(tester, t.weekday - 2); // yesterday
+      expect(
+        find.byWidgetPredicate(
+          (w) => w is DayHeader && w.date == t.addDays(-1),
+        ),
+        findsOneWidget,
+      );
+      expect(find.byIcon(Icons.more_vert), findsNothing);
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpWidget(
+        app(
+          dutyPeriods: [week],
+          dutyAssignments: onMe,
+          overrides: [
+            DayOverride(date: tomorrow, closed: true, reason: 'Malování'),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+      await openChip(tester, t.weekday);
+      await tester.tap(find.byIcon(Icons.more_vert));
+      await tester.pumpAndSettle();
+      expect(find.text('Přidat blok…'), findsOneWidget);
+      expect(find.text('Obnovit týdenní rozvrh'), findsOneWidget);
+      expect(find.text('Zavřít den…'), findsNothing);
+    });
+
     // Today (Wed 10:00): bMorning 9:00–11:00 is under way, bEarly (20:00)
     // is still ahead. The server holds the duty to blocks not yet started.
     const bMorning = TimeBlock(
