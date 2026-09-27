@@ -129,6 +129,8 @@ void main() {
     Map<String, int> activeCounts = const {},
     MyGroup group = MyGroup.none,
     Map<String, MatchResult> matchResults = const {},
+    List<DutyPeriod> dutyPeriods = const [],
+    List<DutyAssignment> dutyAssignments = const [],
   }) {
     return ProviderScope(
       overrides: [
@@ -161,6 +163,10 @@ void main() {
         playersProvider.overrideWith((ref) async => roster),
         nowProvider.overrideWith((ref) => Stream.value(now)),
         myGroupProvider.overrideWithValue(group),
+        dutyPeriodsProvider.overrideWith((ref) => Stream.value(dutyPeriods)),
+        dutyAssignmentsProvider.overrideWith(
+          (ref) => Stream.value(dutyAssignments),
+        ),
       ],
       child: MaterialApp(home: Scaffold(body: WeekScreen(trailing: trailing))),
     );
@@ -1797,5 +1803,48 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(MatchDetailScreen), findsOneWidget);
+  });
+
+  group('the canteen duty line under the week range (0050)', () {
+    final week = DutyPeriod(
+      id: 'd1',
+      startsOn: Day(2026, 9, 7),
+      endsOn: Day(2026, 9, 13),
+    );
+
+    testWidgets('names who serves this week and opens Klubovna → Služby', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        app(
+          dutyPeriods: [week],
+          dutyAssignments: const [DutyAssignment(periodId: 'd1', userId: 'p2')],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Slouží: Petr Novák'), findsOneWidget);
+      await tester.tap(find.text('Slouží: Petr Novák'));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(AppBar, 'Služby'), findsOneWidget);
+    });
+
+    testWidgets('my duty today: „Sloužíš ty“; no period: no line', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        app(
+          dutyPeriods: [week],
+          dutyAssignments: const [DutyAssignment(periodId: 'd1', userId: 'me')],
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Sloužíš ty · do ne 13. 9.'), findsOneWidget);
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Slouží'), findsNothing);
+    });
   });
 }

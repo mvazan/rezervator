@@ -30,8 +30,6 @@ class DutiesAdminScreen extends ConsumerWidget {
   /// „Předstih“: the leads offered, in days.
   static const _leads = [1, 2, 3, 7];
 
-  static String _leadLabel(int days) =>
-      days == 7 ? 'týden' : czechCount(days, 'den', 'dny', 'dní');
 
   Future<void> _generate(
     BuildContext context,
@@ -249,7 +247,7 @@ class DutiesAdminScreen extends ConsumerWidget {
                   for (final lead in {..._leads, days}.toList()..sort())
                     DropdownMenuItem(
                       value: lead,
-                      child: Text(_leadLabel(lead)),
+                      child: Text(dutyLeadLabel(lead)),
                     ),
                 ],
                 onChanged: (lead) {

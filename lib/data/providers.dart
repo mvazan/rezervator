@@ -187,6 +187,28 @@ final myDutyProvider = Provider<MyDuty>((ref) {
   );
 });
 
+/// The Kalendář week header's duty line for the week of [monday] (see
+/// [dutyHeaderLabel]): who serves, or „Sloužíš ty …“ in my week on duty;
+/// null when no one does. Names are the roster's full names, placeholders
+/// included. Equal lines do not notify.
+final weekDutyHeaderProvider = Provider.family<DutyHeader?, Day>((
+  ref,
+  monday,
+) {
+  final me = ref.watch(myProfileProvider.select((p) => p.value?.id));
+  final today = ref.watch(nowProvider
+      .select((now) => Day.fromDateTime(now.value ?? DateTime.now())));
+  final players = ref.watch(playersProvider).value ?? const [];
+  return dutyHeaderLabel(
+    monday,
+    ref.watch(dutyPeriodsProvider).value ?? const [],
+    ref.watch(dutyAssignmentsProvider).value ?? const [],
+    {for (final p in players) p.id: p.displayName},
+    me,
+    today: today,
+  );
+});
+
 /// Alley configuration singleton (null until the backend is seeded).
 /// Alleys offered at registration (id + name; RLS exposes nothing more).
 /// Session-gated, not profile-gated — the register screen runs pre-profile.

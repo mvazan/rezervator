@@ -272,6 +272,32 @@ String dutyCountLabel(DutyCount count) {
       '(${czechCount(count.served, 'odsloužena', 'odslouženy', 'odslouženo')})';
 }
 
+/// „1 den“, „2 dny“, „týden“ — the reminder's lead as Správa → Služby
+/// offers it and Klubovna → Služby says it („Připomínku dostaneš 1 den
+/// předem.“).
+String dutyLeadLabel(int days) =>
+    days == 7 ? 'týden' : czechCount(days, 'den', 'dny', 'dní');
+
+/// Klubovna → Služby's list over [today]: the period running today (at most
+/// one — periods never overlap), the ones ahead and the ones over, both in
+/// date order. A period ending today still runs.
+({DutyPeriod? current, List<DutyPeriod> upcoming, List<DutyPeriod> past})
+    splitDuties(Iterable<DutyPeriod> periods, Day today) {
+  final sorted = [...periods]
+    ..sort((a, b) => a.startsOn.compareTo(b.startsOn));
+  return (
+    current: periodOn(sorted, today),
+    upcoming: [
+      for (final p in sorted)
+        if (p.startsOn.isAfter(today)) p,
+    ],
+    past: [
+      for (final p in sorted)
+        if (p.endsOn.isBefore(today)) p,
+    ],
+  );
+}
+
 // ---------------------------------------------------------------------------
 // The week header and my duty
 // ---------------------------------------------------------------------------
@@ -284,6 +310,13 @@ class DutyHeader {
 
   /// „Sloužíš ty …“ — the header tints the line.
   final bool mine;
+
+  @override
+  bool operator ==(Object other) =>
+      other is DutyHeader && other.text == text && other.mine == mine;
+
+  @override
+  int get hashCode => Object.hash(text, mine);
 
   @override
   String toString() => 'DutyHeader($text${mine ? ', mine' : ''})';

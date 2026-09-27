@@ -6,6 +6,7 @@ import '../../data/providers.dart';
 import '../../data/week_schedule.dart';
 import '../../domain/models.dart';
 import '../../domain/schedule.dart';
+import '../clubhouse/duties_screen.dart';
 import 'schedule_actions.dart';
 import 'week_board.dart';
 import 'widgets/week_header.dart';
@@ -55,6 +56,10 @@ class _WeekScreenState extends ConsumerState<WeekScreen> with WeekNavigation {
       weekOffset: weekOffset,
       onGo: goWeek,
       trailing: widget.trailing,
+      duty: ref.watch(weekDutyHeaderProvider(monday)),
+      onDutyTap: () => Navigator.of(context).push(
+        MaterialPageRoute<void>(builder: (_) => const DutiesScreen()),
+      ),
     );
 
     if (view.isLoading) {

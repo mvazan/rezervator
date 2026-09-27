@@ -578,4 +578,50 @@ void main() {
       );
     });
   });
+
+  group('dutyLeadLabel', () {
+    test('days in Czech, seven as a week', () {
+      expect(dutyLeadLabel(1), '1 den');
+      expect(dutyLeadLabel(2), '2 dny');
+      expect(dutyLeadLabel(3), '3 dny');
+      expect(dutyLeadLabel(5), '5 dní');
+      expect(dutyLeadLabel(7), 'týden');
+    });
+  });
+
+  group('splitDuties', () {
+    DutyPeriod period(String id, Day from, Day to) =>
+        DutyPeriod(id: id, startsOn: from, endsOn: to);
+    final past2 = period('past2', Day(2026, 9, 28), Day(2026, 10, 4));
+    final past1 = period('past1', Day(2026, 9, 21), Day(2026, 9, 27));
+    final now = period('now', Day(2026, 10, 5), Day(2026, 10, 11));
+    final next2 = period('next2', Day(2026, 10, 19), Day(2026, 10, 25));
+    final next1 = period('next1', Day(2026, 10, 12), Day(2026, 10, 18));
+
+    test('the running one, the ones ahead and the ones over, each in date '
+        'order', () {
+      final split = splitDuties(
+        [next2, past2, now, next1, past1],
+        Day(2026, 10, 7),
+      );
+      expect(split.current, now);
+      expect(split.upcoming, [next1, next2]);
+      expect(split.past, [past1, past2]);
+    });
+
+    test('a period ending today is still running, one starting tomorrow is '
+        'ahead', () {
+      final split = splitDuties([now, next1], Day(2026, 10, 11));
+      expect(split.current, now);
+      expect(split.upcoming, [next1]);
+      expect(split.past, isEmpty);
+    });
+
+    test('no period running between two duties', () {
+      final gap = splitDuties([past1, next1], Day(2026, 10, 7));
+      expect(gap.current, isNull);
+      expect(gap.upcoming, [next1]);
+      expect(gap.past, [past1]);
+    });
+  });
 }
