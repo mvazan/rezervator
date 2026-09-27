@@ -9,9 +9,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../data/providers.dart';
+import '../../../domain/labels.dart';
 import '../../../domain/models.dart';
 import '../../../domain/schedule.dart';
 
+/// Asks whom to book for and returns the chosen player's id ([meId] or a
+/// mate's), or null when cancelled. [message] is the slot question above
+/// the choice; [mates] are the other group members, already in Czech
+/// order, offered after "Já". [settings] carries the cap: whoever is at it
+/// is greyed out, and null (not loaded yet) greys out nobody.
 Future<String?> showGroupBookingDialog(
   BuildContext context, {
   required String message,
@@ -100,9 +106,11 @@ class _GroupBookingDialogState extends ConsumerState<_GroupBookingDialog> {
                     enabled: !o.atLimit,
                     title: Text(o.name),
                     subtitle: o.atLimit
-                        ? Text(o.id == widget.meId
-                            ? 'Máš maximální počet rezervací.'
-                            : 'Má maximální počet rezervací.')
+                        ? Text(
+                            reservationLimitGroupSubtitle(
+                              self: o.id == widget.meId,
+                            ),
+                          )
                         : null,
                   ),
               ],

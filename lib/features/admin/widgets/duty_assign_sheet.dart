@@ -151,13 +151,14 @@ class _DutyAssignSheetState extends State<DutyAssignSheet> {
   }
 
   /// [players] with the fewest [counts] first, then Czech-sorted, in
-  /// groups of one count each. Not alphabetical nor chronological: the
+  /// groups of one count each. Neither alphabetical nor chronological: the
   /// user asked for this exception, so the least-served get picked first.
   static List<List<Profile>> _groups(
     List<Profile> players,
     Map<String, int> counts,
   ) {
-    // A player who joined the roster while the sheet was open.
+    // Defensive: the roster is fixed for the sheet's lifetime, so every
+    // player has a count; a missing one would read as none served.
     int count(Profile p) => counts[p.id] ?? 0;
     final sorted = [...players]
       ..sort((a, b) {

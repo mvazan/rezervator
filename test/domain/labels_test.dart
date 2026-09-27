@@ -324,4 +324,11 @@ void main() {
         'Máš maximální počet rezervací — jako služba můžeš rezervovat jen '
         'pro ostatní.');
   });
+
+  test("the group dialog's cap subtitles (0044)", () {
+    expect(reservationLimitGroupSubtitle(self: true),
+        'Máš maximální počet rezervací.');
+    expect(reservationLimitGroupSubtitle(self: false),
+        'Má maximální počet rezervací.');
+  });
 }

@@ -101,6 +101,11 @@ const reservationLimitGroupBanner =
     'Máš maximální počet rezervací — ve skupině můžeš rezervovat jen pro '
     'spoluhráče.';
 
+/// The subtitle under a greyed-out choice in the group booking dialog
+/// (0044): [self] for "Já", else a group mate at their own cap.
+String reservationLimitGroupSubtitle({required bool self}) =>
+    self ? 'Máš maximální počet rezervací.' : 'Má maximální počet rezervací.';
+
 /// [n] with its noun in the right Czech form: [one] for 1, [few] for 2–4,
 /// [many] for anything else (0, 5+, and 22 too — written in digits it takes
 /// the genitive).
