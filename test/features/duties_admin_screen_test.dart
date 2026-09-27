@@ -814,6 +814,34 @@ void main() {
   });
 
   group('period menu', () {
+    testWidgets('Přiřadit hráče… comes first and opens the sheet like a '
+        'tap', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+
+      await tester.tap(menuOf('po 12. 10. – ne 18. 10.'));
+      await tester.pumpAndSettle();
+      final items = ['Přiřadit hráče…', 'Upravit termín…', 'Smazat'];
+      for (var i = 1; i < items.length; i++) {
+        expect(
+          tester.getTopLeft(find.text(items[i - 1])).dy,
+          lessThan(tester.getTopLeft(find.text(items[i])).dy),
+          reason: '${items[i - 1]} before ${items[i]}',
+        );
+      }
+      await tester.tap(find.text('Přiřadit hráče…'));
+      await tester.pumpAndSettle();
+
+      expect(inSheet(find.text('po 12. 10. – ne 18. 10.')), findsOneWidget);
+      expect(inSheet(find.text('Uložit a další')), findsOneWidget);
+      await tester.tap(inSheet(find.text('Cyril Hudec')));
+      await tester.tap(inSheet(find.text('Uložit')));
+      await tester.pumpAndSettle();
+      expect(log, ['assign p4 cyril']);
+      expect(find.text('Uloženo.'), findsOneWidget);
+    });
+
     testWidgets('Smazat asks first, then deletes', (tester) async {
       await tester.pumpWidget(app());
       await tester.pumpAndSettle();

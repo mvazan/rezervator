@@ -259,17 +259,26 @@ class DutiesAdminScreen extends ConsumerWidget {
     );
   }
 
+  /// The tile's ⋮: „Přiřadit hráče…“ does what a tap on the tile does.
   Widget _periodMenu(
     BuildContext context,
-    List<DutyPeriod> periods,
+    DutyData data,
     DutyPeriod period,
     Day today, {
     required bool assigned,
   }) => PopupMenuButton<String>(
-    onSelected: (action) => action == 'edit'
-        ? _editPeriod(context, periods, today, existing: period)
-        : _delete(context, period, assigned: assigned),
+    onSelected: (action) {
+      switch (action) {
+        case 'assign':
+          _assign(context, data, period, today);
+        case 'edit':
+          _editPeriod(context, data.periods, today, existing: period);
+        case 'delete':
+          _delete(context, period, assigned: assigned);
+      }
+    },
     itemBuilder: (_) => const [
+      PopupMenuItem(value: 'assign', child: Text('Přiřadit hráče…')),
       PopupMenuItem(value: 'edit', child: Text('Upravit termín…')),
       PopupMenuItem(value: 'delete', child: Text('Smazat')),
     ],
@@ -303,7 +312,7 @@ class DutiesAdminScreen extends ConsumerWidget {
         onTap: () => _assign(context, data, period, today),
         menu: _periodMenu(
           context,
-          data.periods,
+          data,
           period,
           today,
           assigned: ids.isNotEmpty,
