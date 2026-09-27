@@ -82,7 +82,8 @@ class MyDutyCard extends StatelessWidget {
   }
 }
 
-/// „Teď slouží: Jana Nováková a Petr Svoboda“ with „do ne 11. 10.“.
+/// „Teď slouží: Jana Nováková a Petr Svoboda“ with „do ne 11. 10.“ and the
+/// period's note („do ne 11. 10. · posvícení“).
 class NowServingCard extends StatelessWidget {
   const NowServingCard({super.key, required this.period, required this.names});
 
@@ -97,7 +98,11 @@ class NowServingCard extends StatelessWidget {
     child: ListTile(
       leading: const Icon(Icons.groups_outlined),
       title: Text('Teď slouží: ${joinNames(names)}'),
-      subtitle: Text('do ${dutyDayLabel(period.endsOn)}'),
+      subtitle: Text(
+        period.note.isEmpty
+            ? 'do ${dutyDayLabel(period.endsOn)}'
+            : 'do ${dutyDayLabel(period.endsOn)} · ${period.note}',
+      ),
     ),
   );
 }

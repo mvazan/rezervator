@@ -204,6 +204,8 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('do ne 11. 10.'), findsOneWidget);
+    // Covered by the card, so not repeated in the list.
+    expect(find.text('po 5. 10. – ne 11. 10.'), findsNothing);
 
     await fresh(tester);
     await tester.pumpWidget(
@@ -216,6 +218,67 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('Teď slouží'), findsNothing);
     expect(find.text('Právě sloužíš — do ne 11. 10.'), findsOneWidget);
+  });
+
+  testWidgets('„Teď slouží“ carries the running period’s note', (tester) async {
+    final noted = DutyPeriod(
+      id: 'now',
+      startsOn: Day(2026, 10, 5),
+      endsOn: Day(2026, 10, 11),
+      note: 'posvícení',
+    );
+    await tester.pumpWidget(
+      app(
+        periods: [noted],
+        who: {
+          'now': ['jana'],
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Teď slouží: Jana Nováková'), findsOneWidget);
+    expect(find.text('do ne 11. 10. · posvícení'), findsOneWidget);
+  });
+
+  testWidgets('a running period nobody serves: a „Neobsazeno“ tile, no '
+      'empty state', (tester) async {
+    await tester.pumpWidget(
+      app(
+        periods: [past, now],
+        who: {
+          'past': ['jana'],
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Teď slouží'), findsNothing);
+    expect(find.text('po 5. 10. – ne 11. 10.'), findsOneWidget);
+    expect(find.text('Neobsazeno'), findsOneWidget);
+    expect(find.text('Služby zatím nejsou naplánované.'), findsNothing);
+  });
+
+  testWidgets('a running period of unknown players heads the plan', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(
+        who: {
+          'now': ['ghost'],
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Teď slouží'), findsNothing);
+    final ranges = [
+      'po 5. 10. – ne 11. 10.',
+      'po 12. 10. – ne 18. 10. · posvícení',
+      'po 19. 10. – ne 25. 10.',
+    ];
+    final ys = [for (final r in ranges) tester.getTopLeft(find.text(r)).dy];
+    expect(ys, orderedEquals([...ys]..sort()));
   });
 
   testWidgets('the plan ahead in date order, names Czech-sorted, an empty '

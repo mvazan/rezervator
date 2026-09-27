@@ -163,6 +163,10 @@ class _DutyList extends ConsumerWidget {
             ],
           ),
         const SizedBox(height: 8),
+        // A running period no card shows (nobody the roster knows serves
+        // it) heads the plan as a plain tile, „Neobsazeno“ when unassigned.
+        if (current case final p? when !showNow && !nowIds.contains(meId))
+          tile(p),
         for (final p in split.upcoming) tile(p),
         if (current == null && split.upcoming.isEmpty)
           const Padding(
