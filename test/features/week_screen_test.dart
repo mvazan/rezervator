@@ -2036,6 +2036,54 @@ void main() {
       expect(free.where((t) => t.quiet), isEmpty);
     });
 
+    testWidgets('at my own cap: „Rezervovat“ only for another player; off '
+        'duty the same counts leave no ＋', (tester) async {
+      wideSurface(tester);
+      final mine = [
+        for (var i = 1; i <= 3; i++) res('m$i', 'me', tomorrow.addDays(i)),
+      ];
+      await tester.pumpWidget(
+        app(
+          dutyPeriods: [week],
+          dutyAssignments: onMe,
+          reservations: mine,
+          activeCounts: const {'me': 3},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final addInTomorrow = find.descendant(
+        of: find.byKey(ValueKey(tomorrow)),
+        matching: find.byIcon(Icons.add),
+      );
+      expect(addInTomorrow, findsWidgets);
+      await tester.ensureVisible(addInTomorrow.first);
+      await tester.pumpAndSettle();
+      await tester.tap(addInTomorrow.first);
+      await tester.pumpAndSettle();
+      expect(find.text('Vybráno: já'), findsOneWidget);
+      FilledButton book() => tester.widget<FilledButton>(
+        find.widgetWithText(FilledButton, 'Rezervovat'),
+      );
+      expect(book().onPressed, isNull);
+
+      await tester.tap(find.widgetWithText(ListTile, 'Petr Novák'));
+      await tester.pumpAndSettle();
+      expect(book().onPressed, isNotNull);
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpWidget(
+        app(
+          dutyPeriods: [week],
+          dutyAssignments: onPetr,
+          reservations: mine,
+          activeCounts: const {'me': 3},
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(addInTomorrow, findsNothing);
+    });
+
     testWidgets("another player's future reservation opens the admin's "
         'notify-choice cancel', (tester) async {
       wideSurface(tester);
