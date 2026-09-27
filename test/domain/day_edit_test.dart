@@ -62,6 +62,27 @@ void main() {
       expect(strandedByGrid(rows, laneCount: 4, trainingWeekdays: {4, 5}), 0);
     });
 
+    test('withoutStarted drops rows of blocks already under way on the day '
+        '— what a non-admin day write spares (0050)', () {
+      final rows = [
+        row(date, 'b1'), // 16:00 — started by 17:00
+        row(date, 'b2'), // 17:00 — starts exactly now: started (<=)
+        row(date, 's3'), // 19:00 — still ahead
+        row(other, 'b1'), // another date: untouched
+        row(date, 'gone'), // unknown block: kept (conservative count)
+      ];
+      final left = withoutStarted(rows,
+          date: date, now: const HourMinute(17, 0), blocks: all);
+      expect([for (final r in left) '${r.date.day}/${r.blockId}'],
+          ['16/s3', '17/b1', '16/gone']);
+      // Before the first block nothing has started.
+      expect(
+          withoutStarted(rows,
+                  date: date, now: const HourMinute(15, 59), blocks: all)
+              .length,
+          5);
+    });
+
     test('strandedOnBlock, nextBlockPosition, templateBlockIds', () {
       expect(strandedOnBlock([row(date, 'b1'), row(other, 'b1')], 'b1'), 2);
       expect(nextBlockPosition(const []), 0);

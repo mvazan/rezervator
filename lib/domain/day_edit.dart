@@ -24,6 +24,29 @@ int strandedOnDate(
         Iterable<StrandableReservation> rows, Day date, Set<String> keptIds) =>
     rows.where((r) => r.date == date && !keptIds.contains(r.blockId)).length;
 
+/// [rows] without the ones on [date] whose block has already started by
+/// [now] (starts_at <= now) — the reservations a non-admin's day write
+/// spares on today (0050: set_day_override, cancel_block_day_reservations
+/// and the delete_day_override cascade leave trainings under way alone).
+/// Counting these instead of all rows keeps the player on duty's confirms
+/// honest. A row whose block is not in [blocks] stays (the count errs high,
+/// never low).
+List<StrandableReservation> withoutStarted(
+  Iterable<StrandableReservation> rows, {
+  required Day date,
+  required HourMinute now,
+  required Iterable<TimeBlock> blocks,
+}) {
+  final startById = {for (final b in blocks) b.id: b.startsAt};
+  return [
+    for (final r in rows)
+      if (r.date != date || !_startedBy(startById[r.blockId], now)) r,
+  ];
+}
+
+bool _startedBy(HourMinute? start, HourMinute now) =>
+    start != null && start.compareTo(now) <= 0;
+
 /// Rows that would fall outside the grid after a settings change (fewer
 /// lanes, a weekday dropped). A conservative upper bound: a day override may
 /// keep a non-training day open, but the admin still gets warned.
