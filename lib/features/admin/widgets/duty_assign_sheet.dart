@@ -1,8 +1,9 @@
 /// The assign sheet of Správa → Služby (0050): who works one duty. Every
-/// player with a checkbox, Czech-sorted, searchable by name or nick without
-/// diacritics, each with their count in the duty's season („2×“) so the
-/// admin balances while picking. „Uložit a další“ saves and moves straight
-/// to the next duty.
+/// player with a checkbox, those with the fewest duties in the duty's
+/// season on top, then Czech-sorted, a divider between the counts;
+/// searchable by name or nick without diacritics, each with their count
+/// („2×“) so the admin balances while picking. „Uložit a další“ saves and
+/// moves straight to the next duty.
 library;
 
 import 'package:flutter/material.dart';
@@ -39,6 +40,8 @@ Future<bool?> showDutyAssignSheet(
   ),
 );
 
+/// The sheet itself: the players by their count in the duty's season,
+/// fewest first, then Czech-sorted, with a divider between the counts.
 class DutyAssignSheet extends StatefulWidget {
   const DutyAssignSheet({
     super.key,
@@ -59,7 +62,8 @@ class DutyAssignSheet extends StatefulWidget {
   final List<DutyAssignment> assignments;
   final List<DutySeason> seasons;
 
-  /// The players to offer (`dutyRoster`), Czech-sorted.
+  /// The players to offer (`dutyRoster`), Czech-sorted — the order a save
+  /// sends them in; the list sorts by count first.
   final List<Profile> roster;
   final Day today;
   final Future<void> Function(String periodId, List<String> userIds) save;
@@ -112,9 +116,9 @@ class _DutyAssignSheetState extends State<DutyAssignSheet> {
     ];
   }
 
-  /// Duties per player in [_period]'s season, this one counted as ticked
-  /// right now.
-  Map<String, int> _counts() {
+  /// Duties per player in [_period]'s season, [_period] itself left out —
+  /// what the list sorts by, so a tick never moves a row under the finger.
+  Map<String, int> _otherCounts() {
     final period = _period;
     final season = seasonRanges(
       widget.seasons,
@@ -128,10 +132,31 @@ class _DutyAssignSheetState extends State<DutyAssignSheet> {
       season,
       today: widget.today,
     );
-    return {
-      for (final p in widget.roster)
-        p.id: (others[p.id]?.duties ?? 0) + (_selected.contains(p.id) ? 1 : 0),
-    };
+    return {for (final p in widget.roster) p.id: others[p.id]?.duties ?? 0};
+  }
+
+  /// [players] with the fewest [others] first, then Czech-sorted, in
+  /// groups of one count each. Not alphabetical nor chronological: the
+  /// user asked for this exception, so the least-served get picked first.
+  static List<List<Profile>> _groups(
+    List<Profile> players,
+    Map<String, int> others,
+  ) {
+    final sorted = [...players]
+      ..sort((a, b) {
+        final byCount = others[a.id]!.compareTo(others[b.id]!);
+        return byCount != 0
+            ? byCount
+            : compareCzech(a.displayName, b.displayName);
+      });
+    final groups = <List<Profile>>[];
+    for (final p in sorted) {
+      if (groups.isEmpty || others[groups.last.first.id] != others[p.id]) {
+        groups.add([]);
+      }
+      groups.last.add(p);
+    }
+    return groups;
   }
 
   /// Saves the ticks (skipped when nothing changed); true when done.
@@ -180,8 +205,10 @@ class _DutyAssignSheetState extends State<DutyAssignSheet> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final period = _period;
-    final counts = _counts();
-    final matches = _matches;
+    final others = _otherCounts();
+    // Sorted by the other duties, the ticks shown live on top of them.
+    int count(Profile p) => others[p.id]! + (_selected.contains(p.id) ? 1 : 0);
+    final groups = _groups(_matches, others);
     final title = period.note.isEmpty
         ? dutyRangeLabel(period)
         : '${dutyRangeLabel(period)} · ${period.note}';
@@ -214,7 +241,7 @@ class _DutyAssignSheetState extends State<DutyAssignSheet> {
               ),
               const SizedBox(height: 8),
               Flexible(
-                child: matches.isEmpty
+                child: groups.isEmpty
                     ? const Padding(
                         padding: EdgeInsets.all(24),
                         child: Text('Nikdo neodpovídá hledání.'),
@@ -222,27 +249,10 @@ class _DutyAssignSheetState extends State<DutyAssignSheet> {
                     : ListView(
                         shrinkWrap: true,
                         children: [
-                          for (final p in matches)
-                            CheckboxListTile(
-                              controlAffinity: ListTileControlAffinity.leading,
-                              value: _selected.contains(p.id),
-                              onChanged: _saving
-                                  ? null
-                                  : (on) => setState(() {
-                                      if (on == true) {
-                                        _selected.add(p.id);
-                                      } else {
-                                        _selected.remove(p.id);
-                                      }
-                                    }),
-                              title: Text(p.displayName),
-                              subtitle: _subtitle(p),
-                              // The slot sets no text style of its own.
-                              secondary: Text(
-                                '${counts[p.id] ?? 0}×',
-                                style: theme.textTheme.titleSmall,
-                              ),
-                            ),
+                          for (final (i, group) in groups.indexed) ...[
+                            if (i > 0) const Divider(),
+                            for (final p in group) _tile(p, count(p)),
+                          ],
                         ],
                       ),
               ),
@@ -271,6 +281,25 @@ class _DutyAssignSheetState extends State<DutyAssignSheet> {
       ),
     );
   }
+
+  /// One player's row: the tick, the name and [count] with the tick in.
+  Widget _tile(Profile p, int count) => CheckboxListTile(
+    controlAffinity: ListTileControlAffinity.leading,
+    value: _selected.contains(p.id),
+    onChanged: _saving
+        ? null
+        : (on) => setState(() {
+            if (on == true) {
+              _selected.add(p.id);
+            } else {
+              _selected.remove(p.id);
+            }
+          }),
+    title: Text(p.displayName),
+    subtitle: _subtitle(p),
+    // The slot sets no text style of its own.
+    secondary: Text('$count×', style: Theme.of(context).textTheme.titleSmall),
+  );
 
   /// What tells a player apart: no account, the board nick.
   Widget? _subtitle(Profile p) {

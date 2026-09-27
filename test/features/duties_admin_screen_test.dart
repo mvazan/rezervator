@@ -565,8 +565,28 @@ void main() {
   });
 
   group('assign sheet', () {
-    testWidgets('Czech-sorted players with their season count; the chosen '
-        'ids are saved', (tester) async {
+    /// The sheet's list top to bottom: each player's name, „—“ for a
+    /// divider between the count groups.
+    List<String> rows() {
+      final found = inSheet(
+        find.byWidgetPredicate((w) => w is CheckboxListTile || w is Divider),
+      );
+      final rows = [
+        for (final e in found.evaluate())
+          (
+            // By the element: a const Divider is one widget many times.
+            dy: (e.renderObject! as RenderBox).localToGlobal(Offset.zero).dy,
+            label: switch (e.widget) {
+              CheckboxListTile(:final Text title) => title.data!,
+              _ => '—',
+            },
+          ),
+      ]..sort((a, b) => a.dy.compareTo(b.dy));
+      return [for (final r in rows) r.label];
+    }
+
+    testWidgets('fewest duties first, then Czech-sorted, a divider between '
+        'the counts; the chosen ids are saved', (tester) async {
       tall(tester);
       await tester.pumpWidget(app());
       await tester.pumpAndSettle();
@@ -575,23 +595,18 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(inSheet(find.text('po 12. 10. – ne 18. 10.')), findsOneWidget);
-      final names = [
-        'Bohumil Kroupa',
+      expect(rows(), [
         'Cyril Hudec',
         'Čeněk Dvořák',
-        'Jan Novák',
-        'Jana Nováková',
-        'Petr Svoboda',
         'Správce',
         'Zdeněk Šimek',
-      ];
-      for (var i = 1; i < names.length; i++) {
-        expect(
-          tester.getTopLeft(inSheet(find.text(names[i - 1]))).dy,
-          lessThan(tester.getTopLeft(inSheet(find.text(names[i]))).dy),
-          reason: '${names[i - 1]} before ${names[i]}',
-        );
-      }
+        '—',
+        'Bohumil Kroupa',
+        'Jan Novák',
+        '—',
+        'Jana Nováková',
+        'Petr Svoboda',
+      ]);
       expect(inSheet(find.text('Tablet')), findsNothing);
       expect(inSheet(find.text('Nový Hráč')), findsNothing);
 
@@ -613,6 +628,19 @@ void main() {
       await tester.pump();
       // The count follows the tick, so the admin balances while picking.
       expect(countOf('Cyril Hudec'), '1×');
+      // The order does not: no row moves under the finger.
+      expect(rows(), [
+        'Cyril Hudec',
+        'Čeněk Dvořák',
+        'Správce',
+        'Zdeněk Šimek',
+        '—',
+        'Bohumil Kroupa',
+        'Jan Novák',
+        '—',
+        'Jana Nováková',
+        'Petr Svoboda',
+      ]);
 
       await tester.tap(inSheet(find.text('Uložit')));
       await tester.pumpAndSettle();
@@ -695,6 +723,67 @@ void main() {
       await tester.tap(inSheet(find.text('Uložit')));
       await tester.pumpAndSettle();
       expect(log, ['assign p3 jana', 'assign p4 petr']);
+    });
+
+    testWidgets('the search keeps the order and the groups', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('po 12. 10. – ne 18. 10.'));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(inSheet(find.byType(TextField)), 'nov');
+      await tester.pump();
+      expect(rows(), ['Jan Novák', '—', 'Jana Nováková']);
+
+      await tester.enterText(inSheet(find.byType(TextField)), 'ek');
+      await tester.pump();
+      expect(rows(), ['Čeněk Dvořák', 'Zdeněk Šimek']);
+    });
+
+    testWidgets('Uložit a další sorts the next duty by its own counts', (
+      tester,
+    ) async {
+      tall(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('po 5. 10. – ne 11. 10. · mimo so'));
+      await tester.pumpAndSettle();
+
+      // Jan's only duty is this one, so he sorts with the zeros.
+      final before = [
+        'Cyril Hudec',
+        'Čeněk Dvořák',
+        'Jan Novák',
+        'Správce',
+        'Zdeněk Šimek',
+        '—',
+        'Bohumil Kroupa',
+        'Jana Nováková',
+        '—',
+        'Petr Svoboda',
+      ];
+      expect(rows(), before);
+      await tester.tap(inSheet(find.text('Cyril Hudec')));
+      await tester.pump();
+      expect(rows(), before);
+
+      await tester.tap(inSheet(find.text('Uložit a další')));
+      await tester.pumpAndSettle();
+      expect(log, ['assign p3 cyril,jan,jana']);
+      expect(inSheet(find.text('po 12. 10. – ne 18. 10.')), findsOneWidget);
+      expect(rows(), [
+        'Čeněk Dvořák',
+        'Správce',
+        'Zdeněk Šimek',
+        '—',
+        'Bohumil Kroupa',
+        'Cyril Hudec',
+        'Jan Novák',
+        '—',
+        'Jana Nováková',
+        'Petr Svoboda',
+      ]);
     });
 
     testWidgets('Uložit without a change sends nothing and says nothing', (
