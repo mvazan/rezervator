@@ -213,8 +213,10 @@ class _BlockDialogState extends State<BlockDialog> {
 
   /// The duty's today, asked before any write of [plan]: a start that has
   /// passed would be refused — only after the hidden blocks' sign-ups were
-  /// cancelled and the special inserted — and the edited block must not
-  /// have started. True (after a snack saying why) = write nothing.
+  /// cancelled and the special inserted. Neither the edited block nor a
+  /// block the day shows that the new times would hide may have started:
+  /// a started block stays the admin's, its trainings live on it. True
+  /// (after a snack saying why) = write nothing.
   bool _refuseForDuty(DayEditDay plan) {
     final now = widget.dutyClock?.call();
     if (now == null) return false;
@@ -222,8 +224,13 @@ class _BlockDialogState extends State<BlockDialog> {
       if (mounted) snack(context, startPassedMessage);
       return true;
     }
-    final existing = plan.existing;
-    return existing != null && _refuseStarted(existing);
+    final rendered = widget.dayRenderedIds;
+    final replaced = [
+      if (plan.existing != null) plan.existing!,
+      for (final b in plan.hidden)
+        if (rendered == null || rendered.contains(b.id)) b,
+    ];
+    return replaced.any(_refuseStarted);
   }
 
   /// How a refusal reads — „Služba skončila…“ for a duty that just ended,

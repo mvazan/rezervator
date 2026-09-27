@@ -694,13 +694,35 @@ void main() {
       expect(find.textContaining('1 rezervací'), findsOneWidget);
     });
 
-    testWidgets('hiding a block under way counts and sweeps only the one '
-        'still ahead', (tester) async {
+    testWidgets('hiding a block under way is refused before any request — '
+        'it stays the admin\'s', (tester) async {
       reservationsBody = rows(['b1', 'b2']);
       await tester.pumpWidget(app(BlockDialog(
         existing: null,
         blocks: const [b1, b2],
         initialStart: const HourMinute(16, 45),
+        initialEnd: const HourMinute(17, 45),
+        dayContext: thursday,
+        dayBaseIds: const ['b1', 'b2'],
+        wasOnDuty: true,
+        dutyClock: () => now,
+      )));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Uložit'));
+      await tester.pumpAndSettle();
+
+      expect(find.text(blockStartedMessage), findsOneWidget);
+      expect(find.text('Blok bude skryt'), findsNothing);
+      expect(requests, isEmpty);
+      expect(find.byType(BlockDialog), findsOneWidget);
+    });
+
+    testWidgets('hiding only a block still ahead sweeps it', (tester) async {
+      reservationsBody = rows(['b1', 'b2']);
+      await tester.pumpWidget(app(BlockDialog(
+        existing: null,
+        blocks: const [b1, b2],
+        initialStart: const HourMinute(17, 15),
         initialEnd: const HourMinute(17, 45),
         dayContext: thursday,
         dayBaseIds: const ['b1', 'b2'],
@@ -825,6 +847,34 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.text(startPassedMessage), findsOneWidget);
+        expect(wrote(), isFalse);
+      });
+
+      testWidgets('a hidden block starts before the hide is confirmed', (
+        tester,
+      ) async {
+        clock = const HourMinute(16, 58);
+        reservationsBody = rows(['b2']);
+        await tester.pumpWidget(app(BlockDialog(
+          existing: null,
+          blocks: const [b1, b2],
+          initialStart: const HourMinute(17, 30),
+          initialEnd: const HourMinute(18, 30),
+          dayContext: thursday,
+          dayBaseIds: const ['b1', 'b2'],
+          wasOnDuty: true,
+          dutyClock: () => clock,
+        )));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Uložit'));
+        await tester.pumpAndSettle();
+        expect(find.text('Blok bude skryt'), findsOneWidget);
+
+        clock = const HourMinute(17, 1);
+        await tester.tap(find.text('Pokračovat'));
+        await tester.pumpAndSettle();
+
+        expect(find.text(blockStartedMessage), findsOneWidget);
         expect(wrote(), isFalse);
       });
 
