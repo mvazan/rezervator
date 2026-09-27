@@ -30,7 +30,6 @@ class DutiesAdminScreen extends ConsumerWidget {
   /// „Předstih“: the leads offered, in days.
   static const _leads = [1, 2, 3, 7];
 
-
   Future<void> _generate(
     BuildContext context,
     List<DutyPeriod> periods,
