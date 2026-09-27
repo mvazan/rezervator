@@ -9,7 +9,8 @@ import '../../../domain/models.dart';
 
 /// My current or next duty, tinted `secondaryContainer`: „Právě sloužíš —
 /// do ne 11. 10.“ with „spolu s: …“, or „Tvoje příští služba: …“; plus
-/// the reminder's lead when the admin switched it on.
+/// the reminder's lead when the admin switched it on and a next duty is
+/// ahead to be reminded of.
 class MyDutyCard extends StatelessWidget {
   const MyDutyCard({
     super.key,
@@ -38,7 +39,8 @@ class MyDutyCard extends StatelessWidget {
     final lines = [
       if (current != null && coNames.isNotEmpty)
         'spolu s: ${joinNames(coNames)}',
-      if (reminderDays case final days?)
+      // Only a duty that has not started is reminded of.
+      if (reminderDays case final days? when duty.next != null)
         'Připomínku dostaneš ${dutyLeadLabel(days)} předem.',
     ];
     return Card(

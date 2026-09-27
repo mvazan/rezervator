@@ -138,6 +138,22 @@ void main() {
     expect(find.text('Připomínku dostaneš týden předem.'), findsOneWidget);
   });
 
+  testWidgets('on duty with nothing ahead: no reminder line', (tester) async {
+    await tester.pumpWidget(
+      app(
+        periods: [now],
+        who: {
+          'now': ['me', 'jana'],
+        },
+        settings: reminder(2),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Právě sloužíš — do ne 11. 10.'), findsOneWidget);
+    expect(find.textContaining('Připomínku'), findsNothing);
+  });
+
   testWidgets('off duty with one ahead: my next duty', (tester) async {
     await tester.pumpWidget(
       app(
