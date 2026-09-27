@@ -63,10 +63,11 @@ class WeekHeader extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         nav,
-        // A button to a screen reader; the hit area spans the nav's width
-        // and is 32dp tall, the line itself stays one small centred row.
+        // A button to a screen reader (when it opens something); the hit
+        // area spans the nav's width and is 32dp tall, the line itself
+        // stays one small centred row.
         Semantics(
-          button: true,
+          button: onDutyTap != null,
           child: InkWell(
             onTap: onDutyTap,
             child: ConstrainedBox(

@@ -8,7 +8,9 @@ import 'package:rezervator/features/schedule/widgets/week_header.dart';
 /// the range, ellipsised, tinted when it is my duty, opening Služby on tap —
 /// in the stacked portrait strip and the one-line landscape strip alike.
 void main() {
-  Widget app(DutyHeader? duty, {VoidCallback? onTap}) => MaterialApp(
+  // [tappable] false: no onDutyTap at all.
+  Widget app(DutyHeader? duty, {VoidCallback? onTap, bool tappable = true}) =>
+      MaterialApp(
     home: Scaffold(
       body: WeekHeader(
         monday: Day(2026, 10, 5),
@@ -16,7 +18,7 @@ void main() {
         onGo: (_) {},
         trailing: const [],
         duty: duty,
-        onDutyTap: onTap ?? () {},
+        onDutyTap: tappable ? onTap ?? () {} : null,
       ),
     ),
   );
@@ -99,6 +101,23 @@ void main() {
       expect(taps, 2);
     });
   }
+
+  testWidgets('without onDutyTap the line is no button to a screen reader',
+      (tester) async {
+    await tester.pumpWidget(
+      app(const DutyHeader('Slouží: Jan Novák'), tappable: false),
+    );
+    expect(find.text('Slouží: Jan Novák'), findsOneWidget);
+    expect(
+      find.ancestor(
+        of: find.text('Slouží: Jan Novák'),
+        matching: find.byWidgetPredicate(
+          (w) => w is Semantics && w.properties.button == true,
+        ),
+      ),
+      findsNothing,
+    );
+  });
 
   testWidgets('my duty this week is tinted', (tester) async {
     await tester.pumpWidget(
