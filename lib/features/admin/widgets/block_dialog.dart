@@ -242,6 +242,7 @@ class _BlockDialogState extends State<BlockDialog> {
           fromBlock: existing,
           targets: plan.targets,
           cancelNote: plan.cancelNote,
+          errorText: _errorText,
         ),
       );
       if (moved != true || !mounted) {
