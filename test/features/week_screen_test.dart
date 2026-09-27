@@ -638,6 +638,58 @@ void main() {
     expect(find.text('Pro koho'), findsNothing);
   });
 
+  testWidgets('in a group at my own cap the free cells keep their full ＋; '
+      'the past stays quiet, and without a group no ＋ at all', (
+    tester,
+  ) async {
+    wideSurface(tester);
+    // Three of my own ahead: the cap (3) is reached. A mate's booking
+    // counts against the mate's cap, so the cells stay open for them.
+    final mine = [
+      for (var i = 1; i <= 3; i++) res('r$i', 'me', t.addDays(i)),
+    ];
+    await tester.pumpWidget(app(
+      group: const MyGroup(groupId: 'g', memberIds: ['me', 'p2']),
+      reservations: mine,
+    ));
+    await tester.pumpAndSettle();
+
+    List<SlotTile> freeIn(Day day) => [
+          for (final tile in tester.widgetList<SlotTile>(
+            find.descendant(
+              of: find.byKey(ValueKey(day)),
+              matching: find.byType(SlotTile),
+            ),
+          ))
+            if (tile.state is FreeSlot) tile,
+        ];
+
+    // Quiet is for cells only the admin exemption opens — tomorrow's are
+    // ordinarily bookable for a mate.
+    final future = freeIn(tomorrow);
+    expect(future, isNotEmpty);
+    expect(future.where((tile) => tile.onTap == null), isEmpty);
+    expect(future.where((tile) => tile.quiet), isEmpty);
+
+    // Yesterday stays locked: inert and quiet.
+    final past = freeIn(t.addDays(-1));
+    expect(past, isNotEmpty);
+    expect(past.where((tile) => tile.onTap != null), isEmpty);
+    expect(past.where((tile) => !tile.quiet), isEmpty);
+
+    // The same counts without a group: no ＋ in tomorrow's column.
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpWidget(app(reservations: mine));
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: find.byKey(ValueKey(tomorrow)),
+        matching: find.byIcon(Icons.add),
+      ),
+      findsNothing,
+    );
+  });
+
   testWidgets("a group mate's reservation offers the cancel, naming them",
       (tester) async {
     wideSurface(tester);

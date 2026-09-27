@@ -469,12 +469,14 @@ Widget slotTileFor({
       // beyondHorizon, which a regular player could never book) render the
       // '+' quieter, so admins can tell at a glance which slots are
       // ordinarily locked. The player on duty books for the others past
-      // their own cap, so that alone keeps a cell loud.
+      // their own cap, and a group member for their mates (0044), so either
+      // alone keeps a cell loud.
       final normallyBookable = canBook(
         state: state,
         myActiveCount: myCount,
         settings: settings,
         isAdmin: false,
+        forGroup: slot.groupMateIds.isNotEmpty,
         onDuty: slot.onDuty,
       );
       return SlotTile(
