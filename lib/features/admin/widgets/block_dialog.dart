@@ -350,6 +350,7 @@ class _BlockDialogState extends State<BlockDialog> {
       date: widget.dayContext!,
       isTraining: widget.dayIsTraining,
       blocks: widget.blocks,
+      renderedIds: widget.dayRenderedIds,
       errorText: _errorText,
       dutyClock: widget.dutyClock,
     );

@@ -10,15 +10,19 @@ import '../../../core/ui.dart';
 import '../../../data/providers.dart';
 import '../../../domain/day_edit.dart';
 import '../../../domain/models.dart';
+import 'block_dialog.dart' show blockStartedMessage;
 
 /// Confirms that [hit] reservations on [date] will be cancelled with [note]
 /// — the note the write will actually carry. Nothing to cancel is a yes.
+/// [startedStay]: the duty's today closes and trainings under way stay —
+/// the message says so (0050).
 Future<bool> confirmDayCancellations(
   BuildContext context,
   int hit,
   Day date,
-  String note,
-) async {
+  String note, {
+  bool startedStay = false,
+}) async {
   if (hit == 0) return true;
   if (!context.mounted) return false;
   return confirmDialog(
@@ -26,7 +30,8 @@ Future<bool> confirmDayCancellations(
     title: 'Pozor — rezervace budou zrušeny',
     message:
         '$hit rezervací (${dayFull(date)}) bude zrušeno se '
-        'zprávou „$note". Pokračovat?',
+        'zprávou „$note"${startedStay ? _startedStayClause : ''}. '
+        'Pokračovat?',
     confirmLabel: 'Pokračovat',
   );
 }
@@ -128,15 +133,44 @@ Future<bool> closeDayFlow(
 /// cancel via the RPC); a NON-training day closes again — every
 /// reservation that date cancels, and the closed write lands FIRST so a
 /// failure between the two calls can't leave the day wide open. True once
-/// done. [dutyClock] as in [closeDayFlow].
+/// done. [dutyClock] as in [closeDayFlow]; [renderedIds]: the blocks the
+/// day shows (null = any of [blocks]).
+///
+/// The duty's today (0050): a training day's restore may not drop a block
+/// the day shows that has started — the server would spare its trainings
+/// on a block the calendar no longer shows — so it is refused before any
+/// request and again right before the write. A closing day keeps them
+/// like „Zavřít den“, and the count says so.
 Future<bool> restoreDayFlow(
   BuildContext context, {
   required Day date,
   required bool isTraining,
   required List<TimeBlock> blocks,
+  Set<String>? renderedIds,
   String Function(Object error) errorText = friendlyDbError,
   HourMinute Function()? dutyClock,
 }) async {
+  // The blocks the day shows beyond the weekly ones — the restore drops
+  // them (a closing day drops everything, but the server keeps what has
+  // started, as when closing).
+  final templateIds = templateBlockIds(blocks).toSet();
+  final dropped = [
+    if (isTraining)
+      for (final b in blocks)
+        if (!templateIds.contains(b.id) &&
+            (renderedIds == null || renderedIds.contains(b.id)))
+          b,
+  ];
+  bool refuseStarted({required bool atWrite}) {
+    final now = dutyClock?.call();
+    if (now == null) return false;
+    final by = atWrite ? clockAtWrite(now) : now;
+    if (!dropped.any((b) => b.startsAt.compareTo(by) <= 0)) return false;
+    if (context.mounted) snack(context, blockStartedMessage);
+    return true;
+  }
+
+  if (refuseStarted(atWrite: false)) return false;
   final rows = await _futureRows(context, errorText,
       date: date, dutyClock: dutyClock, blocks: blocks);
   if (rows == null || !context.mounted) return false;
@@ -151,8 +185,11 @@ Future<bool> restoreDayFlow(
     plan.cancellations,
     date,
     scheduleChangeNote,
+    startedStay: !isTraining && _someStarted(blocks, renderedIds, dutyClock),
   );
   if (!ok || !context.mounted) return false;
+  // The confirm took time: the clock is asked again right before the write.
+  if (refuseStarted(atWrite: true)) return false;
   return tryAction(
     context,
     () => Api.restoreDayToTemplate(

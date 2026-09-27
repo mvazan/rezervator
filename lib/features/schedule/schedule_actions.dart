@@ -513,6 +513,7 @@ class ScheduleActions {
       date: date,
       isTraining: settings.trainingWeekdays.contains(date.weekday),
       blocks: dbBlocks,
+      renderedIds: _dayRenderedIds(date),
       errorText: _errorText,
       dutyClock: _dutyClockOn(date),
     );

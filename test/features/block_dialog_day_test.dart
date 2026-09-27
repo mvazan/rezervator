@@ -724,6 +724,76 @@ void main() {
       await tester.tap(find.text('Obnovit týdenní rozvrh'));
       await tester.pumpAndSettle();
       expect(find.textContaining('1 rezervací'), findsOneWidget);
+      // The day closes: the count says why b1's training is left out.
+      expect(
+        find.textContaining('(tréninky, které už začaly, zůstanou)'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('„Obnovit týdenní rozvrh“ of a closing day before any block '
+        'has started counts every row, plainly', (tester) async {
+      reservationsBody = rows(['b1', 'b2']);
+      await tester.pumpWidget(app(BlockDialog(
+        existing: b2,
+        blocks: const [b1, b2],
+        dayContext: thursday,
+        dayBaseIds: const ['b1', 'b2'],
+        dayHasOverride: true,
+        dayIsTraining: false,
+        dutyClock: () => const HourMinute(15, 0),
+      )));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Obnovit týdenní rozvrh'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('2 rezervací'), findsOneWidget);
+      expect(find.textContaining('zůstanou'), findsNothing);
+    });
+
+    // A day-only special that replaced b2 today (0050: specials sit at a
+    // negative position, inactive).
+    const sp = TimeBlock(
+      id: 'sp',
+      startsAt: HourMinute(18, 0),
+      endsAt: HourMinute(19, 0),
+      position: -1,
+      active: false,
+    );
+    BlockDialog restoring(HourMinute Function() clock) => BlockDialog(
+          key: UniqueKey(),
+          existing: sp,
+          blocks: const [b1, b2, sp],
+          dayContext: thursday,
+          dayBaseIds: const ['b1', 'sp'],
+          dayRenderedIds: const {'b1', 'sp'},
+          dayHasOverride: true,
+          wasOnDuty: true,
+          dutyClock: clock,
+        );
+
+    testWidgets('„Obnovit týdenní rozvrh“ that would drop a special under '
+        'way is refused before any request', (tester) async {
+      await tester.pumpWidget(app(restoring(() => const HourMinute(18, 10))));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Obnovit týdenní rozvrh'));
+      await tester.pumpAndSettle();
+
+      expect(find.text(blockStartedMessage), findsOneWidget);
+      expect(requests, isEmpty);
+      expect(find.byType(BlockDialog), findsOneWidget);
+    });
+
+    testWidgets('„Obnovit týdenní rozvrh“ with the special still ahead '
+        'restores', (tester) async {
+      await tester.pumpWidget(app(restoring(() => now)));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Obnovit týdenní rozvrh'));
+      await tester.pumpAndSettle();
+
+      expect(find.text(blockStartedMessage), findsNothing);
+      final restored = requests.singleWhere(
+          (r) => r.url.path.endsWith('/rpc/set_day_override'));
+      expect((jsonDecode(restored.body) as Map)['p_block_ids'], ['b1', 'b2']);
     });
 
     testWidgets('hiding a block under way is refused before any request — '
@@ -933,6 +1003,25 @@ void main() {
         expect(find.textContaining('1 rezervací'), findsOneWidget);
 
         clock = const HourMinute(17, 0);
+        await tester.tap(find.text('Pokračovat'));
+        await tester.pumpAndSettle();
+
+        expect(find.text(blockStartedMessage), findsOneWidget);
+        expect(wrote(), isFalse);
+      });
+
+      testWidgets('„Obnovit týdenní rozvrh“: the special starts before the '
+          'count is confirmed', (tester) async {
+        clock = const HourMinute(17, 58);
+        reservationsBody = rows(['sp']);
+        await tester.pumpWidget(app(restoring(() => clock)));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Obnovit týdenní rozvrh'));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('1 rezervací'), findsOneWidget);
+
+        // sp (18:00) starts within the minute: under way at write time.
+        clock = const HourMinute(17, 59);
         await tester.tap(find.text('Pokračovat'));
         await tester.pumpAndSettle();
 
