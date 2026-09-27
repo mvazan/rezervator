@@ -261,7 +261,11 @@ class _DayPagerViewState extends State<DayPagerView> {
                   ? widget.matchLinks
                   : false,
               slot: widget.slot,
-              admin: widget.admin,
+              // The ⋮ and block gestures resolve their day in the current
+              // week's data, which a sentinel's date is not part of.
+              admin: page >= _firstRealPage && page <= _lastRealPage
+                  ? widget.admin
+                  : CalendarAdminHooks.none,
             ),
           ),
         ),

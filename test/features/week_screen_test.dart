@@ -17,6 +17,7 @@ import 'package:rezervator/features/schedule/schedule_callbacks.dart';
 import 'package:rezervator/features/schedule/week_screen.dart';
 import 'package:rezervator/features/schedule/widgets/calendar_board.dart';
 import 'package:rezervator/features/schedule/widgets/day_chip_strip.dart';
+import 'package:rezervator/features/schedule/widgets/day_header.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -2091,6 +2092,42 @@ void main() {
           .removeCurrentSnackBar();
       await tester.pumpAndSettle();
     }
+
+    testWidgets('portrait: the next week’s preview page has no ⋮', (
+      tester,
+    ) async {
+      portraitSurface(tester);
+      await tester.pumpWidget(
+        app(profile: admin, dutyPeriods: [week], dutyAssignments: onMe),
+      );
+      await tester.pumpAndSettle();
+      // Sunday, the last real page; half a swipe on shows next Monday's
+      // preview beside it without shifting the week.
+      await tester.tap(
+        find
+            .descendant(
+              of: find.byType(DayChipStrip),
+              matching: find.byType(InkWell),
+            )
+            .at(6),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byIcon(Icons.more_vert), findsOneWidget);
+
+      final drag = await tester.startGesture(
+        tester.getCenter(find.byType(PageView)),
+      );
+      await drag.moveBy(const Offset(-40, 0));
+      await drag.moveBy(const Offset(-360, 0));
+      await tester.pump();
+      expect(find.byType(DayHeader), findsNWidgets(2));
+      // Sunday's own ⋮ only; the preview's would act on this week's data.
+      expect(find.byIcon(Icons.more_vert), findsOneWidget);
+
+      await drag.moveBy(const Offset(400, 0));
+      await drag.up();
+      await tester.pumpAndSettle();
+    });
 
     testWidgets('today: a block under way is neither edited nor moved, and '
         'nothing moves onto a start that has passed', (tester) async {
