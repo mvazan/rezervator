@@ -47,6 +47,18 @@ List<StrandableReservation> withoutStarted(
 bool _startedBy(HourMinute? start, HourMinute now) =>
     start != null && start.compareTo(now) <= 0;
 
+/// The player on duty's clock as the checks right before a write read it
+/// (0050): one minute ahead of [now], so a block starting within the next
+/// minute counts as started. The screen's minute clock may report the
+/// previous minute for a few seconds (it polls), and the device clock may
+/// run a little behind the server's Prague time — without the margin a
+/// write could pass the check, and the server's too_late would come only
+/// after the flow's first writes had landed. Capped at 23:59.
+HourMinute clockAtWrite(HourMinute now) {
+  final m = (now.minutesFromMidnight + 1).clamp(0, 24 * 60 - 1);
+  return HourMinute(m ~/ 60, m % 60);
+}
+
 /// Rows that would fall outside the grid after a settings change (fewer
 /// lanes, a weekday dropped). A conservative upper bound: a day override may
 /// keep a non-training day open, but the admin still gets warned.

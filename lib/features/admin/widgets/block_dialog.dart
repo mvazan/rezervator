@@ -202,10 +202,18 @@ class _BlockDialogState extends State<BlockDialog> {
     }
   }
 
-  /// The duty's today: whether [block] has started by now — then the snack
-  /// says it stays the admin's and the caller writes nothing.
-  bool _refuseStarted(TimeBlock block) {
+  /// The duty's clock, one minute ahead when [atWrite] (see [clockAtWrite]);
+  /// null = no limit.
+  HourMinute? _dutyNow({required bool atWrite}) {
     final now = widget.dutyClock?.call();
+    return now == null || !atWrite ? now : clockAtWrite(now);
+  }
+
+  /// The duty's today: whether [block] has started by now — then the snack
+  /// says it stays the admin's and the caller writes nothing. [atWrite]:
+  /// asked right before a write, with the one-minute margin.
+  bool _refuseStarted(TimeBlock block, {bool atWrite = false}) {
+    final now = _dutyNow(atWrite: atWrite);
     if (now == null || block.startsAt.compareTo(now) > 0) return false;
     if (mounted) snack(context, blockStartedMessage);
     return true;
@@ -216,9 +224,10 @@ class _BlockDialogState extends State<BlockDialog> {
   /// cancelled and the special inserted. Neither the edited block nor a
   /// block the day shows that the new times would hide may have started:
   /// a started block stays the admin's, its trainings live on it. True
-  /// (after a snack saying why) = write nothing.
-  bool _refuseForDuty(DayEditDay plan) {
-    final now = widget.dutyClock?.call();
+  /// (after a snack saying why) = write nothing. [atWrite] as in
+  /// [_refuseStarted].
+  bool _refuseForDuty(DayEditDay plan, {bool atWrite = false}) {
+    final now = _dutyNow(atWrite: atWrite);
     if (now == null) return false;
     if (plan.start.compareTo(now) <= 0) {
       if (mounted) snack(context, startPassedMessage);
@@ -230,7 +239,7 @@ class _BlockDialogState extends State<BlockDialog> {
       for (final b in plan.hidden)
         if (rendered == null || rendered.contains(b.id)) b,
     ];
-    return replaced.any(_refuseStarted);
+    return replaced.any((b) => _refuseStarted(b, atWrite: atWrite));
   }
 
   /// How a refusal reads — „Služba skončila…“ for a duty that just ended,
@@ -268,7 +277,7 @@ class _BlockDialogState extends State<BlockDialog> {
         startedBy: widget.dutyClock?.call());
     if (plan.offersMove) {
       // The dialog's moves are the first write.
-      if (_refuseStarted(existing)) {
+      if (_refuseStarted(existing, atWrite: true)) {
         _bail();
         return;
       }
@@ -292,7 +301,7 @@ class _BlockDialogState extends State<BlockDialog> {
     // rows on OTHER non-kept blocks still deserve the standard sweep confirm.
     final ok = await _confirmCancellations(
         strandedOnDate(rows, date, plan.sweepKeptIds), date, plan.cancelNote);
-    if (!ok || !mounted || _refuseStarted(existing)) {
+    if (!ok || !mounted || _refuseStarted(existing, atWrite: true)) {
       _bail();
       return;
     }
@@ -562,7 +571,7 @@ class _BlockDialogState extends State<BlockDialog> {
 
     // The confirms took time: the duty's clock is asked again right before
     // the first write.
-    if (_refuseForDuty(plan)) {
+    if (_refuseForDuty(plan, atWrite: true)) {
       _bail();
       return;
     }

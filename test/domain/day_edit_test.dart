@@ -83,6 +83,12 @@ void main() {
           5);
     });
 
+    test('clockAtWrite reads one minute ahead, capped at 23:59', () {
+      expect(clockAtWrite(const HourMinute(16, 59)), const HourMinute(17, 0));
+      expect(clockAtWrite(const HourMinute(9, 30)), const HourMinute(9, 31));
+      expect(clockAtWrite(const HourMinute(23, 59)), const HourMinute(23, 59));
+    });
+
     test('strandedOnBlock, nextBlockPosition, templateBlockIds', () {
       expect(strandedOnBlock([row(date, 'b1'), row(other, 'b1')], 'b1'), 2);
       expect(nextBlockPosition(const []), 0);

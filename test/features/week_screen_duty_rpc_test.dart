@@ -127,12 +127,13 @@ void main() {
     List<Reservation> reservations = const [],
     Stream<DateTime>? clock,
     Profile profile = me,
+    List<TimeBlock> blocks = const [b1],
   }) {
     return ProviderScope(
       overrides: [
         activeReservationCountProvider.overrideWith((ref, id) async => 0),
         settingsProvider.overrideWith((ref) => Stream.value(settings)),
-        timeBlocksProvider.overrideWith((ref) => Stream.value(const [b1])),
+        timeBlocksProvider.overrideWith((ref) => Stream.value(blocks)),
         dayOverridesProvider.overrideWith((ref) => Stream.value(overrides)),
         prioritySlotsProvider.overrideWithValue(const []),
         prioritySlotsLoadingProvider.overrideWithValue(false),
@@ -360,4 +361,60 @@ void main() {
     expect(find.text(blockStartedMessage), findsOneWidget);
     expect(requests.where((r) => r.method != 'GET'), isEmpty);
   });
+
+  // Right before the write a block starting within the next minute counts
+  // as started: the minute clock may lag by seconds.
+  const b0 = TimeBlock(
+    id: 'b0',
+    startsAt: HourMinute(22, 0),
+    endsAt: HourMinute(22, 30),
+    position: 0,
+    active: true,
+  );
+  for (final withSignUp in [true, false]) {
+    testWidgets('moving a block that starts in 30 s writes nothing '
+        '(${withSignUp ? 'after' : 'without'} the notify choice)', (
+      tester,
+    ) async {
+      wideSurface(tester);
+      final clock = StreamController<DateTime>();
+      addTearDown(clock.close);
+      clock.add(withSignUp ? now : DateTime(2026, 9, 9, 21, 59));
+      await tester.pumpWidget(
+        app(
+          blocks: const [b0],
+          clock: clock.stream,
+          reservations: [
+            if (withSignUp)
+              Reservation(
+                id: 'r2',
+                playerId: 'p2',
+                date: t,
+                blockId: 'b0',
+                lane: 2,
+                createdVia: 'app',
+                createdAt: DateTime.utc(2026, 1, 1),
+              ),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      tester
+          .widget<WeekCalendarView>(find.byType(WeekCalendarView))
+          .admin
+          .onMoveBlock!(t, b0, const HourMinute(23, 0));
+      await tester.pumpAndSettle();
+      if (withSignUp) {
+        // b0 (22:00) is still a minute away when the choice is made.
+        clock.add(DateTime(2026, 9, 9, 21, 59));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Odeslat'));
+        await tester.pumpAndSettle();
+      }
+
+      expect(find.text(blockStartedMessage), findsOneWidget);
+      expect(requests.where((r) => r.method != 'GET'), isEmpty);
+    });
+  }
 }

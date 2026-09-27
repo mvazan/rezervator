@@ -954,6 +954,87 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.textContaining('rezervací'), findsNothing);
       });
+
+      // Right before a write a block starting within the next minute counts
+      // as started: the minute clock may lag by seconds, and the server's
+      // too_late would land only after the first writes.
+      group('the write-time margin of one minute', () {
+        testWidgets('the edited block starting in 30 s writes nothing', (
+          tester,
+        ) async {
+          clock = const HourMinute(16, 58);
+          reservationsBody = rows(['b2']);
+          await tester.pumpWidget(app(BlockDialog(
+            existing: b2,
+            blocks: const [b1, b2],
+            initialStart: const HourMinute(17, 30),
+            initialEnd: const HourMinute(18, 30),
+            dayContext: thursday,
+            dayBaseIds: const ['b1', 'b2'],
+            wasOnDuty: true,
+            dutyClock: () => clock,
+          )));
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('Uložit'));
+          await tester.pumpAndSettle();
+
+          clock = const HourMinute(16, 59); // b2 starts at 17:00
+          await tester.tap(find.text('Odeslat'));
+          await tester.pumpAndSettle();
+
+          expect(find.text(blockStartedMessage), findsOneWidget);
+          expect(wrote(), isFalse);
+        });
+
+        testWidgets('a new start in 30 s has passed', (tester) async {
+          clock = const HourMinute(16, 58);
+          reservationsBody = rows(['b2']);
+          await tester.pumpWidget(app(BlockDialog(
+            existing: null,
+            blocks: const [b1, b2],
+            initialStart: const HourMinute(17, 15),
+            initialEnd: const HourMinute(17, 45),
+            dayContext: thursday,
+            dayBaseIds: const ['b1', 'b2'],
+            wasOnDuty: true,
+            dutyClock: () => clock,
+          )));
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('Uložit'));
+          await tester.pumpAndSettle();
+
+          clock = const HourMinute(17, 14);
+          await tester.tap(find.text('Pokračovat'));
+          await tester.pumpAndSettle();
+
+          expect(find.text(startPassedMessage), findsOneWidget);
+          expect(wrote(), isFalse);
+        });
+
+        testWidgets('„Odebrat v tento den“ of a block starting in 30 s '
+            'writes nothing', (tester) async {
+          clock = now;
+          reservationsBody = rows(['b2']);
+          await tester.pumpWidget(app(BlockDialog(
+            existing: b2,
+            blocks: const [b1, b2],
+            dayContext: thursday,
+            dayBaseIds: const ['b1', 'b2'],
+            wasOnDuty: true,
+            dutyClock: () => clock,
+          )));
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('Odebrat v tento den'));
+          await tester.pumpAndSettle();
+
+          clock = const HourMinute(16, 59);
+          await tester.tap(find.text('Pokračovat'));
+          await tester.pumpAndSettle();
+
+          expect(find.text(blockStartedMessage), findsOneWidget);
+          expect(wrote(), isFalse);
+        });
+      });
     });
   });
 }

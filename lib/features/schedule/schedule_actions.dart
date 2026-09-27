@@ -5,6 +5,7 @@ import '../../core/ui.dart';
 import '../../data/providers.dart';
 import '../../domain/calendar_layout.dart' show hourMinuteAt;
 import '../../domain/collation.dart';
+import '../../domain/day_edit.dart' show clockAtWrite;
 import '../../domain/labels.dart';
 import '../../domain/models.dart';
 import '../../domain/schedule.dart';
@@ -400,10 +401,17 @@ class ScheduleActions {
     return true;
   }
 
+  // The duty's clock on [date], one minute ahead when [atWrite] (the check
+  // right before a write, see clockAtWrite); null = no limit.
+  HourMinute? _dutyNowOn(Day date, {required bool atWrite}) {
+    final now = _dutyClockOn(date)?.call();
+    return now == null || !atWrite ? now : clockAtWrite(now);
+  }
+
   // The duty's today: a block already under way stays the admin's (the
   // server refuses to move it and keeps its trainings).
-  bool _guardStarted(Day date, TimeBlock block) {
-    final dutyNow = _dutyClockOn(date)?.call();
+  bool _guardStarted(Day date, TimeBlock block, {bool atWrite = false}) {
+    final dutyNow = _dutyNowOn(date, atWrite: atWrite);
     if (dutyNow == null || block.startsAt.compareTo(dutyNow) > 0) {
       return false;
     }
@@ -414,8 +422,8 @@ class ScheduleActions {
   // The duty's today: a new start that has passed is refused — checked
   // before the special is inserted, the server's refusal would come only
   // after it.
-  bool _guardStartPassed(Day date, HourMinute start) {
-    final dutyNow = _dutyClockOn(date)?.call();
+  bool _guardStartPassed(Day date, HourMinute start, {bool atWrite = false}) {
+    final dutyNow = _dutyNowOn(date, atWrite: atWrite);
     if (dutyNow == null || start.compareTo(dutyNow) > 0) return false;
     snack(context, startPassedMessage);
     return true;
@@ -603,10 +611,12 @@ class ScheduleActions {
                 '${newStart.display()}–${newEnd.display()}.',
       );
       if (moveNotify == null || !context.mounted) return;
-      // The choice took time: the clock is asked again before any write.
-      if (_guardStarted(date, block) || _guardStartPassed(date, newStart)) {
-        return;
-      }
+    }
+    // The clock is asked again right before any write (the choice took
+    // time), with the one-minute margin.
+    if (_guardStarted(date, block, atWrite: true) ||
+        _guardStartPassed(date, newStart, atWrite: true)) {
+      return;
     }
     await tryAction(
       context,
