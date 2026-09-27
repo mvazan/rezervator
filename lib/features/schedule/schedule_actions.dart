@@ -10,6 +10,7 @@ import '../../domain/models.dart';
 import '../../domain/schedule.dart';
 import '../admin/widgets/block_dialog.dart';
 import '../admin/widgets/blockage_dialog.dart';
+import '../admin/widgets/day_flows.dart';
 import '../admin/widgets/match_dialog.dart';
 import '../admin/widgets/notify_choice_dialog.dart';
 import '../admin/widgets/rental_date_dialog.dart';
@@ -45,6 +46,7 @@ class ScheduleActions {
     required this.canEditBlocks,
     this.noAccountIds = const {},
     this.groupMateIds = const {},
+    this.onDuty = false,
   })  : _overrideByDate = {for (final o in overrides) o.date: o},
         _blockById = {for (final b in dbBlocks) b.id: b};
 
@@ -90,8 +92,23 @@ class ScheduleActions {
   /// matter (they may anything), the kiosk never sets it.
   final Set<String> groupMateIds;
 
+  /// The signed-in player is on canteen duty today (0050): they book and
+  /// cancel for the others and edit single days — the week screen then
+  /// also passes [canEditBlocks]. Matches, blockages, rentals and the
+  /// weekly template stay the admin's.
+  final bool onDuty;
+
   final Map<Day, DayOverride> _overrideByDate;
   final Map<String, TimeBlock> _blockById;
+
+  bool get _isAdmin => me?.isAdmin ?? false;
+
+  /// On duty and not an admin — an admin's own rights already cover it.
+  bool get _asDuty => onDuty && !_isAdmin;
+
+  /// How a refusal reads: „Služba skončila…“ when a duty just ended.
+  String _errorText(Object error) =>
+      friendlyDbError(error, wasOnDuty: _asDuty);
 
   /// The two bundles the views take (see schedule_callbacks.dart).
   SlotCallbacks get slot => SlotCallbacks(
@@ -100,6 +117,7 @@ class ScheduleActions {
         onRental: onEditRental,
         onInfo: onInfo,
         groupMateIds: groupMateIds,
+        onDuty: _asDuty,
       );
   CalendarAdminHooks get admin => CalendarAdminHooks(
         onEditBlock: onEditBlock,
@@ -109,11 +127,14 @@ class ScheduleActions {
         onEditRental: onEditRental,
         onMoveBlock: onMoveBlock,
         onMovePrioritySlot: onMovePrioritySlot,
+        onCloseDay: onCloseDay,
+        onRestoreDay: onRestoreDay,
+        hasDayOverride: (date) => _overrideByDate[date] != null,
       );
 
   void Function(Day, TimeBlock, int lane) get onBook =>
       (Day date, TimeBlock block, int lane) =>
-          _book(date, block, lane, me!, me!.isAdmin);
+          _book(date, block, lane, me!);
 
   void Function(Day, TimeBlock, Reservation, {required bool ownFuture})
       get onCancel => _cancel;
@@ -141,7 +162,7 @@ class ScheduleActions {
   /// match (it is auto-managed); matches open the match dialog, other
   /// blockages the blockage dialog.
   void Function(Day, PrioritySlot)? get onEditPrioritySlot =>
-      canEditBlocks ? _editPrioritySlot : null;
+      canEditBlocks && _isAdmin ? _editPrioritySlot : null;
 
   /// Tap on a rented cell / click on a rental band = edit that day's
   /// rental. Admin-only, but NOT gated on [canEditBlocks]: exceptions never
@@ -156,18 +177,22 @@ class ScheduleActions {
       canEditBlocks ? _moveBlock : null;
 
   void Function(Day, PrioritySlot, HourMinute)? get onMovePrioritySlot =>
-      canEditBlocks ? _movePrioritySlot : null;
+      canEditBlocks && _isAdmin ? _movePrioritySlot : null;
+
+  /// The portrait day menu (0050): close the day, or return it to the
+  /// weekly rules — the same flows as the day-mode block dialog.
+  void Function(Day)? get onCloseDay => canEditBlocks ? _closeDay : null;
+  void Function(Day)? get onRestoreDay => canEditBlocks ? _restoreDay : null;
 
   Future<void> _book(
     Day date,
     TimeBlock block,
     int lane,
     Profile me,
-    bool isAdmin,
   ) async {
     final message = '${dayFull(date)} · ${block.label} · Dráha $lane';
     String? playerId;
-    if (isAdmin) {
+    if (_isAdmin || _asDuty) {
       playerId = await showDialog<String>(
         context: context,
         builder: (dialogContext) => _BookingDialog(
@@ -175,6 +200,7 @@ class ScheduleActions {
           me: me,
           players: ref.read(playersProvider).value ?? const [],
           settings: ref.read(settingsProvider).value,
+          asDuty: _asDuty,
         ),
       );
     } else if (groupMateIds.isNotEmpty) {
@@ -206,7 +232,7 @@ class ScheduleActions {
         lane: lane,
       ),
       success: 'Zarezervováno.',
-      errorText: friendlyDbError,
+      errorText: _errorText,
     );
   }
 
@@ -245,8 +271,9 @@ class ScheduleActions {
     // A group mate's (0044): the tile only offers it before the start, as
     // for one's own; the mate hears about it from the server. Checked
     // locally (not just relying on slot_tile.dart's cancellable gate) so a
-    // non-admin can never fall through into the admin-only flows below.
-    if (!(me?.isAdmin ?? false)) {
+    // non-admin can never fall through into the admin's flows below — only
+    // the player on duty (0050) goes on to them, for anyone else's.
+    if (!_isAdmin && (!_asDuty || groupMateIds.contains(r.playerId))) {
       if (!groupMateIds.contains(r.playerId)) return;
       final ok = await confirmDialog(
         context,
@@ -262,7 +289,7 @@ class ScheduleActions {
         context,
         () => Api.cancelReservation(r.id),
         success: 'Rezervace zrušena.',
-        errorText: friendlyDbError,
+        errorText: _errorText,
       );
       return;
     }
@@ -282,7 +309,7 @@ class ScheduleActions {
         context,
         () => Api.cancelReservation(r.id, note: '', notify: false),
         success: 'Rezervace zrušena.',
-        errorText: friendlyDbError,
+        errorText: _errorText,
       );
       return;
     }
@@ -304,7 +331,7 @@ class ScheduleActions {
       () => Api.cancelReservation(r.id,
           note: choice.message ?? '', notify: choice.notify),
       success: 'Rezervace zrušena.',
-      errorText: friendlyDbError,
+      errorText: _errorText,
     );
   }
 
@@ -360,6 +387,7 @@ class ScheduleActions {
         dayIsTraining: settings.trainingWeekdays.contains(date.weekday),
         dayPriority: week.days[date.weekday - 1].priority,
         dayReason: _overrideByDate[date]?.reason ?? '',
+        wasOnDuty: _asDuty,
       ),
     );
   }
@@ -367,9 +395,10 @@ class ScheduleActions {
   Future<void> _openAdd(Day date,
       {HourMinute? start, HourMinute? end}) async {
     if (_guardPast(date)) return;
+    final closed = week.days[date.weekday - 1] is ClosedDay;
     // Adding a block into a CLOSED day reopens it — that's a bigger
     // decision than the dialog title suggests, so say it out loud.
-    if (week.days[date.weekday - 1] is ClosedDay) {
+    if (closed) {
       final reason = _overrideByDate[date]?.reason ?? '';
       final proceed = await confirmDialog(
         context,
@@ -399,7 +428,26 @@ class ScheduleActions {
         dayIsTraining: settings.trainingWeekdays.contains(date.weekday),
         dayPriority: week.days[date.weekday - 1].priority,
         dayReason: _overrideByDate[date]?.reason ?? '',
+        // The header ＋ (no gap picked) on an open day may close it too.
+        offerCloseDay: !closed && start == null && end == null,
+        wasOnDuty: _asDuty,
       ),
+    );
+  }
+
+  Future<void> _closeDay(Day date) async {
+    if (_guardPast(date)) return;
+    await closeDayFlow(context, date: date, errorText: _errorText);
+  }
+
+  Future<void> _restoreDay(Day date) async {
+    if (_guardPast(date)) return;
+    await restoreDayFlow(
+      context,
+      date: date,
+      isTraining: settings.trainingWeekdays.contains(date.weekday),
+      blocks: dbBlocks,
+      errorText: _errorText,
     );
   }
 
@@ -529,7 +577,7 @@ class ScheduleActions {
         );
       },
       success: 'Přesunuto (jen tento den).',
-      errorText: friendlyDbError,
+      errorText: _errorText,
     );
   }
 
@@ -557,13 +605,14 @@ class ScheduleActions {
         description: slot.description,
       ),
       success: 'Přesunuto.',
-      errorText: friendlyDbError,
+      errorText: _errorText,
     );
   }
 }
 
-/// Admin-only booking dialog: same confirmation as the plain player flow,
-/// plus a player picker (defaults to the admin themself, labelled 'já';
+/// The admin's — and the canteen duty's (0050) — booking dialog: same
+/// confirmation as the plain player flow, plus a player picker (defaults to
+/// the one booking, labelled 'já';
 /// a "hráč bez účtu" is suffixed '· bez účtu' so the admin knows the
 /// booking will never reach an inbox). A roster has dozens of names, so
 /// the picker is a search field — focused on open, so the phone keyboard
@@ -575,6 +624,7 @@ class _BookingDialog extends ConsumerStatefulWidget {
     required this.me,
     required this.players,
     required this.settings,
+    this.asDuty = false,
   });
 
   final String message;
@@ -584,6 +634,10 @@ class _BookingDialog extends ConsumerStatefulWidget {
   /// For the cap: `create_reservation` lets an ADMIN book past
   /// `max_active_reservations` — the dialog warns instead of refusing.
   final ScheduleSettings? settings;
+
+  /// Opened by the player on canteen duty (0050): the booked player's cap
+  /// is a wall, not a warning — „Rezervovat“ goes grey for a player at it.
+  final bool asDuty;
 
   @override
   ConsumerState<_BookingDialog> createState() => _BookingDialogState();
@@ -638,19 +692,27 @@ class _BookingDialogState extends ConsumerState<_BookingDialog> {
               ?.displayName ??
           '';
 
-  /// The cap warning for whoever is chosen right now, or null while the
+  /// The cap note for whoever is chosen right now, or null while the
   /// count is still loading, failed, or leaves them under the cap. Failing
-  /// silently is the honest fallback: the RPC would take the booking either
-  /// way, so a count the app could not fetch must not stand in the way.
+  /// silently is the honest fallback: the RPC decides either way, so a
+  /// count the app could not fetch must not stand in the way.
   String? _limitWarning() {
+    if (_chosenAtLimit() != true) return null;
+    final who = _playerId == widget.me.id ? null : _selectedFullName;
+    final max = widget.settings!.maxActiveReservations;
+    return widget.asDuty
+        ? reservationLimitDutyNote(who, max)
+        : reservationLimitAdminNote(who, max);
+  }
+
+  /// Whether whoever is chosen right now is at the cap; null while the count
+  /// is loading or failed — the RPC decides then.
+  bool? _chosenAtLimit() {
     final settings = widget.settings;
     if (settings == null) return null;
     final count =
         ref.watch(activeReservationCountProvider(_playerId)).value;
-    if (count == null || !atReservationLimit(count, settings)) return null;
-    return reservationLimitAdminNote(
-        _playerId == widget.me.id ? null : _selectedFullName,
-        settings.maxActiveReservations);
+    return count == null ? null : atReservationLimit(count, settings);
   }
 
   @override
@@ -765,7 +827,10 @@ class _BookingDialogState extends ConsumerState<_BookingDialog> {
           child: const Text('Zrušit'),
         ),
         FilledButton(
-          onPressed: () => Navigator.pop(context, _playerId),
+          // The duty cannot book past a player's cap (0050); the admin can.
+          onPressed: widget.asDuty && _chosenAtLimit() == true
+              ? null
+              : () => Navigator.pop(context, _playerId),
           child: const Text('Rezervovat'),
         ),
       ],

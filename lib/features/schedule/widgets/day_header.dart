@@ -19,6 +19,7 @@ class DayHeader extends StatelessWidget {
     this.chipLabel,
     this.closedReason,
     this.interactive = true,
+    this.menu = const [],
   });
 
   final Day date;
@@ -35,6 +36,11 @@ class DayHeader extends StatelessWidget {
   /// Passed straight through to [showDayMatchesDialog]: false on the public,
   /// unauthenticated overview (see its own doc for why).
   final bool interactive;
+
+  /// The ⋮ day menu (0050, portrait — for the admin and the player on
+  /// duty): „Přidat blok…“, „Zavřít den…“, „Obnovit týdenní rozvrh“.
+  /// Empty = no ⋮.
+  final List<({String label, VoidCallback onTap})> menu;
 
   @override
   Widget build(BuildContext context) {
@@ -80,6 +86,16 @@ class DayHeader extends StatelessWidget {
                 background: chipBg,
                 foreground: chipFg,
                 bold: true,
+              ),
+            if (menu.isNotEmpty)
+              PopupMenuButton<VoidCallback>(
+                icon: const Icon(Icons.more_vert),
+                tooltip: 'Úpravy dne',
+                onSelected: (action) => action(),
+                itemBuilder: (_) => [
+                  for (final item in menu)
+                    PopupMenuItem(value: item.onTap, child: Text(item.label)),
+                ],
               ),
           ],
         ),

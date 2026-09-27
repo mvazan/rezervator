@@ -33,6 +33,8 @@ void main() {
 
   late List<http.Request> requests;
   var reservationsBody = '[]';
+  // The server's refusal of set_day_override (0050: a duty that just ended).
+  var refuseOverride = false;
 
   setUpAll(() async {
     TestWidgetsFlutterBinding.ensureInitialized();
@@ -40,6 +42,13 @@ void main() {
     final mock = MockClient((request) async {
       requests.add(request);
       String body = '{}';
+      if (refuseOverride && request.url.path.endsWith('/rpc/set_day_override')) {
+        return http.Response(
+            '{"code":"P0001","message":"not_allowed","details":null,"hint":null}',
+            400,
+            headers: {'content-type': 'application/json'},
+            request: request);
+      }
       if (request.method == 'GET' && request.url.path.contains('reservations')) {
         body = reservationsBody;
       } else if (request.method == 'POST' &&
@@ -65,6 +74,7 @@ void main() {
   setUp(() {
     requests = [];
     reservationsBody = '[]';
+    refuseOverride = false;
   });
 
   Widget app(BlockDialog dialog) =>
@@ -480,5 +490,110 @@ void main() {
           (r) => r.url.path.contains('cancel_block_day_reservations')),
       isTrue,
     );
+  });
+
+  group('„Zavřít den“ (0050)', () {
+    BlockDialog fromPlus({bool offer = true, TimeBlock? existing}) =>
+        BlockDialog(
+          existing: existing,
+          blocks: const [b1, b2],
+          dayContext: thursday,
+          dayBaseIds: const ['b1', 'b2'],
+          offerCloseDay: offer,
+        );
+
+    testWidgets('offered only on a new block from the header ＋', (
+      tester,
+    ) async {
+      await tester.pumpWidget(app(fromPlus()));
+      await tester.pumpAndSettle();
+      expect(find.text('Zavřít den'), findsOneWidget);
+
+      await tester.pumpWidget(app(fromPlus(offer: false)));
+      await tester.pumpAndSettle();
+      expect(find.text('Zavřít den'), findsNothing);
+
+      await tester.pumpWidget(app(fromPlus(existing: b1)));
+      await tester.pumpAndSettle();
+      expect(find.text('Zavřít den'), findsNothing);
+    });
+
+    testWidgets('asks the reason, confirms the count, closes the day with '
+        'the reason', (tester) async {
+      reservationsBody =
+          '[{"date":"${thursday.toSql()}","lane":1,"block_id":"b1"},'
+          '{"date":"${thursday.toSql()}","lane":2,"block_id":"b2"}]';
+      await tester.pumpWidget(app(fromPlus()));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Zavřít den'));
+      await tester.pumpAndSettle();
+      expect(find.text('Důvod zavření'), findsOneWidget);
+      await tester.enterText(find.byType(TextField), 'oprava drah');
+      await tester.tap(find.widgetWithText(FilledButton, 'Zavřít den'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Pozor — rezervace budou zrušeny'), findsOneWidget);
+      expect(find.textContaining('2 rezervací'), findsOneWidget);
+      expect(find.textContaining('„oprava drah"'), findsOneWidget);
+      await tester.tap(find.text('Pokračovat'));
+      await tester.pumpAndSettle();
+
+      final rpc = requests.singleWhere(
+        (r) => r.method == 'POST' && r.url.path.contains('set_day_override'),
+      );
+      final body = jsonDecode(rpc.body) as Map<String, dynamic>;
+      expect(body['p_date'], thursday.toSql());
+      expect(body['p_closed'], true);
+      expect(body['p_reason'], 'oprava drah');
+      expect(find.byType(BlockDialog), findsNothing);
+    });
+
+    testWidgets('backing out of the count confirm writes nothing', (
+      tester,
+    ) async {
+      reservationsBody =
+          '[{"date":"${thursday.toSql()}","lane":1,"block_id":"b1"}]';
+      await tester.pumpWidget(app(fromPlus()));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Zavřít den'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Zavřít den'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Zrušit').last);
+      await tester.pumpAndSettle();
+
+      expect(
+        requests.any((r) => r.url.path.contains('set_day_override')),
+        isFalse,
+      );
+      expect(find.byType(BlockDialog), findsOneWidget);
+    });
+  });
+
+  testWidgets('a duty that ended meanwhile is told so, and the dialog stays',
+      (tester) async {
+    refuseOverride = true;
+    await tester.pumpWidget(app(BlockDialog(
+      existing: null,
+      blocks: const [b1, b2],
+      dayContext: thursday,
+      dayBaseIds: const ['b1', 'b2'],
+      offerCloseDay: true,
+      wasOnDuty: true,
+    )));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Zavřít den'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Zavřít den'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('Služba skončila — tohle teď může jen správce.'),
+      findsOneWidget,
+    );
+    expect(find.byType(BlockDialog), findsOneWidget);
   });
 }

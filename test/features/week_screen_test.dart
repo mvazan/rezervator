@@ -11,6 +11,7 @@ import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/clubhouse/match_detail_screen.dart';
 import 'package:rezervator/features/schedule/widgets/slot_tile.dart';
 import 'package:rezervator/features/schedule/week_calendar_view.dart';
+import 'package:rezervator/features/schedule/schedule_callbacks.dart';
 import 'package:rezervator/features/schedule/week_screen.dart';
 import 'package:rezervator/features/schedule/widgets/calendar_board.dart';
 import 'package:rezervator/features/schedule/widgets/day_chip_strip.dart';
@@ -1845,6 +1846,200 @@ void main() {
       await tester.pumpWidget(app());
       await tester.pumpAndSettle();
       expect(find.textContaining('Slouží'), findsNothing);
+    });
+  });
+
+  group('the calendar while on canteen duty (0050)', () {
+    final week = DutyPeriod(
+      id: 'd1',
+      startsOn: Day(2026, 9, 7),
+      endsOn: Day(2026, 9, 13),
+    );
+    const onMe = [DutyAssignment(periodId: 'd1', userId: 'me')];
+    const onPetr = [DutyAssignment(periodId: 'd1', userId: 'p2')];
+
+    CalendarAdminHooks hooks(WidgetTester tester) =>
+        tester.widget<WeekCalendarView>(find.byType(WeekCalendarView)).admin;
+    SlotCallbacks slots(WidgetTester tester) =>
+        tester.widget<WeekCalendarView>(find.byType(WeekCalendarView)).slot;
+
+    testWidgets('on duty: the day-block hooks, none for matches, blockages '
+        'or rentals', (tester) async {
+      wideSurface(tester);
+      await tester.pumpWidget(
+        app(dutyPeriods: [week], dutyAssignments: onMe),
+      );
+      await tester.pumpAndSettle();
+
+      final admin = hooks(tester);
+      expect(admin.onEditBlock, isNotNull);
+      expect(admin.onAddBlockInGap, isNotNull);
+      expect(admin.onAddForDay, isNotNull);
+      expect(admin.onMoveBlock, isNotNull);
+      expect(admin.onCloseDay, isNotNull);
+      expect(admin.onRestoreDay, isNotNull);
+      expect(admin.onEditPrioritySlot, isNull);
+      expect(admin.onMovePrioritySlot, isNull);
+      expect(admin.onEditRental, isNull);
+      expect(slots(tester).onRental, isNull);
+      expect(slots(tester).onDuty, isTrue);
+    });
+
+    testWidgets('off duty (someone else serves): none of it', (tester) async {
+      wideSurface(tester);
+      await tester.pumpWidget(
+        app(dutyPeriods: [week], dutyAssignments: onPetr),
+      );
+      await tester.pumpAndSettle();
+
+      final admin = hooks(tester);
+      expect(admin.onEditBlock, isNull);
+      expect(admin.onAddForDay, isNull);
+      expect(admin.onCloseDay, isNull);
+      expect(slots(tester).onDuty, isFalse);
+    });
+
+    testWidgets('an admin keeps every hook and is not "on duty"', (
+      tester,
+    ) async {
+      wideSurface(tester);
+      await tester.pumpWidget(
+        app(profile: admin, dutyPeriods: [week], dutyAssignments: onMe),
+      );
+      await tester.pumpAndSettle();
+
+      final hooksOfAdmin = hooks(tester);
+      expect(hooksOfAdmin.onEditPrioritySlot, isNotNull);
+      expect(hooksOfAdmin.onEditRental, isNotNull);
+      expect(hooksOfAdmin.onCloseDay, isNotNull);
+      expect(slots(tester).onDuty, isFalse);
+    });
+
+    testWidgets('the header ＋ opens the day dialog with „Zavřít den“', (
+      tester,
+    ) async {
+      wideSurface(tester);
+      await tester.pumpWidget(
+        app(dutyPeriods: [week], dutyAssignments: onMe),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(headerOf(tomorrow));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Nový blok — jen'), findsOneWidget);
+      expect(find.text('Zavřít den'), findsOneWidget);
+    });
+
+    testWidgets('a free cell opens the player search; a player at the cap '
+        'greys „Rezervovat“', (tester) async {
+      wideSurface(tester);
+      await tester.pumpWidget(
+        app(
+          dutyPeriods: [week],
+          dutyAssignments: onMe,
+          activeCounts: const {'p2': 3},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final addInTomorrow = find.descendant(
+        of: find.byKey(ValueKey(tomorrow)),
+        matching: find.byIcon(Icons.add),
+      );
+      await tester.ensureVisible(addInTomorrow.first);
+      await tester.pumpAndSettle();
+      await tester.tap(addInTomorrow.first);
+      await tester.pumpAndSettle();
+      expect(find.text('Vybráno: já'), findsOneWidget);
+      FilledButton book() => tester.widget<FilledButton>(
+        find.widgetWithText(FilledButton, 'Rezervovat'),
+      );
+      expect(book().onPressed, isNotNull);
+
+      await tester.tap(find.widgetWithText(ListTile, 'Petr Novák'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Petr Novák už má maximální počet rezervací (3).'),
+        findsOneWidget,
+      );
+      expect(book().onPressed, isNull);
+    });
+
+    testWidgets("another player's future reservation opens the admin's "
+        'notify-choice cancel', (tester) async {
+      wideSurface(tester);
+      await tester.pumpWidget(
+        app(
+          dutyPeriods: [week],
+          dutyAssignments: onMe,
+          reservations: [res('r2', 'p2', tomorrow)],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final cell = find.descendant(
+        of: find.byKey(ValueKey(tomorrow)),
+        matching: find.text('Péťa'),
+      );
+      await tester.ensureVisible(cell);
+      await tester.pumpAndSettle();
+      await tester.tap(cell);
+      await tester.pumpAndSettle();
+      expect(find.text('Zrušit a poslat zprávu'), findsOneWidget);
+      expect(find.text('Zrušit bez zprávy'), findsOneWidget);
+    });
+
+    testWidgets('portrait: the ⋮ day menu, „Obnovit“ only with an override; '
+        'off duty no ⋮', (tester) async {
+      portraitSurface(tester);
+      Future<void> openTomorrow() async {
+        final chips = find.descendant(
+          of: find.byType(DayChipStrip),
+          matching: find.byType(InkWell),
+        );
+        await tester.tap(chips.at(t.weekday));
+        await tester.pumpAndSettle();
+      }
+
+      await tester.pumpWidget(
+        app(dutyPeriods: [week], dutyAssignments: onMe),
+      );
+      await tester.pumpAndSettle();
+      await openTomorrow();
+      await tester.tap(find.byIcon(Icons.more_vert));
+      await tester.pumpAndSettle();
+      expect(find.text('Přidat blok…'), findsOneWidget);
+      expect(find.text('Zavřít den…'), findsOneWidget);
+      expect(find.text('Obnovit týdenní rozvrh'), findsNothing);
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpWidget(
+        app(
+          dutyPeriods: [week],
+          dutyAssignments: onMe,
+          overrides: [
+            DayOverride(
+              date: tomorrow,
+              closed: false,
+              reason: '',
+              blockIds: const ['b1'],
+            ),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+      await openTomorrow();
+      await tester.tap(find.byIcon(Icons.more_vert));
+      await tester.pumpAndSettle();
+      expect(find.text('Obnovit týdenní rozvrh'), findsOneWidget);
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpWidget(
+        app(dutyPeriods: [week], dutyAssignments: onPetr),
+      );
+      await tester.pumpAndSettle();
+      await openTomorrow();
+      expect(find.byIcon(Icons.more_vert), findsNothing);
     });
   });
 }

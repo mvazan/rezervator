@@ -4,6 +4,7 @@ import '../../../core/ui.dart';
 import '../../../data/providers.dart';
 import '../../../domain/day_edit.dart';
 import '../../../domain/models.dart';
+import 'day_flows.dart';
 import 'move_reservations_dialog.dart';
 import 'notify_choice_dialog.dart';
 
@@ -59,6 +60,8 @@ class BlockDialog extends StatefulWidget {
     this.dayPriority = const <PrioritySlot>[],
     this.dayReason = '',
     this.noAccountIds = const <String>{},
+    this.offerCloseDay = false,
+    this.wasOnDuty = false,
   });
 
   final TimeBlock? existing;
@@ -103,6 +106,14 @@ class BlockDialog extends StatefulWidget {
 
   /// Day-scoped mode: the day's existing override reason, preserved on save.
   final String dayReason;
+
+  /// Day-scoped mode, a NEW block from the header ＋ on an open day: also
+  /// offer „Zavřít den“ (0050 — the admin and the player on duty).
+  final bool offerCloseDay;
+
+  /// Opened by the player on canteen duty (0050): a `not_allowed` refusal
+  /// then means the duty has just ended, and says so.
+  final bool wasOnDuty;
 
   @override
   State<BlockDialog> createState() => _BlockDialogState();
@@ -154,23 +165,21 @@ class _BlockDialogState extends State<BlockDialog> {
     try {
       return await Api.futureLiveReservations(today());
     } catch (e) {
-      if (mounted) snack(context, friendlyDbError(e));
+      if (mounted) snack(context, _errorText(e));
       return null;
     }
   }
+
+  /// How a refusal reads — „Služba skončila…“ for a duty that just ended.
+  String _errorText(Object error) =>
+      friendlyDbError(error, wasOnDuty: widget.wasOnDuty);
 
   /// Confirms the RPC's exact cancellation count for [date]; quotes the
   /// [note] the write will actually carry.
   Future<bool> _confirmCancellations(int hit, Day date, String note) async {
     if (hit == 0) return true;
     if (!mounted) return false;
-    return confirmDialog(
-      context,
-      title: 'Pozor — rezervace budou zrušeny',
-      message: '$hit rezervací (${dayFull(date)}) bude zrušeno se '
-          'zprávou „$note". Pokračovat?',
-      confirmLabel: 'Pokračovat',
-    );
+    return confirmDayCancellations(context, hit, date, note);
   }
 
   /// Day-scoped removal: the block disappears from [widget.dayContext] only.
@@ -221,7 +230,7 @@ class _BlockDialogState extends State<BlockDialog> {
         blockIds: plan.idsAfter,
       ),
       success: 'Blok odebrán (jen tento den).',
-      errorText: friendlyDbError,
+      errorText: _errorText,
     );
     if (!mounted) return;
     if (done) {
@@ -238,30 +247,29 @@ class _BlockDialogState extends State<BlockDialog> {
   /// lands FIRST so a failure between the two calls can't leave the day
   /// wide open.
   Future<void> _restoreTemplate() async {
-    final date = widget.dayContext!;
     setState(() => _saving = true);
-    final rows = await _loadRows();
-    if (rows == null || !mounted) {
-      _bail();
-      return;
-    }
-    final plan = planRestoreTemplate(
-        date: date,
-        isTraining: widget.dayIsTraining,
-        blocks: widget.blocks,
-        rows: rows);
-    final ok =
-        await _confirmCancellations(plan.cancellations, date, scheduleChangeNote);
-    if (!ok || !mounted) {
-      _bail();
-      return;
-    }
-    final done = await tryAction(
+    final done = await restoreDayFlow(
       context,
-      () => Api.restoreDayToTemplate(date,
-          isTraining: widget.dayIsTraining, templateIds: plan.templateIds),
-      success: 'Den vrácen k týdennímu rozvrhu.',
-      errorText: friendlyDbError,
+      date: widget.dayContext!,
+      isTraining: widget.dayIsTraining,
+      blocks: widget.blocks,
+      errorText: _errorText,
+    );
+    if (!mounted) return;
+    if (done) {
+      closeDialog(context);
+    } else {
+      setState(() => _saving = false);
+    }
+  }
+
+  /// „Zavřít den“ (0050): the reason, the count confirm, the closed write.
+  Future<void> _closeDay() async {
+    setState(() => _saving = true);
+    final done = await closeDayFlow(
+      context,
+      date: widget.dayContext!,
+      errorText: _errorText,
     );
     if (!mounted) return;
     if (done) {
@@ -279,7 +287,7 @@ class _BlockDialogState extends State<BlockDialog> {
       context,
       () => Api.updateTimeBlock(existing.id, active: false),
       success: 'Blok deaktivován.',
-      errorText: friendlyDbError,
+      errorText: _errorText,
     );
     if (done && mounted) closeDialog(context);
   }
@@ -368,7 +376,7 @@ class _BlockDialogState extends State<BlockDialog> {
           ? Api.addTimeBlock(start, end, nextBlockPosition(widget.blocks))
           : Api.updateTimeBlock(existing.id, startsAt: start, endsAt: end),
       success: 'Uloženo.',
-      errorText: friendlyDbError,
+      errorText: _errorText,
     );
     if (!mounted) return;
     if (ok) {
@@ -525,7 +533,7 @@ class _BlockDialogState extends State<BlockDialog> {
         );
       },
       success: 'Uloženo (jen tento den).',
-      errorText: friendlyDbError,
+      errorText: _errorText,
     );
     if (!mounted) return;
     if (done) {
@@ -559,6 +567,14 @@ class _BlockDialogState extends State<BlockDialog> {
         ],
       ),
       actions: [
+        if (_dayMode && widget.existing == null && widget.offerCloseDay)
+          TextButton(
+            onPressed: _saving ? null : _closeDay,
+            child: Text(
+              'Zavřít den',
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ),
         if (_dayMode && widget.dayHasOverride)
           TextButton(
             onPressed: _saving ? null : _restoreTemplate,

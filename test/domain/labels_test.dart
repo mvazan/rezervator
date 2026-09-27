@@ -314,4 +314,14 @@ void main() {
           'Poslední načtení týmů se nepovedlo: boom');
     });
   });
+
+  test("the duty's cap notes (0050)", () {
+    expect(reservationLimitDutyNote(null, 3),
+        'Máš už maximální počet rezervací (3).');
+    expect(reservationLimitDutyNote('Petr Novák', 3),
+        'Petr Novák už má maximální počet rezervací (3).');
+    expect(reservationLimitDutyBanner,
+        'Máš maximální počet rezervací — jako služba můžeš rezervovat jen '
+        'pro ostatní.');
+  });
 }

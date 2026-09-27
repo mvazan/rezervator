@@ -118,9 +118,12 @@ class _WeekScreenState extends ConsumerState<WeekScreen> with WeekNavigation {
         _myLiveCountOn(mine, me?.id, monday.addDays(i)),
     ];
 
-    // Admin block gestures (long-press edit, tap-a-gap add) only exist for
-    // admins on the real DB block set — never on the placeholder grid.
-    final canEditBlocks = (me?.isAdmin ?? false) && blocksFromDb;
+    // Day-block gestures (long-press edit, tap-a-gap add, move, the day
+    // menu) exist for the admin and the player on canteen duty (0050) — on
+    // the real DB block set only, never on the placeholder grid.
+    final onDuty = ref.watch(myDutyProvider.select((d) => d.onDuty));
+    final canEditBlocks =
+        ((me?.isAdmin ?? false) || onDuty) && blocksFromDb;
     final slotTypes = ref.watch(slotTypesProvider).value ?? const [];
     final actions = ScheduleActions(
       context: context,
@@ -138,6 +141,7 @@ class _WeekScreenState extends ConsumerState<WeekScreen> with WeekNavigation {
       canEditBlocks: canEditBlocks,
       noAccountIds: wv.noAccountIds,
       groupMateIds: me == null ? const {} : group.matesOf(me.id),
+      onDuty: onDuty,
     );
 
     return Column(

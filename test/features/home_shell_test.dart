@@ -9,6 +9,7 @@ import 'package:http/testing.dart';
 import 'package:rezervator/data/clock.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/groups.dart';
+import 'package:rezervator/domain/duties.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/schedule/home_shell.dart';
 import 'package:rezervator/features/schedule/my_trainings_screen.dart';
@@ -94,6 +95,7 @@ void main() {
     Profile profile = me,
     Stream<Profile>? profileStream,
     List<Reservation> mine = const [],
+    MyDuty duty = MyDuty.none,
   }) =>
       ProviderScope(
         overrides: [
@@ -113,6 +115,11 @@ void main() {
           tenantNameProvider.overrideWith((ref, id) async => 'Demo'),
           nowProvider.overrideWith((ref) => Stream.value(now)),
           myGroupProvider.overrideWithValue(MyGroup.none),
+          myDutyProvider.overrideWithValue(duty),
+          dutyPeriodsProvider.overrideWith((ref) => Stream.value(const [])),
+          dutyAssignmentsProvider.overrideWith(
+            (ref) => Stream.value(const []),
+          ),
         ],
         child: const MaterialApp(home: HomeShell()),
       );
@@ -145,6 +152,29 @@ void main() {
       findsOneWidget,
     );
 
+  });
+
+  // On canteen duty (0050) the ＋ stays — the duty books for the others —
+  // so the banner says that instead of "wait until one is over".
+  testWidgets('on duty the cap banner says the ＋ is for the others',
+      (tester) async {
+    await tester.pumpWidget(app(
+      mine: [
+        res('r1', today),
+        res('r2', today.addDays(1)),
+        res('r3', today.addDays(2)),
+      ],
+      duty: MyDuty(
+        current: DutyPeriod(id: 'd1', startsOn: today, endsOn: today),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Máš maximální počet rezervací — jako služba můžeš rezervovat '
+          'jen pro ostatní.'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Další půjde'), findsNothing);
   });
 
   // The cap does not bind an admin: create_reservation lets them book past

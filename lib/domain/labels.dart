@@ -82,6 +82,19 @@ String reservationLimitAdminNote(String? player, int max) => player == null
     : '$player už má maximální počet rezervací ($max). Jako správce ji můžeš '
         'vytvořit i tak.';
 
+/// The cap in the booking dialog of the player on canteen duty (0050),
+/// where it is a wall: create_reservation holds the duty to the booked
+/// player's own cap. [player] is null when booking for oneself.
+String reservationLimitDutyNote(String? player, int max) => player == null
+    ? 'Máš už maximální počet rezervací ($max).'
+    : '$player už má maximální počet rezervací ($max).';
+
+/// The own-cap banner for the player on duty (0050): the ＋ stays, because
+/// the duty still books for the others.
+const reservationLimitDutyBanner =
+    'Máš maximální počet rezervací — jako služba můžeš rezervovat jen pro '
+    'ostatní.';
+
 /// [n] with its noun in the right Czech form: [one] for 1, [few] for 2–4,
 /// [many] for anything else (0, 5+, and 22 too — written in digits it takes
 /// the genitive).

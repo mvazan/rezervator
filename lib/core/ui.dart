@@ -272,46 +272,90 @@ Future<String?> promptText(
   String confirmLabel = 'Uložit',
   TextInputType? keyboardType,
   String? suffixText,
-}) async {
-  final controller = TextEditingController(text: initial);
-  try {
-    final result = await showDialog<String>(
+}) =>
+    showDialog<String>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(title),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (message != null) ...[
-              Text(message, style: Theme.of(dialogContext).textTheme.bodySmall),
-              const SizedBox(height: 12),
-            ],
-            TextField(
-              controller: controller,
-              autofocus: true,
-              keyboardType: keyboardType,
-              decoration:
-                  InputDecoration(hintText: hint, suffixText: suffixText),
-            ),
+      builder: (_) => _PromptDialog(
+        title: title,
+        message: message,
+        hint: hint,
+        initial: initial,
+        confirmLabel: confirmLabel,
+        keyboardType: keyboardType,
+        suffixText: suffixText,
+      ),
+    );
+
+/// [promptText]'s dialog. It owns the field's controller, so the controller
+/// lives until the dialog's exit animation is over — disposing it the moment
+/// the dialog popped broke the last frames of that animation.
+class _PromptDialog extends StatefulWidget {
+  const _PromptDialog({
+    required this.title,
+    required this.confirmLabel,
+    this.message,
+    this.hint,
+    this.initial,
+    this.keyboardType,
+    this.suffixText,
+  });
+
+  final String title;
+  final String? message;
+  final String? hint;
+  final String? initial;
+  final String confirmLabel;
+  final TextInputType? keyboardType;
+  final String? suffixText;
+
+  @override
+  State<_PromptDialog> createState() => _PromptDialogState();
+}
+
+class _PromptDialogState extends State<_PromptDialog> {
+  late final _controller = TextEditingController(text: widget.initial);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final message = widget.message;
+    return AlertDialog(
+      title: Text(widget.title),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (message != null) ...[
+            Text(message, style: Theme.of(context).textTheme.bodySmall),
+            const SizedBox(height: 12),
           ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Zrušit'),
-          ),
-          FilledButton(
-            onPressed: () =>
-                Navigator.pop(dialogContext, controller.text.trim()),
-            child: Text(confirmLabel),
+          TextField(
+            controller: _controller,
+            autofocus: true,
+            keyboardType: widget.keyboardType,
+            decoration: InputDecoration(
+              hintText: widget.hint,
+              suffixText: widget.suffixText,
+            ),
           ),
         ],
       ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Zrušit'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _controller.text.trim()),
+          child: Text(widget.confirmLabel),
+        ),
+      ],
     );
-    return result;
-  } finally {
-    controller.dispose();
   }
 }
 

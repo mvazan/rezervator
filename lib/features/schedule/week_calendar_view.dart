@@ -131,6 +131,7 @@ class _WeekCalendarViewState extends State<WeekCalendarView> {
       settings: widget.settings,
       isAdmin: widget.me?.isAdmin ?? false,
       forGroup: widget.slot.groupMateIds.isNotEmpty,
+      onDuty: widget.slot.onDuty,
     );
     return '$freeCount volných';
   }

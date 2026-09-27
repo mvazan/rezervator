@@ -14,6 +14,7 @@ class SlotCallbacks {
     this.onRental,
     this.onInfo,
     this.groupMateIds = const {},
+    this.onDuty = false,
   });
 
   final void Function(Day date, TimeBlock block, int lane) onBook;
@@ -43,6 +44,12 @@ class SlotCallbacks {
   /// and cancel as their own. Empty outside a group, for admins it does not
   /// matter (they may anything), the kiosk never sets it.
   final Set<String> groupMateIds;
+
+  /// The signed-in player is on canteen duty (0050): they book and cancel
+  /// for anyone under that player's usual rules, so their own cap closes
+  /// no cell and others' not-started reservations are tappable. False for
+  /// admins (they may anything) and the kiosk.
+  final bool onDuty;
 }
 
 /// The calendar boards' admin gestures — every hook optional (null = not
@@ -56,7 +63,12 @@ class CalendarAdminHooks {
     this.onEditRental,
     this.onMoveBlock,
     this.onMovePrioritySlot,
+    this.onCloseDay,
+    this.onRestoreDay,
+    this.hasDayOverride = _noOverride,
   });
+
+  static bool _noOverride(Day _) => false;
 
   static const none = CalendarAdminHooks();
 
@@ -84,4 +96,15 @@ class CalendarAdminHooks {
   /// HOLD a band and drop it: move the slot (its úklid child follows).
   final void Function(Day date, PrioritySlot slot, HourMinute newStart)?
       onMovePrioritySlot;
+
+  /// The portrait day menu's „Zavřít den…“ (0050, admin and duty): ask the
+  /// reason, confirm what it cancels, close the day.
+  final void Function(Day date)? onCloseDay;
+
+  /// The portrait day menu's „Obnovit týdenní rozvrh“: drop the day's
+  /// override — offered only where [hasDayOverride] says there is one.
+  final void Function(Day date)? onRestoreDay;
+
+  /// Whether [date] has an override row to restore from.
+  final bool Function(Day date) hasDayOverride;
 }
