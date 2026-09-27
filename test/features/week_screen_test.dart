@@ -1201,6 +1201,42 @@ void main() {
     expect(find.text('Deaktivovat'), findsNothing); // global action lives in Rozvrh
   });
 
+  // Only the label and the pencil shrink in a narrow column; the tap target
+  // stays the header strip's full width, edge to edge.
+  for (final (label, surface) in [
+    ('wide', const Size(1600, 1200)),
+    ('narrow', const Size(800, 400)),
+  ]) {
+    testWidgets('$label: the whole header strip opens the block edit', (
+      tester,
+    ) async {
+      tester.view.physicalSize = surface;
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(app(profile: admin));
+      await tester.pumpAndSettle();
+
+      final card = find.descendant(
+        of: find.byKey(ValueKey(tomorrow)),
+        matching: find.byKey(const ValueKey('cal-block-b1')),
+      );
+      await tester.ensureVisible(card);
+      await tester.pumpAndSettle();
+      final rect = tester.getRect(card);
+      final labelWidth = tester
+          .getRect(find.descendant(of: card, matching: find.text(b1.label)))
+          .width;
+      expect(rect.width, greaterThan(labelWidth));
+      // Just inside the card's left edge, beside the label.
+      await tester.tapAt(Offset(rect.left + 3, rect.top + 7));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(find.textContaining('Upravit blok — jen'), findsOneWidget);
+    });
+  }
+
   testWidgets(
     'admin taps empty calendar space into a Nový blok dialog prefilled with '
     'the free gap',
