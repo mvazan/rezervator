@@ -76,6 +76,11 @@ class _DutyAssignSheetState extends State<DutyAssignSheet> {
   final _query = TextEditingController();
   late int _index = widget.index;
   late Set<String> _selected = _savedIds(_period);
+
+  /// What the list sorts by: [_savedCounts] as the sheet reached
+  /// [_period], kept until it moves on, so a tick never moves a row
+  /// under the finger.
+  late Map<String, int> _order = _savedCounts();
   bool _saving = false;
 
   /// What this sheet saved, per period: the streams catch up a moment
@@ -116,8 +121,8 @@ class _DutyAssignSheetState extends State<DutyAssignSheet> {
     ];
   }
 
-  /// Duties per player in [_period]'s season, [_period] itself left out —
-  /// what the list sorts by, so a tick never moves a row under the finger.
+  /// Duties per player in [_period]'s season, [_period] itself left out;
+  /// the ticks go on top of them.
   Map<String, int> _otherCounts() {
     final period = _period;
     final season = seasonRanges(
@@ -135,23 +140,35 @@ class _DutyAssignSheetState extends State<DutyAssignSheet> {
     return {for (final p in widget.roster) p.id: others[p.id]?.duties ?? 0};
   }
 
-  /// [players] with the fewest [others] first, then Czech-sorted, in
+  /// Duties per player in [_period]'s season with [_period]'s saved
+  /// assignees in — the counts the rows show until something is ticked.
+  Map<String, int> _savedCounts() {
+    final saved = _savedIds(_period);
+    return {
+      for (final MapEntry(key: id, value: n) in _otherCounts().entries)
+        id: n + (saved.contains(id) ? 1 : 0),
+    };
+  }
+
+  /// [players] with the fewest [counts] first, then Czech-sorted, in
   /// groups of one count each. Not alphabetical nor chronological: the
   /// user asked for this exception, so the least-served get picked first.
   static List<List<Profile>> _groups(
     List<Profile> players,
-    Map<String, int> others,
+    Map<String, int> counts,
   ) {
+    // A player who joined the roster while the sheet was open.
+    int count(Profile p) => counts[p.id] ?? 0;
     final sorted = [...players]
       ..sort((a, b) {
-        final byCount = others[a.id]!.compareTo(others[b.id]!);
+        final byCount = count(a).compareTo(count(b));
         return byCount != 0
             ? byCount
             : compareCzech(a.displayName, b.displayName);
       });
     final groups = <List<Profile>>[];
     for (final p in sorted) {
-      if (groups.isEmpty || others[groups.last.first.id] != others[p.id]) {
+      if (groups.isEmpty || count(groups.last.first) != count(p)) {
         groups.add([]);
       }
       groups.last.add(p);
@@ -197,6 +214,7 @@ class _DutyAssignSheetState extends State<DutyAssignSheet> {
     setState(() {
       _index++;
       _selected = _savedIds(_period);
+      _order = _savedCounts();
       _query.clear();
     });
   }
@@ -206,9 +224,9 @@ class _DutyAssignSheetState extends State<DutyAssignSheet> {
     final theme = Theme.of(context);
     final period = _period;
     final others = _otherCounts();
-    // Sorted by the other duties, the ticks shown live on top of them.
+    // Sorted by the saved duties, the ticks shown live on top of the others.
     int count(Profile p) => others[p.id]! + (_selected.contains(p.id) ? 1 : 0);
-    final groups = _groups(_matches, others);
+    final groups = _groups(_matches, _order);
     final title = period.note.isEmpty
         ? dutyRangeLabel(period)
         : '${dutyRangeLabel(period)} · ${period.note}';

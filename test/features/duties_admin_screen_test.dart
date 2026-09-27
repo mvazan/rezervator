@@ -750,23 +750,44 @@ void main() {
       await tester.tap(find.text('po 5. 10. – ne 11. 10. · mimo so'));
       await tester.pumpAndSettle();
 
-      // Jan's only duty is this one, so he sorts with the zeros.
+      String countOf(String name) => tester
+          .widget<Text>(
+            find.descendant(
+              of: find.widgetWithText(CheckboxListTile, name),
+              matching: find.textContaining('×'),
+            ),
+          )
+          .data!;
+
+      // Sorted by the counts shown, this duty's saved ticks in: Jan's only
+      // duty is this one, so he sorts with the ones, Jana with the twos.
       final before = [
         'Cyril Hudec',
         'Čeněk Dvořák',
-        'Jan Novák',
         'Správce',
         'Zdeněk Šimek',
         '—',
         'Bohumil Kroupa',
-        'Jana Nováková',
+        'Jan Novák',
         '—',
+        'Jana Nováková',
         'Petr Svoboda',
       ];
       expect(rows(), before);
+      expect(
+        [for (final name in before) name == '—' ? name : countOf(name)],
+        ['0×', '0×', '0×', '0×', '—', '1×', '1×', '—', '2×', '2×'],
+      );
+
+      // Ticks move the counts, never the rows.
       await tester.tap(inSheet(find.text('Cyril Hudec')));
+      await tester.tap(inSheet(find.text('Jan Novák')));
       await tester.pump();
+      expect(countOf('Cyril Hudec'), '1×');
+      expect(countOf('Jan Novák'), '0×');
       expect(rows(), before);
+      await tester.tap(inSheet(find.text('Jan Novák')));
+      await tester.pump();
 
       await tester.tap(inSheet(find.text('Uložit a další')));
       await tester.pumpAndSettle();
