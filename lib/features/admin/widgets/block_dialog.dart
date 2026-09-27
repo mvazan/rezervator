@@ -314,6 +314,11 @@ class _BlockDialogState extends State<BlockDialog> {
     // rows on OTHER non-kept blocks still deserve the standard sweep confirm.
     final ok = await _confirmCancellations(
         strandedOnDate(rows, date, plan.sweepKeptIds), date, plan.cancelNote);
+    // Moves the dialog above already committed stay if the block starts
+    // before this check and the removal is refused: the block remains with
+    // fewer sign-ups, each moved reservation lives on another block of the
+    // day — nothing is orphaned or cancelled. Harmless, and the server
+    // would refuse the override write anyway (too_late, see dayEditError).
     if (!ok || !mounted || _refuseStarted(existing, atWrite: true)) {
       _bail();
       return;
