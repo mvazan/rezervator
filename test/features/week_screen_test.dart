@@ -136,6 +136,7 @@ void main() {
     Map<String, MatchResult> matchResults = const {},
     List<DutyPeriod> dutyPeriods = const [],
     List<DutyAssignment> dutyAssignments = const [],
+    ScheduleSettings schedule = settings,
   }) {
     return ProviderScope(
       overrides: [
@@ -143,7 +144,7 @@ void main() {
         // future date, which the drawn week alone cannot know.
         activeReservationCountProvider
             .overrideWith((ref, playerId) async => activeCounts[playerId] ?? 0),
-        settingsProvider.overrideWith((ref) => Stream.value(settings)),
+        settingsProvider.overrideWith((ref) => Stream.value(schedule)),
         timeBlocksProvider.overrideWith((ref) => Stream.value(blocks)),
         dayOverridesProvider.overrideWith((ref) => Stream.value(overrides)),
         prioritySlotsProvider.overrideWithValue(matches),
@@ -639,7 +640,8 @@ void main() {
   });
 
   testWidgets('in a group at my own cap the free cells keep their full ＋; '
-      'the past stays quiet, and without a group no ＋ at all', (
+      'the past and beyond the horizon stay quiet, and without a group no ＋ '
+      'at all', (
     tester,
   ) async {
     wideSurface(tester);
@@ -648,9 +650,16 @@ void main() {
     final mine = [
       for (var i = 1; i <= 3; i++) res('r$i', 'me', t.addDays(i)),
     ];
+    // A two-day horizon: Sunday (t + 4) is drawn but beyond it.
     await tester.pumpWidget(app(
       group: const MyGroup(groupId: 'g', memberIds: ['me', 'p2']),
       reservations: mine,
+      schedule: const ScheduleSettings(
+        laneCount: 2,
+        trainingWeekdays: {1, 2, 3, 4, 5, 6, 7},
+        bookingHorizonDays: 2,
+        maxActiveReservations: 3,
+      ),
     ));
     await tester.pumpAndSettle();
 
@@ -676,6 +685,12 @@ void main() {
     expect(past, isNotEmpty);
     expect(past.where((tile) => tile.onTap != null), isEmpty);
     expect(past.where((tile) => !tile.quiet), isEmpty);
+
+    // Beyond the horizon the group opens nothing either: inert and quiet.
+    final beyond = freeIn(t.addDays(4));
+    expect(beyond, isNotEmpty);
+    expect(beyond.where((tile) => tile.onTap != null), isEmpty);
+    expect(beyond.where((tile) => !tile.quiet), isEmpty);
 
     // The same counts without a group: no ＋ in tomorrow's column.
     await tester.pumpWidget(const SizedBox());
