@@ -645,7 +645,11 @@ void main() {
         await tester.tap(find.text('Uložit'));
         await tester.pumpAndSettle();
 
-        expect(find.text(startPassedMessage), findsOneWidget);
+        expect(
+          find.text('Blok nemůže začínat dřív než teď (16:30) — '
+              'vyber pozdější začátek.'),
+          findsOneWidget,
+        );
         expect(requests, isEmpty);
         expect(find.byType(BlockDialog), findsOneWidget);
         ScaffoldMessenger.of(tester.element(find.byType(BlockDialog)))
@@ -953,7 +957,11 @@ void main() {
         await tester.tap(find.text('Pokračovat'));
         await tester.pumpAndSettle();
 
-        expect(find.text(startPassedMessage), findsOneWidget);
+        expect(
+          find.text('Blok nemůže začínat dřív než teď (17:20) — '
+              'vyber pozdější začátek.'),
+          findsOneWidget,
+        );
         expect(wrote(), isFalse);
       });
 
@@ -1122,7 +1130,11 @@ void main() {
           await tester.tap(find.text('Pokračovat'));
           await tester.pumpAndSettle();
 
-          expect(find.text(startPassedMessage), findsOneWidget);
+          expect(
+            find.text('Blok nemůže začínat dřív než teď (17:14) — '
+                'vyber pozdější začátek.'),
+            findsOneWidget,
+          );
           expect(wrote(), isFalse);
         });
 

@@ -2462,7 +2462,11 @@ void main() {
 
       hooks(tester).onMoveBlock!(t, bEarly, const HourMinute(9, 30));
       await tester.pumpAndSettle();
-      expect(find.text(startPassedMessage), findsOneWidget);
+      expect(
+        find.text('Blok nemůže začínat dřív než teď (10:00) — '
+            'vyber pozdější začátek.'),
+        findsOneWidget,
+      );
       await dismissSnack(tester);
 
       // A block still ahead opens, held to starts after now.

@@ -224,10 +224,12 @@ class _BlockDialogState extends State<BlockDialog> {
   /// (after a snack saying why) = write nothing. [atWrite] as in
   /// [_refuseStarted].
   bool _refuseForDuty(DayEditDay plan, {bool atWrite = false}) {
-    final now = _dutyNow(atWrite: atWrite);
-    if (now == null) return false;
+    final real = widget.dutyClock?.call();
+    if (real == null) return false;
+    final now = atWrite ? clockAtWrite(real) : real;
     if (plan.start.compareTo(now) <= 0) {
-      if (mounted) snack(context, startPassedMessage);
+      // The snack prints the real reading, not the write-time margin.
+      if (mounted) snack(context, startPassedMessage(real));
       return true;
     }
     final existing = plan.existing;

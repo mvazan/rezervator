@@ -22,7 +22,12 @@ const hideStartedMessage =
 
 /// What the player on duty is told when a day edit of today would start a
 /// block at a time that has already passed (0050: the server refuses it).
-const startPassedMessage = 'Začátek už dnes minul — vyber pozdější čas.';
+/// [now] is the duty clock's real reading — never the one-minute
+/// write-time margin of [clockAtWrite], so the time shown is the one on the
+/// player's watch.
+String startPassedMessage(HourMinute now) =>
+    'Blok nemůže začínat dřív než teď (${now.display()}) — '
+    'vyber pozdější začátek.';
 
 /// The note every day-scoped write falls back to (set_day_override and the
 /// 0018 cascade use the same wording).

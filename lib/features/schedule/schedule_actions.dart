@@ -423,10 +423,13 @@ class ScheduleActions {
   // The duty's today: a new start that has passed is refused — checked
   // before the special is inserted, the server's refusal would come only
   // after it.
+  // The snack prints the clock's real reading, not the write-time margin.
   bool _guardStartPassed(Day date, HourMinute start, {bool atWrite = false}) {
-    final dutyNow = _dutyNowOn(date, atWrite: atWrite);
-    if (dutyNow == null || start.compareTo(dutyNow) > 0) return false;
-    snack(context, startPassedMessage);
+    final now = _dutyClockOn(date)?.call();
+    if (now == null) return false;
+    final dutyNow = atWrite ? clockAtWrite(now) : now;
+    if (start.compareTo(dutyNow) > 0) return false;
+    snack(context, startPassedMessage(now));
     return true;
   }
 

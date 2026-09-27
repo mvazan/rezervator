@@ -83,6 +83,13 @@ void main() {
           5);
     });
 
+    test('startPassedMessage says what time it is', () {
+      expect(
+        startPassedMessage(const HourMinute(18, 5)),
+        'Blok nemůže začínat dřív než teď (18:05) — vyber pozdější začátek.',
+      );
+    });
+
     test('clockAtWrite reads one minute ahead, capped at 23:59', () {
       expect(clockAtWrite(const HourMinute(16, 59)), const HourMinute(17, 0));
       expect(clockAtWrite(const HourMinute(9, 30)), const HourMinute(9, 31));
