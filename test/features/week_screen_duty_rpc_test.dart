@@ -361,6 +361,55 @@ void main() {
     expect(requests.where((r) => r.method != 'GET'), isEmpty);
   });
 
+  testWidgets('moving a block: a new start that passed during the notify '
+      'choice writes nothing — the snack reads the real time', (
+    tester,
+  ) async {
+    wideSurface(tester);
+    final clock = StreamController<DateTime>();
+    addTearDown(clock.close);
+    clock.add(now);
+    await tester.pumpWidget(
+      app(
+        clock: clock.stream,
+        reservations: [
+          Reservation(
+            id: 'r2',
+            playerId: 'p2',
+            date: t,
+            blockId: 'b1',
+            lane: 2,
+            createdVia: 'app',
+            createdAt: DateTime.utc(2026, 1, 1),
+          ),
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    tester
+        .widget<WeekCalendarView>(find.byType(WeekCalendarView))
+        .admin
+        .onMoveBlock!(t, b1, const HourMinute(21, 0));
+    await tester.pumpAndSettle();
+    expect(find.text('Upozornit na přesun?'), findsOneWidget);
+
+    // 21:30 while the choice is open: the new 21:00 start has passed, b1
+    // (22:58) has not started.
+    clock.add(DateTime(2026, 9, 9, 21, 30));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Odeslat'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text(
+        'Blok nemůže začínat dřív než teď (21:30) — vyber pozdější začátek.',
+      ),
+      findsOneWidget,
+    );
+    expect(requests.where((r) => r.method != 'GET'), isEmpty);
+  });
+
   // Right before the write a block starting within the next minute counts
   // as started: the minute clock may lag by seconds.
   const b0 = TimeBlock(
