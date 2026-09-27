@@ -95,6 +95,12 @@ const reservationLimitDutyBanner =
     'Máš maximální počet rezervací — jako služba můžeš rezervovat jen pro '
     'ostatní.';
 
+/// The own-cap banner for a group member (0044): the ＋ stays, because a
+/// member still books for their mates.
+const reservationLimitGroupBanner =
+    'Máš maximální počet rezervací — ve skupině můžeš rezervovat jen pro '
+    'spoluhráče.';
+
 /// [n] with its noun in the right Czech form: [one] for 1, [few] for 2–4,
 /// [many] for anything else (0, 5+, and 22 too — written in digits it takes
 /// the genitive).
