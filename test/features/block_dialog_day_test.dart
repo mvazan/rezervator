@@ -35,6 +35,9 @@ void main() {
   var reservationsBody = '[]';
   // The server's refusal of set_day_override (0050: a duty that just ended).
   var refuseOverride = false;
+  // The server's refusal of move_day_reservations (0050: a block of today
+  // that has started meanwhile).
+  var refuseMoveTooLate = false;
 
   setUpAll(() async {
     TestWidgetsFlutterBinding.ensureInitialized();
@@ -45,6 +48,14 @@ void main() {
       if (refuseOverride && request.url.path.endsWith('/rpc/set_day_override')) {
         return http.Response(
             '{"code":"P0001","message":"not_allowed","details":null,"hint":null}',
+            400,
+            headers: {'content-type': 'application/json'},
+            request: request);
+      }
+      if (refuseMoveTooLate &&
+          request.url.path.endsWith('/rpc/move_day_reservations')) {
+        return http.Response(
+            '{"code":"P0001","message":"too_late","details":null,"hint":null}',
             400,
             headers: {'content-type': 'application/json'},
             request: request);
@@ -75,6 +86,7 @@ void main() {
     requests = [];
     reservationsBody = '[]';
     refuseOverride = false;
+    refuseMoveTooLate = false;
   });
 
   Widget app(BlockDialog dialog) =>
@@ -595,5 +607,161 @@ void main() {
       findsOneWidget,
     );
     expect(find.byType(BlockDialog), findsOneWidget);
+  });
+
+  // The player on duty editing TODAY (0050): the calendar passes the
+  // current time; b1 (16:00) has started by 16:30, b2 (17:00) has not.
+  group('the duty on today: blocks already under way (0050)', () {
+    const now = HourMinute(16, 30);
+    String rows(List<String> blockIds) => '[${[
+          for (var i = 0; i < blockIds.length; i++)
+            '{"date":"${thursday.toSql()}","lane":${i + 1},'
+                '"block_id":"${blockIds[i]}"}',
+        ].join(',')}]';
+
+    testWidgets('a start already past is refused before any request', (
+      tester,
+    ) async {
+      for (final (existing, start) in [
+        (b2, const HourMinute(16, 15)),
+        (b2, now), // starting exactly now has started
+        (null, const HourMinute(16, 0)),
+      ]) {
+        requests.clear();
+        await tester.pumpWidget(app(BlockDialog(
+          key: UniqueKey(),
+          existing: existing,
+          blocks: const [b1, b2],
+          initialStart: start,
+          initialEnd: const HourMinute(18, 30),
+          dayContext: thursday,
+          dayBaseIds: const ['b1', 'b2'],
+          wasOnDuty: true,
+          dutyNow: now,
+        )));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Uložit'));
+        await tester.pumpAndSettle();
+
+        expect(find.text(startPassedMessage), findsOneWidget);
+        expect(requests, isEmpty);
+        expect(find.byType(BlockDialog), findsOneWidget);
+        ScaffoldMessenger.of(tester.element(find.byType(BlockDialog)))
+            .removeCurrentSnackBar();
+        await tester.pumpAndSettle();
+      }
+    });
+
+    testWidgets('„Zavřít den“ counts only what the server cancels; the '
+        'admin counts every row', (tester) async {
+      reservationsBody = rows(['b1', 'b2']);
+      for (final (dutyNow, count) in [(now, 1), (null, 2)]) {
+        await tester.pumpWidget(app(BlockDialog(
+          key: UniqueKey(),
+          existing: null,
+          blocks: const [b1, b2],
+          dayContext: thursday,
+          dayBaseIds: const ['b1', 'b2'],
+          offerCloseDay: true,
+          dutyNow: dutyNow,
+        )));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Zavřít den'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.widgetWithText(FilledButton, 'Zavřít den'));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('$count rezervací'), findsOneWidget);
+        await tester.tap(find.text('Zrušit').last);
+        await tester.pumpAndSettle();
+      }
+    });
+
+    testWidgets('„Obnovit týdenní rozvrh“ of a closing day counts only what '
+        'the server cancels', (tester) async {
+      reservationsBody = rows(['b1', 'b2']);
+      await tester.pumpWidget(app(BlockDialog(
+        existing: b2,
+        blocks: const [b1, b2],
+        dayContext: thursday,
+        dayBaseIds: const ['b1', 'b2'],
+        dayHasOverride: true,
+        dayIsTraining: false,
+        dutyNow: now,
+      )));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Obnovit týdenní rozvrh'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('1 rezervací'), findsOneWidget);
+    });
+
+    testWidgets('hiding a block under way counts and sweeps only the one '
+        'still ahead', (tester) async {
+      reservationsBody = rows(['b1', 'b2']);
+      await tester.pumpWidget(app(BlockDialog(
+        existing: null,
+        blocks: const [b1, b2],
+        initialStart: const HourMinute(16, 45),
+        initialEnd: const HourMinute(17, 45),
+        dayContext: thursday,
+        dayBaseIds: const ['b1', 'b2'],
+        dutyNow: now,
+      )));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Uložit'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.textContaining('1 rezervací na skrytých blocích bude zrušeno'),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('Pokračovat'));
+      await tester.pumpAndSettle();
+      final swept = [
+        for (final r in requests)
+          if (r.url.path.endsWith('/rpc/cancel_block_day_reservations'))
+            (jsonDecode(r.body) as Map)['p_block'],
+      ];
+      expect(swept, ['b2']);
+    });
+
+    testWidgets('„Odebrat v tento den“ offers no move onto a block under way',
+        (tester) async {
+      reservationsBody = rows(['b2']);
+      await tester.pumpWidget(app(BlockDialog(
+        existing: b2,
+        blocks: const [b1, b2],
+        dayContext: thursday,
+        dayBaseIds: const ['b1', 'b2'],
+        dutyNow: now,
+      )));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Odebrat v tento den'));
+      await tester.pumpAndSettle();
+
+      // b1, the only block left, has started: straight to the count.
+      expect(find.textContaining('Přesun rezervací'), findsNothing);
+      expect(find.textContaining('1 rezervací'), findsOneWidget);
+    });
+
+    testWidgets('a too_late refusal of a day edit reads as the block, not a '
+        'reservation', (tester) async {
+      refuseMoveTooLate = true;
+      await tester.pumpWidget(app(BlockDialog(
+        existing: b2,
+        blocks: const [b1, b2],
+        initialStart: const HourMinute(17, 30),
+        initialEnd: const HourMinute(18, 30),
+        dayContext: thursday,
+        dayBaseIds: const ['b1', 'b2'],
+        wasOnDuty: true,
+        dutyNow: now,
+      )));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Uložit'));
+      await tester.pumpAndSettle();
+
+      expect(find.text(blockStartedMessage), findsOneWidget);
+      expect(find.byType(BlockDialog), findsOneWidget);
+    });
   });
 }

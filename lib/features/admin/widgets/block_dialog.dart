@@ -8,6 +8,23 @@ import 'day_flows.dart';
 import 'move_reservations_dialog.dart';
 import 'notify_choice_dialog.dart';
 
+/// What the player on duty is told about a block of today that has
+/// already started (0050): the server keeps it — and its trainings — the
+/// admin's.
+const blockStartedMessage = 'Blok už začal — upravit ho může jen správce.';
+
+/// What the player on duty is told when a day edit of today would start a
+/// block at a time that has already passed (0050: the server refuses it).
+const startPassedMessage = 'Začátek už dnes minul — vyber pozdější čas.';
+
+/// How a refusal of a DAY edit (a block, not a reservation) reads. For the
+/// player on duty a `too_late` means a block of today has started meanwhile
+/// — the plain copy would talk about cancelling a reservation.
+String dayEditError(Object error, {required bool wasOnDuty}) =>
+    wasOnDuty && '$error'.contains('too_late')
+        ? blockStartedMessage
+        : friendlyDbError(error, wasOnDuty: wasOnDuty);
+
 /// If deactivating [blockId] would cancel future live reservations (the
 /// server cascades them with 'změna rozvrhu', 0018), asks the admin first.
 /// Returns true when it's safe to proceed (nothing stranded, or the admin
@@ -62,6 +79,7 @@ class BlockDialog extends StatefulWidget {
     this.noAccountIds = const <String>{},
     this.offerCloseDay = false,
     this.wasOnDuty = false,
+    this.dutyNow,
   });
 
   final TimeBlock? existing;
@@ -115,6 +133,14 @@ class BlockDialog extends StatefulWidget {
   /// then means the duty has just ended, and says so.
   final bool wasOnDuty;
 
+  /// Day-scoped mode, the player on duty editing TODAY (0050): the current
+  /// time. A block starting at or before it has started — the server
+  /// refuses to move one there and spares its reservations — so the save
+  /// refuses such a start before any write, the counts leave those rows
+  /// out and no move targets them. Null (the admin, any other day) = no
+  /// limit.
+  final HourMinute? dutyNow;
+
   @override
   State<BlockDialog> createState() => _BlockDialogState();
 }
@@ -163,16 +189,22 @@ class _BlockDialogState extends State<BlockDialog> {
   /// guess (the snackbar explains, the caller bails).
   Future<List<StrandableReservation>?> _loadRows() async {
     try {
-      return await Api.futureLiveReservations(today());
+      final rows = await Api.futureLiveReservations(today());
+      final now = widget.dutyNow;
+      return now == null
+          ? rows
+          : withoutStarted(rows,
+              date: widget.dayContext!, now: now, blocks: widget.blocks);
     } catch (e) {
       if (mounted) snack(context, _errorText(e));
       return null;
     }
   }
 
-  /// How a refusal reads — „Služba skončila…“ for a duty that just ended.
+  /// How a refusal reads — „Služba skončila…“ for a duty that just ended,
+  /// the block copy for a duty's `too_late` (see [dayEditError]).
   String _errorText(Object error) =>
-      friendlyDbError(error, wasOnDuty: widget.wasOnDuty);
+      dayEditError(error, wasOnDuty: widget.wasOnDuty);
 
   /// Confirms the RPC's exact cancellation count for [date]; quotes the
   /// [note] the write will actually carry.
@@ -196,7 +228,11 @@ class _BlockDialogState extends State<BlockDialog> {
       return;
     }
     final plan = planBlockRemoval(
-        existing: existing, day: _day, blocks: widget.blocks, rows: rows);
+        existing: existing,
+        day: _day,
+        blocks: widget.blocks,
+        rows: rows,
+        startedBy: widget.dutyNow);
     if (plan.offersMove) {
       final moved = await showDialog<bool>(
         context: context,
@@ -254,6 +290,7 @@ class _BlockDialogState extends State<BlockDialog> {
       isTraining: widget.dayIsTraining,
       blocks: widget.blocks,
       errorText: _errorText,
+      dutyNow: widget.dutyNow,
     );
     if (!mounted) return;
     if (done) {
@@ -270,6 +307,8 @@ class _BlockDialogState extends State<BlockDialog> {
       context,
       date: widget.dayContext!,
       errorText: _errorText,
+      blocks: widget.blocks,
+      dutyNow: widget.dutyNow,
     );
     if (!mounted) return;
     if (done) {
@@ -301,6 +340,13 @@ class _BlockDialogState extends State<BlockDialog> {
     }
     if (end.compareTo(start) <= 0) {
       snack(context, 'Konec musí být po začátku.');
+      return;
+    }
+    // The duty's today: a start that has passed would be refused — and
+    // only after the hidden blocks' sign-ups were already cancelled.
+    final dutyNow = widget.dutyNow;
+    if (_dayMode && dutyNow != null && start.compareTo(dutyNow) <= 0) {
+      snack(context, startPassedMessage);
       return;
     }
     final existing = widget.existing;
