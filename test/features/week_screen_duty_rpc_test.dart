@@ -101,6 +101,15 @@ void main() {
     role: Role.player,
     status: ProfileStatus.approved,
   );
+  // An admin who is also assigned the duty: the admin's own rights cover
+  // it, so a refusal is not the duty ending.
+  const admin = Profile(
+    id: 'me',
+    displayName: 'Já Hráč',
+    email: 'me@example.com',
+    role: Role.admin,
+    status: ProfileStatus.approved,
+  );
   const players = [
     PlayerName(id: 'me', displayName: 'Já Hráč'),
     PlayerName(id: 'p2', displayName: 'Petr Novák', nick: 'Péťa'),
@@ -117,6 +126,7 @@ void main() {
     List<DayOverride> overrides = const [],
     List<Reservation> reservations = const [],
     Stream<DateTime>? clock,
+    Profile profile = me,
   }) {
     return ProviderScope(
       overrides: [
@@ -135,7 +145,7 @@ void main() {
         myActiveReservationsProvider.overrideWith(
           (ref) => Stream.value(const []),
         ),
-        myProfileProvider.overrideWith((ref) => Stream.value(me)),
+        myProfileProvider.overrideWith((ref) => Stream.value(profile)),
         playersProvider.overrideWith((ref) async => players),
         nowProvider.overrideWith((ref) => clock ?? Stream.value(now)),
         myGroupProvider.overrideWithValue(MyGroup.none),
@@ -186,6 +196,30 @@ void main() {
     expect(body['p_player_id'], 'p2');
     expect(body['p_date'], tomorrow.toSql());
     expect(find.text(dutyEnded), findsOneWidget);
+  });
+
+  testWidgets('an admin also on duty: a refusal reads plainly, not as the '
+      'duty ended', (tester) async {
+    wideSurface(tester);
+    await tester.pumpWidget(app(profile: admin));
+    await tester.pumpAndSettle();
+
+    final add = find.descendant(
+      of: find.byKey(ValueKey(tomorrow)),
+      matching: find.byIcon(Icons.add),
+    );
+    await tester.ensureVisible(add.first);
+    await tester.pumpAndSettle();
+    await tester.tap(add.first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ListTile, 'Petr Novák'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Rezervovat'));
+    await tester.pumpAndSettle();
+
+    expect(bodyOf('create_reservation')['p_player_id'], 'p2');
+    expect(find.text('Na tohle nemáš oprávnění.'), findsOneWidget);
+    expect(find.text(dutyEnded), findsNothing);
   });
 
   testWidgets('cancelling another player\'s reservation: a refusal says the '
