@@ -191,7 +191,7 @@ final myDutyProvider = Provider<MyDuty>((ref) {
 /// [dutyHeaderLabel]): who serves, or „Sloužíš ty …“ in my week on duty;
 /// null when no one does. Names are the roster's full names, placeholders
 /// included. Equal lines do not notify.
-final weekDutyHeaderProvider = Provider.family<DutyHeader?, Day>((
+final weekDutyHeaderProvider = Provider.autoDispose.family<DutyHeader?, Day>((
   ref,
   monday,
 ) {
