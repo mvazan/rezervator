@@ -13,6 +13,12 @@ import 'notify_choice_dialog.dart';
 /// admin's.
 const blockStartedMessage = 'Blok už začal — upravit ho může jen správce.';
 
+/// What the player on duty is told when a day edit of today would hide a
+/// block that has already started — not the block being edited (0050: a
+/// started block stays the admin's).
+const hideStartedMessage =
+    'Nový čas by skryl blok, který už začal — to může jen správce.';
+
 /// What the player on duty is told when a day edit of today would start a
 /// block at a time that has already passed (0050: the server refuses it).
 const startPassedMessage = 'Začátek už dnes minul — vyber pozdější čas.';
@@ -212,10 +218,16 @@ class _BlockDialogState extends State<BlockDialog> {
   /// The duty's today: whether [block] has started by now — then the snack
   /// says it stays the admin's and the caller writes nothing. [atWrite]:
   /// asked right before a write, with the one-minute margin.
-  bool _refuseStarted(TimeBlock block, {bool atWrite = false}) {
+  /// [message]: what the snack says (the hidden-block copy for a block
+  /// the edit would hide).
+  bool _refuseStarted(
+    TimeBlock block, {
+    bool atWrite = false,
+    String message = blockStartedMessage,
+  }) {
     final now = _dutyNow(atWrite: atWrite);
     if (now == null || block.startsAt.compareTo(now) > 0) return false;
-    if (mounted) snack(context, blockStartedMessage);
+    if (mounted) snack(context, message);
     return true;
   }
 
@@ -233,13 +245,14 @@ class _BlockDialogState extends State<BlockDialog> {
       if (mounted) snack(context, startPassedMessage);
       return true;
     }
+    final existing = plan.existing;
+    if (existing != null && _refuseStarted(existing, atWrite: atWrite)) {
+      return true;
+    }
     final rendered = widget.dayRenderedIds;
-    final replaced = [
-      if (plan.existing != null) plan.existing!,
-      for (final b in plan.hidden)
-        if (rendered == null || rendered.contains(b.id)) b,
-    ];
-    return replaced.any((b) => _refuseStarted(b, atWrite: atWrite));
+    return plan.hidden.any((b) =>
+        (rendered == null || rendered.contains(b.id)) &&
+        _refuseStarted(b, atWrite: atWrite, message: hideStartedMessage));
   }
 
   /// How a refusal reads — „Služba skončila…“ for a duty that just ended,

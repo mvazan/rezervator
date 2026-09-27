@@ -740,7 +740,9 @@ void main() {
       await tester.tap(find.text('Uložit'));
       await tester.pumpAndSettle();
 
-      expect(find.text(blockStartedMessage), findsOneWidget);
+      // The refusal names the hidden block, not the one being edited.
+      expect(find.text(hideStartedMessage), findsOneWidget);
+      expect(find.text(blockStartedMessage), findsNothing);
       expect(find.text('Blok bude skryt'), findsNothing);
       expect(requests, isEmpty);
       expect(find.byType(BlockDialog), findsOneWidget);
@@ -846,7 +848,9 @@ void main() {
         await tester.tap(find.text('Odeslat'));
         await tester.pumpAndSettle();
 
+        // The edited block itself: the plain block copy.
         expect(find.text(blockStartedMessage), findsOneWidget);
+        expect(find.text(hideStartedMessage), findsNothing);
         expect(wrote(), isFalse);
         expect(find.byType(BlockDialog), findsOneWidget);
       });
@@ -903,7 +907,8 @@ void main() {
         await tester.tap(find.text('Pokračovat'));
         await tester.pumpAndSettle();
 
-        expect(find.text(blockStartedMessage), findsOneWidget);
+        expect(find.text(hideStartedMessage), findsOneWidget);
+        expect(find.text(blockStartedMessage), findsNothing);
         expect(wrote(), isFalse);
       });
 
