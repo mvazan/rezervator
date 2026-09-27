@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -9,6 +10,9 @@ import 'package:rezervator/data/clock.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/groups.dart';
 import 'package:rezervator/domain/models.dart';
+import 'package:rezervator/features/admin/widgets/block_dialog.dart'
+    show blockStartedMessage;
+import 'package:rezervator/features/schedule/week_calendar_view.dart';
 import 'package:rezervator/features/schedule/week_screen.dart';
 import 'package:rezervator/features/schedule/widgets/day_chip_strip.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -108,9 +112,11 @@ void main() {
   );
 
   // week_screen_test's `app`, cut down: I am on duty this week.
+  // [clock]: a clock a test moves on; the pinned [now] otherwise.
   Widget app({
     List<DayOverride> overrides = const [],
     List<Reservation> reservations = const [],
+    Stream<DateTime>? clock,
   }) {
     return ProviderScope(
       overrides: [
@@ -131,7 +137,7 @@ void main() {
         ),
         myProfileProvider.overrideWith((ref) => Stream.value(me)),
         playersProvider.overrideWith((ref) async => players),
-        nowProvider.overrideWith((ref) => Stream.value(now)),
+        nowProvider.overrideWith((ref) => clock ?? Stream.value(now)),
         myGroupProvider.overrideWithValue(MyGroup.none),
         dutyPeriodsProvider.overrideWith((ref) => Stream.value([week])),
         dutyAssignmentsProvider.overrideWith(
@@ -276,5 +282,48 @@ void main() {
     expect(body['p_date'], tomorrow.toSql());
     expect(body['p_block_ids'], ['b1']);
     expect(find.text(dutyEnded), findsOneWidget);
+  });
+
+  testWidgets('moving a block: the clock is asked again after the notify '
+      'choice — a block that started meanwhile writes nothing', (
+    tester,
+  ) async {
+    wideSurface(tester);
+    final clock = StreamController<DateTime>();
+    addTearDown(clock.close);
+    clock.add(now);
+    await tester.pumpWidget(
+      app(
+        clock: clock.stream,
+        reservations: [
+          Reservation(
+            id: 'r2',
+            playerId: 'p2',
+            date: t,
+            blockId: 'b1',
+            lane: 2,
+            createdVia: 'app',
+            createdAt: DateTime.utc(2026, 1, 1),
+          ),
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    tester
+        .widget<WeekCalendarView>(find.byType(WeekCalendarView))
+        .admin
+        .onMoveBlock!(t, b1, const HourMinute(21, 0));
+    await tester.pumpAndSettle();
+    expect(find.text('Upozornit na přesun?'), findsOneWidget);
+
+    // b1 (22:58) starts while the choice is open.
+    clock.add(DateTime(2026, 9, 9, 22, 58));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Odeslat'));
+    await tester.pumpAndSettle();
+
+    expect(find.text(blockStartedMessage), findsOneWidget);
+    expect(requests.where((r) => r.method != 'GET'), isEmpty);
   });
 }

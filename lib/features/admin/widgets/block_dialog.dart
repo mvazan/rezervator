@@ -79,7 +79,7 @@ class BlockDialog extends StatefulWidget {
     this.noAccountIds = const <String>{},
     this.offerCloseDay = false,
     this.wasOnDuty = false,
-    this.dutyNow,
+    this.dutyClock,
   });
 
   final TimeBlock? existing;
@@ -133,13 +133,14 @@ class BlockDialog extends StatefulWidget {
   /// then means the duty has just ended, and says so.
   final bool wasOnDuty;
 
-  /// Day-scoped mode, the player on duty editing TODAY (0050): the current
-  /// time. A block starting at or before it has started — the server
-  /// refuses to move one there and spares its reservations — so the save
-  /// refuses such a start before any write, the counts leave those rows
-  /// out and no move targets them. Null (the admin, any other day) = no
-  /// limit.
-  final HourMinute? dutyNow;
+  /// Day-scoped mode, the player on duty editing TODAY (0050): reads the
+  /// current time. A block starting at or before it has started — the
+  /// server refuses to move one there and spares its reservations — so the
+  /// save refuses such a start, the counts leave those rows out and no move
+  /// targets them. Read afresh for every check: right before the first
+  /// write it is asked again, and a block that started while the dialog
+  /// was open writes nothing. Null (the admin, any other day) = no limit.
+  final HourMinute Function()? dutyClock;
 
   @override
   State<BlockDialog> createState() => _BlockDialogState();
@@ -190,7 +191,7 @@ class _BlockDialogState extends State<BlockDialog> {
   Future<List<StrandableReservation>?> _loadRows() async {
     try {
       final rows = await Api.futureLiveReservations(today());
-      final now = widget.dutyNow;
+      final now = widget.dutyClock?.call();
       return now == null
           ? rows
           : withoutStarted(rows,
@@ -199,6 +200,30 @@ class _BlockDialogState extends State<BlockDialog> {
       if (mounted) snack(context, _errorText(e));
       return null;
     }
+  }
+
+  /// The duty's today: whether [block] has started by now — then the snack
+  /// says it stays the admin's and the caller writes nothing.
+  bool _refuseStarted(TimeBlock block) {
+    final now = widget.dutyClock?.call();
+    if (now == null || block.startsAt.compareTo(now) > 0) return false;
+    if (mounted) snack(context, blockStartedMessage);
+    return true;
+  }
+
+  /// The duty's today, asked before any write of [plan]: a start that has
+  /// passed would be refused — only after the hidden blocks' sign-ups were
+  /// cancelled and the special inserted — and the edited block must not
+  /// have started. True (after a snack saying why) = write nothing.
+  bool _refuseForDuty(DayEditDay plan) {
+    final now = widget.dutyClock?.call();
+    if (now == null) return false;
+    if (plan.start.compareTo(now) <= 0) {
+      if (mounted) snack(context, startPassedMessage);
+      return true;
+    }
+    final existing = plan.existing;
+    return existing != null && _refuseStarted(existing);
   }
 
   /// How a refusal reads — „Služba skončila…“ for a duty that just ended,
@@ -221,6 +246,7 @@ class _BlockDialogState extends State<BlockDialog> {
   Future<void> _removeForDay() async {
     final existing = widget.existing!;
     final date = widget.dayContext!;
+    if (_refuseStarted(existing)) return;
     setState(() => _saving = true);
     final rows = await _loadRows();
     if (rows == null || !mounted) {
@@ -232,8 +258,13 @@ class _BlockDialogState extends State<BlockDialog> {
         day: _day,
         blocks: widget.blocks,
         rows: rows,
-        startedBy: widget.dutyNow);
+        startedBy: widget.dutyClock?.call());
     if (plan.offersMove) {
+      // The dialog's moves are the first write.
+      if (_refuseStarted(existing)) {
+        _bail();
+        return;
+      }
       final moved = await showDialog<bool>(
         context: context,
         barrierDismissible: false,
@@ -254,7 +285,7 @@ class _BlockDialogState extends State<BlockDialog> {
     // rows on OTHER non-kept blocks still deserve the standard sweep confirm.
     final ok = await _confirmCancellations(
         strandedOnDate(rows, date, plan.sweepKeptIds), date, plan.cancelNote);
-    if (!ok || !mounted) {
+    if (!ok || !mounted || _refuseStarted(existing)) {
       _bail();
       return;
     }
@@ -291,7 +322,7 @@ class _BlockDialogState extends State<BlockDialog> {
       isTraining: widget.dayIsTraining,
       blocks: widget.blocks,
       errorText: _errorText,
-      dutyNow: widget.dutyNow,
+      dutyClock: widget.dutyClock,
     );
     if (!mounted) return;
     if (done) {
@@ -309,7 +340,7 @@ class _BlockDialogState extends State<BlockDialog> {
       date: widget.dayContext!,
       errorText: _errorText,
       blocks: widget.blocks,
-      dutyNow: widget.dutyNow,
+      dutyClock: widget.dutyClock,
     );
     if (!mounted) return;
     if (done) {
@@ -343,13 +374,6 @@ class _BlockDialogState extends State<BlockDialog> {
       snack(context, 'Konec musí být po začátku.');
       return;
     }
-    // The duty's today: a start that has passed would be refused — and
-    // only after the hidden blocks' sign-ups were already cancelled.
-    final dutyNow = widget.dutyNow;
-    if (_dayMode && dutyNow != null && start.compareTo(dutyNow) <= 0) {
-      snack(context, startPassedMessage);
-      return;
-    }
     final existing = widget.existing;
     if (!_dayMode) {
       await _saveGlobal(start, end, existing);
@@ -368,6 +392,8 @@ class _BlockDialogState extends State<BlockDialog> {
       closeDialog(context);
       return;
     }
+    // The duty's today: refused before any request (see _refuseForDuty).
+    if (_refuseForDuty(dry as DayEditDay)) return;
     setState(() => _saving = true);
     // Everything below awaits — the flag above keeps both action buttons
     // disabled for the whole flight (confirms included).
@@ -525,6 +551,13 @@ class _BlockDialogState extends State<BlockDialog> {
         _bail();
         return;
       }
+    }
+
+    // The confirms took time: the duty's clock is asked again right before
+    // the first write.
+    if (_refuseForDuty(plan)) {
+      _bail();
+      return;
     }
 
     final done = await tryAction(

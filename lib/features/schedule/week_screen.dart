@@ -32,6 +32,13 @@ class WeekScreen extends ConsumerStatefulWidget {
 }
 
 class _WeekScreenState extends ConsumerState<WeekScreen> with WeekNavigation {
+  /// The app's clock read afresh — the duty's day edits ask it again right
+  /// before writing (0050), long after this build.
+  HourMinute _clockNow() {
+    final t = (mounted ? ref.read(nowProvider).value : null) ?? DateTime.now();
+    return HourMinute(t.hour, t.minute);
+  }
+
   @override
   Widget build(BuildContext context) {
     final nowDt = ref.watch(nowProvider).value ?? DateTime.now();
@@ -143,6 +150,7 @@ class _WeekScreenState extends ConsumerState<WeekScreen> with WeekNavigation {
       noAccountIds: wv.noAccountIds,
       groupMateIds: me == null ? const {} : group.matesOf(me.id),
       onDuty: onDuty,
+      clock: _clockNow,
     );
 
     return Column(

@@ -33,18 +33,20 @@ Future<bool> confirmDayCancellations(
 
 /// The reservation picture a day write needs; null (after a snack saying
 /// why) when it cannot be read — then nobody can promise what the write
-/// would cancel, so the flow stops. With [dutyNow] (the player on duty on
-/// today, 0050) the rows on [date] whose block has started are left out:
-/// the server spares them, so the count must too.
+/// would cancel, so the flow stops. With [dutyClock] (the player on duty on
+/// today, 0050) the rows on [date] whose block has started by now — read
+/// here, right before the count — are left out: the server spares them, so
+/// the count must too.
 Future<List<StrandableReservation>?> _futureRows(
   BuildContext context,
   String Function(Object error) errorText, {
   required Day date,
-  required HourMinute? dutyNow,
+  required HourMinute Function()? dutyClock,
   required List<TimeBlock> blocks,
 }) async {
   try {
     final rows = await Api.futureLiveReservations(today());
+    final dutyNow = dutyClock?.call();
     return dutyNow == null
         ? rows
         : withoutStarted(rows, date: date, now: dutyNow, blocks: blocks);
@@ -59,15 +61,15 @@ Future<List<StrandableReservation>?> _futureRows(
 /// `set_day_override(closed)`. True once the day is closed; false when
 /// the user backed out or the write failed (the snack said why).
 ///
-/// [dutyNow]: the player on duty closing TODAY (0050) — the current time;
-/// trainings already under way stay, so they are not counted ([blocks]
-/// tells their start). Null for the admin and any other day.
+/// [dutyClock]: the player on duty closing TODAY (0050) — reads the current
+/// time; trainings already under way stay, so they are not counted
+/// ([blocks] tells their start). Null for the admin and any other day.
 Future<bool> closeDayFlow(
   BuildContext context, {
   required Day date,
   String Function(Object error) errorText = friendlyDbError,
   List<TimeBlock> blocks = const [],
-  HourMinute? dutyNow,
+  HourMinute Function()? dutyClock,
 }) async {
   final reason = await promptText(
     context,
@@ -77,7 +79,7 @@ Future<bool> closeDayFlow(
   );
   if (reason == null || !context.mounted) return false;
   final rows = await _futureRows(context, errorText,
-      date: date, dutyNow: dutyNow, blocks: blocks);
+      date: date, dutyClock: dutyClock, blocks: blocks);
   if (rows == null || !context.mounted) return false;
   final ok = await confirmDayCancellations(
     context,
@@ -99,17 +101,17 @@ Future<bool> closeDayFlow(
 /// cancel via the RPC); a NON-training day closes again — every
 /// reservation that date cancels, and the closed write lands FIRST so a
 /// failure between the two calls can't leave the day wide open. True once
-/// done. [dutyNow] as in [closeDayFlow].
+/// done. [dutyClock] as in [closeDayFlow].
 Future<bool> restoreDayFlow(
   BuildContext context, {
   required Day date,
   required bool isTraining,
   required List<TimeBlock> blocks,
   String Function(Object error) errorText = friendlyDbError,
-  HourMinute? dutyNow,
+  HourMinute Function()? dutyClock,
 }) async {
   final rows = await _futureRows(context, errorText,
-      date: date, dutyNow: dutyNow, blocks: blocks);
+      date: date, dutyClock: dutyClock, blocks: blocks);
   if (rows == null || !context.mounted) return false;
   final plan = planRestoreTemplate(
     date: date,

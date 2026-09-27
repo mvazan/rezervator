@@ -609,8 +609,8 @@ void main() {
     expect(find.byType(BlockDialog), findsOneWidget);
   });
 
-  // The player on duty editing TODAY (0050): the calendar passes the
-  // current time; b1 (16:00) has started by 16:30, b2 (17:00) has not.
+  // The player on duty editing TODAY (0050): the calendar passes its
+  // clock; b1 (16:00) has started by 16:30, b2 (17:00) has not.
   group('the duty on today: blocks already under way (0050)', () {
     const now = HourMinute(16, 30);
     String rows(List<String> blockIds) => '[${[
@@ -637,7 +637,7 @@ void main() {
           dayContext: thursday,
           dayBaseIds: const ['b1', 'b2'],
           wasOnDuty: true,
-          dutyNow: now,
+          dutyClock: () => now,
         )));
         await tester.pumpAndSettle();
         await tester.tap(find.text('Uložit'));
@@ -655,7 +655,7 @@ void main() {
     testWidgets('„Zavřít den“ counts only what the server cancels; the '
         'admin counts every row', (tester) async {
       reservationsBody = rows(['b1', 'b2']);
-      for (final (dutyNow, count) in [(now, 1), (null, 2)]) {
+      for (final (dutyClock, count) in [(() => now, 1), (null, 2)]) {
         await tester.pumpWidget(app(BlockDialog(
           key: UniqueKey(),
           existing: null,
@@ -663,7 +663,7 @@ void main() {
           dayContext: thursday,
           dayBaseIds: const ['b1', 'b2'],
           offerCloseDay: true,
-          dutyNow: dutyNow,
+          dutyClock: dutyClock,
         )));
         await tester.pumpAndSettle();
         await tester.tap(find.text('Zavřít den'));
@@ -686,7 +686,7 @@ void main() {
         dayBaseIds: const ['b1', 'b2'],
         dayHasOverride: true,
         dayIsTraining: false,
-        dutyNow: now,
+        dutyClock: () => now,
       )));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Obnovit týdenní rozvrh'));
@@ -704,7 +704,7 @@ void main() {
         initialEnd: const HourMinute(17, 45),
         dayContext: thursday,
         dayBaseIds: const ['b1', 'b2'],
-        dutyNow: now,
+        dutyClock: () => now,
       )));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Uložit'));
@@ -732,7 +732,7 @@ void main() {
         blocks: const [b1, b2],
         dayContext: thursday,
         dayBaseIds: const ['b1', 'b2'],
-        dutyNow: now,
+        dutyClock: () => now,
       )));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Odebrat v tento den'));
@@ -754,7 +754,7 @@ void main() {
         dayContext: thursday,
         dayBaseIds: const ['b1', 'b2'],
         wasOnDuty: true,
-        dutyNow: now,
+        dutyClock: () => now,
       )));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Uložit'));
@@ -762,6 +762,119 @@ void main() {
 
       expect(find.text(blockStartedMessage), findsOneWidget);
       expect(find.byType(BlockDialog), findsOneWidget);
+    });
+
+    // The clock moves while the dialog is open: it is read again right
+    // before the first write, and a block that started meanwhile — or a
+    // start that has passed — writes nothing.
+    group('the clock moves on while the dialog is open', () {
+      late HourMinute clock;
+      bool wrote() => requests.any((r) => r.method != 'GET');
+
+      testWidgets('the edited block starts before the move is confirmed', (
+        tester,
+      ) async {
+        clock = const HourMinute(16, 58);
+        reservationsBody = rows(['b2']);
+        await tester.pumpWidget(app(BlockDialog(
+          existing: b2,
+          blocks: const [b1, b2],
+          initialStart: const HourMinute(17, 30),
+          initialEnd: const HourMinute(18, 30),
+          dayContext: thursday,
+          dayBaseIds: const ['b1', 'b2'],
+          wasOnDuty: true,
+          dutyClock: () => clock,
+        )));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Uložit'));
+        await tester.pumpAndSettle();
+        expect(find.text('Upozornit na přesun?'), findsOneWidget);
+
+        clock = const HourMinute(17, 1);
+        await tester.tap(find.text('Odeslat'));
+        await tester.pumpAndSettle();
+
+        expect(find.text(blockStartedMessage), findsOneWidget);
+        expect(wrote(), isFalse);
+        expect(find.byType(BlockDialog), findsOneWidget);
+      });
+
+      testWidgets('the new start passes before the hide is confirmed', (
+        tester,
+      ) async {
+        clock = const HourMinute(16, 58);
+        reservationsBody = rows(['b2']);
+        await tester.pumpWidget(app(BlockDialog(
+          existing: null,
+          blocks: const [b1, b2],
+          initialStart: const HourMinute(17, 15),
+          initialEnd: const HourMinute(17, 45),
+          dayContext: thursday,
+          dayBaseIds: const ['b1', 'b2'],
+          wasOnDuty: true,
+          dutyClock: () => clock,
+        )));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Uložit'));
+        await tester.pumpAndSettle();
+        expect(find.text('Blok bude skryt'), findsOneWidget);
+
+        clock = const HourMinute(17, 20);
+        await tester.tap(find.text('Pokračovat'));
+        await tester.pumpAndSettle();
+
+        expect(find.text(startPassedMessage), findsOneWidget);
+        expect(wrote(), isFalse);
+      });
+
+      testWidgets('„Odebrat v tento den“: the block starts before the count '
+          'is confirmed', (tester) async {
+        clock = now;
+        reservationsBody = rows(['b2']);
+        await tester.pumpWidget(app(BlockDialog(
+          existing: b2,
+          blocks: const [b1, b2],
+          dayContext: thursday,
+          dayBaseIds: const ['b1', 'b2'],
+          wasOnDuty: true,
+          dutyClock: () => clock,
+        )));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Odebrat v tento den'));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('1 rezervací'), findsOneWidget);
+
+        clock = const HourMinute(17, 0);
+        await tester.tap(find.text('Pokračovat'));
+        await tester.pumpAndSettle();
+
+        expect(find.text(blockStartedMessage), findsOneWidget);
+        expect(wrote(), isFalse);
+      });
+
+      testWidgets('„Zavřít den“ counts at the time it asks, not when the '
+          'dialog opened', (tester) async {
+        clock = now;
+        reservationsBody = rows(['b1', 'b2']);
+        await tester.pumpWidget(app(BlockDialog(
+          existing: null,
+          blocks: const [b1, b2],
+          dayContext: thursday,
+          dayBaseIds: const ['b1', 'b2'],
+          offerCloseDay: true,
+          dutyClock: () => clock,
+        )));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Zavřít den'));
+        await tester.pumpAndSettle();
+
+        // Both blocks under way by now: the server cancels nothing.
+        clock = const HourMinute(17, 0);
+        await tester.tap(find.widgetWithText(FilledButton, 'Zavřít den'));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('rezervací'), findsNothing);
+      });
     });
   });
 }

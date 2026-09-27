@@ -50,6 +50,7 @@ class ScheduleActions {
     this.noAccountIds = const {},
     this.groupMateIds = const {},
     this.onDuty = false,
+    this.clock,
   })  : _overrideByDate = {for (final o in overrides) o.date: o},
         _blockById = {for (final b in dbBlocks) b.id: b};
 
@@ -74,6 +75,11 @@ class ScheduleActions {
   /// The current time of [today] — the player on duty is held to blocks
   /// that have not started yet (0050).
   final HourMinute now;
+
+  /// Reads the current time afresh (the screen's clock); null = [now]. A
+  /// duty's day edit asks it again right before writing — a dialog left
+  /// open may outlive the minute a block starts (0050).
+  final HourMinute Function()? clock;
 
   /// This week's live reservations.
   final List<Reservation> reservations;
@@ -122,10 +128,15 @@ class ScheduleActions {
   String _dayEditErrorText(Object error) =>
       dayEditError(error, wasOnDuty: _asDuty);
 
-  /// The duty on [today] (0050): the current time, else null. The server
-  /// refuses the duty's moves of blocks that have started by then and
-  /// spares their reservations — the dialogs and flows hold to it.
-  HourMinute? _dutyNowOn(Day date) => _asDuty && date == today ? now : null;
+  /// The current time, read afresh when the screen gave a [clock].
+  HourMinute _now() => clock?.call() ?? now;
+
+  /// The duty on [today] (0050): the clock, else null. The server refuses
+  /// the duty's moves of blocks that have started by then and spares their
+  /// reservations — the dialogs and flows hold to it, reading it again
+  /// right before they write.
+  HourMinute Function()? _dutyClockOn(Day date) =>
+      _asDuty && date == today ? _now : null;
 
   /// The two bundles the views take (see schedule_callbacks.dart).
   SlotCallbacks get slot => SlotCallbacks(
@@ -392,11 +403,21 @@ class ScheduleActions {
   // The duty's today: a block already under way stays the admin's (the
   // server refuses to move it and keeps its trainings).
   bool _guardStarted(Day date, TimeBlock block) {
-    final dutyNow = _dutyNowOn(date);
+    final dutyNow = _dutyClockOn(date)?.call();
     if (dutyNow == null || block.startsAt.compareTo(dutyNow) > 0) {
       return false;
     }
     snack(context, blockStartedMessage);
+    return true;
+  }
+
+  // The duty's today: a new start that has passed is refused — checked
+  // before the special is inserted, the server's refusal would come only
+  // after it.
+  bool _guardStartPassed(Day date, HourMinute start) {
+    final dutyNow = _dutyClockOn(date)?.call();
+    if (dutyNow == null || start.compareTo(dutyNow) > 0) return false;
+    snack(context, startPassedMessage);
     return true;
   }
 
@@ -416,7 +437,7 @@ class ScheduleActions {
         dayPriority: week.days[date.weekday - 1].priority,
         dayReason: _overrideByDate[date]?.reason ?? '',
         wasOnDuty: _asDuty,
-        dutyNow: _dutyNowOn(date),
+        dutyClock: _dutyClockOn(date),
       ),
     );
   }
@@ -460,7 +481,7 @@ class ScheduleActions {
         // The header ＋ (no gap picked) on an open day may close it too.
         offerCloseDay: !closed && start == null && end == null,
         wasOnDuty: _asDuty,
-        dutyNow: _dutyNowOn(date),
+        dutyClock: _dutyClockOn(date),
       ),
     );
   }
@@ -472,7 +493,7 @@ class ScheduleActions {
       date: date,
       errorText: _errorText,
       blocks: dbBlocks,
-      dutyNow: _dutyNowOn(date),
+      dutyClock: _dutyClockOn(date),
     );
   }
 
@@ -484,7 +505,7 @@ class ScheduleActions {
       isTraining: settings.trainingWeekdays.contains(date.weekday),
       blocks: dbBlocks,
       errorText: _errorText,
-      dutyNow: _dutyNowOn(date),
+      dutyClock: _dutyClockOn(date),
     );
   }
 
@@ -552,13 +573,7 @@ class ScheduleActions {
   Future<void> _moveBlock(
       Day date, TimeBlock block, HourMinute newStart) async {
     if (_guardPast(date) || _guardStarted(date, block)) return;
-    // Checked before the special is inserted: the server's refusal would
-    // come only after it.
-    final dutyNow = _dutyNowOn(date);
-    if (dutyNow != null && newStart.compareTo(dutyNow) <= 0) {
-      snack(context, startPassedMessage);
-      return;
-    }
+    if (_guardStartPassed(date, newStart)) return;
     final endMinutes = newStart.minutesFromMidnight + block.durationMinutes;
     if (endMinutes > 24 * 60 - 1) {
       snack(context, 'Blok se nevejde do dne.');
@@ -588,6 +603,10 @@ class ScheduleActions {
                 '${newStart.display()}–${newEnd.display()}.',
       );
       if (moveNotify == null || !context.mounted) return;
+      // The choice took time: the clock is asked again before any write.
+      if (_guardStarted(date, block) || _guardStartPassed(date, newStart)) {
+        return;
+      }
     }
     await tryAction(
       context,

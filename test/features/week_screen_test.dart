@@ -2414,7 +2414,7 @@ void main() {
       hooks(tester).onEditBlock!(t, bEarly);
       await tester.pumpAndSettle();
       expect(
-        tester.widget<BlockDialog>(find.byType(BlockDialog)).dutyNow,
+        tester.widget<BlockDialog>(find.byType(BlockDialog)).dutyClock?.call(),
         const HourMinute(10, 0),
       );
     });
@@ -2430,7 +2430,7 @@ void main() {
       hooks(tester).onEditBlock!(tomorrow, bMorning);
       await tester.pumpAndSettle();
       expect(
-        tester.widget<BlockDialog>(find.byType(BlockDialog)).dutyNow,
+        tester.widget<BlockDialog>(find.byType(BlockDialog)).dutyClock?.call(),
         isNull,
       );
 
@@ -2446,7 +2446,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text(blockStartedMessage), findsNothing);
       expect(
-        tester.widget<BlockDialog>(find.byType(BlockDialog)).dutyNow,
+        tester.widget<BlockDialog>(find.byType(BlockDialog)).dutyClock?.call(),
         isNull,
       );
     });
@@ -2464,7 +2464,7 @@ void main() {
       hooks(tester).onAddForDay!(t);
       await tester.pumpAndSettle();
       final dialog = tester.widget<BlockDialog>(find.byType(BlockDialog));
-      expect(dialog.dutyNow, const HourMinute(10, 0));
+      expect(dialog.dutyClock?.call(), const HourMinute(10, 0));
       expect(dialog.offerCloseDay, isTrue);
     });
   });
