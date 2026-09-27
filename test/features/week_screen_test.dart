@@ -2300,7 +2300,9 @@ void main() {
       await pickFromMenu(tester, 'Přidat blok…');
       expect(find.textContaining('Nový blok — jen'), findsOneWidget);
       expect(find.text('Důvod zavření'), findsNothing);
-      expect(find.text('Zavřít den…'), findsNothing);
+      // No gap picked on an open day: the dialog offers closing it, like
+      // the header ＋.
+      expect(find.text('Zavřít den'), findsOneWidget);
       await tester.tap(find.text('Zrušit'));
       await tester.pumpAndSettle();
 
