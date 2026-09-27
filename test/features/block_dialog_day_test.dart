@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:rezervator/core/ui.dart' show dayFull;
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/admin/widgets/block_dialog.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -671,6 +672,34 @@ void main() {
         await tester.tap(find.widgetWithText(FilledButton, 'Zavřít den'));
         await tester.pumpAndSettle();
         expect(find.textContaining('$count rezervací'), findsOneWidget);
+        await tester.tap(find.text('Zrušit').last);
+        await tester.pumpAndSettle();
+      }
+    });
+
+    testWidgets('„Důvod zavření“ tells the duty on today that trainings '
+        'under way stay; the admin reads the plain line', (tester) async {
+      for (final (dutyClock, message) in [
+        (
+          () => now,
+          '${dayFull(thursday)} — rezervace v tento den se zruší '
+              '(tréninky, které už začaly, zůstanou).',
+        ),
+        (null, '${dayFull(thursday)} — rezervace v tento den se zruší.'),
+      ]) {
+        await tester.pumpWidget(app(BlockDialog(
+          key: UniqueKey(),
+          existing: null,
+          blocks: const [b1, b2],
+          dayContext: thursday,
+          dayBaseIds: const ['b1', 'b2'],
+          offerCloseDay: true,
+          dutyClock: dutyClock,
+        )));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Zavřít den'));
+        await tester.pumpAndSettle();
+        expect(find.text(message), findsOneWidget);
         await tester.tap(find.text('Zrušit').last);
         await tester.pumpAndSettle();
       }

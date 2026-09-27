@@ -74,7 +74,11 @@ Future<bool> closeDayFlow(
   final reason = await promptText(
     context,
     title: 'Důvod zavření',
-    message: '${dayFull(date)} — rezervace v tento den se zruší.',
+    // The duty's today: the server keeps the trainings already under way.
+    message: dutyClock == null
+        ? '${dayFull(date)} — rezervace v tento den se zruší.'
+        : '${dayFull(date)} — rezervace v tento den se zruší '
+            '(tréninky, které už začaly, zůstanou).',
     confirmLabel: 'Zavřít den',
   );
   if (reason == null || !context.mounted) return false;
