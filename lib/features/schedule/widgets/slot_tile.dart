@@ -468,12 +468,14 @@ Widget slotTileFor({
       // Cells only bookable through the admin exemption (inPast or
       // beyondHorizon, which a regular player could never book) render the
       // '+' quieter, so admins can tell at a glance which slots are
-      // ordinarily locked.
+      // ordinarily locked. The player on duty books for the others past
+      // their own cap, so that alone keeps a cell loud.
       final normallyBookable = canBook(
         state: state,
         myActiveCount: myCount,
         settings: settings,
         isAdmin: false,
+        onDuty: slot.onDuty,
       );
       return SlotTile(
         state: state,

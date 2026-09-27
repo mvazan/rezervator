@@ -8,6 +8,7 @@ import 'package:rezervator/data/clock.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/groups.dart';
 import 'package:rezervator/domain/models.dart';
+import 'package:rezervator/domain/schedule.dart' show FreeSlot;
 import 'package:rezervator/features/admin/widgets/block_dialog.dart';
 import 'package:rezervator/features/clubhouse/match_detail_screen.dart';
 import 'package:rezervator/features/schedule/widgets/slot_tile.dart';
@@ -1964,6 +1965,38 @@ void main() {
         findsOneWidget,
       );
       expect(book().onPressed, isNull);
+    });
+
+    testWidgets('at my own cap the free cells keep their full ＋', (
+      tester,
+    ) async {
+      wideSurface(tester);
+      await tester.pumpWidget(
+        app(
+          dutyPeriods: [week],
+          dutyAssignments: onMe,
+          // Three of my own ahead: the cap (3) is reached.
+          reservations: [
+            for (var i = 1; i <= 3; i++) res('r$i', 'me', t.addDays(i)),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Quiet is for cells only the admin exemption opens (past, beyond the
+      // horizon) — tomorrow's are bookable for the others as usual.
+      final free = [
+        for (final t in tester.widgetList<SlotTile>(
+          find.descendant(
+            of: find.byKey(ValueKey(tomorrow)),
+            matching: find.byType(SlotTile),
+          ),
+        ))
+          if (t.state is FreeSlot) t,
+      ];
+      expect(free, isNotEmpty);
+      expect(free.where((t) => t.onTap == null), isEmpty);
+      expect(free.where((t) => t.quiet), isEmpty);
     });
 
     testWidgets("another player's future reservation opens the admin's "
