@@ -63,18 +63,35 @@ class WeekHeader extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         nav,
-        InkWell(
-          onTap: onDutyTap,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
-            child: Text(
-              duty.text,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: duty.mine ? scheme.primary : scheme.onSurfaceVariant,
-                fontWeight: duty.mine ? FontWeight.w700 : null,
+        // A button to a screen reader; the hit area spans the nav's width
+        // and is 32dp tall, the line itself stays one small centred row.
+        Semantics(
+          button: true,
+          child: InkWell(
+            onTap: onDutyTap,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(
+                minWidth: double.infinity,
+                minHeight: 32,
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Center(
+                  widthFactor: 1,
+                  heightFactor: 1,
+                  child: Text(
+                    duty.text,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: duty.mine
+                          ? scheme.primary
+                          : scheme.onSurfaceVariant,
+                      fontWeight: duty.mine ? FontWeight.w700 : null,
+                    ),
+                  ),
+                ),
               ),
             ),
           ),

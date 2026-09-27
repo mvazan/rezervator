@@ -67,6 +67,37 @@ void main() {
       await tester.tap(find.text('Slouží: Jan Novák a Petr Svoboda'));
       expect(taps, 1);
     });
+
+    testWidgets('$label: the line is a button with a roomy hit area across '
+        'the nav', (tester) async {
+      size(tester, screen);
+      var taps = 0;
+      await tester.pumpWidget(
+        app(const DutyHeader('Slouží: Jan Novák'), onTap: () => taps++),
+      );
+
+      final text = find.text('Slouží: Jan Novák');
+      expect(
+        find.ancestor(
+          of: text,
+          matching: find.byWidgetPredicate(
+            (w) => w is Semantics && w.properties.button == true,
+          ),
+        ),
+        findsOneWidget,
+      );
+      final hit = find.ancestor(of: text, matching: find.byType(InkWell));
+      final box = tester.getRect(hit);
+      expect(box.height, greaterThanOrEqualTo(32));
+      // Wider than the glyphs: the whole nav width, not just the text.
+      expect(box.width, greaterThan(tester.getSize(text).width + 100));
+      // The text itself stays one small line.
+      expect(tester.getSize(text).height, lessThan(20));
+
+      await tester.tapAt(box.bottomLeft + const Offset(4, -2));
+      await tester.tapAt(box.topRight + const Offset(-4, 2));
+      expect(taps, 2);
+    });
   }
 
   testWidgets('my duty this week is tinted', (tester) async {
