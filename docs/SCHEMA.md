@@ -786,9 +786,13 @@ and FCM is configured, e-mail otherwise.
   `set_calendar_teams_for`, deletes dropped teams' events, rewrites the
   rest — §Second calendar and match colours); `secondary` (creates or
   deletes "Rezervátor 2", same section).
-- **cancel** — GET renders the confirmation page, POST verifies the token
-  and updates `reservations` directly with the service role
-  (`cancelled_via = 'one_click'`). This is the one reservation write outside
+- **cancel** — GET only reads (link scanners follow it) and redirects to
+  the confirmation page `web/cancel.html` on rezervator.online with the
+  token; that page's button POSTs it back, and the POST verifies the token,
+  updates `reservations` directly with the service role
+  (`cancelled_via = 'one_click'`) and redirects to the same page with the
+  outcome. Never HTML from the function itself: the edge runtime rewrites
+  the Content-Type to text/plain. This is the one reservation write outside
   the RPCs; the notify function ignores `one_click` cancels.
 
 ## Prod vs git
