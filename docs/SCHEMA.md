@@ -1106,12 +1106,14 @@ threads, no player-to-player messages. Every error is a bare code.
   moving with it; switched off, nothing due and the lead kept), the 0051
   messages (in an alley of its own: select-only tables with the three
   own-row update columns; each audience's recipients with the author,
-  placeholders, the kiosk and a visiting superadmin out; `no_recipients`,
-  `nobody_on_duty` with no period today and with the author the only
-  assignee; the admin, the duty from today on and a plain player per
-  audience, the kiosk and a placeholder sending nothing, another alley
-  reaching only its own admins; every error code; a day-only block
-  counting once its override names it; `can_read_message` for the author,
+  placeholders, cancelled bookings, the kiosk and a visiting superadmin
+  out and a double booking counted once; `no_recipients`,
+  `nobody_on_duty` with no period today and with every assignee excluded
+  (the author, a placeholder); the admin, the duty from today on and a
+  plain player per audience, the kiosk and a placeholder sending nothing,
+  another alley reaching only its own admins; every error code; a
+  day-only block counting on the date its override names it and no
+  other; `can_read_message` for the author,
   a recipient, a bystander, the kiosk and another alley; own-row
   reactions with `reacted_at` stamped and cleared, every other write a
   privilege error; `message_update` notices-only with Sejmout and do

@@ -8257,10 +8257,13 @@ end $$;
 reset role;
 
 -- 23. Fixtures for 0051 in an alley of its own, T: Adam the admin, Bára on
--- duty from today for a week, Cyril and Dana booked today in block 16:00
--- and Dana tomorrow too, Emil a placeholder, the kiosk. Block 17:00 has
--- nobody; block 18:00 is a day-only block (inactive, 21's shape). Every
--- day is a training day, 4 lanes.
+-- duty from today for a week (with Emil, a placeholder, on the same
+-- period), the kiosk. Today block 16:00 holds Cyril, Dana, Emil and Adam
+-- live and Bára cancelled; Dana is in block 19:00 today too. Tomorrow
+-- block 16:00 holds Dana and Bára. So every day/block/duty recipient set
+-- has a placeholder, an author, a cancelled booking and a double booking
+-- to leave out. Block 17:00 has nobody; block 18:00 is a day-only block
+-- (inactive, 21's shape). Every day is a training day, 4 lanes.
 insert into tenants (id, name, status) values
   ('00000000-0000-0000-0000-000000000051', 'Kuželna T (0051)', 'approved');
 do $$
@@ -8269,6 +8272,7 @@ declare
   v_today constant date := (now() at time zone 'Europe/Prague')::date;
   v_b1 uuid;
   v_b2 uuid;
+  v_b3 uuid;
   v_off uuid;
   v_period uuid;
 begin
@@ -8297,10 +8301,13 @@ begin
     values (v_t, '17:00', '18:00', 1) returning id into v_b2;
   insert into time_blocks (tenant_id, starts_at, ends_at, position, active)
     values (v_t, '18:00', '19:00', -1, false) returning id into v_off;
+  insert into time_blocks (tenant_id, starts_at, ends_at, position)
+    values (v_t, '19:00', '20:00', 2) returning id into v_b3;
   insert into duty_periods (tenant_id, starts_on, ends_on)
     values (v_t, v_today, v_today + 6) returning id into v_period;
   insert into duty_assignments (period_id, user_id, tenant_id)
-    values (v_period, '51000000-0000-0000-0000-000000000011', v_t);
+  values (v_period, '51000000-0000-0000-0000-000000000011', v_t),
+         (v_period, '51000000-0000-0000-0000-000000000014', v_t);
   insert into reservations (tenant_id, player_id, date, block_id, lane,
                             created_via, created_by)
   values
@@ -8308,8 +8315,20 @@ begin
      'app', '51000000-0000-0000-0000-000000000012'),
     (v_t, '51000000-0000-0000-0000-000000000013', v_today, v_b1, 2,
      'app', '51000000-0000-0000-0000-000000000013'),
+    (v_t, '51000000-0000-0000-0000-000000000014', v_today, v_b1, 3,
+     'admin', '51000000-0000-0000-0000-000000000010'),
+    (v_t, '51000000-0000-0000-0000-000000000010', v_today, v_b1, 4,
+     'app', '51000000-0000-0000-0000-000000000010'),
+    (v_t, '51000000-0000-0000-0000-000000000013', v_today, v_b3, 1,
+     'app', '51000000-0000-0000-0000-000000000013'),
     (v_t, '51000000-0000-0000-0000-000000000013', v_today + 1, v_b1, 1,
-     'app', '51000000-0000-0000-0000-000000000013');
+     'app', '51000000-0000-0000-0000-000000000013'),
+    (v_t, '51000000-0000-0000-0000-000000000011', v_today + 1, v_b1, 2,
+     'app', '51000000-0000-0000-0000-000000000011');
+  insert into reservations (tenant_id, player_id, date, block_id, lane,
+                            created_via, created_by, cancelled_at, cancelled_via)
+  values (v_t, '51000000-0000-0000-0000-000000000011', v_today, v_b1, 1,
+          'app', '51000000-0000-0000-0000-000000000011', now(), 'app');
   perform set_config('probe.msg_b1', v_b1::text, true);
   perform set_config('probe.msg_b2', v_b2::text, true);
   perform set_config('probe.msg_off', v_off::text, true);
@@ -8394,7 +8413,9 @@ begin
   raise notice 'OK: a notice reaches every account player but the author (0051)';
 end $$;
 
--- 23c. day: everyone with a live reservation that date, any block.
+-- 23c. day: everyone with a live reservation that date, any block, once
+-- (Dana is booked twice) — not Emil the placeholder, not Adam the author,
+-- not Bára whose booking is cancelled.
 do $$
 declare
   v_id uuid;
@@ -8416,7 +8437,8 @@ begin
   raise notice 'OK: a day message reaches the players booked that day (0051)';
 end $$;
 
--- 23d. block: the same, that block only; a block nobody booked has no one
+-- 23d. block: the same, that block only (the placeholder, the author and
+-- the cancelled booking are all in it); a block nobody booked has no one
 -- to tell (no_recipients).
 do $$
 declare
@@ -8502,7 +8524,7 @@ end $$;
 
 -- 23g. The block has to be this alley's and bookable that day: another
 -- alley's block and an inactive one are unknown_block; the day-only block
--- counts once a day override of that date lists it.
+-- counts once a day override of that date lists it, and on that date only.
 do $$
 declare
   v_today constant date := (now() at time zone 'Europe/Prague')::date;
@@ -8545,12 +8567,21 @@ begin
        <> array['51000000-0000-0000-0000-000000000012'::uuid] then
     raise exception 'FAIL: the day-only block''s message reached the wrong players';
   end if;
-  raise notice 'OK: a day-only block counts on the day its override names it (0051)';
+  begin
+    perform message_send('message', 'block', (now() at time zone 'Europe/Prague')::date + 4,
+                         current_setting('probe.msg_off')::uuid, null, 'Den poté.', null,
+                         true);
+    raise exception 'FAIL: the day-only block took a message the day after its override';
+  exception when others then
+    if sqlerrm <> 'unknown_block' then raise; end if;
+  end;
+  raise notice 'OK: a day-only block counts on the day its override names it, not the next (0051)';
 end $$;
 
 
--- 23h. The admin writes to today's duty (Bára) as an admin; to the admins
--- he has nobody to write to but himself, so no_recipients.
+-- 23h. The admin writes to today's duty as an admin: Bára, not Emil the
+-- placeholder on the same period; to the admins he has nobody to write to
+-- but himself, so no_recipients.
 do $$
 declare
   v_id uuid;
@@ -8574,8 +8605,10 @@ exception when others then
 end $$;
 
 -- 23i. Bára on duty writes to a day or a block from today on, as a
--- player; yesterday is date_past; to the duty she is the only one on it,
--- so nobody_on_duty; to the admins she reaches Adam.
+-- player: today that reaches Adam (booked, and not the author now), Cyril
+-- and Dana; tomorrow, where she is booked herself, only Dana. Yesterday is
+-- date_past; to the duty every assignee is excluded (Emil a placeholder,
+-- Bára the author), so nobody_on_duty; to the admins she reaches Adam.
 set local request.jwt.claims =
   '{"sub":"51000000-0000-0000-0000-000000000011","role":"authenticated"}'; -- Bára, duty
 do $$
@@ -8585,7 +8618,11 @@ begin
   v_id := message_send('message', 'day', (now() at time zone 'Europe/Prague')::date, null,
                         null, 'Kantýna dnes zavřená.', null, true);
   if (select author_role from messages where id = v_id) <> 'player'
-     or (select count(*) from message_recipients where message_id = v_id) <> 2 then
+     or (select string_agg(user_id::text, ',' order by user_id)
+           from message_recipients where message_id = v_id)
+        is distinct from '51000000-0000-0000-0000-000000000010,'
+                         '51000000-0000-0000-0000-000000000012,'
+                         '51000000-0000-0000-0000-000000000013' then
     raise exception 'FAIL: the duty''s day message went wrong';
   end if;
   perform set_config('probe.msg_bara_day', v_id::text, true);
@@ -8602,7 +8639,13 @@ begin
        <> array['51000000-0000-0000-0000-000000000013'::uuid] then
     raise exception 'FAIL: the duty''s block message for tomorrow reached the wrong players';
   end if;
-  raise notice 'OK: the duty writes to a block after today (0051)';
+  v_id := message_send('message', 'day', (now() at time zone 'Europe/Prague')::date + 1,
+                        null, null, 'Zítra kantýna od šesti.', null, true);
+  if (select array_agg(user_id) from message_recipients where message_id = v_id)
+       <> array['51000000-0000-0000-0000-000000000013'::uuid] then
+    raise exception 'FAIL: the duty''s day message for tomorrow reached the wrong players';
+  end if;
+  raise notice 'OK: the duty writes to a block and a day after today, not to herself (0051)';
 end $$;
 do $$
 begin
@@ -8615,11 +8658,11 @@ begin
   end;
   begin
     perform message_send('message', 'duty', null, null, null, 'Já sama.', null, true);
-    raise exception 'FAIL: the only duty wrote to herself';
+    raise exception 'FAIL: the duty wrote to herself and a placeholder';
   exception when others then
     if sqlerrm <> 'nobody_on_duty' then raise; end if;
   end;
-  raise notice 'OK: the duty: yesterday is date_past, herself nobody_on_duty (0051)';
+  raise notice 'OK: the duty: yesterday is date_past, herself and a placeholder nobody_on_duty (0051)';
 end $$;
 do $$
 declare
@@ -8843,7 +8886,7 @@ begin
      or (select count(*) from message_recipients where message_id = v_day) <> 2 then
     raise exception 'FAIL: a recipient cannot read the message or its other recipients';
   end if;
-  -- Bára, not booked today: a bystander.
+  -- Bára, her booking today cancelled: a bystander.
   perform set_config('request.jwt.claims',
     '{"sub":"51000000-0000-0000-0000-000000000011","role":"authenticated"}', true);
   if (select count(*) from messages where id = v_day) <> 0
