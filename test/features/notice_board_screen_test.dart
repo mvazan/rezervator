@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -5,6 +7,7 @@ import 'package:rezervator/data/clock.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/clubhouse/notice_board_screen.dart';
+import 'package:rezervator/features/clubhouse/widgets/notice_form.dart';
 
 /// Klubovna → Nástěnka (0051): active notices with „Starší (N)“ below,
 /// read marking on open, the admin's form, seen sheet and ⋮ actions.
@@ -201,4 +204,154 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Smazat oznam?'), findsOneWidget);
   });
+
+  // cachedRows replays the cache (or the pre-resume state) first; the
+  // notice the push was for often arrives only with the live snapshot.
+  testWidgets('a notice listed after the first snapshot is marked too, once', (tester) async {
+    final marked = <List<String>>[];
+    final messages = StreamController<List<Message>>();
+    final mine = StreamController<List<MessageRecipient>>();
+    addTearDown(messages.close);
+    addTearDown(mine.close);
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        myProfileProvider.overrideWith((ref) => Stream.value(me)),
+        messagesProvider.overrideWith((ref) => messages.stream),
+        myMessageRecipientsProvider.overrideWith((ref) => mine.stream),
+        nowProvider.overrideWith((ref) => Stream.value(DateTime(2026, 10, 2, 12))),
+      ],
+      child: MaterialApp(
+        home: NoticeBoardScreen(markRead: (ids) async => marked.add(ids)),
+      ),
+    ));
+    final old = row('o1', 'me', readAt: DateTime(2026, 9, 2));
+    messages.add([notice('o1')]);
+    mine.add([old]);
+    await tester.pumpAndSettle();
+    expect(marked, isEmpty);
+
+    messages.add([notice('o1'), notice('a1')]);
+    mine.add([old, row('a1', 'me')]);
+    await tester.pumpAndSettle();
+    expect(find.text('Nové dráhy a1'), findsOneWidget);
+    expect(marked, [['a1']]);
+
+    // Still unread in the next snapshot (the write's echo is not back
+    // yet): not sent a second time.
+    mine.add([old, row('a1', 'me')]);
+    await tester.pumpAndSettle();
+    expect(marked, [['a1']]);
+  });
+
+  // Each seen count is its own realtime channel, and notices are never
+  // pruned: opening „Starší“ must not subscribe the whole history at once.
+  testWidgets('opening „Starší“ subscribes only the seen counts on screen', (tester) async {
+    final subscribed = <String>{};
+    final expired = [
+      for (var i = 0; i < 80; i++)
+        notice('e${i.toString().padLeft(2, '0')}',
+            createdAt: DateTime(2026, 8, 1).add(Duration(hours: i)),
+            expiresAt: DateTime(2026, 9, 15)),
+    ];
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        myProfileProvider.overrideWith((ref) => Stream.value(admin)),
+        messagesProvider.overrideWith((ref) => Stream.value(expired)),
+        myMessageRecipientsProvider.overrideWith((ref) => Stream.value(const [])),
+        messageParticipantsProvider.overrideWith((ref, id) {
+          subscribed.add(id);
+          return Stream.value([row(id, 'p1')]);
+        }),
+        nowProvider.overrideWith((ref) => Stream.value(DateTime(2026, 10, 2, 12))),
+      ],
+      child: const MaterialApp(home: NoticeBoardScreen(markRead: _noMark)),
+    ));
+    await tester.pumpAndSettle();
+    expect(subscribed, isEmpty);
+    await tester.tap(find.text('Starší (80)'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Zobrazilo 0 z 1'), findsWidgets);
+    expect(subscribed.length, lessThan(20));
+  });
+
+  group('the notice form while it saves', () {
+    // The form on a page of its own above home, so a stray pop shows.
+    Widget host(Future<void> Function(NoticeDraft draft) write,
+            void Function(bool result) done) =>
+        ProviderScope(
+          overrides: [
+            nowProvider.overrideWith((ref) => Stream.value(DateTime(2026, 10, 2, 12))),
+          ],
+          child: MaterialApp(
+            home: Builder(
+              builder: (context) => Scaffold(
+                body: TextButton(
+                  onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                    builder: (context) => Scaffold(
+                      body: TextButton(
+                        onPressed: () async =>
+                            done(await showNoticeForm(context, write: write)),
+                        child: const Text('OTEVŘÍT'),
+                      ),
+                    ),
+                  )),
+                  child: const Text('STRÁNKA'),
+                ),
+              ),
+            ),
+          ),
+        );
+
+    Future<void> openForm(WidgetTester tester) async {
+      await tester.tap(find.text('STRÁNKA'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('OTEVŘÍT'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.widgetWithText(TextField, 'Nadpis'), 'Klíč');
+      await tester.enterText(find.widgetWithText(TextField, 'Text'), 'Je u Petra.');
+      await tester.tap(find.text('Uložit'));
+      await tester.pump();
+      expect(find.text('Ukládám…'), findsOneWidget);
+    }
+
+    testWidgets('„Změnit“ opens no picker over a dialog about to close', (tester) async {
+      final save = Completer<void>();
+      NoticeDraft? sent;
+      bool? result;
+      await tester.pumpWidget(host((d) {
+        sent = d;
+        return save.future;
+      }, (r) => result = r));
+      await openForm(tester);
+      await tester.tap(find.text('Změnit'), warnIfMissed: false);
+      await tester.pumpAndSettle();
+      expect(find.byType(DatePickerDialog), findsNothing);
+
+      save.complete();
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(result, isTrue);
+      expect(find.text('Nový oznam'), findsNothing);
+      expect(find.text('OTEVŘÍT'), findsOneWidget);
+      expect(sent?.title, 'Klíč');
+      expect(sent?.notify, isTrue);
+    });
+
+    testWidgets('„Zrušit“ mid-save: the late result pops nothing else', (tester) async {
+      final save = Completer<void>();
+      bool? result;
+      await tester.pumpWidget(host((_) => save.future, (r) => result = r));
+      await openForm(tester);
+      await tester.tap(find.text('Zrušit'));
+      // The save returns while the dialog is still animating out.
+      await tester.pump(const Duration(milliseconds: 20));
+      save.complete();
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(result, isFalse);
+      expect(find.text('OTEVŘÍT'), findsOneWidget);
+    });
+  });
 }
+
+Future<void> _noMark(List<String> ids) async {}

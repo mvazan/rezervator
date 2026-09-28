@@ -11,24 +11,57 @@ import '../../../core/ui.dart';
 import '../../../data/clock.dart';
 import '../../../data/providers.dart';
 import '../../../domain/models.dart';
+import '../../admin/widgets/form_dialog.dart';
 
-/// Opens the notice form; true once a notice was posted or saved.
-Future<bool> showNoticeForm(BuildContext context, {Message? existing}) async {
+/// What the form sends: the new notice, or [existing]'s new text and
+/// expiry ([notify] is ignored on an edit — message_update never resends).
+typedef NoticeDraft = ({
+  String title,
+  String body,
+  DateTime? expiresAt,
+  bool notify,
+});
+
+/// Opens the notice form; true once a notice was posted or saved. [write]
+/// replaces the RPC (Api.messageSend / Api.messageUpdate), so widget tests
+/// never reach `Supabase.instance`.
+Future<bool> showNoticeForm(
+  BuildContext context, {
+  Message? existing,
+  Future<void> Function(NoticeDraft draft)? write,
+}) async {
   final result = await showDialog<bool>(
     context: context,
-    builder: (_) => _NoticeForm(existing: existing),
+    builder: (_) => _NoticeForm(existing: existing, write: write),
   );
   return result ?? false;
 }
+
+Future<void> _apiWrite(Message? existing, NoticeDraft d) => existing == null
+    ? Api.messageSend(
+        kind: MessageKind.notice,
+        audience: MessageAudience.all,
+        title: d.title,
+        body: d.body,
+        expiresAt: d.expiresAt,
+        notify: d.notify,
+      )
+    : Api.messageUpdate(
+        existing.id,
+        title: d.title,
+        body: d.body,
+        expiresAt: d.expiresAt,
+      );
 
 /// „Platí do 16. 10.“ means through that day: the notice expires at its
 /// last second, local time, not at the midnight that starts it.
 DateTime _endOfDay(Day d) => DateTime(d.year, d.month, d.day, 23, 59, 59);
 
 class _NoticeForm extends ConsumerStatefulWidget {
-  const _NoticeForm({this.existing});
+  const _NoticeForm({this.existing, this.write});
 
   final Message? existing;
+  final Future<void> Function(NoticeDraft draft)? write;
 
   @override
   ConsumerState<_NoticeForm> createState() => _NoticeFormState();
@@ -47,7 +80,6 @@ class _NoticeFormState extends ConsumerState<_NoticeForm> {
   late bool _forever =
       widget.existing != null && widget.existing!.expiresAt == null;
   bool _notify = true;
-  bool _saving = false;
 
   @override
   void dispose() {
@@ -66,38 +98,24 @@ class _NoticeFormState extends ConsumerState<_NoticeForm> {
     if (picked != null) setState(() => _expiresAt = _endOfDay(picked));
   }
 
-  Future<void> _save() async {
-    setState(() => _saving = true);
-    final title = _title.text.trim();
-    final body = _body.text.trim();
-    final expiresAt = _forever ? null : _expiresAt;
+  /// FormDialog's onSave: true closes the form (through `closeDialog`),
+  /// null keeps it open — [tryAction] already showed the error.
+  Future<bool?> _save() async {
     final existing = widget.existing;
+    final NoticeDraft draft = (
+      title: _title.text.trim(),
+      body: _body.text.trim(),
+      expiresAt: _forever ? null : _expiresAt,
+      notify: _notify,
+    );
+    final write = widget.write ?? (d) => _apiWrite(existing, d);
     final ok = await tryAction(
       context,
-      () => existing == null
-          ? Api.messageSend(
-              kind: MessageKind.notice,
-              audience: MessageAudience.all,
-              title: title,
-              body: body,
-              expiresAt: expiresAt,
-              notify: _notify,
-            )
-          : Api.messageUpdate(
-              existing.id,
-              title: title,
-              body: body,
-              expiresAt: expiresAt,
-            ),
+      () => write(draft),
       success: existing == null ? 'Oznam vyvěšen.' : 'Oznam uložen.',
       errorText: friendlyDbError,
     );
-    if (!mounted) return;
-    if (ok) {
-      Navigator.of(context).pop(true);
-    } else {
-      setState(() => _saving = false);
-    }
+    return ok ? true : null;
   }
 
   @override
@@ -105,62 +123,52 @@ class _NoticeFormState extends ConsumerState<_NoticeForm> {
     final until = _forever
         ? 'do odvolání'
         : '${_expiresAt.day}. ${_expiresAt.month}. ${_expiresAt.year}';
-    return AlertDialog(
-      title: Text(widget.existing == null ? 'Nový oznam' : 'Upravit oznam'),
-      content: SizedBox(
-        width: 400,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: _title,
-                decoration: const InputDecoration(labelText: 'Nadpis'),
-                maxLength: 80,
+    // FormDialog, not a hand-rolled AlertDialog: while „Ukládám…“ runs the
+    // fields (and „Změnit“) go quiet, and the form closes its OWN route —
+    // a date picker opened mid-save, or a „Zrušit“ that already closed it,
+    // must not catch the save's pop (Sentry REZERVATOR-4/5/6, closeDialog).
+    return FormDialog<bool>(
+      title: widget.existing == null ? 'Nový oznam' : 'Upravit oznam',
+      onSave: _save,
+      children: [
+        // The form's width (400, less on a narrow phone): AlertDialog sizes
+        // its content to the widest child.
+        const SizedBox(width: 400),
+        TextField(
+          controller: _title,
+          decoration: const InputDecoration(labelText: 'Nadpis'),
+          maxLength: 80,
+        ),
+        TextField(
+          controller: _body,
+          decoration: const InputDecoration(labelText: 'Text'),
+          maxLength: 2000,
+          maxLines: 5,
+          minLines: 1,
+        ),
+        Row(
+          children: [
+            Expanded(child: Text('Platí do: $until')),
+            if (!_forever)
+              TextButton(
+                onPressed: _pickExpiry,
+                child: const Text('Změnit'),
               ),
-              TextField(
-                controller: _body,
-                decoration: const InputDecoration(labelText: 'Text'),
-                maxLength: 2000,
-                maxLines: 5,
-                minLines: 1,
-              ),
-              Row(
-                children: [
-                  Expanded(child: Text('Platí do: $until')),
-                  if (!_forever)
-                    TextButton(
-                      onPressed: _pickExpiry,
-                      child: const Text('Změnit'),
-                    ),
-                ],
-              ),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Do odvolání'),
-                value: _forever,
-                onChanged: (v) => setState(() => _forever = v),
-              ),
-              if (widget.existing == null)
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Poslat upozornění'),
-                  value: _notify,
-                  onChanged: (v) => setState(() => _notify = v),
-                ),
-            ],
+          ],
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Do odvolání'),
+          value: _forever,
+          onChanged: (v) => setState(() => _forever = v),
+        ),
+        if (widget.existing == null)
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Poslat upozornění'),
+            value: _notify,
+            onChanged: (v) => setState(() => _notify = v),
           ),
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(false),
-          child: const Text('Zrušit'),
-        ),
-        FilledButton(
-          onPressed: _saving ? null : _save,
-          child: Text(_saving ? 'Ukládám…' : 'Uložit'),
-        ),
       ],
     );
   }

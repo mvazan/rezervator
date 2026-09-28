@@ -27,9 +27,12 @@ class NoticeBoardScreen extends ConsumerStatefulWidget {
 }
 
 class _NoticeBoardScreenState extends ConsumerState<NoticeBoardScreen> {
-  /// Opening the board marks what it lists read — once per open, on the
-  /// first complete snapshot.
-  bool _markedRead = false;
+  /// The notices this visit has already asked to mark read. Checked on
+  /// EVERY complete snapshot, not just the first: cachedRows replays the
+  /// cache (or the pre-resume state) first, so the notice a push opened
+  /// the board for often arrives a moment later — and one posted while the
+  /// board is open is listed too. Each id is still sent once per visit.
+  final _requested = <String>{};
 
   @override
   Widget build(BuildContext context) {
@@ -59,10 +62,7 @@ class _NoticeBoardScreenState extends ConsumerState<NoticeBoardScreen> {
       body = const Center(child: CircularProgressIndicator());
     } else {
       final data = value.value!;
-      if (!_markedRead) {
-        _markedRead = true;
-        _markActiveRead(data);
-      }
+      _markActiveRead(data);
       body = _NoticeList(data: data, isAdmin: isAdmin);
     }
 
@@ -79,21 +79,27 @@ class _NoticeBoardScreenState extends ConsumerState<NoticeBoardScreen> {
     );
   }
 
-  /// Marks the active notices I have an unread row for — after the frame,
-  /// since it writes to a stream this build watches.
+  /// Marks the active notices I have an unread row for and have not asked
+  /// about yet — after the frame, since it writes to a stream this build
+  /// watches.
   void _markActiveRead(_Data data) {
     final now = ref.read(nowProvider).value ?? DateTime.now();
     // Only rows that exist and are unread: a notice posted before I
     // joined has no row for me, and there is nothing to mark.
     final unread = [
       for (final n in splitNotices(data.notices, now).active)
-        if (data.mine[n.id] case final row? when row.readAt == null) n.id,
+        if (!_requested.contains(n.id))
+          if (data.mine[n.id] case final row? when row.readAt == null) n.id,
     ];
     if (unread.isEmpty) return;
-    // Bookkeeping, not an action the player took — a failure is retried
-    // on the next open, no snack.
+    _requested.addAll(unread);
+    final markRead = widget.markRead;
+    // Bookkeeping, not an action the player took — no snack, and a failure
+    // is retried on the next open, not now: optimisticWrite re-emits the
+    // unread rows when a write fails, so retrying from that rebuild would
+    // loop for as long as the phone is offline.
     WidgetsBinding.instance.addPostFrameCallback(
-      (_) => widget.markRead(unread).catchError((_) {}),
+      (_) => markRead(unread).catchError((_) {}),
     );
   }
 
@@ -130,16 +136,23 @@ AsyncValue<_Data> _watchData(WidgetRef ref) {
   ));
 }
 
-class _NoticeList extends ConsumerWidget {
+class _NoticeList extends ConsumerStatefulWidget {
   const _NoticeList({required this.data, required this.isAdmin});
 
   final _Data data;
   final bool isAdmin;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_NoticeList> createState() => _NoticeListState();
+}
+
+class _NoticeListState extends ConsumerState<_NoticeList> {
+  bool _olderOpen = false;
+
+  @override
+  Widget build(BuildContext context) {
     final now = ref.watch(nowProvider).value ?? DateTime.now();
-    final split = splitNotices(data.notices, now);
+    final split = splitNotices(widget.data.notices, now);
     if (split.active.isEmpty && split.expired.isEmpty) {
       return const Center(
         child: Padding(
@@ -155,7 +168,7 @@ class _NoticeList extends ConsumerWidget {
           key: ValueKey(n.id),
           notice: n,
           now: now,
-          isAdmin: isAdmin,
+          isAdmin: widget.isAdmin,
         );
     return ListView(
       // Room for the admin's FAB below the last card.
@@ -163,10 +176,17 @@ class _NoticeList extends ConsumerWidget {
       children: [
         for (final n in split.active) tile(n),
         if (split.expired.isNotEmpty)
-          ExpansionTile(
+          ListTile(
             title: Text('Starší (${split.expired.length})'),
-            children: [for (final n in split.expired) tile(n)],
+            trailing: Icon(_olderOpen ? Icons.expand_less : Icons.expand_more),
+            onTap: () => setState(() => _olderOpen = !_olderOpen),
           ),
+        // The older cards as the list's own children, not an
+        // ExpansionTile's Column: the list builds only what scrolls into
+        // view, and for the admin every card holds a realtime channel (its
+        // seen count) — notices are never pruned.
+        if (_olderOpen)
+          for (final n in split.expired) tile(n),
       ],
     );
   }
