@@ -78,7 +78,12 @@ drop policy if exists duty_seasons_select on duty_seasons;
 create policy duty_seasons_select on duty_seasons
   for select using (tenant_id = current_tenant_id() and is_approved_or_kiosk());
 
-revoke all on duty_periods, duty_assignments, duty_seasons from anon, authenticated;
+-- service_role is revoked too, so every run rebuilds the ACL in the same
+-- order (authenticated, then service_role). Revoking only anon and
+-- authenticated would move authenticated behind service_role on a second
+-- run, and the schema snapshot would then differ from a fresh database.
+revoke all on duty_periods, duty_assignments, duty_seasons
+  from anon, authenticated, service_role;
 grant select on duty_periods, duty_assignments, duty_seasons to authenticated;
 grant all on duty_periods, duty_assignments, duty_seasons to service_role;
 

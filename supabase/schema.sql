@@ -6045,18 +6045,18 @@ GRANT ALL ON TABLE "public"."day_overrides" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."duty_assignments" TO "service_role";
 GRANT SELECT ON TABLE "public"."duty_assignments" TO "authenticated";
+GRANT ALL ON TABLE "public"."duty_assignments" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."duty_periods" TO "service_role";
 GRANT SELECT ON TABLE "public"."duty_periods" TO "authenticated";
+GRANT ALL ON TABLE "public"."duty_periods" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."duty_seasons" TO "service_role";
 GRANT SELECT ON TABLE "public"."duty_seasons" TO "authenticated";
+GRANT ALL ON TABLE "public"."duty_seasons" TO "service_role";
 
 
 
