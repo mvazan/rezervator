@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="referrer" content="no-referrer">
+<title>Zrušení rezervace — Rezervátor</title>
+<link rel="icon" type="image/png" href="favicon.png">
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+         max-width: 26rem; margin: 0 auto; min-height: 100svh;
+         display: flex; flex-direction: column; justify-content: center;
+         padding: 2rem 1.25rem; text-align: center; line-height: 1.55;
+         color: #1a1a1a; background: #fff; }
+  .mark { font-size: 3.25rem; line-height: 1; margin-bottom: .75rem; }
+  h1 { color: #6366F1; font-size: 1.4rem; margin: 0 0 .6rem; }
+  p { margin: 0 0 .75rem; }
+  .kdy { font-weight: 600; }
+  .hint { color: #666; font-size: .95rem; }
+  .fail h1 { color: #B91C1C; }
+  button { font: inherit; font-weight: 600; color: #fff; background: #6366F1;
+           border: 0; border-radius: .75rem; padding: .85rem 1.5rem;
+           margin-top: .5rem; cursor: pointer; }
+  button:disabled { opacity: .6; cursor: default; }
+  @media (prefers-color-scheme: dark) {
+    body { color: #f2f2f2; background: #161616; }
+    h1 { color: #A5B4FC; }
+    .fail h1 { color: #FCA5A5; }
+    .hint { color: #a5a5a5; }
+  }
+</style>
+</head>
+<body>
+
+<!-- The cancel edge function redirects here — it cannot serve HTML itself,
+     the edge runtime rewrites the Content-Type to text/plain. The link from
+     the kiosk-booking e-mail (a GET, which link scanners follow too) lands on
+     ?stav=potvrdit&token=…&kdy=…; only a click on the button POSTs the token
+     back to the function, which redirects here again with the outcome. This
+     page must never submit on its own. The stav keys, the kdy pattern and
+     the function URL are held to _shared/cancel_flow.ts by its tests. -->
+<div class="mark" id="mark">⚠️</div>
+<h1 id="nadpis">Odkaz neplatí</h1>
+<p class="kdy" id="kdy" hidden></p>
+<p id="popis">Odkaz je poškozený nebo neplatný.</p>
+<form id="formular" method="post" hidden>
+  <button type="submit" id="tlacitko">Zrušit rezervaci</button>
+</form>
+<p class="hint" id="zavrit" hidden>Tuhle stránku můžeš zavřít.</p>
+<noscript><p class="hint">Ke zrušení rezervace je potřeba zapnutý JavaScript.</p></noscript>
+
+<script>
+  var FUNKCE = "https://wgwijvcnslkesyqgaeul.supabase.co/functions/v1/cancel";
+  var KDY = /^(po|út|st|čt|pá|so|ne) \d{1,2}\.\d{1,2}\.( \d{1,2}:\d{2}–\d{1,2}:\d{2})?, dráha \d{1,2}$/;
+  var stavy = {
+    potvrdit: ["🎳", "Zrušit rezervaci?", "Opravdu chceš tuhle rezervaci zrušit?"],
+    zruseno: ["✅", "Rezervace zrušena", "Termín je zase volný. Díky, žes dal vědět!"],
+    hotovo: ["✅", "Hotovo", "Rezervace už je zrušená."],
+    nenalezena: ["🤷", "Rezervace nenalezena", "Tahle rezervace už neexistuje."],
+    vyprselo: ["⌛", "Odkaz neplatí", "Trénink už začal — rezervaci teď může zrušit jen správce."],
+    neplatny: ["⚠️", "Odkaz neplatí", "Odkaz je poškozený nebo neplatný."],
+    chyba: ["⚠️", "Zrušení se nepovedlo", "Zkus to prosím znovu."]
+  };
+  var q = new URLSearchParams(location.search);
+  var klic = q.get("stav");
+  var token = q.get("token") || "";
+  var sTlacitkem = klic === "potvrdit" || klic === "chyba";
+  if (!Object.prototype.hasOwnProperty.call(stavy, klic) || (sTlacitkem && !token)) {
+    klic = "neplatny";
+    sTlacitkem = false;
+  }
+  var s = stavy[klic];
+  document.getElementById("mark").textContent = s[0];
+  document.getElementById("nadpis").textContent = s[1];
+  document.getElementById("popis").textContent = s[2];
+  document.title = s[1] + " — Rezervátor";
+  if (klic !== "potvrdit" && klic !== "zruseno" && klic !== "hotovo") {
+    document.body.classList.add("fail");
+  }
+
+  var kdy = q.get("kdy") || "";
+  if (KDY.test(kdy)) {
+    var radek = document.getElementById("kdy");
+    radek.textContent = kdy;
+    radek.hidden = false;
+  }
+
+  if (sTlacitkem) {
+    var formular = document.getElementById("formular");
+    var tlacitko = document.getElementById("tlacitko");
+    formular.action = FUNKCE + "?token=" + encodeURIComponent(token);
+    if (klic === "chyba") tlacitko.textContent = "Zkusit znovu";
+    formular.hidden = false;
+    // One click, one POST (a second one would only land on "hotovo"). The
+    // back button restores the page from cache with the button still
+    // disabled, hence pageshow.
+    formular.addEventListener("submit", function () { tlacitko.disabled = true; });
+    window.addEventListener("pageshow", function () { tlacitko.disabled = false; });
+  } else if (klic === "zruseno" || klic === "hotovo") {
+    document.getElementById("zavrit").hidden = false;
+  }
+</script>
+
+</body>
+</html>
