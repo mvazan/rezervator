@@ -9,6 +9,7 @@
 // (see calendar-oauth-callback/index.ts's comment) — always redirect to a
 // static result page.
 
+import { isMemberOf, type Membership } from "./membership.ts";
 import { verifyReactToken } from "./react_token.ts";
 
 /// What handleReact needs from the outside world: the HMAC secret
@@ -26,8 +27,6 @@ export type ReactDeps = {
   logError: (message: string, detail?: unknown) => void;
 };
 
-type Membership = { status: string; role: string; tenant_id: string };
-
 /// A message_recipients row with its account, as the deployed lookup
 /// selects it (`tenant_id, profiles!inner(status, role, tenant_id)`).
 /// PostgREST embeds the to-one profile as an object; the untyped client
@@ -40,15 +39,15 @@ export type RecipientMembership = {
 /// Whether the e-mail link may still write [row]'s reaction: the app's own
 /// rule (message_recipients_update_own, plus the select policy's alley
 /// check), which the service role would otherwise bypass — the row exists
-/// and its account is an approved non-kiosk member of the row's alley. An
+/// and its account is an approved non-kiosk member of the row's alley
+/// ([isMemberOf], the same rule notify applies to a reaction's author). An
 /// account set as the kiosk, back to pending or moved to another alley
 /// reacts to nothing, from the app or from an e-mail.
 export function mayReact(row: RecipientMembership | null): boolean {
-  const embedded = row?.profiles;
+  if (row == null) return false;
+  const embedded = row.profiles;
   const profile = Array.isArray(embedded) ? embedded[0] : embedded;
-  return row != null && profile != null &&
-    profile.status === "approved" && profile.role !== "kiosk" &&
-    profile.tenant_id === row.tenant_id;
+  return isMemberOf(profile, row.tenant_id);
 }
 
 /// Verifies the `t` token of [url], writes its reaction when the recipient

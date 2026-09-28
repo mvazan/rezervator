@@ -77,6 +77,7 @@ import {
   reactionChange,
 } from "../_shared/message_notify.ts";
 import { messageContext } from "../_shared/message_texts.ts";
+import type { Membership } from "../_shared/membership.ts";
 import {
   clearSecondaryCalendar,
   deleteEvent,
@@ -879,15 +880,25 @@ async function handle(payload: WebhookPayload) {
       const message = record as unknown as MessageRow;
       if (!message.notify) return;
       const author = await profileOf(message.author_id);
+      // A failed load is logged and thrown — the webhook answers 500, which
+      // net._http_response shows — never read as "nobody to tell".
       let recipientIds: string[] = [];
       {
-        const { data } = await supabase.from("message_recipients")
+        const { data, error } = await supabase.from("message_recipients")
           .select("user_id").eq("message_id", message.id);
+        if (error) {
+          console.error(`message ${message.id}: recipients not loaded:`, error);
+          throw error;
+        }
         recipientIds = (data ?? []).map((r) => r.user_id as string);
       }
       if (recipientIds.length === 0) return;
-      const { data: recipients } = await supabase.from("profiles")
+      const { data: recipients, error: profilesError } = await supabase.from("profiles")
         .select("id, email, fcm_token").in("id", recipientIds);
+      if (profilesError) {
+        console.error(`message ${message.id}: recipient profiles not loaded:`, profilesError);
+        throw profilesError;
+      }
       let blockTimes: { starts_at: string; ends_at: string } | null = null;
       if (message.block_id) {
         const { data: block } = await supabase.from("time_blocks")
@@ -945,16 +956,27 @@ async function handle(payload: WebhookPayload) {
       const old = (payload.old_record ?? {}) as Partial<MessageRecipientRow>;
       const changed = reactionChange(old, row);
       if (!changed) return;
-      const { data: messageData } = await supabase.from("messages")
+      const { data: messageData, error: messageError } = await supabase.from("messages")
         .select(
           "id, tenant_id, kind, audience, author_id, author_role, on_date, block_id, title, body, notify",
         )
         .eq("id", row.message_id).maybeSingle();
+      if (messageError) throw messageError;
       if (!messageData) return;
-      const [author, reactor] = await Promise.all([
-        profileOf(messageData.author_id),
+      // The author with their standing: deliverReaction tells them only
+      // while they may still read the message (isMemberOf) — the service
+      // role would otherwise reach an account set as the kiosk, back to
+      // pending or moved to another alley.
+      const [authorResult, reactor] = await Promise.all([
+        messageData.author_id == null
+          ? Promise.resolve({ data: null, error: null })
+          : supabase.from("profiles")
+            .select("id, email, fcm_token, display_name, status, role, tenant_id")
+            .eq("id", messageData.author_id).maybeSingle(),
         profileOf(row.user_id),
       ]);
+      if (authorResult.error) throw authorResult.error;
+      const author = authorResult.data as (Recipient & Membership) | null;
       await deliverReaction(
         row,
         changed,

@@ -18,6 +18,12 @@ const recipient = (id: string, push: boolean) => ({
   id, email: `${id}@example.com`, fcm_token: push ? "tok" : null,
 });
 
+// The message's author as notify loads it for a reaction: a recipient plus
+// the standing the read rule checks (baseMessage is in alley t1).
+const author = (status = "approved", role = "player", tenant = "t1") => ({
+  ...recipient("author", true), status, role, tenant_id: tenant,
+});
+
 // Recording fakes for deliverMessage's deps: a recipient with a token is
 // pushed, the rest are e-mailed; pushes, e-mail batches and pauses land in
 // the returned logs. An override replaces its fake.
@@ -242,15 +248,51 @@ Deno.test("deliverMessage: a failed push or link skips only that recipient", asy
 });
 
 Deno.test("deliverReaction: notifies the author once, with the text and reply", async () => {
-  let sent: { title: string; body: string } | null = null;
+  const sent: { to: string; title: string; body: string; data?: Record<string, string> }[] = [];
   const ok = await deliverReaction(
     { message_id: "m1", user_id: "p1", reaction: "up", reply: "Přijdu dřív." },
     { reaction: "up", reply: "Přijdu dřív." },
-    { message: baseMessage, author: recipient("author", true), reactorName: "Petr Novák" },
-    (_r, title, body) => { sent = { title, body }; return Promise.resolve("delivered"); },
+    { message: baseMessage, author: author(), reactorName: "Petr Novák" },
+    (r, title, body, opts) => {
+      sent.push({ to: r.id, title, body, data: opts.data });
+      return Promise.resolve("delivered");
+    },
   );
   assertEquals(ok, true);
-  assertEquals(sent, { title: "Reakce na tvou zprávu", body: "Petr Novák: 👍 Přijdu dřív." });
+  // The data carries the alley, so the app can tell a tap on another
+  // alley's reaction (its account moved since) from its own.
+  assertEquals(sent, [{
+    to: "author",
+    title: "Reakce na tvou zprávu",
+    body: "Petr Novák: 👍 Přijdu dřív.",
+    data: { kind: "message_reaction", message_id: "m1", tenant_id: "t1" },
+  }]);
+});
+
+Deno.test("deliverReaction: an author who may no longer read the message hears nothing", async () => {
+  // The read rule (can_read_message): an account set back to pending, set
+  // as the kiosk or moved to another alley loses what it once got — the
+  // reactor's name and reply must not reach it by push or e-mail either.
+  for (const gone of [author("pending"), author("approved", "kiosk"), author("approved", "player", "t2")]) {
+    let called = false;
+    const ok = await deliverReaction(
+      { message_id: "m1", user_id: "p1", reaction: "down", reply: "nestihnu, jsem nemocný" },
+      { reaction: "down", reply: "nestihnu, jsem nemocný" },
+      { message: baseMessage, author: gone, reactorName: "Petr" },
+      () => { called = true; return Promise.resolve("delivered"); },
+    );
+    assertEquals(ok, false);
+    assertEquals(called, false);
+  }
+  // An approved admin of the alley still hears.
+  let heard = false;
+  await deliverReaction(
+    { message_id: "m1", user_id: "p1", reaction: "up", reply: null },
+    { reaction: "up", reply: null },
+    { message: baseMessage, author: author("approved", "admin"), reactorName: "Petr" },
+    () => { heard = true; return Promise.resolve("delivered"); },
+  );
+  assertEquals(heard, true);
 });
 
 Deno.test("deliverReaction: a notice's reaction (should not happen, but stay safe) sends nothing", async () => {
@@ -258,7 +300,7 @@ Deno.test("deliverReaction: a notice's reaction (should not happen, but stay saf
   const ok = await deliverReaction(
     { message_id: "m1", user_id: "p1", reaction: "up", reply: null },
     { reaction: "up", reply: null },
-    { message: { ...baseMessage, kind: "notice" }, author: recipient("author", true), reactorName: "Petr" },
+    { message: { ...baseMessage, kind: "notice" }, author: author(), reactorName: "Petr" },
     () => { called = true; return Promise.resolve("delivered"); },
   );
   assertEquals(ok, false);
@@ -309,7 +351,7 @@ Deno.test("deliverMessage: texts, push data and e-mails by kind and audience", a
 
   assertEquals(pushed[0].title, "Zpráva od správce");
   assertEquals(pushed[0].body, "Přijďte dřív.\ncelý den pá 2. 10.");
-  assertEquals(pushed[0].data, { kind: "message", message_id: "m1" });
+  assertEquals(pushed[0].data, { kind: "message", message_id: "m1", tenant_id: "t1" });
   const mail0 = batches[0][0];
   assertEquals(mail0.to, "e1@example.com");
   assertEquals(mail0.subject, "Zpráva od správce");
@@ -321,7 +363,7 @@ Deno.test("deliverMessage: texts, push data and e-mails by kind and audience", a
   assertEquals(batches[1][0].subject, "Zpráva od Bára Kantýnská");
   assertEquals(pushed[2].title, "Brigáda");
   assertEquals(pushed[2].body, "V sobotu uklízíme.");
-  assertEquals(pushed[2].data, { kind: "notice", message_id: "m1" });
+  assertEquals(pushed[2].data, { kind: "notice", message_id: "m1", tenant_id: "t1" });
   assertEquals(batches[2][0].subject, "Brigáda");
   assertEquals(batches[2][0].html.includes("https://rezervator.online/#/nastenka/m1"), true);
   assertEquals(batches[2][0].html.includes("react?t="), false);

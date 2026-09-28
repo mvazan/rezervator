@@ -3,6 +3,7 @@
 // duty_reminders.ts shape). Both take their send functions injected.
 
 import type { Delivery } from "./delivery.ts";
+import { isMemberOf, type Membership } from "./membership.ts";
 import {
   appMessageUrl,
   appNoticeUrl,
@@ -123,7 +124,7 @@ export async function deliverMessage(
       if (deps.byPush(r)) {
         attempted++;
         await deps.push(r, text.title, text.body, {
-          data: { kind: record.kind, message_id: record.id },
+          data: pushData(record.kind, record.id, record.tenant_id),
         });
         continue;
       }
@@ -174,13 +175,16 @@ async function emailHtml(
 }
 
 /// Notifies [ctx.message]'s author of a fresh reaction/reply. False (sends
-/// nothing) for a notice, or a message whose author profile could not be
-/// loaded (deleted account). [changed] is reactionChange's verdict — a
-/// clear never gets here.
+/// nothing) for a notice, a message whose author profile could not be
+/// loaded (deleted account), or an author who may no longer read it — set
+/// as the kiosk, back to pending or moved to another alley ([isMemberOf],
+/// the rule the react function's mayReact applies): the reactor's name
+/// and reply must not reach an account the app would deny them to.
+/// [changed] is reactionChange's verdict — a clear never gets here.
 export async function deliverReaction(
   record: MessageRecipientRow,
   changed: { reaction: "up" | "down" | null; reply: string | null },
-  ctx: { message: MessageRow; author: Recipient | null; reactorName: string },
+  ctx: { message: MessageRow; author: (Recipient & Membership) | null; reactorName: string },
   send: (
     r: Recipient,
     title: string,
@@ -189,10 +193,22 @@ export async function deliverReaction(
   ) => Promise<Delivery>,
 ): Promise<boolean> {
   if (ctx.message.kind !== "message") return false;
-  if (ctx.author == null) return false;
+  const author = ctx.author;
+  if (author == null || !isMemberOf(author, ctx.message.tenant_id)) return false;
   const text = reactionText(ctx.reactorName, changed.reaction, changed.reply);
-  await send(ctx.author, text.title, text.body, {
-    data: { kind: "message_reaction", message_id: record.message_id },
+  await send(author, text.title, text.body, {
+    data: pushData("message_reaction", record.message_id, ctx.message.tenant_id),
   });
   return true;
+}
+
+/// A message push's `data`: what it is, which message, and its alley — so
+/// the app opens the message only while signed in to that alley (an
+/// account can move; a tap on an old push must not open a wrong one).
+function pushData(
+  kind: "message" | "notice" | "message_reaction",
+  messageId: string,
+  tenantId: string,
+): Record<string, string> {
+  return { kind, message_id: messageId, tenant_id: tenantId };
 }
