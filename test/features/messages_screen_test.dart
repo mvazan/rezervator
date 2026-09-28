@@ -215,7 +215,7 @@ void main() {
     testWidgets('shows a spinner before the first snapshot, then the message', (tester) async {
       await tester.pumpWidget(ProviderScope(
         overrides: overrides(messages: [received()], recipients: [recip('me')]),
-        child: MaterialApp(home: MessageDetailScreen('m1',
+        child: MaterialApp(home: MessageDetailScreen('m1', markRead: (_) async {},
             react: (_, _) async {}, reply: (_, _) async {})),
       ));
       // The first frame, before Stream.value has delivered anything: any
@@ -230,7 +230,7 @@ void main() {
         overrides: overrides(),
         child: MaterialApp(home: Scaffold(body: Builder(builder: (context) => TextButton(
           onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
-              builder: (_) => MessageDetailScreen('missing',
+              builder: (_) => MessageDetailScreen('missing', markRead: (_) async {},
                   react: (_, _) async {}, reply: (_, _) async {}))),
           child: const Text('open'),
         )))),
@@ -250,7 +250,7 @@ void main() {
       addTearDown(messages.close);
       await tester.pumpWidget(ProviderScope(
         overrides: overrides(messageStream: messages.stream, recipients: [recip('me')]),
-        child: MaterialApp(home: MessageDetailScreen('m1',
+        child: MaterialApp(home: MessageDetailScreen('m1', markRead: (_) async {},
             react: (_, _) async {}, reply: (_, _) async {})),
       ));
       messages.add(const []);
@@ -261,6 +261,76 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Přijďte dřív.'), findsOneWidget);
       expect(find.text('Zpráva už neexistuje.'), findsNothing);
+    });
+
+    testWidgets('a sent message opens expanded: names and replies without a tap',
+        (tester) async {
+      // A „Reakce na tvou zprávu“ push lands here; the reply that sent it
+      // must be on screen, not behind the tally.
+      await tester.pumpWidget(ProviderScope(
+        overrides: overrides(
+          messages: [received(authorId: 'me')],
+          recipients: [recip('p1', reaction: Reaction.up, reply: 'přijdu'), recip('p2')],
+          roster: const [PlayerName(id: 'p1', displayName: 'Petr'),
+              PlayerName(id: 'p2', displayName: 'Tomáš'),
+              PlayerName(id: 'me', displayName: 'Já Hráč')],
+        ),
+        child: MaterialApp(home: MessageDetailScreen('m1', markRead: (_) async {},
+            react: (_, _) async {}, reply: (_, _) async {})),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.text('1× 👍 · 1 bez reakce'), findsOneWidget);
+      expect(find.text('👍 Petr „přijdu“ · 1 bez reakce'), findsOneWidget);
+    });
+
+    testWidgets('opening marks my unread row read, once', (tester) async {
+      // Every push tap and e-mail link lands here, not on the list: the
+      // Zprávy badge and the Klubovna dot must drop without a detour.
+      final marked = <List<String>>[];
+      final messages = StreamController<List<Message>>();
+      addTearDown(messages.close);
+      await tester.pumpWidget(ProviderScope(
+        overrides: overrides(messageStream: messages.stream, recipients: [recip('me')]),
+        child: MaterialApp(home: MessageDetailScreen('m1',
+            markRead: (ids) async => marked.add(ids),
+            react: (_, _) async {}, reply: (_, _) async {})),
+      ));
+      messages.add([received()]);
+      await tester.pumpAndSettle();
+      // A second snapshot (the live one after the cache) rebuilds with the
+      // row still unread — the mock does not patch it — and asks nothing.
+      messages.add([received()]);
+      await tester.pumpAndSettle();
+      expect(marked, [['m1']]);
+    });
+
+    testWidgets('a message I sent marks nothing', (tester) async {
+      final marked = <List<String>>[];
+      await tester.pumpWidget(ProviderScope(
+        overrides: overrides(messages: [received(authorId: 'me')], recipients: [recip('p1')]),
+        child: MaterialApp(home: MessageDetailScreen('m1',
+            markRead: (ids) async => marked.add(ids),
+            react: (_, _) async {}, reply: (_, _) async {})),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.text('Přijďte dřív.'), findsOneWidget);
+      expect(marked, isEmpty);
+    });
+
+    testWidgets('a message already read marks nothing', (tester) async {
+      final marked = <List<String>>[];
+      await tester.pumpWidget(ProviderScope(
+        overrides: overrides(messages: [received()], recipients: [
+          MessageRecipient(messageId: 'm1', userId: 'me', readAt: DateTime(2026, 10, 1),
+              reaction: null, reply: null, reactedAt: null),
+        ]),
+        child: MaterialApp(home: MessageDetailScreen('m1',
+            markRead: (ids) async => marked.add(ids),
+            react: (_, _) async {}, reply: (_, _) async {})),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.text('Přijďte dřív.'), findsOneWidget);
+      expect(marked, isEmpty);
     });
   });
 }

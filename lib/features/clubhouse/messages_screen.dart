@@ -231,6 +231,7 @@ class LiveMessageTile extends ConsumerWidget {
     required this.react,
     required this.reply,
     this.onDeleted,
+    this.expanded = false,
   });
 
   final Message message;
@@ -246,6 +247,9 @@ class LiveMessageTile extends ConsumerWidget {
 
   /// Called after a confirmed, successful delete — the detail screen pops.
   final VoidCallback? onDeleted;
+
+  /// [MessageTile.initiallyExpanded]: true on the detail screen.
+  final bool expanded;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -280,6 +284,7 @@ class LiveMessageTile extends ConsumerWidget {
           : (text) => tryAction(context, () => reply(m.id, text),
               errorText: friendlyDbError),
       onDelete: mine ? () => _delete(context) : null,
+      initiallyExpanded: expanded,
     );
   }
 

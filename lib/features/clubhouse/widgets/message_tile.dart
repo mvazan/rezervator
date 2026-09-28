@@ -23,6 +23,7 @@ class MessageTile extends StatefulWidget {
     required this.onReact,
     required this.onReply,
     required this.onDelete,
+    this.initiallyExpanded = false,
   });
 
   final Message message;
@@ -57,6 +58,11 @@ class MessageTile extends StatefulWidget {
   /// Null when I may not delete it (not mine).
   final VoidCallback? onDelete;
 
+  /// Whether a sent message starts with its per-person list open — the
+  /// detail screen's, where a „Reakce na tvou zprávu“ push lands. Read
+  /// once: a tap still toggles it.
+  final bool initiallyExpanded;
+
   @override
   State<MessageTile> createState() => _MessageTileState();
 }
@@ -65,7 +71,7 @@ class _MessageTileState extends State<MessageTile> {
   /// Starts with the reply I already sent, so the field shows what the
   /// others see in the reaction line.
   late final _reply = TextEditingController(text: _myRow?.reply ?? '');
-  bool _expanded = false;
+  late bool _expanded = widget.initiallyExpanded;
 
   @override
   void dispose() {

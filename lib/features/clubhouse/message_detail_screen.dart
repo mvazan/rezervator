@@ -1,7 +1,8 @@
 /// The deep-link target for a push tap or an e-mail „Odpovědět v aplikaci“
-/// link (0051): one expanded [LiveMessageTile]. A spinner until the data
-/// has loaded; a missing id counts as gone only once it has stayed missing
-/// for [_goneAfter] — see [_MessageDetailScreenState._goneTimer].
+/// link (0051): one expanded [LiveMessageTile], marked read on open. A
+/// spinner until the data has loaded; a missing id counts as gone only
+/// once it has stayed missing for [_goneAfter] — see
+/// [_MessageDetailScreenState._goneTimer].
 library;
 
 import 'dart:async';
@@ -11,6 +12,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/ui.dart';
 import '../../data/providers.dart';
+import '../../domain/models.dart';
 import 'messages_screen.dart';
 
 /// How long an id may stay absent from the loaded messages before the
@@ -21,6 +23,7 @@ class MessageDetailScreen extends ConsumerStatefulWidget {
   const MessageDetailScreen(
     this.id, {
     super.key,
+    this.markRead = Api.markMessagesRead,
     this.react = Api.setReaction,
     this.reply = Api.setReply,
   });
@@ -29,6 +32,7 @@ class MessageDetailScreen extends ConsumerStatefulWidget {
   final String id;
 
   /// The own-row writes, injected like [MessagesScreen]'s.
+  final Future<void> Function(List<String> ids) markRead;
   final MessageReact react;
   final MessageReply reply;
 
@@ -48,6 +52,9 @@ class _MessageDetailScreenState extends ConsumerState<MessageDetailScreen> {
   /// again while the route animates away, and a second pop would eat the
   /// caller's route.
   bool _gone = false;
+
+  /// Asked [MessageDetailScreen.markRead] already — once per visit.
+  bool _markRequested = false;
 
   @override
   void dispose() {
@@ -88,12 +95,14 @@ class _MessageDetailScreenState extends ConsumerState<MessageDetailScreen> {
     }
     _goneTimer?.cancel();
     _goneTimer = null;
+    final myRow = mine.value!.where((r) => r.messageId == id).firstOrNull;
+    _markRead(myRow);
     return scaffold(
       ListView(
         children: [
           LiveMessageTile(
             message: m,
-            myRow: mine.value!.where((r) => r.messageId == id).firstOrNull,
+            myRow: myRow,
             names: {for (final p in players.value!) p.id: p.displayName},
             block: m.blockId == null
                 ? null
@@ -102,9 +111,28 @@ class _MessageDetailScreenState extends ConsumerState<MessageDetailScreen> {
             react: widget.react,
             reply: widget.reply,
             onDeleted: _leave,
+            // A „Reakce na tvou zprávu“ push lands on my own message: the
+            // reply that sent it shows without a tap on the tally.
+            expanded: true,
           ),
         ],
       ),
+    );
+  }
+
+  /// Marks the shown message read when I received it and my row is still
+  /// unread: every push tap and e-mail link lands here, not on the list,
+  /// so the Zprávy badge and the Klubovna dot would otherwise stay up. Once
+  /// per visit, after the frame (it writes to a stream this build
+  /// watches); bookkeeping, so no snack, and a failure waits for the next
+  /// open — as `MessagesScreen._markReceivedRead`. No row: I sent it.
+  void _markRead(MessageRecipient? myRow) {
+    if (_markRequested || myRow == null || myRow.readAt != null) return;
+    _markRequested = true;
+    final markRead = widget.markRead;
+    final ids = [widget.id];
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => markRead(ids).catchError((_) {}),
     );
   }
 
