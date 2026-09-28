@@ -22,12 +22,21 @@ Day keyDay(Message m) => m.onDate ?? Day.fromDateTime(m.createdAt.toLocal());
 /// [msgs] split by [keyDay] against [today]: today and ahead stay open
 /// (chronological), everything earlier moves to `older` (also
 /// chronological — the newest-of-the-old last, so "Starší" reads top to
-/// bottom like the rest of the list once expanded).
+/// bottom like the rest of the list once expanded). Within one key day in
+/// posting order, then by id: Dart's `List.sort` is not stable (a
+/// quicksort above 32 items), and the input is stream order anyway, so a
+/// correction could otherwise land above the message it corrects.
 ({List<Message> open, List<Message> older}) splitMessages(
   Iterable<Message> msgs,
   Day today,
 ) {
-  final sorted = [...msgs]..sort((a, b) => keyDay(a).compareTo(keyDay(b)));
+  final sorted = [...msgs]
+    ..sort((a, b) {
+      final byDay = keyDay(a).compareTo(keyDay(b));
+      if (byDay != 0) return byDay;
+      final byPosted = a.createdAt.compareTo(b.createdAt);
+      return byPosted != 0 ? byPosted : a.id.compareTo(b.id);
+    });
   return (
     open: [for (final m in sorted) if (!keyDay(m).isBefore(today)) m],
     older: [for (final m in sorted) if (keyDay(m).isBefore(today)) m],
@@ -35,13 +44,17 @@ Day keyDay(Message m) => m.onDate ?? Day.fromDateTime(m.createdAt.toLocal());
 }
 
 /// Notices split into active (not expired) and expired, oldest posted
-/// first in each group — the Nástěnka order.
+/// first in each group — the Nástěnka order (ties by id, see
+/// [splitMessages]).
 ({List<Message> active, List<Message> expired}) splitNotices(
   Iterable<Message> notices,
   DateTime now,
 ) {
   final sorted = [...notices]
-    ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    ..sort((a, b) {
+      final byPosted = a.createdAt.compareTo(b.createdAt);
+      return byPosted != 0 ? byPosted : a.id.compareTo(b.id);
+    });
   bool isExpired(Message m) =>
       m.expiresAt != null && !m.expiresAt!.isAfter(now);
   return (
@@ -50,9 +63,15 @@ Day keyDay(Message m) => m.onDate ?? Day.fromDateTime(m.createdAt.toLocal());
   );
 }
 
-/// How many recipients reacted 👍, 👎, or not at all.
+/// How many recipients reacted 👍, 👎, only replied, or not at all —
+/// every recipient in exactly one bucket, so the four add up to them all.
 class ReactionTally {
-  const ReactionTally({this.up = 0, this.down = 0, this.none = 0});
+  const ReactionTally({
+    this.up = 0,
+    this.down = 0,
+    this.none = 0,
+    this.replied = 0,
+  });
 
   final int up;
   final int down;
@@ -60,23 +79,28 @@ class ReactionTally {
   /// Neither a chip nor a reply — a reply alone is an answer.
   final int none;
 
+  /// A reply without a chip — the 💬 group of [reactionLine].
+  final int replied;
+
   @override
   bool operator ==(Object other) =>
       other is ReactionTally &&
       other.up == up &&
       other.down == down &&
-      other.none == none;
+      other.none == none &&
+      other.replied == replied;
 
   @override
-  int get hashCode => Object.hash(up, down, none);
+  int get hashCode => Object.hash(up, down, none, replied);
 
   @override
-  String toString() => 'ReactionTally(up: $up, down: $down, none: $none)';
+  String toString() =>
+      'ReactionTally(up: $up, down: $down, none: $none, replied: $replied)';
 }
 
 /// [recipients] counted by reaction — a sent message's summary.
 ReactionTally tally(Iterable<MessageRecipient> recipients) {
-  var up = 0, down = 0, none = 0;
+  var up = 0, down = 0, none = 0, replied = 0;
   for (final r in recipients) {
     switch (r.reaction) {
       case Reaction.up:
@@ -85,18 +109,25 @@ ReactionTally tally(Iterable<MessageRecipient> recipients) {
         down++;
       case null:
         // A reply without a chip is an answer, not "bez reakce".
-        if (!_hasReply(r)) none++;
+        if (_hasReply(r)) {
+          replied++;
+        } else {
+          none++;
+        }
     }
   }
-  return ReactionTally(up: up, down: down, none: none);
+  return ReactionTally(up: up, down: down, none: none, replied: replied);
 }
 
-/// „2× 👍 · 1× 👎 · 3 bez reakce“ — a sent message's summary. A zero count
-/// is left out entirely (never „0× 👎“); no clause at all when everybody
-/// reacted.
+/// „2× 👍 · 1× 👎 · 1× 💬 · 3 bez reakce“ — a sent message's summary, in
+/// [reactionLine]'s group order. A zero count is left out entirely (never
+/// „0× 👎“); no "bez reakce" clause when everybody answered. Empty only for
+/// no recipients at all — a reply alone still shows („1× 💬“), since the
+/// sent tile's tap target is this text.
 String tallyLabel(ReactionTally t) => [
       if (t.up > 0) '${t.up}× 👍',
       if (t.down > 0) '${t.down}× 👎',
+      if (t.replied > 0) '${t.replied}× 💬',
       if (t.none > 0) _noReaction(t.none),
     ].join(' · ');
 
@@ -238,39 +269,52 @@ String noticeFooter(Message m, DateTime now) {
 String seenLabel(int read, int total) => 'Zobrazilo $read z $total';
 
 /// Who a `duty`-audience message would reach right now: the assignees of
-/// the period covering [today], [meId] excluded. Empty when nobody serves
-/// today (or only I do) — the caller renders that as „Dnes nikdo
-/// neslouží“. The server additionally drops placeholders („hráč bez
-/// účtu“), which the app's assignments cannot tell apart; the server set
-/// is authoritative.
+/// the period covering [today], [meId] excluded, and — when [members] is
+/// given — only those in it. Empty when nobody serves today (or only I do,
+/// or only players without an account) — the caller renders that as „Dnes
+/// nikdo neslouží“.
+///
+/// [members] is the roster's ids with an account: `{for (final p in
+/// players) if (p.hasAccount) p.id}` over `playersProvider`. The `players`
+/// view already applies `message_send`'s member rule (approved, not the
+/// kiosk, not a visiting superadmin) and [PlayerName.hasAccount] drops the
+/// placeholders („hráč bez účtu“), so the set matches the server's. Null
+/// (the roster not loaded yet) filters nobody out; the server set stays
+/// authoritative either way.
 List<String> dutyRecipientIds(
   Iterable<DutyPeriod> periods,
   Iterable<DutyAssignment> assignments,
   String? meId,
-  Day today,
-) {
+  Day today, {
+  Set<String>? members,
+}) {
   final current = [for (final p in periods) if (p.covers(today)) p];
   if (current.isEmpty) return const [];
   final periodId = current.first.id;
   return [
     for (final a in assignments)
-      if (a.periodId == periodId && a.userId != meId) a.userId,
+      if (a.periodId == periodId &&
+          a.userId != meId &&
+          (members == null || members.contains(a.userId)))
+        a.userId,
   ];
 }
 
 /// Who a `day`/`block`-audience message would reach: players with a live
 /// reservation on [date] (any block, or [blockId] when given), [meId]
-/// excluded, each once — the set `message_send` computes server-side, so
-/// the staff composer can preview it before sending. The server
-/// additionally drops placeholders („hráč bez účtu“); the roster the app
-/// has (`players` view) carries no placeholder flag, so the preview may
-/// count one more than the server delivers to. The server set is
-/// authoritative.
+/// excluded, each once, and — when [members] is given — only those in it:
+/// the set `message_send` computes server-side, so the staff composer can
+/// preview it before sending. [members] is the same roster set as for
+/// [dutyRecipientIds] (ids with an account, from `playersProvider`), which
+/// leaves out a placeholder's booking („hráč bez účtu“) just as the server
+/// does; null (the roster not loaded yet) filters nobody out. The server
+/// set is authoritative.
 List<String> dayRecipientIds(
   Iterable<Reservation> reservations, {
   required Day date,
   String? blockId,
   String? meId,
+  Set<String>? members,
 }) {
   final seen = <String>{};
   return [
@@ -279,6 +323,7 @@ List<String> dayRecipientIds(
           r.date == date &&
           (blockId == null || r.blockId == blockId) &&
           r.playerId != meId &&
+          (members == null || members.contains(r.playerId)) &&
           seen.add(r.playerId))
         r.playerId,
   ];

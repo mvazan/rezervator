@@ -24,6 +24,11 @@ const cacheKeyVenues = 'venues';
 const cacheKeyMessages = 'messages';
 const cacheKeyMessageRecipients = 'message_recipients';
 
+/// One message's recipient rows (`messageParticipantsProvider`) — per
+/// message, like `match_player_results:{id}`.
+String cacheKeyMessageParticipants(String messageId) =>
+    'message_recipients:$messageId';
+
 /// Tiny JSON row cache behind the offline read-only mode: every data stream
 /// writes its latest rows here and replays them as its first emission on the
 /// next launch, so a signed-in user with no network still sees the last

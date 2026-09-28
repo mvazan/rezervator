@@ -144,8 +144,12 @@ void main() {
               count('messages');
               return Stream.value(const <Message>[]);
             }),
-            messageRecipientsProvider.overrideWith((ref) {
+            myMessageRecipientsProvider.overrideWith((ref) {
               count('recipients');
+              return Stream.value(const <MessageRecipient>[]);
+            }),
+            messageParticipantsProvider('m1').overrideWith((ref) {
+              count('participants');
               return Stream.value(const <MessageRecipient>[]);
             }),
           ],
@@ -153,7 +157,8 @@ void main() {
             home: Consumer(
               builder: (context, ref, _) {
                 ref.watch(messagesProvider);
-                ref.watch(messageRecipientsProvider);
+                ref.watch(myMessageRecipientsProvider);
+                ref.watch(messageParticipantsProvider('m1'));
                 return TextButton(
                   onPressed: () => resetTenantScopedProviders(ref),
                   child: const Text('Přepnout kuželnu'),
@@ -164,12 +169,12 @@ void main() {
         ),
       );
       await tester.pump();
-      expect(builds, {'messages': 1, 'recipients': 1});
+      expect(builds, {'messages': 1, 'recipients': 1, 'participants': 1});
 
       await tester.tap(find.text('Přepnout kuželnu'));
       await tester.pump();
 
-      expect(builds, {'messages': 2, 'recipients': 2});
+      expect(builds, {'messages': 2, 'recipients': 2, 'participants': 2});
     },
   );
 

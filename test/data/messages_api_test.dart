@@ -1,8 +1,12 @@
 import 'dart:convert';
 
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/misc.dart' show ProviderListenable;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:rezervator/data/cache.dart';
+import 'package:rezervator/data/optimistic.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -125,12 +129,94 @@ void main() {
     expect(rpcCall('message_delete'), {'p_id': 'm1'});
   });
 
-  // setReaction/setReply/markMessagesRead read `currentUserId`, and this
-  // MockClient has no session — their optimistic patch is covered in
-  // test/data/optimistic_test.dart and the JSON they send here:
   test('reactionToJson maps the enum to the CHECK values', () {
     expect(reactionToJson(Reaction.up), 'up');
     expect(reactionToJson(Reaction.down), 'down');
     expect(reactionToJson(null), isNull);
+  });
+
+  // Last in the file: the session stays for the rest of the isolate.
+  group('signed in', () {
+    const uid = '11111111-1111-1111-1111-111111111111';
+
+    setUpAll(() async {
+      String b64(Map<String, Object> json) =>
+          base64Url.encode(utf8.encode(jsonEncode(json))).replaceAll('=', '');
+      final exp = DateTime.now().add(const Duration(hours: 1));
+      final jwt = '${b64({'alg': 'HS256', 'typ': 'JWT'})}.'
+          '${b64({'sub': uid, 'role': 'authenticated', 'exp': exp.millisecondsSinceEpoch ~/ 1000})}'
+          '.sig';
+      await Supabase.instance.client.auth.recoverSession(jsonEncode({
+        'access_token': jwt,
+        'token_type': 'bearer',
+        'expires_in': 3600,
+        'refresh_token': 'r',
+        'user': {'id': uid, 'aud': 'authenticated', 'created_at': '2026-01-01'},
+      }));
+      expect(currentUserId, uid);
+    });
+
+    /// The first GET on `/rest/v1/[table]` once [provider]'s stream has
+    /// fetched its snapshot — PostgREST caps an unfiltered one at max rows.
+    Future<http.Request> snapshotFetch(
+        ProviderListenable<Object?> provider, String table) async {
+      final container = ProviderContainer();
+      final sub = container.listen(provider, (_, _) {});
+      try {
+        for (var i = 0; i < 100; i++) {
+          final hit = requests.where(
+              (r) => r.method == 'GET' && r.url.path == '/rest/v1/$table');
+          if (hit.isNotEmpty) return hit.first;
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+        }
+        fail('no snapshot fetch of $table');
+      } finally {
+        sub.close();
+        container.dispose();
+      }
+    }
+
+
+    test('my recipient rows: only mine, never every row I may read', () async {
+      final get = await snapshotFetch(myMessageRecipientsProvider, 'message_recipients');
+      expect(get.url.queryParameters['user_id'], 'eq.$uid');
+      expect(get.url.queryParameters.containsKey('message_id'), isFalse);
+    });
+
+    test("one message's participants: that message's rows only", () async {
+      final get = await snapshotFetch(
+          messageParticipantsProvider('m1'), 'message_recipients');
+      expect(get.url.queryParameters['message_id'], 'eq.m1');
+      expect(get.url.queryParameters.containsKey('user_id'), isFalse);
+    });
+
+    /// My row on m1 as both overlays see it after [write] succeeded (the
+    /// confirmed patch stays until the stream's next delivery).
+    Future<List<Map<String, dynamic>>> overlays(Future<void> Function() write) async {
+      await write();
+      final row = {'message_id': 'm1', 'user_id': uid, 'reaction': null, 'reply': null};
+      final other = {'message_id': 'm1', 'user_id': 'petr', 'reaction': 'down', 'reply': null};
+      return [
+        applyPending(uid, cacheKeyMessageRecipients, [row]).single,
+        ...applyPending(uid, cacheKeyMessageParticipants('m1'), [other, row]),
+      ];
+    }
+
+    test('setReaction patches my row, in my rows and in the reaction line', () async {
+      final seen = await overlays(() => Api.setReaction('m1', Reaction.up));
+      final patch = requests.singleWhere((r) => r.method == 'PATCH');
+      expect(patch.url.path, '/rest/v1/message_recipients');
+      expect(patch.url.queryParameters['message_id'], 'eq.m1');
+      expect(patch.url.queryParameters['user_id'], 'eq.$uid');
+      expect(jsonDecode(patch.body), {'reaction': 'up'});
+      expect([for (final r in seen) r['reaction']], ['up', 'down', 'up']);
+    });
+
+    test('setReply trims, and patches both overlays too', () async {
+      final seen = await overlays(() => Api.setReply('m1', '  nestihnu '));
+      final patch = requests.singleWhere((r) => r.method == 'PATCH');
+      expect(jsonDecode(patch.body), {'reply': 'nestihnu'});
+      expect([for (final r in seen) r['reply']], ['nestihnu', null, 'nestihnu']);
+    });
   });
 }

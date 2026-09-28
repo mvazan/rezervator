@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/domain/messages.dart';
 import 'package:rezervator/domain/models.dart';
@@ -36,6 +38,7 @@ void main() {
     String? blockId = 'b1',
     String authorId = 'staff',
     MessageAuthorRole authorRole = MessageAuthorRole.player,
+    DateTime? createdAt,
   }) =>
       Message(
         id: id,
@@ -49,8 +52,8 @@ void main() {
         body: 'Přijďte dřív.',
         expiresAt: null,
         notify: true,
-        createdAt: DateTime(2026, 10, 1),
-        updatedAt: DateTime(2026, 10, 1),
+        createdAt: createdAt ?? DateTime(2026, 10, 1),
+        updatedAt: createdAt ?? DateTime(2026, 10, 1),
       );
 
   MessageRecipient recipient(
@@ -78,6 +81,34 @@ void main() {
       expect(split.open.map((m) => m.id), ['m1', 'm2']);
       expect(split.older.map((m) => m.id), ['m3']);
     });
+
+    test('same key day: posting order, however many (sort is not stable)', () {
+      // Above 32 elements Dart's List.sort is a quicksort, so equal keys
+      // come out in any order unless the comparator breaks the tie.
+      final today = Day(2026, 10, 2);
+      final ordered = [
+        for (var i = 0; i < 40; i++)
+          message(
+            id: 'm${i.toString().padLeft(2, '0')}',
+            onDate: i.isEven ? today : today.addDays(1),
+            createdAt: DateTime(2026, 9, 1).add(Duration(minutes: i)),
+          ),
+      ];
+      final shuffled = [...ordered]..shuffle(Random(7));
+      final split = splitMessages(shuffled, today);
+      expect(split.open.map((m) => m.id), [
+        for (final m in ordered) if (m.onDate == today) m.id,
+        for (final m in ordered) if (m.onDate != today) m.id,
+      ]);
+    });
+
+    test('same key day and same posting time: by id', () {
+      final today = Day(2026, 10, 2);
+      final split = splitMessages(
+          [for (final id in ['c', 'a', 'b']) message(id: id, onDate: today)],
+          today);
+      expect(split.open.map((m) => m.id), ['a', 'b', 'c']);
+    });
   });
 
   group('splitNotices', () {
@@ -91,6 +122,12 @@ void main() {
       final split = splitNotices([expired, active2, active1], now);
       expect(split.active.map((m) => m.id), ['a1', 'a2']);
       expect(split.expired.map((m) => m.id), ['e1']);
+    });
+
+    test('same posting time: by id', () {
+      final split = splitNotices(
+          [for (final id in ['c', 'a', 'b']) notice(id: id)], DateTime(2026, 10, 2));
+      expect(split.active.map((m) => m.id), ['a', 'b', 'c']);
     });
   });
 
@@ -109,6 +146,24 @@ void main() {
     test('all reacted: no "bez reakce" clause', () {
       final t = tally([recipient('p1', reaction: Reaction.up)]);
       expect(tallyLabel(t), '1× 👍');
+    });
+
+    test('a reply without a chip counts as 💬, so the label is never empty', () {
+      final t = tally([recipient('p1', reply: 'Ok, díky')]);
+      expect(t, const ReactionTally(replied: 1));
+      expect(tallyLabel(t), '1× 💬');
+    });
+
+    test('every recipient counted once, in the reaction line\'s order', () {
+      final t = tally([
+        recipient('p1', reaction: Reaction.up),
+        recipient('p2', reaction: Reaction.down, reply: 'nestihnu'),
+        recipient('p3', reply: 'Přijdu.'),
+        recipient('p4', reply: 'Taky.'),
+        recipient('p5'),
+      ]);
+      expect(t, const ReactionTally(up: 1, down: 1, replied: 2, none: 1));
+      expect(tallyLabel(t), '1× 👍 · 1× 👎 · 2× 💬 · 1 bez reakce');
     });
   });
 
@@ -136,7 +191,7 @@ void main() {
       );
       expect(line, '💬 Petr Novák „Přijdu.“ · 1 bez reakce');
       expect(tally([recipient('petr', reply: 'Přijdu.'), recipient('cenek')]),
-          const ReactionTally(up: 0, down: 0, none: 1));
+          const ReactionTally(up: 0, down: 0, none: 1, replied: 1));
     });
   });
 
@@ -299,6 +354,21 @@ void main() {
         isEmpty,
       );
     });
+
+    test('only members: a placeholder on duty is nobody to write to', () {
+      const withEmil = [
+        DutyAssignment(periodId: 'p1', userId: 'me'),
+        DutyAssignment(periodId: 'p1', userId: 'emil'),
+      ];
+      final today = Day(2026, 10, 2);
+      // `members` = the roster's ids with an account; Emil is „hráč bez účtu“.
+      expect(dutyRecipientIds(periods, withEmil, 'me', today, members: {'me', 'bara'}),
+          isEmpty);
+      expect(dutyRecipientIds(periods, assignments, 'me', today, members: {'me', 'bara'}),
+          ['bara']);
+      // No roster yet: nobody filtered out, the server decides.
+      expect(dutyRecipientIds(periods, withEmil, 'me', today), ['emil']);
+    });
   });
 
   group('dayRecipientIds', () {
@@ -325,6 +395,17 @@ void main() {
 
     test('one block', () {
       expect(dayRecipientIds(reservations, date: day, blockId: 'b1', meId: 'me'), ['jan']);
+    });
+
+    test('only members: a block booked by placeholders alone reaches nobody', () {
+      // `members` = the roster's ids with an account; Jan is „hráč bez účtu“.
+      const members = {'me', 'petra', 'zrusil', 'jinde'};
+      expect(
+          dayRecipientIds(reservations, date: day, blockId: 'b1', meId: 'me',
+              members: members),
+          isEmpty);
+      expect(dayRecipientIds(reservations, date: day, meId: 'me', members: members),
+          ['petra']);
     });
   });
 

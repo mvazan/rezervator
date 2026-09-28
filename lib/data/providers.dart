@@ -161,11 +161,20 @@ final messagesProvider = StreamProvider<List<Message>>((ref) {
       .map((rows) => rows.map(Message.fromJson).toList());
 });
 
-/// Every `message_recipients` row the caller may read (0051): every
-/// participant's row on a message I'm part of, my own row on every notice.
-/// Written only through [Api.markMessagesRead]/[Api.setReaction]/
-/// [Api.setReply].
-final messageRecipientsProvider =
+/// My own `message_recipients` rows (0051): one per notice and per message
+/// I received — read state, my reaction and my reply. The badges
+/// ([unreadCountsProvider]) and my own chips/reply field read this; the
+/// other participants' rows are per message, [messageParticipantsProvider].
+///
+/// Deliberately not "every row I may read": supabase's `.stream()` fetches
+/// its snapshot in ONE unpaginated select, and PostgREST cuts that at max
+/// rows (1000, local and hosted). An admin may read every row of every
+/// notice (40 members × 100 notices ≈ 4000, never pruned), so one such
+/// stream would silently drop rows — and with them unread badges, seen
+/// counts and reactions. Mine stay one per message: bounded by the notices
+/// plus 90 days of messages. Written only through [Api.markMessagesRead]/
+/// [Api.setReaction]/[Api.setReply].
+final myMessageRecipientsProvider =
     StreamProvider<List<MessageRecipient>>((ref) {
   final uid = ref.watch(_authUidProvider);
   if (uid == null) return Stream.value(const []);
@@ -174,7 +183,33 @@ final messageRecipientsProvider =
           cacheKeyMessageRecipients,
           () => _db
               .from('message_recipients')
-              .stream(primaryKey: ['message_id', 'user_id']))
+              .stream(primaryKey: ['message_id', 'user_id'])
+              .eq('user_id', uid))
+      .map((rows) => rows.map(MessageRecipient.fromJson).toList());
+});
+
+/// Every recipient row of one message or notice (0051) that RLS lets me
+/// read: a message's rows for its author and its recipients (the reaction
+/// line, the sent tally and its per-person list, the detail screen), a
+/// notice's rows for the admin („Kdo si to zobrazil“, the „12 z 40“ in the
+/// card footer; a player gets only their own row). One stream per message
+/// keeps each snapshot far below PostgREST's max rows (see
+/// [myMessageRecipientsProvider]). autoDispose, like
+/// [matchPlayerResultsProvider]: watch it from the tile or sheet that
+/// shows it, so only what is on screen holds a realtime channel. My own
+/// reaction/reply shows here at once: [Api.setReaction]/[Api.setReply]
+/// patch this overlay too.
+final messageParticipantsProvider = StreamProvider.autoDispose
+    .family<List<MessageRecipient>, String>((ref, messageId) {
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return Stream.value(const []);
+  return cachedRows(
+          uid,
+          cacheKeyMessageParticipants(messageId),
+          () => _db
+              .from('message_recipients')
+              .stream(primaryKey: ['message_id', 'user_id'])
+              .eq('message_id', messageId))
       .map((rows) => rows.map(MessageRecipient.fromJson).toList());
 });
 
@@ -183,7 +218,7 @@ final messageRecipientsProvider =
 final unreadCountsProvider = Provider<({int messages, int notices})>((ref) {
   final me = ref.watch(myProfileProvider.select((p) => p.value?.id));
   final all = ref.watch(messagesProvider).value ?? const [];
-  final mine = ref.watch(messageRecipientsProvider).value ?? const [];
+  final mine = ref.watch(myMessageRecipientsProvider).value ?? const [];
   final now = ref.watch(nowProvider).value ?? DateTime.now();
   return unreadCounts(all: all, mine: mine, meId: me, now: now);
 });
@@ -1531,7 +1566,9 @@ class Api {
 
   /// Marks [ids] read for the signed-in player — own-row UPDATE (the
   /// column grant allows `read_at`), optimistic: the badges drop at once.
-  /// Rows already read keep their first `read_at`.
+  /// Rows already read keep their first `read_at`. Only my rows' overlay:
+  /// an admin's seen count ([messageParticipantsProvider]) picks my
+  /// `read_at` up from the server's echo — nothing needs it instantly.
   static Future<void> markMessagesRead(Iterable<String> ids) {
     final idList = ids.toSet().toList();
     if (idList.isEmpty) return Future.value();
@@ -1560,36 +1597,43 @@ class Api {
 
   /// Sets ([reaction]) or clears (null) my 👍/👎 on [messageId] — own-row
   /// UPDATE, optimistic; `reacted_at` is stamped server-side.
-  static Future<void> setReaction(String messageId, Reaction? reaction) {
-    final uid = currentUserId!;
-    final value = reactionToJson(reaction);
-    return optimisticWrite(
-      uid,
-      cacheKeyMessageRecipients,
-      patchMessageRecipient(messageId, uid, {'reaction': value}),
-      () => _db
-          .from('message_recipients')
-          .update({'reaction': value})
-          .eq('message_id', messageId)
-          .eq('user_id', uid),
-    );
-  }
+  static Future<void> setReaction(String messageId, Reaction? reaction) =>
+      _updateMyRecipientRow(
+          messageId, {'reaction': reactionToJson(reaction)});
 
   /// Sets my short reply on [messageId] (at most 200 characters, trimmed;
   /// blank clears it) — own-row UPDATE, optimistic.
   static Future<void> setReply(String messageId, String reply) {
-    final uid = currentUserId!;
     final trimmed = reply.trim();
-    final value = trimmed.isEmpty ? null : trimmed;
+    return _updateMyRecipientRow(
+        messageId, {'reply': trimmed.isEmpty ? null : trimmed});
+  }
+
+  /// Writes [fields] to my own row on [messageId], optimistically in both
+  /// streams that show it: my rows ([myMessageRecipientsProvider] — my
+  /// chips) and the message's participants ([messageParticipantsProvider]
+  /// — „👍 Petra, ty“). Nested, so a failure rolls both back and the error
+  /// still reaches the caller once.
+  static Future<void> _updateMyRecipientRow(
+    String messageId,
+    Map<String, dynamic> fields,
+  ) {
+    final uid = currentUserId!;
+    final patch = patchMessageRecipient(messageId, uid, fields);
     return optimisticWrite(
       uid,
       cacheKeyMessageRecipients,
-      patchMessageRecipient(messageId, uid, {'reply': value}),
-      () => _db
-          .from('message_recipients')
-          .update({'reply': value})
-          .eq('message_id', messageId)
-          .eq('user_id', uid),
+      patch,
+      () => optimisticWrite(
+        uid,
+        cacheKeyMessageParticipants(messageId),
+        patch,
+        () => _db
+            .from('message_recipients')
+            .update(fields)
+            .eq('message_id', messageId)
+            .eq('user_id', uid),
+      ),
     );
   }
 
@@ -2014,7 +2058,8 @@ void resetTenantScopedProviders(WidgetRef ref) {
   ref.invalidate(dutySeasonsProvider);
   ref.invalidate(myDutyProvider);
   ref.invalidate(messagesProvider);
-  ref.invalidate(messageRecipientsProvider);
+  ref.invalidate(myMessageRecipientsProvider);
+  ref.invalidate(messageParticipantsProvider);
   ref.invalidate(playersProvider);
   ref.invalidate(contactsProvider);
   ref.invalidate(tenantsProvider);
