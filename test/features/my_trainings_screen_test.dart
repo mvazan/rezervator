@@ -655,6 +655,57 @@ void main() {
     expect(find.text('Napsat službě…'), findsOneWidget);
   });
 
+  Future<void> cancelDialogFits(
+    WidgetTester tester,
+    Size size,
+    double scale,
+  ) async {
+    tester.view.physicalSize = size;
+    tester.view.devicePixelRatio = 1.0;
+    tester.platformDispatcher.textScaleFactorTestValue = scale;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    final cancelled = <String>[];
+    await tester.pumpWidget(
+      app(
+        reservations: [res('r1', today.addDays(1))],
+        cancel: (id) async => cancelled.add(id),
+        dutyPeriods: [
+          DutyPeriod(id: 'd1', startsOn: today, endsOn: today.addDays(6)),
+        ],
+        dutyAssignments: const [DutyAssignment(periodId: 'd1', userId: 'bara')],
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('18:00–19:00 · Dráha 2'));
+    await tester.pumpAndSettle();
+    expect(find.text('Napsat službě…'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.ensureVisible(find.text('Zrušit rezervaci'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Zrušit rezervaci'));
+    await tester.pumpAndSettle();
+    expect(cancelled, ['r1']);
+  }
+
+  // Four actions stack vertically on a narrow screen; without a scrollable
+  // dialog the bottom one — the primary cancel — overflows: at the app's
+  // „largest“ 1.3 on a small landscape phone, and at AppTextScaler's 2.0
+  // cap on a wider one (the calendar opens it from the landscape week
+  // board too).
+  for (final (size, scale) in const [
+    (Size(640, 360), 1.3),
+    (Size(800, 360), 2.0),
+  ]) {
+    testWidgets('the four-action cancel dialog fits ${size.width.toInt()}×'
+        '${size.height.toInt()} at text ×$scale, and its „Zrušit rezervaci“ '
+        'still cancels', (tester) async {
+      await cancelDialogFits(tester, size, scale);
+    });
+  }
+
   testWidgets('„Napsat správci…“ closes the dialog and opens the composer', (
     tester,
   ) async {

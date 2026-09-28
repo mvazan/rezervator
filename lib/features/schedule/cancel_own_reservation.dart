@@ -32,6 +32,11 @@ Future<void> confirmCancelOwnReservation(
   final choice = await showDialog<_Choice>(
     context: context,
     builder: (dialogContext) => AlertDialog(
+      // Up to four actions stack vertically on a narrow screen; at large
+      // text (the app's „largest“ 1.3, up to 2.0 system-wide) they outgrow
+      // a landscape phone and the bottom one — the primary cancel — would
+      // be clipped. Scrolling keeps every action reachable (as BlockDialog).
+      scrollable: true,
       title: const Text('Zrušit rezervaci?'),
       content: Text(
         '${dayFull(reservation.date)} · ${block.label} · '
