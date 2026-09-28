@@ -9683,4 +9683,49 @@ delete from messages
  where tenant_id in ('00000000-0000-0000-0000-000000000050',
                      '00000000-0000-0000-0000-000000000051');
 
+-- 23w. Running 0051 a second time leaves every privilege as the first run
+-- left it, down to the order of the ACL entries. pg_dump writes a table's
+-- GRANTs in ACL order, and CI diffs a dump of a database built once from
+-- the migrations against supabase/schema.sql, which comes from a local
+-- database that has seen the migration more than once. A revoke followed by
+-- a grant back moves that grantee to the end of the ACL, so a grant block
+-- that adds another grantee after it on the first run orders the two one
+-- way on a fresh build and the other way from the second run on.
+create temp view acl_0051 as
+  select c.relname::text as obj, c.relacl::text as acl
+    from pg_class c
+   where c.oid in ('public.messages'::regclass, 'public.message_recipients'::regclass)
+  union all
+  select a.attrelid::regclass || '.' || a.attname, a.attacl::text
+    from pg_attribute a
+   where a.attrelid in ('public.messages'::regclass, 'public.message_recipients'::regclass)
+     and a.attnum > 0 and not a.attisdropped
+  union all
+  select p.oid::regprocedure::text, p.proacl::text
+    from pg_proc p
+   where p.pronamespace = 'public'::regnamespace
+     and p.proname in ('message_recipients_stamp_reacted', 'can_read_message',
+                       'visible_message_ids', 'visible_recipient_message_ids',
+                       'message_send', 'message_update', 'message_delete',
+                       'prune_messages');
+create temp table acl_0051_before as select * from acl_0051;
+set client_min_messages = warning;
+\ir ../migrations/0051_messages.sql
+reset client_min_messages;
+do $$
+declare
+  v_bad text;
+begin
+  select string_agg(coalesce(b.obj, a.obj) || ': ' || coalesce(b.acl, '(default)')
+                    || ' -> ' || coalesce(a.acl, '(default)'), '; ' order by coalesce(b.obj, a.obj))
+    into v_bad
+    from acl_0051_before b
+    full join acl_0051 a on a.obj = b.obj
+   where a.obj is null or b.obj is null or a.acl is distinct from b.acl;
+  if v_bad is not null then
+    raise exception 'FAIL: running 0051 again changed privileges (the schema snapshot would differ from a fresh build): %', v_bad;
+  end if;
+  raise notice 'OK: running 0051 again leaves every privilege and its ACL order as it was (0051)';
+end $$;
+
 rollback;

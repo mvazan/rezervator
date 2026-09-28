@@ -204,10 +204,14 @@ create policy message_recipients_update_own on message_recipients
   using (user_id = auth.uid() and is_approved() and not is_kiosk())
   with check (user_id = auth.uid() and is_approved() and not is_kiosk());
 
+-- service_role first: pg_dump writes GRANTs in ACL order, and a revoke +
+-- grant back moves authenticated to the end of it, so granting it before
+-- service_role would order a fresh build (CI) unlike a second run (the
+-- local database schema.sql is dumped from).
 revoke all on messages, message_recipients from anon, authenticated;
+grant all on messages, message_recipients to service_role;
 grant select on messages, message_recipients to authenticated;
 grant update (read_at, reaction, reply) on message_recipients to authenticated;
-grant all on messages, message_recipients to service_role;
 
 -- ------------------------------------------------------------- Realtime
 do $$
