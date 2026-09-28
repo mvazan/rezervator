@@ -1559,6 +1559,22 @@ class Api {
         'p_expires_at': expiresAt?.toUtc().toIso8601String(),
       });
 
+  /// Whether [id] is a message or notice I may still read: the same
+  /// RLS-scoped table [messagesProvider] streams, asked by
+  /// `MessageDetailScreen` when its (possibly cached) snapshot lacks the
+  /// id. Throws when offline. An id that is no uuid at all (a garbled
+  /// link) is simply gone — Postgres would reject it with 22P02.
+  static Future<bool> messageExists(String id) async {
+    if (!_uuidShape.hasMatch(id)) return false;
+    final row =
+        await _db.from('messages').select('id').eq('id', id).maybeSingle();
+    return row != null;
+  }
+
+  static final _uuidShape = RegExp(
+      r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+      caseSensitive: false);
+
   /// Deletes a message or notice I sent, or (admin) any of the alley's;
   /// its recipient rows go with it. `unknown_message`/`not_allowed`.
   static Future<void> messageDelete(String id) =>

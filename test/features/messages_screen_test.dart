@@ -212,6 +212,18 @@ void main() {
   });
 
   group('MessageDetailScreen', () {
+    // A caller page whose „open“ pushes [detail]: the route every gone
+    // path must land back on.
+    Widget caller(List<Override> overrides, Widget Function() detail) =>
+        ProviderScope(
+          overrides: overrides,
+          child: MaterialApp(home: Scaffold(body: Builder(builder: (context) => TextButton(
+            onPressed: () => Navigator.of(context)
+                .push(MaterialPageRoute<void>(builder: (_) => detail())),
+            child: const Text('open'),
+          )))),
+        );
+
     testWidgets('shows a spinner before the first snapshot, then the message', (tester) async {
       await tester.pumpWidget(ProviderScope(
         overrides: overrides(messages: [received()], recipients: [recip('me')]),
@@ -225,42 +237,72 @@ void main() {
       expect(find.text('Přijďte dřív.'), findsOneWidget);
     });
 
-    testWidgets('an id absent from the data pops once, with a snack', (tester) async {
-      await tester.pumpWidget(ProviderScope(
-        overrides: overrides(),
-        child: MaterialApp(home: Scaffold(body: Builder(builder: (context) => TextButton(
-          onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
-              builder: (_) => MessageDetailScreen('missing', markRead: (_) async {},
-                  react: (_, _) async {}, reply: (_, _) async {}))),
-          child: const Text('open'),
-        )))),
-      ));
+    testWidgets('an id the server no longer has pops once, with a snack', (tester) async {
+      final asked = <String>[];
+      await tester.pumpWidget(caller(overrides(), () => MessageDetailScreen('missing',
+          markRead: (_) async {}, react: (_, _) async {}, reply: (_, _) async {},
+          messageExists: (id) async { asked.add(id); return false; })));
       await tester.tap(find.text('open'));
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(); // the snapshot is in, the id is not: ask
+      await tester.pump(); // the answer: gone
+      await tester.pump(const Duration(seconds: 1)); // no 5 s wait
+      expect(asked, ['missing']);
       expect(find.text('Zpráva už neexistuje.'), findsOneWidget);
       expect(find.text('open'), findsOneWidget); // back on the caller
       expect(find.byType(MessageDetailScreen), findsNothing);
     });
 
-    testWidgets('a stale first snapshot (the cache replay) is not taken for "gone"',
-        (tester) async {
+    testWidgets('a snapshot without the id, but the server has it: spins until '
+        'the stream catches up, however long', (tester) async {
       // cachedRows replays the cache first; the message a push was sent
-      // for is usually newer than it and arrives with the live snapshot.
+      // for is usually newer than it and arrives with the live snapshot —
+      // on a poor network well after 5 s.
+      final asked = <String>[];
       final messages = StreamController<List<Message>>();
-      addTearDown(messages.close);
+      addTearDown(() => unawaited(messages.close()));
       await tester.pumpWidget(ProviderScope(
         overrides: overrides(messageStream: messages.stream, recipients: [recip('me')]),
         child: MaterialApp(home: MessageDetailScreen('m1', markRead: (_) async {},
-            react: (_, _) async {}, reply: (_, _) async {})),
+            react: (_, _) async {}, reply: (_, _) async {},
+            messageExists: (id) async { asked.add(id); return true; })),
       ));
       messages.add(const []);
       await tester.pump();
-      await tester.pump(const Duration(seconds: 1));
+      await tester.pump(const Duration(seconds: 6));
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      expect(find.text('Zpráva už neexistuje.'), findsNothing);
       messages.add([received()]);
       await tester.pumpAndSettle();
       expect(find.text('Přijďte dřív.'), findsOneWidget);
       expect(find.text('Zpráva už neexistuje.'), findsNothing);
+      expect(asked, ['m1']);
+    });
+
+    testWidgets('the server cannot be asked (offline): „Zkusit znovu“, not '
+        '"gone"', (tester) async {
+      // A push tap offline with a stale cache: the cache is all the stream
+      // gives, and it cannot tell "gone" from "not synced yet".
+      final answers = <Future<bool> Function()>[
+        () async => throw Exception('SocketException: Failed host lookup'),
+        () async => false,
+      ];
+      await tester.pumpWidget(caller(overrides(), () => MessageDetailScreen('m1',
+          markRead: (_) async {}, react: (_, _) async {}, reply: (_, _) async {},
+          messageExists: (_) => answers.removeAt(0)())));
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      expect(find.text('Jsi offline — zkus to znovu po připojení.'), findsOneWidget);
+      expect(find.text('Zkusit znovu'), findsOneWidget);
+      expect(find.text('Zpráva už neexistuje.'), findsNothing);
+      expect(find.byType(MessageDetailScreen), findsOneWidget);
+      // Back online: the retry asks again, and now it is gone for real.
+      await tester.tap(find.text('Zkusit znovu'));
+      await tester.pumpAndSettle();
+      expect(answers, isEmpty);
+      expect(find.text('Zpráva už neexistuje.'), findsOneWidget);
+      expect(find.byType(MessageDetailScreen), findsNothing);
+      expect(find.text('open'), findsOneWidget);
     });
 
     testWidgets('a sent message opens expanded: names and replies without a tap',
@@ -315,6 +357,66 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Přijďte dřív.'), findsOneWidget);
       expect(marked, isEmpty);
+    });
+
+    testWidgets('gone with its own ⋮ → Smazat dialog open: the dialog and the '
+        'detail go, back on the caller', (tester) async {
+      // Deleted elsewhere (another device, an admin, the prune) while the
+      // author has „Smazat zprávu?“ up: popping whatever is on top would
+      // close the dialog and leave a blank „Zpráva“ page behind.
+      final messages = StreamController<List<Message>>();
+      addTearDown(() => unawaited(messages.close())); // never awaits a paused listener
+      await tester.pumpWidget(caller(
+        overrides(messageStream: messages.stream, recipients: [recip('p1')]),
+        () => MessageDetailScreen('m1', markRead: (_) async {},
+            react: (_, _) async {}, reply: (_, _) async {},
+            messageExists: (_) async => false),
+      ));
+      await tester.tap(find.text('open'));
+      await tester.pump();
+      messages.add([received(authorId: 'me')]);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(PopupMenuButton<String>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Smazat'));
+      await tester.pumpAndSettle();
+      expect(find.text('Smazat zprávu?'), findsOneWidget);
+      messages.add(const []);
+      await tester.pumpAndSettle();
+      expect(find.text('Zpráva už neexistuje.'), findsOneWidget);
+      expect(find.text('Smazat zprávu?'), findsNothing);
+      expect(find.byType(MessageDetailScreen), findsNothing);
+      expect(find.text('open'), findsOneWidget);
+    });
+
+    testWidgets('gone under a second detail pushed on top: only its own route '
+        'goes', (tester) async {
+      // Two push taps in a row: the first detail still spins when the
+      // second is pushed above it — its gone path must not pop the second.
+      final firstAnswer = Completer<bool>();
+      await tester.pumpWidget(caller(
+        overrides(messages: [received()], recipients: [recip('me')]),
+        () => MessageDetailScreen('missing', markRead: (_) async {},
+            react: (_, _) async {}, reply: (_, _) async {},
+            messageExists: (_) => firstAnswer.future),
+      ));
+      await tester.tap(find.text('open'));
+      await tester.pump();
+      await tester.pump(); // the snapshot is in; the id is not: asking
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      tester.state<NavigatorState>(find.byType(Navigator)).push(
+          MaterialPageRoute<void>(builder: (_) => MessageDetailScreen('m1',
+              markRead: (_) async {}, react: (_, _) async {}, reply: (_, _) async {},
+              messageExists: (_) async => true)));
+      await tester.pumpAndSettle();
+      firstAnswer.complete(false);
+      await tester.pumpAndSettle();
+      expect(find.text('Zpráva už neexistuje.'), findsOneWidget);
+      expect(find.byType(MessageDetailScreen), findsOneWidget);
+      expect(find.text('Přijďte dřív.'), findsOneWidget);
+      tester.state<NavigatorState>(find.byType(Navigator)).pop();
+      await tester.pumpAndSettle();
+      expect(find.text('open'), findsOneWidget); // the caller, not a blank page
     });
 
     testWidgets('a message already read marks nothing', (tester) async {
