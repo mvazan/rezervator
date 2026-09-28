@@ -8258,12 +8258,14 @@ reset role;
 
 -- 23. Fixtures for 0051 in an alley of its own, T: Adam the admin, Bára on
 -- duty from today for a week (with Emil, a placeholder, on the same
--- period), the kiosk. Today block 16:00 holds Cyril, Dana, Emil and Adam
--- live and Bára cancelled; Dana is in block 19:00 today too. Tomorrow
--- block 16:00 holds Dana and Bára. So every day/block/duty recipient set
--- has a placeholder, an author, a cancelled booking and a double booking
--- to leave out. Block 17:00 has nobody; block 18:00 is a day-only block
--- (inactive, 21's shape). Every day is a training day, 4 lanes.
+-- period), the kiosk, and Filip, an account still pending (the admin has
+-- not approved him, or took the approval back). Today block 16:00 holds
+-- Cyril, Dana, Emil and Adam live and Bára cancelled; Dana and Filip are
+-- in block 19:00 today. Tomorrow block 16:00 holds Dana, Bára and Filip.
+-- So every day/block/duty recipient set has a placeholder, an author, a
+-- cancelled booking, a double booking and a pending account to leave out.
+-- Block 17:00 has nobody; block 18:00 is a day-only block (inactive, 21's
+-- shape). Every day is a training day, 4 lanes.
 insert into tenants (id, name, status) values
   ('00000000-0000-0000-0000-000000000051', 'Kuželna T (0051)', 'approved');
 do $$
@@ -8285,7 +8287,9 @@ begin
     ('51000000-0000-0000-0000-000000000012', v_t, 'Cyril Hráč',
      'msg-cyril@example.com', 'player', 'approved'),
     ('51000000-0000-0000-0000-000000000013', v_t, 'Dana Hráčka',
-     'msg-dana@example.com', 'player', 'approved');
+     'msg-dana@example.com', 'player', 'approved'),
+    ('51000000-0000-0000-0000-000000000016', v_t, 'Filip Čekatel',
+     'msg-filip@example.com', 'player', 'pending');
   insert into profiles (id, tenant_id, display_name, role, status, placeholder)
   values ('51000000-0000-0000-0000-000000000014', v_t, 'Emil bez účtu',
           'player', 'approved', true);
@@ -8324,7 +8328,11 @@ begin
     (v_t, '51000000-0000-0000-0000-000000000013', v_today + 1, v_b1, 1,
      'app', '51000000-0000-0000-0000-000000000013'),
     (v_t, '51000000-0000-0000-0000-000000000011', v_today + 1, v_b1, 2,
-     'app', '51000000-0000-0000-0000-000000000011');
+     'app', '51000000-0000-0000-0000-000000000011'),
+    (v_t, '51000000-0000-0000-0000-000000000016', v_today, v_b3, 2,
+     'admin', '51000000-0000-0000-0000-000000000010'),
+    (v_t, '51000000-0000-0000-0000-000000000016', v_today + 1, v_b1, 3,
+     'admin', '51000000-0000-0000-0000-000000000010');
   insert into reservations (tenant_id, player_id, date, block_id, lane,
                             created_via, created_by, cancelled_at, cancelled_via)
   values (v_t, '51000000-0000-0000-0000-000000000011', v_today, v_b1, 1,
@@ -8385,8 +8393,8 @@ begin
 end $$;
 
 -- 23b. message_send as the admin: a notice reaches every account player
--- of the alley but the author (the placeholder and the kiosk are out),
--- and remembers who sent it as an admin.
+-- of the alley but the author (the placeholder, the kiosk and Filip, still
+-- pending, are out), and remembers who sent it as an admin.
 set local role authenticated;
 set local request.jwt.claims =
   '{"sub":"51000000-0000-0000-0000-000000000010","role":"authenticated"}'; -- Adam, admin
@@ -8404,7 +8412,7 @@ begin
         where tenant_id = '00000000-0000-0000-0000-000000000051'
           and status = 'approved' and role <> 'kiosk' and not placeholder
           and id <> '51000000-0000-0000-0000-000000000010') then
-    raise exception 'FAIL: notice recipients wrong (placeholder/kiosk/author must be out): %', v_got;
+    raise exception 'FAIL: notice recipients wrong (placeholder/kiosk/pending/author must be out): %', v_got;
   end if;
   if (select author_role from messages where id = v_id) <> 'admin' then
     raise exception 'FAIL: notice author_role should be admin';
@@ -8415,7 +8423,8 @@ end $$;
 
 -- 23c. day: everyone with a live reservation that date, any block, once
 -- (Dana is booked twice) — not Emil the placeholder, not Adam the author,
--- not Bára whose booking is cancelled.
+-- not Bára whose booking is cancelled, not Filip whose account is pending
+-- (the `players` view's rule, as for `all`).
 do $$
 declare
   v_id uuid;
@@ -8606,7 +8615,8 @@ end $$;
 
 -- 23i. Bára on duty writes to a day or a block from today on, as a
 -- player: today that reaches Adam (booked, and not the author now), Cyril
--- and Dana; tomorrow, where she is booked herself, only Dana. Yesterday is
+-- and Dana; tomorrow, where she is booked herself, only Dana (Filip, booked
+-- in the same block, is pending). Yesterday is
 -- date_past; to the duty every assignee is excluded (Emil a placeholder,
 -- Bára the author), so nobody_on_duty; to the admins she reaches Adam.
 set local request.jwt.claims =
@@ -8764,19 +8774,48 @@ update duty_periods
  where id = current_setting('probe.msg_period')::uuid;
 set local role authenticated;
 
+-- 23k2. Bára, the only assignee with an account, loses her approval: she
+-- is off duty then (is_on_duty and due_duty_reminders skip her, 0050), so
+-- Cyril's message to the duty has nobody to go to — the `players` view's
+-- rule, as for `all`/`admins`, not a success delivered to her.
+reset role;
+update profiles set status = 'pending'
+ where id = '51000000-0000-0000-0000-000000000011';
+set local role authenticated;
+do $$
+begin
+  perform message_send('message', 'duty', null, null, null, 'Je otevřeno?', null, true);
+  raise exception 'FAIL: a duty message went to a pending assignee';
+exception when others then
+  if sqlerrm <> 'nobody_on_duty' then raise; end if;
+  raise notice 'OK: a pending assignee is off duty, so nobody_on_duty (0051)';
+end $$;
+reset role;
+update profiles set status = 'approved'
+ where id = '51000000-0000-0000-0000-000000000011';
+set local role authenticated;
 
--- 23l. The kiosk and a placeholder send nothing, not even to the admins.
+
+-- 23l. The kiosk, a placeholder and Filip, whose account is pending,
+-- send nothing, not even to the admins or the duty.
 do $$
 declare
   v_who text;
 begin
   foreach v_who in array array['51000000-0000-0000-0000-000000000015',
-                               '51000000-0000-0000-0000-000000000014'] loop
+                               '51000000-0000-0000-0000-000000000014',
+                               '51000000-0000-0000-0000-000000000016'] loop
     perform set_config('request.jwt.claims',
       '{"sub":"' || v_who || '","role":"authenticated"}', true);
     begin
       perform message_send('message', 'admins', null, null, null, 'Ahoj.', null, true);
       raise exception 'FAIL: % wrote to the admins', v_who;
+    exception when others then
+      if sqlerrm <> 'not_allowed' then raise; end if;
+    end;
+    begin
+      perform message_send('message', 'duty', null, null, null, 'Ahoj.', null, true);
+      raise exception 'FAIL: % wrote to the duty', v_who;
     exception when others then
       if sqlerrm <> 'not_allowed' then raise; end if;
     end;
@@ -8788,7 +8827,7 @@ begin
       if sqlerrm <> 'not_allowed' then raise; end if;
     end;
   end loop;
-  raise notice 'OK: the kiosk and a placeholder send nothing (0051)';
+  raise notice 'OK: the kiosk, a placeholder and a pending account send nothing (0051)';
 end $$;
 
 -- 23m. A player of another alley (Pavel, S) writes to his own admins only
@@ -8865,7 +8904,8 @@ set local role authenticated;
 -- 23o. can_read_message: a message to its author and its recipients (who
 -- see every recipient row, reactions included), not to a bystander of the
 -- same alley; a notice to every account player of the alley, not to the
--- kiosk; nothing to another alley. RLS filters, no error.
+-- kiosk or a pending account; nothing to another alley. RLS filters, no
+-- error.
 do $$
 declare
   v_day constant uuid := current_setting('probe.msg_day')::uuid;
@@ -8908,6 +8948,17 @@ begin
   if (select count(*) from messages where tenant_id = '00000000-0000-0000-0000-000000000051') <> 0 then
     raise exception 'FAIL: the kiosk reads messages or notices';
   end if;
+  -- Filip, pending: an unvetted self-registration of this alley, so not
+  -- the notice (it may say where the spare key is), nor any recipient row.
+  perform set_config('request.jwt.claims',
+    '{"sub":"51000000-0000-0000-0000-000000000016","role":"authenticated"}', true);
+  if (select count(*) from messages where id = v_notice) <> 0
+     or (select count(*) from messages
+          where tenant_id = '00000000-0000-0000-0000-000000000051') <> 0
+     or (select count(*) from message_recipients
+          where tenant_id = '00000000-0000-0000-0000-000000000051') <> 0 then
+    raise exception 'FAIL: a pending account reads T''s notices or messages';
+  end if;
   perform set_config('request.jwt.claims',
     '{"sub":"50000000-0000-0000-0000-000000000011","role":"authenticated"}', true);
   if (select count(*) from messages where tenant_id = '00000000-0000-0000-0000-000000000051') <> 0
@@ -8915,7 +8966,7 @@ begin
           where tenant_id = '00000000-0000-0000-0000-000000000051') <> 0 then
     raise exception 'FAIL: another alley reads T''s messages';
   end if;
-  raise notice 'OK: can_read_message: author, recipients, notice to the alley; not a bystander, the kiosk or another alley (0051)';
+  raise notice 'OK: can_read_message: author, recipients, notice to the alley; not a bystander, the kiosk, a pending account or another alley (0051)';
 end $$;
 
 

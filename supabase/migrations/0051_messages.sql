@@ -164,12 +164,15 @@ end $$;
 
 -- ------------------------------------------------------------ message_send
 -- Sends a notice or a message and materialises its recipients from the
--- alley's data right now — the author, placeholders and the kiosk are
--- always excluded. `no_recipients` on an empty set except `duty`, which
+-- alley's data right now. Every audience draws from the same members: the
+-- `players` view's rule (approved, not the kiosk, not a placeholder, not a
+-- visiting superadmin) minus the author — so `all`/`admins`/`duty` follow
+-- that rule, and a pending account is no `day`/`block` recipient either,
+-- live booking or not (the app's preview names recipients from that same
+-- roster). A pending assignee is off duty (is_on_duty, 0050), so she gets
+-- no `duty` message. `no_recipients` on an empty set except `duty`, which
 -- says `nobody_on_duty` whenever the computed duty set is empty (no
--- period covers today, or every assignee is excluded). `all`/`admins`
--- follow the `players` view's rule for who counts as a home member (a
--- visiting superadmin is out).
+-- period covers today, or every assignee is excluded).
 create or replace function message_send(
   p_kind text, p_audience text, p_on_date date, p_block_id uuid,
   p_title text, p_body text, p_expires_at timestamptz, p_notify boolean)
@@ -182,6 +185,7 @@ declare
   v_title constant text := nullif(trim(coalesce(p_title, '')), '');
   v_body constant text := trim(coalesce(p_body, ''));
   v_id uuid;
+  v_members uuid[];
   v_recipients uuid[];
   v_role text;
 begin
@@ -244,40 +248,33 @@ begin
     raise exception 'body_too_long';
   end if;
 
+  -- The `players` view's rule, minus the author: whoever may receive.
+  v_members := array(select id from profiles
+                      where tenant_id = v_tenant and status = 'approved' and role <> 'kiosk'
+                        and not placeholder and id <> v_me
+                        and not (superadmin and home_tenant_id is not null
+                                 and tenant_id <> home_tenant_id));
+
   v_recipients := case p_audience
-    when 'all' then
-      array(select id from profiles
-             where tenant_id = v_tenant and status = 'approved' and role <> 'kiosk'
-               and not placeholder and id <> v_me
-               and not (superadmin and home_tenant_id is not null
-                        and tenant_id <> home_tenant_id))
+    when 'all' then v_members
     when 'day' then
       array(select distinct player_id from reservations
              where tenant_id = v_tenant and date = p_on_date and cancelled_at is null
-               and player_id <> v_me
-               and player_id in (select id from profiles
-                                   where tenant_id = v_tenant and not placeholder))
+               and player_id = any (v_members))
     when 'block' then
       array(select distinct player_id from reservations
              where tenant_id = v_tenant and date = p_on_date and block_id = p_block_id
-               and cancelled_at is null and player_id <> v_me
-               and player_id in (select id from profiles
-                                   where tenant_id = v_tenant and not placeholder))
+               and cancelled_at is null and player_id = any (v_members))
     when 'admins' then
       array(select id from profiles
-             where tenant_id = v_tenant and status = 'approved' and role = 'admin'
-               and not placeholder and id <> v_me
-               and not (superadmin and home_tenant_id is not null
-                        and tenant_id <> home_tenant_id))
+             where id = any (v_members) and role = 'admin')
     when 'duty' then
       array(select a.user_id from duty_assignments a
              join duty_periods d on d.id = a.period_id
              where d.tenant_id = v_tenant
                and (now() at time zone 'Europe/Prague')::date
                    between d.starts_on and d.ends_on
-               and a.user_id <> v_me
-               and a.user_id in (select id from profiles
-                                   where tenant_id = v_tenant and not placeholder))
+               and a.user_id = any (v_members))
   end;
 
   if array_length(v_recipients, 1) is null then

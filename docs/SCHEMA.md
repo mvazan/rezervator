@@ -866,19 +866,24 @@ threads, no player-to-player messages. Every error is a bare code.
   A message has no title, no expiry and always pings, ≤ 500 chars; an
   unknown kind is `invalid_kind`, an unknown audience `invalid_audience`, a
   blank body `body_required`, a long one `body_too_long`. Recipients are
-  materialised in the same transaction, the author, placeholders and the
-  kiosk always out:
+  materialised in the same transaction. Every audience draws from the same
+  members — the `players` view's rule (approved, not the kiosk, not a
+  placeholder, not a visiting superadmin) — minus the author. So a pending
+  account gets nothing, not even a `day` / `block` message for a live
+  booking of its own (the composer's preview names recipients from that
+  same roster), and a pending assignee is off duty (`is_on_duty`, 0050):
 
-  | audience | recipients |
+  | audience | recipients (among those members) |
   |---|---|
-  | `all` | every approved non-kiosk member of the alley (admins included), visiting superadmins out |
-  | `day` | players with a live reservation on `on_date`, any block |
-  | `block` | players with a live reservation on `on_date` in `block_id` |
-  | `admins` | every approved admin of the alley, visiting superadmins out (the `players` view's rule) |
+  | `all` | all of them (admins included) |
+  | `day` | those with a live reservation on `on_date`, any block |
+  | `block` | those with a live reservation on `on_date` in `block_id` |
+  | `admins` | the admins |
   | `duty` | the assignees of the period covering Prague today |
 
   An empty set is `no_recipients`, except `duty`: `nobody_on_duty` (no
-  period today, or its only assignee is the author or a placeholder).
+  period today, or every assignee on it is the author, a placeholder or
+  pending).
 - **`can_read_message(id)`** (security definer, stable, `authenticated`) —
   the two select policies: the message is the caller's alley's and it is a
   notice and the caller an approved non-kiosk member, or the caller wrote
@@ -1106,15 +1111,16 @@ threads, no player-to-player messages. Every error is a bare code.
   moving with it; switched off, nothing due and the lead kept), the 0051
   messages (in an alley of its own: select-only tables with the three
   own-row update columns; each audience's recipients with the author,
-  placeholders, cancelled bookings, the kiosk and a visiting superadmin
-  out and a double booking counted once; `no_recipients`,
-  `nobody_on_duty` with no period today and with every assignee excluded
-  (the author, a placeholder); the admin, the duty from today on and a
-  plain player per audience, the kiosk and a placeholder sending nothing,
-  another alley reaching only its own admins; every error code; a
-  day-only block counting on the date its override names it and no
-  other; `can_read_message` for the author,
-  a recipient, a bystander, the kiosk and another alley; own-row
+  placeholders, cancelled bookings, a pending account (booked or not),
+  the kiosk and a visiting superadmin out and a double booking counted
+  once; `no_recipients`, `nobody_on_duty` with no period today, with
+  every assignee excluded (the author, a placeholder) and with the only
+  account assignee pending; the admin, the duty from today on and a
+  plain player per audience, the kiosk, a placeholder and a pending
+  account sending nothing, another alley reaching only its own admins;
+  every error code; a day-only block counting on the date its override
+  names it and no other; `can_read_message` for the author, a recipient,
+  a bystander, the kiosk, a pending account and another alley; own-row
   reactions with `reacted_at` stamped and cleared, every other write a
   privilege error; `message_update` notices-only with Sejmout and do
   odvolání; `message_delete` by the author or the admin, cascading;

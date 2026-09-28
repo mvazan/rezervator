@@ -2263,6 +2263,7 @@ declare
   v_title constant text := nullif(trim(coalesce(p_title, '')), '');
   v_body constant text := trim(coalesce(p_body, ''));
   v_id uuid;
+  v_members uuid[];
   v_recipients uuid[];
   v_role text;
 begin
@@ -2325,40 +2326,33 @@ begin
     raise exception 'body_too_long';
   end if;
 
+  -- The `players` view's rule, minus the author: whoever may receive.
+  v_members := array(select id from profiles
+                      where tenant_id = v_tenant and status = 'approved' and role <> 'kiosk'
+                        and not placeholder and id <> v_me
+                        and not (superadmin and home_tenant_id is not null
+                                 and tenant_id <> home_tenant_id));
+
   v_recipients := case p_audience
-    when 'all' then
-      array(select id from profiles
-             where tenant_id = v_tenant and status = 'approved' and role <> 'kiosk'
-               and not placeholder and id <> v_me
-               and not (superadmin and home_tenant_id is not null
-                        and tenant_id <> home_tenant_id))
+    when 'all' then v_members
     when 'day' then
       array(select distinct player_id from reservations
              where tenant_id = v_tenant and date = p_on_date and cancelled_at is null
-               and player_id <> v_me
-               and player_id in (select id from profiles
-                                   where tenant_id = v_tenant and not placeholder))
+               and player_id = any (v_members))
     when 'block' then
       array(select distinct player_id from reservations
              where tenant_id = v_tenant and date = p_on_date and block_id = p_block_id
-               and cancelled_at is null and player_id <> v_me
-               and player_id in (select id from profiles
-                                   where tenant_id = v_tenant and not placeholder))
+               and cancelled_at is null and player_id = any (v_members))
     when 'admins' then
       array(select id from profiles
-             where tenant_id = v_tenant and status = 'approved' and role = 'admin'
-               and not placeholder and id <> v_me
-               and not (superadmin and home_tenant_id is not null
-                        and tenant_id <> home_tenant_id))
+             where id = any (v_members) and role = 'admin')
     when 'duty' then
       array(select a.user_id from duty_assignments a
              join duty_periods d on d.id = a.period_id
              where d.tenant_id = v_tenant
                and (now() at time zone 'Europe/Prague')::date
                    between d.starts_on and d.ends_on
-               and a.user_id <> v_me
-               and a.user_id in (select id from profiles
-                                   where tenant_id = v_tenant and not placeholder))
+               and a.user_id = any (v_members))
   end;
 
   if array_length(v_recipients, 1) is null then
