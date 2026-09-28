@@ -1,9 +1,12 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rezervator/core/theme.dart' show appFontFamily, buildTheme;
 import 'package:rezervator/data/clock.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/duties.dart' show MyDuty;
@@ -14,7 +17,20 @@ import 'package:rezervator/features/clubhouse/widgets/message_tile.dart';
 
 /// Klubovna → Zprávy (0051): the tile's received and sent sides, the list
 /// (read marking, „Starší (N)“, failed reactions) and the detail screen.
+/// The app's own font, for the FAB layout tests (see
+/// venue_slug_field_test.dart).
+Future<void> _loadManrope() async {
+  final loader = FontLoader(appFontFamily);
+  for (final weight in ['Regular', 'Medium', 'Bold', 'ExtraBold']) {
+    final bytes = File('assets/fonts/Manrope-$weight.ttf').readAsBytesSync();
+    loader.addFont(Future.value(ByteData.view(bytes.buffer)));
+  }
+  await loader.load();
+}
+
 void main() {
+  setUpAll(_loadManrope);
+
   const me = Profile(
     id: 'me', displayName: 'Já Hráč', email: 'me@example.com',
     role: Role.player, status: ProfileStatus.approved,
@@ -121,11 +137,20 @@ void main() {
     Future<void> Function(String id, Reaction? r)? react,
     Future<void> Function(String id, String text)? reply,
     MyDuty duty = MyDuty.none,
+    ThemeData? theme,
+    TextScaler? textScaler,
   }) =>
       ProviderScope(
         overrides: overrides(profile: profile, messages: messages,
             recipients: recipients, roster: roster, duty: duty),
         child: MaterialApp(
+          theme: theme,
+          builder: textScaler == null
+              ? null
+              : (context, child) => MediaQuery(
+                  data: MediaQuery.of(context).copyWith(textScaler: textScaler),
+                  child: child!,
+                ),
           home: MessagesScreen(
             markRead: markRead ?? (_) async {},
             react: react ?? (_, _) async {},
@@ -237,6 +262,42 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Napsat hráčům'), findsOneWidget);
     });
+
+    // WCAG 1.4.4: the app scales text up to 200 % (AppTextScaler). The two
+    // extended FABs must stay on screen and not overflow — they stack when
+    // they do not fit side by side.
+    // In the app's theme and font: the test font's glyphs are wider than
+    // Manrope's, so its labels would not measure as on the phone.
+    for (final (width, scale) in const [
+      (360.0, 2.0), (393.0, 1.69), (360.0, 1.3), (320.0, 2.0), (320.0, 1.15),
+    ]) {
+      testWidgets('both FABs stay on a ${width.toInt()} dp screen at text ×$scale',
+          (tester) async {
+        tester.view.physicalSize = Size(width, 780);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        const admin = Profile(
+          id: 'admin', displayName: 'Adam', email: 'a@example.com',
+          role: Role.admin, status: ProfileStatus.approved,
+        );
+        await tester.pumpWidget(app(profile: admin,
+            theme: buildTheme(Brightness.light), textScaler: TextScaler.linear(scale)));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        final fabs = find.byType(FloatingActionButton);
+        expect(fabs, findsNWidgets(2));
+        for (final part in [
+          ...fabs.evaluate().map((e) => find.byWidget(e.widget)),
+          find.text('Napsat hráčům'),
+          find.text('Napsat'),
+        ]) {
+          final rect = tester.getRect(part);
+          expect(rect.left, greaterThanOrEqualTo(0), reason: '$rect');
+          expect(rect.right, lessThanOrEqualTo(width), reason: '$rect');
+        }
+      });
+    }
   });
 
   group('MessageDetailScreen', () {

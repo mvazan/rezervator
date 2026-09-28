@@ -100,6 +100,20 @@ Future<void> showPlayerComposer(
   );
 }
 
+/// [Api.messageSend]'s shape — [showStaffComposer]'s `send` replaces the
+/// RPC, so widget tests never reach `Supabase.instance`.
+typedef MessageSend =
+    Future<Object?> Function({
+      required MessageKind kind,
+      required MessageAudience audience,
+      Day? onDate,
+      String? blockId,
+      String? title,
+      required String body,
+      DateTime? expiresAt,
+      bool notify,
+    });
+
 /// What the staff sheet hands back: the target (a day, or a block of it),
 /// the text, and whether it was offered for being on duty — so a
 /// `not_allowed` then reads as the duty having ended ([dutyEndedMessage]).
@@ -111,12 +125,13 @@ typedef _StaffMessage = ({Day date, String? blockId, String body, bool asDuty});
 /// defaults to today; the duty cannot pick a past day. Every target shows
 /// who would get it („Dostane 2 hráči: …“), and an empty one cannot be
 /// sent. The sheet watches its own providers, [ref] as in
-/// [showPlayerComposer].
+/// [showPlayerComposer]; [send] is the RPC (see [MessageSend]).
 Future<void> showStaffComposer(
   BuildContext context,
   WidgetRef ref, {
   Day? date,
   String? blockId,
+  MessageSend send = Api.messageSend,
 }) async {
   final result = await showModalBottomSheet<_StaffMessage>(
     context: context,
@@ -127,7 +142,7 @@ Future<void> showStaffComposer(
   if (result == null || !context.mounted) return;
   await tryAction(
     context,
-    () => Api.messageSend(
+    () => send(
       kind: MessageKind.message,
       audience: result.blockId == null
           ? MessageAudience.day
@@ -319,6 +334,14 @@ class _StaffComposerSheetState extends ConsumerState<_StaffComposerSheet> {
   late String? _blockId = widget.initialBlockId;
   final _body = TextEditingController();
 
+  /// Offered for being on duty (and not the admin): once true, it stays —
+  /// a duty ending while the sheet is open (midnight, an unassignment)
+  /// must still read the server's `not_allowed` as [dutyEndedMessage]
+  /// (spec: the duty writing at 23:59). Latched in [build], not read once:
+  /// the streams may land after the sheet opens. [myDutyProvider] is
+  /// `none` until the profile loads, so a true here has a known role.
+  bool _offeredAsDuty = false;
+
   static Day _today(_Get get) =>
       Day.fromDateTime(get(nowProvider).value ?? DateTime.now());
 
@@ -350,7 +373,8 @@ class _StaffComposerSheetState extends ConsumerState<_StaffComposerSheet> {
   Widget build(BuildContext context) {
     final me = ref.watch(myProfileProvider).value;
     final isAdmin = me?.isAdmin ?? false;
-    final asDuty = ref.watch(myDutyProvider).onDuty && !isAdmin;
+    final onDutyNow = ref.watch(myDutyProvider).onDuty && !isAdmin;
+    _offeredAsDuty = _offeredAsDuty || onDutyNow;
     final monday = _mondayOf(_date);
     final week = ref.watch(weekScheduleProvider(monday)).value;
     final reservations =
@@ -432,7 +456,7 @@ class _StaffComposerSheetState extends ConsumerState<_StaffComposerSheet> {
                     date: _date,
                     blockId: blockId,
                     body: text,
-                    asDuty: asDuty,
+                    asDuty: _offeredAsDuty,
                   ))
                 : null,
             child: const Text('Odeslat'),

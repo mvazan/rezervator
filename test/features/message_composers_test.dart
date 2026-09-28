@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart' show StateProvider;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/data/clock.dart';
 import 'package:rezervator/data/providers.dart';
@@ -150,14 +151,34 @@ void main() {
         id: id, playerId: playerId, date: today, blockId: blockId, lane: 1,
         createdVia: 'app', createdAt: DateTime(2026, 10, 1));
 
+    // Stands in for Api.messageSend: succeeds without reaching Supabase.
+    Future<String> sent({
+      required MessageKind kind,
+      required MessageAudience audience,
+      Day? onDate,
+      String? blockId,
+      String? title,
+      required String body,
+      DateTime? expiresAt,
+      bool notify = true,
+    }) async => 'new-id';
+
+    // [duty] backs myDutyProvider with a state a test can flip while the
+    // sheet is open (midnight, an unassignment); [send] replaces the RPC.
     Widget staffApp({
       List<Reservation> reservations = const [],
       List<TimeBlock> blocks = const [],
       String? blockId,
+      Profile profile = admin,
+      StateProvider<MyDuty>? duty,
+      MessageSend? send,
     }) => ProviderScope(
       overrides: [
-        myProfileProvider.overrideWith((ref) => Stream.value(admin)),
-        myDutyProvider.overrideWithValue(MyDuty.none),
+        myProfileProvider.overrideWith((ref) => Stream.value(profile)),
+        if (duty == null)
+          myDutyProvider.overrideWithValue(MyDuty.none)
+        else
+          myDutyProvider.overrideWith((ref) => ref.watch(duty)),
         nowProvider.overrideWith((ref) => Stream.value(DateTime(2026, 10, 5, 12))),
         settingsProvider.overrideWith((ref) => Stream.value(ScheduleSettings.defaults)),
         timeBlocksProvider.overrideWith((ref) => Stream.value(blocks.isEmpty ? [b1] : blocks)),
@@ -173,7 +194,8 @@ void main() {
         ]),
       ],
       child: MaterialApp(home: Scaffold(body: Consumer(builder: (context, ref, _) => TextButton(
-        onPressed: () => showStaffComposer(context, ref, date: today, blockId: blockId),
+        onPressed: () => showStaffComposer(context, ref,
+            date: today, blockId: blockId, send: send ?? sent),
         child: const Text('open'),
       )))),
     );
@@ -246,6 +268,46 @@ void main() {
       await openStaff(tester);
       expect(find.text('5. 10. 2026'), findsOneWidget);
       expect(tester.widget<RadioGroup<String?>>(find.byType(RadioGroup<String?>)).groupValue, 'b1');
+    });
+
+    testWidgets('a duty whose service ends while the sheet is open reads the refusal '
+        'as „Služba skončila“', (tester) async {
+      final onDuty = MyDuty(current: DutyPeriod(id: 'p1', startsOn: today, endsOn: today));
+      final duty = StateProvider<MyDuty>((ref) => onDuty);
+      final calls = <({MessageAudience audience, Day? onDate, String? blockId})>[];
+      Future<String> refused({
+        required MessageKind kind,
+        required MessageAudience audience,
+        Day? onDate,
+        String? blockId,
+        String? title,
+        required String body,
+        DateTime? expiresAt,
+        bool notify = true,
+      }) async {
+        calls.add((audience: audience, onDate: onDate, blockId: blockId));
+        throw Exception('not_allowed');
+      }
+
+      await tester.pumpWidget(staffApp(
+        profile: me,
+        duty: duty,
+        send: refused,
+        reservations: [booking('r1', 'p1', 'b1')],
+      ));
+      await openStaff(tester);
+      await tester.enterText(find.byType(TextField), 'Přijďte dřív.');
+      await tester.pump();
+      // 23:59 → 00:00: the duty's period is over, the sheet is still open.
+      ProviderScope.containerOf(tester.element(find.text('Napsat hráčům')))
+          .read(duty.notifier)
+          .state = MyDuty.none;
+      await tester.pump();
+      await tester.tap(find.text('Odeslat'));
+      await tester.pumpAndSettle();
+      expect(calls, [(audience: MessageAudience.day, onDate: today, blockId: null)]);
+      expect(find.text('Služba skončila — tohle teď může jen správce.'), findsOneWidget);
+      expect(find.text('Na tohle nemáš oprávnění.'), findsNothing);
     });
   });
 

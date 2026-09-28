@@ -2,6 +2,8 @@
 /// day they are about, older collapsed. Not a chat — see the design spec.
 library;
 
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -90,29 +92,41 @@ class _MessagesScreenState extends ConsumerState<MessagesScreen> {
         final isAdmin = ref.watch(
             myProfileProvider.select((p) => p.value?.isAdmin ?? false));
         final onDuty = ref.watch(myDutyProvider.select((d) => d.onDuty));
-        return Row(
-          mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: [
-            // The staff composer: the admin, or the duty today — the
-            // server's `message_send` gate for a day or a block.
-            if (isAdmin || onDuty) ...[
-              FloatingActionButton.extended(
-                heroTag: 'staff-compose',
-                onPressed: () => showStaffComposer(context, ref),
-                icon: const Icon(Icons.campaign_outlined),
-                label: const Text('Napsat hráčům'),
-              ),
-              const SizedBox(width: 12),
-            ],
-            FloatingActionButton.extended(
-              heroTag: 'player-compose',
-              onPressed: () => showPlayerComposer(context, ref),
-              icon: const Icon(Icons.edit_outlined),
-              label: const Text('Napsat'),
+        // Side by side when they fit, else stacked (large text, WCAG
+        // 1.4.4). The slot is as wide as the Scaffold and endFloat keeps a
+        // margin on the right, so the Wrap stops a margin short of the
+        // left edge too.
+        return LayoutBuilder(builder: (context, constraints) {
+          final maxWidth = constraints.maxWidth -
+              2 * kFloatingActionButtonMargin -
+              MediaQuery.paddingOf(context).horizontal;
+          return ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: math.max(0, maxWidth)),
+            child: Wrap(
+              alignment: WrapAlignment.end,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                // The staff composer: the admin, or the duty today — the
+                // server's `message_send` gate for a day or a block.
+                if (isAdmin || onDuty)
+                  FloatingActionButton.extended(
+                    heroTag: 'staff-compose',
+                    onPressed: () => showStaffComposer(context, ref),
+                    icon: const Icon(Icons.campaign_outlined),
+                    label: const Text('Napsat hráčům'),
+                  ),
+                FloatingActionButton.extended(
+                  heroTag: 'player-compose',
+                  onPressed: () => showPlayerComposer(context, ref),
+                  icon: const Icon(Icons.edit_outlined),
+                  label: const Text('Napsat'),
+                ),
+              ],
             ),
-          ],
-        );
+          );
+        });
       }),
     );
   }
