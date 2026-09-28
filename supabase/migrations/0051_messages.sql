@@ -236,9 +236,10 @@ end $$;
 -- that rule, and a pending account is no `day`/`block` recipient either,
 -- live booking or not (the app's preview names recipients from that same
 -- roster). A pending assignee is off duty (is_on_duty, 0050), so she gets
--- no `duty` message. `no_recipients` on an empty set except `duty`, which
--- says `nobody_on_duty` whenever the computed duty set is empty (no
--- period covers today, or every assignee is excluded).
+-- no `duty` message. A message to an empty set is `no_recipients`, except
+-- `duty`, which says `nobody_on_duty` whenever the computed duty set is
+-- empty (no period covers today, or every assignee is excluded); a notice
+-- to an empty set goes up with no recipient rows.
 create or replace function message_send(
   p_kind text, p_audience text, p_on_date date, p_block_id uuid,
   p_title text, p_body text, p_expires_at timestamptz, p_notify boolean)
@@ -274,6 +275,11 @@ begin
     end if;
     if v_title is null then
       raise exception 'title_required';
+    end if;
+    -- A bare code, never the raw messages_title_check; char_length counts
+    -- code points (👍🏽 is two), which is what the app has to count too.
+    if char_length(v_title) > 80 then
+      raise exception 'title_too_long';
     end if;
   elsif p_kind = 'message' then
     if p_audience in ('day', 'block') then
@@ -346,7 +352,11 @@ begin
                and a.user_id = any (v_members))
   end;
 
-  if array_length(v_recipients, 1) is null then
+  -- A notice goes up even with nobody else in the alley yet (a new alley,
+  -- the spare-key notice before the players join): the board is not
+  -- recipient-based, its rows are only for the push and „Kdo si to
+  -- zobrazil“. A message with nobody to go to is refused.
+  if p_kind = 'message' and array_length(v_recipients, 1) is null then
     if p_audience = 'duty' then
       raise exception 'nobody_on_duty';
     end if;
@@ -393,6 +403,9 @@ begin
   end if;
   if v_title is null then
     raise exception 'title_required';
+  end if;
+  if char_length(v_title) > 80 then
+    raise exception 'title_too_long';
   end if;
   if v_body = '' then
     raise exception 'body_required';
@@ -468,10 +481,16 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------- notify
--- The row webhook (existing notify_webhook(), table-generic) fans out a
--- new message and a reaction on it exactly like every other row today.
--- Until notify knows these two tables, it answers 200 and queues nothing
--- (its switch has no default branch).
+-- The row webhook (existing notify_webhook(), table-generic), like every
+-- other row today. notify's `messages` branch fans a new message or
+-- notice out to its recipient rows (none for a notice in an alley of one,
+-- and nothing when notify = false); its `message_recipients` branch tells
+-- the author about a fresh reaction or reply on a `message` (never a
+-- clear, never a notice). A read (read_at alone) is no UPDATE OF reaction,
+-- reply; the WHEN keeps a write that changes neither (a no-op PATCH, the
+-- same 👍 clicked twice in the e-mail) away from pg_net. A recipient who
+-- flips 👍/👎 over and over notifies the author every time — accepted, the
+-- spec wants every reaction told (SCHEMA.md).
 drop trigger if exists notify_messages on messages;
 create trigger notify_messages
   after insert on messages
@@ -479,4 +498,6 @@ create trigger notify_messages
 drop trigger if exists notify_message_reactions on message_recipients;
 create trigger notify_message_reactions
   after update of reaction, reply on message_recipients
-  for each row execute function notify_webhook();
+  for each row
+  when (old.reaction is distinct from new.reaction or old.reply is distinct from new.reply)
+  execute function notify_webhook();

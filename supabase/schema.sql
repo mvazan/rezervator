@@ -2296,6 +2296,11 @@ begin
     if v_title is null then
       raise exception 'title_required';
     end if;
+    -- A bare code, never the raw messages_title_check; char_length counts
+    -- code points (👍🏽 is two), which is what the app has to count too.
+    if char_length(v_title) > 80 then
+      raise exception 'title_too_long';
+    end if;
   elsif p_kind = 'message' then
     if p_audience in ('day', 'block') then
       if p_on_date is null then
@@ -2367,7 +2372,11 @@ begin
                and a.user_id = any (v_members))
   end;
 
-  if array_length(v_recipients, 1) is null then
+  -- A notice goes up even with nobody else in the alley yet (a new alley,
+  -- the spare-key notice before the players join): the board is not
+  -- recipient-based, its rows are only for the push and „Kdo si to
+  -- zobrazil“. A message with nobody to go to is refused.
+  if p_kind = 'message' and array_length(v_recipients, 1) is null then
     if p_audience = 'duty' then
       raise exception 'nobody_on_duty';
     end if;
@@ -2413,6 +2422,9 @@ begin
   end if;
   if v_title is null then
     raise exception 'title_required';
+  end if;
+  if char_length(v_title) > 80 then
+    raise exception 'title_too_long';
   end if;
   if v_body = '' then
     raise exception 'body_required';
@@ -5200,7 +5212,7 @@ CREATE OR REPLACE TRIGGER "message_recipients_reacted_at" BEFORE UPDATE ON "publ
 
 
 
-CREATE OR REPLACE TRIGGER "notify_message_reactions" AFTER UPDATE OF "reaction", "reply" ON "public"."message_recipients" FOR EACH ROW EXECUTE FUNCTION "public"."notify_webhook"();
+CREATE OR REPLACE TRIGGER "notify_message_reactions" AFTER UPDATE OF "reaction", "reply" ON "public"."message_recipients" FOR EACH ROW WHEN ((("old"."reaction" IS DISTINCT FROM "new"."reaction") OR ("old"."reply" IS DISTINCT FROM "new"."reply"))) EXECUTE FUNCTION "public"."notify_webhook"();
 
 
 

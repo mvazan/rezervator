@@ -8441,6 +8441,45 @@ begin
   raise notice 'OK: a notice reaches every account player but the author (0051)';
 end $$;
 
+-- 23b2. The board is not recipient-based: in an alley whose admin is the
+-- only account so far (a new alley; U has Uršula and the kiosk), a notice
+-- still goes up — with no recipient rows — and she reads it; a message
+-- there has nobody to go to (no_recipients).
+reset role;
+insert into tenants (id, name, status) values
+  ('00000000-0000-0000-0000-000000000052', 'Kuželna U (0051)', 'approved');
+insert into profiles (id, tenant_id, display_name, email, role, status)
+values
+  ('52000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000052',
+   'Uršula Sama', 'msg-ursula@example.com', 'admin', 'approved'),
+  ('52000000-0000-0000-0000-000000000015', '00000000-0000-0000-0000-000000000052',
+   'Kiosek U', 'msg-kiosk-u@example.com', 'kiosk', 'approved');
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"52000000-0000-0000-0000-000000000010","role":"authenticated"}'; -- Uršula, U
+do $$
+declare
+  v_id uuid;
+begin
+  v_id := message_send('notice', 'all', null, null, 'Klíč', 'Náhradní klíč je u baru.',
+                        null, true);
+  if (select count(*) from message_recipients where message_id = v_id) <> 0 then
+    raise exception 'FAIL: a notice in an alley of one got recipient rows';
+  end if;
+  if (select count(*) from messages where id = v_id) <> 1 then
+    raise exception 'FAIL: the lone admin does not read her own notice';
+  end if;
+  begin
+    perform message_send('message', 'admins', null, null, null, 'Haló?', null, true);
+    raise exception 'FAIL: a message in an alley of one went out';
+  exception when others then
+    if sqlerrm <> 'no_recipients' then raise; end if;
+  end;
+  raise notice 'OK: a notice goes up with no one else in the alley, a message says no_recipients (0051)';
+end $$;
+set local request.jwt.claims =
+  '{"sub":"51000000-0000-0000-0000-000000000010","role":"authenticated"}'; -- Adam, admin
+
 -- 23c. day: everyone with a live reservation that date, any block, once
 -- (Dana is booked twice) — not Emil the placeholder, not Adam the author,
 -- not Bára whose booking is cancelled, not Filip whose account is pending
@@ -8501,8 +8540,11 @@ end $$;
 
 
 -- 23e. What the admin sends is checked: a notice only to everyone, only
--- the two kinds, a day or a block needs its date, a notice its title,
--- every body is non-blank and short enough (500 / 2000).
+-- the two kinds, a day or a block needs its date, a notice its title of
+-- at most 80 characters, counted as char_length counts them (code points:
+-- 41 × 👍🏽 is 41 on screen but 82 here — title_too_long, never the raw
+-- messages_title_check), every body is non-blank and short enough (500 /
+-- 2000).
 do $$
 declare
   v_today constant date := (now() at time zone 'Europe/Prague')::date;
@@ -8518,6 +8560,8 @@ begin
       ('notice', 'all', null::date, '   ', 'Text', 'title_required'),
       -- Blank is any whitespace, not only spaces: newlines, tabs.
       ('notice', 'all', null::date, E'\n\t', E'\n\n', 'title_required'),
+      ('notice', 'all', null::date, repeat('a', 81), 'Text', 'title_too_long'),
+      ('notice', 'all', null::date, repeat('👍🏽', 41), 'Text', 'title_too_long'),
       ('notice', 'all', null::date, 'Nadpis', E'\n\n', 'body_required'),
       ('message', 'day', v_today, null, E' \t\r\n ', 'body_required'),
       ('message', 'day', v_today, null, '  ', 'body_required'),
@@ -8557,7 +8601,13 @@ begin
      or (select notify from messages where id = v_id) then
     raise exception 'FAIL: the notice lost its trimmed title/body or its notify = false';
   end if;
-  raise notice 'OK: 500 / 2000 characters are still fine, title and body trimmed of any whitespace, notify kept (0051)';
+  -- 80 characters once trimmed is still a title.
+  v_id := message_send('notice', 'all', null, null, E' \n' || repeat('c', 80) || E'\t ',
+                        'Text.', null, false);
+  if (select title from messages where id = v_id) is distinct from repeat('c', 80) then
+    raise exception 'FAIL: an 80-character title (trimmed) did not land';
+  end if;
+  raise notice 'OK: 500 / 2000 / 80 characters are still fine, title and body trimmed of any whitespace, notify kept (0051)';
 end $$;
 
 -- 23g. The block has to be this alley's and bookable that day: another
@@ -8640,6 +8690,36 @@ begin
 exception when others then
   if sqlerrm <> 'no_recipients' then raise; end if;
   raise notice 'OK: the only admin has no admins to write to (0051)';
+end $$;
+
+-- 23h2. The admin writes to any date, a past one too (the matrix's third
+-- column; the duty gets date_past for yesterday in 23i): yesterday's day
+-- and block reach Cyril, booked in block 16:00 yesterday, and only him.
+reset role;
+insert into reservations (tenant_id, player_id, date, block_id, lane, created_via, created_by)
+values ('00000000-0000-0000-0000-000000000051', '51000000-0000-0000-0000-000000000012',
+        (now() at time zone 'Europe/Prague')::date - 1,
+        current_setting('probe.msg_b1')::uuid, 1,
+        'app', '51000000-0000-0000-0000-000000000012');
+set local role authenticated;
+do $$
+declare
+  v_yesterday constant date := (now() at time zone 'Europe/Prague')::date - 1;
+  v_id uuid;
+begin
+  v_id := message_send('message', 'day', v_yesterday, null, null, 'Včera jste nechali světla.',
+                        null, true);
+  if (select array_agg(user_id) from message_recipients where message_id = v_id)
+       is distinct from array['51000000-0000-0000-0000-000000000012'::uuid] then
+    raise exception 'FAIL: the admin''s day message for yesterday went wrong';
+  end if;
+  v_id := message_send('message', 'block', v_yesterday, current_setting('probe.msg_b1')::uuid,
+                        null, 'Včera na dráze 1 zůstala koule.', null, true);
+  if (select array_agg(user_id) from message_recipients where message_id = v_id)
+       is distinct from array['51000000-0000-0000-0000-000000000012'::uuid] then
+    raise exception 'FAIL: the admin''s block message for yesterday went wrong';
+  end if;
+  raise notice 'OK: the admin writes to a past day and a past block (0051)';
 end $$;
 
 -- 23i. Bára on duty writes to a day or a block from today on, as a
@@ -9476,6 +9556,18 @@ begin
     if sqlerrm <> 'title_required' then raise; end if;
   end;
   begin
+    perform message_update(v_notice, repeat('a', 81), 'Text.', null);
+    raise exception 'FAIL: a notice took an 81-character title';
+  exception when others then
+    if sqlerrm <> 'title_too_long' then raise; end if;
+  end;
+  begin
+    perform message_update(v_notice, repeat('👍🏽', 41), 'Text.', null);
+    raise exception 'FAIL: a notice took a title of 82 code points';
+  exception when others then
+    if sqlerrm <> 'title_too_long' then raise; end if;
+  end;
+  begin
     perform message_update(v_notice, 'Nadpis', E'\n\n\t', null);
     raise exception 'FAIL: a notice took a body of newlines and tabs';
   exception when others then
@@ -9657,6 +9749,26 @@ begin
          and not tgisinternal) <> 2 then
     raise exception 'FAIL: a notify trigger is missing';
   end if;
+  -- And their shape: a read (read_at alone) is no UPDATE OF reaction,
+  -- reply, so it posts nothing; a write that leaves both as they were (a
+  -- no-op PATCH, the same 👍 clicked twice in the e-mail) fails the WHEN
+  -- and never reaches pg_net either. A flip (👍 → 👎 → 👍) still notifies
+  -- every time — accepted, the spec wants every reaction told.
+  if pg_get_triggerdef((select oid from pg_trigger where tgname = 'notify_messages'))
+     not like 'CREATE TRIGGER notify_messages AFTER INSERT ON public.messages '
+              'FOR EACH ROW EXECUTE FUNCTION %notify_webhook()' then
+    raise exception 'FAIL: notify_messages is not after insert on messages: %',
+      pg_get_triggerdef((select oid from pg_trigger where tgname = 'notify_messages'));
+  end if;
+  if pg_get_triggerdef((select oid from pg_trigger where tgname = 'notify_message_reactions'))
+     not like 'CREATE TRIGGER notify_message_reactions AFTER UPDATE OF reaction, reply '
+              'ON public.message_recipients FOR EACH ROW '
+              'WHEN (((old.reaction IS DISTINCT FROM new.reaction) '
+              'OR (old.reply IS DISTINCT FROM new.reply))) '
+              'EXECUTE FUNCTION %notify_webhook()' then
+    raise exception 'FAIL: notify_message_reactions is not after update of reaction, reply when either changed: %',
+      pg_get_triggerdef((select oid from pg_trigger where tgname = 'notify_message_reactions'));
+  end if;
   if (select count(*) from cron.job where jobname = 'messages-prune') <> 1 then
     raise exception 'FAIL: the messages-prune cron job is missing';
   end if;
@@ -9671,7 +9783,7 @@ begin
      or (select on_date from messages where id = v_id) is null then
     raise exception 'FAIL: a removed block took its message along or kept a dangling id';
   end if;
-  raise notice 'OK: notify triggers and prune cron in place; a removed block leaves the message on its day (0051)';
+  raise notice 'OK: notify triggers in place and shaped (a read or a no-op posts nothing), prune cron in place; a removed block leaves the message on its day (0051)';
 end $$;
 
 reset role;
