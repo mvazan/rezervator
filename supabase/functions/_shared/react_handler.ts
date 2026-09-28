@@ -50,13 +50,27 @@ export function mayReact(row: RecipientMembership | null): boolean {
   return isMemberOf(profile, row.tenant_id);
 }
 
-/// Verifies the `t` token of [url], writes its reaction when the recipient
-/// may still react, and answers a 303 to `resultPage?ok=1` (written) or
-/// `?ok=0` (missing, bad, expired or orphaned token, a recipient who may no
-/// longer react, nothing written, or a database error); a 500 when no
-/// secret is configured (fail closed). The misconfiguration and database
-/// errors are logged — a dead link on the page must not be the only trace.
-export async function handleReact(url: URL, deps: ReactDeps): Promise<Response> {
+/// Answers a [method] request for [url]. GET verifies the `t` token, writes
+/// its reaction when the recipient may still react, and answers a 303 to
+/// `resultPage?ok=1` (written) or `?ok=0` (missing, bad, expired or
+/// orphaned token, a recipient who may no longer react, nothing written,
+/// or a database error); a 500 when no secret is configured (fail closed).
+/// HEAD — what a link scanner or mail gateway probes with — answers the
+/// same 303 as far as the token tells, and stops before the database:
+/// only the one-click GET is the accepted write. Any other method: 405,
+/// nothing written. The misconfiguration and database errors are logged —
+/// a dead link on the page must not be the only trace.
+export async function handleReact(
+  method: string,
+  url: URL,
+  deps: ReactDeps,
+): Promise<Response> {
+  if (method !== "GET" && method !== "HEAD") {
+    return new Response("method not allowed", {
+      status: 405,
+      headers: { Allow: "GET, HEAD" },
+    });
+  }
   if (!deps.secret) {
     deps.logError("CANCEL_TOKEN_SECRET is not set");
     return new Response("misconfigured", { status: 500 });
@@ -67,6 +81,7 @@ export async function handleReact(url: URL, deps: ReactDeps): Promise<Response> 
   if (!token) return fail();
   const verdict = await verifyReactToken(token, deps.secret, deps.now());
   if ("error" in verdict) return fail();
+  if (method === "HEAD") return ok();
   let allowed: boolean;
   try {
     allowed = await deps.recipientMayReact(verdict.m, verdict.u);

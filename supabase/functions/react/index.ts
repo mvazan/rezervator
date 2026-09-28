@@ -1,7 +1,14 @@
 // react — one-click 👍/👎 from a message e-mail (0051). GET ?t=<token> ->
 // verifies the signed token, writes the reaction, redirects to a static
-// result page. Deploy with --no-verify-jwt (recipients have no session);
-// the HMAC token (_shared/react_token.ts) is the sole authorization.
+// result page. Deploy with --no-verify-jwt (recipients have no session):
+// the HMAC token (_shared/react_token.ts) authenticates the link, and
+// mayReact re-checks that its account may still react (the service role
+// bypasses the RLS that says so). The link is a plain one-click GET with
+// no confirm step — an accepted tradeoff, unlike cancel's confirm page: a
+// reaction is harmless and reversible in the app (see
+// _shared/react_handler.ts); do not "fix" it into two steps. HEAD, what a
+// link scanner probes with, answers the same redirect and writes nothing;
+// any other method gets 405.
 // SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are injected automatically;
 // CANCEL_TOKEN_SECRET is shared with the cancel and notify functions.
 
@@ -17,7 +24,7 @@ const RESULT_PAGE = "https://rezervator.online/reakce.html";
 
 Deno.serve(async (request) => {
   const url = new URL(request.url);
-  return await handleReact(url, {
+  return await handleReact(request.method, url, {
     secret: Deno.env.get("CANCEL_TOKEN_SECRET"),
     now: () => Date.now(),
     // The row and its account: the service role bypasses RLS, so

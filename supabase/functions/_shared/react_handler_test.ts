@@ -12,7 +12,7 @@ function url(token: string): URL {
 Deno.test("a valid, existing recipient reacts and gets ok=1", async () => {
   const token = await signReactToken({ m: "m1", u: "u1", r: "up" }, SECRET);
   const written: { m: string; u: string; r: string }[] = [];
-  const res = await handleReact(url(token), {
+  const res = await handleReact("GET", url(token), {
     secret: SECRET,
     now: () => Date.now(),
     recipientMayReact: (m, u) => Promise.resolve(m === "m1" && u === "u1"),
@@ -33,7 +33,7 @@ Deno.test("a tampered token gets ok=0 and writes nothing", async () => {
   const [payload, signature] = token.split(".");
   const flipped = (signature[0] === "A" ? "B" : "A") + signature.slice(1);
   let wrote = false;
-  const res = await handleReact(url(`${payload}.${flipped}`), {
+  const res = await handleReact("GET", url(`${payload}.${flipped}`), {
     secret: SECRET,
     now: () => Date.now(),
     recipientMayReact: () => Promise.resolve(true),
@@ -52,7 +52,7 @@ Deno.test("a tampered token gets ok=0 and writes nothing", async () => {
 Deno.test("an expired token gets ok=0", async () => {
   const issuedAt = Date.now();
   const token = await signReactToken({ m: "m1", u: "u1", r: "up" }, SECRET, issuedAt);
-  const res = await handleReact(url(token), {
+  const res = await handleReact("GET", url(token), {
     secret: SECRET,
     now: () => issuedAt + 31 * 86400_000,
     recipientMayReact: () => Promise.resolve(true),
@@ -66,7 +66,7 @@ Deno.test("an expired token gets ok=0", async () => {
 Deno.test("a valid token for a recipient row that no longer exists gets ok=0", async () => {
   const token = await signReactToken({ m: "m1", u: "u1", r: "down" }, SECRET);
   let wrote = false;
-  const res = await handleReact(url(token), {
+  const res = await handleReact("GET", url(token), {
     secret: SECRET,
     now: () => Date.now(),
     recipientMayReact: () => Promise.resolve(false),
@@ -82,7 +82,7 @@ Deno.test("a valid token for a recipient row that no longer exists gets ok=0", a
 });
 
 Deno.test("a missing token gets ok=0", async () => {
-  const res = await handleReact(new URL("https://x/react"), {
+  const res = await handleReact("GET", new URL("https://x/react"), {
     secret: SECRET,
     now: () => Date.now(),
     recipientMayReact: () => Promise.resolve(true),
@@ -95,7 +95,7 @@ Deno.test("a missing token gets ok=0", async () => {
 
 Deno.test("no secret configured fails closed with 500 and logs why", async () => {
   const logged: string[] = [];
-  const res = await handleReact(url("whatever"), {
+  const res = await handleReact("GET", url("whatever"), {
     secret: undefined,
     now: () => Date.now(),
     recipientMayReact: () => Promise.resolve(true),
@@ -112,7 +112,7 @@ Deno.test("a failed recipient lookup is logged and gets ok=0", async () => {
   const logged: { message: string; detail: unknown }[] = [];
   const boom = new Error("PGRST301");
   let wrote = false;
-  const res = await handleReact(url(token), {
+  const res = await handleReact("GET", url(token), {
     secret: SECRET,
     now: () => Date.now(),
     recipientMayReact: () => Promise.reject(boom),
@@ -132,7 +132,7 @@ Deno.test("a failed write is logged and gets ok=0", async () => {
   const token = await signReactToken({ m: "m1", u: "u1", r: "down" }, SECRET);
   const logged: { message: string; detail: unknown }[] = [];
   const boom = new Error("permission denied");
-  const res = await handleReact(url(token), {
+  const res = await handleReact("GET", url(token), {
     secret: SECRET,
     now: () => Date.now(),
     recipientMayReact: () => Promise.resolve(true),
@@ -148,7 +148,7 @@ Deno.test("an orphaned token or a write that matched no row logs nothing", async
   const token = await signReactToken({ m: "m1", u: "u1", r: "up" }, SECRET);
   const logged: string[] = [];
   for (const [may, wrote] of [[false, true], [true, false]]) {
-    const res = await handleReact(url(token), {
+    const res = await handleReact("GET", url(token), {
       secret: SECRET,
       now: () => Date.now(),
       recipientMayReact: () => Promise.resolve(may),
@@ -159,6 +159,55 @@ Deno.test("an orphaned token or a write that matched no row logs nothing", async
     assertEquals(res.headers.get("location"), `${RESULT_PAGE}?ok=0`);
   }
   assertEquals(logged, []);
+});
+
+Deno.test("HEAD (a link scanner's probe) answers the same 303 and writes nothing", async () => {
+  // A mail gateway that checks both 👍 and 👎 with HEAD must not record
+  // 'up' then 'down' — each write would push the author.
+  const token = await signReactToken({ m: "m1", u: "u1", r: "up" }, SECRET);
+  const touched: string[] = [];
+  const deps = {
+    secret: SECRET,
+    now: () => Date.now(),
+    recipientMayReact: () => {
+      touched.push("lookup");
+      return Promise.resolve(true);
+    },
+    writeReaction: () => {
+      touched.push("write");
+      return Promise.resolve(true);
+    },
+    resultPage: RESULT_PAGE,
+    logError: () => {},
+  };
+  const res = await handleReact("HEAD", url(token), deps);
+  assertEquals(res.status, 303);
+  assertEquals(res.headers.get("location"), `${RESULT_PAGE}?ok=1`);
+  // A bad token still reads as one.
+  const bad = await handleReact("HEAD", new URL("https://x/react?t=nonsense"), deps);
+  assertEquals(bad.headers.get("location"), `${RESULT_PAGE}?ok=0`);
+  assertEquals(touched, []);
+});
+
+Deno.test("any other method gets 405 and writes nothing", async () => {
+  const token = await signReactToken({ m: "m1", u: "u1", r: "down" }, SECRET);
+  let wrote = false;
+  for (const method of ["POST", "PUT", "OPTIONS", "DELETE"]) {
+    const res = await handleReact(method, url(token), {
+      secret: SECRET,
+      now: () => Date.now(),
+      recipientMayReact: () => Promise.resolve(true),
+      writeReaction: () => {
+        wrote = true;
+        return Promise.resolve(true);
+      },
+      resultPage: RESULT_PAGE,
+      logError: () => {},
+    });
+    assertEquals(res.status, 405);
+    assertEquals(res.headers.get("allow"), "GET, HEAD");
+  }
+  assertEquals(wrote, false);
 });
 
 // mayReact mirrors message_recipients_update_own + the select policy's
