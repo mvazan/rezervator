@@ -1,5 +1,7 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:rezervator/push/pending_link.dart';
 
 void main() {
@@ -45,6 +47,84 @@ void main() {
           const PendingLink(kind: PendingLinkKind.message, id: 'm1'));
       container.read(pendingLinkProvider.notifier).clear();
       expect(container.read(pendingLinkProvider), isNull);
+    });
+  });
+
+  group('DeepLinkSeed', () {
+    // go_router keys a GoRoute's page by its PATTERN (/zpravy/:id), so a
+    // move from /zpravy/A to /zpravy/B in the same tab (a second e-mail
+    // link, browser back/forward) keeps the same seed State: initState
+    // does not run again, so the seed must react in didUpdateWidget.
+    Future<(GoRouter, List<PendingLink?>)> pump(WidgetTester tester) async {
+      PendingLink seed(GoRouterState s, PendingLinkKind kind) =>
+          PendingLink(kind: kind, id: s.pathParameters['id']!);
+      final router = GoRouter(
+        initialLocation: '/',
+        routes: [
+          GoRoute(path: '/', builder: (_, _) => const Text('home')),
+          GoRoute(
+            path: '/zpravy/:id',
+            builder: (_, s) => DeepLinkSeed(
+              link: seed(s, PendingLinkKind.message),
+              child: Text('seed ${s.pathParameters['id']}'),
+            ),
+          ),
+          GoRoute(
+            path: '/nastenka/:id',
+            builder: (_, s) => DeepLinkSeed(
+              link: seed(s, PendingLinkKind.notice),
+              child: Text('seed ${s.pathParameters['id']}'),
+            ),
+          ),
+        ],
+      );
+      addTearDown(router.dispose);
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+      final seen = <PendingLink?>[];
+      container.listen(pendingLinkProvider, (_, next) => seen.add(next));
+      await tester.pumpWidget(UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp.router(routerConfig: router),
+      ));
+      return (router, seen);
+    }
+
+    for (final (path, kind) in [
+      ('/zpravy', PendingLinkKind.message),
+      ('/nastenka', PendingLinkKind.notice),
+    ]) {
+      testWidgets('$path/A then $path/B seeds both links', (tester) async {
+        final (router, seen) = await pump(tester);
+        router.go('$path/A');
+        await tester.pumpAndSettle();
+        expect(find.text('seed A'), findsOneWidget);
+        router.go('$path/B');
+        await tester.pumpAndSettle();
+        expect(find.text('seed B'), findsOneWidget);
+        expect(seen, [
+          PendingLink(kind: kind, id: 'A'),
+          PendingLink(kind: kind, id: 'B'),
+        ]);
+      });
+    }
+
+    testWidgets('a rebuild with the same link does not seed it again',
+        (tester) async {
+      final (router, seen) = await pump(tester);
+      router.go('/zpravy/A');
+      await tester.pumpAndSettle();
+      // HomeShell opens the link and clears it ...
+      final container = ProviderScope.containerOf(
+          tester.element(find.text('seed A')));
+      container.read(pendingLinkProvider.notifier).clear();
+      // ... and a later refresh of the same location must not reopen it.
+      router.refresh();
+      await tester.pumpAndSettle();
+      expect(seen, [
+        const PendingLink(kind: PendingLinkKind.message, id: 'A'),
+        null,
+      ]);
     });
   });
 }

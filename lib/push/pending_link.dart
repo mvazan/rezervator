@@ -8,6 +8,7 @@ library;
 
 import 'dart:async';
 
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 /// Which screen a [PendingLink] opens.
@@ -77,6 +78,50 @@ class PendingLinkNotifier extends Notifier<PendingLink?> {
 final pendingLinkProvider =
     NotifierProvider<PendingLinkNotifier, PendingLink?>(
         () => PendingLinkNotifier());
+
+/// Seeds [pendingLinkProvider] from a /zpravy/:id or /nastenka/:id route,
+/// then renders [child] (the ordinary `AuthGate`) — HomeShell picks the
+/// link up once signed in (0051). A plain visit to `/zpravy` or
+/// `/nastenka` (no id) skips this and goes straight to `AuthGate`.
+class DeepLinkSeed extends ConsumerStatefulWidget {
+  const DeepLinkSeed({super.key, required this.link, required this.child});
+
+  final PendingLink link;
+  final Widget child;
+
+  @override
+  ConsumerState<DeepLinkSeed> createState() => _DeepLinkSeedState();
+}
+
+class _DeepLinkSeedState extends ConsumerState<DeepLinkSeed> {
+  @override
+  void initState() {
+    super.initState();
+    _seed();
+  }
+
+  // go_router keys a GoRoute's page by its pattern (/zpravy/:id), so a
+  // move from /zpravy/A to /zpravy/B in the same tab (a second e-mail
+  // link, browser back/forward) keeps this State: initState does not run
+  // again. An equal link (a plain rebuild) must not reopen it.
+  @override
+  void didUpdateWidget(DeepLinkSeed oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.link != oldWidget.link) _seed();
+  }
+
+  /// Sets [DeepLinkSeed.link] once the frame is done: Riverpod allows no
+  /// provider write in initState.
+  void _seed() {
+    final link = widget.link;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) ref.read(pendingLinkProvider.notifier).set(link);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
 
 /// The plain (non-Riverpod) sink `Push` publishes onto — a broadcast
 /// stream plus a one-slot "initial" value for a cold start, since the

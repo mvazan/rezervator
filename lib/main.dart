@@ -94,11 +94,12 @@ final _router = GoRouter(
     GoRoute(
       path: '/zpravy/:id',
       builder: (_, state) => AppConfig.hasSupabase
-          ? _DeepLinkSeed(
+          ? DeepLinkSeed(
               link: PendingLink(
                 kind: PendingLinkKind.message,
                 id: state.pathParameters['id']!,
               ),
+              child: const AuthGate(),
             )
           : const _NotConfigured(),
     ),
@@ -110,11 +111,12 @@ final _router = GoRouter(
     GoRoute(
       path: '/nastenka/:id',
       builder: (_, state) => AppConfig.hasSupabase
-          ? _DeepLinkSeed(
+          ? DeepLinkSeed(
               link: PendingLink(
                 kind: PendingLinkKind.notice,
                 id: state.pathParameters['id']!,
               ),
+              child: const AuthGate(),
             )
           : const _NotConfigured(),
     ),
@@ -125,32 +127,6 @@ final _router = GoRouter(
     ),
   ],
 );
-
-/// Seeds [pendingLinkProvider] once from a /zpravy/:id or /nastenka/:id
-/// route, then renders the ordinary [AuthGate] — HomeShell picks the link
-/// up once signed in (0051). A plain visit to `/zpravy` or `/nastenka` (no
-/// id) skips this and goes straight to [AuthGate].
-class _DeepLinkSeed extends ConsumerStatefulWidget {
-  const _DeepLinkSeed({required this.link});
-
-  final PendingLink link;
-
-  @override
-  ConsumerState<_DeepLinkSeed> createState() => _DeepLinkSeedState();
-}
-
-class _DeepLinkSeedState extends ConsumerState<_DeepLinkSeed> {
-  @override
-  void initState() {
-    super.initState();
-    // After the frame: Riverpod allows no provider write in initState.
-    WidgetsBinding.instance.addPostFrameCallback(
-        (_) => ref.read(pendingLinkProvider.notifier).set(widget.link));
-  }
-
-  @override
-  Widget build(BuildContext context) => const AuthGate();
-}
 
 class RezervatorApp extends ConsumerWidget {
   const RezervatorApp({super.key});
