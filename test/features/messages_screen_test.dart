@@ -95,6 +95,7 @@ void main() {
     Stream<List<Message>>? messageStream,
     List<MessageRecipient> recipients = const [],
     List<PlayerName> roster = const [],
+    MyDuty duty = MyDuty.none,
   }) =>
       [
         myProfileProvider.overrideWith((ref) => Stream.value(profile)),
@@ -106,7 +107,7 @@ void main() {
         playersProvider.overrideWith((ref) async => roster),
         timeBlocksProvider.overrideWith((ref) => Stream.value(const [])),
         nowProvider.overrideWith((ref) => Stream.value(DateTime(2026, 10, 2, 12))),
-        myDutyProvider.overrideWithValue(MyDuty.none),
+        myDutyProvider.overrideWithValue(duty),
       ];
 
   // The screen's writes are injected (no Supabase in widget tests); the
@@ -119,10 +120,11 @@ void main() {
     Future<void> Function(List<String> ids)? markRead,
     Future<void> Function(String id, Reaction? r)? react,
     Future<void> Function(String id, String text)? reply,
+    MyDuty duty = MyDuty.none,
   }) =>
       ProviderScope(
-        overrides: overrides(
-            profile: profile, messages: messages, recipients: recipients, roster: roster),
+        overrides: overrides(profile: profile, messages: messages,
+            recipients: recipients, roster: roster, duty: duty),
         child: MaterialApp(
           home: MessagesScreen(
             markRead: markRead ?? (_) async {},
@@ -208,6 +210,32 @@ void main() {
       expect(find.text('Přijďte dřív.'), findsOneWidget);
       expect(find.text('Starší zpráva.'), findsNothing);
       expect(find.text('Starší (1)'), findsOneWidget);
+    });
+
+    testWidgets('a plain player sees only "Napsat"', (tester) async {
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+      expect(find.text('Napsat'), findsOneWidget);
+      expect(find.text('Napsat hráčům'), findsNothing);
+    });
+
+    testWidgets('an admin also sees "Napsat hráčům"', (tester) async {
+      const admin = Profile(
+        id: 'admin', displayName: 'Adam', email: 'a@example.com',
+        role: Role.admin, status: ProfileStatus.approved,
+      );
+      await tester.pumpWidget(app(profile: admin));
+      await tester.pumpAndSettle();
+      expect(find.text('Napsat'), findsOneWidget);
+      expect(find.text('Napsat hráčům'), findsOneWidget);
+    });
+
+    testWidgets('so does a player on duty today', (tester) async {
+      final day = Day(2026, 10, 2);
+      await tester.pumpWidget(app(duty: MyDuty(
+          current: DutyPeriod(id: 'p1', startsOn: day, endsOn: day))));
+      await tester.pumpAndSettle();
+      expect(find.text('Napsat hráčům'), findsOneWidget);
     });
   });
 

@@ -10,6 +10,7 @@ import '../../data/clock.dart';
 import '../../data/providers.dart';
 import '../../domain/messages.dart';
 import '../../domain/models.dart';
+import 'widgets/message_composers.dart';
 import 'widgets/message_tile.dart';
 
 /// [Api.setReaction]'s shape: sets or (null) clears my 👍/👎.
@@ -83,6 +84,36 @@ class _MessagesScreenState extends ConsumerState<MessagesScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Zprávy')),
       body: body,
+      // Its own Consumer: a change of role or duty rebuilds the buttons,
+      // not the list.
+      floatingActionButton: Consumer(builder: (context, ref, _) {
+        final isAdmin = ref.watch(
+            myProfileProvider.select((p) => p.value?.isAdmin ?? false));
+        final onDuty = ref.watch(myDutyProvider.select((d) => d.onDuty));
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            // The staff composer: the admin, or the duty today — the
+            // server's `message_send` gate for a day or a block.
+            if (isAdmin || onDuty) ...[
+              FloatingActionButton.extended(
+                heroTag: 'staff-compose',
+                onPressed: () => showStaffComposer(context, ref),
+                icon: const Icon(Icons.campaign_outlined),
+                label: const Text('Napsat hráčům'),
+              ),
+              const SizedBox(width: 12),
+            ],
+            FloatingActionButton.extended(
+              heroTag: 'player-compose',
+              onPressed: () => showPlayerComposer(context, ref),
+              icon: const Icon(Icons.edit_outlined),
+              label: const Text('Napsat'),
+            ),
+          ],
+        );
+      }),
     );
   }
 

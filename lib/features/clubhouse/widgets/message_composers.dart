@@ -1,0 +1,444 @@
+/// The two ways to start a message (0051): a player writing to the admins
+/// or today's duty, and the admin/duty writing to a day or a block of
+/// players. Both end in Api.messageSend; both show the spec's error texts
+/// on refusal.
+library;
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/misc.dart' show ProviderListenable;
+
+import '../../../core/ui.dart';
+import '../../../data/clock.dart';
+import '../../../data/providers.dart';
+import '../../../data/week_schedule.dart' show weekScheduleProvider;
+import '../../../domain/collation.dart';
+import '../../../domain/duties.dart' show dutyDayLabel;
+import '../../../domain/messages.dart'
+    show dayRecipientIds, dutyRecipientIds, recipientPreviewLabel;
+import '../../../domain/models.dart';
+import '../../../domain/schedule.dart';
+
+/// `ref.read` or `ref.watch` — [_dutyReachable] serves a one-off check
+/// and a live sheet with the same rule.
+typedef _Get = T Function<T>(ProviderListenable<T> provider);
+
+/// The roster's ids with an account — `message_send`'s member rule (the
+/// `players` view) minus the players without an account; null while the
+/// roster has not loaded (then nobody is filtered out).
+Set<String>? _members(_Get get) {
+  final players = get(playersProvider).value;
+  if (players == null) return null;
+  return {
+    for (final p in players)
+      if (p.hasAccount) p.id,
+  };
+}
+
+/// Whether „Službě“ has anyone to reach today: someone other than me, with
+/// an account, is assigned to the period covering today — the set
+/// `message_send` computes, so an empty one would only earn
+/// `nobody_on_duty`.
+bool _dutyReachable(_Get get) {
+  final me = get(myProfileProvider).value;
+  if (me == null) return false;
+  final today = Day.fromDateTime(get(nowProvider).value ?? DateTime.now());
+  return dutyRecipientIds(
+    get(dutyPeriodsProvider).value ?? const [],
+    get(dutyAssignmentsProvider).value ?? const [],
+    me.id,
+    today,
+    members: _members(get),
+  ).isNotEmpty;
+}
+
+/// [_dutyReachable] read once, for an entry point deciding whether to
+/// offer „Napsat službě…“ (Task 9's cancel dialog). The player composer
+/// itself watches the same rule live.
+bool dutyReachableToday(WidgetRef ref) => _dutyReachable(ref.read);
+
+/// The player composer — Klubovna → Zprávy's „Napsat“, and the training's
+/// „Napsat správci…“ / „Napsat službě…“ (Task 9) with [date]/[block] as the
+/// context (`on_date`/`block_id`, display only) and [preselect] as the
+/// audience. A [MessageAudience.duty] preselect falls back to Správci while
+/// nobody else serves today. The sheet watches its own providers — [ref]
+/// only keeps the entry points' call shape, as for [showStaffComposer].
+Future<void> showPlayerComposer(
+  BuildContext context,
+  WidgetRef ref, {
+  Day? date,
+  TimeBlock? block,
+  MessageAudience? preselect,
+}) async {
+  final result =
+      await showModalBottomSheet<({MessageAudience audience, String body})>(
+        context: context,
+        isScrollControlled: true,
+        builder: (_) => _PlayerComposerSheet(
+          initial: preselect ?? MessageAudience.admins,
+          trainingLabel: date == null
+              ? null
+              : block == null
+              ? 'K tréninku ${dutyDayLabel(date)}'
+              : 'K tréninku ${dutyDayLabel(date)} · ${block.label}',
+        ),
+      );
+  if (result == null || !context.mounted) return;
+  await tryAction(
+    context,
+    () => Api.messageSend(
+      kind: MessageKind.message,
+      audience: result.audience,
+      onDate: date,
+      blockId: block?.id,
+      body: result.body,
+    ),
+    success: 'Zpráva odeslána.',
+    // `nobody_on_duty` („Dnes nikdo neslouží — napiš správci.“) is in the
+    // shared map; a player composer is never offered for being on duty.
+    errorText: friendlyDbError,
+  );
+}
+
+/// What the staff sheet hands back: the target (a day, or a block of it),
+/// the text, and whether it was offered for being on duty — so a
+/// `not_allowed` then reads as the duty having ended ([dutyEndedMessage]).
+typedef _StaffMessage = ({Day date, String? blockId, String body, bool asDuty});
+
+/// The staff composer — Zprávy's „Napsat hráčům“ (the admin, or the duty on
+/// today or later), and the calendar's „Napsat hráčům dne…“ / „Napsat
+/// hráčům bloku…“ (Task 9) with [date]/[blockId] prefilled. The date
+/// defaults to today; the duty cannot pick a past day. Every target shows
+/// who would get it („Dostane 2 hráči: …“), and an empty one cannot be
+/// sent. The sheet watches its own providers, [ref] as in
+/// [showPlayerComposer].
+Future<void> showStaffComposer(
+  BuildContext context,
+  WidgetRef ref, {
+  Day? date,
+  String? blockId,
+}) async {
+  final result = await showModalBottomSheet<_StaffMessage>(
+    context: context,
+    isScrollControlled: true,
+    builder: (_) =>
+        _StaffComposerSheet(initialDate: date, initialBlockId: blockId),
+  );
+  if (result == null || !context.mounted) return;
+  await tryAction(
+    context,
+    () => Api.messageSend(
+      kind: MessageKind.message,
+      audience: result.blockId == null
+          ? MessageAudience.day
+          : MessageAudience.block,
+      onDate: result.date,
+      blockId: result.blockId,
+      body: result.body,
+    ),
+    success: 'Zpráva odeslána.',
+    errorText: (e) => staffSendErrorText(
+      e,
+      toBlock: result.blockId != null,
+      asDuty: result.asDuty,
+    ),
+  );
+}
+
+/// The staff composer's refusal text: `no_recipients` and `date_past` read
+/// differently here than in the shared map (spec: Errors and edge cases),
+/// and a `not_allowed` sent [asDuty] means the duty has ended.
+@visibleForTesting
+String staffSendErrorText(
+  Object error, {
+  required bool toBlock,
+  required bool asDuty,
+}) {
+  final raw = '$error';
+  if (raw.contains('no_recipients')) {
+    return toBlock
+        ? 'V tomto bloku nikdo nemá rezervaci.'
+        : 'V tento den nikdo nemá rezervaci.';
+  }
+  if (raw.contains('date_past')) return 'Minulým dnům už nejde psát.';
+  return friendlyDbError(error, wasOnDuty: asDuty);
+}
+
+class _PlayerComposerSheet extends ConsumerStatefulWidget {
+  const _PlayerComposerSheet({
+    required this.initial,
+    required this.trainingLabel,
+  });
+
+  /// The audience picked when the sheet opens.
+  final MessageAudience initial;
+
+  /// „K tréninku po 5. 10. · 16:00–17:00“ when opened from a training.
+  final String? trainingLabel;
+
+  @override
+  ConsumerState<_PlayerComposerSheet> createState() =>
+      _PlayerComposerSheetState();
+}
+
+class _PlayerComposerSheetState extends ConsumerState<_PlayerComposerSheet> {
+  /// The player's choice; [build] shows Správci instead while „Službě“ is
+  /// off — the streams may land after the sheet opens, and a duty may end
+  /// while it is open.
+  late MessageAudience _audience = widget.initial;
+  final _body = TextEditingController();
+
+  @override
+  void dispose() {
+    _body.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dutyEnabled = _dutyReachable(ref.watch);
+    final audience = _audience == MessageAudience.duty && !dutyEnabled
+        ? MessageAudience.admins
+        : _audience;
+    final text = _body.text.trim();
+    return _SheetFrame(
+      children: [
+        Text('Napsat', style: Theme.of(context).textTheme.titleMedium),
+        if (widget.trainingLabel case final label?)
+          Text(label, style: Theme.of(context).textTheme.bodySmall),
+        const SizedBox(height: 8),
+        RadioGroup<MessageAudience>(
+          groupValue: audience,
+          onChanged: (v) => setState(() => _audience = v ?? _audience),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const RadioListTile<MessageAudience>(
+                title: Text('Správci'),
+                value: MessageAudience.admins,
+              ),
+              RadioListTile<MessageAudience>(
+                title: const Text('Službě'),
+                subtitle: dutyEnabled
+                    ? null
+                    : const Text('Dnes nikdo neslouží'),
+                value: MessageAudience.duty,
+                enabled: dutyEnabled,
+              ),
+            ],
+          ),
+        ),
+        _BodyField(controller: _body, onChanged: () => setState(() {})),
+        Align(
+          alignment: Alignment.centerRight,
+          child: FilledButton(
+            onPressed: text.isEmpty
+                ? null
+                : () => Navigator.of(
+                    context,
+                  ).pop((audience: audience, body: text)),
+            child: const Text('Odeslat'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// The message text of both composers: up to 500 characters
+/// (`message_send`'s `body_too_long`); [onChanged] rebuilds the sheet, whose
+/// „Odeslat“ reads the controller.
+class _BodyField extends StatelessWidget {
+  const _BodyField({required this.controller, required this.onChanged});
+
+  final TextEditingController controller;
+  final VoidCallback onChanged;
+
+  @override
+  Widget build(BuildContext context) => TextField(
+    controller: controller,
+    maxLength: 500,
+    minLines: 1,
+    maxLines: 3,
+    textCapitalization: TextCapitalization.sentences,
+    decoration: const InputDecoration(hintText: 'Text zprávy'),
+    onChanged: (_) => onChanged(),
+  );
+}
+
+/// Both composers' sheet: padded, lifted above the keyboard, scrolling when
+/// a day's blocks and the keyboard leave too little room.
+class _SheetFrame extends StatelessWidget {
+  const _SheetFrame({required this.children});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) => SafeArea(
+    child: SingleChildScrollView(
+      padding: EdgeInsets.only(
+        left: 16,
+        right: 16,
+        top: 16,
+        bottom: 16 + MediaQuery.viewInsetsOf(context).bottom,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: children,
+      ),
+    ),
+  );
+}
+
+/// The Monday of [d]'s week. `WeekNavigation.mondayOf` (week_board.dart)
+/// is a mixin method bound to a screen's weekOffset, hence this copy.
+Day _mondayOf(Day d) => d.addDays(1 - d.weekday);
+
+class _StaffComposerSheet extends ConsumerStatefulWidget {
+  const _StaffComposerSheet({
+    required this.initialDate,
+    required this.initialBlockId,
+  });
+
+  /// Null = today.
+  final Day? initialDate;
+
+  /// Null = „Celý den“.
+  final String? initialBlockId;
+
+  @override
+  ConsumerState<_StaffComposerSheet> createState() =>
+      _StaffComposerSheetState();
+}
+
+class _StaffComposerSheetState extends ConsumerState<_StaffComposerSheet> {
+  late Day _date = widget.initialDate ?? _today(ref.read);
+
+  /// Null = „Celý den“.
+  late String? _blockId = widget.initialBlockId;
+  final _body = TextEditingController();
+
+  static Day _today(_Get get) =>
+      Day.fromDateTime(get(nowProvider).value ?? DateTime.now());
+
+  @override
+  void dispose() {
+    _body.dispose();
+    super.dispose();
+  }
+
+  /// The admin may write about any day; the duty from today on (the
+  /// server's `duty_gate`).
+  Future<void> _pickDate() async {
+    final isAdmin = ref.read(myProfileProvider).value?.isAdmin ?? false;
+    final picked = await pickDay(
+      context,
+      initial: _date,
+      first: isAdmin ? _date.addDays(-365) : _today(ref.read),
+      last: _date.addDays(365),
+    );
+    if (picked != null && mounted) {
+      setState(() {
+        _date = picked;
+        _blockId = null;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final me = ref.watch(myProfileProvider).value;
+    final isAdmin = me?.isAdmin ?? false;
+    final asDuty = ref.watch(myDutyProvider).onDuty && !isAdmin;
+    final monday = _mondayOf(_date);
+    final week = ref.watch(weekScheduleProvider(monday)).value;
+    final reservations =
+        ref.watch(weekReservationsProvider(monday)).value ?? const [];
+    final players = ref.watch(playersProvider).value;
+    final names = {for (final p in players ?? const []) p.id: p.displayName};
+    final members = players == null
+        ? null
+        : {
+            for (final p in players)
+              if (p.hasAccount) p.id,
+          };
+    // The week runs Monday..Sunday. No blocks on a closed day, nor from
+    // the placeholder grid (its ids are not the server's).
+    final dayBlocks = week != null && week.blocksFromDb
+        ? switch (week.week.days[_date.weekday - 1]) {
+            OpenDay(:final blocks) => blocks,
+            ClosedDay() => const <TimeBlock>[],
+          }
+        : const <TimeBlock>[];
+    // A prefilled block this day does not (yet) list reads as „Celý den“.
+    final blockId = dayBlocks.any((b) => b.id == _blockId) ? _blockId : null;
+
+    // Who `message_send` would pick: the author left out, players without
+    // an account too; Czech-sorted.
+    List<String> recipients(String? blockId) => [
+      for (final id in dayRecipientIds(
+        reservations,
+        date: _date,
+        blockId: blockId,
+        meId: me?.id,
+        members: members,
+      ))
+        ?names[id],
+    ]..sort(compareCzech);
+
+    final text = _body.text.trim();
+    // Not before the day's blocks are known: a prefilled block would
+    // otherwise go out as „Celý den“.
+    final canSend =
+        week != null && text.isNotEmpty && recipients(blockId).isNotEmpty;
+    return _SheetFrame(
+      children: [
+        Text('Napsat hráčům', style: Theme.of(context).textTheme.titleMedium),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          title: Text('${_date.day}. ${_date.month}. ${_date.year}'),
+          trailing: TextButton(
+            onPressed: _pickDate,
+            child: const Text('Změnit'),
+          ),
+        ),
+        RadioGroup<String?>(
+          groupValue: blockId,
+          onChanged: (v) => setState(() => _blockId = v),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              RadioListTile<String?>(
+                title: const Text('Celý den'),
+                subtitle: Text(recipientPreviewLabel(recipients(null))),
+                value: null,
+              ),
+              for (final b in dayBlocks)
+                RadioListTile<String?>(
+                  title: Text(b.label),
+                  subtitle: Text(recipientPreviewLabel(recipients(b.id))),
+                  value: b.id,
+                ),
+            ],
+          ),
+        ),
+        _BodyField(controller: _body, onChanged: () => setState(() {})),
+        Align(
+          alignment: Alignment.centerRight,
+          child: FilledButton(
+            onPressed: canSend
+                ? () => Navigator.of(context).pop((
+                    date: _date,
+                    blockId: blockId,
+                    body: text,
+                    asDuty: asDuty,
+                  ))
+                : null,
+            child: const Text('Odeslat'),
+          ),
+        ),
+      ],
+    );
+  }
+}
