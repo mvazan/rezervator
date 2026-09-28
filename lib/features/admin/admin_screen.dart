@@ -134,6 +134,7 @@ class AdminScreen extends ConsumerWidget {
               label: entry.label,
               icon: entry.icon,
               subtitle: null,
+              badge: null,
               onTap: () => _open(context, entry),
             ),
         ],

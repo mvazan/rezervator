@@ -5,11 +5,15 @@ library;
 
 import 'package:flutter/material.dart';
 
-/// One hub tile: label + icon + optional subtitle + what a tap does.
+/// One hub tile: label + icon + optional subtitle + optional badge count
+/// (null or 0 = none; Klubovna's unread notices/messages, 0051) + what a
+/// tap does. A record, so every literal spells out `badge` — `null` where
+/// the entry has nothing to count.
 typedef HubEntry = ({
   String label,
   IconData icon,
   String? subtitle,
+  int? badge,
   VoidCallback onTap,
 });
 
@@ -20,7 +24,7 @@ List<Widget> _noExtra(bool wide) => const [];
 
 /// A hub's leading icon: tonal 40×40 rounded square around the glyph.
 class HubIcon extends StatelessWidget {
-  const HubIcon(this.icon, {super.key, this.tinted = false});
+  const HubIcon(this.icon, {super.key, this.tinted = false, this.badge});
 
   final IconData icon;
 
@@ -28,10 +32,13 @@ class HubIcon extends StatelessWidget {
   /// tiles on Správa) — apart from the regular (primary-tinted) entries.
   final bool tinted;
 
+  /// A count on the icon's corner ([Badge.count]); null or 0 shows none.
+  final int? badge;
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Container(
+    final box = Container(
       width: 40,
       height: 40,
       alignment: Alignment.center,
@@ -45,6 +52,9 @@ class HubIcon extends StatelessWidget {
         size: 22,
       ),
     );
+    final count = badge;
+    if (count == null || count == 0) return box;
+    return Badge.count(count: count, child: box);
   }
 }
 
@@ -70,7 +80,7 @@ class HubMenu extends StatelessWidget {
               children: [
                 for (final entry in entries)
                   ListTile(
-                    leading: HubIcon(entry.icon),
+                    leading: HubIcon(entry.icon, badge: entry.badge),
                     title: Text(entry.label),
                     subtitle:
                         entry.subtitle == null ? null : Text(entry.subtitle!),
@@ -118,7 +128,7 @@ class _HubCard extends StatelessWidget {
           padding: const EdgeInsets.all(16),
           child: Row(
             children: [
-              HubIcon(entry.icon),
+              HubIcon(entry.icon, badge: entry.badge),
               const SizedBox(width: 16),
               Expanded(
                 child: subtitle == null
