@@ -17,6 +17,15 @@ export function dayLabel(sqlDate: string): string {
   return `${names[d.getUTCDay()]} ${d.getUTCDate()}.${d.getUTCMonth() + 1}.`;
 }
 
+/// "po 5. 10." — the spaced Czech day form Správa a Klubovna → Služby use
+/// (dayLabel above is the unspaced "po 5.10." the notification texts use
+/// elsewhere; duty and message texts want the spaced one).
+export function dutyDayLabel(sqlDate: string): string {
+  const names = ["ne", "po", "út", "st", "čt", "pá", "so"];
+  const d = new Date(`${sqlDate}T00:00:00Z`);
+  return `${names[d.getUTCDay()]} ${d.getUTCDate()}. ${d.getUTCMonth() + 1}.`;
+}
+
 export function timeLabel(sqlTime: string): string {
   const [h, m] = sqlTime.split(":");
   return `${Number(h)}:${m}`;

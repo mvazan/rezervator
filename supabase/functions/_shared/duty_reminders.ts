@@ -4,7 +4,7 @@
 
 import { pragueEpoch } from "./cancel_token.ts";
 import type { Delivery } from "./delivery.ts";
-import { escapeHtml, leadLabel, pragueDateTime } from "./format.ts";
+import { dutyDayLabel, escapeHtml, leadLabel, pragueDateTime } from "./format.ts";
 
 /// One row of due_duty_reminders(): a player to remind of a duty. The
 /// dates are plain Prague dates (`YYYY-MM-DD`), both included; `days` is
@@ -47,13 +47,6 @@ function daysUntil(startsOn: string, now: Date): number {
 export function dutyReminderTitle(startsOn: string, now: Date): string {
   const lead = leadLabel(Math.max(daysUntil(startsOn, now), 1) * 1440);
   return `${lead[0].toUpperCase()}${lead.slice(1)} sloužíš na kantýně`;
-}
-
-/// "po 5. 10." — a duty's day as Správa and Klubovna → Služby write it.
-function dutyDayLabel(sqlDate: string): string {
-  const names = ["ne", "po", "út", "st", "čt", "pá", "so"];
-  const d = new Date(`${sqlDate}T00:00:00Z`);
-  return `${names[d.getUTCDay()]} ${d.getUTCDate()}. ${d.getUTCMonth() + 1}.`;
 }
 
 /// "po 5. 10. – ne 11. 10., spolu s: Jana Nováková" — the period (a
