@@ -61,8 +61,10 @@ export function reactionChange(
 
 /// Sends [record] to every one of [recipients], sequentially (not
 /// Promise.all — Resend's free tier rate-limits around 2 req/s, and a
-/// 40-player "all" notice would trip it with no retry). Returns how many
-/// sends were attempted. record.notify === false sends nothing.
+/// 40-player "all" notice would trip it with no retry). A recipient whose
+/// links or send throw is logged and skipped; the rest still get theirs.
+/// Returns how many sends were attempted. record.notify === false sends
+/// nothing.
 export async function deliverMessage(
   record: MessageRow,
   ctx: { authorName: string; authorIsAdmin: boolean; context: string | null },
@@ -87,22 +89,31 @@ export async function deliverMessage(
     : staffMessageText(record.body, { fromAdmin: ctx.authorIsAdmin, context: ctx.context });
   let attempted = 0;
   for (const r of recipients) {
-    // A message's e-mail carries the recipient's own signed 👍/👎 links.
-    let html: string;
-    if (record.kind === "message") {
-      const [upLink, downLink] = await Promise.all([
-        deps.reactLink(r.id, "up"),
-        deps.reactLink(r.id, "down"),
-      ]);
-      html = messageEmailHtml(text, { upLink, downLink, appLink: appMessageUrl(record.id) });
-    } else {
-      html = noticeEmailHtml(text.title, record.body, appNoticeUrl(record.id));
+    // One recipient's failure (a network error in fetch, an FCM OAuth
+    // failure, a link that cannot be signed) is logged and skipped: the
+    // webhook is not retried, so throwing would cost everyone after it
+    // their one attempt. A missing CANCEL_TOKEN_SECRET is the caller's
+    // check, made once before the fan-out.
+    try {
+      // A message's e-mail carries the recipient's own signed 👍/👎 links.
+      let html: string;
+      if (record.kind === "message") {
+        const [upLink, downLink] = await Promise.all([
+          deps.reactLink(r.id, "up"),
+          deps.reactLink(r.id, "down"),
+        ]);
+        html = messageEmailHtml(text, { upLink, downLink, appLink: appMessageUrl(record.id) });
+      } else {
+        html = noticeEmailHtml(text.title, record.body, appNoticeUrl(record.id));
+      }
+      attempted++;
+      await deps.send(r, text.title, text.body, {
+        data: { kind: record.kind, message_id: record.id },
+        html,
+      });
+    } catch (error) {
+      console.error(`message ${record.id} to ${r.id} failed:`, error);
     }
-    attempted++;
-    await deps.send(r, text.title, text.body, {
-      data: { kind: record.kind, message_id: record.id },
-      html,
-    });
   }
   return attempted;
 }

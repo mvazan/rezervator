@@ -45,25 +45,69 @@ Deno.test("deliverMessage: notify=false sends nothing", async () => {
 });
 
 Deno.test("deliverMessage: one send per recipient, sequential", async () => {
-  const order: string[] = [];
+  // p1's send settles only on a later timer tick: a Promise.all fan-out
+  // would start p2 before p1 ends.
+  const log: string[] = [];
   const n = await deliverMessage(
     baseMessage,
     { authorName: "Bára Kantýnská", authorIsAdmin: false, context: "pá 2. 10. · 16:00–17:00" },
     [recipient("p1", true), recipient("p2", false)],
     {
       send: (r, _title, _body, opts) => {
-        order.push(r.id);
+        log.push(`start ${r.id}`);
         if (r.id === "p2") {
           assertEquals(typeof opts.html, "string");
           assertEquals(opts.html!.includes("react?t="), true);
         }
-        return Promise.resolve("delivered");
+        return new Promise((resolve) =>
+          setTimeout(() => {
+            log.push(`end ${r.id}`);
+            resolve("delivered");
+          }, r.id === "p1" ? 5 : 0)
+        );
       },
       reactLink: (u, reaction) => Promise.resolve(`https://x/react?t=${u}-${reaction}`),
     },
   );
   assertEquals(n, 2);
-  assertEquals(order, ["p1", "p2"]);
+  assertEquals(log, ["start p1", "end p1", "start p2", "end p2"]);
+});
+
+Deno.test("deliverMessage: a failed send or link skips only that recipient", async () => {
+  // A network error in one send (or an OAuth failure in FCM), or a link
+  // that cannot be signed, must not cost everyone after it their one
+  // attempt: pg_net does not retry the webhook.
+  const sent: string[] = [];
+  const logged: unknown[][] = [];
+  const error = console.error;
+  console.error = (...args: unknown[]) => { logged.push(args); };
+  let n: number;
+  try {
+    n = await deliverMessage(
+      baseMessage,
+      { authorName: "Bára Kantýnská", authorIsAdmin: false, context: null },
+      [recipient("p1", true), recipient("p2", true), recipient("p3", false), recipient("p4", false)],
+      {
+        send: (r) => {
+          if (r.id === "p2") return Promise.reject(new TypeError("connection reset"));
+          sent.push(r.id);
+          return Promise.resolve("delivered");
+        },
+        reactLink: (u, reaction) =>
+          u === "p3"
+            ? Promise.reject(new Error("sign failed"))
+            : Promise.resolve(`https://x/react?t=${u}-${reaction}`),
+      },
+    );
+  } finally {
+    console.error = error;
+  }
+  assertEquals(sent, ["p1", "p4"]);
+  // Attempted: p1, p2 (sent, then failed) and p4; p3 never got to a send.
+  assertEquals(n, 3);
+  assertEquals(logged.length, 2);
+  assertEquals(String(logged[0][0]).includes("p2"), true);
+  assertEquals(String(logged[1][0]).includes("p3"), true);
 });
 
 Deno.test("deliverReaction: notifies the author once, with the text and reply", async () => {

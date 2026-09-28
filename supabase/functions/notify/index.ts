@@ -873,7 +873,15 @@ async function handle(payload: WebhookPayload) {
         blockStart: blockTimes?.starts_at ?? null,
         blockEnd: blockTimes?.ends_at ?? null,
       });
+      // Fail closed, as the kiosk branch: signing the 👍/👎 links with an
+      // empty key would mint links anyone could forge. Checked once here,
+      // not in reactLink — deliverMessage logs and skips a recipient whose
+      // link throws, which would turn this deployment bug into quiet
+      // per-recipient log lines instead of a 500.
       const cancelSecret = Deno.env.get("CANCEL_TOKEN_SECRET");
+      if (message.kind === "message" && !cancelSecret) {
+        throw new Error("CANCEL_TOKEN_SECRET is not set");
+      }
       await deliverMessage(
         message,
         {
