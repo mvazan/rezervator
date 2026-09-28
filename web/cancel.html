@@ -41,10 +41,12 @@
      back to the function, which redirects here again with the outcome. This
      page must never submit on its own. The stav keys, the kdy pattern and
      the function URL are held to _shared/cancel_flow.ts by its tests. -->
-<div class="mark" id="mark">⚠️</div>
-<h1 id="nadpis">Odkaz neplatí</h1>
+<!-- Neutral until the script picks the state: without JavaScript a valid
+     link must not read as broken, only as needing JavaScript. -->
+<div class="mark" id="mark">🎳</div>
+<h1 id="nadpis">Zrušení rezervace</h1>
 <p class="kdy" id="kdy" hidden></p>
-<p id="popis">Odkaz je poškozený nebo neplatný.</p>
+<p id="popis"></p>
 <form id="formular" method="post" hidden>
   <button type="submit" id="tlacitko">Zrušit rezervaci</button>
 </form>
