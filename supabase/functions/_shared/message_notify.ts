@@ -1,6 +1,6 @@
 // notify's delivery of a new messages row and of a reaction on it (0051),
 // kept apart from notify/index.ts so it can be tested (the
-// duty_reminders.ts shape). Both take their send function injected.
+// duty_reminders.ts shape). Both take their send functions injected.
 
 import type { Delivery } from "./delivery.ts";
 import {
@@ -59,25 +59,49 @@ export function reactionChange(
   return { reaction: record.reaction, reply: record.reply };
 }
 
-/// Sends [record] to every one of [recipients], sequentially (not
-/// Promise.all — Resend's free tier rate-limits around 2 req/s, and a
-/// 40-player "all" notice would trip it with no retry). A recipient whose
-/// links or send throw is logged and skipped; the rest still get theirs.
-/// Returns how many sends were attempted. record.notify === false sends
+/// One e-mail of a Resend batch: the address and the finished message.
+export type Email = { to: string; subject: string; html: string };
+
+/// Resend takes at most this many e-mails in one /emails/batch request.
+export const emailBatchSize = 100;
+
+/// How long a batch Resend refused as busy (429) or down (5xx) waits
+/// before its one more try: the rate limit is per second.
+export const emailRetryPauseMs = 1000;
+
+/// What deliverMessage sends with — injected, so it can be tested.
+export type MessageDeps = {
+  /// Whether [r] gets it by push (FCM configured and a token); everyone
+  /// else is e-mailed.
+  byPush: (r: Recipient) => boolean;
+  push: (
+    r: Recipient,
+    title: string,
+    body: string,
+    opts: { data?: Record<string, string> },
+  ) => Promise<Delivery>;
+  /// One Resend /emails/batch request of at most [emailBatchSize].
+  sendEmails: (emails: Email[]) => Promise<Delivery>;
+  reactLink: (userId: string, reaction: "up" | "down") => Promise<string>;
+  pause: (ms: number) => Promise<void>;
+};
+
+/// Sends [record] to every one of [recipients]. Pushes go one at a time
+/// (not Promise.all over the whole list). E-mails go out as Resend
+/// batches of up to [emailBatchSize] — one request each, not one per
+/// recipient, so a 40-player "all" notice to web-only players cannot trip
+/// Resend's per-second rate limit, and the fan-out stays short (pg_net
+/// gives the webhook 5 s). A batch Resend answers as busy or down is
+/// tried once more after [emailRetryPauseMs]. A recipient whose push or
+/// links throw, or a batch that throws, is logged and skipped; the rest
+/// still get theirs. Returns how many sends were attempted (each e-mail
+/// of a batch counts, a retry does not). record.notify === false sends
 /// nothing.
 export async function deliverMessage(
   record: MessageRow,
   ctx: { authorName: string; authorIsAdmin: boolean; context: string | null },
   recipients: Recipient[],
-  deps: {
-    send: (
-      r: Recipient,
-      title: string,
-      body: string,
-      opts: { data?: Record<string, string>; html?: string },
-    ) => Promise<Delivery>;
-    reactLink: (userId: string, reaction: "up" | "down") => Promise<string>;
-  },
+  deps: MessageDeps,
 ): Promise<number> {
   if (!record.notify) return 0;
   // The same text for everyone: who wrote it and what about does not
@@ -88,6 +112,7 @@ export async function deliverMessage(
     ? playerMessageText(ctx.authorName, record.body, ctx.context)
     : staffMessageText(record.body, { fromAdmin: ctx.authorIsAdmin, context: ctx.context });
   let attempted = 0;
+  const emails: Email[] = [];
   for (const r of recipients) {
     // One recipient's failure (a network error in fetch, an FCM OAuth
     // failure, a link that cannot be signed) is logged and skipped: the
@@ -95,27 +120,57 @@ export async function deliverMessage(
     // their one attempt. A missing CANCEL_TOKEN_SECRET is the caller's
     // check, made once before the fan-out.
     try {
-      // A message's e-mail carries the recipient's own signed 👍/👎 links.
-      let html: string;
-      if (record.kind === "message") {
-        const [upLink, downLink] = await Promise.all([
-          deps.reactLink(r.id, "up"),
-          deps.reactLink(r.id, "down"),
-        ]);
-        html = messageEmailHtml(text, { upLink, downLink, appLink: appMessageUrl(record.id) });
-      } else {
-        html = noticeEmailHtml(text.title, record.body, appNoticeUrl(record.id));
+      if (deps.byPush(r)) {
+        attempted++;
+        await deps.push(r, text.title, text.body, {
+          data: { kind: record.kind, message_id: record.id },
+        });
+        continue;
       }
-      attempted++;
-      await deps.send(r, text.title, text.body, {
-        data: { kind: record.kind, message_id: record.id },
-        html,
-      });
+      if (!r.email) {
+        console.error(`message ${record.id} to ${r.id} skipped: no push token, no e-mail`);
+        continue;
+      }
+      emails.push({ to: r.email, subject: text.title, html: await emailHtml(record, text, r, deps) });
     } catch (error) {
       console.error(`message ${record.id} to ${r.id} failed:`, error);
     }
   }
+  for (let i = 0; i < emails.length; i += emailBatchSize) {
+    const batch = emails.slice(i, i + emailBatchSize);
+    attempted += batch.length;
+    try {
+      let delivery = await deps.sendEmails(batch);
+      if (delivery === "retry") {
+        await deps.pause(emailRetryPauseMs);
+        delivery = await deps.sendEmails(batch);
+      }
+      if (delivery !== "delivered") {
+        console.error(`message ${record.id}: e-mail batch of ${batch.length} not sent (${delivery})`);
+      }
+    } catch (error) {
+      console.error(`message ${record.id}: e-mail batch of ${batch.length} failed:`, error);
+    }
+  }
   return attempted;
+}
+
+/// [record]'s e-mail to [r]: a message's carries r's own signed 👍/👎
+/// links, a notice's the nástěnka link.
+async function emailHtml(
+  record: MessageRow,
+  text: { title: string; body: string },
+  r: Recipient,
+  deps: MessageDeps,
+): Promise<string> {
+  if (record.kind === "notice") {
+    return noticeEmailHtml(text.title, record.body, appNoticeUrl(record.id));
+  }
+  const [upLink, downLink] = await Promise.all([
+    deps.reactLink(r.id, "up"),
+    deps.reactLink(r.id, "down"),
+  ]);
+  return messageEmailHtml(text, { upLink, downLink, appLink: appMessageUrl(record.id) });
 }
 
 /// Notifies [ctx.message]'s author of a fresh reaction/reply. False (sends

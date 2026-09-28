@@ -71,6 +71,7 @@ import { signReactToken } from "../_shared/react_token.ts";
 import {
   deliverMessage,
   deliverReaction,
+  type Email,
   type MessageRecipientRow,
   type MessageRow,
   reactionChange,
@@ -123,6 +124,32 @@ async function sendEmail(
   });
   if (!response.ok) {
     console.error(`Resend failed for ${to}: ${await response.text()}`);
+  }
+  return deliveryOf(response.status);
+}
+
+/// Many e-mails in one Resend request (/emails/batch, at most 100 — the
+/// caller chunks): a message fan-out (0051) costs one request per 100
+/// recipients instead of one each, so Resend's per-second rate limit is
+/// not in play and the fan-out ends well inside pg_net's 5 s. The caller
+/// leaves out recipients without an address.
+async function sendEmailBatch(emails: Email[]): Promise<Delivery> {
+  const key = Deno.env.get("RESEND_API_KEY");
+  if (!key) {
+    console.error(`e-mail batch of ${emails.length} skipped (missing RESEND_API_KEY)`);
+    return "undeliverable";
+  }
+  const from = Deno.env.get("RESEND_FROM") ?? "Rezervátor <onboarding@resend.dev>";
+  const response = await fetch("https://api.resend.com/emails/batch", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(emails.map((e) => ({ from, to: e.to, subject: e.subject, html: e.html }))),
+  });
+  if (!response.ok) {
+    console.error(`Resend batch of ${emails.length} failed: ${await response.text()}`);
   }
   return deliveryOf(response.status);
 }
@@ -891,7 +918,11 @@ async function handle(payload: WebhookPayload) {
         },
         (recipients ?? []) as Recipient[],
         {
-          send: (r, title, body, opts) => notifyRecipient(r, title, body, opts),
+          // notifyRecipient's own choice, so push goes through it.
+          byPush: (r) => firebaseConfigured() && !!r.fcm_token,
+          push: (r, title, body, opts) => notifyRecipient(r, title, body, opts),
+          sendEmails: sendEmailBatch,
+          pause: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
           reactLink: async (userId, reaction) => {
             if (!cancelSecret) throw new Error("CANCEL_TOKEN_SECRET is not set");
             const token = await signReactToken(

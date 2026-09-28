@@ -940,8 +940,10 @@ threads, no player-to-player messages. Every error is a bare code.
   (the duty's day-level cancels are `'admin'` with a non-empty note);
   tenant
   insert (pending) → superadmins; a `messages` insert (0051) → every one of
-  its `message_recipients`, one at a time (Resend's rate limit), unless
-  `notify` is false — a notice: its title and the text cut to 120
+  its `message_recipients` — pushes one at a time, e-mails as Resend
+  `/emails/batch` requests of up to 100 (one request, not one per
+  recipient: Resend's per-second rate limit; a batch answered 429/5xx is
+  tried once more a second later) — unless `notify` is false — a notice: its title and the text cut to 120
   characters, the e-mail „Otevřít nástěnku“; a message: „Zpráva od
   správce“ / „Zpráva od služby“ (by `author_role`) to players, „Zpráva od
   {jméno}“ to staff, the context („pá 2. 10. · 16:00–17:00“) on its own

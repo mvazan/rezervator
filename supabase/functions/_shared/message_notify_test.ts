@@ -1,5 +1,12 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { deliverMessage, deliverReaction, reactionChange } from "./message_notify.ts";
+import {
+  deliverMessage,
+  deliverReaction,
+  type Email,
+  type MessageDeps,
+  reactionChange,
+  type Recipient,
+} from "./message_notify.ts";
 
 const baseMessage = {
   id: "m1", tenant_id: "t1", kind: "message" as const, audience: "block" as const,
@@ -10,6 +17,49 @@ const baseMessage = {
 const recipient = (id: string, push: boolean) => ({
   id, email: `${id}@example.com`, fcm_token: push ? "tok" : null,
 });
+
+// Recording fakes for deliverMessage's deps: a recipient with a token is
+// pushed, the rest are e-mailed; pushes, e-mail batches and pauses land in
+// the returned logs. An override replaces its fake.
+function fakeDeps(overrides: Partial<MessageDeps> = {}) {
+  const pushed: { id: string; title: string; body: string; data?: Record<string, string> }[] =
+    [];
+  const batches: Email[][] = [];
+  const pauses: number[] = [];
+  const deps: MessageDeps = {
+    byPush: (r: Recipient) => r.fcm_token != null,
+    push: (r, title, body, opts) => {
+      pushed.push({ id: r.id, title, body, data: opts.data });
+      return Promise.resolve("delivered");
+    },
+    sendEmails: (emails) => {
+      batches.push(emails);
+      return Promise.resolve("delivered");
+    },
+    reactLink: (u, reaction) => Promise.resolve(`https://x/react?t=${u}-${reaction}`),
+    pause: (ms) => {
+      pauses.push(ms);
+      return Promise.resolve();
+    },
+    ...overrides,
+  };
+  return { deps, pushed, batches, pauses };
+}
+
+// Runs [body] with console.error recorded instead of printed.
+async function withErrorsLogged(body: () => Promise<void>): Promise<unknown[][]> {
+  const logged: unknown[][] = [];
+  const error = console.error;
+  console.error = (...args: unknown[]) => {
+    logged.push(args);
+  };
+  try {
+    await body();
+  } finally {
+    console.error = error;
+  }
+  return logged;
+}
 
 // A full message_recipients row, as the webhook's `record` carries it.
 const row = (reaction: "up" | "down" | null, reply: string | null) => ({
@@ -32,78 +82,159 @@ Deno.test("reactionChange: null unless reaction or reply changed to non-null", (
 });
 
 Deno.test("deliverMessage: notify=false sends nothing", async () => {
-  const sent: string[] = [];
+  const { deps, pushed, batches } = fakeDeps();
   const n = await deliverMessage(
     { ...baseMessage, notify: false },
     { authorName: "Bára Kantýnská", authorIsAdmin: false, context: "pá 2. 10. · 16:00–17:00" },
-    [recipient("p1", true)],
-    { send: (r) => { sent.push(r.id); return Promise.resolve("delivered"); },
-      reactLink: () => Promise.resolve("https://x/react?t=1") },
+    [recipient("p1", true), recipient("e1", false)],
+    deps,
   );
   assertEquals(n, 0);
-  assertEquals(sent, []);
+  assertEquals(pushed, []);
+  assertEquals(batches, []);
 });
 
-Deno.test("deliverMessage: one send per recipient, sequential", async () => {
-  // p1's send settles only on a later timer tick: a Promise.all fan-out
+Deno.test("deliverMessage: pushes go one at a time", async () => {
+  // p1's push settles only on a later timer tick: a Promise.all fan-out
   // would start p2 before p1 ends.
   const log: string[] = [];
+  const { deps, batches } = fakeDeps({
+    push: (r) => {
+      log.push(`start ${r.id}`);
+      return new Promise((resolve) =>
+        setTimeout(() => {
+          log.push(`end ${r.id}`);
+          resolve("delivered");
+        }, r.id === "p1" ? 5 : 0)
+      );
+    },
+  });
   const n = await deliverMessage(
     baseMessage,
     { authorName: "Bára Kantýnská", authorIsAdmin: false, context: "pá 2. 10. · 16:00–17:00" },
-    [recipient("p1", true), recipient("p2", false)],
-    {
-      send: (r, _title, _body, opts) => {
-        log.push(`start ${r.id}`);
-        if (r.id === "p2") {
-          assertEquals(typeof opts.html, "string");
-          assertEquals(opts.html!.includes("react?t="), true);
-        }
-        return new Promise((resolve) =>
-          setTimeout(() => {
-            log.push(`end ${r.id}`);
-            resolve("delivered");
-          }, r.id === "p1" ? 5 : 0)
-        );
-      },
-      reactLink: (u, reaction) => Promise.resolve(`https://x/react?t=${u}-${reaction}`),
-    },
+    [recipient("p1", true), recipient("p2", true)],
+    deps,
   );
   assertEquals(n, 2);
   assertEquals(log, ["start p1", "end p1", "start p2", "end p2"]);
+  assertEquals(batches, []);
 });
 
-Deno.test("deliverMessage: a failed send or link skips only that recipient", async () => {
-  // A network error in one send (or an OAuth failure in FCM), or a link
+Deno.test("deliverMessage: e-mails go out in one Resend batch per 100, not one request each", async () => {
+  // A 150-player notice by e-mail is two requests, far under Resend's
+  // per-second rate limit however it is set — sent one by one, it would
+  // trip it (a 429 is not retried by anyone).
+  const { deps, pushed, batches, pauses } = fakeDeps();
+  const mailed = Array.from({ length: 150 }, (_, i) => recipient(`e${i}`, false));
+  let n = 0;
+  const logged = await withErrorsLogged(async () => {
+    n = await deliverMessage(
+      baseMessage,
+      { authorName: "Bára Kantýnská", authorIsAdmin: false, context: null },
+      [recipient("p0", true), ...mailed, { id: "x", email: "", fcm_token: null }],
+      deps,
+    );
+  });
+  assertEquals(pushed.map((p) => p.id), ["p0"]);
+  assertEquals(batches.map((b) => b.length), [100, 50]);
+  assertEquals(batches.flat().map((e) => e.to), mailed.map((r) => r.email));
+  // Each e-mail carries its own recipient's 👍/👎 links.
+  const e7 = batches[0][7];
+  assertEquals(e7.html.includes("react?t=e7-up"), true);
+  assertEquals(e7.html.includes("react?t=e7-down"), true);
+  assertEquals(e7.subject, pushed[0].title);
+  // No address and no token (x): nothing to send it by — logged, not
+  // counted, and kept out of the batch.
+  assertEquals(n, 151);
+  assertEquals(logged.length, 1);
+  assertEquals(String(logged[0][0]).includes("x"), true);
+  assertEquals(pauses, []);
+});
+
+Deno.test("deliverMessage: a batch Resend refused as busy is tried once more after a pause", async () => {
+  // Busy now (a 429 from other traffic in the same second), fine a
+  // second later.
+  const calls: Email[][] = [];
+  const answers = ["retry", "delivered"] as const;
+  const first = fakeDeps({
+    sendEmails: (emails) => {
+      calls.push(emails);
+      return Promise.resolve(answers[calls.length - 1]);
+    },
+  });
+  const logged = await withErrorsLogged(async () => {
+    await deliverMessage(baseMessage,
+      { authorName: "Bára Kantýnská", authorIsAdmin: false, context: null },
+      [recipient("e1", false), recipient("e2", false)], first.deps);
+  });
+  assertEquals(calls.length, 2);
+  assertEquals(calls[1], calls[0]);
+  assertEquals(first.pauses, [1000]);
+  assertEquals(logged, []);
+
+  // Still busy: one more try only, then logged — no loop.
+  let tries = 0;
+  const busy = fakeDeps({
+    sendEmails: () => {
+      tries++;
+      return Promise.resolve("retry");
+    },
+  });
+  const loggedBusy = await withErrorsLogged(async () => {
+    await deliverMessage(baseMessage,
+      { authorName: "Bára Kantýnská", authorIsAdmin: false, context: null },
+      [recipient("e1", false)], busy.deps);
+  });
+  assertEquals(tries, 2);
+  assertEquals(busy.pauses, [1000]);
+  assertEquals(loggedBusy.length, 1);
+  assertEquals(String(loggedBusy[0][0]).includes("m1"), true);
+});
+
+Deno.test("deliverMessage: a batch that throws is logged and the next one still goes", async () => {
+  const sizes: number[] = [];
+  const { deps } = fakeDeps({
+    sendEmails: (emails) => {
+      sizes.push(emails.length);
+      return sizes.length === 1
+        ? Promise.reject(new TypeError("connection reset"))
+        : Promise.resolve("delivered");
+    },
+  });
+  const logged = await withErrorsLogged(async () => {
+    await deliverMessage(baseMessage,
+      { authorName: "Bára Kantýnská", authorIsAdmin: false, context: null },
+      Array.from({ length: 101 }, (_, i) => recipient(`e${i}`, false)), deps);
+  });
+  assertEquals(sizes, [100, 1]);
+  assertEquals(logged.length, 1);
+});
+
+Deno.test("deliverMessage: a failed push or link skips only that recipient", async () => {
+  // A network error in one push (or an OAuth failure in FCM), or a link
   // that cannot be signed, must not cost everyone after it their one
   // attempt: pg_net does not retry the webhook.
-  const sent: string[] = [];
-  const logged: unknown[][] = [];
-  const error = console.error;
-  console.error = (...args: unknown[]) => { logged.push(args); };
-  let n: number;
-  try {
+  const { deps, pushed, batches } = fakeDeps({
+    reactLink: (u, reaction) =>
+      u === "p3"
+        ? Promise.reject(new Error("sign failed"))
+        : Promise.resolve(`https://x/react?t=${u}-${reaction}`),
+  });
+  const push = deps.push;
+  deps.push = (r, title, body, opts) =>
+    r.id === "p2" ? Promise.reject(new TypeError("connection reset")) : push(r, title, body, opts);
+  let n = 0;
+  const logged = await withErrorsLogged(async () => {
     n = await deliverMessage(
       baseMessage,
       { authorName: "Bára Kantýnská", authorIsAdmin: false, context: null },
       [recipient("p1", true), recipient("p2", true), recipient("p3", false), recipient("p4", false)],
-      {
-        send: (r) => {
-          if (r.id === "p2") return Promise.reject(new TypeError("connection reset"));
-          sent.push(r.id);
-          return Promise.resolve("delivered");
-        },
-        reactLink: (u, reaction) =>
-          u === "p3"
-            ? Promise.reject(new Error("sign failed"))
-            : Promise.resolve(`https://x/react?t=${u}-${reaction}`),
-      },
+      deps,
     );
-  } finally {
-    console.error = error;
-  }
-  assertEquals(sent, ["p1", "p4"]);
-  // Attempted: p1, p2 (sent, then failed) and p4; p3 never got to a send.
+  });
+  assertEquals(pushed.map((p) => p.id), ["p1"]);
+  assertEquals(batches.map((b) => b.map((e) => e.to)), [["p4@example.com"]]);
+  // Attempted: p1, p2 (pushed, then failed) and p4; p3 never got to a send.
   assertEquals(n, 3);
   assertEquals(logged.length, 2);
   assertEquals(String(logged[0][0]).includes("p2"), true);
@@ -160,40 +291,38 @@ Deno.test("reactionChange: a half clear says nothing, a new chip does", () => {
   assertEquals(reactionChange({}, row("up", null)), { reaction: "up", reply: null });
 });
 
-Deno.test("deliverMessage: texts and push data by kind and audience", async () => {
-  const sent: { title: string; body: string; data?: Record<string, string>; html?: string }[] = [];
-  const deps = {
-    send: (_r: unknown, title: string, body: string,
-      opts: { data?: Record<string, string>; html?: string }) => {
-      sent.push({ title, body, ...opts });
-      return Promise.resolve("delivered" as const);
-    },
-    reactLink: (u: string, reaction: "up" | "down") =>
-      Promise.resolve(`https://x/react?t=${u}-${reaction}`),
-  };
+Deno.test("deliverMessage: texts, push data and e-mails by kind and audience", async () => {
+  // Every run has one pushed (p1) and one e-mailed (e1) recipient.
+  const { deps, pushed, batches } = fakeDeps();
+  const both = [recipient("p1", true), recipient("e1", false)];
   const ctx = { authorName: "Bára Kantýnská", authorIsAdmin: true, context: "celý den pá 2. 10." };
   // Staff → players (an admin's day message).
   await deliverMessage({ ...baseMessage, audience: "day", block_id: null, author_role: "admin" },
-    ctx, [recipient("p1", false)], deps);
+    ctx, both, deps);
   // Player → staff.
   await deliverMessage({ ...baseMessage, audience: "admins" },
-    { ...ctx, authorIsAdmin: false, context: null }, [recipient("a1", false)], deps);
+    { ...ctx, authorIsAdmin: false, context: null }, both, deps);
   // A notice: its title, the nástěnka link, no reaction links.
   await deliverMessage({ ...baseMessage, kind: "notice", audience: "all", on_date: null,
     block_id: null, title: "Brigáda", body: "V sobotu uklízíme." },
-    ctx, [recipient("p1", false)], deps);
+    ctx, both, deps);
 
-  assertEquals(sent[0].title, "Zpráva od správce");
-  assertEquals(sent[0].body, "Přijďte dřív.\ncelý den pá 2. 10.");
-  assertEquals(sent[0].data, { kind: "message", message_id: "m1" });
-  assertEquals(sent[0].html!.includes("https://x/react?t=p1-up"), true);
-  assertEquals(sent[0].html!.includes("https://x/react?t=p1-down"), true);
-  assertEquals(sent[0].html!.includes("https://rezervator.online/#/zpravy/m1"), true);
-  assertEquals(sent[1].title, "Zpráva od Bára Kantýnská");
-  assertEquals(sent[1].body, "Přijďte dřív.");
-  assertEquals(sent[2].title, "Brigáda");
-  assertEquals(sent[2].body, "V sobotu uklízíme.");
-  assertEquals(sent[2].data, { kind: "notice", message_id: "m1" });
-  assertEquals(sent[2].html!.includes("https://rezervator.online/#/nastenka/m1"), true);
-  assertEquals(sent[2].html!.includes("react?t="), false);
+  assertEquals(pushed[0].title, "Zpráva od správce");
+  assertEquals(pushed[0].body, "Přijďte dřív.\ncelý den pá 2. 10.");
+  assertEquals(pushed[0].data, { kind: "message", message_id: "m1" });
+  const mail0 = batches[0][0];
+  assertEquals(mail0.to, "e1@example.com");
+  assertEquals(mail0.subject, "Zpráva od správce");
+  assertEquals(mail0.html.includes("https://x/react?t=e1-up"), true);
+  assertEquals(mail0.html.includes("https://x/react?t=e1-down"), true);
+  assertEquals(mail0.html.includes("https://rezervator.online/#/zpravy/m1"), true);
+  assertEquals(pushed[1].title, "Zpráva od Bára Kantýnská");
+  assertEquals(pushed[1].body, "Přijďte dřív.");
+  assertEquals(batches[1][0].subject, "Zpráva od Bára Kantýnská");
+  assertEquals(pushed[2].title, "Brigáda");
+  assertEquals(pushed[2].body, "V sobotu uklízíme.");
+  assertEquals(pushed[2].data, { kind: "notice", message_id: "m1" });
+  assertEquals(batches[2][0].subject, "Brigáda");
+  assertEquals(batches[2][0].html.includes("https://rezervator.online/#/nastenka/m1"), true);
+  assertEquals(batches[2][0].html.includes("react?t="), false);
 });
