@@ -1761,7 +1761,7 @@ declare
     'google_calendar_links', 'calendar_teams', 'team_colors', 'reservations',
     'day_overrides', 'priority_slot_types', 'priority_slots', 'rentals',
     'match_exceptions', 'player_group_members', 'duty_periods',
-    'duty_assignments'
+    'duty_assignments', 'messages', 'message_recipients'
   ];
   v_missing text[];
 begin
@@ -8249,9 +8249,993 @@ begin
   raise notice 'OK: each alley''s duty reminder follows its own switch and its own lead (0050)';
 end $$;
 
+-- ---------------------------------------------------------------------------
+-- 0051: Zprávy a nástěnka. The admin and the player on duty write to a
+-- block, a day or everyone; any account player writes to the admins or to
+-- today's duty. Recipients are materialised by message_send; reactions are
+-- each recipient's own-row write, seen by every participant.
+reset role;
+
+-- 23. Fixtures for 0051 in an alley of its own, T: Adam the admin, Bára on
+-- duty from today for a week, Cyril and Dana booked today in block 16:00
+-- and Dana tomorrow too, Emil a placeholder, the kiosk. Block 17:00 has
+-- nobody; block 18:00 is a day-only block (inactive, 21's shape). Every
+-- day is a training day, 4 lanes.
+insert into tenants (id, name, status) values
+  ('00000000-0000-0000-0000-000000000051', 'Kuželna T (0051)', 'approved');
+do $$
+declare
+  v_t constant uuid := '00000000-0000-0000-0000-000000000051';
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+  v_b1 uuid;
+  v_b2 uuid;
+  v_off uuid;
+  v_period uuid;
+begin
+  insert into profiles (id, tenant_id, display_name, email, role, status)
+  values
+    ('51000000-0000-0000-0000-000000000010', v_t, 'Adam Správce',
+     'msg-adam@example.com', 'admin', 'approved'),
+    ('51000000-0000-0000-0000-000000000011', v_t, 'Bára Kantýnská',
+     'msg-bara@example.com', 'player', 'approved'),
+    ('51000000-0000-0000-0000-000000000012', v_t, 'Cyril Hráč',
+     'msg-cyril@example.com', 'player', 'approved'),
+    ('51000000-0000-0000-0000-000000000013', v_t, 'Dana Hráčka',
+     'msg-dana@example.com', 'player', 'approved');
+  insert into profiles (id, tenant_id, display_name, role, status, placeholder)
+  values ('51000000-0000-0000-0000-000000000014', v_t, 'Emil bez účtu',
+          'player', 'approved', true);
+  insert into profiles (id, tenant_id, display_name, email, role, status)
+  values ('51000000-0000-0000-0000-000000000015', v_t, 'Kiosek',
+          'msg-kiosk@example.com', 'kiosk', 'approved');
+  update schedule_settings
+     set training_weekdays = '{1,2,3,4,5,6,7}', lane_count = 4
+   where tenant_id = v_t;
+  insert into time_blocks (tenant_id, starts_at, ends_at, position)
+    values (v_t, '16:00', '17:00', 0) returning id into v_b1;
+  insert into time_blocks (tenant_id, starts_at, ends_at, position)
+    values (v_t, '17:00', '18:00', 1) returning id into v_b2;
+  insert into time_blocks (tenant_id, starts_at, ends_at, position, active)
+    values (v_t, '18:00', '19:00', -1, false) returning id into v_off;
+  insert into duty_periods (tenant_id, starts_on, ends_on)
+    values (v_t, v_today, v_today + 6) returning id into v_period;
+  insert into duty_assignments (period_id, user_id, tenant_id)
+    values (v_period, '51000000-0000-0000-0000-000000000011', v_t);
+  insert into reservations (tenant_id, player_id, date, block_id, lane,
+                            created_via, created_by)
+  values
+    (v_t, '51000000-0000-0000-0000-000000000012', v_today, v_b1, 1,
+     'app', '51000000-0000-0000-0000-000000000012'),
+    (v_t, '51000000-0000-0000-0000-000000000013', v_today, v_b1, 2,
+     'app', '51000000-0000-0000-0000-000000000013'),
+    (v_t, '51000000-0000-0000-0000-000000000013', v_today + 1, v_b1, 1,
+     'app', '51000000-0000-0000-0000-000000000013');
+  perform set_config('probe.msg_b1', v_b1::text, true);
+  perform set_config('probe.msg_b2', v_b2::text, true);
+  perform set_config('probe.msg_off', v_off::text, true);
+  perform set_config('probe.msg_period', v_period::text, true);
+end $$;
+
+-- 23a. The tables exist, RLS is on, grants match 0046 (select only for
+-- authenticated + the three own-row UPDATE columns on message_recipients).
+do $$
+declare
+  v_bad text;
+begin
+  -- Schema-qualified: Supabase has a realtime.messages of its own.
+  if not exists (select 1 from pg_tables
+                  where schemaname = 'public' and tablename = 'messages') then
+    raise exception 'FAIL: messages table missing';
+  end if;
+  if not exists (select 1 from pg_tables
+                  where schemaname = 'public' and tablename = 'message_recipients') then
+    raise exception 'FAIL: message_recipients table missing';
+  end if;
+  if exists (select 1 from pg_class
+              where oid in ('public.messages'::regclass,
+                            'public.message_recipients'::regclass)
+                and not relrowsecurity) then
+    raise exception 'FAIL: RLS is off on messages or message_recipients';
+  end if;
+  select string_agg(table_name || '.' || privilege_type, ', ')
+    into v_bad
+    from information_schema.table_privileges
+   where table_schema = 'public' and grantee = 'anon'
+     and table_name in ('messages', 'message_recipients');
+  if v_bad is not null then
+    raise exception 'FAIL: anon has %', v_bad;
+  end if;
+  select string_agg(table_name || '.' || privilege_type, ', ')
+    into v_bad
+    from information_schema.table_privileges
+   where table_schema = 'public' and grantee = 'authenticated'
+     and table_name in ('messages', 'message_recipients')
+     and privilege_type <> 'SELECT';
+  if v_bad is not null then
+    raise exception 'FAIL: authenticated has non-select %', v_bad;
+  end if;
+  if not (has_column_privilege('authenticated', 'message_recipients', 'read_at', 'update')
+      and has_column_privilege('authenticated', 'message_recipients', 'reaction', 'update')
+      and has_column_privilege('authenticated', 'message_recipients', 'reply', 'update')) then
+    raise exception 'FAIL: authenticated missing the own-row update columns';
+  end if;
+  if has_column_privilege('authenticated', 'message_recipients', 'user_id', 'update') then
+    raise exception 'FAIL: authenticated can update user_id — that would let a player steal a recipient row';
+  end if;
+  raise notice 'OK: messages/message_recipients exist with the 0046 grant shape (0051)';
+end $$;
+
+-- 23b. message_send as the admin: a notice reaches every account player
+-- of the alley but the author (the placeholder and the kiosk are out),
+-- and remembers who sent it as an admin.
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"51000000-0000-0000-0000-000000000010","role":"authenticated"}'; -- Adam, admin
+do $$
+declare
+  v_id uuid;
+  v_got text;
+begin
+  v_id := message_send('notice', 'all', null, null, 'Nové dráhy', 'Od pondělí nové dráhy.',
+                        null, true);
+  select string_agg(user_id::text, ',' order by user_id) into v_got
+    from message_recipients where message_id = v_id;
+  if v_got is distinct from (
+       select string_agg(id::text, ',' order by id) from profiles
+        where tenant_id = '00000000-0000-0000-0000-000000000051'
+          and status = 'approved' and role <> 'kiosk' and not placeholder
+          and id <> '51000000-0000-0000-0000-000000000010') then
+    raise exception 'FAIL: notice recipients wrong (placeholder/kiosk/author must be out): %', v_got;
+  end if;
+  if (select author_role from messages where id = v_id) <> 'admin' then
+    raise exception 'FAIL: notice author_role should be admin';
+  end if;
+  perform set_config('probe.msg_notice', v_id::text, true);
+  raise notice 'OK: a notice reaches every account player but the author (0051)';
+end $$;
+
+-- 23c. day: everyone with a live reservation that date, any block.
+do $$
+declare
+  v_id uuid;
+  v_got text;
+begin
+  v_id := message_send('message', 'day', (now() at time zone 'Europe/Prague')::date, null,
+                        null, 'Přijďte dřív.', null, true);
+  select string_agg(user_id::text, ',' order by user_id) into v_got
+    from message_recipients where message_id = v_id;
+  if v_got is distinct from
+     '51000000-0000-0000-0000-000000000012,51000000-0000-0000-0000-000000000013' then
+    raise exception 'FAIL: day recipients wrong: %', v_got;
+  end if;
+  if (select on_date from messages where id = v_id)
+       <> (now() at time zone 'Europe/Prague')::date then
+    raise exception 'FAIL: day message keeps its on_date';
+  end if;
+  perform set_config('probe.msg_day', v_id::text, true);
+  raise notice 'OK: a day message reaches the players booked that day (0051)';
+end $$;
+
+-- 23d. block: the same, that block only; a block nobody booked has no one
+-- to tell (no_recipients).
+do $$
+declare
+  v_id uuid;
+  v_got text;
+begin
+  v_id := message_send('message', 'block', (now() at time zone 'Europe/Prague')::date,
+                        current_setting('probe.msg_b1')::uuid, null, 'Dráha 3 nejede.',
+                        null, true);
+  select string_agg(user_id::text, ',' order by user_id) into v_got
+    from message_recipients where message_id = v_id;
+  if v_got is distinct from
+     '51000000-0000-0000-0000-000000000012,51000000-0000-0000-0000-000000000013' then
+    raise exception 'FAIL: block recipients wrong: %', v_got;
+  end if;
+  if (select block_id from messages where id = v_id)
+       <> current_setting('probe.msg_b1')::uuid then
+    raise exception 'FAIL: block message lost its block';
+  end if;
+  raise notice 'OK: a block message reaches the players booked in that block (0051)';
+end $$;
+do $$
+begin
+  perform message_send('message', 'block', (now() at time zone 'Europe/Prague')::date,
+                        current_setting('probe.msg_b2')::uuid, null, 'Nikdo?', null, true);
+  raise exception 'FAIL: a block nobody booked took a message';
+exception when others then
+  if sqlerrm <> 'no_recipients' then raise; end if;
+  raise notice 'OK: a block nobody booked says no_recipients (0051)';
+end $$;
+
+
+-- 23e. What the admin sends is checked: a notice only to everyone, only
+-- the two kinds, a day or a block needs its date, a notice its title,
+-- every body is non-blank and short enough (500 / 2000).
+do $$
+declare
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+  v_case record;
+begin
+  for v_case in
+    select * from (values
+      ('notice', 'day', null::date, 'Nadpis', 'Text', 'invalid_audience'),
+      ('notice', null, null::date, 'Nadpis', 'Text', 'invalid_audience'),
+      ('chat', 'day', v_today, null, 'Text', 'invalid_kind'),
+      ('message', 'everyone', v_today, null, 'Text', 'invalid_audience'),
+      ('message', 'day', null::date, null, 'Text', 'date_past'),
+      ('notice', 'all', null::date, '   ', 'Text', 'title_required'),
+      ('message', 'day', v_today, null, '  ', 'body_required'),
+      ('notice', 'all', null::date, 'Nadpis', null, 'body_required'),
+      ('message', 'day', v_today, null, repeat('a', 501), 'body_too_long'),
+      ('notice', 'all', null::date, 'Nadpis', repeat('a', 2001), 'body_too_long')
+    ) as c(kind, audience, on_date, title, body, code)
+  loop
+    begin
+      perform message_send(v_case.kind, v_case.audience, v_case.on_date, null,
+                           v_case.title, v_case.body, null, true);
+      raise exception 'FAIL: % / % went through, expected %',
+        v_case.kind, v_case.audience, v_case.code;
+    exception when others then
+      if sqlerrm <> v_case.code then raise; end if;
+    end;
+  end loop;
+  raise notice 'OK: kind, audience, date, title and body are checked with their own codes (0051)';
+end $$;
+
+-- 23f. The limits themselves are allowed: a 500-character message and a
+-- 2000-character notice; the body and title are stored trimmed.
+do $$
+declare
+  v_id uuid;
+begin
+  v_id := message_send('message', 'day', (now() at time zone 'Europe/Prague')::date, null,
+                        null, repeat('a', 500), null, true);
+  v_id := message_send('notice', 'all', null, null, '  Dlouhá  ', repeat('b', 2000),
+                        null, false);
+  if (select title from messages where id = v_id) <> 'Dlouhá'
+     or (select notify from messages where id = v_id) then
+    raise exception 'FAIL: the notice lost its trimmed title or its notify = false';
+  end if;
+  raise notice 'OK: 500 / 2000 characters are still fine, the title is trimmed, notify kept (0051)';
+end $$;
+
+-- 23g. The block has to be this alley's and bookable that day: another
+-- alley's block and an inactive one are unknown_block; the day-only block
+-- counts once a day override of that date lists it.
+do $$
+declare
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+begin
+  begin
+    perform message_send('message', 'block', v_today,
+                         current_setting('probe.duty_b1')::uuid, null, 'Cizí.', null, true);
+    raise exception 'FAIL: another alley''s block took a message';
+  exception when others then
+    if sqlerrm <> 'unknown_block' then raise; end if;
+  end;
+  begin
+    perform message_send('message', 'block', v_today + 3,
+                         current_setting('probe.msg_off')::uuid, null, 'Mimo.', null, true);
+    raise exception 'FAIL: an inactive block no override names took a message';
+  exception when others then
+    if sqlerrm <> 'unknown_block' then raise; end if;
+  end;
+  raise notice 'OK: a foreign or an inactive block is unknown_block (0051)';
+end $$;
+reset role;
+insert into day_overrides (tenant_id, date, block_ids, created_by)
+values ('00000000-0000-0000-0000-000000000051',
+        (now() at time zone 'Europe/Prague')::date + 3,
+        array[current_setting('probe.msg_b1')::uuid, current_setting('probe.msg_off')::uuid],
+        '51000000-0000-0000-0000-000000000010');
+insert into reservations (tenant_id, player_id, date, block_id, lane, created_via, created_by)
+values ('00000000-0000-0000-0000-000000000051', '51000000-0000-0000-0000-000000000012',
+        (now() at time zone 'Europe/Prague')::date + 3,
+        current_setting('probe.msg_off')::uuid, 1,
+        'app', '51000000-0000-0000-0000-000000000012');
+set local role authenticated;
+do $$
+declare
+  v_id uuid;
+begin
+  v_id := message_send('message', 'block', (now() at time zone 'Europe/Prague')::date + 3,
+                        current_setting('probe.msg_off')::uuid, null, 'Speciál.', null, true);
+  if (select array_agg(user_id) from message_recipients where message_id = v_id)
+       <> array['51000000-0000-0000-0000-000000000012'::uuid] then
+    raise exception 'FAIL: the day-only block''s message reached the wrong players';
+  end if;
+  raise notice 'OK: a day-only block counts on the day its override names it (0051)';
+end $$;
+
+
+-- 23h. The admin writes to today's duty (Bára) as an admin; to the admins
+-- he has nobody to write to but himself, so no_recipients.
+do $$
+declare
+  v_id uuid;
+begin
+  v_id := message_send('message', 'duty', null, null, null, 'Dnes přijde revize.',
+                        null, true);
+  if (select array_agg(user_id) from message_recipients where message_id = v_id)
+       <> array['51000000-0000-0000-0000-000000000011'::uuid]
+     or (select author_role from messages where id = v_id) <> 'admin' then
+    raise exception 'FAIL: the admin''s duty message went wrong';
+  end if;
+  raise notice 'OK: the admin writes to today''s duty (0051)';
+end $$;
+do $$
+begin
+  perform message_send('message', 'admins', null, null, null, 'Sám sobě.', null, true);
+  raise exception 'FAIL: the only admin wrote to the admins';
+exception when others then
+  if sqlerrm <> 'no_recipients' then raise; end if;
+  raise notice 'OK: the only admin has no admins to write to (0051)';
+end $$;
+
+-- 23i. Bára on duty writes to a day or a block from today on, as a
+-- player; yesterday is date_past; to the duty she is the only one on it,
+-- so nobody_on_duty; to the admins she reaches Adam.
+set local request.jwt.claims =
+  '{"sub":"51000000-0000-0000-0000-000000000011","role":"authenticated"}'; -- Bára, duty
+do $$
+declare
+  v_id uuid;
+begin
+  v_id := message_send('message', 'day', (now() at time zone 'Europe/Prague')::date, null,
+                        null, 'Kantýna dnes zavřená.', null, true);
+  if (select author_role from messages where id = v_id) <> 'player'
+     or (select count(*) from message_recipients where message_id = v_id) <> 2 then
+    raise exception 'FAIL: the duty''s day message went wrong';
+  end if;
+  perform set_config('probe.msg_bara_day', v_id::text, true);
+  raise notice 'OK: the duty writes to today, labelled as a player (0051)';
+end $$;
+do $$
+declare
+  v_id uuid;
+begin
+  v_id := message_send('message', 'block', (now() at time zone 'Europe/Prague')::date + 1,
+                        current_setting('probe.msg_b1')::uuid, null, 'Zítra dřív.',
+                        null, true);
+  if (select array_agg(user_id) from message_recipients where message_id = v_id)
+       <> array['51000000-0000-0000-0000-000000000013'::uuid] then
+    raise exception 'FAIL: the duty''s block message for tomorrow reached the wrong players';
+  end if;
+  raise notice 'OK: the duty writes to a block after today (0051)';
+end $$;
+do $$
+begin
+  begin
+    perform message_send('message', 'day', (now() at time zone 'Europe/Prague')::date - 1,
+                         null, null, 'Včera.', null, true);
+    raise exception 'FAIL: the duty wrote to yesterday';
+  exception when others then
+    if sqlerrm <> 'date_past' then raise; end if;
+  end;
+  begin
+    perform message_send('message', 'duty', null, null, null, 'Já sama.', null, true);
+    raise exception 'FAIL: the only duty wrote to herself';
+  exception when others then
+    if sqlerrm <> 'nobody_on_duty' then raise; end if;
+  end;
+  raise notice 'OK: the duty: yesterday is date_past, herself nobody_on_duty (0051)';
+end $$;
+do $$
+declare
+  v_id uuid;
+begin
+  v_id := message_send('message', 'admins', null, null, null, 'Došly párky.', null, true);
+  if (select array_agg(user_id) from message_recipients where message_id = v_id)
+       <> array['51000000-0000-0000-0000-000000000010'::uuid] then
+    raise exception 'FAIL: the duty''s admins message reached the wrong players';
+  end if;
+  raise notice 'OK: the duty writes to the admins (0051)';
+end $$;
+
+
+-- 23j. Cyril, a plain player: no day, no block, no notice (not_allowed);
+-- to the admins and to the duty yes, with the training he writes about
+-- kept on the row; another alley's block as that context is unknown_block.
+set local request.jwt.claims =
+  '{"sub":"51000000-0000-0000-0000-000000000012","role":"authenticated"}'; -- Cyril, player
+do $$
+declare
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+  v_b1 constant uuid := current_setting('probe.msg_b1')::uuid;
+begin
+  begin
+    perform message_send('message', 'day', v_today, null, null, 'Ahoj.', null, true);
+    raise exception 'FAIL: a plain player wrote to a day';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  begin
+    perform message_send('message', 'block', v_today, v_b1, null, 'Ahoj.', null, true);
+    raise exception 'FAIL: a plain player wrote to a block';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  begin
+    perform message_send('notice', 'all', null, null, 'Nadpis', 'Ahoj.', null, true);
+    raise exception 'FAIL: a plain player posted a notice';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  begin
+    perform message_send('message', 'admins', v_today,
+                         current_setting('probe.duty_b1')::uuid, null, 'Cizí.', null, true);
+    raise exception 'FAIL: another alley''s block went along as context';
+  exception when others then
+    if sqlerrm <> 'unknown_block' then raise; end if;
+  end;
+  raise notice 'OK: a plain player writes no day, block or notice, no foreign context (0051)';
+end $$;
+do $$
+declare
+  v_id uuid;
+  v_row messages;
+begin
+  v_id := message_send('message', 'admins', (now() at time zone 'Europe/Prague')::date,
+                        current_setting('probe.msg_b1')::uuid, null, 'Nepřijdu.', null, true);
+  select * into v_row from messages where id = v_id;
+  if v_row.on_date <> (now() at time zone 'Europe/Prague')::date
+     or v_row.block_id <> current_setting('probe.msg_b1')::uuid
+     or v_row.author_role <> 'player'
+     or (select array_agg(user_id) from message_recipients where message_id = v_id)
+          <> array['51000000-0000-0000-0000-000000000010'::uuid] then
+    raise exception 'FAIL: the player''s admins message went wrong: %', v_row;
+  end if;
+  perform set_config('probe.msg_cyril_admins', v_id::text, true);
+  raise notice 'OK: a plain player writes to the admins, context kept (0051)';
+end $$;
+do $$
+declare
+  v_id uuid;
+begin
+  v_id := message_send('message', 'duty', null, null, null, 'Je otevřeno?', null, true);
+  if (select array_agg(user_id) from message_recipients where message_id = v_id)
+       <> array['51000000-0000-0000-0000-000000000011'::uuid] then
+    raise exception 'FAIL: the player''s duty message reached the wrong players';
+  end if;
+  raise notice 'OK: a plain player writes to today''s duty (0051)';
+end $$;
+
+-- 23k. No period covers today: nobody_on_duty.
+reset role;
+update duty_periods
+   set starts_on = (now() at time zone 'Europe/Prague')::date + 1
+ where id = current_setting('probe.msg_period')::uuid;
+set local role authenticated;
+do $$
+begin
+  perform message_send('message', 'duty', null, null, null, 'Haló?', null, true);
+  raise exception 'FAIL: a duty message went out with no period today';
+exception when others then
+  if sqlerrm <> 'nobody_on_duty' then raise; end if;
+  raise notice 'OK: no period today is nobody_on_duty (0051)';
+end $$;
+reset role;
+update duty_periods
+   set starts_on = (now() at time zone 'Europe/Prague')::date
+ where id = current_setting('probe.msg_period')::uuid;
+set local role authenticated;
+
+
+-- 23l. The kiosk and a placeholder send nothing, not even to the admins.
+do $$
+declare
+  v_who text;
+begin
+  foreach v_who in array array['51000000-0000-0000-0000-000000000015',
+                               '51000000-0000-0000-0000-000000000014'] loop
+    perform set_config('request.jwt.claims',
+      '{"sub":"' || v_who || '","role":"authenticated"}', true);
+    begin
+      perform message_send('message', 'admins', null, null, null, 'Ahoj.', null, true);
+      raise exception 'FAIL: % wrote to the admins', v_who;
+    exception when others then
+      if sqlerrm <> 'not_allowed' then raise; end if;
+    end;
+    begin
+      perform message_send('message', 'day', (now() at time zone 'Europe/Prague')::date,
+                           null, null, 'Ahoj.', null, true);
+      raise exception 'FAIL: % wrote to a day', v_who;
+    exception when others then
+      if sqlerrm <> 'not_allowed' then raise; end if;
+    end;
+  end loop;
+  raise notice 'OK: the kiosk and a placeholder send nothing (0051)';
+end $$;
+
+-- 23m. A player of another alley (Pavel, S) writes to his own admins only
+-- — never T's — and T's blocks are unknown to him.
+set local request.jwt.claims =
+  '{"sub":"50000000-0000-0000-0000-000000000011","role":"authenticated"}'; -- Pavel, S
+do $$
+declare
+  v_id uuid;
+begin
+  v_id := message_send('message', 'admins', null, null, null, 'Z vedlejší kuželny.',
+                        null, true);
+  if (select array_agg(user_id) from message_recipients where message_id = v_id)
+       <> array['50000000-0000-0000-0000-000000000010'::uuid]
+     or (select tenant_id from messages where id = v_id)
+       <> '00000000-0000-0000-0000-000000000050' then
+    raise exception 'FAIL: another alley''s admins message crossed alleys';
+  end if;
+  raise notice 'OK: a player of another alley writes to his own admins only (0051)';
+end $$;
+do $$
+begin
+  perform message_send('message', 'duty', null, current_setting('probe.msg_b1')::uuid,
+                       null, 'Cizí blok.', null, true);
+  raise exception 'FAIL: another alley''s player named T''s block';
+exception when others then
+  if sqlerrm <> 'unknown_block' then raise; end if;
+  raise notice 'OK: T''s blocks are unknown to another alley (0051)';
+end $$;
+
+-- 23n. A visiting superadmin (Alena, S's admin, in T for a while) is no
+-- home member of T: neither an admins nor an all recipient there.
+reset role;
+update profiles
+   set superadmin = true, home_tenant_id = '00000000-0000-0000-0000-000000000050',
+       tenant_id = '00000000-0000-0000-0000-000000000051'
+ where id = '50000000-0000-0000-0000-000000000010';
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"51000000-0000-0000-0000-000000000012","role":"authenticated"}'; -- Cyril
+do $$
+declare
+  v_id uuid;
+begin
+  v_id := message_send('message', 'admins', null, null, null, 'Kdo je tu správce?',
+                        null, true);
+  if (select array_agg(user_id) from message_recipients where message_id = v_id)
+       <> array['51000000-0000-0000-0000-000000000010'::uuid] then
+    raise exception 'FAIL: a visiting superadmin got T''s admins message';
+  end if;
+  raise notice 'OK: a visiting superadmin is not an admins recipient (0051)';
+end $$;
+set local request.jwt.claims =
+  '{"sub":"51000000-0000-0000-0000-000000000010","role":"authenticated"}'; -- Adam
+do $$
+declare
+  v_id uuid;
+begin
+  v_id := message_send('notice', 'all', null, null, 'Pro domácí', 'Jen pro nás.', null, true);
+  if exists (select 1 from message_recipients where message_id = v_id
+                and user_id = '50000000-0000-0000-0000-000000000010') then
+    raise exception 'FAIL: a visiting superadmin got T''s notice';
+  end if;
+  raise notice 'OK: a visiting superadmin is not a notice recipient (0051)';
+end $$;
+reset role;
+update profiles
+   set superadmin = false, home_tenant_id = null,
+       tenant_id = '00000000-0000-0000-0000-000000000050'
+ where id = '50000000-0000-0000-0000-000000000010';
+set local role authenticated;
+
+
+-- 23o. can_read_message: a message to its author and its recipients (who
+-- see every recipient row, reactions included), not to a bystander of the
+-- same alley; a notice to every account player of the alley, not to the
+-- kiosk; nothing to another alley. RLS filters, no error.
+do $$
+declare
+  v_day constant uuid := current_setting('probe.msg_day')::uuid;
+  v_notice constant uuid := current_setting('probe.msg_notice')::uuid;
+  v_who text;
+begin
+  -- Adam, the author (not a recipient).
+  perform set_config('request.jwt.claims',
+    '{"sub":"51000000-0000-0000-0000-000000000010","role":"authenticated"}', true);
+  if (select count(*) from messages where id = v_day) <> 1
+     or (select count(*) from message_recipients where message_id = v_day) <> 2 then
+    raise exception 'FAIL: the author cannot read his message and its recipients';
+  end if;
+  -- Cyril, a recipient: the message and both recipient rows.
+  perform set_config('request.jwt.claims',
+    '{"sub":"51000000-0000-0000-0000-000000000012","role":"authenticated"}', true);
+  if (select count(*) from messages where id = v_day) <> 1
+     or (select count(*) from message_recipients where message_id = v_day) <> 2 then
+    raise exception 'FAIL: a recipient cannot read the message or its other recipients';
+  end if;
+  -- Bára, not booked today: a bystander.
+  perform set_config('request.jwt.claims',
+    '{"sub":"51000000-0000-0000-0000-000000000011","role":"authenticated"}', true);
+  if (select count(*) from messages where id = v_day) <> 0
+     or (select count(*) from message_recipients where message_id = v_day) <> 0 then
+    raise exception 'FAIL: a bystander of the alley reads a message not to her';
+  end if;
+  foreach v_who in array array['51000000-0000-0000-0000-000000000010',
+                               '51000000-0000-0000-0000-000000000011',
+                               '51000000-0000-0000-0000-000000000012',
+                               '51000000-0000-0000-0000-000000000013'] loop
+    perform set_config('request.jwt.claims',
+      '{"sub":"' || v_who || '","role":"authenticated"}', true);
+    if (select count(*) from messages where id = v_notice) <> 1 then
+      raise exception 'FAIL: % cannot read the notice', v_who;
+    end if;
+  end loop;
+  perform set_config('request.jwt.claims',
+    '{"sub":"51000000-0000-0000-0000-000000000015","role":"authenticated"}', true);
+  if (select count(*) from messages where tenant_id = '00000000-0000-0000-0000-000000000051') <> 0 then
+    raise exception 'FAIL: the kiosk reads messages or notices';
+  end if;
+  perform set_config('request.jwt.claims',
+    '{"sub":"50000000-0000-0000-0000-000000000011","role":"authenticated"}', true);
+  if (select count(*) from messages where tenant_id = '00000000-0000-0000-0000-000000000051') <> 0
+     or (select count(*) from message_recipients
+          where tenant_id = '00000000-0000-0000-0000-000000000051') <> 0 then
+    raise exception 'FAIL: another alley reads T''s messages';
+  end if;
+  raise notice 'OK: can_read_message: author, recipients, notice to the alley; not a bystander, the kiosk or another alley (0051)';
+end $$;
+
+
+-- 23p. A recipient reacts on her own row only: 👍 stamps reacted_at and
+-- the other participants see it; someone else's row updates nothing
+-- (RLS); a read alone stamps nothing; reply alone counts as a reaction;
+-- both cleared clears reacted_at.
+set local request.jwt.claims =
+  '{"sub":"51000000-0000-0000-0000-000000000012","role":"authenticated"}'; -- Cyril
+do $$
+declare
+  v_day constant uuid := current_setting('probe.msg_day')::uuid;
+  v_n integer;
+  v_row message_recipients;
+begin
+  update message_recipients set reaction = 'up'
+   where message_id = v_day and user_id = auth.uid();
+  get diagnostics v_n = row_count;
+  select * into v_row from message_recipients
+   where message_id = v_day and user_id = auth.uid();
+  if v_n <> 1 or v_row.reaction is distinct from 'up' or v_row.reacted_at is null then
+    raise exception 'FAIL: a recipient''s own 👍 did not land or stamp: % %', v_n, v_row;
+  end if;
+  update message_recipients set reaction = 'down'
+   where message_id = v_day and user_id = '51000000-0000-0000-0000-000000000013';
+  get diagnostics v_n = row_count;
+  if v_n <> 0 then
+    raise exception 'FAIL: Cyril reacted on Dana''s row';
+  end if;
+  perform set_config('request.jwt.claims',
+    '{"sub":"51000000-0000-0000-0000-000000000013","role":"authenticated"}', true);
+  if (select reaction from message_recipients
+       where message_id = v_day and user_id = '51000000-0000-0000-0000-000000000012')
+     is distinct from 'up' then
+    raise exception 'FAIL: another recipient does not see Cyril''s 👍';
+  end if;
+  if (select reaction from message_recipients
+       where message_id = v_day and user_id = '51000000-0000-0000-0000-000000000013')
+     is not null then
+    raise exception 'FAIL: Dana''s row changed under Cyril''s update';
+  end if;
+  raise notice 'OK: a recipient reacts on her own row, the others see it (0051)';
+end $$;
+set local request.jwt.claims =
+  '{"sub":"51000000-0000-0000-0000-000000000012","role":"authenticated"}'; -- Cyril
+do $$
+declare
+  v_day constant uuid := current_setting('probe.msg_day')::uuid;
+  v_row message_recipients;
+begin
+  if (select reaction from message_recipients
+       where message_id = v_day and user_id = auth.uid()) is distinct from 'up' then
+    raise exception 'FAIL: expected Cyril''s 👍 from 23p to clear';
+  end if;
+  update message_recipients set reaction = null, reply = null
+   where message_id = v_day and user_id = auth.uid();
+  select * into v_row from message_recipients
+   where message_id = v_day and user_id = auth.uid();
+  if v_row.reacted_at is not null then
+    raise exception 'FAIL: clearing both left reacted_at: %', v_row;
+  end if;
+  update message_recipients set read_at = now()
+   where message_id = v_day and user_id = auth.uid();
+  select * into v_row from message_recipients
+   where message_id = v_day and user_id = auth.uid();
+  if v_row.read_at is null or v_row.reacted_at is not null then
+    raise exception 'FAIL: a read stamped a reaction: %', v_row;
+  end if;
+  update message_recipients set reply = 'Budu tam v pět.'
+   where message_id = v_day and user_id = auth.uid();
+  select * into v_row from message_recipients
+   where message_id = v_day and user_id = auth.uid();
+  if v_row.reacted_at is null then
+    raise exception 'FAIL: a reply alone did not stamp reacted_at';
+  end if;
+  raise notice 'OK: reacted_at follows reaction/reply, cleared with both, not by a read (0051)';
+end $$;
+
+
+-- 23q. Nothing else is writable: inserting or deleting on either table,
+-- or updating any other column (the body; a recipient row's user_id or
+-- reacted_at), is a privilege error for the app — for Bára, who got none
+-- of today's day messages, and for Cyril on his own row alike.
+do $$
+declare
+  v_day constant uuid := current_setting('probe.msg_day')::uuid;
+  v_who text;
+  v_sql text;
+begin
+  foreach v_who in array array['51000000-0000-0000-0000-000000000011',
+                               '51000000-0000-0000-0000-000000000012'] loop
+    perform set_config('request.jwt.claims',
+      '{"sub":"' || v_who || '","role":"authenticated"}', true);
+    foreach v_sql in array array[
+        format($q$insert into messages (tenant_id, author_role, kind, audience, body)
+                  values ('00000000-0000-0000-0000-000000000051', 'player', 'message',
+                          'admins', 'Mimo RPC.')$q$),
+        format('insert into message_recipients (message_id, user_id, tenant_id)
+                  values (%L, %L, %L)', v_day, v_who,
+               '00000000-0000-0000-0000-000000000051'),
+        format('delete from message_recipients where message_id = %L', v_day),
+        format('delete from messages where id = %L', v_day),
+        format('update messages set body = %L where id = %L', 'Přepsáno.', v_day),
+        format('update message_recipients set user_id = %L where message_id = %L',
+               v_who, v_day),
+        format('update message_recipients set reacted_at = now() where message_id = %L',
+               v_day)] loop
+      begin
+        execute v_sql;
+        raise exception 'FAIL: % could run: %', v_who, v_sql;
+      exception when insufficient_privilege then
+        null;
+      end;
+    end loop;
+  end loop;
+  raise notice 'OK: the app writes neither table but its own read/reaction/reply (0051)';
+end $$;
+
+-- 23r. The RPCs are the app's and not anon's; prune_messages is the
+-- server's alone; can_read_message is the policies' (authenticated).
+reset role;
+do $$
+declare
+  v_f text;
+begin
+  foreach v_f in array array[
+      'message_send(text, text, date, uuid, text, text, timestamptz, boolean)',
+      'message_update(uuid, text, text, timestamptz)',
+      'message_delete(uuid)',
+      'can_read_message(uuid)'] loop
+    if has_function_privilege('anon', 'public.' || v_f, 'execute') then
+      raise exception 'FAIL: anon may execute %', v_f;
+    end if;
+    if not has_function_privilege('authenticated', 'public.' || v_f, 'execute') then
+      raise exception 'FAIL: the app cannot call %', v_f;
+    end if;
+    if not (select prosecdef from pg_proc
+             where oid = ('public.' || v_f)::regprocedure) then
+      raise exception 'FAIL: % is not security definer', v_f;
+    end if;
+  end loop;
+  if has_function_privilege('anon', 'public.prune_messages()', 'execute')
+     or has_function_privilege('authenticated', 'public.prune_messages()', 'execute')
+     or not has_function_privilege('service_role', 'public.prune_messages()', 'execute') then
+    raise exception 'FAIL: prune_messages must be the service''s alone';
+  end if;
+  foreach v_f in array array['is_on_duty()', 'duty_gate(date)'] loop
+    if has_function_privilege('authenticated', 'public.' || v_f, 'execute') then
+      raise exception 'FAIL: 0051 opened % to the app', v_f;
+    end if;
+  end loop;
+  raise notice 'OK: the message RPCs are the app''s, prune the server''s, the duty helpers still internal (0051)';
+end $$;
+set local role authenticated;
+
+
+-- 23s. message_update: notices only (a message is unknown_message), the
+-- alley's admin only (a player is not_allowed, another alley's admin finds
+-- nothing); a valid edit writes title/body/expiry and bumps updated_at;
+-- "Sejmout" is an expiry of now, "Do odvolání" an expiry of null.
+do $$
+declare
+  v_day constant uuid := current_setting('probe.msg_day')::uuid;
+  v_notice constant uuid := current_setting('probe.msg_notice')::uuid;
+begin
+  perform set_config('request.jwt.claims',
+    '{"sub":"51000000-0000-0000-0000-000000000012","role":"authenticated"}', true);
+  begin
+    perform message_update(v_notice, 'Moje', 'Přepsáno.', null);
+    raise exception 'FAIL: a player edited a notice';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  perform set_config('request.jwt.claims',
+    '{"sub":"50000000-0000-0000-0000-000000000010","role":"authenticated"}', true);
+  begin
+    perform message_update(v_notice, 'Cizí', 'Přepsáno.', null);
+    raise exception 'FAIL: another alley''s admin edited T''s notice';
+  exception when others then
+    if sqlerrm <> 'unknown_message' then raise; end if;
+  end;
+  perform set_config('request.jwt.claims',
+    '{"sub":"51000000-0000-0000-0000-000000000010","role":"authenticated"}', true);
+  begin
+    perform message_update(v_day, 'Nadpis', 'Přepsáno.', null);
+    raise exception 'FAIL: message_update edited a message, not a notice';
+  exception when others then
+    if sqlerrm <> 'unknown_message' then raise; end if;
+  end;
+  begin
+    perform message_update(v_notice, '  ', 'Text.', null);
+    raise exception 'FAIL: a notice lost its title';
+  exception when others then
+    if sqlerrm <> 'title_required' then raise; end if;
+  end;
+  begin
+    perform message_update(v_notice, 'Nadpis', repeat('a', 2001), null);
+    raise exception 'FAIL: a notice went over 2000 characters';
+  exception when others then
+    if sqlerrm <> 'body_too_long' then raise; end if;
+  end;
+  raise notice 'OK: message_update is the alley admin''s, for notices, checked (0051)';
+end $$;
+reset role;
+update messages set updated_at = now() - interval '1 day'
+ where id = current_setting('probe.msg_notice')::uuid;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"51000000-0000-0000-0000-000000000010","role":"authenticated"}'; -- Adam
+do $$
+declare
+  v_notice constant uuid := current_setting('probe.msg_notice')::uuid;
+  v_row messages;
+begin
+  perform message_update(v_notice, ' Nové dráhy od úterý ', ' Posun o den. ',
+                         now() + interval '7 days');
+  select * into v_row from messages where id = v_notice;
+  if v_row.title <> 'Nové dráhy od úterý' or v_row.body <> 'Posun o den.'
+     or v_row.expires_at <> now() + interval '7 days' or v_row.updated_at <> now() then
+    raise exception 'FAIL: the notice edit did not land: %', v_row;
+  end if;
+  raise notice 'OK: an edit writes title, body and expiry and bumps updated_at (0051)';
+end $$;
+do $$
+declare
+  v_notice constant uuid := current_setting('probe.msg_notice')::uuid;
+begin
+  perform message_update(v_notice, 'Nové dráhy od úterý', 'Posun o den.', now());
+  if (select expires_at from messages where id = v_notice) <> now() then
+    raise exception 'FAIL: Sejmout did not expire the notice now';
+  end if;
+  raise notice 'OK: Sejmout expires the notice now (0051)';
+end $$;
+do $$
+declare
+  v_notice constant uuid := current_setting('probe.msg_notice')::uuid;
+begin
+  perform message_update(v_notice, 'Nové dráhy od úterý', 'Posun o den.', null);
+  if (select expires_at from messages where id = v_notice) is not null then
+    raise exception 'FAIL: a null expiry did not mean do odvolání';
+  end if;
+  raise notice 'OK: a null expiry is do odvolání again (0051)';
+end $$;
+
+
+-- 23t. message_delete: not by another player (unknown_message) nor by
+-- another alley's admin; by the author, with the recipients cascading;
+-- by the admin on someone else's message.
+do $$
+declare
+  v_notice constant uuid := current_setting('probe.msg_notice')::uuid;
+begin
+  perform set_config('request.jwt.claims',
+    '{"sub":"51000000-0000-0000-0000-000000000013","role":"authenticated"}', true);
+  begin
+    perform message_delete(v_notice);
+    raise exception 'FAIL: Dana deleted Adam''s notice';
+  exception when others then
+    if sqlerrm <> 'unknown_message' then raise; end if;
+  end;
+  perform set_config('request.jwt.claims',
+    '{"sub":"50000000-0000-0000-0000-000000000010","role":"authenticated"}', true);
+  begin
+    perform message_delete(v_notice);
+    raise exception 'FAIL: another alley''s admin deleted T''s notice';
+  exception when others then
+    if sqlerrm <> 'unknown_message' then raise; end if;
+  end;
+  raise notice 'OK: nobody but the author or the alley''s admin deletes (0051)';
+end $$;
+set local request.jwt.claims =
+  '{"sub":"51000000-0000-0000-0000-000000000012","role":"authenticated"}'; -- Cyril
+select message_delete(current_setting('probe.msg_cyril_admins')::uuid);
+set local request.jwt.claims =
+  '{"sub":"51000000-0000-0000-0000-000000000010","role":"authenticated"}'; -- Adam
+select message_delete(current_setting('probe.msg_bara_day')::uuid);
+reset role;
+do $$
+begin
+  if exists (select 1 from messages
+              where id in (current_setting('probe.msg_cyril_admins')::uuid,
+                           current_setting('probe.msg_bara_day')::uuid))
+     or exists (select 1 from message_recipients
+                 where message_id in (current_setting('probe.msg_cyril_admins')::uuid,
+                                      current_setting('probe.msg_bara_day')::uuid)) then
+    raise exception 'FAIL: a deleted message or its recipients stayed';
+  end if;
+  raise notice 'OK: the author and the admin delete, the recipients go with it (0051)';
+end $$;
+
+-- 23u. prune_messages: messages whose key day (on_date, else created_at in
+-- Prague) is over 90 days old go; a notice that old and a message of 89
+-- days stay.
+do $$
+declare
+  v_t constant uuid := '00000000-0000-0000-0000-000000000051';
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+  v_old_day uuid;
+  v_old_admins uuid;
+  v_old_notice uuid;
+  v_recent uuid;
+begin
+  insert into messages (tenant_id, author_role, kind, audience, on_date, body)
+    values (v_t, 'admin', 'message', 'day', v_today - 91, 'Staré.')
+    returning id into v_old_day;
+  insert into messages (tenant_id, author_role, kind, audience, body, created_at)
+    values (v_t, 'player', 'message', 'admins', 'Staré bez dne.', now() - interval '91 days')
+    returning id into v_old_admins;
+  insert into messages (tenant_id, author_role, kind, audience, title, body, created_at)
+    values (v_t, 'admin', 'notice', 'all', 'Stará', 'Nástěnka.', now() - interval '91 days')
+    returning id into v_old_notice;
+  insert into messages (tenant_id, author_role, kind, audience, on_date, body)
+    values (v_t, 'admin', 'message', 'day', v_today - 89, 'Nedávné.')
+    returning id into v_recent;
+  if prune_messages() < 2 then
+    raise exception 'FAIL: prune_messages removed fewer than the two old messages';
+  end if;
+  if exists (select 1 from messages where id in (v_old_day, v_old_admins)) then
+    raise exception 'FAIL: an old message survived the prune';
+  end if;
+  if (select count(*) from messages where id in (v_old_notice, v_recent)) <> 2 then
+    raise exception 'FAIL: the prune took a notice or a recent message';
+  end if;
+  raise notice 'OK: prune_messages drops messages over 90 days, keeps notices and recent ones (0051)';
+end $$;
+
+-- 23v. The machinery: both notify triggers, the prune cron job, and a
+-- block that goes away leaves its messages on their day (block_id null).
+do $$
+declare
+  v_t constant uuid := '00000000-0000-0000-0000-000000000051';
+  v_blk uuid;
+  v_id uuid;
+begin
+  if (select count(*) from pg_trigger
+       where tgname in ('notify_messages', 'notify_message_reactions')
+         and not tgisinternal) <> 2 then
+    raise exception 'FAIL: a notify trigger is missing';
+  end if;
+  if (select count(*) from cron.job where jobname = 'messages-prune') <> 1 then
+    raise exception 'FAIL: the messages-prune cron job is missing';
+  end if;
+  insert into time_blocks (tenant_id, starts_at, ends_at, position)
+    values (v_t, '20:00', '21:00', 5) returning id into v_blk;
+  insert into messages (tenant_id, author_role, kind, audience, on_date, block_id, body)
+    values (v_t, 'admin', 'message', 'block', (now() at time zone 'Europe/Prague')::date,
+            v_blk, 'Na zrušený blok.')
+    returning id into v_id;
+  delete from time_blocks where id = v_blk;
+  if (select block_id from messages where id = v_id) is not null
+     or (select on_date from messages where id = v_id) is null then
+    raise exception 'FAIL: a removed block took its message along or kept a dangling id';
+  end if;
+  raise notice 'OK: notify triggers and prune cron in place; a removed block leaves the message on its day (0051)';
+end $$;
+
 reset role;
 delete from duty_periods
  where tenant_id in ('00000000-0000-0000-0000-000000000050',
-                     '00000000-0000-0000-0000-000000000002');
+                     '00000000-0000-0000-0000-000000000002',
+                     '00000000-0000-0000-0000-000000000051');
+delete from messages
+ where tenant_id in ('00000000-0000-0000-0000-000000000050',
+                     '00000000-0000-0000-0000-000000000051');
 
 rollback;

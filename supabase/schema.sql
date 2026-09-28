@@ -513,6 +513,26 @@ $$;
 ALTER FUNCTION "public"."block_day_status"("p_tenant" "uuid", "p_date" "date", "p_block_id" "uuid") OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."can_read_message"("p_id" "uuid") RETURNS boolean
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  select exists (
+    select 1 from messages m
+     where m.id = p_id and m.tenant_id = current_tenant_id()
+       and (
+         (m.kind = 'notice' and is_approved() and not is_kiosk())
+         or m.author_id = auth.uid()
+         or exists (select 1 from message_recipients r
+                     where r.message_id = m.id and r.user_id = auth.uid())
+       )
+  )
+$$;
+
+
+ALTER FUNCTION "public"."can_read_message"("p_id" "uuid") OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."cancel_block_day_reservations"("p_date" "date", "p_block" "uuid", "p_note" "text" DEFAULT 'změna rozvrhu'::"text") RETURNS "void"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -2196,6 +2216,215 @@ $$;
 ALTER FUNCTION "public"."merge_placeholder_player"("p_placeholder_id" "uuid", "p_target_id" "uuid", "p_display_name" "text", "p_nick" "text", "p_club_id" "uuid") OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."message_delete"("p_id" "uuid") RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  delete from messages
+   where id = p_id and tenant_id = current_tenant_id()
+     and (author_id = auth.uid() or is_admin());
+  if not found then
+    raise exception 'unknown_message';
+  end if;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."message_delete"("p_id" "uuid") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."message_recipients_stamp_reacted"() RETURNS "trigger"
+    LANGUAGE "plpgsql"
+    AS $$
+begin
+  if new.reaction is distinct from old.reaction or new.reply is distinct from old.reply then
+    if new.reaction is null and new.reply is null then
+      new.reacted_at := null;
+    else
+      new.reacted_at := now();
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."message_recipients_stamp_reacted"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."message_send"("p_kind" "text", "p_audience" "text", "p_on_date" "date", "p_block_id" "uuid", "p_title" "text", "p_body" "text", "p_expires_at" timestamp with time zone, "p_notify" boolean) RETURNS "uuid"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_tenant constant uuid := current_tenant_id();
+  v_me constant uuid := auth.uid();
+  v_title constant text := nullif(trim(coalesce(p_title, '')), '');
+  v_body constant text := trim(coalesce(p_body, ''));
+  v_id uuid;
+  v_recipients uuid[];
+  v_role text;
+begin
+  select role into v_role from profiles
+    where id = v_me and tenant_id = v_tenant and status = 'approved'
+      and not placeholder and role <> 'kiosk';
+  if v_role is null then
+    raise exception 'not_allowed';
+  end if;
+
+  if p_kind = 'notice' then
+    if not is_admin() then
+      raise exception 'not_allowed';
+    end if;
+    if p_audience is distinct from 'all' then
+      raise exception 'invalid_audience';
+    end if;
+    if v_title is null then
+      raise exception 'title_required';
+    end if;
+  elsif p_kind = 'message' then
+    if p_audience in ('day', 'block') then
+      if p_on_date is null then
+        raise exception 'date_past';
+      end if;
+      perform duty_gate(p_on_date);
+      if p_audience = 'block' then
+        -- An active block of this alley, or a day-only block that belongs
+        -- to this date through day_overrides (add_special_block leaves
+        -- those with active = false).
+        if not exists (select 1 from time_blocks b
+                        where b.id = p_block_id and b.tenant_id = v_tenant
+                          and (b.active or exists (
+                            select 1 from day_overrides o
+                             where o.tenant_id = v_tenant and o.date = p_on_date
+                               and b.id = any (o.block_ids)))) then
+          raise exception 'unknown_block';
+        end if;
+      end if;
+    elsif p_audience in ('admins', 'duty') then
+      -- Any approved home account, admins included (v_role is already
+      -- checked above). on_date/block_id are optional context here —
+      -- the block, if given, has to be this alley's.
+      if p_block_id is not null and not exists (
+          select 1 from time_blocks
+           where id = p_block_id and tenant_id = v_tenant) then
+        raise exception 'unknown_block';
+      end if;
+    else
+      raise exception 'invalid_audience';
+    end if;
+  else
+    raise exception 'invalid_kind';
+  end if;
+
+  if v_body = '' then
+    raise exception 'body_required';
+  end if;
+  if char_length(v_body) > (case when p_kind = 'notice' then 2000 else 500 end) then
+    raise exception 'body_too_long';
+  end if;
+
+  v_recipients := case p_audience
+    when 'all' then
+      array(select id from profiles
+             where tenant_id = v_tenant and status = 'approved' and role <> 'kiosk'
+               and not placeholder and id <> v_me
+               and not (superadmin and home_tenant_id is not null
+                        and tenant_id <> home_tenant_id))
+    when 'day' then
+      array(select distinct player_id from reservations
+             where tenant_id = v_tenant and date = p_on_date and cancelled_at is null
+               and player_id <> v_me
+               and player_id in (select id from profiles
+                                   where tenant_id = v_tenant and not placeholder))
+    when 'block' then
+      array(select distinct player_id from reservations
+             where tenant_id = v_tenant and date = p_on_date and block_id = p_block_id
+               and cancelled_at is null and player_id <> v_me
+               and player_id in (select id from profiles
+                                   where tenant_id = v_tenant and not placeholder))
+    when 'admins' then
+      array(select id from profiles
+             where tenant_id = v_tenant and status = 'approved' and role = 'admin'
+               and not placeholder and id <> v_me
+               and not (superadmin and home_tenant_id is not null
+                        and tenant_id <> home_tenant_id))
+    when 'duty' then
+      array(select a.user_id from duty_assignments a
+             join duty_periods d on d.id = a.period_id
+             where d.tenant_id = v_tenant
+               and (now() at time zone 'Europe/Prague')::date
+                   between d.starts_on and d.ends_on
+               and a.user_id <> v_me
+               and a.user_id in (select id from profiles
+                                   where tenant_id = v_tenant and not placeholder))
+  end;
+
+  if array_length(v_recipients, 1) is null then
+    if p_audience = 'duty' then
+      raise exception 'nobody_on_duty';
+    end if;
+    raise exception 'no_recipients';
+  end if;
+
+  -- A notice keeps no context; a day message no block; only a notice has a
+  -- title, an expiry and a choice about pinging (a message always pings).
+  insert into messages (tenant_id, author_id, author_role, kind, audience, on_date, block_id,
+                        title, body, expires_at, notify)
+    values (v_tenant, v_me, v_role, p_kind, p_audience,
+            case when p_kind = 'notice' then null else p_on_date end,
+            case when p_kind = 'notice' or p_audience = 'day' then null
+                 else p_block_id end,
+            case when p_kind = 'notice' then v_title end,
+            v_body, case when p_kind = 'notice' then p_expires_at end,
+            case when p_kind = 'notice' then coalesce(p_notify, true) else true end)
+    returning id into v_id;
+
+  insert into message_recipients (message_id, user_id, tenant_id)
+    select v_id, u, v_tenant from unnest(v_recipients) u;
+
+  return v_id;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."message_send"("p_kind" "text", "p_audience" "text", "p_on_date" "date", "p_block_id" "uuid", "p_title" "text", "p_body" "text", "p_expires_at" timestamp with time zone, "p_notify" boolean) OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."message_update"("p_id" "uuid", "p_title" "text", "p_body" "text", "p_expires_at" timestamp with time zone) RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_title constant text := nullif(trim(coalesce(p_title, '')), '');
+  v_body constant text := trim(coalesce(p_body, ''));
+begin
+  if not is_admin() then
+    raise exception 'not_allowed';
+  end if;
+  if v_title is null then
+    raise exception 'title_required';
+  end if;
+  if v_body = '' then
+    raise exception 'body_required';
+  end if;
+  if char_length(v_body) > 2000 then
+    raise exception 'body_too_long';
+  end if;
+  update messages
+     set title = v_title, body = v_body, expires_at = p_expires_at, updated_at = now()
+   where id = p_id and tenant_id = current_tenant_id() and kind = 'notice';
+  if not found then
+    raise exception 'unknown_message';
+  end if;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."message_update"("p_id" "uuid", "p_title" "text", "p_body" "text", "p_expires_at" timestamp with time zone) OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."monthly_attendance"("p_year" integer, "p_month" integer) RETURNS TABLE("player_id" "uuid", "display_name" "text", "club" "text", "attended" bigint)
     LANGUAGE "plpgsql" STABLE SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -2582,6 +2811,26 @@ $$;
 
 
 ALTER FUNCTION "public"."priority_slots_mark_hand_edit"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."prune_messages"() RETURNS integer
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_count integer;
+begin
+  delete from messages
+   where kind = 'message'
+     and coalesce(on_date, (created_at at time zone 'Europe/Prague')::date)
+         < (now() at time zone 'Europe/Prague')::date - 90;
+  get diagnostics v_count = row_count;
+  return v_count;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."prune_messages"() OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."public_tenant_id"("p_slug" "text") RETURNS "uuid"
@@ -4271,6 +4520,71 @@ CREATE TABLE IF NOT EXISTS "public"."match_results" (
 ALTER TABLE "public"."match_results" OWNER TO "postgres";
 
 
+CREATE TABLE IF NOT EXISTS "public"."message_recipients" (
+    "message_id" "uuid" NOT NULL,
+    "user_id" "uuid" NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "read_at" timestamp with time zone,
+    "reaction" "text",
+    "reply" "text",
+    "reacted_at" timestamp with time zone,
+    CONSTRAINT "message_recipients_reaction_check" CHECK (("reaction" = ANY (ARRAY['up'::"text", 'down'::"text"]))),
+    CONSTRAINT "message_recipients_reply_check" CHECK (("char_length"("reply") <= 200))
+);
+
+
+ALTER TABLE "public"."message_recipients" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."message_recipients" IS 'Who got a messages row (0051), materialised at send time from the reservations/roster/duty data then. tenant_id is the message''s, denormalised like duty_assignments. read_at/reaction/reply are the recipient''s own-row write.';
+
+
+
+CREATE TABLE IF NOT EXISTS "public"."messages" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "author_id" "uuid",
+    "author_role" "text" NOT NULL,
+    "kind" "text" NOT NULL,
+    "audience" "text" NOT NULL,
+    "on_date" "date",
+    "block_id" "uuid",
+    "title" "text",
+    "body" "text" NOT NULL,
+    "expires_at" timestamp with time zone,
+    "notify" boolean DEFAULT true NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "messages_audience_check" CHECK (("audience" = ANY (ARRAY['all'::"text", 'day'::"text", 'block'::"text", 'admins'::"text", 'duty'::"text"]))),
+    CONSTRAINT "messages_author_role_check" CHECK (("author_role" = ANY (ARRAY['admin'::"text", 'player'::"text"]))),
+    CONSTRAINT "messages_body_check" CHECK ((("char_length"(TRIM(BOTH FROM "body")) >= 1) AND ("char_length"(TRIM(BOTH FROM "body")) <=
+CASE
+    WHEN ("kind" = 'notice'::"text") THEN 2000
+    ELSE 500
+END))),
+    CONSTRAINT "messages_context_check" CHECK (((("audience" = 'all'::"text") AND ("on_date" IS NULL) AND ("block_id" IS NULL)) OR (("audience" = 'day'::"text") AND ("on_date" IS NOT NULL) AND ("block_id" IS NULL)) OR (("audience" = 'block'::"text") AND ("on_date" IS NOT NULL)) OR ("audience" = ANY (ARRAY['admins'::"text", 'duty'::"text"])))),
+    CONSTRAINT "messages_expires_check" CHECK ((("kind" = 'notice'::"text") OR ("expires_at" IS NULL))),
+    CONSTRAINT "messages_kind_audience_check" CHECK (((("kind" = 'notice'::"text") AND ("audience" = 'all'::"text")) OR (("kind" = 'message'::"text") AND ("audience" = ANY (ARRAY['day'::"text", 'block'::"text", 'admins'::"text", 'duty'::"text"]))))),
+    CONSTRAINT "messages_kind_check" CHECK (("kind" = ANY (ARRAY['notice'::"text", 'message'::"text"]))),
+    CONSTRAINT "messages_title_check" CHECK (((("kind" = 'notice'::"text") AND (("char_length"(TRIM(BOTH FROM COALESCE("title", ''::"text"))) >= 1) AND ("char_length"(TRIM(BOTH FROM COALESCE("title", ''::"text"))) <= 80))) OR (("kind" = 'message'::"text") AND ("title" IS NULL))))
+);
+
+
+ALTER TABLE "public"."messages" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."messages" IS 'A notice (kind=notice, audience=all, Klubovna -> Nástěnka) or a message (kind=message, to a day/block/admins/duty, Klubovna -> Zprávy), 0051. Written only through message_send/message_update/message_delete.';
+
+
+
+COMMENT ON COLUMN "public"."messages"."expires_at" IS 'Notice only: when it stops showing as active; null = "do odvolání".';
+
+
+
+COMMENT ON COLUMN "public"."messages"."notify" IS 'Whether sending this pinged its recipients (push/e-mail). Always true for a message; the admin''s choice for a notice.';
+
+
+
 CREATE TABLE IF NOT EXISTS "public"."notification_jobs" (
     "id" bigint NOT NULL,
     "kind" "text" NOT NULL,
@@ -4628,6 +4942,16 @@ ALTER TABLE ONLY "public"."priority_slots"
 
 
 
+ALTER TABLE ONLY "public"."message_recipients"
+    ADD CONSTRAINT "message_recipients_pkey" PRIMARY KEY ("message_id", "user_id");
+
+
+
+ALTER TABLE ONLY "public"."messages"
+    ADD CONSTRAINT "messages_pkey" PRIMARY KEY ("id");
+
+
+
 ALTER TABLE ONLY "public"."notification_jobs"
     ADD CONSTRAINT "notification_jobs_dedupe_key_key" UNIQUE ("dedupe_key");
 
@@ -4763,6 +5087,18 @@ CREATE INDEX "matches_date_idx" ON "public"."priority_slots" USING "btree" ("dat
 
 
 
+CREATE INDEX "message_recipients_tenant_user" ON "public"."message_recipients" USING "btree" ("tenant_id", "user_id", "read_at");
+
+
+
+CREATE INDEX "messages_tenant_kind_created" ON "public"."messages" USING "btree" ("tenant_id", "kind", "created_at");
+
+
+
+CREATE INDEX "messages_tenant_on_date" ON "public"."messages" USING "btree" ("tenant_id", "on_date");
+
+
+
 CREATE INDEX "notification_jobs_due_idx" ON "public"."notification_jobs" USING "btree" ("run_at");
 
 
@@ -4812,6 +5148,18 @@ CREATE OR REPLACE TRIGGER "match_exceptions_enqueue_calendar" AFTER INSERT OR DE
 
 
 CREATE OR REPLACE TRIGGER "match_uklid_sync" AFTER INSERT OR UPDATE ON "public"."priority_slots" FOR EACH ROW EXECUTE FUNCTION "public"."sync_uklid_for_match"();
+
+
+
+CREATE OR REPLACE TRIGGER "message_recipients_reacted_at" BEFORE UPDATE ON "public"."message_recipients" FOR EACH ROW EXECUTE FUNCTION "public"."message_recipients_stamp_reacted"();
+
+
+
+CREATE OR REPLACE TRIGGER "notify_message_reactions" AFTER UPDATE OF "reaction", "reply" ON "public"."message_recipients" FOR EACH ROW EXECUTE FUNCTION "public"."notify_webhook"();
+
+
+
+CREATE OR REPLACE TRIGGER "notify_messages" AFTER INSERT ON "public"."messages" FOR EACH ROW EXECUTE FUNCTION "public"."notify_webhook"();
 
 
 
@@ -4998,6 +5346,36 @@ ALTER TABLE ONLY "public"."match_results"
 
 ALTER TABLE ONLY "public"."priority_slots"
     ADD CONSTRAINT "matches_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "public"."profiles"("id");
+
+
+
+ALTER TABLE ONLY "public"."message_recipients"
+    ADD CONSTRAINT "message_recipients_message_id_fkey" FOREIGN KEY ("message_id") REFERENCES "public"."messages"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."message_recipients"
+    ADD CONSTRAINT "message_recipients_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."message_recipients"
+    ADD CONSTRAINT "message_recipients_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "public"."profiles"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."messages"
+    ADD CONSTRAINT "messages_author_id_fkey" FOREIGN KEY ("author_id") REFERENCES "public"."profiles"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."messages"
+    ADD CONSTRAINT "messages_block_id_fkey" FOREIGN KEY ("block_id") REFERENCES "public"."time_blocks"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."messages"
+    ADD CONSTRAINT "messages_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE CASCADE;
 
 
 
@@ -5269,6 +5647,24 @@ CREATE POLICY "match_results_select" ON "public"."match_results" FOR SELECT USIN
 
 
 
+ALTER TABLE "public"."message_recipients" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "message_recipients_select" ON "public"."message_recipients" FOR SELECT USING ("public"."can_read_message"("message_id"));
+
+
+
+CREATE POLICY "message_recipients_update_own" ON "public"."message_recipients" FOR UPDATE USING (("user_id" = "auth"."uid"())) WITH CHECK (("user_id" = "auth"."uid"()));
+
+
+
+ALTER TABLE "public"."messages" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "messages_select" ON "public"."messages" FOR SELECT USING ("public"."can_read_message"("id"));
+
+
+
 ALTER TABLE "public"."notification_jobs" ENABLE ROW LEVEL SECURITY;
 
 
@@ -5492,6 +5888,12 @@ GRANT ALL ON FUNCTION "public"."backfill_calendar_jobs"("p_user" "uuid") TO "ser
 
 REVOKE ALL ON FUNCTION "public"."block_day_status"("p_tenant" "uuid", "p_date" "date", "p_block_id" "uuid") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."block_day_status"("p_tenant" "uuid", "p_date" "date", "p_block_id" "uuid") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."can_read_message"("p_id" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."can_read_message"("p_id" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."can_read_message"("p_id" "uuid") TO "service_role";
 
 
 
@@ -5773,6 +6175,30 @@ GRANT ALL ON FUNCTION "public"."merge_placeholder_player"("p_placeholder_id" "uu
 
 
 
+REVOKE ALL ON FUNCTION "public"."message_delete"("p_id" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."message_delete"("p_id" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."message_delete"("p_id" "uuid") TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."message_recipients_stamp_reacted"() TO "anon";
+GRANT ALL ON FUNCTION "public"."message_recipients_stamp_reacted"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."message_recipients_stamp_reacted"() TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."message_send"("p_kind" "text", "p_audience" "text", "p_on_date" "date", "p_block_id" "uuid", "p_title" "text", "p_body" "text", "p_expires_at" timestamp with time zone, "p_notify" boolean) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."message_send"("p_kind" "text", "p_audience" "text", "p_on_date" "date", "p_block_id" "uuid", "p_title" "text", "p_body" "text", "p_expires_at" timestamp with time zone, "p_notify" boolean) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."message_send"("p_kind" "text", "p_audience" "text", "p_on_date" "date", "p_block_id" "uuid", "p_title" "text", "p_body" "text", "p_expires_at" timestamp with time zone, "p_notify" boolean) TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."message_update"("p_id" "uuid", "p_title" "text", "p_body" "text", "p_expires_at" timestamp with time zone) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."message_update"("p_id" "uuid", "p_title" "text", "p_body" "text", "p_expires_at" timestamp with time zone) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."message_update"("p_id" "uuid", "p_title" "text", "p_body" "text", "p_expires_at" timestamp with time zone) TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."my_future_matches"("p_user" "uuid") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."my_future_matches"("p_user" "uuid") TO "service_role";
 
@@ -5819,6 +6245,11 @@ GRANT ALL ON FUNCTION "public"."priority_slots_enqueue_calendar"() TO "service_r
 GRANT ALL ON FUNCTION "public"."priority_slots_mark_hand_edit"() TO "anon";
 GRANT ALL ON FUNCTION "public"."priority_slots_mark_hand_edit"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."priority_slots_mark_hand_edit"() TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."prune_messages"() FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."prune_messages"() TO "service_role";
 
 
 
@@ -6086,6 +6517,28 @@ GRANT ALL ON TABLE "public"."match_player_results" TO "service_role";
 
 GRANT SELECT ON TABLE "public"."match_results" TO "authenticated";
 GRANT ALL ON TABLE "public"."match_results" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."message_recipients" TO "service_role";
+GRANT SELECT ON TABLE "public"."message_recipients" TO "authenticated";
+
+
+
+GRANT UPDATE("read_at") ON TABLE "public"."message_recipients" TO "authenticated";
+
+
+
+GRANT UPDATE("reaction") ON TABLE "public"."message_recipients" TO "authenticated";
+
+
+
+GRANT UPDATE("reply") ON TABLE "public"."message_recipients" TO "authenticated";
+
+
+
+GRANT ALL ON TABLE "public"."messages" TO "service_role";
+GRANT SELECT ON TABLE "public"."messages" TO "authenticated";
 
 
 

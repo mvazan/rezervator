@@ -75,6 +75,8 @@ and what cascades — and is updated with every migration.
 | `duty_periods` | (0050) A canteen duty: `starts_on`, `ends_on` (inclusive; `duty_periods_order_check` ends ≥ starts, `duty_periods_length_check` at most 62 days), `note` (trimmed, ≤ 80 chars, `duty_periods_note_check`; `''` = none), `created_by → profiles` (set null), `created_at`. `duty_periods_no_overlap` — `exclude using gist (tenant_id with =, daterange(starts_on, ends_on, '[]') with &&)`: periods of one alley never overlap, touching is fine (needs `btree_gist`, installed into `extensions`). Index (`tenant_id`, `starts_on`). In the Realtime publication. | select approved/kiosk (the whole alley reads the roster). No insert/update/delete for `authenticated`, nothing for `anon` — written only through the admin's `duty_*` RPCs. |
 | `duty_assignments` | (0050) Who works a period: `period_id → duty_periods` (cascade — a deleted period takes its assignees), `user_id → profiles` (cascade), `tenant_id` (the period's, denormalised like `player_group_members`), `assigned_by → profiles` (set null), `created_at`. PK (`period_id`, `user_id`), index (`tenant_id`, `user_id`). Approved non-kiosk members of the alley, placeholders included (counted, never given the duty's rights). A placeholder's rows are history: `delete_placeholder_player` refuses, `merge_placeholder_player` moves them. In the Realtime publication. | as `duty_periods`; written only through `duty_set_assignees`. |
 | `duty_seasons` | (0050) Season boundaries for the duty counts: PK (`tenant_id`, `started_on`), `name` (1–40 chars, `duty_seasons_name_check`, e.g. „2026/27“), `created_by → profiles` (set null), `created_at`. A period belongs to the season with the greatest `started_on ≤ starts_on`; the periods before the first boundary are the implicit first season. A reset inserts a row and moves nothing; undo deletes the newest. **Not in the Realtime publication**: the app reads it as a future and invalidates it after a change. | as `duty_periods`; written only through `duty_season_start` / `duty_season_delete`. |
+| `messages` | (0051) A notice or a message: `kind` notice \| message, `audience` all \| day \| block \| admins \| duty (`messages_kind_audience_check`: a notice goes to `all`, a message to one of the other four), `author_id → profiles` (set null), `author_role` admin \| player (a snapshot of the sender's `profiles.role` at send time — players cannot read other profiles, so the app and notify label „Od správce“ / „Od služby“ from it), `on_date` + `block_id → time_blocks` (set null) — the day for `day`, day and block for `block` (a block removed later leaves the message on its day), optional context for `admins`/`duty`, none for `all` (`messages_context_check`), `title` (notice only, 1–80 chars), `body` (non-blank, ≤ 500 for a message, ≤ 2000 for a notice), `expires_at` (notice only; null = „do odvolání“), `notify` (a notice's ping choice; always true for a message), `created_at`, `updated_at`. Indexes (`tenant_id`, `kind`, `created_at`), (`tenant_id`, `on_date`). Messages (not notices) over 90 days old are pruned daily (`prune_messages`). In the Realtime publication. | select `can_read_message(id)`: a notice to every approved non-kiosk member of the alley, a message to its author and its recipients. No insert/update/delete for `authenticated`, nothing for `anon` — written only through `message_send` / `message_update` / `message_delete`. |
+| `message_recipients` | (0051) Who got a message, materialised by `message_send`: `message_id → messages` (cascade), `user_id → profiles` (cascade), `tenant_id` (the message's, denormalised like `duty_assignments`), `read_at`, `reaction` up \| down \| null, `reply` (≤ 200 chars), `reacted_at` (the BEFORE UPDATE trigger `message_recipients_reacted_at` stamps it when `reaction` or `reply` changes and clears it when both are null). PK (`message_id`, `user_id`), index (`tenant_id`, `user_id`, `read_at`). In the Realtime publication. | select `can_read_message(message_id)` — every participant sees everyone's reaction (and read time; accepted, the app shows reads to no one but the admin). update: own row (`message_recipients_update_own`, `user_id = auth.uid()`), columns `read_at`, `reaction`, `reply` only — the `profiles_update_own` pattern. No insert/delete for `authenticated`, nothing for `anon`. |
 
 Every `color` column above is one `integer` (0030): the negative values are the "none"/default markers, 0–8 a palette entry from `domain/palette.dart` (0031 dropped the three that measured under ΔE2000 10 from a neighbour and kept every affected row on its exact colour as a hand-picked one), and `0x1000000 | rgb` (16777216–33554431) a hand-picked colour. Dart derives the four rendered shades (dark and light background plus its text) from a hand-picked value rather than painting it raw, so it stays readable in both themes; `upsert_club` takes `integer` for the same reason.
 | `app_config` | single row: `min_build` (0025) — the oldest app build the backend still supports; the app streams it (Realtime) and blocks on an update screen while older. Raised by a migration with a breaking release. | select for `authenticated`; writes: migrations only. |
@@ -840,6 +842,67 @@ period, a changed roster or a changed lead simply answers differently.
   once) plus „, spolu s: …“ sorted Czech-alphabetically; the e-mail adds
   what the duty may do. Push data `kind = duty_reminder`.
 
+### Zprávy a nástěnka (0051)
+
+The admin and the player on canteen duty write to players (a block, a day,
+everyone); any account player writes to the admins or to today's duty. A
+notice (`kind = 'notice'`, `audience = 'all'`, Klubovna → Nástěnka) is the
+same machinery with a title, an expiry and no reactions. Not a chat: no
+threads, no player-to-player messages. Every error is a bare code.
+
+- **`message_send(kind, audience, on_date?, block_id?, title?, body,
+  expires_at?, notify?)`** (security definer, `authenticated`) returns the
+  new id. The caller must be an approved account member of the alley, not
+  the kiosk (`not_allowed`). A notice: admin only (`not_allowed`), audience
+  `all` (`invalid_audience`), a title (`title_required`), ≤ 2000 chars;
+  `notify` is the admin's choice (null = true). A message to a `day` /
+  `block`: the admin, or the duty through `duty_gate(on_date)` (on duty
+  today, a date from today on — `not_allowed` / `date_past`; a missing date
+  is `date_past` too); the block must be an active block of the alley or a
+  day-special one that `day_overrides.block_ids` names for that date
+  (`unknown_block`). A message to `admins` / `duty`: any approved account
+  member, admins included; `on_date` / `block_id` are optional context (the
+  training written about), the block must be the alley's (`unknown_block`).
+  A message has no title, no expiry and always pings, ≤ 500 chars; an
+  unknown kind is `invalid_kind`, an unknown audience `invalid_audience`, a
+  blank body `body_required`, a long one `body_too_long`. Recipients are
+  materialised in the same transaction, the author, placeholders and the
+  kiosk always out:
+
+  | audience | recipients |
+  |---|---|
+  | `all` | every approved non-kiosk member of the alley (admins included), visiting superadmins out |
+  | `day` | players with a live reservation on `on_date`, any block |
+  | `block` | players with a live reservation on `on_date` in `block_id` |
+  | `admins` | every approved admin of the alley, visiting superadmins out (the `players` view's rule) |
+  | `duty` | the assignees of the period covering Prague today |
+
+  An empty set is `no_recipients`, except `duty`: `nobody_on_duty` (no
+  period today, or its only assignee is the author or a placeholder).
+- **`can_read_message(id)`** (security definer, stable, `authenticated`) —
+  the two select policies: the message is the caller's alley's and it is a
+  notice and the caller an approved non-kiosk member, or the caller wrote
+  it, or has a recipient row. Security definer so `message_recipients`'
+  policy does not recurse into its own RLS.
+- **`message_update(id, title, body, expires_at)`** — notices of the
+  caller's alley only (a message or another alley's notice is
+  `unknown_message`), admin (`not_allowed`); `title_required`,
+  `body_required`, `body_too_long`. No "leave unchanged" sentinel: the form
+  sends its whole state, so `expires_at = null` is „do odvolání“;
+  „Sejmout“ is the same call with `expires_at = now()`. Bumps `updated_at`.
+- **`message_delete(id)`** — the author or the alley's admin
+  (`unknown_message` otherwise); the recipients cascade.
+- **`prune_messages()`** (`service_role` only) deletes messages — never
+  notices — whose key day (`on_date`, else `created_at` in Prague) is more
+  than 90 days old and returns how many; `cron.job` `messages-prune`
+  (`20 3 * * *` UTC) runs it.
+- **Delivery.** `notify_messages` (after insert on `messages`) and
+  `notify_message_reactions` (after update of `reaction`, `reply` on
+  `message_recipients`) post the row to notify through `notify_webhook()`,
+  like every other row webhook. notify has no branch for these two tables
+  yet: its table switch has no default, so it answers 200 and sends
+  nothing.
+
 ## Edge functions
 
 - **notify** — called by `notify_webhook()` (pg_net POST; URL and
@@ -892,9 +955,9 @@ period, a changed roster or a changed lead simply answers differently.
   configuration, never in migrations; the 0023 cron tick reads the same
   two entries through `notify_webhook_config()`.
 - `pg_cron` is enabled by 0023 (`create extension if not exists`); the
-  `cron` schema and the job rows `notification-jobs` and
-  `federation-nightly` (0045) live outside `public`,
-  so they are not in `supabase/schema.sql` — check with
+  `cron` schema and the job rows `notification-jobs`,
+  `federation-nightly` (0045) and `messages-prune` (0051) live outside
+  `public`, so they are not in `supabase/schema.sql` — check with
   `select jobname from cron.job`.
 - `btree_gist` (0050, for `duty_periods_no_overlap`) is installed into the
   `extensions` schema, so like `pg_cron` it is not in `supabase/schema.sql`
@@ -1040,9 +1103,24 @@ period, a changed roster or a changed lead simply answers differently.
   kiosk, with the others as `co_assignees`; a demoted player not reminded
   until approved again; a receipt silencing only its player, a closer lead
   covering a longer one, a moved period ringing again and its receipt
-  moving with it; switched off, nothing due and the lead kept), and the 0035
-  assertion (now including `team_colors`, `match_exceptions` and 0050's
-  `duty_periods` / `duty_assignments`) that every table
+  moving with it; switched off, nothing due and the lead kept), the 0051
+  messages (in an alley of its own: select-only tables with the three
+  own-row update columns; each audience's recipients with the author,
+  placeholders, the kiosk and a visiting superadmin out; `no_recipients`,
+  `nobody_on_duty` with no period today and with the author the only
+  assignee; the admin, the duty from today on and a plain player per
+  audience, the kiosk and a placeholder sending nothing, another alley
+  reaching only its own admins; every error code; a day-only block
+  counting once its override names it; `can_read_message` for the author,
+  a recipient, a bystander, the kiosk and another alley; own-row
+  reactions with `reacted_at` stamped and cleared, every other write a
+  privilege error; `message_update` notices-only with Sejmout and do
+  odvolání; `message_delete` by the author or the admin, cascading;
+  `prune_messages` keeping notices and recent messages; the triggers, the
+  cron job and a removed block leaving its message on its day), and the
+  0035 assertion (now including `team_colors`, `match_exceptions`, 0050's
+  `duty_periods` / `duty_assignments` and 0051's `messages` /
+  `message_recipients`) that every table
   `lib/data/providers.dart` streams is in the `supabase_realtime`
   publication; run with `psql … -v ON_ERROR_STOP=1 -f` against the local
   stack (CI does).
