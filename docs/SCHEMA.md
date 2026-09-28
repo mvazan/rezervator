@@ -791,9 +791,13 @@ and FCM is configured, e-mail otherwise.
   token; that page's button POSTs it back, and the POST verifies the token,
   updates `reservations` directly with the service role
   (`cancelled_via = 'one_click'`) and redirects to the same page with the
-  outcome. Never HTML from the function itself: the edge runtime rewrites
-  the Content-Type to text/plain. This is the one reservation write outside
-  the RPCs; the notify function ignores `one_click` cancels.
+  outcome. Both methods also refuse (`vyprselo`) once the block the
+  reservation is in *now* has started: the token's expiry is the start it
+  had when the link went out, and a move keeps the row and its token — after
+  the start, cancelling is an admin decision (attendance). Never HTML from
+  the function itself: the edge runtime rewrites the Content-Type to
+  text/plain. This is the one reservation write outside the RPCs; the
+  notify function ignores `one_click` cancels.
 
 ## Prod vs git
 
