@@ -176,18 +176,19 @@ Fázi 4). Push notifikace zatím spí, viz poznámka na konci.
    do Vaultu jako `webhook_secret` v kroku 2 (Databázové schéma) — jinak
    databázový trigger (`notify_webhook`) bude volat funkci `notify` se
    špatným hlavičkovým tokenem a ta ho odmítne (401). `CANCEL_TOKEN_SECRET` je
-   nový, nezávislý řetězec — používá se jen k podepisování odkazů na zrušení
-   rezervace v e-mailech (bez něj funkce `cancel` odpovídá 500 a `notify`
-   neposílá kioskové e-maily).
-4. Nasaď obě funkce:
+   nový, nezávislý řetězec — používá se jen k podepisování odkazů v e-mailech:
+   na zrušení rezervace a na 👍/👎 reakci na zprávu (bez něj funkce `cancel`
+   a `react` odpovídají 500 a `notify` neposílá kioskové e-maily).
+4. Nasaď všechny tři funkce:
    ```bash
    supabase functions deploy notify --no-verify-jwt
    supabase functions deploy cancel --no-verify-jwt
+   supabase functions deploy react --no-verify-jwt
    ```
-   `--no-verify-jwt` je nutné u obou: `notify` volá databázový trigger (ten
+   `--no-verify-jwt` je nutné u všech: `notify` volá databázový trigger (ten
    žádný JWT nemá a nemůže) a je místo toho chráněný hlavičkou
-   `x-webhook-secret`; `cancel` otevírají lidé přímo z e-mailu (taky bez
-   JWT) a je chráněný podepsaným HMAC tokenem v odkazu.
+   `x-webhook-secret`; `cancel` a `react` otevírají lidé přímo z e-mailu
+   (taky bez JWT) a jsou chráněné podepsaným HMAC tokenem v odkazu.
 5. **Test hned teď** (bez kiosku — ten přijde ve Fázi 4, takže plný test
    „rezervace z kiosku → e-mail se zrušovacím odkazem" počká do té doby):
    - Zaregistruj v appce nového hráče (jiný účet/e-mail) → admini by měli
@@ -457,7 +458,8 @@ Sentry vypnuté. Jeden projekt stačí pro web i Android — rozlišuje je tag
   [`docs/SCHEMA.md`](docs/SCHEMA.md).
 - Edge funkce: `deno test supabase/functions` a `deno check --import-map
   supabase/functions/import_map.json supabase/functions/notify/index.ts
-  supabase/functions/cancel/index.ts`; bez lokálního Dena přes Docker:
+  supabase/functions/cancel/index.ts supabase/functions/react/index.ts`;
+  bez lokálního Dena přes Docker:
   `docker run --rm -v "$PWD/supabase/functions:/w" -w /w denoland/deno:latest test`.
 - Vydání do Google Play (verze, changelog, recenzní účet) popisuje
   [`PLAY.md`](PLAY.md); CI/CD a nasazení backendu [`CICD.md`](CICD.md).

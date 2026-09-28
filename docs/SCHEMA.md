@@ -965,6 +965,14 @@ threads, no player-to-player messages. Every error is a bare code.
   and updates `reservations` directly with the service role
   (`cancelled_via = 'one_click'`). This is the one reservation write outside
   the RPCs; the notify function ignores `one_click` cancels.
+- **react** (0051) — the 👍/👎 links of a message e-mail. GET `?t=<token>`
+  (HMAC over `{m, u, r, x}` signed with `CANCEL_TOKEN_SECRET`, valid 30
+  days — `_shared/react_token.ts`) → checks the `message_recipients` row
+  still exists and writes its `reaction` with the service role (the
+  `reacted_at` trigger and `notify_message_reactions` fire as from the
+  app), then a 303 to `reakce.html?ok=1`; a bad, expired or orphaned token
+  → `?ok=0`. One click, no confirm page (unlike cancel): a reaction is
+  harmless and reversible in the app. Logic in `_shared/react_handler.ts`.
 
 ## Prod vs git
 
