@@ -55,6 +55,11 @@ bool _dutyReachable(_Get get) {
 /// [_dutyReachable] read once, for an entry point deciding whether to
 /// offer „Napsat službě…“ (Task 9's cancel dialog). The player composer
 /// itself watches the same rule live.
+///
+/// Reads [myProfileProvider], [nowProvider], [dutyPeriodsProvider],
+/// [dutyAssignmentsProvider] and [playersProvider] — a widget test calling
+/// it overrides all five, the roster giving the duty an account (else
+/// nobody is reachable once it loads).
 bool dutyReachableToday(WidgetRef ref) => _dutyReachable(ref.read);
 
 /// The player composer — Klubovna → Zprávy's „Napsat“, and the training's
@@ -62,7 +67,10 @@ bool dutyReachableToday(WidgetRef ref) => _dutyReachable(ref.read);
 /// context (`on_date`/`block_id`, display only) and [preselect] as the
 /// audience. A [MessageAudience.duty] preselect falls back to Správci while
 /// nobody else serves today. The sheet watches its own providers — [ref]
-/// only keeps the entry points' call shape, as for [showStaffComposer].
+/// only keeps the entry points' call shape, as for [showStaffComposer]:
+/// those of [dutyReachableToday] ([myProfileProvider], [nowProvider],
+/// [dutyPeriodsProvider], [dutyAssignmentsProvider], [playersProvider]),
+/// which a widget test opening it overrides.
 Future<void> showPlayerComposer(
   BuildContext context,
   WidgetRef ref, {
@@ -125,7 +133,10 @@ typedef _StaffMessage = ({Day date, String? blockId, String body, bool asDuty});
 /// defaults to today; the duty cannot pick a past day. Every target shows
 /// who would get it („Dostane 2 hráči: …“), and an empty one cannot be
 /// sent. The sheet watches its own providers, [ref] as in
-/// [showPlayerComposer]; [send] is the RPC (see [MessageSend]).
+/// [showPlayerComposer] — [myProfileProvider], [myDutyProvider],
+/// [nowProvider], [weekScheduleProvider], [weekReservationsProvider] and
+/// [playersProvider], which a widget test opening it overrides; [send] is
+/// the RPC (see [MessageSend]).
 Future<void> showStaffComposer(
   BuildContext context,
   WidgetRef ref, {

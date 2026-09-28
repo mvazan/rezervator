@@ -359,6 +359,53 @@ void main() {
             reason: 'last card $last, upper FAB top $fabTop');
       });
     }
+
+    // The FABs float above the keyboard, but a focused field is scrolled
+    // only to the keyboard's edge — so they would cover the reply I am
+    // typing. They step aside while the keyboard is up.
+    for (final (label, profile, theme) in [
+      ('a player', me, null),
+      ('an admin', const Profile(
+        id: 'me', displayName: 'Já Hráč', email: 'me@example.com',
+        role: Role.admin, status: ProfileStatus.approved,
+      ), buildTheme(Brightness.light)),
+    ]) {
+      testWidgets('with the keyboard up, no FAB covers the reply field '
+          '($label)', (tester) async {
+        tester.view.physicalSize = const Size(360, 640);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+        await tester.pumpWidget(app(
+          profile: profile,
+          messages: [for (final id in ['a', 'b', 'c']) received(id: id)],
+          roster: const [PlayerName(id: 'staff', displayName: 'Bára')],
+          theme: theme,
+        ));
+        await tester.pumpAndSettle();
+        final field = find.descendant(
+          of: find.byKey(const ValueKey('b')),
+          matching: find.byType(TextField),
+        );
+        await tester.tap(field);
+        await tester.pump();
+        tester.view.viewInsets = const FakeViewPadding(bottom: 280);
+        await tester.pumpAndSettle();
+        await tester.enterText(field, 'Přijdu o deset minut později, díky');
+        await tester.pumpAndSettle();
+        final rect = tester.getRect(field);
+        expect(rect.bottom, lessThanOrEqualTo(640 - 280), reason: '$rect');
+        for (final fab in find.byType(FloatingActionButton).evaluate()) {
+          final fabRect = tester.getRect(find.byWidget(fab.widget));
+          expect(rect.overlaps(fabRect), isFalse,
+              reason: 'field $rect, FAB $fabRect');
+        }
+
+        // The keyboard goes down: the FABs are back.
+        tester.view.resetViewInsets();
+        await tester.pumpAndSettle();
+        expect(find.text('Napsat'), findsOneWidget);
+      });
+    }
   });
 
   group('MessageDetailScreen', () {

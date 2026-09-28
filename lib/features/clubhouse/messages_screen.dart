@@ -110,6 +110,13 @@ class _MessagesScreenState extends ConsumerState<MessagesScreen> {
         final isAdmin = ref.watch(
             myProfileProvider.select((p) => p.value?.isAdmin ?? false));
         final onDuty = ref.watch(myDutyProvider.select((d) => d.onDuty));
+        // Not while the keyboard is up: the FABs float above it, but a
+        // focused reply field is scrolled only to its edge, under them.
+        // The FAB slot keeps the view insets (Scaffold strips them from
+        // the body only); the list keeps its last measured room.
+        if (MediaQuery.viewInsetsOf(context).bottom > 0) {
+          return const SizedBox.shrink();
+        }
         // Side by side when they fit, else stacked (large text, WCAG
         // 1.4.4). The slot is as wide as the Scaffold and endFloat keeps a
         // margin on the right, so the Wrap stops a margin short of the
