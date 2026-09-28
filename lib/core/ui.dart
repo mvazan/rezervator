@@ -160,6 +160,16 @@ String friendlyDbError(Object error, {bool wasOnDuty = false}) {
     'not_newest': 'Vrátit jde jen poslední sezónu.',
     'duty_periods_note_check': 'Poznámka smí mít nejvýš 80 znaků.',
     'duty_seasons_name_check': 'Název sezóny smí mít nejvýš 40 znaků.',
+    // Zprávy a nástěnka (0051). `no_recipients` is the generic text; the
+    // staff composer words it for a day or a block itself.
+    'no_recipients': 'Nikdo nemá rezervaci.',
+    'nobody_on_duty': 'Dnes nikdo neslouží — napiš správci.',
+    'title_required': 'Vyplň nadpis.',
+    'body_required': 'Vyplň zprávu.',
+    'body_too_long': 'Zpráva je moc dlouhá.',
+    'unknown_message': 'Zpráva už neexistuje.',
+    'invalid_audience': 'Neplatný typ zprávy.',
+    'invalid_kind': 'Neplatný typ zprávy.',
   };
   for (final entry in messages.entries) {
     if (raw.contains(entry.key)) return entry.value;

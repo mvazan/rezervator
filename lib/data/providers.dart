@@ -20,6 +20,7 @@ import '../config.dart';
 import '../domain/collation.dart';
 import '../domain/duties.dart';
 import '../domain/groups.dart';
+import '../domain/messages.dart' show unreadCounts;
 import '../domain/models.dart';
 import '../domain/public_week.dart';
 
@@ -145,6 +146,46 @@ final dutyAssignmentsProvider = StreamProvider<List<DutyAssignment>>((ref) {
               .from('duty_assignments')
               .stream(primaryKey: ['period_id', 'user_id']))
       .map((rows) => rows.map(DutyAssignment.fromJson).toList());
+});
+
+/// Every message and notice of the alley (`messages`, 0051) the caller may
+/// read — RLS already scopes it to notices plus the ones I sent or
+/// received, so no further filtering happens here. Unfiltered by date: the
+/// past stays visible under "Starší". Written only through
+/// [Api.messageSend]/[Api.messageUpdate]/[Api.messageDelete].
+final messagesProvider = StreamProvider<List<Message>>((ref) {
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return Stream.value(const []);
+  return cachedRows(uid, cacheKeyMessages,
+          () => _db.from('messages').stream(primaryKey: ['id']))
+      .map((rows) => rows.map(Message.fromJson).toList());
+});
+
+/// Every `message_recipients` row the caller may read (0051): every
+/// participant's row on a message I'm part of, my own row on every notice.
+/// Written only through [Api.markMessagesRead]/[Api.setReaction]/
+/// [Api.setReply].
+final messageRecipientsProvider =
+    StreamProvider<List<MessageRecipient>>((ref) {
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return Stream.value(const []);
+  return cachedRows(
+          uid,
+          cacheKeyMessageRecipients,
+          () => _db
+              .from('message_recipients')
+              .stream(primaryKey: ['message_id', 'user_id']))
+      .map((rows) => rows.map(MessageRecipient.fromJson).toList());
+});
+
+/// My unread notices and messages, for the hub badges and the Klubovna
+/// dot (0051); see [unreadCounts].
+final unreadCountsProvider = Provider<({int messages, int notices})>((ref) {
+  final me = ref.watch(myProfileProvider.select((p) => p.value?.id));
+  final all = ref.watch(messagesProvider).value ?? const [];
+  final mine = ref.watch(messageRecipientsProvider).value ?? const [];
+  final now = ref.watch(nowProvider).value ?? DateTime.now();
+  return unreadCounts(all: all, mine: mine, meId: me, now: now);
 });
 
 /// The season boundaries of the duty counts (`duty_seasons`, 0050),
@@ -1437,6 +1478,121 @@ class Api {
     );
   }
 
+  // --- messages and the notice board (0051) ---
+
+  /// Sends a notice (`kind: notice`, `audience: all`) or a message (to a
+  /// day, a block, the admins or today's duty). Returns the new row's id.
+  /// `no_recipients`/`nobody_on_duty`/`unknown_block`/`title_required`/
+  /// `body_required`/`body_too_long`/`not_allowed`/`date_past` on refusal —
+  /// see [friendlyDbError] and the composer's own `errorText` wrapping.
+  static Future<String> messageSend({
+    required MessageKind kind,
+    required MessageAudience audience,
+    Day? onDate,
+    String? blockId,
+    String? title,
+    required String body,
+    DateTime? expiresAt,
+    bool notify = true,
+  }) async =>
+      await _db.rpc('message_send', params: {
+        'p_kind': kind.name,
+        'p_audience': audience.name,
+        'p_on_date': onDate?.toSql(),
+        'p_block_id': blockId,
+        'p_title': title,
+        'p_body': body,
+        'p_expires_at': expiresAt?.toUtc().toIso8601String(),
+        'p_notify': notify,
+      }) as String;
+
+  /// Edits a notice (admin; `not_allowed` otherwise, `unknown_message` for
+  /// anything but a notice of the alley). Always the full current state:
+  /// [expiresAt] null means „do odvolání“ — there is no partial-update path
+  /// (`message_update`'s doc in 0051_messages.sql). „Sejmout“ is this call
+  /// with [expiresAt] = now and the title/body left as they were.
+  static Future<void> messageUpdate(
+    String id, {
+    required String title,
+    required String body,
+    DateTime? expiresAt,
+  }) =>
+      _db.rpc('message_update', params: {
+        'p_id': id,
+        'p_title': title,
+        'p_body': body,
+        'p_expires_at': expiresAt?.toUtc().toIso8601String(),
+      });
+
+  /// Deletes a message or notice I sent, or (admin) any of the alley's;
+  /// its recipient rows go with it. `unknown_message`/`not_allowed`.
+  static Future<void> messageDelete(String id) =>
+      _db.rpc('message_delete', params: {'p_id': id});
+
+  /// Marks [ids] read for the signed-in player — own-row UPDATE (the
+  /// column grant allows `read_at`), optimistic: the badges drop at once.
+  /// Rows already read keep their first `read_at`.
+  static Future<void> markMessagesRead(Iterable<String> ids) {
+    final idList = ids.toSet().toList();
+    if (idList.isEmpty) return Future.value();
+    final uid = currentUserId!;
+    final readAt = DateTime.now().toUtc().toIso8601String();
+    return optimisticWrite(
+      uid,
+      cacheKeyMessageRecipients,
+      (rows) => [
+        for (final r in rows)
+          if (idList.contains(r['message_id']) &&
+              r['user_id'] == uid &&
+              r['read_at'] == null)
+            {...r, 'read_at': readAt}
+          else
+            r,
+      ],
+      () => _db
+          .from('message_recipients')
+          .update({'read_at': readAt})
+          .eq('user_id', uid)
+          .inFilter('message_id', idList)
+          .isFilter('read_at', null),
+    );
+  }
+
+  /// Sets ([reaction]) or clears (null) my 👍/👎 on [messageId] — own-row
+  /// UPDATE, optimistic; `reacted_at` is stamped server-side.
+  static Future<void> setReaction(String messageId, Reaction? reaction) {
+    final uid = currentUserId!;
+    final value = reactionToJson(reaction);
+    return optimisticWrite(
+      uid,
+      cacheKeyMessageRecipients,
+      patchMessageRecipient(messageId, uid, {'reaction': value}),
+      () => _db
+          .from('message_recipients')
+          .update({'reaction': value})
+          .eq('message_id', messageId)
+          .eq('user_id', uid),
+    );
+  }
+
+  /// Sets my short reply on [messageId] (at most 200 characters, trimmed;
+  /// blank clears it) — own-row UPDATE, optimistic.
+  static Future<void> setReply(String messageId, String reply) {
+    final uid = currentUserId!;
+    final trimmed = reply.trim();
+    final value = trimmed.isEmpty ? null : trimmed;
+    return optimisticWrite(
+      uid,
+      cacheKeyMessageRecipients,
+      patchMessageRecipient(messageId, uid, {'reply': value}),
+      () => _db
+          .from('message_recipients')
+          .update({'reply': value})
+          .eq('message_id', messageId)
+          .eq('user_id', uid),
+    );
+  }
+
   // --- admin: reports (see attendanceProvider) ---
   static Future<List<AttendanceRow>> monthlyAttendance(
       int year, int month) async {
@@ -1857,6 +2013,8 @@ void resetTenantScopedProviders(WidgetRef ref) {
   ref.invalidate(dutyAssignmentsProvider);
   ref.invalidate(dutySeasonsProvider);
   ref.invalidate(myDutyProvider);
+  ref.invalidate(messagesProvider);
+  ref.invalidate(messageRecipientsProvider);
   ref.invalidate(playersProvider);
   ref.invalidate(contactsProvider);
   ref.invalidate(tenantsProvider);
