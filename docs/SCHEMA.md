@@ -979,9 +979,11 @@ threads, no player-to-player messages. Every error is a bare code.
   and updates `reservations` directly with the service role
   (`cancelled_via = 'one_click'`). This is the one reservation write outside
   the RPCs; the notify function ignores `one_click` cancels.
-- **react** (0051) — the 👍/👎 links of a message e-mail. GET `?t=<token>`
-  (HMAC over `{m, u, r, x}` signed with `CANCEL_TOKEN_SECRET`, valid 30
-  days — `_shared/react_token.ts`) → checks the `message_recipients` row
+- **react** (0051) — the 👍/👎 links of a message e-mail (no JWT —
+  deployed `--no-verify-jwt`, like cancel; the trust is the token). GET
+  `?t=<token>` (HMAC over `{m, u, r, x}` — message, recipient, reaction,
+  issue time — signed with `CANCEL_TOKEN_SECRET`, valid 30 days from `x`
+  — `_shared/react_token.ts`) → checks the `message_recipients` row
   still exists and its account may still react — the app's
   `message_recipients_update_own` rule, which the service role bypasses:
   an approved non-kiosk member of the row's alley (`mayReact`) — and
