@@ -66,52 +66,40 @@ bool dutyReachableToday(WidgetRef ref) => _dutyReachable(ref.read);
 /// „Napsat správci…“ / „Napsat službě…“ (Task 9) with [date]/[block] as the
 /// context (`on_date`/`block_id`, display only) and [preselect] as the
 /// audience. A [MessageAudience.duty] preselect falls back to Správci while
-/// nobody else serves today. The sheet watches its own providers — [ref]
-/// only keeps the entry points' call shape, as for [showStaffComposer]:
-/// those of [dutyReachableToday] ([myProfileProvider], [nowProvider],
-/// [dutyPeriodsProvider], [dutyAssignmentsProvider], [playersProvider]),
-/// which a widget test opening it overrides.
+/// nobody else serves today. The sheet sends itself ([_sendFromSheet]):
+/// nothing waits on [context] once it is open. It watches its own
+/// providers — [ref] only keeps the entry points' call shape, as for
+/// [showStaffComposer]: those of [dutyReachableToday] ([myProfileProvider],
+/// [nowProvider], [dutyPeriodsProvider], [dutyAssignmentsProvider],
+/// [playersProvider]), which a widget test opening it overrides; [send] is
+/// the RPC (see [MessageSend]).
 Future<void> showPlayerComposer(
   BuildContext context,
   WidgetRef ref, {
   Day? date,
   TimeBlock? block,
   MessageAudience? preselect,
-}) async {
-  final result =
-      await showModalBottomSheet<({MessageAudience audience, String body})>(
-        context: context,
-        isScrollControlled: true,
-        builder: (_) => _PlayerComposerSheet(
-          initial: preselect ?? MessageAudience.admins,
-          trainingLabel: date == null
-              ? null
-              : block == null
-              ? 'K tréninku ${dutyDayLabel(date)}'
-              : 'K tréninku ${dutyDayLabel(date)} · ${block.label}',
-        ),
-      );
-  if (result == null || !context.mounted) return;
-  await tryAction(
-    context,
-    () => Api.messageSend(
-      kind: MessageKind.message,
-      audience: result.audience,
-      onDate: date,
-      blockId: block?.id,
-      body: result.body,
-    ),
-    success: 'Zpráva odeslána.',
-    // `nobody_on_duty` („Dnes nikdo neslouží — napiš správci.“) is in the
-    // shared map; a player composer is never offered for being on duty.
-    errorText: friendlyDbError,
-  );
-}
+  MessageSend? send,
+}) => showModalBottomSheet<void>(
+  context: context,
+  isScrollControlled: true,
+  builder: (_) => _PlayerComposerSheet(
+    initial: preselect ?? MessageAudience.admins,
+    trainingLabel: date == null
+        ? null
+        : block == null
+        ? 'K tréninku ${dutyDayLabel(date)}'
+        : 'K tréninku ${dutyDayLabel(date)} · ${block.label}',
+    date: date,
+    blockId: block?.id,
+    send: send ?? Api.messageSend,
+  ),
+);
 
-/// [Api.messageSend]'s shape — [showStaffComposer]'s `send` replaces the
-/// RPC, so widget tests never reach `Supabase.instance`.
+/// [Api.messageSend]'s shape — both composers' `send` replaces the RPC, so
+/// widget tests never reach `Supabase.instance`.
 typedef MessageSend =
-    Future<Object?> Function({
+    Future<String> Function({
       required MessageKind kind,
       required MessageAudience audience,
       Day? onDate,
@@ -122,18 +110,47 @@ typedef MessageSend =
       bool notify,
     });
 
-/// What the staff sheet hands back: the target (a day, or a block of it),
-/// the text, and whether it was offered for being on duty — so a
-/// `not_allowed` then reads as the duty having ended ([dutyEndedMessage]).
-typedef _StaffMessage = ({Day date, String? blockId, String body, bool asDuty});
+/// „Odeslat“ of both sheets, run with the SHEET's [context] — never the
+/// caller's: Zprávy's FABs step aside while the keyboard is up, and a
+/// message handed back to a FAB that was gone meanwhile was never sent.
+/// Success closes the sheet and the page says „Zpráva odeslána.“; a
+/// refusal shows over the sheet ([snack]) and keeps the text for another
+/// try. The page's messenger is taken first: the sheet may be swiped away
+/// while the call runs, and its outcome must still be told — which
+/// [tryAction], silent once its context is gone, would not do.
+Future<void> _sendFromSheet(
+  BuildContext context,
+  Future<void> Function() send, {
+  required String Function(Object error) errorText,
+}) async {
+  final messenger = ScaffoldMessenger.maybeOf(context);
+  void onPage(String text) {
+    if (messenger != null && messenger.mounted) {
+      messenger.showSnackBar(SnackBar(content: Text(text)));
+    }
+  }
+
+  try {
+    await send();
+  } catch (e) {
+    if (context.mounted) {
+      snack(context, errorText(e));
+    } else {
+      onPage(errorText(e));
+    }
+    return;
+  }
+  if (context.mounted) closeDialog(context);
+  onPage('Zpráva odeslána.');
+}
 
 /// The staff composer — Zprávy's „Napsat hráčům“ (the admin, or the duty on
 /// today or later), and the calendar's „Napsat hráčům dne…“ / „Napsat
 /// hráčům bloku…“ (Task 9) with [date]/[blockId] prefilled. The date
 /// defaults to today; the duty cannot pick a past day. Every target shows
 /// who would get it („Dostane 2 hráči: …“), and an empty one cannot be
-/// sent. The sheet watches its own providers, [ref] as in
-/// [showPlayerComposer] — [myProfileProvider], [myDutyProvider],
+/// sent. The sheet sends itself, as in [showPlayerComposer]. It watches its
+/// own providers, [ref] as there — [myProfileProvider], [myDutyProvider],
 /// [nowProvider], [weekScheduleProvider], [weekReservationsProvider] and
 /// [playersProvider], which a widget test opening it overrides; [send] is
 /// the RPC (see [MessageSend]).
@@ -142,34 +159,16 @@ Future<void> showStaffComposer(
   WidgetRef ref, {
   Day? date,
   String? blockId,
-  MessageSend send = Api.messageSend,
-}) async {
-  final result = await showModalBottomSheet<_StaffMessage>(
-    context: context,
-    isScrollControlled: true,
-    builder: (_) =>
-        _StaffComposerSheet(initialDate: date, initialBlockId: blockId),
-  );
-  if (result == null || !context.mounted) return;
-  await tryAction(
-    context,
-    () => send(
-      kind: MessageKind.message,
-      audience: result.blockId == null
-          ? MessageAudience.day
-          : MessageAudience.block,
-      onDate: result.date,
-      blockId: result.blockId,
-      body: result.body,
-    ),
-    success: 'Zpráva odeslána.',
-    errorText: (e) => staffSendErrorText(
-      e,
-      toBlock: result.blockId != null,
-      asDuty: result.asDuty,
-    ),
-  );
-}
+  MessageSend? send,
+}) => showModalBottomSheet<void>(
+  context: context,
+  isScrollControlled: true,
+  builder: (_) => _StaffComposerSheet(
+    initialDate: date,
+    initialBlockId: blockId,
+    send: send ?? Api.messageSend,
+  ),
+);
 
 /// The staff composer's refusal text: `no_recipients` and `date_past` read
 /// differently here than in the shared map (spec: Errors and edge cases),
@@ -194,6 +193,9 @@ class _PlayerComposerSheet extends ConsumerStatefulWidget {
   const _PlayerComposerSheet({
     required this.initial,
     required this.trainingLabel,
+    required this.date,
+    required this.blockId,
+    required this.send,
   });
 
   /// The audience picked when the sheet opens.
@@ -201,6 +203,11 @@ class _PlayerComposerSheet extends ConsumerStatefulWidget {
 
   /// „K tréninku po 5. 10. · 16:00–17:00“ when opened from a training.
   final String? trainingLabel;
+
+  /// The training's day and block, sent as `on_date`/`block_id`.
+  final Day? date;
+  final String? blockId;
+  final MessageSend send;
 
   @override
   ConsumerState<_PlayerComposerSheet> createState() =>
@@ -214,10 +221,31 @@ class _PlayerComposerSheetState extends ConsumerState<_PlayerComposerSheet> {
   late MessageAudience _audience = widget.initial;
   final _body = TextEditingController();
 
+  /// A send is under way: „Odeslat“ waits, so one tap is one message.
+  bool _sending = false;
+
   @override
   void dispose() {
     _body.dispose();
     super.dispose();
+  }
+
+  Future<void> _send(MessageAudience audience, String text) async {
+    setState(() => _sending = true);
+    await _sendFromSheet(
+      context,
+      () => widget.send(
+        kind: MessageKind.message,
+        audience: audience,
+        onDate: widget.date,
+        blockId: widget.blockId,
+        body: text,
+      ),
+      // `nobody_on_duty` („Dnes nikdo neslouží — napiš správci.“) is in the
+      // shared map; a player composer is never offered for being on duty.
+      errorText: friendlyDbError,
+    );
+    if (mounted) setState(() => _sending = false);
   }
 
   @override
@@ -258,11 +286,9 @@ class _PlayerComposerSheetState extends ConsumerState<_PlayerComposerSheet> {
         Align(
           alignment: Alignment.centerRight,
           child: FilledButton(
-            onPressed: text.isEmpty
+            onPressed: text.isEmpty || _sending
                 ? null
-                : () => Navigator.of(
-                    context,
-                  ).pop((audience: audience, body: text)),
+                : () => _send(audience, text),
             child: const Text('Odeslat'),
           ),
         ),
@@ -325,6 +351,7 @@ class _StaffComposerSheet extends ConsumerStatefulWidget {
   const _StaffComposerSheet({
     required this.initialDate,
     required this.initialBlockId,
+    required this.send,
   });
 
   /// Null = today.
@@ -332,6 +359,7 @@ class _StaffComposerSheet extends ConsumerStatefulWidget {
 
   /// Null = „Celý den“.
   final String? initialBlockId;
+  final MessageSend send;
 
   @override
   ConsumerState<_StaffComposerSheet> createState() =>
@@ -352,6 +380,9 @@ class _StaffComposerSheetState extends ConsumerState<_StaffComposerSheet> {
   /// the streams may land after the sheet opens. [myDutyProvider] is
   /// `none` until the profile loads, so a true here has a known role.
   bool _offeredAsDuty = false;
+
+  /// A send is under way: „Odeslat“ waits, so one tap is one message.
+  bool _sending = false;
 
   static Day _today(_Get get) =>
       Day.fromDateTime(get(nowProvider).value ?? DateTime.now());
@@ -378,6 +409,26 @@ class _StaffComposerSheetState extends ConsumerState<_StaffComposerSheet> {
         _blockId = null;
       });
     }
+  }
+
+  /// Sends to the day ([blockId] null) or one of its blocks.
+  Future<void> _send(String? blockId, String text) async {
+    final date = _date;
+    final asDuty = _offeredAsDuty;
+    setState(() => _sending = true);
+    await _sendFromSheet(
+      context,
+      () => widget.send(
+        kind: MessageKind.message,
+        audience: blockId == null ? MessageAudience.day : MessageAudience.block,
+        onDate: date,
+        blockId: blockId,
+        body: text,
+      ),
+      errorText: (e) =>
+          staffSendErrorText(e, toBlock: blockId != null, asDuty: asDuty),
+    );
+    if (mounted) setState(() => _sending = false);
   }
 
   @override
@@ -462,13 +513,8 @@ class _StaffComposerSheetState extends ConsumerState<_StaffComposerSheet> {
         Align(
           alignment: Alignment.centerRight,
           child: FilledButton(
-            onPressed: canSend
-                ? () => Navigator.of(context).pop((
-                    date: _date,
-                    blockId: blockId,
-                    body: text,
-                    asDuty: _offeredAsDuty,
-                  ))
+            onPressed: canSend && !_sending
+                ? () => _send(blockId, text)
                 : null,
             child: const Text('Odeslat'),
           ),

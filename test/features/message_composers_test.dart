@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart' show StateProvider;
 import 'package:flutter_test/flutter_test.dart';
@@ -7,6 +10,33 @@ import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/duties.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/clubhouse/widgets/message_composers.dart';
+
+/// One call of the composers' RPC, as [recorder] keeps it.
+typedef Sent = ({
+  MessageKind kind,
+  MessageAudience audience,
+  Day? onDate,
+  String? blockId,
+  String body,
+});
+
+/// Stands in for Api.messageSend (no Supabase): records each call into
+/// [calls], then answers with [answer] — a new id when there is none.
+MessageSend recorder(List<Sent> calls, {Future<String> Function()? answer}) =>
+    ({
+      required MessageKind kind,
+      required MessageAudience audience,
+      Day? onDate,
+      String? blockId,
+      String? title,
+      required String body,
+      DateTime? expiresAt,
+      bool notify = true,
+    }) {
+      calls.add((kind: kind, audience: audience, onDate: onDate,
+          blockId: blockId, body: body));
+      return answer?.call() ?? Future.value('new-id');
+    };
 
 /// The two composers (0051): the player's (Správci / Službě) and the
 /// staff's (a day or a block, with a live recipient preview).
@@ -35,6 +65,7 @@ void main() {
     Day? date,
     TimeBlock? block,
     MessageAudience? preselect,
+    MessageSend? send,
   }) =>
       ProviderScope(
         overrides: [
@@ -46,8 +77,8 @@ void main() {
           nowProvider.overrideWith((ref) => Stream.value(DateTime(2026, 10, 5, 12))),
         ],
         child: MaterialApp(home: Scaffold(body: Consumer(builder: (context, ref, _) => TextButton(
-          onPressed: () => showPlayerComposer(context, ref,
-              date: date, block: block, preselect: preselect),
+          onPressed: () => showPlayerComposer(context, ref, date: date,
+              block: block, preselect: preselect, send: send ?? recorder([])),
           child: const Text('open'),
         )))),
       );
@@ -139,6 +170,81 @@ void main() {
         .groupValue, MessageAudience.admins);
   });
 
+  testWidgets('„Odeslat“ sends the trimmed text to Správci, then closes with '
+      '„Zpráva odeslána.“', (tester) async {
+    final calls = <Sent>[];
+    final reply = Completer<String>();
+    await tester.pumpWidget(app(send: recorder(calls, answer: () => reply.future)));
+    await open(tester);
+    await tester.enterText(find.byType(TextField), '  Přijdu později.  ');
+    await tester.pump();
+    await tester.tap(find.text('Odeslat'));
+    await tester.pump();
+    expect(calls, [(kind: MessageKind.message, audience: MessageAudience.admins,
+        onDate: null, blockId: null, body: 'Přijdu později.')]);
+    // Still open while it goes out, and not sendable twice.
+    expect(send(tester).onPressed, isNull);
+    reply.complete('new-id');
+    await tester.pumpAndSettle();
+    expect(find.text('Odeslat'), findsNothing);
+    expect(find.text('Zpráva odeslána.'), findsOneWidget);
+  });
+
+  testWidgets('from a training, „Službě“ goes out with the training\'s on_date '
+      'and block_id', (tester) async {
+    final period = DutyPeriod(id: 'p1', startsOn: today, endsOn: today);
+    final calls = <Sent>[];
+    await tester.pumpWidget(app(
+      periods: [period],
+      assignments: const [DutyAssignment(periodId: 'p1', userId: 'bara')],
+      date: today, block: b1, send: recorder(calls),
+    ));
+    await open(tester);
+    await tester.tap(find.text('Službě'));
+    await tester.enterText(find.byType(TextField), 'Přijdu o 10 minut později.');
+    await tester.pump();
+    await tester.tap(find.text('Odeslat'));
+    await tester.pumpAndSettle();
+    expect(calls, [(kind: MessageKind.message, audience: MessageAudience.duty,
+        onDate: today, blockId: 'b1', body: 'Přijdu o 10 minut později.')]);
+    expect(find.text('Zpráva odeslána.'), findsOneWidget);
+  });
+
+  testWidgets('a refused send keeps the sheet open with the text, says why, '
+      'and can be sent again', (tester) async {
+    final period = DutyPeriod(id: 'p1', startsOn: today, endsOn: today);
+    final calls = <Sent>[];
+    await tester.pumpWidget(app(
+      periods: [period],
+      assignments: const [DutyAssignment(periodId: 'p1', userId: 'bara')],
+      preselect: MessageAudience.duty,
+      // The duty was unassigned meanwhile: refused once, then through.
+      send: recorder(calls, answer: () async => calls.length == 1
+          ? throw Exception('nobody_on_duty')
+          : 'new-id'),
+    ));
+    await open(tester);
+    await tester.enterText(find.byType(TextField), 'Došel toaleťák.');
+    await tester.pump();
+    await tester.tap(find.text('Odeslat'));
+    await tester.pumpAndSettle();
+    expect(calls, hasLength(1));
+    expect(find.text('Dnes nikdo neslouží — napiš správci.'), findsOneWidget);
+    expect(find.text('Zpráva odeslána.'), findsNothing);
+    expect(tester.widget<TextField>(find.byType(TextField)).controller!.text,
+        'Došel toaleťák.');
+    expect(send(tester).onPressed, isNotNull);
+    // The message sits over the sheet's bottom edge until tapped away
+    // (core/messages.dart) — then „Odeslat“ again.
+    await tester.tap(find.text('Dnes nikdo neslouží — napiš správci.'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Odeslat'));
+    await tester.pumpAndSettle();
+    expect(calls, hasLength(2));
+    expect(find.text('Odeslat'), findsNothing);
+    expect(find.text('Zpráva odeslána.'), findsOneWidget);
+  });
+
   group('showStaffComposer', () {
     final b1 = TimeBlock(id: 'b1', startsAt: HourMinute(16, 0), endsAt: HourMinute(17, 0),
         position: 0, active: true);
@@ -193,7 +299,11 @@ void main() {
           PlayerName(id: 'ghost', displayName: 'Hráč Bezúčtu', hasAccount: false),
         ]),
       ],
-      child: MaterialApp(home: Scaffold(body: Consumer(builder: (context, ref, _) => TextButton(
+      // Czech, for „Změnit“'s date picker (pickDay asks for cs).
+      child: MaterialApp(
+          localizationsDelegates: GlobalMaterialLocalizations.delegates,
+          supportedLocales: const [Locale('cs')],
+          home: Scaffold(body: Consumer(builder: (context, ref, _) => TextButton(
         onPressed: () => showStaffComposer(context, ref,
             date: today, blockId: blockId, send: send ?? sent),
         child: const Text('open'),
@@ -270,6 +380,58 @@ void main() {
       expect(tester.widget<RadioGroup<String?>>(find.byType(RadioGroup<String?>)).groupValue, 'b1');
     });
 
+    Future<void> typeAndSend(WidgetTester tester) async {
+      await tester.enterText(find.byType(TextField), '  Přijďte dřív.  ');
+      await tester.pump();
+      await tester.tap(find.text('Odeslat'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('„Celý den“ goes out as a day message, no block, on the sheet\'s date',
+        (tester) async {
+      final calls = <Sent>[];
+      await tester.pumpWidget(staffApp(
+          reservations: [booking('r1', 'p1', 'b1')], send: recorder(calls)));
+      await openStaff(tester);
+      await typeAndSend(tester);
+      expect(calls, [(kind: MessageKind.message, audience: MessageAudience.day,
+          onDate: today, blockId: null, body: 'Přijďte dřív.')]);
+      expect(find.text('Napsat hráčům'), findsNothing);
+      expect(find.text('Zpráva odeslána.'), findsOneWidget);
+    });
+
+    testWidgets('a picked block goes out as a block message with its id', (tester) async {
+      final calls = <Sent>[];
+      await tester.pumpWidget(staffApp(
+          reservations: [booking('r1', 'p1', 'b1')], send: recorder(calls)));
+      await openStaff(tester);
+      await tester.tap(find.text('16:00–17:00'));
+      await tester.pump();
+      await typeAndSend(tester);
+      expect(calls, [(kind: MessageKind.message, audience: MessageAudience.block,
+          onDate: today, blockId: 'b1', body: 'Přijďte dřív.')]);
+      expect(find.text('Zpráva odeslána.'), findsOneWidget);
+    });
+
+    testWidgets('a picked date goes out as on_date', (tester) async {
+      final calls = <Sent>[];
+      final wednesday = Day(2026, 10, 7);
+      await tester.pumpWidget(staffApp(send: recorder(calls), reservations: [
+        Reservation(id: 'r2', playerId: 'p2', date: wednesday, blockId: 'b1', lane: 1,
+            createdVia: 'app', createdAt: DateTime(2026, 10, 1)),
+      ]));
+      await openStaff(tester);
+      await tester.tap(find.text('Změnit'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('7'));
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+      expect(find.text('7. 10. 2026'), findsOneWidget);
+      await typeAndSend(tester);
+      expect(calls, [(kind: MessageKind.message, audience: MessageAudience.day,
+          onDate: wednesday, blockId: null, body: 'Přijďte dřív.')]);
+    });
+
     testWidgets('a duty whose service ends while the sheet is open reads the refusal '
         'as „Služba skončila“', (tester) async {
       final onDuty = MyDuty(current: DutyPeriod(id: 'p1', startsOn: today, endsOn: today));
@@ -308,6 +470,10 @@ void main() {
       expect(calls, [(audience: MessageAudience.day, onDate: today, blockId: null)]);
       expect(find.text('Služba skončila — tohle teď může jen správce.'), findsOneWidget);
       expect(find.text('Na tohle nemáš oprávnění.'), findsNothing);
+      // Refused: the sheet stays, the text kept.
+      expect(find.text('Napsat hráčům'), findsOneWidget);
+      expect(tester.widget<TextField>(find.byType(TextField)).controller!.text,
+          'Přijďte dřív.');
     });
   });
 

@@ -30,6 +30,7 @@ class MessagesScreen extends ConsumerStatefulWidget {
     this.markRead = Api.markMessagesRead,
     this.react = Api.setReaction,
     this.reply = Api.setReply,
+    this.send = Api.messageSend,
   });
 
   /// The three own-row writes, injected like
@@ -38,6 +39,9 @@ class MessagesScreen extends ConsumerStatefulWidget {
   final Future<void> Function(List<String> ids) markRead;
   final MessageReact react;
   final MessageReply reply;
+
+  /// The composers' RPC, handed to both FABs' sheets (see [MessageSend]).
+  final MessageSend send;
 
   @override
   ConsumerState<MessagesScreen> createState() => _MessagesScreenState();
@@ -110,53 +114,62 @@ class _MessagesScreenState extends ConsumerState<MessagesScreen> {
         final isAdmin = ref.watch(
             myProfileProvider.select((p) => p.value?.isAdmin ?? false));
         final onDuty = ref.watch(myDutyProvider.select((d) => d.onDuty));
-        // Not while the keyboard is up: the FABs float above it, but a
-        // focused reply field is scrolled only to its edge, under them.
+        // Not shown while the keyboard is up: the FABs float above it, but
+        // a focused reply field is scrolled only to its edge, under them.
         // The FAB slot keeps the view insets (Scaffold strips them from
-        // the body only); the list keeps its last measured room.
-        if (MediaQuery.viewInsetsOf(context).bottom > 0) {
-          return const SizedBox.shrink();
-        }
+        // the body only). Hidden, not removed (offstage, unfocusable): the
+        // subtree stays mounted and still measured, so the list keeps its
+        // room, and a composer sheet a FAB opened (its own keyboard up)
+        // keeps the context it was opened from — though the sheets send
+        // by themselves and need nothing from it once open.
+        final keyboardUp = MediaQuery.viewInsetsOf(context).bottom > 0;
         // Side by side when they fit, else stacked (large text, WCAG
         // 1.4.4). The slot is as wide as the Scaffold and endFloat keeps a
         // margin on the right, so the Wrap stops a margin short of the
         // left edge too. Its height (one row or two) goes to the list.
-        return LayoutBuilder(builder: (context, constraints) {
-          final maxWidth = constraints.maxWidth -
-              2 * kFloatingActionButtonMargin -
-              MediaQuery.paddingOf(context).horizontal;
-          return _ReportHeight(
-            onHeight: (height) {
-              if (mounted) _fabHeight.value = height;
-            },
-            child: ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: math.max(0, maxWidth)),
-              child: Wrap(
-                alignment: WrapAlignment.end,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                spacing: 12,
-                runSpacing: 12,
-                children: [
-                  // The staff composer: the admin, or the duty today — the
-                  // server's `message_send` gate for a day or a block.
-                  if (isAdmin || onDuty)
+        final horizontalPadding = MediaQuery.paddingOf(context).horizontal;
+        return Visibility(
+          visible: !keyboardUp,
+          maintainState: true,
+          child: LayoutBuilder(builder: (_, constraints) {
+            final maxWidth = constraints.maxWidth -
+                2 * kFloatingActionButtonMargin -
+                horizontalPadding;
+            return _ReportHeight(
+              onHeight: (height) {
+                if (mounted) _fabHeight.value = height;
+              },
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: math.max(0, maxWidth)),
+                child: Wrap(
+                  alignment: WrapAlignment.end,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: [
+                    // The staff composer: the admin, or the duty today — the
+                    // server's `message_send` gate for a day or a block.
+                    if (isAdmin || onDuty)
+                      FloatingActionButton.extended(
+                        heroTag: 'staff-compose',
+                        onPressed: () => showStaffComposer(context, ref,
+                            send: widget.send),
+                        icon: const Icon(Icons.campaign_outlined),
+                        label: const Text('Napsat hráčům'),
+                      ),
                     FloatingActionButton.extended(
-                      heroTag: 'staff-compose',
-                      onPressed: () => showStaffComposer(context, ref),
-                      icon: const Icon(Icons.campaign_outlined),
-                      label: const Text('Napsat hráčům'),
+                      heroTag: 'player-compose',
+                      onPressed: () => showPlayerComposer(context, ref,
+                          send: widget.send),
+                      icon: const Icon(Icons.edit_outlined),
+                      label: const Text('Napsat'),
                     ),
-                  FloatingActionButton.extended(
-                    heroTag: 'player-compose',
-                    onPressed: () => showPlayerComposer(context, ref),
-                    icon: const Icon(Icons.edit_outlined),
-                    label: const Text('Napsat'),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          );
-        });
+            );
+          }),
+        );
       }),
     );
   }

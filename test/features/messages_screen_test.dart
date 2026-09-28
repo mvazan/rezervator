@@ -14,6 +14,8 @@ import 'package:rezervator/domain/duties.dart' show MyDuty;
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/clubhouse/message_detail_screen.dart';
 import 'package:rezervator/features/clubhouse/messages_screen.dart';
+import 'package:rezervator/features/clubhouse/widgets/message_composers.dart'
+    show MessageSend;
 import 'package:rezervator/features/clubhouse/widgets/message_tile.dart';
 
 /// Klubovna → Zprávy (0051): the tile's received and sent sides, the list
@@ -28,6 +30,18 @@ Future<void> _loadManrope() async {
   }
   await loader.load();
 }
+
+/// The composers' RPC for a test that does not look: succeeds, no Supabase.
+Future<String> _sendNothing({
+  required MessageKind kind,
+  required MessageAudience audience,
+  Day? onDate,
+  String? blockId,
+  String? title,
+  required String body,
+  DateTime? expiresAt,
+  bool notify = true,
+}) async => 'new-id';
 
 void main() {
   setUpAll(_loadManrope);
@@ -113,6 +127,7 @@ void main() {
     List<MessageRecipient> recipients = const [],
     List<PlayerName> roster = const [],
     MyDuty duty = MyDuty.none,
+    List<Reservation> reservations = const [],
   }) =>
       [
         myProfileProvider.overrideWith((ref) => Stream.value(profile)),
@@ -125,6 +140,12 @@ void main() {
         timeBlocksProvider.overrideWith((ref) => Stream.value(const [])),
         nowProvider.overrideWith((ref) => Stream.value(DateTime(2026, 10, 2, 12))),
         myDutyProvider.overrideWithValue(duty),
+        // What the staff composer's sheet watches (its week and preview).
+        settingsProvider.overrideWith((ref) => Stream.value(ScheduleSettings.defaults)),
+        dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
+        prioritySlotsProvider.overrideWithValue(const []),
+        rentalsProvider.overrideWith((ref) => Stream.value(const [])),
+        weekReservationsProvider.overrideWith((ref, monday) => Stream.value(reservations)),
       ];
 
   // The screen's writes are injected (no Supabase in widget tests); the
@@ -140,10 +161,13 @@ void main() {
     MyDuty duty = MyDuty.none,
     ThemeData? theme,
     TextScaler? textScaler,
+    MessageSend? send,
+    List<Reservation> reservations = const [],
   }) =>
       ProviderScope(
         overrides: overrides(profile: profile, messages: messages,
-            recipients: recipients, roster: roster, duty: duty),
+            recipients: recipients, roster: roster, duty: duty,
+            reservations: reservations),
         child: MaterialApp(
           theme: theme,
           builder: textScaler == null
@@ -156,6 +180,7 @@ void main() {
             markRead: markRead ?? (_) async {},
             react: react ?? (_, _) async {},
             reply: reply ?? (_, _) async {},
+            send: send ?? _sendNothing,
           ),
         ),
       );
@@ -404,6 +429,64 @@ void main() {
         tester.view.resetViewInsets();
         await tester.pumpAndSettle();
         expect(find.text('Napsat'), findsOneWidget);
+      });
+    }
+
+    // The composer's own keyboard lifts the page's insets too, and the FABs
+    // step aside under it (above). The message must still go out: the
+    // sheet sends it itself instead of handing it back to the FAB.
+    for (final (label, profile, fab, audience, onDate) in [
+      ('the player composer', me, 'Napsat', MessageAudience.admins, null),
+      ('the staff composer', const Profile(
+        id: 'me', displayName: 'Já Hráč', email: 'me@example.com',
+        role: Role.admin, status: ProfileStatus.approved,
+      ), 'Napsat hráčům', MessageAudience.day, Day(2026, 10, 2)),
+    ]) {
+      testWidgets('$label, typed with the keyboard up, still sends', (tester) async {
+        tester.view.physicalSize = const Size(360, 780);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+        final calls = <(MessageAudience, Day?, String?, String)>[];
+        Future<String> send({
+          required MessageKind kind,
+          required MessageAudience audience,
+          Day? onDate,
+          String? blockId,
+          String? title,
+          required String body,
+          DateTime? expiresAt,
+          bool notify = true,
+        }) async {
+          calls.add((audience, onDate, blockId, body));
+          return 'new-id';
+        }
+
+        await tester.pumpWidget(app(
+          profile: profile,
+          send: send,
+          roster: const [PlayerName(id: 'p1', displayName: 'Petr Novák')],
+          reservations: [
+            Reservation(id: 'r1', playerId: 'p1', date: Day(2026, 10, 2),
+                blockId: 'b1', lane: 1, createdVia: 'app',
+                createdAt: DateTime(2026, 10, 1)),
+          ],
+        ));
+        // The app's shell keeps the clock live (myDutyProvider follows
+        // it); here myDutyProvider is a fixed value, so listen as the shell
+        // does — else the staff sheet's „today“ is the device clock's.
+        ProviderScope.containerOf(tester.element(find.byType(MessagesScreen)))
+            .listen(nowProvider, (_, _) {});
+        await tester.pumpAndSettle();
+        await tester.tap(find.text(fab));
+        await tester.pumpAndSettle();
+        tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+        await tester.pumpAndSettle();
+        await tester.enterText(find.byType(TextField), 'Přijďte dřív.');
+        await tester.pump();
+        await tester.tap(find.text('Odeslat'));
+        await tester.pumpAndSettle();
+        expect(calls, [(audience, onDate, null, 'Přijďte dřív.')]);
+        expect(find.text('Zpráva odeslána.'), findsOneWidget);
       });
     }
   });
