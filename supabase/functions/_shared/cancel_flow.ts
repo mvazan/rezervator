@@ -1,6 +1,6 @@
 // The one-click cancel flow behind the cancel edge function, with the
-// database passed in so the one rule that matters — only a POST may cancel —
-// is testable.
+// database and the clock passed in so its two rules are testable: only a
+// POST may cancel, and nothing may once the block has started.
 //
 // Every answer is a redirect to web/cancel.html, never HTML from here: the
 // edge runtime rewrites the Content-Type to text/plain (with nosniff and a
@@ -9,7 +9,7 @@
 // page reads `stav` (+ `kdy`, and `token` when it offers the button) and
 // POSTs back here itself.
 
-import { verifyCancelToken } from "./cancel_token.ts";
+import { pragueEpoch, verifyCancelToken } from "./cancel_token.ts";
 import { dayLabel, timeLabel } from "./format.ts";
 
 /** Ships with the Flutter web build: web/cancel.html lands in the site root. */
@@ -48,6 +48,8 @@ export interface CancelDeps {
   /** true when this call cancelled it, false when it already was; throws
    * when the write fails. */
   cancel(rid: string): Promise<boolean>;
+  /** Epoch milliseconds; tests pin it. */
+  now?(): number;
 }
 
 export function slotLabel(
@@ -91,7 +93,20 @@ export async function handleCancel(
   const reservation = await deps.reservation(verdict.rid);
   if (!reservation) return show(status, "nenalezena");
   if (reservation.cancelled_at) return show(status, "hotovo");
-  const kdy = slotLabel(reservation, await deps.block(reservation.block_id));
+  const block = await deps.block(reservation.block_id);
+  const kdy = slotLabel(reservation, block);
+
+  // The token expires at the start the reservation had when the link went
+  // out, but a move keeps the row (and so the token) and may make it
+  // earlier. The block it is in now decides: once that has started,
+  // cancelling is an admin decision — a one-click cancel would erase the
+  // attendance. time_blocks is FK RESTRICT, so no block means a failed read:
+  // refuse rather than guess, and keep the button for a retry.
+  if (!block) return show(status, "chyba", { kdy, token });
+  const now = deps.now?.() ?? Date.now();
+  if (now / 1000 >= pragueEpoch(reservation.date, block.starts_at)) {
+    return show(status, "vyprselo", { kdy });
+  }
 
   if (!post) {
     // E-mail link-prefetch scanners follow GETs: this only reads. The page

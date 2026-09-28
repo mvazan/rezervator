@@ -12,7 +12,8 @@
 //
 // Deploy with --no-verify-jwt (recipients have no session). The HMAC token
 // (see _shared/cancel_token.ts) is the sole authorization: one reservation,
-// valid until the block starts.
+// valid until its block starts — the block it is in now, since a move keeps
+// the token alive.
 
 import { createClient } from "@supabase/supabase-js";
 import { handleCancel } from "../_shared/cancel_flow.ts";
