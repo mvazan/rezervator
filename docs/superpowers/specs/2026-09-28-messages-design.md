@@ -197,7 +197,7 @@ alley) is not a recipient.
 ## Reactions from e-mail
 
 - Link: `<functions>/react?t=<token>`; token = base64url of `{m: message_id, u: user_id,
-  r: 'up' | 'down', x: <expiry epoch>}` plus an HMAC with the secret `_shared/cancel_token.ts`
+  r: 'up' | 'down', x: <issued-at epoch ms>}` plus an HMAC with the secret `_shared/cancel_token.ts`
   already uses (the helper is generalised to sign/verify any small payload; the kiosk cancel
   link keeps working).
 - New edge function `react` (deployed `--no-verify-jwt`, like `cancel`): verifies the
