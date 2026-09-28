@@ -31,6 +31,8 @@ function fakeDeps(overrides: Partial<MessageDeps> = {}) {
   const pushed: { id: string; title: string; body: string; data?: Record<string, string> }[] =
     [];
   const batches: Email[][] = [];
+  const batchKeys: string[] = [];
+  const singles: { to: string; key: string }[] = [];
   const pauses: number[] = [];
   const deps: MessageDeps = {
     byPush: (r: Recipient) => r.fcm_token != null,
@@ -38,8 +40,13 @@ function fakeDeps(overrides: Partial<MessageDeps> = {}) {
       pushed.push({ id: r.id, title, body, data: opts.data });
       return Promise.resolve("delivered");
     },
-    sendEmails: (emails) => {
+    sendEmails: (emails, key) => {
       batches.push(emails);
+      batchKeys.push(key);
+      return Promise.resolve("delivered");
+    },
+    sendEmail: (email, key) => {
+      singles.push({ to: email.to, key });
       return Promise.resolve("delivered");
     },
     reactLink: (u, reaction) => Promise.resolve(`https://x/react?t=${u}-${reaction}`),
@@ -49,7 +56,7 @@ function fakeDeps(overrides: Partial<MessageDeps> = {}) {
     },
     ...overrides,
   };
-  return { deps, pushed, batches, pauses };
+  return { deps, pushed, batches, batchKeys, singles, pauses };
 }
 
 // Runs [body] with console.error recorded instead of printed.
@@ -130,7 +137,7 @@ Deno.test("deliverMessage: e-mails go out in one Resend batch per 100, not one r
   // A 150-player notice by e-mail is two requests, far under Resend's
   // per-second rate limit however it is set — sent one by one, it would
   // trip it (a 429 is not retried by anyone).
-  const { deps, pushed, batches, pauses } = fakeDeps();
+  const { deps, pushed, batches, batchKeys, pauses } = fakeDeps();
   const mailed = Array.from({ length: 150 }, (_, i) => recipient(`e${i}`, false));
   let n = 0;
   const logged = await withErrorsLogged(async () => {
@@ -144,6 +151,8 @@ Deno.test("deliverMessage: e-mails go out in one Resend batch per 100, not one r
   assertEquals(pushed.map((p) => p.id), ["p0"]);
   assertEquals(batches.map((b) => b.length), [100, 50]);
   assertEquals(batches.flat().map((e) => e.to), mailed.map((r) => r.email));
+  // Each batch under its own idempotency key: the message and the batch.
+  assertEquals(batchKeys, ["message/m1/0", "message/m1/1"]);
   // Each e-mail carries its own recipient's 👍/👎 links.
   const e7 = batches[0][7];
   assertEquals(e7.html.includes("react?t=e7-up"), true);
@@ -161,10 +170,12 @@ Deno.test("deliverMessage: a batch Resend refused as busy is tried once more aft
   // Busy now (a 429 from other traffic in the same second), fine a
   // second later.
   const calls: Email[][] = [];
+  const keys: string[] = [];
   const answers = ["retry", "delivered"] as const;
   const first = fakeDeps({
-    sendEmails: (emails) => {
+    sendEmails: (emails, key) => {
       calls.push(emails);
+      keys.push(key);
       return Promise.resolve(answers[calls.length - 1]);
     },
   });
@@ -175,6 +186,9 @@ Deno.test("deliverMessage: a batch Resend refused as busy is tried once more aft
   });
   assertEquals(calls.length, 2);
   assertEquals(calls[1], calls[0]);
+  // The retry reuses the key: a batch Resend took before a gateway's 5xx
+  // is answered from Resend's record, not sent to everyone twice.
+  assertEquals(keys, ["message/m1/0", "message/m1/0"]);
   assertEquals(first.pauses, [1000]);
   assertEquals(logged, []);
 
@@ -214,6 +228,52 @@ Deno.test("deliverMessage: a batch that throws is logged and the next one still 
   });
   assertEquals(sizes, [100, 1]);
   assertEquals(logged.length, 1);
+});
+
+Deno.test("deliverMessage: a batch refused as invalid goes out one by one, paced", async () => {
+  // Resend's strict batch validation fails all 100 over one malformed
+  // address; alone, only that one fails. A busy single is tried once
+  // more; a refused or throwing one is logged and the rest still go.
+  const { deps, batches, singles, pauses } = fakeDeps({
+    sendEmails: (emails) => {
+      batches.push(emails);
+      return Promise.resolve("invalid");
+    },
+  });
+  const tries = new Map<string, number>();
+  deps.sendEmail = (email, key) => {
+    singles.push({ to: email.to, key });
+    const n = (tries.get(email.to) ?? 0) + 1;
+    tries.set(email.to, n);
+    if (email.to === "e1@example.com") return Promise.resolve("undeliverable");
+    if (email.to === "e2@example.com") return Promise.reject(new TypeError("connection reset"));
+    if (email.to === "e3@example.com" && n === 1) return Promise.resolve("retry");
+    return Promise.resolve("delivered");
+  };
+  let n = 0;
+  const logged = await withErrorsLogged(async () => {
+    n = await deliverMessage(baseMessage,
+      { authorName: "Bára Kantýnská", authorIsAdmin: false, context: null },
+      ["e0", "e1", "e2", "e3", "e4"].map((id) => recipient(id, false)), deps);
+  });
+  assertEquals(batches.length, 1);
+  assertEquals(singles, [
+    { to: "e0@example.com", key: "message/m1/0/0" },
+    { to: "e1@example.com", key: "message/m1/0/1" },
+    { to: "e2@example.com", key: "message/m1/0/2" },
+    { to: "e3@example.com", key: "message/m1/0/3" },
+    { to: "e3@example.com", key: "message/m1/0/3" },
+    { to: "e4@example.com", key: "message/m1/0/4" },
+  ]);
+  // 500 ms between singles (Resend's per-second limit), 1 s before e3's
+  // one more try.
+  assertEquals(pauses, [500, 500, 500, 1000, 500]);
+  // Counted once each, as the batch they were.
+  assertEquals(n, 5);
+  // The fallback itself, e1 refused, e2 thrown.
+  assertEquals(logged.length, 3);
+  assertEquals(String(logged[1][0]).includes("e1@example.com"), true);
+  assertEquals(String(logged[2][0]).includes("e2@example.com"), true);
 });
 
 Deno.test("deliverMessage: a failed push or link skips only that recipient", async () => {
