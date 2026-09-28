@@ -8969,6 +8969,127 @@ begin
   raise notice 'OK: can_read_message: author, recipients, notice to the alley; not a bystander, the kiosk, a pending account or another alley (0051)';
 end $$;
 
+-- 23o, continued. The board is not recipient-based: Filip, approved only
+-- after the notice went out, has no recipient row on it and still reads
+-- it — the notice branch alone answers for him. Back to pending after.
+reset role;
+update profiles set status = 'approved'
+ where id = '51000000-0000-0000-0000-000000000016';
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"51000000-0000-0000-0000-000000000016","role":"authenticated"}'; -- Filip
+do $$
+declare
+  v_notice constant uuid := current_setting('probe.msg_notice')::uuid;
+begin
+  if (select count(*) from message_recipients
+       where message_id = v_notice and user_id = auth.uid()) <> 0 then
+    raise exception 'FAIL: expected Filip to have no recipient row on the notice';
+  end if;
+  if (select count(*) from messages where id = v_notice) <> 1 then
+    raise exception 'FAIL: a player approved after the notice went out cannot read it';
+  end if;
+  raise notice 'OK: every approved player reads a notice, recipient row or not (0051)';
+end $$;
+reset role;
+update profiles set status = 'pending'
+ where id = '51000000-0000-0000-0000-000000000016';
+set local role authenticated;
+
+-- 23o, continued. The kiosk reads nothing here, not even what it once got
+-- as a player: Adam sets Dana — a recipient of the day message and of the
+-- notice — as the kiosk („Nastavit jako kiosk“). She then sees no message
+-- and no recipient row, and her own rows take no reply. Back to a player.
+do $$
+declare
+  v_dana constant uuid := '51000000-0000-0000-0000-000000000013';
+  v_day constant uuid := current_setting('probe.msg_day')::uuid;
+  v_notice constant uuid := current_setting('probe.msg_notice')::uuid;
+  v_n integer;
+begin
+  perform set_config('request.jwt.claims',
+    '{"sub":"51000000-0000-0000-0000-000000000013","role":"authenticated"}', true);
+  if (select count(*) from message_recipients
+       where message_id in (v_day, v_notice) and user_id = auth.uid()) <> 2 then
+    raise exception 'FAIL: expected Dana to be a recipient of the day message and the notice';
+  end if;
+  perform set_config('request.jwt.claims',
+    '{"sub":"51000000-0000-0000-0000-000000000010","role":"authenticated"}', true);
+  perform set_role(v_dana, 'kiosk');
+  perform set_config('request.jwt.claims',
+    '{"sub":"51000000-0000-0000-0000-000000000013","role":"authenticated"}', true);
+  if not is_kiosk() then
+    raise exception 'FAIL: expected Dana to be the kiosk now';
+  end if;
+  if (select count(*) from messages
+       where tenant_id = '00000000-0000-0000-0000-000000000051') <> 0
+     or (select count(*) from message_recipients
+          where tenant_id = '00000000-0000-0000-0000-000000000051') <> 0 then
+    raise exception 'FAIL: a recipient set as the kiosk still reads her messages';
+  end if;
+  update message_recipients set reply = 'z kiosku';
+  get diagnostics v_n = row_count;
+  if v_n <> 0 then
+    raise exception 'FAIL: a recipient set as the kiosk replied on % rows', v_n;
+  end if;
+  perform set_config('request.jwt.claims',
+    '{"sub":"51000000-0000-0000-0000-000000000010","role":"authenticated"}', true);
+  perform set_role(v_dana, 'player');
+  raise notice 'OK: a recipient set as the kiosk reads and replies to nothing (0051)';
+end $$;
+
+-- 23o, continued. The same for an account set back to pending: Dana, a
+-- recipient, reads nothing and replies to nothing. Approved again after.
+reset role;
+update profiles set status = 'pending'
+ where id = '51000000-0000-0000-0000-000000000013';
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"51000000-0000-0000-0000-000000000013","role":"authenticated"}'; -- Dana
+do $$
+declare
+  v_n integer;
+begin
+  if (select count(*) from messages
+       where tenant_id = '00000000-0000-0000-0000-000000000051') <> 0
+     or (select count(*) from message_recipients
+          where tenant_id = '00000000-0000-0000-0000-000000000051') <> 0 then
+    raise exception 'FAIL: a recipient set back to pending still reads her messages';
+  end if;
+  update message_recipients set reply = 'čekám';
+  get diagnostics v_n = row_count;
+  if v_n <> 0 then
+    raise exception 'FAIL: a recipient set back to pending replied on % rows', v_n;
+  end if;
+  raise notice 'OK: a recipient set back to pending reads and replies to nothing (0051)';
+end $$;
+reset role;
+update profiles set status = 'approved'
+ where id = '51000000-0000-0000-0000-000000000013';
+set local role authenticated;
+
+-- 23o, continued. Both select policies lead with the alley, as every other
+-- policy does, so a player's unfiltered stream is an index scan of her own
+-- alley and not a can_read_message call per row of the whole platform.
+do $$
+declare
+  v_bad text;
+begin
+  select string_agg(tablename || '.' || policyname || ': ' || qual, '; ')
+    into v_bad
+    from pg_policies
+   where schemaname = 'public'
+     and (tablename, policyname) in (('messages', 'messages_select'),
+                                     ('message_recipients', 'message_recipients_select'))
+     and qual not like '(%(tenant_id = current_tenant_id()) AND can_read_message(%';
+  if v_bad is not null
+     or (select count(*) from pg_policies where schemaname = 'public'
+          and policyname in ('messages_select', 'message_recipients_select')) <> 2 then
+    raise exception 'FAIL: a 0051 select policy does not lead with the alley: %', v_bad;
+  end if;
+  raise notice 'OK: the 0051 select policies lead with the alley (0051)';
+end $$;
+
 
 -- 23p. A recipient reacts on her own row only: 👍 stamps reacted_at and
 -- the other participants see it; someone else's row updates nothing

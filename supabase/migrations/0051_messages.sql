@@ -106,11 +106,14 @@ create trigger message_recipients_reacted_at
 alter table messages enable row level security;
 alter table message_recipients enable row level security;
 
--- Whether the caller may read [p_id]: a notice, to every approved
--- non-kiosk player of its alley; any message, to its author or a
--- recipient. Security definer so the message_recipients policy below can
--- call it without recursing into its own table's RLS. Accepted tradeoff
--- (0051 spec, "A security-definer helper can_read_message"): this also
+-- Whether the caller may read [p_id]: nothing at all unless the caller is
+-- an approved non-kiosk member of the message's alley (the spec's „the
+-- kiosk reads nothing here“ — so an account later set as the kiosk or
+-- back to pending loses what it once got as a player); then a notice to
+-- every such member, any message to its author or a recipient. Security
+-- definer so the message_recipients policy below can call it without
+-- recursing into its own table's RLS. Accepted tradeoff (0051 spec,
+-- "A security-definer helper can_read_message"): this also
 -- governs message_recipients_select, so a `message` participant sees
 -- every other participant's read_at as well as their reaction — RLS is
 -- row-level, not column-level, and nothing in the app ever surfaces a
@@ -121,8 +124,9 @@ language sql stable security definer set search_path = public as $$
   select exists (
     select 1 from messages m
      where m.id = p_id and m.tenant_id = current_tenant_id()
+       and is_approved() and not is_kiosk()
        and (
-         (m.kind = 'notice' and is_approved() and not is_kiosk())
+         m.kind = 'notice'
          or m.author_id = auth.uid()
          or exists (select 1 from message_recipients r
                      where r.message_id = m.id and r.user_id = auth.uid())
@@ -132,15 +136,23 @@ $$;
 revoke all on function can_read_message(uuid) from public, anon;
 grant execute on function can_read_message(uuid) to authenticated;
 
+-- Both select policies lead with the alley, as every other policy does:
+-- the planner then index-scans the caller's own alley instead of calling
+-- can_read_message on every row of the platform (a player's stream is
+-- unfiltered, and each Realtime change is checked through the same policy).
 drop policy if exists messages_select on messages;
 create policy messages_select on messages
-  for select using (can_read_message(id));
+  for select using (tenant_id = current_tenant_id() and can_read_message(id));
 drop policy if exists message_recipients_select on message_recipients;
 create policy message_recipients_select on message_recipients
-  for select using (can_read_message(message_id));
+  for select using (tenant_id = current_tenant_id() and can_read_message(message_id));
+-- Own row, and only while an approved non-kiosk member (can_read_message's
+-- rule): an account set as the kiosk or back to pending reacts to nothing.
 drop policy if exists message_recipients_update_own on message_recipients;
 create policy message_recipients_update_own on message_recipients
-  for update using (user_id = auth.uid()) with check (user_id = auth.uid());
+  for update
+  using (user_id = auth.uid() and is_approved() and not is_kiosk())
+  with check (user_id = auth.uid() and is_approved() and not is_kiosk());
 
 revoke all on messages, message_recipients from anon, authenticated;
 grant select on messages, message_recipients to authenticated;

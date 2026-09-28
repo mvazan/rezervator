@@ -520,8 +520,9 @@ CREATE OR REPLACE FUNCTION "public"."can_read_message"("p_id" "uuid") RETURNS bo
   select exists (
     select 1 from messages m
      where m.id = p_id and m.tenant_id = current_tenant_id()
+       and is_approved() and not is_kiosk()
        and (
-         (m.kind = 'notice' and is_approved() and not is_kiosk())
+         m.kind = 'notice'
          or m.author_id = auth.uid()
          or exists (select 1 from message_recipients r
                      where r.message_id = m.id and r.user_id = auth.uid())
@@ -5644,18 +5645,18 @@ CREATE POLICY "match_results_select" ON "public"."match_results" FOR SELECT USIN
 ALTER TABLE "public"."message_recipients" ENABLE ROW LEVEL SECURITY;
 
 
-CREATE POLICY "message_recipients_select" ON "public"."message_recipients" FOR SELECT USING ("public"."can_read_message"("message_id"));
+CREATE POLICY "message_recipients_select" ON "public"."message_recipients" FOR SELECT USING ((("tenant_id" = "public"."current_tenant_id"()) AND "public"."can_read_message"("message_id")));
 
 
 
-CREATE POLICY "message_recipients_update_own" ON "public"."message_recipients" FOR UPDATE USING (("user_id" = "auth"."uid"())) WITH CHECK (("user_id" = "auth"."uid"()));
+CREATE POLICY "message_recipients_update_own" ON "public"."message_recipients" FOR UPDATE USING ((("user_id" = "auth"."uid"()) AND "public"."is_approved"() AND (NOT "public"."is_kiosk"()))) WITH CHECK ((("user_id" = "auth"."uid"()) AND "public"."is_approved"() AND (NOT "public"."is_kiosk"())));
 
 
 
 ALTER TABLE "public"."messages" ENABLE ROW LEVEL SECURITY;
 
 
-CREATE POLICY "messages_select" ON "public"."messages" FOR SELECT USING ("public"."can_read_message"("id"));
+CREATE POLICY "messages_select" ON "public"."messages" FOR SELECT USING ((("tenant_id" = "public"."current_tenant_id"()) AND "public"."can_read_message"("id")));
 
 
 
