@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -296,6 +297,66 @@ void main() {
           expect(rect.left, greaterThanOrEqualTo(0), reason: '$rect');
           expect(rect.right, lessThanOrEqualTo(width), reason: '$rect');
         }
+      });
+    }
+
+    // The list leaves room under its last card for the FAB block, however
+    // tall it is: one row, or two once large text stacks the FABs — and
+    // above a gesture-nav inset, which lifts the FABs too.
+    for (final (width, scale, inset) in const [
+      (360.0, 1.0, 0.0), (360.0, 1.3, 0.0), (393.0, 1.69, 0.0),
+      (320.0, 1.15, 0.0), (360.0, 2.0, 0.0), (360.0, 1.3, 48.0),
+    ]) {
+      testWidgets('scrolled to the end, the last card clears the FABs on a '
+          '${width.toInt()} dp screen at text ×$scale, inset ${inset.toInt()}',
+          (tester) async {
+        tester.view.physicalSize = Size(width, 780);
+        tester.view.devicePixelRatio = 1.0;
+        tester.view.padding = FakeViewPadding(bottom: inset);
+        tester.view.viewPadding = FakeViewPadding(bottom: inset);
+        addTearDown(tester.view.reset);
+        const admin = Profile(
+          id: 'admin', displayName: 'Adam', email: 'a@example.com',
+          role: Role.admin, status: ProfileStatus.approved,
+        );
+        final messages = [
+          for (var i = 0; i < 8; i++)
+            Message(
+              id: 'm$i', kind: MessageKind.message,
+              audience: MessageAudience.block, authorId: 'staff',
+              authorRole: MessageAuthorRole.player,
+              onDate: Day(2026, 10, 2 + i), blockId: 'b1', title: null,
+              body: 'Přijďte dřív.', expiresAt: null, notify: true,
+              createdAt: DateTime(2026, 10, 1), updatedAt: DateTime(2026, 10, 1),
+            ),
+        ];
+        await tester.pumpWidget(app(
+          profile: admin,
+          messages: messages,
+          recipients: [
+            for (final m in messages)
+              MessageRecipient(messageId: m.id, userId: 'admin',
+                  readAt: DateTime(2026, 10, 1), reaction: null, reply: null,
+                  reactedAt: null),
+          ],
+          roster: const [PlayerName(id: 'staff', displayName: 'Bára')],
+          theme: buildTheme(Brightness.light),
+          textScaler: TextScaler.linear(scale),
+        ));
+        await tester.pumpAndSettle();
+        final list = tester.state<ScrollableState>(find.byType(Scrollable).first);
+        // Lazily built: the extent grows as tiles are laid out.
+        for (var i = 0; i < 6; i++) {
+          await tester.drag(find.byType(ListView), const Offset(0, -3000));
+          await tester.pumpAndSettle();
+        }
+        expect(list.position.pixels, list.position.maxScrollExtent);
+        final last = tester.getRect(find.byKey(const ValueKey('m7')));
+        final fabTop = find.byType(FloatingActionButton).evaluate()
+            .map((e) => tester.getRect(find.byWidget(e.widget)).top)
+            .reduce(math.min);
+        expect(last.bottom, lessThanOrEqualTo(fabTop),
+            reason: 'last card $last, upper FAB top $fabTop');
       });
     }
   });

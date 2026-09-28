@@ -4,7 +4,9 @@ library;
 
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderProxyBox;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/ui.dart';
@@ -48,6 +50,17 @@ class _MessagesScreenState extends ConsumerState<MessagesScreen> {
   /// `NoticeBoardScreen`.
   final _requested = <String>{};
 
+  /// The FAB block's height as last laid out: one row, or two once large
+  /// text stacks the FABs. The list keeps that much room under its last
+  /// card.
+  final _fabHeight = ValueNotifier<double>(56);
+
+  @override
+  void dispose() {
+    _fabHeight.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final value = _watchData(ref);
@@ -81,7 +94,12 @@ class _MessagesScreenState extends ConsumerState<MessagesScreen> {
                 child: Text('Zatím žádné zprávy.', textAlign: TextAlign.center),
               ),
             )
-          : _MessageList(data: data, react: widget.react, reply: widget.reply);
+          : _MessageList(
+              data: data,
+              react: widget.react,
+              reply: widget.reply,
+              fabHeight: _fabHeight,
+            );
     }
     return Scaffold(
       appBar: AppBar(title: const Text('Zprávy')),
@@ -95,35 +113,40 @@ class _MessagesScreenState extends ConsumerState<MessagesScreen> {
         // Side by side when they fit, else stacked (large text, WCAG
         // 1.4.4). The slot is as wide as the Scaffold and endFloat keeps a
         // margin on the right, so the Wrap stops a margin short of the
-        // left edge too.
+        // left edge too. Its height (one row or two) goes to the list.
         return LayoutBuilder(builder: (context, constraints) {
           final maxWidth = constraints.maxWidth -
               2 * kFloatingActionButtonMargin -
               MediaQuery.paddingOf(context).horizontal;
-          return ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: math.max(0, maxWidth)),
-            child: Wrap(
-              alignment: WrapAlignment.end,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              spacing: 12,
-              runSpacing: 12,
-              children: [
-                // The staff composer: the admin, or the duty today — the
-                // server's `message_send` gate for a day or a block.
-                if (isAdmin || onDuty)
+          return _ReportHeight(
+            onHeight: (height) {
+              if (mounted) _fabHeight.value = height;
+            },
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: math.max(0, maxWidth)),
+              child: Wrap(
+                alignment: WrapAlignment.end,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  // The staff composer: the admin, or the duty today — the
+                  // server's `message_send` gate for a day or a block.
+                  if (isAdmin || onDuty)
+                    FloatingActionButton.extended(
+                      heroTag: 'staff-compose',
+                      onPressed: () => showStaffComposer(context, ref),
+                      icon: const Icon(Icons.campaign_outlined),
+                      label: const Text('Napsat hráčům'),
+                    ),
                   FloatingActionButton.extended(
-                    heroTag: 'staff-compose',
-                    onPressed: () => showStaffComposer(context, ref),
-                    icon: const Icon(Icons.campaign_outlined),
-                    label: const Text('Napsat hráčům'),
+                    heroTag: 'player-compose',
+                    onPressed: () => showPlayerComposer(context, ref),
+                    icon: const Icon(Icons.edit_outlined),
+                    label: const Text('Napsat'),
                   ),
-                FloatingActionButton.extended(
-                  heroTag: 'player-compose',
-                  onPressed: () => showPlayerComposer(context, ref),
-                  icon: const Icon(Icons.edit_outlined),
-                  label: const Text('Napsat'),
-                ),
-              ],
+                ],
+              ),
             ),
           );
         });
@@ -209,11 +232,15 @@ class _MessageList extends ConsumerStatefulWidget {
     required this.data,
     required this.react,
     required this.reply,
+    required this.fabHeight,
   });
 
   final _Data data;
   final MessageReact react;
   final MessageReply reply;
+
+  /// The composer FABs' block height (see `_MessagesScreenState`).
+  final ValueListenable<double> fabHeight;
 
   @override
   ConsumerState<_MessageList> createState() => _MessageListState();
@@ -239,23 +266,34 @@ class _MessageListState extends ConsumerState<_MessageList> {
           react: widget.react,
           reply: widget.reply,
         );
-    return ListView(
-      // Room for the composer FABs below the last card.
-      padding: const EdgeInsets.only(bottom: 88),
-      children: [
-        for (final m in split.open) tile(m),
-        if (split.older.isNotEmpty)
-          ListTile(
-            title: Text('Starší (${split.older.length})'),
-            trailing: Icon(_olderOpen ? Icons.expand_less : Icons.expand_more),
-            onTap: () => setState(() => _olderOpen = !_olderOpen),
-          ),
-        // The older tiles as the list's own children, not an
-        // ExpansionTile's Column: the list builds only what scrolls into
-        // view, and every tile holds a realtime channel (its participants).
-        if (_olderOpen)
-          for (final m in split.older) tile(m),
-      ],
+    return ValueListenableBuilder(
+      valueListenable: widget.fabHeight,
+      builder: (context, fabHeight, _) => ListView(
+        // Room for the composer FABs below the last card: their block (one
+        // row, or two when stacked), endFloat's margin under it, which
+        // sits above the system inset, and the same gap above it.
+        padding: EdgeInsets.only(
+          bottom: fabHeight +
+              2 * kFloatingActionButtonMargin +
+              MediaQuery.paddingOf(context).bottom,
+        ),
+        children: [
+          for (final m in split.open) tile(m),
+          if (split.older.isNotEmpty)
+            ListTile(
+              title: Text('Starší (${split.older.length})'),
+              trailing:
+                  Icon(_olderOpen ? Icons.expand_less : Icons.expand_more),
+              onTap: () => setState(() => _olderOpen = !_olderOpen),
+            ),
+          // The older tiles as the list's own children, not an
+          // ExpansionTile's Column: the list builds only what scrolls into
+          // view, and every tile holds a realtime channel (its
+          // participants).
+          if (_olderOpen)
+            for (final m in split.older) tile(m),
+        ],
+      ),
     );
   }
 }
@@ -342,5 +380,41 @@ class LiveMessageTile extends ConsumerWidget {
       success: 'Zpráva smazána.',
     );
     if (deleted) onDeleted?.call();
+  }
+}
+
+/// Reports [child]'s laid-out height after the frame, whenever it changes —
+/// the FAB block's one row or two, for the list's bottom room.
+class _ReportHeight extends SingleChildRenderObjectWidget {
+  const _ReportHeight({required this.onHeight, super.child});
+
+  final ValueChanged<double> onHeight;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _RenderReportHeight(onHeight);
+
+  @override
+  void updateRenderObject(
+          BuildContext context, _RenderReportHeight renderObject) =>
+      renderObject.onHeight = onHeight;
+}
+
+class _RenderReportHeight extends RenderProxyBox {
+  _RenderReportHeight(this.onHeight);
+
+  ValueChanged<double> onHeight;
+  double? _reported;
+
+  @override
+  void performLayout() {
+    super.performLayout();
+    final height = size.height;
+    if (height == _reported) return;
+    _reported = height;
+    // Not during layout: the listener rebuilds the list.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (attached) onHeight(height);
+    });
   }
 }
