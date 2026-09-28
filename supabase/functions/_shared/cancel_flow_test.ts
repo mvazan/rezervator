@@ -229,5 +229,8 @@ Deno.test("the page POSTs back to this project's cancel function", () => {
 Deno.test("the page never submits on its own", () => {
   // Link scanners that run JavaScript must not be able to cancel either:
   // only a click on the button may send the POST.
-  assert(!/\.submit\(|requestSubmit|autofocus/.test(html));
+  assert(
+    !/\.submit\(|requestSubmit|\.click\(|fetch\(|sendBeacon|XMLHttpRequest|autofocus/
+      .test(html),
+  );
 });
