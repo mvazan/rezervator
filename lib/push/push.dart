@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert' show jsonDecode, jsonEncode;
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -10,6 +11,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config.dart';
 import '../data/providers.dart';
+import 'pending_link.dart';
 
 /// Push notifications via FCM.
 ///
@@ -19,8 +21,9 @@ import '../data/providers.dart';
 ///
 /// This phase delivers the token to the backend so the notify Edge Function
 /// has somewhere to send to, and shows a local notification for messages that
-/// arrive while the app is in the foreground. There's no in-app routing when a
-/// notification is tapped (YAGNI — the OS opens the app, nothing more).
+/// arrive while the app is in the foreground. A tap on a message/notice/
+/// reaction push deep-links via [PendingLinkSource] (0051); every other kind
+/// still just opens the app, unchanged.
 class Push {
   static final _local = FlutterLocalNotificationsPlugin();
   static bool _ready = false;
@@ -45,6 +48,7 @@ class Push {
           android: AndroidInitializationSettings('@mipmap/ic_launcher'),
           iOS: DarwinInitializationSettings(),
         ),
+        onDidReceiveNotificationResponse: _onLocalNotificationTapped,
       );
 
       await FirebaseMessaging.instance.requestPermission();
@@ -58,6 +62,27 @@ class Push {
 
       // Foreground messages: show them via a local notification.
       FirebaseMessaging.onMessage.listen(_showForeground);
+      // Taps (0051): on a push while backgrounded (warm), and the one that
+      // launched the app from terminated (cold).
+      FirebaseMessaging.onMessageOpenedApp.listen(_onMessageTapped);
+      unawaited(FirebaseMessaging.instance.getInitialMessage().then(
+        (message) {
+          if (message != null) _onMessageTapped(message);
+        },
+        onError: (Object e) => debugPrint('Initial push read failed: $e'),
+      ));
+      // …and a foreground push's local notification tapped after the app
+      // was closed: that launch skips onDidReceiveNotificationResponse.
+      unawaited(_local.getNotificationAppLaunchDetails().then(
+        (launch) {
+          final response = launch?.notificationResponse;
+          if ((launch?.didNotificationLaunchApp ?? false) &&
+              response != null) {
+            _onLocalNotificationTapped(response);
+          }
+        },
+        onError: (Object e) => debugPrint('Launch details read failed: $e'),
+      ));
     } catch (e) {
       debugPrint('Push init failed (continuing without push): $e');
     }
@@ -106,6 +131,27 @@ class Push {
           priority: Priority.high,
         ),
       ),
+      // The push's data rides along, so a tap on this local notification
+      // deep-links like a tap on a background push does.
+      payload: jsonEncode(message.data),
     );
+  }
+
+  /// A tap on an OS-shown push: its data may name a message or notice.
+  static void _onMessageTapped(RemoteMessage message) {
+    final link = pendingLinkFromData(message.data);
+    if (link != null) PendingLinkSource.publish(link);
+  }
+
+  /// A tap on a foreground push's local notification: [_showForeground]
+  /// put the push's data into the payload as JSON.
+  static void _onLocalNotificationTapped(NotificationResponse response) {
+    final payload = response.payload;
+    if (payload == null) return;
+    try {
+      final data = jsonDecode(payload) as Map<String, dynamic>;
+      final link = pendingLinkFromData(data);
+      if (link != null) PendingLinkSource.publish(link);
+    } catch (_) {}
   }
 }

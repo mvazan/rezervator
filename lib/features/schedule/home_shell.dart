@@ -7,8 +7,11 @@ import '../../data/providers.dart';
 import '../../domain/labels.dart';
 import '../../domain/models.dart';
 import '../../domain/schedule.dart';
+import '../../push/pending_link.dart';
 import '../admin/admin_screen.dart';
 import '../clubhouse/clubhouse_screen.dart';
+import '../clubhouse/message_detail_screen.dart';
+import '../clubhouse/notice_board_screen.dart';
 import '../profile/profile_screen.dart';
 import 'my_trainings_screen.dart';
 import 'week_screen.dart';
@@ -46,6 +49,62 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   /// paged to, snapping back to the current one mid-rotation. With the key
   /// the subtree is MOVED, State and all.
   final _bodyKey = GlobalKey();
+
+  @override
+  void initState() {
+    super.initState();
+    // fireImmediately: a link can already be waiting when HomeShell mounts
+    // — a cold-start push tap (getInitialMessage) or a /zpravy/:id route
+    // seeded before sign-in. Without it only warm taps would open. AuthGate
+    // builds HomeShell only once the profile is loaded, so this is also
+    // the spec's "once the profile is loaded".
+    ref.listenManual(pendingLinkProvider, (_, next) {
+      if (next != null) _openPendingLink(next);
+    }, fireImmediately: true);
+  }
+
+  /// Opens a deep link (0051) once: a message on its detail screen, a
+  /// notice on the board.
+  void _openPendingLink(PendingLink link) {
+    // May be called from initState (fireImmediately), where Riverpod allows
+    // no provider write and the Navigator above HomeShell is not usable
+    // yet: both the clear and the push wait for the end of the frame — and
+    // a frame is asked for, since a warm tap may come while none is due.
+    WidgetsBinding.instance
+      ..addPostFrameCallback((_) => _consume(link))
+      ..ensureVisualUpdate();
+  }
+
+  /// Clears [link] and opens it — unless it is no longer the pending one:
+  /// a newer link replaced it (that one opens instead) or the same link
+  /// was opened already.
+  void _consume(PendingLink link) {
+    if (!mounted || ref.read(pendingLinkProvider) != link) return;
+    ref.read(pendingLinkProvider.notifier).clear();
+    final navigator = Navigator.of(context);
+    switch (link.kind) {
+      case PendingLinkKind.message:
+        navigator.push(MaterialPageRoute<void>(
+            builder: (_) => MessageDetailScreen(link.id)));
+      case PendingLinkKind.notice:
+        // Notices have no per-item page: the board is the detail, since
+        // every player sees every notice there.
+        navigator.push(MaterialPageRoute<void>(
+            builder: (_) => const NoticeBoardScreen()));
+        _snackIfNoticeGone(link.id);
+    }
+  }
+
+  /// Spec: an unknown or deleted id → a snack. Waits for the first
+  /// messages snapshot so a slow load is not mistaken for "gone".
+  Future<void> _snackIfNoticeGone(String id) async {
+    final messages = await ref.read(messagesProvider.future);
+    if (!mounted) return;
+    if (!messages.any((m) => m.id == id)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Zpráva už neexistuje.')));
+    }
+  }
 
   /// Superadmin's way back from a foreign kuželna (0015): switch the
   /// membership home and re-create every tenant-scoped stream.

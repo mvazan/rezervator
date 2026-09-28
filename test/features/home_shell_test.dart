@@ -11,9 +11,12 @@ import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/groups.dart';
 import 'package:rezervator/domain/duties.dart';
 import 'package:rezervator/domain/models.dart';
+import 'package:rezervator/features/clubhouse/message_detail_screen.dart';
+import 'package:rezervator/features/clubhouse/notice_board_screen.dart';
 import 'package:rezervator/features/schedule/home_shell.dart';
 import 'package:rezervator/features/schedule/my_trainings_screen.dart';
 import 'package:rezervator/features/schedule/week_screen.dart';
+import 'package:rezervator/push/pending_link.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -99,9 +102,20 @@ void main() {
     MyGroup group = MyGroup.none,
     List<Message> messages = const [],
     List<MessageRecipient> messageRecipients = const [],
+    PendingLink? pendingLink,
   }) =>
       ProviderScope(
         overrides: [
+          // A link already pending when HomeShell mounts — what a cold
+          // start (getInitialMessage) or a /zpravy/:id route leaves behind.
+          if (pendingLink != null)
+            pendingLinkProvider.overrideWith(
+              () => PendingLinkNotifier(initial: pendingLink),
+            ),
+          // The detail screen's tile reads the other participants' rows.
+          messageParticipantsProvider.overrideWith(
+            (ref, id) => Stream.value(const []),
+          ),
           // The Klubovna dot (unreadCountsProvider) reads these.
           messagesProvider.overrideWith((ref) => Stream.value(messages)),
           myMessageRecipientsProvider.overrideWith(
@@ -753,5 +767,80 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.descendant(of: find.byType(NavigationBar), matching: find.byType(Badge)),
         findsNothing);
+  });
+
+  // Deep links (0051): a push tap or a /zpravy/:id, /nastenka/:id route
+  // leaves a PendingLink; HomeShell opens it once and clears it.
+  group('pending link', () {
+    Message msg(String id, {MessageKind kind = MessageKind.message}) =>
+        Message(
+          id: id, kind: kind,
+          audience: kind == MessageKind.notice
+              ? MessageAudience.all
+              : MessageAudience.admins,
+          authorId: 'p1', authorRole: MessageAuthorRole.player,
+          onDate: null, blockId: null,
+          title: kind == MessageKind.notice ? 'Úklid' : null,
+          body: 'Ahoj.', expiresAt: null, notify: true,
+          createdAt: DateTime(2026, 9, 1), updatedAt: DateTime(2026, 9, 1),
+        );
+
+    testWidgets('a pending message link set while running opens '
+        'MessageDetailScreen', (tester) async {
+      await tester.pumpWidget(app(messages: [msg('m1')]));
+      await tester.pumpAndSettle();
+      final container =
+          ProviderScope.containerOf(tester.element(find.byType(HomeShell)));
+      container.read(pendingLinkProvider.notifier)
+          .set(const PendingLink(kind: PendingLinkKind.message, id: 'm1'));
+      await tester.pumpAndSettle();
+      expect(find.byType(MessageDetailScreen), findsOneWidget);
+      expect(container.read(pendingLinkProvider), isNull,
+          reason: 'cleared after consuming');
+    });
+
+    testWidgets('a link already pending when HomeShell mounts (cold start, '
+        '/zpravy/:id) opens too', (tester) async {
+      await tester.pumpWidget(app(
+        messages: [msg('m1')],
+        pendingLink: const PendingLink(kind: PendingLinkKind.message, id: 'm1'),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.byType(MessageDetailScreen), findsOneWidget);
+    });
+
+    testWidgets('a pending link for an id that does not exist shows the '
+        'not-found snack', (tester) async {
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+      final container =
+          ProviderScope.containerOf(tester.element(find.byType(HomeShell)));
+      container.read(pendingLinkProvider.notifier).set(
+          const PendingLink(kind: PendingLinkKind.message, id: 'missing'));
+      await tester.pumpAndSettle();
+      expect(find.text('Zpráva už neexistuje.'), findsOneWidget);
+      expect(find.byType(MessageDetailScreen), findsNothing);
+    });
+
+    testWidgets('a notice link opens the board; an unknown notice id adds a '
+        'snack', (tester) async {
+      await tester.pumpWidget(app(
+        pendingLink: const PendingLink(kind: PendingLinkKind.notice, id: 'gone'),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.byType(NoticeBoardScreen), findsOneWidget);
+      expect(find.text('Zpráva už neexistuje.'), findsOneWidget);
+    });
+
+    testWidgets('…and a known notice id opens the board without one',
+        (tester) async {
+      await tester.pumpWidget(app(
+        messages: [msg('n1', kind: MessageKind.notice)],
+        pendingLink: const PendingLink(kind: PendingLinkKind.notice, id: 'n1'),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.byType(NoticeBoardScreen), findsOneWidget);
+      expect(find.text('Zpráva už neexistuje.'), findsNothing);
+    });
   });
 }
