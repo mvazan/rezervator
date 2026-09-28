@@ -665,7 +665,7 @@ class _BlockDialogState extends State<BlockDialog> {
     final dayLabelSuffix =
         _dayMode ? ' — jen ${dayLabel(widget.dayContext!)}' : '';
     return AlertDialog(
-      // Up to five actions stack on a narrow screen: on a landscape phone
+      // Up to four actions stack on a narrow screen: on a landscape phone
       // the times scroll instead of overflowing.
       scrollable: true,
       title: Text(widget.existing == null
@@ -684,6 +684,19 @@ class _BlockDialogState extends State<BlockDialog> {
             trailing: Text(_end?.display() ?? '--:--'),
             onTap: _pickEnd,
           ),
+          // In the content, not the actions: AlertDialog pins its actions,
+          // so a fifth one squeezes the times (landscape) and pushes
+          // „Uložit“ off-screen (large text). Here it scrolls with them.
+          if (_dayMode && widget.existing != null && widget.offerMessageBlock)
+            ListTile(
+              leading: const Icon(Icons.forum_outlined),
+              title: const Text('Napsat hráčům bloku…'),
+              enabled: !_saving && widget.onMessagePlayers != null,
+              onTap: () {
+                closeDialog(context);
+                widget.onMessagePlayers!();
+              },
+            ),
         ],
       ),
       actions: [
@@ -699,16 +712,6 @@ class _BlockDialogState extends State<BlockDialog> {
           TextButton(
             onPressed: _saving ? null : _restoreTemplate,
             child: const Text('Obnovit týdenní rozvrh'),
-          ),
-        if (_dayMode && widget.existing != null && widget.offerMessageBlock)
-          TextButton(
-            onPressed: _saving || widget.onMessagePlayers == null
-                ? null
-                : () {
-                    closeDialog(context);
-                    widget.onMessagePlayers!();
-                  },
-            child: const Text('Napsat hráčům bloku…'),
           ),
         if (widget.existing != null && _dayMode)
           TextButton(
