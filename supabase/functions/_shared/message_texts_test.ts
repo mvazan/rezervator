@@ -38,10 +38,19 @@ Deno.test("messageContext: block, day, training-context and none", () => {
 Deno.test("cutOnWord: short text passes through, long text cuts on a word within max", () => {
   assertEquals(cutOnWord("Krátký text.", 120), "Krátký text.");
   const long = "Slovo ".repeat(30).trim();
-  const cut = cutOnWord(long, 20);
-  assertEquals(cut.length <= 20, true);
-  assertEquals(long.startsWith(cut), true);
-  assertEquals(cut.endsWith(" "), false);
+  assertEquals(cutOnWord(long, 20), "Slovo Slovo Slovo");
+  // The cut lands right before a space: the last word is whole, keep it.
+  assertEquals(cutOnWord("aa bb cc", 5), "aa bb");
+  // A line break is a word boundary too.
+  assertEquals(cutOnWord("Nové dráhy\nzítra", 13), "Nové dráhy");
+});
+
+Deno.test("cutOnWord: no whitespace to break on — hard cut, never half an emoji", () => {
+  assertEquals(cutOnWord("A".repeat(200), 120), "A".repeat(120));
+  // "🎳" is two UTF-16 units; the 120th unit is the first half of one.
+  const cut = cutOnWord("Hurá!" + "🎳".repeat(60) + " Díky všem.", 120);
+  assertEquals(cut, "Hurá!" + "🎳".repeat(57));
+  assertEquals(cut.isWellFormed(), true);
 });
 
 Deno.test("noticeText: title as given, body cut to 120 chars", () => {
@@ -49,6 +58,8 @@ Deno.test("noticeText: title as given, body cut to 120 chars", () => {
   const t = noticeText("Nové dráhy", long);
   assertEquals(t.title, "Nové dráhy");
   assertEquals(t.body.length <= 120, true);
+  const emoji = noticeText("Vyhráli jsme", "Hurá!" + "🎳".repeat(60) + " Díky všem.");
+  assertEquals(emoji.body.isWellFormed(), true);
 });
 
 Deno.test("staffMessageText: admin vs duty title, context appended", () => {

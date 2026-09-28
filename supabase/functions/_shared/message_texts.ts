@@ -40,13 +40,20 @@ export function messageContext(ctx: MessageContext): string | null {
   return `k tréninku ${day}${time}`;
 }
 
-/// Cuts [text] to at most [max] characters, breaking on a word boundary
-/// (never mid-word), for a notice's push preview.
+/// Cuts [text] to at most [max] UTF-16 units for a notice's push preview,
+/// breaking on whitespace (a space or a line break) so no word is split.
+/// A text with no whitespace to break on is cut hard at [max] — then the
+/// cut backs off by one unit rather than end on half a surrogate pair
+/// (an emoji), which would not be valid Unicode in the push payload.
 export function cutOnWord(text: string, max = 120): string {
   if (text.length <= max) return text;
   const slice = text.slice(0, max);
-  const lastSpace = slice.lastIndexOf(" ");
-  return (lastSpace > 0 ? slice.slice(0, lastSpace) : slice).trimEnd();
+  // The next unit is whitespace: the slice ends on a whole word.
+  if (/\s/.test(text[max])) return slice.trimEnd();
+  const lastSpace = slice.search(/\s\S*$/);
+  const onWord = lastSpace > 0 ? slice.slice(0, lastSpace).trimEnd() : "";
+  if (onWord.length > 0) return onWord;
+  return /[\uD800-\uDBFF]$/.test(slice) ? slice.slice(0, -1) : slice;
 }
 
 /// A notice's push: its title, and the body cut to 120 characters.
