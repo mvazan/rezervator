@@ -282,9 +282,8 @@ String dutyLeadLabel(int days) =>
 /// one — periods never overlap), the ones ahead and the ones over, both in
 /// date order. A period ending today still runs.
 ({DutyPeriod? current, List<DutyPeriod> upcoming, List<DutyPeriod> past})
-    splitDuties(Iterable<DutyPeriod> periods, Day today) {
-  final sorted = [...periods]
-    ..sort((a, b) => a.startsOn.compareTo(b.startsOn));
+splitDuties(Iterable<DutyPeriod> periods, Day today) {
+  final sorted = [...periods]..sort((a, b) => a.startsOn.compareTo(b.startsOn));
   return (
     current: periodOn(sorted, today),
     upcoming: [
@@ -328,7 +327,8 @@ class DutyHeader {
 /// * a change inside the week: „Slouží: po–st Jan Novák · čt–ne Petr
 ///   Svoboda“ — each period's days within the week (one day named once);
 /// * when [meId] is on duty [today] and the week holds today: „Sloužíš ty ·
-///   do ne 11. 10.“, [DutyHeader.mine];
+///   do ne 11. 10.“, plus „ · spolu s: …“ (Czech-sorted) when others share
+///   the period, [DutyHeader.mine];
 /// * null when no one serves that week — no period, or only unassigned ones.
 ///
 /// [names] maps user ids to display names (placeholders included); an id
@@ -344,10 +344,14 @@ DutyHeader? dutyHeaderLabel(
 }) {
   final sunday = monday.addDays(6);
   if (!today.isBefore(monday) && !today.isAfter(sunday)) {
-    final current = myDuty(periods, assignments, meId, today).current;
+    final my = myDuty(periods, assignments, meId, today);
+    final current = my.current;
     if (current != null) {
+      final co = [for (final id in my.coAssignees) ?names[id]]
+        ..sort(compareCzech);
+      final withCo = co.isEmpty ? '' : ' · spolu s: ${joinNames(co)}';
       return DutyHeader(
-        'Sloužíš ty · do ${dutyDayLabel(current.endsOn)}',
+        'Sloužíš ty · do ${dutyDayLabel(current.endsOn)}$withCo',
         mine: true,
       );
     }

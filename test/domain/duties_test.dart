@@ -468,12 +468,43 @@ void main() {
           period('a', Day(2026, 10, 1), Day(2026, 10, 7)),
           period('b', Day(2026, 10, 8), Day(2026, 10, 14)),
         ],
-        [assign('a', 'jan'), assign('a', 'petr'), assign('b', 'petr')],
+        [assign('a', 'jan'), assign('b', 'petr')],
         me: 'jan',
         today: Day(2026, 10, 6),
       );
       expect(h?.text, 'Sloužíš ty · do st 7. 10.');
       expect(h?.mine, isTrue);
+    });
+
+    test('a co-assignee is named too: „Sloužíš ty · do st 7. 10. · spolu s: '
+        'Petr Svoboda“', () {
+      final h = label(
+        [period('a', Day(2026, 10, 1), Day(2026, 10, 7))],
+        [assign('a', 'jan'), assign('a', 'petr')],
+        me: 'jan',
+        today: Day(2026, 10, 6),
+      );
+      expect(h?.text, 'Sloužíš ty · do st 7. 10. · spolu s: Petr Svoboda');
+      expect(h?.mine, isTrue);
+    });
+
+    test('several co-assignees are Czech-sorted; one unknown to the roster '
+        'is left out', () {
+      final h = label(
+        [period('a', Day(2026, 10, 1), Day(2026, 10, 7))],
+        [
+          assign('a', 'jan'),
+          assign('a', 'petr'),
+          assign('a', 'cyril'),
+          assign('a', 'unknown'),
+        ],
+        me: 'jan',
+        today: Day(2026, 10, 6),
+      );
+      expect(
+        h?.text,
+        'Sloužíš ty · do st 7. 10. · spolu s: Čestmír Cimrman a Petr Svoboda',
+      );
     });
 
     test('my duty in another week reads like anyone else\'s', () {
