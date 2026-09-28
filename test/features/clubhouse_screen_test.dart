@@ -20,7 +20,7 @@ final class _Failures extends ProviderObserver {
   ) => errors.add(error);
 }
 
-/// The Klubovna hub: its five entries, the shell's trailing icons riding
+/// The Klubovna hub: its six entries, the shell's trailing icons riding
 /// along on the same header, and the shared HubMenu's list/grid breakpoint
 /// (below vs at/above 840 dp).
 void main() {
@@ -45,7 +45,7 @@ void main() {
       ProviderScope(
         observers: [?observer],
         overrides: [
-          // The Nástěnka badge (unreadCountsProvider) reads these.
+          // The Nástěnka and Zprávy badges (unreadCountsProvider) read these.
           messagesProvider.overrideWith((ref) => Stream.value(messages)),
           myMessageRecipientsProvider.overrideWith(
             (ref) => Stream.value(recipients),
@@ -77,6 +77,8 @@ void main() {
             (ref) => Stream.value(const <DutyAssignment>[]),
           ),
           playersProvider.overrideWith((ref) async => const <PlayerName>[]),
+          // The pushed Zprávy screen reads the blocks for its context chips.
+          timeBlocksProvider.overrideWith((ref) => Stream.value(const <TimeBlock>[])),
           settingsProvider.overrideWith(
             (ref) => Stream.value(ScheduleSettings.defaults),
           ),
@@ -100,8 +102,8 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
   }
 
-  testWidgets('shows the Výsledky, Kuželny, Kontakty, Služby and Nástěnka '
-      'entries with their subtitles', (tester) async {
+  testWidgets('shows the Výsledky, Kuželny, Kontakty, Služby, Nástěnka and '
+      'Zprávy entries with their subtitles', (tester) async {
     narrow(tester);
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
@@ -123,6 +125,9 @@ void main() {
     expect(find.text('Nástěnka'), findsOneWidget);
     expect(find.text('Oznámení správce'), findsOneWidget);
     expect(find.byIcon(Icons.campaign_outlined), findsOneWidget);
+    expect(find.text('Zprávy'), findsOneWidget);
+    expect(find.text('Zprávy pro tebe a od tebe'), findsOneWidget);
+    expect(find.byIcon(Icons.forum_outlined), findsOneWidget);
   });
 
   /// Hub labels top to bottom (list) or in reading order (grid).
@@ -130,7 +135,7 @@ void main() {
     final found = find.descendant(
       of: find.byType(HubMenu),
       matching: find.byWidgetPredicate(
-        (w) => w is Text && const {'Kontakty', 'Kuželny', 'Nástěnka', 'Služby', 'Výsledky'}
+        (w) => w is Text && const {'Kontakty', 'Kuželny', 'Nástěnka', 'Služby', 'Výsledky', 'Zprávy'}
             .contains(w.data),
       ),
     );
@@ -155,6 +160,7 @@ void main() {
       'Nástěnka',
       'Služby',
       'Výsledky',
+      'Zprávy',
     ]);
   });
 
@@ -170,6 +176,7 @@ void main() {
       'Nástěnka',
       'Služby',
       'Výsledky',
+      'Zprávy',
     ]);
   });
 
@@ -180,7 +187,7 @@ void main() {
 
     expect(find.byType(ListView), findsOneWidget);
     expect(find.byType(GridView), findsNothing);
-    expect(find.byType(ListTile), findsNWidgets(5));
+    expect(find.byType(ListTile), findsNWidgets(6));
   });
 
   testWidgets('at 840 dp and above the hub renders a card grid', (
@@ -192,7 +199,7 @@ void main() {
 
     expect(find.byType(GridView), findsOneWidget);
     expect(find.byType(ListView), findsNothing);
-    expect(find.byType(Card), findsNWidgets(5));
+    expect(find.byType(Card), findsNWidgets(6));
   });
 
   testWidgets(
@@ -278,6 +285,42 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.widgetWithText(AppBar, 'Nástěnka'), findsOneWidget);
     expect(find.text('Na nástěnce zatím nic není.'), findsOneWidget);
+    expect(failures.errors, isEmpty);
+  });
+
+  testWidgets('Zprávy carries an unread-message badge, and none when read', (tester) async {
+    narrow(tester);
+    final message = Message(
+      id: 'm1', kind: MessageKind.message, audience: MessageAudience.day,
+      authorId: 'staff', authorRole: MessageAuthorRole.player,
+      onDate: Day(2026, 9, 24), blockId: null,
+      title: null, body: 'Přijďte dřív.', expiresAt: null, notify: true,
+      createdAt: DateTime(2026, 9, 23), updatedAt: DateTime(2026, 9, 23),
+    );
+    MessageRecipient row({DateTime? readAt}) => MessageRecipient(
+        messageId: 'm1', userId: 'me', readAt: readAt,
+        reaction: null, reply: null, reactedAt: null);
+
+    await tester.pumpWidget(app(messages: [message], recipients: [row()]));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(Badge, '1'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpWidget(app(messages: [message], recipients: [row(readAt: DateTime(2026, 9, 23))]));
+    await tester.pumpAndSettle();
+    expect(find.byType(Badge), findsNothing);
+  });
+
+  testWidgets('tapping Zprávy opens the real messages screen', (tester) async {
+    narrow(tester);
+    final failures = _Failures();
+    await tester.pumpWidget(app(observer: failures));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Zprávy'));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(AppBar, 'Zprávy'), findsOneWidget);
+    expect(find.text('Zatím žádné zprávy.'), findsOneWidget);
     expect(failures.errors, isEmpty);
   });
 }

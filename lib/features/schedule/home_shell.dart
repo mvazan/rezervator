@@ -189,8 +189,8 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                           label: Text('Kalendář'),
                         ),
                         NavigationRailDestination(
-                          icon: Icon(Icons.groups_outlined),
-                          selectedIcon: Icon(Icons.groups),
+                          icon: _KlubovnaIcon(selected: false),
+                          selectedIcon: _KlubovnaIcon(selected: true),
                           label: Text('Klubovna'),
                         ),
                       ],
@@ -216,8 +216,8 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                     label: 'Kalendář',
                   ),
                   NavigationDestination(
-                    icon: Icon(Icons.groups_outlined),
-                    selectedIcon: Icon(Icons.groups),
+                    icon: _KlubovnaIcon(selected: false),
+                    selectedIcon: _KlubovnaIcon(selected: true),
                     label: 'Klubovna',
                   ),
                 ],
@@ -225,6 +225,25 @@ class _HomeShellState extends ConsumerState<HomeShell> {
             : null,
       ),
     );
+  }
+}
+
+/// The Klubovna destination's icon, with a dot while a message or notice
+/// is unread (0051) — the hub inside shows the counts. A leaf of its own,
+/// like [_ReservationLimitBanner]: an unread change repaints this icon, not
+/// the whole shell, and the destination lists stay const.
+class _KlubovnaIcon extends ConsumerWidget {
+  const _KlubovnaIcon({required this.selected});
+
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final dot = ref.watch(
+      unreadCountsProvider.select((c) => c.messages + c.notices > 0),
+    );
+    final icon = Icon(selected ? Icons.groups : Icons.groups_outlined);
+    return dot ? Badge(smallSize: 8, child: icon) : icon;
   }
 }
 

@@ -97,9 +97,16 @@ void main() {
     List<Reservation> mine = const [],
     MyDuty duty = MyDuty.none,
     MyGroup group = MyGroup.none,
+    List<Message> messages = const [],
+    List<MessageRecipient> messageRecipients = const [],
   }) =>
       ProviderScope(
         overrides: [
+          // The Klubovna dot (unreadCountsProvider) reads these.
+          messagesProvider.overrideWith((ref) => Stream.value(messages)),
+          myMessageRecipientsProvider.overrideWith(
+            (ref) => Stream.value(messageRecipients),
+          ),
           settingsProvider.overrideWith((ref) => Stream.value(settings)),
           timeBlocksProvider.overrideWith((ref) => Stream.value(const [])),
           dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
@@ -720,5 +727,31 @@ void main() {
         iconAt(Icons.account_circle_outlined),
       ], onCalendar);
     });
+  });
+
+  testWidgets('Klubovna carries a dot while a message or notice is unread', (tester) async {
+    phone(tester);
+    final msg = Message(
+      id: 'm1', kind: MessageKind.message, audience: MessageAudience.day,
+      authorId: 'staff', authorRole: MessageAuthorRole.player,
+      onDate: today, blockId: null, title: null, body: 'Přijďte dřív.',
+      expiresAt: null, notify: true, createdAt: now, updatedAt: now,
+    );
+    MessageRecipient row({DateTime? readAt}) => MessageRecipient(
+        messageId: 'm1', userId: 'me', readAt: readAt,
+        reaction: null, reply: null, reactedAt: null);
+
+    await tester.pumpWidget(app(messages: [msg], messageRecipients: [row()]));
+    await tester.pumpAndSettle();
+    expect(find.descendant(of: find.byType(NavigationBar), matching: find.byType(Badge)),
+        findsOneWidget);
+
+    // A fresh scope: re-pumping the same ProviderScope keeps the stream
+    // overrides' first values.
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpWidget(app(messages: [msg], messageRecipients: [row(readAt: now)]));
+    await tester.pumpAndSettle();
+    expect(find.descendant(of: find.byType(NavigationBar), matching: find.byType(Badge)),
+        findsNothing);
   });
 }

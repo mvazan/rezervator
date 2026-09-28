@@ -1,5 +1,5 @@
 /// Klubovna — the third home tab: a hub of team-facing screens (contacts,
-/// venues, the notice board, canteen duties, results — in Czech
+/// venues, the notice board, canteen duties, results, messages — in Czech
 /// alphabetical order), the same [HubMenu] Správa kuželny uses.
 library;
 
@@ -12,6 +12,7 @@ import '../../domain/collation.dart';
 import '../schedule/widgets/home_header.dart';
 import 'contacts_screen.dart';
 import 'duties_screen.dart';
+import 'messages_screen.dart';
 import 'notice_board_screen.dart';
 import 'results_screen.dart';
 import 'venues_screen.dart';
@@ -25,9 +26,13 @@ class ClubhouseScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Unread notices — Nástěnka's badge (0 shows none).
+    // Unread notices and messages — Nástěnka's and Zprávy's badges (0
+    // shows none).
     final unreadNotices = ref.watch(
       unreadCountsProvider.select((c) => c.notices),
+    );
+    final unreadMessages = ref.watch(
+      unreadCountsProvider.select((c) => c.messages),
     );
     return Column(
       children: [
@@ -79,6 +84,15 @@ class ClubhouseScreen extends ConsumerWidget {
                 badge: unreadNotices,
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const NoticeBoardScreen()),
+                ),
+              ),
+              (
+                label: 'Zprávy',
+                icon: Icons.forum_outlined,
+                subtitle: 'Zprávy pro tebe a od tebe',
+                badge: unreadMessages,
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const MessagesScreen()),
                 ),
               ),
             ]..sort((a, b) => compareCzech(a.label, b.label)),
