@@ -190,6 +190,24 @@ void main() {
     expect(find.text('Zpráva odeslána.'), findsOneWidget);
   });
 
+  testWidgets('a double tap handled before the next frame sends once', (tester) async {
+    final calls = <Sent>[];
+    final reply = Completer<String>();
+    await tester.pumpWidget(app(send: recorder(calls, answer: () => reply.future)));
+    await open(tester);
+    await tester.enterText(find.byType(TextField), 'Přijdu později.');
+    await tester.pump();
+    // Both taps land before a rebuild could disable „Odeslat“ (a janky frame).
+    final odeslat = tester.getCenter(find.text('Odeslat'));
+    await tester.tapAt(odeslat);
+    await tester.tapAt(odeslat);
+    await tester.pump();
+    expect(calls, hasLength(1));
+    reply.complete('new-id');
+    await tester.pumpAndSettle();
+    expect(find.text('Zpráva odeslána.'), findsOneWidget);
+  });
+
   testWidgets('from a training, „Službě“ goes out with the training\'s on_date '
       'and block_id', (tester) async {
     final period = DutyPeriod(id: 'p1', startsOn: today, endsOn: today);
@@ -397,6 +415,26 @@ void main() {
       expect(calls, [(kind: MessageKind.message, audience: MessageAudience.day,
           onDate: today, blockId: null, body: 'Přijďte dřív.')]);
       expect(find.text('Napsat hráčům'), findsNothing);
+      expect(find.text('Zpráva odeslána.'), findsOneWidget);
+    });
+
+    testWidgets('a double tap handled before the next frame sends one push, not two',
+        (tester) async {
+      final calls = <Sent>[];
+      final reply = Completer<String>();
+      await tester.pumpWidget(staffApp(reservations: [booking('r1', 'p1', 'b1')],
+          send: recorder(calls, answer: () => reply.future)));
+      await openStaff(tester);
+      await tester.enterText(find.byType(TextField), 'Přijďte dřív.');
+      await tester.pump();
+      // Both taps land before a rebuild could disable „Odeslat“ (a janky frame).
+      final odeslat = tester.getCenter(find.text('Odeslat'));
+      await tester.tapAt(odeslat);
+      await tester.tapAt(odeslat);
+      await tester.pump();
+      expect(calls, hasLength(1));
+      reply.complete('new-id');
+      await tester.pumpAndSettle();
       expect(find.text('Zpráva odeslána.'), findsOneWidget);
     });
 

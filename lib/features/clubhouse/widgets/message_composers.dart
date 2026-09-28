@@ -222,6 +222,8 @@ class _PlayerComposerSheetState extends ConsumerState<_PlayerComposerSheet> {
   final _body = TextEditingController();
 
   /// A send is under way: „Odeslat“ waits, so one tap is one message.
+  /// [_send] checks it too — the button is disabled only from the next
+  /// frame, and a double tap in a janky frame lands twice before that.
   bool _sending = false;
 
   @override
@@ -231,6 +233,7 @@ class _PlayerComposerSheetState extends ConsumerState<_PlayerComposerSheet> {
   }
 
   Future<void> _send(MessageAudience audience, String text) async {
+    if (_sending) return;
     setState(() => _sending = true);
     await _sendFromSheet(
       context,
@@ -381,7 +384,10 @@ class _StaffComposerSheetState extends ConsumerState<_StaffComposerSheet> {
   /// `none` until the profile loads, so a true here has a known role.
   bool _offeredAsDuty = false;
 
-  /// A send is under way: „Odeslat“ waits, so one tap is one message.
+  /// A send is under way: „Odeslat“ waits, so one tap is one message (one
+  /// push to every booked player). [_send] checks it too — the button is
+  /// disabled only from the next frame, and a double tap in a janky frame
+  /// lands twice before that.
   bool _sending = false;
 
   static Day _today(_Get get) =>
@@ -413,6 +419,7 @@ class _StaffComposerSheetState extends ConsumerState<_StaffComposerSheet> {
 
   /// Sends to the day ([blockId] null) or one of its blocks.
   Future<void> _send(String? blockId, String text) async {
+    if (_sending) return;
     final date = _date;
     final asDuty = _offeredAsDuty;
     setState(() => _sending = true);
