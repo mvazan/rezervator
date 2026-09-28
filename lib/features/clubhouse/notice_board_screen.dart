@@ -14,13 +14,28 @@ import '../../domain/models.dart';
 import 'widgets/notice_form.dart';
 import 'widgets/notice_seen_sheet.dart';
 
+/// [Api.messageUpdate]'s shape: the write behind the card's „Sejmout“.
+typedef NoticeUpdate = Future<void> Function(
+  String id, {
+  required String title,
+  required String body,
+  DateTime? expiresAt,
+});
+
 class NoticeBoardScreen extends ConsumerStatefulWidget {
-  const NoticeBoardScreen({super.key, this.markRead = Api.markMessagesRead});
+  const NoticeBoardScreen({
+    super.key,
+    this.markRead = Api.markMessagesRead,
+    this.updateNotice = Api.messageUpdate,
+  });
 
   /// Marks the listed notices read — injected like
   /// `MyTrainingsScreen.cancelReservation`, so widget tests never reach
   /// `Supabase.instance`.
   final Future<void> Function(List<String> ids) markRead;
+
+  /// „Sejmout“'s write, injected for the same reason.
+  final NoticeUpdate updateNotice;
 
   @override
   ConsumerState<NoticeBoardScreen> createState() => _NoticeBoardScreenState();
@@ -63,7 +78,11 @@ class _NoticeBoardScreenState extends ConsumerState<NoticeBoardScreen> {
     } else {
       final data = value.value!;
       _markActiveRead(data);
-      body = _NoticeList(data: data, isAdmin: isAdmin);
+      body = _NoticeList(
+        data: data,
+        isAdmin: isAdmin,
+        updateNotice: widget.updateNotice,
+      );
     }
 
     return Scaffold(
@@ -137,10 +156,15 @@ AsyncValue<_Data> _watchData(WidgetRef ref) {
 }
 
 class _NoticeList extends ConsumerStatefulWidget {
-  const _NoticeList({required this.data, required this.isAdmin});
+  const _NoticeList({
+    required this.data,
+    required this.isAdmin,
+    required this.updateNotice,
+  });
 
   final _Data data;
   final bool isAdmin;
+  final NoticeUpdate updateNotice;
 
   @override
   ConsumerState<_NoticeList> createState() => _NoticeListState();
@@ -169,6 +193,7 @@ class _NoticeListState extends ConsumerState<_NoticeList> {
           notice: n,
           now: now,
           isAdmin: widget.isAdmin,
+          updateNotice: widget.updateNotice,
         );
     return ListView(
       // Room for the admin's FAB below the last card.
@@ -204,11 +229,13 @@ class _NoticeCard extends ConsumerStatefulWidget {
     required this.notice,
     required this.now,
     required this.isAdmin,
+    required this.updateNotice,
   });
 
   final Message notice;
   final DateTime now;
   final bool isAdmin;
+  final NoticeUpdate updateNotice;
 
   @override
   ConsumerState<_NoticeCard> createState() => _NoticeCardState();
@@ -290,14 +317,20 @@ class _NoticeCardState extends ConsumerState<_NoticeCard> {
           message: 'Oznam přestane platit hned.',
         );
         if (!ok || !context.mounted) return;
-        // „Sejmout“ = expire now, title and body as they were.
+        // „Sejmout“ = expire now, title and body as they were. „Now“ is the
+        // board's own clock, not DateTime.now(): nowProvider ticks once a
+        // minute and polls every 15 s, so it runs up to ~75 s behind, and a
+        // wall-clock expiry would leave the echoed notice active (here and
+        // on the badge) until its next tick. Never later than what the
+        // list compares against, so the card moves under „Starší“ at once.
+        final now = ref.read(nowProvider).value ?? DateTime.now();
         await tryAction(
           context,
-          () => Api.messageUpdate(
+          () => widget.updateNotice(
             notice.id,
             title: notice.title ?? '',
             body: notice.body,
-            expiresAt: DateTime.now(),
+            expiresAt: now,
           ),
           success: 'Oznam sejmut.',
           errorText: friendlyDbError,

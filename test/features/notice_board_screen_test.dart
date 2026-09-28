@@ -190,6 +190,55 @@ void main() {
     expect(find.text('Petr'), findsNothing);
   });
 
+  // The spec's „Zobrazilo 12 z 40“ leaves 28 names to list; at a large text
+  // size (2.0 is AppTextScaler's cap) or in landscape they are taller than
+  // the sheet, and the last of them must still be reachable.
+  for (final (size, scale) in const [
+    (Size(412, 915), 2.0),
+    (Size(360, 640), 1.3),
+    (Size(780, 360), 1.0),
+  ]) {
+    final label = '${size.width.toInt()}×${size.height.toInt()}, text ×$scale';
+    testWidgets('the seen sheet scrolls to its last name at $label', (tester) async {
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1;
+      tester.platformDispatcher.textScaleFactorTestValue = scale;
+      addTearDown(tester.view.reset);
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      String pad(int i) => i.toString().padLeft(2, '0');
+      await tester.pumpWidget(app(
+        profile: admin,
+        notices: [notice('a1')],
+        recipients: [
+          for (var i = 1; i <= 40; i++)
+            row('a1', 'p$i', readAt: i <= 12 ? DateTime(2026, 9, 2) : null),
+        ],
+        roster: [
+          for (var i = 1; i <= 40; i++)
+            PlayerName(id: 'p$i', displayName: 'Jaroslav Novotný ${pad(i)}'),
+        ],
+      ));
+      await tester.pumpAndSettle();
+      await openMenu(tester);
+      await tester.tap(find.text('Kdo si to zobrazil'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.text('Zobrazilo 12 z 40'), findsOneWidget);
+      final names = find.textContaining('Novotný 13');
+      expect(names, findsOneWidget);
+      expect(tester.widget<Text>(names).data, endsWith('Novotný 40'));
+      final sheet = find.byType(BottomSheet);
+      await tester.drag(
+        find.descendant(of: sheet, matching: find.byType(Scrollable)).first,
+        const Offset(0, -3000),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(tester.getBottomLeft(names).dy,
+          lessThanOrEqualTo(tester.getBottomLeft(sheet).dy));
+    });
+  }
+
   testWidgets('„Sejmout“ and „Smazat“ both ask first', (tester) async {
     await tester.pumpWidget(app(profile: admin, notices: [notice('a1')]));
     await tester.pumpAndSettle();
@@ -203,6 +252,49 @@ void main() {
     await tester.tap(find.text('Smazat'));
     await tester.pumpAndSettle();
     expect(find.text('Smazat oznam?'), findsOneWidget);
+  });
+
+  // The board and the badge compare against nowProvider, which ticks once a
+  // minute and polls every 15 s — up to ~75 s behind the wall clock. An
+  // expiry taken from DateTime.now() is later than that, so the echoed
+  // notice stayed active after „Oznam sejmut.“ until the next tick.
+  testWidgets('„Sejmout“ expires at the board\'s own clock, so the card leaves at once', (tester) async {
+    final uiNow = DateTime.now().subtract(const Duration(seconds: 40));
+    final sent = <DateTime?>[];
+    final messages = StreamController<List<Message>>();
+    addTearDown(messages.close);
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        myProfileProvider.overrideWith((ref) => Stream.value(admin)),
+        messagesProvider.overrideWith((ref) => messages.stream),
+        myMessageRecipientsProvider.overrideWith((ref) => Stream.value(const [])),
+        messageParticipantsProvider.overrideWith((ref, id) => Stream.value(const [])),
+        nowProvider.overrideWith((ref) => Stream.value(uiNow)),
+      ],
+      child: MaterialApp(
+        home: NoticeBoardScreen(
+          markRead: (_) async {},
+          updateNotice: (id, {required title, required body, expiresAt}) async {
+            expect((id, title, body), ('a1', 'Nové dráhy a1', 'Text oznamu a1.'));
+            sent.add(expiresAt);
+          },
+        ),
+      ),
+    ));
+    messages.add([notice('a1')]);
+    await tester.pumpAndSettle();
+    await openMenu(tester);
+    await tester.tap(find.text('Sejmout'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Ano'));
+    await tester.pumpAndSettle();
+    expect(sent, [uiNow]);
+    expect(find.text('Oznam sejmut.'), findsOneWidget);
+    // The server's echo: the notice as the RPC left it.
+    messages.add([notice('a1', expiresAt: sent.single)]);
+    await tester.pumpAndSettle();
+    expect(find.text('Nové dráhy a1'), findsNothing);
+    expect(find.text('Starší (1)'), findsOneWidget);
   });
 
   // cachedRows replays the cache (or the pre-resume state) first; the

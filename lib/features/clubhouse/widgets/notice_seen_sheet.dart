@@ -39,8 +39,11 @@ class _SeenSheet extends ConsumerWidget {
       for (final r in rows)
         if (r.readAt == null) ?names[r.userId],
     ]..sort(compareCzech);
+    // Scrolls: „12 z 40“ leaves 28 names, and at a large text size or in
+    // landscape they are taller than the sheet (at most 9/16 of the
+    // screen, which keeps the scrim above it to tap away).
     return SafeArea(
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
