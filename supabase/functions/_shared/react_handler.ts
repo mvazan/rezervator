@@ -12,23 +12,54 @@
 import { verifyReactToken } from "./react_token.ts";
 
 /// What handleReact needs from the outside world: the HMAC secret
-/// (undefined = not configured), a clock (epoch ms), the recipient-row
-/// lookup and write (service role in the deployed function), and the
-/// static page to redirect to.
+/// (undefined = not configured), a clock (epoch ms), the recipient lookup
+/// (true when the row exists and its account may react — see [mayReact])
+/// and write (true when a row was updated) — both service role in the
+/// deployed function, both throw on a database error — the static page to
+/// redirect to, and where to log a failure (console.error when deployed).
 export type ReactDeps = {
   secret: string | undefined;
   now: () => number;
-  recipientExists: (messageId: string, userId: string) => Promise<boolean>;
+  recipientMayReact: (messageId: string, userId: string) => Promise<boolean>;
   writeReaction: (messageId: string, userId: string, reaction: "up" | "down") => Promise<boolean>;
   resultPage: string;
+  logError: (message: string, detail?: unknown) => void;
 };
 
+type Membership = { status: string; role: string; tenant_id: string };
+
+/// A message_recipients row with its account, as the deployed lookup
+/// selects it (`tenant_id, profiles!inner(status, role, tenant_id)`).
+/// PostgREST embeds the to-one profile as an object; the untyped client
+/// types it as an array, so both are read (federation_jobs.ts does the same).
+export type RecipientMembership = {
+  tenant_id: string;
+  profiles: Membership | Membership[] | null;
+};
+
+/// Whether the e-mail link may still write [row]'s reaction: the app's own
+/// rule (message_recipients_update_own, plus the select policy's alley
+/// check), which the service role would otherwise bypass — the row exists
+/// and its account is an approved non-kiosk member of the row's alley. An
+/// account set as the kiosk, back to pending or moved to another alley
+/// reacts to nothing, from the app or from an e-mail.
+export function mayReact(row: RecipientMembership | null): boolean {
+  const embedded = row?.profiles;
+  const profile = Array.isArray(embedded) ? embedded[0] : embedded;
+  return row != null && profile != null &&
+    profile.status === "approved" && profile.role !== "kiosk" &&
+    profile.tenant_id === row.tenant_id;
+}
+
 /// Verifies the `t` token of [url], writes its reaction when the recipient
-/// row still exists, and answers a 303 to `resultPage?ok=1` (written) or
-/// `?ok=0` (missing, bad, expired or orphaned token, or nothing written);
-/// a 500 when no secret is configured (fail closed).
+/// may still react, and answers a 303 to `resultPage?ok=1` (written) or
+/// `?ok=0` (missing, bad, expired or orphaned token, a recipient who may no
+/// longer react, nothing written, or a database error); a 500 when no
+/// secret is configured (fail closed). The misconfiguration and database
+/// errors are logged — a dead link on the page must not be the only trace.
 export async function handleReact(url: URL, deps: ReactDeps): Promise<Response> {
   if (!deps.secret) {
+    deps.logError("CANCEL_TOKEN_SECRET is not set");
     return new Response("misconfigured", { status: 500 });
   }
   const token = url.searchParams.get("t");
@@ -37,7 +68,20 @@ export async function handleReact(url: URL, deps: ReactDeps): Promise<Response> 
   if (!token) return fail();
   const verdict = await verifyReactToken(token, deps.secret, deps.now());
   if ("error" in verdict) return fail();
-  if (!(await deps.recipientExists(verdict.m, verdict.u))) return fail();
-  const wrote = await deps.writeReaction(verdict.m, verdict.u, verdict.r);
+  let allowed: boolean;
+  try {
+    allowed = await deps.recipientMayReact(verdict.m, verdict.u);
+  } catch (error) {
+    deps.logError("react lookup failed:", error);
+    return fail();
+  }
+  if (!allowed) return fail();
+  let wrote: boolean;
+  try {
+    wrote = await deps.writeReaction(verdict.m, verdict.u, verdict.r);
+  } catch (error) {
+    deps.logError("react write failed:", error);
+    return fail();
+  }
   return wrote ? ok() : fail();
 }

@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { handleReact } from "./react_handler.ts";
+import { handleReact, mayReact } from "./react_handler.ts";
 import { signReactToken } from "./react_token.ts";
 
 const SECRET = "test-secret";
@@ -15,12 +15,13 @@ Deno.test("a valid, existing recipient reacts and gets ok=1", async () => {
   const res = await handleReact(url(token), {
     secret: SECRET,
     now: () => Date.now(),
-    recipientExists: (m, u) => Promise.resolve(m === "m1" && u === "u1"),
+    recipientMayReact: (m, u) => Promise.resolve(m === "m1" && u === "u1"),
     writeReaction: (m, u, r) => {
       written.push({ m, u, r });
       return Promise.resolve(true);
     },
     resultPage: RESULT_PAGE,
+    logError: () => {},
   });
   assertEquals(res.status, 303);
   assertEquals(res.headers.get("location"), `${RESULT_PAGE}?ok=1`);
@@ -35,12 +36,13 @@ Deno.test("a tampered token gets ok=0 and writes nothing", async () => {
   const res = await handleReact(url(`${payload}.${flipped}`), {
     secret: SECRET,
     now: () => Date.now(),
-    recipientExists: () => Promise.resolve(true),
+    recipientMayReact: () => Promise.resolve(true),
     writeReaction: () => {
       wrote = true;
       return Promise.resolve(true);
     },
     resultPage: RESULT_PAGE,
+    logError: () => {},
   });
   assertEquals(res.status, 303);
   assertEquals(res.headers.get("location"), `${RESULT_PAGE}?ok=0`);
@@ -53,9 +55,10 @@ Deno.test("an expired token gets ok=0", async () => {
   const res = await handleReact(url(token), {
     secret: SECRET,
     now: () => issuedAt + 31 * 86400_000,
-    recipientExists: () => Promise.resolve(true),
+    recipientMayReact: () => Promise.resolve(true),
     writeReaction: () => Promise.resolve(true),
     resultPage: RESULT_PAGE,
+    logError: () => {},
   });
   assertEquals(res.headers.get("location"), `${RESULT_PAGE}?ok=0`);
 });
@@ -66,12 +69,13 @@ Deno.test("a valid token for a recipient row that no longer exists gets ok=0", a
   const res = await handleReact(url(token), {
     secret: SECRET,
     now: () => Date.now(),
-    recipientExists: () => Promise.resolve(false),
+    recipientMayReact: () => Promise.resolve(false),
     writeReaction: () => {
       wrote = true;
       return Promise.resolve(true);
     },
     resultPage: RESULT_PAGE,
+    logError: () => {},
   });
   assertEquals(res.headers.get("location"), `${RESULT_PAGE}?ok=0`);
   assertEquals(wrote, false);
@@ -81,20 +85,118 @@ Deno.test("a missing token gets ok=0", async () => {
   const res = await handleReact(new URL("https://x/react"), {
     secret: SECRET,
     now: () => Date.now(),
-    recipientExists: () => Promise.resolve(true),
+    recipientMayReact: () => Promise.resolve(true),
     writeReaction: () => Promise.resolve(true),
     resultPage: RESULT_PAGE,
+    logError: () => {},
   });
   assertEquals(res.headers.get("location"), `${RESULT_PAGE}?ok=0`);
 });
 
-Deno.test("no secret configured fails closed with 500", async () => {
+Deno.test("no secret configured fails closed with 500 and logs why", async () => {
+  const logged: string[] = [];
   const res = await handleReact(url("whatever"), {
     secret: undefined,
     now: () => Date.now(),
-    recipientExists: () => Promise.resolve(true),
+    recipientMayReact: () => Promise.resolve(true),
     writeReaction: () => Promise.resolve(true),
     resultPage: RESULT_PAGE,
+    logError: (message) => logged.push(message),
   });
   assertEquals(res.status, 500);
+  assertEquals(logged, ["CANCEL_TOKEN_SECRET is not set"]);
+});
+
+Deno.test("a failed recipient lookup is logged and gets ok=0", async () => {
+  const token = await signReactToken({ m: "m1", u: "u1", r: "up" }, SECRET);
+  const logged: { message: string; detail: unknown }[] = [];
+  const boom = new Error("PGRST301");
+  let wrote = false;
+  const res = await handleReact(url(token), {
+    secret: SECRET,
+    now: () => Date.now(),
+    recipientMayReact: () => Promise.reject(boom),
+    writeReaction: () => {
+      wrote = true;
+      return Promise.resolve(true);
+    },
+    resultPage: RESULT_PAGE,
+    logError: (message, detail) => logged.push({ message, detail }),
+  });
+  assertEquals(res.headers.get("location"), `${RESULT_PAGE}?ok=0`);
+  assertEquals(wrote, false);
+  assertEquals(logged, [{ message: "react lookup failed:", detail: boom }]);
+});
+
+Deno.test("a failed write is logged and gets ok=0", async () => {
+  const token = await signReactToken({ m: "m1", u: "u1", r: "down" }, SECRET);
+  const logged: { message: string; detail: unknown }[] = [];
+  const boom = new Error("permission denied");
+  const res = await handleReact(url(token), {
+    secret: SECRET,
+    now: () => Date.now(),
+    recipientMayReact: () => Promise.resolve(true),
+    writeReaction: () => Promise.reject(boom),
+    resultPage: RESULT_PAGE,
+    logError: (message, detail) => logged.push({ message, detail }),
+  });
+  assertEquals(res.headers.get("location"), `${RESULT_PAGE}?ok=0`);
+  assertEquals(logged, [{ message: "react write failed:", detail: boom }]);
+});
+
+Deno.test("an orphaned token or a write that matched no row logs nothing", async () => {
+  const token = await signReactToken({ m: "m1", u: "u1", r: "up" }, SECRET);
+  const logged: string[] = [];
+  for (const [may, wrote] of [[false, true], [true, false]]) {
+    const res = await handleReact(url(token), {
+      secret: SECRET,
+      now: () => Date.now(),
+      recipientMayReact: () => Promise.resolve(may),
+      writeReaction: () => Promise.resolve(wrote),
+      resultPage: RESULT_PAGE,
+      logError: (message) => logged.push(message),
+    });
+    assertEquals(res.headers.get("location"), `${RESULT_PAGE}?ok=0`);
+  }
+  assertEquals(logged, []);
+});
+
+// mayReact mirrors message_recipients_update_own + the select policy's
+// alley check: the app path reacts only while an approved non-kiosk member
+// of the row's alley, so the e-mail path must not do more.
+const member = (status: string, role: string, tenant = "t1") => ({
+  tenant_id: "t1",
+  profiles: { status, role, tenant_id: tenant },
+});
+
+Deno.test("mayReact: an approved player or admin of the row's alley may react", () => {
+  assertEquals(mayReact(member("approved", "player")), true);
+  assertEquals(mayReact(member("approved", "admin")), true);
+});
+
+Deno.test("mayReact: no recipient row (orphaned token) may not react", () => {
+  assertEquals(mayReact(null), false);
+});
+
+Deno.test("mayReact: an account set as the kiosk may not react", () => {
+  assertEquals(mayReact(member("approved", "kiosk")), false);
+});
+
+Deno.test("mayReact: an account back to pending may not react", () => {
+  assertEquals(mayReact(member("pending", "player")), false);
+});
+
+Deno.test("mayReact: an account now in another alley may not react", () => {
+  assertEquals(mayReact(member("approved", "player", "t2")), false);
+});
+
+Deno.test("mayReact: a row without its profile may not react", () => {
+  assertEquals(mayReact({ tenant_id: "t1", profiles: null }), false);
+});
+
+Deno.test("mayReact: reads the profile embedded as an object or a one-row array", () => {
+  const profile = { status: "approved", role: "player", tenant_id: "t1" };
+  assertEquals(mayReact({ tenant_id: "t1", profiles: [profile] }), true);
+  assertEquals(mayReact({ tenant_id: "t1", profiles: [{ ...profile, role: "kiosk" }] }), false);
+  assertEquals(mayReact({ tenant_id: "t1", profiles: [] }), false);
 });

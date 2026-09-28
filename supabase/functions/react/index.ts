@@ -6,7 +6,7 @@
 // CANCEL_TOKEN_SECRET is shared with the cancel and notify functions.
 
 import { createClient } from "@supabase/supabase-js";
-import { handleReact } from "../_shared/react_handler.ts";
+import { handleReact, mayReact } from "../_shared/react_handler.ts";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -20,16 +20,25 @@ Deno.serve(async (request) => {
   return await handleReact(url, {
     secret: Deno.env.get("CANCEL_TOKEN_SECRET"),
     now: () => Date.now(),
-    recipientExists: async (m, u) => {
-      const { data } = await supabase.from("message_recipients")
-        .select("message_id").eq("message_id", m).eq("user_id", u).maybeSingle();
-      return data != null;
+    // The row and its account: the service role bypasses RLS, so
+    // mayReact re-applies the app's rule (approved non-kiosk member of the
+    // row's alley). A database error throws — handleReact logs it.
+    recipientMayReact: async (m, u) => {
+      const { data, error } = await supabase.from("message_recipients")
+        .select("tenant_id, profiles!inner(status, role, tenant_id)")
+        .eq("message_id", m).eq("user_id", u).maybeSingle();
+      if (error) throw error;
+      return mayReact(data);
     },
     writeReaction: async (m, u, r) => {
-      const { data } = await supabase.from("message_recipients")
-        .update({ reaction: r }).eq("message_id", m).eq("user_id", u).select();
+      const { data, error } = await supabase.from("message_recipients")
+        .update({ reaction: r }).eq("message_id", m).eq("user_id", u)
+        .select("message_id");
+      if (error) throw error;
       return (data?.length ?? 0) > 0;
     },
     resultPage: RESULT_PAGE,
+    logError: (message, detail) =>
+      detail === undefined ? console.error(message) : console.error(message, detail),
   });
 });
