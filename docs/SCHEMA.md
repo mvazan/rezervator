@@ -75,8 +75,8 @@ and what cascades — and is updated with every migration.
 | `duty_periods` | (0050) A canteen duty: `starts_on`, `ends_on` (inclusive; `duty_periods_order_check` ends ≥ starts, `duty_periods_length_check` at most 62 days), `note` (trimmed, ≤ 80 chars, `duty_periods_note_check`; `''` = none), `created_by → profiles` (set null), `created_at`. `duty_periods_no_overlap` — `exclude using gist (tenant_id with =, daterange(starts_on, ends_on, '[]') with &&)`: periods of one alley never overlap, touching is fine (needs `btree_gist`, installed into `extensions`). Index (`tenant_id`, `starts_on`). In the Realtime publication. | select approved/kiosk (the whole alley reads the roster). No insert/update/delete for `authenticated`, nothing for `anon` — written only through the admin's `duty_*` RPCs. |
 | `duty_assignments` | (0050) Who works a period: `period_id → duty_periods` (cascade — a deleted period takes its assignees), `user_id → profiles` (cascade), `tenant_id` (the period's, denormalised like `player_group_members`), `assigned_by → profiles` (set null), `created_at`. PK (`period_id`, `user_id`), index (`tenant_id`, `user_id`). Approved non-kiosk members of the alley, placeholders included (counted, never given the duty's rights). A placeholder's rows are history: `delete_placeholder_player` refuses, `merge_placeholder_player` moves them. In the Realtime publication. | as `duty_periods`; written only through `duty_set_assignees`. |
 | `duty_seasons` | (0050) Season boundaries for the duty counts: PK (`tenant_id`, `started_on`), `name` (1–40 chars, `duty_seasons_name_check`, e.g. „2026/27“), `created_by → profiles` (set null), `created_at`. A period belongs to the season with the greatest `started_on ≤ starts_on`; the periods before the first boundary are the implicit first season. A reset inserts a row and moves nothing; undo deletes the newest. **Not in the Realtime publication**: the app reads it as a future and invalidates it after a change. | as `duty_periods`; written only through `duty_season_start` / `duty_season_delete`. |
-| `messages` | (0051) A notice or a message: `kind` notice \| message, `audience` all \| day \| block \| admins \| duty (`messages_kind_audience_check`: a notice goes to `all`, a message to one of the other four), `author_id → profiles` (set null), `author_role` admin \| player (a snapshot of the sender's `profiles.role` at send time — players cannot read other profiles, so the app and notify label „Od správce“ / „Od služby“ from it), `on_date` + `block_id → time_blocks` (set null) — the day for `day`, day and block for `block` (a block removed later leaves the message on its day), optional context for `admins`/`duty`, none for `all` (`messages_context_check`), `title` (notice only, 1–80 chars), `body` (non-blank, ≤ 500 for a message, ≤ 2000 for a notice), `expires_at` (notice only; null = „do odvolání“), `notify` (a notice's ping choice; always true for a message), `created_at`, `updated_at`. Indexes (`tenant_id`, `kind`, `created_at`), (`tenant_id`, `on_date`). Messages (not notices) over 90 days old are pruned daily (`prune_messages`). In the Realtime publication. | select `tenant_id = current_tenant_id() and can_read_message(id)` (the alley first, so a player's stream is an index scan of her own alley): nothing unless the caller is an approved non-kiosk member of the alley — an account later set as the kiosk or back to pending loses what it once got — then a notice to every such member (recipient row or not), a message to its author and its recipients. No insert/update/delete for `authenticated`, nothing for `anon` — written only through `message_send` / `message_update` / `message_delete`. |
-| `message_recipients` | (0051) Who got a message, materialised by `message_send`: `message_id → messages` (cascade), `user_id → profiles` (cascade), `tenant_id` (the message's, denormalised like `duty_assignments`), `read_at`, `reaction` up \| down \| null, `reply` (≤ 200 chars), `reacted_at` (the BEFORE UPDATE trigger `message_recipients_reacted_at` stamps it when `reaction` or `reply` changes and clears it when both are null). PK (`message_id`, `user_id`), index (`tenant_id`, `user_id`, `read_at`). In the Realtime publication. | select `tenant_id = current_tenant_id() and can_read_message(message_id)` — every participant sees everyone's reaction (and read time; accepted, the app shows reads to no one but the admin). update: own row while an approved non-kiosk member (`message_recipients_update_own`, `user_id = auth.uid() and is_approved() and not is_kiosk()`), columns `read_at`, `reaction`, `reply` only — the `profiles_update_own` pattern. No insert/delete for `authenticated`, nothing for `anon`. |
+| `messages` | (0051) A notice or a message: `kind` notice \| message, `audience` all \| day \| block \| admins \| duty (`messages_kind_audience_check`: a notice goes to `all`, a message to one of the other four), `author_id → profiles` (set null), `author_role` admin \| player (a snapshot of the sender's `profiles.role` at send time — players cannot read other profiles, so the app and notify label „Od správce“ / „Od služby“ from it), `on_date` + `block_id → time_blocks` (set null) — the day for `day`, day and block for `block` (a block removed later leaves the message on its day), optional context for `admins`/`duty`, none for `all` (`messages_context_check`), `title` (notice only, 1–80 chars), `body` (non-blank, ≤ 500 for a message, ≤ 2000 for a notice), `expires_at` (notice only; null = „do odvolání“), `notify` (a notice's ping choice; always true for a message), `created_at`, `updated_at`. Indexes (`tenant_id`, `kind`, `created_at`), (`tenant_id`, `on_date`). Messages (not notices) over 90 days old are pruned daily (`prune_messages`). In the Realtime publication. | select `tenant_id = (select current_tenant_id()) and id in (select visible_message_ids())` (the alley first, so a player's stream is an index scan of her own alley; the helper's set once per query, not a helper call per row): nothing unless the caller is an approved non-kiosk member of the alley — an account later set as the kiosk or back to pending loses what it once got — then a notice to every such member (recipient row or not), a message to its author and its recipients; exactly what `can_read_message` admits. No insert/update/delete for `authenticated`, nothing for `anon` — written only through `message_send` / `message_update` / `message_delete`. |
+| `message_recipients` | (0051) Who got a message, materialised by `message_send`: `message_id → messages` (cascade), `user_id → profiles` (cascade), `tenant_id` (the message's, denormalised like `duty_assignments`), `read_at`, `reaction` up \| down \| null, `reply` (≤ 200 chars), `reacted_at` (the BEFORE UPDATE trigger `message_recipients_reacted_at` stamps it when `reaction` or `reply` changes and clears it when both are null, and answers a reaction or a reply on a notice's row with `not_allowed` — notices have no reactions). PK (`message_id`, `user_id`), index (`tenant_id`, `user_id`, `read_at`). In the Realtime publication. | select `tenant_id = (select current_tenant_id())` and either the caller's own row (while an approved non-kiosk member) or `message_id in (select visible_recipient_message_ids())`: a notice's rows to the alley's admins („Kdo si to zobrazil“; a player sees her own row of a notice only), a `message`'s rows to its author and its recipients (everyone's reaction, and read time — accepted, no screen shows a message's reads), nothing to a bystander, the kiosk or a pending account. update: own row while an approved non-kiosk member (`message_recipients_update_own`, `user_id = auth.uid() and is_approved() and not is_kiosk()`), columns `read_at`, `reaction`, `reply` only — the `profiles_update_own` pattern. No insert/delete for `authenticated`, nothing for `anon`. |
 
 Every `color` column above is one `integer` (0030): the negative values are the "none"/default markers, 0–8 a palette entry from `domain/palette.dart` (0031 dropped the three that measured under ΔE2000 10 from a neighbour and kept every affected row on its exact colour as a hand-picked one), and `0x1000000 | rgb` (16777216–33554431) a hand-picked colour. Dart derives the four rendered shades (dark and light background plus its text) from a hand-picked value rather than painting it raw, so it stays readable in both themes; `upsert_club` takes `integer` for the same reason.
 | `app_config` | single row: `min_build` (0025) — the oldest app build the backend still supports; the app streams it (Realtime) and blocks on an update screen while older. Raised by a migration with a breaking release. | select for `authenticated`; writes: migrations only. |
@@ -865,7 +865,8 @@ threads, no player-to-player messages. Every error is a bare code.
   training written about), the block must be the alley's (`unknown_block`).
   A message has no title, no expiry and always pings, ≤ 500 chars; an
   unknown kind is `invalid_kind`, an unknown audience `invalid_audience`, a
-  blank body `body_required`, a long one `body_too_long`. Recipients are
+  blank body `body_required`, a long one `body_too_long` — title and body
+  trimmed of any whitespace (newlines and tabs too) first, and stored so. Recipients are
   materialised in the same transaction. Every audience draws from the same
   members — the `players` view's rule (approved, not the kiosk, not a
   placeholder, not a visiting superadmin) — minus the author. So a pending
@@ -885,20 +886,31 @@ threads, no player-to-player messages. Every error is a bare code.
   period today, or every assignee on it is the author, a placeholder or
   pending).
 - **`can_read_message(id)`** (security definer, stable, `authenticated`) —
-  the two select policies (each led by `tenant_id = current_tenant_id()`):
-  the message is the caller's alley's, the caller an approved non-kiosk
-  member (so an account later set as the kiosk or back to pending reads
-  nothing, not even what it once got), and it is a notice, or the caller
-  wrote it, or has a recipient row. Security definer so
-  `message_recipients`' policy does not recurse into its own RLS.
+  whether the caller reads a message: it is the caller's alley's, the
+  caller an approved non-kiosk member (so an account later set as the
+  kiosk or back to pending reads nothing, not even what it once got), and
+  it is a notice, or the caller wrote it, or has a recipient row.
+- **`visible_message_ids()`** (security definer, stable, `authenticated`,
+  `setof uuid`) — the same rule as a set, for `messages_select`
+  (`id in (select visible_message_ids())`, one call per query instead of
+  one per row: ~13 ms → ~0.4 ms for a player's stream at 150 messages).
+- **`visible_recipient_message_ids()`** (same shape) — the messages whose
+  every recipient row the caller sees, for `message_recipients_select`
+  (besides the caller's own row): a notice to the alley's admins, a
+  `message` to its author and its recipients, nothing to the kiosk or a
+  pending account (~400 ms → ~0.7 ms for a player's stream of recipient
+  rows at 40 members × 100 notices against a per-row helper). Security
+  definer so the policy does not recurse into its own table's RLS.
 - **`message_update(id, title, body, expires_at)`** — notices of the
   caller's alley only (a message or another alley's notice is
   `unknown_message`), admin (`not_allowed`); `title_required`,
-  `body_required`, `body_too_long`. No "leave unchanged" sentinel: the form
-  sends its whole state, so `expires_at = null` is „do odvolání“;
-  „Sejmout“ is the same call with `expires_at = now()`. Bumps `updated_at`.
-- **`message_delete(id)`** — the author or the alley's admin
-  (`unknown_message` otherwise); the recipients cascade.
+  `body_required`, `body_too_long` (trimmed as in `message_send`). No
+  "leave unchanged" sentinel: the form sends its whole state, so
+  `expires_at = null` is „do odvolání“; „Sejmout“ is the same call with
+  `expires_at = now()`. Bumps `updated_at`.
+- **`message_delete(id)`** — the author or the alley's admin, while an
+  approved non-kiosk member (`not_allowed`; `unknown_message` otherwise);
+  the recipients cascade.
 - **`prune_messages()`** (`service_role` only) deletes messages — never
   notices — whose key day (`on_date`, else `created_at` in Prague) is more
   than 90 days old and returns how many; `cron.job` `messages-prune`
@@ -1121,14 +1133,22 @@ threads, no player-to-player messages. Every error is a bare code.
   plain player per audience, the kiosk, a placeholder and a pending
   account sending nothing, another alley reaching only its own admins;
   every error code; a day-only block counting on the date its override
-  names it and no other; `can_read_message` for the author, a recipient,
+  names it and no other; blank as any whitespace and the stored text
+  trimmed of it; `can_read_message` for the author, a recipient,
   a bystander, the kiosk, a pending account and another alley, a notice
   for a player approved after it went out (no recipient row), a recipient
   later set as the kiosk or back to pending reading and replying to
-  nothing, and both select policies led by the alley; own-row
-  reactions with `reacted_at` stamped and cleared, every other write a
-  privilege error; `message_update` notices-only with Sejmout and do
-  odvolání; `message_delete` by the author or the admin, cascading;
+  nothing; recipient rows — a notice's own row for a player and every
+  row for any admin, a message's every row for its author and its
+  recipients, none for a bystander (the admin included) or another
+  alley; both select policies led by the alley and set-based, and
+  `visible_message_ids()` equal to what `can_read_message` admits for
+  every account in the file; own-row reactions with `reacted_at` stamped
+  and cleared, none on a notice (`not_allowed`), exactly `read_at`,
+  `reaction`, `reply` updatable and every other write a privilege error;
+  `message_update` notices-only with Sejmout and do odvolání;
+  `message_delete` by the author or the admin, cascading, not by an
+  author back to pending or set as the kiosk;
   `prune_messages` keeping notices and recent messages; the triggers, the
   cron job and a removed block leaving its message on its day), and the
   0035 assertion (now including `team_colors`, `match_exceptions`, 0050's

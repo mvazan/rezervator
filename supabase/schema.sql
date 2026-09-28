@@ -2222,6 +2222,9 @@ CREATE OR REPLACE FUNCTION "public"."message_delete"("p_id" "uuid") RETURNS "voi
     SET "search_path" TO 'public'
     AS $$
 begin
+  if not is_approved() or is_kiosk() then
+    raise exception 'not_allowed';
+  end if;
   delete from messages
    where id = p_id and tenant_id = current_tenant_id()
      and (author_id = auth.uid() or is_admin());
@@ -2236,9 +2239,14 @@ ALTER FUNCTION "public"."message_delete"("p_id" "uuid") OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."message_recipients_stamp_reacted"() RETURNS "trigger"
-    LANGUAGE "plpgsql"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
     AS $$
 begin
+  if (new.reaction is not null or new.reply is not null)
+     and (select kind from messages where id = new.message_id) = 'notice' then
+    raise exception 'not_allowed';
+  end if;
   if new.reaction is distinct from old.reaction or new.reply is distinct from old.reply then
     if new.reaction is null and new.reply is null then
       new.reacted_at := null;
@@ -2257,12 +2265,15 @@ ALTER FUNCTION "public"."message_recipients_stamp_reacted"() OWNER TO "postgres"
 CREATE OR REPLACE FUNCTION "public"."message_send"("p_kind" "text", "p_audience" "text", "p_on_date" "date", "p_block_id" "uuid", "p_title" "text", "p_body" "text", "p_expires_at" timestamp with time zone, "p_notify" boolean) RETURNS "uuid"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
-    AS $$
+    AS $_$
 declare
   v_tenant constant uuid := current_tenant_id();
   v_me constant uuid := auth.uid();
-  v_title constant text := nullif(trim(coalesce(p_title, '')), '');
-  v_body constant text := trim(coalesce(p_body, ''));
+  -- Trimmed of any whitespace, not only spaces (trim() alone would take
+  -- a body of newlines and tabs as written); what is stored and measured.
+  v_title constant text :=
+    nullif(regexp_replace(coalesce(p_title, ''), '^\s+|\s+$', '', 'g'), '');
+  v_body constant text := regexp_replace(coalesce(p_body, ''), '^\s+|\s+$', '', 'g');
   v_id uuid;
   v_members uuid[];
   v_recipients uuid[];
@@ -2381,7 +2392,7 @@ begin
 
   return v_id;
 end;
-$$;
+$_$;
 
 
 ALTER FUNCTION "public"."message_send"("p_kind" "text", "p_audience" "text", "p_on_date" "date", "p_block_id" "uuid", "p_title" "text", "p_body" "text", "p_expires_at" timestamp with time zone, "p_notify" boolean) OWNER TO "postgres";
@@ -2390,10 +2401,12 @@ ALTER FUNCTION "public"."message_send"("p_kind" "text", "p_audience" "text", "p_
 CREATE OR REPLACE FUNCTION "public"."message_update"("p_id" "uuid", "p_title" "text", "p_body" "text", "p_expires_at" timestamp with time zone) RETURNS "void"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
-    AS $$
+    AS $_$
 declare
-  v_title constant text := nullif(trim(coalesce(p_title, '')), '');
-  v_body constant text := trim(coalesce(p_body, ''));
+  -- Trimmed of any whitespace, as in message_send.
+  v_title constant text :=
+    nullif(regexp_replace(coalesce(p_title, ''), '^\s+|\s+$', '', 'g'), '');
+  v_body constant text := regexp_replace(coalesce(p_body, ''), '^\s+|\s+$', '', 'g');
 begin
   if not is_admin() then
     raise exception 'not_allowed';
@@ -2414,7 +2427,7 @@ begin
     raise exception 'unknown_message';
   end if;
 end;
-$$;
+$_$;
 
 
 ALTER FUNCTION "public"."message_update"("p_id" "uuid", "p_title" "text", "p_body" "text", "p_expires_at" timestamp with time zone) OWNER TO "postgres";
@@ -4259,6 +4272,43 @@ $$;
 ALTER FUNCTION "public"."upsert_federation_venue"("p_tenant" "uuid", "p_venue" "jsonb") OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."visible_message_ids"() RETURNS SETOF "uuid"
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  select m.id from messages m
+   where m.tenant_id = (select current_tenant_id())
+     and (select is_approved()) and not (select is_kiosk())
+     and (m.kind = 'notice'
+          or m.author_id = (select auth.uid())
+          or exists (select 1 from message_recipients r
+                      where r.message_id = m.id
+                        and r.user_id = (select auth.uid())))
+$$;
+
+
+ALTER FUNCTION "public"."visible_message_ids"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."visible_recipient_message_ids"() RETURNS SETOF "uuid"
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  select m.id from messages m
+   where m.tenant_id = (select current_tenant_id())
+     and (select is_approved()) and not (select is_kiosk())
+     and ((m.kind = 'notice' and (select is_admin()))
+          or (m.kind = 'message'
+              and (m.author_id = (select auth.uid())
+                   or exists (select 1 from message_recipients r
+                               where r.message_id = m.id
+                                 and r.user_id = (select auth.uid())))))
+$$;
+
+
+ALTER FUNCTION "public"."visible_recipient_message_ids"() OWNER TO "postgres";
+
+
 CREATE TABLE IF NOT EXISTS "public"."app_config" (
     "id" boolean DEFAULT true NOT NULL,
     "min_build" integer DEFAULT 1 NOT NULL,
@@ -5645,7 +5695,7 @@ CREATE POLICY "match_results_select" ON "public"."match_results" FOR SELECT USIN
 ALTER TABLE "public"."message_recipients" ENABLE ROW LEVEL SECURITY;
 
 
-CREATE POLICY "message_recipients_select" ON "public"."message_recipients" FOR SELECT USING ((("tenant_id" = "public"."current_tenant_id"()) AND "public"."can_read_message"("message_id")));
+CREATE POLICY "message_recipients_select" ON "public"."message_recipients" FOR SELECT USING ((("tenant_id" = ( SELECT "public"."current_tenant_id"() AS "current_tenant_id")) AND ((("user_id" = ( SELECT "auth"."uid"() AS "uid")) AND ( SELECT "public"."is_approved"() AS "is_approved") AND (NOT ( SELECT "public"."is_kiosk"() AS "is_kiosk"))) OR ("message_id" IN ( SELECT "public"."visible_recipient_message_ids"() AS "visible_recipient_message_ids")))));
 
 
 
@@ -5656,7 +5706,7 @@ CREATE POLICY "message_recipients_update_own" ON "public"."message_recipients" F
 ALTER TABLE "public"."messages" ENABLE ROW LEVEL SECURITY;
 
 
-CREATE POLICY "messages_select" ON "public"."messages" FOR SELECT USING ((("tenant_id" = "public"."current_tenant_id"()) AND "public"."can_read_message"("id")));
+CREATE POLICY "messages_select" ON "public"."messages" FOR SELECT USING ((("tenant_id" = ( SELECT "public"."current_tenant_id"() AS "current_tenant_id")) AND ("id" IN ( SELECT "public"."visible_message_ids"() AS "visible_message_ids"))));
 
 
 
@@ -6176,8 +6226,7 @@ GRANT ALL ON FUNCTION "public"."message_delete"("p_id" "uuid") TO "service_role"
 
 
 
-GRANT ALL ON FUNCTION "public"."message_recipients_stamp_reacted"() TO "anon";
-GRANT ALL ON FUNCTION "public"."message_recipients_stamp_reacted"() TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."message_recipients_stamp_reacted"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."message_recipients_stamp_reacted"() TO "service_role";
 
 
@@ -6453,6 +6502,18 @@ GRANT ALL ON FUNCTION "public"."upsert_federation_teams"("p_tenant" "uuid", "p_t
 
 REVOKE ALL ON FUNCTION "public"."upsert_federation_venue"("p_tenant" "uuid", "p_venue" "jsonb") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."upsert_federation_venue"("p_tenant" "uuid", "p_venue" "jsonb") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."visible_message_ids"() FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."visible_message_ids"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."visible_message_ids"() TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."visible_recipient_message_ids"() FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."visible_recipient_message_ids"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."visible_recipient_message_ids"() TO "service_role";
 
 
 

@@ -83,10 +83,18 @@ comment on table message_recipients is
   'Who got a messages row (0051), materialised at send time from the reservations/roster/duty data then. tenant_id is the message''s, denormalised like duty_assignments. read_at/reaction/reply are the recipient''s own-row write.';
 
 -- reacted_at follows reaction/reply: stamped when either changes, cleared
--- when both are back to null. A read (read_at alone) leaves it be.
+-- when both are back to null. A read (read_at alone) leaves it be. A
+-- notice has no reactions: a reaction or a reply on a notice's row is
+-- not_allowed, whoever writes it (the column grant alone would let it
+-- through). Security definer to read the message's kind past RLS; nobody
+-- calls it directly (a trigger needs no EXECUTE to fire).
 create or replace function message_recipients_stamp_reacted()
-returns trigger language plpgsql as $$
+returns trigger language plpgsql security definer set search_path = public as $$
 begin
+  if (new.reaction is not null or new.reply is not null)
+     and (select kind from messages where id = new.message_id) = 'notice' then
+    raise exception 'not_allowed';
+  end if;
   if new.reaction is distinct from old.reaction or new.reply is distinct from old.reply then
     if new.reaction is null and new.reply is null then
       new.reacted_at := null;
@@ -97,6 +105,7 @@ begin
   return new;
 end;
 $$;
+revoke all on function message_recipients_stamp_reacted() from public, anon, authenticated;
 drop trigger if exists message_recipients_reacted_at on message_recipients;
 create trigger message_recipients_reacted_at
   before update on message_recipients
@@ -110,15 +119,9 @@ alter table message_recipients enable row level security;
 -- an approved non-kiosk member of the message's alley (the spec's „the
 -- kiosk reads nothing here“ — so an account later set as the kiosk or
 -- back to pending loses what it once got as a player); then a notice to
--- every such member, any message to its author or a recipient. Security
--- definer so the message_recipients policy below can call it without
--- recursing into its own table's RLS. Accepted tradeoff (0051 spec,
--- "A security-definer helper can_read_message"): this also
--- governs message_recipients_select, so a `message` participant sees
--- every other participant's read_at as well as their reaction — RLS is
--- row-level, not column-level, and nothing in the app ever surfaces a
--- message's read_at to a non-admin, so the extra visibility is harmless
--- and not worth a second helper.
+-- every such member, any message to its author or a recipient. The
+-- messages policy uses the same rule as a set (visible_message_ids); this
+-- per-id form stays for callers that ask about one message.
 create or replace function can_read_message(p_id uuid) returns boolean
 language sql stable security definer set search_path = public as $$
   select exists (
@@ -136,16 +139,63 @@ $$;
 revoke all on function can_read_message(uuid) from public, anon;
 grant execute on function can_read_message(uuid) to authenticated;
 
+-- The same rule as a set, for messages_select: the ids of the alley's
+-- messages the caller reads, exactly those can_read_message admits. One
+-- call per query, not one per row (~13 ms → ~0.4 ms for a player's
+-- stream at 150 messages).
+create or replace function visible_message_ids() returns setof uuid
+language sql stable security definer set search_path = public as $$
+  select m.id from messages m
+   where m.tenant_id = (select current_tenant_id())
+     and (select is_approved()) and not (select is_kiosk())
+     and (m.kind = 'notice'
+          or m.author_id = (select auth.uid())
+          or exists (select 1 from message_recipients r
+                      where r.message_id = m.id
+                        and r.user_id = (select auth.uid())))
+$$;
+revoke all on function visible_message_ids() from public, anon;
+grant execute on function visible_message_ids() to authenticated;
+
+-- The message ids whose recipient rows — beyond the caller's own — the
+-- caller sees: every notice of the alley to its admins („Kdo si to
+-- zobrazil“; a player sees her own row of a notice only), a message to its
+-- author and its recipients (the reactions), nothing to the kiosk or a
+-- pending account. Security definer so the message_recipients policy
+-- reads its own table without recursing into its RLS; a set, so the
+-- policy asks once per query instead of once per row (~400 ms for a
+-- player's stream at 40 members × 100 notices with a per-row helper).
+create or replace function visible_recipient_message_ids() returns setof uuid
+language sql stable security definer set search_path = public as $$
+  select m.id from messages m
+   where m.tenant_id = (select current_tenant_id())
+     and (select is_approved()) and not (select is_kiosk())
+     and ((m.kind = 'notice' and (select is_admin()))
+          or (m.kind = 'message'
+              and (m.author_id = (select auth.uid())
+                   or exists (select 1 from message_recipients r
+                               where r.message_id = m.id
+                                 and r.user_id = (select auth.uid())))))
+$$;
+revoke all on function visible_recipient_message_ids() from public, anon;
+grant execute on function visible_recipient_message_ids() to authenticated;
+
 -- Both select policies lead with the alley, as every other policy does:
 -- the planner then index-scans the caller's own alley instead of calling
--- can_read_message on every row of the platform (a player's stream is
+-- a helper on every row of the platform (a player's stream is
 -- unfiltered, and each Realtime change is checked through the same policy).
 drop policy if exists messages_select on messages;
 create policy messages_select on messages
-  for select using (tenant_id = current_tenant_id() and can_read_message(id));
+  for select using (tenant_id = (select current_tenant_id())
+                    and id in (select visible_message_ids()));
+-- A recipient row: my own (while an approved non-kiosk member), or any row
+-- of a message whose rows I see (visible_recipient_message_ids).
 drop policy if exists message_recipients_select on message_recipients;
 create policy message_recipients_select on message_recipients
-  for select using (tenant_id = current_tenant_id() and can_read_message(message_id));
+  for select using (
+    tenant_id = (select current_tenant_id())
+    and ((user_id = (select auth.uid()) and (select is_approved()) and not (select is_kiosk()))
+         or message_id in (select visible_recipient_message_ids())));
 -- Own row, and only while an approved non-kiosk member (can_read_message's
 -- rule): an account set as the kiosk or back to pending reacts to nothing.
 drop policy if exists message_recipients_update_own on message_recipients;
@@ -194,8 +244,11 @@ as $$
 declare
   v_tenant constant uuid := current_tenant_id();
   v_me constant uuid := auth.uid();
-  v_title constant text := nullif(trim(coalesce(p_title, '')), '');
-  v_body constant text := trim(coalesce(p_body, ''));
+  -- Trimmed of any whitespace, not only spaces (trim() alone would take
+  -- a body of newlines and tabs as written); what is stored and measured.
+  v_title constant text :=
+    nullif(regexp_replace(coalesce(p_title, ''), '^\s+|\s+$', '', 'g'), '');
+  v_body constant text := regexp_replace(coalesce(p_body, ''), '^\s+|\s+$', '', 'g');
   v_id uuid;
   v_members uuid[];
   v_recipients uuid[];
@@ -326,8 +379,10 @@ returns void
 language plpgsql security definer set search_path = public
 as $$
 declare
-  v_title constant text := nullif(trim(coalesce(p_title, '')), '');
-  v_body constant text := trim(coalesce(p_body, ''));
+  -- Trimmed of any whitespace, as in message_send.
+  v_title constant text :=
+    nullif(regexp_replace(coalesce(p_title, ''), '^\s+|\s+$', '', 'g'), '');
+  v_body constant text := regexp_replace(coalesce(p_body, ''), '^\s+|\s+$', '', 'g');
 begin
   if not is_admin() then
     raise exception 'not_allowed';
@@ -350,11 +405,16 @@ begin
 end;
 $$;
 
--- The author or an admin; recipients cascade.
+-- The author or an admin; recipients cascade. Either while an approved
+-- non-kiosk member, like every other right here: an author set back to
+-- pending or as the kiosk deletes nothing (is_admin() already needs both).
 create or replace function message_delete(p_id uuid) returns void
 language plpgsql security definer set search_path = public
 as $$
 begin
+  if not is_approved() or is_kiosk() then
+    raise exception 'not_allowed';
+  end if;
   delete from messages
    where id = p_id and tenant_id = current_tenant_id()
      and (author_id = auth.uid() or is_admin());

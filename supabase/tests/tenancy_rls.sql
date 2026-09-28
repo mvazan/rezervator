@@ -8389,6 +8389,26 @@ begin
   if has_column_privilege('authenticated', 'message_recipients', 'user_id', 'update') then
     raise exception 'FAIL: authenticated can update user_id — that would let a player steal a recipient row';
   end if;
+  -- Column by column (a column grant is not in table_privileges): exactly
+  -- read_at, reaction and reply are the app's to update; nothing of
+  -- messages, and no column of either table is the app's to insert.
+  select string_agg(attname, ',' order by attname) into v_bad
+    from pg_attribute
+   where attrelid = 'public.message_recipients'::regclass and attnum > 0
+     and not attisdropped
+     and has_column_privilege('authenticated', attrelid, attnum, 'update');
+  if v_bad is distinct from 'reaction,read_at,reply' then
+    raise exception 'FAIL: authenticated may update message_recipients columns %, not exactly reaction,read_at,reply', v_bad;
+  end if;
+  select string_agg(attrelid::regclass || '.' || attname || ':' || p.priv, ', ') into v_bad
+    from pg_attribute, unnest(array['update', 'insert']) as p(priv)
+   where attrelid in ('public.messages'::regclass, 'public.message_recipients'::regclass)
+     and attnum > 0 and not attisdropped
+     and (p.priv = 'insert' or attrelid = 'public.messages'::regclass)
+     and has_column_privilege('authenticated', attrelid, attnum, p.priv);
+  if v_bad is not null then
+    raise exception 'FAIL: authenticated may write %', v_bad;
+  end if;
   raise notice 'OK: messages/message_recipients exist with the 0046 grant shape (0051)';
 end $$;
 
@@ -8496,6 +8516,10 @@ begin
       ('message', 'everyone', v_today, null, 'Text', 'invalid_audience'),
       ('message', 'day', null::date, null, 'Text', 'date_past'),
       ('notice', 'all', null::date, '   ', 'Text', 'title_required'),
+      -- Blank is any whitespace, not only spaces: newlines, tabs.
+      ('notice', 'all', null::date, E'\n\t', E'\n\n', 'title_required'),
+      ('notice', 'all', null::date, 'Nadpis', E'\n\n', 'body_required'),
+      ('message', 'day', v_today, null, E' \t\r\n ', 'body_required'),
       ('message', 'day', v_today, null, '  ', 'body_required'),
       ('notice', 'all', null::date, 'Nadpis', null, 'body_required'),
       ('message', 'day', v_today, null, repeat('a', 501), 'body_too_long'),
@@ -8515,20 +8539,25 @@ begin
 end $$;
 
 -- 23f. The limits themselves are allowed: a 500-character message and a
--- 2000-character notice; the body and title are stored trimmed.
+-- 2000-character notice; the body and title are stored trimmed of any
+-- whitespace (newlines and tabs too), and the limits count what is stored.
 do $$
 declare
   v_id uuid;
 begin
   v_id := message_send('message', 'day', (now() at time zone 'Europe/Prague')::date, null,
-                        null, repeat('a', 500), null, true);
-  v_id := message_send('notice', 'all', null, null, '  Dlouhá  ', repeat('b', 2000),
-                        null, false);
-  if (select title from messages where id = v_id) <> 'Dlouhá'
-     or (select notify from messages where id = v_id) then
-    raise exception 'FAIL: the notice lost its trimmed title or its notify = false';
+                        null, E'\n ' || repeat('a', 500) || E'\t\n', null, true);
+  if (select body from messages where id = v_id) is distinct from repeat('a', 500) then
+    raise exception 'FAIL: the message body was not stored trimmed of newlines and tabs';
   end if;
-  raise notice 'OK: 500 / 2000 characters are still fine, the title is trimmed, notify kept (0051)';
+  v_id := message_send('notice', 'all', null, null, E'\n  Dlouhá \t',
+                        E'\r\n' || repeat('b', 2000) || E'\n', null, false);
+  if (select title from messages where id = v_id) is distinct from 'Dlouhá'
+     or (select body from messages where id = v_id) is distinct from repeat('b', 2000)
+     or (select notify from messages where id = v_id) then
+    raise exception 'FAIL: the notice lost its trimmed title/body or its notify = false';
+  end if;
+  raise notice 'OK: 500 / 2000 characters are still fine, title and body trimmed of any whitespace, notify kept (0051)';
 end $$;
 
 -- 23g. The block has to be this alley's and bookable that day: another
@@ -8969,6 +8998,86 @@ begin
   raise notice 'OK: can_read_message: author, recipients, notice to the alley; not a bystander, the kiosk, a pending account or another alley (0051)';
 end $$;
 
+-- 23o2. Recipient rows are not can_read_message's. On a notice a player
+-- sees her own row only (who else has seen it is the admin's „Kdo si to
+-- zobrazil“), the admin every row; on a message its author and every
+-- recipient see every row (the reactions), a bystander none — the admin
+-- included, when the message is not hers; another alley nothing.
+do $$
+declare
+  v_notice constant uuid := current_setting('probe.msg_notice')::uuid;
+  v_bara_day constant uuid := current_setting('probe.msg_bara_day')::uuid;
+  v_day constant uuid := current_setting('probe.msg_day')::uuid;
+  v_adam constant text := '51000000-0000-0000-0000-000000000010';
+  v_bara constant text := '51000000-0000-0000-0000-000000000011';
+  v_cyril constant text := '51000000-0000-0000-0000-000000000012';
+  v_dana constant text := '51000000-0000-0000-0000-000000000013';
+  v_case record;
+  v_got text;
+  v_duty_msg uuid;
+begin
+  for v_case in
+    select * from (values
+      (v_cyril, v_notice, v_cyril, 'a plain member on a notice'),
+      (v_bara, v_notice, v_bara, 'the duty (a player) on a notice'),
+      (v_dana, v_notice, v_dana, 'another plain member on a notice'),
+      (v_adam, v_notice, v_bara || ',' || v_cyril || ',' || v_dana, 'the admin on a notice'),
+      (v_cyril, v_bara_day, v_adam || ',' || v_cyril || ',' || v_dana, 'a recipient'),
+      (v_dana, v_bara_day, v_adam || ',' || v_cyril || ',' || v_dana, 'another recipient'),
+      (v_adam, v_bara_day, v_adam || ',' || v_cyril || ',' || v_dana, 'the admin, a recipient'),
+      (v_bara, v_bara_day, v_adam || ',' || v_cyril || ',' || v_dana, 'the author, a player'),
+      (v_adam, v_day, v_cyril || ',' || v_dana, 'the author, an admin'),
+      (v_bara, v_day, null, 'a bystander'),
+      ('50000000-0000-0000-0000-000000000011', v_notice, null, 'another alley''s player on a notice'),
+      ('50000000-0000-0000-0000-000000000010', v_notice, null, 'another alley''s admin on a notice'),
+      ('50000000-0000-0000-0000-000000000011', v_bara_day, null, 'another alley on a message')
+    ) as c(who, msg, expected, label)
+  loop
+    perform set_config('request.jwt.claims',
+      '{"sub":"' || v_case.who || '","role":"authenticated"}', true);
+    select string_agg(user_id::text, ',' order by user_id) into v_got
+      from message_recipients where message_id = v_case.msg;
+    if v_got is distinct from v_case.expected then
+      raise exception 'FAIL: % sees recipient rows % (expected %)',
+        v_case.label, v_got, v_case.expected;
+    end if;
+  end loop;
+  -- Cyril's message to the duty (Bára): the admin is no participant.
+  perform set_config('request.jwt.claims',
+    '{"sub":"' || v_cyril || '","role":"authenticated"}', true);
+  select id into strict v_duty_msg from messages
+   where author_id = auth.uid() and audience = 'duty';
+  perform set_config('request.jwt.claims',
+    '{"sub":"' || v_adam || '","role":"authenticated"}', true);
+  if (select count(*) from messages where id = v_duty_msg) <> 0
+     or (select count(*) from message_recipients where message_id = v_duty_msg) <> 0 then
+    raise exception 'FAIL: the admin reads a message between a player and the duty';
+  end if;
+  raise notice 'OK: recipient rows: a notice''s to its owner and the admin, a message''s to its author and recipients (0051)';
+end $$;
+
+-- 23o2, continued. The admin's view of a notice's rows is the role's, not
+-- the authorship's: Cyril, made an admin, sees every row of Adam's notice.
+reset role;
+update profiles set role = 'admin' where id = '51000000-0000-0000-0000-000000000012';
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"51000000-0000-0000-0000-000000000012","role":"authenticated"}'; -- Cyril, admin
+do $$
+begin
+  if (select string_agg(user_id::text, ',' order by user_id) from message_recipients
+       where message_id = current_setting('probe.msg_notice')::uuid)
+     is distinct from '51000000-0000-0000-0000-000000000011,'
+                      '51000000-0000-0000-0000-000000000012,'
+                      '51000000-0000-0000-0000-000000000013' then
+    raise exception 'FAIL: an admin who did not post the notice does not see who got it';
+  end if;
+  raise notice 'OK: any admin of the alley sees every row of a notice (0051)';
+end $$;
+reset role;
+update profiles set role = 'player' where id = '51000000-0000-0000-0000-000000000012';
+set local role authenticated;
+
 -- 23o, continued. The board is not recipient-based: Filip, approved only
 -- after the notice went out, has no recipient row on it and still reads
 -- it — the notice branch alone answers for him. Back to pending after.
@@ -9070,7 +9179,10 @@ set local role authenticated;
 
 -- 23o, continued. Both select policies lead with the alley, as every other
 -- policy does, so a player's unfiltered stream is an index scan of her own
--- alley and not a can_read_message call per row of the whole platform.
+-- alley and not a helper call per row of the whole platform. The recipient
+-- rows' policy is set-based: one visible_recipient_message_ids() per
+-- query, not a can_read_message call per row (~400 ms at 40 members × 100
+-- notices).
 do $$
 declare
   v_bad text;
@@ -9081,14 +9193,50 @@ begin
    where schemaname = 'public'
      and (tablename, policyname) in (('messages', 'messages_select'),
                                      ('message_recipients', 'message_recipients_select'))
-     and qual not like '(%(tenant_id = current_tenant_id()) AND can_read_message(%';
+     and qual !~ '^\(\(tenant_id = (\( SELECT )?current_tenant_id\(\)';
   if v_bad is not null
      or (select count(*) from pg_policies where schemaname = 'public'
           and policyname in ('messages_select', 'message_recipients_select')) <> 2 then
     raise exception 'FAIL: a 0051 select policy does not lead with the alley: %', v_bad;
   end if;
-  raise notice 'OK: the 0051 select policies lead with the alley (0051)';
+  select qual into v_bad from pg_policies
+   where schemaname = 'public' and tablename = 'message_recipients'
+     and policyname = 'message_recipients_select';
+  if v_bad not like '%visible_recipient_message_ids()%'
+     or v_bad like '%can_read_message%' then
+    raise exception 'FAIL: message_recipients_select is not set-based: %', v_bad;
+  end if;
+  raise notice 'OK: the 0051 select policies lead with the alley, the recipients'' is set-based (0051)';
 end $$;
+
+-- 23o, continued. messages_select is set-based too (one visible_message_ids()
+-- per query, ~13 ms → ~0.4 ms for a player's stream at 150 messages), and
+-- that set is exactly what can_read_message admits, for every account of
+-- every alley this file made (T's admin, duty, players, the kiosk, a
+-- placeholder, a pending account; S; the rest) and for no account at all.
+reset role;
+do $$
+declare
+  v_who uuid;
+  v_qual text;
+begin
+  select qual into v_qual from pg_policies
+   where schemaname = 'public' and tablename = 'messages' and policyname = 'messages_select';
+  if v_qual not like '%visible_message_ids()%' or v_qual like '%can_read_message%' then
+    raise exception 'FAIL: messages_select is not set-based: %', v_qual;
+  end if;
+  for v_who in select id from profiles
+               union all select '51000000-0000-0000-0000-0000000000ff'::uuid loop
+    perform set_config('request.jwt.claims',
+      '{"sub":"' || v_who || '","role":"authenticated"}', true);
+    if (select array_agg(id order by id) from messages where can_read_message(id))
+       is distinct from (select array_agg(v order by v) from visible_message_ids() v) then
+      raise exception 'FAIL: visible_message_ids and can_read_message disagree for %', v_who;
+    end if;
+  end loop;
+  raise notice 'OK: messages_select is set-based and admits exactly what can_read_message does (0051)';
+end $$;
+set local role authenticated;
 
 
 -- 23p. A recipient reacts on her own row only: 👍 stamps reacted_at and
@@ -9165,6 +9313,38 @@ begin
   end if;
   raise notice 'OK: reacted_at follows reaction/reply, cleared with both, not by a read (0051)';
 end $$;
+-- 23p, continued. A notice has no reactions: a 👍/👎 or a reply on a
+-- notice's row is not_allowed (the trigger, whatever the client); marking
+-- it read is fine.
+do $$
+declare
+  v_notice constant uuid := current_setting('probe.msg_notice')::uuid;
+  v_sql text;
+  v_n integer;
+begin
+  foreach v_sql in array array[
+      format('update message_recipients set reaction = %L
+               where message_id = %L and user_id = auth.uid()', 'up', v_notice),
+      format('update message_recipients set reply = %L
+               where message_id = %L and user_id = auth.uid()', 'Díky.', v_notice),
+      format('update message_recipients set read_at = now(), reaction = %L, reply = %L
+               where message_id = %L and user_id = auth.uid()', 'down', 'Ne.', v_notice)] loop
+    begin
+      execute v_sql;
+      raise exception 'FAIL: a notice took a reaction or a reply: %', v_sql;
+    exception when others then
+      if sqlerrm <> 'not_allowed' then raise; end if;
+    end;
+  end loop;
+  update message_recipients set read_at = now()
+   where message_id = v_notice and user_id = auth.uid();
+  get diagnostics v_n = row_count;
+  if v_n <> 1 or (select read_at from message_recipients
+                   where message_id = v_notice and user_id = auth.uid()) is null then
+    raise exception 'FAIL: reading a notice did not land';
+  end if;
+  raise notice 'OK: a notice takes no reaction or reply, only a read (0051)';
+end $$;
 
 
 -- 23q. Nothing else is writable: inserting or deleting on either table,
@@ -9207,7 +9387,9 @@ begin
 end $$;
 
 -- 23r. The RPCs are the app's and not anon's; prune_messages is the
--- server's alone; can_read_message is the policies' (authenticated).
+-- server's alone; can_read_message, visible_message_ids and
+-- visible_recipient_message_ids are the policies' (authenticated); the reacted_at trigger's function is
+-- nobody's to call.
 reset role;
 do $$
 declare
@@ -9217,7 +9399,9 @@ begin
       'message_send(text, text, date, uuid, text, text, timestamptz, boolean)',
       'message_update(uuid, text, text, timestamptz)',
       'message_delete(uuid)',
-      'can_read_message(uuid)'] loop
+      'can_read_message(uuid)',
+      'visible_message_ids()',
+      'visible_recipient_message_ids()'] loop
     if has_function_privilege('anon', 'public.' || v_f, 'execute') then
       raise exception 'FAIL: anon may execute %', v_f;
     end if;
@@ -9234,8 +9418,10 @@ begin
      or not has_function_privilege('service_role', 'public.prune_messages()', 'execute') then
     raise exception 'FAIL: prune_messages must be the service''s alone';
   end if;
-  foreach v_f in array array['is_on_duty()', 'duty_gate(date)'] loop
-    if has_function_privilege('authenticated', 'public.' || v_f, 'execute') then
+  foreach v_f in array array['is_on_duty()', 'duty_gate(date)',
+                              'message_recipients_stamp_reacted()'] loop
+    if has_function_privilege('authenticated', 'public.' || v_f, 'execute')
+       or has_function_privilege('anon', 'public.' || v_f, 'execute') then
       raise exception 'FAIL: 0051 opened % to the app', v_f;
     end if;
   end loop;
@@ -9284,6 +9470,18 @@ begin
     if sqlerrm <> 'title_required' then raise; end if;
   end;
   begin
+    perform message_update(v_notice, E'\n\t', 'Text.', null);
+    raise exception 'FAIL: a notice took a title of newlines and tabs';
+  exception when others then
+    if sqlerrm <> 'title_required' then raise; end if;
+  end;
+  begin
+    perform message_update(v_notice, 'Nadpis', E'\n\n\t', null);
+    raise exception 'FAIL: a notice took a body of newlines and tabs';
+  exception when others then
+    if sqlerrm <> 'body_required' then raise; end if;
+  end;
+  begin
     perform message_update(v_notice, 'Nadpis', repeat('a', 2001), null);
     raise exception 'FAIL: a notice went over 2000 characters';
   exception when others then
@@ -9302,7 +9500,7 @@ declare
   v_notice constant uuid := current_setting('probe.msg_notice')::uuid;
   v_row messages;
 begin
-  perform message_update(v_notice, ' Nové dráhy od úterý ', ' Posun o den. ',
+  perform message_update(v_notice, E' Nové dráhy od úterý\n', E'\n\t Posun o den. \r\n',
                          now() + interval '7 days');
   select * into v_row from messages where id = v_notice;
   if v_row.title <> 'Nové dráhy od úterý' or v_row.body <> 'Posun o den.'
@@ -9358,6 +9556,38 @@ begin
   end;
   raise notice 'OK: nobody but the author or the alley''s admin deletes (0051)';
 end $$;
+-- 23t, continued. The author's right needs the account still approved and
+-- not the kiosk, like every other right here: Cyril, back to pending or
+-- set as the kiosk, cannot delete his own message to the admins.
+reset role;
+update profiles set status = 'pending' where id = '51000000-0000-0000-0000-000000000012';
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"51000000-0000-0000-0000-000000000012","role":"authenticated"}'; -- Cyril, pending
+do $$
+begin
+  perform message_delete(current_setting('probe.msg_cyril_admins')::uuid);
+  raise exception 'FAIL: an author back to pending deleted his message';
+exception when others then
+  if sqlerrm <> 'not_allowed' then raise; end if;
+end $$;
+reset role;
+update profiles set status = 'approved', role = 'kiosk'
+ where id = '51000000-0000-0000-0000-000000000012';
+set local role authenticated;
+do $$
+begin
+  begin
+    perform message_delete(current_setting('probe.msg_cyril_admins')::uuid);
+    raise exception 'FAIL: an author set as the kiosk deleted his message';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  raise notice 'OK: an author back to pending or set as the kiosk deletes nothing (0051)';
+end $$;
+reset role;
+update profiles set role = 'player' where id = '51000000-0000-0000-0000-000000000012';
+set local role authenticated;
 set local request.jwt.claims =
   '{"sub":"51000000-0000-0000-0000-000000000012","role":"authenticated"}'; -- Cyril
 select message_delete(current_setting('probe.msg_cyril_admins')::uuid);

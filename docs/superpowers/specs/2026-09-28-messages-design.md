@@ -62,16 +62,20 @@ minutes late“ without hunting for a number. And the admin wants a place for la
    `team_colors` / `match_exceptions` pattern), so the app can apply them optimistically.
    Every other write goes through a security-definer RPC, and no table policy is widened for
    the duty — the 0050 rule.
-6. **A security-definer helper `can_read_message(id)` drives the read policies.** A policy
-   that queries its own table (recipients of the same message) ends in Postgres's „infinite
-   recursion detected in policy“; the helper reads past RLS. Accepted consequence: the same
-   policy governs `message_recipients_select`, so a participant in a `message` sees every
-   other participant's `read_at` as well as their reaction — Postgres RLS is row-level, not
-   column-level, so hiding `read_at` from non-admins while keeping reactions visible to
-   everyone would need a second table or a view; not worth it here, since `read_at` on a
-   `message` is never surfaced by any screen in this design (only a notice's admin-only „Kdo
-   si to zobrazil“ reads it, and that path is already admin-gated in the app). Document this
-   in the migration's comment on the policy rather than build the extra indirection.
+6. **Set-returning security-definer helpers drive the read policies.** A policy that
+   queries its own table (recipients of the same message) ends in Postgres's „infinite
+   recursion detected in policy“; a security-definer helper reads past RLS. The helpers
+   return the *set* of message ids the caller may see (`visible_message_ids()`,
+   `visible_recipient_message_ids()`), and each policy asks `id in (select …)` once per
+   query: a per-row helper cost ~400 ms for a player's stream of recipient rows at 40
+   members × 100 notices, the set ~0.7 ms (messages: ~13 ms → ~0.4 ms at 150 messages).
+   `can_read_message(id)` stays as the per-id form of the messages rule. Recipient rows are
+   narrower than messages: a notice's rows are its owner's and the admins' („Kdo si to
+   zobrazil“ — who has seen it is the admin's to know, not every member's); a `message`'s
+   rows are its author's and its recipients' (the reactions). A participant in a `message`
+   therefore also sees the others' `read_at` — RLS is row-level, not column-level, and
+   hiding `read_at` there would need a second table or a view; not worth it, since no screen
+   shows a message's reads.
 7. **Notices are kept, messages are pruned after 90 days.** The board's history is the point
    of the board; a message about a day is noise three months later.
 8. **Sorting follows the app rule:** chronological, past collapsed. Notices by posting date,
@@ -125,31 +129,44 @@ alley) is not a recipient.
 
 ### Rights (RLS and RPCs)
 
-- **Read.** `can_read_message(p_id uuid) returns boolean` — security definer, stable,
-  executable by `authenticated`: true when the message is in my alley and (it is a notice
-  and I am an approved non-kiosk player) or (I am its author) or (I have a recipient row).
-  - `messages_select`: `can_read_message(id)`.
-  - `message_recipients_select`: `can_read_message(message_id)` — so every participant sees
-    everyone's reactions.
+- **Read.** Nothing at all unless I am an approved non-kiosk member of the message's alley
+  (an account later set as the kiosk or back to pending loses what it once got). Security
+  definer, stable, executable by `authenticated`; both policies lead with
+  `tenant_id = (select current_tenant_id())`:
+  - `can_read_message(p_id uuid) returns boolean`: the message is in my alley and it is a
+    notice, or I am its author, or I have a recipient row. `visible_message_ids() returns
+    setof uuid` is the same rule as a set.
+  - `messages_select`: `id in (select visible_message_ids())` — a notice to every member, a
+    message to its author and its recipients.
+  - `message_recipients_select`: my own row, or `message_id in (select
+    visible_recipient_message_ids())`, which holds a notice for the alley's admins and a
+    `message` for its author and its recipients. So on a notice a player sees her own row
+    only and the admin sees every row („Kdo si to zobrazil“); on a `message` its author and
+    every recipient see everyone's reactions; a bystander sees none of them.
   - The kiosk reads nothing here.
-- **Own row.** `message_recipients_update_own`: `user_id = auth.uid()`; grants: `update
-  (read_at, reaction, reply)` to `authenticated` — the `profiles_update_own` pattern (own-row
+- **Own row.** `message_recipients_update_own`: `user_id = auth.uid()` while an approved
+  non-kiosk member; grants: `update (read_at, reaction, reply)` to `authenticated` — the `profiles_update_own` pattern (own-row
   UPDATE policy plus a column-scoped GRANT), not `team_colors`/`match_exceptions`, which are
   select-only for `authenticated` and never grant UPDATE at all. Nothing else is granted on
-  either table to `anon`/`authenticated` beyond `select`; `service_role` gets all.
+  either table to `anon`/`authenticated` beyond `select`; `service_role` gets all. A
+  notice's row takes a read only: the BEFORE UPDATE trigger answers a reaction or a reply
+  on it with `not_allowed` (notices have no reactions).
 - **`message_send(p_kind, p_audience, p_on_date, p_block_id, p_title, p_body, p_expires_at,
   p_notify) returns uuid`** — security definer:
   - `notice`: `is_admin()`.
   - `day` / `block`: `is_admin()`, or the duty via `duty_gate(p_on_date)` (on duty today, date
     from today on). `block_id` must be an active block of the alley (`unknown_block`).
   - `admins` / `duty`: any approved player with an account (admins too).
-  - Validates lengths (`body_too_long`, `title_required`), inserts the message and its
-    recipients in one transaction, returns the id.
+  - Trims the title and body of any whitespace (newlines and tabs too) and stores them so;
+    validates the trimmed values (`title_required`, `body_required`, `body_too_long`),
+    inserts the message and its recipients in one transaction, returns the id.
 - **`message_update(p_id, p_title, p_body, p_expires_at)`** — notices only, admin. There is no
   „leave unchanged“ sentinel: the form always sends its full current state, so `p_expires_at
   = null` always means „do odvolání“, never „don't touch this field“. „Sejmout“ is the same
-  RPC called with `p_expires_at = now()` and the title/body left as they were.
-- **`message_delete(p_id)`** — the author or an admin; hard delete, recipients cascade.
+  RPC called with `p_expires_at = now()` and the title/body left as they were. Title and
+  body trimmed and checked as in `message_send`.
+- **`message_delete(p_id)`** — the author or an admin, either while an approved non-kiosk
+  member (`not_allowed`); hard delete, recipients cascade.
 - **`prune_messages()`** — service role, daily pg_cron: deletes `kind = 'message'` rows whose
   key day (`on_date`, else `created_at` in Prague) is older than 90 days. Notices stay.
 - Every new function: `revoke all … from public, anon`, grant to who needs it; the server-only
@@ -353,8 +370,10 @@ through an edge function. Nothing in this design blocks it.
 - **SQL** (`supabase/tests/tenancy_rls.sql`): rights matrix (admin / duty today / duty on a
   past date / plain player / kiosk / other alley) for each audience; recipient sets for each
   audience with placeholders and the author excluded; `can_read_message` for author, recipient,
-  non-recipient, notice, other alley; only a recipient may react, only their own row, only the
-  granted columns; `reacted_at` trigger; `message_update` notice-only; `message_delete` by
+  non-recipient, notice, other alley; recipient rows (a notice: own row for a player, every
+  row for the admin; a message: every row for its author and recipients, none for a
+  bystander or another alley); only a recipient may react, only their own row, only the
+  granted columns, never on a notice; `reacted_at` trigger; `message_update` notice-only; `message_delete` by
   author/admin only; `prune_messages` keeps notices and recent messages; `v_streamed`.
 - **Deno**: `message_texts.ts` (titles, bodies, 120-char cut on a word, contexts); the token
   sign/verify round trip and tampering; the `react` function (valid → 303 ok=1 and the row
