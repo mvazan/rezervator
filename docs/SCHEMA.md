@@ -918,9 +918,8 @@ threads, no player-to-player messages. Every error is a bare code.
 - **Delivery.** `notify_messages` (after insert on `messages`) and
   `notify_message_reactions` (after update of `reaction`, `reply` on
   `message_recipients`) post the row to notify through `notify_webhook()`,
-  like every other row webhook. notify has no branch for these two tables
-  yet: its table switch has no default, so it answers 200 and sends
-  nothing.
+  like every other row webhook; notify fans the message out and tells the
+  author about a reaction (§Edge functions → notify).
 
 ## Edge functions
 
@@ -940,7 +939,20 @@ threads, no player-to-player messages. Every error is a bare code.
   reason „zrušil(a) X (služba na kantýně)“ instead of „zrušeno správcem“
   (the duty's day-level cancels are `'admin'` with a non-empty note);
   tenant
-  insert (pending) → superadmins. Channel: FCM push when the profile has an
+  insert (pending) → superadmins; a `messages` insert (0051) → every one of
+  its `message_recipients`, one at a time (Resend's rate limit), unless
+  `notify` is false — a notice: its title and the text cut to 120
+  characters, the e-mail „Otevřít nástěnku“; a message: „Zpráva od
+  správce“ / „Zpráva od služby“ (by `author_role`) to players, „Zpráva od
+  {jméno}“ to staff, the context („pá 2. 10. · 16:00–17:00“) on its own
+  line, the e-mail with signed one-click 👍/👎 links to **react**
+  (`signReactToken`, `CANCEL_TOKEN_SECRET`) and „Odpovědět v aplikaci“;
+  push kind `notice` / `message` + `message_id`; a `message_recipients`
+  update of `reaction` / `reply` (0051) → the message's author, „Reakce na
+  tvou zprávu“ / „Petr Novák: 👍 Přijdu dřív.“, push kind
+  `message_reaction` — only when a reaction or a non-blank reply is new,
+  never on a clear (whole or half), never for a notice.
+  Channel: FCM push when the profile has an
   `fcm_token` and `FIREBASE_SERVICE_ACCOUNT` is set, otherwise Resend
   e-mail. Fails closed on a missing `WEBHOOK_SECRET` (401) or
   `CANCEL_TOKEN_SECRET` (500). Since 0023 it also takes the cron tick

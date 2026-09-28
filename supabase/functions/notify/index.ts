@@ -21,6 +21,11 @@
 //   INSERT/UPDATE player_group_members -> player-group notifications (0044):
 //                           an invite (to the invitee), and a new member
 //                           joining (to the rest of the group)
+//   INSERT messages       -> a new notice or message (0051) fans out to its
+//                           already-materialised recipients, unless
+//                           notify = false
+//   UPDATE message_recipients (reaction/reply) -> notifies the message's
+//                           author, unless it was cleared
 //   CRON notification_jobs -> deferred jobs (0023): Google Calendar sync —
 //                           the one branch that talks to the Calendar API
 //                           instead of FCM/Resend. Posted by the minutely
@@ -62,6 +67,15 @@ import {
   groupInviteMessage,
   groupJoinedMessage,
 } from "../_shared/group_messages.ts";
+import { signReactToken } from "../_shared/react_token.ts";
+import {
+  deliverMessage,
+  deliverReaction,
+  type MessageRecipientRow,
+  type MessageRow,
+  reactionChange,
+} from "../_shared/message_notify.ts";
+import { messageContext } from "../_shared/message_texts.ts";
 import {
   clearSecondaryCalendar,
   deleteEvent,
@@ -827,6 +841,87 @@ async function handle(payload: WebhookPayload) {
           }
         }
       }
+      return;
+    }
+
+    case "messages": {
+      // A new notice or message (0051): message_send inserted its
+      // recipients in the same transaction, and pg_net posts only after
+      // the commit, so they are all there by now.
+      if (payload.type !== "INSERT") return;
+      const message = record as unknown as MessageRow;
+      if (!message.notify) return;
+      const author = await profileOf(message.author_id);
+      let recipientIds: string[] = [];
+      {
+        const { data } = await supabase.from("message_recipients")
+          .select("user_id").eq("message_id", message.id);
+        recipientIds = (data ?? []).map((r) => r.user_id as string);
+      }
+      if (recipientIds.length === 0) return;
+      const { data: recipients } = await supabase.from("profiles")
+        .select("id, email, fcm_token").in("id", recipientIds);
+      let blockTimes: { starts_at: string; ends_at: string } | null = null;
+      if (message.block_id) {
+        const { data: block } = await supabase.from("time_blocks")
+          .select("starts_at, ends_at").eq("id", message.block_id).maybeSingle();
+        blockTimes = block as { starts_at: string; ends_at: string } | null;
+      }
+      const context = messageContext({
+        audience: message.audience,
+        onDate: message.on_date,
+        blockStart: blockTimes?.starts_at ?? null,
+        blockEnd: blockTimes?.ends_at ?? null,
+      });
+      const cancelSecret = Deno.env.get("CANCEL_TOKEN_SECRET");
+      await deliverMessage(
+        message,
+        {
+          authorName: author?.display_name ?? "?",
+          authorIsAdmin: message.author_role === "admin",
+          context,
+        },
+        (recipients ?? []) as Recipient[],
+        {
+          send: (r, title, body, opts) => notifyRecipient(r, title, body, opts),
+          reactLink: async (userId, reaction) => {
+            if (!cancelSecret) throw new Error("CANCEL_TOKEN_SECRET is not set");
+            const token = await signReactToken(
+              { m: message.id, u: userId, r: reaction },
+              cancelSecret,
+            );
+            return `${Deno.env.get("SUPABASE_URL")}/functions/v1/react?t=${token}`;
+          },
+        },
+      );
+      return;
+    }
+
+    case "message_recipients": {
+      // A recipient's 👍/👎 or reply (0051) → the message's author. The
+      // trigger fires only on an UPDATE OF reaction, reply; a clear (whole
+      // or half) is filtered out by reactionChange.
+      if (payload.type !== "UPDATE") return;
+      const row = record as unknown as MessageRecipientRow;
+      const old = (payload.old_record ?? {}) as Partial<MessageRecipientRow>;
+      const changed = reactionChange(old, row);
+      if (!changed) return;
+      const { data: messageData } = await supabase.from("messages")
+        .select(
+          "id, tenant_id, kind, audience, author_id, author_role, on_date, block_id, title, body, notify",
+        )
+        .eq("id", row.message_id).maybeSingle();
+      if (!messageData) return;
+      const [author, reactor] = await Promise.all([
+        profileOf(messageData.author_id),
+        profileOf(row.user_id),
+      ]);
+      await deliverReaction(
+        row,
+        changed,
+        { message: messageData as MessageRow, author, reactorName: reactor?.display_name ?? "?" },
+        (r, title, body, opts) => notifyRecipient(r, title, body, opts),
+      );
       return;
     }
   }
