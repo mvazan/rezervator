@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -25,7 +27,12 @@ import 'week_screen.dart';
 /// week/day position — the hidden views keep rebuilding on the minute tick,
 /// which is cheap enough to leave running offstage.
 class HomeShell extends ConsumerStatefulWidget {
-  const HomeShell({super.key});
+  const HomeShell({super.key, this.messageExists = Api.messageExists});
+
+  /// Asks the server whether a deep-linked id still exists (RLS-scoped);
+  /// throws when offline. Handed on to [MessageDetailScreen], and asked
+  /// for a notice link whose loaded snapshot lacks the id.
+  final Future<bool> Function(String id) messageExists;
 
   @override
   ConsumerState<HomeShell> createState() => _HomeShellState();
@@ -85,25 +92,36 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     switch (link.kind) {
       case PendingLinkKind.message:
         navigator.push(MaterialPageRoute<void>(
-            builder: (_) => MessageDetailScreen(link.id)));
+            builder: (_) => MessageDetailScreen(link.id,
+                messageExists: widget.messageExists)));
       case PendingLinkKind.notice:
         // Notices have no per-item page: the board is the detail, since
         // every player sees every notice there.
         navigator.push(MaterialPageRoute<void>(
             builder: (_) => const NoticeBoardScreen()));
-        _snackIfNoticeGone(link.id);
+        unawaited(_snackIfNoticeGone(link.id));
     }
   }
 
-  /// Spec: an unknown or deleted id → a snack. Waits for the first
-  /// messages snapshot so a slow load is not mistaken for "gone".
+  /// Spec: an unknown or deleted id → a snack. A loaded snapshot without
+  /// the id proves nothing by itself — cachedRows replays the cache first
+  /// on a cold start, a warm tap finds the pre-background list, and the
+  /// notice a push was sent for is usually newer than either — so, as
+  /// `MessageDetailScreen._checkGone` does, the server is asked and only
+  /// its "no" makes the snack. Anything unanswerable (no cache and no
+  /// network, offline) stays silent: the board shows what it has.
   Future<void> _snackIfNoticeGone(String id) async {
-    final messages = await ref.read(messagesProvider.future);
-    if (!mounted) return;
-    if (!messages.any((m) => m.id == id)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Zpráva už neexistuje.')));
+    final messageExists = widget.messageExists;
+    try {
+      final messages = await ref.read(messagesProvider.future);
+      if (messages.any((m) => m.id == id)) return;
+      if (!mounted || await messageExists(id)) return;
+    } catch (_) {
+      return;
     }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Zpráva už neexistuje.')));
   }
 
   /// Superadmin's way back from a foreign kuželna (0015): switch the

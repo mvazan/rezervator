@@ -103,6 +103,10 @@ void main() {
     List<Message> messages = const [],
     List<MessageRecipient> messageRecipients = const [],
     PendingLink? pendingLink,
+    // A factory, not a stream: Riverpod retries a failed provider and
+    // would listen to a single-subscription stream twice.
+    Stream<List<Message>> Function()? messagesStream,
+    Future<bool> Function(String id)? messageExists,
   }) =>
       ProviderScope(
         overrides: [
@@ -117,7 +121,9 @@ void main() {
             (ref, id) => Stream.value(const []),
           ),
           // The Klubovna dot (unreadCountsProvider) reads these.
-          messagesProvider.overrideWith((ref) => Stream.value(messages)),
+          messagesProvider.overrideWith(
+            (ref) => messagesStream?.call() ?? Stream.value(messages),
+          ),
           myMessageRecipientsProvider.overrideWith(
             (ref) => Stream.value(messageRecipients),
           ),
@@ -143,7 +149,11 @@ void main() {
             (ref) => Stream.value(const []),
           ),
         ],
-        child: const MaterialApp(home: HomeShell()),
+        child: MaterialApp(
+          home: messageExists == null
+              ? const HomeShell()
+              : HomeShell(messageExists: messageExists),
+        ),
       );
 
   testWidgets('AppBar has no logout icon; profile icon is the entry point', (
@@ -822,25 +832,94 @@ void main() {
       expect(find.byType(MessageDetailScreen), findsNothing);
     });
 
-    testWidgets('a notice link opens the board; an unknown notice id adds a '
-        'snack', (tester) async {
+    const noticeLink = PendingLink(kind: PendingLinkKind.notice, id: 'n1');
+
+    testWidgets('a notice link opens the board; a notice the server calls '
+        'gone adds a snack', (tester) async {
+      final asked = <String>[];
       await tester.pumpWidget(app(
-        pendingLink: const PendingLink(kind: PendingLinkKind.notice, id: 'gone'),
+        pendingLink: noticeLink,
+        messageExists: (id) async {
+          asked.add(id);
+          return false;
+        },
       ));
       await tester.pumpAndSettle();
       expect(find.byType(NoticeBoardScreen), findsOneWidget);
       expect(find.text('Zpráva už neexistuje.'), findsOneWidget);
+      expect(asked, ['n1']);
     });
 
-    testWidgets('…and a known notice id opens the board without one',
-        (tester) async {
+    testWidgets('…and a notice already in the snapshot opens the board '
+        'without one, and without asking the server', (tester) async {
+      final asked = <String>[];
       await tester.pumpWidget(app(
         messages: [msg('n1', kind: MessageKind.notice)],
-        pendingLink: const PendingLink(kind: PendingLinkKind.notice, id: 'n1'),
+        pendingLink: noticeLink,
+        messageExists: (id) async {
+          asked.add(id);
+          return false;
+        },
       ));
       await tester.pumpAndSettle();
       expect(find.byType(NoticeBoardScreen), findsOneWidget);
       expect(find.text('Zpráva už neexistuje.'), findsNothing);
+      expect(asked, isEmpty);
+    });
+
+    // cachedRows replays the on-disk cache first (cold start), and a warm
+    // tap finds the pre-background list: either way the notice the push
+    // announced is usually newer than the first snapshot.
+    testWidgets('a stale first snapshot without the notice is no proof: the '
+        'server says it exists, so no snack once the live list has it',
+        (tester) async {
+      final asked = <String>[];
+      Stream<List<Message>> staleThenLive() async* {
+        yield const [];
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+        yield [msg('n1', kind: MessageKind.notice)];
+      }
+
+      await tester.pumpWidget(app(
+        messagesStream: staleThenLive,
+        pendingLink: noticeLink,
+        messageExists: (id) async {
+          asked.add(id);
+          return true;
+        },
+      ));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pumpAndSettle();
+      expect(find.byType(NoticeBoardScreen), findsOneWidget);
+      expect(find.text('Úklid'), findsOneWidget);
+      expect(find.text('Zpráva už neexistuje.'), findsNothing);
+      expect(asked, ['n1']);
+    });
+
+    testWidgets('offline (the server cannot be asked): no snack, no error',
+        (tester) async {
+      await tester.pumpWidget(app(
+        pendingLink: noticeLink,
+        messageExists: (_) async => throw Exception('offline'),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.byType(NoticeBoardScreen), findsOneWidget);
+      expect(find.text('Zpráva už neexistuje.'), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('no cache and no network (the messages stream fails): no '
+        'snack and no uncaught error', (tester) async {
+      await tester.pumpWidget(app(
+        messagesStream: () => Stream.error(Exception('offline')),
+        pendingLink: noticeLink,
+        messageExists: (_) async => throw Exception('offline'),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.byType(NoticeBoardScreen), findsOneWidget);
+      expect(find.text('Zpráva už neexistuje.'), findsNothing);
+      expect(tester.takeException(), isNull);
     });
   });
 }
