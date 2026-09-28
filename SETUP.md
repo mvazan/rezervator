@@ -178,7 +178,9 @@ Fázi 4). Push notifikace zatím spí, viz poznámka na konci.
    špatným hlavičkovým tokenem a ta ho odmítne (401). `CANCEL_TOKEN_SECRET` je
    nový, nezávislý řetězec — používá se jen k podepisování odkazů v e-mailech:
    na zrušení rezervace a na 👍/👎 reakci na zprávu (bez něj funkce `cancel`
-   a `react` odpovídají 500 a `notify` neposílá kioskové e-maily).
+   a `react` odpovídají 500 a `notify` neposílá kioskové e-maily ani žádnou
+   zprávu ze Zpráv – bez podpisu nesestaví odkazy 👍/👎, takže zpráva
+   neodejde nikomu, pushem ani e-mailem; oznámení na nástěnce chodí dál).
 4. Nasaď všechny tři funkce:
    ```bash
    supabase functions deploy notify --no-verify-jwt

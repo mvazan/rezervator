@@ -973,18 +973,29 @@ threads, no player-to-player messages. Every error is a bare code.
   insert (pending) → superadmins; a `messages` insert (0051) → every one of
   its `message_recipients` — pushes one at a time, e-mails as Resend
   `/emails/batch` requests of up to 100 (one request, not one per
-  recipient: Resend's per-second rate limit; a batch answered 429/5xx is
-  tried once more a second later) — unless `notify` is false — a notice: its title and the text cut to 120
+  recipient: Resend's per-second rate limit; each under the
+  `Idempotency-Key` `message/<id>/<n>`, so a batch answered 429/5xx, tried
+  once more a second later under the same key, is never sent twice; a
+  batch refused as invalid — 400/422, Resend's strict validation fails all
+  of it over one bad address — goes out one by one, 500 ms apart, each
+  under `message/<id>/<n>/<j>`; `_shared/resend.ts`) — unless `notify` is
+  false; a failed load of the recipients is logged and answers 500
+  instead of sending nothing — a notice: its title and the text cut to 120
   characters, the e-mail „Otevřít nástěnku“; a message: „Zpráva od
   správce“ / „Zpráva od služby“ (by `author_role`) to players, „Zpráva od
   {jméno}“ to staff, the context („pá 2. 10. · 16:00–17:00“) on its own
   line, the e-mail with signed one-click 👍/👎 links to **react**
   (`signReactToken`, `CANCEL_TOKEN_SECRET`) and „Odpovědět v aplikaci“;
-  push kind `notice` / `message` + `message_id`; a `message_recipients`
+  push data `{kind: notice | message, message_id, tenant_id}` (the alley,
+  for the app's deep-link guard); a `message_recipients`
   update of `reaction` / `reply` (0051) → the message's author, „Reakce na
-  tvou zprávu“ / „Petr Novák: 👍 Přijdu dřív.“, push kind
-  `message_reaction` — only when a reaction or a non-blank reply is new,
-  never on a clear (whole or half), never for a notice.
+  tvou zprávu“ / „Petr Novák: 👍 Přijdu dřív.“, push data `{kind:
+  message_reaction, message_id, tenant_id}` — only when a reaction or a
+  non-blank reply is new, never on a clear (whole or half), never for a
+  notice, and never to an author who may no longer read the message (set
+  as the kiosk, back to pending or moved to another alley:
+  `_shared/membership.ts`'s `isMemberOf`, the rule react's `mayReact`
+  applies — the service role bypasses the RLS that says it).
   Channel: FCM push when the profile has an
   `fcm_token` and `FIREBASE_SERVICE_ACCOUNT` is set, otherwise Resend
   e-mail. Fails closed on a missing `WEBHOOK_SECRET` (401) or
@@ -1025,7 +1036,10 @@ threads, no player-to-player messages. Every error is a bare code.
   error → `?ok=0`. A database error and a missing `CANCEL_TOKEN_SECRET`
   (500) are logged with `console.error`, as in cancel. One click, no
   confirm page (unlike cancel): a reaction is harmless and reversible in
-  the app. Logic in `_shared/react_handler.ts`.
+  the app. Only GET writes: HEAD (what a link scanner or mail gateway
+  probes with) answers the same 303 as far as the token tells and never
+  touches the database; any other method → 405 (`Allow: GET, HEAD`).
+  Logic in `_shared/react_handler.ts`.
 
 ## Prod vs git
 

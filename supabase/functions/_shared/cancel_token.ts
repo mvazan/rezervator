@@ -15,6 +15,9 @@ export function base64urlDecode(value: string): Uint8Array<ArrayBuffer> {
   return Uint8Array.from(atob(padded), (c) => c.charCodeAt(0));
 }
 
+/// The HMAC-SHA256 key for [secret] (CANCEL_TOKEN_SECRET): signs and
+/// verifies both the kiosk cancel tokens here and the message reaction
+/// tokens (react_token.ts).
 export async function hmacKey(secret: string): Promise<CryptoKey> {
   return await crypto.subtle.importKey(
     "raw",
