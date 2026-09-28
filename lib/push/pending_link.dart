@@ -103,7 +103,8 @@ class _DeepLinkSeedState extends ConsumerState<DeepLinkSeed> {
   // go_router keys a GoRoute's page by its pattern (/zpravy/:id), so a
   // move from /zpravy/A to /zpravy/B in the same tab (a second e-mail
   // link, browser back/forward) keeps this State: initState does not run
-  // again. An equal link (a plain rebuild) must not reopen it.
+  // again. An equal link (a query-only change of the same location, which
+  // rebuilds the page) must not reopen a link HomeShell already cleared.
   @override
   void didUpdateWidget(DeepLinkSeed oldWidget) {
     super.didUpdateWidget(oldWidget);

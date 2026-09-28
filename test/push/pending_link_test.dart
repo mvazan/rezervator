@@ -118,9 +118,14 @@ void main() {
       final container = ProviderScope.containerOf(
           tester.element(find.text('seed A')));
       container.read(pendingLinkProvider.notifier).clear();
-      // ... and a later refresh of the same location must not reopen it.
-      router.refresh();
+      // ... and a query-only change of the same location (e.g. a tracking
+      // parameter) rebuilds the page with an equal, non-identical link:
+      // didUpdateWidget runs and must not reopen it. (router.refresh()
+      // would not do: an equal match list keeps the cached pages, so the
+      // builder never runs and the guard is never reached.)
+      router.go('/zpravy/A?utm=mail');
       await tester.pumpAndSettle();
+      expect(find.text('seed A'), findsOneWidget);
       expect(seen, [
         const PendingLink(kind: PendingLinkKind.message, id: 'A'),
         null,
