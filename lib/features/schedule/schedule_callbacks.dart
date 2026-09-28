@@ -65,6 +65,8 @@ class CalendarAdminHooks {
     this.onMovePrioritySlot,
     this.onCloseDay,
     this.onRestoreDay,
+    this.onMessageDay,
+    this.onMessageBlock,
     this.hasDayOverride = _noOverride,
   });
 
@@ -104,6 +106,14 @@ class CalendarAdminHooks {
   /// The portrait day menu's „Obnovit týdenní rozvrh“: drop the day's
   /// override — offered only where [hasDayOverride] says there is one.
   final void Function(Day date)? onRestoreDay;
+
+  /// The portrait day menu's „Napsat hráčům dne…“ (0051, admin and duty):
+  /// the staff composer with [date] prefilled.
+  final void Function(Day date)? onMessageDay;
+
+  /// The block dialog's „Napsat hráčům bloku…“ (0051, admin and duty): the
+  /// staff composer with [date] and [block] prefilled.
+  final void Function(Day date, TimeBlock block)? onMessageBlock;
 
   /// Whether [date] has an override row to restore from.
   final bool Function(Day date) hasDayOverride;

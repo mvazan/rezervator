@@ -282,6 +282,61 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  /// [pickFromMenu] up to the open ⋮ menu, without picking anything.
+  Future<void> openMenu(WidgetTester tester) async {
+    tester.view.physicalSize = const Size(900, 1600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find
+          .descendant(
+            of: find.byType(DayChipStrip),
+            matching: find.byType(InkWell),
+          )
+          .at(t.weekday),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.more_vert));
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('the duty gets „Napsat hráčům dne…“ in the portrait ⋮ menu', (
+    tester,
+  ) async {
+    await tester.pumpWidget(app());
+    await openMenu(tester);
+    expect(find.text('Napsat hráčům dne…'), findsOneWidget);
+  });
+
+  testWidgets('a plain player off duty has no ⋮ at all', (tester) async {
+    // A profile the fixture's assignment does not name → not on duty.
+    const other = Profile(
+      id: 'other',
+      displayName: 'Ota Hráč',
+      email: 'ota@example.com',
+      role: Role.player,
+      status: ProfileStatus.approved,
+    );
+    await tester.pumpWidget(app(profile: other));
+    tester.view.physicalSize = const Size(900, 1600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find
+          .descendant(
+            of: find.byType(DayChipStrip),
+            matching: find.byType(InkWell),
+          )
+          .at(t.weekday),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.more_vert), findsNothing);
+  });
+
   testWidgets('⋮ „Zavřít den…“: a refusal says the duty ended', (tester) async {
     await tester.pumpWidget(app());
     await pickFromMenu(tester, 'Zavřít den…');

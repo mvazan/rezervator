@@ -18,6 +18,8 @@ import '../admin/widgets/notify_choice_dialog.dart';
 import '../admin/widgets/rental_date_dialog.dart';
 import '../admin/widgets/rental_dialog.dart';
 import '../admin/widgets/rental_occurrence_dialog.dart';
+import '../clubhouse/widgets/message_composers.dart'
+    show dutyReachableToday, showStaffComposer;
 import 'cancel_own_reservation.dart';
 import 'schedule_callbacks.dart';
 import 'widgets/group_booking_dialog.dart';
@@ -60,7 +62,8 @@ class ScheduleActions {
   /// re-checks `context.mounted` after an await.
   final BuildContext context;
 
-  /// Reads the player roster for the admin booking dialog.
+  /// Reads the player roster for the admin booking dialog, and opens the
+  /// message composers (0051).
   final WidgetRef ref;
 
   final WeekSchedule week;
@@ -159,6 +162,8 @@ class ScheduleActions {
         onMovePrioritySlot: onMovePrioritySlot,
         onCloseDay: onCloseDay,
         onRestoreDay: onRestoreDay,
+        onMessageDay: onMessageDay,
+        onMessageBlock: onMessageBlock,
         hasDayOverride: (date) => _overrideByDate[date] != null,
       );
 
@@ -213,6 +218,13 @@ class ScheduleActions {
   /// weekly rules — the same flows as the day-mode block dialog.
   void Function(Day)? get onCloseDay => canEditBlocks ? _closeDay : null;
   void Function(Day)? get onRestoreDay => canEditBlocks ? _restoreDay : null;
+
+  /// „Napsat hráčům dne…“ / „Napsat hráčům bloku…“ (0051): the staff
+  /// composer, under the same gate as the other day rights (the admin, or
+  /// the duty — the menu itself hides past days).
+  void Function(Day)? get onMessageDay => canEditBlocks ? _messageDay : null;
+  void Function(Day, TimeBlock)? get onMessageBlock =>
+      canEditBlocks ? _messageBlock : null;
 
   Future<void> _book(
     Day date,
@@ -293,9 +305,11 @@ class ScheduleActions {
     if (ownFuture) {
       await confirmCancelOwnReservation(
         context,
+        ref: ref,
         reservation: r,
         block: block,
         cancel: (id) => Api.cancelReservation(id),
+        dutyServesToday: dutyReachableToday(ref),
       );
       return;
     }
@@ -449,6 +463,9 @@ class ScheduleActions {
         dayIsTraining: settings.trainingWeekdays.contains(date.weekday),
         dayPriority: week.days[date.weekday - 1].priority,
         dayReason: _overrideByDate[date]?.reason ?? '',
+        // The dialog closes first: the composer opens over the calendar.
+        offerMessageBlock: true,
+        onMessagePlayers: () => _messageBlock(date, block),
         wasOnDuty: _asDuty,
         dutyClock: _dutyClockOn(date),
       ),
@@ -522,6 +539,14 @@ class ScheduleActions {
       errorText: _errorText,
       dutyClock: _dutyClockOn(date),
     );
+  }
+
+  void _messageDay(Day date) {
+    showStaffComposer(context, ref, date: date);
+  }
+
+  void _messageBlock(Day date, TimeBlock block) {
+    showStaffComposer(context, ref, date: date, blockId: block.id);
   }
 
   void _editPrioritySlot(Day date, PrioritySlot slot) {

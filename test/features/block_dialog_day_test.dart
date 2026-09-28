@@ -611,6 +611,37 @@ void main() {
     expect(find.byType(BlockDialog), findsOneWidget);
   });
 
+  testWidgets('„Napsat hráčům bloku…“ shows only when editing an existing '
+      'block, and calls back', (tester) async {
+    var messaged = false;
+    await tester.pumpWidget(app(BlockDialog(
+      existing: b1,
+      blocks: const [b1, b2],
+      dayContext: thursday,
+      dayBaseIds: const ['b1', 'b2'],
+      offerMessageBlock: true,
+      onMessagePlayers: () => messaged = true,
+    )));
+    await tester.pumpAndSettle();
+    expect(find.text('Napsat hráčům bloku…'), findsOneWidget);
+    await tester.tap(find.text('Napsat hráčům bloku…'));
+    expect(messaged, true);
+  });
+
+  testWidgets('a NEW block from the header ＋ never offers „Napsat hráčům '
+      'bloku…“', (tester) async {
+    await tester.pumpWidget(app(BlockDialog(
+      existing: null,
+      blocks: const [b1, b2],
+      dayContext: thursday,
+      dayBaseIds: const ['b1', 'b2'],
+      offerMessageBlock: true,
+      onMessagePlayers: () {},
+    )));
+    await tester.pumpAndSettle();
+    expect(find.text('Napsat hráčům bloku…'), findsNothing);
+  });
+
   // The player on duty editing TODAY (0050): the calendar passes its
   // clock; b1 (16:00) has started by 16:30, b2 (17:00) has not.
   group('the duty on today: blocks already under way (0050)', () {

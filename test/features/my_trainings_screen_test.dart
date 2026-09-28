@@ -36,6 +36,11 @@ void main() {
     role: Role.player,
     status: ProfileStatus.approved,
   );
+  // The roster: „Bára“ is the duty some tests assign, with an account.
+  const players = [
+    PlayerName(id: 'me', displayName: 'Já Hráč'),
+    PlayerName(id: 'bara', displayName: 'Bára Služba'),
+  ];
   Reservation res(String id, Day date) => Reservation(
     id: id,
     playerId: 'me',
@@ -72,6 +77,8 @@ void main() {
     DateTime? nowOverride,
     Map<String, bool> exceptions = const {},
     Map<String, MatchResult> results = const {},
+    List<DutyPeriod> dutyPeriods = const [],
+    List<DutyAssignment> dutyAssignments = const [],
   }) {
     return ProviderScope(
       overrides: [
@@ -100,6 +107,13 @@ void main() {
           (ref, id) => Stream.value(const []),
         ),
         venuesProvider.overrideWith((ref) => Stream.value(const [])),
+        // The cancel dialog's „Napsat službě…“ (dutyReachableToday) and the
+        // player composer it opens read the duty and the roster.
+        dutyPeriodsProvider.overrideWith((ref) => Stream.value(dutyPeriods)),
+        dutyAssignmentsProvider.overrideWith(
+          (ref) => Stream.value(dutyAssignments),
+        ),
+        playersProvider.overrideWith((ref) async => players),
         myCalendarLinkProvider.overrideWith(
           (ref) => Stream.value(
             trainingColorId == null
@@ -111,12 +125,21 @@ void main() {
           ),
         ),
       ],
-      child: MaterialApp(
-        home: Scaffold(
-          body: MyTrainingsScreen(
-            onOpenCalendar: onOpenCalendar ?? () {},
-            cancelReservation:
-                cancel ?? (_) async => throw StateError('unexpected'),
+      // The home shell keeps the duty streams alive (myDutyProvider) in the
+      // app; the cancel dialog only reads them once (dutyReachableToday), so
+      // here a stand-in watches them the same way.
+      child: Consumer(
+        builder: (context, ref, child) {
+          ref.watch(myDutyProvider);
+          return child!;
+        },
+        child: MaterialApp(
+          home: Scaffold(
+            body: MyTrainingsScreen(
+              onOpenCalendar: onOpenCalendar ?? () {},
+              cancelReservation:
+                  cancel ?? (_) async => throw StateError('unexpected'),
+            ),
           ),
         ),
       ),
@@ -600,6 +623,50 @@ void main() {
 
     expect(cancelled, ['r1']);
     expect(find.text('Rezervace zrušena.'), findsOneWidget);
+  });
+
+  testWidgets('the cancel dialog offers „Napsat správci…“, and „Napsat '
+      'službě…“ only when someone else serves today', (tester) async {
+    await tester.pumpWidget(app(reservations: [res('r1', today.addDays(1))]));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('18:00–19:00 · Dráha 2'));
+    await tester.pumpAndSettle();
+    expect(find.text('Zrušit rezervaci?'), findsOneWidget);
+    expect(find.text('Napsat správci…'), findsOneWidget);
+    expect(find.text('Napsat službě…'), findsNothing);
+    await tester.tap(find.text('Zpět'));
+    await tester.pumpAndSettle();
+
+    // A fresh ProviderScope: a stream override's new value never reaches
+    // a provider the old scope has already built.
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpWidget(
+      app(
+        reservations: [res('r1', today.addDays(1))],
+        dutyPeriods: [
+          DutyPeriod(id: 'd1', startsOn: today, endsOn: today.addDays(6)),
+        ],
+        dutyAssignments: const [DutyAssignment(periodId: 'd1', userId: 'bara')],
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('18:00–19:00 · Dráha 2'));
+    await tester.pumpAndSettle();
+    expect(find.text('Napsat službě…'), findsOneWidget);
+  });
+
+  testWidgets('„Napsat správci…“ closes the dialog and opens the composer', (
+    tester,
+  ) async {
+    await tester.pumpWidget(app(reservations: [res('r1', today.addDays(1))]));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('18:00–19:00 · Dráha 2'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Napsat správci…'));
+    await tester.pumpAndSettle();
+    expect(find.text('Zrušit rezervaci?'), findsNothing);
+    expect(find.text('Správci'), findsOneWidget); // the player composer sheet
+    expect(find.textContaining('K tréninku'), findsOneWidget);
   });
 
   testWidgets('a training whose block already started today offers no '

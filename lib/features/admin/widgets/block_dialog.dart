@@ -69,6 +69,8 @@ class BlockDialog extends StatefulWidget {
     this.dayReason = '',
     this.noAccountIds = const <String>{},
     this.offerCloseDay = false,
+    this.offerMessageBlock = false,
+    this.onMessagePlayers,
     this.wasOnDuty = false,
     this.dutyClock,
   });
@@ -119,6 +121,16 @@ class BlockDialog extends StatefulWidget {
   /// Day-scoped mode, a NEW block from the header ＋ on an open day: also
   /// offer „Zavřít den“ (0050 — the admin and the player on duty).
   final bool offerCloseDay;
+
+  /// Day-scoped mode, editing an EXISTING block: also offer „Napsat
+  /// hráčům bloku…“ (0051 — the admin and the player on duty). Never
+  /// offered for a brand-new block (there is nobody booked into it yet).
+  final bool offerMessageBlock;
+
+  /// Called when „Napsat hráčům bloku…“ is tapped, after this dialog has
+  /// closed — the caller opens the staff composer prefilled with this
+  /// block; this dialog does not know about composers itself.
+  final VoidCallback? onMessagePlayers;
 
   /// Opened by the player on canteen duty (0050): a `not_allowed` refusal
   /// then means the duty has just ended, and says so.
@@ -653,6 +665,9 @@ class _BlockDialogState extends State<BlockDialog> {
     final dayLabelSuffix =
         _dayMode ? ' — jen ${dayLabel(widget.dayContext!)}' : '';
     return AlertDialog(
+      // Up to five actions stack on a narrow screen: on a landscape phone
+      // the times scroll instead of overflowing.
+      scrollable: true,
       title: Text(widget.existing == null
           ? 'Nový blok$dayLabelSuffix'
           : 'Upravit blok$dayLabelSuffix'),
@@ -684,6 +699,16 @@ class _BlockDialogState extends State<BlockDialog> {
           TextButton(
             onPressed: _saving ? null : _restoreTemplate,
             child: const Text('Obnovit týdenní rozvrh'),
+          ),
+        if (_dayMode && widget.existing != null && widget.offerMessageBlock)
+          TextButton(
+            onPressed: _saving || widget.onMessagePlayers == null
+                ? null
+                : () {
+                    closeDialog(context);
+                    widget.onMessagePlayers!();
+                  },
+            child: const Text('Napsat hráčům bloku…'),
           ),
         if (widget.existing != null && _dayMode)
           TextButton(
