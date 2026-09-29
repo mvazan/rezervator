@@ -538,15 +538,15 @@ void main() {
     expect(find.byIcon(Icons.play_circle_fill), findsOneWidget);
     expect(find.byIcon(Icons.open_in_new), findsOneWidget);
 
-    // Na webu ČKA sits at the right of the Souboje | Zápis switch, on its
-    // row; the video button keeps its own line above.
+    // Na webu ČKA sits at the right of the „Výsledky z webu“ line, on its
+    // row; the video button keeps its own line below.
     final site = tester.getRect(find.text('Na webu ČKA'));
-    final switchRect = tester.getRect(find.byType(SegmentedButton<MatchDetailView>));
-    expect((site.center.dy - switchRect.center.dy).abs(), lessThan(8));
-    expect(site.left, greaterThan(switchRect.right));
+    final fresh = tester.getRect(find.textContaining('Výsledky z webu'));
+    expect((site.center.dy - fresh.center.dy).abs(), lessThan(12));
+    expect(site.left, greaterThan(fresh.right));
     expect(
       tester.getRect(find.text('Záznam')).center.dy,
-      lessThan(switchRect.top),
+      greaterThan(site.bottom),
     );
   });
 
@@ -1426,23 +1426,17 @@ void main() {
           greaterThanOrEqualTo(tester.getRect(segments).bottom),
         );
         expect(tester.getRect(button).right, lessThanOrEqualTo(360 - 12));
-        // Dropped under the switch, it stays at the right.
-        expect(tester.getRect(button).right, 360 - 12);
       });
     });
 
-    testWidgets('portrait: „Rozbalit vše“ and „Na webu ČKA“ drop under the '
-        'switch together, at the right', (tester) async {
+    testWidgets('portrait: „Na webu ČKA“ shares the row of „Výsledky z webu“, '
+        'at the right, without an overflow', (tester) async {
       _tall(tester, width: 360);
       await tester.pumpWidget(
         app(
           matchId: 'rv',
           slots: [
-            match(
-              id: 'rv',
-              date: rudnaSlot.date,
-              siteSlug: 'zapas-rv',
-            ),
+            match(id: 'rv', date: rudnaSlot.date, siteSlug: 'zapas-rv'),
           ],
           results: {'rv': rudnaResult},
           players: rudnaPlayers,
@@ -1452,15 +1446,14 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(tester.takeException(), isNull);
-      final site = tester.getRect(find.text('Na webu ČKA'));
+      final site = tester.getRect(find.byType(OutlinedButton));
+      final fresh = tester.getRect(find.textContaining('Výsledky z webu'));
+      expect((site.center.dy - fresh.center.dy).abs(), lessThan(12));
+      expect(site.right, 360 - 12);
+      // „Rozbalit vše“ stays in the switch row.
       expect(
-        site.top,
-        greaterThanOrEqualTo(tester.getRect(find.byType(SegmentedButton<MatchDetailView>)).bottom,
-        ),
-      );
-      expect(
-        tester.getRect(find.byType(OutlinedButton)).right,
-        360 - 12,
+        tester.getRect(find.text('Rozbalit vše')).center.dy,
+        greaterThan(site.bottom),
       );
     });
 

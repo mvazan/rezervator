@@ -160,13 +160,51 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     );
   }
 
+  /// „Výsledky z webu: před 5 dny“ on the left and the „Na webu ČKA“ button
+  /// on the right, on one row. The button drops under the text, still at the
+  /// right, when the row is too narrow.
+  Widget _freshnessRow(
+    ThemeData theme,
+    String? siteUrl,
+    MatchResult? result,
+    bool live,
+    DateTime now,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 12, 0),
+      child: OverflowBar(
+        alignment: MainAxisAlignment.spaceBetween,
+        spacing: 8,
+        overflowSpacing: 4,
+        overflowAlignment: OverflowBarAlignment.end,
+        children: [
+          if (result == null || !live)
+            Text(
+              result == null
+                  ? 'Výsledky zatím nejsou.'
+                  : 'Výsledky z webu: ${freshnessLabel(result.fetchedAt, now)}',
+              style: theme.textTheme.bodySmall,
+            )
+          else
+            const SizedBox.shrink(),
+          if (siteUrl != null)
+            OutlinedButton.icon(
+              onPressed: () => widget.launch(siteUrl),
+              icon: const Icon(Icons.open_in_new),
+              label: const Text('Na webu ČKA'),
+            ),
+        ],
+      ),
+    );
+  }
+
   /// [Souboje | Zápis] on the left, bound to [matchDetailViewProvider]; in
   /// Souboje „Rozbalit vše“ / „Sbalit vše“ on the right, on the same row —
   /// the switch has no check icon, so on a 360dp phone both fit up to text
   /// scale 1.3. With larger text the button drops under the switch instead
   /// of overflowing (OverflowBar: a row pushed apart when both fit, else a
   /// column).
-  Widget _switchRow(MatchDetailView view, List<Duel> duels, String? siteUrl) {
+  Widget _switchRow(MatchDetailView view, List<Duel> duels) {
     // A duel nobody has started never opens: it neither needs the button
     // nor keeps it from reading „Sbalit vše“ once the rest are open.
     final openable = [
@@ -180,8 +218,6 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
         alignment: MainAxisAlignment.spaceBetween,
         spacing: 8,
         overflowSpacing: 4,
-        // Dropped under the switch, the buttons stay at the right.
-        overflowAlignment: OverflowBarAlignment.end,
         children: [
           SegmentedButton<MatchDetailView>(
             showSelectedIcon: false,
@@ -197,36 +233,18 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
               ref.read(matchDetailViewProvider.notifier).set(chosen.first),
             ),
           ),
-          // On the right: the match on the ČKA site, and in Souboje „Rozbalit
-          // vše“ beside it. Together they drop under the switch when the
-          // row is too narrow.
-          if (siteUrl != null ||
-              (view == MatchDetailView.souboje && openable.isNotEmpty))
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (view == MatchDetailView.souboje && openable.isNotEmpty)
-                  TextButton(
-                    onPressed: () => setState(() {
-                      if (allOpen) {
-                        _expanded.clear();
-                      } else {
-                        // Every position, the waiting ones too: a duel that
-                        // starts later opens already expanded, as asked.
-                        _expanded.addAll(duels.map((duel) => duel.position));
-                      }
-                    }),
-                    child: Text(allOpen ? 'Sbalit vše' : 'Rozbalit vše'),
-                  ),
-                if (siteUrl != null) ...[
-                  const SizedBox(width: 8),
-                  OutlinedButton.icon(
-                    onPressed: () => widget.launch(siteUrl),
-                    icon: const Icon(Icons.open_in_new),
-                    label: const Text('Na webu ČKA'),
-                  ),
-                ],
-              ],
+          if (view == MatchDetailView.souboje && openable.isNotEmpty)
+            TextButton(
+              onPressed: () => setState(() {
+                if (allOpen) {
+                  _expanded.clear();
+                } else {
+                  // Every position, the waiting ones too: a duel that
+                  // starts later opens already expanded, as asked.
+                  _expanded.addAll(duels.map((duel) => duel.position));
+                }
+              }),
+              child: Text(allOpen ? 'Sbalit vše' : 'Rozbalit vše'),
             ),
         ],
       ),
@@ -423,18 +441,11 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
                 ),
         ),
         // While live the freshness sits in the scoreboard's „Živě“ chip.
-        if (result == null || !live)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-            child: Text(
-              result == null
-                  ? 'Výsledky zatím nejsou.'
-                  : 'Výsledky z webu: ${freshnessLabel(result.fetchedAt, now)}',
-              style: theme.textTheme.bodySmall,
-            ),
-          ),
+        // Na webu ČKA is on the same row, at the right (alone while live).
+        if (result == null || !live || slot.siteUrl != null)
+          _freshnessRow(theme, slot.siteUrl, result, live, now),
         _buttonsRow(context, slot, result, now),
-        _switchRow(view, duels, slot.siteUrl),
+        _switchRow(view, duels),
       ])
         _centred(child),
       ...switch (view) {
