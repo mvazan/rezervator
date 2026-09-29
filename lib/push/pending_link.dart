@@ -1,6 +1,7 @@
 /// What a push tap (or an e-mail deep link, or a foreground local
 /// notification) should open once the app is signed in and ready (0051):
-/// a message, or a notice. `Push.init()` runs before any `ProviderScope`
+/// a message, a notice, or — for an admin — the registrations waiting for
+/// approval (a new player, a new kuželna for the superadmin). `Push.init()` runs before any `ProviderScope`
 /// exists, so it cannot write into a Riverpod provider directly — it
 /// publishes onto [PendingLinkSource], a plain broadcast stream, which
 /// [PendingLinkNotifier] subscribes to from inside the widget tree.
@@ -12,16 +13,17 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 /// Which screen a [PendingLink] opens.
-enum PendingLinkKind { message, notice }
+enum PendingLinkKind { message, notice, pendingPlayer, pendingTenant }
 
 /// One deep link waiting to be opened: the kind and the `messages.id`,
 /// and — from a push — the alley it was sent for.
 class PendingLink {
-  const PendingLink({required this.kind, required this.id, this.tenantId});
+  const PendingLink({required this.kind, this.id = '', this.tenantId});
 
   final PendingLinkKind kind;
 
-  /// The `messages.id` the push or the e-mail link carried.
+  /// The `messages.id` the push or the e-mail link carried; empty for the
+  /// approval links, which point at a list, not at one row.
   final String id;
 
   /// The push's `tenant_id`: the alley whose member it was sent to. Null
@@ -48,10 +50,17 @@ class PendingLink {
 /// A malformed payload (a non-string id) opens nothing rather than
 /// throwing inside the push handler.
 PendingLink? pendingLinkFromData(Map<String, dynamic> data) {
-  final id = data['message_id'];
-  if (id is! String) return null;
   final tenant = data['tenant_id'];
   final tenantId = tenant is String ? tenant : null;
+  // The approval pushes carry no message: they open a list.
+  switch (data['kind']) {
+    case 'pending_player':
+      return PendingLink(kind: PendingLinkKind.pendingPlayer, tenantId: tenantId);
+    case 'pending_tenant':
+      return const PendingLink(kind: PendingLinkKind.pendingTenant);
+  }
+  final id = data['message_id'];
+  if (id is! String) return null;
   return switch (data['kind']) {
     'message' || 'message_reaction' => PendingLink(
         kind: PendingLinkKind.message, id: id, tenantId: tenantId),
@@ -92,7 +101,8 @@ final pendingLinkProvider =
     NotifierProvider<PendingLinkNotifier, PendingLink?>(
         () => PendingLinkNotifier());
 
-/// Seeds [pendingLinkProvider] from a /zpravy/:id or /nastenka/:id route,
+/// Seeds [pendingLinkProvider] from a /zpravy/:id, /nastenka/:id,
+/// /sprava/hraci or /sprava/kuzelny route,
 /// then renders [child] (the ordinary `AuthGate`) — HomeShell picks the
 /// link up once signed in (0051). A plain visit to `/zpravy` or
 /// `/nastenka` (no id) skips this and goes straight to `AuthGate`.

@@ -16,6 +16,11 @@ export const APP_ORIGIN = "https://rezervator.online";
 export const appMessageUrl = (id: string): string => `${APP_ORIGIN}/#/zpravy/${id}`;
 export const appNoticeUrl = (id: string): string => `${APP_ORIGIN}/#/nastenka/${id}`;
 
+/// The registrations waiting for approval: an admin's players list and the
+/// superadmin's kuželny list (the same hash routes the push tap opens).
+export const appPlayersUrl = `${APP_ORIGIN}/#/sprava/hraci`;
+export const appTenantsUrl = `${APP_ORIGIN}/#/sprava/kuzelny`;
+
 /// What a message is about, from its `messages` row: the audience and,
 /// for a day/block/training message, the date and the block's times.
 export type MessageContext = {

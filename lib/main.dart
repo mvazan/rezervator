@@ -125,6 +125,27 @@ final _router = GoRouter(
       builder: (_, _) =>
           AppConfig.hasSupabase ? const AuthGate() : const _NotConfigured(),
     ),
+    // The e-mails about a registration waiting for approval: the players
+    // (an admin's) or the kuželny (the superadmin's) list, opened on top of
+    // the signed-in app.
+    GoRoute(
+      path: '/sprava/hraci',
+      builder: (_, _) => AppConfig.hasSupabase
+          ? const DeepLinkSeed(
+              link: PendingLink(kind: PendingLinkKind.pendingPlayer),
+              child: AuthGate(),
+            )
+          : const _NotConfigured(),
+    ),
+    GoRoute(
+      path: '/sprava/kuzelny',
+      builder: (_, _) => AppConfig.hasSupabase
+          ? const DeepLinkSeed(
+              link: PendingLink(kind: PendingLinkKind.pendingTenant),
+              child: AuthGate(),
+            )
+          : const _NotConfigured(),
+    ),
   ],
 );
 
