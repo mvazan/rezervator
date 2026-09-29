@@ -46,14 +46,15 @@ and what cascades — and is updated with every migration.
   policy is wider — see **The player on duty** under RPCs. For both the
   player is an approved `player` account, not a placeholder, assigned
   (`duty_assignments`) to a `duty_periods` row of the alley they are in.
-  - **Reservations of others** (book, cancel, re-seat one): only WHILE on
-    duty — `is_on_duty()`, a period covering Prague today — on any date
-    from today on, the other duties' days included.
-  - **Blocks of a day** (add or edit a block, move its trainings, close the
-    day, return it to the weekly rules, cancel a block's reservations): only
-    on dates inside a period of their OWN, never in the past — on duty
-    today or not (`duty_edit_gate(date)`). A duty next week Monday to
-    Wednesday edits those three days already today, and no others.
+  - **Reservations of others** (book, cancel): only WHILE on duty —
+    `is_on_duty()`, a period covering Prague today — on any date from
+    today on, the other duties' days included.
+  - **Blocks of a day** (add or edit a block, move its trainings — and
+    re-seat the players of a removed block —, close the day, return it to
+    the weekly rules, cancel a block's reservations): only on dates inside
+    a period of their OWN, never in the past — on duty today or not
+    (`duty_edit_gate(date)`). A duty next week Monday to Wednesday edits
+    those three days already today, and no others.
 
   A pending or demoted player, a placeholder, the kiosk, an admin (who has
   the admin path anyway) and a visiting superadmin (the tenant match) have
@@ -157,7 +158,7 @@ reappears, when `service_role` lacks DML on any table or view, or when
 | `duty_set_assignees(period, users uuid[])` (0050) | admin | Replaces the period's assignees with `users` (duplicates collapse, `{}` clears; rows that stay are kept, not re-inserted). Each must be an approved non-kiosk member of the alley that is not a visiting superadmin — the `players` view's rule, placeholders allowed — or nothing changes: `unknown_player` (a null too). The period row is locked, so two admins saving it at once end with one set. `not_allowed`, `unknown_period`. |
 | `duty_season_start(started_on, name)` (0050) | admin | „Nová sezóna…“: inserts a boundary; nothing else moves. The name is trimmed — `empty_name` when blank, `duty_seasons_name_check` past 40 chars. `season_order` unless it starts after the newest boundary (serialised per alley by an advisory lock). `not_allowed`. |
 | `duty_season_delete(started_on)` (0050) | admin | „Vrátit poslední sezónu“: deletes that boundary, which must be the newest (`not_newest` otherwise, and when there is none). `not_allowed`. |
-| `move_reservation(...)` | admin; the player on duty from today on (0050, `duty_gate`: on duty today, any future day) | Re-seat one reservation; same collision rules as create (rentals resolved by `rental_occurrences`). A reservation-level right like book and cancel, so it stays tied to being on duty, not to the duty's own periods. Passes the gate with Prague today before it reads the row (`not_allowed` before a word about it), then with the reservation's date — a move keeps the date, so source and target are one. On today the duty moves nothing out of or into a block that has started (`too_late`); the admin may. `not_allowed`, `date_past`, `too_late`, `slot_taken`, `blocked_by_*`. |
+| `move_reservation(...)` | admin; the player on duty from today on (0050, `duty_gate`: on duty today, any future day); a player on the days of their own duty periods, on duty today or not (`duty_edit_gate`) | Re-seat one reservation; same collision rules as create (rentals resolved by `rental_occurrences`). It serves both rights: it is how the players of a block the duty removes for a day get new seats (the day dialog's per-player moves), and it is a reservation-level re-seat while on duty. A caller who is not on duty today needs a period that has not ended before a word about the reservation is said (`not_allowed`), then the reservation's day must be one of their own periods (`duty_edit_gate`); one on duty today is held to `duty_gate` (any day from today on). A move keeps the date, so source and target are one. On today the duty moves nothing out of or into a block that has started (`too_late`); the admin may. `not_allowed`, `date_past`, `too_late`, `slot_taken`, `blocked_by_*`. |
 | `move_day_reservations(...)` | admin; a player on the days of their own duty periods, from today on (0050, `duty_edit_gate`) | Re-seat all reservations of a day's block into another block; same collision rules. On today the duty moves nothing out of or into a block that has started (`too_late`); the admin may. `not_allowed`, `date_past`, `unknown_block`, `too_late`, `slot_taken`. |
 | `cancel_block_day_reservations(date, block, note?)` | admin; a player on the days of their own duty periods, from today on (0050, `duty_edit_gate`) | Bulk cancel before hiding a template block for one day. The duty's call spares the trainings of a block that has started today (like `cancel_stranded_reservations`); the admin's cancels them too. `not_allowed`, `date_past`, `unknown_block`. |
 | `set_day_override(date, closed, reason?, block_ids?)` | admin; a player on the days of their own duty periods, from today on (0050, `duty_edit_gate`) | Upsert the override and cancel the reservations it displaces — the duty's call not those whose block has started today (like `cancel_stranded_reservations`), the admin's all of them. `not_allowed`, `date_past`. |
@@ -214,12 +215,12 @@ only through RPCs:
   duties' days included. `create_reservation` / `cancel_reservation`: the
   duty branch (via `'duty'`), with the booked player's rules — their cap
   (`player_at_limit`), the horizon, no past day, no started block
-  (`date_past`, `too_late`). Only the admin goes past them. Re-seating one
-  reservation (`move_reservation`) is the same right and the same gate,
-  `duty_gate(date)`: the admin passes on any date; anyone else needs
-  `is_on_duty()` (`not_allowed`) and a date of Prague today or later
-  (`date_past`). A player whose only period lies ahead books, cancels and
-  re-seats for nobody until it starts.
+  (`date_past`, `too_late`). Only the admin goes past them.
+  `duty_gate(date)` is this right's gate: the admin passes on any date;
+  anyone else needs `is_on_duty()` (`not_allowed`) and a date of Prague
+  today or later (`date_past`). A player whose only period lies ahead books
+  and cancels for nobody until it starts. Re-seating one reservation
+  (`move_reservation`) follows either right, see below.
 - **Blocks of a day — on the days of their OWN periods**, never in the past,
   on duty today or not: `set_day_override`, `cancel_block_day_reservations`,
   `move_day_reservations`, `delete_day_override` and `add_special_block`,
@@ -235,6 +236,10 @@ only through RPCs:
   both theirs. `add_special_block` has no date: its gate asks for a period
   of their own that has not ended (`ends_on` ≥ Prague today), and the
   `set_day_override` that points a day at the block names the real date.
+  `move_reservation`, the per-player step of removing a block for a day
+  (the day dialog's re-seating of its sign-ups), passes the same way: for a
+  player on duty today `duty_gate(date)`, otherwise `duty_edit_gate(date)`
+  — so a duty next week re-seats the players of next week's blocks now.
   A block that has started today is the duty's limit too: the moves refuse
   to take a training out of it or into it (`too_late`), and closing the day
   or cancelling a block spares its trainings, as the override cascade does —
@@ -1064,8 +1069,8 @@ period, a changed roster or a changed lead simply answers differently.
   re-seating and cancelling there still work, both of two consecutive own
   periods edited edge to edge, a past day `date_past` inside an own period
   and `not_allowed` outside, a duty that starts later editing exactly its
-  own days and adding a block but booking, cancelling and re-seating for
-  no one, a pending player, a placeholder, a kiosk account and a visiting
+  own days, adding a block and re-seating players on them but booking and
+  cancelling for no one, a pending player, a placeholder, a kiosk account and a visiting
   superadmin refused, a duty ended yesterday refused (no block added) and
   one ending today still editing today, the admin editing any day), the 0050 duty
   reminder (`due_duty_reminders()` stable, security definer and the
