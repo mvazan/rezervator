@@ -489,8 +489,9 @@ end $$;
 -- clear, never a notice). A read (read_at alone) is no UPDATE OF reaction,
 -- reply; the WHEN keeps a write that changes neither (a no-op PATCH, the
 -- same 👍 clicked twice in the e-mail) away from pg_net. A recipient who
--- flips 👍/👎 over and over notifies the author every time — accepted, the
--- spec wants every reaction told (SCHEMA.md).
+-- flips 👍/👎 over and over, or rewrites her reply over and over, notifies
+-- the author every time — accepted, the spec wants every reaction and
+-- reply told (SCHEMA.md).
 drop trigger if exists notify_messages on messages;
 create trigger notify_messages
   after insert on messages

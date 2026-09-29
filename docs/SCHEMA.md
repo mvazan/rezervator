@@ -936,11 +936,12 @@ threads, no player-to-player messages. Every error is a bare code.
   those columns, and a write that leaves both as they were (a no-op PATCH,
   the same 👍 clicked twice in the e-mail) fails the `when` — neither
   reaches pg_net. **Accepted:** there is no throttle, so a recipient who
-  flips 👍 → 👎 → 👍 over and over (her own row, which she may write)
-  notifies the author once per flip — a push, or a Resend e-mail when the
-  author has no push token, which spends the free tier's quota. The spec
-  wants every reaction told; the abuse is bounded to authors of messages
-  the flipper received, in her own alley.
+  flips 👍 → 👎 → 👍 over and over, or rewrites her reply over and over
+  (her own row, which she may write), notifies the author once per
+  change — a push, or a Resend e-mail when the author has no push token,
+  which spends the free tier's quota. The spec wants every reaction and
+  reply told; the abuse is bounded to authors of messages she received,
+  in her own alley.
 - **Realtime DELETE events.** Both tables are in the publication with the
   default replica identity. Realtime checks no RLS on a DELETE (Postgres
   cannot evaluate a policy against a row that is gone) and sends the old
