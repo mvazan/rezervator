@@ -112,6 +112,9 @@ Deno.test("resendEmail: no address or no API key sends nothing; a refusal is rea
 
 Deno.test("singleDeliveryOf: a refusal over the sender or the key is 'refused', over the address not", () => {
   const error = (name: string) => JSON.stringify({ statusCode: 422, name, message: "x" });
+  assertEquals(singleDeliveryOf(422, error("missing_required_field")), "refused");
+  assertEquals(singleDeliveryOf(403, error("suspended_api_key")), "refused");
+  // A name Resend's reference no longer lists still counts.
   assertEquals(singleDeliveryOf(422, error("invalid_from_address")), "refused");
   assertEquals(singleDeliveryOf(400, error("invalid_idempotency_key")), "refused");
   assertEquals(singleDeliveryOf(403, error("invalid_api_key")), "refused");
@@ -121,6 +124,26 @@ Deno.test("singleDeliveryOf: a refusal over the sender or the key is 'refused', 
   assertEquals(singleDeliveryOf(422, "not json"), "undeliverable");
   assertEquals(singleDeliveryOf(200, "{}"), "delivered");
   assertEquals(singleDeliveryOf(429, error("rate_limit_exceeded")), "retry");
+});
+
+Deno.test("singleDeliveryOf: Resend's validation_error is 'refused' only when it names `from`, not `to`", () => {
+  // Resend's reference today has no error name of its own for a bad
+  // sender: a malformed `from` is a 400 validation_error whose message
+  // names the field.
+  const validation = (message: string) =>
+    JSON.stringify({ statusCode: 400, name: "validation_error", message });
+  const format = " The email address needs to follow the `email@example.com` or " +
+    "`Name <email@example.com>` format.";
+  assertEquals(singleDeliveryOf(400, validation("Invalid `from` field." + format)), "refused");
+  assertEquals(singleDeliveryOf(422, validation("Invalid `from` field." + format)), "refused");
+  // The recipient's own address: the next e-mail may still go.
+  assertEquals(singleDeliveryOf(400, validation("Invalid `to` field." + format)), "undeliverable");
+  // Both named, or neither: not sure it is the sender, so not "refused".
+  assertEquals(singleDeliveryOf(400, validation("Invalid `from` and `to` fields.")), "undeliverable");
+  assertEquals(singleDeliveryOf(400, validation("An error was found.")), "undeliverable");
+  // Another error naming `from` is not taken for a validation_error.
+  assertEquals(singleDeliveryOf(404, JSON.stringify({ name: "not_found", message: "`from`" })),
+    "undeliverable");
 });
 
 Deno.test("resendOneOfBatch: one /emails request under the key, read by singleDeliveryOf", async () => {

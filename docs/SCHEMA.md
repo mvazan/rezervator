@@ -981,8 +981,9 @@ threads, no player-to-player messages. Every error is a bare code.
   of it over one bad address — goes out one by one, 500 ms apart, each
   under `message/<id>/<n>/<j>`, a busy one tried once more a second later,
   a refused one logged while the rest still go — but one refused over
-  something other than its address (a bad sender or key) before any went
-  through stops the rest, logged once; `_shared/resend.ts`; a
+  something other than its address (a bad key; a malformed sender, which
+  Resend answers as a 400 `validation_error` naming `from`) before any
+  went through stops the rest, logged once; `_shared/resend.ts`; a
   recipient whose push or signed links fail, or a batch that throws, is
   logged and skipped, the others still get theirs) — unless `notify` is
   false; a failed load of the recipients is logged and answers 500
@@ -991,9 +992,11 @@ threads, no player-to-player messages. Every error is a bare code.
   cannot be signed — a notice: its title and the text cut to 120
   characters, the e-mail „Otevřít nástěnku“; a message: „Zpráva od
   správce“ / „Zpráva od služby“ (by `author_role`) to players, „Zpráva od
-  hráče: {jméno}“ to staff, the context („pá 2. 10. · 16:00–17:00“) on its own
-  line, the e-mail with signed one-click 👍/👎 links to **react**
-  (`signReactToken`, `CANCEL_TOKEN_SECRET`) and „Odpovědět v aplikaci“;
+  hráče: {jméno}“ from a player to staff (an admin to staff: „Zpráva od
+  správce“ — the author's role decides, not the audience), the context
+  („pá 2. 10. · 16:00–17:00“) on its own line, the e-mail with signed
+  one-click 👍/👎 links to **react** (`signReactToken`,
+  `CANCEL_TOKEN_SECRET`) and „Odpovědět v aplikaci“;
   push data `{kind: notice | message, message_id, tenant_id}` (the alley,
   for the app's deep-link guard); a `message_recipients`
   update of `reaction` / `reply` (0051) → the message's author, „Reakce na

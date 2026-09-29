@@ -119,10 +119,14 @@ export async function deliverMessage(
 ): Promise<number> {
   if (!record.notify) return 0;
   // The same text for everyone: who wrote it and what about does not
-  // depend on the recipient.
+  // depend on the recipient. Who wrote it is the author's role, not the
+  // audience: an admin writing to „Správci“ or „Službě“ gets the staff
+  // title („Zpráva od správce“), only a player to the staff is „Zpráva od
+  // hráče: …“.
+  const toStaff = record.audience === "admins" || record.audience === "duty";
   const text = record.kind === "notice"
     ? noticeText(record.title ?? "", record.body)
-    : record.audience === "admins" || record.audience === "duty"
+    : toStaff && !ctx.authorIsAdmin
     ? playerMessageText(ctx.authorName, record.body, ctx.context)
     : staffMessageText(record.body, { fromAdmin: ctx.authorIsAdmin, context: ctx.context });
   let attempted = 0;

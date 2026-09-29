@@ -223,10 +223,12 @@ alley) is not a recipient.
     - A batch refused as invalid (400/422 — Resend's strict validation fails a whole batch
       over one bad address) goes out one by one, 500 ms apart, each under
       `message/<id>/<n>/<j>`: a busy single is tried once more after a second, a refused one
-      is logged and the rest still go. A refusal that is not about the address (Resend's
-      `invalid_from_address`, a bad key — `resendOneOfBatch` reads it as „refused“) before
-      any single went through stops the fallback, logged once: every other one would be
-      refused the same. Rare and slow on purpose (~50 s for a full batch, inside the
+      is logged and the rest still go. A refusal that is not about the address before any
+      single went through stops the fallback, logged once: every other one would be refused
+      the same. `resendOneOfBatch` reads it as „refused“: a 401, a bad key or a request
+      refused whole (Resend's error names), or a malformed sender — which Resend answers as
+      a 400 `validation_error` whose message names `from` (and not `to`), with no name of
+      its own. Rare and slow on purpose (~50 s for a full batch, inside the
       function's wall clock; pg_net logs its own 5 s timeout for that webhook).
     - A recipient whose push or signed links fail, or a batch that throws, is logged and
       skipped; the others still get theirs.
@@ -255,7 +257,9 @@ alley) is not a recipient.
     body = the text, then the context on its own line: „pá 3. 10. · 16:00–17:00“ or „celý
     den pá 3. 10.“.
   - player → staff: title „Zpráva od hráče: {jméno}“; body = the text, then the context
-    when the message carries one („k tréninku ne 5. 10. · 18:00–19:00“).
+    when the message carries one („k tréninku ne 5. 10. · 18:00–19:00“). The title goes by
+    `author_role`, not by the audience: an admin writing to „Správci“ / „Službě“ gets the
+    staff title „Zpráva od správce“ (see Copy decisions).
 - **E-mail** (`RESEND_*`, the existing fallback for anyone without a push token, i.e. every web
   user): the full text and context; for a `message` two buttons **👍** and **👎** (signed
   links, next section) and „Odpovědět v aplikaci“ → `https://rezervator.online/#/zpravy/<id>`;
@@ -375,8 +379,9 @@ value; either is fine, pick whichever touches less of the existing call sites.
 - One list, chronological by the message's key day (`on_date`, else the posting day): today and
   ahead open, earlier collapsed under „Starší (N)“. Read state: opening the screen marks my
   unread received messages read.
-- Tile: header „Od služby (Jan Novák)“ / „Od správce (…)“ / „Od hráče: Petr Novák“ (names
-  are never inflected — see Copy decisions) / „Ode mě správci“ / „Ode mě službě“ / „Ode mě
+- Tile: header „Od služby (Jan Novák)“ / „Od správce (…)“ / „Od hráče: Petr Novák“ (by the
+  author's role, so an admin writing to the staff is „Od správce (…)“; names are never
+  inflected — see Copy decisions) / „Ode mě správci“ / „Ode mě službě“ / „Ode mě
   hráčům“, a context chip („pá 3. 10. · 16:00–17:00“, „celý den pá 3. 10.“, „k tréninku ne
   5. 10. · 18:00–19:00“, or none), the body.
 - **Received `message`:** two toggle chips 👍 / 👎 (`FilterChip`s named by their emoji, with
@@ -579,6 +584,11 @@ them changes behaviour:
    push/e-mail title (`playerMessageText`). Names are never inflected (automatic Czech
    declension of arbitrary names is unreliable) — the colon form needs none. This spec first
    wrote the inflected „Od Petra Nováka“, and the first build shipped „Od Petr Novák“.
+   The form goes by the author (`author_role`), not by the audience: an admin may write to
+   „Správci“ or „Službě“ too, and their message reads „Od správce (Adam)“ on the tile and
+   „Zpráva od správce“ in the push/e-mail title — the texts an admin's message to players
+   already has. Whether the admin's push title should name them is still the user's call
+   (it would need a new string).
 2. **A sole admin writing to „Správci“.** When the writer is the alley's only admin,
    „Správci“ is still offered, and the send is refused with `no_recipients`; the player
    composer says „Jiného správce tu nemáš.“ (`playerSendErrorText`), not the generic

@@ -287,6 +287,23 @@ void main() {
         'Ode mě službě',
       );
     });
+
+    test('to the staff the author decides: a player or an admin', () {
+      // An admin may write to „Správci“ or „Službě“ too: the header names
+      // them as the admin they are, never as a player.
+      for (final audience in [MessageAudience.admins, MessageAudience.duty]) {
+        expect(
+          headerLabel(message(audience: audience, authorId: 'petr'),
+              authorName: 'Petr Novák', authorIsAdmin: false, meId: 'me'),
+          'Od hráče: Petr Novák',
+        );
+        expect(
+          headerLabel(message(audience: audience, authorId: 'admin1'),
+              authorName: 'Adam', authorIsAdmin: true, meId: 'me'),
+          'Od správce (Adam)',
+        );
+      }
+    });
   });
 
   group('contextLabel', () {

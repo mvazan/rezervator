@@ -62,7 +62,9 @@ export function noticeText(title: string, body: string): Message {
 }
 
 /// Staff → players: „Zpráva od správce“ / „Zpráva od služby“, the text
-/// and then the context on its own line.
+/// and then the context on its own line. Also an admin's message to the
+/// staff („Správci“, „Službě“): „Zpráva od správce“, never the player
+/// title — deliverMessage picks by the author's role.
 export function staffMessageText(
   body: string,
   opts: { fromAdmin: boolean; context: string | null },
@@ -72,7 +74,8 @@ export function staffMessageText(
 }
 
 /// Player → staff: „Zpráva od hráče: {jméno}“, the text and then the context
-/// when the message carries one.
+/// when the message carries one. Only for a player author (`author_role`
+/// 'player', the duty included); an admin → staff is [staffMessageText].
 export function playerMessageText(
   authorName: string,
   body: string,

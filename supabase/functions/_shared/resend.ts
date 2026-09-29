@@ -49,12 +49,16 @@ export async function resendEmail(
 /// e-mail alone would be refused the same.
 export type SingleDelivery = Delivery | "refused";
 
-/// Resend's error names for a request refused over the sender, the key or
-/// the request itself — never over one recipient's address, which comes
-/// back as a `validation_error` naming the `to` field.
+/// Resend's error names for a request refused over the key or the request
+/// itself — never over one recipient's address. Its error reference
+/// (checked 2026-09-29) lists missing/restricted/suspended_api_key,
+/// invalid_idempotency_key and missing_required_field; the others are
+/// names it no longer lists, kept in case an answer still carries them.
+/// A bad sender has no name of its own there: see [namesTheSender].
 const notAboutTheAddress = new Set([
   "missing_api_key",
   "restricted_api_key",
+  "suspended_api_key",
   "invalid_api_key",
   "invalid_from_address",
   "invalid_idempotency_key",
@@ -64,22 +68,42 @@ const notAboutTheAddress = new Set([
 ]);
 
 /// The verdict of an /emails answer ([status], Resend's error [body]) for
-/// one e-mail of a batch refused as invalid: "refused" when Resend names a
-/// reason that is not the address (a 401 is always the key), else
-/// [deliveryOf]. An unreadable body is not taken for "refused": one
-/// e-mail too many is tried rather than the rest skipped.
+/// one e-mail of a batch refused as invalid: "refused" when Resend's
+/// reason is not the address — a 401 (always the key), a name in
+/// [notAboutTheAddress], or a validation_error over the sender
+/// ([namesTheSender]) — else [deliveryOf]. An unreadable body, or a
+/// validation_error that may be about the recipient, is not taken for
+/// "refused": one e-mail too many is tried rather than the rest skipped.
 export function singleDeliveryOf(status: number, body: string): SingleDelivery {
   const delivery = deliveryOf(status);
   if (delivery !== "undeliverable") return delivery;
-  return status === 401 || notAboutTheAddress.has(errorName(body)) ? "refused" : delivery;
+  if (status === 401) return "refused";
+  const error = resendError(body);
+  return notAboutTheAddress.has(error.name) || namesTheSender(error) ? "refused" : delivery;
 }
 
-function errorName(body: string): string {
+/// Resend's answer to a malformed sender (RESEND_FROM): a validation_error
+/// (400) whose message names the field — „Invalid `from` field. …“. One
+/// that names `to` as well may be the recipient's, so it does not count.
+function namesTheSender(error: { name: string; message: string }): boolean {
+  return error.name === "validation_error" && namesField(error.message, "from") &&
+    !namesField(error.message, "to");
+}
+
+/// Whether [message] names [field] the way Resend quotes a field name.
+function namesField(message: string, field: string): boolean {
+  return new RegExp(`[\`'"]${field}[\`'"]`).test(message);
+}
+
+/// Resend's error body read: its `name` and `message`, "" for a missing or
+/// unreadable one.
+function resendError(body: string): { name: string; message: string } {
   try {
-    const name = JSON.parse(body)?.name;
-    return typeof name === "string" ? name : "";
+    const parsed = JSON.parse(body);
+    const text = (value: unknown) => typeof value === "string" ? value : "";
+    return { name: text(parsed?.name), message: text(parsed?.message) };
   } catch {
-    return "";
+    return { name: "", message: "" };
   }
 }
 

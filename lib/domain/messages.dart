@@ -214,6 +214,10 @@ String reactionLine(
 /// The six header forms a `MessageTile` shows, by who sent it and to whom:
 /// „Od služby (Bára)“, „Od správce (Adam)“, „Od hráče: Petr Novák“ (names
 /// are never inflected), „Ode mě hráčům“, „Ode mě správci“, „Ode mě službě“.
+/// Someone else's message says who wrote it by [authorIsAdmin] (the
+/// `author_role` snapshot), not by its audience: an admin writing to
+/// „Správci“ or „Službě“ is still „Od správce (Adam)“, only a player is
+/// „Od hráče: …“.
 String headerLabel(
   Message m, {
   required String authorName,
@@ -231,7 +235,8 @@ String headerLabel(
   return switch (m.audience) {
     MessageAudience.day || MessageAudience.block =>
       authorIsAdmin ? 'Od správce ($authorName)' : 'Od služby ($authorName)',
-    MessageAudience.admins || MessageAudience.duty => 'Od hráče: $authorName',
+    MessageAudience.admins || MessageAudience.duty =>
+      authorIsAdmin ? 'Od správce ($authorName)' : 'Od hráče: $authorName',
     MessageAudience.all => authorName,
   };
 }

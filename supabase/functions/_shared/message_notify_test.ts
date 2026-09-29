@@ -277,16 +277,40 @@ Deno.test("deliverMessage: a batch refused as invalid goes out one by one, paced
   assertEquals(String(logged[2][0]).includes("e2@example.com"), true);
 });
 
+Deno.test("deliverMessage: to the staff the author decides the title, not the audience", async () => {
+  // An admin may write to „Správci“ or „Službě“ too: their push and e-mail
+  // say „Zpráva od správce“ (the staff title by author_role), never that a
+  // player wrote. A player (the duty included) stays „Zpráva od hráče: …“.
+  const { deps, pushed, batches } = fakeDeps();
+  const both = [recipient("p1", true), recipient("e1", false)];
+  const context = "k tréninku pá 2. 10. · 16:00–17:00";
+  for (const audience of ["admins", "duty"] as const) {
+    await deliverMessage({ ...baseMessage, audience, author_role: "admin" },
+      { authorName: "Adam Správce", authorIsAdmin: true, context }, both, deps);
+    await deliverMessage({ ...baseMessage, audience, author_role: "player" },
+      { authorName: "Petr Novák", authorIsAdmin: false, context }, both, deps);
+  }
+  assertEquals(pushed.map((p) => p.title), [
+    "Zpráva od správce",
+    "Zpráva od hráče: Petr Novák",
+    "Zpráva od správce",
+    "Zpráva od hráče: Petr Novák",
+  ]);
+  assertEquals(batches.map((b) => b[0].subject), pushed.map((p) => p.title));
+  assertEquals(pushed[0].body, `Přijďte dřív.\n${context}`);
+});
+
 // Resend behind a fake fetch: the batch and each single answer [answer]'s
-// status and error name; the requests land in the returned log.
-function resendDeps(answer: (url: string, to: string[]) => [number, string]) {
+// status, error name and message (the name when left out); the requests
+// land in the returned log.
+function resendDeps(answer: (url: string, to: string[]) => [number, string, string?]) {
   const requests: { url: string; to: string[] }[] = [];
   const fetch = (url: string, init: RequestInit) => {
     const body = JSON.parse(String(init.body));
     const to = (Array.isArray(body) ? body : [body]).map((e: { to: string }) => e.to);
     requests.push({ url, to });
-    const [status, name] = answer(url, to);
-    const text = status < 300 ? "{}" : JSON.stringify({ statusCode: status, name, message: name });
+    const [status, name, message = name] = answer(url, to);
+    const text = status < 300 ? "{}" : JSON.stringify({ statusCode: status, name, message });
     return Promise.resolve(new Response(text, { status }));
   };
   const config = { apiKey: "re_test", from: "Rezervátor <r@example.com>", fetch };
@@ -299,12 +323,15 @@ function resendDeps(answer: (url: string, to: string[]) => [number, string]) {
 
 const fiveByMail = ["e0", "e1", "e2", "e3", "e4"].map((id) => recipient(id, false));
 const single = "https://api.resend.com/emails";
+const badFrom = "Invalid `from` field. The email address needs to follow the " +
+  "`email@example.com` or `Name <email@example.com>` format.";
+const badTo = badFrom.replace("`from`", "`to`");
 
 Deno.test("deliverMessage: a refusal that is not about the address stops the one-by-one fallback", async () => {
-  // A bad sender (or key) fails the batch and every e-mail alone the same:
-  // after the first single says so, the other four are not tried 500 ms
-  // apart, and the stop is logged once.
-  const { deps, requests, pauses } = resendDeps(() => [422, "invalid_from_address"]);
+  // A request Resend refuses whole (here a missing field) fails the batch
+  // and every e-mail alone the same: after the first single says so, the
+  // other four are not tried 500 ms apart, and the stop is logged once.
+  const { deps, requests, pauses } = resendDeps(() => [422, "missing_required_field"]);
   let n = 0;
   const logged = await withErrorsLogged(async () => {
     n = await deliverMessage(baseMessage,
@@ -318,11 +345,27 @@ Deno.test("deliverMessage: a refusal that is not about the address stops the one
   assertEquals(String(stops[0][0]).includes("4 not sent"), true);
 });
 
+Deno.test("deliverMessage: Resend's validation_error naming `from` stops the fallback too", async () => {
+  // A malformed RESEND_FROM, as Resend answers it today: a 400
+  // validation_error whose message names the field — no error name of its
+  // own. One batch request, one single, no pauses.
+  const { deps, requests, pauses } = resendDeps(() => [400, "validation_error", badFrom]);
+  const logged = await withErrorsLogged(async () => {
+    await deliverMessage(baseMessage,
+      { authorName: "Bára Kantýnská", authorIsAdmin: false, context: null }, fiveByMail, deps);
+  });
+  assertEquals(requests.map((r) => r.url), [`${single}/batch`, single]);
+  assertEquals(pauses, []);
+  assertEquals(logged.filter((l) => String(l[0]).includes("4 not sent")).length, 1);
+});
+
 Deno.test("deliverMessage: a first single refused over its own address does not stop the rest", async () => {
   // Resend's strict batch fails over e0's malformed address; alone, only
   // e0 fails, and the other four still go.
   const { deps, requests, pauses } = resendDeps((url, to) =>
-    url.endsWith("/batch") || to[0] === "e0@example.com" ? [422, "validation_error"] : [200, ""]
+    url.endsWith("/batch") || to[0] === "e0@example.com"
+      ? [400, "validation_error", badTo]
+      : [200, ""]
   );
   await withErrorsLogged(async () => {
     await deliverMessage(baseMessage,
