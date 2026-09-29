@@ -821,9 +821,17 @@ class Api {
   /// to at most one fetch per match per 5 minutes. Returns 'queued' (a fetch
   /// was scheduled), 'fresh' (already refreshed within the last 5 minutes),
   /// or 'not_live' (outside the match's live window, or only switched-off
-  /// teams of ours play it).
-  static Future<String> refreshMatch(String matchId) async =>
-      await _db.rpc('refresh_match', params: {'p_match_id': matchId}) as String;
+  /// teams of ours play it). [force] is the refresh button (0054): it looks
+  /// at the site again even inside the 5 minutes, holding off only a double
+  /// tap (15 s); the background pokes leave it false.
+  static Future<String> refreshMatch(
+    String matchId, {
+    bool force = false,
+  }) async =>
+      await _db.rpc('refresh_match', params: {
+        'p_match_id': matchId,
+        if (force) 'p_force': true,
+      }) as String;
 
   static Future<void> updateTeam({
     required String id,

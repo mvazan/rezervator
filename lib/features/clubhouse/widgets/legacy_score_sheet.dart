@@ -6,10 +6,8 @@
 /// `MatchPlayerSection`'s two ExpansionTile lists.
 library;
 
-import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -171,28 +169,6 @@ class _SheetStyles {
 /// carry their own minus, so only the positive case needs a prefix.
 String _signed(int v) => v > 0 ? '+$v' : '$v';
 
-/// The team-row "Družstvo" value: the points [side] got for the higher pin
-/// total (2 / 0, 1 / 1 on a tie) — kuzelky prints its Body ([sidePoints])
-/// minus the duel points its players won. Null (printed '–') until Body and
-/// every player's [MatchPlayerResult.teamPoints] of that side are known.
-num? _teamBonusPoints(
-  num? sidePoints,
-  List<MatchPlayerResult> players,
-  String side,
-) {
-  if (sidePoints == null) return null;
-  num duels = 0;
-  var any = false;
-  for (final p in players) {
-    if (p.side != side) continue;
-    final points = p.teamPoints;
-    if (points == null) return null;
-    duels += points;
-    any = true;
-  }
-  return any ? sidePoints - duels : null;
-}
-
 /// One pairing block per position (1..N): the home and away player who
 /// faced each other, each with a line per lane thrown plus a Celkem total,
 /// and the pin difference between them. Above the blocks, a team summary
@@ -269,16 +245,52 @@ class LegacyScoreSheet extends StatelessWidget {
   }
 }
 
-/// Every column's width, computed once per render from the table's actual
-/// content (Fix round 5) — kuzelky uses `table-layout: auto`, so its
-/// columns grow to fit whatever they hold; the brief's own widths are
-/// MINIMUMS, not fixed sizes. A column's width is `max(brief minimum,
-/// widest content that column ever holds + 9dp)` — 9dp because [_cell]'s
-/// own padding (4+4) plus its 1px border account for exactly that much
-/// beyond a glyph run's raw measured width. Mirror columns (the same
-/// column on the home and away side) share ONE width — the wider side's
-/// requirement — so the table stays visually symmetric, the same way a
-/// real HTML `<col>` would if both sides sat in the same `<colgroup>`.
+/// A line's name as the sheet prints it: the starter, and under them who
+/// took over — „od 41. hodu“ on its own line, the substitute's name on the
+/// next.
+String _sheetName(MatchPlayerResult p) {
+  final sub = p.substituteName;
+  if (sub == null || sub.isEmpty) return p.playerName;
+  final from = p.substituteFromThrow;
+  return [p.playerName, if (from != null) 'od $from. hodu', sub].join('\n');
+}
+
+/// A thin empty line — the breathing space above and below „od 41. hodu“.
+const _nameGapStyle = TextStyle(fontSize: 4, height: 1);
+const _nameGapHeight = 4.0;
+
+/// Whether [p]'s name carries the „od 41. hodu“ line and its two gaps.
+bool _hasChangeLine(MatchPlayerResult p) =>
+    p.substituteName != null &&
+    p.substituteName!.isNotEmpty &&
+    p.substituteFromThrow != null;
+
+/// How many lines a name printed by [_nameSpan] takes before any wrapping.
+int _nameLines(MatchPlayerResult p) {
+  if (p.substituteName == null || p.substituteName!.isEmpty) return 1;
+  return _hasChangeLine(p) ? 5 : 2;
+}
+
+/// [_sheetName] as spans: a small gap above and below „od 41. hodu“, so the
+/// three lines do not run into each other.
+InlineSpan _nameSpan(MatchPlayerResult p, TextStyle style) {
+  final sub = p.substituteName;
+  if (sub == null || sub.isEmpty) return TextSpan(text: p.playerName, style: style);
+  final from = p.substituteFromThrow;
+  return TextSpan(
+    style: style,
+    children: [
+      TextSpan(text: '${p.playerName}\n'),
+      if (from != null) ...[
+        const TextSpan(text: '\n', style: _nameGapStyle),
+        TextSpan(text: 'od $from. hodu\n'),
+        const TextSpan(text: '\n', style: _nameGapStyle),
+      ],
+      TextSpan(text: sub),
+    ],
+  );
+}
+
 class _ColumnMetrics {
   const _ColumnMetrics({
     required this.nameWidth,
@@ -368,7 +380,7 @@ class _ColumnMetrics {
       ('Registrační číslo', _s10w400),
       (slot.homeTeam, _s16w700),
       (slot.awayTeam, _s16w700),
-      for (final p in players) (p.playerName, _s16w700),
+      for (final p in players) (_sheetName(p), _s16w700),
     ], 144.0);
 
     // Deliberately EXCLUDES "Série hodů" — it's the one header allowed to
@@ -432,11 +444,11 @@ class _ColumnMetrics {
       ('Body', _s10w400),
       ('Družstvo', _s10w400),
       (
-        numLabel(_teamBonusPoints(result?.homePoints, players, 'home')),
+        numLabel(teamBonusPoints(result?.homePoints, players, 'home')),
         styles.summaryBold,
       ),
       (
-        numLabel(_teamBonusPoints(result?.awayPoints, players, 'away')),
+        numLabel(teamBonusPoints(result?.awayPoints, players, 'away')),
         styles.summaryBold,
       ),
       for (final p in players) (numLabel(p.teamPoints), styles.summaryBold),
@@ -527,7 +539,7 @@ class _ColumnMetrics {
       widest = math.max(widest, twoLineWidth('Registrační číslo', _s10w400));
     }
     for (final p in players) {
-      widest = math.max(widest, widestWord(p.playerName, _s16w700));
+      widest = math.max(widest, widestWord(_sheetName(p), _s16w700));
     }
     return (widest + _cellChrome).ceilToDouble();
   }
@@ -766,10 +778,16 @@ class _SheetGeometry {
     double minRowScale(double nameWidth) {
       final textWidth = nameWidth - _ColumnMetrics._cellChrome;
       var scale = 1.0;
-      void fit(String text, TextStyle style, double baseCellHeight) {
+      void fit(
+        String text,
+        TextStyle style,
+        double baseCellHeight, {
+        double extra = 0,
+      }) {
         final needed =
             _ColumnMetrics.wrappedHeight(text, style, textWidth) +
-            _ColumnMetrics._cellChrome;
+            _ColumnMetrics._cellChrome +
+            extra;
         scale = math.max(scale, needed / baseCellHeight);
       }
 
@@ -782,9 +800,10 @@ class _SheetGeometry {
       for (final p in players) {
         final laneRowCount = laneRows[p.position] ?? 0;
         fit(
-          p.playerName,
+          _sheetName(p),
           _s16w700,
           laneRowCount >= 2 ? laneRowCount * laneRowBase : celkemRowBase,
+          extra: _hasChangeLine(p) ? 2 * _nameGapHeight : 0,
         );
       }
       return scale;
@@ -1016,6 +1035,7 @@ class _ScoreTableBody extends StatelessWidget {
     Color color = _kBlack,
     TextAlign align = TextAlign.center,
     int maxLines = 1,
+    InlineSpan? span,
   }) {
     return Container(
       width: width,
@@ -1031,13 +1051,20 @@ class _ScoreTableBody extends StatelessWidget {
           bottom: BorderSide(color: _kBorder, width: 1),
         ),
       ),
-      child: Text(
-        text,
-        textAlign: align,
-        maxLines: maxLines,
-        overflow: TextOverflow.ellipsis,
-        style: style.copyWith(color: color),
-      ),
+      child: span == null
+          ? Text(
+              text,
+              textAlign: align,
+              maxLines: maxLines,
+              overflow: TextOverflow.ellipsis,
+              style: style.copyWith(color: color),
+            )
+          : Text.rich(
+              span,
+              textAlign: align,
+              maxLines: maxLines,
+              overflow: TextOverflow.ellipsis,
+            ),
     );
   }
 
@@ -1108,7 +1135,7 @@ class _ScoreTableBody extends StatelessWidget {
           height: _teamRowHeight,
           bg: _kDruzstvoBlue,
           text: numLabel(
-            _teamBonusPoints(body, players, isHome ? 'home' : 'away'),
+            teamBonusPoints(body, players, isHome ? 'home' : 'away'),
           ),
           style: geometry.styles.summaryBold,
         ),
@@ -1256,7 +1283,7 @@ class _ScoreTableBody extends StatelessWidget {
     // A lone 23px lane row can't hold the 16px name — it goes into the Celkem
     // row then, the same as with no lane rows at all.
     final nameInLaneRows = laneRowCount >= 2;
-    final nameText = player.playerName; // no "N. " prefix (Fix round 5).
+    final changed = _nameLines(player) > 1;
 
     Widget laneRow(PlayerLane? lane) {
       // A filler row when this side threw fewer lanes than the other side
@@ -1369,10 +1396,16 @@ class _ScoreTableBody extends StatelessWidget {
                 width: m.nameWidth,
                 height: laneRowCount * _laneRowHeight,
                 bg: _kNameCellGrey,
-                text: nameInLaneRows ? nameText : '',
+                text: nameInLaneRows && !changed ? player.playerName : '',
+                span: nameInLaneRows && changed
+                    ? _nameSpan(player, _s16w700.copyWith(color: _kBlack))
+                    : null,
                 style: _s16w700,
                 align: TextAlign.left,
-                maxLines: geometry.laneNameMaxLines(laneRowCount),
+                maxLines: math.max(
+                  geometry.laneNameMaxLines(laneRowCount),
+                  _nameLines(player),
+                ),
               ),
             _cell(
               width: m.nameWidth,
@@ -1383,10 +1416,16 @@ class _ScoreTableBody extends StatelessWidget {
               // stretched height holds full screen.
               height: _celkemRowHeight,
               bg: _kRegCellBlue,
-              text: nameInLaneRows ? '' : nameText,
+              text: !nameInLaneRows && !changed ? player.playerName : '',
+              span: !nameInLaneRows && changed
+                  ? _nameSpan(player, _s16w700.copyWith(color: _kBlack))
+                  : null,
               style: _s16w700,
               align: TextAlign.left,
-              maxLines: geometry.celkemNameMaxLines,
+              maxLines: math.max(
+                geometry.celkemNameMaxLines,
+                _nameLines(player),
+              ),
             ),
           ],
         ),
@@ -1453,60 +1492,42 @@ class _ScoreTableBody extends StatelessWidget {
 /// axis, filling the whole display — no AppBar, the status and navigation
 /// bars hidden on Android (a swipe from an edge shows them for a moment),
 /// inside the safe area only so a notch never covers a cell — 100% width
-/// AND 100% height, portrait or landscape (see [_FillViewer]). System back
-/// closes it; there is no close button to take room. The web has no system
-/// back (the browser's leaves the app's page stack), so there a small back
-/// button floats in the corner for 3 s and comes back on a tap on the
-/// sheet ([showBackButton]). Fix round 3 let the user pinch in past the
-/// initial "see it all at once" view.
+/// AND 100% height, portrait or landscape (see [_FillViewer]). A small
+/// „×“ floats in the corner ([showCloseButton]); a tap on the sheet hides
+/// it when it is in the way and shows it again. System back closes the page
+/// too. Fix round 3 let the user pinch in past the initial "see it all at
+/// once" view.
 class LegacyScoreSheetPage extends StatefulWidget {
   const LegacyScoreSheetPage({
     super.key,
     required this.slot,
     required this.result,
     required this.players,
-    this.showBackButton = kIsWeb,
+    this.showCloseButton = true,
   });
 
   final PrioritySlot slot;
   final MatchResult? result;
   final List<MatchPlayerResult> players;
 
-  /// The floating back button — where there is no system back (the web).
-  final bool showBackButton;
+  /// The floating „×“. A tap on the sheet toggles it.
+  final bool showCloseButton;
 
   @override
   State<LegacyScoreSheetPage> createState() => _LegacyScoreSheetPageState();
 }
 
 class _LegacyScoreSheetPageState extends State<LegacyScoreSheetPage> {
-  static const _backButtonShownFor = Duration(seconds: 3);
-
-  bool _backButtonVisible = true;
-  Timer? _hideBackButton;
+  bool _closeVisible = true;
 
   @override
   void initState() {
     super.initState();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-    if (widget.showBackButton) _scheduleHide();
-  }
-
-  void _scheduleHide() {
-    _hideBackButton?.cancel();
-    _hideBackButton = Timer(_backButtonShownFor, () {
-      if (mounted) setState(() => _backButtonVisible = false);
-    });
-  }
-
-  void _showBackButton() {
-    setState(() => _backButtonVisible = true);
-    _scheduleHide();
   }
 
   @override
   void dispose() {
-    _hideBackButton?.cancel();
     // Flutter's own default: both bars shown.
     SystemChrome.setEnabledSystemUIMode(
       SystemUiMode.manual,
@@ -1524,31 +1545,31 @@ class _LegacyScoreSheetPageState extends State<LegacyScoreSheetPage> {
         players: widget.players,
       ),
     );
-    if (!widget.showBackButton) return Scaffold(body: sheet);
+    if (!widget.showCloseButton) return Scaffold(body: sheet);
     final scheme = Theme.of(context).colorScheme;
     return Scaffold(
       body: Stack(
         children: [
           GestureDetector(
             behavior: HitTestBehavior.translucent,
-            onTap: _showBackButton,
+            onTap: () => setState(() => _closeVisible = !_closeVisible),
             child: sheet,
           ),
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.all(8),
               child: AnimatedOpacity(
-                opacity: _backButtonVisible ? 1 : 0,
+                opacity: _closeVisible ? 1 : 0,
                 duration: const Duration(milliseconds: 200),
                 child: IgnorePointer(
-                  ignoring: !_backButtonVisible,
+                  ignoring: !_closeVisible,
                   child: Material(
                     shape: const CircleBorder(),
                     color: scheme.surface.withValues(alpha: 0.85),
                     elevation: 2,
                     child: IconButton(
-                      icon: const Icon(Icons.arrow_back),
-                      tooltip: 'Zpět',
+                      icon: const Icon(Icons.close),
+                      tooltip: 'Zavřít',
                       onPressed: () => Navigator.of(context).maybePop(),
                     ),
                   ),

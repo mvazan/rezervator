@@ -110,7 +110,7 @@ void main() {
     Map<String, int> teamColors = const {},
     Map<String, bool> exceptions = const {},
     List<CalendarTeam> calendarTeams = const [],
-    Future<String> Function(String matchId)? refreshMatch,
+    Future<String> Function(String matchId, {bool force})? refreshMatch,
     void Function(String url)? launch,
   }) {
     return ProviderScope(
@@ -154,7 +154,7 @@ void main() {
           builder: (context) => MediaQuery(
             data: MediaQuery.of(context).copyWith(disableAnimations: true),
             child: ResultsScreen(
-              refreshMatch: refreshMatch ?? (_) async => 'not_live',
+              refreshMatch: refreshMatch ?? (_, {force = false}) async => 'not_live',
               launch: launch ?? (_) {},
             ),
           ),
@@ -381,7 +381,7 @@ void main() {
       app(
         slots: [finishedYesterday, liveToday],
         results: {'m1': finishedResult, 'm2': liveResult},
-        refreshMatch: (id) async {
+        refreshMatch: (id, {force = false}) async {
           refreshed.add(id);
           return 'queued';
         },
@@ -400,18 +400,22 @@ void main() {
     tester,
   ) async {
     final refreshed = <String>[];
+    final forced = <bool>[];
     await tester.pumpWidget(
       app(
         slots: [liveToday],
         results: {'m2': liveResult},
-        refreshMatch: (id) async {
+        refreshMatch: (id, {force = false}) async {
           refreshed.add(id);
+          forced.add(force);
           return 'queued';
         },
       ),
     );
     await tester.pumpAndSettle();
+    expect(forced, [false], reason: 'the open-time poke keeps the 5 min gate');
     refreshed.clear(); // drop the open-time refresh, isolate the pull
+    forced.clear();
 
     await tester.fling(
       find.byKey(const Key('results-list')),
@@ -421,6 +425,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(refreshed, ['m2']);
+    expect(forced, [true], reason: 'a pull is the user asking: always look');
   });
 
   testWidgets('pull-to-refresh with nothing live shows a snackbar', (
@@ -446,7 +451,7 @@ void main() {
       app(
         slots: [liveToday],
         results: {'m2': liveResult},
-        refreshMatch: (_) async => throw Exception('not_allowed'),
+        refreshMatch: (_, {force = false}) async => throw Exception('not_allowed'),
       ),
     );
     await tester.pumpAndSettle();
@@ -718,7 +723,7 @@ void main() {
         app(
           slotsStream: slotsCtrl.stream,
           results: {'m2': liveResultFor('m2')},
-          refreshMatch: (id) async {
+          refreshMatch: (id, {force = false}) async {
             refreshed.add(id);
             return 'queued';
           },
@@ -756,7 +761,7 @@ void main() {
           profile: meFollowsNothing,
           slots: [liveToday, liveToday2],
           results: {'m2': liveResultFor('m2'), 'm5': liveResultFor('m5')},
-          refreshMatch: (id) async {
+          refreshMatch: (id, {force = false}) async {
             refreshed.add(id);
             return 'queued';
           },
@@ -787,7 +792,7 @@ void main() {
           profile: meFollowsNothing,
           slots: [liveToday, liveToday2],
           results: {'m2': liveResultFor('m2'), 'm5': liveResultFor('m5')},
-          refreshMatch: (id) async {
+          refreshMatch: (id, {force = false}) async {
             refreshed.add(id);
             return 'queued';
           },
@@ -818,7 +823,7 @@ void main() {
         app(
           slots: [liveToday],
           results: {'m2': liveResultFor('m2')},
-          refreshMatch: (_) async => throw StateError('boom'),
+          refreshMatch: (_, {force = false}) async => throw StateError('boom'),
         ),
       );
       await tester.pumpAndSettle();

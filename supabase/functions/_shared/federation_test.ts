@@ -570,3 +570,22 @@ Deno.test("resultPayload is what apply_federation_result reads", () => {
   assertEquals((players[0].lanes as unknown[]).length, 2);
   assert(players.some((x) => x.side === "away"));
 });
+
+Deno.test("a substitution lands on the starter's line, only there", () => {
+  const d = parseMatch(fixture("match_substitution.html"));
+  const away = d.away!.players;
+  const medek = away.find((p) => p.name === "Pavel Medek")!;
+  assertEquals(medek.position, 2);
+  assertEquals(medek.substitute, { name: "Miloš Vážan", siteId: 5282, slug: "milos-vazan", fromThrow: 41 });
+  assertEquals(away.filter((p) => p.substitute !== null).length, 1);
+  assertEquals(d.home!.players.filter((p) => p.substitute !== null).length, 0);
+  const row = (resultPayload(d).players as Record<string, unknown>[])
+    .find((x) => x.side === "away" && x.position === 2)!;
+  assertEquals(
+    [row.sub_name, row.sub_site_id, row.sub_slug, row.sub_from_throw],
+    ["Miloš Vážan", 5282, "milos-vazan", 41],
+  );
+  const plain = (resultPayload(d).players as Record<string, unknown>[])
+    .find((x) => x.side === "home" && x.position === 1)!;
+  assertEquals(plain.sub_name, null);
+});

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/core/contrast.dart';
 import 'package:rezervator/core/theme.dart';
+import 'package:rezervator/domain/palette.dart';
 
 /// WCAG 2.1 AA: normal text 4.5:1, shapes and UI elements 3:1.
 const _textAA = 4.5;
@@ -135,6 +136,79 @@ void main() {
         expect(visible, greaterThanOrEqualTo(shapeBar),
             reason: '$variant: card blends into the page — fill and border '
                 'both under $shapeBar:1 (best ${visible.toStringAsFixed(2)}:1)');
+      });
+
+      // The match detail's side-colour marks (a duel's winner stripe, lane
+      // dots and difference bar) sit straight on the card, painted in
+      // legibleSideShade of the side's colour: one of the eleven Google
+      // event colours the viewer gave a team, else green (home) or red
+      // (guests). A mark is a shape: 3:1 in every variant, for either side.
+      test('the Souboje side-colour marks are visible on the card', () {
+        final card = theme.cardTheme.color!;
+        for (final (name, color) in <(String, Color)>[
+          for (final (_, name, color) in googleEventColors) (name, color),
+          ('home green', homeSideColor),
+          ('guests red', awaySideColor),
+        ]) {
+          for (final home in [true, false]) {
+            _expectShape(
+              contrastRatio(
+                legibleSideShade(color, brightness, home: home),
+                card,
+              ),
+              '$name mark on the card (${home ? 'home' : 'guests'})',
+              variant,
+              _shapeAA,
+            );
+          }
+        }
+      });
+
+      // The two default sides must not differ in hue alone: green is the
+      // lighter one, so a viewer who confuses red and green still sees two
+      // brightnesses (measured about 2.5:1 light, 2.2:1 dark).
+      test('home green and guests red differ in brightness too', () {
+        final green = legibleSideShade(homeSideColor, brightness, home: true);
+        final red = legibleSideShade(awaySideColor, brightness, home: false);
+        expect(contrastRatio(green, red), greaterThanOrEqualTo(2.0));
+      });
+
+      // A lead („+22“ home, „-3“ guests) is text in its side's colour on the
+      // card: 4.5:1 (7:1 in the high-contrast appearances), for the default
+      // green and red and for every team colour a viewer can pick.
+      test('the lead labels are legible in their side colours', () {
+        final card = theme.cardTheme.color!;
+        for (final (name, color) in <(String, Color)>[
+          for (final (_, name, color) in googleEventColors) (name, color),
+          ('home green', homeSideColor),
+          ('guests red', awaySideColor),
+        ]) {
+          _expectText(
+            contrastRatio(
+              legibleSideText(color, brightness, highContrast: contrastLevel == 1),
+              card,
+            ),
+            '$name lead on the card',
+            variant,
+            textBar,
+          );
+        }
+      });
+
+      // „bod“ pill: the side colour at 16 % under onSurface text.
+      test('the „bod“ pill text is legible on either default side', () {
+        final card = theme.cardTheme.color!;
+        for (final side in [homeSideColor, awaySideColor]) {
+          _expectText(
+            contrastRatio(
+              scheme.onSurface,
+              composite(side.withValues(alpha: 0.16), card),
+            ),
+            'pill text on the tinted card',
+            variant,
+            textBar,
+          );
+        }
       });
 
       test('text on the card and in an input field is legible', () {

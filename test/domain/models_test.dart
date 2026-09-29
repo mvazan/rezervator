@@ -734,4 +734,34 @@ void main() {
       expect(Profile.fromJson(base).ownColor, -1);
     });
   });
+
+  group('MatchPlayerResult substitution (0053)', () {
+    Map<String, dynamic> row([Map<String, dynamic> extra = const {}]) => {
+      'id': 'x',
+      'match_id': 'm',
+      'side': 'away',
+      'position': 2,
+      'player_name': 'Pavel Medek',
+      ...extra,
+    };
+
+    test('reads the change and words it like the site', () {
+      final p = MatchPlayerResult.fromJson(
+        row({'sub_name': 'Miloš Vážan', 'sub_from_throw': 41}),
+      );
+      expect(p.substituteName, 'Miloš Vážan');
+      expect(p.substituteFromThrow, 41);
+      expect(p.substituteLabel, 'od 41. hodu Miloš Vážan');
+    });
+
+    test('without a known throw it is just the name; without a change null', () {
+      expect(
+        MatchPlayerResult.fromJson(
+          row({'sub_name': 'Miloš Vážan'}),
+        ).substituteLabel,
+        'Miloš Vážan',
+      );
+      expect(MatchPlayerResult.fromJson(row()).substituteLabel, isNull);
+    });
+  });
 }

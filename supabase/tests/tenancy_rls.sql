@@ -4132,7 +4132,7 @@ end $$;
 do $$
 declare
   v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
-  v_res constant jsonb := '{"status":"finished","match_type":"TEAMS_OF_6","discipline":"T120","video_url":null,"venue":{"slug":"jinde","name":"Kuželna Jinde"},"home_prep":30,"home":{"points":6,"total":3200,"fulls":2100,"spares":1100,"errors":10,"set_points":15},"away":{"points":2,"total":3100,"fulls":2050,"spares":1050,"errors":14,"set_points":9},"players":[{"side":"home","position":1,"player_name":"Jan Novák","player_site_id":7,"player_slug":"jan-novak","fulls":350,"spares":190,"errors":1,"total":540,"set_points":3,"team_points":1,"lanes":[{"lane":1,"fulls":90,"spares":45,"errors":0,"total":135,"setPoints":1}]}]}';
+  v_res constant jsonb := '{"status":"finished","match_type":"TEAMS_OF_6","discipline":"T120","video_url":null,"venue":{"slug":"jinde","name":"Kuželna Jinde"},"home_prep":30,"home":{"points":6,"total":3200,"fulls":2100,"spares":1100,"errors":10,"set_points":15},"away":{"points":2,"total":3100,"fulls":2050,"spares":1050,"errors":14,"set_points":9},"players":[{"side":"home","position":1,"player_name":"Jan Novák","player_site_id":7,"player_slug":"jan-novak","fulls":350,"spares":190,"errors":1,"total":540,"set_points":3,"team_points":1,"sub_name":"Petr Nový","sub_site_id":9,"sub_slug":"petr-novy","sub_from_throw":41,"lanes":[{"lane":1,"fulls":90,"spares":45,"errors":0,"total":135,"setPoints":1}]}]}';
   s priority_slots;
   mr match_results;
 begin
@@ -4150,6 +4150,11 @@ begin
      or (select lanes->0->>'total' from match_player_results where match_id = s.id) <> '135' then
     raise exception 'FAIL: player row not stored';
   end if;
+  if (select (sub_name, sub_site_id, sub_slug, sub_from_throw)::text
+        from match_player_results where match_id = s.id)
+     is distinct from '("Petr Nový",9,petr-novy,41)' then
+    raise exception 'FAIL: the substitution was not stored on the starter''s row (0053)';
+  end if;
   if not s.is_away or s.prep_minutes <> 0 or s.venue_slug <> 'jinde'
      or s.venue <> 'Kuželna Jinde' or s.description not like '%· Kuželna Jinde' then
     raise exception 'FAIL: the venue did not turn 103 into an away match: %', to_jsonb(s);
@@ -4166,7 +4171,7 @@ begin
     raise exception 'FAIL: apply_federation_result should answer false for a match with no slot';
   end if;
   perform set_config('import.run', '', true);
-  raise notice 'OK: apply_federation_result upserts the result, replaces players, fixes home/away from the venue; false without a slot (0045)';
+  raise notice 'OK: apply_federation_result upserts the result, replaces players, fixes home/away from the venue; false without a slot (0045); a substitution rides on the starter''s row (0053)';
 end $$;
 
 -- 7. RLS: own alley reads, the other alley sees nothing, nobody writes.
@@ -4636,6 +4641,52 @@ begin
   end if;
 end $$;
 reset role;
+-- 0054: the refresh button (p_force) looks again even inside the 5 minutes;
+-- the background poke still answers fresh; a double tap is held off.
+do $$
+begin
+  update match_results set fetched_at = now() - interval '1 minute'
+   where match_id = current_setting('probe.fed_103')::uuid;
+  update notification_jobs
+     set run_at = now() + interval '1 hour',
+         payload = payload || jsonb_build_object('requested_at', now() - interval '1 minute')
+   where dedupe_key = 'federation_match:00000000-0000-0000-0000-00000000000a:103';
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+begin
+  if refresh_match(current_setting('probe.fed_103')::uuid) <> 'fresh' then
+    raise exception 'FAIL: the background poke did not stay fresh inside 5 minutes';
+  end if;
+  if refresh_match(current_setting('probe.fed_103')::uuid, true) <> 'queued' then
+    raise exception 'FAIL: a forced refresh inside 5 minutes was not queued (0054)';
+  end if;
+end $$;
+reset role;
+do $$
+begin
+  if not exists (select 1 from notification_jobs
+                 where dedupe_key = 'federation_match:00000000-0000-0000-0000-00000000000a:103'
+                   and run_at = now()
+                   and (payload->>'requested_at')::timestamptz = now()) then
+    raise exception 'FAIL: a forced refresh did not re-arm the job (0054)';
+  end if;
+  update match_results set fetched_at = now() - interval '5 seconds'
+   where match_id = current_setting('probe.fed_103')::uuid;
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+begin
+  if refresh_match(current_setting('probe.fed_103')::uuid, true) <> 'fresh' then
+    raise exception 'FAIL: a forced double tap was not held off by the 15 s floor (0054)';
+  end if;
+  raise notice 'OK: a forced refresh looks at the site again inside 5 minutes, a double tap is held off (0054)';
+end $$;
+reset role;
 do $$
 begin
   if not exists (select 1 from notification_jobs
@@ -4792,7 +4843,7 @@ begin
                            'public.request_federation_discovery()',
                            'public.request_federation_sync()',
                            'public.update_team(uuid, text, uuid, boolean)',
-                           'public.refresh_match(uuid)'] loop
+                           'public.refresh_match(uuid, boolean)'] loop
     if has_function_privilege('anon', f, 'execute')
        or not has_function_privilege('authenticated', f, 'execute') then
       raise exception 'FAIL: % must be callable by the app only', f;

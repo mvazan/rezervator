@@ -141,6 +141,37 @@ void main() {
           .data,
   ];
 
+  testWidgets('a substitution is printed under the starter, as on the site', (
+    tester,
+  ) async {
+    final changed = MatchPlayerResult.fromJson({
+      'id': 'p3',
+      'match_id': 'm1',
+      'side': 'away',
+      'position': 1,
+      'player_name': 'Petr Svoboda',
+      'sub_name': 'Miloš Vážan',
+      'sub_from_throw': 41,
+      'fulls': 340,
+      'total': 550,
+      'lanes': [
+        {'lane': 1, 'fulls': 170, 'total': 270},
+        {'lane': 2, 'fulls': 170, 'total': 280},
+      ],
+    });
+    await tester.pumpWidget(
+      app(result: result, players: [homePlayer, changed]),
+    );
+    await tester.pumpAndSettle();
+        // „od 41. hodu“ and the substitute's name each on a line of their own,
+    // with a thin empty line above and below „od 41. hodu“.
+    expect(
+      find.text('Petr Svoboda\n\nod 41. hodu\n\nMiloš Vážan'),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
     'team summary row shows both team names, Body (match points), team '
     'stat totals and the Družstvo (pin-total bonus) points',
@@ -440,7 +471,7 @@ void main() {
 
   testWidgets(
     'tapping Zvětšit pushes a full-screen page with the same data, no '
-    'header of its own and no close button; system back pops it',
+    'header of its own, just a floating ×; system back pops it too',
     (tester) async {
       await tester.pumpWidget(
         app(result: result, players: [homePlayer, awayPlayer]),
@@ -455,8 +486,7 @@ void main() {
       final page = find.byType(LegacyScoreSheetPage);
       expect(page, findsOneWidget);
       expect(find.byType(AppBar), findsNothing);
-      expect(find.byIcon(Icons.close), findsNothing);
-      expect(find.byTooltip('Zpět'), findsNothing, reason: 'Android: system back');
+      expect(find.byTooltip('Zavřít'), findsOneWidget);
       expect(find.text('580'), findsWidgets);
       expect(
         find.descendant(of: page, matching: find.byIcon(Icons.open_in_full)),
@@ -507,8 +537,8 @@ void main() {
   );
 
   testWidgets(
-    'on the web (no system back) a small back button shows for 3 s, a tap '
-    'on the sheet brings it back, and it closes the page; Android gets none',
+    'a floating × closes the page; a tap on the sheet hides it when it is in '
+    'the way and shows it again',
     (tester) async {
       await tester.pumpWidget(
         MaterialApp(
@@ -521,7 +551,6 @@ void main() {
                       slot: slot,
                       result: result,
                       players: [homePlayer, awayPlayer],
-                      showBackButton: true,
                     ),
                   ),
                 ),
@@ -537,15 +566,19 @@ void main() {
       double opacity() => tester
           .widget<AnimatedOpacity>(
             find.ancestor(
-              of: find.byTooltip('Zpět'),
+              of: find.byTooltip('Zavřít'),
               matching: find.byType(AnimatedOpacity),
             ),
           )
           .opacity;
-      expect(find.byTooltip('Zpět'), findsOneWidget);
       expect(opacity(), 1);
 
-      await tester.pump(const Duration(seconds: 3));
+      // No timer hides it behind the user's back.
+      await tester.pump(const Duration(seconds: 10));
+      await tester.pumpAndSettle();
+      expect(opacity(), 1);
+
+      await tester.tap(find.text('580'), warnIfMissed: false);
       await tester.pumpAndSettle();
       expect(opacity(), 0);
 
@@ -553,7 +586,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(opacity(), 1);
 
-      await tester.tap(find.byTooltip('Zpět'));
+      await tester.tap(find.byTooltip('Zavřít'));
       await tester.pumpAndSettle();
       expect(find.byType(LegacyScoreSheetPage), findsNothing);
       expect(find.text('otevřít'), findsOneWidget);

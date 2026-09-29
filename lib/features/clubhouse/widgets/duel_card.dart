@@ -1,0 +1,892 @@
+/// The match detail's duel card (Souboje, Task 4): one position's duel told
+/// at a glance — the two players, their totals with the „bod“ next to the
+/// winner's, the lead and a difference bar on the match's shared scale, and
+/// every lane side by side. A tap opens the per-lane table (Plné, Dor., Ch.,
+/// Celkem) and a sentence that says how the point was won.
+///
+/// Live-safe like the domain under it: while a duel is being played its
+/// totals, lead and bar count only the lanes BOTH players have thrown, a
+/// lane one of them hasn't finished reads „– : –“, and nothing is styled as
+/// won until the duel is done. A duel nobody has started is a slim „čeká“
+/// card.
+///
+/// Home is always on the left. Every number is set in tabular figures, and a
+/// winner is never told by colour alone: the weight of the total, the „bod“
+/// pill, the side the bar grows to and the side of a lane's dot say it too.
+library;
+
+import 'dart:math' as math;
+
+import 'package:flutter/material.dart';
+
+import '../../../domain/duels.dart';
+import '../../../domain/models.dart' show MatchPlayerResult;
+import '../../../domain/palette.dart';
+import '../../../domain/results.dart';
+import 'lead_color.dart';
+
+/// Digits of one width, so a number doesn't jump when a live value changes.
+const _tabular = [FontFeature.tabularFigures()];
+
+/// A side's colour as a mark painted straight on the card (the stripe, a
+/// lane dot, the bar): its legible shade, which keeps at least 3:1 against
+/// the card in light and dark for every team colour a viewer can pick
+/// (test/core/theme_contrast_test.dart). The pills keep the colour itself,
+/// at 16 % under onSurface text.
+Color _mark(BuildContext context, Color side, {required bool home}) =>
+    legibleSideShade(side, Theme.of(context).brightness, home: home);
+
+/// One duel of a match — see the library comment.
+///
+/// The card has no margin of its own: the list places it (12dp from the
+/// edges, 8dp apart).
+class DuelCard extends StatelessWidget {
+  const DuelCard({
+    super.key,
+    required this.duel,
+    required this.scale,
+    required this.expanded,
+    required this.onTap,
+    required this.homeColor,
+    required this.awayColor,
+    this.showSetPoints = false,
+  });
+
+  /// Whether set points are part of the result (120 throws: „1 (550) : (578)
+  /// 3“); at 100 throws they are not shown at all ([setPointsMatter]).
+  final bool showSetPoints;
+
+  /// The duel to show.
+  final Duel duel;
+
+  /// The [diffScale] of the whole match: the difference that fills half the
+  /// bar, shared by every card so a +4 reads as a sliver next to a +99.
+  final int scale;
+
+  /// Whether the per-lane table is open. A waiting duel ignores it.
+  final bool expanded;
+
+  /// Toggles [expanded] in the parent. Called on every tap, a waiting card's
+  /// too (harmless: it never opens).
+  final VoidCallback onTap;
+
+  /// The home side's colour: its stripe, bar, lane dots (all in its
+  /// legible shade) and pill.
+  final Color homeColor;
+
+  /// The away side's colour: its stripe, bar, lane dots (all in its
+  /// legible shade) and pill.
+  final Color awayColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final waiting = duel.state == DuelState.waiting;
+    final winner = duel.state == DuelState.done ? duel.pointWinner : null;
+    return Semantics(
+      container: true,
+      label: duelSemantics(duel),
+      button: true,
+      expanded: waiting ? null : expanded,
+      onTap: onTap,
+      excludeSemantics: true,
+      child: Card(
+        margin: EdgeInsets.zero,
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: waiting
+              ? _WaitingBody(duel: duel)
+              : Stack(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                      child: _DuelBody(
+                        duel: duel,
+                        scale: scale,
+                        expanded: expanded,
+                        homeColor: homeColor,
+                        awayColor: awayColor,
+                        showSetPoints: showSetPoints,
+                      ),
+                    ),
+                    // The winner's outer edge: left for home, right for away.
+                    if (winner != null)
+                      Positioned(
+                        top: 0,
+                        bottom: 0,
+                        left: winner == MatchSide.home ? 0 : null,
+                        right: winner == MatchSide.away ? 0 : null,
+                        width: 4,
+                        child: ColoredBox(
+                          key: Key('duel-${duel.position}-stripe'),
+                          color: _mark(
+                            context,
+                            winner == MatchSide.home ? homeColor : awayColor,
+                            home: winner == MatchSide.home,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A duel nobody has started: „home name  čeká  away name“, at least 56dp.
+class _WaitingBody extends StatelessWidget {
+  const _WaitingBody({required this.duel});
+
+  final Duel duel;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final text = Theme.of(context).textTheme;
+    final name = text.bodyLarge?.copyWith(
+      fontSize: 15,
+      fontWeight: FontWeight.w500,
+      color: scheme.onSurface,
+    );
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: 56),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Row(
+          children: [
+            Expanded(
+              child: _PlayerName(duel.home, style: name),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Text(
+                'čeká',
+                style: text.bodyMedium?.copyWith(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w400,
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+            Expanded(
+              child: _PlayerName(duel.away, style: name, end: true),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A duel being played or done: names, totals, bar, lanes, the verdict line
+/// and, when [expanded], the lane table.
+class _DuelBody extends StatelessWidget {
+  const _DuelBody({
+    required this.duel,
+    required this.scale,
+    required this.expanded,
+    required this.homeColor,
+    required this.awayColor,
+    required this.showSetPoints,
+  });
+
+  final Duel duel;
+  final int scale;
+  final bool expanded;
+  final Color homeColor;
+  final Color awayColor;
+  final bool showSetPoints;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final text = Theme.of(context).textTheme;
+    final done = duel.state == DuelState.done;
+    final small = text.bodySmall?.copyWith(
+      fontSize: 12,
+      fontWeight: FontWeight.w400,
+      color: scheme.onSurfaceVariant,
+      fontFeatures: _tabular,
+    );
+    final reduceMotion = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _Names(duel: duel),
+        const SizedBox(height: 6),
+        _Totals(
+          duel: duel,
+          homeColor: homeColor,
+          awayColor: awayColor,
+          showSetPoints: showSetPoints,
+        ),
+        if (!done && duel.laneCount > 0)
+          Text(
+            'po ${duel.playedLanes} ze ${duel.laneCount} drah',
+            textAlign: TextAlign.center,
+            style: small,
+          ),
+        const SizedBox(height: 10),
+        _DiffBar(
+          position: duel.position,
+          diff: duel.diff,
+          scale: scale,
+          homeColor: homeColor,
+          awayColor: awayColor,
+          // While the duel is played the bar is only provisional: half
+          // strength (the foundation's stand-in for hatching).
+          faded: !done,
+        ),
+        // Collapsed: the lanes with the chevron at the right of the same row.
+        // Expanded: neither — the table replaces them, and a tap on the card
+        // closes it again.
+        if (!expanded) ...[
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: duel.lanes.isNotEmpty
+                    ? _Lanes(
+                        duel: duel,
+                        homeColor: homeColor,
+                        awayColor: awayColor,
+                      )
+                    : const SizedBox.shrink(),
+              ),
+              Icon(Icons.expand_more, size: 20, color: scheme.onSurfaceVariant),
+            ],
+          ),
+        ],
+        AnimatedSize(
+          duration: reduceMotion
+              ? Duration.zero
+              : const Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+          alignment: Alignment.topCenter,
+          child: !expanded
+              ? const SizedBox(width: double.infinity)
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const SizedBox(height: 8),
+                    _LaneTable(
+                      duel: duel,
+                      homeColor: homeColor,
+                      awayColor: awayColor,
+                    ),
+                  ],
+                ),
+        ),
+      ],
+    );
+  }
+}
+
+/// „Lucie Mičanová   Lukáš Pelánek“: both names, up to 2 lines each.
+class _Names extends StatelessWidget {
+  const _Names({required this.duel});
+
+  final Duel duel;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final text = Theme.of(context).textTheme;
+    final name = text.bodyLarge?.copyWith(
+      fontSize: 15,
+      fontWeight: FontWeight.w500,
+      color: scheme.onSurface,
+    );
+    return Row(
+      children: [
+        Expanded(
+          child: _PlayerName(duel.home, style: name),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: _PlayerName(duel.away, style: name, end: true),
+        ),
+      ],
+    );
+  }
+}
+
+/// „407   +22   385“: the totals at 32dp around the lead at 20dp. Done: the
+/// point winner's total is w800 (a split: both w500). Played: both w500, and
+/// the totals are the duel's shown ones ([Duel.shownHome], [Duel.shownAway]): only the lanes both players
+/// threw, so they agree with the lead.
+class _Totals extends StatelessWidget {
+  const _Totals({
+    required this.duel,
+    required this.homeColor,
+    required this.awayColor,
+    required this.showSetPoints,
+  });
+
+  final bool showSetPoints;
+  final Duel duel;
+  final Color homeColor;
+  final Color awayColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final text = Theme.of(context).textTheme;
+    final done = duel.state == DuelState.done;
+    final winner = done ? duel.pointWinner : null;
+    final homeTotal = numLabel(duel.shownHome);
+    final awayTotal = numLabel(duel.shownAway);
+
+    TextStyle? totalStyle(MatchSide side) => text.displaySmall?.copyWith(
+      fontSize: 32,
+      height: 1.1,
+      fontWeight: winner == side ? FontWeight.w800 : FontWeight.w500,
+      color: scheme.onSurface,
+      fontFeatures: _tabular,
+    );
+
+
+    // 120 throws: „1 (550)  +28  (578) 3“ — the set points big, the pins in
+    // brackets beside them. Until both sides have set points (a duel just
+    // started) the plain pins are printed as at 100 throws.
+    final homeSb = duel.home?.setPoints;
+    final awaySb = duel.away?.setPoints;
+    final withSb = showSetPoints && homeSb != null && awaySb != null;
+    final bracket = text.bodyLarge?.copyWith(
+      fontSize: 16,
+      fontWeight: FontWeight.w400,
+      color: scheme.onSurfaceVariant,
+      fontFeatures: _tabular,
+    );
+    Widget total(MatchSide side) {
+      final home = side == MatchSide.home;
+      if (!withSb) {
+        return Text(home ? homeTotal : awayTotal, style: totalStyle(side));
+      }
+      final sb = TextSpan(
+        text: numLabel(home ? homeSb : awaySb),
+        style: totalStyle(side),
+      );
+      final pins = TextSpan(
+        text: '(${home ? homeTotal : awayTotal})',
+        style: bracket,
+      );
+      const gap = TextSpan(text: ' ');
+      return Text.rich(
+        TextSpan(children: home ? [sb, gap, pins] : [pins, gap, sb]),
+      );
+    }
+
+    return Row(
+      children: [
+        Expanded(
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  total(MatchSide.home),
+                ],
+              ),
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: Text(
+            leadLabel(duel.diff),
+            style: text.titleLarge?.copyWith(
+              fontSize: 20,
+              fontWeight: FontWeight.w800,
+              color:
+                  leadColor(
+                    context,
+                    leadLabel(duel.diff),
+                    homeColor: homeColor,
+                    awayColor: awayColor,
+                  ) ??
+                  scheme.onSurface,
+              fontFeatures: _tabular,
+            ),
+          ),
+        ),
+        Expanded(
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  total(MatchSide.away),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// The 6dp difference bar: a track with a 1dp tick in the centre, and a fill
+/// that grows from the centre towards the leader, `|diff| / scale` of the
+/// half, in the leader's legible shade ([faded] = half strength inside a
+/// full-strength 1dp edge, so the provisional bar still reads 3:1).
+class _DiffBar extends StatelessWidget {
+  const _DiffBar({
+    required this.position,
+    required this.diff,
+    required this.scale,
+    required this.homeColor,
+    required this.awayColor,
+    required this.faded,
+  });
+
+  final int position;
+  final int? diff;
+  final int scale;
+  final Color homeColor;
+  final Color awayColor;
+  final bool faded;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final diff = this.diff ?? 0;
+    final share = diff == 0
+        ? 0.0
+        : math.min(diff.abs() / math.max(scale, 1), 1.0);
+    final homeLeads = diff > 0;
+    final color = _mark(
+      context,
+      homeLeads ? homeColor : awayColor,
+      home: homeLeads,
+    );
+    return SizedBox(
+      key: Key('duel-$position-bar'),
+      height: 6,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(3),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final half = constraints.maxWidth / 2;
+            final width = share * half;
+            return Stack(
+              children: [
+                Positioned.fill(
+                  child: ColoredBox(color: scheme.surfaceContainerHighest),
+                ),
+                if (width > 0)
+                  Positioned(
+                    key: Key('duel-$position-bar-fill'),
+                    top: 0,
+                    bottom: 0,
+                    left: homeLeads ? half - width : half,
+                    width: width,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: faded
+                            ? color.withValues(alpha: color.a * 0.5)
+                            : color,
+                        border: faded ? Border.all(color: color) : null,
+                      ),
+                    ),
+                  ),
+                Positioned(
+                  top: 0,
+                  bottom: 0,
+                  left: half - 0.5,
+                  width: 1,
+                  child: ColoredBox(color: scheme.outline),
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+/// One entry per lane, two to a row: T100 side by side, T120 in a 2×2 grid.
+class _Lanes extends StatelessWidget {
+  const _Lanes({
+    required this.duel,
+    required this.homeColor,
+    required this.awayColor,
+  });
+
+  final Duel duel;
+  final Color homeColor;
+  final Color awayColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final lanes = duel.lanes;
+    Widget entry(int i) => Padding(
+      padding: EdgeInsets.fromLTRB(4, i < 2 ? 0 : 6, 4, 0),
+      child: i < lanes.length
+          ? _LaneEntry(
+              position: duel.position,
+              lane: lanes[i],
+              homeColor: homeColor,
+              awayColor: awayColor,
+            )
+          : const SizedBox.shrink(),
+    );
+    // A table, so the columns line up (T120) and every lane shrinks by the
+    // same factor when they don't fit.
+    return _FitWidth(
+      child: Table(
+        defaultColumnWidth: const IntrinsicColumnWidth(),
+        defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+        children: [
+          for (var i = 0; i < lanes.length; i += 2)
+            TableRow(children: [entry(i), entry(i + 1)]),
+        ],
+      ),
+    );
+  }
+}
+
+/// The width of „000“ in [style] as the text is laid out here (tabular
+/// figures: every digit is as wide as a 0).
+double _threeDigits(BuildContext context, TextStyle? style) {
+  final painter = TextPainter(
+    text: TextSpan(text: '000', style: style),
+    textDirection: Directionality.of(context),
+    textScaler: MediaQuery.textScalerOf(context),
+  )..layout();
+  final width = painter.width;
+  painter.dispose();
+  return width;
+}
+
+/// „1.  213 : 216•“: the lane winner's number w800 with a 6dp dot on its
+/// outer side; a tie „215 = 215“; a lane not thrown by both a plain „– : –“. Left-aligned in its cell.
+class _LaneEntry extends StatelessWidget {
+  const _LaneEntry({
+    required this.position,
+    required this.lane,
+    required this.homeColor,
+    required this.awayColor,
+  });
+
+  final int position;
+  final LanePair lane;
+  final Color homeColor;
+  final Color awayColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final text = Theme.of(context).textTheme;
+    final base = text.bodyLarge?.copyWith(
+      fontSize: 16,
+      fontWeight: FontWeight.w500,
+      color: scheme.onSurface,
+      fontFeatures: _tabular,
+    );
+    final label = Text(
+      '${lane.lane}.',
+      style: base?.copyWith(
+        fontWeight: FontWeight.w400,
+        color: scheme.onSurfaceVariant,
+      ),
+    );
+
+    // One skeleton for thrown and not thrown lanes: [dot] [home, right-
+    // aligned] [ : ] [away, left-aligned] [dot], the two numbers in boxes of
+    // one width (three digits, bold), so the colons of every lane stand
+    // under each other — 1. above 3., 2. above 4.
+    final played = lane.played;
+    final winner = lane.winner;
+    final muted = base?.copyWith(color: scheme.onSurfaceVariant);
+    TextStyle? number(MatchSide side) => !played
+        ? muted
+        : base?.copyWith(
+            fontWeight: winner == side ? FontWeight.w800 : FontWeight.w500,
+          );
+    final numberBox = _threeDigits(
+      context,
+      base?.copyWith(fontWeight: FontWeight.w800),
+    );
+    Widget number0(String value, MatchSide side) => ConstrainedBox(
+      constraints: BoxConstraints(minWidth: numberBox),
+      child: Text(
+        value,
+        textAlign: side == MatchSide.home ? TextAlign.right : TextAlign.left,
+        style: number(side),
+      ),
+    );
+    Widget dot(MatchSide side) => SizedBox.square(
+      key: played && winner == side
+          ? Key('duel-$position-lane-${lane.lane}-dot')
+          : null,
+      dimension: 6,
+      child: played && winner == side
+          ? DecoratedBox(
+              decoration: BoxDecoration(
+                color: _mark(
+                  context,
+                  side == MatchSide.home ? homeColor : awayColor,
+                  home: side == MatchSide.home,
+                ),
+                shape: BoxShape.circle,
+              ),
+            )
+          : null,
+    );
+    final score = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        dot(MatchSide.home),
+        const SizedBox(width: 4),
+        Row(
+          key: Key('duel-$position-lane-${lane.lane}-score'),
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            number0(played ? '${lane.home!.total}' : '–', MatchSide.home),
+            Text(lane.tie ? ' = ' : ' : ', style: played ? base : muted),
+            number0(played ? '${lane.away!.total}' : '–', MatchSide.away),
+          ],
+        ),
+        const SizedBox(width: 4),
+        dot(MatchSide.away),
+      ],
+    );
+
+    // Left-aligned in its column, so the numbers of lanes 1 and 3 (2 and 4)
+    // start on one line whatever their scores look like.
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [label, const SizedBox(width: 8), score],
+      ),
+    );
+  }
+}
+
+/// The expanded table, mirrored around the lane column:
+/// `Plné Dor. Ch. Celkem | Dr. n | Celkem Ch. Dor. Plné`, one row per lane
+/// and a Celkem row from the players' own sums. 14dp; the Celkem column and
+/// row w700.
+///
+/// Its columns take their natural width and share what is left evenly; the
+/// column heads are 11dp, so on a 360dp phone at text scale 1.0 it fits
+/// without shrinking. Larger text shrinks the whole table as one piece.
+class _LaneTable extends StatelessWidget {
+  const _LaneTable({
+    required this.duel,
+    required this.homeColor,
+    required this.awayColor,
+  });
+
+  final Duel duel;
+  final Color homeColor;
+  final Color awayColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final text = Theme.of(context).textTheme;
+    final value = text.bodyMedium?.copyWith(
+      fontSize: 14,
+      fontWeight: FontWeight.w500,
+      color: scheme.onSurface,
+      fontFeatures: _tabular,
+    );
+    final bold = value?.copyWith(fontWeight: FontWeight.w700);
+    final caption = text.labelSmall?.copyWith(
+      fontSize: 12,
+      fontWeight: FontWeight.w500,
+      color: scheme.onSurfaceVariant,
+      fontFeatures: _tabular,
+    );
+    final head = caption?.copyWith(fontSize: 11);
+
+    Widget cell(String s, TextStyle? style) => Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 3),
+      child: Text(s, textAlign: TextAlign.center, style: style),
+    );
+
+    /// One side's four values, home in reading order and away mirrored.
+    List<String> side(
+      int? fulls,
+      int? spares,
+      int? errors,
+      int? total, {
+      required bool mirrored,
+    }) {
+      final values = [
+        numLabel(fulls),
+        numLabel(spares),
+        numLabel(errors),
+        numLabel(total),
+      ];
+      return mirrored ? values.reversed.toList() : values;
+    }
+
+    TableRow row(
+      List<String> home,
+      String middle,
+      List<String> away, {
+      required bool sum,
+      Color? middleColor,
+    }) => TableRow(
+      decoration: sum
+          ? BoxDecoration(
+              border: Border(top: BorderSide(color: scheme.outlineVariant)),
+            )
+          : null,
+      children: [
+        for (final (i, s) in home.indexed)
+          cell(s, sum || i == 3 ? bold : value),
+        middleColor == null
+            ? cell(middle, caption)
+            : cell(
+                middle,
+                bold?.copyWith(fontSize: 13, color: middleColor),
+              ),
+        for (final (i, s) in away.indexed)
+          cell(s, sum || i == 0 ? bold : value),
+      ],
+    );
+
+    final home = duel.home;
+    final away = duel.away;
+    const headers = ['Plné', 'Dor.', 'Ch.', 'Celkem'];
+    return _FitWidth(
+      child: Table(
+        defaultColumnWidth: const IntrinsicColumnWidth(),
+        defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+        children: [
+          TableRow(
+            children: [
+              for (final h in headers) cell(h, head),
+              cell('', head),
+              for (final h in headers.reversed) cell(h, head),
+            ],
+          ),
+          for (final lane in duel.lanes)
+            row(
+              side(
+                lane.home?.fulls,
+                lane.home?.spares,
+                lane.home?.errors,
+                lane.home?.total,
+                mirrored: false,
+              ),
+              // The lane's lead: +3 for home, -3 for the guests.
+              lane.played
+                  ? leadLabel(lane.home!.total! - lane.away!.total!)
+                  : '',
+              side(
+                lane.away?.fulls,
+                lane.away?.spares,
+                lane.away?.errors,
+                lane.away?.total,
+                mirrored: true,
+              ),
+              sum: false,
+              middleColor: lane.played
+                  ? leadColor(
+                      context,
+                      leadLabel(lane.home!.total! - lane.away!.total!),
+                      homeColor: homeColor,
+                      awayColor: awayColor,
+                    )
+                  : null,
+            ),
+          row(
+            side(
+              home?.fulls,
+              home?.spares,
+              home?.errors,
+              home?.total,
+              mirrored: false,
+            ),
+            'Celkem',
+            side(
+              away?.fulls,
+              away?.spares,
+              away?.errors,
+              away?.total,
+              mirrored: true,
+            ),
+            sum: true,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Lays [child] out at least as wide as the space it gets, and shrinks it as
+/// one piece when it needs more (large text, a narrow phone), so all of its
+/// cells keep one size.
+class _FitWidth extends StatelessWidget {
+  const _FitWidth({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) => FittedBox(
+      fit: BoxFit.scaleDown,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(minWidth: constraints.maxWidth),
+        child: child,
+      ),
+    ),
+  );
+}
+
+
+/// A duel side's name up to 2 lines, and under it — when someone took over —
+/// the site's „od 41. hodu Miloš Vážan“ in small print.
+class _PlayerName extends StatelessWidget {
+  const _PlayerName(this.player, {required this.style, this.end = false});
+
+  final MatchPlayerResult? player;
+  final TextStyle? style;
+  final bool end;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final change = player?.substituteLabel;
+    return Column(
+      crossAxisAlignment: end
+          ? CrossAxisAlignment.end
+          : CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          player?.playerName ?? '–',
+          textAlign: end ? TextAlign.end : TextAlign.start,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: style,
+        ),
+        if (change != null)
+          Text(
+            change,
+            textAlign: end ? TextAlign.end : TextAlign.start,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              fontSize: 12,
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+      ],
+    );
+  }
+}

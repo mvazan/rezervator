@@ -56,6 +56,8 @@ const appChangelog = <Release>[
         'výkony hráčů) a kuželny soupeřů s adresou, telefonem a navigací.',
     'Detail zápasu má zápis jako na kuzelky.com — ikonou vpravo nahoře ho '
         'otevřeš přes celou obrazovku, na výšku i na šířku.',
+    'Detail zápasu: nový pohled Souboje — velká čísla, kdo vyhrál který '
+        'souboj a dráhu. Původní zápis je o ťuk vedle.',
     'Klubovna → Kontakty: e-mail a telefon hráčů kuželny. Svůj e-mail i '
         'telefon můžeš skrýt v Můj profil.',
     'Služby na kantýně: správce plánuje služby v Správa → Služby, všichni '
@@ -67,9 +69,8 @@ const appChangelog = <Release>[
         'hráčům v bloku či dni — s 👍/👎 a krátkou odpovědí.',
   ], store: [
     'Zápasy a výsledky se stahují z výsledkového servisu ČKA.',
-    'Nový tab Klubovna: výsledky našich týmů (i živě, s videem) a kuželny '
-        'soupeřů.',
-    'Zápis zápasu jako na kuzelky.com, i přes celou obrazovku.',
+    'Klubovna: výsledky našich týmů (i živě) a kuželny soupeřů.',
+    'Detail zápasu: pohled Souboje a zápis jako na kuzelky.com.',
     'Klubovna → Kontakty: e-mail a telefon hráčů kuželny.',
     'Služby na kantýně: kdo má službu, rezervuje a ruší tréninky ostatním '
         'a upravuje bloky v jednotlivých dnech.',
