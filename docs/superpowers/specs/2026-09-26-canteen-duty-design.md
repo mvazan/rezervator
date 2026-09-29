@@ -163,6 +163,7 @@ The hub entry „Služby“ (`Icons.local_cafe_outlined`) goes after „Docházk
   - A change inside the week: „Slouží: po–st Jan Novák · čt–ne Petr Svoboda“.
   - No period that week: no line.
   - If I am on duty and the week contains today, the line is tinted: „Sloužíš ty · do ne 11. 10.“
+  - In every other line I am „ty“, not my name, and last among the names of my period: „Slouží: po–čt ty · pá–ne Jan Novák“, „Slouží: Petr Svoboda a ty“ (untinted; „Sloužíš ty“ is the running duty's line).
 - **Calendar while on duty** (`ScheduleActions(duty:)`, `onDuty` = rule B, `canEditDay(date)` = rule A):
   - `canEditDay(date) = blocksFromDb && (isAdmin || (date >= today && myDuty.coversDay(date)))` drives the block gestures per date, whether or not I am on duty today: add in a gap, edit for the day, move, the header ＋ and the portrait ⋮ menu. A date outside my own periods gets none of them.
   - Matches, blockages and rentals keep their admin-only hooks.

@@ -332,6 +332,10 @@ class DutyHeader {
 ///   the period, [DutyHeader.mine];
 /// * null when no one serves that week — no period, or only unassigned ones.
 ///
+/// Wherever the lines list who serves, I am „ty“, not my name — after the
+/// others, whatever the alphabet says („Slouží: Petr Svoboda a ty“, „Slouží:
+/// po–st ty · čt–ne Petr Svoboda“) — even when the roster does not know me.
+///
 /// [names] maps user ids to display names (placeholders included); an id
 /// it does not know is left out, and each period's names are
 /// Czech-sorted. A period without a known name says nothing.
@@ -364,9 +368,13 @@ DutyHeader? dutyHeaderLabel(
   ]..sort((a, b) => a.startsOn.compareTo(b.startsOn));
   final parts = <(DutyPeriod, String)>[];
   for (final period in inWeek) {
+    final ids = assigneeIds(assignments, period.id);
     final who = [
-      for (final id in assigneeIds(assignments, period.id)) ?names[id],
+      for (final id in ids)
+        if (id != meId) ?names[id],
     ]..sort(compareCzech);
+    // I am „ty“, last — like in a message's reaction line.
+    if (meId != null && ids.contains(meId)) who.add('ty');
     if (who.isNotEmpty) parts.add((period, joinNames(who)));
   }
   if (parts.isEmpty) return null;
