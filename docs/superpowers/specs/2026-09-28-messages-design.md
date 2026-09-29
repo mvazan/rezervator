@@ -391,8 +391,13 @@ value; either is fine, pick whichever touches less of the existing call sites.
   one-line field „Krátká odpověď…“ (≤ 200, saved on submit; both optimistic with rollback
   and a snack on failure; the field follows my stored reply unless I am typing, a reply of
   mine is still out, or it holds an unsent draft — what I typed stays there until its own
-  write goes through, so a failed reply is kept for another try). Below: „👍 Petra, ty · 👎 Tomáš „nestihnu“ · 💬 Jan „přijdu později“ · 1
-  bez reakce“ — the groups in the order 👍, 👎, 💬 (a reply without a chip is an answer,
+  write goes through, so a failed reply is kept for another try). Meanwhile the tile keeps
+  itself alive, so scrolling it out of the list and back keeps both. Leaving the detail
+  screen or collapsing „Starší“ does drop the tile: a draft is lost there, and the tile
+  shown again starts from my row. The snack goes to the page's messenger, so a failure is
+  told even when the tile is gone. Below: „👍 Petra, ty · 👎 Tomáš „nestihnu“ · 💬 Jan
+  „přijdu později“ · 1 bez reakce“ — the groups in the order 👍, 👎, 💬 (a reply without a
+  chip is an answer,
   not „bez reakce“), bez reakce; names Czech-sorted within a group, my own last as „ty“, a
   reply quoted after its name.
 - **Sent:** tally „2× 👍 · 1× 👎 · 1× 💬 · 3 bez reakce“ — the same order and buckets, a

@@ -389,16 +389,18 @@ class LiveMessageTile extends ConsumerWidget {
       authorName: mine ? (names[meId] ?? '') : (names[m.authorId] ?? '?'),
       authorIsAdmin: m.authorIsAdmin,
       block: block,
-      // The optimistic write already rolled the row back on failure;
-      // tryAction adds the snack (friendlyDbError text) and tells the tile
-      // whether the reply went through — its field keeps a failed one.
+      // The optimistic write already rolled the row back on failure; the
+      // snack (friendlyDbError text) goes to the page's messenger, taken
+      // before the write — leaving the detail or collapsing „Starší“ can
+      // drop this tile while it is out — and the reply's result tells the
+      // tile whether it went through: its field keeps a failed one.
       onReact: mine
           ? null
-          : (r) => tryAction(context, () => react(m.id, r),
+          : (r) => tryActionOnPage(context, () => react(m.id, r),
               errorText: friendlyDbError),
       onReply: mine
           ? null
-          : (text) => tryAction(context, () => reply(m.id, text),
+          : (text) => tryActionOnPage(context, () => reply(m.id, text),
               errorText: friendlyDbError),
       onDelete: mine ? () => _delete(context) : null,
       initiallyExpanded: expanded,

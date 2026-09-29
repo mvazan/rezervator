@@ -155,7 +155,7 @@ void main() {
         answers = [];
         sent = [];
       });
-      Widget tile(String? reply) => MaterialApp(home: Scaffold(body: MessageTile(
+      MessageTile message(String? reply) => MessageTile(
         message: received(),
         recipients: [recip('me', reply: reply)],
         names: const {},
@@ -171,7 +171,9 @@ void main() {
           return answer.future;
         },
         onDelete: null,
-      )));
+      );
+      Widget tile(String? reply) =>
+          MaterialApp(home: Scaffold(body: message(reply)));
       String field(WidgetTester tester) =>
           tester.widget<TextField>(find.byType(TextField)).controller!.text;
       bool focused(WidgetTester tester) =>
@@ -246,17 +248,60 @@ void main() {
         expect(sent, ['Přijdu.', 'Nestihnu.']);
       });
 
+      // 'Přijdu. ' trims to the reply already saved (its optimistic patch
+      // changes nothing), so the field holds no draft: only my write being
+      // out keeps the change elsewhere from replacing it.
       testWidgets('a change elsewhere is not followed while my write is out',
           (tester) async {
-        await tester.pumpWidget(tile(null));
-        await submit(tester, 'Přijdu.');
         await tester.pumpWidget(tile('Přijdu.'));
+        await submit(tester, 'Přijdu. ');
         await tester.pumpWidget(tile('Z webu')); // mine has not answered
-        expect(field(tester), 'Přijdu.');
+        expect(field(tester), 'Přijdu. ');
         answers.single.complete(true);
         await tester.pump();
+        expect(field(tester), 'Přijdu.'); // what was saved
         await tester.pumpWidget(tile(null)); // cleared, nothing of mine out
         expect(field(tester), '');
+      });
+
+      // A list drops a tile scrolled past its cache extent, and after
+      // „done“ the field no longer holds it: the tile keeps itself while
+      // my write is out or it holds a draft — and lets go after.
+      testWidgets('scrolled away and back, the tile keeps my write out and '
+          'a failed reply', (tester) async {
+        final scroll = ScrollController();
+        addTearDown(scroll.dispose);
+        Widget listed(String? reply) => MaterialApp(home: Scaffold(
+              body: ListView(controller: scroll, children: [
+                message(reply),
+                const SizedBox(height: 5000),
+              ]),
+            ));
+        Future<void> awayAndBack() async {
+          scroll.jumpTo(4000);
+          await tester.pump();
+          scroll.jumpTo(0);
+          await tester.pump();
+        }
+
+        await tester.pumpWidget(listed(null));
+        await submit(tester, 'Nestihnu.');
+        await tester.pumpWidget(listed('Nestihnu.')); // the optimistic patch
+        await awayAndBack(); // while mine is out
+        answers.single.complete(false);
+        await tester.pump();
+        await tester.pumpWidget(listed(null)); // the rollback
+        expect(field(tester), 'Nestihnu.');
+        await awayAndBack(); // nothing out, the failed reply kept
+        expect(field(tester), 'Nestihnu.');
+
+        await submit(tester, 'Nestihnu.'); // another try goes through
+        await tester.pumpWidget(listed('Nestihnu.'));
+        answers.last.complete(true);
+        await tester.pump();
+        scroll.jumpTo(4000);
+        await tester.pump();
+        expect(find.byType(MessageTile, skipOffstage: false), findsNothing);
       });
     });
 
@@ -890,6 +935,33 @@ void main() {
       myRows.add([recip('me')]); // cleared on another device
       await tester.pumpAndSettle();
       expect(field(), '');
+    });
+
+    // Leaving the detail while my reply is out drops its tile: the page's
+    // messenger, taken before the write, still tells the failure.
+    testWidgets('a reply that fails after I left the detail still says why',
+        (tester) async {
+      final gate = Completer<void>();
+      await tester.pumpWidget(caller(
+        overrides(messages: [received()], recipients: [recip('me')]),
+        () => MessageDetailScreen('m1', markRead: (_) async {},
+            react: (_, _) async {},
+            reply: (_, _) async {
+              await gate.future;
+              throw Exception('offline');
+            }),
+      ));
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'Nestihnu.');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pump();
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(find.byType(MessageTile), findsNothing);
+      gate.complete();
+      await tester.pumpAndSettle();
+      expect(find.byType(SnackBar), findsOneWidget);
     });
 
     testWidgets('deleting here says „Zpráva smazána.“ — never „Zpráva už '

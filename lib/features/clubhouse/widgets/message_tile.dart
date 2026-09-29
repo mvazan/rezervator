@@ -70,18 +70,21 @@ class MessageTile extends StatefulWidget {
   State<MessageTile> createState() => _MessageTileState();
 }
 
-class _MessageTileState extends State<MessageTile> {
-  /// Starts with the reply I already sent, so the field shows what the
-  /// others see in the reaction line — and follows it ([didUpdateWidget]).
-  late final TextEditingController _reply;
-  final _replyFocus = FocusNode();
-  late bool _expanded = widget.initiallyExpanded;
-
+class _MessageTileState extends State<MessageTile>
+    with AutomaticKeepAliveClientMixin {
   /// The reply the field last took from my row, or from my own write that
   /// went through. The field shows anything else only as the player's
   /// draft — typed, or kept from a write that failed — which my row
-  /// never overwrites.
-  late String _synced;
+  /// never overwrites. Initialised on first read: [wantKeepAlive] is
+  /// asked in `super.initState()`.
+  late String _synced = _myRow?.reply ?? '';
+
+  /// Starts with the reply I already sent, so the field shows what the
+  /// others see in the reaction line — and follows it ([didUpdateWidget]).
+  late final TextEditingController _reply =
+      TextEditingController(text: _synced);
+  final _replyFocus = FocusNode();
+  late bool _expanded = widget.initiallyExpanded;
 
   /// My reply writes still out. Meanwhile my row's changes are mostly my
   /// own writes being applied or undone, so none is followed.
@@ -90,12 +93,17 @@ class _MessageTileState extends State<MessageTile> {
   /// Counts my submits: only the latest one's success moves [_synced].
   int _submits = 0;
 
+  /// Whether the field holds a draft — trimmed, as a write would store
+  /// it: only whitespace is no draft.
+  bool get _draft => _reply.text.trim() != _synced;
+
+  /// A list drops a tile scrolled past its cache extent, and after „done“
+  /// the field no longer holds it: a new tile would start from my row,
+  /// losing the draft and taking the rollback of my write out for a
+  /// reply to follow. So the tile keeps itself while either matters
+  /// (updated in [_submit] and on typing).
   @override
-  void initState() {
-    super.initState();
-    _synced = _myRow?.reply ?? '';
-    _reply = TextEditingController(text: _synced);
-  }
+  bool get wantKeepAlive => _pending > 0 || _draft;
 
   @override
   void dispose() {
@@ -116,9 +124,7 @@ class _MessageTileState extends State<MessageTile> {
     super.didUpdateWidget(oldWidget);
     final now = _myRow?.reply ?? '';
     if ((_rowIn(oldWidget)?.reply ?? '') == now) return;
-    // Trimmed, as a write would store it: only whitespace is no draft.
-    final draft = _reply.text.trim() != _synced;
-    if (_replyFocus.hasFocus || _pending > 0 || draft) return;
+    if (_replyFocus.hasFocus || _pending > 0 || _draft) return;
     _reply.text = now;
     _synced = now;
   }
@@ -132,18 +138,22 @@ class _MessageTileState extends State<MessageTile> {
     if (onReply == null || overLimit(text, replyMax)) return;
     final submit = ++_submits;
     _pending++;
+    updateKeepAlive();
     final bool ok;
     try {
       ok = await onReply(text);
     } finally {
       _pending--;
     }
-    if (!ok || !mounted || submit != _submits) return;
-    final saved = text.trim();
-    _synced = saved;
-    if (!_replyFocus.hasFocus && _reply.text == text && text != saved) {
-      _reply.text = saved;
+    if (!mounted) return;
+    if (ok && submit == _submits) {
+      final saved = text.trim();
+      _synced = saved;
+      if (!_replyFocus.hasFocus && _reply.text == text && text != saved) {
+        _reply.text = saved;
+      }
     }
+    updateKeepAlive();
   }
 
   MessageRecipient? get _myRow => _rowIn(widget);
@@ -159,6 +169,7 @@ class _MessageTileState extends State<MessageTile> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context); // keeps the tile alive ([wantKeepAlive])
     final m = widget.message;
     final small = Theme.of(context).textTheme.bodySmall;
     final header = headerLabel(
@@ -290,7 +301,10 @@ class _MessageTileState extends State<MessageTile> {
               replyMax,
             ),
             maxLength: replyMax,
-            onChanged: (_) => setState(() {}),
+            onChanged: (_) {
+              updateKeepAlive(); // a draft now, or none any more
+              setState(() {});
+            },
             // Over the limit (code points) the server's CHECK would refuse
             // it: the field is marked instead, and nothing is sent.
             onSubmitted: _submit,
