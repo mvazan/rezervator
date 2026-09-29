@@ -2304,18 +2304,25 @@ CREATE OR REPLACE FUNCTION "public"."move_reservation"("p_reservation" "uuid", "
     SET "search_path" TO 'public'
     AS $$
 declare
+  v_on_duty constant boolean := is_on_duty();
   v_res reservations;
   v_block time_blocks;
   v_lanes int;
 begin
-  perform duty_gate((now() at time zone 'Europe/Prague')::date);
+  if not v_on_duty then
+    perform duty_edit_gate(null);
+  end if;
 
   select * into v_res from reservations
   where id = p_reservation and tenant_id = current_tenant_id();
   if not found or v_res.cancelled_at is not null then
     raise exception 'unknown_reservation';
   end if;
-  perform duty_gate(v_res.date);
+  if v_on_duty then
+    perform duty_gate(v_res.date);
+  else
+    perform duty_edit_gate(v_res.date);
+  end if;
 
   select * into v_block from time_blocks
   where id = p_to_block and tenant_id = current_tenant_id();

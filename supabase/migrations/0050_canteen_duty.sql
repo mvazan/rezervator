@@ -546,7 +546,8 @@ $$;
 -- from today on, the other duties' days included (is_on_duty(), duty_gate()).
 -- On the days of their OWN periods, on duty today or not, and never in the
 -- past, they also edit single days: add or cancel a block, move its
--- trainings, close a day, return it to the weekly rules (duty_edit_gate()).
+-- trainings (and re-seat the players of a removed block), close a day,
+-- return it to the weekly rules (duty_edit_gate()).
 -- Only the security-definer RPCs below grant either: no table policy gets
 -- wider, so the weekly template, matches, rentals, slot types, clubs and
 -- settings stay the admin's. The duty keeps the booked player's rules (their
@@ -583,11 +584,11 @@ security definer set search_path = public as $$
      and me.status = 'approved' and me.role = 'player' and not me.placeholder
      and (now() at time zone 'Europe/Prague')::date between d.starts_on and d.ends_on) $$;
 
--- The gate of what the duty does WHILE on duty — re-seating a reservation
--- (move_reservation): the admin passes on any date; anyone else must be on
--- duty (`not_allowed`) and touch only Prague today or later (`date_past`).
--- The block edits have a gate of their own, duty_edit_gate(). Internal,
--- like is_on_duty().
+-- The gate of what the duty does WHILE on duty — the booking's clock: the
+-- admin passes on any date; anyone else must be on duty (`not_allowed`) and
+-- touch only Prague today or later (`date_past`). move_reservation asks it
+-- of a caller who is on duty; the block edits have a gate of their own,
+-- duty_edit_gate(). Internal, like is_on_duty().
 create or replace function duty_gate(p_date date) returns void
 language plpgsql stable security definer set search_path = public
 as $$
@@ -696,8 +697,8 @@ grant execute on function delete_day_override(date) to authenticated;
 -- ------------------------------------------ the day RPCs: admin or duty
 -- The current bodies (0011, move_reservation 0021; copied from
 -- supabase/schema.sql): the is_admin() gate became duty_edit_gate(date) —
--- the days of the duty's own periods — and move_reservation's duty_gate(date)
--- (it gates twice, see there), and a started block of today
+-- the days of the duty's own periods; move_reservation's became that or
+-- duty_gate(date), see there. A started block of today
 -- is the duty's limit, as it is every player's: a cancel spares its
 -- trainings (like cancel_stranded_reservations — they are played, and
 -- attendance is the admin's), a move neither leaves nor enters it
@@ -828,8 +829,13 @@ end;
 $$;
 
 -- Re-seat one reservation. A move keeps its date, so the source and the
--- target date are one: the duty is refused before a word about the
--- reservation (Prague today), then held to the reservation's date, and on
+-- target date are one. It serves both rights of the duty: WHILE on duty it
+-- re-seats on any day from today on (duty_gate, the booking's clock), and
+-- with a period of their own, on duty today or not, on the days of that
+-- period (duty_edit_gate) — it is how the players of a block the duty
+-- removes for a day get new seats. Whoever has neither is refused before a
+-- word about the reservation (`not_allowed`: on duty today, or a period
+-- that has not ended), the rest are held to the reservation's date, and on
 -- today neither its block nor the target may have started (`too_late`).
 create or replace function move_reservation(
   p_reservation uuid, p_to_block uuid, p_lane integer,
@@ -838,18 +844,25 @@ returns void
 language plpgsql security definer set search_path = public
 as $$
 declare
+  v_on_duty constant boolean := is_on_duty();
   v_res reservations;
   v_block time_blocks;
   v_lanes int;
 begin
-  perform duty_gate((now() at time zone 'Europe/Prague')::date);
+  if not v_on_duty then
+    perform duty_edit_gate(null);
+  end if;
 
   select * into v_res from reservations
   where id = p_reservation and tenant_id = current_tenant_id();
   if not found or v_res.cancelled_at is not null then
     raise exception 'unknown_reservation';
   end if;
-  perform duty_gate(v_res.date);
+  if v_on_duty then
+    perform duty_gate(v_res.date);
+  else
+    perform duty_edit_gate(v_res.date);
+  end if;
 
   select * into v_block from time_blocks
   where id = p_to_block and tenant_id = current_tenant_id();

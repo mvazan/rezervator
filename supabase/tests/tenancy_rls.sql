@@ -8159,8 +8159,8 @@ begin
     perform pg_temp.expect_day_rpcs(v_d, v_b1, v_b2, 'not_allowed');
   end loop;
 
-  -- The other right is held only while on duty: today she books, cancels
-  -- and re-seats for nobody, her own days included.
+  -- The other right is held only while on duty: today she books and
+  -- cancels for nobody, her own days included.
   begin
     perform create_reservation(v_wanda, v_today + 11, v_b1, 3::smallint);
     raise exception 'FAIL: a duty still ahead booked for another';
@@ -8173,18 +8173,33 @@ begin
   exception when others then
     if sqlerrm <> 'not_allowed' then raise; end if;
   end;
+  -- Re-seating is both: it is how the players of a block she removes get
+  -- new seats, so it follows the day — hers, not the booking's clock.
+  -- Not on a day that is not hers, even her own booking there ...
   begin
-    perform move_reservation(v_res, v_b2, 3);
-    raise exception 'FAIL: a duty still ahead re-seated another''s training';
+    perform move_reservation(current_setting('probe.duty_res_future')::uuid,
+                             v_b1, 3);
+    raise exception 'FAIL: a duty still ahead re-seated a training on a day that is not hers';
   exception when others then
     if sqlerrm <> 'not_allowed' then raise; end if;
   end;
   if not exists (select 1 from reservations
                  where id = v_res and block_id = v_b1 and lane = 2
-                   and cancelled_at is null) then
+                   and cancelled_at is null)
+     or not exists (select 1 from reservations
+                    where id = current_setting('probe.duty_res_future')::uuid
+                      and block_id = v_b2 and lane = 1
+                      and cancelled_at is null) then
     raise exception 'FAIL: a refused call by a duty still ahead changed a reservation';
   end if;
-  raise notice 'OK: a duty starting later edits blocks on her own days only and books, cancels and re-seats for no one until it starts (0050)';
+  -- ... on the days of her own period.
+  perform move_reservation(v_res, v_b2, 3);
+  if not exists (select 1 from reservations
+                 where id = v_res and block_id = v_b2 and lane = 3
+                   and cancelled_at is null) then
+    raise exception 'FAIL: a duty still ahead could not re-seat a training on her own day';
+  end if;
+  raise notice 'OK: a duty starting later edits blocks and re-seats players on her own days only and books and cancels for no one until it starts (0050)';
 end $$;
 
 -- Who is no duty at all, on a day inside a period they are assigned to
@@ -8294,7 +8309,13 @@ begin
   perform pg_temp.expect_day_rpcs(v_today + 2, v_b1, v_b2, 'not_allowed');
   perform pg_temp.expect_day_rpcs(v_today, v_b1, v_b2, 'not_allowed');
   perform pg_temp.expect_day_rpcs(v_today - 5, v_b1, v_b2, 'date_past');
-  raise notice 'OK: a duty that ended yesterday adds no block and edits no future day (0050)';
+  begin
+    perform move_reservation(gen_random_uuid(), v_b1, 1);
+    raise exception 'FAIL: a duty that ended yesterday re-seated a training';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  raise notice 'OK: a duty that ended yesterday adds no block, edits no future day and re-seats no one (0050)';
 end $$;
 reset role;
 update duty_periods
