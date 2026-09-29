@@ -221,7 +221,9 @@ class ScheduleActions {
 
   /// „Napsat hráčům dne…“ / „Napsat hráčům bloku…“ (0051): the staff
   /// composer, under the same gate as the other day rights (the admin, or
-  /// the duty — the menu itself hides past days).
+  /// the duty). Not the edit guards: the day menu offers a past day's
+  /// „Napsat hráčům dne…“ to the admin, and a refused block edit offers
+  /// „Napsat hráčům bloku…“ on its snack ([_editBlock]).
   void Function(Day)? get onMessageDay => canEditBlocks ? _messageDay : null;
   void Function(Day, TimeBlock)? get onMessageBlock =>
       canEditBlocks ? _messageBlock : null;
@@ -411,10 +413,29 @@ class ScheduleActions {
 
   // Past days are history: set_day_override would cancel their (already
   // played) reservations and corrupt attendance — the gestures refuse.
-  bool _guardPast(Day date) {
+  // [message]: what may still be done instead, offered on the snack.
+  bool _guardPast(Day date, {VoidCallback? message}) {
     if (!date.isBefore(today)) return false;
-    snack(context, 'Minulé dny nelze upravovat.');
+    _refuse('Minulé dny nelze upravovat.', message: message);
     return true;
+  }
+
+  /// A refused edit's snack — with „Napsat hráčům bloku…“ on it when
+  /// [message] is given: messaging is not editing, and the edit guards
+  /// must not take it away (0051: the admin writes about any day, the duty
+  /// about a block already under way).
+  void _refuse(String text, {VoidCallback? message}) {
+    if (message == null) {
+      snack(context, text);
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(text),
+      action: SnackBarAction(
+        label: 'Napsat hráčům bloku…',
+        onPressed: message,
+      ),
+    ));
   }
 
   // The duty's clock on [date], one minute ahead when [atWrite] (the check
@@ -426,12 +447,17 @@ class ScheduleActions {
 
   // The duty's today: a block already under way stays the admin's (the
   // server refuses to move it and keeps its trainings).
-  bool _guardStarted(Day date, TimeBlock block, {bool atWrite = false}) {
+  bool _guardStarted(
+    Day date,
+    TimeBlock block, {
+    bool atWrite = false,
+    VoidCallback? message,
+  }) {
     final dutyNow = _dutyNowOn(date, atWrite: atWrite);
     if (dutyNow == null || block.startsAt.compareTo(dutyNow) > 0) {
       return false;
     }
-    snack(context, blockStartedMessage);
+    _refuse(blockStartedMessage, message: message);
     return true;
   }
 
@@ -449,7 +475,14 @@ class ScheduleActions {
   }
 
   void _editBlock(Day date, TimeBlock block) {
-    if (_guardPast(date) || _guardStarted(date, block)) return;
+    // The guards refuse the edit only: the block's players may still be
+    // written to — by the admin about any day, by the duty about today's
+    // block under way (message_send's duty_gate: from today on).
+    void message() => _messageBlock(date, block);
+    if (_guardPast(date, message: _isAdmin ? message : null) ||
+        _guardStarted(date, block, message: message)) {
+      return;
+    }
     showDialog<void>(
       context: context,
       builder: (_) => BlockDialog(

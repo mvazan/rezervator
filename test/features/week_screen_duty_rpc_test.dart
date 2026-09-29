@@ -310,6 +310,112 @@ void main() {
     expect(find.text('Napsat hráčům dne…'), findsOneWidget);
   });
 
+  // The staff composer that „Napsat hráčům …“ opened: its date and target.
+  void expectComposer(WidgetTester tester, Day date, String? blockId) {
+    expect(find.text('Napsat hráčům'), findsOneWidget);
+    expect(find.text('${date.day}. ${date.month}. ${date.year}'), findsOneWidget);
+    expect(
+      tester.widget<RadioGroup<String?>>(find.byType(RadioGroup<String?>)).groupValue,
+      blockId,
+    );
+  }
+
+  testWidgets('⋮ „Napsat hráčům dne…“ opens the staff composer on that day, '
+      '„Celý den“', (tester) async {
+    await tester.pumpWidget(app());
+    await pickFromMenu(tester, 'Napsat hráčům dne…');
+    expectComposer(tester, tomorrow, null);
+  });
+
+  // Messaging is not editing: a block already under way can still be
+  // written to („the block starts late“) — duty_gate allows today.
+  testWidgets('the duty: a block that has started is not editable, but its '
+      'players can be written to', (tester) async {
+    const early = TimeBlock(
+      id: 'b0',
+      startsAt: HourMinute(9, 0),
+      endsAt: HourMinute(10, 30),
+      position: 0,
+      active: true,
+    );
+    await tester.pumpWidget(app(blocks: const [early, b1]));
+    await tester.pumpAndSettle();
+    tester
+        .widget<WeekCalendarView>(find.byType(WeekCalendarView))
+        .admin
+        .onEditBlock!(t, early);
+    await tester.pumpAndSettle();
+    expect(find.text(blockStartedMessage), findsOneWidget);
+    expect(find.text('Upravit blok — jen ${t.day}. ${t.month}.'), findsNothing);
+    await tester.tap(find.widgetWithText(SnackBarAction, 'Napsat hráčům bloku…'));
+    await tester.pumpAndSettle();
+    expectComposer(tester, t, 'b0');
+  });
+
+  // The admin may write about any day (message_send): a past day is
+  // history for editing only.
+  testWidgets('the admin, a past day: no edit, but the block\'s and the '
+      'day\'s players can be written to', (tester) async {
+    final yesterday = t.addDays(-1);
+    await tester.pumpWidget(app(profile: admin));
+    await tester.pumpAndSettle();
+    tester
+        .widget<WeekCalendarView>(find.byType(WeekCalendarView))
+        .admin
+        .onEditBlock!(yesterday, b1);
+    await tester.pumpAndSettle();
+    expect(find.text('Minulé dny nelze upravovat.'), findsOneWidget);
+    await tester.tap(find.widgetWithText(SnackBarAction, 'Napsat hráčům bloku…'));
+    await tester.pumpAndSettle();
+    expectComposer(tester, yesterday, 'b1');
+  });
+
+  testWidgets('…and the portrait ⋮ of a past day offers the admin only '
+      '„Napsat hráčům dne…“', (tester) async {
+    final yesterday = t.addDays(-1);
+    await tester.pumpWidget(app(profile: admin));
+    tester.view.physicalSize = const Size(900, 1600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpAndSettle();
+    await tester.tap(find
+        .descendant(of: find.byType(DayChipStrip), matching: find.byType(InkWell))
+        .at(yesterday.weekday - 1));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.more_vert));
+    await tester.pumpAndSettle();
+    expect(find.text('Přidat blok…'), findsNothing);
+    expect(find.text('Zavřít den…'), findsNothing);
+    await tester.tap(find.text('Napsat hráčům dne…'));
+    await tester.pumpAndSettle();
+    expectComposer(tester, yesterday, null);
+  });
+
+  // duty_gate: the duty writes from today on — a past day stays closed.
+  testWidgets('the duty, a past day: nothing to write, as before', (tester) async {
+    final yesterday = t.addDays(-1);
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+    tester
+        .widget<WeekCalendarView>(find.byType(WeekCalendarView))
+        .admin
+        .onEditBlock!(yesterday, b1);
+    await tester.pumpAndSettle();
+    expect(find.text('Minulé dny nelze upravovat.'), findsOneWidget);
+    expect(find.byType(SnackBarAction), findsNothing);
+    tester.view.physicalSize = const Size(900, 1600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpAndSettle();
+    await tester.tap(find
+        .descendant(of: find.byType(DayChipStrip), matching: find.byType(InkWell))
+        .at(yesterday.weekday - 1));
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.more_vert), findsNothing);
+  });
+
   testWidgets('a plain player off duty has no ⋮ at all', (tester) async {
     // A profile the fixture's assignment does not name → not on duty.
     const other = Profile(

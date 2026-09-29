@@ -329,15 +329,22 @@ class _DayPage extends StatelessWidget {
   final SlotCallbacks slot;
   final CalendarAdminHooks admin;
 
-  /// The ⋮ in the day header: what [admin] offers for this day. None for a
-  /// past day — its reservations are attendance history.
+  /// The ⋮ in the day header: what [admin] offers for this day. A past
+  /// day's reservations are attendance history: no edits — only the
+  /// admin's „Napsat hráčům dne…“ (the admin writes about any day; the
+  /// duty from today on, message_send's duty_gate).
   List<({String label, VoidCallback onTap})> _menu() {
     final date = day.date;
-    if (date.isBefore(today)) return const [];
+    final message = admin.onMessageDay;
+    if (date.isBefore(today)) {
+      return [
+        if (message != null && (me?.isAdmin ?? false))
+          (label: 'Napsat hráčům dne…', onTap: () => message(date)),
+      ];
+    }
     final add = admin.onAddForDay;
     final close = admin.onCloseDay;
     final restore = admin.onRestoreDay;
-    final message = admin.onMessageDay;
     return [
       if (add != null) (label: 'Přidat blok…', onTap: () => add(date)),
       if (close != null && day is OpenDay)
