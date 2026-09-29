@@ -121,7 +121,8 @@ class _MessagesScreenState extends ConsumerState<MessagesScreen> {
       floatingActionButton: Consumer(builder: (context, ref, _) {
         final isAdmin = ref.watch(
             myProfileProvider.select((p) => p.value?.isAdmin ?? false));
-        final onDuty = ref.watch(myDutyProvider.select((d) => d.onDuty));
+        final hasDutyPeriod =
+            ref.watch(myDutyProvider.select((d) => d.mine.isNotEmpty));
         // Not shown while the keyboard is up: the FABs float above it, but
         // a focused reply field is scrolled only to its edge, under them.
         // The FAB slot keeps the view insets (Scaffold strips them from
@@ -155,9 +156,11 @@ class _MessagesScreenState extends ConsumerState<MessagesScreen> {
                   spacing: 12,
                   runSpacing: 12,
                   children: [
-                    // The staff composer: the admin, or the duty today — the
-                    // server's `message_send` gate for a day or a block.
-                    if (isAdmin || onDuty)
+                    // The staff composer: the admin, or a player with a duty
+                    // period that has not ended — `message_send` lets the duty
+                    // write about the days of their own periods only (the
+                    // block edits' gate); the composer offers just those.
+                    if (isAdmin || hasDutyPeriod)
                       FloatingActionButton.extended(
                         heroTag: 'staff-compose',
                         onPressed: () => showStaffComposer(context, ref,

@@ -358,6 +358,8 @@ void main() {
       StateProvider<MyDuty>? duty,
       MessageSend? send,
       bool reservationsLoading = false,
+      // Open as Zprávy's FAB does, with no date at all.
+      bool withoutDate = false,
     }) => ProviderScope(
       overrides: [
         myProfileProvider.overrideWith((ref) => Stream.value(profile)),
@@ -387,7 +389,7 @@ void main() {
           supportedLocales: const [Locale('cs')],
           home: Scaffold(body: Consumer(builder: (context, ref, _) => TextButton(
         onPressed: () => showStaffComposer(context, ref,
-            date: today, blockId: blockId, send: send ?? sent),
+            date: withoutDate ? null : today, blockId: blockId, send: send ?? sent),
         child: const Text('open'),
       )))),
     );
@@ -557,13 +559,14 @@ void main() {
           onDate: wednesday, blockId: null, body: 'Přijďte dřív.')]);
     });
 
-    // duty_gate: the duty writes from today on, the admin about any day.
+    // duty_edit_gate: the duty writes from today on, the admin about any day.
     for (final (who, asDuty, picked) in const [
       ('the duty', true, '5. 10. 2026'),
       ('the admin', false, '4. 10. 2026'),
     ]) {
       testWidgets('$who picking yesterday in „Změnit“ ends on $picked', (tester) async {
-        final onDuty = MyDuty(current: DutyPeriod(id: 'p1', startsOn: today, endsOn: today));
+        final period = DutyPeriod(id: 'p1', startsOn: today, endsOn: today);
+        final onDuty = MyDuty(current: period, mine: [period]);
         await tester.pumpWidget(staffApp(
           profile: asDuty ? me : admin,
           duty: asDuty ? StateProvider<MyDuty>((ref) => onDuty) : null,
@@ -579,9 +582,107 @@ void main() {
       });
     }
 
+    // The duty writes about the days of their own periods only (0051, the
+    // block edits' gate): the sheet opens on one and the picker greys out
+    // every other day.
+    DutyPeriod period(String id, int from, int to) => DutyPeriod(
+        id: id, startsOn: Day(2026, 10, from), endsOn: Day(2026, 10, to));
+    // Today is Monday 5. 10. (the pinned clock).
+    MyDuty dutyOf(List<DutyPeriod> mine, {DutyPeriod? current}) =>
+        MyDuty(current: current, mine: mine);
+
+    testWidgets('a duty not serving today opens on the first day of their next '
+        'period', (tester) async {
+      final next = period('n', 8, 10);
+      await tester.pumpWidget(staffApp(
+        profile: me,
+        duty: StateProvider<MyDuty>((ref) => dutyOf([next])),
+        withoutDate: true,
+      ));
+      await openStaff(tester);
+      expect(find.text('8. 10. 2026'), findsOneWidget);
+    });
+
+    testWidgets('a duty serving today opens on today; the admin too',
+        (tester) async {
+      final running = period('r', 5, 6);
+      await tester.pumpWidget(staffApp(
+        profile: me,
+        duty: StateProvider<MyDuty>((ref) => dutyOf([running], current: running)),
+        withoutDate: true,
+      ));
+      await openStaff(tester);
+      expect(find.text('5. 10. 2026'), findsOneWidget);
+    });
+
+    testWidgets('the duty\'s picker offers the days of their own periods only',
+        (tester) async {
+      final running = period('r', 5, 6);
+      await tester.pumpWidget(staffApp(
+        profile: me,
+        duty: StateProvider<MyDuty>(
+            (ref) => dutyOf([running, period('n', 9, 10)], current: running)),
+        withoutDate: true,
+      ));
+      await openStaff(tester);
+      await tester.tap(find.text('Změnit'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('7')); // between the periods: refused
+      await tester.pump();
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+      expect(find.text('5. 10. 2026'), findsOneWidget);
+      await tester.tap(find.text('Změnit'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('12')); // after the last period: refused
+      await tester.pump();
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+      expect(find.text('5. 10. 2026'), findsOneWidget);
+      await tester.tap(find.text('Změnit'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('9'));
+      await tester.pump();
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+      expect(find.text('9. 10. 2026'), findsOneWidget);
+    });
+
+    testWidgets('a duty starting later that is refused reads it as „Služba '
+        'skončila“ too', (tester) async {
+      final next = period('n', 8, 10);
+      Future<String> refused({
+        required MessageKind kind,
+        required MessageAudience audience,
+        Day? onDate,
+        String? blockId,
+        String? title,
+        required String body,
+        DateTime? expiresAt,
+        bool notify = true,
+      }) async => throw Exception('not_allowed');
+      await tester.pumpWidget(staffApp(
+        profile: me,
+        duty: StateProvider<MyDuty>((ref) => dutyOf([next])),
+        withoutDate: true,
+        send: refused,
+        reservations: [
+          Reservation(id: 'r1', playerId: 'p1', date: Day(2026, 10, 8), blockId: 'b1',
+              lane: 1, createdVia: 'app', createdAt: DateTime(2026, 10, 1)),
+        ],
+      ));
+      await openStaff(tester);
+      await tester.enterText(find.byType(TextField), 'Přijďte dřív.');
+      await tester.pump();
+      await tester.tap(find.text('Odeslat'));
+      await tester.pumpAndSettle();
+      expect(find.text('Služba skončila — tohle teď může jen správce.'), findsOneWidget);
+    });
+
     testWidgets('a duty whose service ends while the sheet is open reads the refusal '
         'as „Služba skončila“', (tester) async {
-      final onDuty = MyDuty(current: DutyPeriod(id: 'p1', startsOn: today, endsOn: today));
+      final period = DutyPeriod(id: 'p1', startsOn: today, endsOn: today);
+      final onDuty = MyDuty(current: period, mine: [period]);
       final duty = StateProvider<MyDuty>((ref) => onDuty);
       final calls = <({MessageAudience audience, Day? onDate, String? blockId})>[];
       Future<String> refused({

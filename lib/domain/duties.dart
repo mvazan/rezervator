@@ -433,6 +433,29 @@ class MyDuty {
   /// days too, and the gestures refuse those (the server: `date_past`).
   bool coversDay(Day day) => mine.any((period) => period.covers(day));
 
+  /// The first day on or after [from] that one of my periods covers — where
+  /// a day to edit or to write about starts: today while I am on duty, else
+  /// the first day of my next period. Null when none is left.
+  Day? firstDayFrom(Day from) {
+    Day? first;
+    for (final period in mine) {
+      if (period.endsOn.isBefore(from)) continue;
+      final start = period.startsOn.isAfter(from) ? period.startsOn : from;
+      if (first == null || start.isBefore(first)) first = start;
+    }
+    return first;
+  }
+
+  /// The last day of my latest period that has not ended; null with none.
+  /// The far end of the days I may edit or write about.
+  Day? get lastDay {
+    Day? last;
+    for (final period in mine) {
+      if (last == null || period.endsOn.isAfter(last)) last = period.endsOn;
+    }
+    return last;
+  }
+
   @override
   bool operator ==(Object other) =>
       other is MyDuty &&

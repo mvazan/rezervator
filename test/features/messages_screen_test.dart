@@ -772,11 +772,27 @@ void main() {
     });
 
     testWidgets('so does a player on duty today', (tester) async {
-      final day = Day(2026, 10, 2);
-      await tester.pumpWidget(app(duty: MyDuty(
-          current: DutyPeriod(id: 'p1', startsOn: day, endsOn: day))));
+      final period = DutyPeriod(id: 'p1', startsOn: Day(2026, 10, 2), endsOn: Day(2026, 10, 2));
+      await tester.pumpWidget(app(duty: MyDuty(current: period, mine: [period])));
       await tester.pumpAndSettle();
       expect(find.text('Napsat hráčům'), findsOneWidget);
+    });
+
+    // The block edits' rule (0051/0050): a duty writes about the days of
+    // their own periods, serving today or not.
+    testWidgets('so does a player whose duty starts later', (tester) async {
+      final next = DutyPeriod(id: 'p1', startsOn: Day(2026, 10, 9), endsOn: Day(2026, 10, 15));
+      await tester.pumpWidget(app(duty: MyDuty(next: next, mine: [next])));
+      await tester.pumpAndSettle();
+      expect(find.text('Napsat hráčům'), findsOneWidget);
+    });
+
+    testWidgets('a player with no duty period left does not', (tester) async {
+      // myDuty() leaves out what has ended, so `mine` is empty.
+      await tester.pumpWidget(app(duty: MyDuty.none));
+      await tester.pumpAndSettle();
+      expect(find.text('Napsat hráčům'), findsNothing);
+      expect(find.text('Napsat'), findsOneWidget);
     });
 
     // WCAG 1.4.4: the app scales text up to 200 % (AppTextScaler). The two

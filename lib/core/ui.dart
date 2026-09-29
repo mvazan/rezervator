@@ -402,25 +402,54 @@ class _PromptDialogState extends State<_PromptDialog> {
 
 /// The platform date picker in Czech, on [Day]s. [initial] (default today)
 /// is clamped into [first]..[last] — showDatePicker asserts on an
-/// out-of-range initial date.
+/// out-of-range initial date. [selectable] greys out the days it refuses
+/// (the duty picks among the days of their own periods only); an [initial]
+/// it refuses gives way to the nearest allowed day — showDatePicker asserts
+/// on that too — and with no allowed day in the range there is no picker
+/// and no answer (null).
 Future<Day?> pickDay(
   BuildContext context, {
   Day? initial,
   required Day first,
   required Day last,
+  bool Function(Day day)? selectable,
 }) async {
   DateTime dt(Day d) => DateTime(d.year, d.month, d.day);
   var base = initial ?? today();
   if (base.isBefore(first)) base = first;
   if (base.isAfter(last)) base = last;
+  if (selectable != null && !selectable(base)) {
+    final nearest = _nearestSelectable(base, first, last, selectable);
+    if (nearest == null) return null;
+    base = nearest;
+  }
   final picked = await showDatePicker(
     context: context,
     initialDate: dt(base),
     firstDate: dt(first),
     lastDate: dt(last),
     locale: const Locale('cs'),
+    selectableDayPredicate:
+        selectable == null ? null : (date) => selectable(Day.fromDateTime(date)),
   );
   return picked == null ? null : Day.fromDateTime(picked);
+}
+
+/// The allowed day closest to [base] within [first]..[last] — ahead of it
+/// first, then back; null when there is none.
+Day? _nearestSelectable(
+  Day base,
+  Day first,
+  Day last,
+  bool Function(Day day) selectable,
+) {
+  for (var d = base; !d.isAfter(last); d = d.addDays(1)) {
+    if (selectable(d)) return d;
+  }
+  for (var d = base.addDays(-1); !d.isBefore(first); d = d.addDays(-1)) {
+    if (selectable(d)) return d;
+  }
+  return null;
 }
 
 /// Confirm → run → snack: the delete flow every admin list repeats.

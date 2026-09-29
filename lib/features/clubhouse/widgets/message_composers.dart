@@ -399,18 +399,34 @@ class _StaffComposerSheet extends ConsumerStatefulWidget {
 }
 
 class _StaffComposerSheetState extends ConsumerState<_StaffComposerSheet> {
-  late Day _date = widget.initialDate ?? _today(ref.read);
+  /// The day the player picked in „Změnit“, once they did.
+  Day? _picked;
+
+  /// The day the message is about: the picked one, else the one the sheet
+  /// was opened on, else where writing starts — today, or for a duty who is
+  /// not serving today the first day of their next period (the days they
+  /// may write about are those of their own periods). Read afresh, not
+  /// once: the clock and the duty may land after the sheet opens.
+  Day get _date =>
+      _picked ?? widget.initialDate ?? _defaultDate(ref.read);
+
+  static Day _defaultDate(_Get get) {
+    final today = _today(get);
+    final isAdmin = get(myProfileProvider).value?.isAdmin ?? false;
+    return isAdmin ? today : get(myDutyProvider).firstDayFrom(today) ?? today;
+  }
 
   /// Null = „Celý den“.
   late String? _blockId = widget.initialBlockId;
   final _body = TextEditingController();
 
-  /// Offered for being on duty (and not the admin): once true, it stays —
-  /// a duty ending while the sheet is open (midnight, an unassignment)
-  /// must still read the server's `not_allowed` as [dutyEndedMessage]
-  /// (spec: the duty writing at 23:59). Latched in [build], not read once:
-  /// the streams may land after the sheet opens. [myDutyProvider] is
-  /// `none` until the profile loads, so a true here has a known role.
+  /// Offered for having a duty period (and not the admin): once true, it
+  /// stays — a duty ending while the sheet is open (midnight, an
+  /// unassignment) must still read the server's `not_allowed` as
+  /// [dutyEndedMessage] (spec: the duty writing at 23:59). Latched in
+  /// [build], not read once: the streams may land after the sheet opens.
+  /// [myDutyProvider] is `none` until the profile loads, so a true here has
+  /// a known role.
   bool _offeredAsDuty = false;
 
   /// A send is under way: „Odeslat“ waits, so one tap is one message (one
@@ -428,19 +444,23 @@ class _StaffComposerSheetState extends ConsumerState<_StaffComposerSheet> {
     super.dispose();
   }
 
-  /// The admin may write about any day; the duty from today on (the
-  /// server's `duty_gate`).
+  /// The admin may write about any day; the duty about the days of their
+  /// own periods from today on (the server's `duty_edit_gate`, the block
+  /// edits' gate) — every other day is greyed out.
   Future<void> _pickDate() async {
     final isAdmin = ref.read(myProfileProvider).value?.isAdmin ?? false;
+    final duty = ref.read(myDutyProvider);
+    final today = _today(ref.read);
     final picked = await pickDay(
       context,
       initial: _date,
-      first: isAdmin ? _date.addDays(-365) : _today(ref.read),
-      last: _date.addDays(365),
+      first: isAdmin ? _date.addDays(-365) : today,
+      last: isAdmin ? _date.addDays(365) : duty.lastDay ?? today,
+      selectable: isAdmin ? null : duty.coversDay,
     );
     if (picked != null && mounted) {
       setState(() {
-        _date = picked;
+        _picked = picked;
         _blockId = null;
       });
     }
@@ -471,8 +491,13 @@ class _StaffComposerSheetState extends ConsumerState<_StaffComposerSheet> {
   Widget build(BuildContext context) {
     final me = ref.watch(myProfileProvider).value;
     final isAdmin = me?.isAdmin ?? false;
-    final onDutyNow = ref.watch(myDutyProvider).onDuty && !isAdmin;
-    _offeredAsDuty = _offeredAsDuty || onDutyNow;
+    // A duty writes on the strength of a period of their own — serving
+    // today or not (`duty_edit_gate`).
+    final hasDutyPeriod =
+        ref.watch(myDutyProvider).mine.isNotEmpty && !isAdmin;
+    _offeredAsDuty = _offeredAsDuty || hasDutyPeriod;
+    // The default day follows the clock once it lands.
+    ref.watch(nowProvider);
     final monday = _mondayOf(_date);
     final week = ref.watch(weekScheduleProvider(monday)).value;
     final loadedReservations = ref.watch(weekReservationsProvider(monday)).value;

@@ -709,6 +709,41 @@ void main() {
       expect(b.next, a.next);
       expect(b, isNot(a));
     });
+
+    test('firstDayFrom: today while a period of mine covers it, else the '
+        'start of the next one', () {
+      final onDuty = myDuty(periods, assignments, 'me', Day(2026, 10, 6));
+      expect(onDuty.firstDayFrom(Day(2026, 10, 6)), Day(2026, 10, 6));
+      // The last day of a period is still today's.
+      final lastDay = myDuty(periods, assignments, 'me', Day(2026, 10, 11));
+      expect(lastDay.firstDayFrom(Day(2026, 10, 11)), Day(2026, 10, 11));
+      // In the gap between two: the next period's first day.
+      final gap = myDuty(periods, assignments, 'me', Day(2026, 10, 12));
+      expect(gap.firstDayFrom(Day(2026, 10, 12)), Day(2026, 10, 19));
+      // Off duty with nothing before the far one: that one's first day.
+      final far = myDuty(periods, assignments, 'me', Day(2026, 10, 26));
+      expect(far.firstDayFrom(Day(2026, 10, 26)), Day(2026, 11, 2));
+      // Nothing left, or nobody: none.
+      expect(
+        myDuty(periods, assignments, 'me', Day(2026, 11, 9))
+            .firstDayFrom(Day(2026, 11, 9)),
+        isNull,
+      );
+      expect(MyDuty.none.firstDayFrom(Day(2026, 10, 6)), isNull);
+    });
+
+    test('lastDay: the end of my latest period that has not ended', () {
+      expect(
+        myDuty(periods, assignments, 'me', Day(2026, 10, 6)).lastDay,
+        Day(2026, 11, 8),
+      );
+      expect(
+        myDuty(periods, assignments, 'me', Day(2026, 11, 8)).lastDay,
+        Day(2026, 11, 8),
+      );
+      expect(myDuty(periods, assignments, 'me', Day(2026, 11, 9)).lastDay, isNull);
+      expect(MyDuty.none.lastDay, isNull);
+    });
   });
 
   group('dutyLeadLabel', () {

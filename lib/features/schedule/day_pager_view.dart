@@ -331,21 +331,21 @@ class _DayPage extends StatelessWidget {
 
   /// The ⋮ in the day header: what [admin] offers for this day. A past
   /// day's reservations are attendance history: no edits — only the
-  /// admin's „Napsat hráčům dne…“ (the admin writes about any day; the
-  /// duty from today on, message_send's duty_gate).
+  /// admin's „Napsat hráčům dne…“ (the admin writes about any day; the duty
+  /// only about the days of their own periods from today on, like the
+  /// block edits — `forDay` leaves a past day nothing for them).
   List<({String label, VoidCallback onTap})> _menu() {
     final date = day.date;
-    final message = admin.onMessageDay;
+    // Per day: the duty (0050) edits blocks, and writes to the day's
+    // players (0051), only on the days of their own periods.
+    final hooks = admin.forDay(date);
+    final message = hooks.onMessageDay;
     if (date.isBefore(today)) {
       return [
-        if (message != null && (me?.isAdmin ?? false))
+        if (message != null)
           (label: 'Napsat hráčům dne…', onTap: () => message(date)),
       ];
     }
-    // Per day: the duty (0050) edits only the days of their own periods.
-    // The message hook is not a block gesture — forDay leaves it out, so it
-    // is read off [admin] itself (its clock is being on duty today).
-    final hooks = admin.forDay(date);
     final add = hooks.onAddForDay;
     final close = hooks.onCloseDay;
     final restore = hooks.onRestoreDay;

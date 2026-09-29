@@ -2875,23 +2875,27 @@ void main() {
       expect(slots(tester).onDuty, isFalse);
     });
 
-    // The third clock (0051): writing to the players of a day or a block is
-    // held by message_send's duty_gate — on duty TODAY, any day from today
-    // on. Neither the days of the own periods nor their absence matter.
-    testWidgets('a duty later this week may edit its days but not write to '
-        'the players yet', (tester) async {
+    // Writing to the players of a day or a block (0051) goes with the right
+    // to change that day's blocks: the same days, on duty today or not.
+    testWidgets('a duty later this week: the message hooks come with the '
+        'block gestures, day by day', (tester) async {
       wideSurface(tester);
       await tester.pumpWidget(
         app(dutyPeriods: [period('d1', 10, 12)], dutyAssignments: onMe),
       );
       await tester.pumpAndSettle();
-      expect(hooks(tester).onMessageDay, isNull);
-      expect(hooks(tester).onMessageBlock, isNull);
-      expect(hooks(tester).forDay(day(11)).onAddForDay, isNotNull);
+      for (final d in [10, 11, 12]) {
+        expect(hooks(tester).forDay(day(d)).onMessageDay, isNotNull, reason: '$d');
+        expect(hooks(tester).forDay(day(d)).onMessageBlock, isNotNull, reason: '$d');
+      }
+      for (final d in [7, 8, 9, 13]) {
+        expect(hooks(tester).forDay(day(d)).onMessageDay, isNull, reason: '$d');
+        expect(hooks(tester).forDay(day(d)).onMessageBlock, isNull, reason: '$d');
+      }
     });
 
-    testWidgets('portrait: its own day\'s ⋮ has no „Napsat hráčům dne…“ '
-        'while it is not on duty', (tester) async {
+    testWidgets('portrait: its own day\'s ⋮ offers „Napsat hráčům dne…“ next '
+        'to „Přidat blok…“, though it is not on duty today', (tester) async {
       portraitSurface(tester);
       await tester.pumpWidget(
         app(dutyPeriods: [period('d1', 10, 12)], dutyAssignments: onMe),
@@ -2901,11 +2905,11 @@ void main() {
       await tester.tap(find.byIcon(Icons.more_vert));
       await tester.pumpAndSettle();
       expect(find.text('Přidat blok…'), findsOneWidget);
-      expect(find.text('Napsat hráčům dne…'), findsNothing);
+      expect(find.text('Napsat hráčům dne…'), findsOneWidget);
     });
 
-    testWidgets('on duty today: the message hooks exist on every day, the '
-        'block gestures only on its own', (tester) async {
+    testWidgets('on duty today: the message hooks, like the block gestures, '
+        'only on the days of its own period', (tester) async {
       wideSurface(tester);
       await tester.pumpWidget(
         app(
@@ -2917,14 +2921,15 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(hooks(tester).onMessageDay, isNotNull);
-      expect(hooks(tester).onMessageBlock, isNotNull);
-      // Petr's Friday: the read-through of forDay leaves them alone.
+      // Today is mine; Petr's Friday is not.
+      expect(hooks(tester).forDay(day(9)).onMessageDay, isNotNull);
+      expect(hooks(tester).forDay(day(9)).onMessageBlock, isNotNull);
+      expect(hooks(tester).forDay(day(11)).onMessageDay, isNull);
+      expect(hooks(tester).forDay(day(11)).onMessageBlock, isNull);
       expect(hooks(tester).forDay(day(11)).onAddForDay, isNull);
-      expect(hooks(tester).onMessageDay, isNotNull);
     });
 
-    testWidgets('portrait: on another duty\'s day the ⋮ offers only '
+    testWidgets('portrait: another duty\'s day has no ⋮ at all, not even '
         '„Napsat hráčům dne…“', (tester) async {
       portraitSurface(tester);
       await tester.pumpWidget(
@@ -2938,11 +2943,27 @@ void main() {
       );
       await tester.pumpAndSettle();
       await chip(tester, 11);
+      expect(find.byIcon(Icons.more_vert), findsNothing);
+      await chip(tester, 9);
       await tester.tap(find.byIcon(Icons.more_vert));
       await tester.pumpAndSettle();
       expect(find.text('Napsat hráčům dne…'), findsOneWidget);
-      expect(find.text('Přidat blok…'), findsNothing);
-      expect(find.text('Zavřít den…'), findsNothing);
+    });
+
+    testWidgets('an admin keeps the message hooks on every day, past ones too',
+        (tester) async {
+      wideSurface(tester);
+      await tester.pumpWidget(
+        app(
+          profile: admin,
+          dutyPeriods: [period('d1', 10, 12)],
+          dutyAssignments: const [DutyAssignment(periodId: 'd1', userId: 'p2')],
+        ),
+      );
+      await tester.pumpAndSettle();
+      for (var d = 7; d <= 13; d++) {
+        expect(hooks(tester).forDay(day(d)).onMessageDay, isNotNull, reason: '$d');
+      }
     });
   });
 }

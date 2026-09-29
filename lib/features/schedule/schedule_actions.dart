@@ -250,19 +250,16 @@ class ScheduleActions {
   void Function(Day)? get onRestoreDay => canEditBlocks ? _restoreDay : null;
 
   /// „Napsat hráčům dne…“ / „Napsat hráčům bloku…“ (0051): the staff
-  /// composer, under the messaging clock ([_mayMessage]: the admin, or on
-  /// duty today). Not the edit guards: the day menu offers a past day's
-  /// „Napsat hráčům dne…“ to the admin, and a refused block edit offers
-  /// „Napsat hráčům bloku…“ on its snack ([_editBlock]).
-  void Function(Day)? get onMessageDay => _mayMessage ? _messageDay : null;
+  /// composer. Writing to the players of a day goes with the right to edit
+  /// that day's blocks — the same days ([canEditDay], `message_send` asks
+  /// the same `duty_edit_gate`), so the views take these hooks per day
+  /// with the block gestures ([CalendarAdminHooks.forDay]). Not the edit
+  /// guards: the day menu offers a past day's „Napsat hráčům dne…“ to the
+  /// admin, and a refused block edit offers „Napsat hráčům bloku…“ on its
+  /// snack ([_editBlock]).
+  void Function(Day)? get onMessageDay => canEditBlocks ? _messageDay : null;
   void Function(Day, TimeBlock)? get onMessageBlock =>
-      _mayMessage ? _messageBlock : null;
-
-  /// The messaging clock (`message_send`'s `duty_gate`): the admin, or a
-  /// player on duty TODAY — for any day from today on, the other duties'
-  /// days too. Not the block edits' clock ([canEditDay]): a duty starting
-  /// next week edits next week's days already, but writes to nobody yet.
-  bool get _mayMessage => canEditBlocks && (_isAdmin || onDuty);
+      canEditBlocks ? _messageBlock : null;
 
   Future<void> _book(
     Day date,
@@ -538,9 +535,9 @@ class ScheduleActions {
         dayIsTraining: settings.trainingWeekdays.contains(date.weekday),
         dayPriority: week.days[date.weekday - 1].priority,
         dayReason: _overrideByDate[date]?.reason ?? '',
-        // The dialog closes first: the composer opens over the calendar.
-        // Only where the server would take the message (the admin, or on
-        // duty today): a duty starting later may edit this day, not write.
+        // The dialog closes first: the composer opens over the calendar. It
+        // opens only on a day whose blocks may be edited, which is a day the
+        // message may be written about too.
         offerMessageBlock: onMessageBlock != null,
         onMessagePlayers: () => _messageBlock(date, block),
         wasOnDuty: _editsAsDuty,
