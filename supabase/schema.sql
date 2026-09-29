@@ -405,6 +405,198 @@ $$;
 ALTER FUNCTION "public"."apply_federation_result"("p_tenant" "uuid", "p_site_match_id" integer, "p_result" "jsonb") OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."apply_league_matches"("p_tenant" "uuid", "p_competition_slug" "text", "p_matches" "jsonb") RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  m jsonb;
+  v_home jsonb;
+  v_away jsonb;
+  v_id integer;
+  v_inserted integer := 0;
+  v_updated integer := 0;
+  v_deleted integer := 0;
+  v_jobs integer := 0;
+  v_seen integer[] := '{}';
+  v_row league_matches;
+  v_new league_matches;
+  v_n integer;
+begin
+  for m in select * from jsonb_array_elements(coalesce(p_matches, '[]'::jsonb)) loop
+    v_id := (m->>'site_match_id')::integer;
+    if exists (select 1 from priority_slots
+                where tenant_id = p_tenant and import_key = 'cka:' || v_id) then
+      continue;
+    end if;
+    v_seen := v_seen || v_id;
+    v_home := coalesce(m->'home', '{}'::jsonb);
+    v_away := coalesce(m->'away', '{}'::jsonb);
+    select * into v_row from league_matches
+     where tenant_id = p_tenant and site_match_id = v_id;
+    if not found then
+      insert into league_matches
+        (tenant_id, site_match_id, site_slug, competition_slug, competition, round,
+         date, starts_at, home_team, away_team, home_team_slug, away_team_slug,
+         video_url, status, match_type, discipline,
+         home_points, away_points, home_total, away_total, home_fulls, away_fulls,
+         home_spares, away_spares, home_errors, away_errors,
+         home_set_points, away_set_points)
+      values
+        (p_tenant, v_id, m->>'site_slug', p_competition_slug,
+         coalesce(m->>'competition', ''), (m->>'round')::smallint,
+         (m->>'date')::date, (m->>'starts_at')::time, m->>'home_team', m->>'away_team',
+         coalesce(m->>'home_team_slug', ''), coalesce(m->>'away_team_slug', ''),
+         m->>'video_url', coalesce(m->>'status', 'scheduled'),
+         coalesce(m->>'match_type', ''), coalesce(m->>'discipline', ''),
+         (v_home->>'points')::numeric, (v_away->>'points')::numeric,
+         (v_home->>'total')::integer, (v_away->>'total')::integer,
+         (v_home->>'fulls')::integer, (v_away->>'fulls')::integer,
+         (v_home->>'spares')::integer, (v_away->>'spares')::integer,
+         (v_home->>'errors')::integer, (v_away->>'errors')::integer,
+         (v_home->>'set_points')::numeric, (v_away->>'set_points')::numeric)
+      returning * into v_new;
+      v_inserted := v_inserted + 1;
+    else
+      update league_matches set
+        site_slug = m->>'site_slug', competition_slug = p_competition_slug,
+        competition = coalesce(m->>'competition', ''), round = (m->>'round')::smallint,
+        date = (m->>'date')::date, starts_at = (m->>'starts_at')::time,
+        home_team = m->>'home_team', away_team = m->>'away_team',
+        home_team_slug = coalesce(m->>'home_team_slug', ''),
+        away_team_slug = coalesce(m->>'away_team_slug', ''),
+        video_url = m->>'video_url', status = coalesce(m->>'status', 'scheduled'),
+        -- the round page carries no format: keep what the detail fetch stored
+        match_type = coalesce(nullif(m->>'match_type', ''), match_type),
+        discipline = coalesce(nullif(m->>'discipline', ''), discipline),
+        home_points = (v_home->>'points')::numeric, away_points = (v_away->>'points')::numeric,
+        home_total = (v_home->>'total')::integer, away_total = (v_away->>'total')::integer,
+        home_fulls = (v_home->>'fulls')::integer, away_fulls = (v_away->>'fulls')::integer,
+        home_spares = (v_home->>'spares')::integer, away_spares = (v_away->>'spares')::integer,
+        home_errors = (v_home->>'errors')::integer, away_errors = (v_away->>'errors')::integer,
+        home_set_points = (v_home->>'set_points')::numeric,
+        away_set_points = (v_away->>'set_points')::numeric,
+        fetched_at = now()
+       where id = v_row.id
+         and (site_slug, competition_slug, competition, round, date, starts_at,
+              home_team, away_team, home_team_slug, away_team_slug, video_url, status,
+              home_points, away_points, home_total, away_total, home_fulls, away_fulls,
+              home_spares, away_spares, home_errors, away_errors,
+              home_set_points, away_set_points)
+             is distinct from
+             (m->>'site_slug', p_competition_slug, coalesce(m->>'competition', ''),
+              (m->>'round')::smallint, (m->>'date')::date, (m->>'starts_at')::time,
+              m->>'home_team', m->>'away_team', coalesce(m->>'home_team_slug', ''),
+              coalesce(m->>'away_team_slug', ''), m->>'video_url',
+              coalesce(m->>'status', 'scheduled'),
+              (v_home->>'points')::numeric, (v_away->>'points')::numeric,
+              (v_home->>'total')::integer, (v_away->>'total')::integer,
+              (v_home->>'fulls')::integer, (v_away->>'fulls')::integer,
+              (v_home->>'spares')::integer, (v_away->>'spares')::integer,
+              (v_home->>'errors')::integer, (v_away->>'errors')::integer,
+              (v_home->>'set_points')::numeric, (v_away->>'set_points')::numeric);
+      get diagnostics v_n = row_count;
+      v_updated := v_updated + v_n;
+    end if;
+  end loop;
+
+  -- A match that turned into one of ours (a team discovered later) leaves.
+  delete from league_matches l
+   where l.tenant_id = p_tenant and l.competition_slug = p_competition_slug
+     and exists (select 1 from priority_slots p
+                  where p.tenant_id = p_tenant and p.import_key = 'cka:' || l.site_match_id);
+  -- The site no longer lists it: only judged from a non-empty list.
+  if jsonb_array_length(coalesce(p_matches, '[]'::jsonb)) > 0 then
+    delete from league_matches l
+     where l.tenant_id = p_tenant and l.competition_slug = p_competition_slug
+       and not (l.site_match_id = any (v_seen));
+    get diagnostics v_deleted = row_count;
+  end if;
+
+  -- One detail fetch per finished match whose lines are not final yet; a
+  -- pending or backing-off job is left alone (do nothing on conflict).
+  with due as (
+    select l.site_match_id, l.site_slug
+      from league_matches l
+     where l.tenant_id = p_tenant and l.competition_slug = p_competition_slug
+       and l.status in ('finished', 'forfeit')
+       and l.detail_status is distinct from l.status
+  ), ins as (
+    insert into notification_jobs (kind, dedupe_key, payload, run_at)
+    select 'federation_league_match',
+           'federation_league_match:' || p_tenant || ':' || d.site_match_id,
+           jsonb_build_object('tenant_id', p_tenant, 'site_match_id', d.site_match_id,
+                              'slug', d.site_slug),
+           now()
+      from due d
+    on conflict (dedupe_key) do nothing
+    returning 1
+  )
+  select count(*) into v_jobs from ins;
+
+  return jsonb_build_object('league_inserted', v_inserted, 'league_updated', v_updated,
+                            'league_deleted', v_deleted, 'league_detail_jobs', v_jobs);
+end;
+$$;
+
+
+ALTER FUNCTION "public"."apply_league_matches"("p_tenant" "uuid", "p_competition_slug" "text", "p_matches" "jsonb") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."apply_league_result"("p_tenant" "uuid", "p_site_match_id" integer, "p_result" "jsonb") RETURNS boolean
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_row league_matches;
+  v_home jsonb := coalesce(p_result->'home', '{}'::jsonb);
+  v_away jsonb := coalesce(p_result->'away', '{}'::jsonb);
+begin
+  select * into v_row from league_matches
+   where tenant_id = p_tenant and site_match_id = p_site_match_id;
+  if not found or not league_competition_is_ours(p_tenant, v_row.competition_slug) then
+    return false;
+  end if;
+  update league_matches set
+    status = p_result->>'status',
+    match_type = coalesce(p_result->>'match_type', ''),
+    discipline = coalesce(p_result->>'discipline', ''),
+    video_url = p_result->>'video_url',
+    venue = case when jsonb_typeof(p_result->'venue') = 'object'
+                 then p_result#>>'{venue,name}' else venue end,
+    venue_slug = case when jsonb_typeof(p_result->'venue') = 'object'
+                      then p_result#>>'{venue,slug}' else venue_slug end,
+    home_points = (v_home->>'points')::numeric, away_points = (v_away->>'points')::numeric,
+    home_total = (v_home->>'total')::integer, away_total = (v_away->>'total')::integer,
+    home_fulls = (v_home->>'fulls')::integer, away_fulls = (v_away->>'fulls')::integer,
+    home_spares = (v_home->>'spares')::integer, away_spares = (v_away->>'spares')::integer,
+    home_errors = (v_home->>'errors')::integer, away_errors = (v_away->>'errors')::integer,
+    home_set_points = (v_home->>'set_points')::numeric,
+    away_set_points = (v_away->>'set_points')::numeric,
+    fetched_at = now(), detail_status = p_result->>'status', detail_fetched_at = now()
+   where id = v_row.id;
+
+  delete from league_player_results where match_id = v_row.id;
+  insert into league_player_results
+    (match_id, tenant_id, side, position, player_name, player_site_id, player_slug,
+     fulls, spares, errors, total, set_points, team_points, lanes,
+     sub_name, sub_site_id, sub_slug, sub_from_throw)
+  select v_row.id, p_tenant, p->>'side', (p->>'position')::smallint, p->>'player_name',
+         (p->>'player_site_id')::integer, p->>'player_slug',
+         (p->>'fulls')::integer, (p->>'spares')::integer, (p->>'errors')::integer,
+         (p->>'total')::integer, (p->>'set_points')::numeric,
+         (p->>'team_points')::numeric, coalesce(p->'lanes', '[]'::jsonb),
+         nullif(p->>'sub_name', ''), (p->>'sub_site_id')::integer, p->>'sub_slug',
+         (p->>'sub_from_throw')::smallint
+    from jsonb_array_elements(coalesce(p_result->'players', '[]'::jsonb)) p;
+  return true;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."apply_league_result"("p_tenant" "uuid", "p_site_match_id" integer, "p_result" "jsonb") OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."approve_player"("p_user_id" "uuid") RETURNS "void"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -1654,6 +1846,10 @@ declare
   r record;
   i integer := 0;
 begin
+  delete from league_matches l
+   where not exists (select 1 from teams t
+                      where t.tenant_id = l.tenant_id and t.active
+                        and t.competition_slug = l.competition_slug);
   for r in
     select distinct t.tenant_id, t.competition_slug
       from teams t
@@ -2169,6 +2365,20 @@ ALTER FUNCTION "public"."kiosk_password_target"("p_user_id" "uuid") OWNER TO "po
 
 COMMENT ON FUNCTION "public"."kiosk_password_target"("p_user_id" "uuid") IS 'Kiosk účtu p_user_id smí správce téže kuželny nastavit nové heslo — vrací jeho id, jinak not_allowed/unknown_kiosk. Volá edge funkce kiosk-password jménem volajícího.';
 
+
+
+CREATE OR REPLACE FUNCTION "public"."league_competition_is_ours"("p_tenant" "uuid", "p_competition_slug" "text") RETURNS boolean
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  select exists (select 1 from teams t
+                  where t.tenant_id = p_tenant and t.active
+                    and t.competition_slug = p_competition_slug
+                    and t.competition_slug <> '');
+$$;
+
+
+ALTER FUNCTION "public"."league_competition_is_ours"("p_tenant" "uuid", "p_competition_slug" "text") OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."mark_reminder_sent"("p_user" "uuid", "p_event_key" "text", "p_offset" integer, "p_starts_at" timestamp with time zone DEFAULT NULL::timestamp with time zone) RETURNS "void"
@@ -3063,12 +3273,11 @@ CREATE OR REPLACE FUNCTION "public"."refresh_match"("p_match_id" "uuid", "p_forc
     AS $$
 declare
   v_slot priority_slots;
+  v_league league_matches;
   v_status text;
   v_fetched timestamptz;
   v_start timestamptz;
   v_job bigint;
-  -- A tap on the refresh button always looks at the site again; the floor
-  -- only stops a double tap from queueing the same fetch twice.
   v_gap interval := case when p_force then interval '15 seconds' else interval '5 minutes' end;
 begin
   if not is_approved_or_kiosk() then
@@ -3076,7 +3285,56 @@ begin
   end if;
   select * into v_slot from priority_slots
    where id = p_match_id and tenant_id = current_tenant_id();
-  if not found or v_slot.site_match_id is null then
+  if not found then
+    -- Not one of ours: maybe a foreign match of one of our competitions.
+    select * into v_league from league_matches
+     where id = p_match_id and tenant_id = current_tenant_id();
+    if not found or not league_competition_is_ours(v_league.tenant_id, v_league.competition_slug) then
+      return 'not_live';
+    end if;
+    v_status := v_league.status;
+    v_fetched := v_league.detail_fetched_at;
+    if v_status in ('finished', 'forfeit') then
+      -- Final: only a missing detail is worth a fetch.
+      if v_league.detail_status is not distinct from v_status then
+        return 'not_live';
+      end if;
+    else
+      if v_league.starts_at is null then
+        return 'not_live';
+      end if;
+      v_start := (v_league.date + v_league.starts_at) at time zone 'Europe/Prague';
+      if not ((v_status = 'in_progress' and now() < v_start + interval '12 hours')
+              or (v_status = 'preparation'
+                  and now() between v_start - interval '1 hour' and v_start + interval '12 hours')
+              or (v_status = 'scheduled'
+                  and now() between v_start - interval '1 hour' and v_start + interval '6 hours')) then
+        return 'not_live';
+      end if;
+    end if;
+    if v_fetched is not null and v_fetched > now() - v_gap then
+      return 'fresh';
+    end if;
+    insert into notification_jobs (kind, dedupe_key, payload, run_at)
+    values ('federation_league_match',
+            'federation_league_match:' || v_league.tenant_id || ':' || v_league.site_match_id,
+            jsonb_build_object('tenant_id', v_league.tenant_id,
+                               'site_match_id', v_league.site_match_id,
+                               'slug', v_league.site_slug, 'requested_at', now()),
+            now())
+    on conflict (dedupe_key) do update
+      set run_at = least(notification_jobs.run_at, excluded.run_at),
+          payload = notification_jobs.payload || jsonb_build_object('requested_at', now())
+      where coalesce((notification_jobs.payload->>'requested_at')::timestamptz, '-infinity')
+            < now() - v_gap
+    returning id into v_job;
+    if v_job is not null then
+      perform trigger_notification_jobs();
+    end if;
+    return 'queued';
+  end if;
+
+  if v_slot.site_match_id is null then
     return 'not_live';
   end if;
   -- Only switched-off teams of ours play it: its job would fetch the page
@@ -4585,6 +4843,79 @@ COMMENT ON COLUMN "public"."google_calendar_tokens"."google_calendar_id_secondar
 
 
 
+CREATE TABLE IF NOT EXISTS "public"."league_matches" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "site_match_id" integer NOT NULL,
+    "site_slug" "text" NOT NULL,
+    "competition_slug" "text" NOT NULL,
+    "competition" "text" DEFAULT ''::"text" NOT NULL,
+    "round" smallint,
+    "date" "date" NOT NULL,
+    "starts_at" time without time zone,
+    "home_team" "text" NOT NULL,
+    "away_team" "text" NOT NULL,
+    "home_team_slug" "text" DEFAULT ''::"text" NOT NULL,
+    "away_team_slug" "text" DEFAULT ''::"text" NOT NULL,
+    "video_url" "text",
+    "venue" "text",
+    "venue_slug" "text",
+    "status" "text" DEFAULT 'scheduled'::"text" NOT NULL,
+    "match_type" "text" DEFAULT ''::"text" NOT NULL,
+    "discipline" "text" DEFAULT ''::"text" NOT NULL,
+    "home_points" numeric,
+    "away_points" numeric,
+    "home_total" integer,
+    "away_total" integer,
+    "home_fulls" integer,
+    "away_fulls" integer,
+    "home_spares" integer,
+    "away_spares" integer,
+    "home_errors" integer,
+    "away_errors" integer,
+    "home_set_points" numeric,
+    "away_set_points" numeric,
+    "fetched_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "detail_status" "text",
+    "detail_fetched_at" timestamp with time zone,
+    CONSTRAINT "league_matches_status_check" CHECK (("status" = ANY (ARRAY['scheduled'::"text", 'preparation'::"text", 'in_progress'::"text", 'finished'::"text", 'forfeit'::"text"])))
+);
+
+ALTER TABLE ONLY "public"."league_matches" REPLICA IDENTITY FULL;
+
+
+ALTER TABLE "public"."league_matches" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."league_player_results" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "match_id" "uuid" NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "side" "text" NOT NULL,
+    "position" smallint NOT NULL,
+    "player_name" "text" NOT NULL,
+    "player_site_id" integer,
+    "player_slug" "text",
+    "fulls" integer,
+    "spares" integer,
+    "errors" integer,
+    "total" integer,
+    "set_points" numeric,
+    "team_points" numeric,
+    "lanes" "jsonb" DEFAULT '[]'::"jsonb" NOT NULL,
+    "sub_name" "text",
+    "sub_site_id" integer,
+    "sub_slug" "text",
+    "sub_from_throw" smallint,
+    CONSTRAINT "league_player_results_side_check" CHECK (("side" = ANY (ARRAY['home'::"text", 'away'::"text"])))
+);
+
+ALTER TABLE ONLY "public"."league_player_results" REPLICA IDENTITY FULL;
+
+
+ALTER TABLE "public"."league_player_results" OWNER TO "postgres";
+
+
 CREATE TABLE IF NOT EXISTS "public"."match_exceptions" (
     "user_id" "uuid" NOT NULL,
     "match_id" "uuid" NOT NULL,
@@ -5061,6 +5392,26 @@ ALTER TABLE ONLY "public"."google_calendar_tokens"
 
 
 
+ALTER TABLE ONLY "public"."league_matches"
+    ADD CONSTRAINT "league_matches_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."league_matches"
+    ADD CONSTRAINT "league_matches_tenant_id_site_match_id_key" UNIQUE ("tenant_id", "site_match_id");
+
+
+
+ALTER TABLE ONLY "public"."league_player_results"
+    ADD CONSTRAINT "league_player_results_match_id_side_position_key" UNIQUE ("match_id", "side", "position");
+
+
+
+ALTER TABLE ONLY "public"."league_player_results"
+    ADD CONSTRAINT "league_player_results_pkey" PRIMARY KEY ("id");
+
+
+
 ALTER TABLE ONLY "public"."match_exceptions"
     ADD CONSTRAINT "match_exceptions_pkey" PRIMARY KEY ("user_id", "match_id");
 
@@ -5220,6 +5571,10 @@ CREATE INDEX "duty_assignments_tenant_user" ON "public"."duty_assignments" USING
 
 
 CREATE INDEX "duty_periods_tenant_starts_on" ON "public"."duty_periods" USING "btree" ("tenant_id", "starts_on");
+
+
+
+CREATE INDEX "league_matches_competition_idx" ON "public"."league_matches" USING "btree" ("tenant_id", "competition_slug");
 
 
 
@@ -5459,6 +5814,21 @@ ALTER TABLE ONLY "public"."google_calendar_links"
 
 ALTER TABLE ONLY "public"."google_calendar_tokens"
     ADD CONSTRAINT "google_calendar_tokens_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "public"."profiles"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."league_matches"
+    ADD CONSTRAINT "league_matches_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."league_player_results"
+    ADD CONSTRAINT "league_player_results_match_id_fkey" FOREIGN KEY ("match_id") REFERENCES "public"."league_matches"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."league_player_results"
+    ADD CONSTRAINT "league_player_results_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE CASCADE;
 
 
 
@@ -5774,6 +6144,20 @@ CREATE POLICY "google_calendar_links_select_own" ON "public"."google_calendar_li
 ALTER TABLE "public"."google_calendar_tokens" ENABLE ROW LEVEL SECURITY;
 
 
+ALTER TABLE "public"."league_matches" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "league_matches_select" ON "public"."league_matches" FOR SELECT USING ((("tenant_id" = "public"."current_tenant_id"()) AND "public"."is_approved_or_kiosk"()));
+
+
+
+ALTER TABLE "public"."league_player_results" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "league_player_results_select" ON "public"."league_player_results" FOR SELECT USING ((("tenant_id" = "public"."current_tenant_id"()) AND "public"."is_approved_or_kiosk"()));
+
+
+
 ALTER TABLE "public"."match_exceptions" ENABLE ROW LEVEL SECURITY;
 
 
@@ -6020,6 +6404,16 @@ GRANT ALL ON FUNCTION "public"."apply_federation_matches"("p_tenant" "uuid", "p_
 
 REVOKE ALL ON FUNCTION "public"."apply_federation_result"("p_tenant" "uuid", "p_site_match_id" integer, "p_result" "jsonb") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."apply_federation_result"("p_tenant" "uuid", "p_site_match_id" integer, "p_result" "jsonb") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."apply_league_matches"("p_tenant" "uuid", "p_competition_slug" "text", "p_matches" "jsonb") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."apply_league_matches"("p_tenant" "uuid", "p_competition_slug" "text", "p_matches" "jsonb") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."apply_league_result"("p_tenant" "uuid", "p_site_match_id" integer, "p_result" "jsonb") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."apply_league_result"("p_tenant" "uuid", "p_site_match_id" integer, "p_result" "jsonb") TO "service_role";
 
 
 
@@ -6313,6 +6707,11 @@ GRANT ALL ON FUNCTION "public"."is_on_duty"() TO "service_role";
 GRANT ALL ON FUNCTION "public"."kiosk_password_target"("p_user_id" "uuid") TO "anon";
 GRANT ALL ON FUNCTION "public"."kiosk_password_target"("p_user_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."kiosk_password_target"("p_user_id" "uuid") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."league_competition_is_ours"("p_tenant" "uuid", "p_competition_slug" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."league_competition_is_ours"("p_tenant" "uuid", "p_competition_slug" "text") TO "service_role";
 
 
 
@@ -6676,6 +7075,16 @@ GRANT SELECT ON TABLE "public"."google_calendar_links" TO "authenticated";
 
 
 GRANT ALL ON TABLE "public"."google_calendar_tokens" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."league_matches" TO "service_role";
+GRANT SELECT ON TABLE "public"."league_matches" TO "authenticated";
+
+
+
+GRANT ALL ON TABLE "public"."league_player_results" TO "service_role";
+GRANT SELECT ON TABLE "public"."league_player_results" TO "authenticated";
 
 
 

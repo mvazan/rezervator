@@ -589,3 +589,18 @@ Deno.test("a substitution lands on the starter's line, only there", () => {
     .find((x) => x.side === "home" && x.position === 1)!;
   assertEquals(plain.sub_name, null);
 });
+
+Deno.test("a round page carries every match's team totals — a foreign match's score without its detail", () => {
+  const c = parseCompetition(fixture("competition_round_finished.html"));
+  for (const m of c.matches) {
+    const { home, away } = m.totals;
+    assert(home !== null && away !== null);
+    assert(home.total !== null && away.total !== null && home.total > 2000);
+    assert(home.points !== null && away.points !== null);
+    // A finished match's points always add up to the match's 8.
+    assertEquals(home.points! + away.points!, 8);
+  }
+  // A match with no results yet has null totals, never an error.
+  const scheduled = parseCompetition(fixture("competition_current_teams_of_4.html"));
+  assert(scheduled.matches.every((m) => m.totals !== undefined));
+});

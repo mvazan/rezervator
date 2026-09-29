@@ -3,10 +3,19 @@
 
 export type MatchStatus = "SCHEDULED" | "PREPARATION" | "IN_PROGRESS" | "FINISHED" | "FORFEIT";
 export type SiteTeam = { id: number; name: string; slug: string };
+/** One side's team-level result as a round page lists it (the same keys
+ * apply_federation_result reads); null where the page has none yet. */
+export type SideTotals = {
+  points: number | null; total: number | null; fulls: number | null;
+  spares: number | null; errors: number | null; set_points: number | null;
+};
 export type SiteMatch = {
   id: number; slug: string; date: string; time: string | null; round: number;
   status: MatchStatus; matchType: string; discipline: string; videoUrl: string | null;
   homeTeam: SiteTeam; awayTeam: SiteTeam; competition: { slug: string; name: string };
+  /** From the round page's `results[]`: enough for the score of a foreign
+   * match without fetching its detail. Missing → nulls, never an error. */
+  totals: { home: SideTotals | null; away: SideTotals | null };
 };
 export type SiteLane = { lane: number; fulls: number | null; spares: number | null; errors: number | null; total: number | null; setPoints: number | null };
 export type SitePlayer = {
@@ -94,6 +103,17 @@ function team(v: unknown): SiteTeam {
   return { id: t.id, name: str(t.name) ?? slug, slug };
 }
 
+/** The team-level totals of the `results[]` entry for one side. */
+function teamTotals(results: unknown, isHome: boolean): SideTotals | null {
+  if (!Array.isArray(results)) return null;
+  const r = (results as Json[]).find((x) => x?.isHome === isHome);
+  if (!r) return null;
+  return {
+    points: num(r.teamPoints), total: num(r.totalPerformance), fulls: num(r.totalFull),
+    spares: num(r.totalSpare), errors: num(r.totalErrors), set_points: num(r.totalSetPoints),
+  };
+}
+
 function siteMatch(v: unknown): SiteMatch {
   const m = v as Json;
   const status = String(m.status);
@@ -109,6 +129,7 @@ function siteMatch(v: unknown): SiteMatch {
     matchType: str(m.matchType) ?? "", discipline: str(m.discipline) ?? "",
     videoUrl: str(m.videoUrl), homeTeam: team(m.homeTeam), awayTeam: team(m.awayTeam),
     competition: { slug: str(c?.slug) ?? "", name: str(c?.name) ?? "" },
+    totals: { home: teamTotals(m.results, true), away: teamTotals(m.results, false) },
   };
 }
 

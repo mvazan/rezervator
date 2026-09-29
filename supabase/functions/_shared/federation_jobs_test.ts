@@ -15,6 +15,7 @@ const match = (over: Partial<SiteMatch> & { id: number }): SiteMatch => ({
   homeTeam: { id: 1, name: "TJ Sokol Brno IV", slug: "tj-sokol-brno-iv-muzi" },
   awayTeam: { id: 2, name: "KC Zlín B", slug: "kc-zlin-b-muzi" },
   competition: { slug: "jihomoravska-divize-2026-2027", name: "Jihomoravská divize" },
+  totals: { home: null, away: null },
   ...over,
 });
 const teams = [
@@ -1261,4 +1262,104 @@ Deno.test("runDiscover: no venue, no clubs on it, or no matches sitemap fails th
     Error, "sitemapa zápasů chybí",
   );
   assertEquals(rpcs, []);
+});
+
+// ---------------------------------------------------------------- league (0055)
+
+Deno.test("planCompetition: a match none of our teams plays is a league row, timeless too; ours and switched-off ones are not", () => {
+  const { rows, league, keepIds } = planCompetition({
+    matches: [
+      match({ id: 1 }),
+      // Two foreign teams: a league match.
+      match({ id: 2, homeTeam: { id: 3, name: "KK X", slug: "kk-x-muzi" },
+              totals: {
+                home: { points: 6, total: 3200, fulls: 2100, spares: 1100, errors: 10, set_points: 15 },
+                away: { points: 2, total: 3100, fulls: 2050, spares: 1050, errors: 14, set_points: 9 },
+              }, status: "FINISHED" }),
+      // No time yet: still a league match, with a null start.
+      match({ id: 3, time: null, homeTeam: { id: 3, name: "KK X", slug: "kk-x-muzi" } }),
+      // Ours but switched off: not a league match (kept, never fetched).
+      match({ id: 4, homeTeam: { id: 3, name: "KK X", slug: "kk-x-muzi" },
+              awayTeam: { id: 4, name: "TJ Sokol Husovice", slug: "tj-sokol-husovice-muzi" } }),
+    ],
+    teams,
+    legacy: [],
+  });
+  assertEquals(rows.map((r) => r.site_match_id), [1]);
+  assertEquals(keepIds, [4]);
+  assertEquals(league.map((l) => l.site_match_id), [2, 3]);
+  assertEquals(league[0], {
+    site_match_id: 2, site_slug: "jihomoravska-divize-2026-2027-kolo-1-m2",
+    date: "2026-10-10", starts_at: "10:00", home_team: "KK X", away_team: "KC Zlín B",
+    home_team_slug: "kk-x-muzi", away_team_slug: "kc-zlin-b-muzi",
+    competition: "Jihomoravská divize", round: 1, video_url: null, status: "finished",
+    match_type: "TEAMS_OF_6", discipline: "T120",
+    home: { points: 6, total: 3200, fulls: 2100, spares: 1100, errors: 10, set_points: 15 },
+    away: { points: 2, total: 3100, fulls: 2050, spares: 1050, errors: 14, set_points: 9 },
+  });
+  assertEquals(league[1].starts_at, null);
+});
+
+Deno.test("runCompetition: the league matches go to apply_league_matches, after ours", async () => {
+  const slug = "jihomoravska-divize-2026-2027";
+  const page = competitionPage([
+    match({ id: 1 }),
+    match({ id: 2, homeTeam: { id: 3, name: "KK X", slug: "kk-x-muzi" } }),
+  ]);
+  const { db, rpcs } = fakeCompetitionDb({ teams: [ourTeam], legacy: [], stored: [] });
+  await runCompetition(db, async () => page, "t1", slug, new Date("2026-10-01T10:00:00Z"));
+  const names = rpcs.map((r) => r.name);
+  assert(names.indexOf("apply_league_matches") > names.indexOf("apply_federation_matches"));
+  const call = rpcs.find((r) => r.name === "apply_league_matches")!;
+  assertEquals(call.args.p_competition_slug, slug);
+  assertEquals((call.args.p_matches as { site_match_id: number }[]).map((l) => l.site_match_id), [2]);
+});
+
+Deno.test("processFederationJobs: a league match job fetches the detail once, writes only apply_league_result and leaves no report", async () => {
+  const slug = "divize-as-2026-2027-kolo-1-tj-sokol-rudna-a-muzi-tj-sokol-vrsovice-a-muzi";
+  const now = new Date(pragueEpoch("2026-09-16", "17:30") * 1000 + 6 * 3600e3);
+  const jobs: FakeJob[] = [{
+    id: 50, kind: "federation_league_match", attempts: 0,
+    run_at: new Date(now.getTime() - 60e3).toISOString(),
+    payload: { tenant_id: "t1", site_match_id: 4859, slug },
+  }];
+  const { db, calls } = fakeJobsDb(jobs, undefined, undefined, undefined, [
+    { site_slug: "tj-sokol-brno-iv-muzi", active: true },
+  ]);
+  await processFederationJobs(db, async () => fixture("match_finished.html"), now);
+  // Done and gone: no re-arm, no live polling.
+  assertEquals(jobs.length, 0);
+  const rpcNames = calls.filter((c) => c.kind === "rpc").map((c) => (c as { name: string }).name);
+  assertEquals(rpcNames, ["apply_league_result"]);
+});
+
+Deno.test("processFederationJobs: a failing league job is retried but never lands in last_report", async () => {
+  const now = new Date("2026-10-01T10:00:00Z");
+  const jobs: FakeJob[] = [{
+    id: 51, kind: "federation_league_match", attempts: 0,
+    run_at: new Date(now.getTime() - 60e3).toISOString(),
+    payload: { tenant_id: "t1", site_match_id: 1, slug: "x-kolo-1-a-b" },
+  }];
+  const { db, calls } = fakeJobsDb(jobs);
+  await processFederationJobs(db, () => Promise.reject(new Error("site down")), now);
+  assertEquals(jobs.length, 1, "backed off, not deleted");
+  assert(!calls.some((c) => c.kind === "rpc" && (c as { name: string }).name === "record_federation_run"));
+});
+
+Deno.test("processFederationJobs: league jobs are leased last, after the venues", async () => {
+  const now = new Date("2026-10-01T10:00:00Z");
+  const due = new Date(now.getTime() - 60e3).toISOString();
+  const jobs: FakeJob[] = [
+    { id: 60, kind: "federation_league_match", attempts: 0, run_at: due,
+      payload: { tenant_id: "t1", site_match_id: 1, slug: "x-kolo-1-a-b" } },
+    { id: 61, kind: "federation_venue", attempts: 0, run_at: due,
+      payload: { tenant_id: "t1", slug: "kk-a" } },
+  ];
+  const order: string[] = [];
+  const { db } = fakeJobsDb(jobs);
+  await processFederationJobs(db, (path) => {
+    order.push(path);
+    return Promise.reject(new Error("stop"));
+  }, now);
+  assertEquals(order, ["/detail-kuzelny/kk-a", "/detail-zapasu/x-kolo-1-a-b"]);
 });

@@ -5,7 +5,7 @@ import {
   competitionSlugsForClubs, endTime, HOME_PREP_MINUTES, type LegacyRow, matchFormat,
   nextCheckpoint, normalizeTeam, pairLegacy, parseCompetition, parseMatch,
   parseSitemapLocs, parseVenue, parseVenueClubs, pollingStatus, resultPayload,
-  type SiteCompetition, type SiteMatch, teamBelongsToClub, type VenueClub,
+  type SideTotals, type SiteCompetition, type SiteMatch, teamBelongsToClub, type VenueClub,
 } from "./federation.ts";
 
 export const SITE = "https://vysledky.kuzelky.cz";
@@ -14,6 +14,15 @@ export type Fetcher = (path: string) => Promise<string>;
 export type Db = any;
 
 export type TeamRow = { site_slug: string; name: string; active: boolean };
+/** A match of the competition that none of our teams plays, as
+ * apply_league_matches (0055) reads it — from the round page alone. */
+export type LeagueRow = {
+  site_match_id: number; site_slug: string; date: string; starts_at: string | null;
+  home_team: string; away_team: string; home_team_slug: string; away_team_slug: string;
+  competition: string; round: number; video_url: string | null; status: string;
+  match_type: string; discipline: string;
+  home: SideTotals | null; away: SideTotals | null;
+};
 /** `home_slug`/`away_slug`: the site's team slugs — how the database tells
  * our teams in a stored match, whatever the admin renamed them to. */
 export type SlotRow = {
@@ -50,6 +59,8 @@ const LIMITS: [string, number][] = [
   ["federation_match", 10],
   // Last, so live match checks never wait behind venue pages for the budget.
   ["federation_venue", 3],
+  // Very last: the foreign matches of the competitions (0055) never delay ours.
+  ["federation_league_match", 5],
 ];
 const MATCH_CONCURRENCY = 3;
 
@@ -61,7 +72,10 @@ const startOf = (m: { date: string; time: string | null }) =>
  * are switched off — stored, but never polled. */
 export function planCompetition(args: {
   matches: SiteMatch[]; teams: TeamRow[]; legacy: LegacyRow[];
-}): { rows: SlotRow[]; skipped: string[]; keepIds: number[]; inactiveIds: number[] } {
+}): {
+  rows: SlotRow[]; skipped: string[]; keepIds: number[]; inactiveIds: number[];
+  league: LeagueRow[];
+} {
   const ours = new Set(args.teams.map((t) => t.site_slug));
   const active = new Set(args.teams.filter((t) => t.active).map((t) => t.site_slug));
   const nameOf = new Map(args.teams.map((t) => [t.site_slug, t.name]));
@@ -70,11 +84,23 @@ export function planCompetition(args: {
   const skipped: string[] = [];
   const keepIds: number[] = [];
   const inactiveIds: number[] = [];
+  const league: LeagueRow[] = [];
   for (const m of unique) {
     if (!active.has(m.homeTeam.slug) && !active.has(m.awayTeam.slug)) {
       if (ours.has(m.homeTeam.slug) || ours.has(m.awayTeam.slug)) {
         keepIds.push(m.id);
         inactiveIds.push(m.id);
+      } else {
+        // Nobody of ours plays it: a league match (0055), kept apart from the
+        // slots — with or without a time.
+        league.push({
+          site_match_id: m.id, site_slug: m.slug, date: m.date, starts_at: m.time,
+          home_team: m.homeTeam.name, away_team: m.awayTeam.name,
+          home_team_slug: m.homeTeam.slug, away_team_slug: m.awayTeam.slug,
+          competition: m.competition.name, round: m.round, video_url: m.videoUrl,
+          status: m.status.toLowerCase(), match_type: m.matchType, discipline: m.discipline,
+          home: m.totals.home, away: m.totals.away,
+        });
       }
       continue;
     }
@@ -101,7 +127,7 @@ export function planCompetition(args: {
     args.legacy,
   );
   for (const r of rows) r.legacy_id = pairs.get(r.site_match_id) ?? null;
-  return { rows, skipped, keepIds, inactiveIds };
+  return { rows, skipped, keepIds, inactiveIds, league };
 }
 
 /** `venueless`: stored matches whose venue no detail fetch has told us yet —
@@ -276,9 +302,14 @@ export async function runCompetition(db: Db, get: Fetcher, tenantId: string, slu
   const legacy = must(await db.from("priority_slots")
     .select("id, import_key, date, starts_at, home_team, away_team")
     .eq("tenant_id", tenantId).like("import_key", "rozpis:%")) as LegacyRow[];
-  const { rows, skipped, keepIds, inactiveIds } = planCompetition({ matches, teams, legacy });
+  const { rows, skipped, keepIds, inactiveIds, league } = planCompetition({ matches, teams, legacy });
   const report = must(await db.rpc("apply_federation_matches", {
     p_tenant: tenantId, p_competition_slug: slug, p_matches: rows, p_keep_ids: keepIds,
+  })) as Record<string, unknown>;
+  // The matches of teams that are none of ours: the whole competition for
+  // Výsledky (0055). Their detail is fetched once they are finished.
+  const leagueReport = must(await db.rpc("apply_league_matches", {
+    p_tenant: tenantId, p_competition_slug: slug, p_matches: league,
   })) as Record<string, unknown>;
   const stillLegacy = rows.length === 0 ? [] : must(await db.from("priority_slots")
     .select("date, starts_at, home_team, away_team")
@@ -311,7 +342,7 @@ export async function runCompetition(db: Db, get: Fetcher, tenantId: string, slu
     }));
   }
   return {
-    ...report, skipped_no_time: skipped, match_jobs: jobs.length,
+    ...report, ...leagueReport, skipped_no_time: skipped, match_jobs: jobs.length,
     legacy_unpaired: unpairedLegacy(rows, stillLegacy),
   };
 }
@@ -352,6 +383,18 @@ export async function runMatch(
   return nextCheckpoint(d.status, startOf(d), now);
 }
 
+/** A foreign match of one of our competitions (0055): its detail page once,
+ * for the player lines — no re-arm, no live polling; a live one is fetched
+ * only when somebody asks (refresh_match). Always null: the job is done. */
+export async function runLeagueMatch(
+  db: Db, get: Fetcher, tenantId: string, siteMatchId: number, slug: string,
+): Promise<null> {
+  const d = parseMatch(await get(`/detail-zapasu/${slug}`));
+  must(await db.rpc("apply_league_result",
+    { p_tenant: tenantId, p_site_match_id: siteMatchId, p_result: resultPayload(d) }));
+  return null;
+}
+
 export async function runVenue(db: Db, get: Fetcher, tenantId: string, slug: string) {
   const v = parseVenue(await get(`/detail-kuzelny/${slug}`), slug);
   must(await db.rpc("upsert_federation_venue", {
@@ -376,6 +419,9 @@ function reportKey(kind: string, job: Job): string {
 
 /** A match's key holds only its site id, so the text names the match. */
 function recordError(db: Db, kind: string, job: Job, message: string) {
+  if (kind === "federation_league_match") {
+    return Promise.resolve();
+  }
   const what = kind === "federation_match" ? `${kind} ${job.payload.slug}` : kind;
   return logged(`record_federation_run ${kind}/${job.id}`, () =>
     db.rpc("record_federation_run", {
@@ -403,6 +449,12 @@ async function runJob(db: Db, get: Fetcher, kind: string, job: Job, now: Date): 
     await runVenue(db, get, tenant, String(job.payload.slug));
     await recordSuccess(db, kind, job);
     return null;
+  }
+  if (kind === "federation_league_match") {
+    // No last_report entry: a foreign match failing must not lock or colour
+    // the admin's sync card; the nightly pass queues it again.
+    return await runLeagueMatch(db, get, tenant, Number(job.payload.site_match_id),
+      String(job.payload.slug));
   }
   const next = await runMatch(db, get, tenant, Number(job.payload.site_match_id),
     String(job.payload.slug), now);
