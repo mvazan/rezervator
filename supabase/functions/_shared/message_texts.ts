@@ -61,10 +61,10 @@ export function noticeText(title: string, body: string): Message {
   return { title, body: cutOnWord(body, 120) };
 }
 
-/// Staff → players: „Zpráva od správce“ / „Zpráva od služby“, the text
-/// and then the context on its own line. Also an admin's message to the
-/// staff („Správci“, „Službě“): „Zpráva od správce“, never the player
-/// title — deliverMessage picks by the author's role.
+/// Staff → players: „Zpráva od správce“ / „Zpráva od služby“ (no name),
+/// the text and then the context on its own line. Not for a message to the
+/// staff: deliverMessage picks [adminToStaffMessageText] or
+/// [playerMessageText] there, by the author's role.
 export function staffMessageText(
   body: string,
   opts: { fromAdmin: boolean; context: string | null },
@@ -73,9 +73,25 @@ export function staffMessageText(
   return { title, body: opts.context ? `${body}\n${opts.context}` : body };
 }
 
+/// Admin → staff („Správci“, „Službě“): „Zpráva od správce ({jméno})“ —
+/// the app's „Od správce (…)“ header — the text and then the context when
+/// the message carries one. Only for an admin author (`author_role`
+/// 'admin'); never the player title.
+export function adminToStaffMessageText(
+  authorName: string,
+  body: string,
+  context: string | null,
+): Message {
+  return {
+    title: `Zpráva od správce (${authorName})`,
+    body: context ? `${body}\n${context}` : body,
+  };
+}
+
 /// Player → staff: „Zpráva od hráče: {jméno}“, the text and then the context
 /// when the message carries one. Only for a player author (`author_role`
-/// 'player', the duty included); an admin → staff is [staffMessageText].
+/// 'player', the duty included); an admin → staff is
+/// [adminToStaffMessageText].
 export function playerMessageText(
   authorName: string,
   body: string,

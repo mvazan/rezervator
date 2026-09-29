@@ -258,8 +258,10 @@ alley) is not a recipient.
     den pá 3. 10.“.
   - player → staff: title „Zpráva od hráče: {jméno}“; body = the text, then the context
     when the message carries one („k tréninku ne 5. 10. · 18:00–19:00“). The title goes by
-    `author_role`, not by the audience: an admin writing to „Správci“ / „Službě“ gets the
-    staff title „Zpráva od správce“ (see Copy decisions).
+    `author_role`, not by the audience: the duty is a player here too.
+  - admin → staff („Správci“ / „Službě“): title „Zpráva od správce ({jméno})“, e.g.
+    „Zpráva od správce (Adam Správce)“ — the tile's „Od správce (…)“ header; body as for a
+    player (see Copy decisions).
 - **E-mail** (`RESEND_*`, the existing fallback for anyone without a push token, i.e. every web
   user): the full text and context; for a `message` two buttons **👍** and **👎** (signed
   links, next section) and „Odpovědět v aplikaci“ → `https://rezervator.online/#/zpravy/<id>`;
@@ -459,7 +461,7 @@ Krátká odpověď…, bez reakce, ty, Od správce, Od služby, Od hráče: {jm�
 Ode mě službě, Ode mě hráčům, k tréninku {den} · {čas}, celý den {den}, Napsat hráčům dne…,
 Napsat hráčům bloku…, Napsat správci…, Napsat službě…, Zatím žádné zprávy., Zpráva už
 neexistuje., Oznámení už neexistuje., Reakce na tvou zprávu, Zpráva od správce, Zpráva od
-služby, Zpráva od hráče: {jméno}, Odpovědět v aplikaci, Otevřít nástěnku, Díky, reakce je
+služby, Zpráva od hráče: {jméno}, Zpráva od správce ({jméno}), Odpovědět v aplikaci, Otevřít nástěnku, Díky, reakce je
 uložená., Odkaz už neplatí., Otevřít Rezervátor., {n}× 👍, {n}× 👎, {n}× 💬 (and 💬 opening the
 reply-only group of the reaction line), Nadpis je moc dlouhý., Odpověď je moc dlouhá.
 
@@ -586,9 +588,10 @@ them changes behaviour:
    wrote the inflected „Od Petra Nováka“, and the first build shipped „Od Petr Novák“.
    The form goes by the author (`author_role`), not by the audience: an admin may write to
    „Správci“ or „Službě“ too, and their message reads „Od správce (Adam)“ on the tile and
-   „Zpráva od správce“ in the push/e-mail title — the texts an admin's message to players
-   already has. Whether the admin's push title should name them is still the user's call
-   (it would need a new string).
+   „Zpráva od správce (Adam)“ in the push/e-mail title (`adminToStaffMessageText`): to
+   the staff the title names the admin, as the tile does. The first build shipped the
+   player title for it, the next one the nameless „Zpráva od správce“. To players the
+   titles stay „Zpráva od správce“ / „Zpráva od služby“, no name.
 2. **A sole admin writing to „Správci“.** When the writer is the alley's only admin,
    „Správci“ is still offered, and the send is refused with `no_recipients`; the player
    composer says „Jiného správce tu nemáš.“ (`playerSendErrorText`), not the generic

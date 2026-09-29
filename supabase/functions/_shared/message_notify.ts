@@ -6,6 +6,7 @@ import type { Delivery } from "./delivery.ts";
 import type { BatchDelivery, Email, SingleDelivery } from "./resend.ts";
 import { isMemberOf, type Membership } from "./membership.ts";
 import {
+  adminToStaffMessageText,
   appMessageUrl,
   appNoticeUrl,
   messageEmailHtml,
@@ -119,16 +120,18 @@ export async function deliverMessage(
 ): Promise<number> {
   if (!record.notify) return 0;
   // The same text for everyone: who wrote it and what about does not
-  // depend on the recipient. Who wrote it is the author's role, not the
-  // audience: an admin writing to „Správci“ or „Službě“ gets the staff
-  // title („Zpráva od správce“), only a player to the staff is „Zpráva od
-  // hráče: …“.
+  // depend on the recipient. To the staff the author's role decides, not
+  // the audience: an admin writing to „Správci“ or „Službě“ is „Zpráva od
+  // správce ({jméno})“, a player (the duty included) „Zpráva od hráče: …“.
+  // To players it is „Zpráva od správce“ / „Zpráva od služby“, no name.
   const toStaff = record.audience === "admins" || record.audience === "duty";
   const text = record.kind === "notice"
     ? noticeText(record.title ?? "", record.body)
-    : toStaff && !ctx.authorIsAdmin
-    ? playerMessageText(ctx.authorName, record.body, ctx.context)
-    : staffMessageText(record.body, { fromAdmin: ctx.authorIsAdmin, context: ctx.context });
+    : !toStaff
+    ? staffMessageText(record.body, { fromAdmin: ctx.authorIsAdmin, context: ctx.context })
+    : ctx.authorIsAdmin
+    ? adminToStaffMessageText(ctx.authorName, record.body, ctx.context)
+    : playerMessageText(ctx.authorName, record.body, ctx.context);
   let attempted = 0;
   const emails: Email[] = [];
   for (const r of recipients) {

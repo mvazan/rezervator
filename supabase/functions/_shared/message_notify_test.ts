@@ -279,8 +279,9 @@ Deno.test("deliverMessage: a batch refused as invalid goes out one by one, paced
 
 Deno.test("deliverMessage: to the staff the author decides the title, not the audience", async () => {
   // An admin may write to „Správci“ or „Službě“ too: their push and e-mail
-  // say „Zpráva od správce“ (the staff title by author_role), never that a
-  // player wrote. A player (the duty included) stays „Zpráva od hráče: …“.
+  // say „Zpráva od správce (Adam Správce)“ — the app's „Od správce (…)“ —
+  // never that a player wrote. A player (the duty included) stays „Zpráva
+  // od hráče: …“.
   const { deps, pushed, batches } = fakeDeps();
   const both = [recipient("p1", true), recipient("e1", false)];
   const context = "k tréninku pá 2. 10. · 16:00–17:00";
@@ -291,9 +292,9 @@ Deno.test("deliverMessage: to the staff the author decides the title, not the au
       { authorName: "Petr Novák", authorIsAdmin: false, context }, both, deps);
   }
   assertEquals(pushed.map((p) => p.title), [
-    "Zpráva od správce",
+    "Zpráva od správce (Adam Správce)",
     "Zpráva od hráče: Petr Novák",
-    "Zpráva od správce",
+    "Zpráva od správce (Adam Správce)",
     "Zpráva od hráče: Petr Novák",
   ]);
   assertEquals(batches.map((b) => b[0].subject), pushed.map((p) => p.title));

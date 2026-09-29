@@ -1,5 +1,6 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import {
+  adminToStaffMessageText,
   appMessageUrl,
   appNoticeUrl,
   cutOnWord,
@@ -84,6 +85,22 @@ Deno.test("playerMessageText: names the author, context optional", () => {
   assertEquals(
     playerMessageText("Petr Novák", "Ahoj.", null),
     { title: "Zpráva od hráče: Petr Novák", body: "Ahoj." },
+  );
+});
+
+Deno.test("adminToStaffMessageText: names the admin as the tile does, context optional", () => {
+  // An admin writing to „Správci“ / „Službě“: the app's „Od správce (…)“
+  // header, as a title.
+  assertEquals(
+    adminToStaffMessageText("Adam Správce", "Zítra zavřeno.", "k tréninku ne 5. 10. · 18:00–19:00"),
+    {
+      title: "Zpráva od správce (Adam Správce)",
+      body: "Zítra zavřeno.\nk tréninku ne 5. 10. · 18:00–19:00",
+    },
+  );
+  assertEquals(
+    adminToStaffMessageText("Adam Správce", "Ahoj.", null),
+    { title: "Zpráva od správce (Adam Správce)", body: "Ahoj." },
   );
 });
 

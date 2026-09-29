@@ -993,8 +993,8 @@ threads, no player-to-player messages. Every error is a bare code.
   characters, the e-mail „Otevřít nástěnku“; a message: „Zpráva od
   správce“ / „Zpráva od služby“ (by `author_role`) to players, „Zpráva od
   hráče: {jméno}“ from a player to staff (an admin to staff: „Zpráva od
-  správce“ — the author's role decides, not the audience), the context
-  („pá 2. 10. · 16:00–17:00“) on its own line, the e-mail with signed
+  správce ({jméno})“ — the author's role decides, not the audience), the
+  context („pá 2. 10. · 16:00–17:00“) on its own line, the e-mail with signed
   one-click 👍/👎 links to **react** (`signReactToken`,
   `CANCEL_TOKEN_SECRET`) and „Odpovědět v aplikaci“;
   push data `{kind: notice | message, message_id, tenant_id}` (the alley,
