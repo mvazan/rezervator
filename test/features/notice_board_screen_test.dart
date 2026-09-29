@@ -616,6 +616,31 @@ void main() {
       expect(save().onPressed, isNull);
     });
 
+    testWidgets('the form keeps its width while a long title and text are typed',
+        (tester) async {
+      // Wide enough that the dialog's own cap never hides the growth.
+      tester.view.physicalSize = const Size(1600, 1200);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(host((_) async {}, (_) {}));
+      await tester.tap(find.text('STRÁNKA'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('OTEVŘÍT'));
+      await tester.pumpAndSettle();
+      // The dialog's surface — AlertDialog itself spans the inset area.
+      final surface = find
+          .descendant(of: find.byType(AlertDialog), matching: find.byType(Material))
+          .first;
+      final before = tester.getSize(surface).width;
+      expect(before, lessThan(600));
+      await tester.enterText(find.widgetWithText(TextField, 'Nadpis'), 'Nové dráhy ' * 7);
+      await tester.enterText(find.widgetWithText(TextField, 'Text'),
+          'Od pondělí hrajeme na nových drahách, klíč je u služby. ' * 4);
+      await tester.pump();
+      expect(tester.getSize(surface).width, before);
+    });
+
     testWidgets('„Změnit“ opens no picker over a dialog about to close', (tester) async {
       final save = Completer<void>();
       NoticeDraft? sent;

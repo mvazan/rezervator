@@ -74,6 +74,9 @@ class _NoticeForm extends ConsumerStatefulWidget {
   ConsumerState<_NoticeForm> createState() => _NoticeFormState();
 }
 
+/// The notice form's width; a narrow phone gives it less.
+const double _formWidth = 400;
+
 class _NoticeFormState extends ConsumerState<_NoticeForm> {
   late final _title = TextEditingController(text: widget.existing?.title ?? '');
   late final _body = TextEditingController(text: widget.existing?.body ?? '');
@@ -142,32 +145,39 @@ class _NoticeFormState extends ConsumerState<_NoticeForm> {
       saveEnabled: !overLimit(_title.text, noticeTitleMax) &&
           !overLimit(_body.text, noticeBodyMax),
       children: [
-        // The form's width (400, less on a narrow phone): AlertDialog sizes
-        // its content to the widest child.
-        const SizedBox(width: 400),
-        TextField(
-          controller: _title,
-          decoration: withServerLimit(
-            context,
-            const InputDecoration(labelText: 'Nadpis'),
-            _title.text,
-            noticeTitleMax,
+        // The fields set the form's width (400, less on a narrow phone):
+        // AlertDialog sizes its content to the widest child, and a bare text
+        // field reports its whole text as its width, so the dialog would
+        // widen with every word typed.
+        SizedBox(
+          width: _formWidth,
+          child: TextField(
+            controller: _title,
+            decoration: withServerLimit(
+              context,
+              const InputDecoration(labelText: 'Nadpis'),
+              _title.text,
+              noticeTitleMax,
+            ),
+            maxLength: noticeTitleMax,
+            onChanged: (_) => setState(() {}),
           ),
-          maxLength: noticeTitleMax,
-          onChanged: (_) => setState(() {}),
         ),
-        TextField(
-          controller: _body,
-          decoration: withServerLimit(
-            context,
-            const InputDecoration(labelText: 'Text'),
-            _body.text,
-            noticeBodyMax,
+        SizedBox(
+          width: _formWidth,
+          child: TextField(
+            controller: _body,
+            decoration: withServerLimit(
+              context,
+              const InputDecoration(labelText: 'Text'),
+              _body.text,
+              noticeBodyMax,
+            ),
+            maxLength: noticeBodyMax,
+            maxLines: 5,
+            minLines: 1,
+            onChanged: (_) => setState(() {}),
           ),
-          maxLength: noticeBodyMax,
-          maxLines: 5,
-          minLines: 1,
-          onChanged: (_) => setState(() {}),
         ),
         Row(
           children: [
