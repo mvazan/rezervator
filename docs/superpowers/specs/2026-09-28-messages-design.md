@@ -93,9 +93,10 @@ minutes late“ without hunting for a number. And the admin wants a place for la
     `created_at`, `updated_at`.
   - `author_role text not null` check in (`admin`, `player`): a snapshot of the sender's
     `profiles.role` at send time. Players cannot read other profiles, so the app's tile
-    header („Od správce“ / „Od služby“) and notify's title („Zpráva od správce“ / „Zpráva od
-    služby“) are labelled from it — and a later promotion or demotion does not relabel old
-    messages.
+    header and notify's title are labelled from it — and a later promotion or demotion does
+    not relabel old messages: to players „Od správce“ / „Od služby“ and „Zpráva od správce“ /
+    „Zpráva od služby“, to the staff „Od hráče: {jméno}“ / „Od správce ({jméno})“ and
+    „Zpráva od hráče: {jméno}“ / „Zpráva od správce ({jméno})“ (Copy decisions).
   - `kind text` check in (`notice`, `message`).
   - `audience text` check in (`all`, `day`, `block`, `admins`, `duty`).
     - `notice` ⇒ `all`; `message` ⇒ one of the other four.
