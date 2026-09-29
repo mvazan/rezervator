@@ -35,6 +35,10 @@ final authStateProvider = StreamProvider<AuthState>(
 
 String? get currentUserId => _db.auth.currentUser?.id;
 
+/// How long sign-out waits to clear this device's push token from the
+/// profile before signing out anyway ([Api.signOut]).
+const fcmHandBackTimeout = Duration(seconds: 3);
+
 /// The signed-in user's id, tracked through auth changes. Every RLS-protected
 /// data stream watches this so it is *recreated* on sign-in.
 ///
@@ -565,6 +569,7 @@ class Api {
 
   static Future<void> signOut() async {
     final uid = currentUserId;
+    await _handBackFcmToken(uid);
     await _db.auth.signOut();
     if (uid != null) await RowCache.clear(uid);
   }
@@ -658,10 +663,42 @@ class Api {
         'p_active': active,
       });
 
+  /// The push token this device registered through [updateFcmToken] — what
+  /// [signOut] hands back. Null where push is off (web, a build without
+  /// Firebase): then no token on the profile is this device's.
+  static String? _deviceFcmToken;
+
   static Future<void> updateFcmToken(String? token) async {
     final uid = currentUserId;
     if (uid == null) return;
+    // Remembered before the write: should this one fail, the profile may
+    // still hold the same token from an earlier start.
+    _deviceFcmToken = token;
     await _db.from('profiles').update({'fcm_token': token}).eq('id', uid);
+  }
+
+  /// Clears this device's token from the profile before the sign-out takes
+  /// the JWT that may write it. notify pushes to every profile holding a
+  /// token, so a token left there kept delivering this account's
+  /// notifications to the phone after sign-out. Only while it is still this
+  /// device's: if the account's other phone registered since, that phone
+  /// keeps its pushes. Best effort within [fcmHandBackTimeout] — offline,
+  /// sign-out goes on, and 0050 takes the token off this profile as soon as
+  /// the device registers it for anyone else.
+  static Future<void> _handBackFcmToken(String? uid) async {
+    final token = _deviceFcmToken;
+    _deviceFcmToken = null;
+    if (uid == null || token == null) return;
+    try {
+      await _db
+          .from('profiles')
+          .update({'fcm_token': null})
+          .eq('id', uid)
+          .eq('fcm_token', token)
+          .timeout(fcmHandBackTimeout);
+    } catch (_) {
+      // Best effort only.
+    }
   }
 
   static Future<void> createReservation({
