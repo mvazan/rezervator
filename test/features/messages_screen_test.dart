@@ -157,6 +157,32 @@ void main() {
       expect(field(), 'Rozepsané');
     });
 
+    testWidgets('a reply from elsewhere that came while the field was focused '
+        'but empty of my typing shows once I leave it', (tester) async {
+      Widget tile(String? reply) => MaterialApp(home: Scaffold(body: MessageTile(
+        message: received(),
+        recipients: [recip('me', reply: reply)],
+        names: const {},
+        meId: 'me',
+        authorName: 'Bára Kantýnská',
+        authorIsAdmin: false,
+        block: null,
+        onReact: (_) {},
+        onReply: (_) async => true,
+        onDelete: null,
+      )));
+      String field() =>
+          tester.widget<TextField>(find.byType(TextField)).controller!.text;
+      await tester.pumpWidget(tile(null));
+      await tester.tap(find.byType(TextField));
+      await tester.pump();
+      await tester.pumpWidget(tile('Z webu'));
+      expect(field(), '', reason: 'a focused field is left alone');
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pump();
+      expect(field(), 'Z webu');
+    });
+
     // My own reply write, as LiveMessageTile hands it in: the answer says
     // whether it went through. Each submit waits on its own answer, and
     // the test plays my row's changes (the optimistic patch, a rollback,

@@ -117,7 +117,28 @@ class _MessageTileState extends State<MessageTile>
   bool get wantKeepAlive => _pending > 0 || _draft;
 
   @override
+  void initState() {
+    super.initState();
+    _replyFocus.addListener(_followRowAfterFocus);
+  }
+
+  /// A change of my row that came while the field was focused was skipped
+  /// ([didUpdateWidget]); once I leave it, and nothing of mine is typed or
+  /// out, the field catches up instead of showing (and resending) a stale
+  /// reply.
+  void _followRowAfterFocus() {
+    if (_replyFocus.hasFocus || _pending > 0 || _draft) return;
+    final now = _myRow?.reply ?? '';
+    if (now == _synced) return;
+    setState(() {
+      _reply.text = now;
+      _synced = now;
+    });
+  }
+
+  @override
   void dispose() {
+    _replyFocus.removeListener(_followRowAfterFocus);
     _reply.dispose();
     _replyFocus.dispose();
     super.dispose();
