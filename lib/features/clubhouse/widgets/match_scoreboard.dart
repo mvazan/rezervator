@@ -119,7 +119,6 @@ class MatchScoreboard extends StatelessWidget {
               _PinsLine(
                 homeTotal: homeTotal,
                 awayTotal: awayTotal,
-                running: running,
                 homeColor: homeColor,
                 awayColor: awayColor,
               ),
@@ -534,13 +533,12 @@ bool _fitsTwoLines(
 }
 
 /// „2555  +234  2321“: the pin totals and, between them, the lead with its
-/// sign (+ home, - guests), in that side's colour. The pill is hollow; while
-/// the match runs it reads „Kuželky zatím +87“, and the totals are [liveTeamTotals].
+/// sign (+ home, - guests), in that side's colour, without a frame — live
+/// and final alike — and the totals are [liveTeamTotals].
 class _PinsLine extends StatelessWidget {
   const _PinsLine({
     required this.homeTotal,
     required this.awayTotal,
-    required this.running,
     this.homeColor,
     this.awayColor,
   });
@@ -549,9 +547,6 @@ class _PinsLine extends StatelessWidget {
   final Color? awayColor;
   final int homeTotal;
   final int awayTotal;
-
-  /// Not final yet: the lead is only „zatím“.
-  final bool running;
 
   @override
   Widget build(BuildContext context) {
@@ -574,14 +569,12 @@ class _PinsLine extends StatelessWidget {
           children: [
             Text('$homeTotal', style: total),
             const SizedBox(width: 12),
-            _Pill(
-              label: running ? 'Kuželky zatím $lead' : lead,
-              // Hollow: no fill, a 1dp outline — the lead is printed in its
-              // side's colour, which is legible on the card, not on a fill.
-              fill: null,
-              border: BorderSide(color: scheme.outline),
-              style: text.titleSmall?.copyWith(
-                fontSize: 15,
+            // Just the signed difference in its side's colour — no frame,
+            // no words: it is the same „+94“ live and final.
+            Text(
+              lead,
+              style: text.titleMedium?.copyWith(
+                fontSize: 20,
                 fontWeight: FontWeight.w800,
                 color:
                     leadColor(
@@ -603,22 +596,18 @@ class _PinsLine extends StatelessWidget {
   }
 }
 
-/// A rounded pill: the status chip, the pin lead and „+2 kuž.“.
+/// A rounded pill: the status chip.
 class _Pill extends StatelessWidget {
   const _Pill({
     required this.label,
     required this.style,
     this.fill,
-    this.border,
     this.leading,
   });
 
   final String label;
   final TextStyle? style;
   final Color? fill;
-
-  /// An outline instead of (or on top of) the fill.
-  final BorderSide? border;
 
   /// Before [label], 4dp apart: the live chip's dot.
   final Widget? leading;
@@ -627,7 +616,7 @@ class _Pill extends StatelessWidget {
   Widget build(BuildContext context) => DecoratedBox(
     decoration: ShapeDecoration(
       color: fill,
-      shape: StadiumBorder(side: border ?? BorderSide.none),
+      shape: const StadiumBorder(),
     ),
     child: Padding(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),

@@ -254,12 +254,18 @@ void main() {
       expect(tester.getCenter(dot).dy, closeTo(label.center.dy, 2));
     });
 
-    testWidgets('the score is průběžně and the pins are „zatím“', (
+    testWidgets('the score is průběžně; the pin lead is just „+37“', (
       tester,
     ) async {
       await pump(tester);
       expect(find.text('průběžně'), findsOneWidget);
-      expect(find.text('Kuželky zatím +37'), findsOneWidget);
+      // No words, no frame — the same as when the match is final.
+      expect(find.text('+37'), findsOneWidget);
+      expect(find.textContaining('zatím'), findsNothing);
+      expect(
+        find.ancestor(of: find.text('+37'), matching: find.byType(DecoratedBox)),
+        findsNothing,
+      );
     });
 
     testWidgets('the live pins count only lanes both players threw, not the '
@@ -293,7 +299,7 @@ void main() {
       expect(find.text('616'), findsOneWidget);
       expect(find.text('579'), findsOneWidget);
       expect(find.text('842'), findsNothing);
-      expect(find.text('Kuželky zatím +37'), findsOneWidget);
+      expect(find.text('+37'), findsOneWidget);
     });
 
     testWidgets('the summary counts the done and the running duels', (
