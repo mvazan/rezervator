@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert' show jsonDecode, jsonEncode;
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -10,6 +11,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config.dart';
 import '../data/providers.dart';
+import 'pending_link.dart';
 
 /// Push notifications via FCM.
 ///
@@ -19,8 +21,9 @@ import '../data/providers.dart';
 ///
 /// This phase delivers the token to the backend so the notify Edge Function
 /// has somewhere to send to, and shows a local notification for messages that
-/// arrive while the app is in the foreground. There's no in-app routing when a
-/// notification is tapped (YAGNI — the OS opens the app, nothing more).
+/// arrive while the app is in the foreground. A tap on a message/notice/
+/// reaction push deep-links via [PendingLinkSource] (0051); every other kind
+/// still just opens the app, unchanged.
 class Push {
   static final _local = FlutterLocalNotificationsPlugin();
   static bool _ready = false;
@@ -45,43 +48,96 @@ class Push {
           android: AndroidInitializationSettings('@mipmap/ic_launcher'),
           iOS: DarwinInitializationSettings(),
         ),
+        onDidReceiveNotificationResponse: _onLocalNotificationTapped,
       );
 
       await FirebaseMessaging.instance.requestPermission();
 
-      // Save the token now (if signed in), on every sign-in, and on refresh.
+      // Save the token now (if signed in), on every sign-in, and on refresh;
+      // forget it whenever nobody is signed in.
       _ready = true;
-      unawaited(_saveToken());
-      listenForSignIn(Supabase.instance.client.auth.onAuthStateChange,
-          () => unawaited(_saveToken()));
+      if (Supabase.instance.client.auth.currentUser == null) {
+        _forgetToken();
+      } else {
+        unawaited(_saveToken());
+      }
+      listenForAuth(Supabase.instance.client.auth.onAuthStateChange,
+          onSignedIn: () => unawaited(_saveToken()),
+          onSignedOut: _forgetToken);
       FirebaseMessaging.instance.onTokenRefresh.listen((_) => _saveToken());
 
       // Foreground messages: show them via a local notification.
       FirebaseMessaging.onMessage.listen(_showForeground);
+      // Taps (0051): on a push while backgrounded (warm), and the one that
+      // launched the app from terminated (cold).
+      FirebaseMessaging.onMessageOpenedApp.listen(_onMessageTapped);
+      unawaited(FirebaseMessaging.instance.getInitialMessage().then(
+        (message) {
+          if (message != null) _onMessageTapped(message);
+        },
+        onError: (Object e) => debugPrint('Initial push read failed: $e'),
+      ));
+      // …and a foreground push's local notification tapped after the app
+      // was closed: that launch skips onDidReceiveNotificationResponse.
+      unawaited(_local.getNotificationAppLaunchDetails().then(
+        (launch) {
+          final response = launch?.notificationResponse;
+          if ((launch?.didNotificationLaunchApp ?? false) &&
+              response != null) {
+            _onLocalNotificationTapped(response);
+          }
+        },
+        onError: (Object e) => debugPrint('Launch details read failed: $e'),
+      ));
     } catch (e) {
       debugPrint('Push init failed (continuing without push): $e');
     }
   }
 
+  /// Sign-ins save the token, sign-outs forget it — an explicit one or a
+  /// session supabase dropped.
+  ///
   /// supabase_flutter puts a failed magic link (expired or used —
   /// `otp_expired`) on onAuthStateChange as a stream error. Without an
   /// onError here that error became uncaught and reached Sentry as a fatal
   /// crash (REZERVATOR-7), though the login screen already explains it.
   @visibleForTesting
-  static StreamSubscription<AuthState> listenForSignIn(
-    Stream<AuthState> changes,
-    void Function() onSignedIn,
-  ) =>
+  static StreamSubscription<AuthState> listenForAuth(
+    Stream<AuthState> changes, {
+    required void Function() onSignedIn,
+    required void Function() onSignedOut,
+  }) =>
       changes.listen(
         (state) {
           if (state.event == AuthChangeEvent.signedIn) onSignedIn();
+          if (state.event == AuthChangeEvent.signedOut) onSignedOut();
         },
         onError: (Object _) {},
       );
 
+  /// The deletion [_forgetToken] started, until it is done.
+  static Future<void>? _forgetting;
+
+  /// A device nobody is signed in on holds no FCM token. The token is the
+  /// device's, not the account's: left alive, FCM keeps delivering to it
+  /// whatever a profile still holds (a sign-out offline, a session that
+  /// expired — nothing could clear the profile then — or a sign-out on an
+  /// app from before this), and the next account here would register the
+  /// very same token. Deleted, the next sign-in gets a fresh one, and a
+  /// profile still holding the old one gets UNREGISTERED from FCM, which
+  /// notify answers by clearing it. Runs on every sign-out and on a start
+  /// without a session; offline it fails and the next start tries again.
+  static void _forgetToken() {
+    _forgetting = FirebaseMessaging.instance.deleteToken().catchError(
+        (Object e) => debugPrint('FCM token delete failed: $e'));
+  }
+
   static Future<void> _saveToken() async {
     if (!_ready) return;
     try {
+      // A sign-in right after a sign-out would otherwise read the token
+      // that is being deleted.
+      await _forgetting;
       if (Supabase.instance.client.auth.currentUser == null) return;
       final token = await FirebaseMessaging.instance.getToken();
       await Api.updateFcmToken(token);
@@ -106,6 +162,27 @@ class Push {
           priority: Priority.high,
         ),
       ),
+      // The push's data rides along, so a tap on this local notification
+      // deep-links like a tap on a background push does.
+      payload: jsonEncode(message.data),
     );
+  }
+
+  /// A tap on an OS-shown push: its data may name a message or notice.
+  static void _onMessageTapped(RemoteMessage message) {
+    final link = pendingLinkFromData(message.data);
+    if (link != null) PendingLinkSource.publish(link);
+  }
+
+  /// A tap on a foreground push's local notification: [_showForeground]
+  /// put the push's data into the payload as JSON.
+  static void _onLocalNotificationTapped(NotificationResponse response) {
+    final payload = response.payload;
+    if (payload == null) return;
+    try {
+      final data = jsonDecode(payload) as Map<String, dynamic>;
+      final link = pendingLinkFromData(data);
+      if (link != null) PendingLinkSource.publish(link);
+    } catch (_) {}
   }
 }

@@ -8,7 +8,8 @@ push to main ───────────► deploy-web.yml: flutter build 
 push to main
   touching supabase/** ─► deploy-backend.yml: supabase db push
                                               supabase functions deploy notify + cancel
-                                                + calendar-oauth-callback + calendar-manage
+                                                + react + calendar-oauth-callback
+                                                + calendar-manage
 push tag v* ────────────► release.yml: signed APK + AAB with production backend
                           baked in → GitHub Releases, AAB → Play internal (draft)
 twice a week cron ──────► keepalive.yml: pings Supabase so the free tier
@@ -89,7 +90,7 @@ local Supabase stack (CLI pinned to 2.109.0) and then:
    visiting, the reservation cascade, the reject guard, rental exceptions,
    players without an account, the Google Calendar link + job queue);
 3. `deno check` over every function entry point (`notify`, `cancel`,
-   `calendar-oauth-callback`, `calendar-manage`) + `deno test` over
+   `react`, `calendar-oauth-callback`, `calendar-manage`) + `deno test` over
    `supabase/functions` (helpers in `_shared/` have unit tests;
    `import_map.json` pins supabase-js).
 

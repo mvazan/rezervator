@@ -1,6 +1,7 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import {
   dayLabel,
+  dutyDayLabel,
   escapeHtml,
   leadLabel,
   pragueDateTime,
@@ -102,4 +103,9 @@ Deno.test("pragueDateTime reads midnight as 00:00, never 24:00", () => {
 
 Deno.test("pragueDateTime takes the fractional seconds PostgREST may send", () => {
   assertEquals(pragueDateTime("2026-09-26T14:30:00.123456+00:00").time, "16:30");
+});
+
+Deno.test("dutyDayLabel writes the spaced Czech day form", () => {
+  assertEquals(dutyDayLabel("2026-10-05"), "po 5. 10.");
+  assertEquals(dutyDayLabel("2026-10-11"), "ne 11. 10.");
 });

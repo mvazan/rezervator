@@ -1,5 +1,5 @@
 // Formatting helpers shared by notify and cancel: HTML escaping for e-mail
-// bodies / the cancel page, the Czech day + time labels ("po 13.7.",
+// bodies, the Czech day + time labels ("po 13.7.",
 // "17:30") used in notification texts, and how long "before" reads in
 // Czech.
 
@@ -15,6 +15,15 @@ export function dayLabel(sqlDate: string): string {
   const names = ["ne", "po", "út", "st", "čt", "pá", "so"];
   const d = new Date(`${sqlDate}T00:00:00Z`);
   return `${names[d.getUTCDay()]} ${d.getUTCDate()}.${d.getUTCMonth() + 1}.`;
+}
+
+/// "po 5. 10." — the spaced Czech day form Správa a Klubovna → Služby use
+/// (dayLabel above is the unspaced "po 5.10." the notification texts use
+/// elsewhere; duty and message texts want the spaced one).
+export function dutyDayLabel(sqlDate: string): string {
+  const names = ["ne", "po", "út", "st", "čt", "pá", "so"];
+  const d = new Date(`${sqlDate}T00:00:00Z`);
+  return `${names[d.getUTCDay()]} ${d.getUTCDate()}. ${d.getUTCMonth() + 1}.`;
 }
 
 export function timeLabel(sqlTime: string): string {

@@ -493,22 +493,27 @@ bool atReservationLimit(int activeCount, ScheduleSettings settings) =>
 ///
 /// [forGroup]: the caller may book for a group mate (0044), whose own cap
 /// the server checks — the caller's full cap then no longer closes the cell.
+/// [onDuty]: the same for the player on canteen duty (0050), who books for
+/// anyone under that player's usual rules — the past and the horizon stay
+/// closed, as the server keeps them for the duty.
 bool canBook({
   required SlotState state,
   required int myActiveCount,
   required ScheduleSettings settings,
   bool isAdmin = false,
   bool forGroup = false,
+  bool onDuty = false,
 }) {
   if (state is! FreeSlot) return false;
   if (isAdmin) return true;
   return !state.inPast &&
       !state.beyondHorizon &&
-      (forGroup || !atReservationLimit(myActiveCount, settings));
+      (forGroup || onDuty || !atReservationLimit(myActiveCount, settings));
 }
 
-/// Own reservation — or a group mate's (0044) — whose block has not started
-/// yet may be cancelled in-app; an admin may cancel ANY reservation.
+/// Own reservation — or a group mate's (0044), or anyone's for the player
+/// on canteen duty (0050) — whose block has not started yet may be
+/// cancelled in-app; an admin may cancel ANY reservation.
 /// Client-side mirror of the cancel RPC's rules — honest UI only, the RPC
 /// remains the authority.
 bool canCancel({
@@ -516,12 +521,13 @@ bool canCancel({
   required String myPlayerId,
   bool isAdmin = false,
   Set<String> groupMateIds = const {},
+  bool onDuty = false,
 }) {
   if (state is! ReservedSlot) return false;
   if (isAdmin) return true;
   final owner = state.reservation.playerId;
   return !state.inPast &&
-      (owner == myPlayerId || groupMateIds.contains(owner));
+      (onDuty || owner == myPlayerId || groupMateIds.contains(owner));
 }
 
 /// Slots of [day] the caller could book right now — [canBook] over every
@@ -530,13 +536,14 @@ bool canCancel({
 /// [forGroup]: same as [canBook] — a player in a group may still book past
 /// their own cap (it counts against the target mate's), so pass true when
 /// the caller has group mates or the header undercounts what the grid
-/// below still offers.
+/// below still offers. [onDuty]: likewise for the player on duty (0050).
 int bookableSlotCount(
   OpenDay day, {
   required int myActiveCount,
   required ScheduleSettings settings,
   bool isAdmin = false,
   bool forGroup = false,
+  bool onDuty = false,
 }) {
   var count = 0;
   for (final block in day.blocks) {
@@ -547,6 +554,7 @@ int bookableSlotCount(
         settings: settings,
         isAdmin: isAdmin,
         forGroup: forGroup,
+        onDuty: onDuty,
       )) {
         count++;
       }

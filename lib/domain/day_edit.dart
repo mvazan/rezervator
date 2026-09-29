@@ -9,6 +9,26 @@ library;
 import 'models.dart';
 import 'schedule.dart' show timesOverlap;
 
+/// What the player on duty is told about a block of today that has
+/// already started (0050): the server keeps it — and its trainings — the
+/// admin's.
+const blockStartedMessage = 'Blok už začal — upravit ho může jen správce.';
+
+/// What the player on duty is told when a day edit of today would hide a
+/// block that has already started — not the block being edited (0050: a
+/// started block stays the admin's).
+const hideStartedMessage =
+    'Nový čas by skryl blok, který už začal — to může jen správce.';
+
+/// What the player on duty is told when a day edit of today would start a
+/// block at a time that has already passed (0050: the server refuses it).
+/// [now] is the duty clock's real reading — never the one-minute
+/// write-time margin of [clockAtWrite], so the time shown is the one on the
+/// player's watch.
+String startPassedMessage(HourMinute now) =>
+    'Blok nemůže začínat dřív než teď (${now.display()}) — '
+    'vyber pozdější začátek.';
+
 /// The note every day-scoped write falls back to (set_day_override and the
 /// 0018 cascade use the same wording).
 const scheduleChangeNote = 'změna rozvrhu';
@@ -23,6 +43,41 @@ String dayCancelNote(String reason) =>
 int strandedOnDate(
         Iterable<StrandableReservation> rows, Day date, Set<String> keptIds) =>
     rows.where((r) => r.date == date && !keptIds.contains(r.blockId)).length;
+
+/// [rows] without the ones on [date] whose block has already started by
+/// [now] (starts_at <= now) — the reservations a non-admin's day write
+/// spares on today (0050: set_day_override, cancel_block_day_reservations
+/// and the delete_day_override cascade leave trainings under way alone).
+/// Counting these instead of all rows keeps the player on duty's confirms
+/// honest. A row whose block is not in [blocks] stays (the count errs high,
+/// never low).
+List<StrandableReservation> withoutStarted(
+  Iterable<StrandableReservation> rows, {
+  required Day date,
+  required HourMinute now,
+  required Iterable<TimeBlock> blocks,
+}) {
+  final startById = {for (final b in blocks) b.id: b.startsAt};
+  return [
+    for (final r in rows)
+      if (r.date != date || !_startedBy(startById[r.blockId], now)) r,
+  ];
+}
+
+bool _startedBy(HourMinute? start, HourMinute now) =>
+    start != null && start.compareTo(now) <= 0;
+
+/// The player on duty's clock as the checks right before a write read it
+/// (0050): one minute ahead of [now], so a block starting within the next
+/// minute counts as started. The screen's minute clock may report the
+/// previous minute for a few seconds (it polls), and the device clock may
+/// run a little behind the server's Prague time — without the margin a
+/// write could pass the check, and the server's too_late would come only
+/// after the flow's first writes had landed. Capped at 23:59.
+HourMinute clockAtWrite(HourMinute now) {
+  final m = (now.minutesFromMidnight + 1).clamp(0, 24 * 60 - 1);
+  return HourMinute(m ~/ 60, m % 60);
+}
 
 /// Rows that would fall outside the grid after a settings change (fewer
 /// lanes, a weekday dropped). A conservative upper bound: a day override may
@@ -366,11 +421,15 @@ class DayRemovalPlan {
       offersMove ? {...idsAfter, existing.id} : idsAfter.toSet();
 }
 
+/// [startedBy]: the player on duty's current time on today (0050) — a
+/// block that has started by then takes no moves (move_reservation refuses
+/// them with `too_late`), so it is no target. Null (the admin) = no limit.
 DayRemovalPlan planBlockRemoval({
   required TimeBlock existing,
   required DayEditContext day,
   required List<TimeBlock> blocks,
   required List<StrandableReservation> rows,
+  HourMinute? startedBy,
 }) {
   final ids = [
     for (final id in day.baseIds)
@@ -395,12 +454,15 @@ DayRemovalPlan planBlockRemoval({
           m.type.lanes == null &&
           !m.type.unresolved &&
           timesOverlap(b.startsAt, b.endsAt, m.startsAt, m.endsAt));
+  bool takesMoves(TimeBlock b) =>
+      willRender(b) &&
+      (startedBy == null || !_startedBy(b.startsAt, startedBy));
   var targets = [
     for (final id in ids)
       if (blockById[id] != null &&
           timesOverlap(existing.startsAt, existing.endsAt,
               blockById[id]!.startsAt, blockById[id]!.endsAt) &&
-          willRender(blockById[id]!))
+          takesMoves(blockById[id]!))
         blockById[id]!,
   ];
   if (targets.isEmpty) {
@@ -408,7 +470,7 @@ DayRemovalPlan planBlockRemoval({
     // rather than forcing a cancellation.
     targets = [
       for (final id in ids)
-        if (blockById[id] != null && willRender(blockById[id]!))
+        if (blockById[id] != null && takesMoves(blockById[id]!))
           blockById[id]!,
     ];
   }

@@ -148,6 +148,7 @@ class WeekBoard extends StatelessWidget {
       interactive: interactive,
       matchLinks: matchLinks,
       slot: slot,
+      admin: admin,
       onSelectDay: onSelectDay,
       onShiftWeek: onShiftWeek,
     );

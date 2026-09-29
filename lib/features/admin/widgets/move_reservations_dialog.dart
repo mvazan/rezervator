@@ -20,6 +20,7 @@ class MoveReservationsDialog extends ConsumerStatefulWidget {
     required this.fromBlock,
     required this.targets,
     required this.cancelNote,
+    this.errorText = friendlyDbError,
   });
 
   final Day date;
@@ -30,6 +31,11 @@ class MoveReservationsDialog extends ConsumerStatefulWidget {
 
   /// The note unmoved reservations will carry once cancelled.
   final String cancelNote;
+
+  /// How a refusal reads — the caller's mapper, so the player on duty
+  /// (0050) hears „Služba skončila…“ or about the block that has started,
+  /// not the plain reservation copy.
+  final String Function(Object error) errorText;
 
   @override
   ConsumerState<MoveReservationsDialog> createState() =>
@@ -363,7 +369,7 @@ class _MoveReservationsDialogState
           if (mounted) setState(() => _staged.remove(entry.key));
         }
       },
-      errorText: friendlyDbError,
+      errorText: widget.errorText,
     );
     if (!mounted) return;
     if (ok) {

@@ -176,18 +176,21 @@ Fázi 4). Push notifikace zatím spí, viz poznámka na konci.
    do Vaultu jako `webhook_secret` v kroku 2 (Databázové schéma) — jinak
    databázový trigger (`notify_webhook`) bude volat funkci `notify` se
    špatným hlavičkovým tokenem a ta ho odmítne (401). `CANCEL_TOKEN_SECRET` je
-   nový, nezávislý řetězec — používá se jen k podepisování odkazů na zrušení
-   rezervace v e-mailech (bez něj funkce `cancel` odpovídá 500 a `notify`
-   neposílá kioskové e-maily).
-4. Nasaď obě funkce:
+   nový, nezávislý řetězec — používá se jen k podepisování odkazů v e-mailech:
+   na zrušení rezervace a na 👍/👎 reakci na zprávu (bez něj funkce `cancel`
+   a `react` odpovídají 500 a `notify` neposílá kioskové e-maily ani žádnou
+   zprávu ze Zpráv – bez podpisu nesestaví odkazy 👍/👎, takže zpráva
+   neodejde nikomu, pushem ani e-mailem; oznámení na nástěnce chodí dál).
+4. Nasaď všechny tři funkce:
    ```bash
    supabase functions deploy notify --no-verify-jwt
    supabase functions deploy cancel --no-verify-jwt
+   supabase functions deploy react --no-verify-jwt
    ```
-   `--no-verify-jwt` je nutné u obou: `notify` volá databázový trigger (ten
+   `--no-verify-jwt` je nutné u všech: `notify` volá databázový trigger (ten
    žádný JWT nemá a nemůže) a je místo toho chráněný hlavičkou
-   `x-webhook-secret`; `cancel` otevírají lidé přímo z e-mailu (taky bez
-   JWT) a je chráněný podepsaným HMAC tokenem v odkazu.
+   `x-webhook-secret`; `cancel` a `react` otevírají lidé přímo z e-mailu
+   (taky bez JWT) a jsou chráněné podepsaným HMAC tokenem v odkazu.
 5. **Test hned teď** (bez kiosku — ten přijde ve Fázi 4, takže plný test
    „rezervace z kiosku → e-mail se zrušovacím odkazem" počká do té doby):
    - Zaregistruj v appce nového hráče (jiný účet/e-mail) → admini by měli
@@ -455,10 +458,13 @@ Sentry vypnuté. Jeden projekt stačí pro web i Android — rozlišuje je tag
 - Po přidání migrace spusť `tool/schema_snapshot.sh` (obnoví
   `supabase/schema.sql`, CI ho porovnává s čerstvou stavbou) a doplň
   [`docs/SCHEMA.md`](docs/SCHEMA.md).
-- Edge funkce: `deno test supabase/functions` a `deno check --import-map
-  supabase/functions/import_map.json supabase/functions/notify/index.ts
-  supabase/functions/cancel/index.ts`; bez lokálního Dena přes Docker:
-  `docker run --rm -v "$PWD/supabase/functions:/w" -w /w denoland/deno:latest test`.
+- Edge funkce (z kořene repa, stejně jako CI): `deno test --allow-read
+  supabase/functions` a `deno check --import-map
+  supabase/functions/import_map.json supabase/functions/*/index.ts`; bez
+  lokálního Dena přes Docker: `docker run --rm -v "$PWD:/w" -w /w
+  denoland/deno:latest test --allow-read supabase/functions`. Testy čtou
+  fixtures i soubory mimo `supabase/functions` (`web/cancel.html`,
+  `supabase/config.toml`), proto celé repo a `--allow-read`.
 - Vydání do Google Play (verze, changelog, recenzní účet) popisuje
   [`PLAY.md`](PLAY.md); CI/CD a nasazení backendu [`CICD.md`](CICD.md).
 

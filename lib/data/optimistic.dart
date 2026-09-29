@@ -206,3 +206,20 @@ List<Map<String, dynamic>> Function(List<Map<String, dynamic>> rows)
                   r,
               ...upserts.values,
             ];
+
+/// Patch přesně řádku `(message_id, user_id)` — tvar, který potřebuje
+/// reakce/odpověď na zprávu (0051): [patchRow] klíčuje jen jedním
+/// sloupcem, a klíč `message_recipients` je dvojice.
+List<Map<String, dynamic>> Function(List<Map<String, dynamic>> rows)
+    patchMessageRecipient(
+  String messageId,
+  String userId,
+  Map<String, dynamic> fields,
+) =>
+        (rows) => [
+              for (final r in rows)
+                if (r['message_id'] == messageId && r['user_id'] == userId)
+                  {...r, ...fields}
+                else
+                  r,
+            ];

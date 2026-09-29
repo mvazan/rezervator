@@ -14,6 +14,7 @@ class SlotCallbacks {
     this.onRental,
     this.onInfo,
     this.groupMateIds = const {},
+    this.onDuty = false,
   });
 
   final void Function(Day date, TimeBlock block, int lane) onBook;
@@ -43,10 +44,23 @@ class SlotCallbacks {
   /// and cancel as their own. Empty outside a group, for admins it does not
   /// matter (they may anything), the kiosk never sets it.
   final Set<String> groupMateIds;
+
+  /// The signed-in player is on canteen duty (0050): they book and cancel
+  /// for anyone under that player's usual rules, so their own cap closes
+  /// no cell and others' not-started reservations are tappable. False for
+  /// admins (they may anything) and the kiosk.
+  final bool onDuty;
 }
 
 /// The calendar boards' admin gestures — every hook optional (null = not
 /// offered). [none] is the read-only board (non-admins, the kiosk).
+///
+/// The block gestures ([onEditBlock], [onAddBlockInGap], [onAddForDay],
+/// [onMoveBlock], [onCloseDay], [onRestoreDay]) and the two message hooks
+/// ([onMessageDay], [onMessageBlock]) are per DAY: the player on canteen duty
+/// (0050) edits blocks — and writes to the players of that day (0051) —
+/// only on the days of their own periods, so a view never reads them off
+/// the bundle directly but asks [forDay].
 class CalendarAdminHooks {
   const CalendarAdminHooks({
     this.onEditBlock,
@@ -56,7 +70,16 @@ class CalendarAdminHooks {
     this.onEditRental,
     this.onMoveBlock,
     this.onMovePrioritySlot,
+    this.onCloseDay,
+    this.onRestoreDay,
+    this.onMessageDay,
+    this.onMessageBlock,
+    this.hasDayOverride = _noOverride,
+    this.canEditDay = _everyDay,
   });
+
+  static bool _noOverride(Day _) => false;
+  static bool _everyDay(Day _) => true;
 
   static const none = CalendarAdminHooks();
 
@@ -84,4 +107,46 @@ class CalendarAdminHooks {
   /// HOLD a band and drop it: move the slot (its úklid child follows).
   final void Function(Day date, PrioritySlot slot, HourMinute newStart)?
       onMovePrioritySlot;
+
+  /// The portrait day menu's „Zavřít den…“ (0050, admin and duty): ask the
+  /// reason, confirm what it cancels, close the day.
+  final void Function(Day date)? onCloseDay;
+
+  /// The portrait day menu's „Obnovit týdenní rozvrh“: drop the day's
+  /// override — offered only where [hasDayOverride] says there is one.
+  final void Function(Day date)? onRestoreDay;
+
+  /// The portrait day menu's „Napsat hráčům dne…“ (0051, admin and duty —
+  /// on the days the block gestures are offered): the staff composer with
+  /// [date] prefilled.
+  final void Function(Day date)? onMessageDay;
+
+  /// The block dialog's „Napsat hráčům bloku…“ (0051, admin and duty — on
+  /// the days the block gestures are offered): the staff composer with
+  /// [date] and [block] prefilled.
+  final void Function(Day date, TimeBlock block)? onMessageBlock;
+
+  /// Whether [date] has an override row to restore from.
+  final bool Function(Day date) hasDayOverride;
+
+  /// Whether the block gestures are offered on [date]: the admin on any
+  /// day, the player on duty (0050) on the days of their own periods, from
+  /// today on. Says nothing about being on duty today — that is the
+  /// booking's clock, not this one.
+  final bool Function(Day date) canEditDay;
+
+  /// These hooks as they stand on [date]: where [canEditDay] says no, the
+  /// six block gestures and the two message hooks are gone. Everything else
+  /// — the matches, blockages and rentals (the admin's, on every day), the
+  /// override lookup and the predicate itself — stays; a new hook that is
+  /// neither a block gesture nor a message hook is copied here too.
+  CalendarAdminHooks forDay(Day date) => canEditDay(date)
+      ? this
+      : CalendarAdminHooks(
+          onEditPrioritySlot: onEditPrioritySlot,
+          onEditRental: onEditRental,
+          onMovePrioritySlot: onMovePrioritySlot,
+          hasDayOverride: hasDayOverride,
+          canEditDay: canEditDay,
+        );
 }

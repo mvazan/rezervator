@@ -9,10 +9,14 @@ import 'package:http/testing.dart';
 import 'package:rezervator/data/clock.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/groups.dart';
+import 'package:rezervator/domain/duties.dart';
 import 'package:rezervator/domain/models.dart';
+import 'package:rezervator/features/clubhouse/message_detail_screen.dart';
+import 'package:rezervator/features/clubhouse/notice_board_screen.dart';
 import 'package:rezervator/features/schedule/home_shell.dart';
 import 'package:rezervator/features/schedule/my_trainings_screen.dart';
 import 'package:rezervator/features/schedule/week_screen.dart';
+import 'package:rezervator/push/pending_link.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -94,9 +98,35 @@ void main() {
     Profile profile = me,
     Stream<Profile>? profileStream,
     List<Reservation> mine = const [],
+    MyDuty duty = MyDuty.none,
+    MyGroup group = MyGroup.none,
+    List<Message> messages = const [],
+    List<MessageRecipient> messageRecipients = const [],
+    PendingLink? pendingLink,
+    // A factory, not a stream: Riverpod retries a failed provider and
+    // would listen to a single-subscription stream twice.
+    Stream<List<Message>> Function()? messagesStream,
+    Future<bool> Function(String id)? messageExists,
   }) =>
       ProviderScope(
         overrides: [
+          // A link already pending when HomeShell mounts — what a cold
+          // start (getInitialMessage) or a /zpravy/:id route leaves behind.
+          if (pendingLink != null)
+            pendingLinkProvider.overrideWith(
+              () => PendingLinkNotifier(initial: pendingLink),
+            ),
+          // The detail screen's tile reads the other participants' rows.
+          messageParticipantsProvider.overrideWith(
+            (ref, id) => Stream.value(const []),
+          ),
+          // The Klubovna dot (unreadCountsProvider) reads these.
+          messagesProvider.overrideWith(
+            (ref) => messagesStream?.call() ?? Stream.value(messages),
+          ),
+          myMessageRecipientsProvider.overrideWith(
+            (ref) => Stream.value(messageRecipients),
+          ),
           settingsProvider.overrideWith((ref) => Stream.value(settings)),
           timeBlocksProvider.overrideWith((ref) => Stream.value(const [])),
           dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
@@ -112,9 +142,18 @@ void main() {
           playersProvider.overrideWith((ref) async => const []),
           tenantNameProvider.overrideWith((ref, id) async => 'Demo'),
           nowProvider.overrideWith((ref) => Stream.value(now)),
-          myGroupProvider.overrideWithValue(MyGroup.none),
+          myGroupProvider.overrideWithValue(group),
+          myDutyProvider.overrideWithValue(duty),
+          dutyPeriodsProvider.overrideWith((ref) => Stream.value(const [])),
+          dutyAssignmentsProvider.overrideWith(
+            (ref) => Stream.value(const []),
+          ),
         ],
-        child: const MaterialApp(home: HomeShell()),
+        child: MaterialApp(
+          home: messageExists == null
+              ? const HomeShell()
+              : HomeShell(messageExists: messageExists),
+        ),
       );
 
   testWidgets('AppBar has no logout icon; profile icon is the entry point', (
@@ -147,6 +186,91 @@ void main() {
 
   });
 
+  // On canteen duty (0050) the ＋ stays — the duty books for the others —
+  // so the banner says that instead of "wait until one is over".
+  testWidgets('on duty the cap banner says the ＋ is for the others',
+      (tester) async {
+    await tester.pumpWidget(app(
+      mine: [
+        res('r1', today),
+        res('r2', today.addDays(1)),
+        res('r3', today.addDays(2)),
+      ],
+      duty: MyDuty(
+        current: DutyPeriod(id: 'd1', startsOn: today, endsOn: today),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Máš maximální počet rezervací — jako služba můžeš rezervovat '
+          'jen pro ostatní.'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Další půjde'), findsNothing);
+  });
+
+  // A group member (0044) at their own cap keeps the ＋ — they may still
+  // book for their mates — so "wait until one is over" would be false.
+  const myGroup = MyGroup(groupId: 'g1', memberIds: ['me', 'p2']);
+
+  testWidgets('in a group the cap banner says the ＋ is for the mates',
+      (tester) async {
+    await tester.pumpWidget(app(
+      mine: [
+        res('r1', today),
+        res('r2', today.addDays(1)),
+        res('r3', today.addDays(2)),
+      ],
+      group: myGroup,
+    ));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Máš maximální počet rezervací — ve skupině můžeš rezervovat '
+          'jen pro spoluhráče.'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Další půjde'), findsNothing);
+  });
+
+  // The duty books for anyone, the group only for the mates — the wider
+  // promise wins.
+  testWidgets('on duty in a group the duty banner wins', (tester) async {
+    await tester.pumpWidget(app(
+      mine: [
+        res('r1', today),
+        res('r2', today.addDays(1)),
+        res('r3', today.addDays(2)),
+      ],
+      duty: MyDuty(
+        current: DutyPeriod(id: 'd1', startsOn: today, endsOn: today),
+      ),
+      group: myGroup,
+    ));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Máš maximální počet rezervací — jako služba můžeš rezervovat '
+          'jen pro ostatní.'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('spoluhráče'), findsNothing);
+  });
+
+  // A group whose other members have all left has nobody to book for.
+  testWidgets('a group without mates keeps the plain cap banner',
+      (tester) async {
+    await tester.pumpWidget(app(
+      mine: [
+        res('r1', today),
+        res('r2', today.addDays(1)),
+        res('r3', today.addDays(2)),
+      ],
+      group: const MyGroup(groupId: 'g1', memberIds: ['me']),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Další půjde'), findsOneWidget);
+    expect(find.textContaining('spoluhráče'), findsNothing);
+  });
+
   // The cap does not bind an admin: create_reservation lets them book past
   // it, so the banner's promise ("another one once this is over") would be
   // a lie. They get the booking dialog's warning instead.
@@ -159,11 +283,15 @@ void main() {
       role: Role.admin,
       status: ProfileStatus.approved,
     );
-    await tester.pumpWidget(app(profile: boss, mine: [
-      res('r1', today),
-      res('r2', today.addDays(1)),
-      res('r3', today.addDays(2)),
-    ]));
+    await tester.pumpWidget(app(
+      profile: boss,
+      mine: [
+        res('r1', today),
+        res('r2', today.addDays(1)),
+        res('r3', today.addDays(2)),
+      ],
+      group: myGroup,
+    ));
     await tester.pumpAndSettle();
     expect(find.textContaining('maximální počet rezervací'), findsNothing);
   });
@@ -622,6 +750,232 @@ void main() {
         iconAt(Icons.admin_panel_settings_outlined),
         iconAt(Icons.account_circle_outlined),
       ], onCalendar);
+    });
+  });
+
+  testWidgets('Klubovna carries a dot while a message or notice is unread', (tester) async {
+    phone(tester);
+    final msg = Message(
+      id: 'm1', kind: MessageKind.message, audience: MessageAudience.day,
+      authorId: 'staff', authorRole: MessageAuthorRole.player,
+      onDate: today, blockId: null, title: null, body: 'Přijďte dřív.',
+      expiresAt: null, notify: true, createdAt: now, updatedAt: now,
+    );
+    MessageRecipient row({DateTime? readAt}) => MessageRecipient(
+        messageId: 'm1', userId: 'me', readAt: readAt,
+        reaction: null, reply: null, reactedAt: null);
+
+    await tester.pumpWidget(app(messages: [msg], messageRecipients: [row()]));
+    await tester.pumpAndSettle();
+    final dot =
+        find.descendant(of: find.byType(NavigationBar), matching: find.byType(Badge));
+    expect(dot, findsOneWidget);
+    // A screen reader hears the tab with its count, not just „Klubovna“.
+    expect(tester.getSemantics(dot).label, allOf(contains('Klubovna'), contains('1')));
+
+    // A fresh scope: re-pumping the same ProviderScope keeps the stream
+    // overrides' first values.
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpWidget(app(messages: [msg], messageRecipients: [row(readAt: now)]));
+    await tester.pumpAndSettle();
+    expect(find.descendant(of: find.byType(NavigationBar), matching: find.byType(Badge)),
+        findsNothing);
+
+    // An unread notice alone keeps the dot: the message half of the sum is 0.
+    final notice = Message(
+      id: 'n1', kind: MessageKind.notice, audience: MessageAudience.all,
+      authorId: 'staff', authorRole: MessageAuthorRole.admin,
+      onDate: null, blockId: null, title: 'Úklid', body: 'V sobotu.',
+      expiresAt: null, notify: true, createdAt: now, updatedAt: now,
+    );
+    MessageRecipient noticeRow() => MessageRecipient(
+        messageId: 'n1', userId: 'me', readAt: null,
+        reaction: null, reply: null, reactedAt: null);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpWidget(app(
+        messages: [msg, notice], messageRecipients: [row(readAt: now), noticeRow()]));
+    await tester.pumpAndSettle();
+    expect(find.descendant(of: find.byType(NavigationBar), matching: find.byType(Badge)),
+        findsOneWidget);
+  });
+
+  // Deep links (0051): a push tap or a /zpravy/:id, /nastenka/:id route
+  // leaves a PendingLink; HomeShell opens it once and clears it.
+  group('pending link', () {
+    Message msg(String id, {MessageKind kind = MessageKind.message}) =>
+        Message(
+          id: id, kind: kind,
+          audience: kind == MessageKind.notice
+              ? MessageAudience.all
+              : MessageAudience.admins,
+          authorId: 'p1', authorRole: MessageAuthorRole.player,
+          onDate: null, blockId: null,
+          title: kind == MessageKind.notice ? 'Úklid' : null,
+          body: 'Ahoj.', expiresAt: null, notify: true,
+          createdAt: DateTime(2026, 9, 1), updatedAt: DateTime(2026, 9, 1),
+        );
+
+    testWidgets('a pending message link set while running opens '
+        'MessageDetailScreen', (tester) async {
+      await tester.pumpWidget(app(messages: [msg('m1')]));
+      await tester.pumpAndSettle();
+      final container =
+          ProviderScope.containerOf(tester.element(find.byType(HomeShell)));
+      container.read(pendingLinkProvider.notifier)
+          .set(const PendingLink(kind: PendingLinkKind.message, id: 'm1'));
+      await tester.pumpAndSettle();
+      expect(find.byType(MessageDetailScreen), findsOneWidget);
+      expect(container.read(pendingLinkProvider), isNull,
+          reason: 'cleared after consuming');
+    });
+
+    testWidgets('a link already pending when HomeShell mounts (cold start, '
+        '/zpravy/:id) opens too', (tester) async {
+      await tester.pumpWidget(app(
+        messages: [msg('m1')],
+        pendingLink: const PendingLink(kind: PendingLinkKind.message, id: 'm1'),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.byType(MessageDetailScreen), findsOneWidget);
+    });
+
+    // A push carries the alley it was sent for; a superadmin visiting
+    // another alley (or another account on a shared phone) cannot read
+    // that message, and „Zpráva už neexistuje.“ would be wrong.
+    testWidgets('a link from another alley is dropped silently: no detail, '
+        'no snack, nothing left pending', (tester) async {
+      await tester.pumpWidget(app(profile: visiting, messages: [msg('m1')]));
+      await tester.pumpAndSettle();
+      final container =
+          ProviderScope.containerOf(tester.element(find.byType(HomeShell)));
+      container.read(pendingLinkProvider.notifier).set(const PendingLink(
+          kind: PendingLinkKind.message, id: 'm1', tenantId: 't-home'));
+      await tester.pumpAndSettle();
+      expect(find.byType(MessageDetailScreen), findsNothing);
+      expect(find.text('Zpráva už neexistuje.'), findsNothing);
+      expect(container.read(pendingLinkProvider), isNull);
+      // A notice link from another alley does not open the board either.
+      container.read(pendingLinkProvider.notifier).set(const PendingLink(
+          kind: PendingLinkKind.notice, id: 'n1', tenantId: 't-home'));
+      await tester.pumpAndSettle();
+      expect(find.byType(NoticeBoardScreen), findsNothing);
+      expect(find.text('Oznámení už neexistuje.'), findsNothing);
+      expect(container.read(pendingLinkProvider), isNull);
+    });
+
+    testWidgets('…while a link of my own alley opens as before', (tester) async {
+      await tester.pumpWidget(app(profile: visiting, messages: [msg('m1')]));
+      await tester.pumpAndSettle();
+      ProviderScope.containerOf(tester.element(find.byType(HomeShell)))
+          .read(pendingLinkProvider.notifier)
+          .set(const PendingLink(
+              kind: PendingLinkKind.message, id: 'm1', tenantId: 't-demo'));
+      await tester.pumpAndSettle();
+      expect(find.byType(MessageDetailScreen), findsOneWidget);
+    });
+
+    testWidgets('a pending link for an id that does not exist shows the '
+        'not-found snack', (tester) async {
+      await tester.pumpWidget(app(messageExists: (_) async => false));
+      await tester.pumpAndSettle();
+      final container =
+          ProviderScope.containerOf(tester.element(find.byType(HomeShell)));
+      container.read(pendingLinkProvider.notifier).set(
+          const PendingLink(kind: PendingLinkKind.message, id: 'missing'));
+      await tester.pumpAndSettle();
+      expect(find.text('Zpráva už neexistuje.'), findsOneWidget);
+      expect(find.byType(MessageDetailScreen), findsNothing);
+    });
+
+    const noticeLink = PendingLink(kind: PendingLinkKind.notice, id: 'n1');
+
+    testWidgets('a notice link opens the board; a notice the server calls '
+        'gone adds „Oznámení už neexistuje.“', (tester) async {
+      final asked = <String>[];
+      await tester.pumpWidget(app(
+        pendingLink: noticeLink,
+        messageExists: (id) async {
+          asked.add(id);
+          return false;
+        },
+      ));
+      await tester.pumpAndSettle();
+      expect(find.byType(NoticeBoardScreen), findsOneWidget);
+      expect(find.text('Oznámení už neexistuje.'), findsOneWidget);
+      expect(find.text('Zpráva už neexistuje.'), findsNothing);
+      expect(asked, ['n1']);
+    });
+
+    testWidgets('…and a notice already in the snapshot opens the board '
+        'without one, and without asking the server', (tester) async {
+      final asked = <String>[];
+      await tester.pumpWidget(app(
+        messages: [msg('n1', kind: MessageKind.notice)],
+        pendingLink: noticeLink,
+        messageExists: (id) async {
+          asked.add(id);
+          return false;
+        },
+      ));
+      await tester.pumpAndSettle();
+      expect(find.byType(NoticeBoardScreen), findsOneWidget);
+      expect(find.text('Oznámení už neexistuje.'), findsNothing);
+      expect(asked, isEmpty);
+    });
+
+    // cachedRows replays the on-disk cache first (cold start), and a warm
+    // tap finds the pre-background list: either way the notice the push
+    // announced is usually newer than the first snapshot.
+    testWidgets('a stale first snapshot without the notice is no proof: the '
+        'server says it exists, so no snack once the live list has it',
+        (tester) async {
+      final asked = <String>[];
+      Stream<List<Message>> staleThenLive() async* {
+        yield const [];
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+        yield [msg('n1', kind: MessageKind.notice)];
+      }
+
+      await tester.pumpWidget(app(
+        messagesStream: staleThenLive,
+        pendingLink: noticeLink,
+        messageExists: (id) async {
+          asked.add(id);
+          return true;
+        },
+      ));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pumpAndSettle();
+      expect(find.byType(NoticeBoardScreen), findsOneWidget);
+      expect(find.text('Úklid'), findsOneWidget);
+      expect(find.text('Oznámení už neexistuje.'), findsNothing);
+      expect(asked, ['n1']);
+    });
+
+    testWidgets('offline (the server cannot be asked): no snack, no error',
+        (tester) async {
+      await tester.pumpWidget(app(
+        pendingLink: noticeLink,
+        messageExists: (_) async => throw Exception('offline'),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.byType(NoticeBoardScreen), findsOneWidget);
+      expect(find.text('Oznámení už neexistuje.'), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('no cache and no network (the messages stream fails): no '
+        'snack and no uncaught error', (tester) async {
+      await tester.pumpWidget(app(
+        messagesStream: () => Stream.error(Exception('offline')),
+        pendingLink: noticeLink,
+        messageExists: (_) async => throw Exception('offline'),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.byType(NoticeBoardScreen), findsOneWidget);
+      expect(find.text('Oznámení už neexistuje.'), findsNothing);
+      expect(tester.takeException(), isNull);
     });
   });
 }

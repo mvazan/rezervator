@@ -83,9 +83,20 @@ void snack(BuildContext context, String message) {
   ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
 }
 
+/// What a player on a canteen duty is told when a call comes back
+/// `not_allowed`: the duty ended while the dialog was open (0050).
+const dutyEndedMessage = 'Služba skončila — tohle teď může jen správce.';
+
 /// Maps the schema's `raise exception` codes to Czech user copy.
-String friendlyDbError(Object error) {
+///
+/// [wasOnDuty]: the action was offered because the caller was on a canteen
+/// duty (0050) when it started. The server judges every call anew, so a
+/// `not_allowed` then means the duty has ended meanwhile (at midnight), and
+/// the message says that instead of the plain refusal. Everywhere else
+/// `not_allowed` keeps its own copy.
+String friendlyDbError(Object error, {bool wasOnDuty = false}) {
   final raw = '$error';
+  if (wasOnDuty && raw.contains('not_allowed')) return dutyEndedMessage;
   const messages = {
     'slot_taken': 'Termín je už obsazený.',
     'limit_reached': 'Máš už maximální počet rezervací.',
@@ -138,6 +149,30 @@ String friendlyDbError(Object error) {
     'empty_name': 'Název nesmí být prázdný.',
     'invalid_phone': invalidPhoneMessage,
     'profiles_phone_check': invalidPhoneMessage,
+    // Canteen duty (0050).
+    'player_at_limit': 'Hráč už má maximální počet rezervací.',
+    'duty_overlap': 'Služba se překrývá s jinou.',
+    'invalid_range': '„Do“ musí být po „Od“.',
+    'invalid_days': 'Počet dní musí být 1–31.',
+    'duty_too_long': 'Služba může mít nejvýše 62 dní.',
+    'unknown_period': 'Tahle služba už neexistuje.',
+    'season_order': 'Nová sezóna musí začínat po té současné.',
+    'not_newest': 'Vrátit jde jen poslední sezónu.',
+    'duty_periods_note_check': 'Poznámka smí mít nejvýš 80 znaků.',
+    'duty_seasons_name_check': 'Název sezóny smí mít nejvýš 40 znaků.',
+    // Zprávy a nástěnka (0051). `no_recipients` is the generic text; the
+    // staff composer words it for a day or a block itself.
+    'no_recipients': 'Nikdo nemá rezervaci.',
+    'nobody_on_duty': 'Dnes nikdo neslouží — napiš správci.',
+    'title_required': 'Vyplň nadpis.',
+    'body_required': 'Vyplň zprávu.',
+    'body_too_long': 'Zpráva je moc dlouhá.',
+    'title_too_long': 'Nadpis je moc dlouhý.',
+    // The reply is a plain row UPDATE (no RPC): PostgREST names the CHECK.
+    'message_recipients_reply_check': 'Odpověď je moc dlouhá.',
+    'unknown_message': 'Zpráva už neexistuje.',
+    'invalid_audience': 'Neplatný typ zprávy.',
+    'invalid_kind': 'Neplatný typ zprávy.',
   };
   for (final entry in messages.entries) {
     if (raw.contains(entry.key)) return entry.value;
@@ -178,6 +213,34 @@ Future<bool> tryAction(
     }
     return false;
   }
+}
+
+/// [tryAction] for an action whose own realtime echo can remove the widget
+/// that started it before the call returns — a deleted message's tile, a
+/// notice moving under a collapsed „Starší“. The page's messenger is taken
+/// before the await, so the outcome is told either way; call it from a
+/// widget on the page, not from a dialog or a sheet.
+Future<bool> tryActionOnPage(
+  BuildContext context,
+  Future<void> Function() action, {
+  String? success,
+  required String Function(Object error) errorText,
+}) async {
+  final messenger = ScaffoldMessenger.of(context);
+  void tell(String text) {
+    if (messenger.mounted) {
+      messenger.showSnackBar(SnackBar(content: Text(text)));
+    }
+  }
+
+  try {
+    await action();
+  } catch (e) {
+    tell(errorText(e));
+    return false;
+  }
+  if (success != null) tell(success);
+  return true;
 }
 
 /// Closes the dialog [context] lives in, handing [result] back to whoever
@@ -250,70 +313,143 @@ Future<String?> promptText(
   String confirmLabel = 'Uložit',
   TextInputType? keyboardType,
   String? suffixText,
-}) async {
-  final controller = TextEditingController(text: initial);
-  try {
-    final result = await showDialog<String>(
+}) =>
+    showDialog<String>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(title),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (message != null) ...[
-              Text(message, style: Theme.of(dialogContext).textTheme.bodySmall),
-              const SizedBox(height: 12),
-            ],
-            TextField(
-              controller: controller,
-              autofocus: true,
-              keyboardType: keyboardType,
-              decoration:
-                  InputDecoration(hintText: hint, suffixText: suffixText),
-            ),
+      builder: (_) => _PromptDialog(
+        title: title,
+        message: message,
+        hint: hint,
+        initial: initial,
+        confirmLabel: confirmLabel,
+        keyboardType: keyboardType,
+        suffixText: suffixText,
+      ),
+    );
+
+/// [promptText]'s dialog. It owns the field's controller, so the controller
+/// lives until the dialog's exit animation is over — disposing it the moment
+/// the dialog popped broke the last frames of that animation.
+class _PromptDialog extends StatefulWidget {
+  const _PromptDialog({
+    required this.title,
+    required this.confirmLabel,
+    this.message,
+    this.hint,
+    this.initial,
+    this.keyboardType,
+    this.suffixText,
+  });
+
+  final String title;
+  final String? message;
+  final String? hint;
+  final String? initial;
+  final String confirmLabel;
+  final TextInputType? keyboardType;
+  final String? suffixText;
+
+  @override
+  State<_PromptDialog> createState() => _PromptDialogState();
+}
+
+class _PromptDialogState extends State<_PromptDialog> {
+  late final _controller = TextEditingController(text: widget.initial);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final message = widget.message;
+    return AlertDialog(
+      title: Text(widget.title),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (message != null) ...[
+            Text(message, style: Theme.of(context).textTheme.bodySmall),
+            const SizedBox(height: 12),
           ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Zrušit'),
-          ),
-          FilledButton(
-            onPressed: () =>
-                Navigator.pop(dialogContext, controller.text.trim()),
-            child: Text(confirmLabel),
+          TextField(
+            controller: _controller,
+            autofocus: true,
+            keyboardType: widget.keyboardType,
+            decoration: InputDecoration(
+              hintText: widget.hint,
+              suffixText: widget.suffixText,
+            ),
           ),
         ],
       ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Zrušit'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _controller.text.trim()),
+          child: Text(widget.confirmLabel),
+        ),
+      ],
     );
-    return result;
-  } finally {
-    controller.dispose();
   }
 }
 
 /// The platform date picker in Czech, on [Day]s. [initial] (default today)
 /// is clamped into [first]..[last] — showDatePicker asserts on an
-/// out-of-range initial date.
+/// out-of-range initial date. [selectable] greys out the days it refuses
+/// (the duty picks among the days of their own periods only); an [initial]
+/// it refuses gives way to the nearest allowed day — showDatePicker asserts
+/// on that too — and with no allowed day in the range there is no picker
+/// and no answer (null).
 Future<Day?> pickDay(
   BuildContext context, {
   Day? initial,
   required Day first,
   required Day last,
+  bool Function(Day day)? selectable,
 }) async {
   DateTime dt(Day d) => DateTime(d.year, d.month, d.day);
   var base = initial ?? today();
   if (base.isBefore(first)) base = first;
   if (base.isAfter(last)) base = last;
+  if (selectable != null && !selectable(base)) {
+    final nearest = _nearestSelectable(base, first, last, selectable);
+    if (nearest == null) return null;
+    base = nearest;
+  }
   final picked = await showDatePicker(
     context: context,
     initialDate: dt(base),
     firstDate: dt(first),
     lastDate: dt(last),
     locale: const Locale('cs'),
+    selectableDayPredicate:
+        selectable == null ? null : (date) => selectable(Day.fromDateTime(date)),
   );
   return picked == null ? null : Day.fromDateTime(picked);
+}
+
+/// The allowed day closest to [base] within [first]..[last] — ahead of it
+/// first, then back; null when there is none.
+Day? _nearestSelectable(
+  Day base,
+  Day first,
+  Day last,
+  bool Function(Day day) selectable,
+) {
+  for (var d = base; !d.isAfter(last); d = d.addDays(1)) {
+    if (selectable(d)) return d;
+  }
+  for (var d = base.addDays(-1); !d.isBefore(first); d = d.addDays(-1)) {
+    if (selectable(d)) return d;
+  }
+  return null;
 }
 
 /// Confirm → run → snack: the delete flow every admin list repeats.

@@ -5,11 +5,14 @@
 /// streamed per-week (Phase 1) so history growth never bloats the stream.
 library;
 
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'cache.dart';
+import 'clock.dart';
 import 'live_refresh.dart';
 import 'backend_reachable.dart';
 import 'offline_gate.dart';
@@ -17,7 +20,9 @@ import 'optimistic.dart';
 
 import '../config.dart';
 import '../domain/collation.dart';
+import '../domain/duties.dart';
 import '../domain/groups.dart';
+import '../domain/messages.dart' show unreadCounts;
 import '../domain/models.dart';
 import '../domain/public_week.dart';
 
@@ -34,6 +39,10 @@ final authStateProvider = StreamProvider<AuthState>(
 );
 
 String? get currentUserId => _db.auth.currentUser?.id;
+
+/// How long sign-out waits to clear this device's push token from the
+/// profile before signing out anyway ([Api.signOut]).
+const fcmHandBackTimeout = Duration(seconds: 3);
 
 /// The signed-in user's id, tracked through auth changes. Every RLS-protected
 /// data stream watches this so it is *recreated* on sign-in.
@@ -115,6 +124,176 @@ final myGroupProvider = Provider<MyGroup>((ref) {
   final uid = ref.watch(_authUidProvider);
   if (uid == null) return MyGroup.none;
   return myGroupOf(ref.watch(groupRowsProvider).value ?? const [], uid);
+});
+
+/// The alley's canteen duties (`duty_periods`, 0050), chronological. The
+/// whole table, unfiltered: a few hundred rows in a decade, and the season
+/// counts need every period — a date-filtered stream would miscount from
+/// mid-season on. The whole alley reads it (Klubovna → Služby, the week
+/// header); only the admin's duty_* RPCs write it.
+final dutyPeriodsProvider = StreamProvider<List<DutyPeriod>>((ref) {
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return Stream.value(const []);
+  return cachedRows(uid, 'duty_periods',
+          () => _db.from('duty_periods').stream(primaryKey: ['id']))
+      .map((rows) => rows.map(DutyPeriod.fromJson).toList()
+        ..sort((a, b) => a.startsOn.compareTo(b.startsOn)));
+});
+
+/// Who works which duty (`duty_assignments`, 0050) — unfiltered, like
+/// [dutyPeriodsProvider]. Written only through [Api.dutySetAssignees].
+final dutyAssignmentsProvider = StreamProvider<List<DutyAssignment>>((ref) {
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return Stream.value(const []);
+  return cachedRows(
+          uid,
+          'duty_assignments',
+          () => _db
+              .from('duty_assignments')
+              .stream(primaryKey: ['period_id', 'user_id']))
+      .map((rows) => rows.map(DutyAssignment.fromJson).toList());
+});
+
+/// Every message and notice of the alley (`messages`, 0051) the caller may
+/// read — RLS already scopes it to notices plus the ones I sent or
+/// received, so no further filtering happens here. Unfiltered by date: the
+/// past stays visible under "Starší". Written only through
+/// [Api.messageSend]/[Api.messageUpdate]/[Api.messageDelete].
+final messagesProvider = StreamProvider<List<Message>>((ref) {
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return Stream.value(const []);
+  return cachedRows(uid, cacheKeyMessages,
+          () => _db.from('messages').stream(primaryKey: ['id']))
+      .map((rows) {
+    // The participant caches of messages that are gone go with them.
+    unawaited(pruneMessageParticipantCaches(uid, rows));
+    return rows.map(Message.fromJson).toList();
+  });
+});
+
+/// My own `message_recipients` rows (0051): one per notice and per message
+/// I received — read state, my reaction and my reply. The badges
+/// ([unreadCountsProvider]) and my own chips/reply field read this; the
+/// other participants' rows are per message, [messageParticipantsProvider].
+///
+/// Deliberately not "every row I may read": supabase's `.stream()` fetches
+/// its snapshot in ONE unpaginated select, and PostgREST cuts that at max
+/// rows (1000, local and hosted). An admin may read every row of every
+/// notice (40 members × 100 notices ≈ 4000, never pruned), so one such
+/// stream would silently drop rows — and with them unread badges, seen
+/// counts and reactions. Mine stay one per message: bounded by the notices
+/// plus 90 days of messages. Written only through [Api.markMessagesRead]/
+/// [Api.setReaction]/[Api.setReply].
+final myMessageRecipientsProvider =
+    StreamProvider<List<MessageRecipient>>((ref) {
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return Stream.value(const []);
+  return cachedRows(
+          uid,
+          cacheKeyMessageRecipients,
+          () => _db
+              .from('message_recipients')
+              .stream(primaryKey: ['message_id', 'user_id'])
+              .eq('user_id', uid))
+      .map((rows) => rows.map(MessageRecipient.fromJson).toList());
+});
+
+/// Every recipient row of one message or notice (0051) that RLS lets me
+/// read: a message's rows for its author and its recipients (the reaction
+/// line, the sent tally and its per-person list, the detail screen), a
+/// notice's rows for the admin („Kdo si to zobrazil“, the „12 z 40“ in the
+/// card footer; a player gets only their own row). One stream per message
+/// keeps each snapshot far below PostgREST's max rows (see
+/// [myMessageRecipientsProvider]). autoDispose, like
+/// [matchPlayerResultsProvider]: watch it from the tile or sheet that
+/// shows it, so only what is on screen holds a realtime channel. My own
+/// reaction/reply shows here at once: [Api.setReaction]/[Api.setReply]
+/// patch this overlay too.
+final messageParticipantsProvider = StreamProvider.autoDispose
+    .family<List<MessageRecipient>, String>((ref, messageId) {
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return Stream.value(const []);
+  return cachedRows(
+          uid,
+          cacheKeyMessageParticipants(messageId),
+          () => _db
+              .from('message_recipients')
+              .stream(primaryKey: ['message_id', 'user_id'])
+              .eq('message_id', messageId))
+      .map((rows) => rows.map(MessageRecipient.fromJson).toList());
+});
+
+/// My unread notices and messages, for the hub badges and the Klubovna
+/// dot (0051); see [unreadCounts].
+final unreadCountsProvider = Provider<({int messages, int notices})>((ref) {
+  final me = ref.watch(myProfileProvider.select((p) => p.value?.id));
+  final all = ref.watch(messagesProvider).value ?? const [];
+  final mine = ref.watch(myMessageRecipientsProvider).value ?? const [];
+  final now = ref.watch(nowProvider).value ?? DateTime.now();
+  return unreadCounts(all: all, mine: mine, meId: me, now: now);
+});
+
+/// The season boundaries of the duty counts (`duty_seasons`, 0050),
+/// chronological. Not streamed — they change only by the admin's hand:
+/// invalidate this after [Api.dutySeasonStart] or [Api.dutySeasonDelete].
+/// Offline it replays the last list, like [playersProvider].
+final dutySeasonsProvider = FutureProvider<List<DutySeason>>((ref) async {
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return const [];
+  List<Map<String, dynamic>> rows;
+  try {
+    final List<dynamic> fetched =
+        await _db.from('duty_seasons').select('started_on, name');
+    rows = [for (final row in fetched) (row as Map).cast<String, dynamic>()];
+    RowCache.write(uid, 'duty_seasons', rows);
+  } catch (_) {
+    final cached = await RowCache.read(uid, 'duty_seasons');
+    if (cached == null) rethrow;
+    rows = cached;
+  }
+  return [for (final row in rows) DutySeason.fromJson(row)]
+    ..sort((a, b) => a.startedOn.compareTo(b.startedOn));
+});
+
+/// The signed-in player's canteen duty: the running period, the next one,
+/// every period of mine that has not ended and who else is on the running
+/// one (see [MyDuty]). Follows the app clock, so it
+/// flips at midnight with no row changing — the server judges every call
+/// by Prague today (`is_on_duty()`). Equal values do not notify, so the
+/// minute tick costs no rebuild.
+final myDutyProvider = Provider<MyDuty>((ref) {
+  final me = ref.watch(myProfileProvider.select((p) => p.value?.id));
+  if (me == null) return MyDuty.none;
+  final today = ref.watch(nowProvider
+      .select((now) => Day.fromDateTime(now.value ?? DateTime.now())));
+  return myDuty(
+    ref.watch(dutyPeriodsProvider).value ?? const [],
+    ref.watch(dutyAssignmentsProvider).value ?? const [],
+    me,
+    today,
+  );
+});
+
+/// The Kalendář week header's duty line for the week of [monday] (see
+/// [dutyHeaderLabel]): who serves, or „Sloužíš ty …“ in my week on duty;
+/// null when no one does. Names are the roster's full names, placeholders
+/// included. Equal lines do not notify.
+final weekDutyHeaderProvider = Provider.autoDispose.family<DutyHeader?, Day>((
+  ref,
+  monday,
+) {
+  final me = ref.watch(myProfileProvider.select((p) => p.value?.id));
+  final today = ref.watch(nowProvider
+      .select((now) => Day.fromDateTime(now.value ?? DateTime.now())));
+  final players = ref.watch(playersProvider).value ?? const [];
+  return dutyHeaderLabel(
+    monday,
+    ref.watch(dutyPeriodsProvider).value ?? const [],
+    ref.watch(dutyAssignmentsProvider).value ?? const [],
+    {for (final p in players) p.id: p.displayName},
+    me,
+    today: today,
+  );
 });
 
 /// Alley configuration singleton (null until the backend is seeded).
@@ -565,6 +744,7 @@ class Api {
 
   static Future<void> signOut() async {
     final uid = currentUserId;
+    await _handBackFcmToken(uid);
     await _db.auth.signOut();
     if (uid != null) await RowCache.clear(uid);
   }
@@ -658,10 +838,42 @@ class Api {
         'p_active': active,
       });
 
+  /// The push token this device registered through [updateFcmToken] — what
+  /// [signOut] hands back. Null where push is off (web, a build without
+  /// Firebase): then no token on the profile is this device's.
+  static String? _deviceFcmToken;
+
   static Future<void> updateFcmToken(String? token) async {
     final uid = currentUserId;
     if (uid == null) return;
+    // Remembered before the write: should this one fail, the profile may
+    // still hold the same token from an earlier start.
+    _deviceFcmToken = token;
     await _db.from('profiles').update({'fcm_token': token}).eq('id', uid);
+  }
+
+  /// Clears this device's token from the profile before the sign-out takes
+  /// the JWT that may write it. notify pushes to every profile holding a
+  /// token, so a token left there kept delivering this account's
+  /// notifications to the phone after sign-out. Only while it is still this
+  /// device's: if the account's other phone registered since, that phone
+  /// keeps its pushes. Best effort within [fcmHandBackTimeout] — offline,
+  /// sign-out goes on, and 0052 takes the token off this profile as soon as
+  /// the device registers it for anyone else.
+  static Future<void> _handBackFcmToken(String? uid) async {
+    final token = _deviceFcmToken;
+    _deviceFcmToken = null;
+    if (uid == null || token == null) return;
+    try {
+      await _db
+          .from('profiles')
+          .update({'fcm_token': null})
+          .eq('id', uid)
+          .eq('fcm_token', token)
+          .timeout(fcmHandBackTimeout);
+    } catch (_) {
+      // Best effort only.
+    }
   }
 
   static Future<void> createReservation({
@@ -780,26 +992,22 @@ class Api {
     }
   }
 
-  /// Inserts an INACTIVE "special" block and returns its id — day-scoped
+  /// Adds an INACTIVE "special" block and returns its id — day-scoped
   /// calendar edits point a day override at it while the weekly template
-  /// ignores it. `active=false` keeps it out of the weekly schedule;
-  /// `position=-1` is the SPECIAL sentinel: the Rozvrh list hides such rows
+  /// ignores it. The server (`add_special_block`, 0050) writes
+  /// `active=false`, which keeps it out of the weekly schedule, and
+  /// `position=-1`, the SPECIAL sentinel: the Rozvrh list hides such rows
   /// and the find-or-create reuse pool only matches them (never a
-  /// deactivated template block that happens to share the times).
+  /// deactivated template block that happens to share the times). An RPC,
+  /// not a table insert: a player with a duty period that has not ended may
+  /// call it (the day edit that follows is held to their own periods), while
+  /// `time_blocks` stays the admin's.
   static Future<String> addSpecialBlock(
-      HourMinute startsAt, HourMinute endsAt) async {
-    final row = await _db
-        .from('time_blocks')
-        .insert({
-          'starts_at': startsAt.toSql(),
-          'ends_at': endsAt.toSql(),
-          'position': -1,
-          'active': false,
-        })
-        .select('id')
-        .single();
-    return row['id'] as String;
-  }
+          HourMinute startsAt, HourMinute endsAt) async =>
+      await _db.rpc('add_special_block', params: {
+        'p_starts_at': startsAt.toSql(),
+        'p_ends_at': endsAt.toSql(),
+      }) as String;
 
   /// Cancels every live reservation on [date] × [blockId] with [note] —
   /// called when a day-special HIDES a template block (after an explicit
@@ -854,8 +1062,11 @@ class Api {
         'p_block_ids': blockIds,
       });
 
+  /// Drops [date]'s override, so the weekly template applies again
+  /// (`delete_day_override`, 0050 — the admin on any date, a duty on the
+  /// days of their own periods from today on). No override is no error.
   static Future<void> deleteDayOverride(Day date) =>
-      _db.from('day_overrides').delete().eq('date', date.toSql());
+      _db.rpc('delete_day_override', params: {'p_date': date.toSql()});
 
   /// Returns [date] to the weekly rules. A training day gets the template
   /// block ids written first (cancelling anything off-template); a
@@ -1250,6 +1461,242 @@ class Api {
         'p_nick': nick,
         'p_club_id': clubId,
       });
+
+  // --- admin: canteen duty (0050, Správa → Služby) ---
+  // All admin only (`not_allowed` otherwise) and always the caller's own
+  // alley. The streams pick every change up; only the seasons are a future
+  // to invalidate.
+
+  /// Periods of [days] days (1–31, `invalid_days`) from [from] up to
+  /// [until], the last one clipped to [until]; a period overlapping an
+  /// existing one is skipped whole. The range must run forward and span at
+  /// most 400 days (`invalid_range`). The generator dialog previews the same
+  /// with `planDutyPeriods`.
+  static Future<({int created, int skipped})> dutyGenerate({
+    required Day from,
+    required int days,
+    required Day until,
+  }) async {
+    final result = Map<String, dynamic>.from(await _db.rpc('duty_generate',
+        params: {
+          'p_from': from.toSql(),
+          'p_days': days,
+          'p_until': until.toSql(),
+        }) as Map);
+    return (
+      created: (result['created'] as num).toInt(),
+      skipped: (result['skipped'] as num).toInt(),
+    );
+  }
+
+  /// Creates ([id] null) or edits one period and returns its id. The note
+  /// is trimmed server-side (at most 80 characters). `invalid_range`,
+  /// `duty_too_long` (over 62 days), `duty_overlap`, `unknown_period`.
+  static Future<String> dutyPeriodSave({
+    String? id,
+    required Day startsOn,
+    required Day endsOn,
+    String note = '',
+  }) async =>
+      await _db.rpc('duty_period_save', params: {
+        'p_id': id,
+        'p_starts_on': startsOn.toSql(),
+        'p_ends_on': endsOn.toSql(),
+        'p_note': note,
+      }) as String;
+
+  /// Deletes one period; its assignees go with it. `unknown_period`.
+  static Future<void> dutyPeriodDelete(String id) =>
+      _db.rpc('duty_period_delete', params: {'p_id': id});
+
+  /// „Smazat neobsazené budoucí…“: deletes every period starting on [from]
+  /// or later that nobody is assigned to; returns how many went.
+  static Future<int> dutyPeriodsDeleteUnassigned(Day from) async =>
+      (await _db.rpc('duty_periods_delete_unassigned',
+              params: {'p_from': from.toSql()}) as num)
+          .toInt();
+
+  /// Replaces the period's assignees with [userIds] (empty clears it).
+  /// Approved non-kiosk players of the alley, placeholders included;
+  /// anyone else refuses the whole call (`unknown_player`).
+  static Future<void> dutySetAssignees(String periodId, List<String> userIds) =>
+      _db.rpc('duty_set_assignees',
+          params: {'p_period': periodId, 'p_users': userIds});
+
+  /// „Nová sezóna…“: a season boundary from [startedOn], after the newest
+  /// one (`season_order`), named [name] (`empty_name`, at most 40
+  /// characters). Moves nothing: the counts simply start again from it.
+  static Future<void> dutySeasonStart(Day startedOn, String name) =>
+      _db.rpc('duty_season_start',
+          params: {'p_started_on': startedOn.toSql(), 'p_name': name});
+
+  /// „Vrátit poslední sezónu“: deletes the boundary [startedOn], which must
+  /// be the newest (`not_newest`).
+  static Future<void> dutySeasonDelete(Day startedOn) => _db.rpc(
+      'duty_season_delete',
+      params: {'p_started_on': startedOn.toSql()});
+
+  /// The reminder before a duty (0050): on or off, and how many days ahead
+  /// (1–14); switching it off keeps the lead. Written straight to the
+  /// alley's settings row, and optimistic, same reasoning as
+  /// [setKioskFitDay].
+  static Future<void> setDutyReminder(bool enabled, int days,
+      {required String tenantId}) {
+    final fields = {
+      'duty_reminder_enabled': enabled,
+      'duty_reminder_days': days,
+    };
+    Future<void> write() =>
+        _db.from('schedule_settings').update(fields).eq('tenant_id', tenantId);
+    final uid = currentUserId;
+    if (uid == null) return write();
+    return optimisticWrite(
+      uid,
+      cacheKeySettings,
+      patchRow('tenant_id', tenantId, fields),
+      write,
+    );
+  }
+
+  // --- messages and the notice board (0051) ---
+
+  /// Sends a notice (`kind: notice`, `audience: all`) or a message (to a
+  /// day, a block, the admins or today's duty). Returns the new row's id.
+  /// `no_recipients`/`nobody_on_duty`/`unknown_block`/`title_required`/
+  /// `body_required`/`body_too_long`/`not_allowed`/`date_past` on refusal —
+  /// see [friendlyDbError] and the composer's own `errorText` wrapping.
+  static Future<String> messageSend({
+    required MessageKind kind,
+    required MessageAudience audience,
+    Day? onDate,
+    String? blockId,
+    String? title,
+    required String body,
+    DateTime? expiresAt,
+    bool notify = true,
+  }) async =>
+      await _db.rpc('message_send', params: {
+        'p_kind': kind.name,
+        'p_audience': audience.name,
+        'p_on_date': onDate?.toSql(),
+        'p_block_id': blockId,
+        'p_title': title,
+        'p_body': body,
+        'p_expires_at': expiresAt?.toUtc().toIso8601String(),
+        'p_notify': notify,
+      }) as String;
+
+  /// Edits a notice (admin; `not_allowed` otherwise, `unknown_message` for
+  /// anything but a notice of the alley). Always the full current state:
+  /// [expiresAt] null means „do odvolání“ — there is no partial-update path
+  /// (`message_update`'s doc in 0051_messages.sql). „Sejmout“ is this call
+  /// with [expiresAt] = now and the title/body left as they were.
+  static Future<void> messageUpdate(
+    String id, {
+    required String title,
+    required String body,
+    DateTime? expiresAt,
+  }) =>
+      _db.rpc('message_update', params: {
+        'p_id': id,
+        'p_title': title,
+        'p_body': body,
+        'p_expires_at': expiresAt?.toUtc().toIso8601String(),
+      });
+
+  /// Whether [id] is a message or notice I may still read: the same
+  /// RLS-scoped table [messagesProvider] streams, asked by
+  /// `MessageDetailScreen` when its (possibly cached) snapshot lacks the
+  /// id. Throws when offline. An id that is no uuid at all (a garbled
+  /// link) is simply gone — Postgres would reject it with 22P02.
+  static Future<bool> messageExists(String id) async {
+    if (!_uuidShape.hasMatch(id)) return false;
+    final row =
+        await _db.from('messages').select('id').eq('id', id).maybeSingle();
+    return row != null;
+  }
+
+  static final _uuidShape = RegExp(
+      r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+      caseSensitive: false);
+
+  /// Deletes a message or notice I sent, or (admin) any of the alley's;
+  /// its recipient rows go with it. `unknown_message`/`not_allowed`.
+  static Future<void> messageDelete(String id) =>
+      _db.rpc('message_delete', params: {'p_id': id});
+
+  /// Marks [ids] read for the signed-in player — own-row UPDATE (the
+  /// column grant allows `read_at`), optimistic: the badges drop at once.
+  /// Rows already read keep their first `read_at`. Only my rows' overlay:
+  /// an admin's seen count ([messageParticipantsProvider]) picks my
+  /// `read_at` up from the server's echo — nothing needs it instantly.
+  static Future<void> markMessagesRead(Iterable<String> ids) {
+    final idList = ids.toSet().toList();
+    if (idList.isEmpty) return Future.value();
+    final uid = currentUserId!;
+    final readAt = DateTime.now().toUtc().toIso8601String();
+    return optimisticWrite(
+      uid,
+      cacheKeyMessageRecipients,
+      (rows) => [
+        for (final r in rows)
+          if (idList.contains(r['message_id']) &&
+              r['user_id'] == uid &&
+              r['read_at'] == null)
+            {...r, 'read_at': readAt}
+          else
+            r,
+      ],
+      () => _db
+          .from('message_recipients')
+          .update({'read_at': readAt})
+          .eq('user_id', uid)
+          .inFilter('message_id', idList)
+          .isFilter('read_at', null),
+    );
+  }
+
+  /// Sets ([reaction]) or clears (null) my 👍/👎 on [messageId] — own-row
+  /// UPDATE, optimistic; `reacted_at` is stamped server-side.
+  static Future<void> setReaction(String messageId, Reaction? reaction) =>
+      _updateMyRecipientRow(
+          messageId, {'reaction': reactionToJson(reaction)});
+
+  /// Sets my short reply on [messageId] (at most 200 characters, trimmed;
+  /// blank clears it) — own-row UPDATE, optimistic.
+  static Future<void> setReply(String messageId, String reply) {
+    final trimmed = reply.trim();
+    return _updateMyRecipientRow(
+        messageId, {'reply': trimmed.isEmpty ? null : trimmed});
+  }
+
+  /// Writes [fields] to my own row on [messageId], optimistically in both
+  /// streams that show it: my rows ([myMessageRecipientsProvider] — my
+  /// chips) and the message's participants ([messageParticipantsProvider]
+  /// — „👍 Petra, ty“). Nested, so a failure rolls both back and the error
+  /// still reaches the caller once.
+  static Future<void> _updateMyRecipientRow(
+    String messageId,
+    Map<String, dynamic> fields,
+  ) {
+    final uid = currentUserId!;
+    final patch = patchMessageRecipient(messageId, uid, fields);
+    return optimisticWrite(
+      uid,
+      cacheKeyMessageRecipients,
+      patch,
+      () => optimisticWrite(
+        uid,
+        cacheKeyMessageParticipants(messageId),
+        patch,
+        () => _db
+            .from('message_recipients')
+            .update(fields)
+            .eq('message_id', messageId)
+            .eq('user_id', uid),
+      ),
+    );
+  }
 
   // --- admin: reports (see attendanceProvider) ---
   static Future<List<AttendanceRow>> monthlyAttendance(
@@ -1667,6 +2114,13 @@ void resetTenantScopedProviders(WidgetRef ref) {
   ref.invalidate(myTeamColorsProvider);
   ref.invalidate(myMatchExceptionsProvider);
   ref.invalidate(groupRowsProvider);
+  ref.invalidate(dutyPeriodsProvider);
+  ref.invalidate(dutyAssignmentsProvider);
+  ref.invalidate(dutySeasonsProvider);
+  ref.invalidate(myDutyProvider);
+  ref.invalidate(messagesProvider);
+  ref.invalidate(myMessageRecipientsProvider);
+  ref.invalidate(messageParticipantsProvider);
   ref.invalidate(playersProvider);
   ref.invalidate(contactsProvider);
   ref.invalidate(tenantsProvider);
