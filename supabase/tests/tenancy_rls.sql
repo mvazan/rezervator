@@ -8358,6 +8358,69 @@ begin
   end loop;
   raise notice 'OK: the admin edits blocks on any day, a duty''s and nobody''s alike (0050)';
 end $$;
+-- 21i2. No day named is no day to edit: the four day RPCs refuse a null
+-- date with date_past, the admin's too, before anything is read or written
+-- (a null would pass `p_date < today` and read as „any day“). The one
+-- date-less edit, add_special_block, asks its own gate instead
+-- (duty_edit_days_gate: a period of theirs that has not ended).
+do $$
+declare
+  v_b1 constant uuid := current_setting('probe.duty_b1')::uuid;
+  v_b2 constant uuid := current_setting('probe.duty_b2')::uuid;
+begin
+  perform pg_temp.expect_day_rpcs(null, v_b1, v_b2, 'date_past');
+  raise notice 'OK: the admin''s day RPCs refuse a null date (0050)';
+end $$;
+set local request.jwt.claims =
+  '{"sub":"50000000-0000-0000-0000-000000000011","role":"authenticated"}';
+do $$
+declare
+  v_b1 constant uuid := current_setting('probe.duty_b1')::uuid;
+  v_b2 constant uuid := current_setting('probe.duty_b2')::uuid;
+begin
+  perform pg_temp.expect_day_rpcs(null, v_b1, v_b2, 'date_past');
+  perform add_special_block('21:00', '22:00');
+  raise notice 'OK: the duty''s day RPCs refuse a null date, add_special_block still works (0050)';
+end $$;
+
+-- 21i3. The gate reads Prague's today, not the session's: under a zone
+-- ahead of Prague (Pacific/Kiritimati, +12 h) and one behind it
+-- (Etc/GMT+12, −14 h), Pavel's today is still his to edit and his yesterday
+-- still past. CI's session is UTC, where current_date and Prague's date
+-- nearly always agree, so without this a current_date in the gate would
+-- pass unseen. Each zone differs from Prague for part of the day; together
+-- they cover every hour. The probe calls delete_day_override and rolls its
+-- own subtransaction back, so it writes nothing either way.
+create function pg_temp.edit_gate_says(p_date date) returns text
+language plpgsql as $$
+begin
+  begin
+    perform delete_day_override(p_date);
+    raise exception 'probe_ok';
+  exception when others then
+    return sqlerrm;
+  end;
+end $$;
+do $$
+declare
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+  v_zone text;
+begin
+  foreach v_zone in array array['Pacific/Kiritimati', 'Etc/GMT+12', 'UTC'] loop
+    perform set_config('timezone', v_zone, true);
+    if pg_temp.edit_gate_says(v_today) <> 'probe_ok' then
+      raise exception 'FAIL: under % the duty could not edit Prague''s today: %',
+        v_zone, pg_temp.edit_gate_says(v_today);
+    end if;
+    if pg_temp.edit_gate_says(v_today - 1) <> 'date_past' then
+      raise exception 'FAIL: under % Prague''s yesterday was not past: %',
+        v_zone, pg_temp.edit_gate_says(v_today - 1);
+    end if;
+  end loop;
+  raise notice 'OK: the edit gate follows Prague''s date in any session zone (0050)';
+end $$;
+reset timezone;
+
 reset role;
 update schedule_settings set max_active_reservations = 2
  where tenant_id = '00000000-0000-0000-0000-000000000050';

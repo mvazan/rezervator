@@ -606,24 +606,55 @@ end;
 $$;
 
 -- The gate of the block edits — set_day_override, delete_day_override,
--- cancel_block_day_reservations, move_day_reservations and, with no date,
--- add_special_block. The admin passes on any date. Anyone else must be an
--- account player (the conditions of is_on_duty(): approved, no placeholder,
--- never the kiosk, in the alley of the period) with a period of their OWN
--- that covers p_date, else `not_allowed`: someone else's period, a day nobody
--- serves and a duty that has ended are alike. Then p_date must not lie
--- before Prague today, else `date_past` — asked second, so a day outside
--- the periods is never told it is „past“. Being on duty TODAY is not asked:
--- a duty starting next week may prepare exactly next week's days now, and
--- no others. p_date null = no day named yet (add_special_block): passes for
--- a player with a period that has not ended; the set_day_override that
--- follows names the day and holds them to it. Does not call is_on_duty() or
--- duty_gate(). Internal, like is_on_duty().
+-- cancel_block_day_reservations, move_day_reservations (add_special_block,
+-- with no date, asks duty_edit_days_gate below). The admin passes on any
+-- date. Anyone else must be an account player (the conditions of
+-- is_on_duty(): approved, no placeholder, never the kiosk, in the alley of
+-- the period) with a period of their OWN that covers p_date, else
+-- `not_allowed`: someone else's period, a day nobody serves and a duty that
+-- has ended are alike. Then p_date must not lie before Prague today, else
+-- `date_past` — asked second, so a day outside the periods is never told it
+-- is „past“. Being on duty TODAY is not asked: a duty starting next week may
+-- prepare exactly next week's days now, and no others. A null p_date names no
+-- day and is `date_past` for everyone, the admin too — asked first, since a
+-- null would slip through `p_date < today` and read as „any day“; a caller
+-- with no day yet asks duty_edit_days_gate(). Does not call is_on_duty() or
+-- duty_gate().
+-- Internal, like is_on_duty().
 create or replace function duty_edit_gate(p_date date) returns void
 language plpgsql stable security definer set search_path = public
 as $$
 declare
   v_today constant date := (now() at time zone 'Europe/Prague')::date;
+begin
+  if p_date is null then
+    raise exception 'date_past';
+  end if;
+  if is_admin() then
+    return;
+  end if;
+  if not exists (select 1 from duty_assignments a
+      join duty_periods d on d.id = a.period_id
+      join profiles me on me.id = auth.uid()
+     where a.user_id = me.id and d.tenant_id = me.tenant_id
+       and me.status = 'approved' and me.role = 'player' and not me.placeholder
+       and p_date between d.starts_on and d.ends_on) then
+    raise exception 'not_allowed';
+  end if;
+  if p_date < v_today then
+    raise exception 'date_past';
+  end if;
+end;
+$$;
+
+-- The block edits' gate before a day is named (add_special_block, and
+-- move_reservation's first word for a caller not on duty today): the admin,
+-- or an account player with a period of their own that has not ended —
+-- they still have a day to edit; duty_edit_gate(date) then holds them to it.
+-- `not_allowed` otherwise. Internal, like is_on_duty().
+create or replace function duty_edit_days_gate() returns void
+language plpgsql stable security definer set search_path = public
+as $$
 begin
   if is_admin() then
     return;
@@ -633,12 +664,8 @@ begin
       join profiles me on me.id = auth.uid()
      where a.user_id = me.id and d.tenant_id = me.tenant_id
        and me.status = 'approved' and me.role = 'player' and not me.placeholder
-       and case when p_date is null then d.ends_on >= v_today
-                else p_date between d.starts_on and d.ends_on end) then
+       and d.ends_on >= (now() at time zone 'Europe/Prague')::date) then
     raise exception 'not_allowed';
-  end if;
-  if p_date < v_today then
-    raise exception 'date_past';
   end if;
 end;
 $$;
@@ -646,6 +673,7 @@ $$;
 revoke all on function is_on_duty() from public, anon, authenticated;
 revoke all on function duty_gate(date) from public, anon, authenticated;
 revoke all on function duty_edit_gate(date) from public, anon, authenticated;
+revoke all on function duty_edit_days_gate() from public, anon, authenticated;
 
 -- --------------------------------------------------- two new day RPCs
 -- The app wrote these two straight into the tables (Api.addSpecialBlock,
@@ -666,7 +694,7 @@ as $$
 declare
   v_id uuid;
 begin
-  perform duty_edit_gate(null);
+  perform duty_edit_days_gate();
   insert into time_blocks (tenant_id, starts_at, ends_at, position, active)
     values (current_tenant_id(), p_starts_at, p_ends_at, -1, false)
     returning id into v_id;
@@ -850,7 +878,7 @@ declare
   v_lanes int;
 begin
   if not v_on_duty then
-    perform duty_edit_gate(null);
+    perform duty_edit_days_gate();
   end if;
 
   select * into v_res from reservations
