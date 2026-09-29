@@ -390,7 +390,8 @@ class LiveMessageTile extends ConsumerWidget {
       authorIsAdmin: m.authorIsAdmin,
       block: block,
       // The optimistic write already rolled the row back on failure;
-      // tryAction adds the snack (friendlyDbError text).
+      // tryAction adds the snack (friendlyDbError text) and tells the tile
+      // whether the reply went through — its field keeps a failed one.
       onReact: mine
           ? null
           : (r) => tryAction(context, () => react(m.id, r),

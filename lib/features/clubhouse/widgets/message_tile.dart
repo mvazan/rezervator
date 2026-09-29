@@ -53,8 +53,10 @@ class MessageTile extends StatefulWidget {
   /// this message (it is mine) — the tile then shows the sent side.
   final void Function(Reaction? reaction)? onReact;
 
-  /// Saves my short reply; null exactly when [onReact] is.
-  final void Function(String reply)? onReply;
+  /// Saves my short reply and answers whether the write went through
+  /// (false: it failed, and the caller already said why); null exactly
+  /// when [onReact] is.
+  final Future<bool> Function(String reply)? onReply;
 
   /// Null when I may not delete it (not mine).
   final VoidCallback? onDelete;
@@ -71,15 +73,29 @@ class MessageTile extends StatefulWidget {
 class _MessageTileState extends State<MessageTile> {
   /// Starts with the reply I already sent, so the field shows what the
   /// others see in the reaction line — and follows it ([didUpdateWidget]).
-  late final _reply = TextEditingController(text: _myRow?.reply ?? '');
+  late final TextEditingController _reply;
   final _replyFocus = FocusNode();
   late bool _expanded = widget.initiallyExpanded;
 
-  /// My last submitted reply ([to], trimmed as the write stores it) and my
-  /// row's reply when I submitted it ([from]). The optimistic write shows
-  /// [to] at once; a failed one rolls the row back to [from] — my own
-  /// write undone, not a new reply to follow ([didUpdateWidget]).
-  ({String from, String to})? _submitted;
+  /// The reply the field last took from my row, or from my own write that
+  /// went through. The field shows anything else only as the player's
+  /// draft — typed, or kept from a write that failed — which my row
+  /// never overwrites.
+  late String _synced;
+
+  /// My reply writes still out. Meanwhile my row's changes are mostly my
+  /// own writes being applied or undone, so none is followed.
+  int _pending = 0;
+
+  /// Counts my submits: only the latest one's success moves [_synced].
+  int _submits = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _synced = _myRow?.reply ?? '';
+    _reply = TextEditingController(text: _synced);
+  }
 
   @override
   void dispose() {
@@ -89,28 +105,44 @@ class _MessageTileState extends State<MessageTile> {
   }
 
   /// My row changed its reply (the live snapshot after a cached one, my
-  /// reply from another device): the field shows the new one — unless I
-  /// am typing, or hold an unsent draft (the field no longer shows the old
-  /// reply). Else a stale reply would be resent. The rollback of my own
-  /// failed write is not followed either: the field keeps what I typed
-  /// for another try, and the snack says why.
+  /// reply from another device, cleared elsewhere): the field shows the
+  /// new one when it is free to — not focused, no write of mine out, and
+  /// no draft in it ([_synced]). Else a stale reply would be resent, or
+  /// what the player typed lost: the rollback of a failed write reaches
+  /// the tile after the failure, and must not wipe the text kept for
+  /// another try (the snack says why).
   @override
   void didUpdateWidget(MessageTile oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final was = _rowIn(oldWidget)?.reply ?? '';
     final now = _myRow?.reply ?? '';
-    if (was == now) return;
-    final submitted = _submitted;
-    final rolledBack = submitted != null &&
-        was == submitted.to &&
-        now == submitted.from;
-    // Kept only while the change is my write being applied.
-    if (submitted != null &&
-        !(was == submitted.from && now == submitted.to)) {
-      _submitted = null;
+    if ((_rowIn(oldWidget)?.reply ?? '') == now) return;
+    // Trimmed, as a write would store it: only whitespace is no draft.
+    final draft = _reply.text.trim() != _synced;
+    if (_replyFocus.hasFocus || _pending > 0 || draft) return;
+    _reply.text = now;
+    _synced = now;
+  }
+
+  /// Sends [text]. A failure keeps it in the field (a draft). Once the
+  /// latest submit went through, what it saved (trimmed, as the write
+  /// stores it) is the row's reply the field follows again — and the field
+  /// shows it, unless the player is back in it or typed something else.
+  Future<void> _submit(String text) async {
+    final onReply = widget.onReply;
+    if (onReply == null || overLimit(text, replyMax)) return;
+    final submit = ++_submits;
+    _pending++;
+    final bool ok;
+    try {
+      ok = await onReply(text);
+    } finally {
+      _pending--;
     }
-    if (!rolledBack && !_replyFocus.hasFocus && _reply.text == was) {
-      _reply.text = now;
+    if (!ok || !mounted || submit != _submits) return;
+    final saved = text.trim();
+    _synced = saved;
+    if (!_replyFocus.hasFocus && _reply.text == text && text != saved) {
+      _reply.text = saved;
     }
   }
 
@@ -261,11 +293,7 @@ class _MessageTileState extends State<MessageTile> {
             onChanged: (_) => setState(() {}),
             // Over the limit (code points) the server's CHECK would refuse
             // it: the field is marked instead, and nothing is sent.
-            onSubmitted: (text) {
-              if (overLimit(text, replyMax)) return;
-              _submitted = (from: _myRow?.reply ?? '', to: text.trim());
-              widget.onReply?.call(text);
-            },
+            onSubmitted: _submit,
           ),
         ),
       ],

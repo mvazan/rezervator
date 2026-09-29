@@ -389,8 +389,9 @@ value; either is fine, pick whichever touches less of the existing call sites.
 - **Received `message`:** two toggle chips 👍 / 👎 (`FilterChip`s named by their emoji, with
   a selected state a screen reader announces; tapping my current reaction clears it) and a
   one-line field „Krátká odpověď…“ (≤ 200, saved on submit; both optimistic with rollback
-  and a snack on failure; the field follows my stored reply unless I am typing or hold an
-  unsent draft). Below: „👍 Petra, ty · 👎 Tomáš „nestihnu“ · 💬 Jan „přijdu později“ · 1
+  and a snack on failure; the field follows my stored reply unless I am typing, a reply of
+  mine is still out, or it holds an unsent draft — what I typed stays there until its own
+  write goes through, so a failed reply is kept for another try). Below: „👍 Petra, ty · 👎 Tomáš „nestihnu“ · 💬 Jan „přijdu později“ · 1
   bez reakce“ — the groups in the order 👍, 👎, 💬 (a reply without a chip is an answer,
   not „bez reakce“), bez reakce; names Czech-sorted within a group, my own last as „ty“, a
   reply quoted after its name.

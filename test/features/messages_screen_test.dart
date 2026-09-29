@@ -86,7 +86,10 @@ void main() {
         authorIsAdmin: false,
         block: null,
         onReact: reactions.add,
-        onReply: replies.add,
+        onReply: (text) async {
+          replies.add(text);
+          return true;
+        },
         onDelete: null,
       )));
       final up = find.widgetWithText(FilterChip, '👍');
@@ -127,7 +130,7 @@ void main() {
         authorIsAdmin: false,
         block: null,
         onReact: (_) {},
-        onReply: (_) {},
+        onReply: (_) async => true,
         onDelete: null,
       )));
       String field() =>
@@ -139,6 +142,122 @@ void main() {
       await tester.enterText(find.byType(TextField), 'Rozepsané');
       await tester.pumpWidget(tile('Z webu'));
       expect(field(), 'Rozepsané');
+    });
+
+    // My own reply write, as LiveMessageTile hands it in: the answer says
+    // whether it went through. Each submit waits on its own answer, and
+    // the test plays my row's changes (the optimistic patch, a rollback,
+    // a change from another device) in the order they reach the tile.
+    group('the reply field and my own writes', () {
+      late List<Completer<bool>> answers;
+      late List<String> sent;
+      setUp(() {
+        answers = [];
+        sent = [];
+      });
+      Widget tile(String? reply) => MaterialApp(home: Scaffold(body: MessageTile(
+        message: received(),
+        recipients: [recip('me', reply: reply)],
+        names: const {},
+        meId: 'me',
+        authorName: 'Bára Kantýnská',
+        authorIsAdmin: false,
+        block: null,
+        onReact: (_) {},
+        onReply: (text) {
+          sent.add(text);
+          final answer = Completer<bool>();
+          answers.add(answer);
+          return answer.future;
+        },
+        onDelete: null,
+      )));
+      String field(WidgetTester tester) =>
+          tester.widget<TextField>(find.byType(TextField)).controller!.text;
+      bool focused(WidgetTester tester) =>
+          tester.widget<TextField>(find.byType(TextField)).focusNode!.hasFocus;
+      Future<void> submit(WidgetTester tester, String text) async {
+        await tester.enterText(find.byType(TextField), text);
+        await tester.testTextInput.receiveAction(TextInputAction.done);
+        await tester.pump();
+        expect(focused(tester), isFalse); // „done“ leaves the field
+      }
+
+      testWidgets('a failed write keeps what I typed, also when its rollback '
+          'reaches the tile after the failure', (tester) async {
+        await tester.pumpWidget(tile(null));
+        await submit(tester, 'Nestihnu.');
+        await tester.pumpWidget(tile('Nestihnu.')); // the optimistic patch
+        answers.single.complete(false);
+        await tester.pump();
+        await tester.pumpWidget(tile(null)); // the rollback, a frame later
+        expect(field(tester), 'Nestihnu.');
+      });
+
+      testWidgets('once my write went through the field follows my row '
+          'again: a reply cleared elsewhere clears it', (tester) async {
+        await tester.pumpWidget(tile(null));
+        await submit(tester, 'Přijdu. ');
+        await tester.pumpWidget(tile('Přijdu.'));
+        answers.single.complete(true);
+        await tester.pump();
+        expect(field(tester), 'Přijdu.'); // what was saved
+        await tester.pumpWidget(tile(null)); // cleared on another device
+        expect(field(tester), '');
+        await tester.pumpWidget(tile('Z webu'));
+        expect(field(tester), 'Z webu');
+      });
+
+      testWidgets('a focused field is never overwritten: not by my write '
+          'going through, not by my row', (tester) async {
+        await tester.pumpWidget(tile(null));
+        await submit(tester, 'Přijdu. ');
+        await tester.pumpWidget(tile('Přijdu.'));
+        await tester.tap(find.byType(TextField)); // back in the field
+        await tester.pump();
+        expect(focused(tester), isTrue);
+        answers.single.complete(true);
+        await tester.pump();
+        expect(field(tester), 'Přijdu. ');
+        await tester.pumpWidget(tile('Z webu'));
+        expect(field(tester), 'Přijdu. ');
+        // Left again, the field holds no draft (only whitespace differs
+        // from what was saved): the next change is followed.
+        FocusManager.instance.primaryFocus?.unfocus();
+        await tester.pump();
+        await tester.pumpWidget(tile('Znovu'));
+        expect(field(tester), 'Znovu');
+      });
+
+      testWidgets('two overlapping writes that both fail keep the latest '
+          'text I typed', (tester) async {
+        await tester.pumpWidget(tile(null));
+        await submit(tester, 'Přijdu.');
+        await tester.pumpWidget(tile('Přijdu.'));
+        await submit(tester, 'Nestihnu.');
+        await tester.pumpWidget(tile('Nestihnu.'));
+        answers[0].complete(false);
+        await tester.pump();
+        await tester.pumpWidget(tile('Nestihnu.')); // only its patch is gone
+        answers[1].complete(false);
+        await tester.pump();
+        await tester.pumpWidget(tile(null)); // the second rolled back too
+        expect(field(tester), 'Nestihnu.');
+        expect(sent, ['Přijdu.', 'Nestihnu.']);
+      });
+
+      testWidgets('a change elsewhere is not followed while my write is out',
+          (tester) async {
+        await tester.pumpWidget(tile(null));
+        await submit(tester, 'Přijdu.');
+        await tester.pumpWidget(tile('Přijdu.'));
+        await tester.pumpWidget(tile('Z webu')); // mine has not answered
+        expect(field(tester), 'Přijdu.');
+        answers.single.complete(true);
+        await tester.pump();
+        await tester.pumpWidget(tile(null)); // cleared, nothing of mine out
+        expect(field(tester), '');
+      });
     });
 
     testWidgets('a reply over 200 code points is not sent and the counter says so',
@@ -153,7 +272,10 @@ void main() {
         authorIsAdmin: false,
         block: null,
         onReact: (_) {},
-        onReply: replies.add,
+        onReply: (text) async {
+          replies.add(text);
+          return true;
+        },
         onDelete: null,
       ))));
       // 101 characters to the field, 202 code points to the server.
@@ -378,6 +500,33 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(SnackBar), findsOneWidget);
       expect(field(), 'Nestihnu.');
+    });
+
+    // The tile hears that the write went through (tryAction's true): a
+    // reply cleared on another device afterwards is followed, not taken
+    // for the rollback of mine.
+    testWidgets('after a reply went through, clearing it elsewhere clears the '
+        'field', (tester) async {
+      final myRows = StreamController<List<MessageRecipient>>()
+        ..add([recip('me')]);
+      addTearDown(myRows.close);
+      await tester.pumpWidget(app(
+        messages: [received()],
+        myRowStream: myRows.stream,
+        roster: const [PlayerName(id: 'staff', displayName: 'Bára')],
+        reply: (id, text) async =>
+            myRows.add([recip('me', reply: text)]), // the optimistic patch
+      ));
+      await tester.pumpAndSettle();
+      String field() =>
+          tester.widget<TextField>(find.byType(TextField)).controller!.text;
+      await tester.enterText(find.byType(TextField), 'Nestihnu.');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect(find.byType(SnackBar), findsNothing);
+      myRows.add([recip('me')]); // cleared on another device
+      await tester.pumpAndSettle();
+      expect(field(), '');
     });
 
     testWidgets('a sent message expands its tally into names on tap', (tester) async {
@@ -705,6 +854,42 @@ void main() {
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
       await tester.pumpAndSettle();
       expect(find.text('Přijďte dřív.'), findsOneWidget);
+    });
+
+    testWidgets('a reply: a failed one stays in the field, one that went '
+        'through follows my row', (tester) async {
+      final myRows = StreamController<List<MessageRecipient>>()
+        ..add([recip('me')]);
+      addTearDown(myRows.close);
+      var fail = true;
+      await tester.pumpWidget(ProviderScope(
+        overrides: overrides(messages: [received()], myRowStream: myRows.stream),
+        child: MaterialApp(home: MessageDetailScreen('m1', markRead: (_) async {},
+            react: (_, _) async {},
+            reply: (id, text) async {
+              myRows.add([recip('me', reply: text)]); // the optimistic patch
+              if (!fail) return;
+              await Future<void>.delayed(Duration.zero);
+              myRows.add([recip('me')]); // the rollback
+              throw Exception('offline');
+            })),
+      ));
+      await tester.pumpAndSettle();
+      String field() =>
+          tester.widget<TextField>(find.byType(TextField)).controller!.text;
+      Future<void> submit(String text) async {
+        await tester.enterText(find.byType(TextField), text);
+        await tester.testTextInput.receiveAction(TextInputAction.done);
+        await tester.pumpAndSettle();
+      }
+      await submit('Nestihnu.');
+      expect(find.byType(SnackBar), findsOneWidget);
+      expect(field(), 'Nestihnu.');
+      fail = false;
+      await submit('Přijdu.');
+      myRows.add([recip('me')]); // cleared on another device
+      await tester.pumpAndSettle();
+      expect(field(), '');
     });
 
     testWidgets('deleting here says „Zpráva smazána.“ — never „Zpráva už '
