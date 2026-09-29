@@ -1437,6 +1437,167 @@ class DutyAssignment {
   int get hashCode => Object.hash(periodId, userId);
 }
 
+/// A notice (Klubovna → Nástěnka) or a message (Klubovna → Zprávy), 0051.
+enum MessageKind { notice, message }
+
+/// Who a message is addressed to. `all` is a notice; the rest are a
+/// message's audience.
+enum MessageAudience { all, day, block, admins, duty }
+
+/// A recipient's 👍 / 👎 on a message (`message_recipients.reaction`).
+enum Reaction { up, down }
+
+Reaction? _reactionOf(Object? v) => switch (v) {
+      'up' => Reaction.up,
+      'down' => Reaction.down,
+      _ => null,
+    };
+
+/// [r] as `message_recipients.reaction` stores it; null clears it.
+/// Public (no underscore): `Api.setReaction` in providers.dart sends it.
+String? reactionToJson(Reaction? r) => switch (r) {
+      Reaction.up => 'up',
+      Reaction.down => 'down',
+      null => null,
+    };
+
+/// Snapshot of the sender's role when the message was sent (`author_role`
+/// in 0051) — players cannot read other profiles, so the „Od správce“ /
+/// „Od služby“ label comes from here.
+enum MessageAuthorRole { admin, player }
+
+/// One row of `messages` (0051): a notice or a message, written only
+/// through `message_send`/`message_update`/`message_delete`.
+class Message {
+  const Message({
+    required this.id,
+    required this.kind,
+    required this.audience,
+    required this.authorId,
+    required this.authorRole,
+    required this.onDate,
+    required this.blockId,
+    required this.title,
+    required this.body,
+    required this.expiresAt,
+    required this.notify,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  final String id;
+  final MessageKind kind;
+  final MessageAudience audience;
+
+  /// Null once the author's profile is deleted (`set null` on delete).
+  final String? authorId;
+
+  /// The sender's role when it was sent; see [authorIsAdmin].
+  final MessageAuthorRole authorRole;
+
+  /// Whether an admin sent it — „Od správce“ rather than „Od služby“.
+  bool get authorIsAdmin => authorRole == MessageAuthorRole.admin;
+
+  /// `day`/`block`: the date the message is about; `admins`/`duty`:
+  /// optional context (the training the player wrote about); `all`: null.
+  final Day? onDate;
+
+  /// Set only for `audience == block`, or as a player's training context.
+  final String? blockId;
+
+  /// Notice only.
+  final String? title;
+  final String body;
+
+  /// Notice only; null = „do odvolání“.
+  final DateTime? expiresAt;
+
+  /// Notice only: whether posting it sent a push/e-mail; always true for a
+  /// message.
+  final bool notify;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+
+  factory Message.fromJson(Map<String, dynamic> json) => Message(
+        id: json['id'] as String,
+        kind: (json['kind'] as String) == 'notice'
+            ? MessageKind.notice
+            : MessageKind.message,
+        audience: MessageAudience.values.byName(json['audience'] as String),
+        authorId: json['author_id'] as String?,
+        authorRole: (json['author_role'] as String?) == 'admin'
+            ? MessageAuthorRole.admin
+            : MessageAuthorRole.player,
+        onDate: json['on_date'] == null
+            ? null
+            : Day.parse(json['on_date'] as String),
+        blockId: json['block_id'] as String?,
+        title: json['title'] as String?,
+        body: json['body'] as String,
+        expiresAt: json['expires_at'] == null
+            ? null
+            : DateTime.parse(json['expires_at'] as String),
+        notify: json['notify'] as bool? ?? true,
+        createdAt: DateTime.parse(json['created_at'] as String),
+        updatedAt: DateTime.parse(json['updated_at'] as String),
+      );
+}
+
+/// One row of `message_recipients` (0051): who a message reached, and
+/// their own reaction/reply/read state.
+class MessageRecipient {
+  const MessageRecipient({
+    required this.messageId,
+    required this.userId,
+    required this.readAt,
+    required this.reaction,
+    required this.reply,
+    required this.reactedAt,
+  });
+
+  final String messageId;
+  final String userId;
+
+  /// When the recipient first opened it; null = unread.
+  final DateTime? readAt;
+  final Reaction? reaction;
+
+  /// At most 200 characters; null = none.
+  final String? reply;
+
+  /// Stamped server-side whenever [reaction] or [reply] changes; null when
+  /// both are empty.
+  final DateTime? reactedAt;
+
+  factory MessageRecipient.fromJson(Map<String, dynamic> json) =>
+      MessageRecipient(
+        messageId: json['message_id'] as String,
+        userId: json['user_id'] as String,
+        readAt: json['read_at'] == null
+            ? null
+            : DateTime.parse(json['read_at'] as String),
+        reaction: _reactionOf(json['reaction']),
+        reply: json['reply'] as String?,
+        reactedAt: json['reacted_at'] == null
+            ? null
+            : DateTime.parse(json['reacted_at'] as String),
+      );
+
+  @override
+  bool operator ==(Object other) =>
+      other is MessageRecipient &&
+      other.messageId == messageId &&
+      other.userId == userId &&
+      other.readAt == readAt &&
+      other.reaction == reaction &&
+      other.reply == reply &&
+      other.reactedAt == reactedAt;
+
+  @override
+  int get hashCode =>
+      Object.hash(messageId, userId, readAt, reaction, reply, reactedAt);
+}
+
 /// A season boundary for the duty counts (`duty_seasons`, 0050): the season
 /// [name] runs from [startedOn] until the next boundary. The periods before
 /// the first boundary form the implicit first season (`seasonRanges`).

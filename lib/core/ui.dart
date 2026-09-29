@@ -160,6 +160,19 @@ String friendlyDbError(Object error, {bool wasOnDuty = false}) {
     'not_newest': 'Vrátit jde jen poslední sezónu.',
     'duty_periods_note_check': 'Poznámka smí mít nejvýš 80 znaků.',
     'duty_seasons_name_check': 'Název sezóny smí mít nejvýš 40 znaků.',
+    // Zprávy a nástěnka (0051). `no_recipients` is the generic text; the
+    // staff composer words it for a day or a block itself.
+    'no_recipients': 'Nikdo nemá rezervaci.',
+    'nobody_on_duty': 'Dnes nikdo neslouží — napiš správci.',
+    'title_required': 'Vyplň nadpis.',
+    'body_required': 'Vyplň zprávu.',
+    'body_too_long': 'Zpráva je moc dlouhá.',
+    'title_too_long': 'Nadpis je moc dlouhý.',
+    // The reply is a plain row UPDATE (no RPC): PostgREST names the CHECK.
+    'message_recipients_reply_check': 'Odpověď je moc dlouhá.',
+    'unknown_message': 'Zpráva už neexistuje.',
+    'invalid_audience': 'Neplatný typ zprávy.',
+    'invalid_kind': 'Neplatný typ zprávy.',
   };
   for (final entry in messages.entries) {
     if (raw.contains(entry.key)) return entry.value;
@@ -200,6 +213,34 @@ Future<bool> tryAction(
     }
     return false;
   }
+}
+
+/// [tryAction] for an action whose own realtime echo can remove the widget
+/// that started it before the call returns — a deleted message's tile, a
+/// notice moving under a collapsed „Starší“. The page's messenger is taken
+/// before the await, so the outcome is told either way; call it from a
+/// widget on the page, not from a dialog or a sheet.
+Future<bool> tryActionOnPage(
+  BuildContext context,
+  Future<void> Function() action, {
+  String? success,
+  required String Function(Object error) errorText,
+}) async {
+  final messenger = ScaffoldMessenger.of(context);
+  void tell(String text) {
+    if (messenger.mounted) {
+      messenger.showSnackBar(SnackBar(content: Text(text)));
+    }
+  }
+
+  try {
+    await action();
+  } catch (e) {
+    tell(errorText(e));
+    return false;
+  }
+  if (success != null) tell(success);
+  return true;
 }
 
 /// Closes the dialog [context] lives in, handing [result] back to whoever
@@ -361,25 +402,54 @@ class _PromptDialogState extends State<_PromptDialog> {
 
 /// The platform date picker in Czech, on [Day]s. [initial] (default today)
 /// is clamped into [first]..[last] — showDatePicker asserts on an
-/// out-of-range initial date.
+/// out-of-range initial date. [selectable] greys out the days it refuses
+/// (the duty picks among the days of their own periods only); an [initial]
+/// it refuses gives way to the nearest allowed day — showDatePicker asserts
+/// on that too — and with no allowed day in the range there is no picker
+/// and no answer (null).
 Future<Day?> pickDay(
   BuildContext context, {
   Day? initial,
   required Day first,
   required Day last,
+  bool Function(Day day)? selectable,
 }) async {
   DateTime dt(Day d) => DateTime(d.year, d.month, d.day);
   var base = initial ?? today();
   if (base.isBefore(first)) base = first;
   if (base.isAfter(last)) base = last;
+  if (selectable != null && !selectable(base)) {
+    final nearest = _nearestSelectable(base, first, last, selectable);
+    if (nearest == null) return null;
+    base = nearest;
+  }
   final picked = await showDatePicker(
     context: context,
     initialDate: dt(base),
     firstDate: dt(first),
     lastDate: dt(last),
     locale: const Locale('cs'),
+    selectableDayPredicate:
+        selectable == null ? null : (date) => selectable(Day.fromDateTime(date)),
   );
   return picked == null ? null : Day.fromDateTime(picked);
+}
+
+/// The allowed day closest to [base] within [first]..[last] — ahead of it
+/// first, then back; null when there is none.
+Day? _nearestSelectable(
+  Day base,
+  Day first,
+  Day last,
+  bool Function(Day day) selectable,
+) {
+  for (var d = base; !d.isAfter(last); d = d.addDays(1)) {
+    if (selectable(d)) return d;
+  }
+  for (var d = base.addDays(-1); !d.isBefore(first); d = d.addDays(-1)) {
+    if (selectable(d)) return d;
+  }
+  return null;
 }
 
 /// Confirm → run → snack: the delete flow every admin list repeats.

@@ -12,6 +12,7 @@ import '../../domain/results.dart'
 import '../../domain/upcoming.dart';
 import '../clubhouse/match_detail_screen.dart';
 import '../clubhouse/widgets/match_title.dart';
+import '../clubhouse/widgets/message_composers.dart' show dutyReachableToday;
 import '../profile/profile_screen.dart';
 import 'cancel_own_reservation.dart';
 import 'widgets/home_header.dart';
@@ -133,9 +134,11 @@ class _MyTrainingsScreenState extends ConsumerState<MyTrainingsScreen> {
   Future<void> _confirmCancel(BuildContext context, UpcomingTraining t) =>
       confirmCancelOwnReservation(
         context,
+        ref: ref,
         reservation: t.reservation,
         block: t.block,
         cancel: widget.cancelReservation,
+        dutyServesToday: dutyReachableToday(ref),
       );
 
   static String _dayLabel(Day date, Day today) {

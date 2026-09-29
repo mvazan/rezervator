@@ -1,0 +1,288 @@
+// notify's delivery of a new messages row and of a reaction on it (0051),
+// kept apart from notify/index.ts so it can be tested (the
+// duty_reminders.ts shape). Both take their send functions injected.
+
+import type { Delivery } from "./delivery.ts";
+import type { BatchDelivery, Email, SingleDelivery } from "./resend.ts";
+import { isMemberOf, type Membership } from "./membership.ts";
+import {
+  adminToStaffMessageText,
+  appMessageUrl,
+  appNoticeUrl,
+  messageEmailHtml,
+  noticeEmailHtml,
+  noticeText,
+  playerMessageText,
+  reactionText,
+  staffMessageText,
+} from "./message_texts.ts";
+
+/// A notification recipient: the profile's id, e-mail and push token.
+export type Recipient = { id: string; email: string; fcm_token: string | null };
+
+/// The `messages` row (0051) as the webhook's `record` carries it — only
+/// the columns delivery reads.
+export type MessageRow = {
+  id: string;
+  tenant_id: string;
+  kind: "notice" | "message";
+  audience: "all" | "day" | "block" | "admins" | "duty";
+  author_id: string | null;
+  author_role: "admin" | "player";
+  on_date: string | null;
+  block_id: string | null;
+  title: string | null;
+  body: string;
+  notify: boolean;
+};
+
+/// The `message_recipients` row (0051) as the webhook's `record` carries
+/// it — only the columns a reaction notification reads.
+export type MessageRecipientRow = {
+  message_id: string;
+  user_id: string;
+  reaction: "up" | "down" | null;
+  reply: string | null;
+};
+
+/// What changed on a message_recipients UPDATE that is worth telling the
+/// author about: a fresh reaction or reply (either alone counts) — then
+/// the row's whole current answer, both halves. Never a clear, not even a
+/// half one: taking back the 👍 while the reply stays (or the reverse)
+/// sends nothing, since nothing new was said. `old` may be a partial row
+/// (the webhook's old_record).
+export function reactionChange(
+  old: Partial<MessageRecipientRow>,
+  record: MessageRecipientRow,
+): { reaction: "up" | "down" | null; reply: string | null } | null {
+  const freshReaction = record.reaction != null && record.reaction !== old.reaction;
+  const freshReply = record.reply != null && record.reply.trim() !== "" &&
+    record.reply !== old.reply;
+  if (!freshReaction && !freshReply) return null;
+  return { reaction: record.reaction, reply: record.reply };
+}
+
+export type { Email };
+
+/// Resend takes at most this many e-mails in one /emails/batch request.
+export const emailBatchSize = 100;
+
+/// How long a batch (or a single e-mail) Resend refused as busy (429) or
+/// down (5xx) waits before its one more try: the rate limit is per second.
+export const emailRetryPauseMs = 1000;
+
+/// The gap between the single e-mails of a batch Resend refused as
+/// invalid: two a second, under Resend's per-second rate limit.
+export const emailSinglePauseMs = 500;
+
+/// What deliverMessage sends with — injected, so it can be tested.
+export type MessageDeps = {
+  /// Whether [r] gets it by push (FCM configured and a token); everyone
+  /// else is e-mailed.
+  byPush: (r: Recipient) => boolean;
+  push: (
+    r: Recipient,
+    title: string,
+    body: string,
+    opts: { data?: Record<string, string> },
+  ) => Promise<Delivery>;
+  /// One Resend /emails/batch request of at most [emailBatchSize], under
+  /// [idempotencyKey] (the Idempotency-Key header — resendBatch).
+  sendEmails: (emails: Email[], idempotencyKey: string) => Promise<BatchDelivery>;
+  /// One e-mail alone (resendOneOfBatch): the fallback for a batch refused
+  /// as invalid; "refused" when Resend's reason is not its address.
+  sendEmail: (email: Email, idempotencyKey: string) => Promise<SingleDelivery>;
+  reactLink: (userId: string, reaction: "up" | "down") => Promise<string>;
+  pause: (ms: number) => Promise<void>;
+};
+
+/// Sends [record] to every one of [recipients]. Pushes go one at a time
+/// (not Promise.all over the whole list). E-mails go out as Resend
+/// batches of up to [emailBatchSize] — one request each, not one per
+/// recipient, so a 40-player "all" notice to web-only players cannot trip
+/// Resend's per-second rate limit, and the usual fan-out ends inside the
+/// 5 s pg_net waits for the webhook. Each batch goes under an idempotency
+/// key (`message/<id>/<batch>`), and a batch Resend answers as busy or
+/// down is tried once more after [emailRetryPauseMs] under the same key —
+/// one it took before a gateway's 5xx is not sent twice. A batch refused
+/// as invalid (one bad address fails a strict batch whole) goes out one
+/// by one ([sendOneByOne]) — rare, and past those 5 s: pg_net then
+/// records a timeout (it never retries) while the function runs on. A
+/// recipient whose push or links throw, or a batch that throws, is logged
+/// and skipped; the rest still get theirs. Returns how many sends were
+/// attempted (each e-mail of a batch counts, a retry does not).
+/// record.notify === false sends nothing.
+export async function deliverMessage(
+  record: MessageRow,
+  ctx: { authorName: string; authorIsAdmin: boolean; context: string | null },
+  recipients: Recipient[],
+  deps: MessageDeps,
+): Promise<number> {
+  if (!record.notify) return 0;
+  // The same text for everyone: who wrote it and what about does not
+  // depend on the recipient. To the staff the author's role decides, not
+  // the audience: an admin writing to „Správci“ or „Službě“ is „Zpráva od
+  // správce ({jméno})“, a player (the duty included) „Zpráva od hráče: …“.
+  // To players it is „Zpráva od správce“ / „Zpráva od služby“, no name.
+  const toStaff = record.audience === "admins" || record.audience === "duty";
+  const text = record.kind === "notice"
+    ? noticeText(record.title ?? "", record.body)
+    : !toStaff
+    ? staffMessageText(record.body, { fromAdmin: ctx.authorIsAdmin, context: ctx.context })
+    : ctx.authorIsAdmin
+    ? adminToStaffMessageText(ctx.authorName, record.body, ctx.context)
+    : playerMessageText(ctx.authorName, record.body, ctx.context);
+  let attempted = 0;
+  const emails: Email[] = [];
+  for (const r of recipients) {
+    // One recipient's failure (a network error in fetch, an FCM OAuth
+    // failure, a link that cannot be signed) is logged and skipped: the
+    // webhook is not retried, so throwing would cost everyone after it
+    // their one attempt. A missing CANCEL_TOKEN_SECRET is the caller's
+    // check, made once before the fan-out.
+    try {
+      if (deps.byPush(r)) {
+        attempted++;
+        await deps.push(r, text.title, text.body, {
+          data: pushData(record.kind, record.id, record.tenant_id),
+        });
+        continue;
+      }
+      if (!r.email) {
+        console.error(`message ${record.id} to ${r.id} skipped: no push token, no e-mail`);
+        continue;
+      }
+      emails.push({ to: r.email, subject: text.title, html: await emailHtml(record, text, r, deps) });
+    } catch (error) {
+      console.error(`message ${record.id} to ${r.id} failed:`, error);
+    }
+  }
+  for (let i = 0; i < emails.length; i += emailBatchSize) {
+    const batch = emails.slice(i, i + emailBatchSize);
+    // Stable across the retry below, unique per message and batch.
+    const key = `message/${record.id}/${i / emailBatchSize}`;
+    attempted += batch.length;
+    try {
+      const delivery = await withOneRetry(() => deps.sendEmails(batch, key), deps);
+      if (delivery === "invalid") {
+        console.error(
+          `message ${record.id}: e-mail batch of ${batch.length} refused as invalid, sending one by one`,
+        );
+        await sendOneByOne(record.id, batch, key, deps);
+      } else if (delivery !== "delivered") {
+        console.error(`message ${record.id}: e-mail batch of ${batch.length} not sent (${delivery})`);
+      }
+    } catch (error) {
+      console.error(`message ${record.id}: e-mail batch of ${batch.length} failed:`, error);
+    }
+  }
+  return attempted;
+}
+
+/// [send], and once more after [emailRetryPauseMs] when Resend answered it
+/// as busy or down ("retry").
+async function withOneRetry<T extends string>(
+  send: () => Promise<T>,
+  deps: MessageDeps,
+): Promise<T> {
+  const first = await send();
+  if (first !== "retry") return first;
+  await deps.pause(emailRetryPauseMs);
+  return await send();
+}
+
+/// [batch]'s e-mails one at a time, [emailSinglePauseMs] apart: the
+/// fallback for a batch Resend refused as invalid — its strict validation
+/// fails all of them over one bad address, alone only that one fails.
+/// Each goes under its own key ([key] plus its place in the batch); one
+/// that is busy is tried once more, one refused or thrown is logged and
+/// the rest still go. But a refusal that is not about the address (a bad
+/// sender or key, "refused") before any of them went through would come
+/// back for every one: the rest are not tried, and that is logged once.
+/// Rare, and slow on purpose (a full batch takes ~50 s, well inside an
+/// edge function's wall clock).
+async function sendOneByOne(
+  messageId: string,
+  batch: Email[],
+  key: string,
+  deps: MessageDeps,
+): Promise<void> {
+  let anyDelivered = false;
+  for (const [j, email] of batch.entries()) {
+    if (j > 0) await deps.pause(emailSinglePauseMs);
+    try {
+      const delivery = await withOneRetry(() => deps.sendEmail(email, `${key}/${j}`), deps);
+      if (delivery === "delivered") anyDelivered = true;
+      if (delivery === "refused" && !anyDelivered) {
+        const rest = batch.length - j - 1;
+        console.error(
+          `message ${messageId}: e-mail to ${email.to} refused, not about the address — ` +
+            `the other ${rest} not sent`,
+        );
+        return;
+      }
+      if (delivery !== "delivered") {
+        console.error(`message ${messageId}: e-mail to ${email.to} not sent (${delivery})`);
+      }
+    } catch (error) {
+      console.error(`message ${messageId}: e-mail to ${email.to} failed:`, error);
+    }
+  }
+}
+
+/// [record]'s e-mail to [r]: a message's carries r's own signed 👍/👎
+/// links, a notice's the nástěnka link.
+async function emailHtml(
+  record: MessageRow,
+  text: { title: string; body: string },
+  r: Recipient,
+  deps: MessageDeps,
+): Promise<string> {
+  if (record.kind === "notice") {
+    return noticeEmailHtml(text.title, record.body, appNoticeUrl(record.id));
+  }
+  const [upLink, downLink] = await Promise.all([
+    deps.reactLink(r.id, "up"),
+    deps.reactLink(r.id, "down"),
+  ]);
+  return messageEmailHtml(text, { upLink, downLink, appLink: appMessageUrl(record.id) });
+}
+
+/// Notifies [ctx.message]'s author of a fresh reaction/reply. False (sends
+/// nothing) for a notice, a message whose author profile could not be
+/// loaded (deleted account), or an author who may no longer read it — set
+/// as the kiosk, back to pending or moved to another alley ([isMemberOf],
+/// the rule the react function's mayReact applies): the reactor's name
+/// and reply must not reach an account the app would deny them to.
+/// [changed] is reactionChange's verdict — a clear never gets here.
+export async function deliverReaction(
+  record: MessageRecipientRow,
+  changed: { reaction: "up" | "down" | null; reply: string | null },
+  ctx: { message: MessageRow; author: (Recipient & Membership) | null; reactorName: string },
+  send: (
+    r: Recipient,
+    title: string,
+    body: string,
+    opts: { data?: Record<string, string> },
+  ) => Promise<Delivery>,
+): Promise<boolean> {
+  if (ctx.message.kind !== "message") return false;
+  const author = ctx.author;
+  if (author == null || !isMemberOf(author, ctx.message.tenant_id)) return false;
+  const text = reactionText(ctx.reactorName, changed.reaction, changed.reply);
+  await send(author, text.title, text.body, {
+    data: pushData("message_reaction", record.message_id, ctx.message.tenant_id),
+  });
+  return true;
+}
+
+/// A message push's `data`: what it is, which message, and its alley — so
+/// the app opens the message only while signed in to that alley (an
+/// account can move; a tap on an old push must not open a wrong one).
+function pushData(
+  kind: "message" | "notice" | "message_reaction",
+  messageId: string,
+  tenantId: string,
+): Record<string, string> {
+  return { kind, message_id: messageId, tenant_id: tenantId };
+}

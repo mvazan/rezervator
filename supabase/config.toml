@@ -25,9 +25,10 @@ sender_name = "Rezervátor"
 subject = "Přihlášení do Rezervátoru"
 content_path = "./supabase/templates/magic_link.html"
 
-# Edge funkce. notify a cancel se volají bez Supabase JWT — notify z Database
-# Webhooks a z minutového cronu (bránou je hlavička x-webhook-secret), cancel
-# podepsaným HMAC odkazem z e-mailu — proto verify_jwt = false. Import mapa
+# Edge funkce. notify, cancel a react se volají bez Supabase JWT — notify
+# z Database Webhooks a z minutového cronu (bránou je hlavička
+# x-webhook-secret), cancel a react (0051) podepsaným HMAC odkazem z e-mailu
+# — proto verify_jwt = false. Import mapa
 # pinuje supabase-js, aby každý deploy sbalil stejnou verzi (reprodukovatelné
 # nasazení).
 [functions.notify]
@@ -35,6 +36,10 @@ verify_jwt = false
 import_map = "./functions/import_map.json"
 
 [functions.cancel]
+verify_jwt = false
+import_map = "./functions/import_map.json"
+
+[functions.react]
 verify_jwt = false
 import_map = "./functions/import_map.json"
 

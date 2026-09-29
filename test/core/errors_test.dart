@@ -118,6 +118,27 @@ void main() {
     );
   });
 
+  test('messages errors (0051)', () {
+    expect(friendlyDbError(Exception('no_recipients')), 'Nikdo nemá rezervaci.');
+    expect(friendlyDbError(Exception('nobody_on_duty')),
+        'Dnes nikdo neslouží — napiš správci.');
+    expect(friendlyDbError(Exception('title_required')), 'Vyplň nadpis.');
+    expect(friendlyDbError(Exception('body_required')), 'Vyplň zprávu.');
+    expect(friendlyDbError(Exception('body_too_long')), 'Zpráva je moc dlouhá.');
+    expect(friendlyDbError(Exception('title_too_long')), 'Nadpis je moc dlouhý.');
+    // The reply has no RPC: PostgREST's refusal names the CHECK constraint.
+    expect(
+        friendlyDbError(Exception('new row for relation "message_recipients" '
+            'violates check constraint "message_recipients_reply_check"')),
+        'Odpověď je moc dlouhá.');
+    expect(friendlyDbError(Exception('unknown_message')), 'Zpráva už neexistuje.');
+    expect(friendlyDbError(Exception('invalid_audience')), 'Neplatný typ zprávy.');
+    expect(friendlyDbError(Exception('invalid_kind')), 'Neplatný typ zprávy.');
+    // Kept from 0050, the text the spec wants for a removed block.
+    expect(friendlyDbError(Exception('unknown_block')),
+        'Tenhle blok už neplatí — mrkni na aktuální rozvrh.');
+  });
+
   test('not_allowed after the duty ended reads as the end of the duty', () {
     const ended = 'Služba skončila — tohle teď může jen správce.';
     final refused = Exception('PostgrestException(message: not_allowed, '

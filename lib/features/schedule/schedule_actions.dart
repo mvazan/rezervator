@@ -19,6 +19,8 @@ import '../admin/widgets/notify_choice_dialog.dart';
 import '../admin/widgets/rental_date_dialog.dart';
 import '../admin/widgets/rental_dialog.dart';
 import '../admin/widgets/rental_occurrence_dialog.dart';
+import '../clubhouse/widgets/message_composers.dart'
+    show dutyReachableToday, showStaffComposer;
 import 'cancel_own_reservation.dart';
 import 'schedule_callbacks.dart';
 import 'widgets/group_booking_dialog.dart';
@@ -62,7 +64,8 @@ class ScheduleActions {
   /// re-checks `context.mounted` after an await.
   final BuildContext context;
 
-  /// Reads the player roster for the admin booking dialog.
+  /// Reads the player roster for the admin booking dialog, and opens the
+  /// message composers (0051).
   final WidgetRef ref;
 
   final WeekSchedule week;
@@ -188,6 +191,8 @@ class ScheduleActions {
         onMovePrioritySlot: onMovePrioritySlot,
         onCloseDay: onCloseDay,
         onRestoreDay: onRestoreDay,
+        onMessageDay: onMessageDay,
+        onMessageBlock: onMessageBlock,
         hasDayOverride: (date) => _overrideByDate[date] != null,
         canEditDay: canEditDay,
       );
@@ -243,6 +248,18 @@ class ScheduleActions {
   /// weekly rules — the same flows as the day-mode block dialog.
   void Function(Day)? get onCloseDay => canEditBlocks ? _closeDay : null;
   void Function(Day)? get onRestoreDay => canEditBlocks ? _restoreDay : null;
+
+  /// „Napsat hráčům dne…“ / „Napsat hráčům bloku…“ (0051): the staff
+  /// composer. Writing to the players of a day goes with the right to edit
+  /// that day's blocks — the same days ([canEditDay], `message_send` asks
+  /// the same `duty_edit_gate`), so the views take these hooks per day
+  /// with the block gestures ([CalendarAdminHooks.forDay]). Not the edit
+  /// guards: the day menu offers a past day's „Napsat hráčům dne…“ to the
+  /// admin, and a refused block edit offers „Napsat hráčům bloku…“ on its
+  /// snack ([_editBlock]).
+  void Function(Day)? get onMessageDay => canEditBlocks ? _messageDay : null;
+  void Function(Day, TimeBlock)? get onMessageBlock =>
+      canEditBlocks ? _messageBlock : null;
 
   Future<void> _book(
     Day date,
@@ -323,9 +340,11 @@ class ScheduleActions {
     if (ownFuture) {
       await confirmCancelOwnReservation(
         context,
+        ref: ref,
         reservation: r,
         block: block,
         cancel: (id) => Api.cancelReservation(id),
+        dutyServesToday: dutyReachableToday(ref),
       );
       return;
     }
@@ -427,10 +446,35 @@ class ScheduleActions {
 
   // Past days are history: set_day_override would cancel their (already
   // played) reservations and corrupt attendance — the gestures refuse.
-  bool _guardPast(Day date) {
+  // [message]: what may still be done instead, offered on the snack.
+  bool _guardPast(Day date, {VoidCallback? message}) {
     if (!date.isBefore(today)) return false;
-    snack(context, 'Minulé dny nelze upravovat.');
+    _refuse('Minulé dny nelze upravovat.', message: message);
     return true;
+  }
+
+  /// A refused edit's snack — with „Napsat hráčům bloku…“ on it when
+  /// [message] is given: messaging is not editing, and the edit guards
+  /// must not take it away (0051: the admin writes about any day, the duty
+  /// about a block already under way).
+  /// Still a short snack: one with an action would persist by default
+  /// (Flutter 3.35+) and every later snack of the app would queue behind
+  /// it unseen. The calendar may be gone by the tap (a tab switch).
+  void _refuse(String text, {VoidCallback? message}) {
+    if (message == null) {
+      snack(context, text);
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      persist: false,
+      content: Text(text),
+      action: SnackBarAction(
+        label: 'Napsat hráčům bloku…',
+        onPressed: () {
+          if (context.mounted) message();
+        },
+      ),
+    ));
   }
 
   // The duty's clock on [date], one minute ahead when [atWrite] (the check
@@ -442,12 +486,17 @@ class ScheduleActions {
 
   // The duty's today: a block already under way stays the admin's (the
   // server refuses to move it and keeps its trainings).
-  bool _guardStarted(Day date, TimeBlock block, {bool atWrite = false}) {
+  bool _guardStarted(
+    Day date,
+    TimeBlock block, {
+    bool atWrite = false,
+    VoidCallback? message,
+  }) {
     final dutyNow = _dutyNowOn(date, atWrite: atWrite);
     if (dutyNow == null || block.startsAt.compareTo(dutyNow) > 0) {
       return false;
     }
-    snack(context, blockStartedMessage);
+    _refuse(blockStartedMessage, message: message);
     return true;
   }
 
@@ -465,7 +514,14 @@ class ScheduleActions {
   }
 
   void _editBlock(Day date, TimeBlock block) {
-    if (_guardPast(date) || _guardStarted(date, block)) return;
+    // The guards refuse the edit only: the block's players may still be
+    // written to — by the admin about any day, by the duty about today's
+    // block under way (message_send's duty_gate: from today on).
+    void message() => _messageBlock(date, block);
+    if (_guardPast(date, message: _isAdmin ? message : null) ||
+        _guardStarted(date, block, message: message)) {
+      return;
+    }
     showDialog<void>(
       context: context,
       builder: (_) => BlockDialog(
@@ -479,6 +535,11 @@ class ScheduleActions {
         dayIsTraining: settings.trainingWeekdays.contains(date.weekday),
         dayPriority: week.days[date.weekday - 1].priority,
         dayReason: _overrideByDate[date]?.reason ?? '',
+        // The dialog closes first: the composer opens over the calendar. It
+        // opens only on a day whose blocks may be edited, which is a day the
+        // message may be written about too.
+        offerMessageBlock: onMessageBlock != null,
+        onMessagePlayers: () => _messageBlock(date, block),
         wasOnDuty: _editsAsDuty,
         dutyClock: _dutyClockOn(date),
       ),
@@ -552,6 +613,14 @@ class ScheduleActions {
       errorText: _editErrorText,
       dutyClock: _dutyClockOn(date),
     );
+  }
+
+  void _messageDay(Day date) {
+    showStaffComposer(context, ref, date: date);
+  }
+
+  void _messageBlock(Day date, TimeBlock block) {
+    showStaffComposer(context, ref, date: date, blockId: block.id);
   }
 
   void _editPrioritySlot(Day date, PrioritySlot slot) {

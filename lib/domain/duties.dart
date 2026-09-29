@@ -338,7 +338,9 @@ class DutyHeader {
 ///
 /// [names] maps user ids to display names (placeholders included); an id
 /// it does not know is left out, and each period's names are
-/// Czech-sorted. A period without a known name says nothing.
+/// Czech-sorted. A period without a known name says nothing; adjacent
+/// periods with the same names are one part („po–ne ty“, not „po–st ty ·
+/// čt–ne ty“).
 DutyHeader? dutyHeaderLabel(
   Day monday,
   Iterable<DutyPeriod> periods,
@@ -366,7 +368,10 @@ DutyHeader? dutyHeaderLabel(
     for (final p in periods)
       if (!p.startsOn.isAfter(sunday) && !p.endsOn.isBefore(monday)) p,
   ]..sort((a, b) => a.startsOn.compareTo(b.startsOn));
-  final parts = <(DutyPeriod, String)>[];
+  // The days of each period inside the week, with who serves; adjacent
+  // periods (the next starts the day after the previous ends) with the very
+  // same names are one part — „po–st ty · čt–ne ty“ would say it twice.
+  final parts = <(Day, Day, String)>[];
   for (final period in inWeek) {
     final ids = assigneeIds(assignments, period.id);
     final who = [
@@ -375,25 +380,34 @@ DutyHeader? dutyHeaderLabel(
     ]..sort(compareCzech);
     // I am „ty“, last — like in a message's reaction line.
     if (meId != null && ids.contains(meId)) who.add('ty');
-    if (who.isNotEmpty) parts.add((period, joinNames(who)));
+    if (who.isEmpty) continue;
+    final from = period.startsOn.isBefore(monday) ? monday : period.startsOn;
+    final to = period.endsOn.isAfter(sunday) ? sunday : period.endsOn;
+    final text = joinNames(who);
+    if (parts.isNotEmpty) {
+      final (lastFrom, lastTo, lastWho) = parts.last;
+      if (lastWho == text && lastTo.addDays(1) == from) {
+        parts[parts.length - 1] = (lastFrom, to, text);
+        continue;
+      }
+    }
+    parts.add((from, to, text));
   }
   if (parts.isEmpty) return null;
 
   if (parts.length == 1) {
-    final (period, who) = parts.single;
-    if (!period.startsOn.isAfter(monday) && !period.endsOn.isBefore(sunday)) {
+    final (from, to, who) = parts.single;
+    if (from == monday && to == sunday && inWeek.length == 1) {
       return DutyHeader('Slouží: $who');
     }
   }
-  String days(DutyPeriod period) {
-    final from = period.startsOn.isBefore(monday) ? monday : period.startsOn;
-    final to = period.endsOn.isAfter(sunday) ? sunday : period.endsOn;
+  String days(Day from, Day to) {
     final first = _weekdays[from.weekday - 1];
     return from == to ? first : '$first–${_weekdays[to.weekday - 1]}';
   }
 
   return DutyHeader(
-    'Slouží: ${[for (final (p, who) in parts) '${days(p)} $who'].join(' · ')}',
+    'Slouží: ${[for (final (from, to, who) in parts) '${days(from, to)} $who'].join(' · ')}',
   );
 }
 
@@ -440,6 +454,29 @@ class MyDuty {
   /// The past is not judged here: a running period covers its own past
   /// days too, and the gestures refuse those (the server: `date_past`).
   bool coversDay(Day day) => mine.any((period) => period.covers(day));
+
+  /// The first day on or after [from] that one of my periods covers — where
+  /// a day to edit or to write about starts: today while I am on duty, else
+  /// the first day of my next period. Null when none is left.
+  Day? firstDayFrom(Day from) {
+    Day? first;
+    for (final period in mine) {
+      if (period.endsOn.isBefore(from)) continue;
+      final start = period.startsOn.isAfter(from) ? period.startsOn : from;
+      if (first == null || start.isBefore(first)) first = start;
+    }
+    return first;
+  }
+
+  /// The last day of my latest period that has not ended; null with none.
+  /// The far end of the days I may edit or write about.
+  Day? get lastDay {
+    Day? last;
+    for (final period in mine) {
+      if (last == null || period.endsOn.isAfter(last)) last = period.endsOn;
+    }
+    return last;
+  }
 
   @override
   bool operator ==(Object other) =>

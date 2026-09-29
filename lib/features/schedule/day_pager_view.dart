@@ -329,13 +329,23 @@ class _DayPage extends StatelessWidget {
   final SlotCallbacks slot;
   final CalendarAdminHooks admin;
 
-  /// The ⋮ in the day header: what [admin] offers for this day. None for a
-  /// past day — its reservations are attendance history.
+  /// The ⋮ in the day header: what [admin] offers for this day. A past
+  /// day's reservations are attendance history: no edits — only the
+  /// admin's „Napsat hráčům dne…“ (the admin writes about any day; the duty
+  /// only about the days of their own periods from today on, like the
+  /// block edits — `forDay` leaves a past day nothing for them).
   List<({String label, VoidCallback onTap})> _menu() {
     final date = day.date;
-    if (date.isBefore(today)) return const [];
-    // Per day: the duty (0050) edits only the days of their own periods.
+    // Per day: the duty (0050) edits blocks, and writes to the day's
+    // players (0051), only on the days of their own periods.
     final hooks = admin.forDay(date);
+    final message = hooks.onMessageDay;
+    if (date.isBefore(today)) {
+      return [
+        if (message != null)
+          (label: 'Napsat hráčům dne…', onTap: () => message(date)),
+      ];
+    }
     final add = hooks.onAddForDay;
     final close = hooks.onCloseDay;
     final restore = hooks.onRestoreDay;
@@ -345,6 +355,8 @@ class _DayPage extends StatelessWidget {
         (label: 'Zavřít den…', onTap: () => close(date)),
       if (restore != null && hooks.hasDayOverride(date))
         (label: 'Obnovit týdenní rozvrh', onTap: () => restore(date)),
+      if (message != null)
+        (label: 'Napsat hráčům dne…', onTap: () => message(date)),
     ];
   }
 

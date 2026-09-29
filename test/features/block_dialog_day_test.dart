@@ -611,6 +611,145 @@ void main() {
     expect(find.byType(BlockDialog), findsOneWidget);
   });
 
+  testWidgets('„Napsat hráčům bloku…“ shows only when editing an existing '
+      'block, and calls back', (tester) async {
+    var messaged = false;
+    await tester.pumpWidget(app(BlockDialog(
+      existing: b1,
+      blocks: const [b1, b2],
+      dayContext: thursday,
+      dayBaseIds: const ['b1', 'b2'],
+      offerMessageBlock: true,
+      onMessagePlayers: () => messaged = true,
+    )));
+    await tester.pumpAndSettle();
+    expect(find.text('Napsat hráčům bloku…'), findsOneWidget);
+    await tester.tap(find.text('Napsat hráčům bloku…'));
+    expect(messaged, true);
+  });
+
+  // Changed times are not saved by „Napsat hráčům bloku…“: messaging
+  // „come at 15:00“ over a block still at 16:00 would mislead the players.
+  testWidgets('„Napsat hráčům bloku…“ is off while the times are changed '
+      'and unsaved', (tester) async {
+    var messaged = false;
+    await tester.pumpWidget(app(BlockDialog(
+      existing: b1,
+      blocks: const [b1, b2],
+      dayContext: thursday,
+      dayBaseIds: const ['b1', 'b2'],
+      initialStart: const HourMinute(15, 0),
+      offerMessageBlock: true,
+      onMessagePlayers: () => messaged = true,
+    )));
+    await tester.pumpAndSettle();
+    final tile = find.widgetWithText(ListTile, 'Napsat hráčům bloku…');
+    expect(tester.widget<ListTile>(tile).enabled, isFalse);
+    await tester.tap(tile, warnIfMissed: false);
+    expect(messaged, isFalse);
+    expect(find.byType(BlockDialog), findsOneWidget);
+  });
+
+  testWidgets('a NEW block from the header ＋ never offers „Napsat hráčům '
+      'bloku…“', (tester) async {
+    await tester.pumpWidget(app(BlockDialog(
+      existing: null,
+      blocks: const [b1, b2],
+      dayContext: thursday,
+      dayBaseIds: const ['b1', 'b2'],
+      offerMessageBlock: true,
+      onMessagePlayers: () {},
+    )));
+    await tester.pumpAndSettle();
+    expect(find.text('Napsat hráčům bloku…'), findsNothing);
+  });
+
+  // „Napsat hráčům bloku…“ must not grow the pinned action bar: AlertDialog
+  // scrolls only the title and content, so every extra action squeezes the
+  // times (landscape) or pushes „Uložit“ off-screen (large text).
+  group('„Napsat hráčům bloku…“ keeps the dialog usable on a small screen', () {
+    Future<void> openDialog(WidgetTester tester, Size size, double scale,
+        BlockDialog dialog) async {
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1;
+      tester.platformDispatcher.textScaleFactorTestValue = scale;
+      addTearDown(tester.view.reset);
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () =>
+                  showDialog<void>(context: context, builder: (_) => dialog),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ));
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    }
+
+    for (final size in const [Size(800, 360), Size(800, 400)]) {
+      final label = '${size.width.toInt()}×${size.height.toInt()}';
+      testWidgets('both times stay on screen at $label', (tester) async {
+        var messaged = false;
+        await openDialog(
+          tester,
+          size,
+          1.0,
+          BlockDialog(
+            existing: b1,
+            blocks: const [b1, b2],
+            dayContext: thursday,
+            dayBaseIds: const ['b1', 'b2'],
+            offerMessageBlock: true,
+            onMessagePlayers: () => messaged = true,
+          ),
+        );
+        expect(find.text('Začátek').hitTestable(), findsOneWidget);
+        expect(find.text('Konec').hitTestable(), findsOneWidget);
+        // The message entry is still reachable (it scrolls with the times).
+        await tester.ensureVisible(find.text('Napsat hráčům bloku…'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Napsat hráčům bloku…'));
+        await tester.pumpAndSettle();
+        expect(messaged, true);
+        expect(find.byType(BlockDialog), findsNothing);
+      });
+    }
+
+    testWidgets('„Uložit“ stays reachable at 640×360, text ×2.0, on a day '
+        'with an override', (tester) async {
+      await openDialog(
+        tester,
+        const Size(640, 360),
+        2.0,
+        BlockDialog(
+          existing: b2,
+          blocks: const [b1, b2],
+          initialStart: const HourMinute(17, 30),
+          initialEnd: const HourMinute(18, 30),
+          dayContext: thursday,
+          dayBaseIds: const ['b1', 'b2'],
+          dayHasOverride: true,
+          offerMessageBlock: true,
+          onMessagePlayers: () {},
+        ),
+      );
+      expect(find.text('Obnovit týdenní rozvrh'), findsOneWidget);
+      expect(find.text('Uložit').hitTestable(), findsOneWidget);
+      await tester.tap(find.text('Uložit'));
+      await tester.pumpAndSettle();
+      expect(
+        requests.any((r) => r.url.path.endsWith('/rpc/set_day_override')),
+        true,
+      );
+      expect(find.byType(BlockDialog), findsNothing);
+    });
+  });
+
   // The player on duty editing TODAY (0050): the calendar passes its
   // clock; b1 (16:00) has started by 16:30, b2 (17:00) has not.
   group('the duty on today: blocks already under way (0050)', () {

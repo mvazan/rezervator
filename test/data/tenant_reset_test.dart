@@ -131,6 +131,53 @@ void main() {
     },
   );
 
+  testWidgets(
+    'resetTenantScopedProviders re-creates the messages streams (0051)',
+    (tester) async {
+      final builds = <String, int>{};
+      void count(String name) => builds[name] = (builds[name] ?? 0) + 1;
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            messagesProvider.overrideWith((ref) {
+              count('messages');
+              return Stream.value(const <Message>[]);
+            }),
+            myMessageRecipientsProvider.overrideWith((ref) {
+              count('recipients');
+              return Stream.value(const <MessageRecipient>[]);
+            }),
+            messageParticipantsProvider('m1').overrideWith((ref) {
+              count('participants');
+              return Stream.value(const <MessageRecipient>[]);
+            }),
+          ],
+          child: MaterialApp(
+            home: Consumer(
+              builder: (context, ref, _) {
+                ref.watch(messagesProvider);
+                ref.watch(myMessageRecipientsProvider);
+                ref.watch(messageParticipantsProvider('m1'));
+                return TextButton(
+                  onPressed: () => resetTenantScopedProviders(ref),
+                  child: const Text('Přepnout kuželnu'),
+                );
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(builds, {'messages': 1, 'recipients': 1, 'participants': 1});
+
+      await tester.tap(find.text('Přepnout kuželnu'));
+      await tester.pump();
+
+      expect(builds, {'messages': 2, 'recipients': 2, 'participants': 2});
+    },
+  );
+
   testWidgets('resetTenantScopedProviders re-fetches the Kontakty list (0048)',
       (tester) async {
     var fetches = 0;

@@ -412,6 +412,80 @@ void main() {
       },
     );
 
+    test('two adjacent periods of mine are one part, not „po–st ty · čt–ne ty“',
+        () {
+      final h = label(
+        [
+          period('a', Day(2026, 10, 1), Day(2026, 10, 7)),
+          period('b', Day(2026, 10, 8), Day(2026, 10, 14)),
+        ],
+        [assign('a', 'jan'), assign('b', 'jan')],
+        me: 'jan',
+      );
+      expect(h?.text, 'Slouží: po–ne ty');
+    });
+
+    test('adjacent periods with the same names merge; the names keep their '
+        'order, and a different pair stays apart', () {
+      final same = label(
+        [
+          period('a', Day(2026, 10, 1), Day(2026, 10, 7)),
+          period('b', Day(2026, 10, 8), Day(2026, 10, 14)),
+        ],
+        [
+          assign('a', 'jan'), assign('a', 'petr'),
+          assign('b', 'petr'), assign('b', 'jan'),
+        ],
+        me: 'jan',
+      );
+      expect(same?.text, 'Slouží: po–ne Petr Svoboda a ty');
+      final firstDays = label(
+        [
+          period('a', Day(2026, 10, 1), Day(2026, 10, 5)),
+          period('b', Day(2026, 10, 6), Day(2026, 10, 8)),
+          period('c', Day(2026, 10, 9), Day(2026, 10, 14)),
+        ],
+        [assign('a', 'jan'), assign('b', 'jan'), assign('c', 'petr')],
+      );
+      expect(firstDays?.text, 'Slouží: po–čt Jan Novák · pá–ne Petr Svoboda');
+    });
+
+    test('three adjacent periods with the same names are one part', () {
+      final h = label(
+        [
+          period('a', Day(2026, 10, 5), Day(2026, 10, 6)),
+          period('b', Day(2026, 10, 7), Day(2026, 10, 9)),
+          period('c', Day(2026, 10, 10), Day(2026, 10, 11)),
+        ],
+        [assign('a', 'jan'), assign('b', 'jan'), assign('c', 'jan')],
+      );
+      expect(h?.text, 'Slouží: po–ne Jan Novák');
+    });
+
+    test('the same names with a gap between the periods stay two parts', () {
+      final h = label(
+        [
+          period('a', Day(2026, 10, 5), Day(2026, 10, 6)),
+          period('b', Day(2026, 10, 8), Day(2026, 10, 9)),
+        ],
+        [assign('a', 'jan'), assign('b', 'jan')],
+      );
+      expect(h?.text, 'Slouží: po–út Jan Novák · čt–pá Jan Novák');
+    });
+
+    test('a merge of the same names hides no other part between them', () {
+      final h = label(
+        [
+          period('a', Day(2026, 10, 5), Day(2026, 10, 6)),
+          period('b', Day(2026, 10, 7), Day(2026, 10, 8)),
+          period('c', Day(2026, 10, 9), Day(2026, 10, 11)),
+        ],
+        [assign('a', 'jan'), assign('b', 'petr'), assign('c', 'jan')],
+      );
+      expect(h?.text,
+          'Slouží: po–út Jan Novák · st–čt Petr Svoboda · pá–ne Jan Novák');
+    });
+
     test('a one-day part names its day once', () {
       final h = label(
         [
@@ -764,6 +838,41 @@ void main() {
       expect(b.current, a.current);
       expect(b.next, a.next);
       expect(b, isNot(a));
+    });
+
+    test('firstDayFrom: today while a period of mine covers it, else the '
+        'start of the next one', () {
+      final onDuty = myDuty(periods, assignments, 'me', Day(2026, 10, 6));
+      expect(onDuty.firstDayFrom(Day(2026, 10, 6)), Day(2026, 10, 6));
+      // The last day of a period is still today's.
+      final lastDay = myDuty(periods, assignments, 'me', Day(2026, 10, 11));
+      expect(lastDay.firstDayFrom(Day(2026, 10, 11)), Day(2026, 10, 11));
+      // In the gap between two: the next period's first day.
+      final gap = myDuty(periods, assignments, 'me', Day(2026, 10, 12));
+      expect(gap.firstDayFrom(Day(2026, 10, 12)), Day(2026, 10, 19));
+      // Off duty with nothing before the far one: that one's first day.
+      final far = myDuty(periods, assignments, 'me', Day(2026, 10, 26));
+      expect(far.firstDayFrom(Day(2026, 10, 26)), Day(2026, 11, 2));
+      // Nothing left, or nobody: none.
+      expect(
+        myDuty(periods, assignments, 'me', Day(2026, 11, 9))
+            .firstDayFrom(Day(2026, 11, 9)),
+        isNull,
+      );
+      expect(MyDuty.none.firstDayFrom(Day(2026, 10, 6)), isNull);
+    });
+
+    test('lastDay: the end of my latest period that has not ended', () {
+      expect(
+        myDuty(periods, assignments, 'me', Day(2026, 10, 6)).lastDay,
+        Day(2026, 11, 8),
+      );
+      expect(
+        myDuty(periods, assignments, 'me', Day(2026, 11, 8)).lastDay,
+        Day(2026, 11, 8),
+      );
+      expect(myDuty(periods, assignments, 'me', Day(2026, 11, 9)).lastDay, isNull);
+      expect(MyDuty.none.lastDay, isNull);
     });
   });
 

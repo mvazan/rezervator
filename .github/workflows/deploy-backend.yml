@@ -32,6 +32,10 @@ jobs:
         run: supabase functions deploy notify --no-verify-jwt
       - name: Deploy cancel function
         run: supabase functions deploy cancel --no-verify-jwt
+      - name: Deploy react function
+        # --no-verify-jwt: recipients react from a plain e-mail link with
+        # no Supabase session; the signed HMAC token is the gate.
+        run: supabase functions deploy react --no-verify-jwt
       - name: Deploy calendar-oauth-callback function
         # --no-verify-jwt: Google's OAuth redirect is a plain browser GET and
         # can't carry a JWT; the function trusts the one-time `state` nonce

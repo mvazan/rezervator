@@ -127,9 +127,13 @@ void main() {
     Stream<DateTime>? clock,
     Profile profile = me,
     List<TimeBlock> blocks = const [b1],
+    // false takes the calendar out while the app (and its messenger) stays
+    // — a tab switch with a snack still on screen.
+    ValueNotifier<bool>? calendarShown,
     // My period; [week] (on duty today) unless a test needs another.
     DutyPeriod? period,
   }) {
+    const calendar = WeekScreen();
     return ProviderScope(
       overrides: [
         activeReservationCountProvider.overrideWith((ref, id) async => 0),
@@ -160,7 +164,17 @@ void main() {
           ]),
         ),
       ],
-      child: const MaterialApp(home: Scaffold(body: WeekScreen())),
+      child: MaterialApp(
+        home: Scaffold(
+          body: calendarShown == null
+              ? calendar
+              : ValueListenableBuilder<bool>(
+                  valueListenable: calendarShown,
+                  builder: (_, shown, _) =>
+                      shown ? calendar : const SizedBox.shrink(),
+                ),
+        ),
+      ),
     );
   }
 
@@ -285,6 +299,238 @@ void main() {
     await tester.tap(find.text(label));
     await tester.pumpAndSettle();
   }
+
+  /// [pickFromMenu] up to the open ⋮ menu, without picking anything.
+  Future<void> openMenu(WidgetTester tester) async {
+    tester.view.physicalSize = const Size(900, 1600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find
+          .descendant(
+            of: find.byType(DayChipStrip),
+            matching: find.byType(InkWell),
+          )
+          .at(t.weekday),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.more_vert));
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('the duty gets „Napsat hráčům dne…“ in the portrait ⋮ menu', (
+    tester,
+  ) async {
+    await tester.pumpWidget(app());
+    await openMenu(tester);
+    expect(find.text('Napsat hráčům dne…'), findsOneWidget);
+  });
+
+  // The staff composer that „Napsat hráčům …“ opened: its date and target.
+  void expectComposer(WidgetTester tester, Day date, String? blockId) {
+    expect(find.text('Napsat hráčům'), findsOneWidget);
+    expect(find.text('${date.day}. ${date.month}. ${date.year}'), findsOneWidget);
+    expect(
+      tester.widget<RadioGroup<String?>>(find.byType(RadioGroup<String?>)).groupValue,
+      blockId,
+    );
+  }
+
+  testWidgets('⋮ „Napsat hráčům dne…“ opens the staff composer on that day, '
+      '„Celý den“', (tester) async {
+    await tester.pumpWidget(app());
+    await pickFromMenu(tester, 'Napsat hráčům dne…');
+    expectComposer(tester, tomorrow, null);
+  });
+
+  // Messaging is not editing: a block already under way can still be
+  // written to („the block starts late“) — duty_gate allows today.
+  testWidgets('the duty: a block that has started is not editable, but its '
+      'players can be written to', (tester) async {
+    const early = TimeBlock(
+      id: 'b0',
+      startsAt: HourMinute(9, 0),
+      endsAt: HourMinute(10, 30),
+      position: 0,
+      active: true,
+    );
+    await tester.pumpWidget(app(blocks: const [early, b1]));
+    await tester.pumpAndSettle();
+    tester
+        .widget<WeekCalendarView>(find.byType(WeekCalendarView))
+        .admin
+        .onEditBlock!(t, early);
+    await tester.pumpAndSettle();
+    expect(find.text(blockStartedMessage), findsOneWidget);
+    expect(find.text('Upravit blok — jen ${t.day}. ${t.month}.'), findsNothing);
+    await tester.tap(find.widgetWithText(SnackBarAction, 'Napsat hráčům bloku…'));
+    await tester.pumpAndSettle();
+    expectComposer(tester, t, 'b0');
+  });
+
+  // The admin may write about any day (message_send): a past day is
+  // history for editing only.
+  testWidgets('the admin, a past day: no edit, but the block\'s and the '
+      'day\'s players can be written to', (tester) async {
+    final yesterday = t.addDays(-1);
+    await tester.pumpWidget(app(profile: admin));
+    await tester.pumpAndSettle();
+    tester
+        .widget<WeekCalendarView>(find.byType(WeekCalendarView))
+        .admin
+        .onEditBlock!(yesterday, b1);
+    await tester.pumpAndSettle();
+    expect(find.text('Minulé dny nelze upravovat.'), findsOneWidget);
+    await tester.tap(find.widgetWithText(SnackBarAction, 'Napsat hráčům bloku…'));
+    await tester.pumpAndSettle();
+    expectComposer(tester, yesterday, 'b1');
+  });
+
+  // A SnackBar with an action persists by default (Flutter 3.35+) — the
+  // refusal stays a short snack, or every later snack of the app would
+  // queue behind it unseen.
+  group('the refusal with „Napsat hráčům bloku…“ still goes away', () {
+    const early = TimeBlock(
+      id: 'b0',
+      startsAt: HourMinute(9, 0),
+      endsAt: HourMinute(10, 30),
+      position: 0,
+      active: true,
+    );
+
+    Future<void> refuse(WidgetTester tester, Day date, TimeBlock block) async {
+      tester
+          .widget<WeekCalendarView>(find.byType(WeekCalendarView))
+          .admin
+          .onEditBlock!(date, block);
+      await tester.pumpAndSettle();
+      expect(
+        find.widgetWithText(SnackBarAction, 'Napsat hráčům bloku…'),
+        findsOneWidget,
+      );
+    }
+
+    // The next snack, queued behind the refusal, is seen after it.
+    Future<void> expectGone(WidgetTester tester, String text) async {
+      ScaffoldMessenger.of(tester.element(find.byType(WeekScreen)))
+          .showSnackBar(const SnackBar(content: Text('Rezervace zrušena.')));
+      await tester.pumpAndSettle();
+      expect(find.text('Rezervace zrušena.'), findsNothing);
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpAndSettle();
+      expect(find.text(text), findsNothing);
+      expect(find.text('Rezervace zrušena.'), findsOneWidget);
+    }
+
+    testWidgets('the duty, a block under way', (tester) async {
+      await tester.pumpWidget(app(blocks: const [early, b1]));
+      await tester.pumpAndSettle();
+      await refuse(tester, t, early);
+      expect(find.text(blockStartedMessage), findsOneWidget);
+      await expectGone(tester, blockStartedMessage);
+    });
+
+    testWidgets('the admin, a past day', (tester) async {
+      await tester.pumpWidget(app(profile: admin));
+      await tester.pumpAndSettle();
+      await refuse(tester, t.addDays(-1), b1);
+      expect(find.text('Minulé dny nelze upravovat.'), findsOneWidget);
+      await expectGone(tester, 'Minulé dny nelze upravovat.');
+    });
+
+    // The snack outlives the calendar (a tab switch): its action then
+    // does nothing instead of opening a sheet from a dead context.
+    testWidgets('the action once the calendar is gone does nothing',
+        (tester) async {
+      final shown = ValueNotifier(true);
+      addTearDown(shown.dispose);
+      await tester.pumpWidget(app(profile: admin, calendarShown: shown));
+      await tester.pumpAndSettle();
+      await refuse(tester, t.addDays(-1), b1);
+      shown.value = false;
+      await tester.pump();
+      expect(find.byType(WeekScreen), findsNothing);
+      await tester.tap(find.widgetWithText(SnackBarAction, 'Napsat hráčům bloku…'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.text('Napsat hráčům'), findsNothing);
+    });
+  });
+
+  testWidgets('…and the portrait ⋮ of a past day offers the admin only '
+      '„Napsat hráčům dne…“', (tester) async {
+    final yesterday = t.addDays(-1);
+    await tester.pumpWidget(app(profile: admin));
+    tester.view.physicalSize = const Size(900, 1600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpAndSettle();
+    await tester.tap(find
+        .descendant(of: find.byType(DayChipStrip), matching: find.byType(InkWell))
+        .at(yesterday.weekday - 1));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.more_vert));
+    await tester.pumpAndSettle();
+    expect(find.text('Přidat blok…'), findsNothing);
+    expect(find.text('Zavřít den…'), findsNothing);
+    await tester.tap(find.text('Napsat hráčům dne…'));
+    await tester.pumpAndSettle();
+    expectComposer(tester, yesterday, null);
+  });
+
+  // duty_gate: the duty writes from today on — a past day stays closed.
+  testWidgets('the duty, a past day: nothing to write, as before', (tester) async {
+    final yesterday = t.addDays(-1);
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+    tester
+        .widget<WeekCalendarView>(find.byType(WeekCalendarView))
+        .admin
+        .onEditBlock!(yesterday, b1);
+    await tester.pumpAndSettle();
+    expect(find.text('Minulé dny nelze upravovat.'), findsOneWidget);
+    expect(find.byType(SnackBarAction), findsNothing);
+    tester.view.physicalSize = const Size(900, 1600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpAndSettle();
+    await tester.tap(find
+        .descendant(of: find.byType(DayChipStrip), matching: find.byType(InkWell))
+        .at(yesterday.weekday - 1));
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.more_vert), findsNothing);
+  });
+
+  testWidgets('a plain player off duty has no ⋮ at all', (tester) async {
+    // A profile the fixture's assignment does not name → not on duty.
+    const other = Profile(
+      id: 'other',
+      displayName: 'Ota Hráč',
+      email: 'ota@example.com',
+      role: Role.player,
+      status: ProfileStatus.approved,
+    );
+    await tester.pumpWidget(app(profile: other));
+    tester.view.physicalSize = const Size(900, 1600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find
+          .descendant(
+            of: find.byType(DayChipStrip),
+            matching: find.byType(InkWell),
+          )
+          .at(t.weekday),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.more_vert), findsNothing);
+  });
 
   testWidgets('⋮ „Zavřít den…“: a refusal says the duty ended', (tester) async {
     await tester.pumpWidget(app());
