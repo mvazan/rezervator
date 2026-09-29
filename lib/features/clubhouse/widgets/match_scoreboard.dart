@@ -8,7 +8,7 @@
 ///
 /// Every number is set in tabular figures, so live values don't jump as
 /// they change, and a winner is never told by colour alone: the name's
-/// weight, the bar's side and the arrow of the lead say it too.
+/// weight, the bar's side and the sign of the lead say it too.
 library;
 
 import 'dart:math' as math;
@@ -513,9 +513,9 @@ bool _fitsTwoLines(
   return fits;
 }
 
-/// „2555  ← 234  2321“: the pin totals and, between them, the lead with its
-/// arrow pointing at the leader. While the match runs the pill is hollow
-/// and reads „Kuželky zatím ← 87“, and the totals are [liveTeamTotals].
+/// „2555  +234  2321“: the pin totals and, between them, the lead with its
+/// sign (+ home, - guests). While the match runs the pill is hollow
+/// and reads „Kuželky zatím +87“, and the totals are [liveTeamTotals].
 class _PinsLine extends StatelessWidget {
   const _PinsLine({
     required this.homeTotal,

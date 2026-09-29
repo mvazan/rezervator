@@ -297,7 +297,7 @@ void main() {
     // explanation, the status chip and the format line.
     expect(_inBoard('3460'), findsOneWidget);
     expect(_inBoard('3349'), findsOneWidget);
-    expect(_inBoard('← 111'), findsOneWidget);
+    expect(_inBoard('+111'), findsOneWidget);
     expect(
       find.descendant(
         of: find.byType(MatchScoreboard),
@@ -436,8 +436,7 @@ void main() {
         findsOneWidget,
       );
       // No pin totals: no lead, no set points, no Družstva card.
-      expect(find.textContaining('←'), findsNothing);
-      expect(find.textContaining('→'), findsNothing);
+      expect(find.textContaining('+'), findsNothing);
       expect(
         find.descendant(
           of: find.byType(MatchScoreboard),

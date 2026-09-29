@@ -1,12 +1,12 @@
 /// The match detail's Družstva card (Souboje, Task 5): the two teams' sums
 /// side by side, below the duels — Kuželky, Plné, Dorážka, Chyby and SB, one
-/// mirrored row each with the lead between the values („Kuželky ← 234“).
+/// mirrored row each with the lead between the values („Kuželky +234“).
 ///
 /// Home is always on the left. Every number is set in tabular figures, and
 /// the leader is never told by colour alone: its value is w800 (the other
-/// w500, both in full onSurface) and the arrow points at it. For Chyby the
-/// side with FEWER errors leads, and its label says so („(méně = lépe)“)
-/// instead of printing an arrow.
+/// w500, both in full onSurface) and the sign says who leads (+ home,
+/// - guests). For Chyby the side with FEWER errors leads, and its label says so („(méně = lépe)“)
+/// instead of printing a sign.
 library;
 
 import 'package:flutter/material.dart';
@@ -100,7 +100,7 @@ class TeamTotalsCard extends StatelessWidget {
     );
   }
 
-  /// [leadLabel] of home − away („← 234“, „100 →“, „=“); '' when either
+  /// [leadLabel] of home − away („+234“, „-100“, „=“); '' when either
   /// side is unknown.
   static String _lead(int? home, int? away) =>
       home == null || away == null ? '' : leadLabel(home - away);
@@ -124,7 +124,7 @@ class _Row extends StatelessWidget {
   /// „Kuželky“, „Plné“, „Dorážka“, „Chyby (méně = lépe)“ or „SB“.
   final String name;
 
-  /// [leadLabel]'s arrow and difference after [name]; '' prints none.
+  /// [leadLabel]'s sign and difference after [name]; '' prints none.
   final String lead;
 
   /// The home side's value; null prints „–“.
@@ -163,7 +163,7 @@ class _Row extends StatelessWidget {
       ),
     );
 
-    // One label per row, read without the arrow glyph: „Kuželky 2555 : 2321“.
+    // One label per row, read without the sign: „Kuželky 2555 : 2321“.
     return Semantics(
       container: true,
       label: '$name ${pointsLabel(home, away)}',
