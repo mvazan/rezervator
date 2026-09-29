@@ -195,6 +195,24 @@ String staffSendErrorText(
   return friendlyDbError(error, wasOnDuty: asDuty);
 }
 
+/// The player composer's refusal text: `no_recipients` to „Správci“ means
+/// the writer is the alley's only admin — the shared „Nikdo nemá
+/// rezervaci.“ speaks of reservations (spec: Copy decisions). Every other
+/// code keeps the shared text; `nobody_on_duty` („Dnes nikdo neslouží —
+/// napiš správci.“) among them, since a player composer is never offered
+/// for being on duty.
+@visibleForTesting
+String playerSendErrorText(
+  Object error, {
+  required MessageAudience audience,
+}) {
+  if (audience == MessageAudience.admins &&
+      '$error'.contains('no_recipients')) {
+    return 'Jiného správce tu nemáš.';
+  }
+  return friendlyDbError(error);
+}
+
 class _PlayerComposerSheet extends ConsumerStatefulWidget {
   const _PlayerComposerSheet({
     required this.initial,
@@ -250,9 +268,7 @@ class _PlayerComposerSheetState extends ConsumerState<_PlayerComposerSheet> {
         blockId: widget.blockId,
         body: text,
       ),
-      // `nobody_on_duty` („Dnes nikdo neslouží — napiš správci.“) is in the
-      // shared map; a player composer is never offered for being on duty.
-      errorText: friendlyDbError,
+      errorText: (e) => playerSendErrorText(e, audience: audience),
     );
     if (mounted) setState(() => _sending = false);
   }

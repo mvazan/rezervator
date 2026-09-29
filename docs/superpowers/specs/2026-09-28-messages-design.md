@@ -460,8 +460,8 @@ Oznam přestane platit hned., Oznam sejmut., Smazat oznam?, Tohle nejde vrátit 
 smazán., Smazat zprávu?, Zmizí i všem příjemcům., Zpráva smazána., Zpráva, Text zprávy,
 K tréninku {den} · {čas}, Změnit, Více, Méně, Nikdo nemá rezervaci., Dnes nikdo neslouží —
 napiš správci., V tomto bloku nikdo nemá rezervaci., V tento den nikdo nemá rezervaci.,
-Minulým dnům už nejde psát., Vyplň nadpis., Vyplň zprávu., Zpráva je moc dlouhá., Neplatný
-typ zprávy. The length counters („502/500“) are digits only.
+Minulým dnům už nejde psát., Jiného správce tu nemáš., Vyplň nadpis., Vyplň zprávu., Zpráva
+je moc dlouhá., Neplatný typ zprávy. The length counters („502/500“) are digits only.
 
 ## Errors and edge cases
 
@@ -486,8 +486,10 @@ typ zprávy. The length counters („502/500“) are digits only.
   (a past day, and a missing date) reads „Minulým dnům už nejde psát.“ instead of the
   generic text; a `not_allowed` sent as the duty still goes through the existing `wasOnDuty`
   handling for „Služba skončila — tohle teď může jen správce.“; `unknown_block` keeps its
-  existing text. The player composer uses `friendlyDbError` as it is (see Open copy
-  questions for its `no_recipients`).
+  existing text. The player composer has its own `errorText` too
+  (`playerSendErrorText`): `no_recipients` to „Správci“ (the writer is the alley's only
+  admin) reads „Jiného správce tu nemáš.“ (see Copy decisions); every other code keeps the
+  shared text.
 - Lengths are checked before the server sees them, in code points as the server counts
   (Data model): „Odeslat“ / „Uložit“ is off and the counter turns to the error colour while
   a field is over its limit, and a reply over 200 is not sent. The server's codes stay the
@@ -575,8 +577,9 @@ them changes behaviour:
    wrote the inflected „Od Petra Nováka“, and the first build shipped „Od Petr Novák“.
 2. **A sole admin writing to „Správci“.** When the writer is the alley's only admin,
    „Správci“ is still offered, and the send is refused with `no_recipients`; the player
-   composer shows the generic „Nikdo nemá rezervaci.“, which speaks of reservations, not of
-   admins.
+   composer says „Jiného správce tu nemáš.“ (`playerSendErrorText`), not the generic
+   „Nikdo nemá rezervaci.“, which speaks of reservations. The first build shipped the
+   generic text.
 3. **A notice link to a notice that is gone** says „Zpráva už neexistuje.“ — the message
    wording — although the UI calls a notice „oznam“.
 

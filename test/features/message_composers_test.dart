@@ -292,6 +292,38 @@ void main() {
     expect(find.text('Zpráva odeslána.'), findsOneWidget);
   });
 
+  testWidgets('„Správci“ refused with no_recipients (I am the only admin) says '
+      '„Jiného správce tu nemáš.“, not the reservation text', (tester) async {
+    final calls = <Sent>[];
+    await tester.pumpWidget(app(
+      send: recorder(calls, answer: () async => throw Exception('no_recipients')),
+    ));
+    await open(tester);
+    await tester.enterText(find.byType(TextField), 'Zamkni prosím.');
+    await tester.pump();
+    await tester.tap(find.text('Odeslat'));
+    await tester.pumpAndSettle();
+    expect(calls.single.audience, MessageAudience.admins);
+    expect(find.text('Jiného správce tu nemáš.'), findsOneWidget);
+    expect(find.text('Nikdo nemá rezervaci.'), findsNothing);
+    expect(tester.widget<TextField>(find.byType(TextField)).controller!.text,
+        'Zamkni prosím.');
+  });
+
+  group('playerSendErrorText', () {
+    test('no_recipients to „Správci“ means no other admin', () {
+      expect(playerSendErrorText(Exception('no_recipients'),
+          audience: MessageAudience.admins), 'Jiného správce tu nemáš.');
+    });
+
+    test('every other refusal keeps the shared text', () {
+      expect(playerSendErrorText(Exception('nobody_on_duty'),
+          audience: MessageAudience.duty), 'Dnes nikdo neslouží — napiš správci.');
+      expect(playerSendErrorText(Exception('no_recipients'),
+          audience: MessageAudience.duty), 'Nikdo nemá rezervaci.');
+    });
+  });
+
   group('showStaffComposer', () {
     final b1 = TimeBlock(id: 'b1', startsAt: HourMinute(16, 0), endsAt: HourMinute(17, 0),
         position: 0, active: true);
