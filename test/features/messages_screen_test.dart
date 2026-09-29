@@ -71,31 +71,74 @@ void main() {
       );
 
   group('MessageTile', () {
-    testWidgets('a received message shows the reaction chips and reply field', (tester) async {
-      var reacted = false;
-      var replied = false;
-      await tester.pumpWidget(MaterialApp(home: Scaffold(body: MessageTile(
+    // Spec: two toggle chips 👍 / 👎 — named and with a selected state a
+    // screen reader can tell apart; tapping my current one clears it.
+    testWidgets('a received message: the chips send their reaction, my current '
+        'one clears, the reply goes out as typed', (tester) async {
+      final reactions = <Reaction?>[];
+      final replies = <String>[];
+      Widget tile(Reaction? mine) => MaterialApp(home: Scaffold(body: MessageTile(
         message: received(),
-        recipients: [recip('me'), recip('p2', reaction: Reaction.up)],
+        recipients: [recip('me', reaction: mine), recip('p2', reaction: Reaction.up)],
         names: const {'p2': 'Petr Novák'},
         meId: 'me',
         authorName: 'Bára Kantýnská',
         authorIsAdmin: false,
         block: null,
-        onReact: (r) { reacted = true; },
-        onReply: (r) { replied = true; },
+        onReact: reactions.add,
+        onReply: replies.add,
         onDelete: null,
-      ))));
+      )));
+      final up = find.widgetWithText(FilterChip, '👍');
+      final down = find.widgetWithText(FilterChip, '👎');
+      await tester.pumpWidget(tile(null));
       expect(find.text('Od služby (Bára Kantýnská)'), findsOneWidget);
-      expect(find.byIcon(Icons.thumb_up_outlined), findsOneWidget);
-      expect(find.byIcon(Icons.thumb_down_outlined), findsOneWidget);
-      await tester.tap(find.byIcon(Icons.thumb_up_outlined));
-      expect(reacted, true);
+      expect(tester.getSemantics(up),
+          containsSemantics(label: '👍', isButton: true, isSelected: false));
+      expect(tester.getSemantics(down),
+          containsSemantics(label: '👎', isButton: true, isSelected: false));
+      await tester.tap(up);
+      await tester.tap(down);
+      expect(reactions, [Reaction.up, Reaction.down]);
+
+      await tester.pumpWidget(tile(Reaction.up));
+      expect(tester.widget<FilterChip>(up).selected, isTrue);
+      expect(tester.getSemantics(up), containsSemantics(isSelected: true));
+      await tester.tap(up);
+      expect(reactions, [Reaction.up, Reaction.down, null]);
+
       await tester.enterText(find.byType(TextField), 'Přijdu.');
       await tester.testTextInput.receiveAction(TextInputAction.done);
-      expect(replied, true);
-      // The line reads „👍 Petr Novák · 1 bez reakce“ (me, unreacted).
+      expect(replies, ['Přijdu.']);
+      // The line reads „👍 Petr Novák, ty · …“ (me, now 👍 too).
       expect(find.textContaining('👍 Petr Novák'), findsOneWidget);
+    });
+
+    // A cached snapshot may be older than my reply from another device;
+    // the field must not keep (and resend) the stale text.
+    testWidgets('the reply field follows my row when it changes, unless I am '
+        'typing', (tester) async {
+      Widget tile(String? reply) => MaterialApp(home: Scaffold(body: MessageTile(
+        message: received(),
+        recipients: [recip('me', reply: reply)],
+        names: const {},
+        meId: 'me',
+        authorName: 'Bára Kantýnská',
+        authorIsAdmin: false,
+        block: null,
+        onReact: (_) {},
+        onReply: (_) {},
+        onDelete: null,
+      )));
+      String field() =>
+          tester.widget<TextField>(find.byType(TextField)).controller!.text;
+      await tester.pumpWidget(tile('Stará'));
+      expect(field(), 'Stará');
+      await tester.pumpWidget(tile('Nová'));
+      expect(field(), 'Nová');
+      await tester.enterText(find.byType(TextField), 'Rozepsané');
+      await tester.pumpWidget(tile('Z webu'));
+      expect(field(), 'Rozepsané');
     });
 
     testWidgets('a reply over 200 code points is not sent and the counter says so',
@@ -141,6 +184,33 @@ void main() {
       expect(find.text('Ode mě hráčům'), findsOneWidget);
       expect(find.text('1× 👍 · 1× 👎'), findsOneWidget);
       expect(find.byType(TextField), findsNothing);
+      expect(find.byType(FilterChip), findsNothing);
+    });
+
+    testWidgets('the sent tally is a button of full tap height that says '
+        'whether its list is open', (tester) async {
+      await tester.pumpWidget(MaterialApp(home: Scaffold(body: MessageTile(
+        message: received(authorId: 'me'),
+        recipients: [recip('p1', reaction: Reaction.up), recip('p2', reaction: Reaction.down)],
+        names: const {'p1': 'Petr', 'p2': 'Tomáš'},
+        meId: 'me',
+        authorName: 'Já Hráč',
+        authorIsAdmin: false,
+        block: null,
+        onReact: null,
+        onReply: null,
+        onDelete: () {},
+      ))));
+      final tally = find.text('1× 👍 · 1× 👎');
+      expect(tester.getSemantics(tally), containsSemantics(
+          isButton: true, hasExpandedState: true, isExpanded: false));
+      final target = find.ancestor(of: tally, matching: find.byType(InkWell));
+      expect(tester.getSize(target).height,
+          greaterThanOrEqualTo(kMinInteractiveDimension));
+      await tester.tap(tally);
+      await tester.pump();
+      expect(tester.getSemantics(tally), containsSemantics(isExpanded: true));
+      expect(find.text('👍 Petr · 👎 Tomáš'), findsOneWidget);
     });
   });
 
@@ -247,10 +317,32 @@ void main() {
         react: (_, _) async => throw Exception('offline'),
       ));
       await tester.pumpAndSettle();
-      await tester.tap(find.byIcon(Icons.thumb_up_outlined));
+      await tester.tap(find.widgetWithText(FilterChip, '👍'));
       await tester.pumpAndSettle();
       expect(find.byType(SnackBar), findsOneWidget);
-      expect(find.byIcon(Icons.thumb_up_outlined), findsOneWidget);
+      expect(tester.widget<FilterChip>(find.widgetWithText(FilterChip, '👍')).selected,
+          isFalse);
+    });
+
+    testWidgets('a reaction and a reply go out for the message they belong to',
+        (tester) async {
+      final reactions = <(String, Reaction?)>[];
+      final replies = <(String, String)>[];
+      await tester.pumpWidget(app(
+        messages: [received()],
+        recipients: [recip('me')],
+        roster: const [PlayerName(id: 'staff', displayName: 'Bára')],
+        react: (id, r) async => reactions.add((id, r)),
+        reply: (id, text) async => replies.add((id, text)),
+      ));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilterChip, '👎'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'Nestihnu.');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect(reactions, [('m1', Reaction.down)]);
+      expect(replies, [('m1', 'Nestihnu.')]);
     });
 
     testWidgets('a sent message expands its tally into names on tap', (tester) async {

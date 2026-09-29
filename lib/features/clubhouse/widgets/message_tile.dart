@@ -70,20 +70,38 @@ class MessageTile extends StatefulWidget {
 
 class _MessageTileState extends State<MessageTile> {
   /// Starts with the reply I already sent, so the field shows what the
-  /// others see in the reaction line.
+  /// others see in the reaction line — and follows it ([didUpdateWidget]).
   late final _reply = TextEditingController(text: _myRow?.reply ?? '');
+  final _replyFocus = FocusNode();
   late bool _expanded = widget.initiallyExpanded;
 
   @override
   void dispose() {
     _reply.dispose();
+    _replyFocus.dispose();
     super.dispose();
   }
 
-  MessageRecipient? get _myRow {
-    final id = widget.meId;
+  /// My row changed its reply (the live snapshot after a cached one, my
+  /// reply from another device, a rolled-back write): the field shows the
+  /// new one — unless I am typing, or hold an unsent draft (the field no
+  /// longer shows the old reply). Else a stale reply would be resent.
+  @override
+  void didUpdateWidget(MessageTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final was = _rowIn(oldWidget)?.reply ?? '';
+    final now = _myRow?.reply ?? '';
+    if (was != now && !_replyFocus.hasFocus && _reply.text == was) {
+      _reply.text = now;
+    }
+  }
+
+  MessageRecipient? get _myRow => _rowIn(widget);
+
+  static MessageRecipient? _rowIn(MessageTile tile) {
+    final id = tile.meId;
     if (id == null) return null;
-    for (final r in widget.recipients) {
+    for (final r in tile.recipients) {
       if (r.userId == id) return r;
     }
     return null;
@@ -146,9 +164,37 @@ class _MessageTileState extends State<MessageTile> {
                   style: small,
                 ),
             ] else if (mine) ...[
-              InkWell(
-                onTap: () => setState(() => _expanded = !_expanded),
-                child: Text(tallyLabel(tally(widget.recipients)), style: small),
+              // A button of full tap height that says whether its list is
+              // open — its own node, not merged into the card's.
+              Semantics(
+                container: true,
+                button: true,
+                expanded: _expanded,
+                child: InkWell(
+                  onTap: () => setState(() => _expanded = !_expanded),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      minHeight: kMinInteractiveDimension,
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            tallyLabel(tally(widget.recipients)),
+                            style: small,
+                          ),
+                        ),
+                        ExcludeSemantics(
+                          child: Icon(
+                            _expanded ? Icons.expand_less : Icons.expand_more,
+                            size: 18,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ),
               if (_expanded)
                 Padding(
@@ -165,31 +211,28 @@ class _MessageTileState extends State<MessageTile> {
     );
   }
 
-  /// 👍 / 👎 (a toggle: tapping my current reaction clears it) and the
-  /// „Krátká odpověď…“ field, saved on submit.
+  /// 👍 / 👎 — the spec's two toggle chips: named by their emoji, with a
+  /// selected state a screen reader announces; tapping my current reaction
+  /// clears it — and the „Krátká odpověď…“ field, saved on submit.
   Widget _receivedRow(void Function(Reaction? reaction) onReact) {
     final current = _myRow?.reaction;
+    Widget chip(Reaction reaction, String label) => Padding(
+          padding: const EdgeInsets.only(right: 8),
+          child: FilterChip(
+            label: Text(label),
+            selected: current == reaction,
+            onSelected: (_) =>
+                onReact(current == reaction ? null : reaction),
+          ),
+        );
     return Row(
       children: [
-        IconButton(
-          icon: Icon(
-            current == Reaction.up ? Icons.thumb_up : Icons.thumb_up_outlined,
-          ),
-          onPressed: () =>
-              onReact(current == Reaction.up ? null : Reaction.up),
-        ),
-        IconButton(
-          icon: Icon(
-            current == Reaction.down
-                ? Icons.thumb_down
-                : Icons.thumb_down_outlined,
-          ),
-          onPressed: () =>
-              onReact(current == Reaction.down ? null : Reaction.down),
-        ),
+        chip(Reaction.up, '👍'),
+        chip(Reaction.down, '👎'),
         Expanded(
           child: TextField(
             controller: _reply,
+            focusNode: _replyFocus,
             decoration: withServerLimit(
               context,
               const InputDecoration(hintText: 'Krátká odpověď…'),
