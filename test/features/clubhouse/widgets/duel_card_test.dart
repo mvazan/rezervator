@@ -255,7 +255,8 @@ void main() {
       expect(find.text('Plné'), findsNWidgets(2));
       expect(find.text('Dor.'), findsNWidgets(2));
       expect(find.text('Ch.'), findsNWidgets(2));
-      expect(find.byIcon(Icons.expand_less), findsOneWidget);
+      expect(find.byIcon(Icons.expand_less), findsNothing);
+      expect(find.byIcon(Icons.expand_more), findsNothing);
     });
 
     testWidgets('expanded: no lane summary, +/- per lane, no verdict', (
@@ -272,8 +273,9 @@ void main() {
       // Nothing of the old sentence.
       expect(find.textContaining('rozhodly'), findsNothing);
       expect(find.textContaining('→'), findsNothing);
-      // The chevron stays, as the way back.
-      expect(find.byIcon(Icons.expand_less), findsOneWidget);
+      // No chevron row either: a tap on the card closes it again.
+      expect(find.byIcon(Icons.expand_less), findsNothing);
+      expect(find.byIcon(Icons.expand_more), findsNothing);
     });
 
     testWidgets('the table is mirrored: home Plné far left, away Plné far '

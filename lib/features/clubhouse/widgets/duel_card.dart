@@ -239,23 +239,26 @@ class _DuelBody extends StatelessWidget {
           // strength (the foundation's stand-in for hatching).
           faded: !done,
         ),
-        const SizedBox(height: 10),
-        // The lanes with the chevron at the right of the same row, so the
-        // card has no row of its own for it.
-        Row(
-          children: [
-            Expanded(
-              child: !expanded && duel.lanes.isNotEmpty
-                  ? _Lanes(duel: duel, homeColor: homeColor, awayColor: awayColor)
-                  : const SizedBox.shrink(),
-            ),
-            Icon(
-              expanded ? Icons.expand_less : Icons.expand_more,
-              size: 20,
-              color: scheme.onSurfaceVariant,
-            ),
-          ],
-        ),
+        // Collapsed: the lanes with the chevron at the right of the same row.
+        // Expanded: neither — the table replaces them, and a tap on the card
+        // closes it again.
+        if (!expanded) ...[
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: duel.lanes.isNotEmpty
+                    ? _Lanes(
+                        duel: duel,
+                        homeColor: homeColor,
+                        awayColor: awayColor,
+                      )
+                    : const SizedBox.shrink(),
+              ),
+              Icon(Icons.expand_more, size: 20, color: scheme.onSurfaceVariant),
+            ],
+          ),
+        ],
         AnimatedSize(
           duration: reduceMotion
               ? Duration.zero
