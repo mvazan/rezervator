@@ -27,11 +27,11 @@ class ResultsScreen extends ConsumerStatefulWidget {
   });
 
   /// Injectable so widget tests never reach Supabase or the platform.
-  final Future<String> Function(String matchId) refreshMatch;
+  final Future<String> Function(String matchId, {bool force}) refreshMatch;
   final void Function(String url) launch;
 
-  static Future<String> _refreshMatch(String matchId) =>
-      Api.refreshMatch(matchId);
+  static Future<String> _refreshMatch(String matchId, {bool force = false}) =>
+      Api.refreshMatch(matchId, force: force);
   static void _launch(String url) => launchWeb(url);
 
   @override
@@ -107,7 +107,9 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
     await tryAction(
       context,
       () =>
-          Future.wait([for (final slot in live) widget.refreshMatch(slot.id)]),
+          Future.wait([
+            for (final slot in live) widget.refreshMatch(slot.id, force: true),
+          ]),
       errorText: friendlyDbError,
     );
   }

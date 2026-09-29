@@ -3057,7 +3057,7 @@ $$;
 ALTER FUNCTION "public"."record_federation_run"("p_tenant" "uuid", "p_key" "text", "p_report" "jsonb", "p_error" "text") OWNER TO "postgres";
 
 
-CREATE OR REPLACE FUNCTION "public"."refresh_match"("p_match_id" "uuid") RETURNS "text"
+CREATE OR REPLACE FUNCTION "public"."refresh_match"("p_match_id" "uuid", "p_force" boolean DEFAULT false) RETURNS "text"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
     AS $$
@@ -3067,6 +3067,9 @@ declare
   v_fetched timestamptz;
   v_start timestamptz;
   v_job bigint;
+  -- A tap on the refresh button always looks at the site again; the floor
+  -- only stops a double tap from queueing the same fetch twice.
+  v_gap interval := case when p_force then interval '15 seconds' else interval '5 minutes' end;
 begin
   if not is_approved_or_kiosk() then
     raise exception 'not_allowed';
@@ -3096,7 +3099,7 @@ begin
               and now() between v_start - interval '1 hour' and v_start + interval '6 hours')) then
     return 'not_live';
   end if;
-  if v_fetched is not null and v_fetched > now() - interval '5 minutes' then
+  if v_fetched is not null and v_fetched > now() - v_gap then
     return 'fresh';
   end if;
   -- fetched_at alone does not gate a fetch that is pending, running or
@@ -3112,7 +3115,7 @@ begin
     set run_at = least(notification_jobs.run_at, excluded.run_at),
         payload = notification_jobs.payload || jsonb_build_object('requested_at', now())
     where coalesce((notification_jobs.payload->>'requested_at')::timestamptz, '-infinity')
-          < now() - interval '5 minutes'
+          < now() - v_gap
   returning id into v_job;
   if v_job is not null then
     perform trigger_notification_jobs();
@@ -3122,7 +3125,7 @@ end;
 $$;
 
 
-ALTER FUNCTION "public"."refresh_match"("p_match_id" "uuid") OWNER TO "postgres";
+ALTER FUNCTION "public"."refresh_match"("p_match_id" "uuid", "p_force" boolean) OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."register_profile"("p_display_name" "text", "p_tenant_id" "uuid", "p_club_id" "uuid" DEFAULT NULL::"uuid", "p_nick" "text" DEFAULT ''::"text", "p_phone" "text" DEFAULT NULL::"text") RETURNS "public"."profiles"
@@ -6429,9 +6432,9 @@ GRANT ALL ON FUNCTION "public"."record_federation_run"("p_tenant" "uuid", "p_key
 
 
 
-REVOKE ALL ON FUNCTION "public"."refresh_match"("p_match_id" "uuid") FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."refresh_match"("p_match_id" "uuid") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."refresh_match"("p_match_id" "uuid") TO "service_role";
+REVOKE ALL ON FUNCTION "public"."refresh_match"("p_match_id" "uuid", "p_force" boolean) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."refresh_match"("p_match_id" "uuid", "p_force" boolean) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."refresh_match"("p_match_id" "uuid", "p_force" boolean) TO "service_role";
 
 
 

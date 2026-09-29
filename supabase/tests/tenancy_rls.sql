@@ -4641,6 +4641,52 @@ begin
   end if;
 end $$;
 reset role;
+-- 0054: the refresh button (p_force) looks again even inside the 5 minutes;
+-- the background poke still answers fresh; a double tap is held off.
+do $$
+begin
+  update match_results set fetched_at = now() - interval '1 minute'
+   where match_id = current_setting('probe.fed_103')::uuid;
+  update notification_jobs
+     set run_at = now() + interval '1 hour',
+         payload = payload || jsonb_build_object('requested_at', now() - interval '1 minute')
+   where dedupe_key = 'federation_match:00000000-0000-0000-0000-00000000000a:103';
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+begin
+  if refresh_match(current_setting('probe.fed_103')::uuid) <> 'fresh' then
+    raise exception 'FAIL: the background poke did not stay fresh inside 5 minutes';
+  end if;
+  if refresh_match(current_setting('probe.fed_103')::uuid, true) <> 'queued' then
+    raise exception 'FAIL: a forced refresh inside 5 minutes was not queued (0054)';
+  end if;
+end $$;
+reset role;
+do $$
+begin
+  if not exists (select 1 from notification_jobs
+                 where dedupe_key = 'federation_match:00000000-0000-0000-0000-00000000000a:103'
+                   and run_at = now()
+                   and (payload->>'requested_at')::timestamptz = now()) then
+    raise exception 'FAIL: a forced refresh did not re-arm the job (0054)';
+  end if;
+  update match_results set fetched_at = now() - interval '5 seconds'
+   where match_id = current_setting('probe.fed_103')::uuid;
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+begin
+  if refresh_match(current_setting('probe.fed_103')::uuid, true) <> 'fresh' then
+    raise exception 'FAIL: a forced double tap was not held off by the 15 s floor (0054)';
+  end if;
+  raise notice 'OK: a forced refresh looks at the site again inside 5 minutes, a double tap is held off (0054)';
+end $$;
+reset role;
 do $$
 begin
   if not exists (select 1 from notification_jobs
@@ -4797,7 +4843,7 @@ begin
                            'public.request_federation_discovery()',
                            'public.request_federation_sync()',
                            'public.update_team(uuid, text, uuid, boolean)',
-                           'public.refresh_match(uuid)'] loop
+                           'public.refresh_match(uuid, boolean)'] loop
     if has_function_privilege('anon', f, 'execute')
        or not has_function_privilege('authenticated', f, 'execute') then
       raise exception 'FAIL: % must be callable by the app only', f;

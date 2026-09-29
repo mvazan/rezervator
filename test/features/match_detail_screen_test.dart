@@ -199,7 +199,7 @@ void main() {
     // The view the screen opens on, pinned by _FixedView; null leaves the
     // real notifier (SharedPreferences) in place.
     MatchDetailView? view = MatchDetailView.souboje,
-    Future<String> Function(String matchId)? refresh,
+    Future<String> Function(String matchId, {bool force})? refresh,
     void Function(String url)? launch,
     // When true, MatchDetailScreen is pushed on top of a host route (via a
     // button tap) instead of being the app's own `home` — lets a test pop
@@ -211,7 +211,7 @@ void main() {
   }) {
     final screen = MatchDetailScreen(
       matchId: matchId,
-      refresh: refresh ?? (_) async => 'queued',
+      refresh: refresh ?? (_, {force = false}) async => 'queued',
       launch: launch ?? (_) {},
     );
     return ProviderScope(
@@ -705,13 +705,15 @@ void main() {
     tester,
   ) async {
     final refreshed = <String>[];
+    final forced = <bool>[];
     await tester.pumpWidget(
       app(
         matchId: 'm2',
         slots: [match(id: 'm2', date: today)],
         results: {'m2': liveResultWith()},
-        refresh: (id) async {
+        refresh: (id, {force = false}) async {
           refreshed.add(id);
+          forced.add(force);
           return 'queued';
         },
       ),
@@ -724,6 +726,13 @@ void main() {
       find.widgetWithIcon(IconButton, Icons.refresh),
     );
     expect(button.tooltip, 'Obnovit');
+
+    // The open-time poke keeps the 5 min gate; the button always looks.
+    expect(forced, [false]);
+    await tester.tap(find.byIcon(Icons.refresh));
+    await tester.pump();
+    expect(refreshed, ['m2', 'm2']);
+    expect(forced, [false, true]);
   });
 
   testWidgets(
@@ -744,7 +753,7 @@ void main() {
           matchId: 'm2',
           slotsStream: slotsCtrl.stream,
           results: {'m2': liveResultWith()},
-          refresh: (id) async {
+          refresh: (id, {force = false}) async {
             refreshed.add(id);
             return 'queued';
           },
@@ -790,7 +799,7 @@ void main() {
           matchId: 'm2',
           slots: [match(id: 'm2', date: today)],
           results: {'m2': liveResultWith()},
-          refresh: (id) async {
+          refresh: (id, {force = false}) async {
             refreshed.add(id);
             return 'queued';
           },
@@ -876,7 +885,7 @@ void main() {
           matchId: 'm2',
           slots: [match(id: 'm2', date: today)],
           results: {'m2': liveResultWith()},
-          refresh: (id) {
+          refresh: (id, {force = false}) {
             refreshed.add(id);
             if (refreshed.length == 1) return Future.value('queued');
             return Completer<String>().future; // manual tap: never resolves
@@ -906,7 +915,7 @@ void main() {
           matchId: 'm2',
           slots: [match(id: 'm2', date: today)],
           resultsStream: resultsCtrl.stream,
-          refresh: (id) {
+          refresh: (id, {force = false}) {
             callCount++;
             if (callCount == 1) return Future.value('queued');
             return Completer<String>().future;
@@ -941,7 +950,7 @@ void main() {
           matchId: 'm2',
           slots: [match(id: 'm2', date: today)],
           results: {'m2': liveResultWith()},
-          refresh: (id) {
+          refresh: (id, {force = false}) {
             callCount++;
             if (callCount == 1) return Future.value('queued');
             return Completer<String>().future;
@@ -969,7 +978,7 @@ void main() {
         matchId: 'm2',
         slots: [match(id: 'm2', date: today)],
         results: {'m2': liveResultWith()},
-        refresh: (id) async {
+        refresh: (id, {force = false}) async {
           callCount++;
           return callCount == 1 ? 'queued' : 'fresh';
         },
@@ -992,7 +1001,7 @@ void main() {
         matchId: 'm2',
         slots: [match(id: 'm2', date: today)],
         results: {'m2': liveResultWith()},
-        refresh: (id) async {
+        refresh: (id, {force = false}) async {
           callCount++;
           return callCount == 1 ? 'queued' : 'not_live';
         },
@@ -1016,7 +1025,7 @@ void main() {
         matchId: 'm2',
         slots: [match(id: 'm2', date: today)],
         results: {'m2': liveResultWith()},
-        refresh: (id) async {
+        refresh: (id, {force = false}) async {
           callCount++;
           if (callCount == 1) return 'queued';
           throw Exception('federation_not_configured');
@@ -1132,7 +1141,7 @@ void main() {
           slots: [match(id: 'm2', date: today)],
           results: {'m2': liveResultWith()},
           pushable: true,
-          refresh: (id) {
+          refresh: (id, {force = false}) {
             callCount++;
             if (callCount == 1) return Future.value('queued'); // open-time
             return completer.future; // manual tap: stays pending

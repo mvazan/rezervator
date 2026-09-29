@@ -38,11 +38,11 @@ class MatchDetailScreen extends ConsumerStatefulWidget {
   final String matchId;
 
   /// Injectable so widget tests never reach Supabase or the platform.
-  final Future<String> Function(String matchId) refresh;
+  final Future<String> Function(String matchId, {bool force}) refresh;
   final void Function(String url) launch;
 
-  static Future<String> _defaultRefresh(String matchId) =>
-      Api.refreshMatch(matchId);
+  static Future<String> _defaultRefresh(String matchId, {bool force = false}) =>
+      Api.refreshMatch(matchId, force: force);
   static void _defaultLaunch(String url) => launchWeb(url);
 
   @override
@@ -95,7 +95,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
       if (mounted) setState(() => _waiting = false);
     });
     try {
-      final status = await widget.refresh(widget.matchId);
+      final status = await widget.refresh(widget.matchId, force: true);
       if (!context.mounted) return;
       // Both terminal answers mean there is nothing left to wait for: a
       // 'fresh' row is already as new as it gets, and 'not_live' means no
