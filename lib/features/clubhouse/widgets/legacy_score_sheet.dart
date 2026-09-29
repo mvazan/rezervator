@@ -6,7 +6,6 @@
 /// `MatchPlayerSection`'s two ExpansionTile lists.
 library;
 
-import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -1438,60 +1437,42 @@ class _ScoreTableBody extends StatelessWidget {
 /// axis, filling the whole display — no AppBar, the status and navigation
 /// bars hidden on Android (a swipe from an edge shows them for a moment),
 /// inside the safe area only so a notch never covers a cell — 100% width
-/// AND 100% height, portrait or landscape (see [_FillViewer]). System back
-/// closes it; there is no close button to take room. The web has no system
-/// back (the browser's leaves the app's page stack), so there a small back
-/// button floats in the corner for 3 s and comes back on a tap on the
-/// sheet ([showBackButton]). Fix round 3 let the user pinch in past the
-/// initial "see it all at once" view.
+/// AND 100% height, portrait or landscape (see [_FillViewer]). A small
+/// „×“ floats in the corner ([showCloseButton]); a tap on the sheet hides
+/// it when it is in the way and shows it again. System back closes the page
+/// too. Fix round 3 let the user pinch in past the initial "see it all at
+/// once" view.
 class LegacyScoreSheetPage extends StatefulWidget {
   const LegacyScoreSheetPage({
     super.key,
     required this.slot,
     required this.result,
     required this.players,
-    this.showBackButton = kIsWeb,
+    this.showCloseButton = true,
   });
 
   final PrioritySlot slot;
   final MatchResult? result;
   final List<MatchPlayerResult> players;
 
-  /// The floating back button — where there is no system back (the web).
-  final bool showBackButton;
+  /// The floating „×“. A tap on the sheet toggles it.
+  final bool showCloseButton;
 
   @override
   State<LegacyScoreSheetPage> createState() => _LegacyScoreSheetPageState();
 }
 
 class _LegacyScoreSheetPageState extends State<LegacyScoreSheetPage> {
-  static const _backButtonShownFor = Duration(seconds: 3);
-
-  bool _backButtonVisible = true;
-  Timer? _hideBackButton;
+  bool _closeVisible = true;
 
   @override
   void initState() {
     super.initState();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-    if (widget.showBackButton) _scheduleHide();
-  }
-
-  void _scheduleHide() {
-    _hideBackButton?.cancel();
-    _hideBackButton = Timer(_backButtonShownFor, () {
-      if (mounted) setState(() => _backButtonVisible = false);
-    });
-  }
-
-  void _showBackButton() {
-    setState(() => _backButtonVisible = true);
-    _scheduleHide();
   }
 
   @override
   void dispose() {
-    _hideBackButton?.cancel();
     // Flutter's own default: both bars shown.
     SystemChrome.setEnabledSystemUIMode(
       SystemUiMode.manual,
@@ -1509,31 +1490,31 @@ class _LegacyScoreSheetPageState extends State<LegacyScoreSheetPage> {
         players: widget.players,
       ),
     );
-    if (!widget.showBackButton) return Scaffold(body: sheet);
+    if (!widget.showCloseButton) return Scaffold(body: sheet);
     final scheme = Theme.of(context).colorScheme;
     return Scaffold(
       body: Stack(
         children: [
           GestureDetector(
             behavior: HitTestBehavior.translucent,
-            onTap: _showBackButton,
+            onTap: () => setState(() => _closeVisible = !_closeVisible),
             child: sheet,
           ),
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.all(8),
               child: AnimatedOpacity(
-                opacity: _backButtonVisible ? 1 : 0,
+                opacity: _closeVisible ? 1 : 0,
                 duration: const Duration(milliseconds: 200),
                 child: IgnorePointer(
-                  ignoring: !_backButtonVisible,
+                  ignoring: !_closeVisible,
                   child: Material(
                     shape: const CircleBorder(),
                     color: scheme.surface.withValues(alpha: 0.85),
                     elevation: 2,
                     child: IconButton(
-                      icon: const Icon(Icons.arrow_back),
-                      tooltip: 'Zpět',
+                      icon: const Icon(Icons.close),
+                      tooltip: 'Zavřít',
                       onPressed: () => Navigator.of(context).maybePop(),
                     ),
                   ),
