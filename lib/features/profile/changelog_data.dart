@@ -49,6 +49,11 @@ String changelogHeading(Release r, {required bool web}) {
 }
 
 const appChangelog = <Release>[
+  Release(null, '29. 9. 2026', [
+    'Klubovna → Kontakty: tlačítko pro WhatsApp má logo WhatsAppu.',
+    'Upozornění, že se registroval nový hráč nebo vznikla nová kuželna, '
+        'po ťuknutí otevře rovnou schvalování (i odkaz v e-mailu).',
+  ]),
   Release(null, '23. 9. 2026', [
     'Zápasy a výsledky se nově stahují z výsledkového servisu ČKA — '
         'správce je zapne v Správa → Oddíly.',

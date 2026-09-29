@@ -53,6 +53,7 @@ dependencies:
   # "socket se teprve vytáčí" od "není síť". Supabase ho stejně táhne
   # tranzitivně; v testech ten samý balík dodává MockClient.
   http: ^1.2.0
+  font_awesome_flutter: ^11.0.0
 
 dev_dependencies:
   flutter_test:

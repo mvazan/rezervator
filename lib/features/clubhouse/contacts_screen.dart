@@ -5,6 +5,7 @@ library;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/ui.dart';
@@ -136,7 +137,7 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                     onPressed: () => widget.callPhone(phone),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.chat_outlined),
+                    icon: const FaIcon(FontAwesomeIcons.whatsapp),
                     tooltip: 'WhatsApp',
                     visualDensity: VisualDensity.compact,
                     onPressed: () =>
