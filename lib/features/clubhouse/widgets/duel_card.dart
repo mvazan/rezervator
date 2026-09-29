@@ -555,8 +555,7 @@ class _Lanes extends StatelessWidget {
 }
 
 /// „Dr. 1  213 : 216•“: the lane winner's number w800 with a 6dp dot on its
-/// outer side; a tie „215 = 215“; a lane not thrown by both „– : –“ in a
-/// dashed frame. Centred in its cell.
+/// outer side; a tie „215 = 215“; a lane not thrown by both a plain „– : –“. Centred in its cell.
 class _LaneEntry extends StatelessWidget {
   const _LaneEntry({
     required this.position,
@@ -590,14 +589,12 @@ class _LaneEntry extends StatelessWidget {
 
     final Widget score;
     if (!lane.played) {
-      score = CustomPaint(
-        painter: _DashedOutlinePainter(color: scheme.outlineVariant, radius: 4),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-          child: Text(
-            '– : –',
-            style: base?.copyWith(color: scheme.onSurfaceVariant),
-          ),
+      // A lane not thrown yet: plain „– : –“, no frame.
+      score = Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+        child: Text(
+          '– : –',
+          style: base?.copyWith(color: scheme.onSurfaceVariant),
         ),
       );
     } else {
@@ -834,43 +831,6 @@ class _FitWidth extends StatelessWidget {
   );
 }
 
-/// A dashed 1dp rounded outline, the frame of a lane not thrown yet.
-class _DashedOutlinePainter extends CustomPainter {
-  const _DashedOutlinePainter({required this.color, required this.radius});
-
-  final Color color;
-  final double radius;
-
-  static const _dash = 3.0;
-  static const _gap = 2.0;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1;
-    final outline = Path()
-      ..addRRect(
-        RRect.fromRectAndRadius(
-          (Offset.zero & size).deflate(0.5),
-          Radius.circular(radius),
-        ),
-      );
-    for (final metric in outline.computeMetrics()) {
-      for (var d = 0.0; d < metric.length; d += _dash + _gap) {
-        canvas.drawPath(
-          metric.extractPath(d, math.min(d + _dash, metric.length)),
-          paint,
-        );
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(_DashedOutlinePainter oldDelegate) =>
-      oldDelegate.color != color || oldDelegate.radius != radius;
-}
 
 /// A duel side's name up to 2 lines, and under it — when someone took over —
 /// the site's „od 41. hodu Miloš Vážan“ in small print.
