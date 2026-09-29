@@ -140,22 +140,29 @@ void main() {
       expect(_text(tester, '385').style?.fontWeight, FontWeight.w500);
     });
 
-    testWidgets('one „bod“ pill, the lead and the lanes', (tester) async {
+    testWidgets('the lead and the lanes; no pill, no position', (tester) async {
       await pump(tester);
-      expect(find.text('bod'), findsOneWidget);
+      expect(find.text('bod'), findsNothing);
       expect(find.text('½'), findsNothing);
       expect(find.text('+22'), findsOneWidget);
-      expect(find.text('Dr. 1'), findsOneWidget);
-      expect(find.text('Dr. 2'), findsOneWidget);
+      // Lanes are „1.“ and „2.“, not „Dr. 1“.
+      expect(find.text('1.'), findsOneWidget);
+      expect(find.text('2.'), findsOneWidget);
+      expect(find.textContaining('Dr.'), findsNothing);
+      // The position circle is gone: the only lone „1“ would be it.
+      expect(find.text('1'), findsNothing);
       expect(find.text('213 : 216'), findsOneWidget);
       expect(find.text('194 : 169'), findsOneWidget);
     });
 
-    testWidgets('the „bod“ pill sits next to the home total', (tester) async {
+    testWidgets('the lead sits between the totals, bigger than before', (
+      tester,
+    ) async {
       await pump(tester);
-      final pill = tester.getCenter(find.text('bod'));
-      expect(pill.dx, greaterThan(tester.getCenter(find.text('407')).dx));
-      expect(pill.dx, lessThan(tester.getCenter(find.text('+22')).dx));
+      final lead = tester.getCenter(find.text('+22'));
+      expect(lead.dx, greaterThan(tester.getCenter(find.text('407')).dx));
+      expect(lead.dx, lessThan(tester.getCenter(find.text('385')).dx));
+      expect(_text(tester, '+22').style?.fontSize, 20);
     });
 
     testWidgets('a closed chevron, no set points, no table', (tester) async {
@@ -290,13 +297,10 @@ void main() {
       expect(find.textContaining('SB'), findsNothing);
     });
 
-    testWidgets('the pill, the bar and the stripe sit on the away side', (
+    testWidgets('the bar and the stripe sit on the away side', (
       tester,
     ) async {
       await tester.pumpWidget(_host(_card(_rudna[5])));
-      final pill = tester.getCenter(find.text('bod'));
-      expect(pill.dx, greaterThan(tester.getCenter(find.text('-3')).dx));
-      expect(pill.dx, lessThan(tester.getCenter(find.text('434')).dx));
 
       final track = _rect(tester, 'duel-6-bar');
       final fill = _rect(tester, 'duel-6-bar-fill');
@@ -358,19 +362,6 @@ void main() {
         expect(fillIn(tester, 'duel-1-lane-1-dot'), away);
         expect(fillIn(tester, 'duel-1-lane-2-dot'), home);
         expect(fillIn(tester, 'duel-1-bar-fill'), home);
-        // The „bod“ pill keeps the side colour itself, at 16 %.
-        final pill = tester.widget<DecoratedBox>(
-          find
-              .ancestor(
-                of: find.text('bod'),
-                matching: find.byType(DecoratedBox),
-              )
-              .first,
-        );
-        expect(
-          (pill.decoration as ShapeDecoration).color,
-          Colors.teal.withValues(alpha: 0.16),
-        );
       });
 
       testWidgets('${brightness.name}: a live bar is half strength inside a '
@@ -508,7 +499,7 @@ void main() {
         tester.getSize(find.byType(DuelCard)).height,
         greaterThanOrEqualTo(56),
       );
-      expect(find.text('Dr. 1'), findsNothing);
+      expect(find.text('1.'), findsNothing);
     });
 
     testWidgets('it never expands, but a tap still reaches onTap', (
@@ -528,12 +519,12 @@ void main() {
   testWidgets('T120: the four lanes in a 2×2 grid', (tester) async {
     await tester.pumpWidget(_host(_card(_t120)));
     for (var n = 1; n <= 4; n++) {
-      expect(find.text('Dr. $n'), findsOneWidget);
+      expect(find.text('$n.'), findsOneWidget);
     }
-    final dr1 = tester.getTopLeft(find.text('Dr. 1'));
-    final dr2 = tester.getTopLeft(find.text('Dr. 2'));
-    final dr3 = tester.getTopLeft(find.text('Dr. 3'));
-    final dr4 = tester.getTopLeft(find.text('Dr. 4'));
+    final dr1 = tester.getTopLeft(find.text('1.'));
+    final dr2 = tester.getTopLeft(find.text('2.'));
+    final dr3 = tester.getTopLeft(find.text('3.'));
+    final dr4 = tester.getTopLeft(find.text('4.'));
     expect(dr3.dy, greaterThan(dr1.dy));
     expect(dr3.dx, closeTo(dr1.dx, 0.01));
     expect(dr2.dy, closeTo(dr1.dy, 0.01));
@@ -559,9 +550,10 @@ void main() {
     expect(find.text('600'), findsOneWidget);
   });
 
-  testWidgets('a split point: „½“ on both sides, no stripe', (tester) async {
+  testWidgets('a split point: no stripe, no bar, the lead „=“', (tester) async {
     await tester.pumpWidget(_host(_card(_split, expanded: true)));
-    expect(find.text('½'), findsNWidgets(2));
+    // A split has no pill and no winner weight: just the lead „=“.
+    expect(find.text('½'), findsNothing);
     expect(find.text('bod'), findsNothing);
     expect(find.text('='), findsOneWidget);
     expect(find.byKey(const Key('duel-1-stripe')), findsNothing);

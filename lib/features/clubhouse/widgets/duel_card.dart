@@ -240,14 +240,16 @@ class _DuelBody extends StatelessWidget {
           // strength (the foundation's stand-in for hatching).
           faded: !done,
         ),
-        if (duel.lanes.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          _Lanes(duel: duel, homeColor: homeColor, awayColor: awayColor),
-        ],
-        const SizedBox(height: 8),
+        const SizedBox(height: 10),
+        // The lanes with the chevron at the right of the same row, so the
+        // card has no row of its own for it.
         Row(
           children: [
-            const Spacer(),
+            Expanded(
+              child: duel.lanes.isNotEmpty
+                  ? _Lanes(duel: duel, homeColor: homeColor, awayColor: awayColor)
+                  : const SizedBox.shrink(),
+            ),
             Icon(
               expanded ? Icons.expand_less : Icons.expand_more,
               size: 20,
@@ -313,8 +315,7 @@ class _DuelBody extends StatelessWidget {
   }
 }
 
-/// „Lucie Mičanová  (1)  Lukáš Pelánek“: both names up to 2 lines around the
-/// position in a 24dp circle.
+/// „Lucie Mičanová   Lukáš Pelánek“: both names, up to 2 lines each.
 class _Names extends StatelessWidget {
   const _Names({required this.duel});
 
@@ -334,33 +335,7 @@ class _Names extends StatelessWidget {
         Expanded(
           child: _PlayerName(duel.home, style: name),
         ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: scheme.surfaceContainerHighest,
-              shape: BoxShape.circle,
-            ),
-            child: SizedBox.square(
-              dimension: 24,
-              child: Padding(
-                padding: const EdgeInsets.all(3),
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text(
-                    '${duel.position}',
-                    style: text.labelMedium?.copyWith(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: scheme.onSurface,
-                      fontFeatures: _tabular,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
+        const SizedBox(width: 12),
         Expanded(
           child: _PlayerName(duel.away, style: name, end: true),
         ),
@@ -369,10 +344,9 @@ class _Names extends StatelessWidget {
   }
 }
 
-/// „407 [bod]   +22   385“: the totals at 32dp around the lead. Done: the
-/// point winner's total is w800 with a „bod“ pill beside it (a split: „½“ on
-/// both). Played: both w500, no pill, and the totals are the duel's shown
-/// ones ([Duel.shownHome], [Duel.shownAway]): only the lanes both players
+/// „407   +22   385“: the totals at 32dp around the lead at 20dp. Done: the
+/// point winner's total is w800 (a split: both w500). Played: both w500, and
+/// the totals are the duel's shown ones ([Duel.shownHome], [Duel.shownAway]): only the lanes both players
 /// threw, so they agree with the lead.
 class _Totals extends StatelessWidget {
   const _Totals({
@@ -393,7 +367,6 @@ class _Totals extends StatelessWidget {
     final text = Theme.of(context).textTheme;
     final done = duel.state == DuelState.done;
     final winner = done ? duel.pointWinner : null;
-    final split = done && duel.pointSplit;
     final homeTotal = numLabel(duel.shownHome);
     final awayTotal = numLabel(duel.shownAway);
 
@@ -405,15 +378,6 @@ class _Totals extends StatelessWidget {
       fontFeatures: _tabular,
     );
 
-    Widget? pill(MatchSide side) {
-      final color = side == MatchSide.home ? homeColor : awayColor;
-      if (winner == side) return _PointPill(label: 'bod', color: color);
-      if (split) return _PointPill(label: '½', color: color);
-      return null;
-    }
-
-    final homePill = pill(MatchSide.home);
-    final awayPill = pill(MatchSide.away);
 
     // 120 throws: „1 (550)  +28  (578) 3“ — the set points big, the pins in
     // brackets beside them. Until both sides have set points (a duel just
@@ -457,7 +421,6 @@ class _Totals extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   total(MatchSide.home),
-                  if (homePill != null) ...[const SizedBox(width: 6), homePill],
                 ],
               ),
             ),
@@ -467,9 +430,9 @@ class _Totals extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 8),
           child: Text(
             leadLabel(duel.diff),
-            style: text.labelLarge?.copyWith(
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
+            style: text.titleLarge?.copyWith(
+              fontSize: 20,
+              fontWeight: FontWeight.w800,
               color:
                   leadColor(
                     context,
@@ -490,7 +453,6 @@ class _Totals extends StatelessWidget {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (awayPill != null) ...[awayPill, const SizedBox(width: 6)],
                   total(MatchSide.away),
                 ],
               ),
@@ -498,38 +460,6 @@ class _Totals extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-/// „bod“ (or „½“) on the side's colour at 16 %, the text in onSurface.
-class _PointPill extends StatelessWidget {
-  const _PointPill({required this.label, required this.color});
-
-  final String label;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final text = Theme.of(context).textTheme;
-    return DecoratedBox(
-      decoration: ShapeDecoration(
-        color: color.withValues(alpha: 0.16),
-        shape: const StadiumBorder(),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-        child: Text(
-          label,
-          style: text.labelMedium?.copyWith(
-            fontSize: 12,
-            fontWeight: FontWeight.w800,
-            color: scheme.onSurface,
-            fontFeatures: _tabular,
-          ),
-        ),
-      ),
     );
   }
 }
@@ -682,7 +612,7 @@ class _LaneEntry extends StatelessWidget {
       fontFeatures: _tabular,
     );
     final label = Text(
-      'Dr. ${lane.lane}',
+      '${lane.lane}.',
       style: base?.copyWith(
         fontWeight: FontWeight.w400,
         color: scheme.onSurfaceVariant,
@@ -858,7 +788,7 @@ class _LaneTable extends StatelessWidget {
                 lane.home?.total,
                 mirrored: false,
               ),
-              'Dr. ${lane.lane}',
+              '${lane.lane}.',
               side(
                 lane.away?.fulls,
                 lane.away?.spares,
