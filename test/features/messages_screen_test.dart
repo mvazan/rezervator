@@ -765,6 +765,12 @@ void main() {
       expect(find.text('Přijďte dřív.'), findsOneWidget);
       expect(find.text('Starší zpráva.'), findsNothing);
       expect(find.text('Starší (1)'), findsOneWidget);
+      await tester.tap(find.text('Starší (1)'));
+      await tester.pumpAndSettle();
+      expect(find.text('Starší zpráva.'), findsOneWidget);
+      await tester.tap(find.text('Starší (1)'));
+      await tester.pumpAndSettle();
+      expect(find.text('Starší zpráva.'), findsNothing);
     });
 
     testWidgets('a plain player sees only "Napsat"', (tester) async {

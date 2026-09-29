@@ -150,6 +150,11 @@ void main() {
     });
   });
 
+  test('messageExists: an id that is no uuid is gone, without asking the server',
+      () async {
+    expect(await Api.messageExists('missing'), isFalse);
+  });
+
   test('messageDelete sends the id', () async {
     await Api.messageDelete('m1');
     expect(rpcCall('message_delete'), {'p_id': 'm1'});

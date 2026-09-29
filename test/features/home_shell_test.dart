@@ -780,6 +780,23 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.descendant(of: find.byType(NavigationBar), matching: find.byType(Badge)),
         findsNothing);
+
+    // An unread notice alone keeps the dot: the message half of the sum is 0.
+    final notice = Message(
+      id: 'n1', kind: MessageKind.notice, audience: MessageAudience.all,
+      authorId: 'staff', authorRole: MessageAuthorRole.admin,
+      onDate: null, blockId: null, title: 'Úklid', body: 'V sobotu.',
+      expiresAt: null, notify: true, createdAt: now, updatedAt: now,
+    );
+    MessageRecipient noticeRow() => MessageRecipient(
+        messageId: 'n1', userId: 'me', readAt: null,
+        reaction: null, reply: null, reactedAt: null);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpWidget(app(
+        messages: [msg, notice], messageRecipients: [row(readAt: now), noticeRow()]));
+    await tester.pumpAndSettle();
+    expect(find.descendant(of: find.byType(NavigationBar), matching: find.byType(Badge)),
+        findsOneWidget);
   });
 
   // Deep links (0051): a push tap or a /zpravy/:id, /nastenka/:id route
@@ -859,7 +876,7 @@ void main() {
 
     testWidgets('a pending link for an id that does not exist shows the '
         'not-found snack', (tester) async {
-      await tester.pumpWidget(app());
+      await tester.pumpWidget(app(messageExists: (_) async => false));
       await tester.pumpAndSettle();
       final container =
           ProviderScope.containerOf(tester.element(find.byType(HomeShell)));
