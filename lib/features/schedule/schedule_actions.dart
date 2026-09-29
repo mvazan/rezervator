@@ -424,16 +424,22 @@ class ScheduleActions {
   /// [message] is given: messaging is not editing, and the edit guards
   /// must not take it away (0051: the admin writes about any day, the duty
   /// about a block already under way).
+  /// Still a short snack: one with an action would persist by default
+  /// (Flutter 3.35+) and every later snack of the app would queue behind
+  /// it unseen. The calendar may be gone by the tap (a tab switch).
   void _refuse(String text, {VoidCallback? message}) {
     if (message == null) {
       snack(context, text);
       return;
     }
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      persist: false,
       content: Text(text),
       action: SnackBarAction(
         label: 'Napsat hráčům bloku…',
-        onPressed: message,
+        onPressed: () {
+          if (context.mounted) message();
+        },
       ),
     ));
   }

@@ -127,7 +127,11 @@ void main() {
     Stream<DateTime>? clock,
     Profile profile = me,
     List<TimeBlock> blocks = const [b1],
+    // false takes the calendar out while the app (and its messenger) stays
+    // — a tab switch with a snack still on screen.
+    ValueNotifier<bool>? calendarShown,
   }) {
+    const calendar = WeekScreen();
     return ProviderScope(
       overrides: [
         activeReservationCountProvider.overrideWith((ref, id) async => 0),
@@ -156,7 +160,17 @@ void main() {
           ]),
         ),
       ],
-      child: const MaterialApp(home: Scaffold(body: WeekScreen())),
+      child: MaterialApp(
+        home: Scaffold(
+          body: calendarShown == null
+              ? calendar
+              : ValueListenableBuilder<bool>(
+                  valueListenable: calendarShown,
+                  builder: (_, shown, _) =>
+                      shown ? calendar : const SizedBox.shrink(),
+                ),
+        ),
+      ),
     );
   }
 
@@ -368,6 +382,77 @@ void main() {
     await tester.tap(find.widgetWithText(SnackBarAction, 'Napsat hráčům bloku…'));
     await tester.pumpAndSettle();
     expectComposer(tester, yesterday, 'b1');
+  });
+
+  // A SnackBar with an action persists by default (Flutter 3.35+) — the
+  // refusal stays a short snack, or every later snack of the app would
+  // queue behind it unseen.
+  group('the refusal with „Napsat hráčům bloku…“ still goes away', () {
+    const early = TimeBlock(
+      id: 'b0',
+      startsAt: HourMinute(9, 0),
+      endsAt: HourMinute(10, 30),
+      position: 0,
+      active: true,
+    );
+
+    Future<void> refuse(WidgetTester tester, Day date, TimeBlock block) async {
+      tester
+          .widget<WeekCalendarView>(find.byType(WeekCalendarView))
+          .admin
+          .onEditBlock!(date, block);
+      await tester.pumpAndSettle();
+      expect(
+        find.widgetWithText(SnackBarAction, 'Napsat hráčům bloku…'),
+        findsOneWidget,
+      );
+    }
+
+    // The next snack, queued behind the refusal, is seen after it.
+    Future<void> expectGone(WidgetTester tester, String text) async {
+      ScaffoldMessenger.of(tester.element(find.byType(WeekScreen)))
+          .showSnackBar(const SnackBar(content: Text('Rezervace zrušena.')));
+      await tester.pumpAndSettle();
+      expect(find.text('Rezervace zrušena.'), findsNothing);
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpAndSettle();
+      expect(find.text(text), findsNothing);
+      expect(find.text('Rezervace zrušena.'), findsOneWidget);
+    }
+
+    testWidgets('the duty, a block under way', (tester) async {
+      await tester.pumpWidget(app(blocks: const [early, b1]));
+      await tester.pumpAndSettle();
+      await refuse(tester, t, early);
+      expect(find.text(blockStartedMessage), findsOneWidget);
+      await expectGone(tester, blockStartedMessage);
+    });
+
+    testWidgets('the admin, a past day', (tester) async {
+      await tester.pumpWidget(app(profile: admin));
+      await tester.pumpAndSettle();
+      await refuse(tester, t.addDays(-1), b1);
+      expect(find.text('Minulé dny nelze upravovat.'), findsOneWidget);
+      await expectGone(tester, 'Minulé dny nelze upravovat.');
+    });
+
+    // The snack outlives the calendar (a tab switch): its action then
+    // does nothing instead of opening a sheet from a dead context.
+    testWidgets('the action once the calendar is gone does nothing',
+        (tester) async {
+      final shown = ValueNotifier(true);
+      addTearDown(shown.dispose);
+      await tester.pumpWidget(app(profile: admin, calendarShown: shown));
+      await tester.pumpAndSettle();
+      await refuse(tester, t.addDays(-1), b1);
+      shown.value = false;
+      await tester.pump();
+      expect(find.byType(WeekScreen), findsNothing);
+      await tester.tap(find.widgetWithText(SnackBarAction, 'Napsat hráčům bloku…'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.text('Napsat hráčům'), findsNothing);
+    });
   });
 
   testWidgets('…and the portrait ⋮ of a past day offers the admin only '
