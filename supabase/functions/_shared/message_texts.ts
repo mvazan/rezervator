@@ -71,7 +71,7 @@ export function staffMessageText(
   return { title, body: opts.context ? `${body}\n${opts.context}` : body };
 }
 
-/// Player → staff: „Zpráva od {jméno}“, the text and then the context
+/// Player → staff: „Zpráva od hráče: {jméno}“, the text and then the context
 /// when the message carries one.
 export function playerMessageText(
   authorName: string,
@@ -79,7 +79,7 @@ export function playerMessageText(
   context: string | null,
 ): Message {
   return {
-    title: `Zpráva od ${authorName}`,
+    title: `Zpráva od hráče: ${authorName}`,
     body: context ? `${body}\n${context}` : body,
   };
 }

@@ -988,7 +988,7 @@ threads, no player-to-player messages. Every error is a bare code.
   cannot be signed — a notice: its title and the text cut to 120
   characters, the e-mail „Otevřít nástěnku“; a message: „Zpráva od
   správce“ / „Zpráva od služby“ (by `author_role`) to players, „Zpráva od
-  {jméno}“ to staff, the context („pá 2. 10. · 16:00–17:00“) on its own
+  hráče: {jméno}“ to staff, the context („pá 2. 10. · 16:00–17:00“) on its own
   line, the e-mail with signed one-click 👍/👎 links to **react**
   (`signReactToken`, `CANCEL_TOKEN_SECRET`) and „Odpovědět v aplikaci“;
   push data `{kind: notice | message, message_id, tenant_id}` (the alley,

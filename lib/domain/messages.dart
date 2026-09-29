@@ -212,8 +212,8 @@ String reactionLine(
 }
 
 /// The six header forms a `MessageTile` shows, by who sent it and to whom:
-/// „Od služby (Bára)“, „Od správce (Adam)“, „Od Petr Novák“ (names are
-/// never inflected), „Ode mě hráčům“, „Ode mě správci“, „Ode mě službě“.
+/// „Od služby (Bára)“, „Od správce (Adam)“, „Od hráče: Petr Novák“ (names
+/// are never inflected), „Ode mě hráčům“, „Ode mě správci“, „Ode mě službě“.
 String headerLabel(
   Message m, {
   required String authorName,
@@ -231,7 +231,7 @@ String headerLabel(
   return switch (m.audience) {
     MessageAudience.day || MessageAudience.block =>
       authorIsAdmin ? 'Od správce ($authorName)' : 'Od služby ($authorName)',
-    MessageAudience.admins || MessageAudience.duty => 'Od $authorName',
+    MessageAudience.admins || MessageAudience.duty => 'Od hráče: $authorName',
     MessageAudience.all => authorName,
   };
 }

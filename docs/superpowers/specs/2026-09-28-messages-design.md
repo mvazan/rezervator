@@ -251,8 +251,8 @@ alley) is not a recipient.
   - staff → players: title „Zpráva od správce“ / „Zpráva od služby“ (by `author_role`);
     body = the text, then the context on its own line: „pá 3. 10. · 16:00–17:00“ or „celý
     den pá 3. 10.“.
-  - player → staff: title „Zpráva od {jméno}“; body = the text, then the context when the
-    message carries one („k tréninku ne 5. 10. · 18:00–19:00“).
+  - player → staff: title „Zpráva od hráče: {jméno}“; body = the text, then the context
+    when the message carries one („k tréninku ne 5. 10. · 18:00–19:00“).
 - **E-mail** (`RESEND_*`, the existing fallback for anyone without a push token, i.e. every web
   user): the full text and context; for a `message` two buttons **👍** and **👎** (signed
   links, next section) and „Odpovědět v aplikaci“ → `https://rezervator.online/#/zpravy/<id>`;
@@ -371,8 +371,8 @@ value; either is fine, pick whichever touches less of the existing call sites.
 - One list, chronological by the message's key day (`on_date`, else the posting day): today and
   ahead open, earlier collapsed under „Starší (N)“. Read state: opening the screen marks my
   unread received messages read.
-- Tile: header „Od služby (Jan Novák)“ / „Od správce (…)“ / „Od Petr Novák“ (names are never
-  inflected — see Open copy questions) / „Ode mě správci“ / „Ode mě službě“ / „Ode mě
+- Tile: header „Od služby (Jan Novák)“ / „Od správce (…)“ / „Od hráče: Petr Novák“ (names
+  are never inflected — see Copy decisions) / „Ode mě správci“ / „Ode mě službě“ / „Ode mě
   hráčům“, a context chip („pá 3. 10. · 16:00–17:00“, „celý den pá 3. 10.“, „k tréninku ne
   5. 10. · 18:00–19:00“, or none), the body.
 - **Received `message`:** two toggle chips 👍 / 👎 (`FilterChip`s named by their emoji, with
@@ -446,13 +446,13 @@ Platí do, Do odvolání, Poslat upozornění, Upravit, Kdo si to zobrazil, Zobr
 Ještě nezobrazili:, Sejmout, Smazat, vyvěšeno {den}, platí do {den}, do odvolání, Starší
 ({n}), Na nástěnce zatím nic není., Napsat, Napsat hráčům, Správci, Službě, Dnes nikdo
 neslouží, Celý den, Dostane {n} hráči: …, Nikdo nemá rezervaci, Odeslat, Zpráva odeslána.,
-Krátká odpověď…, bez reakce, ty, Od správce, Od služby, Ode mě správci, Ode mě službě, Ode mě
-hráčům, k tréninku {den} · {čas}, celý den {den}, Napsat hráčům dne…, Napsat hráčům bloku…,
-Napsat správci…, Napsat službě…, Zatím žádné zprávy., Zpráva už neexistuje., Reakce na tvou
-zprávu, Zpráva od správce, Zpráva od služby, Zpráva od {jméno}, Odpovědět v aplikaci, Otevřít
-nástěnku, Díky, reakce je uložená., Odkaz už neplatí., Otevřít Rezervátor., {n}× 👍,
-{n}× 👎, {n}× 💬 (and 💬 opening the reply-only group of the reaction line), Nadpis je moc
-dlouhý., Odpověď je moc dlouhá.
+Krátká odpověď…, bez reakce, ty, Od správce, Od služby, Od hráče: {jméno}, Ode mě správci,
+Ode mě službě, Ode mě hráčům, k tréninku {den} · {čas}, celý den {den}, Napsat hráčům dne…,
+Napsat hráčům bloku…, Napsat správci…, Napsat službě…, Zatím žádné zprávy., Zpráva už
+neexistuje., Reakce na tvou zprávu, Zpráva od správce, Zpráva od služby, Zpráva od hráče:
+{jméno}, Odpovědět v aplikaci, Otevřít nástěnku, Díky, reakce je uložená., Odkaz už
+neplatí., Otevřít Rezervátor., {n}× 👍, {n}× 👎, {n}× 💬 (and 💬 opening the reply-only group of
+the reaction line), Nadpis je moc dlouhý., Odpověď je moc dlouhá.
 
 Shipped with the plan besides these (dialogs, outcomes and error texts, quoted as the code
 has them): Upravit oznam, Platí do: {den}, Oznam vyvěšen., Oznam uložen., Sejmout oznam?,
@@ -563,15 +563,16 @@ through an edge function. Nothing in this design blocks it.
   appended to the current unreleased web-only batch if this feature ships before that one is
   cut into a version; the implementer picks whichever is true on the day it lands).
 
-## Open copy questions
+## Copy decisions
 
-Three texts shipped as they are, pending the user's word; the code is the reference until
-then, and none of them changes behaviour:
+Three texts first shipped as open questions; the user settled them on 2026-09-29. None of
+them changes behaviour:
 
-1. **The player-message header.** A message from a player to the staff reads „Od Petr
-   Novák“ on the tile (`headerLabel`) and „Zpráva od Petr Novák“ in the push/e-mail title:
-   names are never inflected (automatic Czech declension of arbitrary names is unreliable).
-   This spec first wrote the inflected „Od Petra Nováka“.
+1. **The player-message header.** A message from a player to the staff reads „Od hráče:
+   Petr Novák“ on the tile (`headerLabel`) and „Zpráva od hráče: Petr Novák“ in the
+   push/e-mail title (`playerMessageText`). Names are never inflected (automatic Czech
+   declension of arbitrary names is unreliable) — the colon form needs none. This spec first
+   wrote the inflected „Od Petra Nováka“, and the first build shipped „Od Petr Novák“.
 2. **A sole admin writing to „Správci“.** When the writer is the alley's only admin,
    „Správci“ is still offered, and the send is refused with `no_recipients`; the player
    composer shows the generic „Nikdo nemá rezervaci.“, which speaks of reservations, not of

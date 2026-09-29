@@ -77,13 +77,13 @@ Deno.test("playerMessageText: names the author, context optional", () => {
   assertEquals(
     playerMessageText("Petr Novák", "Přijdu později.", "k tréninku ne 5. 10. · 18:00–19:00"),
     {
-      title: "Zpráva od Petr Novák",
+      title: "Zpráva od hráče: Petr Novák",
       body: "Přijdu později.\nk tréninku ne 5. 10. · 18:00–19:00",
     },
   );
   assertEquals(
     playerMessageText("Petr Novák", "Ahoj.", null),
-    { title: "Zpráva od Petr Novák", body: "Ahoj." },
+    { title: "Zpráva od hráče: Petr Novák", body: "Ahoj." },
   );
 });
 

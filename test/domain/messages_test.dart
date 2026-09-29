@@ -269,7 +269,7 @@ void main() {
       expect(
         headerLabel(message(audience: MessageAudience.admins, authorId: 'petr'),
             authorName: 'Petr Novák', authorIsAdmin: false, meId: 'me'),
-        'Od Petr Novák',
+        'Od hráče: Petr Novák',
       );
       expect(
         headerLabel(message(audience: MessageAudience.block, authorId: 'me'),

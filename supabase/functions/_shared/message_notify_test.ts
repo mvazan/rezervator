@@ -418,9 +418,9 @@ Deno.test("deliverMessage: texts, push data and e-mails by kind and audience", a
   assertEquals(mail0.html.includes("https://x/react?t=e1-up"), true);
   assertEquals(mail0.html.includes("https://x/react?t=e1-down"), true);
   assertEquals(mail0.html.includes("https://rezervator.online/#/zpravy/m1"), true);
-  assertEquals(pushed[1].title, "Zpráva od Bára Kantýnská");
+  assertEquals(pushed[1].title, "Zpráva od hráče: Bára Kantýnská");
   assertEquals(pushed[1].body, "Přijďte dřív.");
-  assertEquals(batches[1][0].subject, "Zpráva od Bára Kantýnská");
+  assertEquals(batches[1][0].subject, "Zpráva od hráče: Bára Kantýnská");
   assertEquals(pushed[2].title, "Brigáda");
   assertEquals(pushed[2].body, "V sobotu uklízíme.");
   assertEquals(pushed[2].data, { kind: "notice", message_id: "m1", tenant_id: "t1" });
