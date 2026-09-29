@@ -245,23 +245,19 @@ class LegacyScoreSheet extends StatelessWidget {
   }
 }
 
-/// A line's name as the site's sheet prints it: the starter, and under them
-/// „od 41. hodu Miloš Vážan“ when someone took over.
-String _sheetName(MatchPlayerResult p) => p.substituteLabel == null
-    ? p.playerName
-    : '${p.playerName}\n${p.substituteLabel}';
+/// A line's name as the sheet prints it: the starter, and under them who
+/// took over — „od 41. hodu“ on its own line, the substitute's name on the
+/// next.
+String _sheetName(MatchPlayerResult p) {
+  final sub = p.substituteName;
+  if (sub == null || sub.isEmpty) return p.playerName;
+  final from = p.substituteFromThrow;
+  return [p.playerName, if (from != null) 'od $from. hodu', sub].join('\n');
+}
 
+/// How many lines a name printed by [_sheetName] takes before any wrapping.
+int _nameLines(String text) => '\n'.allMatches(text).length + 1;
 
-/// Every column's width, computed once per render from the table's actual
-/// content (Fix round 5) — kuzelky uses `table-layout: auto`, so its
-/// columns grow to fit whatever they hold; the brief's own widths are
-/// MINIMUMS, not fixed sizes. A column's width is `max(brief minimum,
-/// widest content that column ever holds + 9dp)` — 9dp because [_cell]'s
-/// own padding (4+4) plus its 1px border account for exactly that much
-/// beyond a glyph run's raw measured width. Mirror columns (the same
-/// column on the home and away side) share ONE width — the wider side's
-/// requirement — so the table stays visually symmetric, the same way a
-/// real HTML `<col>` would if both sides sat in the same `<colgroup>`.
 class _ColumnMetrics {
   const _ColumnMetrics({
     required this.nameWidth,
@@ -1355,7 +1351,10 @@ class _ScoreTableBody extends StatelessWidget {
                 text: nameInLaneRows ? nameText : '',
                 style: _s16w700,
                 align: TextAlign.left,
-                maxLines: geometry.laneNameMaxLines(laneRowCount),
+                maxLines: math.max(
+                  geometry.laneNameMaxLines(laneRowCount),
+                  _nameLines(nameText),
+                ),
               ),
             _cell(
               width: m.nameWidth,
@@ -1369,7 +1368,10 @@ class _ScoreTableBody extends StatelessWidget {
               text: nameInLaneRows ? '' : nameText,
               style: _s16w700,
               align: TextAlign.left,
-              maxLines: geometry.celkemNameMaxLines,
+              maxLines: math.max(
+                geometry.celkemNameMaxLines,
+                _nameLines(nameText),
+              ),
             ),
           ],
         ),

@@ -163,8 +163,11 @@ void main() {
       app(result: result, players: [homePlayer, changed]),
     );
     await tester.pumpAndSettle();
-    expect(find.textContaining('Petr Svoboda'), findsOneWidget);
-    expect(find.textContaining('od 41. hodu Miloš Vážan'), findsOneWidget);
+        // „od 41. hodu“ and the substitute's name each on a line of their own.
+    expect(
+      find.text('Petr Svoboda\nod 41. hodu\nMiloš Vážan'),
+      findsOneWidget,
+    );
     expect(tester.takeException(), isNull);
   });
 
