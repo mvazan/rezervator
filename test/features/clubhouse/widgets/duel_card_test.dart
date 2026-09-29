@@ -562,6 +562,34 @@ void main() {
     expect(find.text('600'), findsOneWidget);
   });
 
+  testWidgets('T120: 1. and 3. (2. and 4.) start in one column, thrown or not', (
+    tester,
+  ) async {
+    final duel = duelsOf([
+      _player('home', 1, [
+        _lane(1, 150, 1),
+        _lane(2, 150, 1),
+        _lane(3, null),
+        _lane(4, null),
+      ]),
+      _player('away', 1, [
+        _lane(1, 140, 0),
+        _lane(2, 140, 0),
+        _lane(3, null),
+        _lane(4, null),
+      ]),
+    ]).single;
+    await tester.pumpWidget(_host(_card(duel)));
+    expect(
+      tester.getTopLeft(find.text('1.')).dx,
+      closeTo(tester.getTopLeft(find.text('3.')).dx, 0.01),
+    );
+    expect(
+      tester.getTopLeft(find.text('2.')).dx,
+      closeTo(tester.getTopLeft(find.text('4.')).dx, 0.01),
+    );
+  });
+
   testWidgets('a split point: no stripe, no bar, the lead „=“', (tester) async {
     await tester.pumpWidget(_host(_card(_split, expanded: true)));
     // A split has no pill and no winner weight: just the lead „=“.

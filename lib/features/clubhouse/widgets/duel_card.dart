@@ -555,7 +555,7 @@ class _Lanes extends StatelessWidget {
 }
 
 /// „Dr. 1  213 : 216•“: the lane winner's number w800 with a 6dp dot on its
-/// outer side; a tie „215 = 215“; a lane not thrown by both a plain „– : –“. Centred in its cell.
+/// outer side; a tie „215 = 215“; a lane not thrown by both a plain „– : –“. Left-aligned in its cell.
 class _LaneEntry extends StatelessWidget {
   const _LaneEntry({
     required this.position,
@@ -647,7 +647,10 @@ class _LaneEntry extends StatelessWidget {
       );
     }
 
-    return Center(
+    // Left-aligned in its column, so the numbers of lanes 1 and 3 (2 and 4)
+    // start on one line whatever their scores look like.
+    return Align(
+      alignment: Alignment.centerLeft,
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [label, const SizedBox(width: 8), score],
