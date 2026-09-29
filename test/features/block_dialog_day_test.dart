@@ -628,6 +628,28 @@ void main() {
     expect(messaged, true);
   });
 
+  // Changed times are not saved by „Napsat hráčům bloku…“: messaging
+  // „come at 15:00“ over a block still at 16:00 would mislead the players.
+  testWidgets('„Napsat hráčům bloku…“ is off while the times are changed '
+      'and unsaved', (tester) async {
+    var messaged = false;
+    await tester.pumpWidget(app(BlockDialog(
+      existing: b1,
+      blocks: const [b1, b2],
+      dayContext: thursday,
+      dayBaseIds: const ['b1', 'b2'],
+      initialStart: const HourMinute(15, 0),
+      offerMessageBlock: true,
+      onMessagePlayers: () => messaged = true,
+    )));
+    await tester.pumpAndSettle();
+    final tile = find.widgetWithText(ListTile, 'Napsat hráčům bloku…');
+    expect(tester.widget<ListTile>(tile).enabled, isFalse);
+    await tester.tap(tile, warnIfMissed: false);
+    expect(messaged, isFalse);
+    expect(find.byType(BlockDialog), findsOneWidget);
+  });
+
   testWidgets('a NEW block from the header ＋ never offers „Napsat hráčům '
       'bloku…“', (tester) async {
     await tester.pumpWidget(app(BlockDialog(
