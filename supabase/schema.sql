@@ -1750,6 +1750,22 @@ $$;
 ALTER FUNCTION "public"."enqueue_notification"("p_kind" "text", "p_dedupe_key" "text", "p_payload" "jsonb", "p_delay" interval) OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."fcm_token_claim"() RETURNS "trigger"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  -- Setting it to null does not fire this trigger again (see WHEN below).
+  update profiles set fcm_token = null
+  where fcm_token = new.fcm_token and id <> new.id;
+  return null;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."fcm_token_claim"() OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."federation_description"("p_competition" "text", "p_round" integer, "p_is_away" boolean, "p_venue" "text") RETURNS "text"
     LANGUAGE "sql" IMMUTABLE
     AS $$
@@ -5261,6 +5277,10 @@ CREATE OR REPLACE TRIGGER "block_deactivated" AFTER UPDATE OF "active" ON "publi
 
 
 
+CREATE OR REPLACE TRIGGER "fcm_token_claim" AFTER INSERT OR UPDATE OF "fcm_token" ON "public"."profiles" FOR EACH ROW WHEN (("new"."fcm_token" IS NOT NULL)) EXECUTE FUNCTION "public"."fcm_token_claim"();
+
+
+
 CREATE OR REPLACE TRIGGER "match_exceptions_enqueue_calendar" AFTER INSERT OR DELETE OR UPDATE ON "public"."match_exceptions" FOR EACH ROW EXECUTE FUNCTION "public"."match_exceptions_enqueue_calendar"();
 
 
@@ -6200,6 +6220,11 @@ GRANT ALL ON FUNCTION "public"."enqueue_match_calendar_sync"("p_user" "uuid", "p
 
 REVOKE ALL ON FUNCTION "public"."enqueue_notification"("p_kind" "text", "p_dedupe_key" "text", "p_payload" "jsonb", "p_delay" interval) FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."enqueue_notification"("p_kind" "text", "p_dedupe_key" "text", "p_payload" "jsonb", "p_delay" interval) TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."fcm_token_claim"() FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."fcm_token_claim"() TO "service_role";
 
 
 

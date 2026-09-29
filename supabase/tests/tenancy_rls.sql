@@ -10443,4 +10443,70 @@ begin
   raise notice 'OK: running 0051 again leaves every privilege and its ACL order as it was (0051)';
 end $$;
 
+-- 0052 One device token, one profile ----------------------------------------
+-- 20. notify pushes to every profile holding a token, so a token the last
+-- account on a device kept (signed out offline, session expired, an older
+-- app) carried its notifications to the next person there. Whoever
+-- registers a token now takes it from everyone else — across alleys too,
+-- it is the same phone — and sign-out hands back only this device's token.
+reset role;
+update profiles set fcm_token = 'tok-0052-other-phone'
+where id = '10000000-0000-0000-0000-000000000004';
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+update profiles set fcm_token = 'tok-0052-device' where id = auth.uid();
+-- Player 2 (another alley) signs in on the same phone.
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000002","role":"authenticated"}';
+update profiles set fcm_token = 'tok-0052-device' where id = auth.uid();
+reset role;
+do $$
+begin
+  if (select fcm_token from profiles
+      where id = '10000000-0000-0000-0000-000000000001') is not null then
+    raise exception 'FAIL: the previous account kept the device token';
+  end if;
+  if (select fcm_token from profiles
+      where id = '10000000-0000-0000-0000-000000000002')
+     is distinct from 'tok-0052-device' then
+    raise exception 'FAIL: the new account did not get the device token';
+  end if;
+  if (select fcm_token from profiles
+      where id = '10000000-0000-0000-0000-000000000004')
+     is distinct from 'tok-0052-other-phone' then
+    raise exception 'FAIL: claiming a token touched another device''s token';
+  end if;
+  raise notice 'OK: registering a device token takes it from the previous account, across alleys (0052)';
+end $$;
+
+-- 20b. Sign-out (Api.signOut) clears the token only while it is still this
+-- device's: player 2's other phone registered since, and signing out here
+-- must not cut that phone off.
+update profiles set fcm_token = 'tok-0052-phone-b'
+where id = '10000000-0000-0000-0000-000000000002';
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000002","role":"authenticated"}';
+update profiles set fcm_token = null
+where id = auth.uid() and fcm_token = 'tok-0052-device';
+do $$
+begin
+  if (select fcm_token from profiles where id = auth.uid())
+     is distinct from 'tok-0052-phone-b' then
+    raise exception 'FAIL: signing out on one phone cleared the other phone''s token';
+  end if;
+end $$;
+update profiles set fcm_token = null
+where id = auth.uid() and fcm_token = 'tok-0052-phone-b';
+reset role;
+do $$
+begin
+  if (select fcm_token from profiles
+      where id = '10000000-0000-0000-0000-000000000002') is not null then
+    raise exception 'FAIL: a player could not hand back their own device token';
+  end if;
+  raise notice 'OK: sign-out clears the token only while it is still this device''s (0052)';
+end $$;
+
 rollback;
