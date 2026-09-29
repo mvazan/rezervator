@@ -416,13 +416,12 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     required bool pullToRefresh,
   }) {
     final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
     // The viewer's own colour for a team (the one Výsledky and the calendar
-    // use), else primary for home and tertiary for away.
+    // use), else green for home and red for the guests.
     final homeColor =
-        googleEventColorOf(teamColors[slot.homeTeam]) ?? scheme.primary;
+        googleEventColorOf(teamColors[slot.homeTeam]) ?? homeSideColor;
     final awayColor =
-        googleEventColorOf(teamColors[slot.awayTeam]) ?? scheme.tertiary;
+        googleEventColorOf(teamColors[slot.awayTeam]) ?? awaySideColor;
     final duels = duelsOf(players);
 
     final children = <Widget>[

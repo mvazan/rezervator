@@ -339,8 +339,8 @@ void main() {
         return (box.decoration as BoxDecoration).color;
       }
 
-      final home = legibleShadeOf(Colors.teal, brightness);
-      final away = legibleShadeOf(Colors.purple, brightness);
+      final home = legibleSideShade(Colors.teal, brightness, home: true);
+      final away = legibleSideShade(Colors.purple, brightness, home: false);
 
       testWidgets('${brightness.name}: the stripe, the lane dots and the bar', (
         tester,

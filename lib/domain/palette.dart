@@ -55,6 +55,26 @@ Color legibleShadeOf(Color color, Brightness brightness) => HSLColor.fromColor(c
     .withLightness(brightness == Brightness.dark ? 0.86 : 0.27)
     .toColor();
 
+/// A match's sides without a team colour of the viewer's own: home green,
+/// guests red (Google's Bazalková and Rajčatová). Only their hue and
+/// saturation matter — [legibleSideShade] sets the lightness.
+const homeSideColor = Color(0xFF0B8043);
+const awaySideColor = Color(0xFFD50000);
+
+/// [legibleShadeOf] for one side of a match: the two sides get different
+/// lightness (green lighter than red), so they differ in brightness as well
+/// as in hue and stay apart for a viewer who confuses red and green. Every
+/// value keeps at least 3:1 against the card in light and dark, high
+/// contrast too (test/core/theme_contrast_test.dart).
+Color legibleSideShade(Color color, Brightness brightness, {required bool home}) =>
+    HSLColor.fromColor(color)
+        .withLightness(
+          brightness == Brightness.dark
+              ? (home ? 0.86 : 0.72)
+              : (home ? 0.29 : 0.25),
+        )
+        .toColor();
+
 /// Club color palette (spec §2). Index 0–8 = a club color; anything else
 /// (e.g. -1 "no club", -2 rental default) → the neutral fallback.
 ///

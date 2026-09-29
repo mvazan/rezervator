@@ -139,24 +139,52 @@ void main() {
       });
 
       // The match detail's side-colour marks (a duel's winner stripe, lane
-      // dots and difference bar, the scoreboard's point bars) sit straight
-      // on the card, painted in legibleShadeOf the side's colour: one of the
-      // eleven Google event colours the viewer gave a team, else primary
-      // (home) or tertiary (away). A mark is a shape: 3:1 in every variant
-      // (Banánová's raw yellow measures 1.45:1 on the light card; the
-      // shades' worst is Bazalková, 3.93:1 in light high contrast).
+      // dots and difference bar) sit straight on the card, painted in
+      // legibleSideShade of the side's colour: one of the eleven Google
+      // event colours the viewer gave a team, else green (home) or red
+      // (guests). A mark is a shape: 3:1 in every variant, for either side.
       test('the Souboje side-colour marks are visible on the card', () {
         final card = theme.cardTheme.color!;
         for (final (name, color) in <(String, Color)>[
           for (final (_, name, color) in googleEventColors) (name, color),
-          ('primary', scheme.primary),
-          ('tertiary', scheme.tertiary),
+          ('home green', homeSideColor),
+          ('guests red', awaySideColor),
         ]) {
-          _expectShape(
-            contrastRatio(legibleShadeOf(color, brightness), card),
-            '$name mark on the card',
+          for (final home in [true, false]) {
+            _expectShape(
+              contrastRatio(
+                legibleSideShade(color, brightness, home: home),
+                card,
+              ),
+              '$name mark on the card (${home ? 'home' : 'guests'})',
+              variant,
+              _shapeAA,
+            );
+          }
+        }
+      });
+
+      // The two default sides must not differ in hue alone: green is the
+      // lighter one, so a viewer who confuses red and green still sees two
+      // brightnesses (measured about 2.5:1 light, 2.3:1 dark).
+      test('home green and guests red differ in brightness too', () {
+        final green = legibleSideShade(homeSideColor, brightness, home: true);
+        final red = legibleSideShade(awaySideColor, brightness, home: false);
+        expect(contrastRatio(green, red), greaterThanOrEqualTo(2.0));
+      });
+
+      // „bod“ pill: the side colour at 16 % under onSurface text.
+      test('the „bod“ pill text is legible on either default side', () {
+        final card = theme.cardTheme.color!;
+        for (final side in [homeSideColor, awaySideColor]) {
+          _expectText(
+            contrastRatio(
+              scheme.onSurface,
+              composite(side.withValues(alpha: 0.16), card),
+            ),
+            'pill text on the tinted card',
             variant,
-            _shapeAA,
+            textBar,
           );
         }
       });

@@ -32,8 +32,8 @@ const _tabular = [FontFeature.tabularFigures()];
 /// the card in light and dark for every team colour a viewer can pick
 /// (test/core/theme_contrast_test.dart). The pills keep the colour itself,
 /// at 16 % under onSurface text.
-Color _mark(BuildContext context, Color side) =>
-    legibleShadeOf(side, Theme.of(context).brightness);
+Color _mark(BuildContext context, Color side, {required bool home}) =>
+    legibleSideShade(side, Theme.of(context).brightness, home: home);
 
 /// One duel of a match — see the library comment.
 ///
@@ -115,6 +115,7 @@ class DuelCard extends StatelessWidget {
                           color: _mark(
                             context,
                             winner == MatchSide.home ? homeColor : awayColor,
+                            home: winner == MatchSide.home,
                           ),
                         ),
                       ),
@@ -515,7 +516,11 @@ class _DiffBar extends StatelessWidget {
         ? 0.0
         : math.min(diff.abs() / math.max(scale, 1), 1.0);
     final homeLeads = diff > 0;
-    final color = _mark(context, homeLeads ? homeColor : awayColor);
+    final color = _mark(
+      context,
+      homeLeads ? homeColor : awayColor,
+      home: homeLeads,
+    );
     return SizedBox(
       key: Key('duel-$position-bar'),
       height: 6,
@@ -665,6 +670,7 @@ class _LaneEntry extends StatelessWidget {
                   color: _mark(
                     context,
                     side == MatchSide.home ? homeColor : awayColor,
+                    home: side == MatchSide.home,
                   ),
                   shape: BoxShape.circle,
                 ),
