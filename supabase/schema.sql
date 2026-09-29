@@ -2335,7 +2335,7 @@ begin
       if p_on_date is null then
         raise exception 'date_past';
       end if;
-      perform duty_gate(p_on_date);
+      perform duty_edit_gate(p_on_date);
       if p_audience = 'block' then
         -- An active block of this alley, or a day-only block that belongs
         -- to this date through day_overrides (add_special_block leaves

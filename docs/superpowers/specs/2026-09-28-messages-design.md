@@ -2,7 +2,7 @@
 
 Requested by the user on 2026-09-28. The app speaks Czech; the user writes Slovak. Migration
 `0051_messages.sql` (the canteen duty branch is at 0050 and this builds on its rights:
-`is_on_duty()`, `duty_gate(date)`). The branch `messages` starts from `canteen-duty`; once
+`is_on_duty()`, `duty_gate(date)`, `duty_edit_gate(date)`). The branch `messages` starts from `canteen-duty`; once
 PR #144 merges it is rebased onto `main`.
 
 ## Decided with the user
@@ -24,8 +24,9 @@ PR #144 merges it is rebased onto `main`.
   Zprávy (messages to and from me).
 - **A player picks the addressee:** „Správci“ or „Službě“ (today's duty).
 - **A notice has an optional expiry:** a date, or „do odvolání“.
-- **Only the admin posts notices;** the duty writes to a day or block during their duty, from
-  today on — the same window as their other rights.
+- **Only the admin posts notices;** the duty writes to the players of a day or block only on
+  the days of their OWN periods (from today on, on duty today or not) — the very days on
+  which they may change that day's blocks: writing about a day goes with the right to edit it.
 - **The admin sees who has seen a notice** („12 z 40“, and who has not).
 - **Attachments later** (images, PDFs — not now, the free Supabase plan has 1 GB of storage).
   The model leaves room for them; see „Attachments“.
@@ -170,8 +171,12 @@ alley) is not a recipient.
   the alley with an account, not the kiosk (`not_allowed`); then:
   - `notice`: `is_admin()` (`not_allowed`), audience `all` (`invalid_audience`), a title
     (`title_required`) of at most 80 characters (`title_too_long`).
-  - `day` / `block`: `is_admin()`, or the duty via `duty_gate(p_on_date)` (on duty today, date
-    from today on — `not_allowed` / `date_past`); a missing `p_on_date` is `date_past` too.
+  - `day` / `block`: `is_admin()`, or the duty via `duty_edit_gate(p_on_date)` (0050 — the
+    block edits' gate: a period of their OWN covers that date, `not_allowed`, and it is not in
+    the past, `date_past`; on duty today or not, so a duty starting next week writes about
+    next week's days already now); a missing `p_on_date` is `date_past` too. Writing to the
+    players of a day or a block goes with the right to change that day's blocks — the two are
+    one right, on the same days.
     For `block` the block must be an active block of the alley, or a day-only block (one
     `add_special_block` left with `active = false`) that `day_overrides.block_ids` names for
     that date (`unknown_block`).
@@ -416,8 +421,10 @@ value; either is fine, pick whichever touches less of the existing call sites.
   another try; the outcome is still told if the sheet was swiped away meanwhile. The sheet
   ends above the keyboard and scrolls; „Odeslat“ is off while the text is over 500 code
   points (the counter says „502/500“).
-- **Staff composer** (admin, or the duty on today or later) — FAB „Napsat hráčům“ → date
-  (default today; the duty cannot pick a past day) → „Celý den“ or one of the day's blocks,
+- **Staff composer** (the admin, or a player with a duty period that has not ended) — FAB
+  „Napsat hráčům“ → date (default today, or for a duty not serving today the first day of
+  their next period; the admin may pick any day, the duty only the days of their own periods
+  from today on — the picker greys out every other day) → „Celý den“ or one of the day's blocks,
   each with „Dostane 4 hráči: Jan, Petra, …“ (0 → disabled, „Nikdo nemá rezervaci“) → text →
   „Odeslat“. While the reservations and the roster are still loading no target shows a
   count and „Odeslat“ waits; a prefilled block that turns out empty stays selected,
@@ -430,12 +437,14 @@ value; either is fine, pick whichever touches less of the existing call sites.
   (`BlockDialog`, edit — where `existing` is the block being edited) gets „Napsat hráčům
   bloku…“. Opened fresh from the header ＋ there is no block yet to message, so that variant
   does not offer it (the day-level „Napsat hráčům dne…“ already covers that case). Both that
-  open the staff composer with the date/block prefilled, under the same gate as the other day
-  rights (admin, or the duty from today on). In the dialog „Napsat hráčům bloku…“ is off
+  open the staff composer with the date/block prefilled, on exactly the days where the block
+  gestures are offered (the admin on any day; the duty on the days of their own periods, from
+  today on — for a duty not serving today those may all lie ahead), like „Přidat blok…“ next
+  to it. In the dialog „Napsat hráčům bloku…“ is off
   while the block's times have unsaved changes (opening the composer would drop them).
   Messaging is not editing, so the edit guards do not take it away:
   - a past day's ⋮ (otherwise no edits) offers the admin „Napsat hráčům dne…“ alone; the
-    duty gets no ⋮ there (`duty_gate` refuses a past day);
+    duty gets no ⋮ there (`duty_edit_gate` refuses a past day);
   - a refused block edit — the admin on a past day („Minulé dny nelze upravovat.“), the
     duty on a block already under way today — offers „Napsat hráčům bloku…“ as the action
     on its snack, which still goes away on its own (`persist: false`, so later snacks do
@@ -519,7 +528,7 @@ je moc dlouhá., Neplatný typ zprávy. The length counters („502/500“) are 
   whose block is later removed keeps its `on_date` and shows the chip without the time.
 - Delivery is one attempt per recipient (§Delivery: a push once, an e-mail batch retried
   once only when Resend answers it busy or down); no receipts of delivery.
-- The duty writing at 23:59 whose duty ends at midnight: the server decides (`duty_gate`), the
+- The duty writing at 23:59 whose duty ends at midnight: the server decides (`duty_edit_gate`), the
   app shows the „Služba skončila“ text on refusal — as everywhere in 0050.
 
 ## Attachments (later, not in this plan)

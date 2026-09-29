@@ -240,6 +240,10 @@ end $$;
 -- `duty`, which says `nobody_on_duty` whenever the computed duty set is
 -- empty (no period covers today, or every assignee is excluded); a notice
 -- to an empty set goes up with no recipient rows.
+-- A message to a `day` / `block` is the block edits' business: the admin
+-- writes about any date, the duty only about the days of their OWN periods
+-- and never the past (duty_edit_gate, 0050 — on duty today or not), the days
+-- whose blocks they may change and whose players that change concerns.
 create or replace function message_send(
   p_kind text, p_audience text, p_on_date date, p_block_id uuid,
   p_title text, p_body text, p_expires_at timestamptz, p_notify boolean)
@@ -286,7 +290,7 @@ begin
       if p_on_date is null then
         raise exception 'date_past';
       end if;
-      perform duty_gate(p_on_date);
+      perform duty_edit_gate(p_on_date);
       if p_audience = 'block' then
         -- An active block of this alley, or a day-only block that belongs
         -- to this date through day_overrides (add_special_block leaves

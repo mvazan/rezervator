@@ -9124,7 +9124,7 @@ exception when others then
 end $$;
 
 -- 23h2. The admin writes to any date, a past one too (the matrix's third
--- column; the duty gets date_past for yesterday in 23i): yesterday's day
+-- column; the duty gets date_past for yesterday in 23i2): yesterday's day
 -- and block reach Cyril, booked in block 16:00 yesterday, and only him.
 reset role;
 insert into reservations (tenant_id, player_id, date, block_id, lane, created_via, created_by)
@@ -9153,11 +9153,13 @@ begin
   raise notice 'OK: the admin writes to a past day and a past block (0051)';
 end $$;
 
--- 23i. Bára on duty writes to a day or a block from today on, as a
+-- 23i. Bára on duty writes to a day or a block on the days of her own
+-- period (today for a week: the block edits' rule, duty_edit_gate), as a
 -- player: today that reaches Adam (booked, and not the author now), Cyril
 -- and Dana; tomorrow, where she is booked herself, only Dana (Filip, booked
--- in the same block, is pending). Yesterday is
--- date_past; to the duty every assignee is excluded (Emil a placeholder,
+-- in the same block, is pending). Yesterday, before her period, and the day
+-- after it are not hers: not_allowed (23i2 has the past inside a period);
+-- to the duty every assignee is excluded (Emil a placeholder,
 -- Bára the author), so nobody_on_duty; to the admins she reaches Adam.
 set local request.jwt.claims =
   '{"sub":"51000000-0000-0000-0000-000000000011","role":"authenticated"}'; -- Bára, duty
@@ -9198,13 +9200,29 @@ begin
   raise notice 'OK: the duty writes to a block and a day after today, not to herself (0051)';
 end $$;
 do $$
+declare
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
 begin
   begin
-    perform message_send('message', 'day', (now() at time zone 'Europe/Prague')::date - 1,
+    perform message_send('message', 'day', v_today - 1,
                          null, null, 'Včera.', null, true);
-    raise exception 'FAIL: the duty wrote to yesterday';
+    raise exception 'FAIL: the duty wrote to yesterday, before her period';
   exception when others then
-    if sqlerrm <> 'date_past' then raise; end if;
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  begin
+    perform message_send('message', 'block', v_today + 7,
+                         current_setting('probe.msg_b1')::uuid, null, 'Za týden.', null, true);
+    raise exception 'FAIL: the duty wrote to a block after her period';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  begin
+    perform message_send('message', 'day', v_today + 7,
+                         null, null, 'Za týden.', null, true);
+    raise exception 'FAIL: the duty wrote to a day after her period';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
   end;
   begin
     perform message_send('message', 'duty', null, null, null, 'Já sama.', null, true);
@@ -9212,7 +9230,7 @@ begin
   exception when others then
     if sqlerrm <> 'nobody_on_duty' then raise; end if;
   end;
-  raise notice 'OK: the duty: yesterday is date_past, herself and a placeholder nobody_on_duty (0051)';
+  raise notice 'OK: the duty: days outside her period are not_allowed, herself and a placeholder nobody_on_duty (0051)';
 end $$;
 do $$
 declare
@@ -9225,6 +9243,45 @@ begin
   end if;
   raise notice 'OK: the duty writes to the admins (0051)';
 end $$;
+
+-- 23i2. The past inside her own period is date_past, not not_allowed: her
+-- period began three days ago, so yesterday is hers but gone (day and
+-- block); a day before it is still not hers. The admin (23h2) is not held.
+reset role;
+update duty_periods
+   set starts_on = (now() at time zone 'Europe/Prague')::date - 3
+ where id = current_setting('probe.msg_period')::uuid;
+set local role authenticated;
+do $$
+declare
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+begin
+  begin
+    perform message_send('message', 'day', v_today - 1, null, null, 'Včera.', null, true);
+    raise exception 'FAIL: the duty wrote to yesterday inside her period';
+  exception when others then
+    if sqlerrm <> 'date_past' then raise; end if;
+  end;
+  begin
+    perform message_send('message', 'block', v_today - 1,
+                         current_setting('probe.msg_b1')::uuid, null, 'Včera.', null, true);
+    raise exception 'FAIL: the duty wrote to yesterday''s block inside her period';
+  exception when others then
+    if sqlerrm <> 'date_past' then raise; end if;
+  end;
+  begin
+    perform message_send('message', 'day', v_today - 4, null, null, 'Předevčírem.', null, true);
+    raise exception 'FAIL: the duty wrote to a day before her period';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  raise notice 'OK: the past inside her period is date_past, before it not_allowed (0051)';
+end $$;
+reset role;
+update duty_periods
+   set starts_on = (now() at time zone 'Europe/Prague')::date
+ where id = current_setting('probe.msg_period')::uuid;
+set local role authenticated;
 
 
 -- 23j. Cyril, a plain player: no day, no block, no notice (not_allowed);
@@ -9313,6 +9370,58 @@ update duty_periods
    set starts_on = (now() at time zone 'Europe/Prague')::date
  where id = current_setting('probe.msg_period')::uuid;
 set local role authenticated;
+
+-- 23k1. A duty whose period starts TOMORROW is not on duty today, yet writes
+-- to the days of that period already now (the block edits' rule,
+-- duty_edit_gate: prepare the days that will be hers) — and to no other day,
+-- today included. Bára's period is moved a day ahead for it: tomorrow's day
+-- and block reach Dana only (Bára herself is booked, Filip is pending).
+reset role;
+update duty_periods
+   set starts_on = (now() at time zone 'Europe/Prague')::date + 1
+ where id = current_setting('probe.msg_period')::uuid;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"51000000-0000-0000-0000-000000000011","role":"authenticated"}'; -- Bára, from tomorrow
+do $$
+declare
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+  v_id uuid;
+begin
+  v_id := message_send('message', 'day', v_today + 1, null, null,
+                       'Zítra otevřeno déle.', null, true);
+  if (select array_agg(user_id) from message_recipients where message_id = v_id)
+       <> array['51000000-0000-0000-0000-000000000013'::uuid] then
+    raise exception 'FAIL: the coming duty''s day message reached the wrong players';
+  end if;
+  v_id := message_send('message', 'block', v_today + 1,
+                       current_setting('probe.msg_b1')::uuid, null, 'Zítra dřív.', null, true);
+  if (select array_agg(user_id) from message_recipients where message_id = v_id)
+       <> array['51000000-0000-0000-0000-000000000013'::uuid] then
+    raise exception 'FAIL: the coming duty''s block message reached the wrong players';
+  end if;
+  begin
+    perform message_send('message', 'day', v_today, null, null, 'Dnes.', null, true);
+    raise exception 'FAIL: a duty starting tomorrow wrote to today';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  begin
+    perform message_send('message', 'block', v_today,
+                         current_setting('probe.msg_b1')::uuid, null, 'Dnes.', null, true);
+    raise exception 'FAIL: a duty starting tomorrow wrote to today''s block';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  raise notice 'OK: a duty from tomorrow writes to tomorrow already, not to today (0051)';
+end $$;
+reset role;
+update duty_periods
+   set starts_on = (now() at time zone 'Europe/Prague')::date
+ where id = current_setting('probe.msg_period')::uuid;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"51000000-0000-0000-0000-000000000012","role":"authenticated"}'; -- Cyril, player
 
 -- 23k2. Bára, the only assignee with an account, loses her approval: she
 -- is off duty then (is_on_duty and due_duty_reminders skip her, 0050), so

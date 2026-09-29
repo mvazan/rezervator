@@ -897,8 +897,9 @@ threads, no player-to-player messages. Every error is a bare code.
   two, so the app counts runes, not what the screen shows; never the raw
   `messages_title_check`), ≤ 2000 chars;
   `notify` is the admin's choice (null = true). A message to a `day` /
-  `block`: the admin, or the duty through `duty_gate(on_date)` (on duty
-  today, a date from today on — `not_allowed` / `date_past`; a missing date
+  `block`: the admin, or the duty through `duty_edit_gate(on_date)` (a
+  period of their own covers the date, on duty today or not — `not_allowed`;
+  not a past date — `date_past`; the block edits' gate, 0050; a missing date
   is `date_past` too); the block must be an active block of the alley or a
   day-special one that `day_overrides.block_ids` names for that date
   (`unknown_block`). A message to `admins` / `duty`: any approved account
@@ -1260,7 +1261,9 @@ threads, no player-to-player messages. Every error is a bare code.
   is its only account goes up with no recipient rows), `nobody_on_duty`
   with no period today, with
   every assignee excluded (the author, a placeholder) and with the only
-  account assignee pending; the admin, the duty from today on and a
+  account assignee pending; the admin, the duty on the days of her own
+  period (also one starting tomorrow, on duty today or not; `date_past`
+  inside a period, `not_allowed` outside it) and a
   plain player per audience (the admin to a past day and block too), the
   kiosk, a placeholder and a pending
   account sending nothing, another alley reaching only its own admins;
