@@ -164,7 +164,7 @@ reappears, when `service_role` lacks DML on any table or view, or when
 | `move_day_reservations(...)` | admin; a player on the days of their own duty periods, from today on (0050, `duty_edit_gate`) | Re-seat all reservations of a day's block into another block; same collision rules. On today the duty moves nothing out of or into a block that has started (`too_late`); the admin may. `not_allowed`, `date_past`, `unknown_block`, `too_late`, `slot_taken`. |
 | `cancel_block_day_reservations(date, block, note?)` | admin; a player on the days of their own duty periods, from today on (0050, `duty_edit_gate`) | Bulk cancel before hiding a template block for one day. The duty's call spares the trainings of a block that has started today (like `cancel_stranded_reservations`); the admin's cancels them too. `not_allowed`, `date_past`, `unknown_block`. |
 | `set_day_override(date, closed, reason?, block_ids?)` | admin; a player on the days of their own duty periods, from today on (0050, `duty_edit_gate`) | Upsert the override and cancel the reservations it displaces — the duty's call not those whose block has started today (like `cancel_stranded_reservations`), the admin's all of them. `not_allowed`, `date_past`. |
-| `add_special_block(starts_at, ends_at)` (0050) | admin; a player with a duty period that has not ended (`duty_edit_gate(null)`: no date here — the `set_day_override` that points a day at the block names it and holds them to their own periods) | Inserts an inactive day-only block of the caller's alley (`position -1` — the SPECIAL sentinel the Rozvrh list hides — `active false`, so the weekly template ignores it) that a day override then points at; returns its id. Behind `Api.addSpecialBlock` instead of a direct insert, so the duty needs no wider `time_blocks` policy. `not_allowed` (no duty period left, and not an admin); `time_blocks_check` when the end is not after the start. |
+| `add_special_block(starts_at, ends_at)` (0050) | admin; a player with a duty period that has not ended (`duty_edit_days_gate()`: no date here — the `set_day_override` that points a day at the block names it and holds them to their own periods; `duty_edit_gate(date)` refuses a null date with `date_past`, the admin's too) | Inserts an inactive day-only block of the caller's alley (`position -1` — the SPECIAL sentinel the Rozvrh list hides — `active false`, so the weekly template ignores it) that a day override then points at; returns its id. Behind `Api.addSpecialBlock` instead of a direct insert, so the duty needs no wider `time_blocks` policy. `not_allowed` (no duty period left, and not an admin); `time_blocks_check` when the end is not after the start. |
 | `delete_day_override(date)` (0050) | admin; a player on the days of their own duty periods, from today on (`duty_edit_gate`) | Deletes the day's override: the day returns to the weekly template (`override_changed` cancels what no longer fits). No override is no error. Behind `Api.deleteDayOverride` instead of a direct delete. `not_allowed`, `date_past`. |
 | `rental_add_date(rental, date, starts_at, ends_at, lanes, note)` | admin | Adds a one-time date next to `rental` (a one-time row of the caller's tenant): creates its `rental_groups` row from the rental's name/colour and adopts it when it has none, then inserts the date with its own lanes/times/note. The source row is read `for update`, so two admins adding a date to the same groupless rental at once cannot each create a group and split it in half. Returns the new row id. Raises `not_authenticated`, `not_allowed`, `unknown_rental` (foreign, exception or weekly row). |
 | `monthly_attendance(year, month)` | admin | Rows (player, club name, attended) — uncancelled reservation = attendance. |
@@ -193,7 +193,7 @@ Internal, no EXECUTE for app roles: `current_tenant_id`, `is_*`,
 `federation_description`, `enqueue_federation_jobs` (called by cron),
 `enqueue_federation_venue`, `federation_live_report`,
 `federation_refresh_error` (0045), `is_on_duty`, `duty_gate`,
-`duty_edit_gate` (0050),
+`duty_edit_gate`, `duty_edit_days_gate` (0050),
 `message_recipients_stamp_reacted` (0051, the `reacted_at` trigger's),
 `prune_messages` (0051, service_role only — called by cron).
 (`is_admin()` is the exception to `is_*`: policies call it, so it stays
@@ -1062,9 +1062,13 @@ threads, no player-to-player messages. Every error is a bare code.
   `set_calendar_teams_for`, deletes dropped teams' events, rewrites the
   rest — §Second calendar and match colours); `secondary` (creates or
   deletes "Rezervátor 2", same section).
-- **cancel** — GET renders the confirmation page, POST verifies the token
-  and updates `reservations` directly with the service role
-  (`cancelled_via = 'one_click'`). This is the one reservation write outside
+- **cancel** — GET only reads (link scanners follow it) and redirects to
+  the confirmation page `web/cancel.html` on rezervator.online with the
+  token; that page's button POSTs it back, and the POST verifies the token,
+  updates `reservations` directly with the service role
+  (`cancelled_via = 'one_click'`) and redirects to the same page with the
+  outcome. Never HTML from the function itself: the edge runtime rewrites
+  the Content-Type to text/plain. This is the one reservation write outside
   the RPCs; the notify function ignores `one_click` cancels.
 - **react** (0051) — the 👍/👎 links of a message e-mail (no JWT —
   deployed `--no-verify-jwt`, like cancel; the trust is the token). GET

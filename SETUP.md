@@ -458,11 +458,13 @@ Sentry vypnuté. Jeden projekt stačí pro web i Android — rozlišuje je tag
 - Po přidání migrace spusť `tool/schema_snapshot.sh` (obnoví
   `supabase/schema.sql`, CI ho porovnává s čerstvou stavbou) a doplň
   [`docs/SCHEMA.md`](docs/SCHEMA.md).
-- Edge funkce: `deno test supabase/functions` a `deno check --import-map
-  supabase/functions/import_map.json supabase/functions/notify/index.ts
-  supabase/functions/cancel/index.ts supabase/functions/react/index.ts`;
-  bez lokálního Dena přes Docker:
-  `docker run --rm -v "$PWD/supabase/functions:/w" -w /w denoland/deno:latest test`.
+- Edge funkce (z kořene repa, stejně jako CI): `deno test --allow-read
+  supabase/functions` a `deno check --import-map
+  supabase/functions/import_map.json supabase/functions/*/index.ts`; bez
+  lokálního Dena přes Docker: `docker run --rm -v "$PWD:/w" -w /w
+  denoland/deno:latest test --allow-read supabase/functions`. Testy čtou
+  fixtures i soubory mimo `supabase/functions` (`web/cancel.html`,
+  `supabase/config.toml`), proto celé repo a `--allow-read`.
 - Vydání do Google Play (verze, changelog, recenzní účet) popisuje
   [`PLAY.md`](PLAY.md); CI/CD a nasazení backendu [`CICD.md`](CICD.md).
 

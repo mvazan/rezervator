@@ -19,6 +19,7 @@ import 'package:rezervator/features/schedule/week_screen.dart';
 import 'package:rezervator/features/schedule/widgets/calendar_board.dart';
 import 'package:rezervator/features/schedule/widgets/day_chip_strip.dart';
 import 'package:rezervator/features/schedule/widgets/day_header.dart';
+import 'package:rezervator/features/schedule/widgets/schedule_day_column.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -2731,6 +2732,29 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Zrušit bez zprávy'), findsNothing);
       expect(find.text('Petr Novák'), findsOneWidget); // the info snack
+    });
+
+    // The columns themselves take the per-day hooks: long-press edit,
+    // tap-a-gap add and drag exist on its own days only — the bundle and
+    // the header ＋ alone would not show a column wired to the full set.
+    testWidgets('a duty later this week: each day column gets the block '
+        'gestures on its own days only', (tester) async {
+      wideSurface(tester);
+      await tester.pumpWidget(
+        app(dutyPeriods: [period('d1', 10, 12)], dutyAssignments: onMe),
+      );
+      await tester.pumpAndSettle();
+      final columns = tester.widgetList<ScheduleDayColumn>(
+        find.byType(ScheduleDayColumn),
+      );
+      expect(columns, hasLength(7));
+      for (final c in columns) {
+        final mine = {10, 11, 12}.contains(c.day.date.day);
+        final why = '${c.day.date.day}. 9.';
+        expect(c.admin.onEditBlock != null, mine, reason: why);
+        expect(c.admin.onAddBlockInGap != null, mine, reason: why);
+        expect(c.admin.onMoveBlock != null, mine, reason: why);
+      }
     });
 
     testWidgets('portrait: the ⋮ menu on its own days only', (tester) async {

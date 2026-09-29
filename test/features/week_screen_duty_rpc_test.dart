@@ -130,6 +130,8 @@ void main() {
     // false takes the calendar out while the app (and its messenger) stays
     // — a tab switch with a snack still on screen.
     ValueNotifier<bool>? calendarShown,
+    // My period; [week] (on duty today) unless a test needs another.
+    DutyPeriod? period,
   }) {
     const calendar = WeekScreen();
     return ProviderScope(
@@ -153,7 +155,9 @@ void main() {
         playersProvider.overrideWith((ref) async => players),
         nowProvider.overrideWith((ref) => clock ?? Stream.value(now)),
         myGroupProvider.overrideWithValue(MyGroup.none),
-        dutyPeriodsProvider.overrideWith((ref) => Stream.value([week])),
+        dutyPeriodsProvider.overrideWith(
+          (ref) => Stream.value([period ?? week]),
+        ),
         dutyAssignmentsProvider.overrideWith(
           (ref) => Stream.value(const [
             DutyAssignment(periodId: 'd1', userId: 'me'),
@@ -538,6 +542,23 @@ void main() {
     final body = bodyOf('set_day_override');
     expect(body['p_date'], tomorrow.toSql());
     expect(body['p_closed'], isTrue);
+    expect(find.text(dutyEnded), findsOneWidget);
+  });
+
+  // A duty not on duty today edits its own days all the same (0050, rule
+  // A); a refusal there — its period gone meanwhile — still reads as the
+  // duty ended, not as „no rights“.
+  testWidgets('⋮ „Zavřít den…“ of a duty starting tomorrow: a refusal says '
+      'the duty ended', (tester) async {
+    await tester.pumpWidget(app(
+      period: DutyPeriod(id: 'd1', startsOn: tomorrow, endsOn: tomorrow.addDays(2)),
+    ));
+    await pickFromMenu(tester, 'Zavřít den…');
+    await tester.enterText(find.byType(TextField), 'Malování');
+    await tester.tap(find.widgetWithText(FilledButton, 'Zavřít den'));
+    await tester.pumpAndSettle();
+
+    expect(bodyOf('set_day_override')['p_date'], tomorrow.toSql());
     expect(find.text(dutyEnded), findsOneWidget);
   });
 

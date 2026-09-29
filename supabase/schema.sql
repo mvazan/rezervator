@@ -48,7 +48,7 @@ CREATE OR REPLACE FUNCTION "public"."add_special_block"("p_starts_at" time witho
 declare
   v_id uuid;
 begin
-  perform duty_edit_gate(null);
+  perform duty_edit_days_gate();
   insert into time_blocks (tenant_id, starts_at, ends_at, position, active)
     values (current_tenant_id(), p_starts_at, p_ends_at, -1, false)
     returning id into v_id;
@@ -1317,12 +1317,10 @@ $$;
 ALTER FUNCTION "public"."due_reminders"() OWNER TO "postgres";
 
 
-CREATE OR REPLACE FUNCTION "public"."duty_edit_gate"("p_date" "date") RETURNS "void"
+CREATE OR REPLACE FUNCTION "public"."duty_edit_days_gate"() RETURNS "void"
     LANGUAGE "plpgsql" STABLE SECURITY DEFINER
     SET "search_path" TO 'public'
     AS $$
-declare
-  v_today constant date := (now() at time zone 'Europe/Prague')::date;
 begin
   if is_admin() then
     return;
@@ -1332,8 +1330,35 @@ begin
       join profiles me on me.id = auth.uid()
      where a.user_id = me.id and d.tenant_id = me.tenant_id
        and me.status = 'approved' and me.role = 'player' and not me.placeholder
-       and case when p_date is null then d.ends_on >= v_today
-                else p_date between d.starts_on and d.ends_on end) then
+       and d.ends_on >= (now() at time zone 'Europe/Prague')::date) then
+    raise exception 'not_allowed';
+  end if;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."duty_edit_days_gate"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."duty_edit_gate"("p_date" "date") RETURNS "void"
+    LANGUAGE "plpgsql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+begin
+  if p_date is null then
+    raise exception 'date_past';
+  end if;
+  if is_admin() then
+    return;
+  end if;
+  if not exists (select 1 from duty_assignments a
+      join duty_periods d on d.id = a.period_id
+      join profiles me on me.id = auth.uid()
+     where a.user_id = me.id and d.tenant_id = me.tenant_id
+       and me.status = 'approved' and me.role = 'player' and not me.placeholder
+       and p_date between d.starts_on and d.ends_on) then
     raise exception 'not_allowed';
   end if;
   if p_date < v_today then
@@ -2559,7 +2584,7 @@ declare
   v_lanes int;
 begin
   if not v_on_duty then
-    perform duty_edit_gate(null);
+    perform duty_edit_days_gate();
   end if;
 
   select * into v_res from reservations
@@ -6088,6 +6113,11 @@ GRANT ALL ON FUNCTION "public"."due_duty_reminders"() TO "service_role";
 
 REVOKE ALL ON FUNCTION "public"."due_reminders"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."due_reminders"() TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."duty_edit_days_gate"() FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."duty_edit_days_gate"() TO "service_role";
 
 
 
