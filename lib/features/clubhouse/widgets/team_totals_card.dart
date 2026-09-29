@@ -5,8 +5,9 @@
 /// Home is always on the left. Every number is set in tabular figures, and
 /// the leader is never told by colour alone: its value is w800 (the other
 /// w500, both in full onSurface) and the sign says who leads (+ home,
-/// - guests). For Chyby the side with FEWER errors leads, and its label says so („(méně = lépe)“)
-/// instead of printing a sign.
+/// - guests). For Chyby the side with FEWER errors leads, so its difference
+/// is counted the other way round: „Chyby +30“ means the home side made 30
+/// fewer.
 library;
 
 import 'package:flutter/material.dart';
@@ -80,10 +81,12 @@ class TeamTotalsCard extends StatelessWidget {
             if (known(result.homeErrors, result.awayErrors))
               _Row(
                 key: const Key('team-totals-chyby'),
-                name: 'Chyby (méně = lépe)',
+                name: 'Chyby',
+                // Fewer errors lead: the arguments are swapped, so „+“ still
+                // reads „in favour of the home side“.
+                lead: _lead(result.awayErrors, result.homeErrors),
                 home: result.homeErrors,
                 away: result.awayErrors,
-                // Fewer errors lead: the arguments are swapped.
                 leader: winningSide(result.awayErrors, result.homeErrors),
               ),
             if (known(result.homeSetPoints, result.awaySetPoints))
@@ -121,7 +124,7 @@ class _Row extends StatelessWidget {
     this.lead = '',
   });
 
-  /// „Kuželky“, „Plné“, „Dorážka“, „Chyby (méně = lépe)“ or „SB“.
+  /// „Kuželky“, „Plné“, „Dorážka“, „Chyby“ or „SB“.
   final String name;
 
   /// [leadLabel]'s sign and difference after [name]; '' prints none.

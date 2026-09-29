@@ -72,7 +72,7 @@ void main() {
         'Dorážka +78',
         '44',
         '74',
-        'Chyby (méně = lépe)',
+        'Chyby +30',
         '8,5',
         'SB',
         '3,5',
@@ -94,13 +94,13 @@ void main() {
       }
     });
 
-    testWidgets('fewer errors lead, and the errors row prints no arrow', (
+    testWidgets('fewer errors lead: 44 against 74 reads „+30“, home ahead', (
       tester,
     ) async {
       await pump(tester);
       expect(_weight(tester, '44'), FontWeight.w800);
       expect(_weight(tester, '74'), FontWeight.w500);
-      expect(find.textContaining('30'), findsNothing);
+      expect(find.text('Chyby +30'), findsOneWidget);
     });
 
     testWidgets('home on the left, away on the right, the label between', (
@@ -109,7 +109,7 @@ void main() {
       await pump(tester);
       for (final (home, label, away) in [
         ('2555', 'Kuželky +234', '2321'),
-        ('44', 'Chyby (méně = lépe)', '74'),
+        ('44', 'Chyby +30', '74'),
         ('8,5', 'SB', '3,5'),
       ]) {
         final h = tester.getRect(find.text(home));
@@ -140,7 +140,7 @@ void main() {
     ) async {
       await pump(tester);
       final scheme = Theme.of(tester.element(find.text('SB'))).colorScheme;
-      for (final label in ['Kuželky +234', 'Chyby (méně = lépe)', 'SB']) {
+      for (final label in ['Kuželky +234', 'Chyby +30', 'SB']) {
         final style = _text(tester, label).style;
         expect(style?.fontSize, 13, reason: label);
         expect(style?.color, scheme.onSurfaceVariant, reason: label);
@@ -182,7 +182,7 @@ void main() {
       String labelOf(String key) =>
           tester.getSemantics(find.byKey(Key(key))).getSemanticsData().label;
       expect(labelOf('team-totals-kuzelky'), 'Kuželky 2555 : 2321');
-      expect(labelOf('team-totals-chyby'), 'Chyby (méně = lépe) 44 : 74');
+      expect(labelOf('team-totals-chyby'), 'Chyby 44 : 74');
       expect(labelOf('team-totals-sb'), 'SB 8,5 : 3,5');
       expect(find.bySemanticsLabel('Kuželky 2555 : 2321'), findsOneWidget);
       expect(find.bySemanticsLabel(RegExp('←')), findsNothing);
@@ -212,6 +212,8 @@ void main() {
       ),
     );
     expect(find.text('Kuželky -100'), findsOneWidget);
+    // Fewer errors on the away side: in favour of the guests.
+    expect(find.text('Chyby -8'), findsOneWidget);
     expect(_weight(tester, '2400'), FontWeight.w800);
     expect(_weight(tester, '2300'), FontWeight.w500);
     // Equal fulls and equal set points: nobody leads, both w500.
@@ -299,7 +301,7 @@ void main() {
         tester.getRect(find.byType(TeamTotalsCard)).right,
         lessThanOrEqualTo(360),
       );
-      expect(find.text('Chyby (méně = lépe)'), findsOneWidget);
+      expect(find.text('Chyby +30'), findsOneWidget);
     });
   }
 }
