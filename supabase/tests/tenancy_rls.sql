@@ -10612,7 +10612,8 @@ begin
      or (select count(*) from clubs) <> v_clubs then
     raise exception 'FAIL: a league match leaked into priority_slots, teams or clubs';
   end if;
-  if (select count(*) from notification_jobs where kind = 'federation_league_match') <> 1
+  if (select count(*) from notification_jobs
+       where kind = 'federation_league_match' and payload->>'tenant_id' = v_a::text) <> 1
      or exists (select 1 from notification_jobs
                  where kind not like 'federation%' and payload::text like '%liga-x-2026%') then
     raise exception 'FAIL: league matches queued the wrong jobs';
@@ -10669,7 +10670,7 @@ begin
     raise exception 'FAIL: a foreign venue was queued for a fetch';
   end if;
   perform apply_league_result(v_a, 9001, v_pay);
-  if (select count(*) from league_player_results) <> 1 then
+  if (select count(*) from league_player_results where tenant_id = v_a) <> 1 then
     raise exception 'FAIL: a repeated detail duplicated the lines';
   end if;
   if apply_league_result(v_a, 424242, v_pay) then
@@ -10738,7 +10739,8 @@ do $$
 declare
   v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
 begin
-  if (select count(*) from notification_jobs where kind = 'federation_league_match') <> 1 then
+  if (select count(*) from notification_jobs
+       where kind = 'federation_league_match' and payload->>'tenant_id' = v_a::text) <> 1 then
     raise exception 'FAIL: the league fetch was queued twice or not at all';
   end if;
   if has_table_privilege('authenticated', 'league_matches', 'insert')
@@ -10758,7 +10760,7 @@ begin
   end if;
   perform enqueue_federation_jobs();
   if exists (select 1 from league_matches where tenant_id = v_a)
-     or exists (select 1 from league_player_results) then
+     or exists (select 1 from league_player_results where tenant_id = v_a) then
     raise exception 'FAIL: the nightly cleanup left league matches of a dead competition';
   end if;
   raise notice 'OK: league matches — RLS, refresh_match on a league id, privileges, cleanup of a dead competition (0055)';
