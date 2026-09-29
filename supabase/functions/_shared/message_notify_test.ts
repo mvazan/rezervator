@@ -163,7 +163,7 @@ Deno.test("deliverMessage: e-mails go out in one Resend batch per 100, not one r
   // counted, and kept out of the batch.
   assertEquals(n, 151);
   assertEquals(logged.length, 1);
-  assertEquals(String(logged[0][0]).includes("x"), true);
+  assertEquals(String(logged[0][0]).includes("message m1 to x skipped"), true);
   assertEquals(pauses, []);
 });
 
@@ -520,6 +520,11 @@ Deno.test("deliverMessage: texts, push data and e-mails by kind and audience", a
   assertEquals(mail0.html.includes("https://rezervator.online/#/zpravy/m1"), true);
   assertEquals(pushed[1].title, "Zpráva od hráče: Bára Kantýnská");
   assertEquals(pushed[1].body, "Přijďte dřív.");
+  // Duty → players: „Zpráva od služby“, no name (a player wrote it).
+  await deliverMessage({ ...baseMessage, audience: "day", block_id: null, author_role: "player" },
+    { ...ctx, authorIsAdmin: false }, both, deps);
+  assertEquals(pushed[3].title, "Zpráva od služby");
+  assertEquals(batches[3][0].subject, "Zpráva od služby");
   assertEquals(batches[1][0].subject, "Zpráva od hráče: Bára Kantýnská");
   assertEquals(pushed[2].title, "Brigáda");
   assertEquals(pushed[2].body, "V sobotu uklízíme.");

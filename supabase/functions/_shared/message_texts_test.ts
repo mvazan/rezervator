@@ -131,6 +131,8 @@ Deno.test("messageEmailHtml escapes the body, keeps its context line once, embed
       appLink: "https://rezervator.online/#/zpravy/abc" },
   );
   assertEquals(html.includes("&lt;dřív&gt;"), true);
+  assertEquals(html.includes("Přijďte &lt;dřív&gt;.<br>pá 2. 10."), true);
+  assertEquals(html.includes(">Odpovědět v aplikaci</a>"), true);
   assertEquals(html.split("pá 2. 10.").length, 2);
   assertEquals(html.includes("https://x/react?t=1"), true);
   assertEquals(html.includes("https://x/react?t=2"), true);
@@ -141,4 +143,8 @@ Deno.test("noticeEmailHtml links to the board", () => {
   const html = noticeEmailHtml("Nové dráhy", "Od pondělí.", "https://rezervator.online/#/nastenka/abc");
   assertEquals(html.includes("Nové dráhy"), true);
   assertEquals(html.includes("https://rezervator.online/#/nastenka/abc"), true);
+  assertEquals(html.includes(">Otevřít nástěnku</a>"), true);
+  const rough = noticeEmailHtml("A <b>", "x & y\nz", "https://rezervator.online/#/nastenka/abc");
+  assertEquals(rough.includes("A &lt;b&gt;"), true);
+  assertEquals(rough.includes("x &amp; y<br>z"), true);
 });

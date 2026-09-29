@@ -120,7 +120,8 @@ export function reactionText(
 }
 
 /// A `message`'s e-mail: the text (its context is already the last line
-/// of `m.body`, see staffMessageText/playerMessageText) and — since e-mail
+/// of `m.body`, see staffMessageText/playerMessageText/
+/// adminToStaffMessageText) and — since e-mail
 /// recipients have no in-app reply — two one-click 👍/👎 links plus a
 /// link into the app for a text reply.
 export function messageEmailHtml(
