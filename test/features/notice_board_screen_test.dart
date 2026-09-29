@@ -198,6 +198,45 @@ void main() {
     expect(find.text('Petr'), findsNothing);
   });
 
+  // „Zobrazilo 0 z 0“ would say the notice reached nobody.
+  for (final (label, failing) in const [('loading', false), ('failed', true)]) {
+    testWidgets('the seen sheet, its rows $label, never says „Zobrazilo 0 z 0“',
+        (tester) async {
+      await tester.pumpWidget(ProviderScope(
+        overrides: [
+          myProfileProvider.overrideWith((ref) => Stream.value(admin)),
+          messagesProvider.overrideWith((ref) => Stream.value([notice('a1')])),
+          myMessageRecipientsProvider.overrideWith((ref) => Stream.value(const [])),
+          // A factory: Riverpod retries a failed provider.
+          messageParticipantsProvider.overrideWith((ref, id) => failing
+              ? Stream<List<MessageRecipient>>.error(
+                  Exception('SocketException: offline'))
+              : const Stream<List<MessageRecipient>>.empty()),
+          playersProvider.overrideWith((ref) async => const []),
+          nowProvider.overrideWith((ref) => Stream.value(DateTime(2026, 10, 2, 12))),
+        ],
+        child: const MaterialApp(home: NoticeBoardScreen(markRead: _noMark)),
+      ));
+      await tester.pump();
+      await tester.pump();
+      await openMenu(tester);
+      await tester.tap(find.text('Kdo si to zobrazil'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      final sheet = find.byType(BottomSheet);
+      expect(find.descendant(of: sheet, matching: find.textContaining('Zobrazilo')),
+          findsNothing);
+      if (failing) {
+        expect(find.descendant(of: sheet,
+                matching: find.text('Jsi offline — zkus to znovu po připojení.')),
+            findsOneWidget);
+      } else {
+        expect(find.descendant(of: sheet, matching: find.byType(CircularProgressIndicator)),
+            findsOneWidget);
+      }
+    });
+  }
+
   // The spec's „Zobrazilo 12 z 40“ leaves 28 names to list; at a large text
   // size (2.0 is AppTextScaler's cap) or in landscape they are taller than
   // the sheet, and the last of them must still be reachable.

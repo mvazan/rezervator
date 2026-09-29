@@ -5,6 +5,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/ui.dart' show friendlyDbError;
 import '../../../data/providers.dart';
 import '../../../domain/collation.dart';
 import '../../../domain/messages.dart';
@@ -28,9 +29,25 @@ class _SeenSheet extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     // The notice's recipient rows (one per player it went to) — the admin
-    // may read them all; see messageParticipantsProvider.
-    final rows =
-        ref.watch(messageParticipantsProvider(notice.id)).value ?? const [];
+    // may read them all; see messageParticipantsProvider. Until they are
+    // in, a spinner (or why they are not): „Zobrazilo 0 z 0“ would say the
+    // notice reached nobody.
+    final value = ref.watch(messageParticipantsProvider(notice.id));
+    final loaded = value.value;
+    if (loaded == null) {
+      return SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Center(
+            heightFactor: 1,
+            child: value.hasError
+                ? Text(friendlyDbError(value.error!), textAlign: TextAlign.center)
+                : const CircularProgressIndicator(),
+          ),
+        ),
+      );
+    }
+    final rows = loaded;
     final players = ref.watch(playersProvider).value ?? const [];
     final names = {for (final p in players) p.id: p.displayName};
     final seen = rows.where((r) => r.readAt != null).length;
