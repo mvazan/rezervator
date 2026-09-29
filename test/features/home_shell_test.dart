@@ -819,6 +819,40 @@ void main() {
       expect(find.byType(MessageDetailScreen), findsOneWidget);
     });
 
+    // A push carries the alley it was sent for; a superadmin visiting
+    // another alley (or another account on a shared phone) cannot read
+    // that message, and „Zpráva už neexistuje.“ would be wrong.
+    testWidgets('a link from another alley is dropped silently: no detail, '
+        'no snack, nothing left pending', (tester) async {
+      await tester.pumpWidget(app(profile: visiting, messages: [msg('m1')]));
+      await tester.pumpAndSettle();
+      final container =
+          ProviderScope.containerOf(tester.element(find.byType(HomeShell)));
+      container.read(pendingLinkProvider.notifier).set(const PendingLink(
+          kind: PendingLinkKind.message, id: 'm1', tenantId: 't-home'));
+      await tester.pumpAndSettle();
+      expect(find.byType(MessageDetailScreen), findsNothing);
+      expect(find.text('Zpráva už neexistuje.'), findsNothing);
+      expect(container.read(pendingLinkProvider), isNull);
+      // A notice link from another alley does not open the board either.
+      container.read(pendingLinkProvider.notifier).set(const PendingLink(
+          kind: PendingLinkKind.notice, id: 'n1', tenantId: 't-home'));
+      await tester.pumpAndSettle();
+      expect(find.byType(NoticeBoardScreen), findsNothing);
+      expect(container.read(pendingLinkProvider), isNull);
+    });
+
+    testWidgets('…while a link of my own alley opens as before', (tester) async {
+      await tester.pumpWidget(app(profile: visiting, messages: [msg('m1')]));
+      await tester.pumpAndSettle();
+      ProviderScope.containerOf(tester.element(find.byType(HomeShell)))
+          .read(pendingLinkProvider.notifier)
+          .set(const PendingLink(
+              kind: PendingLinkKind.message, id: 'm1', tenantId: 't-demo'));
+      await tester.pumpAndSettle();
+      expect(find.byType(MessageDetailScreen), findsOneWidget);
+    });
+
     testWidgets('a pending link for an id that does not exist shows the '
         'not-found snack', (tester) async {
       await tester.pumpWidget(app());

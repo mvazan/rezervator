@@ -14,36 +14,49 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 /// Which screen a [PendingLink] opens.
 enum PendingLinkKind { message, notice }
 
-/// One deep link waiting to be opened: the kind and the `messages.id`.
+/// One deep link waiting to be opened: the kind and the `messages.id`,
+/// and — from a push — the alley it was sent for.
 class PendingLink {
-  const PendingLink({required this.kind, required this.id});
+  const PendingLink({required this.kind, required this.id, this.tenantId});
 
   final PendingLinkKind kind;
 
   /// The `messages.id` the push or the e-mail link carried.
   final String id;
 
+  /// The push's `tenant_id`: the alley whose member it was sent to. Null
+  /// for an e-mail link (`/zpravy/:id` carries no alley) — then any alley
+  /// may open it, and RLS decides what shows.
+  final String? tenantId;
+
   @override
   bool operator ==(Object other) =>
-      other is PendingLink && other.kind == kind && other.id == id;
+      other is PendingLink &&
+      other.kind == kind &&
+      other.id == id &&
+      other.tenantId == tenantId;
 
   @override
-  int get hashCode => Object.hash(kind, id);
+  int get hashCode => Object.hash(kind, id, tenantId);
 
   @override
-  String toString() => 'PendingLink($kind, $id)';
+  String toString() => 'PendingLink($kind, $id, $tenantId)';
 }
 
 /// A push `data` payload -> what to open, or null for a push this app
 /// doesn't deep-link (duty/booking/reservation pushes stay OS-open-only).
+/// A malformed payload (a non-string id) opens nothing rather than
+/// throwing inside the push handler.
 PendingLink? pendingLinkFromData(Map<String, dynamic> data) {
-  final id = data['message_id'] as String?;
-  if (id == null) return null;
+  final id = data['message_id'];
+  if (id is! String) return null;
+  final tenant = data['tenant_id'];
+  final tenantId = tenant is String ? tenant : null;
   return switch (data['kind']) {
-    'message' ||
-    'message_reaction' =>
-      PendingLink(kind: PendingLinkKind.message, id: id),
-    'notice' => PendingLink(kind: PendingLinkKind.notice, id: id),
+    'message' || 'message_reaction' => PendingLink(
+        kind: PendingLinkKind.message, id: id, tenantId: tenantId),
+    'notice' =>
+      PendingLink(kind: PendingLinkKind.notice, id: id, tenantId: tenantId),
     _ => null,
   };
 }
@@ -151,4 +164,8 @@ class PendingLinkSource {
     _initial = null;
     return link;
   }
+
+  /// Forgets the cold-start link — on sign-out, so a tap meant for the
+  /// account that left never opens for the next one.
+  static void clearInitial() => _initial = null;
 }

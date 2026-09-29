@@ -34,6 +34,61 @@ void main() {
     test('missing message_id maps to nothing even for a known kind', () {
       expect(pendingLinkFromData(const {'kind': 'message'}), isNull);
     });
+
+    test('the alley the push was sent for rides along', () {
+      expect(
+        pendingLinkFromData(
+            const {'kind': 'message', 'message_id': 'm1', 'tenant_id': 't1'}),
+        const PendingLink(kind: PendingLinkKind.message, id: 'm1', tenantId: 't1'),
+      );
+    });
+
+    test('a malformed payload maps to nothing (or no alley), never throws', () {
+      expect(pendingLinkFromData(const {'kind': 'message', 'message_id': 7}), isNull);
+      expect(
+        pendingLinkFromData(
+            const {'kind': 'notice', 'message_id': 'n1', 'tenant_id': 7}),
+        const PendingLink(kind: PendingLinkKind.notice, id: 'n1'),
+      );
+    });
+  });
+
+  // Push.init runs before any ProviderScope: a cold-start tap waits in
+  // PendingLinkSource's one slot, a warm one goes through its stream.
+  group('PendingLinkSource', () {
+    const a = PendingLink(kind: PendingLinkKind.message, id: 'a');
+    const b = PendingLink(kind: PendingLinkKind.notice, id: 'b');
+    tearDown(PendingLinkSource.clearInitial);
+
+    test('a link published before any notifier is taken by the first one, '
+        'once', () {
+      PendingLinkSource.publish(a);
+      final first = ProviderContainer();
+      addTearDown(first.dispose);
+      expect(first.read(pendingLinkProvider), a);
+      final second = ProviderContainer();
+      addTearDown(second.dispose);
+      expect(second.read(pendingLinkProvider), isNull);
+    });
+
+    test('a link published while a notifier listens becomes its state', () async {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+      final sub = container.listen(pendingLinkProvider, (_, _) {});
+      addTearDown(sub.close);
+      expect(container.read(pendingLinkProvider), isNull);
+      PendingLinkSource.publish(b);
+      await Future<void>.delayed(Duration.zero);
+      expect(container.read(pendingLinkProvider), b);
+      // Delivered, not also kept for a later cold start.
+      expect(PendingLinkSource.takeInitial(), isNull);
+    });
+
+    test('clearInitial empties the cold-start slot (sign-out)', () {
+      PendingLinkSource.publish(a);
+      PendingLinkSource.clearInitial();
+      expect(PendingLinkSource.takeInitial(), isNull);
+    });
   });
 
   group('PendingLinkNotifier', () {

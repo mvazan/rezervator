@@ -84,10 +84,14 @@ class _HomeShellState extends ConsumerState<HomeShell> {
 
   /// Clears [link] and opens it — unless it is no longer the pending one:
   /// a newer link replaced it (that one opens instead) or the same link
-  /// was opened already.
+  /// was opened already. A push sent for another alley (a superadmin
+  /// visiting elsewhere) is dropped without a word: this alley's RLS
+  /// cannot see it, and „Zpráva už neexistuje.“ would be wrong.
   void _consume(PendingLink link) {
     if (!mounted || ref.read(pendingLinkProvider) != link) return;
     ref.read(pendingLinkProvider.notifier).clear();
+    final tenantId = ref.read(myProfileProvider).value?.tenantId;
+    if (link.tenantId != null && link.tenantId != tenantId) return;
     final navigator = Navigator.of(context);
     switch (link.kind) {
       case PendingLinkKind.message:
