@@ -1426,7 +1426,42 @@ void main() {
           greaterThanOrEqualTo(tester.getRect(segments).bottom),
         );
         expect(tester.getRect(button).right, lessThanOrEqualTo(360 - 12));
+        // Dropped under the switch, it stays at the right.
+        expect(tester.getRect(button).right, 360 - 12);
       });
+    });
+
+    testWidgets('portrait: „Rozbalit vše“ and „Na webu ČKA“ drop under the '
+        'switch together, at the right', (tester) async {
+      _tall(tester, width: 360);
+      await tester.pumpWidget(
+        app(
+          matchId: 'rv',
+          slots: [
+            match(
+              id: 'rv',
+              date: rudnaSlot.date,
+              siteSlug: 'zapas-rv',
+            ),
+          ],
+          results: {'rv': rudnaResult},
+          players: rudnaPlayers,
+          theme: buildTheme(Brightness.light),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      final site = tester.getRect(find.text('Na webu ČKA'));
+      expect(
+        site.top,
+        greaterThanOrEqualTo(tester.getRect(find.byType(SegmentedButton<MatchDetailView>)).bottom,
+        ),
+      );
+      expect(
+        tester.getRect(find.byType(OutlinedButton)).right,
+        360 - 12,
+      );
     });
 
     testWidgets('at 360dp every duel opens without an overflow', (

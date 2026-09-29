@@ -180,6 +180,8 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
         alignment: MainAxisAlignment.spaceBetween,
         spacing: 8,
         overflowSpacing: 4,
+        // Dropped under the switch, the buttons stay at the right.
+        overflowAlignment: OverflowBarAlignment.end,
         children: [
           SegmentedButton<MatchDetailView>(
             showSelectedIcon: false,
