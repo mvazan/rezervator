@@ -322,25 +322,27 @@ class _BodyField extends StatelessWidget {
 }
 
 /// Both composers' sheet: padded, lifted above the keyboard, scrolling when
-/// a day's blocks and the keyboard leave too little room.
+/// a day's blocks and the keyboard leave too little room. The keyboard's
+/// inset pads OUTSIDE the scroll view (as in duty_assign_sheet.dart): the
+/// viewport then ends where the keyboard starts, so a focused field is
+/// scrolled into the part the player can see — a viewport reaching under
+/// the keyboard would reveal the caret, and „Odeslat“, behind it.
 class _SheetFrame extends StatelessWidget {
   const _SheetFrame({required this.children});
 
   final List<Widget> children;
 
   @override
-  Widget build(BuildContext context) => SafeArea(
-    child: SingleChildScrollView(
-      padding: EdgeInsets.only(
-        left: 16,
-        right: 16,
-        top: 16,
-        bottom: 16 + MediaQuery.viewInsetsOf(context).bottom,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: children,
+  Widget build(BuildContext context) => Padding(
+    padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+    child: SafeArea(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: children,
+        ),
       ),
     ),
   );

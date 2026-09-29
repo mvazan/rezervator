@@ -149,6 +149,20 @@ void main() {
     expect(send(tester).onPressed, isNull);
   });
 
+  testWidgets('with the keyboard up the sheet ends above it: the field and '
+      '„Odeslat“ are never scrolled to under the keyboard', (tester) async {
+    // 800×600 logical; a 400-dp keyboard leaves 200 dp — less than the
+    // sheet, so it scrolls, and its viewport must end where the keyboard
+    // starts (a viewport under the keyboard reveals the caret behind it).
+    tester.view.viewInsets = const FakeViewPadding(bottom: 1200);
+    addTearDown(tester.view.resetViewInsets);
+    await tester.pumpWidget(app());
+    await open(tester);
+    final scroll = find.ancestor(
+        of: find.text('Napsat'), matching: find.byType(SingleChildScrollView));
+    expect(tester.getRect(scroll).bottom, lessThanOrEqualTo(600 - 400));
+  });
+
   testWidgets('opened from a training it names the training and preselects Službě when possible',
       (tester) async {
     final period = DutyPeriod(id: 'p1', startsOn: today, endsOn: today);
