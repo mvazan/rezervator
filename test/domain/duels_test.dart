@@ -79,10 +79,6 @@ void main() {
       expect(diffScale(duels), 99);
       expect(diffScale(const []), 50);
     });
-    test('5 duels + 2 for pins = 7, 1 duel + 0 = 1', () {
-      final b = matchPointsBreakdown(rudnaResult, rudnaPlayers)!;
-      expect([b.duelsHome, b.duelsAway, b.pinsHome, b.pinsAway], [5, 1, 2, 0]);
-    });
     test('a substitution is read out after the starter', () {
       final withChange = MatchPlayerResult.fromJson({
         'id': 'x',
@@ -308,16 +304,6 @@ void main() {
       // No lane both threw: the card prints „– : –“, and TalkBack agrees.
       expect(d.shownHome, isNull);
       expect(duelSemantics(d), '1. souboj: home 1 –, – –, hraje se');
-    });
-    test('no result, or a duel point not known yet: no breakdown', () {
-      expect(matchPointsBreakdown(null, rudnaPlayers), isNull);
-      expect(
-        matchPointsBreakdown(rudnaResult, [
-          player('home', 1, [lane(1, 200)], total: 200),
-          player('away', 1, [lane(1, 190)], total: 190),
-        ]),
-        isNull,
-      );
     });
   });
 

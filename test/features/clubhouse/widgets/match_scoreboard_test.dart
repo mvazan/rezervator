@@ -168,27 +168,6 @@ void main() {
       expect(find.text('průběžně'), findsNothing);
     });
 
-    testWidgets('the summary line adds up the score; SB only at 120 throws', (
-      tester,
-    ) async {
-      Widget summary(MatchResult result) => _host(
-        MatchPointsSummary(
-          slot: rudnaSlot,
-          result: result,
-          players: rudnaPlayers,
-          now: _now,
-        ),
-      );
-      await tester.pumpWidget(summary(rudnaResult120));
-      expect(
-        find.text('Souboje 5 : 1 · Kuželky 2 : 0 · SB 8,5 : 3,5'),
-        findsOneWidget,
-      );
-      // 100 throws: set points play no role and are left out.
-      await tester.pumpWidget(summary(rudnaResult));
-      expect(find.text('Souboje 5 : 1 · Kuželky 2 : 0'), findsOneWidget);
-    });
-
     testWidgets('the format and the venue, as plain text', (tester) async {
       await pump(tester);
       expect(find.text('6 hráčů · 100 HS · TJ Sokol Rudná'), findsOneWidget);
@@ -302,49 +281,9 @@ void main() {
       expect(find.text('+37'), findsOneWidget);
     });
 
-    testWidgets('the summary counts the done and the running duels', (
-      tester,
-    ) async {
-      await tester.pumpWidget(
-        _host(
-          MatchPointsSummary(
-            slot: _liveSlot,
-            result: _liveResult,
-            players: _livePlayers,
-            now: _now,
-          ),
-        ),
-      );
-      expect(find.text('Souboje 1 : 0 · 1 rozehraný'), findsOneWidget);
-    });
-
-    // Czech agreement: 1 rozehraný, 2–4 rozehrané, 5 and more rozehraných.
-    for (final (playing, words) in [(3, '3 rozehrané'), (5, '5 rozehraných')]) {
-      testWidgets('$playing duels being played read „$words“', (tester) async {
-        await tester.pumpWidget(
-          _host(
-            MatchPointsSummary(
-              slot: _liveSlot,
-              result: _liveResult,
-              players: [
-                for (var pos = 1; pos <= 6; pos++)
-                  for (final side in ['home', 'away'])
-                    _player(side, pos, [
-                      _lane(1, pos <= playing ? 200 : null),
-                      _lane(2, null),
-                    ]),
-              ],
-              now: _now,
-            ),
-          ),
-        );
-        expect(find.text('Souboje 0 : 0 · $words'), findsOneWidget);
-      });
-    }
-
   });
 
-  testWidgets('a split: the summary counts the halves, both names w500', (
+  testWidgets('a tie on points: the lead is „=“, both names w500', (
     tester,
   ) async {
     final players = [
@@ -381,24 +320,6 @@ void main() {
       _text(tester, 'TJ Sokol Vršovice A').style?.fontWeight,
       FontWeight.w500,
     );
-    // No set points on the result: the summary leaves SB out.
-    await tester.pumpWidget(
-      _host(
-        MatchPointsSummary(
-          slot: rudnaSlot,
-          result: _result(
-            'finished',
-            homePoints: 2.5,
-            awayPoints: 2.5,
-            homeTotal: 615,
-            awayTotal: 615,
-          ),
-          players: players,
-          now: _now,
-        ),
-      ),
-    );
-    expect(find.text('Souboje 1,5 : 1,5 · Kuželky 1 : 1'), findsOneWidget);
   });
 
   testWidgets('a forfeit says the duels were not played', (tester) async {
@@ -420,7 +341,7 @@ void main() {
     expect(find.text('Sestavy zatím nejsou k dispozici.'), findsNothing);
   });
 
-  testWidgets('no lineup yet: a note, and no summary', (tester) async {
+  testWidgets('no lineup yet: a note', (tester) async {
     await tester.pumpWidget(
       _host(
         MatchScoreboard(

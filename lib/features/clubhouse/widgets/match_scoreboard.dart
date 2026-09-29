@@ -2,9 +2,7 @@
 /// score came about. The date and a status chip; the team names around a big
 /// score (each over its own score when a name needs more than 2 lines); the
 /// pin totals with the lead between them. Both views of the match detail
-/// share it, so the score never jumps when the view switches. The line that
-/// adds the score up („Souboje 5 : 1 · Kuželky 2 : 0 · SB 8,5 : 3,5“) is
-/// [MatchPointsSummary], at the very end of the detail.
+/// share it, so the score never jumps when the view switches.
 ///
 /// Every number is set in tabular figures, so live values don't jump as
 /// they change, and a winner is never told by colour alone: the name's
@@ -136,113 +134,6 @@ class MatchScoreboard extends StatelessWidget {
       ),
     );
   }
-}
-
-/// „Souboje 5 : 1 · Kuželky 2 : 0 · SB 8,5 : 3,5“: how the score adds up,
-/// one line at the very end of the match detail (a decided match), or
-/// „Souboje 1 : 0 · 2 rozehrané“ while it runs. Nothing before any duel has
-/// started.
-class MatchPointsSummary extends StatelessWidget {
-  const MatchPointsSummary({
-    super.key,
-    required this.slot,
-    required this.result,
-    required this.players,
-    required this.now,
-  });
-
-  final PrioritySlot slot;
-  final MatchResult? result;
-  final List<MatchPlayerResult> players;
-  final DateTime now;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final result = this.result;
-    final status = result?.status;
-    // Not final yet: live, or in progress per the last fetch.
-    final running = isLive(slot, result, now) || status == MatchStatus.inProgress;
-    final decided =
-        status == MatchStatus.finished || status == MatchStatus.forfeit;
-    // Only a decided match adds up: until every duel is done its players'
-    // teamPoints are incomplete.
-    final line = decided
-        ? _decidedExplanation(matchPointsBreakdown(result, players), result!)
-        : running
-        ? _runningExplanation(duelsOf(players))
-        : null;
-    if (line == null) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-      child: Text(
-        line,
-        textAlign: TextAlign.center,
-        style: theme.textTheme.bodyMedium?.copyWith(
-          fontSize: 13,
-          fontWeight: FontWeight.w400,
-          color: theme.colorScheme.onSurfaceVariant,
-          fontFeatures: _tabular,
-        ),
-      ),
-    );
-  }
-
-  /// „Souboje 5 : 1 · Kuželky 2 : 0 · SB 8,5 : 3,5“ for a decided match;
-  /// null when [breakdown] is. SB is left out when the result has none.
-  static String? _decidedExplanation(
-    ({num duelsHome, num duelsAway, num pinsHome, num pinsAway})? breakdown,
-    MatchResult result,
-  ) {
-    if (breakdown == null) return null;
-    final hasSetPoints =
-        setPointsMatter(result.discipline) &&
-        (result.homeSetPoints != null || result.awaySetPoints != null);
-    return [
-      'Souboje ${numLabel(breakdown.duelsHome)} : '
-          '${numLabel(breakdown.duelsAway)}',
-      'Kuželky ${numLabel(breakdown.pinsHome)} : '
-          '${numLabel(breakdown.pinsAway)}',
-      if (hasSetPoints)
-        'SB ${pointsLabel(result.homeSetPoints, result.awaySetPoints)}',
-    ].join(' · ');
-  }
-
-  /// „Souboje 1 : 0 · 2 rozehrané“ while the match runs, from the duels
-  /// themselves: [matchPointsBreakdown] stays null until every duel is done.
-  /// The points are those of the done duels; the count is the duels being
-  /// played. Null while no duel has started.
-  static String? _runningExplanation(List<Duel> duels) {
-    num home = 0;
-    num away = 0;
-    var done = 0;
-    var playing = 0;
-    for (final duel in duels) {
-      switch (duel.state) {
-        case DuelState.done:
-          done++;
-          home += duel.home?.teamPoints ?? 0;
-          away += duel.away?.teamPoints ?? 0;
-        case DuelState.playing:
-          playing++;
-        case DuelState.waiting:
-          break;
-      }
-    }
-    if (done == 0 && playing == 0) return null;
-    return [
-      'Souboje ${numLabel(home)} : ${numLabel(away)}',
-      if (playing > 0) _inPlay(playing),
-    ].join(' · ');
-  }
-
-  /// „1 rozehraný“, „2 rozehrané“ … „4 rozehrané“, „5 rozehraných“ (and
-  /// „0 rozehraných“): the adjective agrees with the count.
-  static String _inPlay(int count) => switch (count) {
-    1 => '1 rozehraný',
-    2 || 3 || 4 => '$count rozehrané',
-    _ => '$count rozehraných',
-  };
 }
 
 /// The date and start on the left, the status chip on the right (it drops

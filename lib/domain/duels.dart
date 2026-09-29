@@ -254,47 +254,6 @@ String leadLabel(int? diff) {
   return diff > 0 ? '+$diff' : '-${-diff}';
 }
 
-/// Duel points per side (sum of teamPoints) and the pin points
-/// (teamBonusPoints); null when [result] or a needed value is missing.
-///
-/// For the scoreboard's „Souboje 5 : 1 · Kuželky 2 : 0“: the duel points and
-/// the pin points add up to the match's Body.
-({num duelsHome, num duelsAway, num pinsHome, num pinsAway})?
-matchPointsBreakdown(MatchResult? result, List<MatchPlayerResult> players) {
-  if (result == null) return null;
-  final duelsHome = _duelPoints(players, 'home');
-  final duelsAway = _duelPoints(players, 'away');
-  final pinsHome = teamBonusPoints(result.homePoints, players, 'home');
-  final pinsAway = teamBonusPoints(result.awayPoints, players, 'away');
-  if (duelsHome == null ||
-      duelsAway == null ||
-      pinsHome == null ||
-      pinsAway == null) {
-    return null;
-  }
-  return (
-    duelsHome: duelsHome,
-    duelsAway: duelsAway,
-    pinsHome: pinsHome,
-    pinsAway: pinsAway,
-  );
-}
-
-/// The duel points [side]'s players won (the sum of their teamPoints); null
-/// when the side has no players or any of them has no teamPoints yet.
-num? _duelPoints(List<MatchPlayerResult> players, String side) {
-  num sum = 0;
-  var any = false;
-  for (final p in players) {
-    if (p.side != side) continue;
-    final points = p.teamPoints;
-    if (points == null) return null;
-    sum += points;
-    any = true;
-  }
-  return any ? sum : null;
-}
-
 /// The last word of [name] („Lucie Mičanová“ → „Mičanová“); '–' when
 /// there is no name.
 String surnameOf(String? name) {

@@ -474,15 +474,6 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
           LegacyScoreSheet(slot: slot, result: result, players: players),
         ],
       },
-      // How the score adds up, once, at the very end of either view.
-      _centred(
-        MatchPointsSummary(
-          slot: slot,
-          result: result,
-          players: players,
-          now: now,
-        ),
-      ),
     ];
 
     final list = ListView(

@@ -293,27 +293,13 @@ void main() {
       tester.widget<Text>(_inBoard(away)).style?.fontWeight,
       FontWeight.w400,
     );
-    // The pins with the lead between them, the set points in the
-    // summary line at the end, the status chip and the format line.
+    // The pins with the lead between them, the status chip and the format
+    // line.
     expect(_inBoard('3460'), findsOneWidget);
     expect(_inBoard('3349'), findsOneWidget);
     expect(_inBoard('+111'), findsOneWidget);
     expect(_inBoard('Dokončeno'), findsOneWidget);
     expect(_inBoard('6 hráčů · 120 HS'), findsOneWidget);
-
-    // The summary sits at the very end of the (lazily built) list.
-    await tester.dragUntilVisible(
-      find.byType(MatchPointsSummary),
-      find.byType(ListView),
-      const Offset(0, -300),
-    );
-    expect(
-      find.descendant(
-        of: find.byType(MatchPointsSummary),
-        matching: find.textContaining('SB 15 : 9'),
-      ),
-      findsOneWidget,
-    );
 
     // Souboje (the default): the two players meet in duel 1.
     final duel = find.byType(DuelCard);
