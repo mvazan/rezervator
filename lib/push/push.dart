@@ -49,11 +49,17 @@ class Push {
 
       await FirebaseMessaging.instance.requestPermission();
 
-      // Save the token now (if signed in), on every sign-in, and on refresh.
+      // Save the token now (if signed in), on every sign-in, and on refresh;
+      // forget it whenever nobody is signed in.
       _ready = true;
-      unawaited(_saveToken());
-      listenForSignIn(Supabase.instance.client.auth.onAuthStateChange,
-          () => unawaited(_saveToken()));
+      if (Supabase.instance.client.auth.currentUser == null) {
+        _forgetToken();
+      } else {
+        unawaited(_saveToken());
+      }
+      listenForAuth(Supabase.instance.client.auth.onAuthStateChange,
+          onSignedIn: () => unawaited(_saveToken()),
+          onSignedOut: _forgetToken);
       FirebaseMessaging.instance.onTokenRefresh.listen((_) => _saveToken());
 
       // Foreground messages: show them via a local notification.
@@ -63,25 +69,50 @@ class Push {
     }
   }
 
+  /// Sign-ins save the token, sign-outs forget it — an explicit one or a
+  /// session supabase dropped.
+  ///
   /// supabase_flutter puts a failed magic link (expired or used —
   /// `otp_expired`) on onAuthStateChange as a stream error. Without an
   /// onError here that error became uncaught and reached Sentry as a fatal
   /// crash (REZERVATOR-7), though the login screen already explains it.
   @visibleForTesting
-  static StreamSubscription<AuthState> listenForSignIn(
-    Stream<AuthState> changes,
-    void Function() onSignedIn,
-  ) =>
+  static StreamSubscription<AuthState> listenForAuth(
+    Stream<AuthState> changes, {
+    required void Function() onSignedIn,
+    required void Function() onSignedOut,
+  }) =>
       changes.listen(
         (state) {
           if (state.event == AuthChangeEvent.signedIn) onSignedIn();
+          if (state.event == AuthChangeEvent.signedOut) onSignedOut();
         },
         onError: (Object _) {},
       );
 
+  /// The deletion [_forgetToken] started, until it is done.
+  static Future<void>? _forgetting;
+
+  /// A device nobody is signed in on holds no FCM token. The token is the
+  /// device's, not the account's: left alive, FCM keeps delivering to it
+  /// whatever a profile still holds (a sign-out offline, a session that
+  /// expired — nothing could clear the profile then — or a sign-out on an
+  /// app from before this), and the next account here would register the
+  /// very same token. Deleted, the next sign-in gets a fresh one, and a
+  /// profile still holding the old one gets UNREGISTERED from FCM, which
+  /// notify answers by clearing it. Runs on every sign-out and on a start
+  /// without a session; offline it fails and the next start tries again.
+  static void _forgetToken() {
+    _forgetting = FirebaseMessaging.instance.deleteToken().catchError(
+        (Object e) => debugPrint('FCM token delete failed: $e'));
+  }
+
   static Future<void> _saveToken() async {
     if (!_ready) return;
     try {
+      // A sign-in right after a sign-out would otherwise read the token
+      // that is being deleted.
+      await _forgetting;
       if (Supabase.instance.client.auth.currentUser == null) return;
       final token = await FirebaseMessaging.instance.getToken();
       await Api.updateFcmToken(token);
