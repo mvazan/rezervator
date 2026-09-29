@@ -169,8 +169,9 @@ final dutySeasonsProvider = FutureProvider<List<DutySeason>>((ref) async {
     ..sort((a, b) => a.startedOn.compareTo(b.startedOn));
 });
 
-/// The signed-in player's canteen duty: the running period, the next one
-/// and who else is on it (see [MyDuty]). Follows the app clock, so it
+/// The signed-in player's canteen duty: the running period, the next one,
+/// every period of mine that has not ended and who else is on the running
+/// one (see [MyDuty]). Follows the app clock, so it
 /// flips at midnight with no row changing — the server judges every call
 /// by Prague today (`is_on_duty()`). Equal values do not notify, so the
 /// minute tick costs no rebuild.
@@ -879,8 +880,9 @@ class Api {
   /// `position=-1`, the SPECIAL sentinel: the Rozvrh list hides such rows
   /// and the find-or-create reuse pool only matches them (never a
   /// deactivated template block that happens to share the times). An RPC,
-  /// not a table insert: the player on duty may call it, while `time_blocks`
-  /// stays the admin's.
+  /// not a table insert: a player with a duty period that has not ended may
+  /// call it (the day edit that follows is held to their own periods), while
+  /// `time_blocks` stays the admin's.
   static Future<String> addSpecialBlock(
           HourMinute startsAt, HourMinute endsAt) async =>
       await _db.rpc('add_special_block', params: {
@@ -942,8 +944,8 @@ class Api {
       });
 
   /// Drops [date]'s override, so the weekly template applies again
-  /// (`delete_day_override`, 0050 — the admin on any date, the player on
-  /// duty from today on). No override is no error.
+  /// (`delete_day_override`, 0050 — the admin on any date, a duty on the
+  /// days of their own periods from today on). No override is no error.
   static Future<void> deleteDayOverride(Day date) =>
       _db.rpc('delete_day_override', params: {'p_date': date.toSql()});
 

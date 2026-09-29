@@ -2,8 +2,9 @@
 /// seasons and their counts, the Kalendář week header and "my duty". Pure
 /// Dart over the `duty_periods`, `duty_assignments` and `duty_seasons` rows,
 /// unit-tested; the screens only render it. The rights themselves are the
-/// server's (`is_on_duty()` / `duty_gate()` in 0050_canteen_duty.sql) — the
-/// app only hides what the server would refuse.
+/// server's (`is_on_duty()` / `duty_gate()` for booking and cancelling,
+/// `duty_edit_gate()` for the blocks of a day, in 0050_canteen_duty.sql) —
+/// the app only hides what the server would refuse.
 library;
 
 import 'collation.dart';
@@ -389,9 +390,17 @@ DutyHeader? dutyHeaderLabel(
 }
 
 /// The signed-in player's duty, for Klubovna → Služby's card and the
-/// calendar's rights.
+/// calendar's rights. The rights have two clocks (0050): booking and
+/// cancelling for others is held WHILE on duty ([onDuty], a period covering
+/// today), editing the blocks of a day on the days of my OWN periods
+/// ([coversDay]), on duty today or not.
 class MyDuty {
-  const MyDuty({this.current, this.next, this.coAssignees = const []});
+  const MyDuty({
+    this.current,
+    this.next,
+    this.mine = const [],
+    this.coAssignees = const [],
+  });
 
   static const none = MyDuty();
 
@@ -402,28 +411,56 @@ class MyDuty {
   /// now.
   final DutyPeriod? next;
 
+  /// Every period of mine that has not ended — the running one and all
+  /// those ahead, chronological. What is over is left out: nothing in the
+  /// past can be edited anyway.
+  final List<DutyPeriod> mine;
+
   /// The others on [current] („spolu s: …“), as user ids in no particular
   /// order — sort their names with [compareCzech]. Empty off duty.
   final List<String> coAssignees;
 
   /// Assigned to a period covering today. The server says the same for an
-  /// approved account player (`is_on_duty()`); an admin passes anyway.
+  /// approved account player (`is_on_duty()`); an admin passes anyway. The
+  /// clock of booking and cancelling for others — not of editing blocks,
+  /// see [coversDay].
   bool get onDuty => current != null;
+
+  /// Whether one of my periods covers [day]: the days whose blocks I may
+  /// edit (`duty_edit_gate()`), whether or not I am on duty today — a duty
+  /// next week Monday to Wednesday covers those three days from now on.
+  /// The past is not judged here: a running period covers its own past
+  /// days too, and the gestures refuse those (the server: `date_past`).
+  bool coversDay(Day day) => mine.any((period) => period.covers(day));
 
   @override
   bool operator ==(Object other) =>
       other is MyDuty &&
       other.current == current &&
       other.next == next &&
+      _samePeriods(other.mine, mine) &&
       _sameIds(other.coAssignees, coAssignees);
 
   @override
-  int get hashCode => Object.hash(current, next, Object.hashAll(coAssignees));
+  int get hashCode => Object.hash(
+    current,
+    next,
+    Object.hashAll(mine),
+    Object.hashAll(coAssignees),
+  );
 
   @override
   String toString() =>
-      'MyDuty(current: $current, next: $next, '
+      'MyDuty(current: $current, next: $next, mine: $mine, '
       'with: $coAssignees)';
+}
+
+bool _samePeriods(List<DutyPeriod> a, List<DutyPeriod> b) {
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
 }
 
 bool _sameIds(List<String> a, List<String> b) {
@@ -436,7 +473,7 @@ bool _sameIds(List<String> a, List<String> b) {
 
 /// [meId]'s duty on [today] (see [MyDuty]); [MyDuty.none] for nobody signed
 /// in, or no duty now or ahead. A period that starts or ends today is the
-/// current one.
+/// current one, and one that ends today has not ended yet ([MyDuty.mine]).
 MyDuty myDuty(
   Iterable<DutyPeriod> periods,
   Iterable<DutyAssignment> assignments,
@@ -444,14 +481,16 @@ MyDuty myDuty(
   Day today,
 ) {
   if (meId == null) return MyDuty.none;
-  final mine = {
+  final mineIds = {
     for (final a in assignments)
       if (a.userId == meId) a.periodId,
   };
   DutyPeriod? current;
   DutyPeriod? next;
+  final ahead = <DutyPeriod>[];
   for (final period in periods) {
-    if (!mine.contains(period.id)) continue;
+    if (!mineIds.contains(period.id)) continue;
+    if (!period.endsOn.isBefore(today)) ahead.add(period);
     if (period.covers(today)) {
       current = period;
     } else if (period.startsOn.isAfter(today) &&
@@ -462,6 +501,7 @@ MyDuty myDuty(
   return MyDuty(
     current: current,
     next: next,
+    mine: ahead..sort((a, b) => a.startsOn.compareTo(b.startsOn)),
     coAssignees: current == null
         ? const []
         : [

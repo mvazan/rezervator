@@ -39,6 +39,7 @@ void main() {
   Future<(ProviderContainer, StreamController<DateTime>)> container({
     Profile? profile = me,
     required DateTime start,
+    List<DutyAssignment> roster = assignments,
   }) async {
     final clock = StreamController<DateTime>();
     addTearDown(clock.close);
@@ -47,9 +48,7 @@ void main() {
         nowProvider.overrideWith((ref) => clock.stream),
         myProfileProvider.overrideWith((ref) => Stream.value(profile)),
         dutyPeriodsProvider.overrideWith((ref) => Stream.value(periods)),
-        dutyAssignmentsProvider.overrideWith(
-          (ref) => Stream.value(assignments),
-        ),
+        dutyAssignmentsProvider.overrideWith((ref) => Stream.value(roster)),
       ],
     );
     addTearDown(c.dispose);
@@ -97,6 +96,43 @@ void main() {
     await Future<void>.delayed(Duration.zero);
 
     expect(notified, 0);
+  });
+
+  test('a duty next week: not on duty today, its days are mine already',
+      () async {
+    final (c, _) = await container(
+      start: DateTime(2026, 10, 7, 12),
+      roster: const [DutyAssignment(periodId: 'next', userId: 'me')],
+    );
+    final duty = c.read(myDutyProvider);
+    expect(duty.onDuty, isFalse);
+    expect([for (final p in duty.mine) p.id], ['next']);
+    expect(duty.coversDay(Day(2026, 10, 12)), isTrue);
+    expect(duty.coversDay(Day(2026, 10, 18)), isTrue);
+    expect(duty.coversDay(Day(2026, 10, 7)), isFalse);
+    expect(duty.coversDay(Day(2026, 10, 19)), isFalse);
+  });
+
+  test('the days I may edit follow the clock: a period over drops out',
+      () async {
+    final (c, clock) = await container(
+      start: DateTime(2026, 10, 11, 23, 59),
+      roster: const [
+        DutyAssignment(periodId: 'now', userId: 'me'),
+        DutyAssignment(periodId: 'next', userId: 'me'),
+      ],
+    );
+    expect(c.read(myDutyProvider).coversDay(Day(2026, 10, 11)), isTrue);
+
+    clock.add(DateTime(2026, 10, 12, 0, 0));
+    await Future<void>.delayed(Duration.zero);
+
+    final duty = c.read(myDutyProvider);
+    expect(duty.onDuty, isTrue);
+    expect(duty.current?.id, 'next');
+    expect([for (final p in duty.mine) p.id], ['next']);
+    expect(duty.coversDay(Day(2026, 10, 11)), isFalse);
+    expect(duty.coversDay(Day(2026, 10, 12)), isTrue);
   });
 
   test('signed out (no profile): none', () async {
