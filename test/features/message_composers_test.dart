@@ -214,6 +214,12 @@ void main() {
     // Still open while it goes out, and not sendable twice.
     expect(send(tester).onPressed, isNull);
     reply.complete('new-id');
+    // The sheet slides away for a moment: „Odeslat“ must not come back on
+    // meanwhile, a tap there would send the message a second time.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(find.text('Odeslat'), findsOneWidget);
+    expect(send(tester).onPressed, isNull);
     await tester.pumpAndSettle();
     expect(find.text('Odeslat'), findsNothing);
     expect(find.text('Zpráva odeslána.'), findsOneWidget);

@@ -123,8 +123,10 @@ typedef MessageSend =
 /// refusal shows over the sheet ([snack]) and keeps the text for another
 /// try. The page's messenger is taken first: the sheet may be swiped away
 /// while the call runs, and its outcome must still be told — which
-/// [tryAction], silent once its context is gone, would not do.
-Future<void> _sendFromSheet(
+/// [tryAction], silent once its context is gone, would not do. Says whether
+/// it went through: the sheet then stays „sending“ (no second „Odeslat“
+/// while it slides away); after a refusal it is free for another try.
+Future<bool> _sendFromSheet(
   BuildContext context,
   Future<void> Function() send, {
   required String Function(Object error) errorText,
@@ -144,10 +146,11 @@ Future<void> _sendFromSheet(
     } else {
       onPage(errorText(e));
     }
-    return;
+    return false;
   }
   if (context.mounted) closeDialog(context);
   onPage('Zpráva odeslána.');
+  return true;
 }
 
 /// The staff composer — Zprávy's „Napsat hráčům“ (the admin, or the duty on
@@ -259,7 +262,7 @@ class _PlayerComposerSheetState extends ConsumerState<_PlayerComposerSheet> {
   Future<void> _send(MessageAudience audience, String text) async {
     if (_sending) return;
     setState(() => _sending = true);
-    await _sendFromSheet(
+    final sent = await _sendFromSheet(
       context,
       () => widget.send(
         kind: MessageKind.message,
@@ -270,7 +273,7 @@ class _PlayerComposerSheetState extends ConsumerState<_PlayerComposerSheet> {
       ),
       errorText: (e) => playerSendErrorText(e, audience: audience),
     );
-    if (mounted) setState(() => _sending = false);
+    if (!sent && mounted) setState(() => _sending = false);
   }
 
   @override
@@ -472,7 +475,7 @@ class _StaffComposerSheetState extends ConsumerState<_StaffComposerSheet> {
     final date = _date;
     final asDuty = _offeredAsDuty;
     setState(() => _sending = true);
-    await _sendFromSheet(
+    final sent = await _sendFromSheet(
       context,
       () => widget.send(
         kind: MessageKind.message,
@@ -484,7 +487,7 @@ class _StaffComposerSheetState extends ConsumerState<_StaffComposerSheet> {
       errorText: (e) =>
           staffSendErrorText(e, toBlock: blockId != null, asDuty: asDuty),
     );
-    if (mounted) setState(() => _sending = false);
+    if (!sent && mounted) setState(() => _sending = false);
   }
 
   @override
