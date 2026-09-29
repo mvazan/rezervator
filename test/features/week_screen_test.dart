@@ -2633,4 +2633,229 @@ void main() {
       expect(dialog.offerCloseDay, isTrue);
     });
   });
+
+  // Two rights, two clocks (0050): booking, cancelling and re-seating for
+  // others is held WHILE on duty (a period covering today); the blocks of a
+  // day are edited on the days of the player's OWN periods, from today on,
+  // on duty today or not. The drawn week is Mon 7. 9. – Sun 13. 9., today
+  // is Wednesday the 9th.
+  group('block edits follow the days of my own periods (0050)', () {
+    Day day(int d) => Day(2026, 9, d);
+    DutyPeriod period(String id, int from, int to) =>
+        DutyPeriod(id: id, startsOn: day(from), endsOn: day(to));
+    const onMe = [DutyAssignment(periodId: 'd1', userId: 'me')];
+
+    CalendarAdminHooks hooks(WidgetTester tester) =>
+        tester.widget<WeekCalendarView>(find.byType(WeekCalendarView)).admin;
+    SlotCallbacks slots(WidgetTester tester) =>
+        tester.widget<WeekCalendarView>(find.byType(WeekCalendarView)).slot;
+
+    // Which days of the drawn week the calendar lets me edit: those whose
+    // header takes the ＋ tap.
+    Set<int> addable(WidgetTester tester) => {
+      for (var d = 7; d <= 13; d++)
+        if (find
+            .descendant(of: headerOf(day(d)), matching: find.byType(InkWell))
+            .evaluate()
+            .isNotEmpty)
+          d,
+    };
+
+    Future<void> chip(WidgetTester tester, int d) async {
+      await tester.tap(
+        find
+            .descendant(
+              of: find.byType(DayChipStrip),
+              matching: find.byType(InkWell),
+            )
+            .at(d - 7),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('a duty later this week, not on duty today: its own days '
+        'and no others', (tester) async {
+      wideSurface(tester);
+      await tester.pumpWidget(
+        app(dutyPeriods: [period('d1', 10, 12)], dutyAssignments: onMe),
+      );
+      await tester.pumpAndSettle();
+
+      // Thursday to Saturday; not today (not mine), not Sunday, not the past.
+      expect(addable(tester), {10, 11, 12});
+      expect(
+        [for (var d = 7; d <= 13; d++) hooks(tester).canEditDay(day(d))],
+        [false, false, false, true, true, true, false],
+      );
+      expect(slots(tester).onDuty, isFalse);
+      // The hooks of a day outside it are gone; inside they are all there.
+      expect(hooks(tester).forDay(day(13)).onEditBlock, isNull);
+      expect(hooks(tester).forDay(day(9)).onCloseDay, isNull);
+      expect(hooks(tester).forDay(day(11)).onEditBlock, isNotNull);
+      expect(hooks(tester).forDay(day(11)).onCloseDay, isNotNull);
+      expect(hooks(tester).forDay(day(11)).onEditPrioritySlot, isNull);
+    });
+
+    testWidgets('that duty books, and cancels, for nobody yet — its own '
+        'days included', (tester) async {
+      wideSurface(tester);
+      await tester.pumpWidget(
+        app(
+          dutyPeriods: [period('d1', 10, 12)],
+          dutyAssignments: onMe,
+          reservations: [res('r2', 'p2', tomorrow)],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final free = find.descendant(
+        of: find.byKey(ValueKey(tomorrow)),
+        matching: find.byIcon(Icons.add),
+      );
+      await tester.ensureVisible(free.first);
+      await tester.pumpAndSettle();
+      await tester.tap(free.first);
+      await tester.pumpAndSettle();
+      expect(find.text('Rezervovat termín?'), findsOneWidget);
+      expect(find.textContaining('Vybráno:'), findsNothing);
+      await tester.tap(find.text('Zrušit'));
+      await tester.pumpAndSettle();
+
+      final cell = find.descendant(
+        of: find.byKey(ValueKey(tomorrow)),
+        matching: find.text('Péťa'),
+      );
+      await tester.ensureVisible(cell);
+      await tester.pumpAndSettle();
+      await tester.tap(cell);
+      await tester.pumpAndSettle();
+      expect(find.text('Zrušit bez zprávy'), findsNothing);
+      expect(find.text('Petr Novák'), findsOneWidget); // the info snack
+    });
+
+    testWidgets('portrait: the ⋮ menu on its own days only', (tester) async {
+      portraitSurface(tester);
+      await tester.pumpWidget(
+        app(dutyPeriods: [period('d1', 10, 12)], dutyAssignments: onMe),
+      );
+      await tester.pumpAndSettle();
+
+      for (final d in [7, 8, 9, 13]) {
+        await chip(tester, d);
+        expect(find.byIcon(Icons.more_vert), findsNothing, reason: '$d. 9.');
+      }
+      for (final d in [10, 11, 12]) {
+        await chip(tester, d);
+        await tester.tap(find.byIcon(Icons.more_vert));
+        await tester.pumpAndSettle();
+        expect(find.text('Přidat blok…'), findsOneWidget, reason: '$d. 9.');
+        expect(find.text('Zavřít den…'), findsOneWidget, reason: '$d. 9.');
+        await tester.tapAt(const Offset(5, 5)); // dismiss the menu
+        await tester.pumpAndSettle();
+      }
+    });
+
+    testWidgets('on duty today: books and cancels for others on another '
+        'duty\'s days, edits blocks on its own only', (tester) async {
+      wideSurface(tester);
+      await tester.pumpWidget(
+        app(
+          // Mine until today, then Petr's Thursday to Sunday.
+          dutyPeriods: [period('d1', 7, 9), period('d2', 10, 13)],
+          dutyAssignments: const [
+            DutyAssignment(periodId: 'd1', userId: 'me'),
+            DutyAssignment(periodId: 'd2', userId: 'p2'),
+          ],
+          reservations: [res('r2', 'p2', tomorrow)],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Today only: Monday and Tuesday are mine but past.
+      expect(addable(tester), {9});
+      expect(slots(tester).onDuty, isTrue);
+
+      // Thursday is Petr's duty: a free cell still books for anyone ...
+      final free = find.descendant(
+        of: find.byKey(ValueKey(tomorrow)),
+        matching: find.byIcon(Icons.add),
+      );
+      await tester.ensureVisible(free.first);
+      await tester.pumpAndSettle();
+      await tester.tap(free.first);
+      await tester.pumpAndSettle();
+      expect(find.text('Vybráno: já'), findsOneWidget);
+      await tester.tap(find.text('Zrušit'));
+      await tester.pumpAndSettle();
+
+      // ... and another player's reservation there is cancelled with the
+      // notify choice.
+      final cell = find.descendant(
+        of: find.byKey(ValueKey(tomorrow)),
+        matching: find.text('Péťa'),
+      );
+      await tester.ensureVisible(cell);
+      await tester.pumpAndSettle();
+      await tester.tap(cell);
+      await tester.pumpAndSettle();
+      expect(find.text('Zrušit bez zprávy'), findsOneWidget);
+    });
+
+    testWidgets('two consecutive periods of mine: every day from today on',
+        (tester) async {
+      wideSurface(tester);
+      await tester.pumpWidget(
+        app(
+          dutyPeriods: [period('d1', 7, 9), period('d2', 10, 13)],
+          dutyAssignments: const [
+            DutyAssignment(periodId: 'd1', userId: 'me'),
+            DutyAssignment(periodId: 'd2', userId: 'me'),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(addable(tester), {9, 10, 11, 12, 13});
+    });
+
+    testWidgets('an admin edits every day of the week, past ones too, with '
+        'or without a period', (tester) async {
+      wideSurface(tester);
+      await tester.pumpWidget(
+        app(
+          profile: admin,
+          dutyPeriods: [period('d1', 10, 12)],
+          dutyAssignments: const [
+            DutyAssignment(periodId: 'd1', userId: 'p2'),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(addable(tester), {7, 8, 9, 10, 11, 12, 13});
+      expect(hooks(tester).canEditDay(day(8)), isTrue);
+      expect(hooks(tester).forDay(day(8)).onEditPrioritySlot, isNotNull);
+    });
+
+    testWidgets('a duty of mine far ahead: no day of this week is mine',
+        (tester) async {
+      wideSurface(tester);
+      await tester.pumpWidget(
+        app(
+          dutyPeriods: [
+            DutyPeriod(
+              id: 'd1',
+              startsOn: Day(2026, 10, 12),
+              endsOn: Day(2026, 10, 14),
+            ),
+          ],
+          dutyAssignments: onMe,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(addable(tester), isEmpty);
+      expect(slots(tester).onDuty, isFalse);
+    });
+  });
 }

@@ -126,11 +126,13 @@ class _WeekScreenState extends ConsumerState<WeekScreen> with WeekNavigation {
     ];
 
     // Day-block gestures (long-press edit, tap-a-gap add, move, the day
-    // menu) exist for the admin and the player on canteen duty (0050) — on
-    // the real DB block set only, never on the placeholder grid.
-    final onDuty = ref.watch(myDutyProvider.select((d) => d.onDuty));
+    // menu) exist for the admin and for a player with canteen duty periods
+    // (0050) — on the real DB block set only, never on the placeholder
+    // grid. Which days a duty may edit is ScheduleActions.canEditDay's
+    // question: the days of their own periods, on duty today or not.
+    final duty = ref.watch(myDutyProvider);
     final canEditBlocks =
-        ((me?.isAdmin ?? false) || onDuty) && blocksFromDb;
+        ((me?.isAdmin ?? false) || duty.mine.isNotEmpty) && blocksFromDb;
     final slotTypes = ref.watch(slotTypesProvider).value ?? const [];
     final actions = ScheduleActions(
       context: context,
@@ -149,7 +151,7 @@ class _WeekScreenState extends ConsumerState<WeekScreen> with WeekNavigation {
       canEditBlocks: canEditBlocks,
       noAccountIds: wv.noAccountIds,
       groupMateIds: me == null ? const {} : group.matesOf(me.id),
-      onDuty: onDuty,
+      duty: duty,
       clock: _clockNow,
     );
 

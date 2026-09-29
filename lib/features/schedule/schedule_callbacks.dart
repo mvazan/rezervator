@@ -54,6 +54,11 @@ class SlotCallbacks {
 
 /// The calendar boards' admin gestures — every hook optional (null = not
 /// offered). [none] is the read-only board (non-admins, the kiosk).
+///
+/// The block gestures ([onEditBlock], [onAddBlockInGap], [onAddForDay],
+/// [onMoveBlock], [onCloseDay], [onRestoreDay]) are per DAY: the player on
+/// canteen duty (0050) edits blocks only on the days of their own periods,
+/// so a view never reads them off the bundle directly but asks [forDay].
 class CalendarAdminHooks {
   const CalendarAdminHooks({
     this.onEditBlock,
@@ -66,9 +71,11 @@ class CalendarAdminHooks {
     this.onCloseDay,
     this.onRestoreDay,
     this.hasDayOverride = _noOverride,
+    this.canEditDay = _everyDay,
   });
 
   static bool _noOverride(Day _) => false;
+  static bool _everyDay(Day _) => true;
 
   static const none = CalendarAdminHooks();
 
@@ -107,4 +114,25 @@ class CalendarAdminHooks {
 
   /// Whether [date] has an override row to restore from.
   final bool Function(Day date) hasDayOverride;
+
+  /// Whether the block gestures are offered on [date]: the admin on any
+  /// day, the player on duty (0050) on the days of their own periods, from
+  /// today on. Says nothing about being on duty today — that is the
+  /// booking's clock, not this one.
+  final bool Function(Day date) canEditDay;
+
+  /// These hooks as they stand on [date]: where [canEditDay] says no, the
+  /// six block gestures are gone. Everything else — the matches, blockages
+  /// and rentals (the admin's, on every day), the override lookup and the
+  /// predicate itself — stays; a new hook that is not a block gesture is
+  /// copied here too.
+  CalendarAdminHooks forDay(Day date) => canEditDay(date)
+      ? this
+      : CalendarAdminHooks(
+          onEditPrioritySlot: onEditPrioritySlot,
+          onEditRental: onEditRental,
+          onMovePrioritySlot: onMovePrioritySlot,
+          hasDayOverride: hasDayOverride,
+          canEditDay: canEditDay,
+        );
 }

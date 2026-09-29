@@ -334,14 +334,16 @@ class _DayPage extends StatelessWidget {
   List<({String label, VoidCallback onTap})> _menu() {
     final date = day.date;
     if (date.isBefore(today)) return const [];
-    final add = admin.onAddForDay;
-    final close = admin.onCloseDay;
-    final restore = admin.onRestoreDay;
+    // Per day: the duty (0050) edits only the days of their own periods.
+    final hooks = admin.forDay(date);
+    final add = hooks.onAddForDay;
+    final close = hooks.onCloseDay;
+    final restore = hooks.onRestoreDay;
     return [
       if (add != null) (label: 'Přidat blok…', onTap: () => add(date)),
       if (close != null && day is OpenDay)
         (label: 'Zavřít den…', onTap: () => close(date)),
-      if (restore != null && admin.hasDayOverride(date))
+      if (restore != null && hooks.hasDayOverride(date))
         (label: 'Obnovit týdenní rozvrh', onTap: () => restore(date)),
     ];
   }
