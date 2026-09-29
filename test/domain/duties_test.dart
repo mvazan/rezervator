@@ -507,14 +507,14 @@ void main() {
       );
     });
 
-    test('my duty in another week reads like anyone else\'s', () {
+    test('my duty in another week says „ty“, not my name', () {
       final periods = [period('a', monday, monday.addDays(6))];
       final assignments = [assign('a', 'jan')];
       // Next week's duty, seen today (not in the week).
-      expect(
-        label(periods, assignments, me: 'jan', today: Day(2026, 9, 30))?.text,
-        'Slouží: Jan Novák',
-      );
+      final ahead = label(periods, assignments, me: 'jan', today: Day(2026, 9, 30));
+      expect(ahead?.text, 'Slouží: ty');
+      // Not tinted: „Sloužíš ty“ is the running duty's line.
+      expect(ahead?.mine, isFalse);
       // On duty today, looking at the week after.
       final h = label(
         periods,
@@ -536,8 +536,64 @@ void main() {
         me: 'jan',
         today: Day(2026, 10, 6),
       );
-      expect(h?.text, 'Slouží: po–st Petr Svoboda · čt–ne Jan Novák');
+      expect(h?.text, 'Slouží: po–st Petr Svoboda · čt–ne ty');
       expect(h?.mine, isFalse);
+    });
+
+    test('me in a change inside the week: „ty“ in my days, names in the '
+        'others\'', () {
+      final periods = [
+        period('a', Day(2026, 10, 1), Day(2026, 10, 7)),
+        period('b', Day(2026, 10, 8), Day(2026, 10, 14)),
+      ];
+      final assignments = [assign('a', 'jan'), assign('b', 'petr')];
+      expect(
+        label(periods, assignments, me: 'jan')?.text,
+        'Slouží: po–st ty · čt–ne Petr Svoboda',
+      );
+      expect(
+        label(periods, assignments, me: 'petr')?.text,
+        'Slouží: po–st Jan Novák · čt–ne ty',
+      );
+    });
+
+    test('with others on the period „ty“ closes the list, whatever the '
+        'alphabet says', () {
+      final periods = [period('a', monday, monday.addDays(6))];
+      // Jan sorts after Adam and before Petr; „ty“ is still last.
+      expect(
+        label(periods, [assign('a', 'jan'), assign('a', 'petr')], me: 'jan')?.text,
+        'Slouží: Petr Svoboda a ty',
+      );
+      expect(
+        label(
+          periods,
+          [assign('a', 'jan'), assign('a', 'petr'), assign('a', 'adam')],
+          me: 'jan',
+        )?.text,
+        'Slouží: Adam Beneš, Petr Svoboda a ty',
+      );
+    });
+
+    test('I am „ty“ even when the roster does not know me (yet)', () {
+      final h = dutyHeaderLabel(
+        monday,
+        [period('a', monday, monday.addDays(6))],
+        [assign('a', 'me'), assign('a', 'jan')],
+        const {'jan': 'Jan Novák'},
+        'me',
+        today: farToday,
+      );
+      expect(h?.text, 'Slouží: Jan Novák a ty');
+    });
+
+    test('someone else\'s view names me as anyone', () {
+      final h = label(
+        [period('a', monday, monday.addDays(6))],
+        [assign('a', 'jan'), assign('a', 'petr')],
+        me: 'adam',
+      );
+      expect(h?.text, 'Slouží: Jan Novák a Petr Svoboda');
     });
   });
 
