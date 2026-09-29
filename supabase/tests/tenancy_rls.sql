@@ -6997,8 +6997,10 @@ update schedule_settings set duty_reminder_enabled = false, duty_reminder_days =
 -- 0050 — práva služby ---------------------------------------------------------
 -- The player on duty (an approved player assigned to a period that covers
 -- Prague today) books and cancels for the alley's players under THEIR
--- rules and edits single days from today on, through the RPCs only; the
--- weekly template, matches, rentals and settings stay the admin's.
+-- rules, from today on; the days of their OWN periods — on duty today or
+-- not, never the past — they also edit (blocks, closing, the template),
+-- through the RPCs only. The weekly template, matches, rentals and
+-- settings stay the admin's.
 reset role;
 
 -- 21. Fixtures in an alley of its own, S: tenant A carries matches placed
@@ -7083,15 +7085,16 @@ begin
   perform set_config('probe.duty_horizon', v_horizon::text, true);
 end $$;
 
--- 21a. is_on_duty() and duty_gate() are internal: only security-definer
--- bodies call them. The two new day RPCs are the app's and not anon's; the
+-- 21a. is_on_duty(), duty_gate() and duty_edit_gate() are internal: only
+-- security-definer bodies call them. The two new day RPCs are the app's and not anon's; the
 -- replaced RPCs keep their callers; is_admin() stays PUBLIC-executable
 -- (policies call it). Both via CHECKs know 'duty' and hold for every row.
 do $$
 declare
   v_f text;
 begin
-  foreach v_f in array array['is_on_duty()', 'duty_gate(date)'] loop
+  foreach v_f in array array[
+      'is_on_duty()', 'duty_gate(date)', 'duty_edit_gate(date)'] loop
     if has_function_privilege('authenticated', 'public.' || v_f, 'execute')
        or has_function_privilege('anon', 'public.' || v_f, 'execute') then
       raise exception 'FAIL: % is callable from the app', v_f;
@@ -7930,6 +7933,392 @@ begin
   end if;
   raise notice 'OK: the admin edits any day, yesterday and started blocks too, through the duty''s RPCs (0050)';
 end $$;
+
+-- 21i. Block edits belong to a duty's OWN periods (duty_edit_gate):
+-- set_day_override, delete_day_override, cancel_block_day_reservations and
+-- move_day_reservations on the days of a period of theirs — on duty today or
+-- not — never in the past, and add_special_block while a period of theirs
+-- has not ended. Someone else's days and days nobody serves are refused
+-- (not_allowed), a past day inside an own period is date_past. Booking,
+-- cancelling and re-seating for others is the other right: held only WHILE
+-- on duty (a period covering today), on any future day, the other duties'
+-- days included. Pavel serves today and owns [today − 1, today + 5] and,
+-- right behind it, [today + 6, today + 9]; Tereza's [today + 10, today + 16]
+-- lies ahead; Quido's ended long ago; days beyond are nobody's.
+reset role;
+-- Runs the four day RPCs on p_date as whoever is signed in and demands the
+-- same outcome of each: p_want is the code they raise, 'ok' = through.
+create function pg_temp.expect_day_rpcs(
+  p_date date, p_b1 uuid, p_b2 uuid, p_want text)
+returns void language plpgsql as $$
+declare
+  v_call text;
+  v_got text;
+begin
+  foreach v_call in array array[
+      'set_day_override', 'cancel_block_day_reservations',
+      'move_day_reservations', 'delete_day_override'] loop
+    begin
+      case v_call
+        when 'set_day_override' then
+          perform set_day_override(p_date, true, 'probe');
+        when 'cancel_block_day_reservations' then
+          perform cancel_block_day_reservations(p_date, p_b1, 'probe');
+        when 'move_day_reservations' then
+          perform move_day_reservations(p_date, p_b1, p_b2);
+        else
+          perform delete_day_override(p_date);
+      end case;
+      v_got := 'ok';
+    exception when others then
+      v_got := sqlerrm;
+    end;
+    if v_got <> p_want then
+      raise exception 'FAIL: % on % gave %, expected %',
+        v_call, p_date, v_got, p_want;
+    end if;
+  end loop;
+end $$;
+do $$
+declare
+  v_s constant uuid := '00000000-0000-0000-0000-000000000050';
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+  v_second uuid;
+  v_id uuid;
+begin
+  insert into duty_periods (tenant_id, starts_on, ends_on)
+    values (v_s, v_today + 6, v_today + 9) returning id into v_second;
+  insert into duty_assignments (period_id, user_id, tenant_id)
+    values (v_second, '50000000-0000-0000-0000-000000000011', v_s);
+  -- What this section books for Wanda is not about her cap.
+  update schedule_settings set max_active_reservations = 50
+   where tenant_id = v_s;
+  -- One override on a day of Tereza's and one on a day nobody serves: what
+  -- Pavel must still find there after his refused edits. And a training of
+  -- Wanda's on another of Tereza's days, for her refused cancel below.
+  insert into day_overrides (tenant_id, date, closed, reason, created_by)
+    values (v_s, v_today + 11, false, 'Terezin den',
+            '50000000-0000-0000-0000-000000000010'),
+           (v_s, v_today + 20, true, 'nikoho den',
+            '50000000-0000-0000-0000-000000000010');
+  insert into reservations (tenant_id, player_id, date, block_id, lane,
+                            created_via, created_by)
+  values (v_s, '50000000-0000-0000-0000-000000000016', v_today + 12,
+          current_setting('probe.duty_b1')::uuid, 2, 'app',
+          '50000000-0000-0000-0000-000000000016')
+  returning id into v_id;
+  perform set_config('probe.duty_res_wanda', v_id::text, true);
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"50000000-0000-0000-0000-000000000011","role":"authenticated"}';
+do $$
+declare
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+  v_b1 constant uuid := current_setting('probe.duty_b1')::uuid;
+  v_b2 constant uuid := current_setting('probe.duty_b2')::uuid;
+  v_wanda constant uuid := '50000000-0000-0000-0000-000000000016';
+  v_res reservations;
+  v_d date;
+begin
+  -- Tereza's day: booked, re-seated and cancelled for another player, as
+  -- on any future day.
+  select * into v_res from create_reservation(
+    v_wanda, v_today + 11, v_b1, 1::smallint);
+  if v_res.created_via <> 'duty' then
+    raise exception 'FAIL: the duty could not book on another duty''s day: %', v_res;
+  end if;
+  perform move_reservation(v_res.id, v_b2, 2);
+  if not exists (select 1 from reservations
+                 where id = v_res.id and block_id = v_b2 and lane = 2
+                   and cancelled_at is null) then
+    raise exception 'FAIL: the duty could not re-seat a training on another duty''s day';
+  end if;
+  perform move_reservation(v_res.id, v_b1, 1);
+
+  -- No block edit there: on Tereza's days (the day right behind his own
+  -- included), nor on a day nobody serves.
+  foreach v_d in array array[v_today + 10, v_today + 11, v_today + 16,
+                             v_today + 20] loop
+    perform pg_temp.expect_day_rpcs(v_d, v_b1, v_b2, 'not_allowed');
+  end loop;
+  if not exists (select 1 from reservations
+                 where id = v_res.id and block_id = v_b1 and lane = 1
+                   and cancelled_at is null)
+     or (select reason from day_overrides where date = v_today + 11)
+        is distinct from 'Terezin den'
+     or not exists (select 1 from day_overrides
+                    where date = v_today + 20 and closed
+                      and reason = 'nikoho den')
+     or exists (select 1 from day_overrides
+                where date in (v_today + 10, v_today + 16)) then
+    raise exception 'FAIL: a refused block edit outside the duty''s own periods changed something';
+  end if;
+
+  perform cancel_reservation(v_res.id, 'jiný den', false);
+  if not exists (select 1 from reservations
+                 where id = v_res.id and cancelled_via = 'duty'
+                   and cancelled_at is not null) then
+    raise exception 'FAIL: the duty could not cancel a training on another duty''s day';
+  end if;
+  raise notice 'OK: the duty books, re-seats and cancels on another duty''s day, but edits no block there or on a day nobody serves (0050)';
+end $$;
+
+do $$
+declare
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+  v_b1 constant uuid := current_setting('probe.duty_b1')::uuid;
+  v_b2 constant uuid := current_setting('probe.duty_b2')::uuid;
+  v_wanda constant uuid := '50000000-0000-0000-0000-000000000016';
+  v_res reservations;
+  v_d date;
+begin
+  -- His own days, the edges of both consecutive periods included: the last
+  -- day of the first, the first and the last of the second.
+  foreach v_d in array array[v_today + 5, v_today + 6, v_today + 9] loop
+    perform pg_temp.expect_day_rpcs(v_d, v_b1, v_b2, 'ok');
+    if exists (select 1 from day_overrides where date = v_d) then
+      raise exception 'FAIL: the duty''s edit of % left an override', v_d;
+    end if;
+  end loop;
+  -- ... and the edits do their work there: a block's trainings move to
+  -- another block, then that block is cancelled for the day.
+  select * into v_res from create_reservation(
+    v_wanda, v_today + 6, v_b1, 1::smallint);
+  perform move_day_reservations(v_today + 6, v_b1, v_b2);
+  if not exists (select 1 from reservations
+                 where id = v_res.id and block_id = v_b2
+                   and cancelled_at is null) then
+    raise exception 'FAIL: the duty could not move a block on the day her second period starts';
+  end if;
+  perform cancel_block_day_reservations(v_today + 6, v_b2, 'blok zrušen');
+  if not exists (select 1 from reservations
+                 where id = v_res.id and cancelled_at is not null
+                   and cancelled_via = 'admin' and cancel_note = 'blok zrušen') then
+    raise exception 'FAIL: the duty could not cancel a block on the day her second period starts';
+  end if;
+
+  -- The past: inside his own period it is date_past; outside, the day is
+  -- not his own to begin with, and that is asked first.
+  perform pg_temp.expect_day_rpcs(v_today - 1, v_b1, v_b2, 'date_past');
+  perform pg_temp.expect_day_rpcs(v_today - 3, v_b1, v_b2, 'not_allowed');
+  raise notice 'OK: the duty edits blocks on the days of both her own periods, edges included; a past day is date_past, or not_allowed outside her periods (0050)';
+end $$;
+
+-- Tereza's own period starts in ten days: not on duty today, she still
+-- edits exactly her own days, and adds a block for them.
+set local request.jwt.claims =
+  '{"sub":"50000000-0000-0000-0000-000000000013","role":"authenticated"}';
+do $$
+declare
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+  v_b1 constant uuid := current_setting('probe.duty_b1')::uuid;
+  v_b2 constant uuid := current_setting('probe.duty_b2')::uuid;
+  v_wanda constant uuid := '50000000-0000-0000-0000-000000000016';
+  v_res constant uuid := current_setting('probe.duty_res_wanda')::uuid;
+  v_id uuid;
+  v_d date;
+begin
+  foreach v_d in array array[v_today + 10, v_today + 13, v_today + 16] loop
+    perform pg_temp.expect_day_rpcs(v_d, v_b1, v_b2, 'ok');
+    if exists (select 1 from day_overrides where date = v_d) then
+      raise exception 'FAIL: the edit of % by a duty still ahead left an override', v_d;
+    end if;
+  end loop;
+  v_id := add_special_block('07:00', '07:10');
+  if not exists (select 1 from time_blocks
+                 where id = v_id and position = -1 and not active
+                   and tenant_id = '00000000-0000-0000-0000-000000000050') then
+    raise exception 'FAIL: a duty still ahead could not add a day-only block';
+  end if;
+  -- Nothing outside her days: today, a day of Pavel's, the last day of his
+  -- second period right before hers, the day after hers, and yesterday.
+  foreach v_d in array array[v_today, v_today + 2, v_today + 9, v_today + 17,
+                             v_today - 1] loop
+    perform pg_temp.expect_day_rpcs(v_d, v_b1, v_b2, 'not_allowed');
+  end loop;
+
+  -- The other right is held only while on duty: today she books, cancels
+  -- and re-seats for nobody, her own days included.
+  begin
+    perform create_reservation(v_wanda, v_today + 11, v_b1, 3::smallint);
+    raise exception 'FAIL: a duty still ahead booked for another';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  begin
+    perform cancel_reservation(v_res);
+    raise exception 'FAIL: a duty still ahead cancelled another''s training';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  begin
+    perform move_reservation(v_res, v_b2, 3);
+    raise exception 'FAIL: a duty still ahead re-seated another''s training';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  if not exists (select 1 from reservations
+                 where id = v_res and block_id = v_b1 and lane = 2
+                   and cancelled_at is null) then
+    raise exception 'FAIL: a refused call by a duty still ahead changed a reservation';
+  end if;
+  raise notice 'OK: a duty starting later edits blocks on her own days only and books, cancels and re-seats for no one until it starts (0050)';
+end $$;
+
+-- Who is no duty at all, on a day inside a period they are assigned to
+-- (t+2 is Pavel's, t+7 his second period's): Pavel demoted to pending, the
+-- placeholder Vilém, Wanda as a kiosk account assigned by hand (the
+-- roster's RPC never does), Pavel as a superadmin visiting the other alley.
+reset role;
+update profiles set status = 'pending'
+ where id = '50000000-0000-0000-0000-000000000011';
+update profiles set role = 'kiosk'
+ where id = '50000000-0000-0000-0000-000000000016';
+insert into duty_assignments (period_id, user_id, tenant_id)
+  select id, '50000000-0000-0000-0000-000000000016', tenant_id
+    from duty_periods
+   where tenant_id = '00000000-0000-0000-0000-000000000050'
+     and starts_on = (now() at time zone 'Europe/Prague')::date + 6;
+set local role authenticated;
+do $$
+declare
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+  v_b1 constant uuid := current_setting('probe.duty_b1')::uuid;
+  v_b2 constant uuid := current_setting('probe.duty_b2')::uuid;
+  v_who text;
+begin
+  foreach v_who in array array[
+      '50000000-0000-0000-0000-000000000011',   -- Pavel, pending
+      '50000000-0000-0000-0000-000000000015',   -- Vilém, placeholder
+      '50000000-0000-0000-0000-000000000016']   -- Wanda, kiosk
+  loop
+    perform set_config('request.jwt.claims',
+      '{"sub":"' || v_who || '","role":"authenticated"}', true);
+    perform pg_temp.expect_day_rpcs(v_today + 2, v_b1, v_b2, 'not_allowed');
+    perform pg_temp.expect_day_rpcs(v_today + 7, v_b1, v_b2, 'not_allowed');
+    begin
+      perform add_special_block('07:20', '07:30');
+      raise exception 'FAIL: % added a block', v_who;
+    exception when others then
+      if sqlerrm <> 'not_allowed' then raise; end if;
+    end;
+  end loop;
+  raise notice 'OK: a pending player, a placeholder and a kiosk account assigned to a period still edit no block (0050)';
+end $$;
+reset role;
+update profiles set status = 'approved'
+ where id = '50000000-0000-0000-0000-000000000011';
+update profiles set role = 'player'
+ where id = '50000000-0000-0000-0000-000000000016';
+delete from duty_assignments
+ where user_id = '50000000-0000-0000-0000-000000000016';
+update profiles
+   set superadmin = true, home_tenant_id = '00000000-0000-0000-0000-000000000050'
+ where id = '50000000-0000-0000-0000-000000000011';
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"50000000-0000-0000-0000-000000000011","role":"authenticated"}';
+select switch_tenant('00000000-0000-0000-0000-000000000002');
+do $$
+declare
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+begin
+  perform pg_temp.expect_day_rpcs(v_today + 2,
+    current_setting('probe.duty_b1')::uuid,
+    current_setting('probe.duty_b2')::uuid, 'not_allowed');
+  begin
+    perform add_special_block('07:20', '07:30');
+    raise exception 'FAIL: a visiting superadmin added a block as the other alley''s duty';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  raise notice 'OK: a visiting superadmin edits no block as the duty of his own alley (0050)';
+end $$;
+select switch_tenant('00000000-0000-0000-0000-000000000050');
+reset role;
+update profiles set superadmin = false, home_tenant_id = null
+ where id = '50000000-0000-0000-0000-000000000011';
+
+-- The end of a duty, to the day: Pavel's second period goes and the first
+-- one is moved to [today − 8, today − 1] — over since yesterday: no block,
+-- no day, not even yesterday's own (a past day is date_past inside a period,
+-- but today is not covered at all). Then to [today − 8, today]: it ends
+-- today, and today is still his (the blocks of the last seconds, which have
+-- not started: the same ones 21e uses).
+reset role;
+delete from duty_periods
+ where tenant_id = '00000000-0000-0000-0000-000000000050'
+   and starts_on = (now() at time zone 'Europe/Prague')::date + 6;
+update duty_periods
+   set starts_on = (now() at time zone 'Europe/Prague')::date - 8,
+       ends_on = (now() at time zone 'Europe/Prague')::date - 1
+ where tenant_id = '00000000-0000-0000-0000-000000000050'
+   and starts_on = (now() at time zone 'Europe/Prague')::date - 1;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"50000000-0000-0000-0000-000000000011","role":"authenticated"}';
+do $$
+declare
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+  v_b1 constant uuid := current_setting('probe.duty_b1')::uuid;
+  v_b2 constant uuid := current_setting('probe.duty_b2')::uuid;
+begin
+  begin
+    perform add_special_block('07:20', '07:30');
+    raise exception 'FAIL: a duty that ended yesterday added a block';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  perform pg_temp.expect_day_rpcs(v_today + 2, v_b1, v_b2, 'not_allowed');
+  perform pg_temp.expect_day_rpcs(v_today, v_b1, v_b2, 'not_allowed');
+  perform pg_temp.expect_day_rpcs(v_today - 5, v_b1, v_b2, 'date_past');
+  raise notice 'OK: a duty that ended yesterday adds no block and edits no future day (0050)';
+end $$;
+reset role;
+update duty_periods
+   set ends_on = (now() at time zone 'Europe/Prague')::date
+ where tenant_id = '00000000-0000-0000-0000-000000000050'
+   and starts_on = (now() at time zone 'Europe/Prague')::date - 8;
+set local role authenticated;
+do $$
+declare
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+  v_b1 constant uuid := current_setting('probe.duty_b1')::uuid;
+  v_b2 constant uuid := current_setting('probe.duty_b2')::uuid;
+  v_id uuid;
+begin
+  v_id := add_special_block('07:20', '07:30');
+  perform pg_temp.expect_day_rpcs(v_today,
+    current_setting('probe.duty_l1')::uuid,
+    current_setting('probe.duty_l2')::uuid, 'ok');
+  perform pg_temp.expect_day_rpcs(v_today + 1, v_b1, v_b2, 'not_allowed');
+  raise notice 'OK: a duty ending today still edits today, no day after it (0050)';
+end $$;
+
+-- The admin needs no period at all: the duties' days and the days nobody
+-- serves are hers, and what Pavel left on them goes with her edits.
+set local request.jwt.claims =
+  '{"sub":"50000000-0000-0000-0000-000000000010","role":"authenticated"}';
+do $$
+declare
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+  v_b1 constant uuid := current_setting('probe.duty_b1')::uuid;
+  v_b2 constant uuid := current_setting('probe.duty_b2')::uuid;
+  v_d date;
+begin
+  foreach v_d in array array[v_today + 10, v_today + 11, v_today + 20,
+                             v_today + 40] loop
+    perform pg_temp.expect_day_rpcs(v_d, v_b1, v_b2, 'ok');
+    if exists (select 1 from day_overrides where date = v_d) then
+      raise exception 'FAIL: the admin''s edit of % left an override', v_d;
+    end if;
+  end loop;
+  raise notice 'OK: the admin edits blocks on any day, a duty''s and nobody''s alike (0050)';
+end $$;
+reset role;
+update schedule_settings set max_active_reservations = 2
+ where tenant_id = '00000000-0000-0000-0000-000000000050';
 
 -- The next sections start without duties.
 reset role;

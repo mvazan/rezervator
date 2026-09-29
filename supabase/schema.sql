@@ -48,7 +48,7 @@ CREATE OR REPLACE FUNCTION "public"."add_special_block"("p_starts_at" time witho
 declare
   v_id uuid;
 begin
-  perform duty_gate((now() at time zone 'Europe/Prague')::date);
+  perform duty_edit_gate(null);
   insert into time_blocks (tenant_id, starts_at, ends_at, position, active)
     values (current_tenant_id(), p_starts_at, p_ends_at, -1, false)
     returning id into v_id;
@@ -522,7 +522,7 @@ declare
   v_today date := (now() at time zone 'Europe/Prague')::date;
   v_now time := (now() at time zone 'Europe/Prague')::time;
 begin
-  perform duty_gate(p_date);
+  perform duty_edit_gate(p_date);
   if not exists (
     select 1 from time_blocks
     where id = p_block and tenant_id = current_tenant_id()
@@ -1170,7 +1170,7 @@ CREATE OR REPLACE FUNCTION "public"."delete_day_override"("p_date" "date") RETUR
     SET "search_path" TO 'public'
     AS $$
 begin
-  perform duty_gate(p_date);
+  perform duty_edit_gate(p_date);
   delete from day_overrides
    where tenant_id = current_tenant_id() and date = p_date;
 end;
@@ -1294,6 +1294,35 @@ $$;
 
 
 ALTER FUNCTION "public"."due_reminders"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."duty_edit_gate"("p_date" "date") RETURNS "void"
+    LANGUAGE "plpgsql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+begin
+  if is_admin() then
+    return;
+  end if;
+  if not exists (select 1 from duty_assignments a
+      join duty_periods d on d.id = a.period_id
+      join profiles me on me.id = auth.uid()
+     where a.user_id = me.id and d.tenant_id = me.tenant_id
+       and me.status = 'approved' and me.role = 'player' and not me.placeholder
+       and case when p_date is null then d.ends_on >= v_today
+                else p_date between d.starts_on and d.ends_on end) then
+    raise exception 'not_allowed';
+  end if;
+  if p_date < v_today then
+    raise exception 'date_past';
+  end if;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."duty_edit_gate"("p_date" "date") OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."duty_gate"("p_date" "date") RETURNS "void"
@@ -2232,7 +2261,7 @@ CREATE OR REPLACE FUNCTION "public"."move_day_reservations"("p_date" "date", "p_
     SET "search_path" TO 'public'
     AS $$
 begin
-  perform duty_gate(p_date);
+  perform duty_edit_gate(p_date);
 
   if not exists (
     select 1 from time_blocks
@@ -3424,7 +3453,7 @@ declare
   v_today date := (now() at time zone 'Europe/Prague')::date;
   v_now time := (now() at time zone 'Europe/Prague')::time;
 begin
-  perform duty_gate(p_date);
+  perform duty_edit_gate(p_date);
 
   insert into day_overrides (tenant_id, date, closed, reason, block_ids, created_by)
   values (current_tenant_id(), p_date, p_closed, trim(coalesce(p_reason, '')),
@@ -5593,6 +5622,11 @@ GRANT ALL ON FUNCTION "public"."due_duty_reminders"() TO "service_role";
 
 REVOKE ALL ON FUNCTION "public"."due_reminders"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."due_reminders"() TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."duty_edit_gate"("p_date" "date") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."duty_edit_gate"("p_date" "date") TO "service_role";
 
 
 
