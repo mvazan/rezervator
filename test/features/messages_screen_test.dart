@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:ui' show Tristate;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart' show SemanticsData;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show Override;
@@ -42,6 +44,10 @@ Future<String> _sendNothing({
   DateTime? expiresAt,
   bool notify = true,
 }) async => 'new-id';
+
+/// The semantics node of [finder] as data: label and flags.
+SemanticsData semanticsData(WidgetTester tester, Finder finder) =>
+    tester.getSemantics(finder).getSemanticsData();
 
 void main() {
   setUpAll(_loadManrope);
@@ -96,17 +102,24 @@ void main() {
       final down = find.widgetWithText(FilterChip, '👎');
       await tester.pumpWidget(tile(null));
       expect(find.text('Od služby (Bára Kantýnská)'), findsOneWidget);
-      expect(tester.getSemantics(up),
-          containsSemantics(label: '👍', isButton: true, isSelected: false));
-      expect(tester.getSemantics(down),
-          containsSemantics(label: '👎', isButton: true, isSelected: false));
+      // Read off the node's data: containsSemantics is deprecated on the
+      // newer Flutter CI runs, and its replacement (isSemantics) is missing
+      // on 3.38.
+      final upData = semanticsData(tester, up);
+      expect(upData.label, '👍');
+      expect(upData.flagsCollection.isButton, isTrue);
+      expect(upData.flagsCollection.isSelected, Tristate.isFalse);
+      final downData = semanticsData(tester, down);
+      expect(downData.label, '👎');
+      expect(downData.flagsCollection.isButton, isTrue);
+      expect(downData.flagsCollection.isSelected, Tristate.isFalse);
       await tester.tap(up);
       await tester.tap(down);
       expect(reactions, [Reaction.up, Reaction.down]);
 
       await tester.pumpWidget(tile(Reaction.up));
       expect(tester.widget<FilterChip>(up).selected, isTrue);
-      expect(tester.getSemantics(up), containsSemantics(isSelected: true));
+      expect(semanticsData(tester, up).flagsCollection.isSelected, Tristate.isTrue);
       await tester.tap(up);
       expect(reactions, [Reaction.up, Reaction.down, null]);
 
@@ -475,14 +488,15 @@ void main() {
         onDelete: () {},
       ))));
       final tally = find.text('1× 👍 · 1× 👎');
-      expect(tester.getSemantics(tally), containsSemantics(
-          isButton: true, hasExpandedState: true, isExpanded: false));
+      final collapsed = semanticsData(tester, tally).flagsCollection;
+      expect(collapsed.isButton, isTrue);
+      expect(collapsed.isExpanded, Tristate.isFalse); // has an expanded state, and is collapsed
       final target = find.ancestor(of: tally, matching: find.byType(InkWell));
       expect(tester.getSize(target).height,
           greaterThanOrEqualTo(kMinInteractiveDimension));
       await tester.tap(tally);
       await tester.pump();
-      expect(tester.getSemantics(tally), containsSemantics(isExpanded: true));
+      expect(semanticsData(tester, tally).flagsCollection.isExpanded, Tristate.isTrue);
       expect(find.text('👍 Petr · 👎 Tomáš'), findsOneWidget);
     });
   });
