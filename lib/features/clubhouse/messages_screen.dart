@@ -24,6 +24,9 @@ typedef MessageReact = Future<void> Function(
 /// [Api.setReply]'s shape: saves (blank clears) my short reply.
 typedef MessageReply = Future<void> Function(String messageId, String text);
 
+/// [Api.messageDelete]'s shape: deletes a message I sent.
+typedef MessageDelete = Future<void> Function(String messageId);
+
 class MessagesScreen extends ConsumerStatefulWidget {
   const MessagesScreen({
     super.key,
@@ -31,6 +34,7 @@ class MessagesScreen extends ConsumerStatefulWidget {
     this.react = Api.setReaction,
     this.reply = Api.setReply,
     this.send = Api.messageSend,
+    this.delete = Api.messageDelete,
   });
 
   /// The three own-row writes, injected like
@@ -42,6 +46,9 @@ class MessagesScreen extends ConsumerStatefulWidget {
 
   /// The composers' RPC, handed to both FABs' sheets (see [MessageSend]).
   final MessageSend send;
+
+  /// ⋮ „Smazat“ on a message I sent, injected like the writes above.
+  final MessageDelete delete;
 
   @override
   ConsumerState<MessagesScreen> createState() => _MessagesScreenState();
@@ -102,6 +109,7 @@ class _MessagesScreenState extends ConsumerState<MessagesScreen> {
               data: data,
               react: widget.react,
               reply: widget.reply,
+              delete: widget.delete,
               fabHeight: _fabHeight,
             );
     }
@@ -252,12 +260,14 @@ class _MessageList extends ConsumerStatefulWidget {
     required this.data,
     required this.react,
     required this.reply,
+    required this.delete,
     required this.fabHeight,
   });
 
   final _Data data;
   final MessageReact react;
   final MessageReply reply;
+  final MessageDelete delete;
 
   /// The composer FABs' block height (see `_MessagesScreenState`).
   final ValueListenable<double> fabHeight;
@@ -285,6 +295,7 @@ class _MessageListState extends ConsumerState<_MessageList> {
           meId: data.meId,
           react: widget.react,
           reply: widget.reply,
+          delete: widget.delete,
         );
     return ValueListenableBuilder(
       valueListenable: widget.fabHeight,
@@ -333,6 +344,7 @@ class LiveMessageTile extends ConsumerWidget {
     required this.meId,
     required this.react,
     required this.reply,
+    required this.delete,
     this.onDeleted,
     this.expanded = false,
   });
@@ -347,6 +359,7 @@ class LiveMessageTile extends ConsumerWidget {
   final String? meId;
   final MessageReact react;
   final MessageReply reply;
+  final MessageDelete delete;
 
   /// Called after a confirmed, successful delete — the detail screen pops.
   final VoidCallback? onDeleted;
@@ -392,12 +405,19 @@ class LiveMessageTile extends ConsumerWidget {
   }
 
   Future<void> _delete(BuildContext context) async {
-    final deleted = await confirmDelete(
+    final ok = await confirmDialog(
       context,
       title: 'Smazat zprávu?',
       message: 'Zmizí i všem příjemcům.',
-      action: () => Api.messageDelete(message.id),
+    );
+    if (!ok || !context.mounted) return;
+    // On the page's messenger: the realtime DELETE can unmount this tile
+    // before the RPC's reply, and „Zpráva smazána.“ must still show.
+    final deleted = await tryActionOnPage(
+      context,
+      () => delete(message.id),
       success: 'Zpráva smazána.',
+      errorText: friendlyDbError,
     );
     if (deleted) onDeleted?.call();
   }

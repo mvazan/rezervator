@@ -42,11 +42,14 @@ void main() {
     List<MessageRecipient> recipients = const [],
     List<PlayerName> roster = const [],
     Future<void> Function(List<String> ids)? markRead,
+    Stream<List<Message>>? noticeStream,
+    NoticeUpdate? updateNotice,
+    Future<void> Function(String id)? deleteNotice,
   }) =>
       ProviderScope(
         overrides: [
           myProfileProvider.overrideWith((ref) => Stream.value(profile)),
-          messagesProvider.overrideWith((ref) => Stream.value(notices)),
+          messagesProvider.overrideWith((ref) => noticeStream ?? Stream.value(notices)),
           myMessageRecipientsProvider.overrideWith((ref) => Stream.value(
               [for (final r in recipients) if (r.userId == profile.id) r])),
           messageParticipantsProvider.overrideWith((ref, id) => Stream.value(
@@ -55,7 +58,12 @@ void main() {
           nowProvider.overrideWith((ref) => Stream.value(DateTime(2026, 10, 2, 12))),
         ],
         child: MaterialApp(
-          home: NoticeBoardScreen(markRead: markRead ?? (_) async {}),
+          home: NoticeBoardScreen(
+            markRead: markRead ?? (_) async {},
+            updateNotice: updateNotice ??
+                (id, {required title, required body, expiresAt}) async {},
+            deleteNotice: deleteNotice ?? (_) async {},
+          ),
         ),
       );
 
@@ -296,6 +304,93 @@ void main() {
     expect(find.text('Nové dráhy a1'), findsNothing);
     expect(find.text('Starší (1)'), findsOneWidget);
   });
+
+  // „Sejmout“ = expire now: on a notice that already expired it would only
+  // move its expiry later („platí do“ rewritten).
+  testWidgets('„Sejmout“ is offered on an active notice only', (tester) async {
+    await tester.pumpWidget(app(profile: admin, notices: [
+      notice('a1'),
+      notice('e1', expiresAt: DateTime(2026, 9, 15)),
+    ]));
+    await tester.pumpAndSettle();
+    await openMenu(tester);
+    expect(find.text('Sejmout'), findsOneWidget);
+    await tester.tapAt(Offset.zero); // close the menu
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Starší (1)'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(PopupMenuButton<String>).last);
+    await tester.pumpAndSettle();
+    expect(find.text('Upravit'), findsOneWidget);
+    expect(find.text('Smazat'), findsOneWidget);
+    expect(find.text('Sejmout'), findsNothing);
+  });
+
+  testWidgets('„Sejmout“ sends the notice as it is when confirmed, not as it '
+      'was when the menu opened', (tester) async {
+    final messages = StreamController<List<Message>>();
+    addTearDown(() => unawaited(messages.close()));
+    final sent = <(String, String)>[];
+    await tester.pumpWidget(app(
+      profile: admin,
+      noticeStream: messages.stream,
+      updateNotice: (id, {required title, required body, expiresAt}) async =>
+          sent.add((title, body)),
+    ));
+    messages.add([notice('a1')]);
+    await tester.pumpAndSettle();
+    await openMenu(tester);
+    await tester.tap(find.text('Sejmout'));
+    await tester.pumpAndSettle();
+    // Another admin's edit lands while „Sejmout oznam?“ is open.
+    messages.add([notice('a1', body: 'Opravený text.')]);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Ano'));
+    await tester.pumpAndSettle();
+    expect(sent, [('Nové dráhy a1', 'Opravený text.')]);
+  });
+
+  // The RPC's realtime echo can beat its HTTP reply: the card moves under
+  // the collapsed „Starší“ (sejmout) or disappears (smazat) first, and the
+  // outcome must still be told.
+  for (final (action, done) in const [
+    ('Sejmout', 'Oznam sejmut.'),
+    ('Smazat', 'Oznam smazán.'),
+  ]) {
+    testWidgets('„$action“ says „$done“ even when the echo removed the card '
+        'first', (tester) async {
+      final messages = StreamController<List<Message>>();
+      addTearDown(() => unawaited(messages.close()));
+      final reply = Completer<void>();
+      final deleted = <String>[];
+      await tester.pumpWidget(app(
+        profile: admin,
+        noticeStream: messages.stream,
+        updateNotice: (id, {required title, required body, expiresAt}) =>
+            reply.future,
+        deleteNotice: (id) {
+          deleted.add(id);
+          return reply.future;
+        },
+      ));
+      messages.add([notice('a1')]);
+      await tester.pumpAndSettle();
+      await openMenu(tester);
+      await tester.tap(find.text(action));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Ano'));
+      await tester.pump();
+      messages.add(action == 'Smazat'
+          ? const []
+          : [notice('a1', expiresAt: DateTime(2026, 10, 1))]);
+      await tester.pumpAndSettle();
+      expect(find.text('Nové dráhy a1'), findsNothing);
+      reply.complete();
+      await tester.pumpAndSettle();
+      expect(find.text(done), findsOneWidget);
+      if (action == 'Smazat') expect(deleted, ['a1']);
+    });
+  }
 
   // cachedRows replays the cache (or the pre-resume state) first; the
   // notice the push was for often arrives only with the live snapshot.

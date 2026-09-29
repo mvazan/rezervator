@@ -215,6 +215,34 @@ Future<bool> tryAction(
   }
 }
 
+/// [tryAction] for an action whose own realtime echo can remove the widget
+/// that started it before the call returns — a deleted message's tile, a
+/// notice moving under a collapsed „Starší“. The page's messenger is taken
+/// before the await, so the outcome is told either way; call it from a
+/// widget on the page, not from a dialog or a sheet.
+Future<bool> tryActionOnPage(
+  BuildContext context,
+  Future<void> Function() action, {
+  String? success,
+  required String Function(Object error) errorText,
+}) async {
+  final messenger = ScaffoldMessenger.of(context);
+  void tell(String text) {
+    if (messenger.mounted) {
+      messenger.showSnackBar(SnackBar(content: Text(text)));
+    }
+  }
+
+  try {
+    await action();
+  } catch (e) {
+    tell(errorText(e));
+    return false;
+  }
+  if (success != null) tell(success);
+  return true;
+}
+
 /// Closes the dialog [context] lives in, handing [result] back to whoever
 /// awaits `showDialog`.
 ///

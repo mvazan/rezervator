@@ -190,9 +190,12 @@ void main() {
     TextScaler? textScaler,
     MessageSend? send,
     List<Reservation> reservations = const [],
+    Stream<List<Message>>? messageStream,
+    Future<void> Function(String id)? delete,
   }) =>
       ProviderScope(
         overrides: overrides(profile: profile, messages: messages,
+            messageStream: messageStream,
             recipients: recipients, roster: roster, duty: duty,
             reservations: reservations),
         child: MaterialApp(
@@ -208,6 +211,7 @@ void main() {
             react: react ?? (_, _) async {},
             reply: reply ?? (_, _) async {},
             send: send ?? _sendNothing,
+            delete: delete ?? (_) async {},
           ),
         ),
       );
@@ -267,6 +271,38 @@ void main() {
       await tester.tap(find.text('1× 👍 · 1 bez reakce'));
       await tester.pumpAndSettle();
       expect(find.text('👍 Petr · 1 bez reakce'), findsOneWidget);
+    });
+
+    // The RPC's realtime DELETE can beat its HTTP reply and unmount the
+    // tile first; the outcome must still be told.
+    testWidgets('deleting a sent message says „Zpráva smazána.“ even when the '
+        'echo removed the tile first', (tester) async {
+      final messages = StreamController<List<Message>>();
+      addTearDown(() => unawaited(messages.close()));
+      final answer = Completer<void>();
+      final deleted = <String>[];
+      await tester.pumpWidget(app(
+        messageStream: messages.stream,
+        delete: (id) {
+          deleted.add(id);
+          return answer.future;
+        },
+      ));
+      messages.add([received(id: 'mine', authorId: 'me')]);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(PopupMenuButton<String>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Smazat'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Ano'));
+      await tester.pump();
+      messages.add(const []);
+      await tester.pumpAndSettle();
+      expect(find.text('Přijďte dřív.'), findsNothing);
+      answer.complete();
+      await tester.pumpAndSettle();
+      expect(deleted, ['mine']);
+      expect(find.text('Zpráva smazána.'), findsOneWidget);
     });
 
     testWidgets('today+ahead open, older collapsed', (tester) async {
@@ -542,6 +578,40 @@ void main() {
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
       await tester.pumpAndSettle();
       expect(find.text('Přijďte dřív.'), findsOneWidget);
+    });
+
+    testWidgets('deleting here says „Zpráva smazána.“ — never „Zpráva už '
+        'neexistuje.“ — when the echo comes before the reply', (tester) async {
+      final messages = StreamController<List<Message>>();
+      addTearDown(() => unawaited(messages.close()));
+      final answer = Completer<void>();
+      final asked = <String>[];
+      await tester.pumpWidget(caller(overrides(messageStream: messages.stream),
+          () => MessageDetailScreen('mine',
+              markRead: (_) async {}, react: (_, _) async {}, reply: (_, _) async {},
+              messageExists: (id) async { asked.add(id); return false; },
+              delete: (_) => answer.future)));
+      messages.add([received(id: 'mine', authorId: 'me')]);
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(PopupMenuButton<String>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Smazat'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Ano'));
+      await tester.pump();
+      messages.add(const []); // the echo, before the RPC's reply
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      expect(asked, isEmpty);
+      expect(find.text('Zpráva už neexistuje.'), findsNothing);
+      answer.complete();
+      await tester.pump();
+      await tester.pumpAndSettle();
+      expect(find.text('Zpráva smazána.'), findsOneWidget);
+      expect(find.text('Zpráva už neexistuje.'), findsNothing);
+      expect(find.text('open'), findsOneWidget); // back on the caller
     });
 
     testWidgets('an id the server no longer has pops once, with a snack', (tester) async {

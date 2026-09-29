@@ -20,6 +20,7 @@ class MessageDetailScreen extends ConsumerStatefulWidget {
     this.react = Api.setReaction,
     this.reply = Api.setReply,
     this.messageExists = Api.messageExists,
+    this.delete = Api.messageDelete,
   });
 
   /// The `messages.id` the link carried.
@@ -33,6 +34,9 @@ class MessageDetailScreen extends ConsumerStatefulWidget {
   /// Asks the server whether [id] still exists (RLS-scoped); throws when
   /// offline. Asked only when a loaded snapshot lacks the id.
   final Future<bool> Function(String id) messageExists;
+
+  /// ⋮ „Smazat“ on my own message, injected like the writes above.
+  final MessageDelete delete;
 
   @override
   ConsumerState<MessageDetailScreen> createState() =>
@@ -63,6 +67,22 @@ class _MessageDetailScreenState extends ConsumerState<MessageDetailScreen> {
   /// Asked [MessageDetailScreen.markRead] already — once per visit.
   bool _markRequested = false;
 
+  /// A delete confirmed here is running. Its realtime echo can take the
+  /// message out of the snapshot before the RPC's reply: that is not
+  /// „Zpráva už neexistuje.“ — the reply says „Zpráva smazána.“ and
+  /// leaves ([_leave]).
+  bool _deleting = false;
+
+  Future<void> _delete(String id) async {
+    _deleting = true;
+    try {
+      await widget.delete(id);
+    } catch (_) {
+      _deleting = false;
+      rethrow;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     Widget scaffold(Widget body) => Scaffold(
@@ -90,6 +110,9 @@ class _MessageDetailScreenState extends ConsumerState<MessageDetailScreen> {
       return scaffold(const Center(child: CircularProgressIndicator()));
     }
     final m = messages.value!.where((m) => m.id == id).firstOrNull;
+    if (m == null && _deleting) {
+      return scaffold(const Center(child: CircularProgressIndicator()));
+    }
     if (m == null) {
       final snapshot = messages.value!;
       final checkError = _checkError;
@@ -115,6 +138,7 @@ class _MessageDetailScreenState extends ConsumerState<MessageDetailScreen> {
             meId: meId,
             react: widget.react,
             reply: widget.reply,
+            delete: _delete,
             onDeleted: _leave,
             // A „Reakce na tvou zprávu“ push lands on my own message: the
             // reply that sent it shows without a tap on the tally.

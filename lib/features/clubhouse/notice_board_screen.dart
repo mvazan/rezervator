@@ -27,6 +27,7 @@ class NoticeBoardScreen extends ConsumerStatefulWidget {
     super.key,
     this.markRead = Api.markMessagesRead,
     this.updateNotice = Api.messageUpdate,
+    this.deleteNotice = Api.messageDelete,
   });
 
   /// Marks the listed notices read — injected like
@@ -36,6 +37,9 @@ class NoticeBoardScreen extends ConsumerStatefulWidget {
 
   /// „Sejmout“'s write, injected for the same reason.
   final NoticeUpdate updateNotice;
+
+  /// „Smazat“'s write ([Api.messageDelete]), injected for the same reason.
+  final Future<void> Function(String id) deleteNotice;
 
   @override
   ConsumerState<NoticeBoardScreen> createState() => _NoticeBoardScreenState();
@@ -82,6 +86,7 @@ class _NoticeBoardScreenState extends ConsumerState<NoticeBoardScreen> {
         data: data,
         isAdmin: isAdmin,
         updateNotice: widget.updateNotice,
+        deleteNotice: widget.deleteNotice,
       );
     }
 
@@ -160,11 +165,13 @@ class _NoticeList extends ConsumerStatefulWidget {
     required this.data,
     required this.isAdmin,
     required this.updateNotice,
+    required this.deleteNotice,
   });
 
   final _Data data;
   final bool isAdmin;
   final NoticeUpdate updateNotice;
+  final Future<void> Function(String id) deleteNotice;
 
   @override
   ConsumerState<_NoticeList> createState() => _NoticeListState();
@@ -194,6 +201,7 @@ class _NoticeListState extends ConsumerState<_NoticeList> {
           now: now,
           isAdmin: widget.isAdmin,
           updateNotice: widget.updateNotice,
+          deleteNotice: widget.deleteNotice,
         );
     return ListView(
       // Room for the admin's FAB below the last card.
@@ -230,12 +238,14 @@ class _NoticeCard extends ConsumerStatefulWidget {
     required this.now,
     required this.isAdmin,
     required this.updateNotice,
+    required this.deleteNotice,
   });
 
   final Message notice;
   final DateTime now;
   final bool isAdmin;
   final NoticeUpdate updateNotice;
+  final Future<void> Function(String id) deleteNotice;
 
   @override
   ConsumerState<_NoticeCard> createState() => _NoticeCardState();
@@ -288,14 +298,22 @@ class _NoticeCardState extends ConsumerState<_NoticeCard> {
         trailing: isAdmin
             ? PopupMenuButton<String>(
                 onSelected: (a) => _act(context, a),
-                itemBuilder: (_) => const [
-                  PopupMenuItem(value: 'edit', child: Text('Upravit')),
-                  PopupMenuItem(
+                itemBuilder: (_) => [
+                  const PopupMenuItem(value: 'edit', child: Text('Upravit')),
+                  const PopupMenuItem(
                     value: 'seen',
                     child: Text('Kdo si to zobrazil'),
                   ),
-                  PopupMenuItem(value: 'unpost', child: Text('Sejmout')),
-                  PopupMenuItem(value: 'delete', child: Text('Smazat')),
+                  // „Sejmout“ = expire now: an expired notice would only
+                  // get a later expiry. The board's own clock and rule
+                  // (splitNotices) decide what is active.
+                  if (notice.expiresAt == null ||
+                      notice.expiresAt!.isAfter(widget.now))
+                    const PopupMenuItem(
+                      value: 'unpost',
+                      child: Text('Sejmout'),
+                    ),
+                  const PopupMenuItem(value: 'delete', child: Text('Smazat')),
                 ],
               )
             : null,
@@ -317,31 +335,48 @@ class _NoticeCardState extends ConsumerState<_NoticeCard> {
           message: 'Oznam přestane platit hned.',
         );
         if (!ok || !context.mounted) return;
-        // „Sejmout“ = expire now, title and body as they were. „Now“ is the
-        // board's own clock, not DateTime.now(): nowProvider ticks once a
-        // minute and polls every 15 s, so it runs up to ~75 s behind, and a
-        // wall-clock expiry would leave the echoed notice active (here and
-        // on the badge) until its next tick. Never later than what the
-        // list compares against, so the card moves under „Starší“ at once.
+        // „Sejmout“ = expire now, title and body as they are NOW: another
+        // admin may have edited the notice while the dialog was open, and
+        // message_update writes the full state — the text the menu opened
+        // with would revert that edit. „Now“ is the board's own clock, not
+        // DateTime.now(): nowProvider ticks once a minute and polls every
+        // 15 s, so it runs up to ~75 s behind, and a wall-clock expiry
+        // would leave the echoed notice active (here and on the badge)
+        // until its next tick. Never later than what the list compares
+        // against, so the card moves under „Starší“ at once.
         final now = ref.read(nowProvider).value ?? DateTime.now();
-        await tryAction(
+        final current = ref
+                .read(messagesProvider)
+                .value
+                ?.where((m) => m.id == notice.id)
+                .firstOrNull ??
+            notice;
+        // On the page's messenger: the echo can move the card under the
+        // collapsed „Starší“ before the call returns.
+        await tryActionOnPage(
           context,
           () => widget.updateNotice(
-            notice.id,
-            title: notice.title ?? '',
-            body: notice.body,
+            current.id,
+            title: current.title ?? '',
+            body: current.body,
             expiresAt: now,
           ),
           success: 'Oznam sejmut.',
           errorText: friendlyDbError,
         );
       case 'delete':
-        await confirmDelete(
+        final ok = await confirmDialog(
           context,
           title: 'Smazat oznam?',
           message: 'Tohle nejde vrátit zpět.',
-          action: () => Api.messageDelete(notice.id),
+        );
+        if (!ok || !context.mounted) return;
+        // The echo can remove the card before the call returns.
+        await tryActionOnPage(
+          context,
+          () => widget.deleteNotice(notice.id),
           success: 'Oznam smazán.',
+          errorText: friendlyDbError,
         );
     }
   }
