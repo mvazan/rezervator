@@ -338,7 +338,9 @@ class DutyHeader {
 ///
 /// [names] maps user ids to display names (placeholders included); an id
 /// it does not know is left out, and each period's names are
-/// Czech-sorted. A period without a known name says nothing.
+/// Czech-sorted. A period without a known name says nothing; adjacent
+/// periods with the same names are one part („po–ne ty“, not „po–st ty ·
+/// čt–ne ty“).
 DutyHeader? dutyHeaderLabel(
   Day monday,
   Iterable<DutyPeriod> periods,
