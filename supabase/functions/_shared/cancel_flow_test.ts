@@ -12,11 +12,13 @@ import {
   KDY_PATTERN,
   slotLabel,
 } from "./cancel_flow.ts";
-import { signCancelToken } from "./cancel_token.ts";
+import { pragueEpoch, signCancelToken } from "./cancel_token.ts";
 
 const SECRET = "test-secret";
 const RID = "3f6b0a4e-1c2d-4e5f-8a9b-0c1d2e3f4a5b";
 const FUNCTION_URL = "http://localhost/functions/v1/cancel";
+/** When the fake's block starts (13.7. 17:30 in Prague), in epoch ms. */
+const BLOCK_START = pragueEpoch("2026-07-13", "17:30") * 1000;
 
 type Fake = CancelDeps & { cancelCalls: string[] };
 
@@ -34,6 +36,8 @@ function fake(
         cancelled_at: overrides.cancelledAt ?? null,
       }),
     block: () => Promise.resolve({ starts_at: "17:30:00", ends_at: "19:00:00" }),
+    // An hour before the block: the token's own clock is the real one.
+    now: () => BLOCK_START - 3600e3,
     ...overrides,
     cancel: (rid) => {
       cancelCalls.push(rid);
@@ -151,6 +155,53 @@ Deno.test("bad, expired and orphaned tokens land on their own stav", async () =>
         .get("stav"),
       "nenalezena",
     );
+  }
+});
+
+Deno.test("a started block refuses GET and POST, cancels nothing", async () => {
+  // A move keeps the reservation's id, so a kiosk link signed for a later
+  // start stays live after a move to an earlier block. The block it is in
+  // now decides: from its start on only an admin may cancel — a one-click
+  // cancel would erase the attendance.
+  const token = await liveToken();
+  for (const at of [BLOCK_START, BLOCK_START + 3600e3, BLOCK_START + 86400e3]) {
+    for (const method of ["GET", "POST"]) {
+      const deps = fake({ now: () => at });
+      const page = landing(await handleCancel(call(method, token), deps));
+      assertEquals(page.get("stav"), "vyprselo");
+      assertEquals(page.get("kdy"), "po 13.7. 17:30–19:00, dráha 2");
+      assertEquals(page.get("token"), null);
+      assertEquals(deps.cancelCalls, []);
+    }
+  }
+});
+
+Deno.test("a block that has not started yet can still be cancelled", async () => {
+  const token = await liveToken();
+  const deps = fake({ now: () => BLOCK_START - 1000 });
+  assertEquals(
+    landing(await handleCancel(call("GET", token), deps)).get("stav"),
+    "potvrdit",
+  );
+  assertEquals(deps.cancelCalls, []);
+  assertEquals(
+    landing(await handleCancel(call("POST", token), deps)).get("stav"),
+    "zruseno",
+  );
+  assertEquals(deps.cancelCalls, [RID]);
+});
+
+Deno.test("an unknown block start refuses to cancel, keeps the button", async () => {
+  // time_blocks is FK RESTRICT, so a missing block is a failed read: the
+  // start cannot be checked, and a retry may well see it.
+  const token = await liveToken();
+  for (const method of ["GET", "POST"]) {
+    const deps = fake({ block: () => Promise.resolve(null) });
+    const page = landing(await handleCancel(call(method, token), deps));
+    assertEquals(page.get("stav"), "chyba");
+    assertEquals(page.get("token"), token);
+    assertEquals(page.get("kdy"), "po 13.7., dráha 2");
+    assertEquals(deps.cancelCalls, []);
   }
 });
 

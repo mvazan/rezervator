@@ -1,6 +1,8 @@
 // Stateless one-click-cancel tokens: `${base64url(JSON{rid,exp})}.${base64url(hmacSHA256(payload))}`.
 // exp = epoch seconds of the reservation's block start (Europe/Prague wall
 // clock) — once the training has started, cancellation is an admin decision.
+// A move keeps the reservation and its token, so cancel_flow.ts checks the
+// current block's start as well.
 
 export function base64urlEncode(data: Uint8Array | string): string {
   const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
