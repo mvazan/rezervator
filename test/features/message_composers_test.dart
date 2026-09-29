@@ -525,6 +525,28 @@ void main() {
           onDate: wednesday, blockId: null, body: 'Přijďte dřív.')]);
     });
 
+    // duty_gate: the duty writes from today on, the admin about any day.
+    for (final (who, asDuty, picked) in const [
+      ('the duty', true, '5. 10. 2026'),
+      ('the admin', false, '4. 10. 2026'),
+    ]) {
+      testWidgets('$who picking yesterday in „Změnit“ ends on $picked', (tester) async {
+        final onDuty = MyDuty(current: DutyPeriod(id: 'p1', startsOn: today, endsOn: today));
+        await tester.pumpWidget(staffApp(
+          profile: asDuty ? me : admin,
+          duty: asDuty ? StateProvider<MyDuty>((ref) => onDuty) : null,
+        ));
+        await openStaff(tester);
+        await tester.tap(find.text('Změnit'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('4')); // yesterday: disabled for the duty
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('OK'));
+        await tester.pumpAndSettle();
+        expect(find.text(picked), findsOneWidget);
+      });
+    }
+
     testWidgets('a duty whose service ends while the sheet is open reads the refusal '
         'as „Služba skončila“', (tester) async {
       final onDuty = MyDuty(current: DutyPeriod(id: 'p1', startsOn: today, endsOn: today));

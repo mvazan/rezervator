@@ -706,6 +706,11 @@ void main() {
     });
   }
 
+  /// The player composer's picked audience.
+  MessageAudience? audience(WidgetTester tester) => tester
+      .widget<RadioGroup<MessageAudience>>(find.byType(RadioGroup<MessageAudience>))
+      .groupValue;
+
   testWidgets('„Napsat správci…“ closes the dialog and opens the composer', (
     tester,
   ) async {
@@ -718,6 +723,28 @@ void main() {
     expect(find.text('Zrušit rezervaci?'), findsNothing);
     expect(find.text('Správci'), findsOneWidget); // the player composer sheet
     expect(find.textContaining('K tréninku'), findsOneWidget);
+    expect(audience(tester), MessageAudience.admins);
+  });
+
+  testWidgets('„Napsat službě…“ closes the dialog and opens the composer on '
+      'Službě', (tester) async {
+    await tester.pumpWidget(
+      app(
+        reservations: [res('r1', today.addDays(1))],
+        dutyPeriods: [
+          DutyPeriod(id: 'd1', startsOn: today, endsOn: today.addDays(6)),
+        ],
+        dutyAssignments: const [DutyAssignment(periodId: 'd1', userId: 'bara')],
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('18:00–19:00 · Dráha 2'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Napsat službě…'));
+    await tester.pumpAndSettle();
+    expect(find.text('Zrušit rezervaci?'), findsNothing);
+    expect(find.textContaining('K tréninku'), findsOneWidget);
+    expect(audience(tester), MessageAudience.duty);
   });
 
   testWidgets('a training whose block already started today offers no '
