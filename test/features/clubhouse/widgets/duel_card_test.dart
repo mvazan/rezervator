@@ -87,6 +87,7 @@ Widget _card(
   bool expanded = false,
   VoidCallback? onTap,
   int? scale,
+  bool showSetPoints = false,
 }) => DuelCard(
   duel: duel,
   scale: scale ?? _scale,
@@ -94,6 +95,7 @@ Widget _card(
   onTap: onTap ?? () {},
   homeColor: Colors.teal,
   awayColor: Colors.purple,
+  showSetPoints: showSetPoints,
 );
 
 Widget _host(Widget child) => MaterialApp(
@@ -156,11 +158,11 @@ void main() {
       expect(pill.dx, lessThan(tester.getCenter(find.text('+22')).dx));
     });
 
-    testWidgets('the verdict line and a closed chevron; no table', (
-      tester,
-    ) async {
+    testWidgets('a closed chevron, no set points, no table', (tester) async {
       await pump(tester);
-      expect(find.text('SB 1 : 1 · rozhodly kuželky'), findsOneWidget);
+      // 100 throws: set points do not play a role, they are not shown.
+      expect(find.textContaining('SB'), findsNothing);
+      expect(find.textContaining('rozhodly'), findsNothing);
       expect(find.byIcon(Icons.expand_more), findsOneWidget);
       expect(find.byIcon(Icons.expand_less), findsNothing);
       // The Plné of lane 1 is only in the expanded table.
@@ -252,7 +254,7 @@ void main() {
     testWidgets('the sentence tells how the point was won', (tester) async {
       await pump(tester);
       expect(
-        find.text('SB 1 : 1 → rozhodly kuželky 407 : 385 → bod Mičanová'),
+        find.text('rozhodly kuželky 407 : 385 → bod Mičanová'),
         findsOneWidget,
       );
     });
@@ -285,7 +287,7 @@ void main() {
         _spanStyle(tester, '215 = 215', '215')?.fontWeight,
         FontWeight.w500,
       );
-      expect(find.text('SB 0,5 : 1,5'), findsOneWidget);
+      expect(find.textContaining('SB'), findsNothing);
     });
 
     testWidgets('the pill, the bar and the stripe sit on the away side', (
@@ -309,7 +311,7 @@ void main() {
       tester,
     ) async {
       await tester.pumpWidget(_host(_card(_rudna[5], expanded: true)));
-      expect(find.text('SB 0,5 : 1,5 → bod Vilímovský'), findsOneWidget);
+      expect(find.text('bod Vilímovský'), findsOneWidget);
     });
 
     testWidgets('duel 5 (+99) fills its half of the bar', (tester) async {
@@ -538,7 +540,23 @@ void main() {
     expect(dr2.dx, greaterThan(dr1.dx));
     expect(dr4.dy, closeTo(dr3.dy, 0.01));
     expect(dr4.dx, closeTo(dr2.dx, 0.01));
-    expect(find.text('SB 4 : 0'), findsOneWidget);
+  });
+
+  testWidgets('T120: the set points in the result, the pins in brackets', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_host(_card(_t120, showSetPoints: true)));
+    // „4 (600)  +40  (560) 0“: SB big, the pins beside them in brackets.
+    expect(find.text('4 (600)'), findsOneWidget);
+    expect(find.text('(560) 0'), findsOneWidget);
+    // Nothing of the old verdict line.
+    expect(find.text('SB 4 : 0'), findsNothing);
+    await tester.pumpWidget(_host(_card(_t120, showSetPoints: true, expanded: true)));
+    expect(find.text('SB 4 : 0 → bod 1'), findsOneWidget);
+    // Without set points (100 throws) the plain pins.
+    await tester.pumpWidget(_host(_card(_t120)));
+    expect(find.text('4 (600)'), findsNothing);
+    expect(find.text('600'), findsOneWidget);
   });
 
   testWidgets('a split point: „½“ on both sides, no stripe', (tester) async {
@@ -548,7 +566,7 @@ void main() {
     expect(find.text('='), findsOneWidget);
     expect(find.byKey(const Key('duel-1-stripe')), findsNothing);
     expect(find.byKey(const Key('duel-1-bar-fill')), findsNothing);
-    expect(find.text('SB 0,5 : 0,5 → body napůl'), findsOneWidget);
+    expect(find.text('body napůl'), findsOneWidget);
   });
 
   final states = {

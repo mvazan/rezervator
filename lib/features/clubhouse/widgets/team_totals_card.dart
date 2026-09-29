@@ -30,7 +30,11 @@ class TeamTotalsCard extends StatelessWidget {
     required this.result,
     this.homeColor,
     this.awayColor,
+    this.showSetPoints = false,
   });
+
+  /// The SB row: only where set points matter ([setPointsMatter]).
+  final bool showSetPoints;
 
   /// The team-level score whose sums the card shows. Without both pin
   /// totals the card renders nothing.
@@ -108,7 +112,7 @@ class TeamTotalsCard extends StatelessWidget {
                 away: result.awayErrors,
                 leader: winningSide(result.awayErrors, result.homeErrors),
               ),
-            if (known(result.homeSetPoints, result.awaySetPoints))
+            if (showSetPoints && known(result.homeSetPoints, result.awaySetPoints))
               _Row(
                 homeColor: homeColor,
                 awayColor: awayColor,

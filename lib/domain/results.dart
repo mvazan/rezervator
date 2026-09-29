@@ -105,6 +105,14 @@ String formatLabel(String matchType, String discipline) {
   return [?players, ?hs].join(' · ');
 }
 
+/// Whether set points (SB, „dílčí body“) play a role in a match of
+/// [discipline] (`T100`, `T120`): from 120 throws on they decide a duel's
+/// point; at 100 they only mirror the lanes and are not shown at all.
+bool setPointsMatter(String? discipline) {
+  final hs = int.tryParse(RegExp(r'^T(\d+)$').firstMatch(discipline ?? '')?.group(1) ?? '');
+  return hs != null && hs >= 120;
+}
+
 /// Whether [r] has a real, on-the-board score worth showing — as opposed to
 /// a `match_results` row the sync created ahead of kickoff (status
 /// `scheduled`/`preparation`, all points still null). A different question

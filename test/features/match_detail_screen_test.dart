@@ -509,7 +509,8 @@ void main() {
     players.add(duel1(played: true));
     await tester.pumpAndSettle();
 
-    expect(find.text('407'), findsOneWidget);
+    // This match is a 120-throw one: the set points, the pins in brackets.
+    expect(find.text('1 (407)'), findsOneWidget);
     expect(find.text('156'), findsNothing, reason: 'still collapsed');
   });
 

@@ -49,7 +49,12 @@ class DuelCard extends StatelessWidget {
     required this.onTap,
     required this.homeColor,
     required this.awayColor,
+    this.showSetPoints = false,
   });
+
+  /// Whether set points are part of the result (120 throws: „1 (550) : (578)
+  /// 3“); at 100 throws they are not shown at all ([setPointsMatter]).
+  final bool showSetPoints;
 
   /// The duel to show.
   final Duel duel;
@@ -101,6 +106,7 @@ class DuelCard extends StatelessWidget {
                         expanded: expanded,
                         homeColor: homeColor,
                         awayColor: awayColor,
+                        showSetPoints: showSetPoints,
                       ),
                     ),
                     // The winner's outer edge: left for home, right for away.
@@ -182,6 +188,7 @@ class _DuelBody extends StatelessWidget {
     required this.expanded,
     required this.homeColor,
     required this.awayColor,
+    required this.showSetPoints,
   });
 
   final Duel duel;
@@ -189,6 +196,7 @@ class _DuelBody extends StatelessWidget {
   final bool expanded;
   final Color homeColor;
   final Color awayColor;
+  final bool showSetPoints;
 
   @override
   Widget build(BuildContext context) {
@@ -201,7 +209,7 @@ class _DuelBody extends StatelessWidget {
       color: scheme.onSurfaceVariant,
       fontFeatures: _tabular,
     );
-    final sentence = _sentence(duel);
+    final sentence = _sentence(duel, showSetPoints);
     final reduceMotion = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
 
     return Column(
@@ -209,7 +217,12 @@ class _DuelBody extends StatelessWidget {
       children: [
         _Names(duel: duel),
         const SizedBox(height: 6),
-        _Totals(duel: duel, homeColor: homeColor, awayColor: awayColor),
+        _Totals(
+          duel: duel,
+          homeColor: homeColor,
+          awayColor: awayColor,
+          showSetPoints: showSetPoints,
+        ),
         if (!done && duel.laneCount > 0)
           Text(
             'po ${duel.playedLanes} ze ${duel.laneCount} drah',
@@ -234,16 +247,7 @@ class _DuelBody extends StatelessWidget {
         const SizedBox(height: 8),
         Row(
           children: [
-            Expanded(
-              child: done
-                  ? Text(
-                      'SB ${numLabel(duel.home?.setPoints)} : '
-                      '${numLabel(duel.away?.setPoints)}'
-                      '${duel.decidedByPins ? ' · rozhodly kuželky' : ''}',
-                      style: small,
-                    )
-                  : const SizedBox.shrink(),
-            ),
+            const Spacer(),
             Icon(
               expanded ? Icons.expand_less : Icons.expand_more,
               size: 20,
@@ -286,24 +290,26 @@ class _DuelBody extends StatelessWidget {
 
   /// „SB 1 : 1 → rozhodly kuželky 407 : 385 → bod Mičanová“ when pins
   /// decided, „SB 2 : 0 → bod Strnad“ otherwise, „SB 0,5 : 0,5 → body
-  /// napůl“ on a split. Null until the duel is done, or when its point is
+  /// napůl“ on a split; without the „SB …“ part when set points do not
+  /// matter ([showSetPoints] false). Null until the duel is done, or when its point is
   /// unknown.
-  static String? _sentence(Duel duel) {
+  static String? _sentence(Duel duel, bool showSetPoints) {
     if (duel.state != DuelState.done) return null;
-    final sb =
-        'SB ${numLabel(duel.home?.setPoints)} : '
-        '${numLabel(duel.away?.setPoints)}';
-    if (duel.pointSplit) return '$sb → body napůl';
+    final sb = showSetPoints
+        ? 'SB ${numLabel(duel.home?.setPoints)} : '
+              '${numLabel(duel.away?.setPoints)}'
+        : '';
+    if (duel.pointSplit) return sb.isEmpty ? 'body napůl' : '$sb → body napůl';
     final winner = duel.pointWinner;
     if (winner == null) return null;
     final surname = surnameOf(
       (winner == MatchSide.home ? duel.home : duel.away)?.playerName,
     );
     final pins = duel.decidedByPins
-        ? ' → rozhodly kuželky ${numLabel(duel.home?.total)} : '
+        ? 'rozhodly kuželky ${numLabel(duel.home?.total)} : '
               '${numLabel(duel.away?.total)}'
         : '';
-    return '$sb$pins → bod $surname';
+    return [sb, pins, 'bod $surname'].where((p) => p.isNotEmpty).join(' → ');
   }
 }
 
@@ -373,8 +379,10 @@ class _Totals extends StatelessWidget {
     required this.duel,
     required this.homeColor,
     required this.awayColor,
+    required this.showSetPoints,
   });
 
+  final bool showSetPoints;
   final Duel duel;
   final Color homeColor;
   final Color awayColor;
@@ -407,6 +415,37 @@ class _Totals extends StatelessWidget {
     final homePill = pill(MatchSide.home);
     final awayPill = pill(MatchSide.away);
 
+    // 120 throws: „1 (550)  +28  (578) 3“ — the set points big, the pins in
+    // brackets beside them. Until both sides have set points (a duel just
+    // started) the plain pins are printed as at 100 throws.
+    final homeSb = duel.home?.setPoints;
+    final awaySb = duel.away?.setPoints;
+    final withSb = showSetPoints && homeSb != null && awaySb != null;
+    final bracket = text.bodyLarge?.copyWith(
+      fontSize: 16,
+      fontWeight: FontWeight.w400,
+      color: scheme.onSurfaceVariant,
+      fontFeatures: _tabular,
+    );
+    Widget total(MatchSide side) {
+      final home = side == MatchSide.home;
+      if (!withSb) {
+        return Text(home ? homeTotal : awayTotal, style: totalStyle(side));
+      }
+      final sb = TextSpan(
+        text: numLabel(home ? homeSb : awaySb),
+        style: totalStyle(side),
+      );
+      final pins = TextSpan(
+        text: '(${home ? homeTotal : awayTotal})',
+        style: bracket,
+      );
+      const gap = TextSpan(text: ' ');
+      return Text.rich(
+        TextSpan(children: home ? [sb, gap, pins] : [pins, gap, sb]),
+      );
+    }
+
     return Row(
       children: [
         Expanded(
@@ -417,7 +456,7 @@ class _Totals extends StatelessWidget {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(homeTotal, style: totalStyle(MatchSide.home)),
+                  total(MatchSide.home),
                   if (homePill != null) ...[const SizedBox(width: 6), homePill],
                 ],
               ),
@@ -452,7 +491,7 @@ class _Totals extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   if (awayPill != null) ...[awayPill, const SizedBox(width: 6)],
-                  Text(awayTotal, style: totalStyle(MatchSide.away)),
+                  total(MatchSide.away),
                 ],
               ),
             ),

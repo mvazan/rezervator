@@ -168,21 +168,25 @@ void main() {
       expect(find.text('průběžně'), findsNothing);
     });
 
-    testWidgets('the summary line adds up the score', (tester) async {
-      await tester.pumpWidget(
-        _host(
-          MatchPointsSummary(
-            slot: rudnaSlot,
-            result: rudnaResult,
-            players: rudnaPlayers,
-            now: _now,
-          ),
+    testWidgets('the summary line adds up the score; SB only at 120 throws', (
+      tester,
+    ) async {
+      Widget summary(MatchResult result) => _host(
+        MatchPointsSummary(
+          slot: rudnaSlot,
+          result: result,
+          players: rudnaPlayers,
+          now: _now,
         ),
       );
+      await tester.pumpWidget(summary(rudnaResult120));
       expect(
         find.text('Souboje 5 : 1 · Kuželky 2 : 0 · SB 8,5 : 3,5'),
         findsOneWidget,
       );
+      // 100 throws: set points play no role and are left out.
+      await tester.pumpWidget(summary(rudnaResult));
+      expect(find.text('Souboje 5 : 1 · Kuželky 2 : 0'), findsOneWidget);
     });
 
     testWidgets('the format and the venue, as plain text', (tester) async {

@@ -44,6 +44,28 @@ final rudnaResult = MatchResult.fromJson(const {
   'fetched_at': '2026-09-17T08:00:00+00:00',
 });
 
+/// [rudnaResult] as a 120-throw match: the same numbers, but set points
+/// play a role there.
+final rudnaResult120 = MatchResult.fromJson({
+  'match_id': 'rv',
+  'status': 'finished',
+  'match_type': 'TEAMS_OF_6',
+  'discipline': 'T120',
+  'home_points': 7,
+  'away_points': 1,
+  'home_total': 2555,
+  'away_total': 2321,
+  'home_fulls': 1809,
+  'away_fulls': 1653,
+  'home_spares': 746,
+  'away_spares': 668,
+  'home_errors': 44,
+  'away_errors': 74,
+  'home_set_points': 8.5,
+  'away_set_points': 3.5,
+  'fetched_at': '2026-09-17T08:00:00+00:00',
+});
+
 /// One lane of the `lanes` jsonb, in the table's order: fulls, spares,
 /// errors, total, set points.
 Map<String, Object?> _lane(

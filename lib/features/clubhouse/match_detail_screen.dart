@@ -280,6 +280,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
                   }),
             homeColor: homeColor,
             awayColor: awayColor,
+            showSetPoints: setPointsMatter(result?.discipline),
           ),
         ),
       if (result != null)
@@ -289,6 +290,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
             result: result,
             homeColor: homeColor,
             awayColor: awayColor,
+            showSetPoints: setPointsMatter(result.discipline),
           ),
         ),
     ];

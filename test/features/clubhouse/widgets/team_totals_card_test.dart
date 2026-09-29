@@ -54,7 +54,9 @@ FontWeight? _weight(WidgetTester tester, String data) =>
 void main() {
   group('the finished Rudná A 7 : 1 Vršovice A', () {
     Future<void> pump(WidgetTester tester) =>
-        tester.pumpWidget(_host(TeamTotalsCard(result: rudnaResult)));
+        tester.pumpWidget(
+          _host(TeamTotalsCard(result: rudnaResult, showSetPoints: true)),
+        );
 
     testWidgets('the title, every row, its values and its lead', (
       tester,
@@ -123,6 +125,12 @@ void main() {
         spans.last.style?.color,
         legibleSideText(Colors.teal, Brightness.light, highContrast: false),
       );
+    });
+
+    testWidgets('no SB row at 100 throws', (tester) async {
+      await tester.pumpWidget(_host(TeamTotalsCard(result: rudnaResult)));
+      expect(find.byKey(const Key('team-totals-sb')), findsNothing);
+      expect(find.text('SB'), findsNothing);
     });
 
     testWidgets('home on the left, away on the right, the label between', (

@@ -197,7 +197,8 @@ class MatchPointsSummary extends StatelessWidget {
   ) {
     if (breakdown == null) return null;
     final hasSetPoints =
-        result.homeSetPoints != null || result.awaySetPoints != null;
+        setPointsMatter(result.discipline) &&
+        (result.homeSetPoints != null || result.awaySetPoints != null);
     return [
       'Souboje ${numLabel(breakdown.duelsHome)} : '
           '${numLabel(breakdown.duelsAway)}',
