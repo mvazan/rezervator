@@ -26,6 +26,15 @@ Deno.test("messageContext: block, day, training-context and none", () => {
     messageContext({ audience: "duty", onDate: "2026-10-05", blockStart: "18:00", blockEnd: "19:00" }),
     "k tréninku po 5. 10. · 18:00–19:00",
   );
+  // The block was removed later: the date stays, the time is gone.
+  assertEquals(
+    messageContext({ audience: "block", onDate: "2026-10-02", blockStart: null, blockEnd: null }),
+    "pá 2. 10.",
+  );
+  assertEquals(
+    messageContext({ audience: "duty", onDate: "2026-10-05", blockStart: null, blockEnd: null }),
+    "k tréninku po 5. 10.",
+  );
   assertEquals(
     messageContext({ audience: "admins", onDate: null, blockStart: null, blockEnd: null }),
     null,
