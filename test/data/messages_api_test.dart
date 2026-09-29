@@ -9,6 +9,8 @@ import 'package:rezervator/data/cache.dart';
 import 'package:rezervator/data/optimistic.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
+import 'package:rezervator/features/clubhouse/widgets/notice_form.dart'
+    show NoticeDraft, noticeApiWrite;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -159,6 +161,48 @@ void main() {
     expect(reactionToJson(null), isNull);
   });
 
+  // The notice form's own write (its widget tests inject `write`).
+  test('the notice form posts a new notice to everyone, „do odvolání“ as no '
+      'expiry', () async {
+    const NoticeDraft draft =
+        (title: 'Klíč', body: 'Je u Petra.', expiresAt: null, notify: false);
+    await noticeApiWrite(null, draft);
+    expect(rpcCall('message_send'), {
+      'p_kind': 'notice',
+      'p_audience': 'all',
+      'p_on_date': null,
+      'p_block_id': null,
+      'p_title': 'Klíč',
+      'p_body': 'Je u Petra.',
+      'p_expires_at': null,
+      'p_notify': false,
+    });
+  });
+
+  test('the notice form saves an edit as the notice\'s full state', () async {
+    final existing = Message(
+      id: 'n1', kind: MessageKind.notice, audience: MessageAudience.all,
+      authorId: 'admin', authorRole: MessageAuthorRole.admin, onDate: null,
+      blockId: null, title: 'Klíč', body: 'Starý text.', expiresAt: null,
+      notify: true, createdAt: DateTime.utc(2026, 9, 1),
+      updatedAt: DateTime.utc(2026, 9, 1),
+    );
+    final NoticeDraft draft = (
+      title: 'Klíč',
+      body: 'Je u Petra.',
+      expiresAt: DateTime.utc(2026, 10, 20, 21, 59, 59),
+      notify: true,
+    );
+    await noticeApiWrite(existing, draft);
+    expect(requests.where((r) => r.url.path.endsWith('/rpc/message_send')), isEmpty);
+    expect(rpcCall('message_update'), {
+      'p_id': 'n1',
+      'p_title': 'Klíč',
+      'p_body': 'Je u Petra.',
+      'p_expires_at': '2026-10-20T21:59:59.000Z',
+    });
+  });
+
   // Last in the file: the session stays for the rest of the isolate.
   group('signed in', () {
     const uid = '11111111-1111-1111-1111-111111111111';
@@ -254,6 +298,45 @@ void main() {
       expect(patch.url.queryParameters['user_id'], 'eq.$uid');
       expect(jsonDecode(patch.body), {'reaction': 'up'});
       expect([for (final r in seen) r['reaction']], ['up', 'down', 'up']);
+    });
+
+    // The only write that clears the badges.
+    test('markMessagesRead: one PATCH of read_at, first reads kept, only my '
+        'unread rows stamped at once', () async {
+      await Api.markMessagesRead(['r1', 'r2', 'r1']);
+      final patch = requests.singleWhere((r) => r.method == 'PATCH');
+      expect(patch.url.path, '/rest/v1/message_recipients');
+      expect(patch.url.queryParameters['user_id'], 'eq.$uid');
+      expect(patch.url.queryParameters['message_id'], 'in.("r1","r2")'); // each id once
+      expect(patch.url.queryParameters['read_at'], 'is.null');
+      final body = jsonDecode(patch.body) as Map<String, dynamic>;
+      expect(body.keys, ['read_at']);
+      final seen = applyPending(uid, cacheKeyMessageRecipients, [
+        {'message_id': 'r1', 'user_id': uid, 'read_at': null},
+        {'message_id': 'r2', 'user_id': uid, 'read_at': '2026-09-01T00:00:00Z'},
+        {'message_id': 'r1', 'user_id': 'petr', 'read_at': null},
+      ]);
+      expect([for (final r in seen) r['read_at']],
+          [body['read_at'], '2026-09-01T00:00:00Z', null]);
+    });
+
+    test('markMessagesRead with no ids sends nothing', () async {
+      await Api.markMessagesRead(const []);
+      expect(requests, isEmpty);
+    });
+
+    // Spec: react optimistic + rollback — where the rollback happens.
+    test('a refused reaction throws and rolls both overlays back', () async {
+      patchStatus = 403;
+      await expectLater(Api.setReaction('m2', Reaction.up), throwsA(anything));
+      final row = {'message_id': 'm2', 'user_id': uid, 'reaction': null, 'reply': null};
+      final other = {'message_id': 'm2', 'user_id': 'petr', 'reaction': 'down', 'reply': null};
+      expect(applyPending(uid, cacheKeyMessageRecipients, [row]).single['reaction'],
+          isNull);
+      expect([
+        for (final r in applyPending(uid, cacheKeyMessageParticipants('m2'), [other, row]))
+          r['reaction'],
+      ], ['down', null]);
     });
 
     test('setReply trims, and patches both overlays too', () async {

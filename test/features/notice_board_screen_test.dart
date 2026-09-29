@@ -501,32 +501,81 @@ void main() {
   });
 
   group('the notice form while it saves', () {
-    // The form on a page of its own above home, so a stray pop shows.
+    // The form on a page of its own above home, so a stray pop shows. Home
+    // watches the clock, as the board does: the form reads it once, and
+    // its +14 days would otherwise count from the device's clock.
     Widget host(Future<void> Function(NoticeDraft draft) write,
-            void Function(bool result) done) =>
+            void Function(bool result) done, {Message? existing}) =>
         ProviderScope(
           overrides: [
             nowProvider.overrideWith((ref) => Stream.value(DateTime(2026, 10, 2, 12))),
           ],
           child: MaterialApp(
-            home: Builder(
-              builder: (context) => Scaffold(
+            home: Consumer(builder: (context, ref, _) {
+              ref.watch(nowProvider);
+              return Scaffold(
                 body: TextButton(
                   onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
                     builder: (context) => Scaffold(
                       body: TextButton(
-                        onPressed: () async =>
-                            done(await showNoticeForm(context, write: write)),
+                        onPressed: () async => done(await showNoticeForm(context,
+                            existing: existing, write: write)),
                         child: const Text('OTEVŘÍT'),
                       ),
                     ),
                   )),
                   child: const Text('STRÁNKA'),
                 ),
-              ),
-            ),
+              );
+            }),
           ),
         );
+
+    /// Opens the form (for [existing] or a new notice, then titled „Klíč“),
+    /// runs [change], saves; returns what the form handed to its write.
+    Future<NoticeDraft> saved(WidgetTester tester,
+        {Message? existing, Future<void> Function()? change}) async {
+      NoticeDraft? sent;
+      await tester.pumpWidget(host((d) async => sent = d, (_) {}, existing: existing));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('STRÁNKA'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('OTEVŘÍT'));
+      await tester.pumpAndSettle();
+      if (existing == null) {
+        await tester.enterText(find.widgetWithText(TextField, 'Nadpis'), 'Klíč');
+        await tester.enterText(find.widgetWithText(TextField, 'Text'), 'Je u Petra.');
+      }
+      await change?.call();
+      await tester.pump();
+      await tester.tap(find.text('Uložit'));
+      await tester.pumpAndSettle();
+      return sent!;
+    }
+
+    testWidgets('a new notice expires at the end of the 14th day, and notifies',
+        (tester) async {
+      final draft = await saved(tester);
+      expect(draft.expiresAt, DateTime(2026, 10, 16, 23, 59, 59));
+      expect(draft.notify, isTrue);
+    });
+
+    testWidgets('„Do odvolání“ saves no expiry; „Poslat upozornění“ off saves '
+        'no notification', (tester) async {
+      final draft = await saved(tester, change: () async {
+        await tester.tap(find.text('Do odvolání'));
+        await tester.tap(find.text('Poslat upozornění'));
+      });
+      expect(draft.expiresAt, isNull);
+      expect(draft.notify, isFalse);
+    });
+
+    testWidgets('an edit keeps the notice\'s own expiry', (tester) async {
+      final expires = DateTime(2026, 10, 20, 23, 59, 59);
+      final draft = await saved(tester, existing: notice('a1', expiresAt: expires));
+      expect(draft.title, 'Nové dráhy a1');
+      expect(draft.expiresAt!.isAtSameMomentAs(expires), isTrue);
+    });
 
     Future<void> openForm(WidgetTester tester) async {
       await tester.tap(find.text('STRÁNKA'));

@@ -40,7 +40,11 @@ Future<bool> showNoticeForm(
   return result ?? false;
 }
 
-Future<void> _apiWrite(Message? existing, NoticeDraft d) => existing == null
+/// The form's own write: a new notice ([Api.messageSend], kind notice to
+/// everyone) or [existing]'s full new state ([Api.messageUpdate]).
+@visibleForTesting
+Future<void> noticeApiWrite(Message? existing, NoticeDraft d) =>
+    existing == null
     ? Api.messageSend(
         kind: MessageKind.notice,
         audience: MessageAudience.all,
@@ -111,7 +115,7 @@ class _NoticeFormState extends ConsumerState<_NoticeForm> {
       expiresAt: _forever ? null : _expiresAt,
       notify: _notify,
     );
-    final write = widget.write ?? (d) => _apiWrite(existing, d);
+    final write = widget.write ?? (d) => noticeApiWrite(existing, d);
     final ok = await tryAction(
       context,
       () => write(draft),
