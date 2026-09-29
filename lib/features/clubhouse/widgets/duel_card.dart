@@ -20,6 +20,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../../domain/duels.dart';
+import '../../../domain/models.dart' show MatchPlayerResult;
 import '../../../domain/palette.dart';
 import '../../../domain/results.dart';
 
@@ -147,12 +148,7 @@ class _WaitingBody extends StatelessWidget {
         child: Row(
           children: [
             Expanded(
-              child: Text(
-                duel.home?.playerName ?? '–',
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: name,
-              ),
+              child: _PlayerName(duel.home, style: name),
             ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -166,13 +162,7 @@ class _WaitingBody extends StatelessWidget {
               ),
             ),
             Expanded(
-              child: Text(
-                duel.away?.playerName ?? '–',
-                textAlign: TextAlign.end,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: name,
-              ),
+              child: _PlayerName(duel.away, style: name, end: true),
             ),
           ],
         ),
@@ -334,12 +324,7 @@ class _Names extends StatelessWidget {
     return Row(
       children: [
         Expanded(
-          child: Text(
-            duel.home?.playerName ?? '–',
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: name,
-          ),
+          child: _PlayerName(duel.home, style: name),
         ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -369,13 +354,7 @@ class _Names extends StatelessWidget {
           ),
         ),
         Expanded(
-          child: Text(
-            duel.away?.playerName ?? '–',
-            textAlign: TextAlign.end,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: name,
-          ),
+          child: _PlayerName(duel.away, style: name, end: true),
         ),
       ],
     );
@@ -916,4 +895,46 @@ class _DashedOutlinePainter extends CustomPainter {
   @override
   bool shouldRepaint(_DashedOutlinePainter oldDelegate) =>
       oldDelegate.color != color || oldDelegate.radius != radius;
+}
+
+/// A duel side's name up to 2 lines, and under it — when someone took over —
+/// the site's „od 41. hodu Miloš Vážan“ in small print.
+class _PlayerName extends StatelessWidget {
+  const _PlayerName(this.player, {required this.style, this.end = false});
+
+  final MatchPlayerResult? player;
+  final TextStyle? style;
+  final bool end;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final change = player?.substituteLabel;
+    return Column(
+      crossAxisAlignment: end
+          ? CrossAxisAlignment.end
+          : CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          player?.playerName ?? '–',
+          textAlign: end ? TextAlign.end : TextAlign.start,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: style,
+        ),
+        if (change != null)
+          Text(
+            change,
+            textAlign: end ? TextAlign.end : TextAlign.start,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              fontSize: 12,
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+      ],
+    );
+  }
 }

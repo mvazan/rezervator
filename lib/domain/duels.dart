@@ -313,10 +313,16 @@ String surnameOf(String? name) {
 /// o 3“ („hraje se, nerozhodně“ when level, just „hraje se“ before a lane
 /// both players threw).
 String duelSemantics(Duel duel) {
+  // „Pavel Medek (od 41. hodu Miloš Vážan)“ when someone took over.
+  String named(MatchPlayerResult? p) => p == null
+      ? '–'
+      : p.substituteLabel == null
+      ? p.playerName
+      : '${p.playerName} (${p.substituteLabel})';
   final text = StringBuffer(
     '${duel.position}. souboj: '
-    '${duel.home?.playerName ?? '–'} ${numLabel(duel.shownHome)}, '
-    '${duel.away?.playerName ?? '–'} ${numLabel(duel.shownAway)}',
+    '${named(duel.home)} ${numLabel(duel.shownHome)}, '
+    '${named(duel.away)} ${numLabel(duel.shownAway)}',
   );
   final diff = duel.diff;
   switch (duel.state) {

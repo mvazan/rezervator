@@ -141,6 +141,33 @@ void main() {
           .data,
   ];
 
+  testWidgets('a substitution is printed under the starter, as on the site', (
+    tester,
+  ) async {
+    final changed = MatchPlayerResult.fromJson({
+      'id': 'p3',
+      'match_id': 'm1',
+      'side': 'away',
+      'position': 1,
+      'player_name': 'Petr Svoboda',
+      'sub_name': 'Miloš Vážan',
+      'sub_from_throw': 41,
+      'fulls': 340,
+      'total': 550,
+      'lanes': [
+        {'lane': 1, 'fulls': 170, 'total': 270},
+        {'lane': 2, 'fulls': 170, 'total': 280},
+      ],
+    });
+    await tester.pumpWidget(
+      app(result: result, players: [homePlayer, changed]),
+    );
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Petr Svoboda'), findsOneWidget);
+    expect(find.textContaining('od 41. hodu Miloš Vážan'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
     'team summary row shows both team names, Body (match points), team '
     'stat totals and the Družstvo (pin-total bonus) points',

@@ -247,6 +247,13 @@ class LegacyScoreSheet extends StatelessWidget {
   }
 }
 
+/// A line's name as the site's sheet prints it: the starter, and under them
+/// „od 41. hodu Miloš Vážan“ when someone took over.
+String _sheetName(MatchPlayerResult p) => p.substituteLabel == null
+    ? p.playerName
+    : '${p.playerName}\n${p.substituteLabel}';
+
+
 /// Every column's width, computed once per render from the table's actual
 /// content (Fix round 5) — kuzelky uses `table-layout: auto`, so its
 /// columns grow to fit whatever they hold; the brief's own widths are
@@ -346,7 +353,7 @@ class _ColumnMetrics {
       ('Registrační číslo', _s10w400),
       (slot.homeTeam, _s16w700),
       (slot.awayTeam, _s16w700),
-      for (final p in players) (p.playerName, _s16w700),
+      for (final p in players) (_sheetName(p), _s16w700),
     ], 144.0);
 
     // Deliberately EXCLUDES "Série hodů" — it's the one header allowed to
@@ -505,7 +512,7 @@ class _ColumnMetrics {
       widest = math.max(widest, twoLineWidth('Registrační číslo', _s10w400));
     }
     for (final p in players) {
-      widest = math.max(widest, widestWord(p.playerName, _s16w700));
+      widest = math.max(widest, widestWord(_sheetName(p), _s16w700));
     }
     return (widest + _cellChrome).ceilToDouble();
   }
@@ -760,7 +767,7 @@ class _SheetGeometry {
       for (final p in players) {
         final laneRowCount = laneRows[p.position] ?? 0;
         fit(
-          p.playerName,
+          _sheetName(p),
           _s16w700,
           laneRowCount >= 2 ? laneRowCount * laneRowBase : celkemRowBase,
         );
@@ -1234,7 +1241,7 @@ class _ScoreTableBody extends StatelessWidget {
     // A lone 23px lane row can't hold the 16px name — it goes into the Celkem
     // row then, the same as with no lane rows at all.
     final nameInLaneRows = laneRowCount >= 2;
-    final nameText = player.playerName; // no "N. " prefix (Fix round 5).
+    final nameText = _sheetName(player); // no "N. " prefix (Fix round 5).
 
     Widget laneRow(PlayerLane? lane) {
       // A filler row when this side threw fewer lanes than the other side

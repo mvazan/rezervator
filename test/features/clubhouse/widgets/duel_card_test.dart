@@ -387,6 +387,30 @@ void main() {
     }
   });
 
+  testWidgets('a substitution shows under the starter, nowhere else', (
+    tester,
+  ) async {
+    final duel = duelsOf([
+      MatchPlayerResult.fromJson({
+        'id': 'a',
+        'match_id': 'x',
+        'side': 'away',
+        'position': 1,
+        'player_name': 'Pavel Medek',
+        'sub_name': 'Miloš Vážan',
+        'sub_from_throw': 41,
+        'lanes': [_lane(1, 200), _lane(2, 210)],
+        'total': 410,
+      }),
+      _player('home', 1, [_lane(1, 190), _lane(2, 200)], total: 390),
+    ]).single;
+    await tester.pumpWidget(_host(_card(duel)));
+    expect(find.text('Pavel Medek'), findsOneWidget);
+    expect(find.text('od 41. hodu Miloš Vážan'), findsOneWidget);
+    await tester.pumpWidget(_host(_card(_rudna[0])));
+    expect(find.textContaining('od '), findsNothing);
+  });
+
   testWidgets('tapping the card calls onTap once', (tester) async {
     var taps = 0;
     await tester.pumpWidget(_host(_card(_rudna[0], onTap: () => taps++)));

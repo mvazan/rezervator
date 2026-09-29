@@ -83,6 +83,22 @@ void main() {
       final b = matchPointsBreakdown(rudnaResult, rudnaPlayers)!;
       expect([b.duelsHome, b.duelsAway, b.pinsHome, b.pinsAway], [5, 1, 2, 0]);
     });
+    test('a substitution is read out after the starter', () {
+      final withChange = MatchPlayerResult.fromJson({
+        'id': 'x',
+        'match_id': 'm',
+        'side': 'home',
+        'position': 1,
+        'player_name': 'Pavel Medek',
+        'sub_name': 'Miloš Vážan',
+        'sub_from_throw': 41,
+      });
+      final d = duelsOf([withChange]).single;
+      expect(
+        duelSemantics(d),
+        startsWith('1. souboj: Pavel Medek (od 41. hodu Miloš Vážan) '),
+      );
+    });
     test('the TalkBack text of duel 1', () {
       expect(
         duelSemantics(duels[0]),

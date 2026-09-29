@@ -1036,6 +1036,8 @@ class MatchPlayerResult {
     this.setPoints,
     this.teamPoints,
     this.lanes = const [],
+    this.substituteName,
+    this.substituteFromThrow,
   });
 
   final String id;
@@ -1053,6 +1055,20 @@ class MatchPlayerResult {
   final num? setPoints;
   final num? teamPoints;
   final List<PlayerLane> lanes;
+
+  /// Who took over this line and from which throw ("od 41. hodu") — the site
+  /// keeps the starter's line and lists the change apart (0053).
+  final String? substituteName;
+  final int? substituteFromThrow;
+
+  /// „od 41. hodu Miloš Vážan“ — the site's own wording; null without a
+  /// change. Without a known throw it is just „Miloš Vážan“.
+  String? get substituteLabel {
+    final name = substituteName;
+    if (name == null || name.isEmpty) return null;
+    final from = substituteFromThrow;
+    return from == null ? name : 'od $from. hodu $name';
+  }
 
   factory MatchPlayerResult.fromJson(Map<String, dynamic> json) =>
       MatchPlayerResult(
@@ -1072,6 +1088,8 @@ class MatchPlayerResult {
           for (final lane in json['lanes'] as List? ?? const [])
             PlayerLane.fromJson((lane as Map).cast<String, dynamic>()),
         ],
+        substituteName: json['sub_name'] as String?,
+        substituteFromThrow: (json['sub_from_throw'] as num?)?.toInt(),
       );
 }
 
