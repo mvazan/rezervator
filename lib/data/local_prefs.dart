@@ -174,3 +174,80 @@ class MatchDetailViewNotifier extends Notifier<MatchDetailView> {
     }
   }
 }
+
+// ---------------------------------------------------------------------------
+// Výsledky: by team or by competition (0055)
+// ---------------------------------------------------------------------------
+
+const _resultsModeKey = 'results_mode';
+const _resultsCompetitionKey = 'results_competition';
+
+/// How Výsledky lists the matches: [teams] = our teams' matches (chips: Vše
+/// and a team), [competitions] = one whole competition by round, foreign
+/// matches included.
+///
+/// Persisted by name — do not rename a value.
+enum ResultsMode { teams, competitions }
+
+ResultsMode parseResultsMode(String? name) => ResultsMode.values
+    .firstWhere((m) => m.name == name, orElse: () => ResultsMode.teams);
+
+/// The mode picked last, remembered on the device. Defaults to [ResultsMode.teams].
+final resultsModeProvider =
+    NotifierProvider<ResultsModeNotifier, ResultsMode>(ResultsModeNotifier.new);
+
+class ResultsModeNotifier extends Notifier<ResultsMode> {
+  @override
+  ResultsMode build() {
+    _load();
+    return ResultsMode.teams;
+  }
+
+  Future<void> _load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (!ref.mounted) return;
+      state = parseResultsMode(prefs.getString(_resultsModeKey));
+    } catch (_) {
+      // Best effort only, like the match detail's view.
+    }
+  }
+
+  Future<void> set(ResultsMode mode) async {
+    state = mode;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_resultsModeKey, mode.name);
+    } catch (_) {}
+  }
+}
+
+/// The competition (its slug) picked last in [ResultsMode.competitions];
+/// null until one was picked — the screen then takes the first.
+final resultsCompetitionProvider =
+    NotifierProvider<ResultsCompetitionNotifier, String?>(
+        ResultsCompetitionNotifier.new);
+
+class ResultsCompetitionNotifier extends Notifier<String?> {
+  @override
+  String? build() {
+    _load();
+    return null;
+  }
+
+  Future<void> _load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (!ref.mounted) return;
+      state = prefs.getString(_resultsCompetitionKey);
+    } catch (_) {}
+  }
+
+  Future<void> set(String slug) async {
+    state = slug;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_resultsCompetitionKey, slug);
+    } catch (_) {}
+  }
+}

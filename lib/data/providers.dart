@@ -456,6 +456,60 @@ final matchPlayerResultsProvider = StreamProvider.autoDispose
         }));
 });
 
+/// One competition's foreign matches (0055) — the matches of two teams that
+/// are none of ours. autoDispose.family by the competition's slug: only the
+/// competition Výsledky (or a match detail) is looking at is streamed.
+final leagueMatchesProvider = StreamProvider.autoDispose
+    .family<List<LeagueMatch>, String>((ref, competitionSlug) {
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return Stream.value(const []);
+  return cachedRows(
+          uid,
+          'league_matches:$competitionSlug',
+          () => _db
+              .from('league_matches')
+              .stream(primaryKey: ['id'])
+              .eq('competition_slug', competitionSlug))
+      .map((rows) => rows.map(LeagueMatch.fromJson).toList());
+});
+
+/// One foreign match's player lines (0055), home side first then by
+/// position — [MatchPlayerResult] read from `league_player_results`.
+final leaguePlayerResultsProvider = StreamProvider.autoDispose
+    .family<List<MatchPlayerResult>, String>((ref, matchId) {
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return Stream.value(const []);
+  return cachedRows(
+          uid,
+          'league_player_results:$matchId',
+          () => _db
+              .from('league_player_results')
+              .stream(primaryKey: ['id'])
+              .eq('match_id', matchId))
+      .map((rows) => rows.map(MatchPlayerResult.fromJson).toList()
+        ..sort((a, b) {
+          final bySide = (a.side == 'home' ? 0 : 1) - (b.side == 'home' ? 0 : 1);
+          return bySide != 0 ? bySide : a.position.compareTo(b.position);
+        }));
+});
+
+/// The competitions our active teams play (0045 `teams.competition_*`) —
+/// the ones whose whole schedule Výsledky can show — Czech-sorted by name.
+final leagueCompetitionsProvider =
+    Provider<List<({String slug, String name})>>((ref) {
+  final teams = ref.watch(teamsProvider).value ?? const <Team>[];
+  final bySlug = <String, String>{};
+  for (final t in teams) {
+    if (t.active && t.competitionSlug.isNotEmpty) {
+      bySlug.putIfAbsent(t.competitionSlug, () => t.competitionName);
+    }
+  }
+  return [
+    for (final e in bySlug.entries)
+      (slug: e.key, name: e.value.isEmpty ? e.key : e.value),
+  ]..sort((a, b) => compareCzech(a.name, b.name));
+});
+
 /// The alleys our teams play at (0045), Czech-sorted by name.
 final venuesProvider = StreamProvider<List<Venue>>((ref) {
   final uid = ref.watch(_authUidProvider);
@@ -2109,6 +2163,8 @@ void resetTenantScopedProviders(WidgetRef ref) {
   ref.invalidate(teamsProvider);
   ref.invalidate(federationSyncProvider);
   ref.invalidate(matchResultsProvider);
+  ref.invalidate(leagueMatchesProvider);
+  ref.invalidate(leaguePlayerResultsProvider);
   ref.invalidate(venuesProvider);
   ref.invalidate(timeBlocksProvider);
   ref.invalidate(dayOverridesProvider);

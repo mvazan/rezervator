@@ -224,3 +224,97 @@ String? mostRecentDecidedMatchId(
   }
   return found;
 }
+
+/// The same over a flat list already in display order
+/// (Výsledky's „Soutěže“ view lists rounds, not days): the last DECIDED
+/// match dated at or before [today].
+String? mostRecentDecidedInOrder(
+  Iterable<PrioritySlot> ordered,
+  Map<String, MatchResult> results,
+  Day today,
+) {
+  String? found;
+  for (final slot in ordered) {
+    if (slot.date.isAfter(today)) continue;
+    final status = results[slot.id]?.status;
+    if (status == MatchStatus.finished || status == MatchStatus.forfeit) {
+      found = slot.id;
+    }
+  }
+  return found;
+}
+
+/// One round of a competition in Výsledky's „Soutěže“ view.
+typedef RoundGroup = ({
+  int round,
+  Day first,
+  Day last,
+  List<PrioritySlot> matches,
+});
+
+/// The matches of the competition [slug]: our federation matches (a slot
+/// whose site slug is `<slug>-kolo-…`, no Úklid child) plus the [league]
+/// matches — the ones between two teams that are none of ours, as slot views.
+/// [foreignIds] are the league ones; a league match that is one of ours by
+/// now (the two tables may disagree for a moment) is listed once, as ours.
+({List<PrioritySlot> matches, Set<String> foreignIds}) competitionMatches(
+  List<PrioritySlot> slots,
+  List<LeagueMatch> league,
+  String slug,
+) {
+  final ours = [
+    for (final s in slots)
+      if (s.type.isMatch &&
+          s.parentId == null &&
+          s.fromFederation &&
+          (s.siteSlug ?? '').startsWith('$slug-kolo-'))
+        s,
+  ];
+  final ourSiteIds = {for (final s in ours) s.siteMatchId};
+  final foreign = [
+    for (final l in league)
+      if (l.competitionSlug == slug && !ourSiteIds.contains(l.siteMatchId)) l,
+  ];
+  return (
+    matches: [...ours, for (final l in foreign) l.asSlot()],
+    foreignIds: {for (final l in foreign) l.id},
+  );
+}
+
+/// [matches] grouped by round. The rounds are NOT played in order (a round
+/// is postponed, a team plays two in a week), so the groups go by their
+/// first match date, then by round number; inside a round by day, time and
+/// title.
+List<RoundGroup> competitionRounds(List<PrioritySlot> matches) {
+  final byRound = <int, List<PrioritySlot>>{};
+  for (final m in matches) {
+    (byRound[m.round ?? 0] ??= []).add(m);
+  }
+  final groups = <RoundGroup>[];
+  byRound.forEach((round, items) {
+    items.sort((a, b) {
+      final byTime = compareDayTime(a.date, a.startsAt, b.date, b.startsAt);
+      return byTime != 0 ? byTime : compareCzech(a.title, b.title);
+    });
+    groups.add((
+      round: round,
+      first: items.first.date,
+      last: items.map((m) => m.date).reduce((a, b) => b.isAfter(a) ? b : a),
+      matches: items,
+    ));
+  });
+  groups.sort((a, b) {
+    final byDate = a.first.compareTo(b.first);
+    return byDate != 0 ? byDate : a.round.compareTo(b.round);
+  });
+  return groups;
+}
+
+/// „9. kolo · 26. 9.“, or over several days „9. kolo · 26.9.–27.9.“; without
+/// a round number just the date.
+String roundLabel(RoundGroup g) {
+  final when = g.first == g.last
+      ? '${g.first.day}. ${g.first.month}.'
+      : rangeLabel(g.first, g.last);
+  return g.round == 0 ? when : '${g.round}. kolo · $when';
+}
