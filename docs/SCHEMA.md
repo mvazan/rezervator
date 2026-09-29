@@ -47,7 +47,7 @@ and what cascades — and is updated with every migration.
 | Table | Purpose / key columns | RLS (all `tenant_id = current_tenant_id()` unless noted) |
 |---|---|---|
 | `tenants` | `name` unique, `founder_email` (only the founder can become the first admin), `status`, `approved_at`. **Public overview** (0043): `public_slug` unique, 3–40 lower-case letters/digits/hyphens (`tenants_public_slug_format`), `public_enabled` default off, `tenants_public_needs_slug` (can't enable without a slug) | select for `authenticated` `using (true)` **but column grants expose only `id, name, status`** — `founder_email` never leaves the server; `public_slug`/`public_enabled` are likewise outside the `authenticated` grant, read only by `public_tenant_id`/`my_public_overview`. Writes: RPC only. |
-| `profiles` | `id` (= `auth.uid()` for real accounts; no FK to `auth.users` since 0022), `display_name`, `nick` ≤ 14, `email` ('' for placeholders), `role`, `status`, `club_id → clubs`, `fcm_token`, `superadmin`, `home_tenant_id`, `approved_by/at`, `placeholder` (hand-made row: player ∧ approved ∧ not superadmin), `own_color` (0024: the colour the player picked for their own reservations in their own view, −1 = club colour, else a packed RGB — 0042 moved the picker to the Google palette + wheel, both stored as `0x1000000\|rgb`; a legacy palette index 0-11 from the 1.2.6 app still renders), `followed_teams` (≤ 20 names, the Můj přehled list — separate from the calendar's `calendar_teams`), `default_view` (`calendar` | `trainings`, what the app opens at launch); both own-row updatable (0029); `phone` (0048: E.164 `+<digits>`, `profiles_phone_check` = `^\+[1-9][0-9]{7,14}$`, null = none), `show_email` / `show_phone` (0048: default true, for existing rows too — whether `contacts()` hands the e-mail / phone to the alley's players) | select: own row, or admin of the same tenant. update: own row, columns `display_name`, `fcm_token`, `own_color`, `followed_teams`, `default_view`, `notify_before_minutes`, `phone`, `show_email`, `show_phone` only. insert/delete: RPC only. |
+| `profiles` | `id` (= `auth.uid()` for real accounts; no FK to `auth.users` since 0022), `display_name`, `nick` ≤ 14, `email` ('' for placeholders), `role`, `status`, `club_id → clubs`, `fcm_token` (the device's push token; 0050: one profile per token — registering it takes it from every other profile, trigger `fcm_token_claim`), `superadmin`, `home_tenant_id`, `approved_by/at`, `placeholder` (hand-made row: player ∧ approved ∧ not superadmin), `own_color` (0024: the colour the player picked for their own reservations in their own view, −1 = club colour, else a packed RGB — 0042 moved the picker to the Google palette + wheel, both stored as `0x1000000\|rgb`; a legacy palette index 0-11 from the 1.2.6 app still renders), `followed_teams` (≤ 20 names, the Můj přehled list — separate from the calendar's `calendar_teams`), `default_view` (`calendar` | `trainings`, what the app opens at launch); both own-row updatable (0029); `phone` (0048: E.164 `+<digits>`, `profiles_phone_check` = `^\+[1-9][0-9]{7,14}$`, null = none), `show_email` / `show_phone` (0048: default true, for existing rows too — whether `contacts()` hands the e-mail / phone to the alley's players) | select: own row, or admin of the same tenant. update: own row, columns `display_name`, `fcm_token`, `own_color`, `followed_teams`, `default_view`, `notify_before_minutes`, `phone`, `show_email`, `show_phone` only. insert/delete: RPC only. |
 | `schedule_settings` | PK `tenant_id`; `lane_count` 1–12, `training_weekdays smallint[]` (ISO 1–7), `booking_horizon_days` 1–90, `max_active_reservations` 1–50, `kiosk_dark`, `kiosk_fit_day` | select approved/kiosk; update admin. |
 | `time_blocks` | `starts_at`, `ends_at`, `position`, `active`. `position = -1` marks a day-special block: inactive, reachable only through `day_overrides.block_ids` | select approved/kiosk; insert/update/delete admin. FK from `reservations` is RESTRICT — only never-used blocks can be deleted. |
 | `day_overrides` | PK (`tenant_id`, `date`); `closed`, `reason`, `block_ids uuid[]` (`null` = the default active set) | select approved/kiosk; write admin. Normally written through `set_day_override`. |
@@ -206,7 +206,11 @@ exception: validation + name/colour copy), `rental_series_changed` (after
 update of a weekly rental: prune orphaned exceptions, propagate name/colour), `notify_profiles` / `notify_reservations` /
 `notify_tenants` (`notify_webhook` → the notify function),
 `reservations_enqueue_calendar` / `time_blocks_enqueue_calendar` (the
-calendar job producers, next section).
+calendar job producers, next section), `fcm_token_claim` (0050, after a
+profile writes a non-null `fcm_token`: clears that token from every other
+profile, in any alley — a device pushes for one account only, whichever
+app version saved it; the app also clears its own token on sign-out, only
+while it is still this device's).
 
 ## Výsledkový servis ČKA (0045)
 
@@ -893,7 +897,10 @@ and FCM is configured, e-mail otherwise.
   bounds; `register_profile` with a phone, a refused one, a blank one, a
   named call without `p_phone`; `create_tenant_and_register` without a
   phone, with the founder's phone, and with a bad one that founds no
-  tenant), and the 0035
+  tenant), the 0050 push tokens (registering a device token takes it from
+  the previous account, in another alley too, and leaves other devices'
+  tokens alone; sign-out clears the token only while it is still this
+  device's), and the 0035
   assertion (now including `team_colors` and `match_exceptions`) that every table
   `lib/data/providers.dart` streams is in the `supabase_realtime`
   publication; run with `psql … -v ON_ERROR_STOP=1 -f` against the local
