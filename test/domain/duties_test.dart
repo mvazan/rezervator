@@ -608,6 +608,107 @@ void main() {
         isNot(myDuty(periods, assignments, 'me', Day(2026, 10, 12))),
       );
     });
+
+    List<String> ids(MyDuty d) => [for (final p in d.mine) p.id];
+
+    test('mine: every period of mine that has not ended, in date order', () {
+      // Running, ahead and later; the one already over is left out.
+      expect(
+        ids(myDuty(periods, assignments, 'me', Day(2026, 10, 6))),
+        ['now', 'next', 'later'],
+      );
+      // A period ending today has not ended; the day after, it has.
+      expect(
+        ids(myDuty(periods, assignments, 'me', Day(2026, 10, 11))),
+        ['now', 'next', 'later'],
+      );
+      expect(
+        ids(myDuty(periods, assignments, 'me', Day(2026, 10, 12))),
+        ['next', 'later'],
+      );
+      // Not on duty today, still all of mine ahead — more than `next`.
+      final off = myDuty(periods, assignments, 'me', Day(2026, 10, 12));
+      expect(off.onDuty, isFalse);
+      expect(off.next?.id, 'next');
+      expect(ids(off), ['next', 'later']);
+      expect(ids(myDuty(periods, assignments, 'me', Day(2026, 11, 9))), isEmpty);
+    });
+
+    test('coversDay: the days of my own periods, on duty today or not', () {
+      final onDuty = myDuty(periods, assignments, 'me', Day(2026, 10, 6));
+      // Inside the running period, both edges included.
+      expect(onDuty.coversDay(Day(2026, 10, 5)), isTrue);
+      expect(onDuty.coversDay(Day(2026, 10, 11)), isTrue);
+      // The gap after it, then my next period, edges included.
+      expect(onDuty.coversDay(Day(2026, 10, 12)), isFalse);
+      expect(onDuty.coversDay(Day(2026, 10, 18)), isFalse);
+      expect(onDuty.coversDay(Day(2026, 10, 19)), isTrue);
+      expect(onDuty.coversDay(Day(2026, 10, 25)), isTrue);
+      expect(onDuty.coversDay(Day(2026, 10, 26)), isFalse);
+      // Off duty today: the days of my periods ahead are mine all the same.
+      final off = myDuty(periods, assignments, 'me', Day(2026, 10, 12));
+      expect(off.onDuty, isFalse);
+      expect(off.coversDay(Day(2026, 10, 20)), isTrue);
+      expect(off.coversDay(Day(2026, 11, 3)), isTrue);
+      expect(off.coversDay(Day(2026, 10, 18)), isFalse);
+    });
+
+    test('a duty next week Monday to Wednesday: those three days only', () {
+      final week = period('week', Day(2026, 10, 12), Day(2026, 10, 14));
+      final d = myDuty([week], [assign('week', 'me')], 'me', Day(2026, 10, 6));
+      expect(d.onDuty, isFalse);
+      expect(d.current, isNull);
+      expect(d.coversDay(Day(2026, 10, 11)), isFalse);
+      expect(d.coversDay(Day(2026, 10, 12)), isTrue);
+      expect(d.coversDay(Day(2026, 10, 13)), isTrue);
+      expect(d.coversDay(Day(2026, 10, 14)), isTrue);
+      expect(d.coversDay(Day(2026, 10, 15)), isFalse);
+      expect(d.coversDay(Day(2026, 10, 6)), isFalse);
+    });
+
+    test('two consecutive periods of mine are both covered, no gap between', () {
+      final first = period('a', Day(2026, 10, 5), Day(2026, 10, 11));
+      final second = period('b', Day(2026, 10, 12), Day(2026, 10, 18));
+      final d = myDuty(
+        [second, first],
+        [assign('a', 'me'), assign('b', 'me')],
+        'me',
+        Day(2026, 10, 6),
+      );
+      expect(ids(d), ['a', 'b']);
+      for (var day = 5; day <= 18; day++) {
+        expect(d.coversDay(Day(2026, 10, day)), isTrue, reason: '$day. 10.');
+      }
+      expect(d.coversDay(Day(2026, 10, 19)), isFalse);
+    });
+
+    test('someone else\'s periods and no one signed in cover nothing', () {
+      final adam = myDuty(periods, assignments, 'adam', Day(2026, 10, 6));
+      expect(adam.coversDay(Day(2026, 10, 6)), isFalse);
+      expect(adam.coversDay(Day(2026, 10, 20)), isTrue);
+      expect(MyDuty.none.coversDay(Day(2026, 10, 6)), isFalse);
+      expect(
+        myDuty(periods, assignments, null, Day(2026, 10, 6)).coversDay(
+          Day(2026, 10, 6),
+        ),
+        isFalse,
+      );
+    });
+
+    test('a further period of mine makes a different value', () {
+      // Same running and next period, one more ahead: the calendar's rights
+      // differ, so the provider must notify.
+      final a = myDuty(periods, assignments, 'me', Day(2026, 10, 6));
+      final b = myDuty(
+        [...periods, period('far', Day(2026, 12, 1), Day(2026, 12, 7))],
+        [...assignments, assign('far', 'me')],
+        'me',
+        Day(2026, 10, 6),
+      );
+      expect(b.current, a.current);
+      expect(b.next, a.next);
+      expect(b, isNot(a));
+    });
   });
 
   group('dutyLeadLabel', () {

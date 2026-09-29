@@ -7,6 +7,7 @@ import '../../domain/calendar_layout.dart' show hourMinuteAt;
 import '../../domain/collation.dart';
 import '../../domain/day_edit.dart'
     show blockStartedMessage, clockAtWrite, startPassedMessage;
+import '../../domain/duties.dart' show MyDuty;
 import '../../domain/labels.dart';
 import '../../domain/models.dart';
 import '../../domain/schedule.dart';
@@ -29,8 +30,9 @@ import 'widgets/group_booking_dialog.dart';
 /// signatures the views already take; admin ones are null for non-admins
 /// or while the placeholder grid shows (canEditBlocks false) — except the
 /// rental edit, which never touches blocks and only needs an admin. The
-/// player on canteen duty (0050) gets the day-block ones and the day menu,
-/// never the matches, blockages or rentals.
+/// player on canteen duty (0050) gets the day-block ones and the day menu
+/// on the days of their own periods (see [canEditDay]), never the matches,
+/// blockages or rentals.
 ///
 /// Calendar edits are DAY-SCOPED: they compose a day override around an
 /// inactive "special" block instead of touching the weekly template (that
@@ -53,7 +55,7 @@ class ScheduleActions {
     required this.canEditBlocks,
     this.noAccountIds = const {},
     this.groupMateIds = const {},
-    this.onDuty = false,
+    this.duty = MyDuty.none,
     this.clock,
   })  : _overrideByDate = {for (final o in overrides) o.date: o},
         _blockById = {for (final b in dbBlocks) b.id: b};
@@ -97,8 +99,10 @@ class ScheduleActions {
   /// The signed-in profile; the views only fire [onBook] with one present.
   final Profile? me;
 
-  /// Admin block gestures (long-press edit, tap-a-gap add) only exist for
-  /// admins on the real DB block set — never on the placeholder grid.
+  /// Block gestures (long-press edit, tap-a-gap add, the day menu) exist for
+  /// admins and for a player with canteen duty periods (0050), on the real
+  /// DB block set only — never on the placeholder grid. Which days is
+  /// [canEditDay]'s question.
   final bool canEditBlocks;
 
   /// Hand-made "hráči bez účtu" (0022): no e-mail, no app, so a cancel or
@@ -110,28 +114,53 @@ class ScheduleActions {
   /// matter (they may anything), the kiosk never sets it.
   final Set<String> groupMateIds;
 
-  /// The signed-in player is on canteen duty today (0050): they book and
-  /// cancel for the others and edit single days — the week screen then
-  /// also passes [canEditBlocks]. Matches, blockages, rentals and the
-  /// weekly template stay the admin's.
-  final bool onDuty;
+  /// The signed-in player's canteen duty (0050), with two rights on two
+  /// clocks. On duty TODAY ([onDuty]) they book and cancel for the others,
+  /// on any day from today on. On the days of their OWN periods
+  /// ([MyDuty.coversDay]), on duty today or not, they edit the blocks of
+  /// single days — the week screen then also passes [canEditBlocks].
+  /// Matches, blockages, rentals and the weekly template stay the admin's.
+  final MyDuty duty;
 
   final Map<Day, DayOverride> _overrideByDate;
   final Map<String, TimeBlock> _blockById;
 
   bool get _isAdmin => me?.isAdmin ?? false;
 
-  /// On duty and not an admin — an admin's own rights already cover it.
+  /// The signed-in player is on canteen duty today (0050).
+  bool get onDuty => duty.onDuty;
+
+  /// On duty today and not an admin — an admin's own rights already cover
+  /// it. The booking side: booking and cancelling for others.
   bool get _asDuty => onDuty && !_isAdmin;
+
+  /// Editing blocks on the strength of their own duty periods (0050): a
+  /// player with duty periods, not an admin. Whether they are on duty today
+  /// does not matter here.
+  bool get _editsAsDuty => canEditBlocks && !_isAdmin;
+
+  /// Whether the block gestures are offered on [date] (0050): the admin on
+  /// any day, the player with duty periods only on a day of their own
+  /// period and from today on — on duty today or not, exactly the server's
+  /// `duty_edit_gate`. A day of someone else's, or one nobody serves, gets
+  /// none of them.
+  bool canEditDay(Day date) =>
+      canEditBlocks &&
+      (_isAdmin || (!date.isBefore(today) && duty.coversDay(date)));
 
   /// How a refusal reads: „Služba skončila…“ when a duty just ended.
   String _errorText(Object error) =>
       friendlyDbError(error, wasOnDuty: _asDuty);
 
+  /// How a refusal of a block edit reads: „Služba skončila…“ when their
+  /// duty is gone by now (0050).
+  String _editErrorText(Object error) =>
+      friendlyDbError(error, wasOnDuty: _editsAsDuty);
+
   /// How a refusal of a day edit reads: a duty's `too_late` is about the
   /// block, not a reservation.
   String _dayEditErrorText(Object error) =>
-      dayEditError(error, wasOnDuty: _asDuty);
+      dayEditError(error, wasOnDuty: _editsAsDuty);
 
   /// The current time, read afresh when the screen gave a [clock].
   HourMinute _now() => clock?.call() ?? now;
@@ -141,7 +170,7 @@ class ScheduleActions {
   /// reservations — the dialogs and flows hold to it, reading it again
   /// right before they write.
   HourMinute Function()? _dutyClockOn(Day date) =>
-      _asDuty && date == today ? _now : null;
+      _editsAsDuty && date == today ? _now : null;
 
   /// The two bundles the views take (see schedule_callbacks.dart).
   SlotCallbacks get slot => SlotCallbacks(
@@ -165,6 +194,7 @@ class ScheduleActions {
         onMessageDay: onMessageDay,
         onMessageBlock: onMessageBlock,
         hasDayOverride: (date) => _overrideByDate[date] != null,
+        canEditDay: canEditDay,
       );
 
   void Function(Day, TimeBlock, int lane) get onBook =>
@@ -220,13 +250,19 @@ class ScheduleActions {
   void Function(Day)? get onRestoreDay => canEditBlocks ? _restoreDay : null;
 
   /// „Napsat hráčům dne…“ / „Napsat hráčům bloku…“ (0051): the staff
-  /// composer, under the same gate as the other day rights (the admin, or
-  /// the duty). Not the edit guards: the day menu offers a past day's
+  /// composer, under the messaging clock ([_mayMessage]: the admin, or on
+  /// duty today). Not the edit guards: the day menu offers a past day's
   /// „Napsat hráčům dne…“ to the admin, and a refused block edit offers
   /// „Napsat hráčům bloku…“ on its snack ([_editBlock]).
-  void Function(Day)? get onMessageDay => canEditBlocks ? _messageDay : null;
+  void Function(Day)? get onMessageDay => _mayMessage ? _messageDay : null;
   void Function(Day, TimeBlock)? get onMessageBlock =>
-      canEditBlocks ? _messageBlock : null;
+      _mayMessage ? _messageBlock : null;
+
+  /// The messaging clock (`message_send`'s `duty_gate`): the admin, or a
+  /// player on duty TODAY — for any day from today on, the other duties'
+  /// days too. Not the block edits' clock ([canEditDay]): a duty starting
+  /// next week edits next week's days already, but writes to nobody yet.
+  bool get _mayMessage => canEditBlocks && (_isAdmin || onDuty);
 
   Future<void> _book(
     Day date,
@@ -503,9 +539,11 @@ class ScheduleActions {
         dayPriority: week.days[date.weekday - 1].priority,
         dayReason: _overrideByDate[date]?.reason ?? '',
         // The dialog closes first: the composer opens over the calendar.
-        offerMessageBlock: true,
+        // Only where the server would take the message (the admin, or on
+        // duty today): a duty starting later may edit this day, not write.
+        offerMessageBlock: onMessageBlock != null,
         onMessagePlayers: () => _messageBlock(date, block),
-        wasOnDuty: _asDuty,
+        wasOnDuty: _editsAsDuty,
         dutyClock: _dutyClockOn(date),
       ),
     );
@@ -549,7 +587,7 @@ class ScheduleActions {
         dayReason: _overrideByDate[date]?.reason ?? '',
         // The header ＋ (no gap picked) on an open day may close it too.
         offerCloseDay: !closed && start == null && end == null,
-        wasOnDuty: _asDuty,
+        wasOnDuty: _editsAsDuty,
         dutyClock: _dutyClockOn(date),
       ),
     );
@@ -560,7 +598,7 @@ class ScheduleActions {
     await closeDayFlow(
       context,
       date: date,
-      errorText: _errorText,
+      errorText: _editErrorText,
       blocks: dbBlocks,
       renderedIds: _dayRenderedIds(date),
       dutyClock: _dutyClockOn(date),
@@ -575,7 +613,7 @@ class ScheduleActions {
       isTraining: settings.trainingWeekdays.contains(date.weekday),
       blocks: dbBlocks,
       renderedIds: _dayRenderedIds(date),
-      errorText: _errorText,
+      errorText: _editErrorText,
       dutyClock: _dutyClockOn(date),
     );
   }

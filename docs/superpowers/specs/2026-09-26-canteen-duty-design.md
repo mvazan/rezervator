@@ -4,8 +4,9 @@ Requested by the user on 2026-09-26; the design came out of three independent pr
 
 ## Decided with the user
 
-- **Rights while on duty:** book and cancel trainings for other players, and day-level schedule edits (add or cancel a block on a given day, close a day). The weekly template (Správa → Rozvrh) stays admin-only.
-- **When:** during the duty period, on any calendar date from today on.
+- **Two rights, two clocks.** The weekly template (Správa → Rozvrh) stays admin-only.
+  - **Rule B — reservations of others:** book and cancel trainings for other players only WHILE on duty (a period covering today's Prague date), on any date from today on — also dates that belong to other people's periods — under the booked player's normal rules: the admin's booking horizon, the player's cap on active reservations, no started block, no past date. A player whose only period is next week is not on duty today and books and cancels for nobody yet.
+  - **Rule A — blocks of a day:** add a special block for a day, edit a block for a day, move players between blocks, close a day, restore the weekly template for a day, cancel a block's day reservations — only on dates inside one of the player's OWN periods, and never in the past. Moving players between blocks includes re-seating one reservation (`move_reservation`, the per-player step of removing a block for a day); while on duty the player may also do that on any future day. Being on duty today is NOT required: „next week Monday–Wednesday I have duty → I can edit blocks already today, but only for Monday–Wednesday of next week.“ A date outside the own periods (someone else's period, a gap, a duty that ended) is refused and the app does not offer it. The admin edits any date, as ever.
 - **Who sees the roster:** every player of the alley — Klubovna → Služby and a „Slouží: …“ line in the Kalendář week header. The admin plans, counts and keeps history in Správa → Služby.
 - **Reminder before a duty:** yes; the admin switches it on or off for the alley and picks the lead (1 day, 2 days, …).
 - **Booking rules for the duty:** the booked player's usual rules apply — their active-reservation limit, the booking horizon, no block that has already started. Only the admin may go past them.
@@ -18,7 +19,7 @@ Each week one or more club members work in the canteen. That person has to book 
 ## Decisions (trade-offs resolved)
 1. **No new `profiles.role` value.** "Kantýnský" means an approved `player` account assigned to a duty period that covers today's Prague date. `set_role`, kiosk, superadmin and the players view stay untouched. All three proposals agreed on this.
 2. **The rights live only in security-definer RPCs, and no table policy gets wider.** The app writes directly to tables in two places today (`Api.addSpecialBlock`, `Api.deleteDayOverride`). Both move behind new RPCs with the same Dart signatures. I rejected the extra-policy approach: those policies would need `is_on_duty()` to be executable by `authenticated`, and a direct override delete skips the write order that `restoreDayToTemplate` relies on.
-3. **The duty gets kiosk-level rules, not the admin's exemptions.** That means the target player's booking limit, the booking horizon, no past or already-started blocks, and day edits only from today on. All of it is enforced in SQL (`date_past`, `too_late`). Attendance history stays admin-only. I rejected proposal 2's admin-like booking because it lets the duty rewrite `monthly_attendance`.
+3. **The duty gets kiosk-level rules, not the admin's exemptions.** That means the target player's booking limit, the booking horizon, no past or already-started blocks, and block edits only on the days of the duty's own periods, from today on. All of it is enforced in SQL (`date_past`, `too_late`). Attendance history stays admin-only. I rejected proposal 2's admin-like booking because it lets the duty rewrite `monthly_attendance`.
 4. **A new via value `'duty'` instead of reusing `'admin'`.** The booked player learns who booked them, and the audit trail stays honest.
 5. **Branch order is admin → kiosk → self → group → duty.** A duty holder who books a group mate still books as `'group'`, and their own bookings stay `'app'`.
 6. **Streams are unfiltered, and counts are computed in pure Dart.** These tables hold a few hundred rows per decade. This fixes proposal 1's bug, where counts built from a filtered stream would be wrong from mid-season on. It also removes the need for copied dates and copy triggers.
@@ -65,13 +66,17 @@ security definer set search_path = public as $$
      and me.status = 'approved' and me.role = 'player' and not me.placeholder
      and (now() at time zone 'Europe/Prague')::date between d.starts_on and d.ends_on) $$;
 ```
-- **Internal helpers.** `duty_gate(p_date)` passes for an admin. Otherwise it requires `is_on_duty()` (else `not_allowed`) and `p_date >= Prague today` (else `date_past`). Both functions are revoked from `public`, `anon` and `authenticated`, because only definer bodies call them, the same way `same_group` works.
+- **Internal helpers.**
+  - `duty_gate(p_date)` (rule B) passes for an admin. Otherwise it requires `is_on_duty()` (else `not_allowed`) and `p_date >= Prague today` (else `date_past`).
+  - `duty_edit_gate(p_date)` (rule A) passes for an admin. Otherwise the caller must be an approved, non-placeholder `player` (`is_on_duty()`'s account conditions minus „covers today“) with a `duty_assignments` row on a period of the same tenant that covers `p_date`, else `not_allowed`; only then `p_date < Prague today` raises `date_past`. It calls neither `is_on_duty()` nor `duty_gate()`. With `p_date` null (no date named yet — `add_special_block`) it asks for an own period with `ends_on >= Prague today`.
+  - All three functions are revoked from `public`, `anon` and `authenticated`, because only definer bodies call them, the same way `same_group` works.
   - Note for the implementer: `is_admin()` is PUBLIC-executable because policies call it. Do not copy proposal 1's "internal like `is_admin`" comment.
 - **`create_reservation`** gets a new branch after the group branch: approved player, `p_player_id <> v_uid`, `is_on_duty()` → `v_via := 'duty'`. The existing non-admin block (past, started, horizon, the target's limit) still applies. The limit error is `player_at_limit` when `v_via = 'duty'`.
 - **`cancel_reservation`** gets a new branch after the owner/group branch: approved player, same tenant, `is_on_duty()`, and the block has not started yet (else `too_late`). It sets `v_via 'duty'`, `cancelled_by`, `cancel_note` and `notify_player = p_notify`.
-- **`set_day_override`, `cancel_block_day_reservations`, `move_day_reservations`, `move_reservation`**: the gate `is_admin()` becomes `duty_gate(date)`. For `move_reservation` both the source and the target date are checked.
-- **New RPCs**, both gated by `duty_gate`:
-  - `add_special_block(p_starts_at, p_ends_at) → uuid` inserts `position -1, active false`.
+- **`set_day_override`, `cancel_block_day_reservations`, `move_day_reservations`**: the gate `is_admin()` becomes `duty_edit_gate(date)`.
+- **`move_reservation`** (one reservation) serves both rights, because removing a block for a day re-seats its players one by one through it: the gate `is_admin()` becomes „`duty_edit_gate(null)` before the row is read (unless on duty today), then `duty_gate(date)` for a player on duty today and `duty_edit_gate(date)` for anyone else“. A move keeps its date, so source and target are one.
+- **New RPCs**, both gated by `duty_edit_gate`:
+  - `add_special_block(p_starts_at, p_ends_at) → uuid` inserts `position -1, active false`. It has no date, so its gate is `duty_edit_gate(null)`: an own period that has not ended; the `set_day_override` that points a day at the block names the real date and holds the player to their own periods.
   - `delete_day_override(p_date)`.
 - **Still admin-only**: the weekly template, `priority_slots`, rentals, slot types, settings, clubs, profiles and every Správa screen.
 - **notify changes**:
@@ -84,7 +89,7 @@ security definer set search_path = public as $$
   - A pending or demoted player loses the rights at once.
   - A visiting superadmin gets no duty rights, because of the tenant match.
   - Periods cannot overlap.
-  - At midnight every call is re-evaluated. If the dialog was opened while `onDuty` was true and it is now false, `not_allowed` shows as „Služba skončila — tohle teď může jen správce.“ A multi-step BlockDialog save stops at the first refused step, which is the same outcome as an admin losing the connection today.
+  - At midnight every call is re-evaluated. If the dialog was opened while the duty was running and the duty is over now, `not_allowed` shows as „Služba skončila — tohle teď může jen správce.“ A multi-step BlockDialog save stops at the first refused step, which is the same outcome as an admin losing the connection today. For a date outside the own periods there is no refusal text: the entry is simply not offered.
 
 ## Generation & editing
 All admin-only, security definer; revoked from `public` and `anon`, granted to `authenticated`.
@@ -108,7 +113,7 @@ All admin-only, security definer; revoked from `public` and `anon`, granted to `
   - `player_has_history` → the existing message.
 - **Dart**:
   - `lib/domain/duties.dart` is pure and unit-tested: `planDutyPeriods` (mirrors the SQL), `periodOn`, `seasonRanges`, `dutyCounts` (duties, days, served), `dutyHeaderLabel`, `seasonNameFor`.
-  - Providers: `dutyPeriodsProvider` and `dutyAssignmentsProvider` use `cachedRows` with the retry and refresh-on-resume wrapper. `myDutyProvider` gives `(current, next, onDuty)` and recomputes on `nowProvider`. All of them are added to `resetTenantScopedProviders`.
+  - Providers: `dutyPeriodsProvider` and `dutyAssignmentsProvider` use `cachedRows` with the retry and refresh-on-resume wrapper. `myDutyProvider` gives `(current, next, mine, onDuty)` and recomputes on `nowProvider`; `mine` is every period of mine that has not ended (`endsOn >= today`), and `coversDay(day)` says whether one of them covers a day — rule A's client half, independent of `onDuty` (rule B's). All of them are added to `resetTenantScopedProviders`.
 
 ## Admin UI (Správa → Služby)
 The hub entry „Služby“ (`Icons.local_cafe_outlined`) goes after „Docházka“. The screen is `DutiesAdminScreen` with `AdminScaffold('Služby')`.
@@ -158,11 +163,11 @@ The hub entry „Služby“ (`Icons.local_cafe_outlined`) goes after „Docházk
   - A change inside the week: „Slouží: po–st Jan Novák · čt–ne Petr Svoboda“.
   - No period that week: no line.
   - If I am on duty and the week contains today, the line is tinted: „Sloužíš ty · do ne 11. 10.“
-- **Calendar while on duty** (`ScheduleActions(onDuty:)`):
-  - `canEditDays = (isAdmin || onDuty) && blocksFromDb` drives the block gestures: add in a gap, edit for the day, move.
+- **Calendar while on duty** (`ScheduleActions(duty:)`, `onDuty` = rule B, `canEditDay(date)` = rule A):
+  - `canEditDay(date) = blocksFromDb && (isAdmin || (date >= today && myDuty.coversDay(date)))` drives the block gestures per date, whether or not I am on duty today: add in a gap, edit for the day, move, the header ＋ and the portrait ⋮ menu. A date outside my own periods gets none of them.
   - Matches, blockages and rentals keep their admin-only hooks.
   - `_book` opens the player-search dialog. When the selected player is at the limit, the note reads „… už má maximální počet rezervací“ and „Rezervovat“ is disabled.
-  - `canCancel(onDuty:)` allows other players' reservations that have not started, through the admin's notify-choice dialog.
+  - `canCancel(onDuty:)` allows other players' reservations that have not started, through the admin's notify-choice dialog. Still keyed on being on duty today, like booking for others and the own-limit banner.
   - The own-limit banner reads „Máš maximální počet rezervací — jako služba můžeš rezervovat jen pro ostatní.“
 - **Closing a day.**
   - The day-mode BlockDialog opened from the header ＋ gains „Zavřít den“ for admin and duty: prompt „Důvod zavření“, then the standard count confirm, then `set_day_override(closed)`.
@@ -214,7 +219,8 @@ A reset is `duty_season_start`: it inserts a boundary row and nothing else.
   - Assignment: kiosk, pending and foreign players refused; placeholder accepted.
   - `is_on_duty()`: before, inside and after the period; demoted player; other tenant.
   - Duty booking: `created_via 'duty'`, `player_at_limit`, `date_past`, `beyond_horizon`, `too_late`.
-  - The day RPCs succeed from today on and fail with `date_past` for yesterday.
+  - The block RPCs succeed on the days of the player's own periods (both of two consecutive ones, edges included) and fail with `not_allowed` on another duty's days and on days nobody serves; `date_past` for a past day inside an own period; a duty that starts next week edits exactly those days today and adds a block, and re-seats players on those days, but books and cancels for nobody; a duty ended yesterday adds no block, one ending today still edits today; pending, placeholder, kiosk and a visiting superadmin are refused; the admin edits any day.
+  - Booking, re-seating and cancelling for others still work on another duty's days.
   - Direct template, `priority_slots` and `rentals` writes fail with 42501.
   - Everything is `not_allowed` outside the period.
   - The existing kiosk and 0044 group cases still pass.
@@ -222,7 +228,8 @@ A reset is `duty_season_start`: it inserts a boundary row and nothing else.
   - Seasons, including undo.
   - Reminders: the placeholder is excluded; the mark silences; moving the period re-arms; switching off returns nothing.
 - **App tests**:
-  - `duties_test.dart`, plus schedule `canBook` and `canCancel` with `onDuty`.
+  - `duties_test.dart` (`myDuty`'s `mine` and `coversDay`), plus schedule `canBook` and `canCancel` with `onDuty`.
+  - Week screen: a duty next week Monday–Wednesday gets the block edits (⋮ menu, header ＋) on those three dates and none elsewhere, and no booking dialog or cancel of others today; a duty running today books and cancels for others on any future date but edits blocks on the days of its own period only; the admin gets everything.
   - Klubovna order.
   - Klubovna and admin screens.
   - Week header line.
