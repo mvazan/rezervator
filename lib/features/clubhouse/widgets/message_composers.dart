@@ -459,9 +459,13 @@ class _StaffComposerSheetState extends ConsumerState<_StaffComposerSheet> {
     _offeredAsDuty = _offeredAsDuty || onDutyNow;
     final monday = _mondayOf(_date);
     final week = ref.watch(weekScheduleProvider(monday)).value;
-    final reservations =
-        ref.watch(weekReservationsProvider(monday)).value ?? const [];
+    final loadedReservations = ref.watch(weekReservationsProvider(monday)).value;
+    final reservations = loadedReservations ?? const <Reservation>[];
     final players = ref.watch(playersProvider).value;
+    // Until the week's reservations and the roster are in, nobody's count
+    // is known: no „Nikdo nemá rezervaci“ (nor a disabled target) for what
+    // is only loading, and nothing to send.
+    final known = loadedReservations != null && players != null;
     final names = {for (final p in players ?? const []) p.id: p.displayName};
     final members = players == null
         ? null
@@ -493,10 +497,18 @@ class _StaffComposerSheetState extends ConsumerState<_StaffComposerSheet> {
         ?names[id],
     ]..sort(compareCzech);
 
+    // „Dostane 2 hráči: …“ under each target once known; a target nobody
+    // would get is disabled (spec: 0 → disabled, „Nikdo nemá rezervaci“).
+    Widget? preview(String? blockId) =>
+        known ? Text(recipientPreviewLabel(recipients(blockId))) : null;
+    bool pickable(String? blockId) =>
+        !known || recipients(blockId).isNotEmpty;
+
     final text = _body.text.trim();
     // Not before the day's blocks are known: a prefilled block would
     // otherwise go out as „Celý den“.
     final canSend =
+        known &&
         week != null &&
         text.isNotEmpty &&
         !overLimit(text, messageBodyMax) &&
@@ -520,14 +532,16 @@ class _StaffComposerSheetState extends ConsumerState<_StaffComposerSheet> {
             children: [
               RadioListTile<String?>(
                 title: const Text('Celý den'),
-                subtitle: Text(recipientPreviewLabel(recipients(null))),
+                subtitle: preview(null),
                 value: null,
+                enabled: pickable(null),
               ),
               for (final b in dayBlocks)
                 RadioListTile<String?>(
                   title: Text(b.label),
-                  subtitle: Text(recipientPreviewLabel(recipients(b.id))),
+                  subtitle: preview(b.id),
                   value: b.id,
+                  enabled: pickable(b.id),
                 ),
             ],
           ),

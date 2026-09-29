@@ -325,6 +325,7 @@ void main() {
       Profile profile = admin,
       StateProvider<MyDuty>? duty,
       MessageSend? send,
+      bool reservationsLoading = false,
     }) => ProviderScope(
       overrides: [
         myProfileProvider.overrideWith((ref) => Stream.value(profile)),
@@ -338,7 +339,9 @@ void main() {
         dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
         prioritySlotsProvider.overrideWithValue(const []),
         rentalsProvider.overrideWith((ref) => Stream.value(const [])),
-        weekReservationsProvider.overrideWith((ref, monday) => Stream.value(reservations)),
+        weekReservationsProvider.overrideWith((ref, monday) => reservationsLoading
+            ? StreamController<List<Reservation>>().stream
+            : Stream.value(reservations)),
         playersProvider.overrideWith((ref) async => const [
           PlayerName(id: 'admin', displayName: 'Adam'),
           PlayerName(id: 'p1', displayName: 'Petr Novák'),
@@ -378,10 +381,29 @@ void main() {
       expect(send(tester).onPressed, isNotNull);
     });
 
-    testWidgets('with nobody booked every preview says so and "Odeslat" stays off', (tester) async {
+    RadioListTile<String?> target(WidgetTester tester, String title) =>
+        tester.widget<RadioListTile<String?>>(
+            find.widgetWithText(RadioListTile<String?>, title));
+
+    testWidgets('with nobody booked every target says so, cannot be picked, and '
+        '"Odeslat" stays off', (tester) async {
       await tester.pumpWidget(staffApp());
       await openStaff(tester);
       expect(find.text('Nikdo nemá rezervaci'), findsNWidgets(2));
+      expect(target(tester, 'Celý den').enabled, isFalse);
+      expect(target(tester, '16:00–17:00').enabled, isFalse);
+      await tester.enterText(find.byType(TextField), 'Přijďte dřív.');
+      await tester.pump();
+      expect(send(tester).onPressed, isNull);
+    });
+
+    testWidgets('while the reservations load, no target claims „Nikdo nemá '
+        'rezervaci“, and "Odeslat" stays off', (tester) async {
+      await tester.pumpWidget(staffApp(reservationsLoading: true));
+      await openStaff(tester);
+      expect(find.text('Celý den'), findsOneWidget);
+      expect(find.text('Nikdo nemá rezervaci'), findsNothing);
+      expect(find.textContaining('Dostane'), findsNothing);
       await tester.enterText(find.byType(TextField), 'Přijďte dřív.');
       await tester.pump();
       expect(send(tester).onPressed, isNull);
@@ -400,7 +422,8 @@ void main() {
       expect(find.text('Dostane 2 hráči: Petr Novák a Tomáš Válka'), findsNWidgets(2));
     });
 
-    testWidgets('"Odeslat" follows the selected target: on for a booked block, off for an empty one', (tester) async {
+    testWidgets('an empty block is disabled and cannot be picked; a booked one '
+        'can', (tester) async {
       final b2 = TimeBlock(id: 'b2', startsAt: HourMinute(17, 0), endsAt: HourMinute(18, 0),
           position: 1, active: true);
       await tester.pumpWidget(staffApp(
@@ -411,12 +434,15 @@ void main() {
       await tester.enterText(find.byType(TextField), 'Přijďte dřív.');
       await tester.pump();
       expect(send(tester).onPressed, isNotNull); // „Celý den“ has Petr
+      expect(target(tester, '17:00–18:00').enabled, isFalse);
       await tester.tap(find.text('17:00–18:00'));
       await tester.pump();
-      expect(tester.widget<RadioGroup<String?>>(find.byType(RadioGroup<String?>)).groupValue, 'b2');
-      expect(send(tester).onPressed, isNull); // b2 is empty
+      RadioGroup<String?> group() =>
+          tester.widget<RadioGroup<String?>>(find.byType(RadioGroup<String?>));
+      expect(group().groupValue, isNull); // still „Celý den“
       await tester.tap(find.text('16:00–17:00'));
       await tester.pump();
+      expect(group().groupValue, 'b1');
       expect(send(tester).onPressed, isNotNull);
     });
 
