@@ -320,11 +320,17 @@ class _KlubovnaIcon extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final dot = ref.watch(
-      unreadCountsProvider.select((c) => c.messages + c.notices > 0),
+    final unread = ref.watch(
+      unreadCountsProvider.select((c) => c.messages + c.notices),
     );
     final icon = Icon(selected ? Icons.groups : Icons.groups_outlined);
-    return dot ? Badge(smallSize: 8, child: icon) : icon;
+    if (unread == 0) return icon;
+    // A dot says nothing to a screen reader: the destination reads with
+    // the count („Klubovna, 2“), as the hub's own badges do.
+    return Semantics(
+      label: '$unread',
+      child: Badge(smallSize: 8, child: icon),
+    );
   }
 }
 

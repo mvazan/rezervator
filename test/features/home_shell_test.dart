@@ -767,8 +767,11 @@ void main() {
 
     await tester.pumpWidget(app(messages: [msg], messageRecipients: [row()]));
     await tester.pumpAndSettle();
-    expect(find.descendant(of: find.byType(NavigationBar), matching: find.byType(Badge)),
-        findsOneWidget);
+    final dot =
+        find.descendant(of: find.byType(NavigationBar), matching: find.byType(Badge));
+    expect(dot, findsOneWidget);
+    // A screen reader hears the tab with its count, not just „Klubovna“.
+    expect(tester.getSemantics(dot).label, allOf(contains('Klubovna'), contains('1')));
 
     // A fresh scope: re-pumping the same ProviderScope keeps the stream
     // overrides' first values.
