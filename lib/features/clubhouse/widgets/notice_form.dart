@@ -81,12 +81,14 @@ class _NoticeFormState extends ConsumerState<_NoticeForm> {
   late final _title = TextEditingController(text: widget.existing?.title ?? '');
   late final _body = TextEditingController(text: widget.existing?.body ?? '');
 
-  // +14 days from the app clock (nowProvider), so tests pin the default.
+  // +14 calendar days from the app clock (nowProvider), so tests pin the
+  // default. Not `now.add(Duration(days: 14))`: 336 hours fall a day short
+  // when the clocks go back in between.
   late DateTime _expiresAt = widget.existing?.expiresAt?.toLocal() ??
-      _endOfDay(Day.fromDateTime(
-        (ref.read(nowProvider).value ?? DateTime.now())
-            .add(const Duration(days: 14)),
-      ));
+      _endOfDay(() {
+        final now = ref.read(nowProvider).value ?? DateTime.now();
+        return Day.fromDateTime(DateTime(now.year, now.month, now.day + 14));
+      }());
   late bool _forever =
       widget.existing != null && widget.existing!.expiresAt == null;
   bool _notify = true;

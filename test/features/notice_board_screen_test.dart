@@ -505,10 +505,12 @@ void main() {
     // watches the clock, as the board does: the form reads it once, and
     // its +14 days would otherwise count from the device's clock.
     Widget host(Future<void> Function(NoticeDraft draft) write,
-            void Function(bool result) done, {Message? existing}) =>
+            void Function(bool result) done,
+            {Message? existing, DateTime? now}) =>
         ProviderScope(
           overrides: [
-            nowProvider.overrideWith((ref) => Stream.value(DateTime(2026, 10, 2, 12))),
+            nowProvider.overrideWith(
+                (ref) => Stream.value(now ?? DateTime(2026, 10, 2, 12))),
           ],
           child: MaterialApp(
             home: Consumer(builder: (context, ref, _) {
@@ -534,9 +536,10 @@ void main() {
     /// Opens the form (for [existing] or a new notice, then titled „Klíč“),
     /// runs [change], saves; returns what the form handed to its write.
     Future<NoticeDraft> saved(WidgetTester tester,
-        {Message? existing, Future<void> Function()? change}) async {
+        {Message? existing, DateTime? now, Future<void> Function()? change}) async {
       NoticeDraft? sent;
-      await tester.pumpWidget(host((d) async => sent = d, (_) {}, existing: existing));
+      await tester.pumpWidget(
+          host((d) async => sent = d, (_) {}, existing: existing, now: now));
       await tester.pumpAndSettle();
       await tester.tap(find.text('STRÁNKA'));
       await tester.pumpAndSettle();
@@ -558,6 +561,14 @@ void main() {
       final draft = await saved(tester);
       expect(draft.expiresAt, DateTime(2026, 10, 16, 23, 59, 59));
       expect(draft.notify, isTrue);
+    });
+
+    testWidgets('the 14 days are calendar days, also over the clocks going back',
+        (tester) async {
+      // 336 hours after 12. 10. 00:30 is still 25. 10. (that day has 25
+      // hours), one day short.
+      final draft = await saved(tester, now: DateTime(2026, 10, 12, 0, 30));
+      expect(draft.expiresAt, DateTime(2026, 10, 26, 23, 59, 59));
     });
 
     testWidgets('„Do odvolání“ saves no expiry; „Poslat upozornění“ off saves '
