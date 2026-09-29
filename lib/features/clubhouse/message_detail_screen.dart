@@ -73,14 +73,24 @@ class _MessageDetailScreenState extends ConsumerState<MessageDetailScreen> {
   /// leaves ([_leave]).
   bool _deleting = false;
 
+  /// A delete here failed as gone (`unknown_message`): its own snack
+  /// already says [_goneText], so [_reportGone] leaves without a second.
+  bool _goneTold = false;
+
   /// A failed delete rebuilds: a snapshot its echo emptied meanwhile (the
   /// message deleted elsewhere) is then asked about, not spun on.
   Future<void> _delete(String id) async {
     _deleting = true;
     try {
       await widget.delete(id);
-    } catch (_) {
-      if (mounted) setState(() => _deleting = false);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _deleting = false;
+          // The words LiveMessageTile's snack shows for it.
+          _goneTold = friendlyDbError(e) == _goneText;
+        });
+      }
       rethrow;
     }
   }
@@ -205,14 +215,19 @@ class _MessageDetailScreenState extends ConsumerState<MessageDetailScreen> {
     ref.invalidate(timeBlocksProvider);
   }
 
+  static const _goneText = 'Zpráva už neexistuje.';
+
   /// The server has no such message (deleted, pruned, never mine): snack
-  /// on the root messenger (it outlives this route), then back to
-  /// wherever the link opened from.
+  /// on the root messenger (it outlives this route) — unless a failed
+  /// delete here said so already ([_goneTold]) — then back to wherever the
+  /// link opened from.
   void _reportGone() {
     if (!mounted || _gone) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Zpráva už neexistuje.')),
-    );
+    if (!_goneTold) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text(_goneText)),
+      );
+    }
     _leave();
   }
 

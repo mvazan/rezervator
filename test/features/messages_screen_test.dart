@@ -776,6 +776,39 @@ void main() {
       expect(find.text('open'), findsOneWidget); // back on the caller
     });
 
+    // The failed delete's snack already says it; the server's "gone" that
+    // follows must not queue the same words again.
+    testWidgets('a delete that fails as gone after the echo says „Zpráva už '
+        'neexistuje.“ once', (tester) async {
+      final messages = StreamController<List<Message>>();
+      addTearDown(() => unawaited(messages.close()));
+      final answer = Completer<void>();
+      await tester.pumpWidget(caller(overrides(messageStream: messages.stream),
+          () => MessageDetailScreen('mine',
+              markRead: (_) async {}, react: (_, _) async {}, reply: (_, _) async {},
+              messageExists: (_) async => false,
+              delete: (_) => answer.future)));
+      messages.add([received(id: 'mine', authorId: 'me')]);
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(PopupMenuButton<String>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Smazat'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Ano'));
+      await tester.pump();
+      messages.add(const []); // the echo of the other device's delete
+      await tester.pump();
+      answer.completeError(Exception('unknown_message'));
+      await tester.pumpAndSettle();
+      expect(find.text('open'), findsOneWidget); // back on the caller
+      expect(find.text('Zpráva už neexistuje.'), findsOneWidget);
+      // A second snack would be queued behind the first: let it go.
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpAndSettle();
+      expect(find.text('Zpráva už neexistuje.'), findsNothing);
+    });
+
     testWidgets('an id the server no longer has pops once, with a snack', (tester) async {
       final asked = <String>[];
       await tester.pumpWidget(caller(overrides(), () => MessageDetailScreen('missing',
