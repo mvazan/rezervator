@@ -86,7 +86,8 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   /// a newer link replaced it (that one opens instead) or the same link
   /// was opened already. A push sent for another alley (a superadmin
   /// visiting elsewhere) is dropped without a word: this alley's RLS
-  /// cannot see it, and „Zpráva už neexistuje.“ would be wrong.
+  /// cannot see it, and „Zpráva už neexistuje.“ / „Oznámení už
+  /// neexistuje.“ would be wrong.
   void _consume(PendingLink link) {
     if (!mounted || ref.read(pendingLinkProvider) != link) return;
     ref.read(pendingLinkProvider.notifier).clear();
@@ -107,7 +108,8 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     }
   }
 
-  /// Spec: an unknown or deleted id → a snack. A loaded snapshot without
+  /// Spec: an unknown or deleted id → „Oznámení už neexistuje.“ (a
+  /// message's page says „Zpráva už neexistuje.“). A loaded snapshot without
   /// the id proves nothing by itself — cachedRows replays the cache first
   /// on a cold start, a warm tap finds the pre-background list, and the
   /// notice a push was sent for is usually newer than either — so, as
@@ -125,7 +127,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     }
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Zpráva už neexistuje.')));
+        const SnackBar(content: Text('Oznámení už neexistuje.')));
   }
 
   /// Superadmin's way back from a foreign kuželna (0015): switch the

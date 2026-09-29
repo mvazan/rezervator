@@ -310,13 +310,14 @@ alley) is not a recipient.
   link and opens it:
   - a message → `MessageDetailScreen(id)`;
   - a notice → `NoticeBoardScreen` (notices have no per-item page: every notice is listed on
-    the board). The snack „Zpráva už neexistuje.“ comes only when the loaded board lacks the
-    id and the server (`Api.messageExists`, the RLS-scoped `messages` table) confirms it is
-    gone; anything unanswerable (offline) stays silent.
+    the board). The snack „Oznámení už neexistuje.“ (a message's page says „Zpráva už
+    neexistuje.“) comes only when the loaded board lacks the id and the server
+    (`Api.messageExists`, the RLS-scoped `messages` table) confirms it is gone; anything
+    unanswerable (offline) stays silent.
   - **Tenant guard:** a link whose `tenant_id` is not the signed-in profile's alley (a
     superadmin visiting elsewhere, an account moved since) is dropped without a word — no
-    screen, no snack: this alley's RLS cannot see it, and „Zpráva už neexistuje.“ would be
-    wrong. An e-mail link carries no alley; RLS decides what shows.
+    screen, no snack: this alley's RLS cannot see it, and „Zpráva už neexistuje.“ / „Oznámení
+    už neexistuje.“ would be wrong. An e-mail link carries no alley; RLS decides what shows.
   - **Sign-out** (`AuthChangeEvent.signedOut`, in `AuthGate`) clears `pendingLinkProvider`
     and the cold-start slot, so a link waiting for one account never opens for the next.
   - Web (no push) never publishes one.
@@ -449,10 +450,10 @@ neslouží, Celý den, Dostane {n} hráči: …, Nikdo nemá rezervaci, Odeslat,
 Krátká odpověď…, bez reakce, ty, Od správce, Od služby, Od hráče: {jméno}, Ode mě správci,
 Ode mě službě, Ode mě hráčům, k tréninku {den} · {čas}, celý den {den}, Napsat hráčům dne…,
 Napsat hráčům bloku…, Napsat správci…, Napsat službě…, Zatím žádné zprávy., Zpráva už
-neexistuje., Reakce na tvou zprávu, Zpráva od správce, Zpráva od služby, Zpráva od hráče:
-{jméno}, Odpovědět v aplikaci, Otevřít nástěnku, Díky, reakce je uložená., Odkaz už
-neplatí., Otevřít Rezervátor., {n}× 👍, {n}× 👎, {n}× 💬 (and 💬 opening the reply-only group of
-the reaction line), Nadpis je moc dlouhý., Odpověď je moc dlouhá.
+neexistuje., Oznámení už neexistuje., Reakce na tvou zprávu, Zpráva od správce, Zpráva od
+služby, Zpráva od hráče: {jméno}, Odpovědět v aplikaci, Otevřít nástěnku, Díky, reakce je
+uložená., Odkaz už neplatí., Otevřít Rezervátor., {n}× 👍, {n}× 👎, {n}× 💬 (and 💬 opening the
+reply-only group of the reaction line), Nadpis je moc dlouhý., Odpověď je moc dlouhá.
 
 Shipped with the plan besides these (dialogs, outcomes and error texts, quoted as the code
 has them): Upravit oznam, Platí do: {den}, Oznam vyvěšen., Oznam uložen., Sejmout oznam?,
@@ -580,8 +581,9 @@ them changes behaviour:
    composer says „Jiného správce tu nemáš.“ (`playerSendErrorText`), not the generic
    „Nikdo nemá rezervaci.“, which speaks of reservations. The first build shipped the
    generic text.
-3. **A notice link to a notice that is gone** says „Zpráva už neexistuje.“ — the message
-   wording — although the UI calls a notice „oznam“.
+3. **A notice link to a notice that is gone** says „Oznámení už neexistuje.“ on the opened
+   board (`HomeShell._snackIfNoticeGone`); „Zpráva už neexistuje.“ stays for messages. The
+   first build shipped the message wording for both.
 
 ## Out of scope
 

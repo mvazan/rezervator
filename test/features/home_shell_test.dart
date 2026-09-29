@@ -842,6 +842,7 @@ void main() {
           kind: PendingLinkKind.notice, id: 'n1', tenantId: 't-home'));
       await tester.pumpAndSettle();
       expect(find.byType(NoticeBoardScreen), findsNothing);
+      expect(find.text('Oznámení už neexistuje.'), findsNothing);
       expect(container.read(pendingLinkProvider), isNull);
     });
 
@@ -872,7 +873,7 @@ void main() {
     const noticeLink = PendingLink(kind: PendingLinkKind.notice, id: 'n1');
 
     testWidgets('a notice link opens the board; a notice the server calls '
-        'gone adds a snack', (tester) async {
+        'gone adds „Oznámení už neexistuje.“', (tester) async {
       final asked = <String>[];
       await tester.pumpWidget(app(
         pendingLink: noticeLink,
@@ -883,7 +884,8 @@ void main() {
       ));
       await tester.pumpAndSettle();
       expect(find.byType(NoticeBoardScreen), findsOneWidget);
-      expect(find.text('Zpráva už neexistuje.'), findsOneWidget);
+      expect(find.text('Oznámení už neexistuje.'), findsOneWidget);
+      expect(find.text('Zpráva už neexistuje.'), findsNothing);
       expect(asked, ['n1']);
     });
 
@@ -900,7 +902,7 @@ void main() {
       ));
       await tester.pumpAndSettle();
       expect(find.byType(NoticeBoardScreen), findsOneWidget);
-      expect(find.text('Zpráva už neexistuje.'), findsNothing);
+      expect(find.text('Oznámení už neexistuje.'), findsNothing);
       expect(asked, isEmpty);
     });
 
@@ -930,7 +932,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(NoticeBoardScreen), findsOneWidget);
       expect(find.text('Úklid'), findsOneWidget);
-      expect(find.text('Zpráva už neexistuje.'), findsNothing);
+      expect(find.text('Oznámení už neexistuje.'), findsNothing);
       expect(asked, ['n1']);
     });
 
@@ -942,7 +944,7 @@ void main() {
       ));
       await tester.pumpAndSettle();
       expect(find.byType(NoticeBoardScreen), findsOneWidget);
-      expect(find.text('Zpráva už neexistuje.'), findsNothing);
+      expect(find.text('Oznámení už neexistuje.'), findsNothing);
       expect(tester.takeException(), isNull);
     });
 
@@ -955,7 +957,7 @@ void main() {
       ));
       await tester.pumpAndSettle();
       expect(find.byType(NoticeBoardScreen), findsOneWidget);
-      expect(find.text('Zpráva už neexistuje.'), findsNothing);
+      expect(find.text('Oznámení už neexistuje.'), findsNothing);
       expect(tester.takeException(), isNull);
     });
   });
