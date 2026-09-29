@@ -62,6 +62,40 @@ void main() {
       expect(strandedByGrid(rows, laneCount: 4, trainingWeekdays: {4, 5}), 0);
     });
 
+    test('withoutStarted drops rows of blocks already under way on the day '
+        '— what a non-admin day write spares (0050)', () {
+      final rows = [
+        row(date, 'b1'), // 16:00 — started by 17:00
+        row(date, 'b2'), // 17:00 — starts exactly now: started (<=)
+        row(date, 's3'), // 19:00 — still ahead
+        row(other, 'b1'), // another date: untouched
+        row(date, 'gone'), // unknown block: kept (conservative count)
+      ];
+      final left = withoutStarted(rows,
+          date: date, now: const HourMinute(17, 0), blocks: all);
+      expect([for (final r in left) '${r.date.day}/${r.blockId}'],
+          ['16/s3', '17/b1', '16/gone']);
+      // Before the first block nothing has started.
+      expect(
+          withoutStarted(rows,
+                  date: date, now: const HourMinute(15, 59), blocks: all)
+              .length,
+          5);
+    });
+
+    test('startPassedMessage says what time it is', () {
+      expect(
+        startPassedMessage(const HourMinute(18, 5)),
+        'Blok nemůže začínat dřív než teď (18:05) — vyber pozdější začátek.',
+      );
+    });
+
+    test('clockAtWrite reads one minute ahead, capped at 23:59', () {
+      expect(clockAtWrite(const HourMinute(16, 59)), const HourMinute(17, 0));
+      expect(clockAtWrite(const HourMinute(9, 30)), const HourMinute(9, 31));
+      expect(clockAtWrite(const HourMinute(23, 59)), const HourMinute(23, 59));
+    });
+
     test('strandedOnBlock, nextBlockPosition, templateBlockIds', () {
       expect(strandedOnBlock([row(date, 'b1'), row(other, 'b1')], 'b1'), 2);
       expect(nextBlockPosition(const []), 0);
@@ -260,6 +294,20 @@ void main() {
           blocks: all,
           rows: const []);
       expect(hiddenByMatch.targets, isEmpty);
+    });
+
+    test('for the duty on today a block already under way takes no moves '
+        '(the server refuses them with too_late)', () {
+      final plan = planBlockRemoval(
+          existing: s3,
+          day: DayEditContext(date: date, baseIds: const ['b1', 'b2', 's3']),
+          blocks: all,
+          rows: [row(date, 's3')],
+          startedBy: const HourMinute(16, 30));
+      // Nothing overlaps 19–20 → fallback to every rendering block, minus
+      // b1 (16:00, started by 16:30).
+      expect(plan.targets, [b2]);
+      expect(plan.offersMove, isTrue);
     });
   });
 

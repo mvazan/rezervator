@@ -6,14 +6,20 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/core/ui.dart' show dayFull;
 import 'package:rezervator/data/clock.dart';
 import 'package:rezervator/data/providers.dart';
+import 'package:rezervator/domain/day_edit.dart';
 import 'package:rezervator/domain/groups.dart';
 import 'package:rezervator/domain/models.dart';
+import 'package:rezervator/domain/schedule.dart' show FreeSlot;
+import 'package:rezervator/features/admin/widgets/block_dialog.dart';
 import 'package:rezervator/features/clubhouse/match_detail_screen.dart';
 import 'package:rezervator/features/schedule/widgets/slot_tile.dart';
 import 'package:rezervator/features/schedule/week_calendar_view.dart';
+import 'package:rezervator/features/schedule/schedule_callbacks.dart';
 import 'package:rezervator/features/schedule/week_screen.dart';
 import 'package:rezervator/features/schedule/widgets/calendar_board.dart';
 import 'package:rezervator/features/schedule/widgets/day_chip_strip.dart';
+import 'package:rezervator/features/schedule/widgets/day_header.dart';
+import 'package:rezervator/features/schedule/widgets/schedule_day_column.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -129,6 +135,9 @@ void main() {
     Map<String, int> activeCounts = const {},
     MyGroup group = MyGroup.none,
     Map<String, MatchResult> matchResults = const {},
+    List<DutyPeriod> dutyPeriods = const [],
+    List<DutyAssignment> dutyAssignments = const [],
+    ScheduleSettings schedule = settings,
   }) {
     return ProviderScope(
       overrides: [
@@ -136,7 +145,7 @@ void main() {
         // future date, which the drawn week alone cannot know.
         activeReservationCountProvider
             .overrideWith((ref, playerId) async => activeCounts[playerId] ?? 0),
-        settingsProvider.overrideWith((ref) => Stream.value(settings)),
+        settingsProvider.overrideWith((ref) => Stream.value(schedule)),
         timeBlocksProvider.overrideWith((ref) => Stream.value(blocks)),
         dayOverridesProvider.overrideWith((ref) => Stream.value(overrides)),
         prioritySlotsProvider.overrideWithValue(matches),
@@ -161,6 +170,10 @@ void main() {
         playersProvider.overrideWith((ref) async => roster),
         nowProvider.overrideWith((ref) => Stream.value(now)),
         myGroupProvider.overrideWithValue(group),
+        dutyPeriodsProvider.overrideWith((ref) => Stream.value(dutyPeriods)),
+        dutyAssignmentsProvider.overrideWith(
+          (ref) => Stream.value(dutyAssignments),
+        ),
       ],
       child: MaterialApp(home: Scaffold(body: WeekScreen(trailing: trailing))),
     );
@@ -611,6 +624,97 @@ void main() {
     expect(find.text('Petr Novák'), findsOneWidget);
   });
 
+  // The group dialog knows the cap (0044): create_reservation holds every
+  // booked player to their own, so offering someone at it only earns a
+  // refusal. Two mates, so the preselection has one to skip.
+  group('the group booking dialog at the cap', () {
+    const trio = MyGroup(groupId: 'g', memberIds: ['me', 'p2', 'p3']);
+    const roster = [
+      ...players,
+      PlayerName(id: 'p3', displayName: 'Žofie Adamová'),
+    ];
+
+    Future<void> openDialog(
+      WidgetTester tester,
+      Map<String, int> activeCounts,
+    ) async {
+      wideSurface(tester);
+      await tester.pumpWidget(app(
+        group: trio,
+        roster: roster,
+        activeCounts: activeCounts,
+      ));
+      await tester.pumpAndSettle();
+      final addInTomorrow = find.descendant(
+        of: find.byKey(ValueKey(tomorrow)),
+        matching: find.byIcon(Icons.add),
+      );
+      await tester.ensureVisible(addInTomorrow.first);
+      await tester.pumpAndSettle();
+      await tester.tap(addInTomorrow.first);
+      await tester.pumpAndSettle();
+      expect(find.text('Pro koho'), findsOneWidget);
+    }
+
+    RadioListTile<String> option(WidgetTester tester, String name) =>
+        tester.widget<RadioListTile<String>>(
+          find.widgetWithText(RadioListTile<String>, name),
+        );
+    String? chosen(WidgetTester tester) => tester
+        .widget<RadioGroup<String>>(find.byType(RadioGroup<String>))
+        .groupValue;
+    VoidCallback? book(WidgetTester tester) => tester
+        .widget<FilledButton>(find.widgetWithText(FilledButton, 'Rezervovat'))
+        .onPressed;
+
+    testWidgets('under the cap nothing changes: Já first and chosen',
+        (tester) async {
+      await openDialog(tester, const {});
+      expect(option(tester, 'Já').enabled, isNot(false));
+      expect(option(tester, 'Petr Novák').enabled, isNot(false));
+      expect(option(tester, 'Žofie Adamová').enabled, isNot(false));
+      expect(chosen(tester), 'me');
+      expect(book(tester), isNotNull);
+      expect(find.textContaining('maximální počet'), findsNothing);
+    });
+
+    testWidgets('me at my cap: Já is disabled, the first mate is chosen',
+        (tester) async {
+      await openDialog(tester, const {'me': 3});
+      expect(option(tester, 'Já').enabled, isFalse);
+      expect(
+        find.widgetWithText(
+            RadioListTile<String>, 'Máš maximální počet rezervací.'),
+        findsOneWidget,
+      );
+      expect(chosen(tester), 'p2');
+      expect(book(tester), isNotNull);
+    });
+
+    testWidgets('a mate at their cap is disabled and skipped',
+        (tester) async {
+      await openDialog(tester, const {'me': 3, 'p2': 3});
+      expect(option(tester, 'Petr Novák').enabled, isFalse);
+      expect(
+        find.widgetWithText(
+            RadioListTile<String>, 'Má maximální počet rezervací.'),
+        findsOneWidget,
+      );
+      expect(option(tester, 'Žofie Adamová').enabled, isNot(false));
+      expect(chosen(tester), 'p3');
+      expect(book(tester), isNotNull);
+    });
+
+    testWidgets('everybody at the cap: Rezervovat is disabled',
+        (tester) async {
+      await openDialog(tester, const {'me': 3, 'p2': 4, 'p3': 3});
+      expect(option(tester, 'Já').enabled, isFalse);
+      expect(option(tester, 'Petr Novák').enabled, isFalse);
+      expect(option(tester, 'Žofie Adamová').enabled, isFalse);
+      expect(book(tester), isNull);
+    });
+  });
+
   testWidgets('without a group the plain confirm stays', (tester) async {
     wideSurface(tester);
     await tester.pumpWidget(app());
@@ -625,6 +729,72 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Rezervovat termín?'), findsOneWidget);
     expect(find.text('Pro koho'), findsNothing);
+  });
+
+  testWidgets('in a group at my own cap the free cells keep their full ＋; '
+      'the past and beyond the horizon stay quiet, and without a group no ＋ '
+      'at all', (
+    tester,
+  ) async {
+    wideSurface(tester);
+    // Three of my own ahead: the cap (3) is reached. A mate's booking
+    // counts against the mate's cap, so the cells stay open for them.
+    final mine = [
+      for (var i = 1; i <= 3; i++) res('r$i', 'me', t.addDays(i)),
+    ];
+    // A two-day horizon: Sunday (t + 4) is drawn but beyond it.
+    await tester.pumpWidget(app(
+      group: const MyGroup(groupId: 'g', memberIds: ['me', 'p2']),
+      reservations: mine,
+      schedule: const ScheduleSettings(
+        laneCount: 2,
+        trainingWeekdays: {1, 2, 3, 4, 5, 6, 7},
+        bookingHorizonDays: 2,
+        maxActiveReservations: 3,
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    List<SlotTile> freeIn(Day day) => [
+          for (final tile in tester.widgetList<SlotTile>(
+            find.descendant(
+              of: find.byKey(ValueKey(day)),
+              matching: find.byType(SlotTile),
+            ),
+          ))
+            if (tile.state is FreeSlot) tile,
+        ];
+
+    // Quiet is for cells only the admin exemption opens — tomorrow's are
+    // ordinarily bookable for a mate.
+    final future = freeIn(tomorrow);
+    expect(future, isNotEmpty);
+    expect(future.where((tile) => tile.onTap == null), isEmpty);
+    expect(future.where((tile) => tile.quiet), isEmpty);
+
+    // Yesterday stays locked: inert and quiet.
+    final past = freeIn(t.addDays(-1));
+    expect(past, isNotEmpty);
+    expect(past.where((tile) => tile.onTap != null), isEmpty);
+    expect(past.where((tile) => !tile.quiet), isEmpty);
+
+    // Beyond the horizon the group opens nothing either: inert and quiet.
+    final beyond = freeIn(t.addDays(4));
+    expect(beyond, isNotEmpty);
+    expect(beyond.where((tile) => tile.onTap != null), isEmpty);
+    expect(beyond.where((tile) => !tile.quiet), isEmpty);
+
+    // The same counts without a group: no ＋ in tomorrow's column.
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpWidget(app(reservations: mine));
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: find.byKey(ValueKey(tomorrow)),
+        matching: find.byIcon(Icons.add),
+      ),
+      findsNothing,
+    );
   });
 
   testWidgets("a group mate's reservation offers the cancel, naming them",
@@ -1190,6 +1360,42 @@ void main() {
     expect(find.text('Odebrat v tento den'), findsOneWidget);
     expect(find.text('Deaktivovat'), findsNothing); // global action lives in Rozvrh
   });
+
+  // Only the label and the pencil shrink in a narrow column; the tap target
+  // stays the header strip's full width, edge to edge.
+  for (final (label, surface) in [
+    ('wide', const Size(1600, 1200)),
+    ('narrow', const Size(800, 400)),
+  ]) {
+    testWidgets('$label: the whole header strip opens the block edit', (
+      tester,
+    ) async {
+      tester.view.physicalSize = surface;
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(app(profile: admin));
+      await tester.pumpAndSettle();
+
+      final card = find.descendant(
+        of: find.byKey(ValueKey(tomorrow)),
+        matching: find.byKey(const ValueKey('cal-block-b1')),
+      );
+      await tester.ensureVisible(card);
+      await tester.pumpAndSettle();
+      final rect = tester.getRect(card);
+      final labelWidth = tester
+          .getRect(find.descendant(of: card, matching: find.text(b1.label)))
+          .width;
+      expect(rect.width, greaterThan(labelWidth));
+      // Just inside the card's left edge, beside the label.
+      await tester.tapAt(Offset(rect.left + 3, rect.top + 7));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(find.textContaining('Upravit blok — jen'), findsOneWidget);
+    });
+  }
 
   testWidgets(
     'admin taps empty calendar space into a Nový blok dialog prefilled with '
@@ -1797,5 +2003,900 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(MatchDetailScreen), findsOneWidget);
+  });
+
+  group('the canteen duty line under the week range (0050)', () {
+    final week = DutyPeriod(
+      id: 'd1',
+      startsOn: Day(2026, 9, 7),
+      endsOn: Day(2026, 9, 13),
+    );
+
+    testWidgets('names who serves this week and opens Klubovna → Služby', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        app(
+          dutyPeriods: [week],
+          dutyAssignments: const [DutyAssignment(periodId: 'd1', userId: 'p2')],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Slouží: Petr Novák'), findsOneWidget);
+      await tester.tap(find.text('Slouží: Petr Novák'));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(AppBar, 'Služby'), findsOneWidget);
+    });
+
+    testWidgets('my duty today: „Sloužíš ty“; no period: no line', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        app(
+          dutyPeriods: [week],
+          dutyAssignments: const [DutyAssignment(periodId: 'd1', userId: 'me')],
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Sloužíš ty · do ne 13. 9.'), findsOneWidget);
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Slouží'), findsNothing);
+    });
+  });
+
+  group('the calendar while on canteen duty (0050)', () {
+    final week = DutyPeriod(
+      id: 'd1',
+      startsOn: Day(2026, 9, 7),
+      endsOn: Day(2026, 9, 13),
+    );
+    const onMe = [DutyAssignment(periodId: 'd1', userId: 'me')];
+    const onPetr = [DutyAssignment(periodId: 'd1', userId: 'p2')];
+
+    CalendarAdminHooks hooks(WidgetTester tester) =>
+        tester.widget<WeekCalendarView>(find.byType(WeekCalendarView)).admin;
+    SlotCallbacks slots(WidgetTester tester) =>
+        tester.widget<WeekCalendarView>(find.byType(WeekCalendarView)).slot;
+
+    testWidgets('on duty: the day-block hooks, none for matches, blockages '
+        'or rentals', (tester) async {
+      wideSurface(tester);
+      await tester.pumpWidget(
+        app(dutyPeriods: [week], dutyAssignments: onMe),
+      );
+      await tester.pumpAndSettle();
+
+      final admin = hooks(tester);
+      expect(admin.onEditBlock, isNotNull);
+      expect(admin.onAddBlockInGap, isNotNull);
+      expect(admin.onAddForDay, isNotNull);
+      expect(admin.onMoveBlock, isNotNull);
+      expect(admin.onCloseDay, isNotNull);
+      expect(admin.onRestoreDay, isNotNull);
+      expect(admin.onEditPrioritySlot, isNull);
+      expect(admin.onMovePrioritySlot, isNull);
+      expect(admin.onEditRental, isNull);
+      expect(slots(tester).onRental, isNull);
+      expect(slots(tester).onDuty, isTrue);
+    });
+
+    testWidgets('off duty (someone else serves): none of it', (tester) async {
+      wideSurface(tester);
+      await tester.pumpWidget(
+        app(dutyPeriods: [week], dutyAssignments: onPetr),
+      );
+      await tester.pumpAndSettle();
+
+      final admin = hooks(tester);
+      expect(admin.onEditBlock, isNull);
+      expect(admin.onAddBlockInGap, isNull);
+      expect(admin.onAddForDay, isNull);
+      expect(admin.onMoveBlock, isNull);
+      expect(admin.onCloseDay, isNull);
+      expect(admin.onRestoreDay, isNull);
+      expect(admin.onEditPrioritySlot, isNull);
+      expect(admin.onMovePrioritySlot, isNull);
+      expect(admin.onEditRental, isNull);
+      expect(slots(tester).onRental, isNull);
+      expect(slots(tester).onDuty, isFalse);
+
+      // A free cell asks the plain question — no player search.
+      final addInTomorrow = find.descendant(
+        of: find.byKey(ValueKey(tomorrow)),
+        matching: find.byIcon(Icons.add),
+      );
+      await tester.ensureVisible(addInTomorrow.first);
+      await tester.pumpAndSettle();
+      await tester.tap(addInTomorrow.first);
+      await tester.pumpAndSettle();
+      expect(find.text('Rezervovat termín?'), findsOneWidget);
+      expect(find.textContaining('Vybráno:'), findsNothing);
+    });
+
+    testWidgets('an admin keeps every hook and is not "on duty"', (
+      tester,
+    ) async {
+      wideSurface(tester);
+      await tester.pumpWidget(
+        app(profile: admin, dutyPeriods: [week], dutyAssignments: onMe),
+      );
+      await tester.pumpAndSettle();
+
+      final hooksOfAdmin = hooks(tester);
+      expect(hooksOfAdmin.onEditPrioritySlot, isNotNull);
+      expect(hooksOfAdmin.onEditRental, isNotNull);
+      expect(hooksOfAdmin.onCloseDay, isNotNull);
+      expect(slots(tester).onDuty, isFalse);
+    });
+
+    testWidgets('the header ＋ opens the day dialog with „Zavřít den“', (
+      tester,
+    ) async {
+      wideSurface(tester);
+      await tester.pumpWidget(
+        app(dutyPeriods: [week], dutyAssignments: onMe),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(headerOf(tomorrow));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Nový blok — jen'), findsOneWidget);
+      expect(find.text('Zavřít den'), findsOneWidget);
+    });
+
+    testWidgets('the admin gets „Zavřít den“ too: header ＋ and portrait ⋮', (
+      tester,
+    ) async {
+      wideSurface(tester);
+      await tester.pumpWidget(
+        app(profile: admin, dutyPeriods: [week], dutyAssignments: onPetr),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(headerOf(tomorrow));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Nový blok — jen'), findsOneWidget);
+      expect(find.text('Zavřít den'), findsOneWidget);
+
+      await tester.pumpWidget(const SizedBox());
+      portraitSurface(tester);
+      await tester.pumpWidget(
+        app(profile: admin, dutyPeriods: [week], dutyAssignments: onPetr),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find
+            .descendant(
+              of: find.byType(DayChipStrip),
+              matching: find.byType(InkWell),
+            )
+            .at(t.weekday), // tomorrow
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.more_vert));
+      await tester.pumpAndSettle();
+      expect(find.text('Zavřít den…'), findsOneWidget);
+    });
+
+    testWidgets('no „Zavřít den“ from a gap tap, nor on a closed day reopened '
+        'through „Otevřít den“', (tester) async {
+      wideSurface(tester);
+      // bEarly 20:00–21:00 and b1 22:58–23:59 leave the 21:00–22:58 gap.
+      await tester.pumpWidget(
+        app(
+          blocks: const [bEarly, b1],
+          dutyPeriods: [week],
+          dutyAssignments: onMe,
+        ),
+      );
+      await tester.pumpAndSettle();
+      // Tomorrow's column at ~21:30; px/min is laneCount(2) * 40 / 60.
+      const pxPerMinute = 2 * 40.0 / 60;
+      final columnTop = tester.getTopLeft(
+        find.descendant(
+          of: find.byKey(ValueKey(tomorrow)),
+          matching: find.byType(CalendarColumn),
+        ),
+      );
+      await tester.tapAt(
+        columnTop + Offset(40, (21.5 - 20) * 60 * pxPerMinute),
+      );
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Nový blok — jen'), findsOneWidget);
+      expect(find.text('22:58'), findsWidgets);
+      expect(find.text('Zavřít den'), findsNothing);
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpWidget(
+        app(
+          dutyPeriods: [week],
+          dutyAssignments: onMe,
+          overrides: [
+            DayOverride(date: tomorrow, closed: true, reason: 'Malování'),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(headerOf(tomorrow));
+      await tester.pumpAndSettle();
+      expect(find.text('Den je zavřený'), findsOneWidget);
+      await tester.tap(find.text('Otevřít den'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Nový blok — jen'), findsOneWidget);
+      expect(find.text('Zavřít den'), findsNothing);
+    });
+
+    testWidgets('a free cell opens the player search; a player at the cap '
+        'greys „Rezervovat“', (tester) async {
+      wideSurface(tester);
+      await tester.pumpWidget(
+        app(
+          dutyPeriods: [week],
+          dutyAssignments: onMe,
+          activeCounts: const {'p2': 3},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final addInTomorrow = find.descendant(
+        of: find.byKey(ValueKey(tomorrow)),
+        matching: find.byIcon(Icons.add),
+      );
+      await tester.ensureVisible(addInTomorrow.first);
+      await tester.pumpAndSettle();
+      await tester.tap(addInTomorrow.first);
+      await tester.pumpAndSettle();
+      expect(find.text('Vybráno: já'), findsOneWidget);
+      FilledButton book() => tester.widget<FilledButton>(
+        find.widgetWithText(FilledButton, 'Rezervovat'),
+      );
+      expect(book().onPressed, isNotNull);
+
+      await tester.tap(find.widgetWithText(ListTile, 'Petr Novák'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Petr Novák už má maximální počet rezervací (3).'),
+        findsOneWidget,
+      );
+      expect(book().onPressed, isNull);
+    });
+
+    testWidgets('at my own cap the free cells keep their full ＋', (
+      tester,
+    ) async {
+      wideSurface(tester);
+      await tester.pumpWidget(
+        app(
+          dutyPeriods: [week],
+          dutyAssignments: onMe,
+          // Three of my own ahead: the cap (3) is reached.
+          reservations: [
+            for (var i = 1; i <= 3; i++) res('r$i', 'me', t.addDays(i)),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Quiet is for cells only the admin exemption opens (past, beyond the
+      // horizon) — tomorrow's are bookable for the others as usual.
+      final free = [
+        for (final t in tester.widgetList<SlotTile>(
+          find.descendant(
+            of: find.byKey(ValueKey(tomorrow)),
+            matching: find.byType(SlotTile),
+          ),
+        ))
+          if (t.state is FreeSlot) t,
+      ];
+      expect(free, isNotEmpty);
+      expect(free.where((t) => t.onTap == null), isEmpty);
+      expect(free.where((t) => t.quiet), isEmpty);
+    });
+
+    testWidgets('at my own cap: „Rezervovat“ only for another player; off '
+        'duty the same counts leave no ＋', (tester) async {
+      wideSurface(tester);
+      final mine = [
+        for (var i = 1; i <= 3; i++) res('m$i', 'me', tomorrow.addDays(i)),
+      ];
+      await tester.pumpWidget(
+        app(
+          dutyPeriods: [week],
+          dutyAssignments: onMe,
+          reservations: mine,
+          activeCounts: const {'me': 3},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final addInTomorrow = find.descendant(
+        of: find.byKey(ValueKey(tomorrow)),
+        matching: find.byIcon(Icons.add),
+      );
+      expect(addInTomorrow, findsWidgets);
+      await tester.ensureVisible(addInTomorrow.first);
+      await tester.pumpAndSettle();
+      await tester.tap(addInTomorrow.first);
+      await tester.pumpAndSettle();
+      expect(find.text('Vybráno: já'), findsOneWidget);
+      FilledButton book() => tester.widget<FilledButton>(
+        find.widgetWithText(FilledButton, 'Rezervovat'),
+      );
+      expect(book().onPressed, isNull);
+
+      await tester.tap(find.widgetWithText(ListTile, 'Petr Novák'));
+      await tester.pumpAndSettle();
+      expect(book().onPressed, isNotNull);
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpWidget(
+        app(
+          dutyPeriods: [week],
+          dutyAssignments: onPetr,
+          reservations: mine,
+          activeCounts: const {'me': 3},
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(addInTomorrow, findsNothing);
+    });
+
+    testWidgets("another player's future reservation opens the admin's "
+        'notify-choice cancel', (tester) async {
+      wideSurface(tester);
+      await tester.pumpWidget(
+        app(
+          dutyPeriods: [week],
+          dutyAssignments: onMe,
+          reservations: [res('r2', 'p2', tomorrow)],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final cell = find.descendant(
+        of: find.byKey(ValueKey(tomorrow)),
+        matching: find.text('Péťa'),
+      );
+      await tester.ensureVisible(cell);
+      await tester.pumpAndSettle();
+      await tester.tap(cell);
+      await tester.pumpAndSettle();
+      expect(find.text('Zrušit a poslat zprávu'), findsOneWidget);
+      expect(find.text('Zrušit bez zprávy'), findsOneWidget);
+    });
+
+    testWidgets('portrait: the ⋮ day menu, „Obnovit“ only with an override; '
+        'off duty no ⋮', (tester) async {
+      portraitSurface(tester);
+      Future<void> openTomorrow() async {
+        final chips = find.descendant(
+          of: find.byType(DayChipStrip),
+          matching: find.byType(InkWell),
+        );
+        await tester.tap(chips.at(t.weekday));
+        await tester.pumpAndSettle();
+      }
+
+      await tester.pumpWidget(
+        app(dutyPeriods: [week], dutyAssignments: onMe),
+      );
+      await tester.pumpAndSettle();
+      await openTomorrow();
+      await tester.tap(find.byIcon(Icons.more_vert));
+      await tester.pumpAndSettle();
+      expect(find.text('Přidat blok…'), findsOneWidget);
+      expect(find.text('Zavřít den…'), findsOneWidget);
+      expect(find.text('Obnovit týdenní rozvrh'), findsNothing);
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpWidget(
+        app(
+          dutyPeriods: [week],
+          dutyAssignments: onMe,
+          overrides: [
+            DayOverride(
+              date: tomorrow,
+              closed: false,
+              reason: '',
+              blockIds: const ['b1'],
+            ),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+      await openTomorrow();
+      await tester.tap(find.byIcon(Icons.more_vert));
+      await tester.pumpAndSettle();
+      expect(find.text('Obnovit týdenní rozvrh'), findsOneWidget);
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpWidget(
+        app(dutyPeriods: [week], dutyAssignments: onPetr),
+      );
+      await tester.pumpAndSettle();
+      await openTomorrow();
+      expect(find.byIcon(Icons.more_vert), findsNothing);
+    });
+
+    // Picks a day of the pinned week through the chip strip (Mon = 0) —
+    // the pager's own first page follows the real clock.
+    Future<void> openChip(WidgetTester tester, int index) async {
+      await tester.tap(
+        find
+            .descendant(
+              of: find.byType(DayChipStrip),
+              matching: find.byType(InkWell),
+            )
+            .at(index),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> pickFromMenu(WidgetTester tester, String label) async {
+      await tester.tap(find.byIcon(Icons.more_vert));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(label));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('portrait: each ⋮ item opens its own flow; no ⋮ on '
+        'yesterday, no „Zavřít den…“ on a closed day', (tester) async {
+      portraitSurface(tester);
+      await tester.pumpWidget(
+        app(dutyPeriods: [week], dutyAssignments: onMe),
+      );
+      await tester.pumpAndSettle();
+      await openChip(tester, t.weekday); // tomorrow
+
+      await pickFromMenu(tester, 'Zavřít den…');
+      expect(find.text('Důvod zavření'), findsOneWidget);
+      expect(find.byType(BlockDialog), findsNothing);
+      await tester.tap(find.text('Zrušit'));
+      await tester.pumpAndSettle();
+
+      await pickFromMenu(tester, 'Přidat blok…');
+      expect(find.textContaining('Nový blok — jen'), findsOneWidget);
+      expect(find.text('Důvod zavření'), findsNothing);
+      // No gap picked on an open day: the dialog offers closing it, like
+      // the header ＋.
+      expect(find.text('Zavřít den'), findsOneWidget);
+      await tester.tap(find.text('Zrušit'));
+      await tester.pumpAndSettle();
+
+      await openChip(tester, t.weekday - 2); // yesterday
+      expect(
+        find.byWidgetPredicate(
+          (w) => w is DayHeader && w.date == t.addDays(-1),
+        ),
+        findsOneWidget,
+      );
+      expect(find.byIcon(Icons.more_vert), findsNothing);
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpWidget(
+        app(
+          dutyPeriods: [week],
+          dutyAssignments: onMe,
+          overrides: [
+            DayOverride(date: tomorrow, closed: true, reason: 'Malování'),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+      await openChip(tester, t.weekday);
+      await tester.tap(find.byIcon(Icons.more_vert));
+      await tester.pumpAndSettle();
+      expect(find.text('Přidat blok…'), findsOneWidget);
+      expect(find.text('Obnovit týdenní rozvrh'), findsOneWidget);
+      expect(find.text('Zavřít den…'), findsNothing);
+    });
+
+    // Today (Wed 10:00): bMorning 9:00–11:00 is under way, bEarly (20:00)
+    // is still ahead. The server holds the duty to blocks not yet started.
+    const bMorning = TimeBlock(
+      id: 'bMorning',
+      startsAt: HourMinute(9, 0),
+      endsAt: HourMinute(11, 0),
+      position: 2,
+      active: true,
+    );
+
+    Future<void> dismissSnack(WidgetTester tester) async {
+      ScaffoldMessenger.of(tester.element(find.byType(WeekScreen)))
+          .removeCurrentSnackBar();
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('portrait: the next week’s preview page has no ⋮', (
+      tester,
+    ) async {
+      portraitSurface(tester);
+      await tester.pumpWidget(
+        app(profile: admin, dutyPeriods: [week], dutyAssignments: onMe),
+      );
+      await tester.pumpAndSettle();
+      // Sunday, the last real page; half a swipe on shows next Monday's
+      // preview beside it without shifting the week.
+      await tester.tap(
+        find
+            .descendant(
+              of: find.byType(DayChipStrip),
+              matching: find.byType(InkWell),
+            )
+            .at(6),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byIcon(Icons.more_vert), findsOneWidget);
+
+      final drag = await tester.startGesture(
+        tester.getCenter(find.byType(PageView)),
+      );
+      await drag.moveBy(const Offset(-40, 0));
+      await drag.moveBy(const Offset(-360, 0));
+      await tester.pump();
+      expect(find.byType(DayHeader), findsNWidgets(2));
+      // Sunday's own ⋮ only; the preview's would act on this week's data.
+      expect(find.byIcon(Icons.more_vert), findsOneWidget);
+
+      await drag.moveBy(const Offset(400, 0));
+      await drag.up();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('today: a block under way is neither edited nor moved, and '
+        'nothing moves onto a start that has passed', (tester) async {
+      wideSurface(tester);
+      await tester.pumpWidget(app(
+        blocks: const [bMorning, bEarly, b1],
+        dutyPeriods: [week],
+        dutyAssignments: onMe,
+      ));
+      await tester.pumpAndSettle();
+
+      hooks(tester).onEditBlock!(t, bMorning);
+      await tester.pumpAndSettle();
+      expect(find.text(blockStartedMessage), findsOneWidget);
+      expect(find.byType(BlockDialog), findsNothing);
+      await dismissSnack(tester);
+
+      hooks(tester).onMoveBlock!(t, bMorning, const HourMinute(12, 0));
+      await tester.pumpAndSettle();
+      expect(find.text(blockStartedMessage), findsOneWidget);
+      await dismissSnack(tester);
+
+      hooks(tester).onMoveBlock!(t, bEarly, const HourMinute(9, 30));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Blok nemůže začínat dřív než teď (10:00) — '
+            'vyber pozdější začátek.'),
+        findsOneWidget,
+      );
+      await dismissSnack(tester);
+
+      // A block still ahead opens, held to starts after now.
+      hooks(tester).onEditBlock!(t, bEarly);
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<BlockDialog>(find.byType(BlockDialog)).dutyClock?.call(),
+        const HourMinute(10, 0),
+      );
+    });
+
+    testWidgets('no limit tomorrow, nor for the admin today', (tester) async {
+      wideSurface(tester);
+      await tester.pumpWidget(app(
+        blocks: const [bMorning, bEarly, b1],
+        dutyPeriods: [week],
+        dutyAssignments: onMe,
+      ));
+      await tester.pumpAndSettle();
+      hooks(tester).onEditBlock!(tomorrow, bMorning);
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<BlockDialog>(find.byType(BlockDialog)).dutyClock?.call(),
+        isNull,
+      );
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpWidget(app(
+        profile: admin,
+        blocks: const [bMorning, bEarly, b1],
+        dutyPeriods: [week],
+        dutyAssignments: onMe,
+      ));
+      await tester.pumpAndSettle();
+      hooks(tester).onEditBlock!(t, bMorning);
+      await tester.pumpAndSettle();
+      expect(find.text(blockStartedMessage), findsNothing);
+      expect(
+        tester.widget<BlockDialog>(find.byType(BlockDialog)).dutyClock?.call(),
+        isNull,
+      );
+    });
+
+    testWidgets('the header ＋ on today hands the dialog the current time', (
+      tester,
+    ) async {
+      wideSurface(tester);
+      await tester.pumpWidget(app(
+        blocks: const [bMorning, bEarly, b1],
+        dutyPeriods: [week],
+        dutyAssignments: onMe,
+      ));
+      await tester.pumpAndSettle();
+      hooks(tester).onAddForDay!(t);
+      await tester.pumpAndSettle();
+      final dialog = tester.widget<BlockDialog>(find.byType(BlockDialog));
+      expect(dialog.dutyClock?.call(), const HourMinute(10, 0));
+      expect(dialog.offerCloseDay, isTrue);
+    });
+  });
+
+  // Two rights, two clocks (0050): booking, cancelling and re-seating for
+  // others is held WHILE on duty (a period covering today); the blocks of a
+  // day are edited on the days of the player's OWN periods, from today on,
+  // on duty today or not. The drawn week is Mon 7. 9. – Sun 13. 9., today
+  // is Wednesday the 9th.
+  group('block edits follow the days of my own periods (0050)', () {
+    Day day(int d) => Day(2026, 9, d);
+    DutyPeriod period(String id, int from, int to) =>
+        DutyPeriod(id: id, startsOn: day(from), endsOn: day(to));
+    const onMe = [DutyAssignment(periodId: 'd1', userId: 'me')];
+
+    CalendarAdminHooks hooks(WidgetTester tester) =>
+        tester.widget<WeekCalendarView>(find.byType(WeekCalendarView)).admin;
+    SlotCallbacks slots(WidgetTester tester) =>
+        tester.widget<WeekCalendarView>(find.byType(WeekCalendarView)).slot;
+
+    // Which days of the drawn week (Monday the [from]th) the calendar lets me
+    // edit: those whose header takes the ＋ tap.
+    Set<int> addable(WidgetTester tester, {int from = 7}) => {
+      for (var d = from; d < from + 7; d++)
+        if (find
+            .descendant(of: headerOf(day(d)), matching: find.byType(InkWell))
+            .evaluate()
+            .isNotEmpty)
+          d,
+    };
+
+    Future<void> chip(WidgetTester tester, int d) async {
+      await tester.tap(
+        find
+            .descendant(
+              of: find.byType(DayChipStrip),
+              matching: find.byType(InkWell),
+            )
+            .at(d - 7),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('a duty later this week, not on duty today: its own days '
+        'and no others', (tester) async {
+      wideSurface(tester);
+      await tester.pumpWidget(
+        app(dutyPeriods: [period('d1', 10, 12)], dutyAssignments: onMe),
+      );
+      await tester.pumpAndSettle();
+
+      // Thursday to Saturday; not today (not mine), not Sunday, not the past.
+      expect(addable(tester), {10, 11, 12});
+      expect(
+        [for (var d = 7; d <= 13; d++) hooks(tester).canEditDay(day(d))],
+        [false, false, false, true, true, true, false],
+      );
+      expect(slots(tester).onDuty, isFalse);
+      // The hooks of a day outside it are gone; inside they are all there.
+      expect(hooks(tester).forDay(day(13)).onEditBlock, isNull);
+      expect(hooks(tester).forDay(day(9)).onCloseDay, isNull);
+      expect(hooks(tester).forDay(day(11)).onEditBlock, isNotNull);
+      expect(hooks(tester).forDay(day(11)).onCloseDay, isNotNull);
+      expect(hooks(tester).forDay(day(11)).onEditPrioritySlot, isNull);
+    });
+
+    testWidgets('that duty books, and cancels, for nobody yet — its own '
+        'days included', (tester) async {
+      wideSurface(tester);
+      await tester.pumpWidget(
+        app(
+          dutyPeriods: [period('d1', 10, 12)],
+          dutyAssignments: onMe,
+          reservations: [res('r2', 'p2', tomorrow)],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final free = find.descendant(
+        of: find.byKey(ValueKey(tomorrow)),
+        matching: find.byIcon(Icons.add),
+      );
+      await tester.ensureVisible(free.first);
+      await tester.pumpAndSettle();
+      await tester.tap(free.first);
+      await tester.pumpAndSettle();
+      expect(find.text('Rezervovat termín?'), findsOneWidget);
+      expect(find.textContaining('Vybráno:'), findsNothing);
+      await tester.tap(find.text('Zrušit'));
+      await tester.pumpAndSettle();
+
+      final cell = find.descendant(
+        of: find.byKey(ValueKey(tomorrow)),
+        matching: find.text('Péťa'),
+      );
+      await tester.ensureVisible(cell);
+      await tester.pumpAndSettle();
+      await tester.tap(cell);
+      await tester.pumpAndSettle();
+      expect(find.text('Zrušit bez zprávy'), findsNothing);
+      expect(find.text('Petr Novák'), findsOneWidget); // the info snack
+    });
+
+    // The columns themselves take the per-day hooks: long-press edit,
+    // tap-a-gap add and drag exist on its own days only — the bundle and
+    // the header ＋ alone would not show a column wired to the full set.
+    testWidgets('a duty later this week: each day column gets the block '
+        'gestures on its own days only', (tester) async {
+      wideSurface(tester);
+      await tester.pumpWidget(
+        app(dutyPeriods: [period('d1', 10, 12)], dutyAssignments: onMe),
+      );
+      await tester.pumpAndSettle();
+      final columns = tester.widgetList<ScheduleDayColumn>(
+        find.byType(ScheduleDayColumn),
+      );
+      expect(columns, hasLength(7));
+      for (final c in columns) {
+        final mine = {10, 11, 12}.contains(c.day.date.day);
+        final why = '${c.day.date.day}. 9.';
+        expect(c.admin.onEditBlock != null, mine, reason: why);
+        expect(c.admin.onAddBlockInGap != null, mine, reason: why);
+        expect(c.admin.onMoveBlock != null, mine, reason: why);
+      }
+    });
+
+    testWidgets('portrait: the ⋮ menu on its own days only', (tester) async {
+      portraitSurface(tester);
+      await tester.pumpWidget(
+        app(dutyPeriods: [period('d1', 10, 12)], dutyAssignments: onMe),
+      );
+      await tester.pumpAndSettle();
+
+      for (final d in [7, 8, 9, 13]) {
+        await chip(tester, d);
+        expect(find.byIcon(Icons.more_vert), findsNothing, reason: '$d. 9.');
+      }
+      for (final d in [10, 11, 12]) {
+        await chip(tester, d);
+        await tester.tap(find.byIcon(Icons.more_vert));
+        await tester.pumpAndSettle();
+        expect(find.text('Přidat blok…'), findsOneWidget, reason: '$d. 9.');
+        expect(find.text('Zavřít den…'), findsOneWidget, reason: '$d. 9.');
+        await tester.tapAt(const Offset(5, 5)); // dismiss the menu
+        await tester.pumpAndSettle();
+      }
+    });
+
+    testWidgets('on duty today: books and cancels for others on another '
+        'duty\'s days, edits blocks on its own only', (tester) async {
+      wideSurface(tester);
+      await tester.pumpWidget(
+        app(
+          // Mine until today, then Petr's Thursday to Sunday.
+          dutyPeriods: [period('d1', 7, 9), period('d2', 10, 13)],
+          dutyAssignments: const [
+            DutyAssignment(periodId: 'd1', userId: 'me'),
+            DutyAssignment(periodId: 'd2', userId: 'p2'),
+          ],
+          reservations: [res('r2', 'p2', tomorrow)],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Today only: Monday and Tuesday are mine but past.
+      expect(addable(tester), {9});
+      expect(slots(tester).onDuty, isTrue);
+
+      // Thursday is Petr's duty: a free cell still books for anyone ...
+      final free = find.descendant(
+        of: find.byKey(ValueKey(tomorrow)),
+        matching: find.byIcon(Icons.add),
+      );
+      await tester.ensureVisible(free.first);
+      await tester.pumpAndSettle();
+      await tester.tap(free.first);
+      await tester.pumpAndSettle();
+      expect(find.text('Vybráno: já'), findsOneWidget);
+      await tester.tap(find.text('Zrušit'));
+      await tester.pumpAndSettle();
+
+      // ... and another player's reservation there is cancelled with the
+      // notify choice.
+      final cell = find.descendant(
+        of: find.byKey(ValueKey(tomorrow)),
+        matching: find.text('Péťa'),
+      );
+      await tester.ensureVisible(cell);
+      await tester.pumpAndSettle();
+      await tester.tap(cell);
+      await tester.pumpAndSettle();
+      expect(find.text('Zrušit bez zprávy'), findsOneWidget);
+    });
+
+    testWidgets('two consecutive periods of mine: every day from today on',
+        (tester) async {
+      wideSurface(tester);
+      await tester.pumpWidget(
+        app(
+          dutyPeriods: [period('d1', 7, 9), period('d2', 10, 13)],
+          dutyAssignments: const [
+            DutyAssignment(periodId: 'd1', userId: 'me'),
+            DutyAssignment(periodId: 'd2', userId: 'me'),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(addable(tester), {9, 10, 11, 12, 13});
+    });
+
+    testWidgets('an admin edits every day of the week, past ones too, with '
+        'or without a period', (tester) async {
+      wideSurface(tester);
+      await tester.pumpWidget(
+        app(
+          profile: admin,
+          dutyPeriods: [period('d1', 10, 12)],
+          dutyAssignments: const [
+            DutyAssignment(periodId: 'd1', userId: 'p2'),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(addable(tester), {7, 8, 9, 10, 11, 12, 13});
+      expect(hooks(tester).canEditDay(day(8)), isTrue);
+      expect(hooks(tester).forDay(day(8)).onEditPrioritySlot, isNotNull);
+    });
+
+    testWidgets('a duty of mine far ahead: no day of this week is mine',
+        (tester) async {
+      wideSurface(tester);
+      await tester.pumpWidget(
+        app(
+          dutyPeriods: [
+            DutyPeriod(
+              id: 'd1',
+              startsOn: Day(2026, 10, 12),
+              endsOn: Day(2026, 10, 14),
+            ),
+          ],
+          dutyAssignments: onMe,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(addable(tester), isEmpty);
+      expect(slots(tester).onDuty, isFalse);
+    });
+
+    testWidgets('a duty next week Monday to Wednesday: those three days are '
+        'editable already today, nothing else', (tester) async {
+      wideSurface(tester);
+      await tester.pumpWidget(
+        app(dutyPeriods: [period('d1', 14, 16)], dutyAssignments: onMe),
+      );
+      await tester.pumpAndSettle();
+      // This week nothing is mine, and nothing is booked for others.
+      expect(addable(tester), isEmpty);
+      expect(slots(tester).onDuty, isFalse);
+
+      await tester.tap(find.byIcon(Icons.chevron_right));
+      await tester.pumpAndSettle();
+      expect(addable(tester, from: 14), {14, 15, 16});
+      expect(slots(tester).onDuty, isFalse);
+    });
   });
 }

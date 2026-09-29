@@ -20,7 +20,7 @@ final class _Failures extends ProviderObserver {
   ) => errors.add(error);
 }
 
-/// The Klubovna hub: its three entries, the shell's trailing icons riding
+/// The Klubovna hub: its four entries, the shell's trailing icons riding
 /// along on the same header, and the shared HubMenu's list/grid breakpoint
 /// (below vs at/above 840 dp).
 void main() {
@@ -60,6 +60,16 @@ void main() {
             (ref) => Stream.value(DateTime(2026, 9, 23, 18, 0)),
           ),
           contactsProvider.overrideWith((ref) async => const <Contact>[]),
+          dutyPeriodsProvider.overrideWith(
+            (ref) => Stream.value(const <DutyPeriod>[]),
+          ),
+          dutyAssignmentsProvider.overrideWith(
+            (ref) => Stream.value(const <DutyAssignment>[]),
+          ),
+          playersProvider.overrideWith((ref) async => const <PlayerName>[]),
+          settingsProvider.overrideWith(
+            (ref) => Stream.value(ScheduleSettings.defaults),
+          ),
         ],
         child: MaterialApp(
           home: Scaffold(body: ClubhouseScreen(trailing: trailing)),
@@ -80,8 +90,8 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
   }
 
-  testWidgets('shows the Výsledky, Kuželny and Kontakty entries with their '
-      'subtitles', (tester) async {
+  testWidgets('shows the Výsledky, Kuželny, Kontakty and Služby entries with '
+      'their subtitles', (tester) async {
     narrow(tester);
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
@@ -97,6 +107,9 @@ void main() {
     expect(find.byIcon(Icons.scoreboard_outlined), findsOneWidget);
     expect(find.byIcon(Icons.location_on_outlined), findsOneWidget);
     expect(find.byIcon(Icons.contacts_outlined), findsOneWidget);
+    expect(find.text('Služby'), findsOneWidget);
+    expect(find.text('Kdo slouží na kantýně'), findsOneWidget);
+    expect(find.byIcon(Icons.local_cafe_outlined), findsOneWidget);
   });
 
   /// Hub labels top to bottom (list) or in reading order (grid).
@@ -104,7 +117,7 @@ void main() {
     final found = find.descendant(
       of: find.byType(HubMenu),
       matching: find.byWidgetPredicate(
-        (w) => w is Text && const {'Kontakty', 'Kuželny', 'Výsledky'}
+        (w) => w is Text && const {'Kontakty', 'Kuželny', 'Služby', 'Výsledky'}
             .contains(w.data),
       ),
     );
@@ -123,7 +136,7 @@ void main() {
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
 
-    expect(labels(tester), ['Kontakty', 'Kuželny', 'Výsledky']);
+    expect(labels(tester), ['Kontakty', 'Kuželny', 'Služby', 'Výsledky']);
   });
 
   testWidgets('the entries are in Czech alphabetical order, in the grid',
@@ -132,7 +145,7 @@ void main() {
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
 
-    expect(labels(tester), ['Kontakty', 'Kuželny', 'Výsledky']);
+    expect(labels(tester), ['Kontakty', 'Kuželny', 'Služby', 'Výsledky']);
   });
 
   testWidgets('below 840 dp the hub renders a list', (tester) async {
@@ -142,7 +155,7 @@ void main() {
 
     expect(find.byType(ListView), findsOneWidget);
     expect(find.byType(GridView), findsNothing);
-    expect(find.byType(ListTile), findsNWidgets(3));
+    expect(find.byType(ListTile), findsNWidgets(4));
   });
 
   testWidgets('at 840 dp and above the hub renders a card grid', (
@@ -154,12 +167,13 @@ void main() {
 
     expect(find.byType(GridView), findsOneWidget);
     expect(find.byType(ListView), findsNothing);
-    expect(find.byType(Card), findsNWidgets(3));
+    expect(find.byType(Card), findsNWidgets(4));
   });
 
   testWidgets(
     'tapping Výsledky opens the real results screen, Kuželny the real '
-    'venues screen, Kontakty the real contacts screen',
+    'venues screen, Kontakty the real contacts screen, Služby the real duty '
+    'roster',
     (tester) async {
       narrow(tester);
       final failures = _Failures();
@@ -184,6 +198,14 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.widgetWithText(AppBar, 'Kontakty'), findsOneWidget);
       expect(find.text('Zatím tu nikdo není.'), findsOneWidget);
+
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Služby'));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(AppBar, 'Služby'), findsOneWidget);
+      expect(find.text('Služby zatím nejsou naplánované.'), findsOneWidget);
       expect(failures.errors, isEmpty);
     },
   );

@@ -131,8 +131,16 @@ class _WeekCalendarViewState extends State<WeekCalendarView> {
       settings: widget.settings,
       isAdmin: widget.me?.isAdmin ?? false,
       forGroup: widget.slot.groupMateIds.isNotEmpty,
+      onDuty: widget.slot.onDuty,
     );
     return '$freeCount volných';
+  }
+
+  /// The header ＋ of [date]: only where the block gestures are offered on
+  /// that day (the duty's own periods, 0050).
+  VoidCallback? _addForDay(Day date) {
+    final add = widget.admin.forDay(date).onAddForDay;
+    return add == null ? null : () => add(date);
   }
 
   @override
@@ -217,7 +225,8 @@ class _WeekCalendarViewState extends State<WeekCalendarView> {
               ? widget.now.minutesFromMidnight
               : null,
           laneRow: _laneRow,
-          admin: widget.admin,
+          // Per day: the duty (0050) edits only the days of their own periods.
+          admin: widget.admin.forDay(day.date),
         ),
     ];
 
@@ -235,9 +244,7 @@ class _WeekCalendarViewState extends State<WeekCalendarView> {
               height: headerHeight,
               collapsed: _collapsed,
               subtitle: _freeLabel(day),
-              onAdd: widget.admin.onAddForDay == null
-                  ? null
-                  : () => widget.admin.onAddForDay!(day.date),
+              onAdd: _addForDay(day.date),
               interactive: widget.matchLinks,
             ),
           ),

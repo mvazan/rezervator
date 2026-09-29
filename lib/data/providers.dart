@@ -10,6 +10,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'cache.dart';
+import 'clock.dart';
 import 'live_refresh.dart';
 import 'backend_reachable.dart';
 import 'offline_gate.dart';
@@ -17,6 +18,7 @@ import 'optimistic.dart';
 
 import '../config.dart';
 import '../domain/collation.dart';
+import '../domain/duties.dart';
 import '../domain/groups.dart';
 import '../domain/models.dart';
 import '../domain/public_week.dart';
@@ -115,6 +117,97 @@ final myGroupProvider = Provider<MyGroup>((ref) {
   final uid = ref.watch(_authUidProvider);
   if (uid == null) return MyGroup.none;
   return myGroupOf(ref.watch(groupRowsProvider).value ?? const [], uid);
+});
+
+/// The alley's canteen duties (`duty_periods`, 0050), chronological. The
+/// whole table, unfiltered: a few hundred rows in a decade, and the season
+/// counts need every period — a date-filtered stream would miscount from
+/// mid-season on. The whole alley reads it (Klubovna → Služby, the week
+/// header); only the admin's duty_* RPCs write it.
+final dutyPeriodsProvider = StreamProvider<List<DutyPeriod>>((ref) {
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return Stream.value(const []);
+  return cachedRows(uid, 'duty_periods',
+          () => _db.from('duty_periods').stream(primaryKey: ['id']))
+      .map((rows) => rows.map(DutyPeriod.fromJson).toList()
+        ..sort((a, b) => a.startsOn.compareTo(b.startsOn)));
+});
+
+/// Who works which duty (`duty_assignments`, 0050) — unfiltered, like
+/// [dutyPeriodsProvider]. Written only through [Api.dutySetAssignees].
+final dutyAssignmentsProvider = StreamProvider<List<DutyAssignment>>((ref) {
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return Stream.value(const []);
+  return cachedRows(
+          uid,
+          'duty_assignments',
+          () => _db
+              .from('duty_assignments')
+              .stream(primaryKey: ['period_id', 'user_id']))
+      .map((rows) => rows.map(DutyAssignment.fromJson).toList());
+});
+
+/// The season boundaries of the duty counts (`duty_seasons`, 0050),
+/// chronological. Not streamed — they change only by the admin's hand:
+/// invalidate this after [Api.dutySeasonStart] or [Api.dutySeasonDelete].
+/// Offline it replays the last list, like [playersProvider].
+final dutySeasonsProvider = FutureProvider<List<DutySeason>>((ref) async {
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return const [];
+  List<Map<String, dynamic>> rows;
+  try {
+    final List<dynamic> fetched =
+        await _db.from('duty_seasons').select('started_on, name');
+    rows = [for (final row in fetched) (row as Map).cast<String, dynamic>()];
+    RowCache.write(uid, 'duty_seasons', rows);
+  } catch (_) {
+    final cached = await RowCache.read(uid, 'duty_seasons');
+    if (cached == null) rethrow;
+    rows = cached;
+  }
+  return [for (final row in rows) DutySeason.fromJson(row)]
+    ..sort((a, b) => a.startedOn.compareTo(b.startedOn));
+});
+
+/// The signed-in player's canteen duty: the running period, the next one,
+/// every period of mine that has not ended and who else is on the running
+/// one (see [MyDuty]). Follows the app clock, so it
+/// flips at midnight with no row changing — the server judges every call
+/// by Prague today (`is_on_duty()`). Equal values do not notify, so the
+/// minute tick costs no rebuild.
+final myDutyProvider = Provider<MyDuty>((ref) {
+  final me = ref.watch(myProfileProvider.select((p) => p.value?.id));
+  if (me == null) return MyDuty.none;
+  final today = ref.watch(nowProvider
+      .select((now) => Day.fromDateTime(now.value ?? DateTime.now())));
+  return myDuty(
+    ref.watch(dutyPeriodsProvider).value ?? const [],
+    ref.watch(dutyAssignmentsProvider).value ?? const [],
+    me,
+    today,
+  );
+});
+
+/// The Kalendář week header's duty line for the week of [monday] (see
+/// [dutyHeaderLabel]): who serves, or „Sloužíš ty …“ in my week on duty;
+/// null when no one does. Names are the roster's full names, placeholders
+/// included. Equal lines do not notify.
+final weekDutyHeaderProvider = Provider.autoDispose.family<DutyHeader?, Day>((
+  ref,
+  monday,
+) {
+  final me = ref.watch(myProfileProvider.select((p) => p.value?.id));
+  final today = ref.watch(nowProvider
+      .select((now) => Day.fromDateTime(now.value ?? DateTime.now())));
+  final players = ref.watch(playersProvider).value ?? const [];
+  return dutyHeaderLabel(
+    monday,
+    ref.watch(dutyPeriodsProvider).value ?? const [],
+    ref.watch(dutyAssignmentsProvider).value ?? const [],
+    {for (final p in players) p.id: p.displayName},
+    me,
+    today: today,
+  );
 });
 
 /// Alley configuration singleton (null until the backend is seeded).
@@ -780,26 +873,22 @@ class Api {
     }
   }
 
-  /// Inserts an INACTIVE "special" block and returns its id — day-scoped
+  /// Adds an INACTIVE "special" block and returns its id — day-scoped
   /// calendar edits point a day override at it while the weekly template
-  /// ignores it. `active=false` keeps it out of the weekly schedule;
-  /// `position=-1` is the SPECIAL sentinel: the Rozvrh list hides such rows
+  /// ignores it. The server (`add_special_block`, 0050) writes
+  /// `active=false`, which keeps it out of the weekly schedule, and
+  /// `position=-1`, the SPECIAL sentinel: the Rozvrh list hides such rows
   /// and the find-or-create reuse pool only matches them (never a
-  /// deactivated template block that happens to share the times).
+  /// deactivated template block that happens to share the times). An RPC,
+  /// not a table insert: a player with a duty period that has not ended may
+  /// call it (the day edit that follows is held to their own periods), while
+  /// `time_blocks` stays the admin's.
   static Future<String> addSpecialBlock(
-      HourMinute startsAt, HourMinute endsAt) async {
-    final row = await _db
-        .from('time_blocks')
-        .insert({
-          'starts_at': startsAt.toSql(),
-          'ends_at': endsAt.toSql(),
-          'position': -1,
-          'active': false,
-        })
-        .select('id')
-        .single();
-    return row['id'] as String;
-  }
+          HourMinute startsAt, HourMinute endsAt) async =>
+      await _db.rpc('add_special_block', params: {
+        'p_starts_at': startsAt.toSql(),
+        'p_ends_at': endsAt.toSql(),
+      }) as String;
 
   /// Cancels every live reservation on [date] × [blockId] with [note] —
   /// called when a day-special HIDES a template block (after an explicit
@@ -854,8 +943,11 @@ class Api {
         'p_block_ids': blockIds,
       });
 
+  /// Drops [date]'s override, so the weekly template applies again
+  /// (`delete_day_override`, 0050 — the admin on any date, a duty on the
+  /// days of their own periods from today on). No override is no error.
   static Future<void> deleteDayOverride(Day date) =>
-      _db.from('day_overrides').delete().eq('date', date.toSql());
+      _db.rpc('delete_day_override', params: {'p_date': date.toSql()});
 
   /// Returns [date] to the weekly rules. A training day gets the template
   /// block ids written first (cancelling anything off-template); a
@@ -1250,6 +1342,102 @@ class Api {
         'p_nick': nick,
         'p_club_id': clubId,
       });
+
+  // --- admin: canteen duty (0050, Správa → Služby) ---
+  // All admin only (`not_allowed` otherwise) and always the caller's own
+  // alley. The streams pick every change up; only the seasons are a future
+  // to invalidate.
+
+  /// Periods of [days] days (1–31, `invalid_days`) from [from] up to
+  /// [until], the last one clipped to [until]; a period overlapping an
+  /// existing one is skipped whole. The range must run forward and span at
+  /// most 400 days (`invalid_range`). The generator dialog previews the same
+  /// with `planDutyPeriods`.
+  static Future<({int created, int skipped})> dutyGenerate({
+    required Day from,
+    required int days,
+    required Day until,
+  }) async {
+    final result = Map<String, dynamic>.from(await _db.rpc('duty_generate',
+        params: {
+          'p_from': from.toSql(),
+          'p_days': days,
+          'p_until': until.toSql(),
+        }) as Map);
+    return (
+      created: (result['created'] as num).toInt(),
+      skipped: (result['skipped'] as num).toInt(),
+    );
+  }
+
+  /// Creates ([id] null) or edits one period and returns its id. The note
+  /// is trimmed server-side (at most 80 characters). `invalid_range`,
+  /// `duty_too_long` (over 62 days), `duty_overlap`, `unknown_period`.
+  static Future<String> dutyPeriodSave({
+    String? id,
+    required Day startsOn,
+    required Day endsOn,
+    String note = '',
+  }) async =>
+      await _db.rpc('duty_period_save', params: {
+        'p_id': id,
+        'p_starts_on': startsOn.toSql(),
+        'p_ends_on': endsOn.toSql(),
+        'p_note': note,
+      }) as String;
+
+  /// Deletes one period; its assignees go with it. `unknown_period`.
+  static Future<void> dutyPeriodDelete(String id) =>
+      _db.rpc('duty_period_delete', params: {'p_id': id});
+
+  /// „Smazat neobsazené budoucí…“: deletes every period starting on [from]
+  /// or later that nobody is assigned to; returns how many went.
+  static Future<int> dutyPeriodsDeleteUnassigned(Day from) async =>
+      (await _db.rpc('duty_periods_delete_unassigned',
+              params: {'p_from': from.toSql()}) as num)
+          .toInt();
+
+  /// Replaces the period's assignees with [userIds] (empty clears it).
+  /// Approved non-kiosk players of the alley, placeholders included;
+  /// anyone else refuses the whole call (`unknown_player`).
+  static Future<void> dutySetAssignees(String periodId, List<String> userIds) =>
+      _db.rpc('duty_set_assignees',
+          params: {'p_period': periodId, 'p_users': userIds});
+
+  /// „Nová sezóna…“: a season boundary from [startedOn], after the newest
+  /// one (`season_order`), named [name] (`empty_name`, at most 40
+  /// characters). Moves nothing: the counts simply start again from it.
+  static Future<void> dutySeasonStart(Day startedOn, String name) =>
+      _db.rpc('duty_season_start',
+          params: {'p_started_on': startedOn.toSql(), 'p_name': name});
+
+  /// „Vrátit poslední sezónu“: deletes the boundary [startedOn], which must
+  /// be the newest (`not_newest`).
+  static Future<void> dutySeasonDelete(Day startedOn) => _db.rpc(
+      'duty_season_delete',
+      params: {'p_started_on': startedOn.toSql()});
+
+  /// The reminder before a duty (0050): on or off, and how many days ahead
+  /// (1–14); switching it off keeps the lead. Written straight to the
+  /// alley's settings row, and optimistic, same reasoning as
+  /// [setKioskFitDay].
+  static Future<void> setDutyReminder(bool enabled, int days,
+      {required String tenantId}) {
+    final fields = {
+      'duty_reminder_enabled': enabled,
+      'duty_reminder_days': days,
+    };
+    Future<void> write() =>
+        _db.from('schedule_settings').update(fields).eq('tenant_id', tenantId);
+    final uid = currentUserId;
+    if (uid == null) return write();
+    return optimisticWrite(
+      uid,
+      cacheKeySettings,
+      patchRow('tenant_id', tenantId, fields),
+      write,
+    );
+  }
 
   // --- admin: reports (see attendanceProvider) ---
   static Future<List<AttendanceRow>> monthlyAttendance(
@@ -1667,6 +1855,10 @@ void resetTenantScopedProviders(WidgetRef ref) {
   ref.invalidate(myTeamColorsProvider);
   ref.invalidate(myMatchExceptionsProvider);
   ref.invalidate(groupRowsProvider);
+  ref.invalidate(dutyPeriodsProvider);
+  ref.invalidate(dutyAssignmentsProvider);
+  ref.invalidate(dutySeasonsProvider);
+  ref.invalidate(myDutyProvider);
   ref.invalidate(playersProvider);
   ref.invalidate(contactsProvider);
   ref.invalidate(tenantsProvider);

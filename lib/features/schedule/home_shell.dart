@@ -254,8 +254,21 @@ class _ReservationLimitBanner extends ConsumerWidget {
       Day.fromDateTime(now),
     );
     if (!atReservationLimit(count, settings)) return const SizedBox.shrink();
+    // On canteen duty (0050) the ＋ stays — for booking the others; in a
+    // group (0044) it stays too — for booking the mates. The duty's is the
+    // wider promise, so it wins.
+    final onDuty = ref.watch(myDutyProvider.select((d) => d.onDuty));
+    final hasMates = ref.watch(
+      myGroupProvider.select((g) => g.matesOf(profile.id).isNotEmpty),
+    );
     return MaterialBanner(
-      content: Text(reservationLimitNote(settings.maxActiveReservations)),
+      content: Text(
+        onDuty
+            ? reservationLimitDutyBanner
+            : hasMates
+                ? reservationLimitGroupBanner
+                : reservationLimitNote(settings.maxActiveReservations),
+      ),
       leading: const Icon(Icons.info_outline),
       actions: const [SizedBox.shrink()],
     );

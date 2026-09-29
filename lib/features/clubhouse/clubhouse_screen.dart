@@ -1,6 +1,6 @@
 /// Klubovna — the third home tab: a hub of team-facing screens (contacts,
-/// venues, results — in Czech alphabetical order), the same [HubMenu]
-/// Správa kuželny uses.
+/// venues, canteen duties, results — in Czech alphabetical order), the same
+/// [HubMenu] Správa kuželny uses.
 library;
 
 import 'package:flutter/material.dart';
@@ -9,6 +9,7 @@ import '../../core/hub_menu.dart';
 import '../../domain/collation.dart';
 import '../schedule/widgets/home_header.dart';
 import 'contacts_screen.dart';
+import 'duties_screen.dart';
 import 'results_screen.dart';
 import 'venues_screen.dart';
 
@@ -42,6 +43,14 @@ class ClubhouseScreen extends StatelessWidget {
                 subtitle: 'Adresy a vybavení kuželen',
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const VenuesScreen()),
+                ),
+              ),
+              (
+                label: 'Služby',
+                icon: Icons.local_cafe_outlined,
+                subtitle: 'Kdo slouží na kantýně',
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const DutiesScreen()),
                 ),
               ),
               (

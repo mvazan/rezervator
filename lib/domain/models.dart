@@ -591,6 +591,8 @@ class ScheduleSettings {
     this.kioskDark = true,
     this.kioskFitDay = true,
     this.tenantId = '',
+    this.dutyReminderEnabled = false,
+    this.dutyReminderDays = 1,
   });
 
   final int laneCount;
@@ -612,6 +614,15 @@ class ScheduleSettings {
   /// tenant instead of the old singleton).
   final String tenantId;
 
+  /// Whether the players on a canteen duty get a reminder before it (0050,
+  /// Správa → Služby). Off by default; switching it off keeps
+  /// [dutyReminderDays].
+  final bool dutyReminderEnabled;
+
+  /// How many days before a duty that reminder goes out, at 18:00 Prague
+  /// (0050), 1–14.
+  final int dutyReminderDays;
+
   static const defaults = ScheduleSettings(
     laneCount: 4,
     trainingWeekdays: {1, 2, 4},
@@ -630,6 +641,8 @@ class ScheduleSettings {
         kioskDark: json['kiosk_dark'] as bool? ?? true,
         kioskFitDay: json['kiosk_fit_day'] as bool? ?? true,
         tenantId: json['tenant_id'] as String? ?? '',
+        dutyReminderEnabled: json['duty_reminder_enabled'] as bool? ?? false,
+        dutyReminderDays: json['duty_reminder_days'] as int? ?? 1,
       );
 }
 
@@ -1343,6 +1356,101 @@ class AttendanceRow {
         displayName: json['display_name'] as String,
         club: json['club'] as String? ?? '',
         attended: json['attended'] as int,
+      );
+}
+
+// ---------------------------------------------------------------------------
+// Canteen duty (0050)
+// ---------------------------------------------------------------------------
+
+/// A canteen duty (`duty_periods`, 0050): the days [startsOn]..[endsOn],
+/// both included, that the players in `duty_assignments` work the canteen.
+/// Periods of one alley never overlap; the admin writes them through the
+/// duty_* RPCs only. The pure logic on top lives in `duties.dart`.
+class DutyPeriod {
+  const DutyPeriod({
+    required this.id,
+    required this.startsOn,
+    required this.endsOn,
+    this.note = '',
+  });
+
+  final String id;
+  final Day startsOn;
+
+  /// The last day of the duty, included.
+  final Day endsOn;
+
+  /// The admin's note shown next to the dates (at most 80 characters);
+  /// '' = none.
+  final String note;
+
+  /// How many days the duty lasts, both ends counted.
+  int get days => endsOn.differenceInDays(startsOn) + 1;
+
+  /// Whether [day] is one of the duty's days.
+  bool covers(Day day) => !day.isBefore(startsOn) && !day.isAfter(endsOn);
+
+  factory DutyPeriod.fromJson(Map<String, dynamic> json) => DutyPeriod(
+        id: json['id'] as String,
+        startsOn: Day.parse(json['starts_on'] as String),
+        endsOn: Day.parse(json['ends_on'] as String),
+        note: json['note'] as String? ?? '',
+      );
+
+  @override
+  bool operator ==(Object other) =>
+      other is DutyPeriod &&
+      other.id == id &&
+      other.startsOn == startsOn &&
+      other.endsOn == endsOn &&
+      other.note == note;
+
+  @override
+  int get hashCode => Object.hash(id, startsOn, endsOn, note);
+
+  @override
+  String toString() => 'DutyPeriod($id, $startsOn..$endsOn)';
+}
+
+/// One player on one duty (`duty_assignments`, 0050) — placeholders
+/// ("hráč bez účtu") included, the kiosk never. Written only through
+/// `duty_set_assignees`.
+class DutyAssignment {
+  const DutyAssignment({required this.periodId, required this.userId});
+
+  final String periodId;
+  final String userId;
+
+  factory DutyAssignment.fromJson(Map<String, dynamic> json) => DutyAssignment(
+        periodId: json['period_id'] as String,
+        userId: json['user_id'] as String,
+      );
+
+  @override
+  bool operator ==(Object other) =>
+      other is DutyAssignment &&
+      other.periodId == periodId &&
+      other.userId == userId;
+
+  @override
+  int get hashCode => Object.hash(periodId, userId);
+}
+
+/// A season boundary for the duty counts (`duty_seasons`, 0050): the season
+/// [name] runs from [startedOn] until the next boundary. The periods before
+/// the first boundary form the implicit first season (`seasonRanges`).
+class DutySeason {
+  const DutySeason({required this.startedOn, required this.name});
+
+  final Day startedOn;
+
+  /// E.g. „2026/27“, 1–40 characters.
+  final String name;
+
+  factory DutySeason.fromJson(Map<String, dynamic> json) => DutySeason(
+        startedOn: Day.parse(json['started_on'] as String),
+        name: json['name'] as String,
       );
 }
 

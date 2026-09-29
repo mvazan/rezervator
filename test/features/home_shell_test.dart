@@ -9,6 +9,7 @@ import 'package:http/testing.dart';
 import 'package:rezervator/data/clock.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/groups.dart';
+import 'package:rezervator/domain/duties.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/schedule/home_shell.dart';
 import 'package:rezervator/features/schedule/my_trainings_screen.dart';
@@ -94,6 +95,8 @@ void main() {
     Profile profile = me,
     Stream<Profile>? profileStream,
     List<Reservation> mine = const [],
+    MyDuty duty = MyDuty.none,
+    MyGroup group = MyGroup.none,
   }) =>
       ProviderScope(
         overrides: [
@@ -112,7 +115,12 @@ void main() {
           playersProvider.overrideWith((ref) async => const []),
           tenantNameProvider.overrideWith((ref, id) async => 'Demo'),
           nowProvider.overrideWith((ref) => Stream.value(now)),
-          myGroupProvider.overrideWithValue(MyGroup.none),
+          myGroupProvider.overrideWithValue(group),
+          myDutyProvider.overrideWithValue(duty),
+          dutyPeriodsProvider.overrideWith((ref) => Stream.value(const [])),
+          dutyAssignmentsProvider.overrideWith(
+            (ref) => Stream.value(const []),
+          ),
         ],
         child: const MaterialApp(home: HomeShell()),
       );
@@ -147,6 +155,91 @@ void main() {
 
   });
 
+  // On canteen duty (0050) the ＋ stays — the duty books for the others —
+  // so the banner says that instead of "wait until one is over".
+  testWidgets('on duty the cap banner says the ＋ is for the others',
+      (tester) async {
+    await tester.pumpWidget(app(
+      mine: [
+        res('r1', today),
+        res('r2', today.addDays(1)),
+        res('r3', today.addDays(2)),
+      ],
+      duty: MyDuty(
+        current: DutyPeriod(id: 'd1', startsOn: today, endsOn: today),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Máš maximální počet rezervací — jako služba můžeš rezervovat '
+          'jen pro ostatní.'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Další půjde'), findsNothing);
+  });
+
+  // A group member (0044) at their own cap keeps the ＋ — they may still
+  // book for their mates — so "wait until one is over" would be false.
+  const myGroup = MyGroup(groupId: 'g1', memberIds: ['me', 'p2']);
+
+  testWidgets('in a group the cap banner says the ＋ is for the mates',
+      (tester) async {
+    await tester.pumpWidget(app(
+      mine: [
+        res('r1', today),
+        res('r2', today.addDays(1)),
+        res('r3', today.addDays(2)),
+      ],
+      group: myGroup,
+    ));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Máš maximální počet rezervací — ve skupině můžeš rezervovat '
+          'jen pro spoluhráče.'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Další půjde'), findsNothing);
+  });
+
+  // The duty books for anyone, the group only for the mates — the wider
+  // promise wins.
+  testWidgets('on duty in a group the duty banner wins', (tester) async {
+    await tester.pumpWidget(app(
+      mine: [
+        res('r1', today),
+        res('r2', today.addDays(1)),
+        res('r3', today.addDays(2)),
+      ],
+      duty: MyDuty(
+        current: DutyPeriod(id: 'd1', startsOn: today, endsOn: today),
+      ),
+      group: myGroup,
+    ));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Máš maximální počet rezervací — jako služba můžeš rezervovat '
+          'jen pro ostatní.'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('spoluhráče'), findsNothing);
+  });
+
+  // A group whose other members have all left has nobody to book for.
+  testWidgets('a group without mates keeps the plain cap banner',
+      (tester) async {
+    await tester.pumpWidget(app(
+      mine: [
+        res('r1', today),
+        res('r2', today.addDays(1)),
+        res('r3', today.addDays(2)),
+      ],
+      group: const MyGroup(groupId: 'g1', memberIds: ['me']),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Další půjde'), findsOneWidget);
+    expect(find.textContaining('spoluhráče'), findsNothing);
+  });
+
   // The cap does not bind an admin: create_reservation lets them book past
   // it, so the banner's promise ("another one once this is over") would be
   // a lie. They get the booking dialog's warning instead.
@@ -159,11 +252,15 @@ void main() {
       role: Role.admin,
       status: ProfileStatus.approved,
     );
-    await tester.pumpWidget(app(profile: boss, mine: [
-      res('r1', today),
-      res('r2', today.addDays(1)),
-      res('r3', today.addDays(2)),
-    ]));
+    await tester.pumpWidget(app(
+      profile: boss,
+      mine: [
+        res('r1', today),
+        res('r2', today.addDays(1)),
+        res('r3', today.addDays(2)),
+      ],
+      group: myGroup,
+    ));
     await tester.pumpAndSettle();
     expect(find.textContaining('maximální počet rezervací'), findsNothing);
   });

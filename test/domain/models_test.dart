@@ -51,6 +51,89 @@ void main() {
       expect(ScheduleSettings.defaults.laneCount, 4);
       expect(ScheduleSettings.defaults.trainingWeekdays, {1, 2, 4});
       expect(ScheduleSettings.defaults.kioskDark, isTrue);
+      expect(ScheduleSettings.defaults.dutyReminderEnabled, isFalse);
+      expect(ScheduleSettings.defaults.dutyReminderDays, 1);
+    });
+
+    test('fromJson reads the duty reminder (0050); off and 1 day when absent',
+        () {
+      const base = {
+        'lane_count': 4,
+        'training_weekdays': [1, 2, 4],
+        'booking_horizon_days': 14,
+        'max_active_reservations': 3,
+      };
+      final on = ScheduleSettings.fromJson({
+        ...base,
+        'duty_reminder_enabled': true,
+        'duty_reminder_days': 7,
+      });
+      expect(on.dutyReminderEnabled, isTrue);
+      expect(on.dutyReminderDays, 7);
+      final old = ScheduleSettings.fromJson(base);
+      expect(old.dutyReminderEnabled, isFalse);
+      expect(old.dutyReminderDays, 1);
+    });
+  });
+
+  group('canteen duty (0050)', () {
+    test('DutyPeriod.fromJson reads a duty_periods row', () {
+      final p = DutyPeriod.fromJson({
+        'id': 'd1',
+        'tenant_id': 't1',
+        'starts_on': '2026-10-05',
+        'ends_on': '2026-10-11',
+        'note': 'posvícení',
+        'created_by': 'u1',
+        'created_at': '2026-09-26T10:00:00+00:00',
+      });
+      expect(p.id, 'd1');
+      expect(p.startsOn, Day(2026, 10, 5));
+      expect(p.endsOn, Day(2026, 10, 11));
+      expect(p.note, 'posvícení');
+      expect(p.days, 7);
+      expect(p.covers(Day(2026, 10, 5)), isTrue);
+      expect(p.covers(Day(2026, 10, 11)), isTrue);
+      expect(p.covers(Day(2026, 10, 12)), isFalse);
+      expect(p.covers(Day(2026, 10, 4)), isFalse);
+    });
+
+    test('DutyPeriod: a missing note is none; equal rows are equal', () {
+      const row = {
+        'id': 'd1',
+        'starts_on': '2026-10-10',
+        'ends_on': '2026-10-10',
+      };
+      final p = DutyPeriod.fromJson(row);
+      expect(p.note, '');
+      expect(p.days, 1);
+      expect(p, DutyPeriod.fromJson(row));
+      expect(p, isNot(DutyPeriod.fromJson({...row, 'ends_on': '2026-10-11'})));
+    });
+
+    test('DutyAssignment.fromJson reads a duty_assignments row', () {
+      final a = DutyAssignment.fromJson({
+        'period_id': 'd1',
+        'user_id': 'u2',
+        'tenant_id': 't1',
+        'assigned_by': 'u1',
+        'created_at': '2026-09-26T10:00:00+00:00',
+      });
+      expect(a.periodId, 'd1');
+      expect(a.userId, 'u2');
+      expect(a, const DutyAssignment(periodId: 'd1', userId: 'u2'));
+    });
+
+    test('DutySeason.fromJson reads a duty_seasons row', () {
+      final s = DutySeason.fromJson({
+        'tenant_id': 't1',
+        'started_on': '2026-09-01',
+        'name': '2026/27',
+        'created_by': 'u1',
+        'created_at': '2026-09-01T08:00:00+00:00',
+      });
+      expect(s.startedOn, Day(2026, 9, 1));
+      expect(s.name, '2026/27');
     });
   });
 

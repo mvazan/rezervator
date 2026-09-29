@@ -7,7 +7,10 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:rezervator/core/ui.dart' show dayFull;
 import 'package:rezervator/data/providers.dart';
+import 'package:rezervator/domain/day_edit.dart' show blockStartedMessage;
 import 'package:rezervator/domain/models.dart';
+import 'package:rezervator/features/admin/widgets/block_dialog.dart'
+    show dayEditError;
 import 'package:rezervator/features/admin/widgets/move_reservations_dialog.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -39,12 +42,23 @@ void main() {
   final thursday = Day(2026, 7, 16);
 
   late List<http.Request> requests;
+  // The server's refusal of move_reservation (0050: a block of today that
+  // has started meanwhile).
+  var refuseMoveTooLate = false;
 
   setUpAll(() async {
     TestWidgetsFlutterBinding.ensureInitialized();
     SharedPreferences.setMockInitialValues({});
     final mock = MockClient((request) async {
       requests.add(request);
+      if (refuseMoveTooLate &&
+          request.url.path.endsWith('/rpc/move_reservation')) {
+        return http.Response(
+            '{"code":"P0001","message":"too_late","details":null,"hint":null}',
+            400,
+            headers: {'content-type': 'application/json'},
+            request: request);
+      }
       return http.Response('{}', 200,
           headers: {'content-type': 'application/json'}, request: request);
     });
@@ -59,7 +73,10 @@ void main() {
     );
   });
 
-  setUp(() => requests = []);
+  setUp(() {
+    requests = [];
+    refuseMoveTooLate = false;
+  });
 
   Reservation res(String id, String playerId, int lane, String blockId) =>
       Reservation(
@@ -375,5 +392,57 @@ void main() {
       requests.any((r) => r.url.path.contains('move_reservation')),
       isFalse,
     );
+  });
+
+  testWidgets('a refusal reads through the caller\'s mapper — the duty '
+      'hears about the block, not a reservation', (tester) async {
+    tester.view.physicalSize = const Size(1000, 800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    refuseMoveTooLate = true;
+
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        settingsProvider.overrideWith((ref) => Stream.value(settings)),
+        weekReservationsProvider.overrideWith(
+          (ref, monday) => Stream.value([res('r1', 'ph1', 1, removed.id)]),
+        ),
+        playersProvider.overrideWith(
+          (ref) async => const [
+            PlayerName(
+              id: 'ph1',
+              displayName: 'Bohumil Kroupa',
+              nick: 'Bohouš',
+              hasAccount: false,
+            ),
+          ],
+        ),
+      ],
+      child: MaterialApp(
+        home: Scaffold(
+          body: MoveReservationsDialog(
+            date: thursday,
+            fromBlock: removed,
+            targets: const [target],
+            cancelNote: 'změna rozvrhu',
+            errorText: (e) => dayEditError(e, wasOnDuty: true),
+          ),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    final gesture =
+        await tester.startGesture(tester.getCenter(find.text('Bohouš · D1')));
+    await tester.pump(const Duration(milliseconds: 250));
+    await gesture.moveTo(tester.getCenter(find.text('Dráha 1 — volná')));
+    await tester.pump();
+    await gesture.up();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Pokračovat'));
+    await tester.pumpAndSettle();
+
+    expect(find.text(blockStartedMessage), findsOneWidget);
   });
 }

@@ -48,6 +48,7 @@ class DayPagerView extends StatefulWidget {
     required this.slot,
     required this.onSelectDay,
     required this.onShiftWeek,
+    this.admin = CalendarAdminHooks.none,
   });
 
   /// The currently displayed week (Monday..Sunday), already computed by the
@@ -93,6 +94,11 @@ class DayPagerView extends StatefulWidget {
   /// governs booking.
   final bool matchLinks;
   final SlotCallbacks slot;
+
+  /// The day menu's hooks (0050): the pager has no gestures for blocks —
+  /// dragging stays landscape-only — but a phone on canteen duty still
+  /// adds a block, closes the day or restores it from the ⋮.
+  final CalendarAdminHooks admin;
 
   /// Chip tapped directly (no week change).
   final ValueChanged<int> onSelectDay;
@@ -255,6 +261,11 @@ class _DayPagerViewState extends State<DayPagerView> {
                   ? widget.matchLinks
                   : false,
               slot: widget.slot,
+              // The ⋮ and block gestures resolve their day in the current
+              // week's data, which a sentinel's date is not part of.
+              admin: page >= _firstRealPage && page <= _lastRealPage
+                  ? widget.admin
+                  : CalendarAdminHooks.none,
             ),
           ),
         ),
@@ -303,6 +314,7 @@ class _DayPage extends StatelessWidget {
     required this.interactive,
     required this.matchLinks,
     required this.slot,
+    required this.admin,
   });
 
   final DaySchedule day;
@@ -315,6 +327,26 @@ class _DayPage extends StatelessWidget {
   final bool interactive;
   final bool matchLinks;
   final SlotCallbacks slot;
+  final CalendarAdminHooks admin;
+
+  /// The ⋮ in the day header: what [admin] offers for this day. None for a
+  /// past day — its reservations are attendance history.
+  List<({String label, VoidCallback onTap})> _menu() {
+    final date = day.date;
+    if (date.isBefore(today)) return const [];
+    // Per day: the duty (0050) edits only the days of their own periods.
+    final hooks = admin.forDay(date);
+    final add = hooks.onAddForDay;
+    final close = hooks.onCloseDay;
+    final restore = hooks.onRestoreDay;
+    return [
+      if (add != null) (label: 'Přidat blok…', onTap: () => add(date)),
+      if (close != null && day is OpenDay)
+        (label: 'Zavřít den…', onTap: () => close(date)),
+      if (restore != null && hooks.hasDayOverride(date))
+        (label: 'Obnovit týdenní rozvrh', onTap: () => restore(date)),
+    ];
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -331,6 +363,7 @@ class _DayPage extends StatelessWidget {
                 priority: headerEvents(day),
                 closedReason: reason,
                 interactive: matchLinks,
+                menu: _menu(),
               ),
             ),
           ),
@@ -347,6 +380,7 @@ class _DayPage extends StatelessWidget {
       settings: settings,
       isAdmin: me?.isAdmin ?? false,
       forGroup: slot.groupMateIds.isNotEmpty,
+      onDuty: slot.onDuty,
     );
 
     return Card(
@@ -361,6 +395,7 @@ class _DayPage extends StatelessWidget {
               priority: headerEvents(day),
               chipLabel: '$freeCount volných',
               interactive: matchLinks,
+              menu: _menu(),
             ),
             const SizedBox(height: 10),
             // Lane header + block rows always stay column-aligned: lanes flex

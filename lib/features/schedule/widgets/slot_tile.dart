@@ -430,6 +430,7 @@ Widget slotTileFor({
             myPlayerId: me.id,
             isAdmin: me.isAdmin,
             groupMateIds: slot.groupMateIds,
+            onDuty: slot.onDuty,
           );
       // A reservation someone else cannot cancel is not necessarily one
       // they should learn nothing from: the board nick can be too short to
@@ -462,16 +463,21 @@ Widget slotTileFor({
             settings: settings,
             isAdmin: isAdmin,
             forGroup: slot.groupMateIds.isNotEmpty,
+            onDuty: slot.onDuty,
           );
       // Cells only bookable through the admin exemption (inPast or
       // beyondHorizon, which a regular player could never book) render the
       // '+' quieter, so admins can tell at a glance which slots are
-      // ordinarily locked.
+      // ordinarily locked. The player on duty books for the others past
+      // their own cap, and a group member for their mates (0044), so either
+      // alone keeps a cell loud.
       final normallyBookable = canBook(
         state: state,
         myActiveCount: myCount,
         settings: settings,
         isAdmin: false,
+        forGroup: slot.groupMateIds.isNotEmpty,
+        onDuty: slot.onDuty,
       );
       return SlotTile(
         state: state,
