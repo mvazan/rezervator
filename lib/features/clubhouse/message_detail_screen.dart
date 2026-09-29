@@ -73,12 +73,14 @@ class _MessageDetailScreenState extends ConsumerState<MessageDetailScreen> {
   /// leaves ([_leave]).
   bool _deleting = false;
 
+  /// A failed delete rebuilds: a snapshot its echo emptied meanwhile (the
+  /// message deleted elsewhere) is then asked about, not spun on.
   Future<void> _delete(String id) async {
     _deleting = true;
     try {
       await widget.delete(id);
     } catch (_) {
-      _deleting = false;
+      if (mounted) setState(() => _deleting = false);
       rethrow;
     }
   }

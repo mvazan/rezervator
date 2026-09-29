@@ -741,6 +741,41 @@ void main() {
       expect(find.text('open'), findsOneWidget); // back on the caller
     });
 
+    // Deleted from another device meanwhile: the echo takes the message
+    // out while this delete runs, and the RPC then refuses. The screen
+    // must stop waiting for its own delete and ask the server, not spin.
+    testWidgets('a delete that fails after the echo stops spinning: the '
+        'screen asks the server and leaves', (tester) async {
+      final messages = StreamController<List<Message>>();
+      addTearDown(() => unawaited(messages.close()));
+      final answer = Completer<void>();
+      final asked = <String>[];
+      await tester.pumpWidget(caller(overrides(messageStream: messages.stream),
+          () => MessageDetailScreen('mine',
+              markRead: (_) async {}, react: (_, _) async {}, reply: (_, _) async {},
+              messageExists: (id) async { asked.add(id); return false; },
+              delete: (_) => answer.future)));
+      messages.add([received(id: 'mine', authorId: 'me')]);
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(PopupMenuButton<String>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Smazat'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Ano'));
+      await tester.pump();
+      messages.add(const []); // the echo of the other device's delete
+      await tester.pump();
+      await tester.pump();
+      expect(asked, isEmpty); // still waiting for its own delete
+      answer.completeError(Exception('unknown_message'));
+      await tester.pump();
+      await tester.pumpAndSettle();
+      expect(asked, ['mine']);
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(find.text('open'), findsOneWidget); // back on the caller
+    });
+
     testWidgets('an id the server no longer has pops once, with a snack', (tester) async {
       final asked = <String>[];
       await tester.pumpWidget(caller(overrides(), () => MessageDetailScreen('missing',
