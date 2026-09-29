@@ -3,7 +3,7 @@
 // duty_reminders.ts shape). Both take their send functions injected.
 
 import type { Delivery } from "./delivery.ts";
-import type { BatchDelivery, Email } from "./resend.ts";
+import type { BatchDelivery, Email, SingleDelivery } from "./resend.ts";
 import { isMemberOf, type Membership } from "./membership.ts";
 import {
   appMessageUrl,
@@ -88,9 +88,9 @@ export type MessageDeps = {
   /// One Resend /emails/batch request of at most [emailBatchSize], under
   /// [idempotencyKey] (the Idempotency-Key header — resendBatch).
   sendEmails: (emails: Email[], idempotencyKey: string) => Promise<BatchDelivery>;
-  /// One e-mail alone (resendEmail): the fallback for a batch refused as
-  /// invalid.
-  sendEmail: (email: Email, idempotencyKey: string) => Promise<Delivery>;
+  /// One e-mail alone (resendOneOfBatch): the fallback for a batch refused
+  /// as invalid; "refused" when Resend's reason is not its address.
+  sendEmail: (email: Email, idempotencyKey: string) => Promise<SingleDelivery>;
   reactLink: (userId: string, reaction: "up" | "down") => Promise<string>;
   pause: (ms: number) => Promise<void>;
 };
@@ -99,16 +99,18 @@ export type MessageDeps = {
 /// (not Promise.all over the whole list). E-mails go out as Resend
 /// batches of up to [emailBatchSize] — one request each, not one per
 /// recipient, so a 40-player "all" notice to web-only players cannot trip
-/// Resend's per-second rate limit, and the fan-out stays short (pg_net
-/// gives the webhook 5 s). Each batch goes under an idempotency key
-/// (`message/<id>/<batch>`), and a batch Resend answers as busy or down is
-/// tried once more after [emailRetryPauseMs] under the same key — one it
-/// took before a gateway's 5xx is not sent twice. A batch refused as
-/// invalid (one bad address fails a strict batch whole) goes out one by
-/// one ([sendOneByOne]). A recipient whose push or links throw, or a
-/// batch that throws, is logged and skipped; the rest still get theirs. Returns how many sends were attempted (each e-mail
-/// of a batch counts, a retry does not). record.notify === false sends
-/// nothing.
+/// Resend's per-second rate limit, and the usual fan-out ends inside the
+/// 5 s pg_net waits for the webhook. Each batch goes under an idempotency
+/// key (`message/<id>/<batch>`), and a batch Resend answers as busy or
+/// down is tried once more after [emailRetryPauseMs] under the same key —
+/// one it took before a gateway's 5xx is not sent twice. A batch refused
+/// as invalid (one bad address fails a strict batch whole) goes out one
+/// by one ([sendOneByOne]) — rare, and past those 5 s: pg_net then
+/// records a timeout (it never retries) while the function runs on. A
+/// recipient whose push or links throw, or a batch that throws, is logged
+/// and skipped; the rest still get theirs. Returns how many sends were
+/// attempted (each e-mail of a batch counts, a retry does not).
+/// record.notify === false sends nothing.
 export async function deliverMessage(
   record: MessageRow,
   ctx: { authorName: string; authorIsAdmin: boolean; context: string | null },
@@ -187,18 +189,31 @@ async function withOneRetry<T extends string>(
 /// fails all of them over one bad address, alone only that one fails.
 /// Each goes under its own key ([key] plus its place in the batch); one
 /// that is busy is tried once more, one refused or thrown is logged and
-/// the rest still go. Rare, and slow on purpose (a full batch takes ~50 s,
-/// well inside an edge function's wall clock).
+/// the rest still go. But a refusal that is not about the address (a bad
+/// sender or key, "refused") before any of them went through would come
+/// back for every one: the rest are not tried, and that is logged once.
+/// Rare, and slow on purpose (a full batch takes ~50 s, well inside an
+/// edge function's wall clock).
 async function sendOneByOne(
   messageId: string,
   batch: Email[],
   key: string,
   deps: MessageDeps,
 ): Promise<void> {
+  let anyDelivered = false;
   for (const [j, email] of batch.entries()) {
     if (j > 0) await deps.pause(emailSinglePauseMs);
     try {
       const delivery = await withOneRetry(() => deps.sendEmail(email, `${key}/${j}`), deps);
+      if (delivery === "delivered") anyDelivered = true;
+      if (delivery === "refused" && !anyDelivered) {
+        const rest = batch.length - j - 1;
+        console.error(
+          `message ${messageId}: e-mail to ${email.to} refused, not about the address — ` +
+            `the other ${rest} not sent`,
+        );
+        return;
+      }
       if (delivery !== "delivered") {
         console.error(`message ${messageId}: e-mail to ${email.to} not sent (${delivery})`);
       }

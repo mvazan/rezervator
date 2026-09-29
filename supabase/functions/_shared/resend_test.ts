@@ -1,5 +1,12 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { batchDeliveryOf, type Email, resendBatch, resendEmail } from "./resend.ts";
+import {
+  batchDeliveryOf,
+  type Email,
+  resendBatch,
+  resendEmail,
+  resendOneOfBatch,
+  singleDeliveryOf,
+} from "./resend.ts";
 
 type Call = { url: string; headers: Headers; body: unknown };
 
@@ -101,4 +108,38 @@ Deno.test("resendEmail: no address or no API key sends nothing; a refusal is rea
   assertEquals(await quietly(() =>
     resendEmail(mail("bad"), { apiKey: "re_test", from: FROM, fetch: refused.fetch })
   ), "undeliverable");
+});
+
+Deno.test("singleDeliveryOf: a refusal over the sender or the key is 'refused', over the address not", () => {
+  const error = (name: string) => JSON.stringify({ statusCode: 422, name, message: "x" });
+  assertEquals(singleDeliveryOf(422, error("invalid_from_address")), "refused");
+  assertEquals(singleDeliveryOf(400, error("invalid_idempotency_key")), "refused");
+  assertEquals(singleDeliveryOf(403, error("invalid_api_key")), "refused");
+  assertEquals(singleDeliveryOf(401, "not json"), "refused");
+  // A malformed `to` is this e-mail's own: the next one may still go.
+  assertEquals(singleDeliveryOf(422, error("validation_error")), "undeliverable");
+  assertEquals(singleDeliveryOf(422, "not json"), "undeliverable");
+  assertEquals(singleDeliveryOf(200, "{}"), "delivered");
+  assertEquals(singleDeliveryOf(429, error("rate_limit_exceeded")), "retry");
+});
+
+Deno.test("resendOneOfBatch: one /emails request under the key, read by singleDeliveryOf", async () => {
+  const sent = fakeFetch(200);
+  assertEquals(await resendOneOfBatch(mail("a@x.cz"),
+    { apiKey: "re_test", from: FROM, fetch: sent.fetch }, "message/m1/0/3"), "delivered");
+  assertEquals(sent.calls[0].url, "https://api.resend.com/emails");
+  assertEquals(sent.calls[0].headers.get("idempotency-key"), "message/m1/0/3");
+  const refused = fakeFetch(401);
+  assertEquals(await quietly(() =>
+    resendOneOfBatch(mail("a@x.cz"), { apiKey: "re_test", from: FROM, fetch: refused.fetch }, "k")
+  ), "refused");
+  // No key: nothing is sent, and no other e-mail would go either.
+  const none = fakeFetch(200);
+  assertEquals(await quietly(() =>
+    resendOneOfBatch(mail("a@x.cz"), { apiKey: undefined, from: FROM, fetch: none.fetch }, "k")
+  ), "refused");
+  assertEquals(await quietly(() =>
+    resendOneOfBatch(mail(""), { apiKey: "re_test", from: FROM, fetch: none.fetch }, "k")
+  ), "undeliverable");
+  assertEquals(none.calls, []);
 });

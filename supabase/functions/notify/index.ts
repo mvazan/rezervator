@@ -53,7 +53,12 @@ import { firebaseConfigured, sendPush } from "../_shared/fcm.ts";
 import { processFederationJobs, siteFetcher } from "../_shared/federation_jobs.ts";
 import { dayLabel, escapeHtml, timeLabel } from "../_shared/format.ts";
 import type { Delivery } from "../_shared/delivery.ts";
-import { resendBatch, type ResendConfig, resendEmail } from "../_shared/resend.ts";
+import {
+  resendBatch,
+  type ResendConfig,
+  resendEmail,
+  resendOneOfBatch,
+} from "../_shared/resend.ts";
 import { deliverDueReminders, type DueReminder } from "../_shared/reminders.ts";
 import {
   deliverDueDutyReminders,
@@ -899,11 +904,14 @@ async function handle(payload: WebhookPayload) {
           byPush: (r) => firebaseConfigured() && !!r.fcm_token,
           push: (r, title, body, opts) => notifyRecipient(r, title, body, opts),
           // One request per 100 e-mails (Resend's per-second rate limit is
-          // not in play, the fan-out ends well inside pg_net's 5 s), under
-          // deliverMessage's idempotency key; one by one only as the
-          // fallback for a batch refused as invalid.
+          // not in play, and the usual fan-out ends inside the 5 s pg_net
+          // waits), under deliverMessage's idempotency key; one by one only
+          // as the fallback for a batch refused as invalid — rare, and
+          // slower than those 5 s: pg_net records a timeout (no retry)
+          // while this runs on. A refusal that is not about the address
+          // stops that fallback after its first e-mail (sendOneByOne).
           sendEmails: (emails, key) => resendBatch(emails, key, resendConfig()),
-          sendEmail: (email, key) => resendEmail(email, resendConfig(), key),
+          sendEmail: (email, key) => resendOneOfBatch(email, resendConfig(), key),
           pause: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
           reactLink: async (userId, reaction) => {
             if (!cancelSecret) throw new Error("CANCEL_TOKEN_SECRET is not set");

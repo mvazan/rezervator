@@ -979,7 +979,9 @@ threads, no player-to-player messages. Every error is a bare code.
   batch refused as invalid — 400/422, Resend's strict validation fails all
   of it over one bad address — goes out one by one, 500 ms apart, each
   under `message/<id>/<n>/<j>`, a busy one tried once more a second later,
-  a refused one logged while the rest still go; `_shared/resend.ts`; a
+  a refused one logged while the rest still go — but one refused over
+  something other than its address (a bad sender or key) before any went
+  through stops the rest, logged once; `_shared/resend.ts`; a
   recipient whose push or signed links fail, or a batch that throws, is
   logged and skipped, the others still get theirs) — unless `notify` is
   false; a failed load of the recipients is logged and answers 500

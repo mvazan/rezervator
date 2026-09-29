@@ -223,8 +223,11 @@ alley) is not a recipient.
     - A batch refused as invalid (400/422 — Resend's strict validation fails a whole batch
       over one bad address) goes out one by one, 500 ms apart, each under
       `message/<id>/<n>/<j>`: a busy single is tried once more after a second, a refused one
-      is logged and the rest still go. Rare and slow on purpose (~50 s for a full batch,
-      inside the function's wall clock; pg_net logs its own 5 s timeout for that webhook).
+      is logged and the rest still go. A refusal that is not about the address (Resend's
+      `invalid_from_address`, a bad key — `resendOneOfBatch` reads it as „refused“) before
+      any single went through stops the fallback, logged once: every other one would be
+      refused the same. Rare and slow on purpose (~50 s for a full batch, inside the
+      function's wall clock; pg_net logs its own 5 s timeout for that webhook).
     - A recipient whose push or signed links fail, or a batch that throws, is logged and
       skipped; the others still get theirs.
     - `kind = 'message'` without `CANCEL_TOKEN_SECRET` fails closed (500) before any
