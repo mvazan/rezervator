@@ -89,6 +89,10 @@ Future<void> showPlayerComposer(
 }) => showModalBottomSheet<void>(
   context: context,
   isScrollControlled: true,
+  // No drag-to-close: a drag pops the route without asking, so it could
+  // close the sheet while a send is out (see [_SheetFrame.sending]). The
+  // barrier and the back gesture close it as usual.
+  enableDrag: false,
   builder: (_) => _PlayerComposerSheet(
     initial: preselect ?? MessageAudience.admins,
     trainingLabel: date == null
@@ -157,7 +161,7 @@ Future<bool> _sendFromSheet(
 /// today or later), and the calendar's „Napsat hráčům dne…“ / „Napsat
 /// hráčům bloku…“ (Task 9) with [date]/[blockId] prefilled. The date
 /// defaults to today; the duty cannot pick a past day. Every target shows
-/// who would get it („Dostane 2 hráči: …“), and an empty one cannot be
+/// who would get it („Dostanou 2 hráči: …“), and an empty one cannot be
 /// sent. The sheet sends itself, as in [showPlayerComposer]. It watches its
 /// own providers, [ref] as there — [myProfileProvider], [myDutyProvider],
 /// [nowProvider], [weekScheduleProvider], [weekReservationsProvider] and
@@ -172,6 +176,10 @@ Future<void> showStaffComposer(
 }) => showModalBottomSheet<void>(
   context: context,
   isScrollControlled: true,
+  // No drag-to-close: a drag pops the route without asking, so it could
+  // close the sheet while a send is out (see [_SheetFrame.sending]). The
+  // barrier and the back gesture close it as usual.
+  enableDrag: false,
   builder: (_) => _StaffComposerSheet(
     initialDate: date,
     initialBlockId: blockId,
@@ -284,6 +292,7 @@ class _PlayerComposerSheetState extends ConsumerState<_PlayerComposerSheet> {
         : _audience;
     final text = _body.text.trim();
     return _SheetFrame(
+      sending: _sending,
       children: [
         Text('Napsat', style: Theme.of(context).textTheme.titleMedium),
         if (widget.trainingLabel case final label?)
@@ -357,21 +366,30 @@ class _BodyField extends StatelessWidget {
 /// viewport then ends where the keyboard starts, so a focused field is
 /// scrolled into the part the player can see — a viewport reaching under
 /// the keyboard would reveal the caret, and „Odeslat“, behind it.
+///
+/// While [sending] the sheet cannot be closed (the barrier and the back
+/// gesture ask [PopScope]; the drag is off, see the two show functions): a
+/// send that fails after the sheet is gone would lose the text the player
+/// typed, its refusal shown only on the page behind.
 class _SheetFrame extends StatelessWidget {
-  const _SheetFrame({required this.children});
+  const _SheetFrame({required this.children, required this.sending});
 
   final List<Widget> children;
+  final bool sending;
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
-    child: SafeArea(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: children,
+  Widget build(BuildContext context) => PopScope(
+    canPop: !sending,
+    child: Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+      child: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: children,
+          ),
         ),
       ),
     ),
@@ -541,7 +559,7 @@ class _StaffComposerSheetState extends ConsumerState<_StaffComposerSheet> {
         ?names[id],
     ]..sort(compareCzech);
 
-    // „Dostane 2 hráči: …“ under each target once known; a target nobody
+    // „Dostanou 2 hráči: …“ under each target once known; a target nobody
     // would get is disabled (spec: 0 → disabled, „Nikdo nemá rezervaci“).
     Widget? preview(String? blockId) =>
         known ? Text(recipientPreviewLabel(recipients(blockId))) : null;
@@ -558,6 +576,7 @@ class _StaffComposerSheetState extends ConsumerState<_StaffComposerSheet> {
         !overLimit(text, messageBodyMax) &&
         recipients(blockId).isNotEmpty;
     return _SheetFrame(
+      sending: _sending,
       children: [
         Text('Napsat hráčům', style: Theme.of(context).textTheme.titleMedium),
         ListTile(

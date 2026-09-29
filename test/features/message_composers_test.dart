@@ -263,6 +263,58 @@ void main() {
     expect(find.text('Zpráva odeslána.'), findsOneWidget);
   });
 
+  // A send is out: the sheet must stay — a failure that came after it was
+  // gone would lose the text the player typed. Barrier tap, the back
+  // gesture and a drag are all refused until the answer is in.
+  testWidgets('while a send is out the sheet cannot be dismissed, and a '
+      'failure then keeps the text', (tester) async {
+    final period = DutyPeriod(id: 'p1', startsOn: today, endsOn: today);
+    final reply = Completer<String>();
+    final calls = <Sent>[];
+    await tester.pumpWidget(app(
+      periods: [period],
+      assignments: const [DutyAssignment(periodId: 'p1', userId: 'bara')],
+      preselect: MessageAudience.duty,
+      send: recorder(calls, answer: () => reply.future),
+    ));
+    await open(tester);
+    await tester.enterText(find.byType(TextField), 'Došel toaleťák.');
+    await tester.pump();
+    await tester.tap(find.text('Odeslat'));
+    await tester.pump();
+    expect(calls, hasLength(1));
+
+    await tester.tapAt(const Offset(5, 5)); // the barrier
+    await tester.pumpAndSettle();
+    expect(find.text('Odeslat'), findsOneWidget);
+    await tester.binding.handlePopRoute(); // the back gesture
+    await tester.pumpAndSettle();
+    expect(find.text('Odeslat'), findsOneWidget);
+    await tester.drag(find.byType(TextField), const Offset(0, 500));
+    await tester.pumpAndSettle();
+    expect(find.text('Odeslat'), findsOneWidget);
+
+    reply.completeError(Exception('nobody_on_duty'));
+    await tester.pumpAndSettle();
+    expect(find.text('Odeslat'), findsOneWidget);
+    expect(tester.widget<TextField>(find.byType(TextField)).controller!.text,
+        'Došel toaleťák.');
+    expect(find.text('Dnes nikdo neslouží — napiš správci.'), findsOneWidget);
+  });
+
+  testWidgets('with no send out the barrier and the back gesture close the '
+      'sheet as before', (tester) async {
+    await tester.pumpWidget(app());
+    await open(tester);
+    await tester.tapAt(const Offset(5, 5));
+    await tester.pumpAndSettle();
+    expect(find.text('Odeslat'), findsNothing);
+    await open(tester);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.text('Odeslat'), findsNothing);
+  });
+
   testWidgets('a refused send keeps the sheet open with the text, says why, '
       'and can be sent again', (tester) async {
     final period = DutyPeriod(id: 'p1', startsOn: today, endsOn: today);
@@ -459,7 +511,7 @@ void main() {
       ]));
       await openStaff(tester);
       // Czech-sorted, the admin's own booking and the placeholder's left out.
-      expect(find.text('Dostane 2 hráči: Petr Novák a Tomáš Válka'), findsNWidgets(2));
+      expect(find.text('Dostanou 2 hráči: Petr Novák a Tomáš Válka'), findsNWidgets(2));
     });
 
     testWidgets('an empty block is disabled and cannot be picked; a booked one '

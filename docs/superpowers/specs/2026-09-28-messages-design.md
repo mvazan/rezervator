@@ -291,7 +291,8 @@ alley) is not a recipient.
   (service role — the reacted-at trigger and the reaction webhook fire as from the app), and
   answers **`Response.redirect(..., 303)` → `https://rezervator.online/reakce.html?ok=1`**; a
   bad, expired or orphaned token, a recipient set as the kiosk, back to pending or moved to
-  another alley, or a database error → `?ok=0`. A missing `CANCEL_TOKEN_SECRET` → 500 (fail
+  another alley → `?ok=0`; a database error → `?ok=retry` (the link is fine, a second click
+  may work). A missing `CANCEL_TOKEN_SECRET` → 500 (fail
   closed), logged.
 - **Only GET writes.** HEAD — what a link scanner or mail gateway probes with — verifies the
   token alone (a pure HMAC) and answers the same 303 (`ok=1` for a valid token, `ok=0`
@@ -305,8 +306,9 @@ alley) is not a recipient.
   comment so it isn't "fixed" into a two-step flow later. The function itself never returns
   HTML (edge-function bodies are served as `text/plain`; the rule stays redirect-to-a-static-
   page, as `calendar-oauth-callback` already does).
-- `web/reakce.html`: static page, „Díky, reakce je uložená.“ / „Odkaz už neplatí.“, with a
-  link „Otevřít Rezervátor“ → `/#/zpravy`.
+- `web/reakce.html`: static page, „Díky, reakce je uložená.“ / „Odkaz už neplatí.“ / (for
+  `?ok=retry`) „Teď se to nepovedlo. Zkus to za chvíli znovu.“, with a link „Otevřít
+  Rezervátor“ → `/#/zpravy`.
 
 ## Deep link
 
@@ -419,14 +421,16 @@ value; either is fine, pick whichever touches less of the existing call sites.
   context (never the caller's — Zprávy's FABs step aside while the keyboard is up) and waits
   while a send is under way, so one tap is one message. Success closes the sheet and the
   page says „Zpráva odeslána.“; a refusal shows over the sheet and keeps the text for
-  another try; the outcome is still told if the sheet was swiped away meanwhile. The sheet
+  another try. The sheet cannot be closed while a send is out — the barrier and the back
+  gesture are refused, and there is no drag-to-close at all (a drag pops the route without
+  asking) — so a refusal never arrives after the typed text is gone. The sheet
   ends above the keyboard and scrolls; „Odeslat“ is off while the text is over 500 code
   points (the counter says „502/500“).
 - **Staff composer** (the admin, or a player with a duty period that has not ended) — FAB
   „Napsat hráčům“ → date (default today, or for a duty not serving today the first day of
   their next period; the admin may pick any day, the duty only the days of their own periods
   from today on — the picker greys out every other day) → „Celý den“ or one of the day's blocks,
-  each with „Dostane 4 hráči: Jan, Petra, …“ (0 → disabled, „Nikdo nemá rezervaci“) → text →
+  each with „Dostanou 4 hráči: Jan, Petra, …“ (the verb agrees with the numeral: „Dostane 1 hráč“, „Dostanou 2–4 hráči“, „Dostane 5 hráčů“) (0 → disabled, „Nikdo nemá rezervaci“) → text →
   „Odeslat“. While the reservations and the roster are still loading no target shows a
   count and „Odeslat“ waits; a prefilled block that turns out empty stays selected,
   disabled, and cannot be sent.
@@ -474,13 +478,13 @@ Nástěnka, Oznámení správce, Zprávy, Zprávy pro tebe a od tebe, Nový ozna
 Platí do, Do odvolání, Poslat upozornění, Upravit, Kdo si to zobrazil, Zobrazilo {n} z {m},
 Ještě nezobrazili:, Sejmout, Smazat, vyvěšeno {den}, platí do {den}, do odvolání, Starší
 ({n}), Na nástěnce zatím nic není., Napsat, Napsat hráčům, Správci, Službě, Dnes nikdo
-neslouží, Celý den, Dostane {n} hráči: …, Nikdo nemá rezervaci, Odeslat, Zpráva odeslána.,
+neslouží, Celý den, Dostane/Dostanou {n} hráč/hráči/hráčů: …, Nikdo nemá rezervaci, Odeslat, Zpráva odeslána.,
 Krátká odpověď…, bez reakce, ty, Od správce, Od služby, Od hráče: {jméno}, Ode mě správci,
 Ode mě službě, Ode mě hráčům, k tréninku {den} · {čas}, celý den {den}, Napsat hráčům dne…,
 Napsat hráčům bloku…, Napsat správci…, Napsat službě…, Zatím žádné zprávy., Zpráva už
 neexistuje., Oznámení už neexistuje., Reakce na tvou zprávu, Zpráva od správce, Zpráva od
 služby, Zpráva od hráče: {jméno}, Zpráva od správce ({jméno}), Odpovědět v aplikaci, Otevřít nástěnku, Díky, reakce je
-uložená., Odkaz už neplatí., Otevřít Rezervátor., {n}× 👍, {n}× 👎, {n}× 💬 (and 💬 opening the
+uložená., Odkaz už neplatí., Teď se to nepovedlo. Zkus to za chvíli znovu., Otevřít Rezervátor., {n}× 👍, {n}× 👎, {n}× 💬 (and 💬 opening the
 reply-only group of the reaction line), Nadpis je moc dlouhý., Odpověď je moc dlouhá.
 
 Shipped with the plan besides these (dialogs, outcomes and error texts, quoted as the code

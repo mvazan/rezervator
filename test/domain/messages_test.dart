@@ -480,10 +480,21 @@ void main() {
 
   group('recipientPreviewLabel', () {
     test('"Dostane N hráči: …" in Czech list form', () {
-      expect(recipientPreviewLabel(['Jan Novák', 'Petra Svobodová']),
-          'Dostane 2 hráči: Jan Novák a Petra Svobodová');
       expect(recipientPreviewLabel(['Jan Novák']), 'Dostane 1 hráč: Jan Novák');
+      expect(recipientPreviewLabel(['Jan Novák', 'Petra Svobodová']),
+          'Dostanou 2 hráči: Jan Novák a Petra Svobodová');
       expect(recipientPreviewLabel([]), 'Nikdo nemá rezervaci');
+    });
+
+    // The verb agrees with the numeral: 1 → Dostane, 2–4 → Dostanou (plural
+    // subject), 5+ → Dostane again (a numeral of five or more takes the
+    // singular, with the genitive „hráčů“).
+    test('the verb follows the count: 1 Dostane, 2–4 Dostanou, 5+ Dostane', () {
+      List<String> names(int n) => [for (var i = 1; i <= n; i++) 'Hráč $i'];
+      expect(recipientPreviewLabel(names(3)).startsWith('Dostanou 3 hráči: '), isTrue);
+      expect(recipientPreviewLabel(names(4)).startsWith('Dostanou 4 hráči: '), isTrue);
+      expect(recipientPreviewLabel(names(5)).startsWith('Dostane 5 hráčů: '), isTrue);
+      expect(recipientPreviewLabel(names(12)).startsWith('Dostane 12 hráčů: '), isTrue);
     });
   });
 

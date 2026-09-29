@@ -370,11 +370,15 @@ List<String> dayRecipientIds(
   ];
 }
 
-/// „Dostane 2 hráči: Jan Novák a Petra Svobodová“ / „Nikdo nemá
+/// „Dostanou 2 hráči: Jan Novák a Petra Svobodová“ / „Nikdo nemá
 /// rezervaci“ for an empty list — the staff composer's live recipient
-/// preview. Keeps the order of [names]: sort them with [compareCzech]
-/// first.
-String recipientPreviewLabel(List<String> names) => names.isEmpty
-    ? 'Nikdo nemá rezervaci'
-    : 'Dostane ${czechCount(names.length, 'hráč', 'hráči', 'hráčů')}: '
-        '${joinNames(names)}';
+/// preview. The verb agrees with the numeral: „Dostane 1 hráč“, „Dostanou
+/// 2–4 hráči“ (a plural subject), „Dostane 5 hráčů“ (five and more take
+/// the singular). Keeps the order of [names]: sort them with
+/// [compareCzech] first.
+String recipientPreviewLabel(List<String> names) {
+  if (names.isEmpty) return 'Nikdo nemá rezervaci';
+  final n = names.length;
+  final verb = n >= 2 && n <= 4 ? 'Dostanou' : 'Dostane';
+  return '$verb ${czechCount(n, 'hráč', 'hráči', 'hráčů')}: ${joinNames(names)}';
+}
