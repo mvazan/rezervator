@@ -978,9 +978,14 @@ threads, no player-to-player messages. Every error is a bare code.
   once more a second later under the same key, is never sent twice; a
   batch refused as invalid — 400/422, Resend's strict validation fails all
   of it over one bad address — goes out one by one, 500 ms apart, each
-  under `message/<id>/<n>/<j>`; `_shared/resend.ts`) — unless `notify` is
+  under `message/<id>/<n>/<j>`, a busy one tried once more a second later,
+  a refused one logged while the rest still go; `_shared/resend.ts`; a
+  recipient whose push or signed links fail, or a batch that throws, is
+  logged and skipped, the others still get theirs) — unless `notify` is
   false; a failed load of the recipients is logged and answers 500
-  instead of sending nothing — a notice: its title and the text cut to 120
+  instead of sending nothing; a `message` (not a notice) without
+  `CANCEL_TOKEN_SECRET` answers 500 before any delivery, its 👍/👎 links
+  cannot be signed — a notice: its title and the text cut to 120
   characters, the e-mail „Otevřít nástěnku“; a message: „Zpráva od
   správce“ / „Zpráva od služby“ (by `author_role`) to players, „Zpráva od
   {jméno}“ to staff, the context („pá 2. 10. · 16:00–17:00“) on its own
