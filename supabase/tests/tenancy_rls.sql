@@ -8008,6 +8008,14 @@ begin
           '50000000-0000-0000-0000-000000000016')
   returning id into v_id;
   perform set_config('probe.duty_res_wanda', v_id::text, true);
+  -- ... and one in the 00:00 block of today, which has started.
+  insert into reservations (tenant_id, player_id, date, block_id, lane,
+                            created_via, created_by)
+  values (v_s, '50000000-0000-0000-0000-000000000016', v_today,
+          current_setting('probe.duty_b0')::uuid, 4, 'app',
+          '50000000-0000-0000-0000-000000000016')
+  returning id into v_id;
+  perform set_config('probe.duty_res_started', v_id::text, true);
 end $$;
 set local role authenticated;
 set local request.jwt.claims =
@@ -8060,6 +8068,19 @@ begin
                  where id = v_res.id and cancelled_via = 'duty'
                    and cancelled_at is not null) then
     raise exception 'FAIL: the duty could not cancel a training on another duty''s day';
+  end if;
+  -- The booked player's rules hold there as anywhere: no cancel once the
+  -- block has started.
+  begin
+    perform cancel_reservation(current_setting('probe.duty_res_started')::uuid);
+    raise exception 'FAIL: the duty cancelled a training of a block that has started today';
+  exception when others then
+    if sqlerrm <> 'too_late' then raise; end if;
+  end;
+  if not exists (select 1 from reservations
+                 where id = current_setting('probe.duty_res_started')::uuid
+                   and cancelled_at is null) then
+    raise exception 'FAIL: a refused cancel by the duty cancelled the training';
   end if;
   raise notice 'OK: the duty books, re-seats and cancels on another duty''s day, but edits no block there or on a day nobody serves (0050)';
 end $$;
