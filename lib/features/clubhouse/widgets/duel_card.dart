@@ -554,7 +554,20 @@ class _Lanes extends StatelessWidget {
   }
 }
 
-/// „Dr. 1  213 : 216•“: the lane winner's number w800 with a 6dp dot on its
+/// The width of „000“ in [style] as the text is laid out here (tabular
+/// figures: every digit is as wide as a 0).
+double _threeDigits(BuildContext context, TextStyle? style) {
+  final painter = TextPainter(
+    text: TextSpan(text: '000', style: style),
+    textDirection: Directionality.of(context),
+    textScaler: MediaQuery.textScalerOf(context),
+  )..layout();
+  final width = painter.width;
+  painter.dispose();
+  return width;
+}
+
+/// „1.  213 : 216•“: the lane winner's number w800 with a 6dp dot on its
 /// outer side; a tie „215 = 215“; a lane not thrown by both a plain „– : –“. Left-aligned in its cell.
 class _LaneEntry extends StatelessWidget {
   const _LaneEntry({
@@ -587,65 +600,66 @@ class _LaneEntry extends StatelessWidget {
       ),
     );
 
-    final Widget score;
-    if (!lane.played) {
-      // A lane not thrown yet: plain „– : –“, no frame.
-      score = Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-        child: Text(
-          '– : –',
-          style: base?.copyWith(color: scheme.onSurfaceVariant),
+    // One skeleton for thrown and not thrown lanes: [dot] [home, right-
+    // aligned] [ : ] [away, left-aligned] [dot], the two numbers in boxes of
+    // one width (three digits, bold), so the colons of every lane stand
+    // under each other — 1. above 3., 2. above 4.
+    final played = lane.played;
+    final winner = lane.winner;
+    final muted = base?.copyWith(color: scheme.onSurfaceVariant);
+    TextStyle? number(MatchSide side) => !played
+        ? muted
+        : base?.copyWith(
+            fontWeight: winner == side ? FontWeight.w800 : FontWeight.w500,
+          );
+    final numberBox = _threeDigits(
+      context,
+      base?.copyWith(fontWeight: FontWeight.w800),
+    );
+    Widget number0(String value, MatchSide side) => ConstrainedBox(
+      constraints: BoxConstraints(minWidth: numberBox),
+      child: Text(
+        value,
+        textAlign: side == MatchSide.home ? TextAlign.right : TextAlign.left,
+        style: number(side),
+      ),
+    );
+    Widget dot(MatchSide side) => SizedBox.square(
+      key: played && winner == side
+          ? Key('duel-$position-lane-${lane.lane}-dot')
+          : null,
+      dimension: 6,
+      child: played && winner == side
+          ? DecoratedBox(
+              decoration: BoxDecoration(
+                color: _mark(
+                  context,
+                  side == MatchSide.home ? homeColor : awayColor,
+                  home: side == MatchSide.home,
+                ),
+                shape: BoxShape.circle,
+              ),
+            )
+          : null,
+    );
+    final score = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        dot(MatchSide.home),
+        const SizedBox(width: 4),
+        Row(
+          key: Key('duel-$position-lane-${lane.lane}-score'),
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            number0(played ? '${lane.home!.total}' : '–', MatchSide.home),
+            Text(lane.tie ? ' = ' : ' : ', style: played ? base : muted),
+            number0(played ? '${lane.away!.total}' : '–', MatchSide.away),
+          ],
         ),
-      );
-    } else {
-      final winner = lane.winner;
-      TextStyle? number(MatchSide side) => base?.copyWith(
-        fontWeight: winner == side ? FontWeight.w800 : FontWeight.w500,
-      );
-      Widget dot(MatchSide side) => SizedBox.square(
-        key: winner == side
-            ? Key('duel-$position-lane-${lane.lane}-dot')
-            : null,
-        dimension: 6,
-        child: winner == side
-            ? DecoratedBox(
-                decoration: BoxDecoration(
-                  color: _mark(
-                    context,
-                    side == MatchSide.home ? homeColor : awayColor,
-                    home: side == MatchSide.home,
-                  ),
-                  shape: BoxShape.circle,
-                ),
-              )
-            : null,
-      );
-      score = Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          dot(MatchSide.home),
-          const SizedBox(width: 4),
-          Text.rich(
-            TextSpan(
-              children: [
-                TextSpan(
-                  text: '${lane.home!.total}',
-                  style: number(MatchSide.home),
-                ),
-                TextSpan(text: lane.tie ? ' = ' : ' : '),
-                TextSpan(
-                  text: '${lane.away!.total}',
-                  style: number(MatchSide.away),
-                ),
-              ],
-            ),
-            style: base,
-          ),
-          const SizedBox(width: 4),
-          dot(MatchSide.away),
-        ],
-      );
-    }
+        const SizedBox(width: 4),
+        dot(MatchSide.away),
+      ],
+    );
 
     // Left-aligned in its column, so the numbers of lanes 1 and 3 (2 and 4)
     // start on one line whatever their scores look like.

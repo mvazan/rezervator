@@ -116,18 +116,25 @@ Rect _rect(WidgetTester tester, String key) =>
     tester.getRect(find.byKey(Key(key)));
 
 /// The style of the span that prints [number] inside the lane text [lane].
-TextStyle? _spanStyle(WidgetTester tester, String lane, String number) {
-  final span = _text(tester, lane).textSpan!;
-  TextStyle? found;
-  span.visitChildren((child) {
-    if (child is TextSpan && child.text == number) {
-      found = child.style;
-      return false;
-    }
-    return true;
-  });
-  return found;
-}
+/// The [number] Text inside lane [lane]'s row of duel [position].
+Text _inLane(WidgetTester tester, int position, int lane, String number) =>
+    tester.widget<Text>(
+      find.descendant(
+        of: find.byKey(Key('duel-$position-lane-$lane-score')),
+        matching: find.text(number),
+      ),
+    );
+
+/// The three texts of one lane row: home, the separator, away.
+List<String> _laneRow(WidgetTester tester, int position, int lane) => [
+  for (final t in tester.widgetList<Text>(
+    find.descendant(
+      of: find.byKey(Key('duel-$position-lane-$lane-score')),
+      matching: find.byType(Text),
+    ),
+  ))
+    t.data!,
+];
 
 void main() {
   group('duel 1, collapsed: Mičanová 407 : 385 Pelánek, pins decided', () {
@@ -151,8 +158,9 @@ void main() {
       expect(find.textContaining('Dr.'), findsNothing);
       // The position circle is gone: the only lone „1“ would be it.
       expect(find.text('1'), findsNothing);
-      expect(find.text('213 : 216'), findsOneWidget);
-      expect(find.text('194 : 169'), findsOneWidget);
+      // Each lane is one row „213 : 216“ (home right-aligned, away left).
+      expect(_laneRow(tester, 1, 1), ['213', ' : ', '216']);
+      expect(_laneRow(tester, 1, 2), ['194', ' : ', '169']);
     });
 
     testWidgets('the lead sits between the totals, bigger than before', (
@@ -182,29 +190,14 @@ void main() {
     ) async {
       await pump(tester);
       // Lane 1 went away (216), lane 2 home (194).
-      expect(
-        _spanStyle(tester, '213 : 216', '216')?.fontWeight,
-        FontWeight.w800,
-      );
-      expect(
-        _spanStyle(tester, '213 : 216', '213')?.fontWeight,
-        FontWeight.w500,
-      );
-      expect(
-        _spanStyle(tester, '194 : 169', '194')?.fontWeight,
-        FontWeight.w800,
-      );
-      expect(
-        _spanStyle(tester, '194 : 169', '169')?.fontWeight,
-        FontWeight.w500,
-      );
+      expect(_inLane(tester, 1, 1, '216').style?.fontWeight, FontWeight.w800);
+      expect(_inLane(tester, 1, 1, '213').style?.fontWeight, FontWeight.w500);
+      expect(_inLane(tester, 1, 2, '194').style?.fontWeight, FontWeight.w800);
+      expect(_inLane(tester, 1, 2, '169').style?.fontWeight, FontWeight.w500);
       final dot1 = _rect(tester, 'duel-1-lane-1-dot');
       final dot2 = _rect(tester, 'duel-1-lane-2-dot');
-      expect(
-        dot1.left,
-        greaterThan(tester.getRect(find.text('213 : 216')).right),
-      );
-      expect(dot2.right, lessThan(tester.getRect(find.text('194 : 169')).left));
+      expect(dot1.left, greaterThan(_rect(tester, 'duel-1-lane-1-score').right));
+      expect(dot2.right, lessThan(_rect(tester, 'duel-1-lane-2-score').left));
       expect(dot1.size, const Size(6, 6));
     });
 
@@ -228,7 +221,7 @@ void main() {
 
     testWidgets('numbers use tabular figures', (tester) async {
       await pump(tester);
-      for (final number in ['407', '385', '+22', '213 : 216']) {
+      for (final number in ['407', '385', '+22']) {
         expect(
           _text(tester, number).style?.fontFeatures,
           contains(const FontFeature.tabularFigures()),
@@ -299,13 +292,15 @@ void main() {
       expect(find.text('-3'), findsOneWidget);
       expect(_text(tester, '434').style?.fontWeight, FontWeight.w800);
       expect(_text(tester, '431').style?.fontWeight, FontWeight.w500);
-      expect(find.text('215 = 215'), findsOneWidget);
+      expect(_laneRow(tester, 6, 1), ['215', ' = ', '215']);
       // A tie has no dot and no winner weight.
       expect(find.byKey(const Key('duel-6-lane-1-dot')), findsNothing);
-      expect(
-        _spanStyle(tester, '215 = 215', '215')?.fontWeight,
-        FontWeight.w500,
-      );
+      for (final t in tester.widgetList<Text>(find.descendant(
+        of: find.byKey(const Key('duel-6-lane-1-score')),
+        matching: find.text('215'),
+      ))) {
+        expect(t.style?.fontWeight, FontWeight.w500);
+      }
       expect(find.textContaining('SB'), findsNothing);
     });
 
@@ -456,12 +451,19 @@ void main() {
     testWidgets('after 1 of 2 lanes; no winner styling yet', (tester) async {
       await tester.pumpWidget(_host(_card(_playing)));
       expect(find.text('po 1 ze 2 drah'), findsOneWidget);
-      expect(find.text('– : –'), findsOneWidget);
+      expect(_laneRow(tester, 1, 2), ['–', ' : ', '–']);
       expect(find.text('bod'), findsNothing);
       expect(find.text('½'), findsNothing);
       // The totals count only the lane both threw, as the lead does.
-      expect(_text(tester, '213').style?.fontWeight, FontWeight.w500);
-      expect(_text(tester, '216').style?.fontWeight, FontWeight.w500);
+      // The 32dp totals carry no winner weight while the duel is played; a
+      // thrown lane still has its own winner (216 in lane 1).
+      for (final total in ['213', '216']) {
+        final big = tester
+            .widgetList<Text>(find.text(total))
+            .where((t) => t.style?.fontSize == 32);
+        expect(big.single.style?.fontWeight, FontWeight.w500, reason: total);
+      }
+      expect(_inLane(tester, 1, 1, '216').style?.fontWeight, FontWeight.w800);
       expect(find.text('363'), findsNothing);
       expect(find.text('-3'), findsOneWidget);
       expect(find.textContaining('SB'), findsNothing);
@@ -588,6 +590,17 @@ void main() {
       tester.getTopLeft(find.text('2.')).dx,
       closeTo(tester.getTopLeft(find.text('4.')).dx, 0.01),
     );
+    // The colons stand under each other as well, thrown lane or not.
+    double colon(int lane) => tester
+        .getCenter(
+          find.descendant(
+            of: find.byKey(Key('duel-1-lane-$lane-score')),
+            matching: find.text(lane <= 2 ? ' : ' : ' : '),
+          ),
+        )
+        .dx;
+    expect(colon(1), closeTo(colon(3), 0.01));
+    expect(colon(2), closeTo(colon(4), 0.01));
   });
 
   testWidgets('a split point: no stripe, no bar, the lead „=“', (tester) async {
