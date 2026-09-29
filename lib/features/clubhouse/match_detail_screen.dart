@@ -31,11 +31,17 @@ class MatchDetailScreen extends ConsumerStatefulWidget {
   const MatchDetailScreen({
     super.key,
     required this.matchId,
+    this.competitionSlug,
     this.refresh = _defaultRefresh,
     this.launch = _defaultLaunch,
   });
 
   final String matchId;
+
+  /// Set for a match of two teams that are none of ours (0055): it is read
+  /// from `league_matches` of this competition instead of the alley's
+  /// priority slots.
+  final String? competitionSlug;
 
   /// Injectable so widget tests never reach Supabase or the platform.
   final Future<String> Function(String matchId, {bool force}) refresh;
@@ -312,26 +318,43 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final now = ref.watch(nowProvider).value ?? DateTime.now();
-    final slots = ref.watch(prioritySlotsProvider);
-    final slotsLoading = ref.watch(prioritySlotsLoadingProvider);
+    final leagueSlug = widget.competitionSlug;
+    final isLeague = leagueSlug != null;
+    // One source of the match: our slots, or (a foreign match) its
+    // competition's league matches.
+    final slots = isLeague ? const <PrioritySlot>[] : ref.watch(prioritySlotsProvider);
+    final leagueAsync = isLeague ? ref.watch(leagueMatchesProvider(leagueSlug)) : null;
+    LeagueMatch? leagueMatch;
+    for (final l in leagueAsync?.value ?? const <LeagueMatch>[]) {
+      if (l.id == widget.matchId) leagueMatch = l;
+    }
+    final slotsLoading = isLeague
+        ? !(leagueAsync?.hasValue ?? false)
+        : ref.watch(prioritySlotsLoadingProvider);
     final resultsAsync = ref.watch(matchResultsProvider);
     final results = resultsAsync.value ?? const <String, MatchResult>{};
-    final result = results[widget.matchId];
+    final result = isLeague ? leagueMatch?.result : results[widget.matchId];
     final players =
-        ref.watch(matchPlayerResultsProvider(widget.matchId)).value ??
+        (isLeague
+                ? ref.watch(leaguePlayerResultsProvider(widget.matchId))
+                : ref.watch(matchPlayerResultsProvider(widget.matchId)))
+            .value ??
         const <MatchPlayerResult>[];
     final venues = ref.watch(venuesProvider).value ?? const <Venue>[];
     final view = ref.watch(matchDetailViewProvider);
     final teamColors =
         ref.watch(myTeamColorsProvider).value ?? const <String, int>{};
 
-    PrioritySlot? slot;
+    PrioritySlot? slot = leagueMatch?.asSlot();
     for (final s in slots) {
       if (s.id == widget.matchId) {
         slot = s;
         break;
       }
     }
+    // A foreign match with no time yet is never live.
+    bool liveNow(PrioritySlot slot) =>
+        (leagueMatch?.timeKnown ?? true) && isLive(slot, result, now);
 
     Venue? venueMatch;
     if (slot?.venueSlug case final slug? when slug.isNotEmpty) {
@@ -345,10 +368,12 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
 
     if (!_didOpenRefresh &&
         !slotsLoading &&
-        resultsAsync.hasValue &&
+        (isLeague || resultsAsync.hasValue) &&
         slot != null) {
       _didOpenRefresh = true;
-      if (isLive(slot, result, now)) {
+      // Live, or a finished foreign match whose player lines were never
+      // fetched: asking is what queues the fetch (refresh_match, 0055).
+      if (liveNow(slot) || (leagueMatch?.needsDetail ?? false)) {
         WidgetsBinding.instance.addPostFrameCallback(
           (_) => unawaited(_refreshQuietly()),
         );
@@ -363,7 +388,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
       });
     }
     final showWaiting = _waiting && !resultChanged;
-    final live = slot != null && isLive(slot, result, now);
+    final live = slot != null && liveNow(slot);
     final showRefreshButton = live && !_hiddenByNotLive;
 
     return Scaffold(

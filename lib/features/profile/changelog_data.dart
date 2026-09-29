@@ -49,6 +49,11 @@ String changelogHeading(Release r, {required bool web}) {
 }
 
 const appChangelog = <Release>[
+  Release(null, '29. 9. 2026', [
+    'Výsledky: přepínač Oddíly / Soutěže. Soutěže ukáže celou soutěž, ve '
+        'které hrají naše oddíly, po kolech (podle dat konání) — včetně '
+        'zápasů ostatních družstev, s detailem a zápisem hráčů.',
+  ]),
   Release(null, '23. 9. 2026', [
     'Zápasy a výsledky se nově stahují z výsledkového servisu ČKA — '
         'správce je zapne v Správa → Oddíly.',
