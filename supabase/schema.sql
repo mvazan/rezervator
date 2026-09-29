@@ -387,12 +387,15 @@ begin
   delete from match_player_results where match_id = v_row.id;
   insert into match_player_results
     (match_id, tenant_id, side, position, player_name, player_site_id, player_slug,
-     fulls, spares, errors, total, set_points, team_points, lanes)
+     fulls, spares, errors, total, set_points, team_points, lanes,
+     sub_name, sub_site_id, sub_slug, sub_from_throw)
   select v_row.id, p_tenant, p->>'side', (p->>'position')::smallint, p->>'player_name',
          (p->>'player_site_id')::integer, p->>'player_slug',
          (p->>'fulls')::integer, (p->>'spares')::integer, (p->>'errors')::integer,
          (p->>'total')::integer, (p->>'set_points')::numeric,
-         (p->>'team_points')::numeric, coalesce(p->'lanes', '[]'::jsonb)
+         (p->>'team_points')::numeric, coalesce(p->'lanes', '[]'::jsonb),
+         nullif(p->>'sub_name', ''), (p->>'sub_site_id')::integer, p->>'sub_slug',
+         (p->>'sub_from_throw')::smallint
     from jsonb_array_elements(coalesce(p_result->'players', '[]'::jsonb)) p;
   return true;
 end;
@@ -4619,6 +4622,10 @@ CREATE TABLE IF NOT EXISTS "public"."match_player_results" (
     "set_points" numeric,
     "team_points" numeric,
     "lanes" "jsonb" DEFAULT '[]'::"jsonb" NOT NULL,
+    "sub_name" "text",
+    "sub_site_id" integer,
+    "sub_slug" "text",
+    "sub_from_throw" smallint,
     CONSTRAINT "match_player_results_side_check" CHECK (("side" = ANY (ARRAY['home'::"text", 'away'::"text"])))
 );
 

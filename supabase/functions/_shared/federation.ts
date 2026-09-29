@@ -13,7 +13,10 @@ export type SitePlayer = {
   position: number; name: string; siteId: number | null; slug: string | null;
   fulls: number | null; spares: number | null; errors: number | null; total: number | null;
   setPoints: number | null; teamPoints: number | null; lanes: SiteLane[];
+  /** Who took over this line and from which throw ("od 41. hodu"), if anyone. */
+  substitute: SiteSubstitute | null;
 };
+export type SiteSubstitute = { name: string; siteId: number | null; slug: string | null; fromThrow: number | null };
 export type SiteSide = {
   points: number | null; total: number | null; fulls: number | null; spares: number | null;
   errors: number | null; setPoints: number | null; players: SitePlayer[];
@@ -137,6 +140,18 @@ export function parseCompetition(html: string): SiteCompetition {
 function side(v: Json | undefined): SiteSide | null {
   if (!v) return null;
   if (!Array.isArray(v.playerResults)) throw new Error("match player results missing");
+  // The site lists a change apart from the lines: who came in for whom.
+  const changes = new Map<number, SiteSubstitute>();
+  for (const c of (Array.isArray(v.substitutions) ? v.substitutions : []) as Json[]) {
+    const out = c?.playerOut as Json | undefined;
+    const into = c?.playerIn as Json | undefined;
+    const outId = num(out?.id);
+    if (outId === null || !into || typeof into !== "object") continue;
+    changes.set(outId, {
+      name: `${into.firstName ?? ""} ${into.lastName ?? ""}`.trim(),
+      siteId: num(into.id), slug: str(into.slug), fromThrow: num(c.throwNumber),
+    });
+  }
   const players = (v.playerResults as Json[])
     .filter((p) => p.player && typeof p.player === "object")
     .map((p): SitePlayer => {
@@ -151,6 +166,7 @@ function side(v: Json | undefined): SiteSide | null {
           lane: Number(l.laneNumber), fulls: num(l.full), spares: num(l.spare),
           errors: num(l.errors), total: num(l.total), setPoints: num(l.setPoints),
         })),
+        substitute: num(who.id) === null ? null : changes.get(num(who.id)!) ?? null,
       };
     });
   return {
@@ -459,6 +475,8 @@ export function resultPayload(d: SiteMatchDetail): Record<string, unknown> {
       player_site_id: p.siteId, player_slug: p.slug,
       fulls: p.fulls, spares: p.spares, errors: p.errors, total: p.total,
       set_points: p.setPoints, team_points: p.teamPoints,
+      sub_name: p.substitute?.name ?? null, sub_site_id: p.substitute?.siteId ?? null,
+      sub_slug: p.substitute?.slug ?? null, sub_from_throw: p.substitute?.fromThrow ?? null,
       lanes: p.lanes.map((l) => ({
         lane: l.lane, fulls: l.fulls, spares: l.spares, errors: l.errors,
         total: l.total, setPoints: l.setPoints,

@@ -4132,7 +4132,7 @@ end $$;
 do $$
 declare
   v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
-  v_res constant jsonb := '{"status":"finished","match_type":"TEAMS_OF_6","discipline":"T120","video_url":null,"venue":{"slug":"jinde","name":"Kuželna Jinde"},"home_prep":30,"home":{"points":6,"total":3200,"fulls":2100,"spares":1100,"errors":10,"set_points":15},"away":{"points":2,"total":3100,"fulls":2050,"spares":1050,"errors":14,"set_points":9},"players":[{"side":"home","position":1,"player_name":"Jan Novák","player_site_id":7,"player_slug":"jan-novak","fulls":350,"spares":190,"errors":1,"total":540,"set_points":3,"team_points":1,"lanes":[{"lane":1,"fulls":90,"spares":45,"errors":0,"total":135,"setPoints":1}]}]}';
+  v_res constant jsonb := '{"status":"finished","match_type":"TEAMS_OF_6","discipline":"T120","video_url":null,"venue":{"slug":"jinde","name":"Kuželna Jinde"},"home_prep":30,"home":{"points":6,"total":3200,"fulls":2100,"spares":1100,"errors":10,"set_points":15},"away":{"points":2,"total":3100,"fulls":2050,"spares":1050,"errors":14,"set_points":9},"players":[{"side":"home","position":1,"player_name":"Jan Novák","player_site_id":7,"player_slug":"jan-novak","fulls":350,"spares":190,"errors":1,"total":540,"set_points":3,"team_points":1,"sub_name":"Petr Nový","sub_site_id":9,"sub_slug":"petr-novy","sub_from_throw":41,"lanes":[{"lane":1,"fulls":90,"spares":45,"errors":0,"total":135,"setPoints":1}]}]}';
   s priority_slots;
   mr match_results;
 begin
@@ -4150,6 +4150,11 @@ begin
      or (select lanes->0->>'total' from match_player_results where match_id = s.id) <> '135' then
     raise exception 'FAIL: player row not stored';
   end if;
+  if (select (sub_name, sub_site_id, sub_slug, sub_from_throw)::text
+        from match_player_results where match_id = s.id)
+     is distinct from '("Petr Nový",9,petr-novy,41)' then
+    raise exception 'FAIL: the substitution was not stored on the starter''s row (0053)';
+  end if;
   if not s.is_away or s.prep_minutes <> 0 or s.venue_slug <> 'jinde'
      or s.venue <> 'Kuželna Jinde' or s.description not like '%· Kuželna Jinde' then
     raise exception 'FAIL: the venue did not turn 103 into an away match: %', to_jsonb(s);
@@ -4166,7 +4171,7 @@ begin
     raise exception 'FAIL: apply_federation_result should answer false for a match with no slot';
   end if;
   perform set_config('import.run', '', true);
-  raise notice 'OK: apply_federation_result upserts the result, replaces players, fixes home/away from the venue; false without a slot (0045)';
+  raise notice 'OK: apply_federation_result upserts the result, replaces players, fixes home/away from the venue; false without a slot (0045); a substitution rides on the starter''s row (0053)';
 end $$;
 
 -- 7. RLS: own alley reads, the other alley sees nothing, nobody writes.
