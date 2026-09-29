@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/domain/models.dart';
+import 'package:rezervator/domain/palette.dart';
 import 'package:rezervator/features/clubhouse/widgets/team_totals_card.dart';
 
 import '../../../support/rudna_vrsovice.dart';
@@ -101,6 +102,27 @@ void main() {
       expect(_weight(tester, '44'), FontWeight.w800);
       expect(_weight(tester, '74'), FontWeight.w500);
       expect(find.text('Chyby +30'), findsOneWidget);
+    });
+
+    testWidgets('the lead is printed in its side colour, the name is not', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _host(
+          TeamTotalsCard(
+            result: rudnaResult,
+            homeColor: Colors.teal,
+            awayColor: Colors.purple,
+          ),
+        ),
+      );
+      final label = tester.widget<Text>(find.text('Kuželky +234'));
+      final spans = (label.textSpan! as TextSpan).children!.cast<TextSpan>();
+      expect(spans.first.style, isNull);
+      expect(
+        spans.last.style?.color,
+        legibleSideText(Colors.teal, Brightness.light, highContrast: false),
+      );
     });
 
     testWidgets('home on the left, away on the right, the label between', (

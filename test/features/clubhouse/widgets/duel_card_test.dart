@@ -411,6 +411,19 @@ void main() {
     expect(find.textContaining('od '), findsNothing);
   });
 
+  testWidgets('the lead is printed in its side colour: + home, - guests', (
+    tester,
+  ) async {
+    Color? colorOf(String label) => tester.widget<Text>(find.text(label)).style?.color;
+    Color shade(Color c) => legibleSideText(c, Brightness.light, highContrast: false);
+    // Duel 1 went to home (+22), duel 6 to the guests (-3); the card's
+    // sides are teal and purple.
+    await tester.pumpWidget(_host(_card(_rudna[0])));
+    expect(colorOf('+22'), shade(Colors.teal));
+    await tester.pumpWidget(_host(_card(_rudna[5])));
+    expect(colorOf('-3'), shade(Colors.purple));
+  });
+
   testWidgets('tapping the card calls onTap once', (tester) async {
     var taps = 0;
     await tester.pumpWidget(_host(_card(_rudna[0], onTap: () => taps++)));

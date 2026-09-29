@@ -15,6 +15,7 @@ import 'package:flutter/material.dart';
 import '../../../domain/duels.dart';
 import '../../../domain/models.dart';
 import '../../../domain/results.dart';
+import 'lead_color.dart';
 
 /// Digits of one width, so a number doesn't jump when a live value changes.
 const _tabular = [FontFeature.tabularFigures()];
@@ -24,11 +25,21 @@ const _tabular = [FontFeature.tabularFigures()];
 /// The card has no margin of its own: the list places it, like the duel
 /// cards above it.
 class TeamTotalsCard extends StatelessWidget {
-  const TeamTotalsCard({super.key, required this.result});
+  const TeamTotalsCard({
+    super.key,
+    required this.result,
+    this.homeColor,
+    this.awayColor,
+  });
 
   /// The team-level score whose sums the card shows. Without both pin
   /// totals the card renders nothing.
   final MatchResult result;
+
+  /// The sides' colours for the leads („+234“ in home's, „-100“ in the
+  /// guests'); null = green and red.
+  final Color? homeColor;
+  final Color? awayColor;
 
   @override
   Widget build(BuildContext context) {
@@ -53,6 +64,8 @@ class TeamTotalsCard extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             _Row(
+                homeColor: homeColor,
+                awayColor: awayColor,
               key: const Key('team-totals-kuzelky'),
               name: 'Kuželky',
               lead: _lead(homeTotal, awayTotal),
@@ -62,6 +75,8 @@ class TeamTotalsCard extends StatelessWidget {
             ),
             if (known(result.homeFulls, result.awayFulls))
               _Row(
+                homeColor: homeColor,
+                awayColor: awayColor,
                 key: const Key('team-totals-plne'),
                 name: 'Plné',
                 lead: _lead(result.homeFulls, result.awayFulls),
@@ -71,6 +86,8 @@ class TeamTotalsCard extends StatelessWidget {
               ),
             if (known(result.homeSpares, result.awaySpares))
               _Row(
+                homeColor: homeColor,
+                awayColor: awayColor,
                 key: const Key('team-totals-dorazka'),
                 name: 'Dorážka',
                 lead: _lead(result.homeSpares, result.awaySpares),
@@ -80,6 +97,8 @@ class TeamTotalsCard extends StatelessWidget {
               ),
             if (known(result.homeErrors, result.awayErrors))
               _Row(
+                homeColor: homeColor,
+                awayColor: awayColor,
                 key: const Key('team-totals-chyby'),
                 name: 'Chyby',
                 // Fewer errors lead: the arguments are swapped, so „+“ still
@@ -91,6 +110,8 @@ class TeamTotalsCard extends StatelessWidget {
               ),
             if (known(result.homeSetPoints, result.awaySetPoints))
               _Row(
+                homeColor: homeColor,
+                awayColor: awayColor,
                 key: const Key('team-totals-sb'),
                 name: 'SB',
                 home: result.homeSetPoints,
@@ -122,6 +143,8 @@ class _Row extends StatelessWidget {
     required this.away,
     required this.leader,
     this.lead = '',
+    this.homeColor,
+    this.awayColor,
   });
 
   /// „Kuželky“, „Plné“, „Dorážka“, „Chyby“ or „SB“.
@@ -129,6 +152,10 @@ class _Row extends StatelessWidget {
 
   /// [leadLabel]'s sign and difference after [name]; '' prints none.
   final String lead;
+
+  /// The sides' colours the lead is printed in.
+  final Color? homeColor;
+  final Color? awayColor;
 
   /// The home side's value; null prints „–“.
   final num? home;
@@ -183,8 +210,25 @@ class _Row extends StatelessWidget {
                   constraints: BoxConstraints(
                     maxWidth: constraints.maxWidth / 2,
                   ),
-                  child: Text(
-                    lead.isEmpty ? name : '$name $lead',
+                  child: Text.rich(
+                    TextSpan(
+                      children: [
+                        TextSpan(text: lead.isEmpty ? name : '$name '),
+                        if (lead.isNotEmpty)
+                          TextSpan(
+                            text: lead,
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              color: leadColor(
+                                context,
+                                lead,
+                                homeColor: homeColor,
+                                awayColor: awayColor,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
                     textAlign: TextAlign.center,
                     // A wrapped label is only as wide as its longest line,
                     // so the values keep the rest.

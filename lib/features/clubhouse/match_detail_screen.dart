@@ -285,7 +285,11 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
       if (result != null)
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-          child: TeamTotalsCard(result: result),
+          child: TeamTotalsCard(
+            result: result,
+            homeColor: homeColor,
+            awayColor: awayColor,
+          ),
         ),
     ];
   }
@@ -438,6 +442,8 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
                     builder: (_) => VenueDetailScreen(slug: venueMatch.slug),
                   ),
                 ),
+          homeColor: homeColor,
+          awayColor: awayColor,
         ),
         // While live the freshness sits in the scoreboard's „Živě“ chip.
         // Na webu ČKA is on the same row, at the right (alone while live).

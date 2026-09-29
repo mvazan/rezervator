@@ -70,10 +70,25 @@ Color legibleSideShade(Color color, Brightness brightness, {required bool home})
     HSLColor.fromColor(color)
         .withLightness(
           brightness == Brightness.dark
-              ? (home ? 0.86 : 0.72)
+              ? (home ? 0.68 : 0.66)
               : (home ? 0.29 : 0.25),
         )
         .toColor();
+
+/// [legibleSideShade] for TEXT (a lead like „+22“ printed in its side's
+/// colour): darker in light, lighter in dark, so it clears 4.5:1 on the card
+/// — 7:1 in the two high-contrast appearances ([highContrast]).
+Color legibleSideText(
+  Color color,
+  Brightness brightness, {
+  required bool highContrast,
+}) => HSLColor.fromColor(color)
+    .withLightness(
+      brightness == Brightness.dark
+          ? (highContrast ? 0.86 : 0.72)
+          : (highContrast ? 0.17 : 0.22),
+    )
+    .toColor();
 
 /// Club color palette (spec §2). Index 0–8 = a club color; anything else
 /// (e.g. -1 "no club", -2 rental default) → the neutral fallback.

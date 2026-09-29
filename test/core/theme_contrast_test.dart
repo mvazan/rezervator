@@ -166,11 +166,33 @@ void main() {
 
       // The two default sides must not differ in hue alone: green is the
       // lighter one, so a viewer who confuses red and green still sees two
-      // brightnesses (measured about 2.5:1 light, 2.3:1 dark).
+      // brightnesses (measured about 2.5:1 light, 2.2:1 dark).
       test('home green and guests red differ in brightness too', () {
         final green = legibleSideShade(homeSideColor, brightness, home: true);
         final red = legibleSideShade(awaySideColor, brightness, home: false);
         expect(contrastRatio(green, red), greaterThanOrEqualTo(2.0));
+      });
+
+      // A lead („+22“ home, „-3“ guests) is text in its side's colour on the
+      // card: 4.5:1 (7:1 in the high-contrast appearances), for the default
+      // green and red and for every team colour a viewer can pick.
+      test('the lead labels are legible in their side colours', () {
+        final card = theme.cardTheme.color!;
+        for (final (name, color) in <(String, Color)>[
+          for (final (_, name, color) in googleEventColors) (name, color),
+          ('home green', homeSideColor),
+          ('guests red', awaySideColor),
+        ]) {
+          _expectText(
+            contrastRatio(
+              legibleSideText(color, brightness, highContrast: contrastLevel == 1),
+              card,
+            ),
+            '$name lead on the card',
+            variant,
+            textBar,
+          );
+        }
       });
 
       // „bod“ pill: the side colour at 16 % under onSurface text.

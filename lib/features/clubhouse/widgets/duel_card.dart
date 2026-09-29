@@ -23,6 +23,7 @@ import '../../../domain/duels.dart';
 import '../../../domain/models.dart' show MatchPlayerResult;
 import '../../../domain/palette.dart';
 import '../../../domain/results.dart';
+import 'lead_color.dart';
 
 /// Digits of one width, so a number doesn't jump when a live value changes.
 const _tabular = [FontFeature.tabularFigures()];
@@ -430,7 +431,14 @@ class _Totals extends StatelessWidget {
             style: text.labelLarge?.copyWith(
               fontSize: 13,
               fontWeight: FontWeight.w700,
-              color: scheme.onSurface,
+              color:
+                  leadColor(
+                    context,
+                    leadLabel(duel.diff),
+                    homeColor: homeColor,
+                    awayColor: awayColor,
+                  ) ??
+                  scheme.onSurface,
               fontFeatures: _tabular,
             ),
           ),

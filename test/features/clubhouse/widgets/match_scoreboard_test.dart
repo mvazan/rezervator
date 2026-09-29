@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/core/theme.dart';
 import 'package:rezervator/domain/models.dart';
+import 'package:rezervator/domain/palette.dart';
 import 'package:rezervator/features/clubhouse/widgets/match_scoreboard.dart';
 
 import '../../../support/rudna_vrsovice.dart';
@@ -159,6 +160,11 @@ void main() {
       expect(find.text('2555'), findsOneWidget);
       expect(find.text('2321'), findsOneWidget);
       expect(find.text('+234'), findsOneWidget);
+      // The lead is printed in the home side's colour (green by default).
+      expect(
+        _text(tester, '+234').style?.color,
+        legibleSideText(homeSideColor, Brightness.light, highContrast: false),
+      );
       expect(find.text('průběžně'), findsNothing);
     });
 

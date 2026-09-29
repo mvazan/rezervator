@@ -19,6 +19,7 @@ import '../../../core/ui.dart';
 import '../../../domain/duels.dart';
 import '../../../domain/models.dart';
 import '../../../domain/results.dart';
+import 'lead_color.dart';
 
 /// Digits of one width, so a number doesn't jump when a live value changes.
 const _tabular = [FontFeature.tabularFigures()];
@@ -32,6 +33,8 @@ class MatchScoreboard extends StatelessWidget {
     required this.players,
     required this.now,
     this.onVenueTap,
+    this.homeColor,
+    this.awayColor,
   });
 
   /// The match: its date and start, the teams and the venue.
@@ -49,6 +52,10 @@ class MatchScoreboard extends StatelessWidget {
 
   /// Null = the venue is plain text (no known venue page).
   final VoidCallback? onVenueTap;
+
+  /// The sides' colours the pin lead is printed in; null = green and red.
+  final Color? homeColor;
+  final Color? awayColor;
 
   /// The chip's word for a match that is not live.
   static String _statusLabel(MatchStatus status) => switch (status) {
@@ -113,6 +120,8 @@ class MatchScoreboard extends StatelessWidget {
                 homeTotal: homeTotal,
                 awayTotal: awayTotal,
                 running: running,
+                homeColor: homeColor,
+                awayColor: awayColor,
               ),
             ],
             _Footer(
@@ -524,15 +533,19 @@ bool _fitsTwoLines(
 }
 
 /// „2555  +234  2321“: the pin totals and, between them, the lead with its
-/// sign (+ home, - guests). While the match runs the pill is hollow
-/// and reads „Kuželky zatím +87“, and the totals are [liveTeamTotals].
+/// sign (+ home, - guests), in that side's colour. The pill is hollow; while
+/// the match runs it reads „Kuželky zatím +87“, and the totals are [liveTeamTotals].
 class _PinsLine extends StatelessWidget {
   const _PinsLine({
     required this.homeTotal,
     required this.awayTotal,
     required this.running,
+    this.homeColor,
+    this.awayColor,
   });
 
+  final Color? homeColor;
+  final Color? awayColor;
   final int homeTotal;
   final int awayTotal;
 
@@ -562,13 +575,21 @@ class _PinsLine extends StatelessWidget {
             const SizedBox(width: 12),
             _Pill(
               label: running ? 'Kuželky zatím $lead' : lead,
-              // Hollow while running: no fill, a 1dp outline.
-              fill: running ? null : scheme.secondaryContainer,
-              border: running ? BorderSide(color: scheme.outline) : null,
+              // Hollow: no fill, a 1dp outline — the lead is printed in its
+              // side's colour, which is legible on the card, not on a fill.
+              fill: null,
+              border: BorderSide(color: scheme.outline),
               style: text.titleSmall?.copyWith(
                 fontSize: 15,
                 fontWeight: FontWeight.w800,
-                color: running ? scheme.onSurface : scheme.onSecondaryContainer,
+                color:
+                    leadColor(
+                      context,
+                      lead,
+                      homeColor: homeColor,
+                      awayColor: awayColor,
+                    ) ??
+                    scheme.onSurface,
                 fontFeatures: _tabular,
               ),
             ),
