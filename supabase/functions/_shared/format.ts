@@ -1,5 +1,5 @@
 // Formatting helpers shared by notify and cancel: HTML escaping for e-mail
-// bodies / the cancel page, the Czech day + time labels ("po 13.7.",
+// bodies, the Czech day + time labels ("po 13.7.",
 // "17:30") used in notification texts, and how long "before" reads in
 // Czech.
 
