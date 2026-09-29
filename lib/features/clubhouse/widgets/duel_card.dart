@@ -209,7 +209,6 @@ class _DuelBody extends StatelessWidget {
       color: scheme.onSurfaceVariant,
       fontFeatures: _tabular,
     );
-    final sentence = _sentence(duel, showSetPoints);
     final reduceMotion = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
 
     return Column(
@@ -246,7 +245,7 @@ class _DuelBody extends StatelessWidget {
         Row(
           children: [
             Expanded(
-              child: duel.lanes.isNotEmpty
+              child: !expanded && duel.lanes.isNotEmpty
                   ? _Lanes(duel: duel, homeColor: homeColor, awayColor: awayColor)
                   : const SizedBox.shrink(),
             ),
@@ -269,49 +268,16 @@ class _DuelBody extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     const SizedBox(height: 8),
-                    _LaneTable(duel: duel),
-                    if (sentence != null) ...[
-                      const SizedBox(height: 10),
-                      Text(
-                        sentence,
-                        textAlign: TextAlign.center,
-                        style: text.bodyMedium?.copyWith(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w500,
-                          color: scheme.onSurface,
-                          fontFeatures: _tabular,
-                        ),
-                      ),
-                    ],
+                    _LaneTable(
+                      duel: duel,
+                      homeColor: homeColor,
+                      awayColor: awayColor,
+                    ),
                   ],
                 ),
         ),
       ],
     );
-  }
-
-  /// „SB 1 : 1 → rozhodly kuželky 407 : 385 → bod Mičanová“ when pins
-  /// decided, „SB 2 : 0 → bod Strnad“ otherwise, „SB 0,5 : 0,5 → body
-  /// napůl“ on a split; without the „SB …“ part when set points do not
-  /// matter ([showSetPoints] false). Null until the duel is done, or when its point is
-  /// unknown.
-  static String? _sentence(Duel duel, bool showSetPoints) {
-    if (duel.state != DuelState.done) return null;
-    final sb = showSetPoints
-        ? 'SB ${numLabel(duel.home?.setPoints)} : '
-              '${numLabel(duel.away?.setPoints)}'
-        : '';
-    if (duel.pointSplit) return sb.isEmpty ? 'body napůl' : '$sb → body napůl';
-    final winner = duel.pointWinner;
-    if (winner == null) return null;
-    final surname = surnameOf(
-      (winner == MatchSide.home ? duel.home : duel.away)?.playerName,
-    );
-    final pins = duel.decidedByPins
-        ? 'rozhodly kuželky ${numLabel(duel.home?.total)} : '
-              '${numLabel(duel.away?.total)}'
-        : '';
-    return [sb, pins, 'bod $surname'].where((p) => p.isNotEmpty).join(' → ');
   }
 }
 
@@ -699,9 +665,15 @@ class _LaneEntry extends StatelessWidget {
 /// column heads are 11dp, so on a 360dp phone at text scale 1.0 it fits
 /// without shrinking. Larger text shrinks the whole table as one piece.
 class _LaneTable extends StatelessWidget {
-  const _LaneTable({required this.duel});
+  const _LaneTable({
+    required this.duel,
+    required this.homeColor,
+    required this.awayColor,
+  });
 
   final Duel duel;
+  final Color homeColor;
+  final Color awayColor;
 
   @override
   Widget build(BuildContext context) {
@@ -749,6 +721,7 @@ class _LaneTable extends StatelessWidget {
       String middle,
       List<String> away, {
       required bool sum,
+      Color? middleColor,
     }) => TableRow(
       decoration: sum
           ? BoxDecoration(
@@ -758,7 +731,12 @@ class _LaneTable extends StatelessWidget {
       children: [
         for (final (i, s) in home.indexed)
           cell(s, sum || i == 3 ? bold : value),
-        cell(middle, caption),
+        middleColor == null
+            ? cell(middle, caption)
+            : cell(
+                middle,
+                bold?.copyWith(fontSize: 13, color: middleColor),
+              ),
         for (final (i, s) in away.indexed)
           cell(s, sum || i == 0 ? bold : value),
       ],
@@ -788,7 +766,10 @@ class _LaneTable extends StatelessWidget {
                 lane.home?.total,
                 mirrored: false,
               ),
-              '${lane.lane}.',
+              // The lane's lead: +3 for home, -3 for the guests.
+              lane.played
+                  ? leadLabel(lane.home!.total! - lane.away!.total!)
+                  : '',
               side(
                 lane.away?.fulls,
                 lane.away?.spares,
@@ -797,6 +778,14 @@ class _LaneTable extends StatelessWidget {
                 mirrored: true,
               ),
               sum: false,
+              middleColor: lane.played
+                  ? leadColor(
+                      context,
+                      leadLabel(lane.home!.total! - lane.away!.total!),
+                      homeColor: homeColor,
+                      awayColor: awayColor,
+                    )
+                  : null,
             ),
           row(
             side(

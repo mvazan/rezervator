@@ -258,12 +258,22 @@ void main() {
       expect(find.byIcon(Icons.expand_less), findsOneWidget);
     });
 
-    testWidgets('the sentence tells how the point was won', (tester) async {
+    testWidgets('expanded: no lane summary, +/- per lane, no verdict', (
+      tester,
+    ) async {
       await pump(tester);
-      expect(
-        find.text('rozhodly kuželky 407 : 385 → bod Mičanová'),
-        findsOneWidget,
-      );
+      // The collapsed lane summary is hidden once the table is open.
+      expect(find.text('213 : 216'), findsNothing);
+      expect(find.text('194 : 169'), findsNothing);
+      expect(find.text('1.'), findsNothing);
+      // Lane 1 went away by 3, lane 2 home by 25: in the middle column.
+      expect(find.text('-3'), findsOneWidget);
+      expect(find.text('+25'), findsOneWidget);
+      // Nothing of the old sentence.
+      expect(find.textContaining('rozhodly'), findsNothing);
+      expect(find.textContaining('→'), findsNothing);
+      // The chevron stays, as the way back.
+      expect(find.byIcon(Icons.expand_less), findsOneWidget);
     });
 
     testWidgets('the table is mirrored: home Plné far left, away Plné far '
@@ -311,11 +321,13 @@ void main() {
       expect(_rect(tester, 'duel-6-stripe').right, closeTo(card.right, 0.01));
     });
 
-    testWidgets('the sentence names the away winner by surname', (
+    testWidgets('expanded: the lane leads are signed, a tie is „=“', (
       tester,
     ) async {
       await tester.pumpWidget(_host(_card(_rudna[5], expanded: true)));
-      expect(find.text('bod Vilímovský'), findsOneWidget);
+      expect(find.text('='), findsOneWidget);
+      expect(find.text('-3'), findsNWidgets(2), reason: 'the lead and lane 2');
+      expect(find.textContaining('bod '), findsNothing);
     });
 
     testWidgets('duel 5 (+99) fills its half of the bar', (tester) async {
@@ -542,8 +554,6 @@ void main() {
     expect(find.text('(560) 0'), findsOneWidget);
     // Nothing of the old verdict line.
     expect(find.text('SB 4 : 0'), findsNothing);
-    await tester.pumpWidget(_host(_card(_t120, showSetPoints: true, expanded: true)));
-    expect(find.text('SB 4 : 0 → bod 1'), findsOneWidget);
     // Without set points (100 throws) the plain pins.
     await tester.pumpWidget(_host(_card(_t120)));
     expect(find.text('4 (600)'), findsNothing);
@@ -555,10 +565,11 @@ void main() {
     // A split has no pill and no winner weight: just the lead „=“.
     expect(find.text('½'), findsNothing);
     expect(find.text('bod'), findsNothing);
-    expect(find.text('='), findsOneWidget);
+    // The lead and the tied lane in the open table.
+    expect(find.text('='), findsNWidgets(2));
     expect(find.byKey(const Key('duel-1-stripe')), findsNothing);
     expect(find.byKey(const Key('duel-1-bar-fill')), findsNothing);
-    expect(find.text('body napůl'), findsOneWidget);
+    expect(find.textContaining('body'), findsNothing);
   });
 
   final states = {
