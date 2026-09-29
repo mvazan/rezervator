@@ -6,6 +6,7 @@ import '../../data/providers.dart';
 import '../../data/week_schedule.dart';
 import '../../domain/models.dart';
 import '../../domain/schedule.dart';
+import '../clubhouse/duties_screen.dart';
 import 'schedule_actions.dart';
 import 'week_board.dart';
 import 'widgets/week_header.dart';
@@ -31,6 +32,13 @@ class WeekScreen extends ConsumerStatefulWidget {
 }
 
 class _WeekScreenState extends ConsumerState<WeekScreen> with WeekNavigation {
+  /// The app's clock read afresh — the duty's day edits ask it again right
+  /// before writing (0050), long after this build.
+  HourMinute _clockNow() {
+    final t = (mounted ? ref.read(nowProvider).value : null) ?? DateTime.now();
+    return HourMinute(t.hour, t.minute);
+  }
+
   @override
   Widget build(BuildContext context) {
     final nowDt = ref.watch(nowProvider).value ?? DateTime.now();
@@ -55,6 +63,10 @@ class _WeekScreenState extends ConsumerState<WeekScreen> with WeekNavigation {
       weekOffset: weekOffset,
       onGo: goWeek,
       trailing: widget.trailing,
+      duty: ref.watch(weekDutyHeaderProvider(monday)),
+      onDutyTap: () => Navigator.of(context).push(
+        MaterialPageRoute<void>(builder: (_) => const DutiesScreen()),
+      ),
     );
 
     if (view.isLoading) {
@@ -113,9 +125,14 @@ class _WeekScreenState extends ConsumerState<WeekScreen> with WeekNavigation {
         _myLiveCountOn(mine, me?.id, monday.addDays(i)),
     ];
 
-    // Admin block gestures (long-press edit, tap-a-gap add) only exist for
-    // admins on the real DB block set — never on the placeholder grid.
-    final canEditBlocks = (me?.isAdmin ?? false) && blocksFromDb;
+    // Day-block gestures (long-press edit, tap-a-gap add, move, the day
+    // menu) exist for the admin and for a player with canteen duty periods
+    // (0050) — on the real DB block set only, never on the placeholder
+    // grid. Which days a duty may edit is ScheduleActions.canEditDay's
+    // question: the days of their own periods, on duty today or not.
+    final duty = ref.watch(myDutyProvider);
+    final canEditBlocks =
+        ((me?.isAdmin ?? false) || duty.mine.isNotEmpty) && blocksFromDb;
     final slotTypes = ref.watch(slotTypesProvider).value ?? const [];
     final actions = ScheduleActions(
       context: context,
@@ -127,12 +144,15 @@ class _WeekScreenState extends ConsumerState<WeekScreen> with WeekNavigation {
       slotTypes: slotTypes,
       settings: settings,
       today: todayDay,
+      now: now,
       reservations: reservations,
       rentals: rentals,
       me: me,
       canEditBlocks: canEditBlocks,
       noAccountIds: wv.noAccountIds,
       groupMateIds: me == null ? const {} : group.matesOf(me.id),
+      duty: duty,
+      clock: _clockNow,
     );
 
     return Column(

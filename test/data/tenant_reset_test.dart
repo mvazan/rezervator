@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/data/providers.dart';
+import 'package:rezervator/domain/duties.dart';
 import 'package:rezervator/domain/models.dart';
 
 /// A superadmin's kuželna switch: every tenant-scoped stream must be
@@ -72,6 +73,108 @@ void main() {
         'matchResults': 2,
         'venues': 2,
       });
+    },
+  );
+
+  testWidgets(
+    'resetTenantScopedProviders re-creates the duty streams, the seasons and '
+    'my duty (0050)',
+    (tester) async {
+      final builds = <String, int>{};
+      void count(String name) => builds[name] = (builds[name] ?? 0) + 1;
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            dutyPeriodsProvider.overrideWith((ref) {
+              count('periods');
+              return Stream.value(const <DutyPeriod>[]);
+            }),
+            dutyAssignmentsProvider.overrideWith((ref) {
+              count('assignments');
+              return Stream.value(const <DutyAssignment>[]);
+            }),
+            dutySeasonsProvider.overrideWith((ref) async {
+              count('seasons');
+              return const <DutySeason>[];
+            }),
+            myDutyProvider.overrideWith((ref) {
+              count('myDuty');
+              return MyDuty.none;
+            }),
+          ],
+          child: MaterialApp(
+            home: Consumer(
+              builder: (context, ref, _) {
+                ref.watch(dutyPeriodsProvider);
+                ref.watch(dutyAssignmentsProvider);
+                ref.watch(dutySeasonsProvider);
+                ref.watch(myDutyProvider);
+                return TextButton(
+                  onPressed: () => resetTenantScopedProviders(ref),
+                  child: const Text('Přepnout kuželnu'),
+                );
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(builds,
+          {'periods': 1, 'assignments': 1, 'seasons': 1, 'myDuty': 1});
+
+      await tester.tap(find.text('Přepnout kuželnu'));
+      await tester.pump();
+
+      expect(builds,
+          {'periods': 2, 'assignments': 2, 'seasons': 2, 'myDuty': 2});
+    },
+  );
+
+  testWidgets(
+    'resetTenantScopedProviders re-creates the messages streams (0051)',
+    (tester) async {
+      final builds = <String, int>{};
+      void count(String name) => builds[name] = (builds[name] ?? 0) + 1;
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            messagesProvider.overrideWith((ref) {
+              count('messages');
+              return Stream.value(const <Message>[]);
+            }),
+            myMessageRecipientsProvider.overrideWith((ref) {
+              count('recipients');
+              return Stream.value(const <MessageRecipient>[]);
+            }),
+            messageParticipantsProvider('m1').overrideWith((ref) {
+              count('participants');
+              return Stream.value(const <MessageRecipient>[]);
+            }),
+          ],
+          child: MaterialApp(
+            home: Consumer(
+              builder: (context, ref, _) {
+                ref.watch(messagesProvider);
+                ref.watch(myMessageRecipientsProvider);
+                ref.watch(messageParticipantsProvider('m1'));
+                return TextButton(
+                  onPressed: () => resetTenantScopedProviders(ref),
+                  child: const Text('Přepnout kuželnu'),
+                );
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(builds, {'messages': 1, 'recipients': 1, 'participants': 1});
+
+      await tester.tap(find.text('Přepnout kuželnu'));
+      await tester.pump();
+
+      expect(builds, {'messages': 2, 'recipients': 2, 'participants': 2});
     },
   );
 

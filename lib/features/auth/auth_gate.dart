@@ -6,6 +6,7 @@ import '../../core/widgets/auth_background.dart';
 import '../../data/live_refresh.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
+import '../../push/pending_link.dart';
 import '../kiosk/kiosk_shell.dart';
 import '../schedule/home_shell.dart';
 import 'login_screen.dart';
@@ -45,6 +46,14 @@ class _AuthGateState extends ConsumerState<AuthGate> {
 
   @override
   Widget build(BuildContext context) {
+    // A deep link waiting for the account that just left (a push tapped
+    // for it, a /zpravy/:id it opened) must not open for the next one on
+    // this device (0051).
+    ref.listen(authStateProvider, (_, next) {
+      if (next.value?.event != AuthChangeEvent.signedOut) return;
+      PendingLinkSource.clearInitial();
+      ref.read(pendingLinkProvider.notifier).clear();
+    });
     final auth = ref.watch(authStateProvider);
     final session =
         auth.value?.session ?? Supabase.instance.client.auth.currentSession;

@@ -4,8 +4,17 @@ import '../../../core/ui.dart';
 import '../../../data/providers.dart';
 import '../../../domain/day_edit.dart';
 import '../../../domain/models.dart';
+import 'day_flows.dart';
 import 'move_reservations_dialog.dart';
 import 'notify_choice_dialog.dart';
+
+/// How a refusal of a DAY edit (a block, not a reservation) reads. For the
+/// player on duty a `too_late` means a block of today has started meanwhile
+/// — the plain copy would talk about cancelling a reservation.
+String dayEditError(Object error, {required bool wasOnDuty}) =>
+    wasOnDuty && '$error'.contains('too_late')
+        ? blockStartedMessage
+        : friendlyDbError(error, wasOnDuty: wasOnDuty);
 
 /// If deactivating [blockId] would cancel future live reservations (the
 /// server cascades them with 'změna rozvrhu', 0018), asks the admin first.
@@ -59,6 +68,11 @@ class BlockDialog extends StatefulWidget {
     this.dayPriority = const <PrioritySlot>[],
     this.dayReason = '',
     this.noAccountIds = const <String>{},
+    this.offerCloseDay = false,
+    this.offerMessageBlock = false,
+    this.onMessagePlayers,
+    this.wasOnDuty = false,
+    this.dutyClock,
   });
 
   final TimeBlock? existing;
@@ -103,6 +117,33 @@ class BlockDialog extends StatefulWidget {
 
   /// Day-scoped mode: the day's existing override reason, preserved on save.
   final String dayReason;
+
+  /// Day-scoped mode, a NEW block from the header ＋ on an open day: also
+  /// offer „Zavřít den“ (0050 — the admin and the player on duty).
+  final bool offerCloseDay;
+
+  /// Day-scoped mode, editing an EXISTING block: also offer „Napsat
+  /// hráčům bloku…“ (0051 — the admin and the player on duty). Never
+  /// offered for a brand-new block (there is nobody booked into it yet).
+  final bool offerMessageBlock;
+
+  /// Called when „Napsat hráčům bloku…“ is tapped, after this dialog has
+  /// closed — the caller opens the staff composer prefilled with this
+  /// block; this dialog does not know about composers itself.
+  final VoidCallback? onMessagePlayers;
+
+  /// Opened by the player on canteen duty (0050): a `not_allowed` refusal
+  /// then means the duty has just ended, and says so.
+  final bool wasOnDuty;
+
+  /// Day-scoped mode, the player on duty editing TODAY (0050): reads the
+  /// current time. A block starting at or before it has started — the
+  /// server refuses to move one there and spares its reservations — so the
+  /// save refuses such a start, the counts leave those rows out and no move
+  /// targets them. Read afresh for every check: right before the first
+  /// write it is asked again, and a block that started while the dialog
+  /// was open writes nothing. Null (the admin, any other day) = no limit.
+  final HourMinute Function()? dutyClock;
 
   @override
   State<BlockDialog> createState() => _BlockDialogState();
@@ -152,25 +193,78 @@ class _BlockDialogState extends State<BlockDialog> {
   /// guess (the snackbar explains, the caller bails).
   Future<List<StrandableReservation>?> _loadRows() async {
     try {
-      return await Api.futureLiveReservations(today());
+      final rows = await Api.futureLiveReservations(today());
+      final now = widget.dutyClock?.call();
+      return now == null
+          ? rows
+          : withoutStarted(rows,
+              date: widget.dayContext!, now: now, blocks: widget.blocks);
     } catch (e) {
-      if (mounted) snack(context, friendlyDbError(e));
+      if (mounted) snack(context, _errorText(e));
       return null;
     }
   }
+
+  /// The duty's clock, one minute ahead when [atWrite] (see [clockAtWrite]);
+  /// null = no limit.
+  HourMinute? _dutyNow({required bool atWrite}) {
+    final now = widget.dutyClock?.call();
+    return now == null || !atWrite ? now : clockAtWrite(now);
+  }
+
+  /// The duty's today: whether [block] has started by now — then the snack
+  /// says it stays the admin's and the caller writes nothing. [atWrite]:
+  /// asked right before a write, with the one-minute margin.
+  /// [message]: what the snack says (the hidden-block copy for a block
+  /// the edit would hide).
+  bool _refuseStarted(
+    TimeBlock block, {
+    bool atWrite = false,
+    String message = blockStartedMessage,
+  }) {
+    final now = _dutyNow(atWrite: atWrite);
+    if (now == null || block.startsAt.compareTo(now) > 0) return false;
+    if (mounted) snack(context, message);
+    return true;
+  }
+
+  /// The duty's today, asked before any write of [plan]: a start that has
+  /// passed would be refused — only after the hidden blocks' sign-ups were
+  /// cancelled and the special inserted. Neither the edited block nor a
+  /// block the day shows that the new times would hide may have started:
+  /// a started block stays the admin's, its trainings live on it. True
+  /// (after a snack saying why) = write nothing. [atWrite] as in
+  /// [_refuseStarted].
+  bool _refuseForDuty(DayEditDay plan, {bool atWrite = false}) {
+    final real = widget.dutyClock?.call();
+    if (real == null) return false;
+    final now = atWrite ? clockAtWrite(real) : real;
+    if (plan.start.compareTo(now) <= 0) {
+      // The snack prints the real reading, not the write-time margin.
+      if (mounted) snack(context, startPassedMessage(real));
+      return true;
+    }
+    final existing = plan.existing;
+    if (existing != null && _refuseStarted(existing, atWrite: atWrite)) {
+      return true;
+    }
+    final rendered = widget.dayRenderedIds;
+    return plan.hidden.any((b) =>
+        (rendered == null || rendered.contains(b.id)) &&
+        _refuseStarted(b, atWrite: atWrite, message: hideStartedMessage));
+  }
+
+  /// How a refusal reads — „Služba skončila…“ for a duty that just ended,
+  /// the block copy for a duty's `too_late` (see [dayEditError]).
+  String _errorText(Object error) =>
+      dayEditError(error, wasOnDuty: widget.wasOnDuty);
 
   /// Confirms the RPC's exact cancellation count for [date]; quotes the
   /// [note] the write will actually carry.
   Future<bool> _confirmCancellations(int hit, Day date, String note) async {
     if (hit == 0) return true;
     if (!mounted) return false;
-    return confirmDialog(
-      context,
-      title: 'Pozor — rezervace budou zrušeny',
-      message: '$hit rezervací (${dayFull(date)}) bude zrušeno se '
-          'zprávou „$note". Pokračovat?',
-      confirmLabel: 'Pokračovat',
-    );
+    return confirmDayCancellations(context, hit, date, note);
   }
 
   /// Day-scoped removal: the block disappears from [widget.dayContext] only.
@@ -180,6 +274,7 @@ class _BlockDialogState extends State<BlockDialog> {
   Future<void> _removeForDay() async {
     final existing = widget.existing!;
     final date = widget.dayContext!;
+    if (_refuseStarted(existing)) return;
     setState(() => _saving = true);
     final rows = await _loadRows();
     if (rows == null || !mounted) {
@@ -187,8 +282,17 @@ class _BlockDialogState extends State<BlockDialog> {
       return;
     }
     final plan = planBlockRemoval(
-        existing: existing, day: _day, blocks: widget.blocks, rows: rows);
+        existing: existing,
+        day: _day,
+        blocks: widget.blocks,
+        rows: rows,
+        startedBy: widget.dutyClock?.call());
     if (plan.offersMove) {
+      // The dialog's moves are the first write.
+      if (_refuseStarted(existing, atWrite: true)) {
+        _bail();
+        return;
+      }
       final moved = await showDialog<bool>(
         context: context,
         barrierDismissible: false,
@@ -197,6 +301,7 @@ class _BlockDialogState extends State<BlockDialog> {
           fromBlock: existing,
           targets: plan.targets,
           cancelNote: plan.cancelNote,
+          errorText: _errorText,
         ),
       );
       if (moved != true || !mounted) {
@@ -208,7 +313,14 @@ class _BlockDialogState extends State<BlockDialog> {
     // rows on OTHER non-kept blocks still deserve the standard sweep confirm.
     final ok = await _confirmCancellations(
         strandedOnDate(rows, date, plan.sweepKeptIds), date, plan.cancelNote);
-    if (!ok || !mounted) {
+    // Moves the dialog above already committed stay if the block starts
+    // before this check and the removal is refused: the block remains with
+    // fewer sign-ups, each moved reservation lives on another block of the
+    // day — nothing is orphaned or cancelled. The check itself must stay:
+    // set_day_override does NOT refuse the duty here, it would hide the
+    // started block and leave its trainings live on a block the calendar no
+    // longer shows.
+    if (!ok || !mounted || _refuseStarted(existing, atWrite: true)) {
       _bail();
       return;
     }
@@ -221,7 +333,7 @@ class _BlockDialogState extends State<BlockDialog> {
         blockIds: plan.idsAfter,
       ),
       success: 'Blok odebrán (jen tento den).',
-      errorText: friendlyDbError,
+      errorText: _errorText,
     );
     if (!mounted) return;
     if (done) {
@@ -238,30 +350,34 @@ class _BlockDialogState extends State<BlockDialog> {
   /// lands FIRST so a failure between the two calls can't leave the day
   /// wide open.
   Future<void> _restoreTemplate() async {
-    final date = widget.dayContext!;
     setState(() => _saving = true);
-    final rows = await _loadRows();
-    if (rows == null || !mounted) {
-      _bail();
-      return;
-    }
-    final plan = planRestoreTemplate(
-        date: date,
-        isTraining: widget.dayIsTraining,
-        blocks: widget.blocks,
-        rows: rows);
-    final ok =
-        await _confirmCancellations(plan.cancellations, date, scheduleChangeNote);
-    if (!ok || !mounted) {
-      _bail();
-      return;
-    }
-    final done = await tryAction(
+    final done = await restoreDayFlow(
       context,
-      () => Api.restoreDayToTemplate(date,
-          isTraining: widget.dayIsTraining, templateIds: plan.templateIds),
-      success: 'Den vrácen k týdennímu rozvrhu.',
-      errorText: friendlyDbError,
+      date: widget.dayContext!,
+      isTraining: widget.dayIsTraining,
+      blocks: widget.blocks,
+      renderedIds: widget.dayRenderedIds,
+      errorText: _errorText,
+      dutyClock: widget.dutyClock,
+    );
+    if (!mounted) return;
+    if (done) {
+      closeDialog(context);
+    } else {
+      setState(() => _saving = false);
+    }
+  }
+
+  /// „Zavřít den“ (0050): the reason, the count confirm, the closed write.
+  Future<void> _closeDay() async {
+    setState(() => _saving = true);
+    final done = await closeDayFlow(
+      context,
+      date: widget.dayContext!,
+      errorText: _errorText,
+      blocks: widget.blocks,
+      renderedIds: widget.dayRenderedIds,
+      dutyClock: widget.dutyClock,
     );
     if (!mounted) return;
     if (done) {
@@ -279,7 +395,7 @@ class _BlockDialogState extends State<BlockDialog> {
       context,
       () => Api.updateTimeBlock(existing.id, active: false),
       success: 'Blok deaktivován.',
-      errorText: friendlyDbError,
+      errorText: _errorText,
     );
     if (done && mounted) closeDialog(context);
   }
@@ -313,6 +429,8 @@ class _BlockDialogState extends State<BlockDialog> {
       closeDialog(context);
       return;
     }
+    // The duty's today: refused before any request (see _refuseForDuty).
+    if (_refuseForDuty(dry as DayEditDay)) return;
     setState(() => _saving = true);
     // Everything below awaits — the flag above keeps both action buttons
     // disabled for the whole flight (confirms included).
@@ -368,7 +486,7 @@ class _BlockDialogState extends State<BlockDialog> {
           ? Api.addTimeBlock(start, end, nextBlockPosition(widget.blocks))
           : Api.updateTimeBlock(existing.id, startsAt: start, endsAt: end),
       success: 'Uloženo.',
-      errorText: friendlyDbError,
+      errorText: _errorText,
     );
     if (!mounted) return;
     if (ok) {
@@ -472,6 +590,13 @@ class _BlockDialogState extends State<BlockDialog> {
       }
     }
 
+    // The confirms took time: the duty's clock is asked again right before
+    // the first write.
+    if (_refuseForDuty(plan, atWrite: true)) {
+      _bail();
+      return;
+    }
+
     final done = await tryAction(
       context,
       () async {
@@ -525,7 +650,7 @@ class _BlockDialogState extends State<BlockDialog> {
         );
       },
       success: 'Uloženo (jen tento den).',
-      errorText: friendlyDbError,
+      errorText: _errorText,
     );
     if (!mounted) return;
     if (done) {
@@ -540,6 +665,9 @@ class _BlockDialogState extends State<BlockDialog> {
     final dayLabelSuffix =
         _dayMode ? ' — jen ${dayLabel(widget.dayContext!)}' : '';
     return AlertDialog(
+      // Up to four actions stack on a narrow screen: on a landscape phone
+      // the times scroll instead of overflowing.
+      scrollable: true,
       title: Text(widget.existing == null
           ? 'Nový blok$dayLabelSuffix'
           : 'Upravit blok$dayLabelSuffix'),
@@ -556,9 +684,36 @@ class _BlockDialogState extends State<BlockDialog> {
             trailing: Text(_end?.display() ?? '--:--'),
             onTap: _pickEnd,
           ),
+          // In the content, not the actions: AlertDialog pins its actions,
+          // so a fifth one squeezes the times (landscape) and pushes
+          // „Uložit“ off-screen (large text). Here it scrolls with them.
+          // Off while the times are changed and unsaved: it closes the
+          // dialog without saving, and „come at 15:00“ over a block still
+          // at 16:00 would mislead the players.
+          if (_dayMode && widget.existing != null && widget.offerMessageBlock)
+            ListTile(
+              leading: const Icon(Icons.forum_outlined),
+              title: const Text('Napsat hráčům bloku…'),
+              enabled: !_saving &&
+                  widget.onMessagePlayers != null &&
+                  _start == widget.existing!.startsAt &&
+                  _end == widget.existing!.endsAt,
+              onTap: () {
+                closeDialog(context);
+                widget.onMessagePlayers!();
+              },
+            ),
         ],
       ),
       actions: [
+        if (_dayMode && widget.existing == null && widget.offerCloseDay)
+          TextButton(
+            onPressed: _saving ? null : _closeDay,
+            child: Text(
+              'Zavřít den',
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ),
         if (_dayMode && widget.dayHasOverride)
           TextButton(
             onPressed: _saving ? null : _restoreTemplate,

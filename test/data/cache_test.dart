@@ -31,6 +31,30 @@ void main() {
     expect(await RowCache.read('u1', 'time_blocks'), isNull);
   });
 
+  test('pruneMessageParticipantCaches drops the participants of messages '
+      'no longer listed, and nothing else', () async {
+    const row = [
+      {'message_id': 'x', 'user_id': 'p1'},
+    ];
+    RowCache.write('u1', cacheKeyMessageParticipants('kept'), row);
+    RowCache.write('u1', cacheKeyMessageParticipants('gone'), row);
+    RowCache.write('u1', cacheKeyMessageRecipients, row);
+    RowCache.write('u1', cacheKeyMessages, row);
+    RowCache.write('u2', cacheKeyMessageParticipants('gone'), row);
+    await Future<void>.delayed(Duration.zero);
+
+    await pruneMessageParticipantCaches('u1', const [
+      {'id': 'kept'},
+    ]);
+    expect(await RowCache.read('u1', cacheKeyMessageParticipants('kept')), row);
+    expect(await RowCache.read('u1', cacheKeyMessageParticipants('gone')), isNull);
+    // My own rows and the messages are other caches; another account's
+    // are its own business.
+    expect(await RowCache.read('u1', cacheKeyMessageRecipients), row);
+    expect(await RowCache.read('u1', cacheKeyMessages), row);
+    expect(await RowCache.read('u2', cacheKeyMessageParticipants('gone')), row);
+  });
+
   test('cachedRows replays the cache first, then live rows win and persist',
       () async {
     const cached = [

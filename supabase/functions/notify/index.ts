@@ -4,12 +4,16 @@
 //   INSERT profiles      -> "new player waiting for approval" (to admins)
 //   INSERT reservations  -> kiosk booking confirmation (to the player;
 //                           the e-mail variant carries a one-click cancel link);
-//                           or, created_via = 'group' (0044), "X ti
-//                           zarezervoval(a) trénink" to the player it's for
+//                           or, created_via = 'group' (0044) or 'duty' (0050,
+//                           the player on duty), "X ti zarezervoval(a)
+//                           trénink" to the player it's for
 //   UPDATE reservations  -> admin cancelled an upcoming reservation, or an
 //                           admin MOVED it ("termín přesunut z X na Y") —
 //                           both honour the per-change notify_player flag +
 //                           optional notify_message the RPCs stamp (0011);
+//                           a cancel by the player on duty (cancelled_via
+//                           'duty', 0050) the same way, with "zrušil(a) X
+//                           (služba na kantýně)" as the default reason;
 //                           or, cancelled_via = 'group' (0044), "X ti zrušil(a)
 //                           trénink" to the player it was for
 //   INSERT tenants       -> "new kuželna waiting for approval" (to the
@@ -17,6 +21,11 @@
 //   INSERT/UPDATE player_group_members -> player-group notifications (0044):
 //                           an invite (to the invitee), and a new member
 //                           joining (to the rest of the group)
+//   INSERT messages       -> a new notice or message (0051) fans out to its
+//                           already-materialised recipients, unless
+//                           notify = false
+//   UPDATE message_recipients (reaction/reply) -> notifies the message's
+//                           author, unless it was cleared
 //   CRON notification_jobs -> deferred jobs (0023): Google Calendar sync —
 //                           the one branch that talks to the Calendar API
 //                           instead of FCM/Resend. Posted by the minutely
@@ -24,7 +33,9 @@
 //                           webhook (URL + x-webhook-secret). The same tick
 //                           also carries the due reminders (0040): "za 2
 //                           hodiny trénink", by the same push-or-e-mail
-//                           rule as everything else.
+//                           rule as everything else — and, after them, the
+//                           reminder before a canteen duty (0050): "Zítra
+//                           sloužíš na kantýně".
 //   CRON notification_jobs -> federation_* jobs (0045): vysledky.kuzelky.cz sync
 //
 // Channel per recipient: FCM push when profiles.fcm_token is set AND
@@ -41,14 +52,37 @@ import { pragueEpoch, pragueToday, signCancelToken } from "../_shared/cancel_tok
 import { firebaseConfigured, sendPush } from "../_shared/fcm.ts";
 import { processFederationJobs, siteFetcher } from "../_shared/federation_jobs.ts";
 import { dayLabel, escapeHtml, timeLabel } from "../_shared/format.ts";
-import { type Delivery, deliveryOf } from "../_shared/delivery.ts";
+import type { Delivery } from "../_shared/delivery.ts";
+import {
+  resendBatch,
+  type ResendConfig,
+  resendEmail,
+  resendOneOfBatch,
+} from "../_shared/resend.ts";
 import { deliverDueReminders, type DueReminder } from "../_shared/reminders.ts";
+import {
+  deliverDueDutyReminders,
+  dutyCancelReason,
+  type DueDutyReminder,
+  dutyReminderHtml,
+  dutyReminderReceipt,
+} from "../_shared/duty_reminders.ts";
 import {
   groupBookedMessage,
   groupCancelledMessage,
   groupInviteMessage,
   groupJoinedMessage,
 } from "../_shared/group_messages.ts";
+import { signReactToken } from "../_shared/react_token.ts";
+import {
+  deliverMessage,
+  deliverReaction,
+  type MessageRecipientRow,
+  type MessageRow,
+  reactionChange,
+} from "../_shared/message_notify.ts";
+import { messageContext } from "../_shared/message_texts.ts";
+import type { Membership } from "../_shared/membership.ts";
 import {
   clearSecondaryCalendar,
   deleteEvent,
@@ -75,29 +109,21 @@ const supabase = createClient(
 // E-mail via Resend
 // ---------------------------------------------------------------------------
 
+/// RESEND_API_KEY / RESEND_FROM as read now, and the real fetch.
+function resendConfig(): ResendConfig {
+  return {
+    apiKey: Deno.env.get("RESEND_API_KEY"),
+    from: Deno.env.get("RESEND_FROM") ?? "Rezervátor <onboarding@resend.dev>",
+    fetch,
+  };
+}
+
 async function sendEmail(
   to: string,
   subject: string,
   html: string,
 ): Promise<Delivery> {
-  const key = Deno.env.get("RESEND_API_KEY");
-  if (!key || !to) {
-    console.error(`e-mail skipped for '${to}' (missing RESEND_API_KEY or address)`);
-    return "undeliverable";
-  }
-  const from = Deno.env.get("RESEND_FROM") ?? "Rezervátor <onboarding@resend.dev>";
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ from, to, subject, html }),
-  });
-  if (!response.ok) {
-    console.error(`Resend failed for ${to}: ${await response.text()}`);
-  }
-  return deliveryOf(response.status);
+  return await resendEmail({ to, subject, html }, resendConfig());
 }
 
 type Recipient = {
@@ -486,6 +512,37 @@ async function sendDueReminders() {
   );
 }
 
+/// The reminder before a canteen duty (0050), by the same rules as the
+/// ones above: sent through the usual door (the e-mail adds what the duty
+/// may do), marked once delivered or undeliverable, due again next tick
+/// otherwise. The receipt is 'd:<period>' at the alley's lead for the
+/// duty's first day, so a period moved to other dates rings again.
+async function sendDueDutyReminders() {
+  const { data, error } = await supabase.rpc("due_duty_reminders");
+  if (error) {
+    console.error("due_duty_reminders failed:", error);
+    return;
+  }
+  await deliverDueDutyReminders(
+    (data ?? []) as DueDutyReminder[],
+    new Date(),
+    (row, title, body) =>
+      notifyRecipient(
+        { id: row.user_id, email: row.email, fcm_token: row.fcm_token },
+        title,
+        body,
+        { data: { kind: "duty_reminder" }, html: dutyReminderHtml(row) },
+      ),
+    async (row) => {
+      const { error: markError } = await supabase.rpc(
+        "mark_reminder_sent",
+        dutyReminderReceipt(row),
+      );
+      if (markError) throw markError;
+    },
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Event handlers
 // ---------------------------------------------------------------------------
@@ -535,10 +592,12 @@ async function whenLabel(record: Record<string, unknown>): Promise<string | null
 async function handle(payload: WebhookPayload) {
   if (payload.type === "CRON" && payload.table === "notification_jobs") {
     // The minutely pg_cron tick (0023): process everything that's due — the
-    // calendar jobs, and then the reminders whose moment has come (0040).
-    // Its record is null, so it must never reach the row handlers below.
+    // calendar jobs, and then the reminders whose moment has come (0040),
+    // the canteen duty's last (0050). Its record is null, so it must never
+    // reach the row handlers below.
     await processJobs();
     await sendDueReminders();
+    await sendDueDutyReminders();
     try {
       await processFederationJobs(supabase, siteFetcher());
     } catch (error) {
@@ -603,7 +662,9 @@ async function handle(payload: WebhookPayload) {
 
     case "reservations": {
       if (payload.type === "INSERT") {
-        if (record.created_via === "group") {
+        // A booking made for the player by a group mate (0044) or by the
+        // player on duty (0050) reads the same: who booked it, and when.
+        if (record.created_via === "group" || record.created_via === "duty") {
           const [ctx, by] = await Promise.all([
             reservationContext(record),
             profileOf(record.created_by),
@@ -611,7 +672,10 @@ async function handle(payload: WebhookPayload) {
           if (!ctx || !by) return;
           const m = groupBookedMessage(by.display_name, ctx.when);
           await notifyRecipient(ctx.player, m.title, m.body, {
-            data: { kind: "group_booking", reservation_id: String(record.id) },
+            data: {
+              kind: record.created_via === "duty" ? "duty_booking" : "group_booking",
+              reservation_id: String(record.id),
+            },
           });
           return;
         }
@@ -676,20 +740,31 @@ async function handle(payload: WebhookPayload) {
             });
             return;
           }
-          if (record.cancelled_via !== "admin") return;
+          // The player on duty (0050) cancels like the admin: the same
+          // notify choice and the same silence for past dates, but the
+          // default reason names who it was, not the admin.
+          const byDuty = record.cancelled_via === "duty";
+          if (record.cancelled_via !== "admin" && !byDuty) return;
           if (!wantsNotify) return;
           // Retro no-show cancels (past dates) stay silent.
           if ((record.date as string) < pragueToday()) return;
-          const ctx = await reservationContext(record);
+          const [ctx, by] = await Promise.all([
+            reservationContext(record),
+            byDuty ? profileOf(record.cancelled_by) : null,
+          ]);
           if (!ctx) return;
           const note = String(record.cancel_note ?? "").trim();
-          const reason = note.length > 0 ? note : "zrušeno správcem";
+          let reason = note.length > 0 ? note : "zrušeno správcem";
+          if (byDuty) {
+            if (!by) return;
+            reason = dutyCancelReason(note, by.display_name);
+          }
           await notifyRecipient(
             ctx.player,
             "Trénink zrušen",
             `${ctx.when} — ${reason}.`,
             {
-              data: { kind: "admin_cancelled" },
+              data: { kind: byDuty ? "duty_cancelled" : "admin_cancelled" },
               html: `<p>Tvoje rezervace byla zrušena:</p>` +
                 `<p><b>${escapeHtml(ctx.when)}</b></p>` +
                 `<p>Důvod: ${escapeHtml(reason)}.</p>`,
@@ -765,6 +840,128 @@ async function handle(payload: WebhookPayload) {
           }
         }
       }
+      return;
+    }
+
+    case "messages": {
+      // A new notice or message (0051): message_send inserted its
+      // recipients in the same transaction, and pg_net posts only after
+      // the commit, so they are all there by now.
+      if (payload.type !== "INSERT") return;
+      const message = record as unknown as MessageRow;
+      if (!message.notify) return;
+      const author = await profileOf(message.author_id);
+      // A failed load is logged and thrown — the webhook answers 500, which
+      // net._http_response shows — never read as "nobody to tell".
+      let recipientIds: string[] = [];
+      {
+        const { data, error } = await supabase.from("message_recipients")
+          .select("user_id").eq("message_id", message.id);
+        if (error) {
+          console.error(`message ${message.id}: recipients not loaded:`, error);
+          throw error;
+        }
+        recipientIds = (data ?? []).map((r) => r.user_id as string);
+      }
+      if (recipientIds.length === 0) return;
+      const { data: recipients, error: profilesError } = await supabase.from("profiles")
+        .select("id, email, fcm_token").in("id", recipientIds);
+      if (profilesError) {
+        console.error(`message ${message.id}: recipient profiles not loaded:`, profilesError);
+        throw profilesError;
+      }
+      let blockTimes: { starts_at: string; ends_at: string } | null = null;
+      if (message.block_id) {
+        const { data: block } = await supabase.from("time_blocks")
+          .select("starts_at, ends_at").eq("id", message.block_id).maybeSingle();
+        blockTimes = block as { starts_at: string; ends_at: string } | null;
+      }
+      const context = messageContext({
+        audience: message.audience,
+        onDate: message.on_date,
+        blockStart: blockTimes?.starts_at ?? null,
+        blockEnd: blockTimes?.ends_at ?? null,
+      });
+      // Fail closed, as the kiosk branch: signing the 👍/👎 links with an
+      // empty key would mint links anyone could forge. Checked once here,
+      // not in reactLink — deliverMessage logs and skips a recipient whose
+      // link throws, which would turn this deployment bug into quiet
+      // per-recipient log lines instead of a 500.
+      const cancelSecret = Deno.env.get("CANCEL_TOKEN_SECRET");
+      if (message.kind === "message" && !cancelSecret) {
+        throw new Error("CANCEL_TOKEN_SECRET is not set");
+      }
+      await deliverMessage(
+        message,
+        {
+          authorName: author?.display_name ?? "?",
+          authorIsAdmin: message.author_role === "admin",
+          context,
+        },
+        (recipients ?? []) as Recipient[],
+        {
+          // notifyRecipient's own choice, so push goes through it.
+          byPush: (r) => firebaseConfigured() && !!r.fcm_token,
+          push: (r, title, body, opts) => notifyRecipient(r, title, body, opts),
+          // One request per 100 e-mails (Resend's per-second rate limit is
+          // not in play, and the usual fan-out ends inside the 5 s pg_net
+          // waits), under deliverMessage's idempotency key; one by one only
+          // as the fallback for a batch refused as invalid — rare, and
+          // slower than those 5 s: pg_net records a timeout (no retry)
+          // while this runs on. A refusal that is not about the address
+          // stops that fallback after its first e-mail (sendOneByOne).
+          sendEmails: (emails, key) => resendBatch(emails, key, resendConfig()),
+          sendEmail: (email, key) => resendOneOfBatch(email, resendConfig(), key),
+          pause: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+          reactLink: async (userId, reaction) => {
+            if (!cancelSecret) throw new Error("CANCEL_TOKEN_SECRET is not set");
+            const token = await signReactToken(
+              { m: message.id, u: userId, r: reaction },
+              cancelSecret,
+            );
+            return `${Deno.env.get("SUPABASE_URL")}/functions/v1/react?t=${token}`;
+          },
+        },
+      );
+      return;
+    }
+
+    case "message_recipients": {
+      // A recipient's 👍/👎 or reply (0051) → the message's author. The
+      // trigger fires only on an UPDATE OF reaction, reply; a clear (whole
+      // or half) is filtered out by reactionChange.
+      if (payload.type !== "UPDATE") return;
+      const row = record as unknown as MessageRecipientRow;
+      const old = (payload.old_record ?? {}) as Partial<MessageRecipientRow>;
+      const changed = reactionChange(old, row);
+      if (!changed) return;
+      const { data: messageData, error: messageError } = await supabase.from("messages")
+        .select(
+          "id, tenant_id, kind, audience, author_id, author_role, on_date, block_id, title, body, notify",
+        )
+        .eq("id", row.message_id).maybeSingle();
+      if (messageError) throw messageError;
+      if (!messageData) return;
+      // The author with their standing: deliverReaction tells them only
+      // while they may still read the message (isMemberOf) — the service
+      // role would otherwise reach an account set as the kiosk, back to
+      // pending or moved to another alley.
+      const [authorResult, reactor] = await Promise.all([
+        messageData.author_id == null
+          ? Promise.resolve({ data: null, error: null })
+          : supabase.from("profiles")
+            .select("id, email, fcm_token, display_name, status, role, tenant_id")
+            .eq("id", messageData.author_id).maybeSingle(),
+        profileOf(row.user_id),
+      ]);
+      if (authorResult.error) throw authorResult.error;
+      const author = authorResult.data as (Recipient & Membership) | null;
+      await deliverReaction(
+        row,
+        changed,
+        { message: messageData as MessageRow, author, reactorName: reactor?.display_name ?? "?" },
+        (r, title, body, opts) => notifyRecipient(r, title, body, opts),
+      );
       return;
     }
   }

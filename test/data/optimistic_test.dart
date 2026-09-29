@@ -399,4 +399,20 @@ void main() {
       expect(out.where((r) => r['team'] == 'C').single['color_id'], 3);
     });
   });
+
+  group('patchMessageRecipient', () {
+    test('patches exactly the (message, user) row', () {
+      final rows = [
+        {'message_id': 'm1', 'user_id': 'p1', 'reaction': null, 'reply': null},
+        {'message_id': 'm1', 'user_id': 'p2', 'reaction': null, 'reply': null},
+        {'message_id': 'm2', 'user_id': 'p1', 'reaction': null, 'reply': null},
+      ];
+      final patched = patchMessageRecipient('m1', 'p1', {'reaction': 'up'})(rows);
+      expect(patched, [
+        {'message_id': 'm1', 'user_id': 'p1', 'reaction': 'up', 'reply': null},
+        {'message_id': 'm1', 'user_id': 'p2', 'reaction': null, 'reply': null},
+        {'message_id': 'm2', 'user_id': 'p1', 'reaction': null, 'reply': null},
+      ]);
+    });
+  });
 }

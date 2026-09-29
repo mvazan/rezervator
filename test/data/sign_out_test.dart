@@ -11,7 +11,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 /// Sign-out hands this device's push token back while the session can still
 /// write the profile. notify pushes to every profile holding a token, so a
 /// token left behind kept delivering the signed-out account's notifications
-/// to the phone (0050 is the database side). Pinned at the HTTP layer: the
+/// to the phone (0052 is the database side). Pinned at the HTTP layer: the
 /// order (the write needs the JWT the sign-out throws away) and the filter
 /// (only this device's token — the account's other phone keeps its own).
 void main() {

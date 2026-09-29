@@ -727,6 +727,59 @@ void main() {
           isFalse);
     });
 
+    test('on duty (0050): the own cap closes no cell, but the past and the '
+        'horizon still do', () {
+      const free = FreeSlot(inPast: false, beyondHorizon: false);
+      expect(
+          canBook(
+              state: free, myActiveCount: 2, settings: settings, onDuty: true),
+          isTrue);
+      expect(
+          canBook(
+              state: const FreeSlot(inPast: true, beyondHorizon: false),
+              myActiveCount: 0,
+              settings: settings,
+              onDuty: true),
+          isFalse);
+      expect(
+          canBook(
+              state: const FreeSlot(inPast: false, beyondHorizon: true),
+              myActiveCount: 0,
+              settings: settings,
+              onDuty: true),
+          isFalse);
+    });
+
+    test("on duty (0050): anyone's not-started reservation, never a started "
+        'one', () {
+      final foreign = ReservedSlot(
+          res(playerId: 'p2', date: thursday, blockId: 'b1', lane: 1),
+          inPast: false,
+          beyondHorizon: false);
+      final started = ReservedSlot(
+          res(playerId: 'p2', date: monday, blockId: 'b1', lane: 1),
+          inPast: true,
+          beyondHorizon: false);
+      expect(canCancel(state: foreign, myPlayerId: 'p1', onDuty: true), isTrue);
+      expect(canCancel(state: started, myPlayerId: 'p1', onDuty: true), isFalse);
+      expect(
+          canCancel(
+              state: const FreeSlot(inPast: false, beyondHorizon: false),
+              myPlayerId: 'p1',
+              onDuty: true),
+          isFalse);
+    });
+
+    test('bookableSlotCount on duty: the own cap does not empty the day', () {
+      final day = build(now: const HourMinute(16, 0)).days[1] as OpenDay;
+      expect(
+          bookableSlotCount(day,
+              myActiveCount: settings.maxActiveReservations,
+              settings: settings,
+              onDuty: true),
+          bookableSlotCount(day, myActiveCount: 0, settings: settings));
+    });
+
     test('admin may book past/beyond-horizon free slots and ignores limit', () {
       const past = FreeSlot(inPast: true, beyondHorizon: false);
       const far = FreeSlot(inPast: false, beyondHorizon: true);

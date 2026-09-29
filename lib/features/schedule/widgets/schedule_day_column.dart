@@ -385,27 +385,39 @@ class ScheduleDayColumn extends StatelessWidget {
         color: scheme.onSurfaceVariant.withValues(alpha: 0.55),
       ),
     );
-    final header = Container(
-      height: blockCardHeaderHeight,
-      alignment: Alignment.center,
-      child: onEditBlock == null
-          ? headerText
-          : InkWell(
-              onTap: () => onEditBlock!(openDay.date, block),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  headerText,
-                  const SizedBox(width: 3),
-                  Icon(
-                    Icons.edit_outlined,
-                    size: 9,
-                    color: scheme.onSurfaceVariant.withValues(alpha: 0.45),
-                  ),
-                ],
+    final header = onEditBlock == null
+        ? Container(
+            height: blockCardHeaderHeight,
+            alignment: Alignment.center,
+            child: headerText,
+          )
+        // The whole strip is the tap target, edge to edge; only its
+        // content shrinks.
+        : InkWell(
+            onTap: () => onEditBlock!(openDay.date, block),
+            child: Container(
+              height: blockCardHeaderHeight,
+              alignment: Alignment.center,
+              // A narrow column (a phone on its side, seven days across)
+              // has no room for the label AND the pencil: shrink the pair a
+              // touch rather than cut the time off.
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    headerText,
+                    const SizedBox(width: 3),
+                    Icon(
+                      Icons.edit_outlined,
+                      size: 9,
+                      color: scheme.onSurfaceVariant.withValues(alpha: 0.45),
+                    ),
+                  ],
+                ),
               ),
             ),
-    );
+          );
 
     final card = Container(
       // Stable per-block key (unique among one column's entries) so tests

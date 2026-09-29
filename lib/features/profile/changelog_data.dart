@@ -58,6 +58,22 @@ const appChangelog = <Release>[
         'otevřeš přes celou obrazovku, na výšku i na šířku.',
     'Klubovna → Kontakty: e-mail a telefon hráčů kuželny. Svůj e-mail i '
         'telefon můžeš skrýt v Můj profil.',
+    'Služby na kantýně: správce plánuje služby v Správa → Služby, všichni '
+        'je vidí v Klubovna → Služby. Kdo má službu, může po dobu služby '
+        'rezervovat a rušit tréninky ostatním a upravovat bloky '
+        'v jednotlivých dnech.',
+    'Nástěnka a zprávy: Klubovna → Nástěnka jsou oznámení od správce, '
+        'Klubovna → Zprávy je psaní se správci, se službou na kantýně nebo '
+        'hráčům v bloku či dni — s 👍/👎 a krátkou odpovědí.',
+  ], store: [
+    'Zápasy a výsledky se stahují z výsledkového servisu ČKA.',
+    'Nový tab Klubovna: výsledky našich týmů (i živě, s videem) a kuželny '
+        'soupeřů.',
+    'Zápis zápasu jako na kuzelky.com, i přes celou obrazovku.',
+    'Klubovna → Kontakty: e-mail a telefon hráčů kuželny.',
+    'Služby na kantýně: kdo má službu, rezervuje a ruší tréninky ostatním '
+        'a upravuje bloky v jednotlivých dnech.',
+    'Nástěnka (oznámení) a Zprávy (se správci/službou/hráči, s 👍/👎).',
   ]),
   Release('1.2.8', '22. 9. 2026', [
     'Ve správě appky se tlačítko pro přidání (oddíl, hráč, pronájem…) už '

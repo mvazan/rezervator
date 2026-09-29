@@ -1,4 +1,4 @@
--- 0050 — a device's push token belongs to one profile at a time.
+-- 0052 — a device's push token belongs to one profile at a time.
 --
 -- notify pushes to every profile whose fcm_token is set. The token is the
 -- DEVICE's, not the account's, and nothing ever took it off the profile at
@@ -37,8 +37,12 @@ end;
 $$;
 
 -- UPDATE OF fires on every write of the column, the same value included:
--- a profile re-saving a token it already shares (from before 0050) still
+-- a profile re-saving a token it already shares (from before 0052) still
 -- takes it back from the other one.
+-- A trigger function is nobody's to call: no default grant to anon or the
+-- app (0046 stopped the table defaults; functions still get PUBLIC's).
+revoke all on function fcm_token_claim() from public, anon, authenticated;
+
 drop trigger if exists fcm_token_claim on profiles;
 create trigger fcm_token_claim
   after insert or update of fcm_token on profiles

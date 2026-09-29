@@ -16,6 +16,7 @@ import 'data/local_prefs.dart';
 import 'features/auth/auth_gate.dart';
 import 'features/kiosk/kiosk_login_screen.dart';
 import 'features/public/public_schedule_screen.dart';
+import 'push/pending_link.dart';
 import 'push/push.dart';
 
 Future<void> main() async {
@@ -86,6 +87,43 @@ final _router = GoRouter(
       builder: (_, state) => AppConfig.hasSupabase
           ? PublicScheduleScreen(slug: state.pathParameters['slug']!)
           : const _NotConfigured(),
+    ),
+    // Deep links (0051) from the e-mails (and any later Android app link):
+    // the signed-in app as usual, with the message or notice opened on
+    // top once HomeShell is up. The bare paths are the plain app.
+    GoRoute(
+      path: '/zpravy/:id',
+      builder: (_, state) => AppConfig.hasSupabase
+          ? DeepLinkSeed(
+              link: PendingLink(
+                kind: PendingLinkKind.message,
+                id: state.pathParameters['id']!,
+              ),
+              child: const AuthGate(),
+            )
+          : const _NotConfigured(),
+    ),
+    GoRoute(
+      path: '/zpravy',
+      builder: (_, _) =>
+          AppConfig.hasSupabase ? const AuthGate() : const _NotConfigured(),
+    ),
+    GoRoute(
+      path: '/nastenka/:id',
+      builder: (_, state) => AppConfig.hasSupabase
+          ? DeepLinkSeed(
+              link: PendingLink(
+                kind: PendingLinkKind.notice,
+                id: state.pathParameters['id']!,
+              ),
+              child: const AuthGate(),
+            )
+          : const _NotConfigured(),
+    ),
+    GoRoute(
+      path: '/nastenka',
+      builder: (_, _) =>
+          AppConfig.hasSupabase ? const AuthGate() : const _NotConfigured(),
     ),
   ],
 );

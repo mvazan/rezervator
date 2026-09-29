@@ -41,6 +41,25 @@ $$;
 ALTER FUNCTION "public"."_group_drop_member"("p_group" "uuid", "p_user" "uuid") OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."add_special_block"("p_starts_at" time without time zone, "p_ends_at" time without time zone) RETURNS "uuid"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_id uuid;
+begin
+  perform duty_edit_days_gate();
+  insert into time_blocks (tenant_id, starts_at, ends_at, position, active)
+    values (current_tenant_id(), p_starts_at, p_ends_at, -1, false)
+    returning id into v_id;
+  return v_id;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."add_special_block"("p_starts_at" time without time zone, "p_ends_at" time without time zone) OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."admin_list_tenants"() RETURNS TABLE("id" "uuid", "name" "text", "status" "text", "founder_email" "text", "created_at" timestamp with time zone, "approved_at" timestamp with time zone, "member_count" bigint)
     LANGUAGE "plpgsql" STABLE SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -494,14 +513,37 @@ $$;
 ALTER FUNCTION "public"."block_day_status"("p_tenant" "uuid", "p_date" "date", "p_block_id" "uuid") OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."can_read_message"("p_id" "uuid") RETURNS boolean
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  select exists (
+    select 1 from messages m
+     where m.id = p_id and m.tenant_id = current_tenant_id()
+       and is_approved() and not is_kiosk()
+       and (
+         m.kind = 'notice'
+         or m.author_id = auth.uid()
+         or exists (select 1 from message_recipients r
+                     where r.message_id = m.id and r.user_id = auth.uid())
+       )
+  )
+$$;
+
+
+ALTER FUNCTION "public"."can_read_message"("p_id" "uuid") OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."cancel_block_day_reservations"("p_date" "date", "p_block" "uuid", "p_note" "text" DEFAULT 'změna rozvrhu'::"text") RETURNS "void"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
     AS $$
+declare
+  v_admin boolean := is_admin();
+  v_today date := (now() at time zone 'Europe/Prague')::date;
+  v_now time := (now() at time zone 'Europe/Prague')::time;
 begin
-  if not is_admin() then
-    raise exception 'not_allowed';
-  end if;
+  perform duty_edit_gate(p_date);
   if not exists (
     select 1 from time_blocks
     where id = p_block and tenant_id = current_tenant_id()
@@ -509,16 +551,19 @@ begin
     raise exception 'unknown_block';
   end if;
 
-  update reservations
+  update reservations r
   set cancelled_at = now(),
       cancelled_via = 'admin',
       cancel_note = coalesce(nullif(trim(p_note), ''), 'změna rozvrhu'),
       notify_player = true,
       notify_message = null
-  where date = p_date
-    and block_id = p_block
-    and cancelled_at is null
-    and tenant_id = current_tenant_id();
+  from time_blocks b
+  where b.id = r.block_id
+    and r.date = p_date
+    and r.block_id = p_block
+    and r.cancelled_at is null
+    and r.tenant_id = current_tenant_id()
+    and (v_admin or not (r.date = v_today and b.starts_at <= v_now));
 end;
 $$;
 
@@ -739,6 +784,14 @@ begin
       raise exception 'too_late';
     end if;
     v_via := case when v_res.player_id = v_uid then 'app' else 'group' end;
+  elsif v_caller.status = 'approved' and v_caller.role = 'player'
+        and v_res.tenant_id = v_caller.tenant_id and is_on_duty() then
+    select * into v_block from time_blocks where id = v_res.block_id;
+    v_starts := (v_res.date + v_block.starts_at) at time zone 'Europe/Prague';
+    if v_now >= v_starts then
+      raise exception 'too_late';
+    end if;
+    v_via := 'duty';
   else
     raise exception 'not_allowed';
   end if;
@@ -875,8 +928,8 @@ CREATE TABLE IF NOT EXISTS "public"."reservations" (
     "notify_player" boolean DEFAULT true NOT NULL,
     "notify_message" "text",
     "cancelled_by" "uuid",
-    CONSTRAINT "reservations_cancelled_via_check" CHECK (("cancelled_via" = ANY (ARRAY['app'::"text", 'one_click'::"text", 'admin'::"text", 'group'::"text"]))),
-    CONSTRAINT "reservations_created_via_check" CHECK (("created_via" = ANY (ARRAY['app'::"text", 'kiosk'::"text", 'admin'::"text", 'group'::"text"]))),
+    CONSTRAINT "reservations_cancelled_via_check" CHECK (("cancelled_via" = ANY (ARRAY['app'::"text", 'one_click'::"text", 'admin'::"text", 'group'::"text", 'duty'::"text"]))),
+    CONSTRAINT "reservations_created_via_check" CHECK (("created_via" = ANY (ARRAY['app'::"text", 'kiosk'::"text", 'admin'::"text", 'group'::"text", 'duty'::"text"]))),
     CONSTRAINT "reservations_lane_check" CHECK (("lane" >= 1))
 );
 
@@ -917,6 +970,9 @@ begin
   elsif v_caller.status = 'approved' and v_caller.role = 'player'
         and same_group(v_uid, p_player_id) then
     v_via := 'group';
+  elsif v_caller.status = 'approved' and v_caller.role = 'player'
+        and p_player_id <> v_uid and is_on_duty() then
+    v_via := 'duty';
   else
     raise exception 'not_allowed';
   end if;
@@ -961,7 +1017,9 @@ begin
     if v_active_count >= v_settings.max_active_reservations then
       -- "Máš už…" would be a lie about a member's cap.
       raise exception '%',
-        case when v_via = 'group' then 'member_at_limit' else 'limit_reached' end;
+        case when v_via = 'group' then 'member_at_limit'
+             when v_via = 'duty' then 'player_at_limit'
+             else 'limit_reached' end;
     end if;
   end if;
 
@@ -1128,6 +1186,21 @@ end; $$;
 ALTER FUNCTION "public"."delete_club"("p_id" "uuid") OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."delete_day_override"("p_date" "date") RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  perform duty_edit_gate(p_date);
+  delete from day_overrides
+   where tenant_id = current_tenant_id() and date = p_date;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."delete_day_override"("p_date" "date") OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."delete_placeholder_player"("p_id" "uuid") RETURNS "void"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -1142,7 +1215,8 @@ begin
   ) then
     raise exception 'unknown_player';
   end if;
-  if exists (select 1 from reservations where player_id = p_id) then
+  if exists (select 1 from reservations where player_id = p_id)
+     or exists (select 1 from duty_assignments where user_id = p_id) then
     raise exception 'player_has_history';
   end if;
   delete from profiles where id = p_id;
@@ -1151,6 +1225,40 @@ $$;
 
 
 ALTER FUNCTION "public"."delete_placeholder_player"("p_id" "uuid") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."due_duty_reminders"() RETURNS TABLE("user_id" "uuid", "email" "text", "fcm_token" "text", "period_id" "uuid", "starts_on" "date", "ends_on" "date", "days" smallint, "co_assignees" "text"[])
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  select p.id, p.email, p.fcm_token, d.id, d.starts_on, d.ends_on,
+         s.duty_reminder_days,
+         array(select o.display_name
+                 from duty_assignments oa
+                 join profiles o on o.id = oa.user_id
+                where oa.period_id = d.id and oa.user_id <> p.id
+                order by o.display_name)
+    from duty_periods d
+    join schedule_settings s on s.tenant_id = d.tenant_id
+    join duty_assignments a on a.period_id = d.id
+    join profiles p on p.id = a.user_id
+   where s.duty_reminder_enabled
+     and p.status = 'approved' and not p.placeholder and p.role <> 'kiosk'
+     and d.starts_on > (now() at time zone 'Europe/Prague')::date
+     and ((d.starts_on - s.duty_reminder_days) + time '18:00')
+           at time zone 'Europe/Prague' <= now()
+     and not exists (
+       select 1 from reminders_sent r
+        where r.user_id = p.id
+          and r.event_key = 'd:' || d.id
+          and r.offset_minutes <= s.duty_reminder_days * 1440
+          and (r.starts_at is null
+               or r.starts_at = d.starts_on::timestamp at time zone 'Europe/Prague'))
+   order by d.starts_on, p.id;
+$$;
+
+
+ALTER FUNCTION "public"."due_duty_reminders"() OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."due_reminders"() RETURNS TABLE("user_id" "uuid", "email" "text", "fcm_token" "text", "event_key" "text", "offset_minutes" integer, "kind" "text", "starts_at" timestamp with time zone, "ends_at" time without time zone, "lane" smallint, "alley_name" "text", "home_team" "text", "away_team" "text", "is_away" boolean)
@@ -1207,6 +1315,316 @@ $$;
 
 
 ALTER FUNCTION "public"."due_reminders"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."duty_edit_days_gate"() RETURNS "void"
+    LANGUAGE "plpgsql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  if is_admin() then
+    return;
+  end if;
+  if not exists (select 1 from duty_assignments a
+      join duty_periods d on d.id = a.period_id
+      join profiles me on me.id = auth.uid()
+     where a.user_id = me.id and d.tenant_id = me.tenant_id
+       and me.status = 'approved' and me.role = 'player' and not me.placeholder
+       and d.ends_on >= (now() at time zone 'Europe/Prague')::date) then
+    raise exception 'not_allowed';
+  end if;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."duty_edit_days_gate"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."duty_edit_gate"("p_date" "date") RETURNS "void"
+    LANGUAGE "plpgsql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_today constant date := (now() at time zone 'Europe/Prague')::date;
+begin
+  if p_date is null then
+    raise exception 'date_past';
+  end if;
+  if is_admin() then
+    return;
+  end if;
+  if not exists (select 1 from duty_assignments a
+      join duty_periods d on d.id = a.period_id
+      join profiles me on me.id = auth.uid()
+     where a.user_id = me.id and d.tenant_id = me.tenant_id
+       and me.status = 'approved' and me.role = 'player' and not me.placeholder
+       and p_date between d.starts_on and d.ends_on) then
+    raise exception 'not_allowed';
+  end if;
+  if p_date < v_today then
+    raise exception 'date_past';
+  end if;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."duty_edit_gate"("p_date" "date") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."duty_gate"("p_date" "date") RETURNS "void"
+    LANGUAGE "plpgsql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  if is_admin() then
+    return;
+  end if;
+  if not is_on_duty() then
+    raise exception 'not_allowed';
+  end if;
+  if p_date < (now() at time zone 'Europe/Prague')::date then
+    raise exception 'date_past';
+  end if;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."duty_gate"("p_date" "date") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."duty_generate"("p_from" "date", "p_days" smallint, "p_until" "date") RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_tenant constant uuid := current_tenant_id();
+  v_start date := p_from;
+  v_end date;
+  v_created integer := 0;
+  v_skipped integer := 0;
+begin
+  if not is_admin() then
+    raise exception 'not_allowed';
+  end if;
+  if p_days is null or p_days < 1 or p_days > 31 then
+    raise exception 'invalid_days';
+  end if;
+  if p_from is null or p_until is null or p_until < p_from
+     or p_until - p_from + 1 > 400 then
+    raise exception 'invalid_range';
+  end if;
+
+  while v_start <= p_until loop
+    v_end := least(v_start + p_days - 1, p_until);
+    if exists (select 1 from duty_periods
+                where tenant_id = v_tenant
+                  and daterange(starts_on, ends_on, '[]')
+                      && daterange(v_start, v_end, '[]')) then
+      v_skipped := v_skipped + 1;
+    else
+      -- Another admin's period may land between the check and the insert.
+      begin
+        insert into duty_periods (tenant_id, starts_on, ends_on, created_by)
+          values (v_tenant, v_start, v_end, auth.uid());
+        v_created := v_created + 1;
+      exception when exclusion_violation then
+        v_skipped := v_skipped + 1;
+      end;
+    end if;
+    v_start := v_start + p_days;
+  end loop;
+
+  return jsonb_build_object('created', v_created, 'skipped', v_skipped);
+end;
+$$;
+
+
+ALTER FUNCTION "public"."duty_generate"("p_from" "date", "p_days" smallint, "p_until" "date") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."duty_period_delete"("p_id" "uuid") RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  if not is_admin() then
+    raise exception 'not_allowed';
+  end if;
+  delete from duty_periods where id = p_id and tenant_id = current_tenant_id();
+  if not found then
+    raise exception 'unknown_period';
+  end if;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."duty_period_delete"("p_id" "uuid") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."duty_period_save"("p_id" "uuid", "p_starts_on" "date", "p_ends_on" "date", "p_note" "text") RETURNS "uuid"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_tenant constant uuid := current_tenant_id();
+  v_note constant text := trim(coalesce(p_note, ''));
+  v_id uuid;
+begin
+  if not is_admin() then
+    raise exception 'not_allowed';
+  end if;
+  if p_starts_on is null or p_ends_on is null or p_ends_on < p_starts_on then
+    raise exception 'invalid_range';
+  end if;
+  if p_ends_on - p_starts_on >= 62 then
+    raise exception 'duty_too_long';
+  end if;
+
+  begin
+    if p_id is null then
+      insert into duty_periods (tenant_id, starts_on, ends_on, note, created_by)
+        values (v_tenant, p_starts_on, p_ends_on, v_note, auth.uid())
+        returning id into v_id;
+    else
+      update duty_periods
+         set starts_on = p_starts_on, ends_on = p_ends_on, note = v_note
+       where id = p_id and tenant_id = v_tenant
+       returning id into v_id;
+      if v_id is null then
+        raise exception 'unknown_period';
+      end if;
+    end if;
+  exception when exclusion_violation then
+    raise exception 'duty_overlap';
+  end;
+  return v_id;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."duty_period_save"("p_id" "uuid", "p_starts_on" "date", "p_ends_on" "date", "p_note" "text") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."duty_periods_delete_unassigned"("p_from" "date") RETURNS integer
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_count integer;
+begin
+  if not is_admin() then
+    raise exception 'not_allowed';
+  end if;
+  if p_from is null then
+    raise exception 'invalid_range';
+  end if;
+  delete from duty_periods d
+   where d.tenant_id = current_tenant_id()
+     and d.starts_on >= p_from
+     and not exists (select 1 from duty_assignments a where a.period_id = d.id);
+  get diagnostics v_count = row_count;
+  return v_count;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."duty_periods_delete_unassigned"("p_from" "date") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."duty_season_delete"("p_started_on" "date") RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_tenant constant uuid := current_tenant_id();
+  v_newest date;
+begin
+  if not is_admin() then
+    raise exception 'not_allowed';
+  end if;
+  perform pg_advisory_xact_lock(hashtext('duty_season'), hashtext(v_tenant::text));
+  select max(started_on) into v_newest from duty_seasons where tenant_id = v_tenant;
+  if v_newest is null or p_started_on is distinct from v_newest then
+    raise exception 'not_newest';
+  end if;
+  delete from duty_seasons where tenant_id = v_tenant and started_on = v_newest;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."duty_season_delete"("p_started_on" "date") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."duty_season_start"("p_started_on" "date", "p_name" "text") RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_tenant constant uuid := current_tenant_id();
+  v_name constant text := trim(coalesce(p_name, ''));
+begin
+  if not is_admin() then
+    raise exception 'not_allowed';
+  end if;
+  if v_name = '' then
+    raise exception 'empty_name';
+  end if;
+  -- One season change at a time per alley, so "after the newest" holds.
+  perform pg_advisory_xact_lock(hashtext('duty_season'), hashtext(v_tenant::text));
+  if exists (select 1 from duty_seasons
+              where tenant_id = v_tenant and started_on >= p_started_on) then
+    raise exception 'season_order';
+  end if;
+  insert into duty_seasons (tenant_id, started_on, name, created_by)
+    values (v_tenant, p_started_on, v_name, auth.uid());
+end;
+$$;
+
+
+ALTER FUNCTION "public"."duty_season_start"("p_started_on" "date", "p_name" "text") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."duty_set_assignees"("p_period" "uuid", "p_users" "uuid"[]) RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_tenant constant uuid := current_tenant_id();
+  v_users constant uuid[] :=
+    array(select distinct u from unnest(coalesce(p_users, '{}')) u);
+begin
+  if not is_admin() then
+    raise exception 'not_allowed';
+  end if;
+  -- Two admins saving the same period end with one of their sets, not a mix.
+  perform 1 from duty_periods
+   where id = p_period and tenant_id = v_tenant
+     for update;
+  if not found then
+    raise exception 'unknown_period';
+  end if;
+  if exists (
+    select 1 from unnest(v_users) u
+     where u is null or not exists (
+       select 1 from profiles p
+        where p.id = u and p.tenant_id = v_tenant
+          and p.status = 'approved' and p.role <> 'kiosk'
+          and not (p.superadmin and p.home_tenant_id is not null
+                   and p.tenant_id <> p.home_tenant_id))
+  ) then
+    raise exception 'unknown_player';
+  end if;
+
+  delete from duty_assignments
+   where period_id = p_period and user_id <> all (v_users);
+  insert into duty_assignments (period_id, user_id, tenant_id, assigned_by)
+  select p_period, u, v_tenant, auth.uid() from unnest(v_users) u
+  on conflict (period_id, user_id) do nothing;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."duty_set_assignees"("p_period" "uuid", "p_users" "uuid"[]) OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."enqueue_calendar_sync"("p_user" "uuid", "p_reservation" "uuid") RETURNS "void"
@@ -1693,6 +2111,21 @@ $$;
 ALTER FUNCTION "public"."is_kiosk"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."is_on_duty"() RETURNS boolean
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  select exists (select 1 from duty_assignments a
+    join duty_periods d on d.id = a.period_id
+    join profiles me on me.id = auth.uid()
+   where a.user_id = me.id and d.tenant_id = me.tenant_id
+     and me.status = 'approved' and me.role = 'player' and not me.placeholder
+     and (now() at time zone 'Europe/Prague')::date between d.starts_on and d.ends_on) $$;
+
+
+ALTER FUNCTION "public"."is_on_duty"() OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."is_superadmin"() RETURNS boolean
     LANGUAGE "sql" STABLE SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -1829,6 +2262,14 @@ begin
   update reservations set player_id = p_target_id
   where player_id = p_placeholder_id;
 
+  -- Duties too (0050), except where the account is on the same period
+  -- already: that row is the one kept. What stays on the placeholder goes
+  -- with it (the FK cascades).
+  update duty_assignments a set user_id = p_target_id
+  where a.user_id = p_placeholder_id
+    and not exists (select 1 from duty_assignments b
+                    where b.period_id = a.period_id and b.user_id = p_target_id);
+
   update profiles
   set display_name = trim(p_display_name),
       nick = trim(coalesce(p_nick, '')),
@@ -1844,6 +2285,234 @@ $$;
 
 
 ALTER FUNCTION "public"."merge_placeholder_player"("p_placeholder_id" "uuid", "p_target_id" "uuid", "p_display_name" "text", "p_nick" "text", "p_club_id" "uuid") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."message_delete"("p_id" "uuid") RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  if not is_approved() or is_kiosk() then
+    raise exception 'not_allowed';
+  end if;
+  delete from messages
+   where id = p_id and tenant_id = current_tenant_id()
+     and (author_id = auth.uid() or is_admin());
+  if not found then
+    raise exception 'unknown_message';
+  end if;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."message_delete"("p_id" "uuid") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."message_recipients_stamp_reacted"() RETURNS "trigger"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  if (new.reaction is not null or new.reply is not null)
+     and (select kind from messages where id = new.message_id) = 'notice' then
+    raise exception 'not_allowed';
+  end if;
+  if new.reaction is distinct from old.reaction or new.reply is distinct from old.reply then
+    if new.reaction is null and new.reply is null then
+      new.reacted_at := null;
+    else
+      new.reacted_at := now();
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."message_recipients_stamp_reacted"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."message_send"("p_kind" "text", "p_audience" "text", "p_on_date" "date", "p_block_id" "uuid", "p_title" "text", "p_body" "text", "p_expires_at" timestamp with time zone, "p_notify" boolean) RETURNS "uuid"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $_$
+declare
+  v_tenant constant uuid := current_tenant_id();
+  v_me constant uuid := auth.uid();
+  -- Trimmed of any whitespace, not only spaces (trim() alone would take
+  -- a body of newlines and tabs as written); what is stored and measured.
+  v_title constant text :=
+    nullif(regexp_replace(coalesce(p_title, ''), '^\s+|\s+$', '', 'g'), '');
+  v_body constant text := regexp_replace(coalesce(p_body, ''), '^\s+|\s+$', '', 'g');
+  v_id uuid;
+  v_members uuid[];
+  v_recipients uuid[];
+  v_role text;
+begin
+  select role into v_role from profiles
+    where id = v_me and tenant_id = v_tenant and status = 'approved'
+      and not placeholder and role <> 'kiosk';
+  if v_role is null then
+    raise exception 'not_allowed';
+  end if;
+
+  if p_kind = 'notice' then
+    if not is_admin() then
+      raise exception 'not_allowed';
+    end if;
+    if p_audience is distinct from 'all' then
+      raise exception 'invalid_audience';
+    end if;
+    if v_title is null then
+      raise exception 'title_required';
+    end if;
+    -- A bare code, never the raw messages_title_check; char_length counts
+    -- code points (👍🏽 is two), which is what the app has to count too.
+    if char_length(v_title) > 80 then
+      raise exception 'title_too_long';
+    end if;
+  elsif p_kind = 'message' then
+    if p_audience in ('day', 'block') then
+      if p_on_date is null then
+        raise exception 'date_past';
+      end if;
+      perform duty_edit_gate(p_on_date);
+      if p_audience = 'block' then
+        -- An active block of this alley, or a day-only block that belongs
+        -- to this date through day_overrides (add_special_block leaves
+        -- those with active = false).
+        if not exists (select 1 from time_blocks b
+                        where b.id = p_block_id and b.tenant_id = v_tenant
+                          and (b.active or exists (
+                            select 1 from day_overrides o
+                             where o.tenant_id = v_tenant and o.date = p_on_date
+                               and b.id = any (o.block_ids)))) then
+          raise exception 'unknown_block';
+        end if;
+      end if;
+    elsif p_audience in ('admins', 'duty') then
+      -- Any approved home account, admins included (v_role is already
+      -- checked above). on_date/block_id are optional context here —
+      -- the block, if given, has to be this alley's.
+      if p_block_id is not null and not exists (
+          select 1 from time_blocks
+           where id = p_block_id and tenant_id = v_tenant) then
+        raise exception 'unknown_block';
+      end if;
+    else
+      raise exception 'invalid_audience';
+    end if;
+  else
+    raise exception 'invalid_kind';
+  end if;
+
+  if v_body = '' then
+    raise exception 'body_required';
+  end if;
+  if char_length(v_body) > (case when p_kind = 'notice' then 2000 else 500 end) then
+    raise exception 'body_too_long';
+  end if;
+
+  -- The `players` view's rule, minus the author: whoever may receive.
+  v_members := array(select id from profiles
+                      where tenant_id = v_tenant and status = 'approved' and role <> 'kiosk'
+                        and not placeholder and id <> v_me
+                        and not (superadmin and home_tenant_id is not null
+                                 and tenant_id <> home_tenant_id));
+
+  v_recipients := case p_audience
+    when 'all' then v_members
+    when 'day' then
+      array(select distinct player_id from reservations
+             where tenant_id = v_tenant and date = p_on_date and cancelled_at is null
+               and player_id = any (v_members))
+    when 'block' then
+      array(select distinct player_id from reservations
+             where tenant_id = v_tenant and date = p_on_date and block_id = p_block_id
+               and cancelled_at is null and player_id = any (v_members))
+    when 'admins' then
+      array(select id from profiles
+             where id = any (v_members) and role = 'admin')
+    when 'duty' then
+      array(select a.user_id from duty_assignments a
+             join duty_periods d on d.id = a.period_id
+             where d.tenant_id = v_tenant
+               and (now() at time zone 'Europe/Prague')::date
+                   between d.starts_on and d.ends_on
+               and a.user_id = any (v_members))
+  end;
+
+  -- A notice goes up even with nobody else in the alley yet (a new alley,
+  -- the spare-key notice before the players join): the board is not
+  -- recipient-based, its rows are only for the push and „Kdo si to
+  -- zobrazil“. A message with nobody to go to is refused.
+  if p_kind = 'message' and array_length(v_recipients, 1) is null then
+    if p_audience = 'duty' then
+      raise exception 'nobody_on_duty';
+    end if;
+    raise exception 'no_recipients';
+  end if;
+
+  -- A notice keeps no context; a day message no block; only a notice has a
+  -- title, an expiry and a choice about pinging (a message always pings).
+  insert into messages (tenant_id, author_id, author_role, kind, audience, on_date, block_id,
+                        title, body, expires_at, notify)
+    values (v_tenant, v_me, v_role, p_kind, p_audience,
+            case when p_kind = 'notice' then null else p_on_date end,
+            case when p_kind = 'notice' or p_audience = 'day' then null
+                 else p_block_id end,
+            case when p_kind = 'notice' then v_title end,
+            v_body, case when p_kind = 'notice' then p_expires_at end,
+            case when p_kind = 'notice' then coalesce(p_notify, true) else true end)
+    returning id into v_id;
+
+  insert into message_recipients (message_id, user_id, tenant_id)
+    select v_id, u, v_tenant from unnest(v_recipients) u;
+
+  return v_id;
+end;
+$_$;
+
+
+ALTER FUNCTION "public"."message_send"("p_kind" "text", "p_audience" "text", "p_on_date" "date", "p_block_id" "uuid", "p_title" "text", "p_body" "text", "p_expires_at" timestamp with time zone, "p_notify" boolean) OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."message_update"("p_id" "uuid", "p_title" "text", "p_body" "text", "p_expires_at" timestamp with time zone) RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $_$
+declare
+  -- Trimmed of any whitespace, as in message_send.
+  v_title constant text :=
+    nullif(regexp_replace(coalesce(p_title, ''), '^\s+|\s+$', '', 'g'), '');
+  v_body constant text := regexp_replace(coalesce(p_body, ''), '^\s+|\s+$', '', 'g');
+begin
+  if not is_admin() then
+    raise exception 'not_allowed';
+  end if;
+  if v_title is null then
+    raise exception 'title_required';
+  end if;
+  if char_length(v_title) > 80 then
+    raise exception 'title_too_long';
+  end if;
+  if v_body = '' then
+    raise exception 'body_required';
+  end if;
+  if char_length(v_body) > 2000 then
+    raise exception 'body_too_long';
+  end if;
+  update messages
+     set title = v_title, body = v_body, expires_at = p_expires_at, updated_at = now()
+   where id = p_id and tenant_id = current_tenant_id() and kind = 'notice';
+  if not found then
+    raise exception 'unknown_message';
+  end if;
+end;
+$_$;
+
+
+ALTER FUNCTION "public"."message_update"("p_id" "uuid", "p_title" "text", "p_body" "text", "p_expires_at" timestamp with time zone) OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."monthly_attendance"("p_year" integer, "p_month" integer) RETURNS TABLE("player_id" "uuid", "display_name" "text", "club" "text", "attended" bigint)
@@ -1882,9 +2551,7 @@ CREATE OR REPLACE FUNCTION "public"."move_day_reservations"("p_date" "date", "p_
     SET "search_path" TO 'public'
     AS $$
 begin
-  if not is_admin() then
-    raise exception 'not_allowed';
-  end if;
+  perform duty_edit_gate(p_date);
 
   if not exists (
     select 1 from time_blocks
@@ -1894,6 +2561,15 @@ begin
     where id = p_to_block and tenant_id = current_tenant_id()
   ) then
     raise exception 'unknown_block';
+  end if;
+
+  if not is_admin()
+     and p_date = (now() at time zone 'Europe/Prague')::date
+     and exists (
+       select 1 from time_blocks
+       where id in (p_from_block, p_to_block)
+         and starts_at <= (now() at time zone 'Europe/Prague')::time) then
+    raise exception 'too_late';
   end if;
 
   update reservations
@@ -1918,12 +2594,13 @@ CREATE OR REPLACE FUNCTION "public"."move_reservation"("p_reservation" "uuid", "
     SET "search_path" TO 'public'
     AS $$
 declare
+  v_on_duty constant boolean := is_on_duty();
   v_res reservations;
   v_block time_blocks;
   v_lanes int;
 begin
-  if not is_admin() then
-    raise exception 'not_allowed';
+  if not v_on_duty then
+    perform duty_edit_days_gate();
   end if;
 
   select * into v_res from reservations
@@ -1931,11 +2608,24 @@ begin
   if not found or v_res.cancelled_at is not null then
     raise exception 'unknown_reservation';
   end if;
+  if v_on_duty then
+    perform duty_gate(v_res.date);
+  else
+    perform duty_edit_gate(v_res.date);
+  end if;
 
   select * into v_block from time_blocks
   where id = p_to_block and tenant_id = current_tenant_id();
   if not found then
     raise exception 'unknown_block';
+  end if;
+
+  if not is_admin()
+     and v_res.date = (now() at time zone 'Europe/Prague')::date
+     and (v_block.starts_at <= (now() at time zone 'Europe/Prague')::time
+          or (select starts_at from time_blocks where id = v_res.block_id)
+             <= (now() at time zone 'Europe/Prague')::time) then
+    raise exception 'too_late';
   end if;
 
   select lane_count into v_lanes from schedule_settings
@@ -2092,7 +2782,8 @@ CREATE OR REPLACE FUNCTION "public"."notifications_due"() RETURNS boolean
     SET "search_path" TO 'public'
     AS $$
   select exists (select 1 from notification_jobs where run_at <= now())
-      or exists (select 1 from due_reminders());
+      or exists (select 1 from due_reminders())
+      or exists (select 1 from due_duty_reminders());
 $$;
 
 
@@ -2219,6 +2910,26 @@ $$;
 ALTER FUNCTION "public"."priority_slots_mark_hand_edit"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."prune_messages"() RETURNS integer
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_count integer;
+begin
+  delete from messages
+   where kind = 'message'
+     and coalesce(on_date, (created_at at time zone 'Europe/Prague')::date)
+         < (now() at time zone 'Europe/Prague')::date - 90;
+  get diagnostics v_count = row_count;
+  return v_count;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."prune_messages"() OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."public_tenant_id"("p_slug" "text") RETURNS "uuid"
     LANGUAGE "plpgsql" STABLE SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -2255,6 +2966,7 @@ begin
   return jsonb_build_object(
     'tenant_name', (select name from tenants where id = v_tenant),
     'settings', (select to_jsonb(s) - 'tenant_id'
+                          - 'duty_reminder_enabled' - 'duty_reminder_days'
                    from schedule_settings s where s.tenant_id = v_tenant),
     'blocks', coalesce((
       select jsonb_agg(to_jsonb(b) - 'tenant_id')
@@ -3053,10 +3765,12 @@ CREATE OR REPLACE FUNCTION "public"."set_day_override"("p_date" "date", "p_close
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
     AS $$
+declare
+  v_admin boolean := is_admin();
+  v_today date := (now() at time zone 'Europe/Prague')::date;
+  v_now time := (now() at time zone 'Europe/Prague')::time;
 begin
-  if not is_admin() then
-    raise exception 'not_allowed';
-  end if;
+  perform duty_edit_gate(p_date);
 
   insert into day_overrides (tenant_id, date, closed, reason, block_ids, created_by)
   values (current_tenant_id(), p_date, p_closed, trim(coalesce(p_reason, '')),
@@ -3074,10 +3788,13 @@ begin
       cancel_note = coalesce(nullif(trim(p_reason), ''), 'změna rozvrhu'),
       notify_player = true,
       notify_message = null
-  where r.date = p_date
+  from time_blocks b
+  where b.id = r.block_id
+    and r.date = p_date
     and r.tenant_id = current_tenant_id()
     and r.cancelled_at is null
-    and (p_closed or (p_block_ids is not null and not (r.block_id = any (p_block_ids))));
+    and (p_closed or (p_block_ids is not null and not (r.block_id = any (p_block_ids))))
+    and (v_admin or not (r.date = v_today and b.starts_at <= v_now));
 end;
 $$;
 
@@ -3644,6 +4361,43 @@ $$;
 ALTER FUNCTION "public"."upsert_federation_venue"("p_tenant" "uuid", "p_venue" "jsonb") OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."visible_message_ids"() RETURNS SETOF "uuid"
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  select m.id from messages m
+   where m.tenant_id = (select current_tenant_id())
+     and (select is_approved()) and not (select is_kiosk())
+     and (m.kind = 'notice'
+          or m.author_id = (select auth.uid())
+          or exists (select 1 from message_recipients r
+                      where r.message_id = m.id
+                        and r.user_id = (select auth.uid())))
+$$;
+
+
+ALTER FUNCTION "public"."visible_message_ids"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."visible_recipient_message_ids"() RETURNS SETOF "uuid"
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  select m.id from messages m
+   where m.tenant_id = (select current_tenant_id())
+     and (select is_approved()) and not (select is_kiosk())
+     and ((m.kind = 'notice' and (select is_admin()))
+          or (m.kind = 'message'
+              and (m.author_id = (select auth.uid())
+                   or exists (select 1 from message_recipients r
+                               where r.message_id = m.id
+                                 and r.user_id = (select auth.uid())))))
+$$;
+
+
+ALTER FUNCTION "public"."visible_recipient_message_ids"() OWNER TO "postgres";
+
+
 CREATE TABLE IF NOT EXISTS "public"."app_config" (
     "id" boolean DEFAULT true NOT NULL,
     "min_build" integer DEFAULT 1 NOT NULL,
@@ -3691,6 +4445,64 @@ CREATE TABLE IF NOT EXISTS "public"."day_overrides" (
 
 
 ALTER TABLE "public"."day_overrides" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."duty_assignments" (
+    "period_id" "uuid" NOT NULL,
+    "user_id" "uuid" NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "assigned_by" "uuid",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."duty_assignments" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."duty_assignments" IS 'Who works a duty_periods row (0050): approved players of the alley, placeholders included (they count, but never get the duty''s rights); never the kiosk. tenant_id is the period''s, denormalised like player_group_members. Written only through duty_set_assignees; a merge moves a placeholder''s rows to the account.';
+
+
+
+CREATE TABLE IF NOT EXISTS "public"."duty_periods" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "starts_on" "date" NOT NULL,
+    "ends_on" "date" NOT NULL,
+    "note" "text" DEFAULT ''::"text" NOT NULL,
+    "created_by" "uuid",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "duty_periods_length_check" CHECK ((("ends_on" - "starts_on") < 62)),
+    CONSTRAINT "duty_periods_note_check" CHECK (("char_length"("note") <= 80)),
+    CONSTRAINT "duty_periods_order_check" CHECK (("ends_on" >= "starts_on"))
+);
+
+
+ALTER TABLE "public"."duty_periods" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."duty_periods" IS 'A canteen duty (0050): the days [starts_on, ends_on], both included, at most 62 of them, that the players in duty_assignments work the canteen. Periods of one alley never overlap (duty_periods_no_overlap). Written only through the admin''s duty_* RPCs.';
+
+
+
+COMMENT ON COLUMN "public"."duty_periods"."note" IS 'The admin''s note shown next to the dates, trimmed, at most 80 characters; '''' = none.';
+
+
+
+CREATE TABLE IF NOT EXISTS "public"."duty_seasons" (
+    "tenant_id" "uuid" NOT NULL,
+    "started_on" "date" NOT NULL,
+    "name" "text" NOT NULL,
+    "created_by" "uuid",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "duty_seasons_name_check" CHECK ((("char_length"("name") >= 1) AND ("char_length"("name") <= 40)))
+);
+
+
+ALTER TABLE "public"."duty_seasons" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."duty_seasons" IS 'Season boundaries for the duty counts (0050). A period belongs to the season with the greatest started_on <= its starts_on; the periods before the first boundary form the implicit first season. Starting a season inserts a row and moves nothing; undoing it deletes the newest row (duty_season_start / duty_season_delete).';
+
 
 
 CREATE TABLE IF NOT EXISTS "public"."federation_sync" (
@@ -3840,6 +4652,71 @@ CREATE TABLE IF NOT EXISTS "public"."match_results" (
 
 
 ALTER TABLE "public"."match_results" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."message_recipients" (
+    "message_id" "uuid" NOT NULL,
+    "user_id" "uuid" NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "read_at" timestamp with time zone,
+    "reaction" "text",
+    "reply" "text",
+    "reacted_at" timestamp with time zone,
+    CONSTRAINT "message_recipients_reaction_check" CHECK (("reaction" = ANY (ARRAY['up'::"text", 'down'::"text"]))),
+    CONSTRAINT "message_recipients_reply_check" CHECK (("char_length"("reply") <= 200))
+);
+
+
+ALTER TABLE "public"."message_recipients" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."message_recipients" IS 'Who got a messages row (0051), materialised at send time from the reservations/roster/duty data then. tenant_id is the message''s, denormalised like duty_assignments. read_at/reaction/reply are the recipient''s own-row write.';
+
+
+
+CREATE TABLE IF NOT EXISTS "public"."messages" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "author_id" "uuid",
+    "author_role" "text" NOT NULL,
+    "kind" "text" NOT NULL,
+    "audience" "text" NOT NULL,
+    "on_date" "date",
+    "block_id" "uuid",
+    "title" "text",
+    "body" "text" NOT NULL,
+    "expires_at" timestamp with time zone,
+    "notify" boolean DEFAULT true NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "messages_audience_check" CHECK (("audience" = ANY (ARRAY['all'::"text", 'day'::"text", 'block'::"text", 'admins'::"text", 'duty'::"text"]))),
+    CONSTRAINT "messages_author_role_check" CHECK (("author_role" = ANY (ARRAY['admin'::"text", 'player'::"text"]))),
+    CONSTRAINT "messages_body_check" CHECK ((("char_length"(TRIM(BOTH FROM "body")) >= 1) AND ("char_length"(TRIM(BOTH FROM "body")) <=
+CASE
+    WHEN ("kind" = 'notice'::"text") THEN 2000
+    ELSE 500
+END))),
+    CONSTRAINT "messages_context_check" CHECK (((("audience" = 'all'::"text") AND ("on_date" IS NULL) AND ("block_id" IS NULL)) OR (("audience" = 'day'::"text") AND ("on_date" IS NOT NULL) AND ("block_id" IS NULL)) OR (("audience" = 'block'::"text") AND ("on_date" IS NOT NULL)) OR ("audience" = ANY (ARRAY['admins'::"text", 'duty'::"text"])))),
+    CONSTRAINT "messages_expires_check" CHECK ((("kind" = 'notice'::"text") OR ("expires_at" IS NULL))),
+    CONSTRAINT "messages_kind_audience_check" CHECK (((("kind" = 'notice'::"text") AND ("audience" = 'all'::"text")) OR (("kind" = 'message'::"text") AND ("audience" = ANY (ARRAY['day'::"text", 'block'::"text", 'admins'::"text", 'duty'::"text"]))))),
+    CONSTRAINT "messages_kind_check" CHECK (("kind" = ANY (ARRAY['notice'::"text", 'message'::"text"]))),
+    CONSTRAINT "messages_title_check" CHECK (((("kind" = 'notice'::"text") AND (("char_length"(TRIM(BOTH FROM COALESCE("title", ''::"text"))) >= 1) AND ("char_length"(TRIM(BOTH FROM COALESCE("title", ''::"text"))) <= 80))) OR (("kind" = 'message'::"text") AND ("title" IS NULL))))
+);
+
+
+ALTER TABLE "public"."messages" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."messages" IS 'A notice (kind=notice, audience=all, Klubovna -> Nástěnka) or a message (kind=message, to a day/block/admins/duty, Klubovna -> Zprávy), 0051. Written only through message_send/message_update/message_delete.';
+
+
+
+COMMENT ON COLUMN "public"."messages"."expires_at" IS 'Notice only: when it stops showing as active; null = "do odvolání".';
+
+
+
+COMMENT ON COLUMN "public"."messages"."notify" IS 'Whether sending this pinged its recipients (push/e-mail). Always true for a message; the admin''s choice for a notice.';
+
 
 
 CREATE TABLE IF NOT EXISTS "public"."notification_jobs" (
@@ -4001,13 +4878,24 @@ CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     "kiosk_dark" boolean DEFAULT true NOT NULL,
     "tenant_id" "uuid" NOT NULL,
     "kiosk_fit_day" boolean DEFAULT true NOT NULL,
+    "duty_reminder_enabled" boolean DEFAULT false NOT NULL,
+    "duty_reminder_days" smallint DEFAULT 1 NOT NULL,
     CONSTRAINT "schedule_settings_booking_horizon_days_check" CHECK ((("booking_horizon_days" >= 1) AND ("booking_horizon_days" <= 90))),
+    CONSTRAINT "schedule_settings_duty_reminder_days_check" CHECK ((("duty_reminder_days" >= 1) AND ("duty_reminder_days" <= 14))),
     CONSTRAINT "schedule_settings_lane_count_check" CHECK ((("lane_count" >= 1) AND ("lane_count" <= 12))),
     CONSTRAINT "schedule_settings_max_active_reservations_check" CHECK ((("max_active_reservations" >= 1) AND ("max_active_reservations" <= 50)))
 );
 
 
 ALTER TABLE "public"."schedule_settings" OWNER TO "postgres";
+
+
+COMMENT ON COLUMN "public"."schedule_settings"."duty_reminder_enabled" IS 'Whether the players on a canteen duty get a reminder before it (0050). Off by default; switching it off keeps duty_reminder_days.';
+
+
+
+COMMENT ON COLUMN "public"."schedule_settings"."duty_reminder_days" IS 'How many days before a canteen duty the reminder goes out, at 18:00 Prague (0050), 1–14.';
+
 
 
 CREATE TABLE IF NOT EXISTS "public"."team_colors" (
@@ -4128,6 +5016,26 @@ ALTER TABLE ONLY "public"."day_overrides"
 
 
 
+ALTER TABLE ONLY "public"."duty_assignments"
+    ADD CONSTRAINT "duty_assignments_pkey" PRIMARY KEY ("period_id", "user_id");
+
+
+
+ALTER TABLE ONLY "public"."duty_periods"
+    ADD CONSTRAINT "duty_periods_no_overlap" EXCLUDE USING "gist" ("tenant_id" WITH =, "daterange"("starts_on", "ends_on", '[]'::"text") WITH &&);
+
+
+
+ALTER TABLE ONLY "public"."duty_periods"
+    ADD CONSTRAINT "duty_periods_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."duty_seasons"
+    ADD CONSTRAINT "duty_seasons_pkey" PRIMARY KEY ("tenant_id", "started_on");
+
+
+
 ALTER TABLE ONLY "public"."federation_sync"
     ADD CONSTRAINT "federation_sync_pkey" PRIMARY KEY ("tenant_id");
 
@@ -4165,6 +5073,16 @@ ALTER TABLE ONLY "public"."match_results"
 
 ALTER TABLE ONLY "public"."priority_slots"
     ADD CONSTRAINT "matches_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."message_recipients"
+    ADD CONSTRAINT "message_recipients_pkey" PRIMARY KEY ("message_id", "user_id");
+
+
+
+ALTER TABLE ONLY "public"."messages"
+    ADD CONSTRAINT "messages_pkey" PRIMARY KEY ("id");
 
 
 
@@ -4287,11 +5205,31 @@ CREATE UNIQUE INDEX "clubs_tenant_site_slug_key" ON "public"."clubs" USING "btre
 
 
 
+CREATE INDEX "duty_assignments_tenant_user" ON "public"."duty_assignments" USING "btree" ("tenant_id", "user_id");
+
+
+
+CREATE INDEX "duty_periods_tenant_starts_on" ON "public"."duty_periods" USING "btree" ("tenant_id", "starts_on");
+
+
+
 CREATE INDEX "match_player_results_player_idx" ON "public"."match_player_results" USING "btree" ("tenant_id", "player_site_id");
 
 
 
 CREATE INDEX "matches_date_idx" ON "public"."priority_slots" USING "btree" ("date");
+
+
+
+CREATE INDEX "message_recipients_tenant_user" ON "public"."message_recipients" USING "btree" ("tenant_id", "user_id", "read_at");
+
+
+
+CREATE INDEX "messages_tenant_kind_created" ON "public"."messages" USING "btree" ("tenant_id", "kind", "created_at");
+
+
+
+CREATE INDEX "messages_tenant_on_date" ON "public"."messages" USING "btree" ("tenant_id", "on_date");
 
 
 
@@ -4348,6 +5286,18 @@ CREATE OR REPLACE TRIGGER "match_exceptions_enqueue_calendar" AFTER INSERT OR DE
 
 
 CREATE OR REPLACE TRIGGER "match_uklid_sync" AFTER INSERT OR UPDATE ON "public"."priority_slots" FOR EACH ROW EXECUTE FUNCTION "public"."sync_uklid_for_match"();
+
+
+
+CREATE OR REPLACE TRIGGER "message_recipients_reacted_at" BEFORE UPDATE ON "public"."message_recipients" FOR EACH ROW EXECUTE FUNCTION "public"."message_recipients_stamp_reacted"();
+
+
+
+CREATE OR REPLACE TRIGGER "notify_message_reactions" AFTER UPDATE OF "reaction", "reply" ON "public"."message_recipients" FOR EACH ROW WHEN ((("old"."reaction" IS DISTINCT FROM "new"."reaction") OR ("old"."reply" IS DISTINCT FROM "new"."reply"))) EXECUTE FUNCTION "public"."notify_webhook"();
+
+
+
+CREATE OR REPLACE TRIGGER "notify_messages" AFTER INSERT ON "public"."messages" FOR EACH ROW EXECUTE FUNCTION "public"."notify_webhook"();
 
 
 
@@ -4447,6 +5397,46 @@ ALTER TABLE ONLY "public"."day_overrides"
 
 
 
+ALTER TABLE ONLY "public"."duty_assignments"
+    ADD CONSTRAINT "duty_assignments_assigned_by_fkey" FOREIGN KEY ("assigned_by") REFERENCES "public"."profiles"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."duty_assignments"
+    ADD CONSTRAINT "duty_assignments_period_id_fkey" FOREIGN KEY ("period_id") REFERENCES "public"."duty_periods"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."duty_assignments"
+    ADD CONSTRAINT "duty_assignments_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."duty_assignments"
+    ADD CONSTRAINT "duty_assignments_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "public"."profiles"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."duty_periods"
+    ADD CONSTRAINT "duty_periods_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "public"."profiles"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."duty_periods"
+    ADD CONSTRAINT "duty_periods_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."duty_seasons"
+    ADD CONSTRAINT "duty_seasons_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "public"."profiles"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."duty_seasons"
+    ADD CONSTRAINT "duty_seasons_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE CASCADE;
+
+
+
 ALTER TABLE ONLY "public"."federation_sync"
     ADD CONSTRAINT "federation_sync_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE CASCADE;
 
@@ -4494,6 +5484,36 @@ ALTER TABLE ONLY "public"."match_results"
 
 ALTER TABLE ONLY "public"."priority_slots"
     ADD CONSTRAINT "matches_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "public"."profiles"("id");
+
+
+
+ALTER TABLE ONLY "public"."message_recipients"
+    ADD CONSTRAINT "message_recipients_message_id_fkey" FOREIGN KEY ("message_id") REFERENCES "public"."messages"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."message_recipients"
+    ADD CONSTRAINT "message_recipients_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."message_recipients"
+    ADD CONSTRAINT "message_recipients_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "public"."profiles"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."messages"
+    ADD CONSTRAINT "messages_author_id_fkey" FOREIGN KEY ("author_id") REFERENCES "public"."profiles"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."messages"
+    ADD CONSTRAINT "messages_block_id_fkey" FOREIGN KEY ("block_id") REFERENCES "public"."time_blocks"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."messages"
+    ADD CONSTRAINT "messages_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE CASCADE;
 
 
 
@@ -4706,6 +5726,27 @@ CREATE POLICY "clubs_write" ON "public"."clubs" USING ((("tenant_id" = "public".
 ALTER TABLE "public"."day_overrides" ENABLE ROW LEVEL SECURITY;
 
 
+ALTER TABLE "public"."duty_assignments" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "duty_assignments_select" ON "public"."duty_assignments" FOR SELECT USING ((("tenant_id" = "public"."current_tenant_id"()) AND "public"."is_approved_or_kiosk"()));
+
+
+
+ALTER TABLE "public"."duty_periods" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "duty_periods_select" ON "public"."duty_periods" FOR SELECT USING ((("tenant_id" = "public"."current_tenant_id"()) AND "public"."is_approved_or_kiosk"()));
+
+
+
+ALTER TABLE "public"."duty_seasons" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "duty_seasons_select" ON "public"."duty_seasons" FOR SELECT USING ((("tenant_id" = "public"."current_tenant_id"()) AND "public"."is_approved_or_kiosk"()));
+
+
+
 ALTER TABLE "public"."federation_sync" ENABLE ROW LEVEL SECURITY;
 
 
@@ -4741,6 +5782,24 @@ ALTER TABLE "public"."match_results" ENABLE ROW LEVEL SECURITY;
 
 
 CREATE POLICY "match_results_select" ON "public"."match_results" FOR SELECT USING ((("tenant_id" = "public"."current_tenant_id"()) AND "public"."is_approved_or_kiosk"()));
+
+
+
+ALTER TABLE "public"."message_recipients" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "message_recipients_select" ON "public"."message_recipients" FOR SELECT USING ((("tenant_id" = ( SELECT "public"."current_tenant_id"() AS "current_tenant_id")) AND ((("user_id" = ( SELECT "auth"."uid"() AS "uid")) AND ( SELECT "public"."is_approved"() AS "is_approved") AND (NOT ( SELECT "public"."is_kiosk"() AS "is_kiosk"))) OR ("message_id" IN ( SELECT "public"."visible_recipient_message_ids"() AS "visible_recipient_message_ids")))));
+
+
+
+CREATE POLICY "message_recipients_update_own" ON "public"."message_recipients" FOR UPDATE USING ((("user_id" = "auth"."uid"()) AND "public"."is_approved"() AND (NOT "public"."is_kiosk"()))) WITH CHECK ((("user_id" = "auth"."uid"()) AND "public"."is_approved"() AND (NOT "public"."is_kiosk"())));
+
+
+
+ALTER TABLE "public"."messages" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "messages_select" ON "public"."messages" FOR SELECT USING ((("tenant_id" = ( SELECT "public"."current_tenant_id"() AS "current_tenant_id")) AND ("id" IN ( SELECT "public"."visible_message_ids"() AS "visible_message_ids"))));
 
 
 
@@ -4927,6 +5986,12 @@ GRANT ALL ON FUNCTION "public"."_group_drop_member"("p_group" "uuid", "p_user" "
 
 
 
+REVOKE ALL ON FUNCTION "public"."add_special_block"("p_starts_at" time without time zone, "p_ends_at" time without time zone) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."add_special_block"("p_starts_at" time without time zone, "p_ends_at" time without time zone) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."add_special_block"("p_starts_at" time without time zone, "p_ends_at" time without time zone) TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."admin_list_tenants"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."admin_list_tenants"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."admin_list_tenants"() TO "service_role";
@@ -4961,6 +6026,12 @@ GRANT ALL ON FUNCTION "public"."backfill_calendar_jobs"("p_user" "uuid") TO "ser
 
 REVOKE ALL ON FUNCTION "public"."block_day_status"("p_tenant" "uuid", "p_date" "date", "p_block_id" "uuid") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."block_day_status"("p_tenant" "uuid", "p_date" "date", "p_block_id" "uuid") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."can_read_message"("p_id" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."can_read_message"("p_id" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."can_read_message"("p_id" "uuid") TO "service_role";
 
 
 
@@ -5043,14 +6114,82 @@ GRANT ALL ON FUNCTION "public"."create_tenant_and_register"("p_tenant_name" "tex
 
 
 
+REVOKE ALL ON FUNCTION "public"."delete_day_override"("p_date" "date") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."delete_day_override"("p_date" "date") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."delete_day_override"("p_date" "date") TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."delete_placeholder_player"("p_id" "uuid") TO "anon";
 GRANT ALL ON FUNCTION "public"."delete_placeholder_player"("p_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."delete_placeholder_player"("p_id" "uuid") TO "service_role";
 
 
 
+REVOKE ALL ON FUNCTION "public"."due_duty_reminders"() FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."due_duty_reminders"() TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."due_reminders"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."due_reminders"() TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."duty_edit_days_gate"() FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."duty_edit_days_gate"() TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."duty_edit_gate"("p_date" "date") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."duty_edit_gate"("p_date" "date") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."duty_gate"("p_date" "date") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."duty_gate"("p_date" "date") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."duty_generate"("p_from" "date", "p_days" smallint, "p_until" "date") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."duty_generate"("p_from" "date", "p_days" smallint, "p_until" "date") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."duty_generate"("p_from" "date", "p_days" smallint, "p_until" "date") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."duty_period_delete"("p_id" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."duty_period_delete"("p_id" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."duty_period_delete"("p_id" "uuid") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."duty_period_save"("p_id" "uuid", "p_starts_on" "date", "p_ends_on" "date", "p_note" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."duty_period_save"("p_id" "uuid", "p_starts_on" "date", "p_ends_on" "date", "p_note" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."duty_period_save"("p_id" "uuid", "p_starts_on" "date", "p_ends_on" "date", "p_note" "text") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."duty_periods_delete_unassigned"("p_from" "date") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."duty_periods_delete_unassigned"("p_from" "date") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."duty_periods_delete_unassigned"("p_from" "date") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."duty_season_delete"("p_started_on" "date") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."duty_season_delete"("p_started_on" "date") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."duty_season_delete"("p_started_on" "date") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."duty_season_start"("p_started_on" "date", "p_name" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."duty_season_start"("p_started_on" "date", "p_name" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."duty_season_start"("p_started_on" "date", "p_name" "text") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."duty_set_assignees"("p_period" "uuid", "p_users" "uuid"[]) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."duty_set_assignees"("p_period" "uuid", "p_users" "uuid"[]) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."duty_set_assignees"("p_period" "uuid", "p_users" "uuid"[]) TO "service_role";
 
 
 
@@ -5084,8 +6223,7 @@ GRANT ALL ON FUNCTION "public"."enqueue_notification"("p_kind" "text", "p_dedupe
 
 
 
-GRANT ALL ON FUNCTION "public"."fcm_token_claim"() TO "anon";
-GRANT ALL ON FUNCTION "public"."fcm_token_claim"() TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."fcm_token_claim"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."fcm_token_claim"() TO "service_role";
 
 
@@ -5157,6 +6295,11 @@ GRANT ALL ON FUNCTION "public"."group_remove_member"("p_user" "uuid") TO "servic
 
 
 
+REVOKE ALL ON FUNCTION "public"."is_on_duty"() FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."is_on_duty"() TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."kiosk_password_target"("p_user_id" "uuid") TO "anon";
 GRANT ALL ON FUNCTION "public"."kiosk_password_target"("p_user_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."kiosk_password_target"("p_user_id" "uuid") TO "service_role";
@@ -5182,6 +6325,29 @@ GRANT ALL ON FUNCTION "public"."match_exceptions_enqueue_calendar"() TO "service
 GRANT ALL ON FUNCTION "public"."merge_placeholder_player"("p_placeholder_id" "uuid", "p_target_id" "uuid", "p_display_name" "text", "p_nick" "text", "p_club_id" "uuid") TO "anon";
 GRANT ALL ON FUNCTION "public"."merge_placeholder_player"("p_placeholder_id" "uuid", "p_target_id" "uuid", "p_display_name" "text", "p_nick" "text", "p_club_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."merge_placeholder_player"("p_placeholder_id" "uuid", "p_target_id" "uuid", "p_display_name" "text", "p_nick" "text", "p_club_id" "uuid") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."message_delete"("p_id" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."message_delete"("p_id" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."message_delete"("p_id" "uuid") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."message_recipients_stamp_reacted"() FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."message_recipients_stamp_reacted"() TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."message_send"("p_kind" "text", "p_audience" "text", "p_on_date" "date", "p_block_id" "uuid", "p_title" "text", "p_body" "text", "p_expires_at" timestamp with time zone, "p_notify" boolean) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."message_send"("p_kind" "text", "p_audience" "text", "p_on_date" "date", "p_block_id" "uuid", "p_title" "text", "p_body" "text", "p_expires_at" timestamp with time zone, "p_notify" boolean) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."message_send"("p_kind" "text", "p_audience" "text", "p_on_date" "date", "p_block_id" "uuid", "p_title" "text", "p_body" "text", "p_expires_at" timestamp with time zone, "p_notify" boolean) TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."message_update"("p_id" "uuid", "p_title" "text", "p_body" "text", "p_expires_at" timestamp with time zone) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."message_update"("p_id" "uuid", "p_title" "text", "p_body" "text", "p_expires_at" timestamp with time zone) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."message_update"("p_id" "uuid", "p_title" "text", "p_body" "text", "p_expires_at" timestamp with time zone) TO "service_role";
 
 
 
@@ -5231,6 +6397,11 @@ GRANT ALL ON FUNCTION "public"."priority_slots_enqueue_calendar"() TO "service_r
 GRANT ALL ON FUNCTION "public"."priority_slots_mark_hand_edit"() TO "anon";
 GRANT ALL ON FUNCTION "public"."priority_slots_mark_hand_edit"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."priority_slots_mark_hand_edit"() TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."prune_messages"() FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."prune_messages"() TO "service_role";
 
 
 
@@ -5442,6 +6613,18 @@ GRANT ALL ON FUNCTION "public"."upsert_federation_venue"("p_tenant" "uuid", "p_v
 
 
 
+REVOKE ALL ON FUNCTION "public"."visible_message_ids"() FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."visible_message_ids"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."visible_message_ids"() TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."visible_recipient_message_ids"() FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."visible_recipient_message_ids"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."visible_recipient_message_ids"() TO "service_role";
+
+
+
 GRANT ALL ON TABLE "public"."app_config" TO "service_role";
 GRANT SELECT ON TABLE "public"."app_config" TO "authenticated";
 
@@ -5454,6 +6637,21 @@ GRANT ALL ON TABLE "public"."calendar_teams" TO "service_role";
 
 GRANT ALL ON TABLE "public"."day_overrides" TO "authenticated";
 GRANT ALL ON TABLE "public"."day_overrides" TO "service_role";
+
+
+
+GRANT SELECT ON TABLE "public"."duty_assignments" TO "authenticated";
+GRANT ALL ON TABLE "public"."duty_assignments" TO "service_role";
+
+
+
+GRANT SELECT ON TABLE "public"."duty_periods" TO "authenticated";
+GRANT ALL ON TABLE "public"."duty_periods" TO "service_role";
+
+
+
+GRANT SELECT ON TABLE "public"."duty_seasons" TO "authenticated";
+GRANT ALL ON TABLE "public"."duty_seasons" TO "service_role";
 
 
 
@@ -5483,6 +6681,28 @@ GRANT ALL ON TABLE "public"."match_player_results" TO "service_role";
 
 GRANT SELECT ON TABLE "public"."match_results" TO "authenticated";
 GRANT ALL ON TABLE "public"."match_results" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."message_recipients" TO "service_role";
+GRANT SELECT ON TABLE "public"."message_recipients" TO "authenticated";
+
+
+
+GRANT UPDATE("read_at") ON TABLE "public"."message_recipients" TO "authenticated";
+
+
+
+GRANT UPDATE("reaction") ON TABLE "public"."message_recipients" TO "authenticated";
+
+
+
+GRANT UPDATE("reply") ON TABLE "public"."message_recipients" TO "authenticated";
+
+
+
+GRANT ALL ON TABLE "public"."messages" TO "service_role";
+GRANT SELECT ON TABLE "public"."messages" TO "authenticated";
 
 
 

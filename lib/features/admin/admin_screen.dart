@@ -5,6 +5,7 @@ import '../../core/hub_menu.dart';
 import '../../core/ui.dart';
 import '../../data/providers.dart';
 import 'clubs_screen.dart';
+import 'duties_admin_screen.dart';
 import 'kiosk_screen.dart';
 import 'matches_screen.dart';
 import 'overrides_screen.dart';
@@ -39,6 +40,11 @@ class AdminScreen extends ConsumerWidget {
       label: 'Docházka',
       icon: Icons.fact_check_outlined,
       screen: () => const ReportScreen(),
+    ),
+    (
+      label: 'Služby',
+      icon: Icons.local_cafe_outlined,
+      screen: () => const DutiesAdminScreen(),
     ),
     (
       label: 'Rozvrh',
@@ -128,6 +134,7 @@ class AdminScreen extends ConsumerWidget {
               label: entry.label,
               icon: entry.icon,
               subtitle: null,
+              badge: null,
               onTap: () => _open(context, entry),
             ),
         ],

@@ -1,6 +1,8 @@
 // Stateless one-click-cancel tokens: `${base64url(JSON{rid,exp})}.${base64url(hmacSHA256(payload))}`.
 // exp = epoch seconds of the reservation's block start (Europe/Prague wall
 // clock) — once the training has started, cancellation is an admin decision.
+// A move keeps the reservation and its token, so cancel_flow.ts checks the
+// current block's start as well.
 
 export function base64urlEncode(data: Uint8Array | string): string {
   const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
@@ -15,7 +17,10 @@ export function base64urlDecode(value: string): Uint8Array<ArrayBuffer> {
   return Uint8Array.from(atob(padded), (c) => c.charCodeAt(0));
 }
 
-async function hmacKey(secret: string): Promise<CryptoKey> {
+/// The HMAC-SHA256 key for [secret] (CANCEL_TOKEN_SECRET): signs and
+/// verifies both the kiosk cancel tokens here and the message reaction
+/// tokens (react_token.ts).
+export async function hmacKey(secret: string): Promise<CryptoKey> {
   return await crypto.subtle.importKey(
     "raw",
     new TextEncoder().encode(secret),

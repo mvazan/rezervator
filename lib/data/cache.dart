@@ -21,6 +21,27 @@ const cacheKeyTeams = 'teams';
 const cacheKeyFederationSync = 'federation_sync';
 const cacheKeyMatchResults = 'match_results';
 const cacheKeyVenues = 'venues';
+const cacheKeyMessages = 'messages';
+const cacheKeyMessageRecipients = 'message_recipients';
+
+/// One message's recipient rows (`messageParticipantsProvider`) — per
+/// message, like `match_player_results:{id}`.
+String cacheKeyMessageParticipants(String messageId) =>
+    'message_recipients:$messageId';
+
+/// Drops the participant caches ([cacheKeyMessageParticipants]) of every
+/// message [messageRows] (a `messages` snapshot) no longer lists — deleted
+/// (`message_delete`) or pruned after 90 days (`prune_messages`). Each
+/// message's rows live under a key of their own, and nothing else removes
+/// them before sign-out: on web they would fill the localStorage quota, on
+/// Android the prefs file loaded at every start.
+Future<void> pruneMessageParticipantCaches(
+  String uid,
+  List<Map<String, dynamic>> messageRows,
+) =>
+    RowCache.retainPrefixed(uid, cacheKeyMessageParticipants(''), {
+      for (final row in messageRows) '${row['id']}',
+    });
 
 /// Tiny JSON row cache behind the offline read-only mode: every data stream
 /// writes its latest rows here and replays them as its first emission on the
@@ -59,6 +80,27 @@ class RowCache {
         // Best effort only.
       }
     });
+  }
+
+  /// Drops [uid]'s row sets named [prefix] + an id whose id is not in
+  /// [keep] — per-item caches whose item is gone. Best effort, like
+  /// [write].
+  static Future<void> retainPrefixed(
+      String uid, String prefix, Set<String> keep) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final full = _key(uid, prefix);
+      final stale = [
+        for (final key in prefs.getKeys())
+          if (key.startsWith(full) && !keep.contains(key.substring(full.length)))
+            key,
+      ];
+      for (final key in stale) {
+        await prefs.remove(key);
+      }
+    } catch (_) {
+      // Best effort only.
+    }
   }
 
   /// Drops every cached row set of [uid] — called on sign-out.

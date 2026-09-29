@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Reakce — Rezervátor</title>
+<link rel="icon" type="image/png" href="favicon.png">
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+         max-width: 26rem; margin: 0 auto; min-height: 100svh;
+         display: flex; flex-direction: column; justify-content: center;
+         padding: 2rem 1.25rem; text-align: center; line-height: 1.55;
+         color: #1a1a1a; background: #fff; }
+  .mark { font-size: 3.25rem; line-height: 1; margin-bottom: .75rem; }
+  h1 { color: #6366F1; font-size: 1.4rem; margin: 0 0 .6rem; }
+  p { margin: 0 0 .75rem; }
+  a { color: #6366F1; font-weight: 600; }
+  .fail h1 { color: #B91C1C; }
+  @media (prefers-color-scheme: dark) {
+    body { color: #f2f2f2; background: #161616; }
+    h1, a { color: #A5B4FC; }
+    .fail h1 { color: #FCA5A5; }
+  }
+</style>
+</head>
+<body>
+
+<!-- The react edge function (0051) redirects here with ?ok=1 when the
+     reaction from the e-mail was saved, ?ok=retry when the database failed
+     (the link is fine — a second click may work) and ?ok=0 when the link was
+     bad, expired or its message is gone (it cannot serve HTML itself — the
+     edge runtime rewrites the Content-Type to text/plain). Without a
+     parameter this is the failure page: only the function sends people here. -->
+<div class="mark" id="mark">⌛</div>
+<h1 id="nadpis">Odkaz už neplatí.</h1>
+<p><a href="/#/zpravy">Otevřít Rezervátor</a></p>
+
+<script>
+  const ok = new URLSearchParams(location.search).get("ok");
+  if (ok === "1") {
+    document.getElementById("mark").textContent = "✅";
+    document.getElementById("nadpis").textContent = "Díky, reakce je uložená.";
+  } else {
+    document.body.classList.add("fail");
+    if (ok === "retry") {
+      document.getElementById("nadpis").textContent =
+        "Teď se to nepovedlo. Zkus to za chvíli znovu.";
+    }
+  }
+</script>
+
+</body>
+</html>
