@@ -163,9 +163,10 @@ void main() {
       app(result: result, players: [homePlayer, changed]),
     );
     await tester.pumpAndSettle();
-        // „od 41. hodu“ and the substitute's name each on a line of their own.
+        // „od 41. hodu“ and the substitute's name each on a line of their own,
+    // with a thin empty line above and below „od 41. hodu“.
     expect(
-      find.text('Petr Svoboda\nod 41. hodu\nMiloš Vážan'),
+      find.text('Petr Svoboda\n\nod 41. hodu\n\nMiloš Vážan'),
       findsOneWidget,
     );
     expect(tester.takeException(), isNull);

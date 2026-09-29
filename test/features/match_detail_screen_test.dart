@@ -294,19 +294,26 @@ void main() {
       FontWeight.w400,
     );
     // The pins with the lead between them, the set points in the
-    // explanation, the status chip and the format line.
+    // summary line at the end, the status chip and the format line.
     expect(_inBoard('3460'), findsOneWidget);
     expect(_inBoard('3349'), findsOneWidget);
     expect(_inBoard('+111'), findsOneWidget);
+    expect(_inBoard('Dokončeno'), findsOneWidget);
+    expect(_inBoard('6 hráčů · 120 HS'), findsOneWidget);
+
+    // The summary sits at the very end of the (lazily built) list.
+    await tester.dragUntilVisible(
+      find.byType(MatchPointsSummary),
+      find.byType(ListView),
+      const Offset(0, -300),
+    );
     expect(
       find.descendant(
-        of: find.byType(MatchScoreboard),
+        of: find.byType(MatchPointsSummary),
         matching: find.textContaining('SB 15 : 9'),
       ),
       findsOneWidget,
     );
-    expect(_inBoard('Dokončeno'), findsOneWidget);
-    expect(_inBoard('6 hráčů · 120 HS'), findsOneWidget);
 
     // Souboje (the default): the two players meet in duel 1.
     final duel = find.byType(DuelCard);
@@ -530,6 +537,17 @@ void main() {
     expect(find.text('Na webu ČKA'), findsOneWidget);
     expect(find.byIcon(Icons.play_circle_fill), findsOneWidget);
     expect(find.byIcon(Icons.open_in_new), findsOneWidget);
+
+    // Na webu ČKA sits at the right of the Souboje | Zápis switch, on its
+    // row; the video button keeps its own line above.
+    final site = tester.getRect(find.text('Na webu ČKA'));
+    final switchRect = tester.getRect(find.byType(SegmentedButton<MatchDetailView>));
+    expect((site.center.dy - switchRect.center.dy).abs(), lessThan(8));
+    expect(site.left, greaterThan(switchRect.right));
+    expect(
+      tester.getRect(find.text('Záznam')).center.dy,
+      lessThan(switchRect.top),
+    );
   });
 
   testWidgets('no video/site data hides the buttons', (tester) async {

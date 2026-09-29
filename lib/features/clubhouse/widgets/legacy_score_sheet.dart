@@ -255,8 +255,41 @@ String _sheetName(MatchPlayerResult p) {
   return [p.playerName, if (from != null) 'od $from. hodu', sub].join('\n');
 }
 
-/// How many lines a name printed by [_sheetName] takes before any wrapping.
-int _nameLines(String text) => '\n'.allMatches(text).length + 1;
+/// A thin empty line — the breathing space above and below „od 41. hodu“.
+const _nameGapStyle = TextStyle(fontSize: 4, height: 1);
+const _nameGapHeight = 4.0;
+
+/// Whether [p]'s name carries the „od 41. hodu“ line and its two gaps.
+bool _hasChangeLine(MatchPlayerResult p) =>
+    p.substituteName != null &&
+    p.substituteName!.isNotEmpty &&
+    p.substituteFromThrow != null;
+
+/// How many lines a name printed by [_nameSpan] takes before any wrapping.
+int _nameLines(MatchPlayerResult p) {
+  if (p.substituteName == null || p.substituteName!.isEmpty) return 1;
+  return _hasChangeLine(p) ? 5 : 2;
+}
+
+/// [_sheetName] as spans: a small gap above and below „od 41. hodu“, so the
+/// three lines do not run into each other.
+InlineSpan _nameSpan(MatchPlayerResult p, TextStyle style) {
+  final sub = p.substituteName;
+  if (sub == null || sub.isEmpty) return TextSpan(text: p.playerName, style: style);
+  final from = p.substituteFromThrow;
+  return TextSpan(
+    style: style,
+    children: [
+      TextSpan(text: '${p.playerName}\n'),
+      if (from != null) ...[
+        const TextSpan(text: '\n', style: _nameGapStyle),
+        TextSpan(text: 'od $from. hodu\n'),
+        const TextSpan(text: '\n', style: _nameGapStyle),
+      ],
+      TextSpan(text: sub),
+    ],
+  );
+}
 
 class _ColumnMetrics {
   const _ColumnMetrics({
@@ -745,10 +778,16 @@ class _SheetGeometry {
     double minRowScale(double nameWidth) {
       final textWidth = nameWidth - _ColumnMetrics._cellChrome;
       var scale = 1.0;
-      void fit(String text, TextStyle style, double baseCellHeight) {
+      void fit(
+        String text,
+        TextStyle style,
+        double baseCellHeight, {
+        double extra = 0,
+      }) {
         final needed =
             _ColumnMetrics.wrappedHeight(text, style, textWidth) +
-            _ColumnMetrics._cellChrome;
+            _ColumnMetrics._cellChrome +
+            extra;
         scale = math.max(scale, needed / baseCellHeight);
       }
 
@@ -764,6 +803,7 @@ class _SheetGeometry {
           _sheetName(p),
           _s16w700,
           laneRowCount >= 2 ? laneRowCount * laneRowBase : celkemRowBase,
+          extra: _hasChangeLine(p) ? 2 * _nameGapHeight : 0,
         );
       }
       return scale;
@@ -995,6 +1035,7 @@ class _ScoreTableBody extends StatelessWidget {
     Color color = _kBlack,
     TextAlign align = TextAlign.center,
     int maxLines = 1,
+    InlineSpan? span,
   }) {
     return Container(
       width: width,
@@ -1010,13 +1051,20 @@ class _ScoreTableBody extends StatelessWidget {
           bottom: BorderSide(color: _kBorder, width: 1),
         ),
       ),
-      child: Text(
-        text,
-        textAlign: align,
-        maxLines: maxLines,
-        overflow: TextOverflow.ellipsis,
-        style: style.copyWith(color: color),
-      ),
+      child: span == null
+          ? Text(
+              text,
+              textAlign: align,
+              maxLines: maxLines,
+              overflow: TextOverflow.ellipsis,
+              style: style.copyWith(color: color),
+            )
+          : Text.rich(
+              span,
+              textAlign: align,
+              maxLines: maxLines,
+              overflow: TextOverflow.ellipsis,
+            ),
     );
   }
 
@@ -1235,7 +1283,7 @@ class _ScoreTableBody extends StatelessWidget {
     // A lone 23px lane row can't hold the 16px name — it goes into the Celkem
     // row then, the same as with no lane rows at all.
     final nameInLaneRows = laneRowCount >= 2;
-    final nameText = _sheetName(player); // no "N. " prefix (Fix round 5).
+    final changed = _nameLines(player) > 1;
 
     Widget laneRow(PlayerLane? lane) {
       // A filler row when this side threw fewer lanes than the other side
@@ -1348,12 +1396,15 @@ class _ScoreTableBody extends StatelessWidget {
                 width: m.nameWidth,
                 height: laneRowCount * _laneRowHeight,
                 bg: _kNameCellGrey,
-                text: nameInLaneRows ? nameText : '',
+                text: nameInLaneRows && !changed ? player.playerName : '',
+                span: nameInLaneRows && changed
+                    ? _nameSpan(player, _s16w700.copyWith(color: _kBlack))
+                    : null,
                 style: _s16w700,
                 align: TextAlign.left,
                 maxLines: math.max(
                   geometry.laneNameMaxLines(laneRowCount),
-                  _nameLines(nameText),
+                  _nameLines(player),
                 ),
               ),
             _cell(
@@ -1365,12 +1416,15 @@ class _ScoreTableBody extends StatelessWidget {
               // stretched height holds full screen.
               height: _celkemRowHeight,
               bg: _kRegCellBlue,
-              text: nameInLaneRows ? '' : nameText,
+              text: !nameInLaneRows && !changed ? player.playerName : '',
+              span: !nameInLaneRows && changed
+                  ? _nameSpan(player, _s16w700.copyWith(color: _kBlack))
+                  : null,
               style: _s16w700,
               align: TextAlign.left,
               maxLines: math.max(
                 geometry.celkemNameMaxLines,
-                _nameLines(nameText),
+                _nameLines(player),
               ),
             ),
           ],

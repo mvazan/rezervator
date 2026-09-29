@@ -1,10 +1,10 @@
 /// The match detail's scoreboard (Souboje, Task 3): who won and how the
 /// score came about. The date and a status chip; the team names around a big
 /// score (each over its own score when a name needs more than 2 lines); the
-/// pin totals with the lead between them; one tile per duel with
-/// a bar on the side that took its point; and a line that adds the score up
-/// („Souboje 5 : 1 · Kuželky 2 : 0 · SB 8,5 : 3,5“). Both views of the match
-/// detail share it, so the score never jumps when the view switches.
+/// pin totals with the lead between them. Both views of the match detail
+/// share it, so the score never jumps when the view switches. The line that
+/// adds the score up („Souboje 5 : 1 · Kuželky 2 : 0 · SB 8,5 : 3,5“) is
+/// [MatchPointsSummary], at the very end of the detail.
 ///
 /// Every number is set in tabular figures, so live values don't jump as
 /// they change, and a winner is never told by colour alone: the name's
@@ -18,7 +18,6 @@ import 'package:flutter/material.dart';
 import '../../../core/ui.dart';
 import '../../../domain/duels.dart';
 import '../../../domain/models.dart';
-import '../../../domain/palette.dart';
 import '../../../domain/results.dart';
 
 /// Digits of one width, so a number doesn't jump when a live value changes.
@@ -33,8 +32,6 @@ class MatchScoreboard extends StatelessWidget {
     required this.players,
     required this.now,
     this.onVenueTap,
-    this.homeColor,
-    this.awayColor,
   });
 
   /// The match: its date and start, the teams and the venue.
@@ -53,12 +50,6 @@ class MatchScoreboard extends StatelessWidget {
   /// Null = the venue is plain text (no known venue page).
   final VoidCallback? onVenueTap;
 
-  /// Each side's colour for the point bars (in its legible shade) and the
-  /// „+2 kuž.“ pill — the same the duel cards use; null = the theme's
-  /// primary (home) or tertiary (away).
-  final Color? homeColor;
-  final Color? awayColor;
-
   /// The chip's word for a match that is not live.
   static String _statusLabel(MatchStatus status) => switch (status) {
     MatchStatus.scheduled => 'Naplánováno',
@@ -73,7 +64,6 @@ class MatchScoreboard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
     final text = theme.textTheme;
     final result = this.result;
     final status = result?.status;
@@ -82,22 +72,13 @@ class MatchScoreboard extends StatelessWidget {
     // past isLive's window is no final score either).
     final running = live || status == MatchStatus.inProgress;
     final forfeit = status == MatchStatus.forfeit;
-    final decided = status == MatchStatus.finished || forfeit;
     final duels = duelsOf(players);
-    // Only a decided match adds up: until every duel is done its players'
-    // teamPoints are incomplete.
-    final breakdown = decided ? matchPointsBreakdown(result, players) : null;
     // While the match runs the pins count only the lanes both players of a
     // duel threw — the result's totals already count a lane one side has
     // finished, which would show a false lead.
     final liveTotals = running ? liveTeamTotals(duels) : null;
     final homeTotal = running ? liveTotals?.home : result?.homeTotal;
     final awayTotal = running ? liveTotals?.away : result?.awayTotal;
-    final explanation = decided
-        ? _decidedExplanation(breakdown, result!)
-        : running
-        ? _runningExplanation(duels)
-        : null;
     final note = forfeit
         ? 'Zápas skončil kontumací – souboje se nehrály.'
         : players.isEmpty
@@ -134,28 +115,6 @@ class MatchScoreboard extends StatelessWidget {
                 running: running,
               ),
             ],
-            if (duels.isNotEmpty) ...[
-              const SizedBox(height: 16),
-              _PointsStrip(
-                duels: duels,
-                breakdown: breakdown,
-                homeColor: homeColor ?? scheme.primary,
-                awayColor: awayColor ?? scheme.tertiary,
-              ),
-            ],
-            if (explanation != null) ...[
-              const SizedBox(height: 12),
-              Text(
-                explanation,
-                textAlign: TextAlign.center,
-                style: text.bodyMedium?.copyWith(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w400,
-                  color: scheme.onSurfaceVariant,
-                  fontFeatures: _tabular,
-                ),
-              ),
-            ],
             _Footer(
               format: formatLabel(
                 result?.matchType ?? '',
@@ -165,6 +124,57 @@ class MatchScoreboard extends StatelessWidget {
               onVenueTap: onVenueTap,
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// „Souboje 5 : 1 · Kuželky 2 : 0 · SB 8,5 : 3,5“: how the score adds up,
+/// one line at the very end of the match detail (a decided match), or
+/// „Souboje 1 : 0 · 2 rozehrané“ while it runs. Nothing before any duel has
+/// started.
+class MatchPointsSummary extends StatelessWidget {
+  const MatchPointsSummary({
+    super.key,
+    required this.slot,
+    required this.result,
+    required this.players,
+    required this.now,
+  });
+
+  final PrioritySlot slot;
+  final MatchResult? result;
+  final List<MatchPlayerResult> players;
+  final DateTime now;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final result = this.result;
+    final status = result?.status;
+    // Not final yet: live, or in progress per the last fetch.
+    final running = isLive(slot, result, now) || status == MatchStatus.inProgress;
+    final decided =
+        status == MatchStatus.finished || status == MatchStatus.forfeit;
+    // Only a decided match adds up: until every duel is done its players'
+    // teamPoints are incomplete.
+    final line = decided
+        ? _decidedExplanation(matchPointsBreakdown(result, players), result!)
+        : running
+        ? _runningExplanation(duelsOf(players))
+        : null;
+    if (line == null) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: Text(
+        line,
+        textAlign: TextAlign.center,
+        style: theme.textTheme.bodyMedium?.copyWith(
+          fontSize: 13,
+          fontWeight: FontWeight.w400,
+          color: theme.colorScheme.onSurfaceVariant,
+          fontFeatures: _tabular,
         ),
       ),
     );
@@ -571,214 +581,6 @@ class _PinsLine extends StatelessWidget {
   }
 }
 
-/// One tile per duel, then a „+2 kuž.“ pill for the pin points. Scales
-/// down as a whole when a narrow phone can't fit it on one line.
-class _PointsStrip extends StatelessWidget {
-  const _PointsStrip({
-    required this.duels,
-    required this.breakdown,
-    required this.homeColor,
-    required this.awayColor,
-  });
-
-  final List<Duel> duels;
-  final Color homeColor;
-  final Color awayColor;
-
-  /// The decided match's points; null = no pin pill (not decided yet).
-  final ({num duelsHome, num duelsAway, num pinsHome, num pinsAway})? breakdown;
-
-  @override
-  Widget build(BuildContext context) {
-    final breakdown = this.breakdown;
-    final pins = [
-      if (breakdown != null && breakdown.pinsHome > 0)
-        (side: MatchSide.home, points: breakdown.pinsHome),
-      if (breakdown != null && breakdown.pinsAway > 0)
-        (side: MatchSide.away, points: breakdown.pinsAway),
-    ];
-    return Center(
-      child: FittedBox(
-        fit: BoxFit.scaleDown,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            for (final (i, duel) in duels.indexed) ...[
-              if (i > 0) const SizedBox(width: 6),
-              _DuelTile(duel: duel, homeColor: homeColor, awayColor: awayColor),
-            ],
-            for (final pin in pins) ...[
-              const SizedBox(width: 8),
-              _PinPoints(
-                side: pin.side,
-                points: pin.points,
-                color: pin.side == MatchSide.home ? homeColor : awayColor,
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// A 40×40 tile with the duel's position and, under it, a 4dp bar on the
-/// side that took the point: left for home, right for away, the full width
-/// (half each) for a split. A duel not done yet has a dashed tile and no
-/// bar.
-class _DuelTile extends StatelessWidget {
-  const _DuelTile({
-    required this.duel,
-    required this.homeColor,
-    required this.awayColor,
-  });
-
-  final Duel duel;
-  final Color homeColor;
-  final Color awayColor;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final text = Theme.of(context).textTheme;
-    final position = duel.position;
-    final done = duel.state == DuelState.done;
-    final number = Center(
-      child: Text(
-        '$position',
-        style: text.titleSmall?.copyWith(
-          fontSize: 15,
-          fontWeight: FontWeight.w700,
-          color: scheme.onSurface,
-          fontFeatures: _tabular,
-        ),
-      ),
-    );
-    final barKey = Key('scoreboard-bar-$position');
-    final Widget? bar = !done
-        ? null
-        : duel.pointSplit
-        ? Row(
-            key: barKey,
-            children: [
-              Expanded(child: _Bar(color: homeColor)),
-              Expanded(child: _Bar(color: awayColor)),
-            ],
-          )
-        : duel.pointWinner == null
-        ? null
-        : Align(
-            alignment: duel.pointWinner == MatchSide.home
-                ? Alignment.centerLeft
-                : Alignment.centerRight,
-            child: SizedBox(
-              key: barKey,
-              width: 20,
-              child: _Bar(
-                color: duel.pointWinner == MatchSide.home
-                    ? homeColor
-                    : awayColor,
-              ),
-            ),
-          );
-    return Semantics(
-      label: duelSemantics(duel),
-      excludeSemantics: true,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          SizedBox(
-            key: Key('scoreboard-tile-$position'),
-            width: 40,
-            height: 40,
-            child: done
-                ? DecoratedBox(
-                    decoration: BoxDecoration(
-                      border: Border.all(color: scheme.outlineVariant),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: number,
-                  )
-                : CustomPaint(
-                    painter: _DashedBorderPainter(color: scheme.outlineVariant),
-                    child: number,
-                  ),
-          ),
-          const SizedBox(height: 4),
-          SizedBox(width: 40, height: 4, child: bar),
-        ],
-      ),
-    );
-  }
-}
-
-/// „+2 kuž.“ styled like a duel card's „bod“ (the pins winner's side colour
-/// at 16 % under onSurface text), with the same 4dp bar under it as a duel
-/// tile has — so its side reads from the bar's position too, not from the
-/// colour alone.
-class _PinPoints extends StatelessWidget {
-  const _PinPoints({
-    required this.side,
-    required this.points,
-    required this.color,
-  });
-
-  final MatchSide side;
-  final num points;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final text = Theme.of(context).textTheme;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: side == MatchSide.home
-          ? CrossAxisAlignment.start
-          : CrossAxisAlignment.end,
-      children: [
-        SizedBox(
-          height: 40,
-          child: Center(
-            child: _Pill(
-              label: '+${numLabel(points)} kuž.',
-              fill: color.withValues(alpha: 0.16),
-              style: text.labelMedium?.copyWith(
-                fontSize: 13,
-                fontWeight: FontWeight.w800,
-                color: scheme.onSurface,
-                fontFeatures: _tabular,
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 4),
-        SizedBox(width: 20, height: 4, child: _Bar(color: color)),
-      ],
-    );
-  }
-}
-
-/// A 4dp rounded bar in [color]'s legible shade — a mark straight on the
-/// card, at least 3:1 against it in light and dark for every team colour
-/// (test/core/theme_contrast_test.dart). Its parent sets the size.
-class _Bar extends StatelessWidget {
-  const _Bar({required this.color});
-
-  /// The side's colour; the bar paints its legible shade.
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) => DecoratedBox(
-    decoration: BoxDecoration(
-      color: legibleShadeOf(color, Theme.of(context).brightness),
-      borderRadius: BorderRadius.circular(2),
-    ),
-    child: const SizedBox(height: 4),
-  );
-}
-
 /// A rounded pill: the status chip, the pin lead and „+2 kuž.“.
 class _Pill extends StatelessWidget {
   const _Pill({
@@ -819,43 +621,6 @@ class _Pill extends StatelessWidget {
             ),
     ),
   );
-}
-
-/// The dashed 1dp outline of a duel tile that isn't done yet (radius 8).
-class _DashedBorderPainter extends CustomPainter {
-  const _DashedBorderPainter({required this.color});
-
-  final Color color;
-
-  static const _dash = 4.0;
-  static const _gap = 3.0;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1;
-    final outline = Path()
-      ..addRRect(
-        RRect.fromRectAndRadius(
-          (Offset.zero & size).deflate(0.5),
-          const Radius.circular(8),
-        ),
-      );
-    for (final metric in outline.computeMetrics()) {
-      for (var d = 0.0; d < metric.length; d += _dash + _gap) {
-        canvas.drawPath(
-          metric.extractPath(d, math.min(d + _dash, metric.length)),
-          paint,
-        );
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(_DashedBorderPainter oldDelegate) =>
-      oldDelegate.color != color;
 }
 
 /// „6 hráčů · 100 HS · TJ Sokol Rudná“: the format, then the venue — a link

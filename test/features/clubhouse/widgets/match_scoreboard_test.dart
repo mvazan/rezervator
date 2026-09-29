@@ -6,7 +6,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/core/theme.dart';
 import 'package:rezervator/domain/models.dart';
-import 'package:rezervator/domain/palette.dart';
 import 'package:rezervator/features/clubhouse/widgets/match_scoreboard.dart';
 
 import '../../../support/rudna_vrsovice.dart';
@@ -135,9 +134,6 @@ final _liveResult = _result(
 Text _text(WidgetTester tester, String data) =>
     tester.widget<Text>(find.text(data));
 
-Rect _rect(WidgetTester tester, String key) =>
-    tester.getRect(find.byKey(Key(key)));
-
 void main() {
   group('the finished Rudná A 7 : 1 Vršovice A', () {
     Future<void> pump(WidgetTester tester, {VoidCallback? onVenueTap}) =>
@@ -158,121 +154,30 @@ void main() {
       expect(find.text('středa 16. 9. · 17:30'), findsOneWidget);
       expect(find.text('Dokončeno'), findsOneWidget);
       expect(find.text('7'), findsOneWidget);
-      // The away score and the first tile.
-      expect(find.text('1'), findsNWidgets(2));
+      // The away score.
+      expect(find.text('1'), findsOneWidget);
       expect(find.text('2555'), findsOneWidget);
       expect(find.text('2321'), findsOneWidget);
       expect(find.text('+234'), findsOneWidget);
       expect(find.text('průběžně'), findsNothing);
     });
 
-    testWidgets('the explanation line adds up the score', (tester) async {
-      await pump(tester);
+    testWidgets('the summary line adds up the score', (tester) async {
+      await tester.pumpWidget(
+        _host(
+          MatchPointsSummary(
+            slot: rudnaSlot,
+            result: rudnaResult,
+            players: rudnaPlayers,
+            now: _now,
+          ),
+        ),
+      );
       expect(
         find.text('Souboje 5 : 1 · Kuželky 2 : 0 · SB 8,5 : 3,5'),
         findsOneWidget,
       );
     });
-
-    testWidgets('one tile per duel, then +2 kuž. for the pins', (tester) async {
-      await pump(tester);
-      for (var pos = 1; pos <= 6; pos++) {
-        expect(find.byKey(Key('scoreboard-tile-$pos')), findsOneWidget);
-        expect(
-          find.descendant(
-            of: find.byKey(Key('scoreboard-tile-$pos')),
-            matching: find.text('$pos'),
-          ),
-          findsOneWidget,
-        );
-      }
-      expect(find.byKey(const Key('scoreboard-tile-7')), findsNothing);
-      expect(find.text('+2 kuž.'), findsOneWidget);
-      expect(find.text('+1 kuž.'), findsNothing);
-    });
-
-    testWidgets('each point bar sits on the side that won the duel', (
-      tester,
-    ) async {
-      await pump(tester);
-      // Duels 1–5 went home: the bar hugs the tile's left edge.
-      for (var pos = 1; pos <= 5; pos++) {
-        final bar = _rect(tester, 'scoreboard-bar-$pos');
-        final tile = _rect(tester, 'scoreboard-tile-$pos');
-        expect(bar.left, tile.left, reason: 'duel $pos');
-        expect(bar.width, closeTo(tile.width / 2, 0.01), reason: 'duel $pos');
-      }
-      // Duel 6 went away: the bar hugs the right edge.
-      final bar = _rect(tester, 'scoreboard-bar-6');
-      final tile = _rect(tester, 'scoreboard-tile-6');
-      expect(bar.right, closeTo(tile.right, 0.01));
-      expect(bar.width, closeTo(tile.width / 2, 0.01));
-    });
-
-    for (final brightness in Brightness.values) {
-      testWidgets('${brightness.name}: the point bars and „+2 kuž.“ take the '
-          'sides\' colours when given — the same the duel cards use', (
-        tester,
-      ) async {
-        await tester.pumpWidget(
-          MaterialApp(
-            theme: ThemeData(brightness: brightness),
-            home: Scaffold(
-              body: SingleChildScrollView(
-                child: MatchScoreboard(
-                  slot: rudnaSlot,
-                  result: rudnaResult,
-                  players: rudnaPlayers,
-                  now: _now,
-                  homeColor: const Color(0xFF0B8043),
-                  awayColor: const Color(0xFF8E24AA),
-                ),
-              ),
-            ),
-          ),
-        );
-        Color? fillOf(Finder f) =>
-            (tester
-                        .widget<DecoratedBox>(
-                          find
-                              .descendant(
-                                of: f,
-                                matching: find.byType(DecoratedBox),
-                              )
-                              .first,
-                        )
-                        .decoration
-                    as BoxDecoration)
-                .color;
-        // The bars are marks on the card: a legible shade of the colour.
-        expect(
-          fillOf(find.byKey(const Key('scoreboard-bar-1'))),
-          legibleShadeOf(const Color(0xFF0B8043), brightness),
-        );
-        expect(
-          fillOf(find.byKey(const Key('scoreboard-bar-6'))),
-          legibleShadeOf(const Color(0xFF8E24AA), brightness),
-        );
-        // „+2 kuž.“ is styled like the duel card's „bod“: the side colour
-        // at 16 % under onSurface text.
-        final pill = tester.widget<DecoratedBox>(
-          find
-              .ancestor(
-                of: find.text('+2 kuž.'),
-                matching: find.byType(DecoratedBox),
-              )
-              .first,
-        );
-        expect(
-          (pill.decoration as ShapeDecoration).color,
-          const Color(0xFF0B8043).withValues(alpha: 0.16),
-        );
-        final scheme = Theme.of(
-          tester.element(find.text('+2 kuž.')),
-        ).colorScheme;
-        expect(_text(tester, '+2 kuž.').style?.color, scheme.onSurface);
-      });
-    }
 
     testWidgets('the format and the venue, as plain text', (tester) async {
       await pump(tester);
@@ -381,10 +286,19 @@ void main() {
       expect(find.text('Kuželky zatím +37'), findsOneWidget);
     });
 
-    testWidgets('the explanation counts the done and the running duels', (
+    testWidgets('the summary counts the done and the running duels', (
       tester,
     ) async {
-      await pump(tester);
+      await tester.pumpWidget(
+        _host(
+          MatchPointsSummary(
+            slot: _liveSlot,
+            result: _liveResult,
+            players: _livePlayers,
+            now: _now,
+          ),
+        ),
+      );
       expect(find.text('Souboje 1 : 0 · 1 rozehraný'), findsOneWidget);
     });
 
@@ -393,7 +307,7 @@ void main() {
       testWidgets('$playing duels being played read „$words“', (tester) async {
         await tester.pumpWidget(
           _host(
-            MatchScoreboard(
+            MatchPointsSummary(
               slot: _liveSlot,
               result: _liveResult,
               players: [
@@ -412,19 +326,9 @@ void main() {
       });
     }
 
-    testWidgets('only a done duel has a bar; no pin points yet', (
-      tester,
-    ) async {
-      await pump(tester);
-      expect(find.byKey(const Key('scoreboard-bar-1')), findsOneWidget);
-      expect(find.byKey(const Key('scoreboard-bar-2')), findsNothing);
-      expect(find.byKey(const Key('scoreboard-bar-3')), findsNothing);
-      expect(find.byKey(const Key('scoreboard-tile-3')), findsOneWidget);
-      expect(find.textContaining('kuž.'), findsNothing);
-    });
   });
 
-  testWidgets('a split: +1 kuž. for each side, a full-width duel bar', (
+  testWidgets('a split: the summary counts the halves, both names w500', (
     tester,
   ) async {
     final players = [
@@ -451,18 +355,7 @@ void main() {
         ),
       ),
     );
-    expect(find.text('+1 kuž.'), findsNWidgets(2));
     expect(find.text('='), findsOneWidget);
-    // No set points on the result: the explanation leaves SB out.
-    expect(find.text('Souboje 1,5 : 1,5 · Kuželky 1 : 1'), findsOneWidget);
-    expect(
-      _rect(tester, 'scoreboard-bar-2').right,
-      closeTo(_rect(tester, 'scoreboard-tile-2').right, 0.01),
-    );
-    expect(
-      _rect(tester, 'scoreboard-bar-3').width,
-      closeTo(_rect(tester, 'scoreboard-tile-3').width, 0.01),
-    );
     // A tie on points: both names w500.
     expect(
       _text(tester, 'TJ Sokol Rudná A').style?.fontWeight,
@@ -472,6 +365,24 @@ void main() {
       _text(tester, 'TJ Sokol Vršovice A').style?.fontWeight,
       FontWeight.w500,
     );
+    // No set points on the result: the summary leaves SB out.
+    await tester.pumpWidget(
+      _host(
+        MatchPointsSummary(
+          slot: rudnaSlot,
+          result: _result(
+            'finished',
+            homePoints: 2.5,
+            awayPoints: 2.5,
+            homeTotal: 615,
+            awayTotal: 615,
+          ),
+          players: players,
+          now: _now,
+        ),
+      ),
+    );
+    expect(find.text('Souboje 1,5 : 1,5 · Kuželky 1 : 1'), findsOneWidget);
   });
 
   testWidgets('a forfeit says the duels were not played', (tester) async {
@@ -493,7 +404,7 @@ void main() {
     expect(find.text('Sestavy zatím nejsou k dispozici.'), findsNothing);
   });
 
-  testWidgets('no lineup yet: a note, and no strip', (tester) async {
+  testWidgets('no lineup yet: a note, and no summary', (tester) async {
     await tester.pumpWidget(
       _host(
         MatchScoreboard(
@@ -508,7 +419,6 @@ void main() {
     expect(find.text('Naplánováno'), findsOneWidget);
     expect(find.text('–'), findsOneWidget);
     expect(find.text('1'), findsNothing);
-    expect(find.byKey(const Key('scoreboard-tile-1')), findsNothing);
   });
 
   testWidgets('preparation has its chip; no result, no chip', (tester) async {
@@ -690,9 +600,8 @@ void main() {
           ),
         );
         expect(tester.takeException(), isNull);
-        // The strip scales down to fit rather than overflowing.
         expect(
-          tester.getRect(find.byKey(const Key('scoreboard-tile-6'))).right,
+          tester.getRect(find.byType(MatchScoreboard)).right,
           lessThanOrEqualTo(360),
         );
       });

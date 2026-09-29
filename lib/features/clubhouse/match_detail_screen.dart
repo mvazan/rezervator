@@ -132,8 +132,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     DateTime now,
   ) {
     final videoUrl = slot.videoUrl;
-    final siteUrl = slot.siteUrl;
-    if (videoUrl == null && siteUrl == null) return const SizedBox.shrink();
+    if (videoUrl == null) return const SizedBox.shrink();
     final live = isLive(slot, result, now);
     final recorded =
         result?.status == MatchStatus.finished ||
@@ -143,26 +142,19 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
       child: Wrap(
         spacing: 8,
         children: [
-          if (videoUrl != null)
-            FilledButton.icon(
-              onPressed: () => widget.launch(videoUrl),
-              icon: live
-                  ? Icon(
-                      Icons.circle,
-                      size: 12,
-                      color: Theme.of(context).colorScheme.error,
-                    )
-                  : const Icon(Icons.play_circle_fill),
-              label: Text(
-                live ? 'Sledovat živě' : (recorded ? 'Záznam' : 'Video'),
-              ),
+          FilledButton.icon(
+            onPressed: () => widget.launch(videoUrl),
+            icon: live
+                ? Icon(
+                    Icons.circle,
+                    size: 12,
+                    color: Theme.of(context).colorScheme.error,
+                  )
+                : const Icon(Icons.play_circle_fill),
+            label: Text(
+              live ? 'Sledovat živě' : (recorded ? 'Záznam' : 'Video'),
             ),
-          if (siteUrl != null)
-            OutlinedButton.icon(
-              onPressed: () => widget.launch(siteUrl),
-              icon: const Icon(Icons.open_in_new),
-              label: const Text('Na webu ČKA'),
-            ),
+          ),
         ],
       ),
     );
@@ -174,7 +166,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
   /// scale 1.3. With larger text the button drops under the switch instead
   /// of overflowing (OverflowBar: a row pushed apart when both fit, else a
   /// column).
-  Widget _switchRow(MatchDetailView view, List<Duel> duels) {
+  Widget _switchRow(MatchDetailView view, List<Duel> duels, String? siteUrl) {
     // A duel nobody has started never opens: it neither needs the button
     // nor keeps it from reading „Sbalit vše“ once the rest are open.
     final openable = [
@@ -203,18 +195,36 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
               ref.read(matchDetailViewProvider.notifier).set(chosen.first),
             ),
           ),
-          if (view == MatchDetailView.souboje && openable.isNotEmpty)
-            TextButton(
-              onPressed: () => setState(() {
-                if (allOpen) {
-                  _expanded.clear();
-                } else {
-                  // Every position, the waiting ones too: a duel that
-                  // starts later opens already expanded, as asked.
-                  _expanded.addAll(duels.map((duel) => duel.position));
-                }
-              }),
-              child: Text(allOpen ? 'Sbalit vše' : 'Rozbalit vše'),
+          // On the right: the match on the ČKA site, and in Souboje „Rozbalit
+          // vše“ beside it. Together they drop under the switch when the
+          // row is too narrow.
+          if (siteUrl != null ||
+              (view == MatchDetailView.souboje && openable.isNotEmpty))
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (view == MatchDetailView.souboje && openable.isNotEmpty)
+                  TextButton(
+                    onPressed: () => setState(() {
+                      if (allOpen) {
+                        _expanded.clear();
+                      } else {
+                        // Every position, the waiting ones too: a duel that
+                        // starts later opens already expanded, as asked.
+                        _expanded.addAll(duels.map((duel) => duel.position));
+                      }
+                    }),
+                    child: Text(allOpen ? 'Sbalit vše' : 'Rozbalit vše'),
+                  ),
+                if (siteUrl != null) ...[
+                  const SizedBox(width: 8),
+                  OutlinedButton.icon(
+                    onPressed: () => widget.launch(siteUrl),
+                    icon: const Icon(Icons.open_in_new),
+                    label: const Text('Na webu ČKA'),
+                  ),
+                ],
+              ],
             ),
         ],
       ),
@@ -409,8 +419,6 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
                     builder: (_) => VenueDetailScreen(slug: venueMatch.slug),
                   ),
                 ),
-          homeColor: homeColor,
-          awayColor: awayColor,
         ),
         // While live the freshness sits in the scoreboard's „Živě“ chip.
         if (result == null || !live)
@@ -424,7 +432,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
             ),
           ),
         _buttonsRow(context, slot, result, now),
-        _switchRow(view, duels),
+        _switchRow(view, duels, slot.siteUrl),
       ])
         _centred(child),
       ...switch (view) {
@@ -446,6 +454,15 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
           LegacyScoreSheet(slot: slot, result: result, players: players),
         ],
       },
+      // How the score adds up, once, at the very end of either view.
+      _centred(
+        MatchPointsSummary(
+          slot: slot,
+          result: result,
+          players: players,
+          now: now,
+        ),
+      ),
     ];
 
     final list = ListView(
