@@ -12,6 +12,8 @@ import 'package:rezervator/domain/groups.dart';
 import 'package:rezervator/domain/duties.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/clubhouse/message_detail_screen.dart';
+import 'package:rezervator/features/admin/players_screen.dart';
+import 'package:rezervator/features/admin/tenants_screen.dart';
 import 'package:rezervator/features/clubhouse/notice_board_screen.dart';
 import 'package:rezervator/features/schedule/home_shell.dart';
 import 'package:rezervator/features/schedule/my_trainings_screen.dart';
@@ -140,6 +142,11 @@ void main() {
             (ref) => profileStream ?? Stream.value(profile),
           ),
           playersProvider.overrideWith((ref) async => const []),
+          // The approval screens a deep link can open.
+          profilesProvider.overrideWith((ref) => Stream.value(const [])),
+          clubsProvider.overrideWith((ref) => Stream.value(const [])),
+          groupRowsProvider.overrideWith((ref) => Stream.value(const [])),
+          tenantsProvider.overrideWith((ref) async => const []),
           tenantNameProvider.overrideWith((ref, id) async => 'Demo'),
           nowProvider.overrideWith((ref) => Stream.value(now)),
           myGroupProvider.overrideWithValue(group),
@@ -872,6 +879,34 @@ void main() {
               kind: PendingLinkKind.message, id: 'm1', tenantId: 't-demo'));
       await tester.pumpAndSettle();
       expect(find.byType(MessageDetailScreen), findsOneWidget);
+    });
+
+    testWidgets('a „new player waits“ link opens the admin\'s players list; '
+        'one sent for another alley is dropped', (tester) async {
+      await tester.pumpWidget(app(profile: visiting));
+      await tester.pumpAndSettle();
+      final container =
+          ProviderScope.containerOf(tester.element(find.byType(HomeShell)));
+      container.read(pendingLinkProvider.notifier).set(const PendingLink(
+          kind: PendingLinkKind.pendingPlayer, tenantId: 't-home'));
+      await tester.pumpAndSettle();
+      expect(find.byType(PlayersScreen), findsNothing);
+      expect(container.read(pendingLinkProvider), isNull);
+
+      container.read(pendingLinkProvider.notifier).set(const PendingLink(
+          kind: PendingLinkKind.pendingPlayer, tenantId: 't-demo'));
+      await tester.pumpAndSettle();
+      expect(find.byType(PlayersScreen), findsOneWidget);
+    });
+
+    testWidgets('a „new kuželna waits“ link opens the superadmin\'s kuželny '
+        'list', (tester) async {
+      await tester.pumpWidget(app(
+        profile: visiting,
+        pendingLink: const PendingLink(kind: PendingLinkKind.pendingTenant),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.byType(TenantsScreen), findsOneWidget);
     });
 
     testWidgets('a pending link for an id that does not exist shows the '

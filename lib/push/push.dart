@@ -22,7 +22,8 @@ import 'pending_link.dart';
 /// This phase delivers the token to the backend so the notify Edge Function
 /// has somewhere to send to, and shows a local notification for messages that
 /// arrive while the app is in the foreground. A tap on a message/notice/
-/// reaction push deep-links via [PendingLinkSource] (0051); every other kind
+/// reaction push — or on the „new player / new kuželna waits for approval“
+/// one — deep-links via [PendingLinkSource] (0051); every other kind
 /// still just opens the app, unchanged.
 class Push {
   static final _local = FlutterLocalNotificationsPlugin();

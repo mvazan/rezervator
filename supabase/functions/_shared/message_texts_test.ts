@@ -3,6 +3,8 @@ import {
   adminToStaffMessageText,
   appMessageUrl,
   appNoticeUrl,
+  appPlayersUrl,
+  appTenantsUrl,
   cutOnWord,
   messageContext,
   messageEmailHtml,
@@ -131,6 +133,9 @@ Deno.test("reactionText: reaction and optional reply, or a reply alone", () => {
 Deno.test("app links point at the hash routes", () => {
   assertEquals(appMessageUrl("abc"), "https://rezervator.online/#/zpravy/abc");
   assertEquals(appNoticeUrl("abc"), "https://rezervator.online/#/nastenka/abc");
+  // The approval e-mails and pushes open the same hash routes the app serves.
+  assertEquals(appPlayersUrl, "https://rezervator.online/#/sprava/hraci");
+  assertEquals(appTenantsUrl, "https://rezervator.online/#/sprava/kuzelny");
 });
 
 Deno.test("messageEmailHtml escapes the body, keeps its context line once, embeds both react links", () => {
