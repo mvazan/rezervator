@@ -2650,10 +2650,10 @@ void main() {
     SlotCallbacks slots(WidgetTester tester) =>
         tester.widget<WeekCalendarView>(find.byType(WeekCalendarView)).slot;
 
-    // Which days of the drawn week the calendar lets me edit: those whose
-    // header takes the ＋ tap.
-    Set<int> addable(WidgetTester tester) => {
-      for (var d = 7; d <= 13; d++)
+    // Which days of the drawn week (Monday the [from]th) the calendar lets me
+    // edit: those whose header takes the ＋ tap.
+    Set<int> addable(WidgetTester tester, {int from = 7}) => {
+      for (var d = from; d < from + 7; d++)
         if (find
             .descendant(of: headerOf(day(d)), matching: find.byType(InkWell))
             .evaluate()
@@ -2855,6 +2855,23 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(addable(tester), isEmpty);
+      expect(slots(tester).onDuty, isFalse);
+    });
+
+    testWidgets('a duty next week Monday to Wednesday: those three days are '
+        'editable already today, nothing else', (tester) async {
+      wideSurface(tester);
+      await tester.pumpWidget(
+        app(dutyPeriods: [period('d1', 14, 16)], dutyAssignments: onMe),
+      );
+      await tester.pumpAndSettle();
+      // This week nothing is mine, and nothing is booked for others.
+      expect(addable(tester), isEmpty);
+      expect(slots(tester).onDuty, isFalse);
+
+      await tester.tap(find.byIcon(Icons.chevron_right));
+      await tester.pumpAndSettle();
+      expect(addable(tester, from: 14), {14, 15, 16});
       expect(slots(tester).onDuty, isFalse);
     });
   });
