@@ -226,6 +226,20 @@ void main() {
       expect(counts, (messages: 0, notices: 1));
     });
 
+    test('an unread message counts as a message, a notice as a notice; '
+        'another player\'s row counts for nobody', () {
+      MessageRecipient row(String messageId, String userId) => MessageRecipient(
+          messageId: messageId, userId: userId, readAt: null,
+          reaction: null, reply: null, reactedAt: null);
+      final counts = unreadCounts(
+        all: [notice(id: 'n1'), message(id: 'm1'), message(id: 'm2')],
+        mine: [row('n1', 'me'), row('m1', 'me'), row('m2', 'petr')],
+        meId: 'me',
+        now: DateTime(2026, 10, 2),
+      );
+      expect(counts, (messages: 1, notices: 1));
+    });
+
     test('an expired unread notice does not count (the board never marks it)', () {
       final counts = unreadCounts(
         all: [notice(id: 'n1', expiresAt: DateTime(2026, 10, 1))],

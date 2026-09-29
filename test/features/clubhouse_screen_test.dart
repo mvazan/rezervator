@@ -311,6 +311,42 @@ void main() {
     expect(find.byType(Badge), findsNothing);
   });
 
+  // Each entry counts its own kind: a swapped count would still leave a
+  // badge somewhere, so each is looked for on its own entry.
+  testWidgets('Nástěnka counts the unread notices and Zprávy the unread '
+      'messages, each on its own entry', (tester) async {
+    narrow(tester);
+    Message message(String id, MessageKind kind) => Message(
+          id: id, kind: kind,
+          audience: kind == MessageKind.notice ? MessageAudience.all : MessageAudience.day,
+          authorId: 'admin', authorRole: MessageAuthorRole.admin,
+          onDate: kind == MessageKind.notice ? null : Day(2026, 9, 24), blockId: null,
+          title: kind == MessageKind.notice ? 'Oznam $id' : null, body: 'Text $id.',
+          expiresAt: null, notify: true,
+          createdAt: DateTime(2026, 9, 23), updatedAt: DateTime(2026, 9, 23),
+        );
+    MessageRecipient unread(String id) => MessageRecipient(
+        messageId: id, userId: 'me', readAt: null,
+        reaction: null, reply: null, reactedAt: null);
+
+    await tester.pumpWidget(app(
+      messages: [
+        message('n1', MessageKind.notice),
+        message('n2', MessageKind.notice),
+        message('m1', MessageKind.message),
+      ],
+      recipients: [unread('n1'), unread('n2'), unread('m1')],
+    ));
+    await tester.pumpAndSettle();
+    Finder badgeOf(String entry, String count) => find.descendant(
+        of: find.widgetWithText(ListTile, entry),
+        matching: find.widgetWithText(Badge, count));
+    expect(badgeOf('Nástěnka', '2'), findsOneWidget);
+    expect(badgeOf('Zprávy', '1'), findsOneWidget);
+    expect(badgeOf('Nástěnka', '1'), findsNothing);
+    expect(badgeOf('Zprávy', '2'), findsNothing);
+  });
+
   testWidgets('tapping Zprávy opens the real messages screen', (tester) async {
     narrow(tester);
     final failures = _Failures();
