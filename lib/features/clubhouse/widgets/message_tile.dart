@@ -72,11 +72,11 @@ class MessageTile extends StatefulWidget {
 
 class _MessageTileState extends State<MessageTile>
     with AutomaticKeepAliveClientMixin {
-  /// The reply the field last took from my row, or from my own write that
-  /// went through. The field shows anything else only as the player's
-  /// draft — typed, or kept from a write that failed — which my row
-  /// never overwrites. Initialised on first read: [wantKeepAlive] is
-  /// asked in `super.initState()`.
+  /// The reply the field last took from my row, or what the newest of my
+  /// writes that went through saved (the server stores them in the order
+  /// sent). Text that differs from it is the player's typed draft, which
+  /// my row never overwrites. Initialised on first read: [wantKeepAlive]
+  /// is asked in `super.initState()`.
   late String _synced = _myRow?.reply ?? '';
 
   /// Starts with the reply I already sent, so the field shows what the
@@ -90,12 +90,23 @@ class _MessageTileState extends State<MessageTile>
   /// own writes being applied or undone, so none is followed.
   int _pending = 0;
 
-  /// Counts my submits: only the latest one's success moves [_synced].
+  /// Counts my submits: only the latest one's outcome touches the field.
   int _submits = 0;
 
-  /// Whether the field holds a draft — trimmed, as a write would store
-  /// it: only whitespace is no draft.
-  bool get _draft => _reply.text.trim() != _synced;
+  /// The newest submit that went through: an older one's success, come
+  /// after it, does not move [_synced] back.
+  int _saved = 0;
+
+  /// Whether the field holds the text of my latest submit, which failed:
+  /// kept for another try whatever [_synced] is — a reply skipped while I
+  /// was in the field, or one an earlier write saved meanwhile, may equal
+  /// it. Ends on the next edit, or when a latest submit goes through.
+  bool _kept = false;
+
+  /// Whether the field holds a draft: a failed reply kept, or text that
+  /// differs from [_synced] — trimmed, as a write would store it: only
+  /// whitespace is no draft.
+  bool get _draft => _kept || _reply.text.trim() != _synced;
 
   /// A list drops a tile scrolled past its cache extent, and after „done“
   /// the field no longer holds it: a new tile would start from my row,
@@ -115,7 +126,7 @@ class _MessageTileState extends State<MessageTile>
   /// My row changed its reply (the live snapshot after a cached one, my
   /// reply from another device, cleared elsewhere): the field shows the
   /// new one when it is free to — not focused, no write of mine out, and
-  /// no draft in it ([_synced]). Else a stale reply would be resent, or
+  /// no draft in it ([_draft]). Else a stale reply would be resent, or
   /// what the player typed lost: the rollback of a failed write reaches
   /// the tile after the failure, and must not wipe the text kept for
   /// another try (the snack says why).
@@ -129,10 +140,12 @@ class _MessageTileState extends State<MessageTile>
     _synced = now;
   }
 
-  /// Sends [text]. A failure keeps it in the field (a draft). Once the
-  /// latest submit went through, what it saved (trimmed, as the write
-  /// stores it) is the row's reply the field follows again — and the field
-  /// shows it, unless the player is back in it or typed something else.
+  /// Sends [text]. What a submit that went through saved (trimmed, as the
+  /// write stores it) is [_synced], unless a newer one already went
+  /// through. Only the latest submit touches the field: its failure keeps
+  /// the text there ([_kept]) while the field still shows it; its success
+  /// shows what was saved, unless the player is back in the field or
+  /// typed something else.
   Future<void> _submit(String text) async {
     final onReply = widget.onReply;
     if (onReply == null || overLimit(text, replyMax)) return;
@@ -146,11 +159,19 @@ class _MessageTileState extends State<MessageTile>
       _pending--;
     }
     if (!mounted) return;
-    if (ok && submit == _submits) {
-      final saved = text.trim();
+    final saved = text.trim();
+    if (ok && submit > _saved) {
+      _saved = submit;
       _synced = saved;
-      if (!_replyFocus.hasFocus && _reply.text == text && text != saved) {
-        _reply.text = saved;
+    }
+    if (submit == _submits) {
+      if (ok) {
+        _kept = false;
+        if (!_replyFocus.hasFocus && _reply.text == text && text != saved) {
+          _reply.text = saved;
+        }
+      } else if (_reply.text == text) {
+        _kept = true;
       }
     }
     updateKeepAlive();
@@ -302,6 +323,7 @@ class _MessageTileState extends State<MessageTile>
             ),
             maxLength: replyMax,
             onChanged: (_) {
+              _kept = false; // edited: a draft only where it differs
               updateKeepAlive(); // a draft now, or none any more
               setState(() {});
             },

@@ -185,6 +185,23 @@ void main() {
         expect(focused(tester), isFalse); // „done“ leaves the field
       }
 
+      // The tile first in a list, a spacer after it: jumping to 4000 and
+      // back takes it past the cache extent, so only a keep-alive keeps it.
+      Widget listed(ScrollController scroll, String? reply) =>
+          MaterialApp(home: Scaffold(
+            body: ListView(controller: scroll, children: [
+              message(reply),
+              const SizedBox(height: 5000),
+            ]),
+          ));
+      Future<void> awayAndBack(
+          WidgetTester tester, ScrollController scroll) async {
+        scroll.jumpTo(4000);
+        await tester.pump();
+        scroll.jumpTo(0);
+        await tester.pump();
+      }
+
       testWidgets('a failed write keeps what I typed, also when its rollback '
           'reaches the tile after the failure', (tester) async {
         await tester.pumpWidget(tile(null));
@@ -271,37 +288,126 @@ void main() {
           'a failed reply', (tester) async {
         final scroll = ScrollController();
         addTearDown(scroll.dispose);
-        Widget listed(String? reply) => MaterialApp(home: Scaffold(
-              body: ListView(controller: scroll, children: [
-                message(reply),
-                const SizedBox(height: 5000),
-              ]),
-            ));
-        Future<void> awayAndBack() async {
-          scroll.jumpTo(4000);
-          await tester.pump();
-          scroll.jumpTo(0);
-          await tester.pump();
-        }
-
-        await tester.pumpWidget(listed(null));
+        await tester.pumpWidget(listed(scroll, null));
         await submit(tester, 'Nestihnu.');
-        await tester.pumpWidget(listed('Nestihnu.')); // the optimistic patch
-        await awayAndBack(); // while mine is out
+        await tester.pumpWidget(listed(scroll, 'Nestihnu.')); // optimistic
+        await awayAndBack(tester, scroll); // while mine is out
         answers.single.complete(false);
         await tester.pump();
-        await tester.pumpWidget(listed(null)); // the rollback
+        await tester.pumpWidget(listed(scroll, null)); // the rollback
         expect(field(tester), 'Nestihnu.');
-        await awayAndBack(); // nothing out, the failed reply kept
+        await awayAndBack(tester, scroll); // nothing out, the reply kept
         expect(field(tester), 'Nestihnu.');
 
         await submit(tester, 'Nestihnu.'); // another try goes through
-        await tester.pumpWidget(listed('Nestihnu.'));
+        await tester.pumpWidget(listed(scroll, 'Nestihnu.'));
         answers.last.complete(true);
         await tester.pump();
         scroll.jumpTo(4000);
         await tester.pump();
         expect(find.byType(MessageTile, skipOffstage: false), findsNothing);
+      });
+
+      // What the field holds after my latest write failed is kept as such,
+      // not inferred from its text: here it equals the reply the field
+      // started from, while the server holds the earlier write's.
+      testWidgets('the latest write failed, an earlier one went through: '
+          'the field keeps the latest', (tester) async {
+        await tester.pumpWidget(tile('Přijdu.'));
+        await submit(tester, 'Nestihnu.');
+        await tester.pumpWidget(tile('Nestihnu.'));
+        await submit(tester, 'Přijdu.');
+        await tester.pumpWidget(tile('Přijdu.'));
+        answers[0].complete(true);
+        await tester.pump();
+        answers[1].complete(false);
+        await tester.pump();
+        await tester.pumpWidget(tile('Nestihnu.')); // the first one stays
+        expect(field(tester), 'Přijdu.');
+        // Edited to what went through and left, it is no draft any more:
+        // a change elsewhere is followed again.
+        await tester.enterText(find.byType(TextField), 'Nestihnu.');
+        FocusManager.instance.primaryFocus?.unfocus();
+        await tester.pump();
+        await tester.pumpWidget(tile('Z webu'));
+        expect(field(tester), 'Z webu');
+      });
+
+      testWidgets('a clear that failed after an earlier write went through '
+          'stays cleared', (tester) async {
+        await tester.pumpWidget(tile(null));
+        await submit(tester, 'Nestihnu.');
+        await tester.pumpWidget(tile('Nestihnu.'));
+        await submit(tester, '');
+        await tester.pumpWidget(tile(null));
+        answers[0].complete(true);
+        await tester.pump();
+        answers[1].complete(false);
+        await tester.pump();
+        await tester.pumpWidget(tile('Nestihnu.')); // the clear rolled back
+        expect(field(tester), '');
+        expect(sent, ['Nestihnu.', '']);
+      });
+
+      // Focused, the field did not take the change from another device, so
+      // it still shows (and „done“ sends) the reply it took before.
+      testWidgets('a reply sent from a field that skipped a change elsewhere '
+          'stays when it fails', (tester) async {
+        await tester.pumpWidget(tile('Přijdu.'));
+        await tester.tap(find.byType(TextField));
+        await tester.pump();
+        await tester.pumpWidget(tile('Z webu')); // skipped: I am in the field
+        expect(field(tester), 'Přijdu.');
+        await tester.testTextInput.receiveAction(TextInputAction.done);
+        await tester.pump();
+        expect(sent, ['Přijdu.']);
+        await tester.pumpWidget(tile('Přijdu.')); // the optimistic patch
+        answers.single.complete(false);
+        await tester.pump();
+        await tester.pumpWidget(tile('Z webu')); // the rollback
+        expect(field(tester), 'Přijdu.');
+      });
+
+      testWidgets('the latest write failed first, the earlier one went '
+          'through after: scrolled away and back, the field keeps the latest',
+          (tester) async {
+        final scroll = ScrollController();
+        addTearDown(scroll.dispose);
+        await tester.pumpWidget(listed(scroll, 'Přijdu.'));
+        await submit(tester, 'Nestihnu.');
+        await tester.pumpWidget(listed(scroll, 'Nestihnu.'));
+        await submit(tester, 'Přijdu.');
+        await tester.pumpWidget(listed(scroll, 'Přijdu.'));
+        answers[1].complete(false);
+        await tester.pump();
+        await tester.pumpWidget(listed(scroll, 'Nestihnu.')); // its rollback
+        expect(field(tester), 'Přijdu.');
+        answers[0].complete(true);
+        await tester.pump();
+        await tester.pumpWidget(listed(scroll, 'Nestihnu.')); // the echo
+        expect(field(tester), 'Přijdu.');
+        await awayAndBack(tester, scroll); // nothing out, the reply kept
+        expect(field(tester), 'Přijdu.');
+      });
+
+      // A write that went through is what the server holds, in the order
+      // sent, though not the latest: a draft is what differs from it.
+      testWidgets('a reply I cleared while my writes were out stays cleared '
+          'once the earlier one went through', (tester) async {
+        await tester.pumpWidget(tile(null));
+        await submit(tester, 'Přijdu.');
+        await tester.pumpWidget(tile('Přijdu.'));
+        await submit(tester, 'Nestihnu.');
+        await tester.pumpWidget(tile('Nestihnu.'));
+        answers[0].complete(true);
+        await tester.pump();
+        await tester.enterText(find.byType(TextField), ''); // not sent
+        FocusManager.instance.primaryFocus?.unfocus();
+        await tester.pump();
+        answers[1].complete(false);
+        await tester.pump();
+        await tester.pumpWidget(tile('Přijdu.')); // the latest rolled back
+        expect(field(tester), '');
       });
     });
 
