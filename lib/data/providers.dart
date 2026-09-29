@@ -5,6 +5,8 @@
 /// streamed per-week (Phase 1) so history growth never bloats the stream.
 library;
 
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -158,7 +160,11 @@ final messagesProvider = StreamProvider<List<Message>>((ref) {
   if (uid == null) return Stream.value(const []);
   return cachedRows(uid, cacheKeyMessages,
           () => _db.from('messages').stream(primaryKey: ['id']))
-      .map((rows) => rows.map(Message.fromJson).toList());
+      .map((rows) {
+    // The participant caches of messages that are gone go with them.
+    unawaited(pruneMessageParticipantCaches(uid, rows));
+    return rows.map(Message.fromJson).toList();
+  });
 });
 
 /// My own `message_recipients` rows (0051): one per notice and per message

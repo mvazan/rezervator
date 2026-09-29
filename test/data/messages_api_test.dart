@@ -24,15 +24,36 @@ void main() {
     'message_send': '"m-new"',
   };
 
+  /// What a table GET answers (else no rows): the messages snapshot holds
+  /// one message, `kept`.
+  const tableAnswers = {
+    'messages': '[{"id": "kept", "kind": "message", "audience": "admins", '
+        '"author_id": null, "author_role": "player", "on_date": null, '
+        '"block_id": null, "title": null, "body": "x", "expires_at": null, '
+        '"notify": true, "created_at": "2026-10-01T00:00:00Z", '
+        '"updated_at": "2026-10-01T00:00:00Z"}]',
+  };
+
+  /// The status every PATCH gets — a test sets 403 to see a write refused.
+  var patchStatus = 200;
+
   setUpAll(() async {
     TestWidgetsFlutterBinding.ensureInitialized();
     SharedPreferences.setMockInitialValues({});
     final mock = MockClient((request) async {
       requests.add(request);
       final name = request.url.pathSegments.last;
+      if (request.method == 'PATCH' && patchStatus != 200) {
+        return http.Response(
+          '{"code": "42501", "message": "permission denied"}',
+          patchStatus,
+          headers: {'content-type': 'application/json'},
+          request: request,
+        );
+      }
       final body = request.url.path.contains('/rpc/')
           ? answers[name] ?? 'null'
-          : '[]';
+          : tableAnswers[name] ?? '[]';
       return http.Response(
         body,
         200,
@@ -51,7 +72,10 @@ void main() {
     );
   });
 
-  setUp(() => requests = []);
+  setUp(() {
+    requests = [];
+    patchStatus = 200;
+  });
 
   /// The single POST to `rpc/[name]`; returns its JSON body.
   Map<String, dynamic> rpcCall(String name) {
@@ -176,6 +200,26 @@ void main() {
       }
     }
 
+
+    test('each messages snapshot drops the participant caches of the '
+        'messages it no longer lists', () async {
+      final prefs = await SharedPreferences.getInstance();
+      final gone = 'cache.$uid.${cacheKeyMessageParticipants('gone')}';
+      final kept = 'cache.$uid.${cacheKeyMessageParticipants('kept')}';
+      await prefs.setString(gone, '[]');
+      await prefs.setString(kept, '[]');
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+      final sub = container.listen(messagesProvider, (_, _) {});
+      addTearDown(sub.close);
+      for (var i = 0; i < 100 && prefs.containsKey(gone); i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+      expect([for (final m in container.read(messagesProvider).value!) m.id],
+          ['kept']);
+      expect(prefs.containsKey(gone), isFalse);
+      expect(prefs.containsKey(kept), isTrue);
+    });
 
     test('my recipient rows: only mine, never every row I may read', () async {
       final get = await snapshotFetch(myMessageRecipientsProvider, 'message_recipients');
