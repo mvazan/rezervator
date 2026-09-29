@@ -75,6 +75,12 @@ class _MessageTileState extends State<MessageTile> {
   final _replyFocus = FocusNode();
   late bool _expanded = widget.initiallyExpanded;
 
+  /// My last submitted reply ([to], trimmed as the write stores it) and my
+  /// row's reply when I submitted it ([from]). The optimistic write shows
+  /// [to] at once; a failed one rolls the row back to [from] — my own
+  /// write undone, not a new reply to follow ([didUpdateWidget]).
+  ({String from, String to})? _submitted;
+
   @override
   void dispose() {
     _reply.dispose();
@@ -83,15 +89,27 @@ class _MessageTileState extends State<MessageTile> {
   }
 
   /// My row changed its reply (the live snapshot after a cached one, my
-  /// reply from another device, a rolled-back write): the field shows the
-  /// new one — unless I am typing, or hold an unsent draft (the field no
-  /// longer shows the old reply). Else a stale reply would be resent.
+  /// reply from another device): the field shows the new one — unless I
+  /// am typing, or hold an unsent draft (the field no longer shows the old
+  /// reply). Else a stale reply would be resent. The rollback of my own
+  /// failed write is not followed either: the field keeps what I typed
+  /// for another try, and the snack says why.
   @override
   void didUpdateWidget(MessageTile oldWidget) {
     super.didUpdateWidget(oldWidget);
     final was = _rowIn(oldWidget)?.reply ?? '';
     final now = _myRow?.reply ?? '';
-    if (was != now && !_replyFocus.hasFocus && _reply.text == was) {
+    if (was == now) return;
+    final submitted = _submitted;
+    final rolledBack = submitted != null &&
+        was == submitted.to &&
+        now == submitted.from;
+    // Kept only while the change is my write being applied.
+    if (submitted != null &&
+        !(was == submitted.from && now == submitted.to)) {
+      _submitted = null;
+    }
+    if (!rolledBack && !_replyFocus.hasFocus && _reply.text == was) {
       _reply.text = now;
     }
   }
@@ -244,7 +262,9 @@ class _MessageTileState extends State<MessageTile> {
             // Over the limit (code points) the server's CHECK would refuse
             // it: the field is marked instead, and nothing is sent.
             onSubmitted: (text) {
-              if (!overLimit(text, replyMax)) widget.onReply?.call(text);
+              if (overLimit(text, replyMax)) return;
+              _submitted = (from: _myRow?.reply ?? '', to: text.trim());
+              widget.onReply?.call(text);
             },
           ),
         ),

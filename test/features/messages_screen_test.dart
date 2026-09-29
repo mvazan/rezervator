@@ -222,6 +222,7 @@ void main() {
     List<Message> messages = const [],
     Stream<List<Message>>? messageStream,
     List<MessageRecipient> recipients = const [],
+    Stream<List<MessageRecipient>>? myRowStream,
     List<PlayerName> roster = const [],
     MyDuty duty = MyDuty.none,
     List<Reservation> reservations = const [],
@@ -229,7 +230,7 @@ void main() {
       [
         myProfileProvider.overrideWith((ref) => Stream.value(profile)),
         messagesProvider.overrideWith((ref) => messageStream ?? Stream.value(messages)),
-        myMessageRecipientsProvider.overrideWith((ref) => Stream.value(
+        myMessageRecipientsProvider.overrideWith((ref) => myRowStream ?? Stream.value(
             [for (final r in recipients) if (r.userId == profile.id) r])),
         messageParticipantsProvider.overrideWith((ref, id) => Stream.value(
             [for (final r in recipients) if (r.messageId == id) r])),
@@ -261,11 +262,12 @@ void main() {
     MessageSend? send,
     List<Reservation> reservations = const [],
     Stream<List<Message>>? messageStream,
+    Stream<List<MessageRecipient>>? myRowStream,
     Future<void> Function(String id)? delete,
   }) =>
       ProviderScope(
         overrides: overrides(profile: profile, messages: messages,
-            messageStream: messageStream,
+            messageStream: messageStream, myRowStream: myRowStream,
             recipients: recipients, roster: roster, duty: duty,
             reservations: reservations),
         child: MaterialApp(
@@ -343,6 +345,39 @@ void main() {
       await tester.pumpAndSettle();
       expect(reactions, [('m1', Reaction.down)]);
       expect(replies, [('m1', 'Nestihnu.')]);
+    });
+
+    // optimisticWrite shows my reply at once and, when the write fails,
+    // rolls my row back: that rollback is not a new reply to follow — the
+    // field keeps what I typed, for another try after the snack.
+    testWidgets('a failed reply keeps what I typed in the field and says why',
+        (tester) async {
+      final myRows = StreamController<List<MessageRecipient>>()
+        ..add([recip('me')]);
+      addTearDown(myRows.close);
+      final gate = Completer<void>();
+      await tester.pumpWidget(app(
+        messages: [received()],
+        myRowStream: myRows.stream,
+        roster: const [PlayerName(id: 'staff', displayName: 'Bára')],
+        reply: (id, text) async {
+          myRows.add([recip('me', reply: text)]); // the optimistic patch
+          await gate.future;
+          myRows.add([recip('me')]); // the rollback
+          throw Exception('offline');
+        },
+      ));
+      await tester.pumpAndSettle();
+      String field() =>
+          tester.widget<TextField>(find.byType(TextField)).controller!.text;
+      await tester.enterText(find.byType(TextField), 'Nestihnu.');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pump();
+      expect(field(), 'Nestihnu.');
+      gate.complete();
+      await tester.pumpAndSettle();
+      expect(find.byType(SnackBar), findsOneWidget);
+      expect(field(), 'Nestihnu.');
     });
 
     testWidgets('a sent message expands its tally into names on tap', (tester) async {
