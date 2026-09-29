@@ -167,6 +167,9 @@ String friendlyDbError(Object error, {bool wasOnDuty = false}) {
     'title_required': 'Vyplň nadpis.',
     'body_required': 'Vyplň zprávu.',
     'body_too_long': 'Zpráva je moc dlouhá.',
+    'title_too_long': 'Nadpis je moc dlouhý.',
+    // The reply is a plain row UPDATE (no RPC): PostgREST names the CHECK.
+    'message_recipients_reply_check': 'Odpověď je moc dlouhá.',
     'unknown_message': 'Zpráva už neexistuje.',
     'invalid_audience': 'Neplatný typ zprávy.',
     'invalid_kind': 'Neplatný typ zprávy.',

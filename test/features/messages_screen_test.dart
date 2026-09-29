@@ -98,6 +98,33 @@ void main() {
       expect(find.textContaining('👍 Petr Novák'), findsOneWidget);
     });
 
+    testWidgets('a reply over 200 code points is not sent and the counter says so',
+        (tester) async {
+      final replies = <String>[];
+      await tester.pumpWidget(MaterialApp(home: Scaffold(body: MessageTile(
+        message: received(),
+        recipients: [recip('me')],
+        names: const {},
+        meId: 'me',
+        authorName: 'Bára Kantýnská',
+        authorIsAdmin: false,
+        block: null,
+        onReact: (_) {},
+        onReply: replies.add,
+        onDelete: null,
+      ))));
+      // 101 characters to the field, 202 code points to the server.
+      await tester.enterText(find.byType(TextField), '👍🏽' * 101);
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pump();
+      expect(replies, isEmpty);
+      expect(find.text('202/200'), findsOneWidget);
+      await tester.enterText(find.byType(TextField), '👍🏽' * 100);
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pump();
+      expect(replies, ['👍🏽' * 100]);
+    });
+
     testWidgets('a sent message shows the tally, not chips', (tester) async {
       await tester.pumpWidget(MaterialApp(home: Scaffold(body: MessageTile(
         message: received(authorId: 'me'),

@@ -265,6 +265,22 @@ String noticeFooter(Message m, DateTime now) {
   return 'vyvěšeno $posted · $until';
 }
 
+/// The server's length limits (0051): a notice's title, a message's and a
+/// notice's body, and a reply (`message_recipients_reply_check`).
+const noticeTitleMax = 80;
+const messageBodyMax = 500;
+const noticeBodyMax = 2000;
+const replyMax = 200;
+
+/// [text] measured as the server measures it: trimmed (every write trims),
+/// in code points — Postgres' `char_length`. Not what `TextField.maxLength`
+/// counts (grapheme clusters): 👍🏽 is one character there and two here,
+/// so a full field can still be too long for the server.
+int serverLength(String text) => text.trim().runes.length;
+
+/// Whether [text] is longer than the server takes ([serverLength] > [max]).
+bool overLimit(String text, int max) => serverLength(text) > max;
+
 /// „Zobrazilo 12 z 40“ — the admin's seen count on a notice.
 String seenLabel(int read, int total) => 'Zobrazilo $read z $total';
 

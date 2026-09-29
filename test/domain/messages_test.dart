@@ -417,4 +417,25 @@ void main() {
       expect(recipientPreviewLabel([]), 'Nikdo nemá rezervaci');
     });
   });
+
+  group('serverLength', () {
+    test('counts code points of the trimmed text, as char_length does', () {
+      expect(serverLength('  Ahoj  '), 4);
+      // One grapheme each (what TextField.maxLength counts), but 👍🏽 is
+      // two code points and the family five — the server's measure.
+      expect(serverLength('👍'), 1);
+      expect(serverLength('👍🏽'), 2);
+      expect(serverLength('👨‍👩‍👧'), 5);
+      expect(serverLength('\n\t'), 0);
+    });
+
+    test('the limits are the server\'s', () {
+      expect(noticeTitleMax, 80);
+      expect(messageBodyMax, 500);
+      expect(noticeBodyMax, 2000);
+      expect(replyMax, 200);
+      expect(overLimit('👍🏽' * 40, noticeTitleMax), isFalse);
+      expect(overLimit('${'👍🏽' * 40}a', noticeTitleMax), isTrue);
+    });
+  });
 }

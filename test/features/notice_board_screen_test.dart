@@ -406,6 +406,33 @@ void main() {
       expect(find.text('Ukládám…'), findsOneWidget);
     }
 
+    testWidgets('over the limit in code points „Uložit“ is off and the counter '
+        'says so, though the field counts fewer characters', (tester) async {
+      await tester.pumpWidget(host((_) async {}, (_) {}));
+      await tester.tap(find.text('STRÁNKA'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('OTEVŘÍT'));
+      await tester.pumpAndSettle();
+      FilledButton save() =>
+          tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Uložit'));
+      final title = find.widgetWithText(TextField, 'Nadpis');
+      final body = find.widgetWithText(TextField, 'Text');
+      // 👍🏽 is one character to the field, two code points to the server.
+      await tester.enterText(title, '👍🏽' * 41);
+      await tester.enterText(body, 'Je u Petra.');
+      await tester.pump();
+      expect(find.text('82/80'), findsOneWidget);
+      expect(save().onPressed, isNull);
+      await tester.enterText(title, '👍🏽' * 40);
+      await tester.pump();
+      expect(find.text('80/80'), findsOneWidget);
+      expect(save().onPressed, isNotNull);
+      await tester.enterText(body, '👍🏽' * 1001);
+      await tester.pump();
+      expect(find.text('2002/2000'), findsOneWidget);
+      expect(save().onPressed, isNull);
+    });
+
     testWidgets('„Změnit“ opens no picker over a dialog about to close', (tester) async {
       final save = Completer<void>();
       NoticeDraft? sent;

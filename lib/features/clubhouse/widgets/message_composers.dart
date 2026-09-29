@@ -15,9 +15,15 @@ import '../../../data/week_schedule.dart' show weekScheduleProvider;
 import '../../../domain/collation.dart';
 import '../../../domain/duties.dart' show dutyDayLabel;
 import '../../../domain/messages.dart'
-    show dayRecipientIds, dutyRecipientIds, recipientPreviewLabel;
+    show
+        dayRecipientIds,
+        dutyRecipientIds,
+        messageBodyMax,
+        overLimit,
+        recipientPreviewLabel;
 import '../../../domain/models.dart';
 import '../../../domain/schedule.dart';
+import 'server_limit.dart';
 
 /// `ref.read` or `ref.watch` — [_dutyReachable] serves a one-off check
 /// and a live sheet with the same rule.
@@ -289,7 +295,7 @@ class _PlayerComposerSheetState extends ConsumerState<_PlayerComposerSheet> {
         Align(
           alignment: Alignment.centerRight,
           child: FilledButton(
-            onPressed: text.isEmpty || _sending
+            onPressed: text.isEmpty || overLimit(text, messageBodyMax) || _sending
                 ? null
                 : () => _send(audience, text),
             child: const Text('Odeslat'),
@@ -300,9 +306,9 @@ class _PlayerComposerSheetState extends ConsumerState<_PlayerComposerSheet> {
   }
 }
 
-/// The message text of both composers: up to 500 characters
-/// (`message_send`'s `body_too_long`); [onChanged] rebuilds the sheet, whose
-/// „Odeslat“ reads the controller.
+/// The message text of both composers: up to 500 code points
+/// (`message_send`'s `body_too_long`, see [withServerLimit]); [onChanged]
+/// rebuilds the sheet, whose „Odeslat“ reads the controller.
 class _BodyField extends StatelessWidget {
   const _BodyField({required this.controller, required this.onChanged});
 
@@ -312,11 +318,16 @@ class _BodyField extends StatelessWidget {
   @override
   Widget build(BuildContext context) => TextField(
     controller: controller,
-    maxLength: 500,
+    maxLength: messageBodyMax,
     minLines: 1,
     maxLines: 3,
     textCapitalization: TextCapitalization.sentences,
-    decoration: const InputDecoration(hintText: 'Text zprávy'),
+    decoration: withServerLimit(
+      context,
+      const InputDecoration(hintText: 'Text zprávy'),
+      controller.text,
+      messageBodyMax,
+    ),
     onChanged: (_) => onChanged(),
   );
 }
@@ -486,7 +497,10 @@ class _StaffComposerSheetState extends ConsumerState<_StaffComposerSheet> {
     // Not before the day's blocks are known: a prefilled block would
     // otherwise go out as „Celý den“.
     final canSend =
-        week != null && text.isNotEmpty && recipients(blockId).isNotEmpty;
+        week != null &&
+        text.isNotEmpty &&
+        !overLimit(text, messageBodyMax) &&
+        recipients(blockId).isNotEmpty;
     return _SheetFrame(
       children: [
         Text('Napsat hráčům', style: Theme.of(context).textTheme.titleMedium),

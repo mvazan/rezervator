@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 
 import '../../../domain/messages.dart';
 import '../../../domain/models.dart';
+import 'server_limit.dart';
 
 class MessageTile extends StatefulWidget {
   const MessageTile({
@@ -189,9 +190,19 @@ class _MessageTileState extends State<MessageTile> {
         Expanded(
           child: TextField(
             controller: _reply,
-            decoration: const InputDecoration(hintText: 'Krátká odpověď…'),
-            maxLength: 200,
-            onSubmitted: widget.onReply,
+            decoration: withServerLimit(
+              context,
+              const InputDecoration(hintText: 'Krátká odpověď…'),
+              _reply.text,
+              replyMax,
+            ),
+            maxLength: replyMax,
+            onChanged: (_) => setState(() {}),
+            // Over the limit (code points) the server's CHECK would refuse
+            // it: the field is marked instead, and nothing is sent.
+            onSubmitted: (text) {
+              if (!overLimit(text, replyMax)) widget.onReply?.call(text);
+            },
           ),
         ),
       ],

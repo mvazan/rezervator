@@ -149,6 +149,21 @@ void main() {
     expect(send(tester).onPressed, isNull);
   });
 
+  testWidgets('over 500 code points „Odeslat“ is off and the counter says so, '
+      'though the field counts fewer characters', (tester) async {
+    await tester.pumpWidget(app());
+    await open(tester);
+    // 250 graphemes (the field's own count), 500 code points (the server's).
+    await tester.enterText(find.byType(TextField), '👍🏽' * 250);
+    await tester.pump();
+    expect(send(tester).onPressed, isNotNull);
+    expect(find.text('500/500'), findsOneWidget);
+    await tester.enterText(find.byType(TextField), '👍🏽' * 251);
+    await tester.pump();
+    expect(send(tester).onPressed, isNull);
+    expect(find.text('502/500'), findsOneWidget);
+  });
+
   testWidgets('with the keyboard up the sheet ends above it: the field and '
       '„Odeslat“ are never scrolled to under the keyboard', (tester) async {
     // 800×600 logical; a 400-dp keyboard leaves 200 dp — less than the

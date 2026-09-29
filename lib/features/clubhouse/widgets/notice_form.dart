@@ -10,8 +10,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/ui.dart';
 import '../../../data/clock.dart';
 import '../../../data/providers.dart';
+import '../../../domain/messages.dart'
+    show noticeBodyMax, noticeTitleMax, overLimit;
 import '../../../domain/models.dart';
 import '../../admin/widgets/form_dialog.dart';
+import 'server_limit.dart';
 
 /// What the form sends: the new notice, or [existing]'s new text and
 /// expiry ([notify] is ignored on an edit — message_update never resends).
@@ -130,21 +133,37 @@ class _NoticeFormState extends ConsumerState<_NoticeForm> {
     return FormDialog<bool>(
       title: widget.existing == null ? 'Nový oznam' : 'Upravit oznam',
       onSave: _save,
+      // Over the server's limit (code points, see withServerLimit) the
+      // save could only earn title_too_long / body_too_long.
+      saveEnabled: !overLimit(_title.text, noticeTitleMax) &&
+          !overLimit(_body.text, noticeBodyMax),
       children: [
         // The form's width (400, less on a narrow phone): AlertDialog sizes
         // its content to the widest child.
         const SizedBox(width: 400),
         TextField(
           controller: _title,
-          decoration: const InputDecoration(labelText: 'Nadpis'),
-          maxLength: 80,
+          decoration: withServerLimit(
+            context,
+            const InputDecoration(labelText: 'Nadpis'),
+            _title.text,
+            noticeTitleMax,
+          ),
+          maxLength: noticeTitleMax,
+          onChanged: (_) => setState(() {}),
         ),
         TextField(
           controller: _body,
-          decoration: const InputDecoration(labelText: 'Text'),
-          maxLength: 2000,
+          decoration: withServerLimit(
+            context,
+            const InputDecoration(labelText: 'Text'),
+            _body.text,
+            noticeBodyMax,
+          ),
+          maxLength: noticeBodyMax,
           maxLines: 5,
           minLines: 1,
+          onChanged: (_) => setState(() {}),
         ),
         Row(
           children: [
