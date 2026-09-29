@@ -28,20 +28,26 @@
 <body>
 
 <!-- The react edge function (0051) redirects here with ?ok=1 when the
-     reaction from the e-mail was saved and ?ok=0 when the link was bad,
-     expired or its message is gone (it cannot serve HTML itself — the edge
-     runtime rewrites the Content-Type to text/plain). Without a parameter
-     this is the failure page: only the function sends people here. -->
+     reaction from the e-mail was saved, ?ok=retry when the database failed
+     (the link is fine — a second click may work) and ?ok=0 when the link was
+     bad, expired or its message is gone (it cannot serve HTML itself — the
+     edge runtime rewrites the Content-Type to text/plain). Without a
+     parameter this is the failure page: only the function sends people here. -->
 <div class="mark" id="mark">⌛</div>
 <h1 id="nadpis">Odkaz už neplatí.</h1>
 <p><a href="/#/zpravy">Otevřít Rezervátor</a></p>
 
 <script>
-  if (new URLSearchParams(location.search).get("ok") === "1") {
+  const ok = new URLSearchParams(location.search).get("ok");
+  if (ok === "1") {
     document.getElementById("mark").textContent = "✅";
     document.getElementById("nadpis").textContent = "Díky, reakce je uložená.";
   } else {
     document.body.classList.add("fail");
+    if (ok === "retry") {
+      document.getElementById("nadpis").textContent =
+        "Teď se to nepovedlo. Zkus to za chvíli znovu.";
+    }
   }
 </script>
 

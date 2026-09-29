@@ -1085,8 +1085,9 @@ threads, no player-to-player messages. Every error is a bare code.
   writes its `reaction` with the service role (the `reacted_at` trigger
   and `notify_message_reactions` fire as from the app), then a 303 to
   `reakce.html?ok=1`; a bad, expired or orphaned token, a recipient set as
-  the kiosk, back to pending or moved to another alley, or a database
-  error → `?ok=0`. A database error and a missing `CANCEL_TOKEN_SECRET`
+  the kiosk, back to pending or moved to another alley → `?ok=0`; a
+  database error → `?ok=retry` (the link is fine; the page asks to try
+  again). A database error and a missing `CANCEL_TOKEN_SECRET`
   (500) are logged with `console.error`, as in cancel. One click, no
   confirm page (unlike cancel): a reaction is harmless and reversible in
   the app. Only GET writes: HEAD (what a link scanner or mail gateway

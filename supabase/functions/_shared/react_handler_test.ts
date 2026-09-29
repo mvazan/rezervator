@@ -107,7 +107,7 @@ Deno.test("no secret configured fails closed with 500 and logs why", async () =>
   assertEquals(logged, ["CANCEL_TOKEN_SECRET is not set"]);
 });
 
-Deno.test("a failed recipient lookup is logged and gets ok=0", async () => {
+Deno.test("a failed recipient lookup is logged and asks to try again (ok=retry)", async () => {
   const token = await signReactToken({ m: "m1", u: "u1", r: "up" }, SECRET);
   const logged: { message: string; detail: unknown }[] = [];
   const boom = new Error("PGRST301");
@@ -123,12 +123,12 @@ Deno.test("a failed recipient lookup is logged and gets ok=0", async () => {
     resultPage: RESULT_PAGE,
     logError: (message, detail) => logged.push({ message, detail }),
   });
-  assertEquals(res.headers.get("location"), `${RESULT_PAGE}?ok=0`);
+  assertEquals(res.headers.get("location"), `${RESULT_PAGE}?ok=retry`);
   assertEquals(wrote, false);
   assertEquals(logged, [{ message: "react lookup failed:", detail: boom }]);
 });
 
-Deno.test("a failed write is logged and gets ok=0", async () => {
+Deno.test("a failed write is logged and asks to try again (ok=retry)", async () => {
   const token = await signReactToken({ m: "m1", u: "u1", r: "down" }, SECRET);
   const logged: { message: string; detail: unknown }[] = [];
   const boom = new Error("permission denied");
@@ -140,7 +140,7 @@ Deno.test("a failed write is logged and gets ok=0", async () => {
     resultPage: RESULT_PAGE,
     logError: (message, detail) => logged.push({ message, detail }),
   });
-  assertEquals(res.headers.get("location"), `${RESULT_PAGE}?ok=0`);
+  assertEquals(res.headers.get("location"), `${RESULT_PAGE}?ok=retry`);
   assertEquals(logged, [{ message: "react write failed:", detail: boom }]);
 });
 

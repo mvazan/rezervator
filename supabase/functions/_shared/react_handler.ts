@@ -52,9 +52,10 @@ export function mayReact(row: RecipientMembership | null): boolean {
 
 /// Answers a [method] request for [url]. GET verifies the `t` token, writes
 /// its reaction when the recipient may still react, and answers a 303 to
-/// `resultPage?ok=1` (written) or `?ok=0` (missing, bad, expired or
-/// orphaned token, a recipient who may no longer react, nothing written,
-/// or a database error); a 500 when no secret is configured (fail closed).
+/// `resultPage?ok=1` (written), `?ok=retry` (a database error: the link is
+/// fine and a second click may well work) or `?ok=0` (missing, bad, expired
+/// or orphaned token, a recipient who may no longer react, nothing
+/// written); a 500 when no secret is configured (fail closed).
 /// HEAD — what a link scanner or mail gateway probes with — answers the
 /// same 303 as far as the token tells, and stops before the database:
 /// only the one-click GET is the accepted write. Any other method: 405,
@@ -78,6 +79,7 @@ export async function handleReact(
   const token = url.searchParams.get("t");
   const ok = () => Response.redirect(`${deps.resultPage}?ok=1`, 303);
   const fail = () => Response.redirect(`${deps.resultPage}?ok=0`, 303);
+  const retry = () => Response.redirect(`${deps.resultPage}?ok=retry`, 303);
   if (!token) return fail();
   const verdict = await verifyReactToken(token, deps.secret, deps.now());
   if ("error" in verdict) return fail();
@@ -87,7 +89,7 @@ export async function handleReact(
     allowed = await deps.recipientMayReact(verdict.m, verdict.u);
   } catch (error) {
     deps.logError("react lookup failed:", error);
-    return fail();
+    return retry();
   }
   if (!allowed) return fail();
   let wrote: boolean;
@@ -95,7 +97,7 @@ export async function handleReact(
     wrote = await deps.writeReaction(verdict.m, verdict.u, verdict.r);
   } catch (error) {
     deps.logError("react write failed:", error);
-    return fail();
+    return retry();
   }
   return wrote ? ok() : fail();
 }
