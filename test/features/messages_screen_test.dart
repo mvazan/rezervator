@@ -694,10 +694,10 @@ void main() {
       ));
       await tester.pumpAndSettle();
       expect(find.text('1× 👍 · 1 bez reakce'), findsOneWidget);
-      expect(find.text('👍 Petr · 1 bez reakce'), findsNothing);
+      expect(find.text('👍 Petr · bez reakce: Tomáš'), findsNothing);
       await tester.tap(find.text('1× 👍 · 1 bez reakce'));
       await tester.pumpAndSettle();
-      expect(find.text('👍 Petr · 1 bez reakce'), findsOneWidget);
+      expect(find.text('👍 Petr · bez reakce: Tomáš'), findsOneWidget);
     });
 
     // The RPC's realtime DELETE can beat its HTTP reply and unmount the
@@ -1257,7 +1257,7 @@ void main() {
       ));
       await tester.pumpAndSettle();
       expect(find.text('1× 👍 · 1 bez reakce'), findsOneWidget);
-      expect(find.text('👍 Petr „přijdu“ · 1 bez reakce'), findsOneWidget);
+      expect(find.text('👍 Petr „přijdu“ · bez reakce: Tomáš'), findsOneWidget);
     });
 
     testWidgets('opening marks my unread row read, once', (tester) async {

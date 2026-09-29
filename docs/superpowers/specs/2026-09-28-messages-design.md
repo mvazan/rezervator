@@ -403,7 +403,9 @@ value; either is fine, pick whichever touches less of the existing call sites.
 - **Sent:** tally „2× 👍 · 1× 👎 · 1× 💬 · 3 bez reakce“ — the same order and buckets, a
   zero group left out, no „bez reakce“ once everybody answered. The tally is a button
   (full tap height, announces expanded/collapsed) that expands the per-person list with
-  replies. Sent messages can be deleted (⋮ „Smazat“, confirm).
+  replies; there the „bez reakce“ bucket names who has not answered yet („bez reakce:
+  Čeněk, Tomáš Válka“, Czech-sorted; recipients the roster does not know only counted,
+  „… a 1 další“). Sent messages can be deleted (⋮ „Smazat“, confirm).
 - **Player composer** — FAB „Napsat“ → a sheet with „Správci“ and „Službě“ (the latter
   disabled with „Dnes nikdo neslouží“ when no one serves today, or when I am the only one) →
   text (≤ 500) → „Odeslat“.

@@ -148,8 +148,9 @@ bool _hasReply(MessageRecipient r) => (r.reply ?? '').isNotEmpty;
 String reactionLine(
   Iterable<MessageRecipient> recipients,
   Map<String, String> names,
-  String? meId,
-) {
+  String? meId, {
+  bool namesForNone = false,
+}) {
   String label(MessageRecipient r) {
     final name = r.userId == meId ? 'ty' : names[r.userId];
     if (name == null) return '';
@@ -174,14 +175,33 @@ String reactionLine(
   final down = group(Reaction.down);
   // Replied without pressing a chip.
   final replied = group(null);
-  final none =
-      recipients.where((r) => r.reaction == null && !_hasReply(r)).length;
+  final silent =
+      recipients.where((r) => r.reaction == null && !_hasReply(r)).toList();
   return [
     if (up.isNotEmpty) '👍 ${up.join(', ')}',
     if (down.isNotEmpty) '👎 ${down.join(', ')}',
     if (replied.isNotEmpty) '💬 ${replied.join(', ')}',
-    if (none > 0) _noReaction(none),
+    if (silent.isNotEmpty)
+      namesForNone ? _silentNames(silent, names, meId) : _noReaction(silent.length),
   ].join(' · ');
+}
+
+/// „bez reakce: Čeněk, Tomáš Válka a 1 další“ — the expanded sent-side
+/// list names who has not answered yet, Czech-sorted; recipients the
+/// roster does not know are only counted.
+String _silentNames(
+  List<MessageRecipient> silent,
+  Map<String, String> names,
+  String? meId,
+) {
+  final known = [for (final r in silent) ?names[r.userId]]
+    ..sort(compareCzech);
+  final unknown = silent.length - known.length;
+  if (known.isEmpty) return _noReaction(unknown);
+  final list = known.join(', ');
+  return unknown == 0
+      ? 'bez reakce: $list'
+      : 'bez reakce: $list a ${czechCount(unknown, 'další', 'další', 'dalších')}';
 }
 
 /// How many of [all] have an unread recipient row of [meId]'s, split by

@@ -282,7 +282,8 @@ class _MessageTileState extends State<MessageTile>
                 Padding(
                   padding: const EdgeInsets.only(top: 4),
                   child: Text(
-                    reactionLine(widget.recipients, widget.names, widget.meId),
+                    reactionLine(widget.recipients, widget.names, widget.meId,
+                        namesForNone: true),
                     style: small,
                   ),
                 ),

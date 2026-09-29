@@ -195,6 +195,44 @@ void main() {
     });
   });
 
+  group('reactionLine with namesForNone (the sent side\'s expanded list)', () {
+    test('lists who has not answered, Czech-sorted, unknown ones only counted', () {
+      final line = reactionLine(
+        [
+          recipient('petr', reaction: Reaction.up),
+          recipient('tomas'),
+          recipient('cenek'),
+          recipient('ghost'),
+        ],
+        const {'petr': 'Petr Novák', 'tomas': 'Tomáš Válka', 'cenek': 'Čeněk'},
+        'me',
+        namesForNone: true,
+      );
+      expect(line, '👍 Petr Novák · bez reakce: Čeněk, Tomáš Válka a 1 další');
+    });
+
+    test('everybody known: just the names; nobody left: no clause', () {
+      expect(
+        reactionLine([recipient('tomas')], const {'tomas': 'Tomáš Válka'}, 'me',
+            namesForNone: true),
+        'bez reakce: Tomáš Válka',
+      );
+      expect(
+        reactionLine([recipient('tomas', reaction: Reaction.down)],
+            const {'tomas': 'Tomáš Válka'}, 'me',
+            namesForNone: true),
+        '👎 Tomáš Válka',
+      );
+    });
+
+    test('the received line keeps the plain count', () {
+      expect(
+        reactionLine([recipient('tomas')], const {'tomas': 'Tomáš Válka'}, 'me'),
+        '1 bez reakce',
+      );
+    });
+  });
+
   group('Message.fromJson', () {
     test('reads author_role into authorIsAdmin', () {
       final json = {
