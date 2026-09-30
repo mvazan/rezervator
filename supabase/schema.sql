@@ -420,9 +420,21 @@ declare
   v_jobs integer := 0;
   v_seen integer[] := '{}';
   v_row league_matches;
-  v_new league_matches;
   v_n integer;
+  v_final constant text[] := array['finished', 'forfeit'];
+  v_status text;
+  v_type text;
+  v_disc text;
 begin
+  if not league_competition_is_ours(p_tenant, p_competition_slug) then
+    delete from league_matches
+     where tenant_id = p_tenant and competition_slug = p_competition_slug;
+    get diagnostics v_deleted = row_count;
+    perform league_drop_orphan_jobs(p_tenant);
+    return jsonb_build_object('league_inserted', 0, 'league_updated', 0,
+                              'league_deleted', v_deleted, 'league_detail_jobs', 0);
+  end if;
+
   for m in select * from jsonb_array_elements(coalesce(p_matches, '[]'::jsonb)) loop
     v_id := (m->>'site_match_id')::integer;
     if exists (select 1 from priority_slots
@@ -445,7 +457,7 @@ begin
       values
         (p_tenant, v_id, m->>'site_slug', p_competition_slug,
          coalesce(m->>'competition', ''), (m->>'round')::smallint,
-         (m->>'date')::date, (m->>'starts_at')::time, m->>'home_team', m->>'away_team',
+         (m->>'date')::date, nullif(m->>'starts_at', '')::time, m->>'home_team', m->>'away_team',
          coalesce(m->>'home_team_slug', ''), coalesce(m->>'away_team_slug', ''),
          m->>'video_url', coalesce(m->>'status', 'scheduled'),
          coalesce(m->>'match_type', ''), coalesce(m->>'discipline', ''),
@@ -454,21 +466,26 @@ begin
          (v_home->>'fulls')::integer, (v_away->>'fulls')::integer,
          (v_home->>'spares')::integer, (v_away->>'spares')::integer,
          (v_home->>'errors')::integer, (v_away->>'errors')::integer,
-         (v_home->>'set_points')::numeric, (v_away->>'set_points')::numeric)
-      returning * into v_new;
+         (v_home->>'set_points')::numeric, (v_away->>'set_points')::numeric);
       v_inserted := v_inserted + 1;
     else
+      -- The status the detail page reported for a final match stands: the
+      -- round page and the detail may disagree (finished / forfeit), and
+      -- neither may flip the row back every night. The format is the round
+      -- page's when it has one.
+      v_status := case when v_row.detail_status = any (v_final)
+                       then v_row.status else coalesce(m->>'status', 'scheduled') end;
+      v_type := coalesce(nullif(m->>'match_type', ''), v_row.match_type);
+      v_disc := coalesce(nullif(m->>'discipline', ''), v_row.discipline);
       update league_matches set
         site_slug = m->>'site_slug', competition_slug = p_competition_slug,
         competition = coalesce(m->>'competition', ''), round = (m->>'round')::smallint,
-        date = (m->>'date')::date, starts_at = (m->>'starts_at')::time,
+        date = (m->>'date')::date, starts_at = nullif(m->>'starts_at', '')::time,
         home_team = m->>'home_team', away_team = m->>'away_team',
         home_team_slug = coalesce(m->>'home_team_slug', ''),
         away_team_slug = coalesce(m->>'away_team_slug', ''),
-        video_url = m->>'video_url', status = coalesce(m->>'status', 'scheduled'),
-        -- the round page carries no format: keep what the detail fetch stored
-        match_type = coalesce(nullif(m->>'match_type', ''), match_type),
-        discipline = coalesce(nullif(m->>'discipline', ''), discipline),
+        video_url = m->>'video_url', status = v_status,
+        match_type = v_type, discipline = v_disc,
         home_points = (v_home->>'points')::numeric, away_points = (v_away->>'points')::numeric,
         home_total = (v_home->>'total')::integer, away_total = (v_away->>'total')::integer,
         home_fulls = (v_home->>'fulls')::integer, away_fulls = (v_away->>'fulls')::integer,
@@ -476,19 +493,27 @@ begin
         home_errors = (v_home->>'errors')::integer, away_errors = (v_away->>'errors')::integer,
         home_set_points = (v_home->>'set_points')::numeric,
         away_set_points = (v_away->>'set_points')::numeric,
+        -- A final match whose totals moved has its player lines fetched again.
+        detail_status = case
+          when v_status = any (v_final)
+               and (home_points, away_points, home_total, away_total)
+                   is distinct from ((v_home->>'points')::numeric, (v_away->>'points')::numeric,
+                                     (v_home->>'total')::integer, (v_away->>'total')::integer)
+          then null else detail_status end,
         fetched_at = now()
        where id = v_row.id
          and (site_slug, competition_slug, competition, round, date, starts_at,
               home_team, away_team, home_team_slug, away_team_slug, video_url, status,
+              match_type, discipline,
               home_points, away_points, home_total, away_total, home_fulls, away_fulls,
               home_spares, away_spares, home_errors, away_errors,
               home_set_points, away_set_points)
              is distinct from
              (m->>'site_slug', p_competition_slug, coalesce(m->>'competition', ''),
-              (m->>'round')::smallint, (m->>'date')::date, (m->>'starts_at')::time,
+              (m->>'round')::smallint, (m->>'date')::date, nullif(m->>'starts_at', '')::time,
               m->>'home_team', m->>'away_team', coalesce(m->>'home_team_slug', ''),
-              coalesce(m->>'away_team_slug', ''), m->>'video_url',
-              coalesce(m->>'status', 'scheduled'),
+              coalesce(m->>'away_team_slug', ''), m->>'video_url', v_status,
+              v_type, v_disc,
               (v_home->>'points')::numeric, (v_away->>'points')::numeric,
               (v_home->>'total')::integer, (v_away->>'total')::integer,
               (v_home->>'fulls')::integer, (v_away->>'fulls')::integer,
@@ -510,29 +535,33 @@ begin
     delete from league_matches l
      where l.tenant_id = p_tenant and l.competition_slug = p_competition_slug
        and not (l.site_match_id = any (v_seen));
-    get diagnostics v_deleted = row_count;
+    get diagnostics v_n = row_count;
+    v_deleted := v_deleted + v_n;
   end if;
+  perform league_drop_orphan_jobs(p_tenant);
 
-  -- One detail fetch per finished match whose lines are not final yet; a
-  -- pending or backing-off job is left alone (do nothing on conflict).
+  -- One detail fetch per final match whose player lines are not final yet; a
+  -- pending or backing-off job is left alone (only a stale slug is mended).
   with due as (
     select l.site_match_id, l.site_slug
       from league_matches l
      where l.tenant_id = p_tenant and l.competition_slug = p_competition_slug
-       and l.status in ('finished', 'forfeit')
-       and l.detail_status is distinct from l.status
+       and l.status = any (v_final)
+       and (l.detail_status is null or not (l.detail_status = any (v_final)))
   ), ins as (
-    insert into notification_jobs (kind, dedupe_key, payload, run_at)
+    insert into notification_jobs as j (kind, dedupe_key, payload, run_at)
     select 'federation_league_match',
            'federation_league_match:' || p_tenant || ':' || d.site_match_id,
            jsonb_build_object('tenant_id', p_tenant, 'site_match_id', d.site_match_id,
                               'slug', d.site_slug),
            now()
       from due d
-    on conflict (dedupe_key) do nothing
-    returning 1
+    on conflict (dedupe_key) do update
+      set payload = j.payload || jsonb_build_object('slug', excluded.payload->>'slug')
+      where j.payload->>'slug' is distinct from excluded.payload->>'slug'
+    returning (xmax = 0) as fresh
   )
-  select count(*) into v_jobs from ins;
+  select count(*) filter (where fresh) into v_jobs from ins;
 
   return jsonb_build_object('league_inserted', v_inserted, 'league_updated', v_updated,
                             'league_deleted', v_deleted, 'league_detail_jobs', v_jobs);
@@ -551,14 +580,18 @@ declare
   v_row league_matches;
   v_home jsonb := coalesce(p_result->'home', '{}'::jsonb);
   v_away jsonb := coalesce(p_result->'away', '{}'::jsonb);
+  v_final constant text[] := array['finished', 'forfeit'];
+  v_new text := p_result->>'status';
+  v_lagging boolean;
 begin
   select * into v_row from league_matches
    where tenant_id = p_tenant and site_match_id = p_site_match_id;
   if not found or not league_competition_is_ours(p_tenant, v_row.competition_slug) then
     return false;
   end if;
+  v_lagging := v_row.status = any (v_final) and not (v_new = any (v_final));
   update league_matches set
-    status = p_result->>'status',
+    status = case when v_lagging then v_row.status else v_new end,
     match_type = coalesce(p_result->>'match_type', ''),
     discipline = coalesce(p_result->>'discipline', ''),
     video_url = p_result->>'video_url',
@@ -566,14 +599,21 @@ begin
                  then p_result#>>'{venue,name}' else venue end,
     venue_slug = case when jsonb_typeof(p_result->'venue') = 'object'
                       then p_result#>>'{venue,slug}' else venue_slug end,
-    home_points = (v_home->>'points')::numeric, away_points = (v_away->>'points')::numeric,
-    home_total = (v_home->>'total')::integer, away_total = (v_away->>'total')::integer,
-    home_fulls = (v_home->>'fulls')::integer, away_fulls = (v_away->>'fulls')::integer,
-    home_spares = (v_home->>'spares')::integer, away_spares = (v_away->>'spares')::integer,
-    home_errors = (v_home->>'errors')::integer, away_errors = (v_away->>'errors')::integer,
-    home_set_points = (v_home->>'set_points')::numeric,
-    away_set_points = (v_away->>'set_points')::numeric,
-    fetched_at = now(), detail_status = p_result->>'status', detail_fetched_at = now()
+    home_points = case when v_lagging then home_points else (v_home->>'points')::numeric end,
+    away_points = case when v_lagging then away_points else (v_away->>'points')::numeric end,
+    home_total = case when v_lagging then home_total else (v_home->>'total')::integer end,
+    away_total = case when v_lagging then away_total else (v_away->>'total')::integer end,
+    home_fulls = case when v_lagging then home_fulls else (v_home->>'fulls')::integer end,
+    away_fulls = case when v_lagging then away_fulls else (v_away->>'fulls')::integer end,
+    home_spares = case when v_lagging then home_spares else (v_home->>'spares')::integer end,
+    away_spares = case when v_lagging then away_spares else (v_away->>'spares')::integer end,
+    home_errors = case when v_lagging then home_errors else (v_home->>'errors')::integer end,
+    away_errors = case when v_lagging then away_errors else (v_away->>'errors')::integer end,
+    home_set_points = case when v_lagging then home_set_points
+                           else (v_home->>'set_points')::numeric end,
+    away_set_points = case when v_lagging then away_set_points
+                           else (v_away->>'set_points')::numeric end,
+    fetched_at = now(), detail_status = v_new, detail_fetched_at = now()
    where id = v_row.id;
 
   delete from league_player_results where match_id = v_row.id;
@@ -1850,6 +1890,7 @@ begin
    where not exists (select 1 from teams t
                       where t.tenant_id = l.tenant_id and t.active
                         and t.competition_slug = l.competition_slug);
+  perform league_drop_orphan_jobs();
   for r in
     select distinct t.tenant_id, t.competition_slug
       from teams t
@@ -2379,6 +2420,25 @@ $$;
 
 
 ALTER FUNCTION "public"."league_competition_is_ours"("p_tenant" "uuid", "p_competition_slug" "text") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."league_drop_orphan_jobs"("p_tenant" "uuid" DEFAULT NULL::"uuid") RETURNS integer
+    LANGUAGE "sql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  with gone as (
+    delete from notification_jobs j
+     where j.kind = 'federation_league_match'
+       and (p_tenant is null or j.payload->>'tenant_id' = p_tenant::text)
+       and not exists (select 1 from league_matches l
+                        where l.tenant_id = (j.payload->>'tenant_id')::uuid
+                          and l.site_match_id = (j.payload->>'site_match_id')::integer)
+    returning 1)
+  select count(*)::integer from gone;
+$$;
+
+
+ALTER FUNCTION "public"."league_drop_orphan_jobs"("p_tenant" "uuid") OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."mark_reminder_sent"("p_user" "uuid", "p_event_key" "text", "p_offset" integer, "p_starts_at" timestamp with time zone DEFAULT NULL::timestamp with time zone) RETURNS "void"
@@ -3286,17 +3346,16 @@ begin
   select * into v_slot from priority_slots
    where id = p_match_id and tenant_id = current_tenant_id();
   if not found then
-    -- Not one of ours: maybe a foreign match of one of our competitions.
+    -- Not one of ours: maybe a match of one of our competitions.
     select * into v_league from league_matches
      where id = p_match_id and tenant_id = current_tenant_id();
     if not found or not league_competition_is_ours(v_league.tenant_id, v_league.competition_slug) then
       return 'not_live';
     end if;
-    v_status := v_league.status;
     v_fetched := v_league.detail_fetched_at;
-    if v_status in ('finished', 'forfeit') then
+    if v_league.status in ('finished', 'forfeit') then
       -- Final: only a missing detail is worth a fetch.
-      if v_league.detail_status is not distinct from v_status then
+      if v_league.detail_status in ('finished', 'forfeit') then
         return 'not_live';
       end if;
     else
@@ -3304,11 +3363,7 @@ begin
         return 'not_live';
       end if;
       v_start := (v_league.date + v_league.starts_at) at time zone 'Europe/Prague';
-      if not ((v_status = 'in_progress' and now() < v_start + interval '12 hours')
-              or (v_status = 'preparation'
-                  and now() between v_start - interval '1 hour' and v_start + interval '12 hours')
-              or (v_status = 'scheduled'
-                  and now() between v_start - interval '1 hour' and v_start + interval '6 hours')) then
+      if not (now() between v_start - interval '1 hour' and v_start + interval '30 hours') then
         return 'not_live';
       end if;
     end if;
@@ -6712,6 +6767,11 @@ GRANT ALL ON FUNCTION "public"."kiosk_password_target"("p_user_id" "uuid") TO "s
 
 REVOKE ALL ON FUNCTION "public"."league_competition_is_ours"("p_tenant" "uuid", "p_competition_slug" "text") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."league_competition_is_ours"("p_tenant" "uuid", "p_competition_slug" "text") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."league_drop_orphan_jobs"("p_tenant" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."league_drop_orphan_jobs"("p_tenant" "uuid") TO "service_role";
 
 
 

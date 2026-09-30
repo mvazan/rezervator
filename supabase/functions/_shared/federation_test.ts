@@ -600,7 +600,9 @@ Deno.test("a round page carries every match's team totals — a foreign match's 
     // A finished match's points always add up to the match's 8.
     assertEquals(home.points! + away.points!, 8);
   }
-  // A match with no results yet has null totals, never an error.
-  const scheduled = parseCompetition(fixture("competition_current_teams_of_4.html"));
-  assert(scheduled.matches.every((m) => m.totals !== undefined));
+  // A match with no result yet has null totals — not zeros, and never an error.
+  const upcoming = parseCompetition(fixture("competition_current_teams_of_4.html"))
+    .matches.filter((m) => m.status === "SCHEDULED" || m.status === "PREPARATION");
+  assert(upcoming.length > 0, "the fixture must have an unplayed match");
+  for (const m of upcoming) assertEquals(m.totals, { home: null, away: null });
 });

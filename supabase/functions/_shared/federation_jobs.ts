@@ -70,6 +70,19 @@ const startOf = (m: { date: string; time: string | null }) =>
 /** `keepIds`: our listed matches that are not written but must not read as
  * withdrawn. `inactiveIds`, a subset, are the ones whose only teams of ours
  * are switched off — stored, but never polled. */
+/** A match as apply_league_matches (0055) reads it. `starts_at`: the site's
+ * time, or null — an empty string counts as none (`''::time` would raise). */
+function leagueRow(m: SiteMatch): LeagueRow {
+  return {
+    site_match_id: m.id, site_slug: m.slug, date: m.date, starts_at: m.time || null,
+    home_team: m.homeTeam.name, away_team: m.awayTeam.name,
+    home_team_slug: m.homeTeam.slug, away_team_slug: m.awayTeam.slug,
+    competition: m.competition.name, round: m.round, video_url: m.videoUrl,
+    status: m.status.toLowerCase(), match_type: m.matchType, discipline: m.discipline,
+    home: m.totals.home, away: m.totals.away,
+  };
+}
+
 export function planCompetition(args: {
   matches: SiteMatch[]; teams: TeamRow[]; legacy: LegacyRow[];
 }): {
@@ -90,23 +103,19 @@ export function planCompetition(args: {
       if (ours.has(m.homeTeam.slug) || ours.has(m.awayTeam.slug)) {
         keepIds.push(m.id);
         inactiveIds.push(m.id);
-      } else {
-        // Nobody of ours plays it: a league match (0055), kept apart from the
-        // slots — with or without a time.
-        league.push({
-          site_match_id: m.id, site_slug: m.slug, date: m.date, starts_at: m.time,
-          home_team: m.homeTeam.name, away_team: m.awayTeam.name,
-          home_team_slug: m.homeTeam.slug, away_team_slug: m.awayTeam.slug,
-          competition: m.competition.name, round: m.round, video_url: m.videoUrl,
-          status: m.status.toLowerCase(), match_type: m.matchType, discipline: m.discipline,
-          home: m.totals.home, away: m.totals.away,
-        });
       }
+      // No active team of ours plays it: a league match (0055), kept apart
+      // from the slots — with or without a time. That includes a match of a
+      // switched-off team of ours, so the round has no hole.
+      league.push(leagueRow(m));
       continue;
     }
     if (!m.time) {
       skipped.push(`${m.homeTeam.name} – ${m.awayTeam.name} (${m.date}): bez času`);
       keepIds.push(m.id);
+      // Ours, but with no time it has no slot yet (a slot needs a start):
+      // until it has one, the round shows it from here.
+      league.push(leagueRow(m));
       continue;
     }
     rows.push({
@@ -306,11 +315,20 @@ export async function runCompetition(db: Db, get: Fetcher, tenantId: string, slu
   const report = must(await db.rpc("apply_federation_matches", {
     p_tenant: tenantId, p_competition_slug: slug, p_matches: rows, p_keep_ids: keepIds,
   })) as Record<string, unknown>;
-  // The matches of teams that are none of ours: the whole competition for
-  // Výsledky (0055). Their detail is fetched once they are finished.
-  const leagueReport = must(await db.rpc("apply_league_matches", {
-    p_tenant: tenantId, p_competition_slug: slug, p_matches: league,
-  })) as Record<string, unknown>;
+  // The matches no active team of ours plays: the whole competition for
+  // Výsledky (0055). Their detail is fetched once they are finished. A
+  // failure here must not cost us our own matches (their jobs are armed
+  // below): it is logged and shows in the report, nothing more.
+  let leagueReport: Record<string, unknown> = {};
+  try {
+    leagueReport = must(await db.rpc("apply_league_matches", {
+      p_tenant: tenantId, p_competition_slug: slug, p_matches: league,
+    })) as Record<string, unknown>;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`apply_league_matches ${slug} failed:`, message);
+    leagueReport = { league_error: message };
+  }
   const stillLegacy = rows.length === 0 ? [] : must(await db.from("priority_slots")
     .select("date, starts_at, home_team, away_team")
     .eq("tenant_id", tenantId).like("import_key", "rozpis:%")) as
@@ -389,6 +407,11 @@ export async function runMatch(
 export async function runLeagueMatch(
   db: Db, get: Fetcher, tenantId: string, siteMatchId: number, slug: string,
 ): Promise<null> {
+  // The match may be gone since the job was queued (it became one of ours,
+  // the site dropped it): no page fetch for nothing.
+  const rows = must(await db.from("league_matches").select("id")
+    .eq("tenant_id", tenantId).eq("site_match_id", siteMatchId).limit(1)) as unknown[];
+  if (rows.length === 0) return null;
   const d = parseMatch(await get(`/detail-zapasu/${slug}`));
   must(await db.rpc("apply_league_result",
     { p_tenant: tenantId, p_site_match_id: siteMatchId, p_result: resultPayload(d) }));
