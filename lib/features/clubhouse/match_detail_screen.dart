@@ -355,12 +355,11 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     final resultsAsync = ref.watch(matchResultsProvider);
     final results = resultsAsync.value ?? const <String, MatchResult>{};
     final result = fromLeague ? leagueMatch?.result : results[_matchId];
-    final players =
-        (fromLeague
-                ? ref.watch(leaguePlayerResultsProvider(widget.matchId))
-                : ref.watch(matchPlayerResultsProvider(_matchId)))
-            .value ??
-        const <MatchPlayerResult>[];
+    final playersAsync = fromLeague
+        ? ref.watch(leaguePlayerResultsProvider(widget.matchId))
+        : ref.watch(matchPlayerResultsProvider(_matchId));
+    final players = playersAsync.value ?? const <MatchPlayerResult>[];
+    final playersLoading = !playersAsync.hasValue && !playersAsync.hasError;
     final venues = ref.watch(venuesProvider).value ?? const <Venue>[];
     final view = ref.watch(matchDetailViewProvider);
     final teamColors =
@@ -445,6 +444,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
               slot: slot,
               result: result,
               players: players,
+              playersLoading: playersLoading,
               venueMatch: venueMatch,
               view: view,
               teamColors: teamColors,
@@ -463,6 +463,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     required PrioritySlot slot,
     required MatchResult? result,
     required List<MatchPlayerResult> players,
+    required bool playersLoading,
     required Venue? venueMatch,
     required MatchDetailView view,
     required Map<String, int> teamColors,
@@ -485,6 +486,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
           slot: slot,
           result: result,
           players: players,
+          playersLoading: playersLoading,
           now: now,
           onVenueTap: venueMatch == null
               ? null

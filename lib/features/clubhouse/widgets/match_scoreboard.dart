@@ -29,6 +29,7 @@ class MatchScoreboard extends StatelessWidget {
     required this.slot,
     required this.result,
     required this.players,
+    this.playersLoading = false,
     required this.now,
     this.onVenueTap,
     this.homeColor,
@@ -43,6 +44,9 @@ class MatchScoreboard extends StatelessWidget {
 
   /// Both lineups, one row per player; empty until the lineups are out.
   final List<MatchPlayerResult> players;
+
+  /// The lineups are still being read: no „not available“ note yet.
+  final bool playersLoading;
 
   /// The current time: whether the match is live, and the freshness in the
   /// „Živě“ chip.
@@ -86,7 +90,7 @@ class MatchScoreboard extends StatelessWidget {
     final awayTotal = running ? liveTotals?.away : result?.awayTotal;
     final note = forfeit
         ? 'Zápas skončil kontumací – souboje se nehrály.'
-        : players.isEmpty
+        : players.isEmpty && !playersLoading
         ? 'Sestavy zatím nejsou k dispozici.'
         : null;
 

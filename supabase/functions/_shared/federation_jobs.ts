@@ -65,17 +65,15 @@ const LIMITS: [string, number][] = [
 const MATCH_CONCURRENCY = 3;
 
 const startOf = (m: { date: string; time: string | null }) =>
-  new Date(pragueEpoch(m.date, m.time ?? "12:00") * 1000);
+  new Date(pragueEpoch(m.date, m.time || "12:00") * 1000);
 
-/** `keepIds`: our listed matches that are not written but must not read as
- * withdrawn. `inactiveIds`, a subset, are the ones whose only teams of ours
- * are switched off — stored, but never polled. */
 /** A match as apply_league_matches (0055) reads it. `starts_at`: the site's
  * time, or null — an empty string counts as none (`''::time` would raise). */
-function leagueRow(m: SiteMatch): LeagueRow {
+function leagueRow(m: SiteMatch, nameOf: Map<string, string>): LeagueRow {
   return {
     site_match_id: m.id, site_slug: m.slug, date: m.date, starts_at: m.time || null,
-    home_team: m.homeTeam.name, away_team: m.awayTeam.name,
+    home_team: nameOf.get(m.homeTeam.slug) ?? m.homeTeam.name,
+    away_team: nameOf.get(m.awayTeam.slug) ?? m.awayTeam.name,
     home_team_slug: m.homeTeam.slug, away_team_slug: m.awayTeam.slug,
     competition: m.competition.name, round: m.round, video_url: m.videoUrl,
     status: m.status.toLowerCase(), match_type: m.matchType, discipline: m.discipline,
@@ -83,6 +81,9 @@ function leagueRow(m: SiteMatch): LeagueRow {
   };
 }
 
+/** `keepIds`: our listed matches that are not written but must not read as
+ * withdrawn. `inactiveIds`, a subset, are the ones whose only teams of ours
+ * are switched off — stored, but never polled. */
 export function planCompetition(args: {
   matches: SiteMatch[]; teams: TeamRow[]; legacy: LegacyRow[];
 }): {
@@ -107,7 +108,7 @@ export function planCompetition(args: {
       // No active team of ours plays it: a league match (0055), kept apart
       // from the slots — with or without a time. That includes a match of a
       // switched-off team of ours, so the round has no hole.
-      league.push(leagueRow(m));
+      league.push(leagueRow(m, nameOf));
       continue;
     }
     if (!m.time) {
@@ -115,7 +116,7 @@ export function planCompetition(args: {
       keepIds.push(m.id);
       // Ours, but with no time it has no slot yet (a slot needs a start):
       // until it has one, the round shows it from here.
-      league.push(leagueRow(m));
+      league.push(leagueRow(m, nameOf));
       continue;
     }
     rows.push({

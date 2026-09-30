@@ -78,13 +78,10 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
   });
 
   void _selectMode(ResultsMode mode) {
-    if (mode == ref.read(resultsModeProvider)) return;
     unawaited(ref.read(resultsModeProvider.notifier).set(mode));
   }
 
-  void _selectCompetition(String slug, String current) {
-    // ChoiceChip reports a tap on the chip that is already chosen too.
-    if (slug == current) return;
+  void _selectCompetition(String slug) {
     unawaited(ref.read(resultsCompetitionProvider.notifier).set(slug));
   }
 
@@ -94,8 +91,6 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
     return dayFull(date);
   }
 
-  /// [competitionSlug]: set for a match of another team (0055) — the detail
-  /// then reads it from `league_matches`.
   /// [competitionSlug]: set for a match of other teams (0055) — the detail
   /// then reads it from `league_matches`.
   static void _openMatch(
@@ -184,7 +179,7 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
             ChoiceChip(
               label: Text(c.name),
               selected: c.slug == selected,
-              onSelected: (_) => _selectCompetition(c.slug, selected),
+              onSelected: (_) => _selectCompetition(c.slug),
             ),
           ],
         ],
@@ -229,7 +224,6 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
     // (foreign) has no home/away for us and no team colour.
     bool inCompetition = false,
     bool foreign = false,
-    bool timeKnown = true,
     String? competitionSlug,
   }) {
     final theme = Theme.of(context);
@@ -240,7 +234,7 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
             if (slot.round != null) '${slot.round}. kolo',
           ].join(', ');
     final subtitle = [
-      timeKnown ? slot.startsAt.display() : 'čas bude upřesněn',
+      slot.timeKnown ? slot.startsAt.display() : 'čas bude upřesněn',
       if (competitionPart.isNotEmpty) competitionPart,
       if (!foreign) slot.isAway ? 'venku' : 'doma',
       if (foreign && (slot.venue ?? '').isNotEmpty) slot.venue!,
@@ -249,15 +243,13 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
         ? ''
         : pinsLabel(result.homeTotal, result.awayTotal);
 
-    final colorId = foreign
-        ? null
-        : matchColorOf(
-            slot,
-            followedTeams,
-            teamColors,
-            calendarTeams: calendarTeams,
-            exceptions: exceptions,
-          );
+    final colorId = matchColorOf(
+      slot,
+      followedTeams,
+      teamColors,
+      calendarTeams: calendarTeams,
+      exceptions: exceptions,
+    );
     return ListTile(
       key: _matchKeyFor(slot.id),
       leading: MatchLeading(
@@ -318,9 +310,8 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
         ref.watch(myMatchExceptionsProvider).value ?? const <String, bool>{};
 
     final competitions = ref.watch(leagueCompetitionsProvider);
-    final mode = competitions.isEmpty
-        ? ResultsMode.teams
-        : ref.watch(resultsModeProvider);
+    final savedMode = ref.watch(resultsModeProvider);
+    final mode = competitions.isEmpty ? ResultsMode.teams : savedMode;
     final inCompetitions = mode == ResultsMode.competitions;
     final pickedSlug = ref.watch(resultsCompetitionProvider);
     final slug = !inCompetitions
@@ -336,7 +327,8 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
     final leagueLoading = inCompetitions && !leagueAsync.hasValue;
     // Until the teams are known the switch may still appear above the list
     // (and shift it): nothing scrolls before that.
-    final teamsSettled = !ref.watch(teamsProvider).isLoading;
+    final teams = ref.watch(teamsProvider);
+    final teamsSettled = teams.hasValue || teams.hasError;
     // The saved mode / competition arrive after the first frame: a list that
     // changed under the latches gets them afresh.
     final listKey = inCompetitions ? 'c:$slug' : 't';
@@ -352,15 +344,10 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
     final List<_Section> sections;
     var listResults = results;
     var foreignIds = const <String>{};
-    var foreignTimeless = const <String>{};
     var refreshableForeign = const <String>{};
     if (inCompetitions) {
       final cm = competitionMatches(slots, league, slug);
       foreignIds = cm.foreignIds;
-      foreignTimeless = {
-        for (final l in league)
-          if (!l.timeKnown) l.id,
-      };
       refreshableForeign = {
         for (final l in league)
           if (l.refreshable(now)) l.id,
@@ -553,7 +540,6 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
                                 exceptions,
                                 inCompetition: inCompetitions,
                                 foreign: foreignIds.contains(slot.id),
-                                timeKnown: !foreignTimeless.contains(slot.id),
                                 competitionSlug: slug,
                               ),
                           ],

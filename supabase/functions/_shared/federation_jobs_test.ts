@@ -1424,3 +1424,28 @@ Deno.test("runLeagueMatch: a match that is gone is not fetched", async () => {
   assert(!fetched);
   assert(!calls.some((c) => c.kind === "rpc"));
 });
+
+Deno.test("runLeagueMatch: the existence read is scoped to the tenant and the match", async () => {
+  const { db, calls } = fakeJobsDb([], undefined, undefined, undefined, undefined, []);
+  await runLeagueMatch(db, () => Promise.resolve(""), "t1", 77, "x-kolo-1-a-b");
+  const read = calls.find((c) => c.kind === "read" && c.table === "league_matches") as
+    { kind: "read"; table: string; eqs: [string, unknown][] } | undefined;
+  assertEquals(read?.eqs, [["tenant_id", "t1"], ["site_match_id", 77]]);
+});
+
+Deno.test("planCompetition: a league row carries the admin's name for a team of ours, and an empty time counts as none", () => {
+  const mk = (id: number, time: string | null, home: string, away: string) => ({
+    id, slug: `x-kolo-1-${id}`, date: "2026-10-03", time, round: 1, status: "SCHEDULED",
+    matchType: "TEAMS_OF_6", discipline: "T100", videoUrl: null,
+    homeTeam: { slug: home, name: home.toUpperCase() }, awayTeam: { slug: away, name: away.toUpperCase() },
+    competition: { slug: "x", name: "X" }, totals: { home: null, away: null },
+  }) as unknown as Parameters<typeof planCompetition>[0]["matches"][number];
+  const { league } = planCompetition({
+    matches: [mk(1, "", "ours-off", "foreign")],
+    teams: [{ site_slug: "ours-off", name: "Naše vypnuté", active: false }] as never,
+    legacy: [],
+  });
+  assertEquals(league[0].home_team, "Naše vypnuté");
+  assertEquals(league[0].away_team, "FOREIGN");
+  assertEquals(league[0].starts_at, null);
+});

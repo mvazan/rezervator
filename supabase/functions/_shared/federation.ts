@@ -124,7 +124,7 @@ function siteMatch(v: unknown): SiteMatch {
   }
   const c = m.competition as Json;
   return {
-    id: m.id, slug, date, time: str(m.time),
+    id: m.id, slug, date, time: str(m.time) || null,
     round: Number(m.round), status: status as MatchStatus,
     matchType: str(m.matchType) ?? "", discipline: str(m.discipline) ?? "",
     videoUrl: str(m.videoUrl), homeTeam: team(m.homeTeam), awayTeam: team(m.awayTeam),
