@@ -49,25 +49,20 @@ String changelogHeading(Release r, {required bool web}) {
 }
 
 const appChangelog = <Release>[
-  Release(null, '29. 9. 2026', [
-    'Výsledky: přepínač Oddíly / Soutěže. Soutěže ukáže celou soutěž, ve '
-        'které hrají naše oddíly, po kolech (podle dat konání) — včetně '
-        'zápasů ostatních družstev, s detailem a zápisem hráčů.',
-    'Klubovna → Kontakty: tlačítko pro WhatsApp má logo WhatsAppu.',
-    'Upozornění, že se registroval nový hráč nebo vznikla nová kuželna, '
-        'po ťuknutí otevře rovnou schvalování (i odkaz v e-mailu).',
-  ]),
-  Release(null, '23. 9. 2026', [
+  Release('2.0.0', '30. 9. 2026', [
     'Zápasy a výsledky se nově stahují z výsledkového servisu ČKA — '
         'správce je zapne v Správa → Oddíly.',
     'Nový tab Klubovna: výsledky zápasů našich týmů (i živě, s videem a '
         'výkony hráčů) a kuželny soupeřů s adresou, telefonem a navigací.',
+    'Výsledky: přepínač Oddíly / Soutěže. Soutěže ukáže celou soutěž, ve '
+        'které hrají naše oddíly, po kolách (podle dat konání) — včetně '
+        'zápasů ostatních družstev, s detailem a zápisem hráčů.',
     'Detail zápasu má zápis jako na kuzelky.com — ikonou vpravo nahoře ho '
         'otevřeš přes celou obrazovku, na výšku i na šířku.',
     'Detail zápasu: nový pohled Souboje — velká čísla, kdo vyhrál který '
         'souboj a dráhu. Původní zápis je o ťuk vedle.',
-    'Klubovna → Kontakty: e-mail a telefon hráčů kuželny. Svůj e-mail i '
-        'telefon můžeš skrýt v Můj profil.',
+    'Klubovna → Kontakty: e-mail a telefon hráčů kuželny (s tlačítkem pro '
+        'WhatsApp). Svůj e-mail i telefon můžeš skrýt v Můj profil.',
     'Služby na kantýně: správce plánuje služby v Správa → Služby, všichni '
         'je vidí v Klubovna → Služby. Kdo má službu, může po dobu služby '
         'rezervovat a rušit tréninky ostatním a upravovat bloky '
@@ -75,14 +70,18 @@ const appChangelog = <Release>[
     'Nástěnka a zprávy: Klubovna → Nástěnka jsou oznámení od správce, '
         'Klubovna → Zprávy je psaní se správci, se službou na kantýně nebo '
         'hráčům v bloku či dni — s 👍/👎 a krátkou odpovědí.',
+    'Upozornění, že se registroval nový hráč nebo vznikla nová kuželna, '
+        'po ťuknutí otevře rovnou schvalování (i odkaz v e-mailu).',
   ], store: [
-    'Zápasy a výsledky se stahují z výsledkového servisu ČKA.',
-    'Klubovna: výsledky našich týmů (i živě) a kuželny soupeřů.',
-    'Detail zápasu: pohled Souboje a zápis jako na kuzelky.com.',
-    'Klubovna → Kontakty: e-mail a telefon hráčů kuželny.',
-    'Služby na kantýně: kdo má službu, rezervuje a ruší tréninky ostatním '
-        'a upravuje bloky v jednotlivých dnech.',
-    'Nástěnka (oznámení) a Zprávy (se správci/službou/hráči, s 👍/👎).',
+    'Zápasy a výsledky z výsledkového servisu ČKA; Klubovna s výsledky '
+        'týmů (i živě) a kuželnami soupeřů.',
+    'Výsledky: Oddíly / Soutěže — celá soutěž po kolech i se zápasy '
+        'ostatních družstev.',
+    'Detail zápasu: Souboje a zápis jako na kuzelky.com.',
+    'Služby na kantýně: kdo má službu, rezervuje a ruší tréninky '
+        'ostatním.',
+    'Nástěnka a Zprávy (správci, služba, hráči; 👍/👎).',
+    'Kontakty hráčů s WhatsAppem.',
   ]),
   Release('1.2.8', '22. 9. 2026', [
     'Ve správě appky se tlačítko pro přidání (oddíl, hráč, pronájem…) už '
