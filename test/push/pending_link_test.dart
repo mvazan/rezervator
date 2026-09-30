@@ -27,6 +27,22 @@ void main() {
       );
     });
 
+    test('the approval pushes map to their lists, with no message id', () {
+      expect(
+        pendingLinkFromData(const {'kind': 'pending_player', 'tenant_id': 't1'}),
+        const PendingLink(kind: PendingLinkKind.pendingPlayer, tenantId: 't1'),
+      );
+      expect(
+        pendingLinkFromData(const {'kind': 'pending_tenant'}),
+        const PendingLink(kind: PendingLinkKind.pendingTenant),
+      );
+      // A malformed alley is no alley, never a throw.
+      expect(
+        pendingLinkFromData(const {'kind': 'pending_player', 'tenant_id': 7}),
+        const PendingLink(kind: PendingLinkKind.pendingPlayer),
+      );
+    });
+
     test('an unrelated push kind maps to nothing', () {
       expect(pendingLinkFromData(const {'kind': 'duty_reminder'}), isNull);
     });

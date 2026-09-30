@@ -4,6 +4,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/clubhouse/contacts_screen.dart';
@@ -108,6 +109,9 @@ void main() {
     // Both shown: e-mail, call, WhatsApp.
     await tester.tap(inRow('Adam Admin', find.byTooltip('Napsat e-mail')));
     await tester.tap(inRow('Adam Admin', find.byTooltip('Zavolat')));
+    // The WhatsApp button wears the WhatsApp logo, not a generic chat icon.
+    expect(inRow('Adam Admin', find.byType(FaIcon)), findsOneWidget);
+    expect(inRow('Adam Admin', find.byIcon(Icons.chat_outlined)), findsNothing);
     await tester.tap(inRow('Adam Admin', find.byTooltip('WhatsApp')));
     expect(launched, [
       'email:adam@example.com',

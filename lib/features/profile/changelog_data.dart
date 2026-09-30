@@ -53,6 +53,9 @@ const appChangelog = <Release>[
     'Výsledky: přepínač Oddíly / Soutěže. Soutěže ukáže celou soutěž, ve '
         'které hrají naše oddíly, po kolech (podle dat konání) — včetně '
         'zápasů ostatních družstev, s detailem a zápisem hráčů.',
+    'Klubovna → Kontakty: tlačítko pro WhatsApp má logo WhatsAppu.',
+    'Upozornění, že se registroval nový hráč nebo vznikla nová kuželna, '
+        'po ťuknutí otevře rovnou schvalování (i odkaz v e-mailu).',
   ]),
   Release(null, '23. 9. 2026', [
     'Zápasy a výsledky se nově stahují z výsledkového servisu ČKA — '

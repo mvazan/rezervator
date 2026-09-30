@@ -11,6 +11,8 @@ import '../../domain/models.dart';
 import '../../domain/schedule.dart';
 import '../../push/pending_link.dart';
 import '../admin/admin_screen.dart';
+import '../admin/players_screen.dart';
+import '../admin/tenants_screen.dart';
 import '../clubhouse/clubhouse_screen.dart';
 import '../clubhouse/message_detail_screen.dart';
 import '../clubhouse/notice_board_screen.dart';
@@ -71,7 +73,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   }
 
   /// Opens a deep link (0051) once: a message on its detail screen, a
-  /// notice on the board.
+  /// notice on the board, the players or kuželny waiting for approval.
   void _openPendingLink(PendingLink link) {
     // May be called from initState (fireImmediately), where Riverpod allows
     // no provider write and the Navigator above HomeShell is not usable
@@ -105,6 +107,14 @@ class _HomeShellState extends ConsumerState<HomeShell> {
         navigator.push(MaterialPageRoute<void>(
             builder: (_) => const NoticeBoardScreen()));
         unawaited(_snackIfNoticeGone(link.id));
+      case PendingLinkKind.pendingPlayer:
+        // The admin's list, where the new player waits for approval.
+        navigator.push(
+            MaterialPageRoute<void>(builder: (_) => const PlayersScreen()));
+      case PendingLinkKind.pendingTenant:
+        // The superadmin's list of kuželny, the new one at the top.
+        navigator.push(
+            MaterialPageRoute<void>(builder: (_) => const TenantsScreen()));
     }
   }
 

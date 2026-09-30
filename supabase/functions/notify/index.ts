@@ -81,7 +81,11 @@ import {
   type MessageRow,
   reactionChange,
 } from "../_shared/message_notify.ts";
-import { messageContext } from "../_shared/message_texts.ts";
+import {
+  appPlayersUrl,
+  appTenantsUrl,
+  messageContext,
+} from "../_shared/message_texts.ts";
 import type { Membership } from "../_shared/membership.ts";
 import {
   clearSecondaryCalendar,
@@ -628,7 +632,8 @@ async function handle(payload: WebhookPayload) {
             data: { kind: "pending_tenant" },
             html: `<p>Někdo založil novou kuželnu <b>${name}</b> ` +
               `(zakladatel: ${founder}).</p>` +
-              `<p>Schval ji v aplikaci: Správa kuželny → Kuželny.</p>`,
+              `<p><a href="${appTenantsUrl}">Schval ji v aplikaci</a> ` +
+              `(Správa kuželny → Kuželny).</p>`,
           },
         )
       ));
@@ -651,9 +656,15 @@ async function handle(payload: WebhookPayload) {
           "Nový hráč čeká na schválení",
           `${record.display_name} se zaregistroval(a). Schval ho v sekci Hráči.`,
           {
-            data: { kind: "pending_player" },
+            // The alley rides along: an admin who is visiting another
+            // kuželna is not sent to the wrong list.
+            data: {
+              kind: "pending_player",
+              tenant_id: String(record.tenant_id ?? ""),
+            },
             html: `<p><b>${name}</b> se zaregistroval(a) do Rezervátoru.</p>` +
-              `<p>Schval ho v aplikaci: Správa kuželny → Hráči.</p>`,
+              `<p><a href="${appPlayersUrl}">Schval ho v aplikaci</a> ` +
+              `(Správa kuželny → Hráči).</p>`,
           },
         )
       ));
