@@ -32,6 +32,7 @@ class MatchDetailScreen extends ConsumerStatefulWidget {
     super.key,
     required this.matchId,
     this.competitionSlug,
+    this.siteMatchId,
     this.refresh = _defaultRefresh,
     this.launch = _defaultLaunch,
   });
@@ -42,6 +43,11 @@ class MatchDetailScreen extends ConsumerStatefulWidget {
   /// from `league_matches` of this competition instead of the alley's
   /// priority slots.
   final String? competitionSlug;
+
+  /// The site's id of the match, when known: a foreign match that becomes
+  /// one of ours while this screen is open (a team discovered later) is then
+  /// found among our slots instead of reading „už v rozpisu není“.
+  final int? siteMatchId;
 
   /// Injectable so widget tests never reach Supabase or the platform.
   final Future<String> Function(String matchId, {bool force}) refresh;
@@ -57,6 +63,11 @@ class MatchDetailScreen extends ConsumerStatefulWidget {
 
 class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
   bool _didOpenRefresh = false;
+
+  /// The id the refresh calls use: the widget's, or — once a foreign match
+  /// turned into one of ours — our slot's.
+  String? _resolvedId;
+  String get _matchId => _resolvedId ?? widget.matchId;
 
   /// True while the ⟳ tap's own refresh is outstanding — cleared either by
   /// [_waitTimer] (20s) or, declaratively in [build], the moment the
@@ -85,9 +96,9 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
   // poke on open, not a user action — errors are logged and swallowed.
   Future<void> _refreshQuietly() async {
     try {
-      await widget.refresh(widget.matchId);
+      await widget.refresh(_matchId);
     } catch (e) {
-      debugPrint('Detail zápasu: auto-refresh of ${widget.matchId} failed: $e');
+      debugPrint('Detail zápasu: auto-refresh of $_matchId failed: $e');
     }
   }
 
@@ -101,7 +112,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
       if (mounted) setState(() => _waiting = false);
     });
     try {
-      final status = await widget.refresh(widget.matchId, force: true);
+      final status = await widget.refresh(_matchId, force: true);
       if (!context.mounted) return;
       // Both terminal answers mean there is nothing left to wait for: a
       // 'fresh' row is already as new as it gets, and 'not_live' means no
@@ -322,22 +333,32 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     final isLeague = leagueSlug != null;
     // One source of the match: our slots, or (a foreign match) its
     // competition's league matches.
-    final slots = isLeague ? const <PrioritySlot>[] : ref.watch(prioritySlotsProvider);
+    final slots = ref.watch(prioritySlotsProvider);
     final leagueAsync = isLeague ? ref.watch(leagueMatchesProvider(leagueSlug)) : null;
     LeagueMatch? leagueMatch;
     for (final l in leagueAsync?.value ?? const <LeagueMatch>[]) {
       if (l.id == widget.matchId) leagueMatch = l;
     }
-    final slotsLoading = isLeague
+    // A foreign match that meanwhile became one of ours (the league row is
+    // gone, a slot with its site id is there): show our slot.
+    PrioritySlot? becameOurs;
+    if (isLeague && leagueMatch == null && widget.siteMatchId != null) {
+      for (final s in slots) {
+        if (s.siteMatchId == widget.siteMatchId) becameOurs = s;
+      }
+    }
+    final fromLeague = isLeague && becameOurs == null;
+    _resolvedId = becameOurs?.id;
+    final slotsLoading = fromLeague
         ? !(leagueAsync?.hasValue ?? false)
         : ref.watch(prioritySlotsLoadingProvider);
     final resultsAsync = ref.watch(matchResultsProvider);
     final results = resultsAsync.value ?? const <String, MatchResult>{};
-    final result = isLeague ? leagueMatch?.result : results[widget.matchId];
+    final result = fromLeague ? leagueMatch?.result : results[_matchId];
     final players =
-        (isLeague
+        (fromLeague
                 ? ref.watch(leaguePlayerResultsProvider(widget.matchId))
-                : ref.watch(matchPlayerResultsProvider(widget.matchId)))
+                : ref.watch(matchPlayerResultsProvider(_matchId)))
             .value ??
         const <MatchPlayerResult>[];
     final venues = ref.watch(venuesProvider).value ?? const <Venue>[];
@@ -345,16 +366,19 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     final teamColors =
         ref.watch(myTeamColorsProvider).value ?? const <String, int>{};
 
-    PrioritySlot? slot = leagueMatch?.asSlot();
-    for (final s in slots) {
-      if (s.id == widget.matchId) {
-        slot = s;
-        break;
+    PrioritySlot? slot = leagueMatch?.asSlot() ?? becameOurs;
+    if (!isLeague) {
+      for (final s in slots) {
+        if (s.id == widget.matchId) {
+          slot = s;
+          break;
+        }
       }
     }
-    // A foreign match with no time yet is never live.
-    bool liveNow(PrioritySlot slot) =>
-        (leagueMatch?.timeKnown ?? true) && isLive(slot, result, now);
+    bool liveNow(PrioritySlot slot) => isLive(slot, result, now);
+    // A foreign match is not polled: its stored status may be a day behind,
+    // so it can be asked for outside the live window too (0055).
+    final askable = leagueMatch?.refreshable(now) ?? false;
 
     Venue? venueMatch;
     if (slot?.venueSlug case final slug? when slug.isNotEmpty) {
@@ -368,12 +392,12 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
 
     if (!_didOpenRefresh &&
         !slotsLoading &&
-        (isLeague || resultsAsync.hasValue) &&
+        (fromLeague || resultsAsync.hasValue) &&
         slot != null) {
       _didOpenRefresh = true;
       // Live, or a finished foreign match whose player lines were never
       // fetched: asking is what queues the fetch (refresh_match, 0055).
-      if (liveNow(slot) || (leagueMatch?.needsDetail ?? false)) {
+      if (liveNow(slot) || askable || (leagueMatch?.needsDetail ?? false)) {
         WidgetsBinding.instance.addPostFrameCallback(
           (_) => unawaited(_refreshQuietly()),
         );
@@ -389,7 +413,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     }
     final showWaiting = _waiting && !resultChanged;
     final live = slot != null && liveNow(slot);
-    final showRefreshButton = live && !_hiddenByNotLive;
+    final showRefreshButton = (live || askable) && !_hiddenByNotLive;
 
     return Scaffold(
       appBar: AppBar(

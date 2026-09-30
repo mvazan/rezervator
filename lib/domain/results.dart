@@ -14,6 +14,8 @@ import 'upcoming.dart' show matchIsMine;
 /// [MatchStatus.scheduled]. The server also answers `not_live` for a match
 /// only switched-off teams of ours play, which this cannot see.
 bool isLive(PrioritySlot slot, MatchResult? result, DateTime now) {
+  // A match with no time yet (a league match, 0055) is not being played.
+  if (!slot.timeKnown) return false;
   final start = DateTime(
     slot.date.year,
     slot.date.month,

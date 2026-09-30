@@ -787,11 +787,17 @@ class PrioritySlot {
     this.siteMatchId,
     this.venue,
     this.venueSlug,
+    this.timeKnown = true,
   });
 
   final String id;
   final Day date;
   final HourMinute startsAt;
+
+  /// False for a match of a competition the site has no time for yet (a
+  /// league match, 0055): [startsAt] is then a placeholder, the match is
+  /// never live and no time is shown.
+  final bool timeKnown;
   final HourMinute endsAt;
   final PrioritySlotType type;
 
@@ -1100,18 +1106,28 @@ class LeagueMatch {
 
   bool get timeKnown => startsAt != null;
 
-  /// A final match whose player lines were not fetched at its final status.
+  /// A final match whose player lines were not fetched at a final status.
   bool get needsDetail =>
       (status == MatchStatus.finished || status == MatchStatus.forfeit) &&
-      detailStatus != _statusName(status);
+      detailStatus != 'finished' &&
+      detailStatus != 'forfeit';
 
-  static String _statusName(MatchStatus s) => switch (s) {
-        MatchStatus.scheduled => 'scheduled',
-        MatchStatus.preparation => 'preparation',
-        MatchStatus.inProgress => 'in_progress',
-        MatchStatus.finished => 'finished',
-        MatchStatus.forfeit => 'forfeit',
-      };
+  /// Whether asking the server for this match is worth it now: nothing polls
+  /// a league match, so its stored status can be a day behind — from an hour
+  /// before the start until 30 hours after it the match is asked for whatever
+  /// the status says (the same window as `refresh_match`, 0055), unless it is
+  /// final or has no time.
+  bool refreshable(DateTime now) {
+    final at = startsAt;
+    if (at == null ||
+        status == MatchStatus.finished ||
+        status == MatchStatus.forfeit) {
+      return false;
+    }
+    final start = DateTime(date.year, date.month, date.day, at.hour, at.minute);
+    return now.isAfter(start.subtract(const Duration(hours: 1))) &&
+        now.isBefore(start.add(const Duration(hours: 30)));
+  }
 
   /// The team-level result, in the shape the scoreboard reads. Its
   /// [MatchResult.matchId] is this match's id (the detail keys by it).
@@ -1155,6 +1171,7 @@ class LeagueMatch {
         siteMatchId: siteMatchId,
         venue: venue,
         venueSlug: venueSlug,
+        timeKnown: timeKnown,
       );
 }
 

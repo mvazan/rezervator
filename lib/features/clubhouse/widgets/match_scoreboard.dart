@@ -98,7 +98,9 @@ class MatchScoreboard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             _TopLine(
-              date: '${dayFull(slot.date)} · ${slot.startsAt.display()}',
+              date: slot.timeKnown
+                  ? '${dayFull(slot.date)} · ${slot.startsAt.display()}'
+                  : dayFull(slot.date),
               chip: result == null
                   ? null
                   : live

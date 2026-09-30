@@ -747,6 +747,80 @@ void main() {
       expect(timeless.asSlot().startsAt, const HourMinute(0, 0));
     });
 
+    test('needsDetail: a final match whose lines are not final yet', () {
+      LeagueMatch with_(String status, String? detail) => LeagueMatch.fromJson({
+        'id': 'x',
+        'site_match_id': 1,
+        'site_slug': 's',
+        'competition_slug': slug,
+        'date': '2026-10-10',
+        'starts_at': '10:00:00',
+        'home_team': 'A',
+        'away_team': 'B',
+        'status': status,
+        'fetched_at': '2026-10-10T10:00:00+00:00',
+        'detail_status': detail,
+      });
+      expect(with_('finished', null).needsDetail, isTrue);
+      expect(with_('finished', 'in_progress').needsDetail, isTrue);
+      expect(with_('finished', 'finished').needsDetail, isFalse);
+      // The detail settled on forfeit where the round page says finished.
+      expect(with_('finished', 'forfeit').needsDetail, isFalse);
+      expect(with_('scheduled', null).needsDetail, isFalse);
+    });
+
+    test('refreshable: from an hour before the start to 30 hours after it, '
+        'whatever the stale status says; never final, never without a time', () {
+      final l = league(1, '2026-10-10', 3, startsAt: '10:00:00');
+      DateTime at(int day, int h, [int m = 0]) => DateTime(2026, 10, day, h, m);
+      // The fixture's status is 'finished': not refreshable at all.
+      expect(l.refreshable(at(10, 12)), isFalse);
+      LeagueMatch open(String status, {String? startsAt = '10:00:00'}) =>
+          LeagueMatch.fromJson({
+            'id': 'x',
+            'site_match_id': 1,
+            'site_slug': 's',
+            'competition_slug': slug,
+            'date': '2026-10-10',
+            'starts_at': startsAt,
+            'home_team': 'A',
+            'away_team': 'B',
+            'status': status,
+            'fetched_at': '2026-10-10T10:00:00+00:00',
+          });
+      final scheduled = open('scheduled');
+      expect(scheduled.refreshable(at(10, 8, 30)), isFalse, reason: '1.5 h before');
+      expect(scheduled.refreshable(at(10, 9, 30)), isTrue, reason: '30 min before');
+      expect(scheduled.refreshable(at(10, 18)), isTrue, reason: '8 h after');
+      expect(scheduled.refreshable(at(11, 15)), isTrue, reason: '29 h after');
+      expect(scheduled.refreshable(at(11, 17)), isFalse, reason: '31 h after');
+      expect(open('in_progress').refreshable(at(10, 11)), isTrue);
+      expect(open('forfeit').refreshable(at(10, 11)), isFalse);
+      expect(open('scheduled', startsAt: null).refreshable(at(10, 11)), isFalse);
+    });
+
+    test('a match with no time yet is never live', () {
+      final timeless = league(1, '2026-10-10', 3, startsAt: null);
+      final scheduled = MatchResult(
+        matchId: 'lg1',
+        status: MatchStatus.scheduled,
+        fetchedAt: DateTime.utc(2026, 10, 9),
+      );
+      // Ten past midnight of its day would be „one hour before 00:00“.
+      expect(
+        isLive(timeless.asSlot(), scheduled, DateTime(2026, 10, 10, 0, 10)),
+        isFalse,
+      );
+      expect(
+        isLive(
+          league(2, '2026-10-10', 3).asSlot(),
+          scheduled,
+          DateTime(2026, 10, 10, 9, 30),
+        ),
+        isTrue,
+      );
+    });
+
     test('our matches of the competition plus the league ones, once', () {
       final slots = [
         ours(1, '2026-10-10', 3),

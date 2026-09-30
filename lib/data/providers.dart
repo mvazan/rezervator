@@ -463,6 +463,14 @@ final leagueMatchesProvider = StreamProvider.autoDispose
     .family<List<LeagueMatch>, String>((ref, competitionSlug) {
   final uid = ref.watch(_authUidProvider);
   if (uid == null) return Stream.value(const []);
+  // One cache key per competition: the ones of competitions no team of ours
+  // plays any more (a new season) are dropped, or they would pile up.
+  final playedSlugs = {
+    for (final c in ref.read(leagueCompetitionsProvider)) c.slug,
+  };
+  if (playedSlugs.isNotEmpty) {
+    unawaited(RowCache.retainPrefixed(uid, 'league_matches:', playedSlugs));
+  }
   return cachedRows(
           uid,
           'league_matches:$competitionSlug',
@@ -479,9 +487,11 @@ final leaguePlayerResultsProvider = StreamProvider.autoDispose
     .family<List<MatchPlayerResult>, String>((ref, matchId) {
   final uid = ref.watch(_authUidProvider);
   if (uid == null) return Stream.value(const []);
+  // Not persisted: hundreds of matches a season, worth nothing offline.
   return cachedRows(
           uid,
           'league_player_results:$matchId',
+          persist: false,
           () => _db
               .from('league_player_results')
               .stream(primaryKey: ['id'])

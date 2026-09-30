@@ -45,6 +45,12 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
   String? _team;
   bool _scrolledToRecentResults = false;
   bool _didLiveRefreshCheck = false;
+
+  /// Which list the two latches above were set for ('t' = the teams view,
+  /// 'c' + the competition's slug). The saved mode and competition arrive a
+  /// moment after the first frame, so the list can change under the
+  /// latches — a new list scrolls and looks for live matches afresh.
+  String? _listKey;
   // A day (Day) or a round ('round:N') → its header's key.
   final Map<Object, GlobalKey> _sectionKeys = {};
   final Map<String, GlobalKey> _matchKeys = {};
@@ -71,20 +77,14 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
     _scrolledToRecentResults = false;
   });
 
-  /// A new list (another mode or competition): scroll to its recent results
-  /// again and look for live matches in it once more.
-  void _listChanged() {
-    _scrolledToRecentResults = false;
-    _didLiveRefreshCheck = false;
-  }
-
   void _selectMode(ResultsMode mode) {
-    _listChanged();
+    if (mode == ref.read(resultsModeProvider)) return;
     unawaited(ref.read(resultsModeProvider.notifier).set(mode));
   }
 
-  void _selectCompetition(String slug) {
-    _listChanged();
+  void _selectCompetition(String slug, String current) {
+    // ChoiceChip reports a tap on the chip that is already chosen too.
+    if (slug == current) return;
     unawaited(ref.read(resultsCompetitionProvider.notifier).set(slug));
   }
 
@@ -96,29 +96,37 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
 
   /// [competitionSlug]: set for a match of another team (0055) — the detail
   /// then reads it from `league_matches`.
+  /// [competitionSlug]: set for a match of other teams (0055) — the detail
+  /// then reads it from `league_matches`.
   static void _openMatch(
     BuildContext context,
     PrioritySlot slot, {
     String? competitionSlug,
   }) => Navigator.of(context).push(
     MaterialPageRoute(
-      builder: (_) =>
-          MatchDetailScreen(matchId: slot.id, competitionSlug: competitionSlug),
+      builder: (_) => MatchDetailScreen(
+        matchId: slot.id,
+        competitionSlug: competitionSlug,
+        siteMatchId: slot.siteMatchId,
+      ),
     ),
   );
 
-  /// The matches being played now. A foreign match with no time yet is never
-  /// live ([foreignTimeless] holds their ids).
+  /// The matches worth refreshing now: ours while they are live, a league
+  /// match ([refreshableForeign] holds their ids) in its refresh window —
+  /// nothing polls it, so its stored status may be a day behind.
   static List<PrioritySlot> _liveMatches(
     List<_Section> sections,
     Map<String, MatchResult> results,
     DateTime now, {
-    Set<String> foreignTimeless = const {},
+    Set<String> foreignIds = const {},
+    Set<String> refreshableForeign = const {},
   }) => [
     for (final section in sections)
       for (final slot in section.matches)
-        if (!foreignTimeless.contains(slot.id) &&
-            isLive(slot, results[slot.id], now))
+        if (foreignIds.contains(slot.id)
+            ? refreshableForeign.contains(slot.id)
+            : isLive(slot, results[slot.id], now))
           slot,
   ];
 
@@ -176,7 +184,7 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
             ChoiceChip(
               label: Text(c.name),
               selected: c.slug == selected,
-              onSelected: (_) => _selectCompetition(c.slug),
+              onSelected: (_) => _selectCompetition(c.slug, selected),
             ),
           ],
         ],
@@ -263,16 +271,25 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
       ),
       title: MatchTitle(slot: slot, winner: displayWinner(result)),
       subtitle: Text(subtitle),
-      trailing: Column(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            pointsLabel(result?.homePoints, result?.awayPoints),
-            style: theme.textTheme.titleMedium,
+      // Scaled down as one piece when large text makes the score wider than
+      // its share of the row (it overflowed at text scale 2.0).
+      trailing: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 110),
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerRight,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                pointsLabel(result?.homePoints, result?.awayPoints),
+                style: theme.textTheme.titleMedium,
+              ),
+              if (pins.isNotEmpty) Text(pins, style: theme.textTheme.bodySmall),
+            ],
           ),
-          if (pins.isNotEmpty) Text(pins, style: theme.textTheme.bodySmall),
-        ],
+        ),
       ),
       onTap: () =>
           _openMatch(context, slot, competitionSlug: foreign ? competitionSlug : null),
@@ -317,6 +334,17 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
         : const AsyncData<List<LeagueMatch>>([]);
     final league = leagueAsync.value ?? const <LeagueMatch>[];
     final leagueLoading = inCompetitions && !leagueAsync.hasValue;
+    // Until the teams are known the switch may still appear above the list
+    // (and shift it): nothing scrolls before that.
+    final teamsSettled = !ref.watch(teamsProvider).isLoading;
+    // The saved mode / competition arrive after the first frame: a list that
+    // changed under the latches gets them afresh.
+    final listKey = inCompetitions ? 'c:$slug' : 't';
+    if (_listKey != listKey) {
+      _listKey = listKey;
+      _scrolledToRecentResults = false;
+      _didLiveRefreshCheck = false;
+    }
 
     // The list, as sections (a day, or a round) of matches — one renderer
     // for both views.
@@ -325,12 +353,17 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
     var listResults = results;
     var foreignIds = const <String>{};
     var foreignTimeless = const <String>{};
+    var refreshableForeign = const <String>{};
     if (inCompetitions) {
       final cm = competitionMatches(slots, league, slug);
       foreignIds = cm.foreignIds;
       foreignTimeless = {
         for (final l in league)
           if (!l.timeKnown) l.id,
+      };
+      refreshableForeign = {
+        for (final l in league)
+          if (l.refreshable(now)) l.id,
       };
       // Our results and the foreign ones (their totals ride on the row).
       listResults = {...results, for (final l in league) l.id: l.result};
@@ -374,13 +407,17 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
     // (prioritySlotsLoadingProvider's own signal) has delivered, so gating
     // on the results stream alone would let this latch on an empty list
     // and never see a live match that only shows up once slots catches up.
-    if (!_didLiveRefreshCheck && !loading && resultsAsync.hasValue) {
+    if (!_didLiveRefreshCheck &&
+        !loading &&
+        teamsSettled &&
+        resultsAsync.hasValue) {
       _didLiveRefreshCheck = true;
       final live = _liveMatches(
         sections,
         listResults,
         now,
-        foreignTimeless: foreignTimeless,
+        foreignIds: foreignIds,
+        refreshableForeign: refreshableForeign,
       );
       if (live.isNotEmpty) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -395,7 +432,10 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
     // mostRecentDecidedInOrder reads `results`, so latching this on the
     // pre-stream `{}` snapshot would scroll to the fallback and never
     // revisit once the real results (and any decided match) arrive.
-    if (!loading && resultsAsync.hasValue && !_scrolledToRecentResults) {
+    if (!loading &&
+        teamsSettled &&
+        resultsAsync.hasValue &&
+        !_scrolledToRecentResults) {
       final recentMatchId = mostRecentDecidedInOrder([
         for (final section in sections) ...section.matches,
       ], listResults, today);
@@ -470,7 +510,8 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
                         sections,
                         listResults,
                         now,
-                        foreignTimeless: foreignTimeless,
+                        foreignIds: foreignIds,
+                        refreshableForeign: refreshableForeign,
                       ),
                     ),
                     // A plain, eagerly built scroll view (not a lazy

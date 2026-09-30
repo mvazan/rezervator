@@ -131,19 +131,26 @@ class RowCache {
 /// returns; with nothing emitted yet the first error rethrows, so the
 /// existing error screens (with their retry buttons) still work for
 /// cache-less users.
+///
+/// [persist] false keeps the retry-and-wake behaviour but stores nothing —
+/// for rows worth nothing offline that come in hundreds (a foreign match's
+/// player lines, 0055).
 Stream<List<Map<String, dynamic>>> cachedRows(
   String uid,
   String name,
-  Stream<List<Map<String, dynamic>>> Function() live,
-) =>
-    withOptimisticOverlay(uid, name, _cachedRowsCore(uid, name, live));
+  Stream<List<Map<String, dynamic>>> Function() live, {
+  bool persist = true,
+}) =>
+    withOptimisticOverlay(
+        uid, name, _cachedRowsCore(uid, name, live, persist: persist));
 
 Stream<List<Map<String, dynamic>>> _cachedRowsCore(
   String uid,
   String name,
-  Stream<List<Map<String, dynamic>>> Function() live,
-) async* {
-  final cached = await RowCache.read(uid, name);
+  Stream<List<Map<String, dynamic>>> Function() live, {
+  bool persist = true,
+}) async* {
+  final cached = persist ? await RowCache.read(uid, name) : null;
   var emitted = cached != null;
   if (cached != null) yield cached;
 
@@ -157,7 +164,7 @@ Stream<List<Map<String, dynamic>>> _cachedRowsCore(
         .map((rows) {
       attempt = 0;
       emitted = true;
-      RowCache.write(uid, name, rows);
+      if (persist) RowCache.write(uid, name, rows);
       return rows;
     }).handleError((Object e) {
       // Swallowing keeps the last-known state on screen; the throw path
