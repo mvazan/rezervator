@@ -174,3 +174,119 @@ class MatchDetailViewNotifier extends Notifier<MatchDetailView> {
     }
   }
 }
+
+// ---------------------------------------------------------------------------
+// Výsledky: by team or by competition (0055)
+// ---------------------------------------------------------------------------
+
+const _resultsModeKey = 'results_mode';
+const _resultsCompetitionKey = 'results_competition';
+
+/// How Výsledky lists the matches: [teams] = our teams' matches (chips: Vše
+/// and a team), [competitions] = one whole competition by round, foreign
+/// matches included.
+///
+/// Persisted by name — do not rename a value.
+enum ResultsMode { teams, competitions }
+
+ResultsMode parseResultsMode(String? name) => ResultsMode.values
+    .firstWhere((m) => m.name == name, orElse: () => ResultsMode.teams);
+
+/// The mode picked last, remembered on the device. Defaults to [ResultsMode.teams].
+final resultsModeProvider =
+    NotifierProvider<ResultsModeNotifier, ResultsMode>(ResultsModeNotifier.new);
+
+class ResultsModeNotifier extends Notifier<ResultsMode> {
+  @override
+  ResultsMode build() {
+    _load();
+    return ResultsMode.teams;
+  }
+
+  Future<void> _load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (!ref.mounted) return;
+      state = parseResultsMode(prefs.getString(_resultsModeKey));
+    } catch (_) {
+      // Best effort only, like the match detail's view.
+    }
+  }
+
+  Future<void> set(ResultsMode mode) async {
+    state = mode;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_resultsModeKey, mode.name);
+    } catch (_) {}
+  }
+}
+
+/// The competition (its slug) picked last in [ResultsMode.competitions];
+/// null until one was picked — the screen then takes the first.
+final resultsCompetitionProvider =
+    NotifierProvider<ResultsCompetitionNotifier, String?>(
+        ResultsCompetitionNotifier.new);
+
+class ResultsCompetitionNotifier extends Notifier<String?> {
+  @override
+  String? build() {
+    _load();
+    return null;
+  }
+
+  Future<void> _load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (!ref.mounted) return;
+      state = prefs.getString(_resultsCompetitionKey);
+    } catch (_) {}
+  }
+
+  Future<void> set(String slug) async {
+    state = slug;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_resultsCompetitionKey, slug);
+    } catch (_) {}
+  }
+}
+
+/// A [ResultsModeNotifier] that starts from a value already read — see
+/// [loadPersistedResultsView].
+class _PreloadedResultsMode extends ResultsModeNotifier {
+  _PreloadedResultsMode(this._initial);
+  final ResultsMode _initial;
+  @override
+  ResultsMode build() => _initial;
+}
+
+/// A [ResultsCompetitionNotifier] that starts from a value already read —
+/// see [loadPersistedResultsView].
+class _PreloadedResultsCompetition extends ResultsCompetitionNotifier {
+  _PreloadedResultsCompetition(this._initial);
+  final String? _initial;
+  @override
+  String? build() => _initial;
+}
+
+/// Reads the saved Výsledky mode and competition once, before `runApp`, the
+/// way [loadPersistedAppearance] does. Without it the screen's first frame
+/// is the teams view and the saved one arrives a frame later — the list
+/// latches (scroll, poke of live matches) would run for the wrong list.
+Future<List<Override>> loadPersistedResultsView() async {
+  var mode = ResultsMode.teams;
+  String? competition;
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    mode = parseResultsMode(prefs.getString(_resultsModeKey));
+    competition = prefs.getString(_resultsCompetitionKey);
+  } catch (_) {
+    // Best effort only — see _load above.
+  }
+  return [
+    resultsModeProvider.overrideWith(() => _PreloadedResultsMode(mode)),
+    resultsCompetitionProvider
+        .overrideWith(() => _PreloadedResultsCompetition(competition)),
+  ];
+}

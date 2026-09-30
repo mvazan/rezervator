@@ -1761,7 +1761,8 @@ declare
     'google_calendar_links', 'calendar_teams', 'team_colors', 'reservations',
     'day_overrides', 'priority_slot_types', 'priority_slots', 'rentals',
     'match_exceptions', 'player_group_members', 'duty_periods',
-    'duty_assignments', 'messages', 'message_recipients'
+    'duty_assignments', 'messages', 'message_recipients',
+    'league_matches', 'league_player_results'
   ];
   v_missing text[];
 begin
@@ -4822,7 +4823,11 @@ begin
                            'public.federation_live_report(uuid, jsonb)',
                            'public.federation_last_error(uuid, jsonb)',
                            'public.federation_refresh_error(uuid)',
-                           'public.federation_match_switched_off(uuid, text, text)'] loop
+                           'public.federation_match_switched_off(uuid, text, text)',
+                           'public.league_competition_is_ours(uuid, text)',
+                           'public.league_drop_orphan_jobs(uuid)',
+                           'public.apply_league_matches(uuid, text, jsonb)',
+                           'public.apply_league_result(uuid, integer, jsonb)'] loop
     if has_function_privilege('authenticated', f, 'execute')
        or has_function_privilege('anon', f, 'execute') then
       raise exception 'FAIL: % is callable from the app', f;
@@ -10558,6 +10563,640 @@ begin
     raise exception 'FAIL: a player could not hand back their own device token';
   end if;
   raise notice 'OK: sign-out clears the token only while it is still this device''s (0052)';
+end $$;
+
+-- 21. League matches (0055): the matches of a competition one of our active
+-- teams plays that none of our active teams plays — in their own tables,
+-- never in priority_slots.
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_slots integer;
+  v_teams integer;
+  v_clubs integer;
+  v_res jsonb;
+  v_c1 tid;
+  v_c2 tid;
+  v_list constant jsonb := '[
+    {"site_match_id":9001,"site_slug":"liga-x-2026-kolo-3-a-b","date":"2026-10-10","starts_at":"10:00",
+     "home_team":"KK A","away_team":"KK B","home_team_slug":"kk-a-muzi","away_team_slug":"kk-b-muzi",
+     "competition":"Liga X","round":3,"status":"finished","match_type":"TEAMS_OF_6","discipline":"T120",
+     "home":{"points":6,"total":3200,"fulls":2100,"spares":1100,"errors":10,"set_points":15},
+     "away":{"points":2,"total":3100,"fulls":2050,"spares":1050,"errors":14,"set_points":9}},
+    {"site_match_id":9002,"site_slug":"liga-x-2026-kolo-4-c-d","date":"2026-10-17","starts_at":"",
+     "home_team":"KK C","away_team":"KK D","home_team_slug":"kk-c-muzi","away_team_slug":"kk-d-muzi",
+     "competition":"Liga X","round":4,"status":"scheduled","home":{},"away":{}},
+    {"site_match_id":9003,"site_slug":"liga-x-2026-kolo-3-e-f","date":"2026-10-10","starts_at":"10:00",
+     "home_team":"KK E","away_team":"KK F","competition":"Liga X","round":3,"status":"scheduled"}]';
+begin
+  insert into teams (tenant_id, name, site_slug, competition_slug, active)
+  values (v_a, 'Liga tým 0055', 'liga-tym-0055-muzi', 'liga-x-2026', true);
+  -- 9003 is one of OUR matches already (a cka: slot): it must be skipped.
+  perform set_config('import.run', 'on', true);
+  insert into priority_slots
+    (tenant_id, date, starts_at, ends_at, type_id, home_team, away_team,
+     created_by, import_key, site_slug, site_match_id, is_away)
+  values
+    (v_a, '2026-10-10', '10:00', '13:00',
+     (select id from priority_slot_types where tenant_id = v_a and is_match and builtin),
+     'KK E', 'KK F', '10000000-0000-0000-0000-000000000001',
+     'cka:9003', 'liga-x-2026-kolo-3-e-f', 9003, true);
+  perform set_config('import.run', '', true);
+  select count(*) into v_slots from priority_slots;
+  select count(*) into v_teams from teams;
+  select count(*) into v_clubs from clubs;
+
+  -- 9002's time is an empty string, as the site can send it: no time, no error.
+  v_res := apply_league_matches(v_a, 'liga-x-2026', v_list);
+  if (v_res->>'league_inserted')::int <> 2 or (v_res->>'league_detail_jobs')::int <> 1 then
+    raise exception 'FAIL: apply_league_matches answered %', v_res;
+  end if;
+  if (select count(*) from league_matches where tenant_id = v_a) <> 2
+     or exists (select 1 from league_matches where site_match_id = 9003) then
+    raise exception 'FAIL: league matches wrong (our own 9003 must be skipped)';
+  end if;
+  if (select count(*) from priority_slots) <> v_slots or (select count(*) from teams) <> v_teams
+     or (select count(*) from clubs) <> v_clubs then
+    raise exception 'FAIL: a league match leaked into priority_slots, teams or clubs';
+  end if;
+  if (select count(*) from notification_jobs
+       where kind = 'federation_league_match' and payload->>'tenant_id' = v_a::text) <> 1
+     or exists (select 1 from notification_jobs
+                 where kind not like 'federation%' and payload::text like '%liga-x-2026%') then
+    raise exception 'FAIL: league matches queued the wrong jobs';
+  end if;
+  if (select home_points || '/' || home_total || '/' || discipline from league_matches
+       where site_match_id = 9001) <> '6/3200/T120'
+     or not (select starts_at is null from league_matches where site_match_id = 9002) then
+    raise exception 'FAIL: a league match lost its totals, its format or its missing time';
+  end if;
+  if not exists (select 1 from pg_class where relname = 'league_matches' and relreplident = 'f')
+     or not exists (select 1 from pg_class where relname = 'league_player_results' and relreplident = 'f') then
+    raise exception 'FAIL: the league tables must have replica identity full';
+  end if;
+
+  -- Nothing changed: nothing written (the row stays where it is), nothing re-queued.
+  select ctid into v_c1 from league_matches where site_match_id = 9001;
+  v_res := apply_league_matches(v_a, 'liga-x-2026', v_list);
+  select ctid into v_c2 from league_matches where site_match_id = 9001;
+  if (v_res->>'league_updated')::int <> 0 or (v_res->>'league_detail_jobs')::int <> 0
+     or v_c1 is distinct from v_c2 then
+    raise exception 'FAIL: an unchanged league list wrote or re-queued: %', v_res;
+  end if;
+  -- A change of the format alone is a change.
+  v_res := apply_league_matches(v_a, 'liga-x-2026',
+    jsonb_set(v_list, '{0,discipline}', '"T100"'));
+  if (v_res->>'league_updated')::int <> 1
+     or (select discipline from league_matches where site_match_id = 9001) <> 'T100' then
+    raise exception 'FAIL: a changed format was not written: %', v_res;
+  end if;
+  -- An empty list deletes nothing; a shorter one drops what the site forgot
+  -- together with its detail job.
+  perform apply_league_matches(v_a, 'liga-x-2026', '[]'::jsonb);
+  if (select count(*) from league_matches where tenant_id = v_a) <> 2 then
+    raise exception 'FAIL: an empty list deleted league matches';
+  end if;
+  perform apply_league_matches(v_a, 'liga-x-2026', jsonb_build_array(v_list->1));
+  if (select count(*) from league_matches where tenant_id = v_a) <> 1
+     or exists (select 1 from notification_jobs where kind = 'federation_league_match'
+                 and payload->>'tenant_id' = v_a::text) then
+    raise exception 'FAIL: a match the site no longer lists stayed, or left its detail job behind';
+  end if;
+  perform apply_league_matches(v_a, 'liga-x-2026', v_list);
+  raise notice 'OK: apply_league_matches keeps foreign matches out of slots/teams/clubs, skips ours, tolerates an empty time, writes only changes (format too), deletes only from a non-empty list and with the job (0055)';
+end $$;
+
+-- The final status stands: the detail may lag, and the round page and the
+-- detail may disagree on finished / forfeit — neither flips it every night.
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_list jsonb;
+  v_res jsonb;
+  v_pay constant jsonb := '{"status":"finished","match_type":"TEAMS_OF_6","discipline":"T120",
+    "video_url":null,"venue":{"slug":"cizi-kuzelna","name":"Cizí kuželna"},"home_prep":30,
+    "home":{"points":6,"total":3201,"fulls":2101,"spares":1100,"errors":10,"set_points":15},
+    "away":{"points":2,"total":3100,"fulls":2050,"spares":1050,"errors":14,"set_points":9},
+    "players":[{"side":"home","position":1,"player_name":"Jan Cizí","player_site_id":7,
+      "player_slug":"jan-cizi","fulls":350,"spares":190,"errors":1,"total":540,"set_points":3,
+      "team_points":1,"sub_name":"Petr Nový","sub_site_id":9,"sub_slug":"petr-novy","sub_from_throw":41,
+      "lanes":[{"lane":1,"fulls":90,"spares":45,"errors":0,"total":135,"setPoints":1}]}]}';
+begin
+  if not apply_league_result(v_a, 9001, v_pay) then
+    raise exception 'FAIL: apply_league_result refused a league match';
+  end if;
+  if (select (venue_slug, detail_status, home_total, discipline)::text from league_matches where site_match_id = 9001)
+     is distinct from '(cizi-kuzelna,finished,3201,T120)'
+     or (select count(*) from league_player_results
+          where match_id = (select id from league_matches where site_match_id = 9001)
+            and sub_name = 'Petr Nový' and lanes->0->>'total' = '135') <> 1 then
+    raise exception 'FAIL: apply_league_result did not store the result and the lines';
+  end if;
+  if exists (select 1 from notification_jobs where kind = 'federation_venue' and dedupe_key like '%cizi-kuzelna%') then
+    raise exception 'FAIL: a foreign venue was queued for a fetch';
+  end if;
+  perform apply_league_result(v_a, 9001, v_pay);
+  if (select count(*) from league_player_results where tenant_id = v_a) <> 1 then
+    raise exception 'FAIL: a repeated detail duplicated the lines';
+  end if;
+  if apply_league_result(v_a, 424242, v_pay) then
+    raise exception 'FAIL: apply_league_result answered true for an unknown match';
+  end if;
+
+  -- A lagging detail (still in progress, partial totals) does not take a
+  -- final status back, and does not overwrite the totals.
+  perform apply_league_result(v_a, 9001,
+    '{"status":"in_progress","home":{"points":null,"total":900},"away":{"points":null,"total":800},"players":[]}');
+  if (select status || '/' || home_total from league_matches where site_match_id = 9001) <> 'finished/3201' then
+    raise exception 'FAIL: a lagging detail took a final status back';
+  end if;
+  -- The detail says forfeit where the round page says finished: the detail's
+  -- word stands, and the round page — saying the same as last night — neither
+  -- flips it back nor re-queues the lines.
+  perform apply_league_result(v_a, 9001, jsonb_set(v_pay, '{status}', '"forfeit"'));
+  v_list := '[{"site_match_id":9001,"site_slug":"liga-x-2026-kolo-3-a-b","date":"2026-10-10","starts_at":"10:00",
+     "home_team":"KK A","away_team":"KK B","home_team_slug":"kk-a-muzi","away_team_slug":"kk-b-muzi",
+     "competition":"Liga X","round":3,"status":"finished","match_type":"TEAMS_OF_6","discipline":"T120",
+     "home":{"points":6,"total":3200,"fulls":2100,"spares":1100,"errors":10,"set_points":15},
+     "away":{"points":2,"total":3100,"fulls":2050,"spares":1050,"errors":14,"set_points":9}}]';
+  v_res := apply_league_matches(v_a, 'liga-x-2026', v_list);
+  if (select status from league_matches where site_match_id = 9001) <> 'forfeit'
+     or (v_res->>'league_updated')::int <> 0 or (v_res->>'league_detail_jobs')::int <> 0 then
+    raise exception 'FAIL: the round page flipped a status the detail settled, or re-queued: %', v_res;
+  end if;
+  -- The detail's totals differ from the round page's (3201 against 3200):
+  -- that is no change of the round page, so nothing is re-fetched every night.
+  if (select home_total from league_matches where site_match_id = 9001) <> 3201 then
+    raise exception 'FAIL: the round page overwrote the totals the detail wrote';
+  end if;
+  -- A late correction of the totals sends the lines to be fetched again (the
+  -- job of the first fetch has long run: it is gone).
+  delete from notification_jobs where kind = 'federation_league_match'
+     and payload->>'tenant_id' = v_a::text;
+  v_res := apply_league_matches(v_a, 'liga-x-2026',
+    jsonb_set(v_list, '{0,home,total}', '3300'));
+  if (v_res->>'league_updated')::int <> 1 or (v_res->>'league_detail_jobs')::int <> 1
+     or (select detail_status from league_matches where site_match_id = 9001) is not null
+     or (select status || '/' || home_total from league_matches where site_match_id = 9001) <> 'finished/3300' then
+    raise exception 'FAIL: a corrected result did not queue its lines again: %', v_res;
+  end if;
+  -- A correction of the STATUS alone (finished -> forfeit, same totals) is
+  -- picked up after the detail settled too.
+  perform apply_league_result(v_a, 9001, jsonb_set(v_pay, '{home,total}', '3300'));
+  delete from notification_jobs where kind = 'federation_league_match'
+     and payload->>'tenant_id' = v_a::text;
+  v_res := apply_league_matches(v_a, 'liga-x-2026',
+    jsonb_set(jsonb_set(v_list, '{0,home,total}', '3300'), '{0,status}', '"forfeit"'));
+  if (v_res->>'league_updated')::int <> 1 or (v_res->>'league_detail_jobs')::int <> 1
+     or (select status from league_matches where site_match_id = 9001) <> 'forfeit' then
+    raise exception 'FAIL: a status-only correction was not picked up: %', v_res;
+  end if;
+  -- A detail page that keeps saying „in progress“ is given up a week after
+  -- the match: not re-queued every night for the rest of the season.
+  update league_matches set detail_status = 'in_progress', status = 'finished',
+         date = ((now() at time zone 'Europe/Prague') - interval '10 days')::date
+   where site_match_id = 9001;
+  delete from notification_jobs where kind = 'federation_league_match'
+     and payload->>'tenant_id' = v_a::text;
+  v_res := apply_league_matches(v_a, 'liga-x-2026', jsonb_build_array(
+    jsonb_set(jsonb_set(jsonb_set(v_list, '{0,home,total}', '3300'), '{0,status}', '"forfeit"'),
+              '{0,date}', to_jsonb(((now() at time zone 'Europe/Prague') - interval '10 days')::date::text))->0));
+  if (v_res->>'league_detail_jobs')::int <> 0 then
+    raise exception 'FAIL: a lagging detail of an old match was queued again: %', v_res;
+  end if;
+  update league_matches set date = ((now() at time zone 'Europe/Prague') - interval '2 days')::date
+   where site_match_id = 9001;
+  v_res := apply_league_matches(v_a, 'liga-x-2026', jsonb_build_array(
+    jsonb_set(jsonb_set(jsonb_set(v_list, '{0,home,total}', '3300'), '{0,status}', '"forfeit"'),
+              '{0,date}', to_jsonb(((now() at time zone 'Europe/Prague') - interval '2 days')::date::text))->0));
+  if (v_res->>'league_detail_jobs')::int <> 1 then
+    raise exception 'FAIL: a lagging detail of a recent match was not queued again: %', v_res;
+  end if;
+  -- (the lists above named only 9001: 9002 was dropped as forgotten — bring it back)
+  perform apply_league_matches(v_a, 'liga-x-2026', jsonb_build_array(
+    jsonb_set(v_list, '{0,home,total}', '3300')->0,
+    '{"site_match_id":9002,"site_slug":"liga-x-2026-kolo-4-c-d","date":"2026-10-17","starts_at":"",
+      "home_team":"KK C","away_team":"KK D","home_team_slug":"kk-c-muzi","away_team_slug":"kk-d-muzi",
+      "competition":"Liga X","round":4,"status":"scheduled","home":{},"away":{}}'::jsonb));
+  raise notice 'OK: apply_league_result stores the result, the lines and the venue (display only); a lagging detail does not take a final status back; a settled status does not flip and the detail''s totals are not fought over; a corrected total or status re-queues the lines; a detail stuck below final is given up after a week (0055)';
+end $$;
+
+-- The match of a switched-off team of ours that already has its slot: its slot
+-- is stale for good, so the match is kept in league_matches (with its lines)
+-- and our own match_results are never written from the round page; a match of
+-- an ACTIVE team has its own job and is left alone; the moment the team is
+-- switched on again the league row goes (counted as deleted) and the match is
+-- fetched as ours. Also: the detail is queued for at most 3 nights in a row,
+-- and a never-fetched old match is still queued (the first deploy's backfill).
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_base jsonb;
+  v_list jsonb;
+  v_res jsonb;
+  v_off jsonb;
+  v_act jsonb;
+  v_old jsonb;
+  v_c1 tid;
+  v_c2 tid;
+  v_job_off constant text := 'federation_league_match:00000000-0000-0000-0000-00000000000a:9020';
+  v_job_old constant text := 'federation_league_match:00000000-0000-0000-0000-00000000000a:9021';
+begin
+  insert into teams (tenant_id, name, site_slug, competition_slug, active)
+  values (v_a, 'Vypnutý 0055', 'liga-vypnuty-muzi', 'liga-x-2026', false);
+  perform set_config('import.run', 'on', true);
+  insert into priority_slots
+    (tenant_id, date, starts_at, ends_at, type_id, home_team, away_team,
+     created_by, import_key, site_slug, site_match_id, is_away, home_team_slug, away_team_slug)
+  values
+    (v_a, '2026-10-24', '10:00', '13:00',
+     (select id from priority_slot_types where tenant_id = v_a and is_match and builtin),
+     'Vypnutý 0055', 'KK Z', '10000000-0000-0000-0000-000000000001',
+     'cka:9020', 'liga-x-2026-kolo-5-off-z', 9020, true, 'liga-vypnuty-muzi', 'kk-z-muzi');
+  -- 9003 becomes the match of an ACTIVE team of ours (the control).
+  update priority_slots set home_team_slug = 'liga-tym-0055-muzi', away_team_slug = 'kk-f-muzi'
+   where tenant_id = v_a and import_key = 'cka:9003';
+  perform set_config('import.run', '', true);
+
+  -- The rows already stored (9001, 9002), as the round page would list them.
+  v_base := (select jsonb_agg(jsonb_build_object(
+      'site_match_id', site_match_id, 'site_slug', site_slug, 'date', date,
+      'starts_at', to_char(starts_at, 'HH24:MI'), 'home_team', home_team,
+      'away_team', away_team, 'home_team_slug', home_team_slug,
+      'away_team_slug', away_team_slug, 'competition', competition, 'round', round,
+      'status', status, 'match_type', match_type, 'discipline', discipline,
+      'home', jsonb_build_object('points', home_points, 'total', home_total, 'fulls', home_fulls,
+        'spares', home_spares, 'errors', home_errors, 'set_points', home_set_points),
+      'away', jsonb_build_object('points', away_points, 'total', away_total, 'fulls', away_fulls,
+        'spares', away_spares, 'errors', away_errors, 'set_points', away_set_points))
+      order by site_match_id)
+    from league_matches where tenant_id = v_a and site_match_id in (9001, 9002));
+  v_off := '{"site_match_id":9020,"site_slug":"liga-x-2026-kolo-5-off-z","date":"2026-10-24","starts_at":"10:00",
+    "home_team":"Vypnutý","away_team":"KK Z","home_team_slug":"liga-vypnuty-muzi","away_team_slug":"kk-z-muzi",
+    "competition":"Liga X","round":5,"status":"finished","match_type":"TEAMS_OF_6","discipline":"T120",
+    "home":{"points":5,"total":3000,"fulls":2000,"spares":1000,"errors":9,"set_points":12},
+    "away":{"points":3,"total":2900,"fulls":1950,"spares":950,"errors":11,"set_points":12}}';
+  v_act := '{"site_match_id":9003,"site_slug":"liga-x-2026-kolo-3-e-f","date":"2026-10-10","starts_at":"10:00",
+    "home_team":"Liga tým","away_team":"KK F","home_team_slug":"liga-tym-0055-muzi","away_team_slug":"kk-f-muzi",
+    "competition":"Liga X","round":3,"status":"finished","match_type":"TEAMS_OF_6","discipline":"T120",
+    "home":{"points":4,"total":3100,"fulls":2000,"spares":1100,"errors":8,"set_points":10},
+    "away":{"points":4,"total":3100,"fulls":2000,"spares":1100,"errors":8,"set_points":10}}';
+  -- A final match a month old, its lines never fetched: still queued.
+  v_old := jsonb_build_object('site_match_id', 9021, 'site_slug', 'liga-x-2026-kolo-1-old-z',
+    'date', ((now() at time zone 'Europe/Prague') - interval '30 days')::date::text,
+    'starts_at', '10:00', 'home_team', 'KK Old', 'away_team', 'KK Z',
+    'home_team_slug', 'kk-old-muzi', 'away_team_slug', 'kk-z-muzi', 'competition', 'Liga X',
+    'round', 1, 'status', 'finished', 'match_type', 'TEAMS_OF_6', 'discipline', 'T120',
+    'home', '{"points":4,"total":3000}'::jsonb, 'away', '{"points":4,"total":3000}'::jsonb);
+  v_list := v_base || jsonb_build_array(v_off, v_act, v_old);
+  delete from notification_jobs where kind = 'federation_league_match'
+     and payload->>'tenant_id' = v_a::text;
+
+  v_res := apply_league_matches(v_a, 'liga-x-2026', v_list);
+  if not exists (select 1 from league_matches
+                  where tenant_id = v_a and site_match_id = 9020
+                    and status = 'finished' and home_total = 3000 and away_points = 3)
+     or exists (select 1 from league_matches where tenant_id = v_a and site_match_id = 9003) then
+    raise exception 'FAIL: a switched-off team''s match is not kept as a league row, or an active team''s is: %', v_res;
+  end if;
+  if exists (select 1 from match_results
+              where match_id in (select id from priority_slots
+                                  where tenant_id = v_a and import_key in ('cka:9020', 'cka:9003'))) then
+    raise exception 'FAIL: the round page wrote a match_results row of ours';
+  end if;
+  if (select is_away from priority_slots where tenant_id = v_a and import_key = 'cka:9020') is distinct from true then
+    raise exception 'FAIL: the switched-off team''s slot was touched';
+  end if;
+  if not exists (select 1 from notification_jobs where dedupe_key = v_job_off)
+     or not exists (select 1 from notification_jobs where dedupe_key = v_job_old) then
+    raise exception 'FAIL: the lines of a switched-off team''s match or of a never-fetched old one are not queued: %', v_res;
+  end if;
+
+  -- The same page again: nothing written.
+  select ctid into v_c1 from league_matches where tenant_id = v_a and site_match_id = 9020;
+  v_res := apply_league_matches(v_a, 'liga-x-2026', v_list);
+  select ctid into v_c2 from league_matches where tenant_id = v_a and site_match_id = 9020;
+  if (v_res->>'league_inserted')::int <> 0 or v_c1 is distinct from v_c2 then
+    raise exception 'FAIL: an unchanged round page rewrote a switched-off team''s league row: %', v_res;
+  end if;
+
+  -- Nights 2 and 3 queue the lines again; the 4th does not (a page that cannot
+  -- be read must not cost six fetches every night).
+  for i in 2..3 loop
+    delete from notification_jobs where dedupe_key = v_job_off;
+    perform apply_league_matches(v_a, 'liga-x-2026', v_list);
+    if not exists (select 1 from notification_jobs where dedupe_key = v_job_off) then
+      raise exception 'FAIL: night % did not queue the lines', i;
+    end if;
+  end loop;
+  delete from notification_jobs where dedupe_key = v_job_off;
+  perform apply_league_matches(v_a, 'liga-x-2026', v_list);
+  if exists (select 1 from notification_jobs where dedupe_key = v_job_off) then
+    raise exception 'FAIL: the lines of a match that never applies were queued a 4th night';
+  end if;
+  -- A change of the round page starts over.
+  perform apply_league_matches(v_a, 'liga-x-2026',
+    v_base || jsonb_build_array(jsonb_set(v_off, '{home,total}', '3001'), v_act, v_old));
+  if not exists (select 1 from notification_jobs where dedupe_key = v_job_off) then
+    raise exception 'FAIL: a corrected result did not start the fetching over';
+  end if;
+
+  -- The team is switched on again: the league row goes (counted), its job with
+  -- it — the match is fetched as ours from now on.
+  update teams set active = true where tenant_id = v_a and site_slug = 'liga-vypnuty-muzi';
+  v_res := apply_league_matches(v_a, 'liga-x-2026', v_list);
+  if (v_res->>'league_deleted')::int <> 1
+     or exists (select 1 from league_matches where tenant_id = v_a and site_match_id = 9020)
+     or exists (select 1 from notification_jobs where dedupe_key = v_job_off) then
+    raise exception 'FAIL: a match of a team switched on again stayed a league row: %', v_res;
+  end if;
+  -- Back to the fixture the later blocks expect.
+  update teams set active = false where tenant_id = v_a and site_slug = 'liga-vypnuty-muzi';
+  delete from league_matches where tenant_id = v_a and site_match_id = 9021;
+  perform league_drop_orphan_jobs(v_a);
+  raise notice 'OK: a switched-off team''s match is kept as a league row (our match_results and slot untouched, an active team''s match left alone), unchanged pages write nothing, the lines are queued at most 3 nights, an old never-fetched match is still queued, switching the team on drops the row (counted) and its job (0055)';
+end $$;
+
+-- A failure of the league call shows on the admin card (last_error) although
+-- our own matches synced; an ordinary error still wins when it is newer.
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+begin
+  if federation_last_error(v_a,
+       '{"competition:liga-x-2026":{"at":"2026-10-01T10:00:00Z","league_error":"boom"}}')
+     is distinct from 'Zápasy ostatních družstev: boom'
+     or federation_last_error(v_a,
+       '{"competition:liga-x-2026":{"at":"2026-10-01T10:00:00Z","inserted":3}}') is not null
+     or federation_last_error(v_a,
+       '{"competition:liga-x-2026":{"at":"2026-10-01T10:00:00Z","league_error":"boom"},
+         "discover":{"at":"2026-10-02T10:00:00Z","error":"site down"}}')
+     is distinct from 'site down' then
+    raise exception 'FAIL: federation_last_error does not report a league failure (or misorders it)';
+  end if;
+  raise notice 'OK: a league failure is the admin card''s last error (0055)';
+end $$;
+
+-- RLS: our alley reads, another alley sees nothing, nobody writes.
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+begin
+  if (select count(*) from league_matches) <> 2 or (select count(*) from league_player_results) <> 1 then
+    raise exception 'FAIL: a member of the alley cannot read its league matches';
+  end if;
+  begin
+    insert into league_matches (tenant_id, site_match_id, site_slug, competition_slug, date, home_team, away_team)
+    values ('00000000-0000-0000-0000-00000000000a', 1, 'x', 'liga-x-2026', now()::date, 'A', 'B');
+    raise exception 'FAIL: a member wrote a league match';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+reset role;
+
+-- refresh_match on a league id. The ids are captured as the superuser: under
+-- another alley's RLS a subselect would be NULL and prove nothing.
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+begin
+  perform set_config('probe.lg_9001', (select id::text from league_matches where site_match_id = 9001), true);
+  perform set_config('probe.lg_9002', (select id::text from league_matches where site_match_id = 9002), true);
+  -- 9001: a final match with its lines: nothing to fetch. 9002: no time.
+  update league_matches set status = 'finished', detail_status = 'finished',
+         detail_fetched_at = now() - interval '1 hour'
+   where site_match_id = 9001;
+  delete from notification_jobs where kind = 'federation_league_match'
+     and payload->>'tenant_id' = v_a::text;
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+begin
+  if refresh_match(current_setting('probe.lg_9002')::uuid) <> 'not_live'
+     or refresh_match(current_setting('probe.lg_9001')::uuid) <> 'not_live' then
+    raise exception 'FAIL: refresh_match fetched a league match that has nothing to fetch';
+  end if;
+end $$;
+reset role;
+do $$
+begin
+  if exists (select 1 from notification_jobs where kind = 'federation_league_match') then
+    raise exception 'FAIL: a refused league refresh queued a job';
+  end if;
+  -- The lines of a finished match are missing: opening it queues one fetch.
+  update league_matches set detail_status = null where site_match_id = 9001;
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+begin
+  if refresh_match(current_setting('probe.lg_9001')::uuid) <> 'queued' then
+    raise exception 'FAIL: opening a final league match without its lines was not queued';
+  end if;
+end $$;
+reset role;
+do $$
+declare
+  v_at text;
+begin
+  select payload->>'requested_at' into v_at from notification_jobs
+   where kind = 'federation_league_match'
+     and dedupe_key like '%:' || (select site_match_id from league_matches where site_match_id = 9001);
+  if v_at is null then
+    raise exception 'FAIL: a league refresh wrote no job (or no requested_at)';
+  end if;
+  -- A repeat inside the (15 s) gate is answered queued and leaves the job
+  -- alone: the request 10 seconds ago stays the request.
+  update notification_jobs
+     set payload = payload || jsonb_build_object('requested_at', now() - interval '10 seconds')
+   where kind = 'federation_league_match';
+  perform set_config('probe.req', (select payload->>'requested_at' from notification_jobs
+    where kind = 'federation_league_match' limit 1), true);
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+begin
+  if refresh_match(current_setting('probe.lg_9001')::uuid, true) <> 'queued' then
+    raise exception 'FAIL: a repeated league refresh was not answered queued';
+  end if;
+end $$;
+reset role;
+do $$
+begin
+  if (select payload->>'requested_at' from notification_jobs
+       where kind = 'federation_league_match' limit 1) is distinct from current_setting('probe.req') then
+    raise exception 'FAIL: a repeat inside the gate re-stamped the league job';
+  end if;
+  -- ... while one outside it does (the request 30 seconds ago).
+  update notification_jobs
+     set payload = payload || jsonb_build_object('requested_at', now() - interval '30 seconds')
+   where kind = 'federation_league_match';
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+begin
+  perform refresh_match(current_setting('probe.lg_9001')::uuid, true);
+end $$;
+reset role;
+do $$
+begin
+  if (select payload->>'requested_at' from notification_jobs
+       where kind = 'federation_league_match' limit 1) = current_setting('probe.req') then
+    raise exception 'FAIL: a repeat outside the gate did not re-stamp the league job';
+  end if;
+end $$;
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+begin
+  -- Not final yet: asked for from an hour before the start until 30 hours
+  -- after it, whatever the stale status says; then not any more.
+  update league_matches set status = 'scheduled', detail_status = null, detail_fetched_at = null,
+         date = ((now() at time zone 'Europe/Prague') - interval '8 hours')::date,
+         starts_at = ((now() at time zone 'Europe/Prague') - interval '8 hours')::time
+   where site_match_id = 9001;
+  delete from notification_jobs where kind = 'federation_league_match'
+     and payload->>'tenant_id' = v_a::text;
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+begin
+  if refresh_match(current_setting('probe.lg_9001')::uuid) <> 'queued' then
+    raise exception 'FAIL: a stale scheduled league match 8 hours after its start was not refreshable';
+  end if;
+end $$;
+reset role;
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+begin
+  update league_matches set date = ((now() at time zone 'Europe/Prague') - interval '2 days')::date
+   where site_match_id = 9001;
+  delete from notification_jobs where kind = 'federation_league_match'
+     and payload->>'tenant_id' = v_a::text;
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+begin
+  if refresh_match(current_setting('probe.lg_9001')::uuid) <> 'not_live' then
+    raise exception 'FAIL: a league match two days after its start was still refreshable';
+  end if;
+end $$;
+reset role;
+
+-- Another alley sees none of it and cannot refresh it (the real ids, not a
+-- subselect that RLS would turn into NULL). 9001 is made refreshable first —
+-- final, lines missing — and our own alley's call is the positive control.
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+begin
+  update league_matches set status = 'finished', detail_status = null, detail_fetched_at = null
+   where site_match_id = 9001;
+  delete from notification_jobs where kind = 'federation_league_match'
+     and payload->>'tenant_id' = v_a::text;
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+begin
+  if refresh_match(current_setting('probe.lg_9001')::uuid, true) <> 'queued' then
+    raise exception 'FAIL: the control failed: our own alley could not refresh its league match';
+  end if;
+end $$;
+reset role;
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+begin
+  -- A request sorts before the backfill jobs (the runner takes the oldest
+  -- run_at first): someone is waiting for it.
+  if not exists (select 1 from notification_jobs where kind = 'federation_league_match'
+                    and payload->>'tenant_id' = v_a::text and run_at = 'epoch'::timestamptz) then
+    raise exception 'FAIL: a requested league refresh does not sort before the backfill jobs';
+  end if;
+  delete from notification_jobs where kind = 'federation_league_match'
+     and payload->>'tenant_id' = v_a::text;
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000002","role":"authenticated"}';
+do $$
+begin
+  if exists (select 1 from league_matches) or exists (select 1 from league_player_results) then
+    raise exception 'FAIL: another alley sees our league matches';
+  end if;
+  if refresh_match(current_setting('probe.lg_9001')::uuid, true) <> 'not_live'
+     or refresh_match(current_setting('probe.lg_9002')::uuid, true) <> 'not_live' then
+    raise exception 'FAIL: another alley refreshed our league match';
+  end if;
+end $$;
+reset role;
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+begin
+  if exists (select 1 from notification_jobs where kind = 'federation_league_match'
+              and payload->>'tenant_id' = v_a::text) then
+    raise exception 'FAIL: another alley''s refresh queued our league fetch';
+  end if;
+  if has_table_privilege('authenticated', 'league_matches', 'insert')
+     or has_table_privilege('anon', 'league_matches', 'select')
+     or not has_table_privilege('authenticated', 'league_player_results', 'select')
+     or has_function_privilege('authenticated', 'public.apply_league_matches(uuid, text, jsonb)', 'execute')
+     or has_function_privilege('authenticated', 'public.apply_league_result(uuid, integer, jsonb)', 'execute')
+     or has_function_privilege('authenticated', 'public.league_drop_orphan_jobs(uuid)', 'execute')
+     or not has_function_privilege('service_role', 'public.apply_league_result(uuid, integer, jsonb)', 'execute') then
+    raise exception 'FAIL: league privileges are wrong';
+  end if;
+
+  -- A stale competition job after the team was switched off: nothing is kept
+  -- (no rows, no detail jobs), and the detail is refused.
+  update teams set active = false where tenant_id = v_a and site_slug = 'liga-tym-0055-muzi';
+  if apply_league_result(v_a, 9001, '{"status":"finished"}'::jsonb) then
+    raise exception 'FAIL: a competition none of our teams plays was still written';
+  end if;
+  perform apply_league_matches(v_a, 'liga-x-2026', '[{"site_match_id":9010,"site_slug":"liga-x-2026-kolo-1-a-b","date":"2026-10-10","starts_at":"10:00","home_team":"A","away_team":"B","competition":"Liga X","round":1,"status":"finished","home":{},"away":{}}]');
+  if exists (select 1 from league_matches where tenant_id = v_a)
+     or exists (select 1 from notification_jobs where kind = 'federation_league_match'
+                 and payload->>'tenant_id' = v_a::text) then
+    raise exception 'FAIL: a competition nobody plays kept league matches or their jobs';
+  end if;
+
+  -- The nightly cleanup: a live competition keeps its matches and jobs; the
+  -- matches of a dead one go with their lines and their detail jobs.
+  update teams set active = true where tenant_id = v_a and site_slug = 'liga-tym-0055-muzi';
+  perform apply_league_matches(v_a, 'liga-x-2026', '[{"site_match_id":9001,"site_slug":"liga-x-2026-kolo-3-a-b","date":"2026-10-10","starts_at":"10:00","home_team":"KK A","away_team":"KK B","competition":"Liga X","round":3,"status":"finished","home":{},"away":{}}]');
+  perform apply_league_result(v_a, 9001, '{"status":"finished","players":[{"side":"home","position":1,"player_name":"X"}]}');
+  perform enqueue_federation_jobs();
+  if not exists (select 1 from league_matches where tenant_id = v_a and site_match_id = 9001)
+     or not exists (select 1 from league_player_results where tenant_id = v_a)
+     or not exists (select 1 from notification_jobs where kind = 'federation_league_match'
+                     and payload->>'tenant_id' = v_a::text) then
+    raise exception 'FAIL: the nightly cleanup dropped the matches, lines or jobs of a live competition';
+  end if;
+  update teams set active = false where tenant_id = v_a and site_slug in ('liga-tym-0055-muzi');
+  perform enqueue_federation_jobs();
+  if exists (select 1 from league_matches where tenant_id = v_a)
+     or exists (select 1 from league_player_results where tenant_id = v_a)
+     or exists (select 1 from notification_jobs where kind = 'federation_league_match'
+                 and payload->>'tenant_id' = v_a::text) then
+    raise exception 'FAIL: the nightly cleanup left league matches, lines or jobs of a dead competition';
+  end if;
+  raise notice 'OK: league matches — RLS, refresh_match on a league id (windows, gates, the job write, other alleys), privileges, dead competitions and orphan jobs (0055)';
 end $$;
 
 rollback;

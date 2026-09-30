@@ -77,6 +77,50 @@ void main() {
   );
 
   testWidgets(
+    'resetTenantScopedProviders re-creates the league match and player-line '
+    'families (0055)',
+    (tester) async {
+      final builds = <String, int>{};
+      Stream<T> counted<T>(String name, T value) {
+        builds[name] = (builds[name] ?? 0) + 1;
+        return Stream.value(value);
+      }
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            leagueMatchesProvider.overrideWith(
+              (ref, slug) => counted('league', const <LeagueMatch>[]),
+            ),
+            leaguePlayerResultsProvider.overrideWith(
+              (ref, id) => counted('lines', const <MatchPlayerResult>[]),
+            ),
+          ],
+          child: MaterialApp(
+            home: Consumer(
+              builder: (context, ref, _) {
+                ref.watch(leagueMatchesProvider('liga-x'));
+                ref.watch(leaguePlayerResultsProvider('lg1'));
+                return TextButton(
+                  onPressed: () => resetTenantScopedProviders(ref),
+                  child: const Text('Přepnout kuželnu'),
+                );
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(builds, {'league': 1, 'lines': 1});
+
+      await tester.tap(find.text('Přepnout kuželnu'));
+      await tester.pump();
+
+      expect(builds, {'league': 2, 'lines': 2});
+    },
+  );
+
+  testWidgets(
     'resetTenantScopedProviders re-creates the duty streams, the seasons and '
     'my duty (0050)',
     (tester) async {

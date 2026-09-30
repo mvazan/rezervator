@@ -10,6 +10,7 @@ import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/clubhouse/match_detail_screen.dart';
 import 'package:rezervator/features/clubhouse/results_screen.dart';
 import 'package:rezervator/features/clubhouse/widgets/match_video_icon.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rezervator/features/schedule/my_trainings_screen.dart'
     show MatchTrophy;
 
@@ -112,9 +113,22 @@ void main() {
     List<CalendarTeam> calendarTeams = const [],
     Future<String> Function(String matchId, {bool force})? refreshMatch,
     void Function(String url)? launch,
+    // 0055: the competitions our teams play, and the foreign matches of each.
+    List<({String slug, String name})> competitions = const [],
+    Map<String, List<LeagueMatch>> league = const {},
+    Map<String, List<MatchPlayerResult>> leaguePlayers = const {},
+    Stream<DateTime>? nowStream,
   }) {
     return ProviderScope(
       overrides: [
+        leagueCompetitionsProvider.overrideWithValue(competitions),
+        teamsProvider.overrideWith((ref) => Stream.value(const [])),
+        leagueMatchesProvider.overrideWith(
+          (ref, slug) => Stream.value(league[slug] ?? const []),
+        ),
+        leaguePlayerResultsProvider.overrideWith(
+          (ref, id) => Stream.value(leaguePlayers[id] ?? const []),
+        ),
         myProfileProvider.overrideWith((ref) => Stream.value(profile)),
         if (slotsStream != null) ...[
           testSlotsStreamProvider.overrideWith((ref) => slotsStream),
@@ -143,7 +157,7 @@ void main() {
         myCalendarTeamsProvider.overrideWith(
           (ref) => Stream.value(calendarTeams),
         ),
-        nowProvider.overrideWith((ref) => Stream.value(now)),
+        nowProvider.overrideWith((ref) => nowStream ?? Stream.value(now)),
       ],
       // Disables MatchLeading's pulsing ring for a live match — a repeating
       // AnimationController never settles on its own, which would hang
@@ -831,4 +845,321 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  // ---- „Soutěže“ (0055): a whole competition by round -------------------
+
+  const liga = 'liga-x-2026';
+  const ligaName = 'Liga X';
+  const competitions = [(slug: liga, name: ligaName)];
+
+  PrioritySlot ourLiga(String id, Day date, int round) => PrioritySlot(
+    id: id,
+    date: date,
+    startsAt: const HourMinute(17, 30),
+    endsAt: const HourMinute(20, 30),
+    type: PrioritySlot.fallbackMatchType,
+    homeTeam: veverky,
+    awayTeam: souperA,
+    importKey: 'cka:$id',
+    competition: ligaName,
+    round: round,
+    siteSlug: '$liga-kolo-$round-a-b',
+    siteMatchId: id.hashCode & 0xffff,
+  );
+
+  LeagueMatch foreign(
+    String id,
+    Day date,
+    int round, {
+    String home = 'KK Cizí A',
+    String away = 'KK Cizí B',
+    String? startsAt = '09:00:00',
+    String status = 'finished',
+  }) => LeagueMatch.fromJson({
+    'id': id,
+    'site_match_id': id.hashCode & 0xffff | 0x10000,
+    'site_slug': '$liga-kolo-$round-x-y',
+    'competition_slug': liga,
+    'competition': ligaName,
+    'round': round,
+    'date': date.toSql(),
+    'starts_at': startsAt,
+    'home_team': home,
+    'away_team': away,
+    'venue': 'Cizí kuželna',
+    'status': status,
+    'home_points': status == 'finished' ? 6 : null,
+    'away_points': status == 'finished' ? 2 : null,
+    'home_total': status == 'finished' ? 3200 : null,
+    'away_total': status == 'finished' ? 3100 : null,
+    'fetched_at': '2026-09-20T10:00:00+00:00',
+    'detail_status': status == 'finished' ? 'finished' : null,
+  });
+
+  group('competition view', () {
+    testWidgets('no competition of ours: no switch, the teams view as before',
+        (tester) async {
+      await tester.pumpWidget(app(slots: [finishedYesterday]));
+      await tester.pumpAndSettle();
+      expect(find.text('Soutěže'), findsNothing);
+      expect(find.text('Vše'), findsOneWidget);
+    });
+
+    testWidgets(
+        'Soutěže lists the whole competition by round — rounds by their dates, '
+        'foreign matches included and neutral', (tester) async {
+      final r5 = today.addDays(-20);
+      final r3 = today.addDays(-6);
+      final r4 = today.addDays(-13);
+      await tester.pumpWidget(app(
+        slots: [ourLiga('mine3', r3, 3), ourLiga('mine5', r5, 5)],
+        competitions: competitions,
+        league: {
+          liga: [
+            foreign('f3', r3, 3),
+            foreign('f4', r4, 4, home: 'KK Čtvrté', away: 'KK Kolo'),
+            foreign('f5', r5, 5, startsAt: null, status: 'scheduled'),
+          ],
+        },
+      ));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Soutěže'));
+      await tester.pumpAndSettle();
+
+      // Chips: the competition (no „Vše“), and the round headers by date.
+      expect(find.widgetWithText(ChoiceChip, ligaName), findsOneWidget);
+      expect(find.text('Vše'), findsNothing);
+      double y(String text) => tester.getTopLeft(find.textContaining(text)).dy;
+      expect(y('5. kolo'), lessThan(y('4. kolo')));
+      expect(y('4. kolo'), lessThan(y('3. kolo')));
+      // A foreign match: its teams, its score, the venue; no home/away.
+      expect(find.textContaining('KK Čtvrté'), findsOneWidget);
+      expect(find.text('6 : 2'), findsNWidgets(2));
+      expect(find.textContaining('Cizí kuželna'), findsWidgets);
+      // A foreign match with no time yet says so.
+      expect(find.textContaining('čas bude upřesněn'), findsOneWidget);
+      // Our own match in it keeps home/away, and drops the round from its
+      // subtitle (the header has it).
+      expect(find.textContaining('doma'), findsWidgets);
+      expect(find.textContaining('Liga X, 3. kolo'), findsNothing);
+      // Nothing left over from the teams view.
+      expect(find.widgetWithText(ChoiceChip, veverky), findsNothing);
+    });
+
+    testWidgets('a foreign match opens the detail with its player lines',
+        (tester) async {
+      final day = today.addDays(-6);
+      const home = MatchPlayerResult(
+        id: 'p1',
+        matchId: 'f3',
+        side: 'home',
+        position: 1,
+        playerName: 'Jan Cizí',
+        total: 540,
+        setPoints: 3,
+        teamPoints: 1,
+      );
+      const away = MatchPlayerResult(
+        id: 'p2',
+        matchId: 'f3',
+        side: 'away',
+        position: 1,
+        playerName: 'Petr Hostující',
+        total: 500,
+        setPoints: 1,
+        teamPoints: 0,
+      );
+      await tester.pumpWidget(app(
+        competitions: competitions,
+        league: {liga: [foreign('f3', day, 3)]},
+        leaguePlayers: {'f3': [home, away]},
+      ));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Soutěže'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.textContaining('KK Cizí A'));
+      await tester.pumpAndSettle();
+      expect(find.byType(MatchDetailScreen), findsOneWidget);
+      expect(find.text('Liga X · 3. kolo'), findsOneWidget);
+      expect(find.text('Jan Cizí'), findsWidgets);
+      expect(find.text('Petr Hostující'), findsWidgets);
+    });
+
+    testWidgets('a competition with no match says so', (tester) async {
+      await tester.pumpWidget(app(competitions: competitions));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Soutěže'));
+      await tester.pumpAndSettle();
+      expect(find.text('Soutěž zatím nemá žádné zápasy.'), findsOneWidget);
+    });
+  });
+
+  // The saved mode and competition arrive a moment after the first frame.
+  group('competition view, saved choice', () {
+    // A season long enough to scroll: 20 rounds of finished foreign matches
+    // (one a week, ending three weeks ago), then a live one being played now.
+    List<LeagueMatch> season() => [
+      for (var r = 1; r <= 20; r++)
+        foreign('old$r', today.addDays(-21 - 7 * (20 - r)), r),
+      foreign(
+        'live1',
+        today,
+        21,
+        home: 'KK Živě A',
+        away: 'KK Živě B',
+        startsAt: '17:00:00',
+        status: 'scheduled',
+      ),
+    ];
+
+    setUp(() {
+      SharedPreferences.setMockInitialValues({
+        'results_mode': 'competitions',
+        'results_competition': liga,
+      });
+    });
+
+    testWidgets('opens on the saved competition, scrolled to the recent '
+        'results, and pokes the live foreign match', (tester) async {
+      final refreshed = <String>[];
+      await tester.pumpWidget(app(
+        competitions: competitions,
+        league: {liga: season()},
+        refreshMatch: (id, {force = false}) async {
+          refreshed.add('$id:$force');
+          return 'queued';
+        },
+      ));
+      await tester.pumpAndSettle();
+
+      // Not the teams view, and not the start of the season: the last decided
+      // match (round 20) is at the bottom edge of the screen.
+      expect(find.widgetWithText(ChoiceChip, ligaName), findsOneWidget);
+      final state = tester.state<State>(find.byType(ResultsScreen));
+      final key = (state as dynamic).debugMatchKey('old20') as GlobalKey?;
+      expect(key, isNotNull);
+      final rect = tester.getRect(find.byKey(key!));
+      expect(rect.bottom, lessThanOrEqualTo(tester.view.physicalSize.height));
+      expect(rect.top, greaterThan(0));
+      // The match being played got its poke (not forced), once.
+      expect(refreshed, ['live1:false']);
+    });
+
+    testWidgets('switching from the teams view scrolls the competition to its '
+        'recent results and pokes its live match afresh', (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      final refreshed = <String>[];
+      await tester.pumpWidget(app(
+        competitions: competitions,
+        league: {liga: season()},
+        refreshMatch: (id, {force = false}) async {
+          refreshed.add(id);
+          return 'queued';
+        },
+      ));
+      await tester.pumpAndSettle();
+      // The teams view came first and used up its own one-shot latches.
+      expect(find.text('Vše'), findsOneWidget);
+      expect(refreshed, isEmpty);
+      await tester.tap(find.text('Soutěže'));
+      await tester.pumpAndSettle();
+      final state = tester.state<State>(find.byType(ResultsScreen));
+      final key = (state as dynamic).debugMatchKey('old20') as GlobalKey?;
+      final rect = tester.getRect(find.byKey(key!));
+      expect(rect.bottom, lessThanOrEqualTo(tester.view.physicalSize.height));
+      expect(rect.top, greaterThan(0));
+      expect(refreshed, ['live1']);
+    });
+
+    testWidgets('a tap on the chip that is already chosen changes nothing, '
+        'not even on the next clock tick', (tester) async {
+      final clock = StreamController<DateTime>();
+      addTearDown(clock.close);
+      final refreshed = <String>[];
+      await tester.pumpWidget(app(
+        competitions: competitions,
+        league: {liga: season()},
+        nowStream: clock.stream,
+        refreshMatch: (id, {force = false}) async {
+          refreshed.add(id);
+          return 'queued';
+        },
+      ));
+      clock.add(now);
+      await tester.pumpAndSettle();
+      refreshed.clear();
+
+      // The user scrolls back to the top and taps the chosen chip.
+      await tester.fling(
+        find.byKey(const Key('results-list')),
+        const Offset(0, 5000),
+        8000,
+      );
+      await tester.pumpAndSettle();
+      final firstRound = find.textContaining(RegExp(r'^1\. kolo'));
+      final before = tester.getTopLeft(firstRound).dy;
+      await tester.tap(find.widgetWithText(ChoiceChip, ligaName));
+      clock.add(now.add(const Duration(minutes: 1)));
+      await tester.pumpAndSettle();
+      expect(tester.getTopLeft(firstRound).dy, before);
+      expect(refreshed, isEmpty);
+    });
+
+    testWidgets('pull-to-refresh asks for a foreign match in its window, '
+        'forced', (tester) async {
+      final refreshed = <String>[];
+      await tester.pumpWidget(app(
+        competitions: competitions,
+        league: {liga: season()},
+        refreshMatch: (id, {force = false}) async {
+          refreshed.add('$id:$force');
+          return 'queued';
+        },
+      ));
+      await tester.pumpAndSettle();
+      refreshed.clear();
+      // To the top of the season first, then the pull.
+      await tester.fling(
+        find.byKey(const Key('results-list')),
+        const Offset(0, 8000),
+        8000,
+      );
+      await tester.pumpAndSettle();
+      await tester.fling(
+        find.byKey(const Key('results-list')),
+        const Offset(0, 300),
+        1000,
+      );
+      await tester.pumpAndSettle();
+      expect(refreshed, ['live1:true']);
+    });
+  });
+
+  testWidgets('large text at 360 dp: the score column scales, nothing '
+      'overflows (teams view and competition view)', (tester) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    SharedPreferences.setMockInitialValues({});
+    await tester.pumpWidget(
+      MediaQuery(
+        data: const MediaQueryData(
+          size: Size(360, 800),
+          textScaler: TextScaler.linear(2.0),
+        ),
+        child: app(
+          slots: [finishedYesterday],
+          results: {'m1': finishedResult},
+          competitions: competitions,
+          league: {liga: [foreign('f1', today.addDays(-3), 3)]},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.text('Soutěže'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
 }

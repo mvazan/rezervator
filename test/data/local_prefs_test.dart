@@ -96,4 +96,39 @@ void main() {
       expect(prefs.getString('theme_choice'), 'lightContrast');
     });
   });
+  group('loadPersistedResultsView', () {
+    test('seeds the saved Výsledky mode and competition synchronously', () async {
+      SharedPreferences.setMockInitialValues(
+          {'results_mode': 'competitions', 'results_competition': 'liga-2026'});
+      final container =
+          ProviderContainer(overrides: await loadPersistedResultsView());
+      addTearDown(container.dispose);
+
+      expect(container.read(resultsModeProvider), ResultsMode.competitions);
+      expect(container.read(resultsCompetitionProvider), 'liga-2026');
+    });
+
+    test('defaults to the teams view, no competition', () async {
+      SharedPreferences.setMockInitialValues({});
+      final container =
+          ProviderContainer(overrides: await loadPersistedResultsView());
+      addTearDown(container.dispose);
+
+      expect(container.read(resultsModeProvider), ResultsMode.teams);
+      expect(container.read(resultsCompetitionProvider), isNull);
+    });
+
+    test('a preloaded provider still persists a later set()', () async {
+      SharedPreferences.setMockInitialValues({});
+      final container =
+          ProviderContainer(overrides: await loadPersistedResultsView());
+      addTearDown(container.dispose);
+
+      await container
+          .read(resultsModeProvider.notifier)
+          .set(ResultsMode.competitions);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('results_mode'), 'competitions');
+    });
+  });
 }

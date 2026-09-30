@@ -60,8 +60,10 @@ Future<void> _bootstrap() async {
   // ThemeChoiceNotifier/TextSizeNotifier's own async load is still pending
   // (see data/local_prefs.dart).
   final appearanceOverrides = await loadPersistedAppearance();
+  // The same for Výsledky's saved mode / competition (see loadPersistedResultsView).
+  final resultsViewOverrides = await loadPersistedResultsView();
   runApp(ProviderScope(
-    overrides: appearanceOverrides,
+    overrides: [...appearanceOverrides, ...resultsViewOverrides],
     child: const RezervatorApp(),
   ));
 }

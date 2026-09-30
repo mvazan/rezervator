@@ -668,4 +668,241 @@ void main() {
       expect(venuesMatching(venues, 'nikdenic'), isEmpty);
     });
   });
+
+  // Výsledky „Soutěže“ (0055): a whole competition by round, foreign matches
+  // included.
+  group('competition view', () {
+    const matchType = PrioritySlotType(
+      id: 'match-type',
+      name: 'Zápas',
+      isMatch: true,
+    );
+    const slug = 'liga-x-2026';
+
+    PrioritySlot ours(
+      int siteId,
+      String date,
+      int round, {
+      String? parent,
+      String comp = slug,
+    }) =>
+        PrioritySlot.fromJson({
+          'id': 'slot$siteId',
+          'date': date,
+          'starts_at': '10:00:00',
+          'ends_at': '13:00:00',
+          'type_id': 'match-type',
+          'home_team': 'Naše $siteId',
+          'away_team': 'Soupeř',
+          'description': '',
+          'import_key': 'cka:$siteId',
+          'site_slug': '$comp-kolo-$round-x-y',
+          'site_match_id': siteId,
+          'round': round,
+          'parent_id': parent,
+        }, {'match-type': matchType});
+
+    LeagueMatch league(
+      int siteId,
+      String date,
+      int round, {
+      String? startsAt = '10:00:00',
+      String comp = slug,
+      String home = 'KK A',
+      String away = 'KK B',
+    }) => LeagueMatch.fromJson({
+      'id': 'lg$siteId',
+      'site_match_id': siteId,
+      'site_slug': '$comp-kolo-$round-a-b',
+      'competition_slug': comp,
+      'competition': 'Liga X',
+      'round': round,
+      'date': date,
+      'starts_at': startsAt,
+      'home_team': home,
+      'away_team': away,
+      'status': 'finished',
+      'home_points': 6,
+      'away_points': 2,
+      'home_total': 3200,
+      'away_total': 3100,
+      'fetched_at': '2026-09-20T10:00:00+00:00',
+      'detail_status': null,
+    });
+
+    test('LeagueMatch: result, slot view, needs a detail once finished', () {
+      final l = league(9001, '2026-10-10', 3);
+      expect(l.result.matchId, 'lg9001');
+      expect(l.result.status, MatchStatus.finished);
+      expect(pointsLabel(l.result.homePoints, l.result.awayPoints), '6 : 2');
+      expect(l.needsDetail, isTrue);
+      final slot = l.asSlot();
+      expect(slot.id, 'lg9001');
+      expect(slot.fromFederation, isTrue);
+      expect(slot.siteUrl, contains('$slug-kolo-3-a-b'));
+      expect(slot.isAway, isFalse);
+      // A match with no time yet.
+      final timeless = league(9002, '2026-10-17', 4, startsAt: null);
+      expect(timeless.timeKnown, isFalse);
+      expect(timeless.asSlot().startsAt, const HourMinute(0, 0));
+    });
+
+    test('needsDetail: a final match whose lines are not final yet', () {
+      LeagueMatch with_(String status, String? detail) => LeagueMatch.fromJson({
+        'id': 'x',
+        'site_match_id': 1,
+        'site_slug': 's',
+        'competition_slug': slug,
+        'date': '2026-10-10',
+        'starts_at': '10:00:00',
+        'home_team': 'A',
+        'away_team': 'B',
+        'status': status,
+        'fetched_at': '2026-10-10T10:00:00+00:00',
+        'detail_status': detail,
+      });
+      expect(with_('finished', null).needsDetail, isTrue);
+      expect(with_('finished', 'in_progress').needsDetail, isTrue);
+      expect(with_('finished', 'finished').needsDetail, isFalse);
+      // The detail settled on forfeit where the round page says finished.
+      expect(with_('finished', 'forfeit').needsDetail, isFalse);
+      expect(with_('scheduled', null).needsDetail, isFalse);
+    });
+
+    test('refreshable: from an hour before the start to 30 hours after it, '
+        'whatever the stale status says; never final, never without a time', () {
+      final l = league(1, '2026-10-10', 3, startsAt: '10:00:00');
+      DateTime at(int day, int h, [int m = 0]) => DateTime(2026, 10, day, h, m);
+      // The fixture's status is 'finished': not refreshable at all.
+      expect(l.refreshable(at(10, 12)), isFalse);
+      LeagueMatch open(String status, {String? startsAt = '10:00:00'}) =>
+          LeagueMatch.fromJson({
+            'id': 'x',
+            'site_match_id': 1,
+            'site_slug': 's',
+            'competition_slug': slug,
+            'date': '2026-10-10',
+            'starts_at': startsAt,
+            'home_team': 'A',
+            'away_team': 'B',
+            'status': status,
+            'fetched_at': '2026-10-10T10:00:00+00:00',
+          });
+      final scheduled = open('scheduled');
+      expect(scheduled.refreshable(at(10, 8, 30)), isFalse, reason: '1.5 h before');
+      expect(scheduled.refreshable(at(10, 9, 30)), isTrue, reason: '30 min before');
+      expect(scheduled.refreshable(at(10, 18)), isTrue, reason: '8 h after');
+      expect(scheduled.refreshable(at(11, 15)), isTrue, reason: '29 h after');
+      expect(scheduled.refreshable(at(11, 17)), isFalse, reason: '31 h after');
+      expect(open('in_progress').refreshable(at(10, 11)), isTrue);
+      expect(open('forfeit').refreshable(at(10, 11)), isFalse);
+      expect(open('scheduled', startsAt: null).refreshable(at(10, 11)), isFalse);
+    });
+
+    test('a match with no time yet is never live', () {
+      final timeless = league(1, '2026-10-10', 3, startsAt: null);
+      final scheduled = MatchResult(
+        matchId: 'lg1',
+        status: MatchStatus.scheduled,
+        fetchedAt: DateTime.utc(2026, 10, 9),
+      );
+      // Ten past midnight of its day would be „one hour before 00:00“.
+      expect(
+        isLive(timeless.asSlot(), scheduled, DateTime(2026, 10, 10, 0, 10)),
+        isFalse,
+      );
+      expect(
+        isLive(
+          league(2, '2026-10-10', 3).asSlot(),
+          scheduled,
+          DateTime(2026, 10, 10, 9, 30),
+        ),
+        isTrue,
+      );
+    });
+
+    test('our matches of the competition plus the league ones, once', () {
+      final slots = [
+        ours(1, '2026-10-10', 3),
+        ours(2, '2026-10-10', 3, parent: 'slot1'),
+        ours(3, '2026-10-10', 3, comp: 'other-comp'),
+        ours(4, '2026-10-10', 3),
+      ];
+      final r = competitionMatches(slots, [
+        league(9001, '2026-10-10', 3),
+        league(9004, '2026-10-10', 3, comp: 'other'),
+      ], slug);
+      expect(r.matches.map((m) => m.id), ['slot1', 'slot4', 'lg9001']);
+      expect(r.foreignIds, {'lg9001'});
+    });
+
+    test('a switched-off team\'s slot that also has a league row (same site '
+        'id) is one tile: the league one', () {
+      final slots = [
+        ours(1, '2026-10-10', 3),
+        ours(2, '2026-10-17', 4),
+      ];
+      final r = competitionMatches(slots, [
+        // The server kept the row (with its details) of the switched-off
+        // team's match; the slot 1 of the same site match is not listed.
+        league(1, '2026-10-10', 3),
+      ], slug);
+      expect(r.matches.map((m) => m.id), ['slot2', 'lg1']);
+      expect(r.foreignIds, {'lg1'});
+    });
+
+    test('rounds are grouped and ordered by their dates, not their numbers', () {
+      final all = competitionMatches([
+        ours(1, '2026-10-17', 4),
+        ours(2, '2026-10-03', 5),
+      ], [
+        league(9001, '2026-10-10', 3, home: 'KK Hvězda'),
+        league(9002, '2026-10-10', 3, home: 'KK Chodov', away: 'KK C'),
+        league(9003, '2026-10-03', 5, startsAt: '09:00:00'),
+      ], slug).matches;
+      final rounds = competitionRounds(all);
+      // 5th round first (3. 10.), then the 3rd (10. 10.), the 4th (17. 10.).
+      expect(rounds.map((g) => g.round), [5, 3, 4]);
+      expect(rounds[0].matches.map((m) => m.id), ['lg9003', 'slot2']);
+      // Inside a round: the same time → Czech title order (H before Ch,
+      // which plain compareTo gets the other way round).
+      expect(rounds[1].matches.map((m) => m.homeTeam), ['KK Hvězda', 'KK Chodov']);
+    });
+
+    test('a round played over several days spans them', () {
+      final rounds = competitionRounds([
+        league(1, '2026-10-10', 3).asSlot(),
+        league(2, '2026-10-11', 3).asSlot(),
+      ]);
+      expect(rounds.single.first, Day(2026, 10, 10));
+      expect(rounds.single.last, Day(2026, 10, 11));
+      expect(roundLabel(rounds.single), '3. kolo · 10.10.–11.10.');
+      expect(
+        roundLabel(competitionRounds([league(1, '2026-10-10', 3).asSlot()]).single),
+        '3. kolo · 10. 10.',
+      );
+    });
+
+    test('the last decided match is found in display order, not by day list', () {
+      final all = competitionMatches([
+        ours(1, '2026-10-03', 5),
+        ours(2, '2026-10-10', 3),
+      ], const [], slug).matches;
+      final results = {
+        'slot1': MatchResult(
+          matchId: 'slot1',
+          status: MatchStatus.finished,
+          fetchedAt: DateTime.utc(2026, 10, 4),
+        ),
+        'slot2': MatchResult(
+          matchId: 'slot2',
+          status: MatchStatus.scheduled,
+          fetchedAt: DateTime.utc(2026, 10, 4),
+        ),
+      };
+      final ordered = [for (final g in competitionRounds(all)) ...g.matches];
+      expect(mostRecentDecidedInOrder(ordered, results, Day(2026, 10, 12)), 'slot1');
+      expect(mostRecentDecidedInOrder(ordered, results, Day(2026, 10, 1)), isNull);
+    });
+  });
 }

@@ -787,11 +787,17 @@ class PrioritySlot {
     this.siteMatchId,
     this.venue,
     this.venueSlug,
+    this.timeKnown = true,
   });
 
   final String id;
   final Day date;
   final HourMinute startsAt;
+
+  /// False for a match of a competition the site has no time for yet (a
+  /// league match, 0055): [startsAt] is then a placeholder, the match is
+  /// never live and no time is shown.
+  final bool timeKnown;
   final HourMinute endsAt;
   final PrioritySlotType type;
 
@@ -986,6 +992,188 @@ class MatchResult {
         homeSetPoints: json['home_set_points'] as num?,
         awaySetPoints: json['away_set_points'] as num?,
         fetchedAt: DateTime.parse(json['fetched_at'] as String),
+      );
+}
+
+/// One `league_matches` row (0055): a match that no ACTIVE team of ours plays
+/// (two foreign teams; a team of ours that is switched off, its details
+/// kept; one of ours with no time yet), in a competition one of our active
+/// teams plays — shown by Výsledky's „Soutěže“ view and its match detail. It
+/// carries its own team-level result (the columns are those of
+/// `match_results`); the player lines live in `league_player_results`, read
+/// as [MatchPlayerResult].
+class LeagueMatch {
+  const LeagueMatch({
+    required this.id,
+    required this.siteMatchId,
+    required this.siteSlug,
+    required this.competitionSlug,
+    required this.competition,
+    required this.round,
+    required this.date,
+    required this.startsAt,
+    required this.homeTeam,
+    required this.awayTeam,
+    this.videoUrl,
+    this.venue,
+    this.venueSlug,
+    this.status = MatchStatus.scheduled,
+    this.matchType = '',
+    this.discipline = '',
+    this.homePoints,
+    this.awayPoints,
+    this.homeTotal,
+    this.awayTotal,
+    this.homeFulls,
+    this.awayFulls,
+    this.homeSpares,
+    this.awaySpares,
+    this.homeErrors,
+    this.awayErrors,
+    this.homeSetPoints,
+    this.awaySetPoints,
+    required this.fetchedAt,
+    this.detailStatus,
+  });
+
+  final String id;
+  final int siteMatchId;
+  final String siteSlug;
+  final String competitionSlug;
+  final String competition;
+  final int? round;
+  final Day date;
+
+  /// Null while the site has no time for the match yet.
+  final HourMinute? startsAt;
+  final String homeTeam;
+  final String awayTeam;
+  final String? videoUrl;
+  final String? venue;
+  final String? venueSlug;
+  final MatchStatus status;
+  final String matchType;
+  final String discipline;
+  final num? homePoints;
+  final num? awayPoints;
+  final int? homeTotal;
+  final int? awayTotal;
+  final int? homeFulls;
+  final int? awayFulls;
+  final int? homeSpares;
+  final int? awaySpares;
+  final int? homeErrors;
+  final int? awayErrors;
+  final num? homeSetPoints;
+  final num? awaySetPoints;
+  final DateTime fetchedAt;
+
+  /// The status the player lines were fetched at; null = never.
+  final String? detailStatus;
+
+  factory LeagueMatch.fromJson(Map<String, dynamic> json) => LeagueMatch(
+        id: json['id'] as String,
+        siteMatchId: (json['site_match_id'] as num).toInt(),
+        siteSlug: json['site_slug'] as String,
+        competitionSlug: json['competition_slug'] as String,
+        competition: json['competition'] as String? ?? '',
+        round: (json['round'] as num?)?.toInt(),
+        date: Day.parse(json['date'] as String),
+        startsAt: json['starts_at'] == null
+            ? null
+            : HourMinute.parse(json['starts_at'] as String),
+        homeTeam: json['home_team'] as String,
+        awayTeam: json['away_team'] as String,
+        videoUrl: json['video_url'] as String?,
+        venue: json['venue'] as String?,
+        venueSlug: json['venue_slug'] as String?,
+        status: _matchStatusFrom(json['status'] as String?),
+        matchType: json['match_type'] as String? ?? '',
+        discipline: json['discipline'] as String? ?? '',
+        homePoints: json['home_points'] as num?,
+        awayPoints: json['away_points'] as num?,
+        homeTotal: (json['home_total'] as num?)?.toInt(),
+        awayTotal: (json['away_total'] as num?)?.toInt(),
+        homeFulls: (json['home_fulls'] as num?)?.toInt(),
+        awayFulls: (json['away_fulls'] as num?)?.toInt(),
+        homeSpares: (json['home_spares'] as num?)?.toInt(),
+        awaySpares: (json['away_spares'] as num?)?.toInt(),
+        homeErrors: (json['home_errors'] as num?)?.toInt(),
+        awayErrors: (json['away_errors'] as num?)?.toInt(),
+        homeSetPoints: json['home_set_points'] as num?,
+        awaySetPoints: json['away_set_points'] as num?,
+        fetchedAt: DateTime.parse(json['fetched_at'] as String),
+        detailStatus: json['detail_status'] as String?,
+      );
+
+  bool get timeKnown => startsAt != null;
+
+  /// A final match whose player lines were not fetched at a final status.
+  bool get needsDetail =>
+      (status == MatchStatus.finished || status == MatchStatus.forfeit) &&
+      detailStatus != 'finished' &&
+      detailStatus != 'forfeit';
+
+  /// Whether asking the server for this match is worth it now: nothing polls
+  /// a league match, so its stored status can be a day behind — from an hour
+  /// before the start until 30 hours after it the match is asked for whatever
+  /// the status says (the same window as `refresh_match`, 0055), unless it is
+  /// final or has no time.
+  bool refreshable(DateTime now) {
+    final at = startsAt;
+    if (at == null ||
+        status == MatchStatus.finished ||
+        status == MatchStatus.forfeit) {
+      return false;
+    }
+    final start = DateTime(date.year, date.month, date.day, at.hour, at.minute);
+    return now.isAfter(start.subtract(const Duration(hours: 1))) &&
+        now.isBefore(start.add(const Duration(hours: 30)));
+  }
+
+  /// The team-level result, in the shape the scoreboard reads. Its
+  /// [MatchResult.matchId] is this match's id (the detail keys by it).
+  MatchResult get result => MatchResult(
+        matchId: id,
+        status: status,
+        matchType: matchType,
+        discipline: discipline,
+        homePoints: homePoints,
+        awayPoints: awayPoints,
+        homeTotal: homeTotal,
+        awayTotal: awayTotal,
+        homeFulls: homeFulls,
+        awayFulls: awayFulls,
+        homeSpares: homeSpares,
+        awaySpares: awaySpares,
+        homeErrors: homeErrors,
+        awayErrors: awayErrors,
+        homeSetPoints: homeSetPoints,
+        awaySetPoints: awaySetPoints,
+        fetchedAt: fetchedAt,
+      );
+
+  /// A [PrioritySlot] view of this match — so the tile, the title and the
+  /// match detail read it like one of ours. It is only a view: it never
+  /// reaches `prioritySlotsProvider`. A match with no time yet sits at
+  /// 00:00 ([timeKnown] tells).
+  PrioritySlot asSlot() => PrioritySlot(
+        id: id,
+        date: date,
+        startsAt: startsAt ?? const HourMinute(0, 0),
+        endsAt: startsAt ?? const HourMinute(0, 0),
+        type: PrioritySlot.fallbackMatchType,
+        homeTeam: homeTeam,
+        awayTeam: awayTeam,
+        importKey: 'cka:$siteMatchId',
+        videoUrl: videoUrl,
+        competition: competition,
+        round: round,
+        siteSlug: siteSlug,
+        siteMatchId: siteMatchId,
+        venue: venue,
+        venueSlug: venueSlug,
+        timeKnown: timeKnown,
       );
 }
 

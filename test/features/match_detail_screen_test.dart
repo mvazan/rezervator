@@ -208,14 +208,25 @@ void main() {
     // The app's own theme (Manrope) for a test that measures real widths;
     // null = MaterialApp's default.
     ThemeData? theme,
+    // 0055: a foreign match of a competition (read from league_matches).
+    String? competitionSlug,
+    int? siteMatchId,
+    List<LeagueMatch> league = const [],
+    List<MatchPlayerResult> leaguePlayers = const [],
   }) {
     final screen = MatchDetailScreen(
       matchId: matchId,
+      competitionSlug: competitionSlug,
+      siteMatchId: siteMatchId,
       refresh: refresh ?? (_, {force = false}) async => 'queued',
       launch: launch ?? (_) {},
     );
     return ProviderScope(
       overrides: [
+        leagueMatchesProvider.overrideWith((ref, slug) => Stream.value(league)),
+        leaguePlayerResultsProvider.overrideWith(
+          (ref, id) => Stream.value(leaguePlayers),
+        ),
         if (slotsStream != null) ...[
           testSlotsStreamProvider.overrideWith((ref) => slotsStream),
           prioritySlotsProvider.overrideWith(
@@ -1452,6 +1463,164 @@ void main() {
 
       expect(tester.takeException(), isNull);
       expect(find.text('Sbalit vše'), findsOneWidget);
+    });
+  });
+
+  // ---- a match of other teams (0055) -----------------------------------
+  group('a foreign match (league)', () {
+    LeagueMatch league0({
+      String id = 'lg1',
+      String? startsAt = '10:00:00',
+      String status = 'finished',
+      String? detailStatus,
+      Day? date,
+    }) => LeagueMatch.fromJson({
+      'id': id,
+      'site_match_id': 777,
+      'site_slug': 'liga-x-2026-kolo-3-a-b',
+      'competition_slug': 'liga-x-2026',
+      'competition': 'Liga X',
+      'round': 3,
+      'date': (date ?? today.addDays(-3)).toSql(),
+      'starts_at': startsAt,
+      'home_team': 'KK Cizí A',
+      'away_team': 'KK Cizí B',
+      'status': status,
+      'home_points': status == 'finished' ? 6 : null,
+      'away_points': status == 'finished' ? 2 : null,
+      'home_total': status == 'finished' ? 3200 : null,
+      'away_total': status == 'finished' ? 3100 : null,
+      'fetched_at': '2026-09-20T10:00:00+00:00',
+      'detail_status': detailStatus,
+    });
+
+    testWidgets('a finished one without its player lines asks for them once '
+        'on open', (tester) async {
+      final asked = <String>[];
+      await tester.pumpWidget(
+        app(
+          matchId: 'lg1',
+          competitionSlug: 'liga-x-2026',
+          league: [league0()],
+          refresh: (id, {force = false}) async {
+            asked.add(id);
+            return 'queued';
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(asked, ['lg1']);
+      expect(find.text('Liga X · 3. kolo'), findsOneWidget);
+    });
+
+    testWidgets('one whose lines are in does not ask at all', (tester) async {
+      final asked = <String>[];
+      await tester.pumpWidget(
+        app(
+          matchId: 'lg1',
+          competitionSlug: 'liga-x-2026',
+          league: [league0(detailStatus: 'finished')],
+          refresh: (id, {force = false}) async {
+            asked.add(id);
+            return 'queued';
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(asked, isEmpty);
+      expect(find.byIcon(Icons.refresh), findsNothing);
+    });
+
+    testWidgets('a match with no time yet shows its date only, is not live '
+        'and has no refresh button', (tester) async {
+      await tester.pumpWidget(
+        app(
+          matchId: 'lg1',
+          competitionSlug: 'liga-x-2026',
+          league: [
+            league0(
+              startsAt: null,
+              status: 'scheduled',
+              date: today,
+            ),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.textContaining('0:00'), findsNothing);
+      expect(find.text('Živě'), findsNothing);
+      expect(find.textContaining('Živě'), findsNothing);
+      expect(find.byIcon(Icons.refresh), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a stale „scheduled“ match hours after its start can still '
+        'be refreshed (the server allows it until 30 h)', (tester) async {
+      final asked = <String>[];
+      // now is 8 hours after a 10:00 start on the same day is not what
+      // `now` gives (the fixture clock is fixed): use a start 8 hours back.
+      final start = now.subtract(const Duration(hours: 8));
+      await tester.pumpWidget(
+        app(
+          matchId: 'lg1',
+          competitionSlug: 'liga-x-2026',
+          league: [
+            league0(
+              startsAt: '${start.hour.toString().padLeft(2, '0')}:00:00',
+              status: 'scheduled',
+              date: Day.fromDateTime(start),
+            ),
+          ],
+          refresh: (id, {force = false}) async {
+            asked.add('$id:$force');
+            return 'queued';
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+      // Asked on open, and the refresh button is there for the next ask.
+      expect(asked, ['lg1:false']);
+      expect(find.byIcon(Icons.refresh), findsOneWidget);
+    });
+
+    testWidgets('a match that meanwhile became one of ours shows our slot, '
+        'not „už v rozpisu není“', (tester) async {
+      final ours = PrioritySlot(
+        id: 'slot1',
+        date: today.addDays(-3),
+        startsAt: const HourMinute(10, 0),
+        endsAt: const HourMinute(13, 0),
+        type: PrioritySlot.fallbackMatchType,
+        homeTeam: 'KK Cizí A',
+        awayTeam: 'KK Cizí B',
+        importKey: 'cka:777',
+        competition: 'Liga X',
+        round: 3,
+        siteMatchId: 777,
+        siteSlug: 'liga-x-2026-kolo-3-a-b',
+      );
+      await tester.pumpWidget(
+        app(
+          matchId: 'lg1',
+          competitionSlug: 'liga-x-2026',
+          siteMatchId: 777,
+          league: const [],
+          slots: [ours],
+          results: {'slot1': finishedResult},
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Zápas už v rozpisu není.'), findsNothing);
+      expect(find.text('Liga X · 3. kolo'), findsOneWidget);
+    });
+
+    testWidgets('a league id nobody knows reads „už v rozpisu není“',
+        (tester) async {
+      await tester.pumpWidget(
+        app(matchId: 'nope', competitionSlug: 'liga-x-2026', league: const []),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Zápas už v rozpisu není.'), findsOneWidget);
     });
   });
 }

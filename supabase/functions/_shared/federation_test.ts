@@ -589,3 +589,50 @@ Deno.test("a substitution lands on the starter's line, only there", () => {
     .find((x) => x.side === "home" && x.position === 1)!;
   assertEquals(plain.sub_name, null);
 });
+
+Deno.test("a round page carries every match's team totals — a foreign match's score without its detail", () => {
+  const c = parseCompetition(fixture("competition_round_finished.html"));
+  for (const m of c.matches) {
+    const { home, away } = m.totals;
+    assert(home !== null && away !== null);
+    assert(home.total !== null && away.total !== null && home.total > 2000);
+    assert(home.points !== null && away.points !== null);
+    // A finished match's points always add up to the match's 8.
+    assertEquals(home.points! + away.points!, 8);
+  }
+  // A match with no result yet has null totals — not zeros, and never an error.
+  const upcoming = parseCompetition(fixture("competition_current_teams_of_4.html"))
+    .matches.filter((m) => m.status === "SCHEDULED" || m.status === "PREPARATION");
+  assert(upcoming.length > 0, "the fixture must have an unplayed match");
+  for (const m of upcoming) assertEquals(m.totals, { home: null, away: null });
+});
+
+Deno.test("parseCompetition: a start time that is not exactly HH:MM reads as none", () => {
+  const wire = (time: unknown) => {
+    const data = { data: { title: "T", rounds: [{ id: "1" }], currentRound: { id: "1", matches: [{
+      id: 9, slug: "x-kolo-1-a-b", date: "2026-10-10", status: "SCHEDULED", time, round: 1,
+      homeTeam: { id: 1, name: "A", slug: "a" }, awayTeam: { id: 2, name: "B", slug: "b" },
+      competition: { slug: "x", name: "X" },
+    }] } } };
+    return parseCompetition(
+      `<script>self.__next_f.push([1,${JSON.stringify(`5:${JSON.stringify(data)}\n`)}])</script>`,
+    ).matches[0].time;
+  };
+  assertEquals(wire(""), null);
+  assertEquals(wire("TBD"), null);
+  assertEquals(wire("9:00"), null);
+  assertEquals(wire("09:00:00"), null);
+  assertEquals(wire(undefined), null);
+  assertEquals(wire("09:00"), "09:00");
+});
+
+Deno.test("parseCompetition: the round page's totals of one real match, by side and field", () => {
+  const c = parseCompetition(fixture("competition_round_finished.html"));
+  const m = c.matches.find((x) => x.id === 2245)!;
+  assertEquals(m.totals, {
+    home: { points: 3, total: 3169, fulls: 2180, spares: 989, errors: 30, set_points: 12.5 },
+    away: { points: 5, total: 3280, fulls: 2193, spares: 1087, errors: 31, set_points: 11.5 },
+  });
+  const v = parseCompetition(fixture("competition_round_video.html"));
+  assert(v.matches.find((x) => x.id === 502)!.videoUrl?.startsWith("https://www.youtube.com/"));
+});

@@ -81,6 +81,8 @@ and what cascades — and is updated with every migration.
 | `federation_sync` | (0045) PK `tenant_id`: `venue_slug` (the alley's kuželna on the site, `''` = not configured, otherwise lower-case letters/digits/hyphens like `tenants.public_slug` but without its 3–40 length bound), `enabled` (default off), `last_run_at`, `last_success_at` (stamped only by `competition:<slug>` runs — the nightly sync's; since 0047 not by `discover`, so `last_run_at` null means never synced, which the setup wizard reads; match and venue jobs never touch them), `last_error` (the error of the newest live `last_report` entry that has one), `last_report jsonb` (`discover` and `competition:<slug>` — the last run's report + `at`, or `{error, at}` when it failed; `match:<site_match_id>` and `venue:<slug>` — `{error, at}` only while that match's or venue's fetch is failing; keys that can no longer run are dropped on every write — see **Runs** below). In the Realtime publication. | select **admin** only. Written by `set_federation_sync` and `record_federation_run`; `update_team`, `upsert_federation_teams` and `set_federation_sync` re-derive `last_error` (`federation_refresh_error`). |
 | `match_results` | (0045) PK `match_id → priority_slots` (cascade), `tenant_id`, `status` scheduled \| preparation \| in_progress \| finished \| forfeit, `match_type`, `discipline`, per side `points`, `total`, `fulls`, `spares`, `errors`, `set_points` (`home_*`/`away_*`), `fetched_at`. In the Realtime publication. | select approved/kiosk; server-only writes (`apply_federation_result`). |
 | `match_player_results` | (0045) `match_id → priority_slots` (cascade), `tenant_id`, `side` home\|away, `position`, `player_name`, `player_site_id`, `player_slug`, `fulls`, `spares`, `errors`, `total`, `set_points`, `team_points`, `lanes jsonb` (`[{lane, fulls, spares, errors, total, setPoints}]`), (0053) `sub_name`, `sub_site_id`, `sub_slug`, `sub_from_throw` — who took over the starter's line and from which throw (null without a change). Unique (`match_id`, `side`, `position`); index (`tenant_id`, `player_site_id`). Replaced whole on every fetch. In the Realtime publication, replica identity full (the app's stream is filtered by `match_id`, and Realtime checks a DELETE against the identity alone). | as `match_results`. |
+| `league_matches` | (0055) The matches of a competition one of our active teams plays that **no active team of ours plays** (foreign ones; the matches of a switched-off team of ours — even though their slot still exists, it is stale for good and our `match_results` are never written from the round page; and those of ours with no time yet, which have no slot) — so Výsledky can show the whole competition by round. Deliberately not `priority_slots` (a slot blocks lanes, feeds the calendar, the public board, the team picker, the calendar/reminder triggers). `tenant_id`, `site_match_id` (unique per tenant), `site_slug`, `competition_slug`, `competition`, `round`, `date`, `starts_at` (null = the site has no time yet), team names + slugs, `video_url`, `venue`/`venue_slug` (display only, never fetched), `status`, `match_type`, `discipline` and the team result columns named as in `match_results`, `fetched_at`, `detail_status`/`detail_fetched_at` (the status the player lines were fetched at). Round page → `apply_league_matches` (totals, no detail); the detail (player lines) is fetched once when the match is final and its lines are not (`federation_league_match` job, 5 per tick, last; `detail_status` in finished/forfeit = done), again when the round page's result of a final match differs from what is stored, or on `refresh_match` (a request sorts before the backfill jobs: `run_at` is the epoch). The nightly run queues it at most 3 nights in a row (`detail_queued`; a change of the round page or a successful final detail starts over), so a page that cannot be read costs a few fetches, not six every night. A final status the detail reported stands (a lagging detail never takes it back; the round page does not flip it while its own version is unchanged). Index (`tenant_id`, `competition_slug`); replica identity full; in the Realtime publication. `round_sig` = the round page's own signature of the row (status, points, totals, set points): result columns and status are rewritten only when it changes, so an unchanged round page never flips a status the detail reported (a changed one does, until the re-queued detail runs). A final match whose detail keeps lagging is given up after 7 days; one whose detail was never fetched is queued whatever its age (the first deploy's backfill). Rows of a competition no active team plays are dropped by `apply_league_matches` itself and by the nightly `enqueue_federation_jobs`, together with the detail jobs of matches that are gone (`league_drop_orphan_jobs`). | select approved/kiosk of the tenant; server-only writes. |
+| `league_player_results` | (0055) `match_player_results`, column for column (incl. `sub_*`), for a league match: `match_id → league_matches` (cascade). | as `league_matches`. |
 | `venues` | (0045) The alleys (kuželny) the tenant's matches are played at, from their page on vysledky.kuzelky.cz: `slug` (the site's `/detail-kuzelny/<slug>`, unique per tenant — matches `priority_slots.venue_slug` and `federation_sync.venue_slug`), `name`, `address`, `phone`, `email`, `lat`/`lng` (from the page's mapy.cz link), `sections jsonb` (`[{title, items: [{label, value}]}]` — the page's technical/contact blocks as shown), `clubs text[]` (club names at the alley), `fetched_at`. In the Realtime publication. | select approved/kiosk; server-only writes (`upsert_federation_venue`). |
 | `duty_periods` | (0050) A canteen duty: `starts_on`, `ends_on` (inclusive; `duty_periods_order_check` ends ≥ starts, `duty_periods_length_check` at most 62 days), `note` (trimmed, ≤ 80 chars, `duty_periods_note_check`; `''` = none), `created_by → profiles` (set null), `created_at`. `duty_periods_no_overlap` — `exclude using gist (tenant_id with =, daterange(starts_on, ends_on, '[]') with &&)`: periods of one alley never overlap, touching is fine (needs `btree_gist`, installed into `extensions`). Index (`tenant_id`, `starts_on`). In the Realtime publication. | select approved/kiosk (the whole alley reads the roster). No insert/update/delete for `authenticated`, nothing for `anon` — written only through the admin's `duty_*` RPCs. |
 | `duty_assignments` | (0050) Who works a period: `period_id → duty_periods` (cascade — a deleted period takes its assignees), `user_id → profiles` (cascade), `tenant_id` (the period's, denormalised like `player_group_members`), `assigned_by → profiles` (set null), `created_at`. PK (`period_id`, `user_id`), index (`tenant_id`, `user_id`). Approved non-kiosk members of the alley, placeholders included (counted, never given the duty's rights). A placeholder's rows are history: `delete_placeholder_player` refuses, `merge_placeholder_player` moves them. In the Realtime publication. | as `duty_periods`; written only through `duty_set_assignees`. |
@@ -90,7 +92,7 @@ and what cascades — and is updated with every migration.
 
 Every `color` column above is one `integer` (0030): the negative values are the "none"/default markers, 0–8 a palette entry from `domain/palette.dart` (0031 dropped the three that measured under ΔE2000 10 from a neighbour and kept every affected row on its exact colour as a hand-picked one), and `0x1000000 | rgb` (16777216–33554431) a hand-picked colour. Dart derives the four rendered shades (dark and light background plus its text) from a hand-picked value rather than painting it raw, so it stays readable in both themes; `upsert_club` takes `integer` for the same reason.
 | `app_config` | single row: `min_build` (0025) — the oldest app build the backend still supports; the app streams it (Realtime) and blocks on an update screen while older. Raised by a migration with a breaking release. | select for `authenticated`; writes: migrations only. |
-| `notification_jobs` | Deferred-job queue (0023): `kind` (`calendar_sync`; 0045 adds `federation_discover`, `federation_competition`, `federation_match`, `federation_venue`), `dedupe_key` unique (`calendar:<user_id>:<reservation_id>` — a repeat re-arms `run_at` instead of adding a row), `payload` jsonb, `run_at`, `attempts` (the handler backs off 2^attempts minutes and drops the job at 5), `created_at`. Index on `run_at`. | **server-only**: RLS on, no policy; `service_role` all, `anon`/`authenticated` nothing. Written by the security-definer producers (§Google kalendář) and `backfill_calendar_jobs`, consumed by the notify function on the cron tick. |
+| `notification_jobs` | Deferred-job queue (0023): `kind` (`calendar_sync`; 0045 adds `federation_discover`, `federation_competition`, `federation_match`, `federation_venue`; 0055 `federation_league_match`), `dedupe_key` unique (`calendar:<user_id>:<reservation_id>` — a repeat re-arms `run_at` instead of adding a row), `payload` jsonb, `run_at`, `attempts` (the handler backs off 2^attempts minutes and drops the job at 5), `created_at`. Index on `run_at`. | **server-only**: RLS on, no policy; `service_role` all, `anon`/`authenticated` nothing. Written by the security-definer producers (§Google kalendář) and `backfill_calendar_jobs`, consumed by the notify function on the cron tick. |
 | `google_calendar_links` | One row per *person* (not per tenant; `user_id → profiles`, cascade): `status` pending \| linked \| broken \| unlinked, `google_email`, `last_error`, `reminder_minutes int[]` (Calendar API shape — ≤ 5 entries, each 0–40320, CHECK-enforced, stored sorted descending), `created_at`, `updated_at`, plus (0032) `secondary_enabled` (the player turned on the second Google calendar "Rezervátor 2"), `reminder_minutes_secondary` (same shape/bounds, for events written there), `training_color_id` (Google event `colorId` 1–11 for trainings, which always go to the primary calendar; `null` = no colour). `match_teams` (0027) is gone (0033) — see `calendar_teams` for what replaced it. Holds no secret: it is in the Realtime publication and the profile card streams it. | select own row only (`user_id = auth.uid()`); `authenticated` has SELECT and nothing else — every write is the server's (`service_role`). |
 | `google_calendar_tokens` | `user_id → profiles` (cascade), `refresh_token`, `google_calendar_id` (the app-created "Rezervátor" calendar), `google_calendar_id_secondary` (0032: the second one, "Rezervátor 2"; `null` until `secondary_enabled`), `updated_at`. A separate table on purpose: a streamed table must never carry the token. | **server-only**: RLS on, zero policies; `service_role` only. |
 | `calendar_teams` | (0032) One row per player **+** followed team — replaces `google_calendar_links.match_teams`, because a team now needs to say more than its name: `user_id → profiles` (cascade), `team` (a `priority_slots.home_team`/`away_team` string), `calendar` (`primary` \| `secondary`, default `primary` — which of the player's two Google calendars this team's matches go to). PK (`user_id`, `team`). In the Realtime publication (0035) — the profile card streams it. Colour (`color_id`) lived here until 0036 moved it to `team_colors` below, independent of this table. | select own rows only (`user_id = auth.uid()`); `authenticated` has SELECT and nothing else (0035) — every write is the server's, through `calendar-manage`/`set_calendar_teams_for`, which also keeps `google_calendar_links.match_teams` mirrored for the 1.2.1 app. |
@@ -180,8 +182,8 @@ reappears, when `service_role` lacks DML on any table or view, or when
 | `request_federation_discovery()`, `request_federation_sync()` (0045) | admin | Enqueue a `federation_discover` job / one `federation_competition` job per active team's competition, due now, and kick the dispatcher. `not_allowed`; `federation_not_configured` (no venue slug) / `federation_disabled` (sync off or no slug). |
 | `federation_sync_progress()` (0047) | admin | The caller's federation jobs due now (`run_at <= now()`) or leased (`attempts > 0` and `run_at` within the notify tick's 10-minute lease), per kind → `{discover, competitions, matches, venues}`; a match's future checkpoint never counts. The ČKA card polls it. `not_allowed`. |
 | `update_team(id, name, club_id, active)` (0045) | admin | Renames (trimmed), assigns a club of the same alley, switches the team on/off; a team switched off takes its competition's and matches' errors off the admin card at once (the keys die — see **Runs** below). `not_allowed` (foreign team, not admin), `unknown_club` (not a club of this alley, e.g. deleted meanwhile), `empty_name`, `team_name_taken`. |
-| `refresh_match(match_id, force default false)` (0045, 0054) | approved member or kiosk | On-demand refresh of a live match → `queued` (a `federation_match` job due now, at most one request per 5 minutes — see below), `fresh` (fetched < 5 min ago) or `not_live` (not a federation match, foreign, played only by switched-off teams of ours — `federation_match_switched_off`, whose job would stop unwritten and leave no gate — or outside the window: `in_progress` until start + 12 h, `preparation` from start − 1 h to start + 12 h — the site shows it days before some matches — and `scheduled` from start − 1 h to start + 6 h; the same windows as the job's checkpoints and the app's `isLive`). With `force` (the refresh button, 0054) the 5-minute gate shrinks to a 15-second floor against a double tap; the background pokes keep 5 minutes. `not_allowed`. |
-| `apply_federation_matches(tenant, competition_slug, matches, keep_ids)`, `apply_federation_result(tenant, site_match_id, result)`, `upsert_federation_teams(tenant, teams)`, `record_federation_run(tenant, key, report, error)`, `enqueue_federation_match(tenant, site_match_id, slug, run_at)`, `upsert_federation_venue(tenant, venue)`, `federation_last_error(tenant, report)` (0045), `apply_federation_discovery(tenant, clubs, teams)` (0047) | service_role only (notify function) | The sync's writes — see **Výsledkový servis ČKA** below. `apply_federation_matches` raises `federation_tenant_not_ready` when the tenant has no approved admin or no builtin match type. |
+| `refresh_match(match_id, force default false)` (0045, 0054) | approved member or kiosk | On-demand refresh of a live match → `queued` (a `federation_match` job due now, at most one request per 5 minutes — see below), `fresh` (fetched < 5 min ago) or `not_live` (not a federation match, foreign, played only by switched-off teams of ours — `federation_match_switched_off`, whose job would stop unwritten and leave no gate — or outside the window: `in_progress` until start + 12 h, `preparation` from start − 1 h to start + 12 h — the site shows it days before some matches — and `scheduled` from start − 1 h to start + 6 h; the same windows as the job's checkpoints and the app's `isLive`). With `force` (the refresh button, 0054) the 5-minute gate shrinks to a 15-second floor against a double tap; the background pokes keep 5 minutes. Since 0055 also for a **league match's id** (`league_matches`, same alley, its competition played by an active team): a final match is fetched once, when its lines are missing (`detail_status` not final → `queued`, also on a plain open); a match not final yet is asked for from an hour before its start until 30 hours after it whatever the stored status says (nothing polls it, the status may be a day behind), `fresh` by `detail_fetched_at`, job kind `federation_league_match`; no time → `not_live`. `not_allowed`. |
+| `apply_federation_matches(tenant, competition_slug, matches, keep_ids)`, `apply_federation_result(tenant, site_match_id, result)`, `apply_league_matches(tenant, competition_slug, matches)`, `apply_league_result(tenant, site_match_id, result)`, `league_competition_is_ours(tenant, competition_slug)`, `league_drop_orphan_jobs(tenant)` (0055), `upsert_federation_teams(tenant, teams)`, `record_federation_run(tenant, key, report, error)`, `enqueue_federation_match(tenant, site_match_id, slug, run_at)`, `upsert_federation_venue(tenant, venue)`, `federation_last_error(tenant, report)` (0045), `apply_federation_discovery(tenant, clubs, teams)` (0047) | service_role only (notify function) | The sync's writes — see **Výsledkový servis ČKA** below. `apply_federation_matches` raises `federation_tenant_not_ready` when the tenant has no approved admin or no builtin match type. |
 
 Internal, no EXECUTE for app roles: `current_tenant_id`, `is_*`,
 `block_day_status`, `cancel_stranded_reservations`, `rental_occurs`,
@@ -396,15 +398,25 @@ superseded and retired.
     in it is active) — they are never "dropped". An empty list is a
     failed fetch and deletes nothing.
   - Report: `{inserted, updated, rekeyed, deleted, skipped_hand_edited[]}`;
-    the edge function adds `skipped_no_time[]`, `match_jobs` and
+    the edge function adds the `apply_league_matches` answer (0055:
+    `league_inserted`, `league_updated`, `league_deleted`,
+    `league_detail_jobs`, or `league_error` when that call failed — it never
+    fails the run, but the admin card shows it as the last error:
+    `federation_last_error` reads `league_error` too), `skipped_no_time[]`, `match_jobs` and
     `legacy_unpaired[]` — up to 20 `{date, title}` of `rozpis:` rows still
     unpaired after the apply that fall within the competition's dates and
     involve one of its teams (by name). On the first run these are the
     rows to check by hand: a match that stays `rozpis:` next to a new
     `cka:` row is a duplicate.
   - **Deactivating a team** (`update_team(…, active := false)`) stops
-    syncing it: its matches are no longer written, and the ones already
-    stored stay as they are. When the competition is still synced for
+    syncing it: its matches are no longer written as slots, and the ones
+    already stored stay as they are (stale for good). Its matches go to
+    `league_matches` (0055) instead — with their result and player lines,
+    so the whole-competition view has no hole — and our `match_results`
+    are never written from the round page. When the team is switched on
+    again, the league row is dropped (counted in `league_deleted`) and the
+    match is fetched as ours (no stored result, so the run arms its job).
+    When the competition is still synced for
     another active team of the alley, the inactive team's listed matches
     go as `keep_ids`, so they are never "no longer listed", and the run
     arms no `federation_match` job for a match with no active team of
@@ -504,7 +516,10 @@ superseded and retired.
   spaced one minute apart, then one `federation_venue` job per distinct
   slug among the tenant's `federation_sync.venue_slug` and its
   `priority_slots.venue_slug` whose `venues` row is missing or older than
-  7 days, continuing the one-minute spacing.
+  7 days, continuing the one-minute spacing. Since 0055 it first deletes
+  the `league_matches` of a competition none of the alley's active teams
+  plays (a team switched off, a new season) and the `federation_league_match`
+  jobs of matches that are gone.
 - **Live refresh:** `refresh_match` lets any member ask for a fresh
   result of a live match, gated on the server so no client can hammer the
   site: `fresh` while `fetched_at` is under 5 minutes old; otherwise it
@@ -521,6 +536,14 @@ superseded and retired.
   `request_federation_discovery` needs only a saved venue slug: a
   „Načíst týmy z webu“ clicked while the old `notify` is still deployed
   is dropped and just needs clicking again after the function deploy.
+- **0055 first fill:** the migration arms a `federation_competition` job for
+  every synced competition 15 minutes (plus a minute each) after `db push`,
+  so the whole-competition view fills soon after the functions are live
+  instead of at the next 01:00 UTC run; the foreign matches' player lines
+  then follow at 5 per minute (about half an hour for ~150 matches). The web
+  deploy (`deploy-web.yml`) is independent of the backend one: a web build
+  live before the migration shows only our own matches of a competition
+  (with a note) until the tables exist.
 - **After the first run** (Správa → Oddíly → Synchronizovat teď), check
   what each competition did:
 
@@ -530,7 +553,10 @@ superseded and retired.
          e.v->'updated' as updated, e.v->'deleted' as deleted,
          e.v->'skipped_hand_edited' as skipped_hand_edited,
          e.v->'skipped_no_time' as skipped_no_time,
-         e.v->'legacy_unpaired' as legacy_unpaired
+         e.v->'legacy_unpaired' as legacy_unpaired,
+         e.v->>'league_error' as league_error,
+         e.v->'league_inserted' as league_inserted,
+         e.v->'league_detail_jobs' as league_detail_jobs
     from federation_sync s
     join tenants t on t.id = s.tenant_id
     cross join jsonb_each(s.last_report) as e(k, v)
@@ -586,7 +612,7 @@ re-timed block) reach Google through `notification_jobs`:
   wait (the local stack). The notify function's `processJobs` takes ≤ 100
   due jobs (never a `federation_%` kind — since 0045 the same tick runs
   `processFederationJobs` after the reminders: at most 1 discover,
-  1 competition, 10 match and 3 venue jobs per tick within a 60 s budget,
+  1 competition, 10 match, 3 venue and 5 league-match jobs per tick within a 60 s budget,
   §Výsledkový servis ČKA), deletes a job on success, on failure sets
   `attempts + 1`, `run_at = now() + 2^attempts minutes`, and drops it
   after 5 attempts;
@@ -1196,7 +1222,20 @@ threads, no player-to-player messages. Every error is a bare code.
   enqueues, and never for a match in the past before and after; and the
   venues — upsert, one fetch for an unknown match venue, the nightly and
   sync-request producers, no re-arm of a pending or recently failed
-  fetch), the 0048 contacts (`contacts()` lists the alley's registered
+  fetch), the 0055 league matches (section 21: foreign matches in
+  their own tables and never in slots, teams or clubs, our own `cka:` ids
+  skipped, an empty time tolerated, writes only on a change — the format
+  too — deletes only from a non-empty list and with the detail job, a
+  settled final status never taken back or flipped, a corrected total
+  re-queuing the lines, a switched-off team's match kept as a league row (our
+  `match_results` and its slot untouched, an active team's slot left alone,
+  the row and its job dropped and counted when the team is switched on
+  again), the lines queued at most 3 nights and an old never-fetched match
+  still queued, a league failure as the admin card's last error, a
+  requested refresh sorting before the backfill, `refresh_match` on a league id with its windows,
+  gates and job write, another alley seeing and refreshing nothing,
+  privileges, replica identity, and a dead competition dropped by a stale
+  job and by the nightly cleanup with its jobs), the 0048 contacts (`contacts()` lists the alley's registered
   players only — no placeholder, kiosk, pending member or visiting
   superadmin, who may still read it — with a hidden e-mail or phone null
   and the other still shown; the kiosk and a pending member refused, anon

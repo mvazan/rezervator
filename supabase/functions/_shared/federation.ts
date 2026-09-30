@@ -3,10 +3,19 @@
 
 export type MatchStatus = "SCHEDULED" | "PREPARATION" | "IN_PROGRESS" | "FINISHED" | "FORFEIT";
 export type SiteTeam = { id: number; name: string; slug: string };
+/** One side's team-level result as a round page lists it (the same keys
+ * apply_federation_result reads); null where the page has none yet. */
+export type SideTotals = {
+  points: number | null; total: number | null; fulls: number | null;
+  spares: number | null; errors: number | null; set_points: number | null;
+};
 export type SiteMatch = {
   id: number; slug: string; date: string; time: string | null; round: number;
   status: MatchStatus; matchType: string; discipline: string; videoUrl: string | null;
   homeTeam: SiteTeam; awayTeam: SiteTeam; competition: { slug: string; name: string };
+  /** From the round page's `results[]`: enough for the score of a foreign
+   * match without fetching its detail. Missing → nulls, never an error. */
+  totals: { home: SideTotals | null; away: SideTotals | null };
 };
 export type SiteLane = { lane: number; fulls: number | null; spares: number | null; errors: number | null; total: number | null; setPoints: number | null };
 export type SitePlayer = {
@@ -87,11 +96,30 @@ const num = (v: unknown): number | null => (typeof v === "number" ? v : null);
 const str = (v: unknown): string | null =>
   typeof v === "string" && !v.startsWith("$") ? v : null;
 
+/** The site's start time, only when it is exactly HH:MM: an empty string,
+ * "TBD" or "9:00" count as no time (null), so nothing downstream — the
+ * `::time` cast in SQL, `endTime`, `pragueEpoch` — ever sees a malformed one. */
+const clock = (v: unknown): string | null => {
+  const t = str(v);
+  return t !== null && /^\d{2}:\d{2}$/.test(t) ? t : null;
+};
+
 function team(v: unknown): SiteTeam {
   const t = v as Json;
   const slug = str(t?.slug);
   if (typeof t?.id !== "number" || !slug) throw new Error("bad team");
   return { id: t.id, name: str(t.name) ?? slug, slug };
+}
+
+/** The team-level totals of the `results[]` entry for one side. */
+function teamTotals(results: unknown, isHome: boolean): SideTotals | null {
+  if (!Array.isArray(results)) return null;
+  const r = (results as Json[]).find((x) => x?.isHome === isHome);
+  if (!r) return null;
+  return {
+    points: num(r.teamPoints), total: num(r.totalPerformance), fulls: num(r.totalFull),
+    spares: num(r.totalSpare), errors: num(r.totalErrors), set_points: num(r.totalSetPoints),
+  };
 }
 
 function siteMatch(v: unknown): SiteMatch {
@@ -104,11 +132,12 @@ function siteMatch(v: unknown): SiteMatch {
   }
   const c = m.competition as Json;
   return {
-    id: m.id, slug, date, time: str(m.time),
+    id: m.id, slug, date, time: clock(m.time),
     round: Number(m.round), status: status as MatchStatus,
     matchType: str(m.matchType) ?? "", discipline: str(m.discipline) ?? "",
     videoUrl: str(m.videoUrl), homeTeam: team(m.homeTeam), awayTeam: team(m.awayTeam),
     competition: { slug: str(c?.slug) ?? "", name: str(c?.name) ?? "" },
+    totals: { home: teamTotals(m.results, true), away: teamTotals(m.results, false) },
   };
 }
 
