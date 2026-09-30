@@ -995,11 +995,13 @@ class MatchResult {
       );
 }
 
-/// One `league_matches` row (0055): a match between two teams that are none
-/// of ours, in a competition one of our active teams plays — shown by
-/// Výsledky's „Soutěže“ view and its match detail. It carries its own
-/// team-level result (the columns are those of `match_results`); the player
-/// lines live in `league_player_results`, read as [MatchPlayerResult].
+/// One `league_matches` row (0055): a match that no ACTIVE team of ours plays
+/// (two foreign teams; a team of ours that is switched off, its details
+/// kept; one of ours with no time yet), in a competition one of our active
+/// teams plays — shown by Výsledky's „Soutěže“ view and its match detail. It
+/// carries its own team-level result (the columns are those of
+/// `match_results`); the player lines live in `league_player_results`, read
+/// as [MatchPlayerResult].
 class LeagueMatch {
   const LeagueMatch({
     required this.id,

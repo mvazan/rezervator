@@ -12,6 +12,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/ui.dart';
 import '../../data/clock.dart';
+import '../../data/live_refresh.dart';
 import '../../data/local_prefs.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
@@ -47,10 +48,31 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
   bool _didLiveRefreshCheck = false;
 
   /// Which list the two latches above were set for ('t' = the teams view,
-  /// 'c' + the competition's slug). The saved mode and competition arrive a
-  /// moment after the first frame, so the list can change under the
-  /// latches — a new list scrolls and looks for live matches afresh.
+  /// 'c' + the competition's slug). The saved mode and competition are
+  /// seeded before runApp ([loadPersistedResultsView]), but the competition
+  /// list itself (teams) can still arrive late, so the list can change under
+  /// the latches — a new list scrolls and looks for live matches afresh.
   String? _listKey;
+
+  /// The app coming back from the background: the open-time poke of live /
+  /// refreshable matches is worth doing again (the server still gates it at
+  /// five minutes). Only that latch — the list keeps its scroll position.
+  StreamSubscription<void>? _wake;
+
+  @override
+  void initState() {
+    super.initState();
+    _wake = LiveRefresh.stream.listen((_) {
+      if (mounted) setState(() => _didLiveRefreshCheck = false);
+    });
+  }
+
+  @override
+  void dispose() {
+    unawaited(_wake?.cancel());
+    super.dispose();
+  }
+
   // A day (Day) or a round ('round:N') → its header's key.
   final Map<Object, GlobalKey> _sectionKeys = {};
   final Map<String, GlobalKey> _matchKeys = {};
@@ -220,9 +242,11 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
     List<String> calendarTeams,
     Map<String, int> teamColors,
     Map<String, bool> exceptions, {
-    // Competition view: the round is in the header; a match of other teams
-    // (foreign) has no home/away for us and no team colour.
+    // Competition view: the round is in the header; a league match
+    // (foreign) has no home/away for us, and takes a team colour only from
+    // a side that is one of OUR teams ([ourTeamNames], active or not).
     bool inCompetition = false,
+    Set<String> ourTeamNames = const {},
     bool foreign = false,
     String? competitionSlug,
   }) {
@@ -243,13 +267,28 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
         ? ''
         : pinsLabel(result.homeTotal, result.awayTotal);
 
-    final colorId = matchColorOf(
-      slot,
-      followedTeams,
-      teamColors,
-      calendarTeams: calendarTeams,
-      exceptions: exceptions,
-    );
+    // A foreign team that merely shares a followed / calendar team's name
+    // stays neutral: only names of our own teams count on a league tile.
+    final colorId = foreign
+        ? matchColorOf(
+            slot,
+            [
+              for (final t in followedTeams)
+                if (ourTeamNames.contains(t)) t,
+            ],
+            teamColors,
+            calendarTeams: [
+              for (final t in calendarTeams)
+                if (ourTeamNames.contains(t)) t,
+            ],
+          )
+        : matchColorOf(
+            slot,
+            followedTeams,
+            teamColors,
+            calendarTeams: calendarTeams,
+            exceptions: exceptions,
+          );
     return ListTile(
       key: _matchKeyFor(slot.id),
       leading: MatchLeading(
@@ -265,21 +304,27 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
       subtitle: Text(subtitle),
       // Scaled down as one piece when large text makes the score wider than
       // its share of the row (it overflowed at text scale 2.0).
-      trailing: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 110),
-        child: FittedBox(
-          fit: BoxFit.scaleDown,
-          alignment: Alignment.centerRight,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                pointsLabel(result?.homePoints, result?.awayPoints),
-                style: theme.textTheme.titleMedium,
-              ),
-              if (pins.isNotEmpty) Text(pins, style: theme.textTheme.bodySmall),
-            ],
+      trailing: ExcludeSemantics(
+        // A bare „–“ (no points yet) is not worth reading out.
+        excluding:
+            result?.homePoints == null && result?.awayPoints == null && pins.isEmpty,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 110),
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerRight,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  pointsLabel(result?.homePoints, result?.awayPoints),
+                  style: theme.textTheme.titleMedium,
+                ),
+                if (pins.isNotEmpty)
+                  Text(pins, style: theme.textTheme.bodySmall),
+              ],
+            ),
           ),
         ),
       ),
@@ -324,13 +369,19 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
         ? ref.watch(leagueMatchesProvider(slug))
         : const AsyncData<List<LeagueMatch>>([]);
     final league = leagueAsync.value ?? const <LeagueMatch>[];
-    final leagueLoading = inCompetitions && !leagueAsync.hasValue;
+    // Nothing cached and the stream failed (offline): our own matches of the
+    // competition are shown anyway, with a note instead of a spinner.
+    final leagueFailed =
+        inCompetitions && !leagueAsync.hasValue && leagueAsync.hasError;
+    final leagueLoading =
+        inCompetitions && !leagueAsync.hasValue && !leagueAsync.hasError;
     // Until the teams are known the switch may still appear above the list
     // (and shift it): nothing scrolls before that.
     final teams = ref.watch(teamsProvider);
     final teamsSettled = teams.hasValue || teams.hasError;
-    // The saved mode / competition arrive after the first frame: a list that
-    // changed under the latches gets them afresh.
+    final ourTeamNames = {for (final t in teams.value ?? const <Team>[]) t.name};
+    // A list that changed under the latches (the teams — hence the
+    // competitions — arriving late) gets them afresh.
     final listKey = inCompetitions ? 'c:$slug' : 't';
     if (_listKey != listKey) {
       _listKey = listKey;
@@ -389,7 +440,7 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
     }
     final loading = slotsLoading || leagueLoading;
 
-    // Once per screen lifetime, past the first real snapshot of BOTH inputs
+    // Once per list (and again after the app woke), past the first real snapshot of BOTH inputs
     // — slots is a plain Provider that reads `[]` before its own stream
     // (prioritySlotsLoadingProvider's own signal) has delivered, so gating
     // on the results stream alone would let this latch on an empty list
@@ -472,9 +523,19 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
             _competitionChips(competitions, slug)
           else
             _filterChips(ourTeams),
+          if (leagueFailed)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+              child: Text(
+                'Zápasy ostatních družstev se nepodařilo načíst.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
           Expanded(
             child: loading
                 ? const Center(child: CircularProgressIndicator())
+                : !anyMatches && leagueFailed
+                ? const SizedBox.shrink()
                 : !anyMatches
                 ? Center(
                     child: Padding(
@@ -491,16 +552,22 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
                 : sections.isEmpty
                 ? const Center(child: Text('Žádné zápasy pro tento výběr.'))
                 : RefreshIndicator(
-                    onRefresh: () => _refresh(
-                      context,
-                      _liveMatches(
-                        sections,
-                        listResults,
-                        now,
-                        foreignIds: foreignIds,
-                        refreshableForeign: refreshableForeign,
-                      ),
-                    ),
+                    onRefresh: () {
+                      // A failed league stream is re-subscribed at once.
+                      if (leagueFailed) {
+                        ref.invalidate(leagueMatchesProvider(slug));
+                      }
+                      return _refresh(
+                        context,
+                        _liveMatches(
+                          sections,
+                          listResults,
+                          now,
+                          foreignIds: foreignIds,
+                          refreshableForeign: refreshableForeign,
+                        ),
+                      );
+                    },
                     // A plain, eagerly built scroll view (not a lazy
                     // ListView) — a season's federation matches for one
                     // alley are few enough that building them all is
@@ -539,6 +606,7 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
                                 teamColors,
                                 exceptions,
                                 inCompetition: inCompetitions,
+                                ourTeamNames: ourTeamNames,
                                 foreign: foreignIds.contains(slot.id),
                                 competitionSlug: slug,
                               ),

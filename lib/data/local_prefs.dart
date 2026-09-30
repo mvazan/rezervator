@@ -251,3 +251,42 @@ class ResultsCompetitionNotifier extends Notifier<String?> {
     } catch (_) {}
   }
 }
+
+/// A [ResultsModeNotifier] that starts from a value already read — see
+/// [loadPersistedResultsView].
+class _PreloadedResultsMode extends ResultsModeNotifier {
+  _PreloadedResultsMode(this._initial);
+  final ResultsMode _initial;
+  @override
+  ResultsMode build() => _initial;
+}
+
+/// A [ResultsCompetitionNotifier] that starts from a value already read —
+/// see [loadPersistedResultsView].
+class _PreloadedResultsCompetition extends ResultsCompetitionNotifier {
+  _PreloadedResultsCompetition(this._initial);
+  final String? _initial;
+  @override
+  String? build() => _initial;
+}
+
+/// Reads the saved Výsledky mode and competition once, before `runApp`, the
+/// way [loadPersistedAppearance] does. Without it the screen's first frame
+/// is the teams view and the saved one arrives a frame later — the list
+/// latches (scroll, poke of live matches) would run for the wrong list.
+Future<List<Override>> loadPersistedResultsView() async {
+  var mode = ResultsMode.teams;
+  String? competition;
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    mode = parseResultsMode(prefs.getString(_resultsModeKey));
+    competition = prefs.getString(_resultsCompetitionKey);
+  } catch (_) {
+    // Best effort only — see _load above.
+  }
+  return [
+    resultsModeProvider.overrideWith(() => _PreloadedResultsMode(mode)),
+    resultsCompetitionProvider
+        .overrideWith(() => _PreloadedResultsCompetition(competition)),
+  ];
+}

@@ -39,9 +39,9 @@ class MatchDetailScreen extends ConsumerStatefulWidget {
 
   final String matchId;
 
-  /// Set for a match of two teams that are none of ours (0055): it is read
-  /// from `league_matches` of this competition instead of the alley's
-  /// priority slots.
+  /// Set for a match no active team of ours plays (0055 — a foreign one, or
+  /// one of a switched-off team): it is read from `league_matches` of this
+  /// competition instead of the alley's priority slots.
   final String? competitionSlug;
 
   /// The site's id of the match, when known: a foreign match that becomes
@@ -362,8 +362,21 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     final playersLoading = !playersAsync.hasValue && !playersAsync.hasError;
     final venues = ref.watch(venuesProvider).value ?? const <Venue>[];
     final view = ref.watch(matchDetailViewProvider);
-    final teamColors =
+    var teamColors =
         ref.watch(myTeamColorsProvider).value ?? const <String, int>{};
+    if (fromLeague) {
+      // A side takes the viewer's team colour only when it IS one of our
+      // teams (active or not) — a foreign team that shares a followed
+      // team's name stays neutral.
+      final ours = {
+        for (final t in ref.watch(teamsProvider).value ?? const <Team>[])
+          t.name,
+      };
+      teamColors = {
+        for (final e in teamColors.entries)
+          if (ours.contains(e.key)) e.key: e.value,
+      };
+    }
 
     PrioritySlot? slot = leagueMatch?.asSlot() ?? becameOurs;
     if (!isLeague) {

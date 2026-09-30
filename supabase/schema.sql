@@ -417,7 +417,6 @@ declare
   v_inserted integer := 0;
   v_updated integer := 0;
   v_deleted integer := 0;
-  v_synced integer := 0;
   v_jobs integer := 0;
   v_seen integer[] := '{}';
   v_row league_matches;
@@ -436,8 +435,7 @@ begin
     get diagnostics v_deleted = row_count;
     perform league_drop_orphan_jobs(p_tenant);
     return jsonb_build_object('league_inserted', 0, 'league_updated', 0,
-                              'league_deleted', v_deleted, 'league_slot_results', 0,
-                              'league_detail_jobs', 0);
+                              'league_deleted', v_deleted, 'league_detail_jobs', 0);
   end if;
 
   for m in select * from jsonb_array_elements(coalesce(p_matches, '[]'::jsonb)) loop
@@ -447,46 +445,10 @@ begin
     v_status := coalesce(m->>'status', 'scheduled');
     select * into v_slot from priority_slots
      where tenant_id = p_tenant and import_key = 'cka:' || v_id;
-    if found then
-      -- Ours (has a slot). Nobody polls the match of a switched-off team, so
-      -- its result follows the round page; a played one has its own job.
-      if federation_match_switched_off(p_tenant, v_slot.home_team_slug, v_slot.away_team_slug) then
-        insert into match_results as r
-          (match_id, tenant_id, status, match_type, discipline,
-           home_points, away_points, home_total, away_total, home_fulls, away_fulls,
-           home_spares, away_spares, home_errors, away_errors,
-           home_set_points, away_set_points, fetched_at)
-        values
-          (v_slot.id, p_tenant, v_status,
-           coalesce(m->>'match_type', ''), coalesce(m->>'discipline', ''),
-           (v_home->>'points')::numeric, (v_away->>'points')::numeric,
-           (v_home->>'total')::integer, (v_away->>'total')::integer,
-           (v_home->>'fulls')::integer, (v_away->>'fulls')::integer,
-           (v_home->>'spares')::integer, (v_away->>'spares')::integer,
-           (v_home->>'errors')::integer, (v_away->>'errors')::integer,
-           (v_home->>'set_points')::numeric, (v_away->>'set_points')::numeric, now())
-        on conflict (match_id) do update set
-          status = excluded.status,
-          home_points = excluded.home_points, away_points = excluded.away_points,
-          home_total = excluded.home_total, away_total = excluded.away_total,
-          home_fulls = excluded.home_fulls, away_fulls = excluded.away_fulls,
-          home_spares = excluded.home_spares, away_spares = excluded.away_spares,
-          home_errors = excluded.home_errors, away_errors = excluded.away_errors,
-          home_set_points = excluded.home_set_points,
-          away_set_points = excluded.away_set_points,
-          fetched_at = now()
-        where (r.status, r.home_points, r.away_points, r.home_total, r.away_total,
-               r.home_fulls, r.away_fulls, r.home_spares, r.away_spares,
-               r.home_errors, r.away_errors, r.home_set_points, r.away_set_points)
-              is distinct from
-              (excluded.status, excluded.home_points, excluded.away_points,
-               excluded.home_total, excluded.away_total, excluded.home_fulls,
-               excluded.away_fulls, excluded.home_spares, excluded.away_spares,
-               excluded.home_errors, excluded.away_errors, excluded.home_set_points,
-               excluded.away_set_points);
-        get diagnostics v_n = row_count;
-        v_synced := v_synced + v_n;
-      end if;
+    -- Ours and active (has a slot): its own job fetches it. A switched-off
+    -- team's slot is stale for good, so its match is kept here instead.
+    if found and not federation_match_switched_off(
+         p_tenant, v_slot.home_team_slug, v_slot.away_team_slug) then
       continue;
     end if;
     v_seen := v_seen || v_id;
@@ -547,9 +509,22 @@ begin
                                else home_set_points end,
         away_set_points = case when v_changed then (v_away->>'set_points')::numeric
                                else away_set_points end,
-        -- A final match whose result changed has its player lines fetched again.
+        -- A final match whose result differs from what is stored (the detail
+        -- may have written the same already) has its lines fetched again.
         detail_status = case when v_changed and v_status = any (v_final)
+                                  and (status, home_points, away_points, home_total, away_total,
+                                       home_fulls, away_fulls, home_spares, away_spares,
+                                       home_errors, away_errors, home_set_points, away_set_points)
+                                      is distinct from
+                                      (v_status, (v_home->>'points')::numeric,
+                                       (v_away->>'points')::numeric, (v_home->>'total')::integer,
+                                       (v_away->>'total')::integer, (v_home->>'fulls')::integer,
+                                       (v_away->>'fulls')::integer, (v_home->>'spares')::integer,
+                                       (v_away->>'spares')::integer, (v_home->>'errors')::integer,
+                                       (v_away->>'errors')::integer, (v_home->>'set_points')::numeric,
+                                       (v_away->>'set_points')::numeric)
                              then null else detail_status end,
+        detail_queued = case when v_changed then 0 else detail_queued end,
         round_sig = v_sig,
         fetched_at = now()
        where id = v_row.id
@@ -568,11 +543,14 @@ begin
     end if;
   end loop;
 
-  -- A match that turned into one of ours (a team discovered later) leaves.
+  -- A match that turned into one of ours and active (a team discovered or
+  -- switched on later, a time set) leaves.
   delete from league_matches l
    where l.tenant_id = p_tenant and l.competition_slug = p_competition_slug
      and exists (select 1 from priority_slots p
-                  where p.tenant_id = p_tenant and p.import_key = 'cka:' || l.site_match_id);
+                  where p.tenant_id = p_tenant and p.import_key = 'cka:' || l.site_match_id
+                    and not federation_match_switched_off(p.tenant_id, p.home_team_slug,
+                                                          p.away_team_slug));
   get diagnostics v_n = row_count;
   v_deleted := v_deleted + v_n;
   -- The site no longer lists it: only judged from a non-empty list.
@@ -594,6 +572,7 @@ begin
       from league_matches l
      where l.tenant_id = p_tenant and l.competition_slug = p_competition_slug
        and l.status = any (v_final)
+       and l.detail_queued < 3
        and (l.detail_status is null
             or (not (l.detail_status = any (v_final))
                 and l.date >= (now() at time zone 'Europe/Prague')::date - 7))
@@ -608,13 +587,17 @@ begin
     on conflict (dedupe_key) do update
       set payload = j.payload || jsonb_build_object('slug', excluded.payload->>'slug')
       where j.payload->>'slug' is distinct from excluded.payload->>'slug'
-    returning (xmax = 0) as fresh
+    returning (xmax = 0) as fresh, (j.payload->>'site_match_id')::integer as sid
+  ), bump as (
+    update league_matches l set detail_queued = l.detail_queued + 1
+      from ins
+     where ins.fresh and l.tenant_id = p_tenant and l.site_match_id = ins.sid
+    returning 1
   )
   select count(*) filter (where fresh) into v_jobs from ins;
 
   return jsonb_build_object('league_inserted', v_inserted, 'league_updated', v_updated,
-                            'league_deleted', v_deleted, 'league_slot_results', v_synced,
-                            'league_detail_jobs', v_jobs);
+                            'league_deleted', v_deleted, 'league_detail_jobs', v_jobs);
 end;
 $$;
 
@@ -663,7 +646,8 @@ begin
                            else (v_home->>'set_points')::numeric end,
     away_set_points = case when v_lagging then away_set_points
                            else (v_away->>'set_points')::numeric end,
-    fetched_at = now(), detail_status = v_new, detail_fetched_at = now()
+    fetched_at = now(), detail_status = v_new, detail_fetched_at = now(),
+    detail_queued = case when v_new = any (v_final) then 0 else detail_queued end
    where id = v_row.id;
 
   delete from league_player_results where match_id = v_row.id;
@@ -2071,9 +2055,10 @@ CREATE OR REPLACE FUNCTION "public"."federation_last_error"("p_tenant" "uuid", "
     LANGUAGE "sql" STABLE SECURITY DEFINER
     SET "search_path" TO 'public'
     AS $$
-  select e.value->>'error'
+  select coalesce(e.value->>'error',
+                  'Zápasy ostatních družstev: ' || (e.value->>'league_error'))
     from jsonb_each(federation_live_report(p_tenant, p_report)) e
-   where e.value ? 'error'
+   where e.value ? 'error' or e.value ? 'league_error'
    order by (e.value->>'at')::timestamptz desc nulls last, e.key
    limit 1
 $$;
@@ -3426,14 +3411,22 @@ begin
             jsonb_build_object('tenant_id', v_league.tenant_id,
                                'site_match_id', v_league.site_match_id,
                                'slug', v_league.site_slug, 'requested_at', now()),
-            now())
+            -- a request sorts before the backfill jobs (the runner takes the
+            -- oldest run_at first): someone is waiting for this one
+            'epoch'::timestamptz)
     on conflict (dedupe_key) do update
       set run_at = least(notification_jobs.run_at, excluded.run_at),
           payload = notification_jobs.payload || jsonb_build_object('requested_at', now())
       where coalesce((notification_jobs.payload->>'requested_at')::timestamptz, '-infinity')
             < now() - v_gap
     returning id into v_job;
-    if v_job is not null then
+    -- One dispatch for a burst (opening Výsledky pokes every refreshable
+    -- match): each would start a whole notify run. The button (force) always
+    -- dispatches.
+    if v_job is not null and (p_force or not exists (
+         select 1 from notification_jobs o
+          where o.kind = 'federation_league_match' and o.id <> v_job
+            and (o.payload->>'requested_at')::timestamptz > now() - interval '10 seconds')) then
       perform trigger_notification_jobs();
     end if;
     return 'queued';
@@ -4984,6 +4977,7 @@ CREATE TABLE IF NOT EXISTS "public"."league_matches" (
     "detail_status" "text",
     "detail_fetched_at" timestamp with time zone,
     "round_sig" "text",
+    "detail_queued" smallint DEFAULT 0 NOT NULL,
     CONSTRAINT "league_matches_status_check" CHECK (("status" = ANY (ARRAY['scheduled'::"text", 'preparation'::"text", 'in_progress'::"text", 'finished'::"text", 'forfeit'::"text"])))
 );
 

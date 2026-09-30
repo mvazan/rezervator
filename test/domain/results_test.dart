@@ -826,15 +826,29 @@ void main() {
         ours(1, '2026-10-10', 3),
         ours(2, '2026-10-10', 3, parent: 'slot1'),
         ours(3, '2026-10-10', 3, comp: 'other-comp'),
+        ours(4, '2026-10-10', 3),
       ];
       final r = competitionMatches(slots, [
         league(9001, '2026-10-10', 3),
-        // Already one of ours: listed once, as ours.
-        league(1, '2026-10-10', 3),
         league(9004, '2026-10-10', 3, comp: 'other'),
       ], slug);
-      expect(r.matches.map((m) => m.id), ['slot1', 'lg9001']);
+      expect(r.matches.map((m) => m.id), ['slot1', 'slot4', 'lg9001']);
       expect(r.foreignIds, {'lg9001'});
+    });
+
+    test('a switched-off team\'s slot that also has a league row (same site '
+        'id) is one tile: the league one', () {
+      final slots = [
+        ours(1, '2026-10-10', 3),
+        ours(2, '2026-10-17', 4),
+      ];
+      final r = competitionMatches(slots, [
+        // The server kept the row (with its details) of the switched-off
+        // team's match; the slot 1 of the same site match is not listed.
+        league(1, '2026-10-10', 3),
+      ], slug);
+      expect(r.matches.map((m) => m.id), ['slot2', 'lg1']);
+      expect(r.foreignIds, {'lg1'});
     });
 
     test('rounds are grouped and ordered by their dates, not their numbers', () {
@@ -842,16 +856,17 @@ void main() {
         ours(1, '2026-10-17', 4),
         ours(2, '2026-10-03', 5),
       ], [
-        league(9001, '2026-10-10', 3),
-        league(9002, '2026-10-10', 3, home: 'KK Á', away: 'KK C'),
+        league(9001, '2026-10-10', 3, home: 'KK Hvězda'),
+        league(9002, '2026-10-10', 3, home: 'KK Chodov', away: 'KK C'),
         league(9003, '2026-10-03', 5, startsAt: '09:00:00'),
       ], slug).matches;
       final rounds = competitionRounds(all);
       // 5th round first (3. 10.), then the 3rd (10. 10.), the 4th (17. 10.).
       expect(rounds.map((g) => g.round), [5, 3, 4]);
       expect(rounds[0].matches.map((m) => m.id), ['lg9003', 'slot2']);
-      // Inside a round: the same time → Czech title order.
-      expect(rounds[1].matches.map((m) => m.homeTeam), ['KK A', 'KK Á']);
+      // Inside a round: the same time → Czech title order (H before Ch,
+      // which plain compareTo gets the other way round).
+      expect(rounds[1].matches.map((m) => m.homeTeam), ['KK Hvězda', 'KK Chodov']);
     });
 
     test('a round played over several days spans them', () {

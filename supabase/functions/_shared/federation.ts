@@ -96,6 +96,14 @@ const num = (v: unknown): number | null => (typeof v === "number" ? v : null);
 const str = (v: unknown): string | null =>
   typeof v === "string" && !v.startsWith("$") ? v : null;
 
+/** The site's start time, only when it is exactly HH:MM: an empty string,
+ * "TBD" or "9:00" count as no time (null), so nothing downstream — the
+ * `::time` cast in SQL, `endTime`, `pragueEpoch` — ever sees a malformed one. */
+const clock = (v: unknown): string | null => {
+  const t = str(v);
+  return t !== null && /^\d{2}:\d{2}$/.test(t) ? t : null;
+};
+
 function team(v: unknown): SiteTeam {
   const t = v as Json;
   const slug = str(t?.slug);
@@ -124,7 +132,7 @@ function siteMatch(v: unknown): SiteMatch {
   }
   const c = m.competition as Json;
   return {
-    id: m.id, slug, date, time: str(m.time) || null,
+    id: m.id, slug, date, time: clock(m.time),
     round: Number(m.round), status: status as MatchStatus,
     matchType: str(m.matchType) ?? "", discipline: str(m.discipline) ?? "",
     videoUrl: str(m.videoUrl), homeTeam: team(m.homeTeam), awayTeam: team(m.awayTeam),

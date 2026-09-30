@@ -254,32 +254,35 @@ typedef RoundGroup = ({
   List<PrioritySlot> matches,
 });
 
-/// The matches of the competition [slug]: our federation matches (a slot
-/// whose site slug is `<slug>-kolo-…`, no Úklid child) plus the [league]
-/// matches — the ones between two teams that are none of ours, as slot views.
-/// [foreignIds] are the league ones; a league match that is one of ours by
-/// now (the two tables may disagree for a moment) is listed once, as ours.
+/// The matches of the competition [slug]: every [league] row of it (0055 —
+/// the matches no ACTIVE team of ours plays: foreign ones, the ones of a
+/// team switched off, ours with no time yet), as slot views, plus our
+/// federation matches (a slot whose site slug is `<slug>-kolo-…`, no Úklid
+/// child) that no league row stands for. [foreignIds] are the league ones.
+/// A switched-off team's match can be both a slot and a league row (the
+/// server keeps the row, with its details): listed once, as the league row.
 ({List<PrioritySlot> matches, Set<String> foreignIds}) competitionMatches(
   List<PrioritySlot> slots,
   List<LeagueMatch> league,
   String slug,
 ) {
+  final rows = [
+    for (final l in league)
+      if (l.competitionSlug == slug) l,
+  ];
+  final leagueSiteIds = {for (final l in rows) l.siteMatchId};
   final ours = [
     for (final s in slots)
       if (s.type.isMatch &&
           s.parentId == null &&
           s.fromFederation &&
-          (s.siteSlug ?? '').startsWith('$slug-kolo-'))
+          (s.siteSlug ?? '').startsWith('$slug-kolo-') &&
+          !leagueSiteIds.contains(s.siteMatchId))
         s,
   ];
-  final ourSiteIds = {for (final s in ours) s.siteMatchId};
-  final foreign = [
-    for (final l in league)
-      if (l.competitionSlug == slug && !ourSiteIds.contains(l.siteMatchId)) l,
-  ];
   return (
-    matches: [...ours, for (final l in foreign) l.asSlot()],
-    foreignIds: {for (final l in foreign) l.id},
+    matches: [...ours, for (final l in rows) l.asSlot()],
+    foreignIds: {for (final l in rows) l.id},
   );
 }
 

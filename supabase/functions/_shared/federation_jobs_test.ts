@@ -1,6 +1,6 @@
 import { assert, assertEquals, assertRejects } from "jsr:@std/assert@1";
 import { pragueEpoch } from "./cancel_token.ts";
-import type { SiteMatch } from "./federation.ts";
+import { parseMatch, resultPayload, type SiteMatch } from "./federation.ts";
 import {
   jobOutcome, matchJobsFor, planClubs, planCompetition, planTeams,
   processFederationJobs, runCompetition, runDiscover, runLeagueMatch, SITE,
@@ -1448,4 +1448,141 @@ Deno.test("planCompetition: a league row carries the admin's name for a team of 
   assertEquals(league[0].home_team, "Naše vypnuté");
   assertEquals(league[0].away_team, "FOREIGN");
   assertEquals(league[0].starts_at, null);
+});
+
+Deno.test("matchJobsFor: a stored match with an empty or missing time is planned at noon, no throw", () => {
+  const now = new Date("2026-10-10T08:30:00Z");
+  for (const time of ["", null]) {
+    matchJobsFor({ matches: [match({ id: 9, time })], statusById: new Map([[9, null]]), now });
+  }
+});
+
+Deno.test("runCompetition: a stored match of ours whose site time became '' does not fail the run; the live match is armed", async () => {
+  const slug = "jihomoravska-divize-2026-2027";
+  const page = competitionPage([
+    match({ id: 1, status: "IN_PROGRESS" }),
+    match({ id: 9, date: "2026-10-17", time: "" }),
+  ]);
+  const { db, rpcs } = fakeCompetitionDb({
+    teams: [ourTeam], legacy: [],
+    stored: [1, 9].map((id) => ({ site_match_id: id, venue_slug: "v", match_results: null })),
+  });
+  const report = await runCompetition(db, async () => page, "t1", slug,
+    new Date("2026-10-10T08:30:00Z")) as Record<string, unknown>;
+  assert(rpcs.some((r) => r.name === "enqueue_federation_match" && r.args.p_site_match_id === 1));
+  assertEquals(report.skipped_no_time, ["TJ Sokol Brno IV – KC Zlín B (2026-10-17): bez času"]);
+  const league = rpcs.find((r) => r.name === "apply_league_matches")!.args.p_matches as
+    { site_match_id: number; starts_at: unknown; home_team: string }[];
+  assertEquals(league.map((l) => [l.site_match_id, l.starts_at, l.home_team]),
+    [[9, null, "TJ Sokol Brno IV A"]]);
+});
+
+Deno.test("runCompetition: a malformed time ('TBD') is none: no NaN slot, no league_error", async () => {
+  const slug = "jihomoravska-divize-2026-2027";
+  const page = competitionPage([
+    match({ id: 1, status: "IN_PROGRESS" }),
+    match({ id: 9, date: "2026-10-17", time: "TBD" }),
+    match({ id: 5, time: "TBD", homeTeam: { id: 7, name: "KK X", slug: "kk-x-muzi" } }),
+  ]);
+  const { db, rpcs } = fakeCompetitionDb({
+    teams: [ourTeam], legacy: [],
+    stored: [1, 9].map((id) => ({ site_match_id: id, venue_slug: "v", match_results: null })),
+  });
+  const report = await runCompetition(db, async () => page, "t1", slug,
+    new Date("2026-10-10T08:30:00Z")) as Record<string, unknown>;
+  assertEquals(report.league_error, undefined);
+  const slots = rpcs.find((r) => r.name === "apply_federation_matches")!.args.p_matches as
+    { ends_at: string }[];
+  assert(slots.every((s) => !s.ends_at.includes("NaN")));
+  const league = rpcs.find((r) => r.name === "apply_league_matches")!.args.p_matches as
+    { site_match_id: number; starts_at: unknown }[];
+  assertEquals(league.map((l) => [l.site_match_id, l.starts_at]).sort(), [[5, null], [9, null]]);
+  assert(rpcs.some((r) => r.name === "enqueue_federation_match" && r.args.p_site_match_id === 1));
+});
+
+Deno.test("planCompetition: league rows carry the admin's team names on BOTH sides, active-timeless included", () => {
+  const away = { id: 1, name: "TJ Sokol Brno IV", slug: "tj-sokol-brno-iv-muzi" };
+  const other = { id: 2, name: "KC Zlín B", slug: "kc-zlin-b-muzi" };
+  const { league } = planCompetition({
+    matches: [
+      match({ id: 5, time: null }),
+      match({ id: 6, time: null, homeTeam: other, awayTeam: away }),
+    ],
+    teams: [ourTeam], legacy: [],
+  });
+  assertEquals(league.map((l) => [l.home_team, l.away_team]),
+    [["TJ Sokol Brno IV A", "KC Zlín B"], ["KC Zlín B", "TJ Sokol Brno IV A"]]);
+  const off = planCompetition({
+    matches: [match({ id: 7, homeTeam: other, awayTeam: away })],
+    teams: [{ ...ourTeam, active: false }], legacy: [],
+  }).league;
+  assertEquals([off[0].home_team, off[0].away_team], ["KC Zlín B", "TJ Sokol Brno IV A"]);
+});
+
+Deno.test("planCompetition: a league row keeps the video link and the round page's totals", () => {
+  const totals = {
+    home: { points: 3, total: 3169, fulls: 2180, spares: 989, errors: 30, set_points: 12.5 },
+    away: { points: 5, total: 3280, fulls: 2193, spares: 1087, errors: 31, set_points: 11.5 },
+  };
+  const { league } = planCompetition({
+    matches: [match({ id: 5, homeTeam: { id: 7, name: "KK X", slug: "kk-x-muzi" },
+      videoUrl: "https://www.youtube.com/watch?v=x", totals })],
+    teams: [], legacy: [],
+  });
+  assertEquals(league[0].video_url, "https://www.youtube.com/watch?v=x");
+  assertEquals([league[0].home, league[0].away], [totals.home, totals.away]);
+});
+
+// What runLeagueMatch hands apply_league_result, and how a failure ends the job.
+function leagueDb(rpcResult: { data: unknown; error: { message: string } | null }) {
+  const rpcs: { name: string; args: Record<string, unknown> }[] = [];
+  const db = {
+    from() {
+      // deno-lint-ignore no-explicit-any
+      const chain: any = { select: () => chain, eq: () => chain, limit: () => chain,
+        then: (ok: (v: unknown) => unknown) => Promise.resolve({ data: [{ id: "lg" }], error: null }).then(ok) };
+      return chain;
+    },
+    rpc(name: string, args: Record<string, unknown>) {
+      rpcs.push({ name, args });
+      return Promise.resolve(rpcResult);
+    },
+  };
+  return { db, rpcs };
+}
+
+Deno.test("runLeagueMatch: apply_league_result gets the tenant, the job's match id and the detail's payload", async () => {
+  const html = fixture("match_substitution.html");
+  const { db, rpcs } = leagueDb({ data: true, error: null });
+  assertEquals(await runLeagueMatch(db, () => Promise.resolve(html), "t1", 4050, "slug"), null);
+  assertEquals(rpcs, [{ name: "apply_league_result",
+    args: { p_tenant: "t1", p_site_match_id: 4050, p_result: resultPayload(parseMatch(html)) } }]);
+});
+
+Deno.test("runLeagueMatch: an RPC error or an unparsable page rejects; false (row gone) ends the job", async () => {
+  const html = fixture("match_substitution.html");
+  await assertRejects(() => runLeagueMatch(leagueDb({ data: null, error: { message: "boom" } }).db,
+    () => Promise.resolve(html), "t1", 4050, "slug"), Error, "boom");
+  await assertRejects(() => runLeagueMatch(leagueDb({ data: true, error: null }).db,
+    () => Promise.resolve("<html>not a match</html>"), "t1", 4050, "slug"));
+  assertEquals(await runLeagueMatch(leagueDb({ data: false, error: null }).db,
+    () => Promise.resolve(html), "t1", 4050, "slug"), null);
+});
+
+Deno.test("processFederationJobs: a league match job that fails is retried with backoff, not dropped", async () => {
+  const slug = "divize-as-2026-2027-kolo-1-tj-sokol-rudna-a-muzi-tj-sokol-vrsovice-a-muzi";
+  const now = new Date("2026-10-01T10:00:00Z");
+  const jobs: FakeJob[] = [{
+    id: 51, kind: "federation_league_match", attempts: 0,
+    run_at: new Date(now.getTime() - 60e3).toISOString(),
+    payload: { tenant_id: "t1", site_match_id: 4859, slug },
+  }];
+  const { db, calls } = fakeJobsDb(jobs, (name) =>
+    name === "apply_league_result" ? { data: null, error: { message: "boom" } } : { data: null, error: null });
+  await processFederationJobs(db, async () => fixture("match_finished.html"), now);
+  const j = jobs.find((x) => x.id === 51);
+  assert(j, "the job is kept");
+  assertEquals(j.attempts, 1);
+  assert(new Date(j.run_at).getTime() > now.getTime(), "run_at pushed into the future");
+  void calls;
 });

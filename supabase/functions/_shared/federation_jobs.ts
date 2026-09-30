@@ -14,8 +14,10 @@ export type Fetcher = (path: string) => Promise<string>;
 export type Db = any;
 
 export type TeamRow = { site_slug: string; name: string; active: boolean };
-/** A match of the competition that none of our teams plays, as
- * apply_league_matches (0055) reads it — from the round page alone. */
+/** A match of the competition that no ACTIVE team of ours plays as a timed
+ * match — foreign, of a switched-off team of ours, or of an active team of
+ * ours with no time yet — as apply_league_matches (0055) reads it, from the
+ * round page alone. */
 export type LeagueRow = {
   site_match_id: number; site_slug: string; date: string; starts_at: string | null;
   home_team: string; away_team: string; home_team_slug: string; away_team_slug: string;
@@ -59,7 +61,7 @@ const LIMITS: [string, number][] = [
   ["federation_match", 10],
   // Last, so live match checks never wait behind venue pages for the budget.
   ["federation_venue", 3],
-  // Very last: the foreign matches of the competitions (0055) never delay ours.
+  // Very last: the league matches of the competitions (0055) never delay ours.
   ["federation_league_match", 5],
 ];
 const MATCH_CONCURRENCY = 3;
@@ -316,8 +318,9 @@ export async function runCompetition(db: Db, get: Fetcher, tenantId: string, slu
   const report = must(await db.rpc("apply_federation_matches", {
     p_tenant: tenantId, p_competition_slug: slug, p_matches: rows, p_keep_ids: keepIds,
   })) as Record<string, unknown>;
-  // The matches no active team of ours plays: the whole competition for
-  // Výsledky (0055). Their detail is fetched once they are finished. A
+  // The matches no active team of ours plays as a timed match (foreign ones,
+  // those of a switched-off team of ours, our active team's with no time
+  // yet): the whole competition for Výsledky (0055). Their detail is fetched once they are finished. A
   // failure here must not cost us our own matches (their jobs are armed
   // below): it is logged and shows in the report, nothing more.
   let leagueReport: Record<string, unknown> = {};
@@ -402,8 +405,9 @@ export async function runMatch(
   return nextCheckpoint(d.status, startOf(d), now);
 }
 
-/** A foreign match of one of our competitions (0055): its detail page once,
- * for the player lines — no re-arm, no live polling; a live one is fetched
+/** A league match of one of our competitions (0055) — foreign, of a
+ * switched-off team of ours, or ours still without a time: its detail page
+ * once, for the player lines — no re-arm, no live polling; a live one is fetched
  * only when somebody asks (refresh_match). Always null: the job is done. */
 export async function runLeagueMatch(
   db: Db, get: Fetcher, tenantId: string, siteMatchId: number, slug: string,
@@ -475,7 +479,7 @@ async function runJob(db: Db, get: Fetcher, kind: string, job: Job, now: Date): 
     return null;
   }
   if (kind === "federation_league_match") {
-    // No last_report entry: a foreign match failing must not lock or colour
+    // No last_report entry: a league match failing must not lock or colour
     // the admin's sync card; the nightly pass queues it again.
     return await runLeagueMatch(db, get, tenant, Number(job.payload.site_match_id),
       String(job.payload.slug));
