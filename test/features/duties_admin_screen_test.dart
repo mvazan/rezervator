@@ -744,6 +744,66 @@ void main() {
       expect(log, ['assign p4 jan,petr']);
     });
 
+    testWidgets('the chosen club is remembered for the next opening',
+        (tester) async {
+      tall(tester);
+      await tester.pumpWidget(
+        app(
+          everyone: [
+            for (final p in profiles)
+              if (p.id == 'jan')
+                Profile(
+                  id: p.id,
+                  displayName: p.displayName,
+                  email: p.email,
+                  role: p.role,
+                  status: p.status,
+                  clubId: 'c1',
+                )
+              else if (p.id == 'petr')
+                Profile(
+                  id: p.id,
+                  displayName: p.displayName,
+                  email: p.email,
+                  role: p.role,
+                  status: p.status,
+                  clubId: 'c2',
+                )
+              else
+                p,
+          ],
+          clubs: const [
+            Club(id: 'c1', name: 'Sokol'),
+            Club(id: 'c2', name: 'Veverky'),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('po 12. 10. – ne 18. 10.'));
+      await tester.pumpAndSettle();
+      await tester.tap(inSheet(find.text('Veverky')));
+      await tester.pump();
+      expect(inSheet(find.text('Jan Novák')), findsNothing);
+      await tester.tap(inSheet(find.text('Uložit')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('po 19. 10. – ne 25. 10.'));
+      await tester.pumpAndSettle();
+      expect(inSheet(find.text('Petr Svoboda')), findsOneWidget);
+      expect(inSheet(find.text('Jan Novák')), findsNothing);
+      expect(
+        tester
+            .widget<ChoiceChip>(
+              find.ancestor(
+                of: inSheet(find.text('Veverky')),
+                matching: find.byType(ChoiceChip),
+              ),
+            )
+            .selected,
+        isTrue,
+      );
+    });
+
     testWidgets('without clubs the sheet shows no chips', (tester) async {
       tall(tester);
       await tester.pumpWidget(app());

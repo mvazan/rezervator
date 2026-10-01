@@ -8,7 +8,9 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../data/local_prefs.dart';
 import '../../../core/ui.dart';
 import '../../../domain/collation.dart';
 import '../../../domain/duties.dart';
@@ -45,7 +47,7 @@ Future<bool?> showDutyAssignSheet(
 
 /// The sheet itself: the players by their count in the duty's season,
 /// fewest first, then Czech-sorted, with a divider between the counts.
-class DutyAssignSheet extends StatefulWidget {
+class DutyAssignSheet extends ConsumerStatefulWidget {
   const DutyAssignSheet({
     super.key,
     required this.periods,
@@ -77,18 +79,26 @@ class DutyAssignSheet extends StatefulWidget {
   final Future<void> Function(String periodId, List<String> userIds) save;
 
   @override
-  State<DutyAssignSheet> createState() => _DutyAssignSheetState();
+  ConsumerState<DutyAssignSheet> createState() => _DutyAssignSheetState();
 }
 
-class _DutyAssignSheetState extends State<DutyAssignSheet> {
+class _DutyAssignSheetState extends ConsumerState<DutyAssignSheet> {
   final _query = TextEditingController();
   late int _index = widget.index;
   late Set<String> _selected = _savedIds(_period);
 
-  /// The club the list is narrowed to: null = everybody, [_noClub] = the
-  /// players without one. Hidden ticks stay ticked.
-  String? _club;
   static const _noClub = '';
+
+  /// The club the list is narrowed to: null = everybody, [_noClub] = the
+  /// players without one. Remembered on the device (the next duty, the next
+  /// opening), unless that club has no chip any more. Hidden ticks stay
+  /// ticked.
+  String? get _club {
+    final saved = ref.watch(dutyClubFilterProvider);
+    if (saved == null) return null;
+    final chips = _chips;
+    return chips.any((c) => c.$1 == saved) ? saved : null;
+  }
 
   /// What the list sorts by: [_savedCounts] as the sheet reached
   /// [_period], kept until it moves on, so a tick never moves a row
@@ -162,17 +172,24 @@ class _DutyAssignSheetState extends State<DutyAssignSheet> {
     ];
   }
 
-  /// „Všichni“ and a chip per club: one row that scrolls sideways when
-  /// the clubs outgrow the sheet.
-  Widget _clubChips() {
+  /// „Všichni“ and a chip per club; empty when there is nothing to choose
+  /// between (one club or none).
+  List<(String?, String)> get _chips {
     final clubs = _chipClubs;
     final chips = <(String?, String)>[
       (null, 'Všichni'),
       for (final c in clubs) (c.id, c.name),
       if (clubs.isNotEmpty && _hasNoClub) (_noClub, 'Bez oddílu'),
     ];
-    // One club or none: nothing to choose between.
-    if (chips.length < 3) return const SizedBox.shrink();
+    return chips.length < 3 ? const [] : chips;
+  }
+
+  /// The chips in one row that scrolls sideways when the clubs outgrow the
+  /// sheet.
+  Widget _clubChips() {
+    final chips = _chips;
+    if (chips.isEmpty) return const SizedBox.shrink();
+    final selected = _club;
     return Padding(
       padding: const EdgeInsets.only(top: 8),
       child: SingleChildScrollView(
@@ -184,8 +201,9 @@ class _DutyAssignSheetState extends State<DutyAssignSheet> {
               if (i > 0) const SizedBox(width: 8),
               ChoiceChip(
                 label: Text(label),
-                selected: _club == id,
-                onSelected: (_) => setState(() => _club = id),
+                selected: selected == id,
+                onSelected: (_) =>
+                    ref.read(dutyClubFilterProvider.notifier).set(id),
               ),
             ],
           ],
