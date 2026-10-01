@@ -49,6 +49,11 @@ String changelogHeading(Release r, {required bool web}) {
 }
 
 const appChangelog = <Release>[
+  Release(null, '1. 10. 2026', [
+    'Zápas, kde družstvo nenastoupilo v plném počtu: Souboje ukážou hráče '
+        '„bez soupeře“ s jeho výkonem a Zápis dopočítá hráči dva dílčí body '
+        'a bod za souboj, které web ČKA nechává prázdné.',
+  ]),
   Release('2.0.0', '30. 9. 2026', [
     'Zápasy a výsledky se nově stahují z výsledkového servisu ČKA — '
         'správce je zapne v Správa → Oddíly.',

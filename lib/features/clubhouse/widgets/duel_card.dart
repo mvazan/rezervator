@@ -20,7 +20,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../../domain/duels.dart';
-import '../../../domain/models.dart' show MatchPlayerResult;
+import '../../../domain/models.dart' show MatchPlayerResult, PlayerLane;
 import '../../../domain/palette.dart';
 import '../../../domain/results.dart';
 import 'lead_color.dart';
@@ -302,11 +302,20 @@ class _Names extends StatelessWidget {
     return Row(
       children: [
         Expanded(
-          child: _PlayerName(duel.home, style: name),
+          child: _PlayerName(
+            duel.home,
+            style: name,
+            emptyLabel: duel.walkover ? 'bez soupeře' : '–',
+          ),
         ),
         const SizedBox(width: 12),
         Expanded(
-          child: _PlayerName(duel.away, style: name, end: true),
+          child: _PlayerName(
+            duel.away,
+            style: name,
+            end: true,
+            emptyLabel: duel.walkover ? 'bez soupeře' : '–',
+          ),
         ),
       ],
     );
@@ -606,8 +615,12 @@ class _LaneEntry extends StatelessWidget {
     // under each other — 1. above 3., 2. above 4.
     final played = lane.played;
     final winner = lane.winner;
+    // A walkover lane (nobody opposite) shows the lone player's number.
+    final solo = lane.soloSide != null;
+    final shown = played || solo;
+    String lanePins(PlayerLane? l) => l?.total == null ? '–' : '${l!.total}';
     final muted = base?.copyWith(color: scheme.onSurfaceVariant);
-    TextStyle? number(MatchSide side) => !played
+    TextStyle? number(MatchSide side) => !shown
         ? muted
         : base?.copyWith(
             fontWeight: winner == side ? FontWeight.w800 : FontWeight.w500,
@@ -625,11 +638,11 @@ class _LaneEntry extends StatelessWidget {
       ),
     );
     Widget dot(MatchSide side) => SizedBox.square(
-      key: played && winner == side
+      key: shown && winner == side
           ? Key('duel-$position-lane-${lane.lane}-dot')
           : null,
       dimension: 6,
-      child: played && winner == side
+      child: shown && winner == side
           ? DecoratedBox(
               decoration: BoxDecoration(
                 color: _mark(
@@ -651,9 +664,9 @@ class _LaneEntry extends StatelessWidget {
           key: Key('duel-$position-lane-${lane.lane}-score'),
           mainAxisSize: MainAxisSize.min,
           children: [
-            number0(played ? '${lane.home!.total}' : '–', MatchSide.home),
-            Text(lane.tie ? ' = ' : ' : ', style: played ? base : muted),
-            number0(played ? '${lane.away!.total}' : '–', MatchSide.away),
+            number0(shown ? lanePins(lane.home) : '–', MatchSide.home),
+            Text(lane.tie ? ' = ' : ' : ', style: shown ? base : muted),
+            number0(shown ? lanePins(lane.away) : '–', MatchSide.away),
           ],
         ),
         const SizedBox(width: 4),
@@ -852,7 +865,15 @@ class _FitWidth extends StatelessWidget {
 /// A duel side's name up to 2 lines, and under it — when someone took over —
 /// the site's „od 41. hodu Miloš Vážan“ in small print.
 class _PlayerName extends StatelessWidget {
-  const _PlayerName(this.player, {required this.style, this.end = false});
+  const _PlayerName(
+    this.player, {
+    required this.style,
+    this.end = false,
+    this.emptyLabel = '–',
+  });
+
+  /// What stands where nobody played („bez soupeře“ in a walkover).
+  final String emptyLabel;
 
   final MatchPlayerResult? player;
   final TextStyle? style;
@@ -869,11 +890,16 @@ class _PlayerName extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(
-          player?.playerName ?? '–',
+          player?.playerName ?? emptyLabel,
           textAlign: end ? TextAlign.end : TextAlign.start,
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
-          style: style,
+          style: player == null && emptyLabel != '–'
+              ? style?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                  fontStyle: FontStyle.italic,
+                )
+              : style,
         ),
         if (change != null)
           Text(

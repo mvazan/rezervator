@@ -1619,4 +1619,83 @@ void main() {
       },
     );
   });
+
+  group('a team one player short', () {
+    MatchPlayerResult pl(String side, int pos, int total, {num? sb, num? tb}) =>
+        MatchPlayerResult.fromJson({
+          'id': '$side$pos',
+          'match_id': 'm1',
+          'side': side,
+          'position': pos,
+          'player_name': '$side $pos',
+          'total': total,
+          'set_points': sb,
+          'team_points': tb,
+          'fulls': total - 70,
+          'spares': 70,
+          'errors': 1,
+          'lanes': [
+            {'lane': 1, 'fulls': 100, 'spares': 30, 'errors': 0, 'total': total ~/ 2, 'setPoints': sb == null ? null : 1},
+            {'lane': 2, 'fulls': 100, 'spares': 30, 'errors': 1, 'total': total - total ~/ 2, 'setPoints': sb == null ? null : 1},
+          ],
+        });
+
+    // The cells of a pairing's Družstvo column (not the 43px team row's).
+    int druzstvoCells(WidgetTester tester) => find
+        .byWidgetPredicate(
+          (w) =>
+              w is Container &&
+              (w.decoration as BoxDecoration?)?.color ==
+                  const Color(0xFFADD8E6) &&
+              w.constraints?.maxHeight != 43.0,
+        )
+        .evaluate()
+        .length;
+
+    List<MatchPlayerResult> lineup(int missingAway) => [
+      for (var pos = 1; pos <= 4; pos++)
+        pl('home', pos, 400 + pos, sb: pos == 4 ? null : 1, tb: pos == 4 ? null : 1),
+      for (var pos = 1; pos <= 4; pos++)
+        if (pos != missingAway) pl('away', pos, 380 + pos, sb: 0, tb: 0),
+    ];
+
+    for (final missing in [4, 3]) {
+      testWidgets('position $missing of 4 empty on one side: the block is '
+          'drawn as a whole empty table, like any other', (tester) async {
+        // Position 4 of the home side has no sb/tb in this lineup; for the
+        // middle gap the lone player is home 3 — keep the same owed points.
+        final players = lineup(missing);
+        await tester.pumpWidget(app(result: result, players: players));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        // Four pairings, a Družstvo cell on each side of each: no side is
+        // one blank white cell any more.
+        expect(druzstvoCells(tester), 8);
+      });
+    }
+
+    testWidgets('the lone player is shown the points the site leaves blank: '
+        'the sheet reads as if the site had given 2 set points and the point',
+        (tester) async {
+      Future<List<String?>> texts(List<MatchPlayerResult> players) async {
+        await tester.pumpWidget(app(result: result, players: players));
+        await tester.pumpAndSettle();
+        return [
+          for (final t in tester.widgetList<Text>(find.byType(Text))) t.data,
+        ];
+      }
+
+      final blank = await texts(lineup(4));
+      final given = await texts([
+        for (final p in lineup(4))
+          if (p.side == 'home' && p.position == 4)
+            pl('home', 4, 404, sb: 2, tb: 1)
+          else
+            p,
+      ]);
+      expect(blank, given);
+      // ... and the blank one really had nothing to infer from.
+      expect(lineup(4).firstWhere((p) => p.position == 4).setPoints, isNull);
+    });
+  });
 }

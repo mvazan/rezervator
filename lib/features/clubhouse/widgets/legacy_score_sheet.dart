@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../core/theme.dart' show appFontFamily;
+import '../../../domain/duels.dart';
 import '../../../domain/models.dart';
 import '../../../domain/results.dart';
 
@@ -194,6 +195,8 @@ class LegacyScoreSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (result == null && players.isEmpty) return const SizedBox.shrink();
+    // A lone player's blank points are filled in (see [withWalkoverPoints]).
+    final shown = withWalkoverPoints(players);
     final theme = Theme.of(context);
 
     return Column(
@@ -216,7 +219,7 @@ class LegacyScoreSheet extends StatelessWidget {
                       builder: (_) => LegacyScoreSheetPage(
                         slot: slot,
                         result: result,
-                        players: players,
+                        players: shown,
                       ),
                     ),
                   ),
@@ -231,11 +234,11 @@ class LegacyScoreSheet extends StatelessWidget {
             child: _ScoreTableBody(
               slot: slot,
               result: result,
-              players: players,
+              players: shown,
               geometry: _SheetGeometry.natural(
                 slot: slot,
                 result: result,
-                players: players,
+                players: shown,
               ),
             ),
           ),
@@ -1255,35 +1258,17 @@ class _ScoreTableBody extends StatelessWidget {
     int laneRowCount,
     double blockHeight,
   ) {
-    if (player == null) {
-      // Ragged data (a position only the other side fielded): one blank
-      // bordered cell spanning the FULL block height — matching the other
-      // side's height, so there's no unpainted/unbordered gap below it
-      // (Fix round 5, item 5's same reasoning applied to a wholly missing
-      // side, not just an uneven lane count).
-      final width =
-          m.nameWidth +
-          m.serieWidth +
-          m.plneWidth +
-          m.dorWidth +
-          m.chWidth +
-          m.celkemColWidth +
-          m.dilciWidth +
-          m.druzstvoWidth;
-      return _cell(
-        width: width,
-        height: blockHeight,
-        bg: _kWhite,
-        text: '',
-        style: _s10w400,
-      );
-    }
+    // A side nobody fielded (a team came one player short) is drawn as the
+    // same empty table block — blank name, lane rows, Celkem row and Družstvo
+    // cell — so the layout never depends on which position is missing.
+    final empty = player == null;
+    String pts(num? v) => empty ? '' : numLabel(v);
 
-    final realLaneCount = player.lanes.length;
+    final realLaneCount = player?.lanes.length ?? 0;
     // A lone 23px lane row can't hold the 16px name — it goes into the Celkem
     // row then, the same as with no lane rows at all.
     final nameInLaneRows = laneRowCount >= 2;
-    final changed = _nameLines(player) > 1;
+    final changed = player != null && _nameLines(player) > 1;
 
     Widget laneRow(PlayerLane? lane) {
       // A filler row when this side threw fewer lanes than the other side
@@ -1331,7 +1316,9 @@ class _ScoreTableBody extends StatelessWidget {
             width: m.dilciWidth,
             height: _laneRowHeight,
             bg: _kStatsPurple,
-            text: lane == null ? '' : numLabel(lane.setPoints),
+            text: lane == null
+                ? ''
+                : numLabel(lane.setPoints),
             style: geometry.styles.laneValue,
           ),
         ],
@@ -1351,28 +1338,28 @@ class _ScoreTableBody extends StatelessWidget {
           width: m.plneWidth,
           height: _celkemRowHeight,
           bg: _kStatsPurple,
-          text: numLabel(player.fulls),
+          text: pts(player?.fulls),
           style: geometry.styles.playerSum,
         ),
         _cell(
           width: m.dorWidth,
           height: _celkemRowHeight,
           bg: _kStatsPurple,
-          text: numLabel(player.spares),
+          text: pts(player?.spares),
           style: geometry.styles.playerSum,
         ),
         _cell(
           width: m.chWidth,
           height: _celkemRowHeight,
           bg: _kStatsPurple,
-          text: numLabel(player.errors),
+          text: pts(player?.errors),
           style: geometry.styles.playerSum,
         ),
         _cell(
           width: m.celkemColWidth,
           height: _celkemRowHeight,
           bg: _kRegCellBlue,
-          text: numLabel(player.total),
+          text: pts(player?.total),
           style: geometry.styles.playerTotal,
           color: _kCelkemTotalRed,
         ),
@@ -1380,7 +1367,7 @@ class _ScoreTableBody extends StatelessWidget {
           width: m.dilciWidth,
           height: _celkemRowHeight,
           bg: _kRegCellBlue,
-          text: numLabel(player.setPoints),
+          text: pts(player?.setPoints),
           style: geometry.styles.playerSetPoints,
         ),
       ],
@@ -1396,7 +1383,7 @@ class _ScoreTableBody extends StatelessWidget {
                 width: m.nameWidth,
                 height: laneRowCount * _laneRowHeight,
                 bg: _kNameCellGrey,
-                text: nameInLaneRows && !changed ? player.playerName : '',
+                text: nameInLaneRows && !changed ? (player?.playerName ?? '') : '',
                 span: nameInLaneRows && changed
                     ? _nameSpan(player, _s16w700.copyWith(color: _kBlack))
                     : null,
@@ -1404,7 +1391,7 @@ class _ScoreTableBody extends StatelessWidget {
                 align: TextAlign.left,
                 maxLines: math.max(
                   geometry.laneNameMaxLines(laneRowCount),
-                  _nameLines(player),
+                  player == null ? 1 : _nameLines(player),
                 ),
               ),
             _cell(
@@ -1416,7 +1403,7 @@ class _ScoreTableBody extends StatelessWidget {
               // stretched height holds full screen.
               height: _celkemRowHeight,
               bg: _kRegCellBlue,
-              text: !nameInLaneRows && !changed ? player.playerName : '',
+              text: !nameInLaneRows && !changed ? (player?.playerName ?? '') : '',
               span: !nameInLaneRows && changed
                   ? _nameSpan(player, _s16w700.copyWith(color: _kBlack))
                   : null,
@@ -1424,7 +1411,7 @@ class _ScoreTableBody extends StatelessWidget {
               align: TextAlign.left,
               maxLines: math.max(
                 geometry.celkemNameMaxLines,
-                _nameLines(player),
+                player == null ? 1 : _nameLines(player),
               ),
             ),
           ],
@@ -1432,7 +1419,7 @@ class _ScoreTableBody extends StatelessWidget {
         Column(
           children: [
             for (var i = 0; i < laneRowCount; i++)
-              laneRow(i < realLaneCount ? player.lanes[i] : null),
+              laneRow(player != null && i < realLaneCount ? player.lanes[i] : null),
             celkemRow,
           ],
         ),
@@ -1440,7 +1427,7 @@ class _ScoreTableBody extends StatelessWidget {
           width: m.druzstvoWidth,
           height: blockHeight,
           bg: _kDruzstvoBlue,
-          text: numLabel(player.teamPoints),
+          text: pts(player?.teamPoints),
           style: geometry.styles.summaryBold,
         ),
       ],
@@ -1650,7 +1637,7 @@ class _FillViewerState extends State<_FillViewer> {
               child: _ScoreTableBody(
                 slot: widget.slot,
                 result: widget.result,
-                players: widget.players,
+                players: withWalkoverPoints(widget.players),
                 geometry: geometry,
               ),
             ),
