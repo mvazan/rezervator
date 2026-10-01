@@ -19,6 +19,7 @@ import '../clubhouse/notice_board_screen.dart';
 import '../profile/profile_screen.dart';
 import 'my_trainings_screen.dart';
 import 'week_screen.dart';
+import '../../core/push_screen.dart';
 
 /// The signed-in home: three views — Můj přehled, the calendar and Klubovna
 /// — behind bottom tabs on a narrow screen and a rail on a wide one. Which
@@ -94,26 +95,23 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     ref.read(pendingLinkProvider.notifier).clear();
     final tenantId = ref.read(myProfileProvider).value?.tenantId;
     if (link.tenantId != null && link.tenantId != tenantId) return;
-    final navigator = Navigator.of(context);
     switch (link.kind) {
       case PendingLinkKind.message:
-        navigator.push(MaterialPageRoute<void>(
-            builder: (_) => MessageDetailScreen(link.id,
-                messageExists: widget.messageExists)));
+        pushScreen<void>(
+            context,
+            (_) => MessageDetailScreen(link.id,
+                messageExists: widget.messageExists));
       case PendingLinkKind.notice:
         // Notices have no per-item page: the board is the detail, since
         // every player sees every notice there.
-        navigator.push(MaterialPageRoute<void>(
-            builder: (_) => const NoticeBoardScreen()));
+        pushScreen<void>(context, (_) => const NoticeBoardScreen());
         unawaited(_snackIfNoticeGone(link.id));
       case PendingLinkKind.pendingPlayer:
         // The admin's list, where the new player waits for approval.
-        navigator.push(
-            MaterialPageRoute<void>(builder: (_) => const PlayersScreen()));
+        pushScreen<void>(context, (_) => const PlayersScreen());
       case PendingLinkKind.pendingTenant:
         // The superadmin's list of kuželny, the new one at the top.
-        navigator.push(
-            MaterialPageRoute<void>(builder: (_) => const TenantsScreen()));
+        pushScreen<void>(context, (_) => const TenantsScreen());
     }
   }
 
@@ -174,17 +172,13 @@ class _HomeShellState extends ConsumerState<HomeShell> {
           icon: const Icon(Icons.admin_panel_settings_outlined),
           tooltip: 'Správa',
           visualDensity: VisualDensity.compact,
-          onPressed: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const AdminScreen()),
-          ),
+          onPressed: () => pushScreen(context, (_) => const AdminScreen()),
         ),
       IconButton(
         icon: const Icon(Icons.account_circle_outlined),
         tooltip: 'Můj profil',
         visualDensity: VisualDensity.compact,
-        onPressed: () => Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const ProfileScreen()),
-        ),
+        onPressed: () => pushScreen(context, (_) => const ProfileScreen()),
       ),
     ];
 

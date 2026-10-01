@@ -26,6 +26,7 @@ import 'widgets/duel_card.dart';
 import 'widgets/legacy_score_sheet.dart';
 import 'widgets/match_scoreboard.dart';
 import 'widgets/team_totals_card.dart';
+import '../../core/push_screen.dart';
 
 class MatchDetailScreen extends ConsumerStatefulWidget {
   const MatchDetailScreen({
@@ -498,11 +499,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
           now: now,
           onVenueTap: venueMatch == null
               ? null
-              : () => Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => VenueDetailScreen(slug: venueMatch.slug),
-                  ),
-                ),
+              : () => pushScreen(context, (_) => VenueDetailScreen(slug: venueMatch.slug)),
           homeColor: homeColor,
           awayColor: awayColor,
           video: videoInScoreboard

@@ -16,6 +16,7 @@ import 'report_screen.dart';
 import 'schedule_screen.dart';
 import 'tenants_screen.dart';
 import 'widgets/admin_scaffold.dart';
+import '../../core/push_screen.dart';
 
 /// One admin hub entry: label + icon + target screen.
 typedef _Entry = ({String label, IconData icon, Widget Function() screen});
@@ -78,9 +79,7 @@ class AdminScreen extends ConsumerWidget {
     ),
   ];
 
-  void _open(BuildContext context, _Entry entry) => Navigator.of(
-    context,
-  ).push(MaterialPageRoute(builder: (_) => entry.screen()));
+  void _open(BuildContext context, _Entry entry) => pushScreen(context, (_) => entry.screen());
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -104,8 +103,7 @@ class AdminScreen extends ConsumerWidget {
     final homeName = isVisiting
         ? ref.watch(tenantNameProvider(profile!.homeTenantId)).value
         : null;
-    void openTenants() => Navigator.of(context)
-        .push(MaterialPageRoute(builder: (_) => const TenantsScreen()));
+    void openTenants() => pushScreen(context, (_) => const TenantsScreen());
     Future<void> goHome() async {
       final ok = await tryAction(
         context,

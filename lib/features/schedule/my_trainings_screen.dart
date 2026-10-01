@@ -16,6 +16,7 @@ import '../clubhouse/widgets/message_composers.dart' show dutyReachableToday;
 import '../profile/profile_screen.dart';
 import 'cancel_own_reservation.dart';
 import 'widgets/home_header.dart';
+import '../../core/push_screen.dart';
 
 /// Fixed-width, centred slot every list row's leading sits in, so the match
 /// trophy dots and the training T line up down one straight column however
@@ -173,9 +174,7 @@ class _MyTrainingsScreenState extends ConsumerState<MyTrainingsScreen> {
           'Můj profil → Moje týmy.',
           style: theme.textTheme.bodySmall,
         ),
-        onTap: () => Navigator.of(
-          context,
-        ).push(MaterialPageRoute(builder: (_) => const ProfileScreen())),
+        onTap: () => pushScreen(context, (_) => const ProfileScreen()),
       );
 
   @override
@@ -435,13 +434,9 @@ class _MyTrainingsScreenState extends ConsumerState<MyTrainingsScreen> {
                           onTap:
                               item.slot.fromFederation &&
                                   hasScoreData(results[item.slot.id])
-                              ? () => Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) => MatchDetailScreen(
+                              ? () => pushScreen(context, (_) => MatchDetailScreen(
                                       matchId: item.slot.id,
-                                    ),
-                                  ),
-                                )
+                                    ))
                               : null,
                         ),
                       },

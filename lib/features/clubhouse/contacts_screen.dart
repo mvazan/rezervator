@@ -15,6 +15,7 @@ import '../../domain/models.dart';
 import '../../domain/phone.dart';
 import '../admin/widgets/form_fields.dart' show ColorDot;
 import '../profile/profile_screen.dart';
+import '../../core/push_screen.dart';
 
 Widget _profilePage(BuildContext _) => const ProfileScreen();
 
@@ -51,8 +52,7 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
   }
 
   Future<void> _openProfile() async {
-    await Navigator.of(context)
-        .push(MaterialPageRoute<void>(builder: widget.profilePage));
+    await pushScreen<void>(context, widget.profilePage);
     // A switch just flipped there shows here at once.
     if (mounted) ref.invalidate(contactsProvider);
   }

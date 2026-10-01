@@ -22,6 +22,7 @@ import '../schedule/my_trainings_screen.dart' show MatchTrophy;
 import 'match_detail_screen.dart';
 import 'widgets/match_title.dart';
 import 'widgets/match_video_icon.dart';
+import '../../core/push_screen.dart';
 
 class ResultsScreen extends ConsumerStatefulWidget {
   const ResultsScreen({
@@ -119,15 +120,11 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
     BuildContext context,
     PrioritySlot slot, {
     String? competitionSlug,
-  }) => Navigator.of(context).push(
-    MaterialPageRoute(
-      builder: (_) => MatchDetailScreen(
+  }) => pushScreen(context, (_) => MatchDetailScreen(
         matchId: slot.id,
         competitionSlug: competitionSlug,
         siteMatchId: slot.siteMatchId,
-      ),
-    ),
-  );
+      ));
 
   /// The matches worth refreshing now: ours while they are live, a league
   /// match ([refreshableForeign] holds their ids) in its refresh window —
