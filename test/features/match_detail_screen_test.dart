@@ -537,15 +537,18 @@ void main() {
     expect(find.byIcon(Icons.open_in_new), findsOneWidget);
 
     // Na webu ČKA sits at the right of the „Výsledky z webu“ line, on its
-    // row; the video button keeps its own line below.
+    // row; the video button stands in the scoreboard, where the status chip
+    // („Dokončeno“) would be, so above that line.
     final site = tester.getRect(find.text('Na webu ČKA'));
     final fresh = tester.getRect(find.textContaining('Výsledky z webu'));
     expect((site.center.dy - fresh.center.dy).abs(), lessThan(12));
     expect(site.left, greaterThan(fresh.right));
-    expect(
-      tester.getRect(find.text('Záznam')).center.dy,
-      greaterThan(site.bottom),
-    );
+    expect(find.text('Dokončeno'), findsNothing);
+    final date = tester.getRect(find.textContaining('·').first);
+    final record = tester.getRect(find.text('Záznam'));
+    expect(record.center.dy, lessThan(fresh.top));
+    expect((record.center.dy - date.center.dy).abs(), lessThan(24));
+    expect(record.left, greaterThan(date.right));
   });
 
   testWidgets('no video/site data hides the buttons', (tester) async {
@@ -639,7 +642,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Sledovat živě'), findsOneWidget);
-      // Scoped to the button: the scoreboard's Živě chip has a dot too.
+      // Scoped to the button (the chip's own dot is gone with the chip).
       expect(
         find.descendant(
           of: find.bySubtype<FilledButton>(),
@@ -648,6 +651,10 @@ void main() {
         findsOneWidget,
       );
       expect(find.byIcon(Icons.play_circle_fill), findsNothing);
+      // The button took the „Živě · …“ chip's place, so the freshness
+      // moves to the line below.
+      expect(find.textContaining('Živě ·'), findsNothing);
+      expect(find.textContaining('Výsledky z webu'), findsOneWidget);
     },
   );
 
@@ -1304,8 +1311,7 @@ void main() {
     );
 
     testWidgets(
-      'each side takes its colour from my team colours, else green for home '
-      'and red for the guests',
+      'green for home and red for the guests, whatever my team colours are',
       (tester) async {
         _tall(tester);
         await tester.pumpWidget(
@@ -1314,22 +1320,10 @@ void main() {
         await tester.pumpAndSettle();
 
         final card = tester.widget<DuelCard>(find.byType(DuelCard).first);
-        expect(card.homeColor, googleEventColorOf(5));
+        expect(card.homeColor, homeSideColor);
         expect(card.awayColor, awaySideColor);
       },
     );
-
-    testWidgets('without team colours: green for home, red for the guests', (
-      tester,
-    ) async {
-      _tall(tester);
-      await tester.pumpWidget(rudna());
-      await tester.pumpAndSettle();
-
-      final card = tester.widget<DuelCard>(find.byType(DuelCard).first);
-      expect(card.homeColor, homeSideColor);
-      expect(card.awayColor, awaySideColor);
-    });
 
     testWidgets('on a wide window the column is centred, at most 720dp', (
       tester,

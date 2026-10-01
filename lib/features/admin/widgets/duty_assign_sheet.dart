@@ -1,13 +1,16 @@
 /// The assign sheet of Správa → Služby (0050): who works one duty. Every
 /// player with a checkbox, those with the fewest duties in the duty's
 /// season on top, then Czech-sorted, a divider between the counts;
-/// searchable by name or nick without diacritics, each with their count
+/// narrowed by club (oddíl) with chips, searchable by name or nick without
+/// diacritics, each with their count
 /// („2×“) so the admin balances while picking. „Uložit a další“ saves and
 /// moves straight to the next duty.
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../data/local_prefs.dart';
 import '../../../core/ui.dart';
 import '../../../domain/collation.dart';
 import '../../../domain/duties.dart';
@@ -24,6 +27,7 @@ Future<bool?> showDutyAssignSheet(
   required List<DutyAssignment> assignments,
   required List<DutySeason> seasons,
   required List<Profile> roster,
+  List<Club> clubs = const [],
   required Day today,
   required Future<void> Function(String periodId, List<String> userIds) save,
 }) => showModalBottomSheet<bool>(
@@ -35,6 +39,7 @@ Future<bool?> showDutyAssignSheet(
     assignments: assignments,
     seasons: seasons,
     roster: roster,
+    clubs: clubs,
     today: today,
     save: save,
   ),
@@ -42,7 +47,7 @@ Future<bool?> showDutyAssignSheet(
 
 /// The sheet itself: the players by their count in the duty's season,
 /// fewest first, then Czech-sorted, with a divider between the counts.
-class DutyAssignSheet extends StatefulWidget {
+class DutyAssignSheet extends ConsumerStatefulWidget {
   const DutyAssignSheet({
     super.key,
     required this.periods,
@@ -50,6 +55,7 @@ class DutyAssignSheet extends StatefulWidget {
     required this.assignments,
     required this.seasons,
     required this.roster,
+    this.clubs = const [],
     required this.today,
     required this.save,
   });
@@ -65,17 +71,34 @@ class DutyAssignSheet extends StatefulWidget {
   /// The players to offer (`dutyRoster`), Czech-sorted — the order a save
   /// sends them in; the list sorts by count first.
   final List<Profile> roster;
+
+  /// The alley's clubs, for the filter chips; only those with a player in
+  /// [roster] get one.
+  final List<Club> clubs;
   final Day today;
   final Future<void> Function(String periodId, List<String> userIds) save;
 
   @override
-  State<DutyAssignSheet> createState() => _DutyAssignSheetState();
+  ConsumerState<DutyAssignSheet> createState() => _DutyAssignSheetState();
 }
 
-class _DutyAssignSheetState extends State<DutyAssignSheet> {
+class _DutyAssignSheetState extends ConsumerState<DutyAssignSheet> {
   final _query = TextEditingController();
   late int _index = widget.index;
   late Set<String> _selected = _savedIds(_period);
+
+  static const _noClub = '';
+
+  /// The club the list is narrowed to: null = everybody, [_noClub] = the
+  /// players without one. Remembered on the device (the next duty, the next
+  /// opening), unless that club has no chip any more. Hidden ticks stay
+  /// ticked.
+  String? get _club {
+    final saved = ref.watch(dutyClubFilterProvider);
+    if (saved == null) return null;
+    final chips = _chips;
+    return chips.any((c) => c.$1 == saved) ? saved : null;
+  }
 
   /// What the list sorts by: [_savedCounts] as the sheet reached
   /// [_period], kept until it moves on, so a tick never moves a row
@@ -110,15 +133,83 @@ class _DutyAssignSheetState extends State<DutyAssignSheet> {
 
   static String _fold(String s) => foldDiacritics(s).toLowerCase();
 
-  /// The roster narrowed by the search, name or nick, accent- and
-  /// case-insensitive. Hidden ticks stay ticked.
+  /// The clubs with a player in the roster, Czech-sorted — a club nobody
+  /// of the roster belongs to would be a chip to an empty list.
+  List<Club> get _chipClubs {
+    final used = {for (final p in widget.roster) p.clubId};
+    return [
+      for (final c in widget.clubs)
+        if (used.contains(c.id)) c,
+    ]..sort((a, b) => compareCzech(a.name, b.name));
+  }
+
+  /// Whether some player of the roster has no club (or a deleted one).
+  bool get _hasNoClub {
+    final known = {for (final c in widget.clubs) c.id};
+    return widget.roster.any((p) => !known.contains(p.clubId));
+  }
+
+  bool _inClub(Profile p) {
+    final club = _club;
+    if (club == null) return true;
+    if (club == _noClub) {
+      return !widget.clubs.any((c) => c.id == p.clubId);
+    }
+    return p.clubId == club;
+  }
+
+  /// The roster narrowed by the club and the search, name or nick, accent-
+  /// and case-insensitive. Hidden ticks stay ticked.
   List<Profile> get _matches {
     final q = _fold(_query.text.trim());
-    if (q.isEmpty) return widget.roster;
     return [
       for (final p in widget.roster)
-        if (_fold(p.displayName).contains(q) || _fold(p.nick).contains(q)) p,
+        if (_inClub(p) &&
+            (q.isEmpty ||
+                _fold(p.displayName).contains(q) ||
+                _fold(p.nick).contains(q)))
+          p,
     ];
+  }
+
+  /// „Všichni“ and a chip per club; empty when there is nothing to choose
+  /// between (one club or none).
+  List<(String?, String)> get _chips {
+    final clubs = _chipClubs;
+    final chips = <(String?, String)>[
+      (null, 'Všichni'),
+      for (final c in clubs) (c.id, c.name),
+      if (clubs.isNotEmpty && _hasNoClub) (_noClub, 'Bez oddílu'),
+    ];
+    return chips.length < 3 ? const [] : chips;
+  }
+
+  /// The chips in one row that scrolls sideways when the clubs outgrow the
+  /// sheet.
+  Widget _clubChips() {
+    final chips = _chips;
+    if (chips.isEmpty) return const SizedBox.shrink();
+    final selected = _club;
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Row(
+          children: [
+            for (final (i, (id, label)) in chips.indexed) ...[
+              if (i > 0) const SizedBox(width: 8),
+              ChoiceChip(
+                label: Text(label),
+                selected: selected == id,
+                onSelected: (_) =>
+                    ref.read(dutyClubFilterProvider.notifier).set(id),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 
   /// Duties per player in [_period]'s season, [_period] itself left out;
@@ -258,6 +349,7 @@ class _DutyAssignSheetState extends State<DutyAssignSheet> {
                   ),
                 ),
               ),
+              _clubChips(),
               const SizedBox(height: 8),
               Flexible(
                 child: groups.isEmpty

@@ -13,6 +13,7 @@ import '../core/theme_choice.dart';
 const _themeChoiceKey = 'theme_choice';
 const _textSizeKey = 'text_size';
 const _matchDetailViewKey = 'match_detail_view';
+const _dutyClubFilterKey = 'duty_club_filter';
 
 /// The appearance chosen in Settings. Device-local: it's about how the
 /// screen looks, not about the team.
@@ -172,6 +173,43 @@ class MatchDetailViewNotifier extends Notifier<MatchDetailView> {
     } catch (_) {
       // Best effort only — the in-memory choice still applies this session.
     }
+  }
+}
+
+/// The club chip picked last in Správa → Služby's assign sheet, so an admin
+/// assigning several duties in a row keeps the same club: a club id, `''`
+/// for „Bez oddílu“, null for „Všichni“. Device-local.
+final dutyClubFilterProvider =
+    NotifierProvider<DutyClubFilterNotifier, String?>(
+        DutyClubFilterNotifier.new);
+
+class DutyClubFilterNotifier extends Notifier<String?> {
+  @override
+  String? build() {
+    _load();
+    return null;
+  }
+
+  Future<void> _load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (!ref.mounted) return;
+      state = prefs.getString(_dutyClubFilterKey);
+    } catch (_) {
+      // Best effort only — the default (everybody) applies.
+    }
+  }
+
+  Future<void> set(String? club) async {
+    state = club;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (club == null) {
+        await prefs.remove(_dutyClubFilterKey);
+      } else {
+        await prefs.setString(_dutyClubFilterKey, club);
+      }
+    } catch (_) {}
   }
 }
 

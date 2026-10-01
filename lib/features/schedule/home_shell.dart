@@ -22,9 +22,8 @@ import 'week_screen.dart';
 
 /// The signed-in home: three views — Můj přehled, the calendar and Klubovna
 /// — behind bottom tabs on a narrow screen and a rail on a wide one. Which
-/// one opens at launch is the profile's choice (between the first two only
-/// — Klubovna is a tab, not a launch target); a tap changes it for this run
-/// only. All three views stay mounted (an IndexedStack, not a switch) so
+/// one opens at launch is the profile's choice; a tap changes it for this
+/// run only. All three views stay mounted (an IndexedStack, not a switch) so
 /// paging the calendar forward and glancing at the list never loses the
 /// week/day position — the hidden views keep rebuilding on the minute tick,
 /// which is cheap enough to leave running offstage.

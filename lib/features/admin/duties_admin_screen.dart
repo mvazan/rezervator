@@ -123,6 +123,7 @@ class DutiesAdminScreen extends ConsumerWidget {
     DutyData data,
     DutyPeriod period,
     Day today,
+    List<Club> clubs,
   ) async {
     final saved = await showDutyAssignSheet(
       context,
@@ -131,6 +132,7 @@ class DutiesAdminScreen extends ConsumerWidget {
       assignments: data.assignments,
       seasons: data.seasons,
       roster: dutyRoster(data.profiles),
+      clubs: clubs,
       today: today,
       save: api.setAssignees,
     );
@@ -264,13 +266,14 @@ class DutiesAdminScreen extends ConsumerWidget {
     BuildContext context,
     DutyData data,
     DutyPeriod period,
-    Day today, {
+    Day today,
+    List<Club> clubs, {
     required bool assigned,
   }) => PopupMenuButton<String>(
     onSelected: (action) {
       switch (action) {
         case 'assign':
-          _assign(context, data, period, today);
+          _assign(context, data, period, today, clubs);
         case 'edit':
           _editPeriod(context, data.periods, today, existing: period);
         case 'delete':
@@ -289,6 +292,7 @@ class DutiesAdminScreen extends ConsumerWidget {
     DutyData data,
     ScheduleSettings? settings,
     Day today,
+    List<Club> clubs,
   ) {
     final theme = Theme.of(context);
     final season = currentSeason(seasonRanges(data.seasons), today);
@@ -309,12 +313,13 @@ class DutiesAdminScreen extends ConsumerWidget {
         period: period,
         assignees: dutyAssigneesLabel(ids, byId),
         current: period.covers(today),
-        onTap: () => _assign(context, data, period, today),
+        onTap: () => _assign(context, data, period, today, clubs),
         menu: _periodMenu(
           context,
           data,
           period,
           today,
+          clubs,
           assigned: ids.isNotEmpty,
         ),
       );
@@ -360,13 +365,16 @@ class DutiesAdminScreen extends ConsumerWidget {
     final value = watchDutyData(ref);
     final data = value.value;
     final settings = ref.watch(settingsProvider).value;
+    // Only names the filter chips of the assign sheet: not yet streamed
+    // just means no club chips.
+    final clubs = ref.watch(clubsProvider).value ?? const <Club>[];
     return AdminScaffold(
       title: 'Služby',
       actions: [_seasonMenu(context, ref, data, today)],
       body: AsyncBody(
         value: value,
         onRetry: () => refreshDutyData(ref),
-        builder: (data) => _body(context, data, settings, today),
+        builder: (data) => _body(context, data, settings, today, clubs),
       ),
       // Not a FAB: the bar docks under the list (ListActionBar).
       floatingActionButton: Wrap(
