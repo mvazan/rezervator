@@ -7,6 +7,7 @@ import 'package:sentry_flutter/sentry_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'config.dart';
+import 'core/app_scroll_behavior.dart';
 import 'core/auth_redirect.dart';
 import 'core/error_reporting.dart';
 import 'core/text_size.dart';
@@ -181,6 +182,7 @@ class RezervatorApp extends ConsumerWidget {
       darkTheme:
           buildTheme(Brightness.dark, contrastLevel: plan.contrastLevel),
       themeMode: plan.mode,
+      scrollBehavior: const AppScrollBehavior(),
       routerConfig: _router,
     );
   }
