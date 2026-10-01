@@ -312,4 +312,101 @@ void main() {
     expect(teamBonusPoints(1, rudnaPlayers, 'away'), 0);
     expect(teamBonusPoints(null, rudnaPlayers, 'home'), isNull);
   });
+
+  group('a team one player short (a walkover)', () {
+    // The real Veverky B : Husovice E: 4 home players, 3 away; the lone
+    // fourth throws 217 + 223 and the site leaves his points blank.
+    List<MatchPlayerResult> lineup({int missingAway = 4, num? lonelyTb}) => [
+      for (var pos = 1; pos <= 4; pos++)
+        player(
+          'home',
+          pos,
+          [lane(1, 200 + pos), lane(2, 200)],
+          total: 400 + pos,
+          sb: pos == 4 ? null : 1,
+          tb: pos == 4 ? lonelyTb : 1,
+        ),
+      for (var pos = 1; pos <= 4; pos++)
+        if (pos != missingAway)
+          player(
+            'away',
+            pos,
+            [lane(1, 190), lane(2, 190)],
+            total: 380,
+            sb: 0,
+            tb: 0,
+          ),
+    ];
+
+    test('the fourth duel is done: no contest, no lead, the lone player wins '
+        'it with a set point per lane', () {
+      final d = duelsOf(lineup()).last;
+      expect(d.walkover, isTrue);
+      expect(d.state, DuelState.done);
+      expect(d.diff, isNull);
+      expect(d.shownHome, 404);
+      expect(d.shownAway, isNull);
+      expect(d.pointWinner, MatchSide.home);
+      expect(d.walkoverSetPoints, 2);
+      expect(d.decidedByPins, isFalse);
+      expect(d.lanes.map((l) => l.soloSide), [MatchSide.home, MatchSide.home]);
+      expect(d.lanes.every((l) => l.winner == MatchSide.home), isTrue);
+      expect(d.playedLanes, 0);
+    });
+
+    test('the duels with a pair are untouched', () {
+      final ds = duelsOf(lineup());
+      expect(ds.take(3).every((d) => !d.walkover), isTrue);
+      expect(ds.take(3).map((d) => d.state), everyElement(DuelState.done));
+    });
+
+    test('a gap in the middle (nobody away at 3 of 4) is the same walkover, '
+        'and the fourth duel is a normal one', () {
+      final ds = duelsOf(lineup(missingAway: 3));
+      expect(ds.map((d) => d.walkover), [false, false, true, false]);
+      expect(ds[3].diff, isNotNull);
+    });
+
+    test('the lone player on the away side wins it for the guests', () {
+      final ds = duelsOf([
+        player('home', 1, [lane(1, 200), lane(2, 200)], total: 400, sb: 1, tb: 1),
+        player('away', 1, [lane(1, 190), lane(2, 190)], total: 380, sb: 0, tb: 0),
+        player('away', 2, [lane(1, 210), lane(2, 210)], total: 420),
+      ]);
+      expect(ds.last.walkover, isTrue);
+      expect(ds.last.pointWinner, MatchSide.away);
+    });
+
+    test('a lineup that is not out yet is no walkover (every duel would be)', () {
+      final ds = duelsOf([
+        player('home', 1, [lane(1, 200), lane(2, 200)], total: 400),
+        player('home', 2, [lane(1, 200), lane(2, 200)], total: 400),
+      ]);
+      expect(ds.any((d) => d.walkover), isFalse);
+    });
+
+    test('until the lone player has thrown every lane it is played, not done',
+        () {
+      final ds = duelsOf([
+        player('home', 1, [lane(1, 200), lane(2, 200)], total: 400, sb: 1, tb: 1),
+        player('away', 1, [lane(1, 190), lane(2, 190)], total: 380, sb: 0, tb: 0),
+        player('home', 2, [lane(1, 210), lane(2, null)], total: 210),
+      ]);
+      expect(ds.last.walkover, isFalse);
+      expect(ds.last.state, DuelState.playing);
+    });
+
+    test('what the site says wins: a point it gave the lone player stays, a '
+        'zero means nobody took the duel', () {
+      expect(duelsOf(lineup(lonelyTb: 1)).last.pointWinner, MatchSide.home);
+      expect(duelsOf(lineup(lonelyTb: 0)).last.pointWinner, isNull);
+    });
+
+    test('TalkBack: „bez soupeře“, the lone total and the point', () {
+      expect(
+        duelSemantics(duelsOf(lineup()).last),
+        '4. souboj: home 4 404, bez soupeře, bod domácím',
+      );
+    });
+  });
 }

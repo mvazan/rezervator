@@ -660,4 +660,39 @@ void main() {
       });
     }
   }
+
+  group('a walkover (nobody opposite)', () {
+    // The fourth home player throws 217 + 223 with nobody opposite.
+    final lone = duelsOf([
+      _player('home', 1, [_lane(1, 190), _lane(2, 190)], total: 380, sb: 0, tb: 0),
+      _player('away', 1, [_lane(1, 200), _lane(2, 200)], total: 400, sb: 2, tb: 1),
+      _player('home', 2, [_lane(1, 217), _lane(2, 223)], total: 440),
+    ]).last;
+
+    testWidgets('says „bez soupeře“, shows the lone total, no lead, and marks '
+        'every lane for the present player', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: DuelCard(
+              duel: lone,
+              scale: 50,
+              expanded: false,
+              onTap: () {},
+              homeColor: Colors.green,
+              awayColor: Colors.red,
+            ),
+          ),
+        ),
+      );
+      expect(find.text('bez soupeře'), findsOneWidget);
+      expect(find.text('440'), findsOneWidget);
+      expect(find.textContaining('po 0 ze'), findsNothing);
+      expect(find.byKey(const Key('duel-2-lane-1-dot')), findsOneWidget);
+      expect(find.byKey(const Key('duel-2-lane-2-dot')), findsOneWidget);
+      expect(find.text('217'), findsOneWidget);
+      expect(find.text('223'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  });
 }

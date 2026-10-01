@@ -20,7 +20,24 @@ enum DuelState { waiting, playing, done }
 
 /// The home and away player's line on one lane number.
 class LanePair {
-  const LanePair({required this.lane, this.home, this.away});
+  const LanePair({
+    required this.lane,
+    this.home,
+    this.away,
+    this.walkover = false,
+  });
+
+  /// Only one side fielded a player here (the other side's lineup is one
+  /// short): the lane belongs to the present player without a contest.
+  final bool walkover;
+
+  /// The side that threw this lane alone ([walkover] and its total known).
+  MatchSide? get soloSide {
+    if (!walkover) return null;
+    if (home?.total != null) return MatchSide.home;
+    if (away?.total != null) return MatchSide.away;
+    return null;
+  }
 
   /// The lane number (1-based).
   final int lane;
@@ -34,9 +51,10 @@ class LanePair {
   /// Both players threw this lane (both totals non-null).
   bool get played => home?.total != null && away?.total != null;
 
-  /// Higher total when [played]; null on a tie or when not played.
+  /// Higher total when [played]; the lone thrower of a [walkover] lane; null
+  /// on a tie or when not played.
   MatchSide? get winner {
-    if (!played) return null;
+    if (!played) return soloSide;
     return winningSide(home!.total, away!.total);
   }
 
@@ -59,6 +77,7 @@ class Duel {
     required this.pointWinner,
     required this.pointSplit,
     required this.decidedByPins,
+    required this.walkover,
   });
 
   /// The position in the lineup (1-based), shared by both players.
@@ -105,6 +124,18 @@ class Duel {
 
   /// done only: equal set points and a pointWinner (pins decided it).
   final bool decidedByPins;
+
+  /// One side fielded nobody at this position although its lineup exists (a
+  /// team came one player short) and the present player threw every lane:
+  /// the duel is done without a contest. The site leaves the points of such
+  /// a player blank; the present side takes the duel point ([pointWinner])
+  /// and a set point for every lane ([walkoverSetPoints]).
+  final bool walkover;
+
+  /// The set points the lone player of a [walkover] is owed (one per lane);
+  /// null otherwise.
+  int? get walkoverSetPoints =>
+      walkover ? (home ?? away)!.lanes.length : null;
 }
 
 /// One Duel per position present in [players], sorted by position.
@@ -125,12 +156,24 @@ List<Duel> duelsOf(List<MatchPlayerResult> players) {
   final positions = {...homes.keys, ...aways.keys}.toList()..sort();
   return [
     for (final position in positions)
-      _duel(position, homes[position], aways[position]),
+      _duel(
+        position,
+        homes[position],
+        aways[position],
+        homeFielded: homes.isNotEmpty,
+        awayFielded: aways.isNotEmpty,
+      ),
   ];
 }
 
 /// The duel at [position] between [home] and [away] (either may be missing).
-Duel _duel(int position, MatchPlayerResult? home, MatchPlayerResult? away) {
+Duel _duel(
+  int position,
+  MatchPlayerResult? home,
+  MatchPlayerResult? away, {
+  required bool homeFielded,
+  required bool awayFielded,
+}) {
   PlayerLane? laneOf(MatchPlayerResult? p, int lane) {
     for (final l in p?.lanes ?? const <PlayerLane>[]) {
       if (l.lane == lane) return l;
@@ -138,13 +181,29 @@ Duel _duel(int position, MatchPlayerResult? home, MatchPlayerResult? away) {
     return null;
   }
 
+  // One side is a player short while its lineup is out: the other side's
+  // player throws alone. Only once all of the lone player's lanes are thrown
+  // is it a finished walkover (until then it is played like any duel).
+  final present = home ?? away;
+  final walkoverCandidate =
+      (home == null) != (away == null) && (home == null ? homeFielded : awayFielded);
+  bool thrown(MatchPlayerResult p) =>
+      p.lanes.isEmpty ? p.total != null : p.lanes.every((l) => l.total != null);
+  final walkover =
+      walkoverCandidate && present != null && thrown(present);
+
   final laneNumbers = {
     for (final l in home?.lanes ?? const <PlayerLane>[]) l.lane,
     for (final l in away?.lanes ?? const <PlayerLane>[]) l.lane,
   }.toList()..sort();
   final lanes = List<LanePair>.unmodifiable([
     for (final n in laneNumbers)
-      LanePair(lane: n, home: laneOf(home, n), away: laneOf(away, n)),
+      LanePair(
+        lane: n,
+        home: laneOf(home, n),
+        away: laneOf(away, n),
+        walkover: walkover,
+      ),
   ]);
   final played = lanes.where((l) => l.played).toList();
 
@@ -152,7 +211,9 @@ Duel _duel(int position, MatchPlayerResult? home, MatchPlayerResult? away) {
       p != null && (p.total != null || p.lanes.any((l) => l.total != null));
 
   final DuelState state;
-  if (home != null &&
+  if (walkover) {
+    state = DuelState.done;
+  } else if (home != null &&
       away != null &&
       ((home.teamPoints != null && away.teamPoints != null) ||
           (lanes.isEmpty
@@ -176,7 +237,9 @@ Duel _duel(int position, MatchPlayerResult? home, MatchPlayerResult? away) {
               played.fold<int>(0, (sum, l) => sum + l.home!.total!),
               played.fold<int>(0, (sum, l) => sum + l.away!.total!),
             ),
-    DuelState.done => (home!.total, away!.total),
+    DuelState.done => walkover
+        ? (home?.total, away?.total)
+        : (home!.total, away!.total),
   };
   final (shownHome, shownAway) = shown;
 
@@ -192,6 +255,11 @@ Duel _duel(int position, MatchPlayerResult? home, MatchPlayerResult? away) {
   MatchSide? pointWinner;
   if (done && homePoint == 1 && awayPoint != 1) pointWinner = MatchSide.home;
   if (done && awayPoint == 1 && homePoint != 1) pointWinner = MatchSide.away;
+  if (walkover) {
+    // The present side takes the duel point unless the site says otherwise.
+    final side = home != null ? MatchSide.home : MatchSide.away;
+    if ((present.teamPoints ?? 1) == 1) pointWinner = side;
+  }
   final homeSet = home?.setPoints;
   final awaySet = away?.setPoints;
 
@@ -207,7 +275,9 @@ Duel _duel(int position, MatchPlayerResult? home, MatchPlayerResult? away) {
     shownAway: shownAway,
     pointWinner: pointWinner,
     pointSplit: done && homePoint == 0.5 && awayPoint == 0.5,
-    decidedByPins: pointWinner != null && homeSet != null && homeSet == awaySet,
+    decidedByPins:
+        !walkover && pointWinner != null && homeSet != null && homeSet == awaySet,
+    walkover: walkover,
   );
 }
 
@@ -273,14 +343,14 @@ String surnameOf(String? name) {
 String duelSemantics(Duel duel) {
   // „Pavel Medek (od 41. hodu Miloš Vážan)“ when someone took over.
   String named(MatchPlayerResult? p) => p == null
-      ? '–'
+      ? (duel.walkover ? 'bez soupeře' : '–')
       : p.substituteLabel == null
       ? p.playerName
       : '${p.playerName} (${p.substituteLabel})';
   final text = StringBuffer(
     '${duel.position}. souboj: '
-    '${named(duel.home)} ${numLabel(duel.shownHome)}, '
-    '${named(duel.away)} ${numLabel(duel.shownAway)}',
+    '${named(duel.home)}${duel.home == null && duel.walkover ? '' : ' ${numLabel(duel.shownHome)}'}, '
+    '${named(duel.away)}${duel.away == null && duel.walkover ? '' : ' ${numLabel(duel.shownAway)}'}',
   );
   final diff = duel.diff;
   switch (duel.state) {
@@ -305,4 +375,49 @@ String duelSemantics(Duel duel) {
       }
   }
   return text.toString();
+}
+
+/// [players] with the points a walkover's lone player is owed filled in
+/// where the site leaves them blank: a set point per lane and the duel point
+/// (see [Duel.walkover]). The score sheet prints them (and the team's Družstvo
+/// bonus follows); everything else passes through untouched.
+List<MatchPlayerResult> withWalkoverPoints(List<MatchPlayerResult> players) {
+  final lone = <MatchPlayerResult, Duel>{
+    for (final d in duelsOf(players))
+      if (d.walkover) (d.home ?? d.away)!: d,
+  };
+  if (lone.isEmpty) return players;
+  return [
+    for (final p in players)
+      if (lone[p] case final duel? when p.setPoints == null)
+        MatchPlayerResult(
+          id: p.id,
+          matchId: p.matchId,
+          side: p.side,
+          position: p.position,
+          playerName: p.playerName,
+          playerSlug: p.playerSlug,
+          fulls: p.fulls,
+          spares: p.spares,
+          errors: p.errors,
+          total: p.total,
+          setPoints: duel.walkoverSetPoints,
+          teamPoints: p.teamPoints ?? (duel.pointWinner != null ? 1 : null),
+          lanes: [
+            for (final l in p.lanes)
+              PlayerLane(
+                lane: l.lane,
+                fulls: l.fulls,
+                spares: l.spares,
+                errors: l.errors,
+                total: l.total,
+                setPoints: l.setPoints ?? 1,
+              ),
+          ],
+          substituteName: p.substituteName,
+          substituteFromThrow: p.substituteFromThrow,
+        )
+      else
+        p,
+  ];
 }
