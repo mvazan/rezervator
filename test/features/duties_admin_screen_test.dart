@@ -194,10 +194,15 @@ void main() {
     List<DutyAssignment> dutyAssignments = assignments,
     List<DutySeason>? dutySeasons,
     ScheduleSettings? scheduleSettings = settings,
+    List<Profile>? everyone,
+    List<Club> clubs = const [],
   }) => ProviderScope(
     overrides: [
       myProfileProvider.overrideWith((ref) => Stream.value(me)),
-      profilesProvider.overrideWith((ref) => Stream.value(profiles)),
+      profilesProvider.overrideWith(
+        (ref) => Stream.value(everyone ?? profiles),
+      ),
+      clubsProvider.overrideWith((ref) => Stream.value(clubs)),
       dutyPeriodsProvider.overrideWith(
         (ref) => Stream.value(dutyPeriods ?? periods),
       ),
@@ -673,6 +678,79 @@ void main() {
       await tester.tap(inSheet(find.text('Uložit')));
       await tester.pumpAndSettle();
       expect(log, ['assign p4 cyril,petr']);
+    });
+
+    testWidgets('the club chips narrow the list; ticks in other clubs stay', (
+      tester,
+    ) async {
+      tall(tester);
+      Profile inClub(Profile p, String clubId) => Profile(
+        id: p.id,
+        displayName: p.displayName,
+        email: p.email,
+        role: p.role,
+        status: p.status,
+        nick: p.nick,
+        clubId: clubId,
+      );
+      await tester.pumpWidget(
+        app(
+          everyone: [
+            for (final p in profiles)
+              if (p.id == 'jan' || p.id == 'jana')
+                inClub(p, 'c1')
+              else if (p.id == 'petr')
+                inClub(p, 'c2')
+              else
+                p,
+          ],
+          clubs: const [
+            Club(id: 'c2', name: 'Veverky'),
+            Club(id: 'c1', name: 'Sokol'),
+            Club(id: 'c3', name: 'Prázdný'),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('po 12. 10. – ne 18. 10.'));
+      await tester.pumpAndSettle();
+
+      // Only clubs with a player, Czech-sorted, after „Všichni“.
+      expect(inSheet(find.byType(ChoiceChip)), findsNWidgets(4));
+      expect(inSheet(find.text('Prázdný')), findsNothing);
+      expect(
+        tester.getTopLeft(inSheet(find.text('Sokol'))).dx,
+        lessThan(tester.getTopLeft(inSheet(find.text('Veverky'))).dx),
+      );
+
+      await tester.tap(inSheet(find.text('Sokol')));
+      await tester.pump();
+      expect(inSheet(find.text('Jan Novák')), findsOneWidget);
+      expect(inSheet(find.text('Jana Nováková')), findsOneWidget);
+      expect(inSheet(find.text('Petr Svoboda')), findsNothing);
+      expect(inSheet(find.text('Cyril Hudec')), findsNothing);
+      await tester.tap(inSheet(find.text('Jan Novák')));
+
+      await tester.tap(inSheet(find.text('Bez oddílu')));
+      await tester.pump();
+      expect(inSheet(find.text('Jan Novák')), findsNothing);
+      expect(inSheet(find.text('Cyril Hudec')), findsOneWidget);
+
+      await tester.tap(inSheet(find.text('Veverky')));
+      await tester.pump();
+      await tester.tap(inSheet(find.text('Petr Svoboda')));
+      await tester.tap(inSheet(find.text('Uložit')));
+      await tester.pumpAndSettle();
+      expect(log, ['assign p4 jan,petr']);
+    });
+
+    testWidgets('without clubs the sheet shows no chips', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('po 12. 10. – ne 18. 10.'));
+      await tester.pumpAndSettle();
+      expect(inSheet(find.byType(ChoiceChip)), findsNothing);
     });
 
     testWidgets('Uložit a další saves and moves to the next duty', (
