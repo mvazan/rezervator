@@ -14,6 +14,7 @@ import '../../domain/schedule.dart';
 import 'schedule_callbacks.dart';
 import 'widgets/day_chip_strip.dart';
 import 'widgets/day_header.dart';
+import 'widgets/day_watch_button.dart';
 import 'widgets/gap_rows.dart';
 import 'widgets/slot_tile.dart';
 
@@ -249,6 +250,7 @@ class _DayPagerViewState extends State<DayPagerView> {
             itemBuilder: (context, page) => _DayPage(
               day: _dayFor(page),
               today: widget.today,
+              now: widget.now,
               me: widget.me,
               myCount: widget.myCount,
               settings: widget.settings,
@@ -306,6 +308,7 @@ class _DayPage extends StatelessWidget {
   const _DayPage({
     required this.day,
     required this.today,
+    required this.now,
     required this.me,
     required this.myCount,
     required this.settings,
@@ -319,6 +322,7 @@ class _DayPage extends StatelessWidget {
 
   final DaySchedule day;
   final Day today;
+  final HourMinute now;
   final Profile? me;
   final int myCount;
   final ScheduleSettings settings;
@@ -408,6 +412,23 @@ class _DayPage extends StatelessWidget {
               chipLabel: '$freeCount volných',
               interactive: matchLinks,
               menu: _menu(),
+              watch: canWatchDay(
+                date: day.date,
+                today: today,
+                settings: settings,
+                me: me,
+                interactive: interactive,
+              )
+                  ? DayWatchButton(
+                      date: day.date,
+                      blocks: watchableBlocks(
+                        day.blocks,
+                        date: day.date,
+                        today: today,
+                        now: now,
+                      ),
+                    )
+                  : null,
             ),
             const SizedBox(height: 10),
             // Lane header + block rows always stay column-aligned: lanes flex

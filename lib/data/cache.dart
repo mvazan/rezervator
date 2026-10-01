@@ -23,6 +23,7 @@ const cacheKeyMatchResults = 'match_results';
 const cacheKeyVenues = 'venues';
 const cacheKeyMessages = 'messages';
 const cacheKeyMessageRecipients = 'message_recipients';
+const cacheKeySlotWatches = 'slot_watches';
 
 /// One message's recipient rows (`messageParticipantsProvider`) — per
 /// message, like `match_player_results:{id}`.

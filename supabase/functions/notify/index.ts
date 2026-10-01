@@ -16,6 +16,9 @@
 //                           (služba na kantýně)" as the default reason;
 //                           or, cancelled_via = 'group' (0044), "X ti zrušil(a)
 //                           trénink" to the player it was for
+//                           and ANY cancellation of an upcoming reservation
+//                           (0058): the player's who watch that day get "a
+//                           spot was freed", when it is really bookable again
 //   INSERT tenants       -> "new kuželna waiting for approval" (to the
 //                           superadmins — trigger added in 0014)
 //   INSERT/UPDATE player_group_members -> player-group notifications (0044):
@@ -67,6 +70,7 @@ import {
   dutyReminderHtml,
   dutyReminderReceipt,
 } from "../_shared/duty_reminders.ts";
+import { freedSpotMessage } from "../_shared/freed_spot.ts";
 import {
   groupBookedMessage,
   groupCancelledMessage,
@@ -593,6 +597,40 @@ async function whenLabel(record: Record<string, unknown>): Promise<string | null
     `dráha ${record.lane}`;
 }
 
+/// A reservation was cancelled (by anyone, for any reason): tells the players
+/// who switched the bell on for that day (0058) that a spot may be free. Which
+/// of them hear about it is decided by claim_freed_spot_watchers — only when
+/// the cell is bookable again, only the watchers who can book it, and a
+/// watcher at most once per ten minutes. Never throws: the cancellation's
+/// own notifications must not depend on it.
+async function notifyFreedSpot(record: Record<string, unknown>) {
+  try {
+    const { data: watchers, error } = await supabase.rpc(
+      "claim_freed_spot_watchers",
+      { p_reservation: record.id },
+    );
+    if (error) throw error;
+    if (!watchers?.length) return;
+    const where = await whenLabel(record);
+    if (where == null) return;
+    const m = freedSpotMessage(where);
+    await Promise.all((watchers as { user_id: string; email: string; fcm_token: string | null }[])
+      .map((w) =>
+        notifyRecipient(
+          { id: w.user_id, email: w.email, fcm_token: w.fcm_token },
+          m.title,
+          m.body,
+          {
+            data: { kind: "freed_spot", date: String(record.date) },
+            html: `<p>${escapeHtml(m.body)}</p>`,
+          },
+        )
+      ));
+  } catch (error) {
+    console.error("freed spot notification failed:", error);
+  }
+}
+
 async function handle(payload: WebhookPayload) {
   if (payload.type === "CRON" && payload.table === "notification_jobs") {
     // The minutely pg_cron tick (0023): process everything that's due — the
@@ -735,6 +773,9 @@ async function handle(payload: WebhookPayload) {
         // The admin's per-change choice (0011): a silent move/cancel sets
         // notify_player=false on the same UPDATE.
         const wantsNotify = record.notify_player !== false;
+
+        // Whoever cancelled it and however (0058): the watchers of its day.
+        if (record.cancelled_at != null) await notifyFreedSpot(record);
 
         // ADMIN CANCEL of an upcoming reservation.
         if (record.cancelled_at != null) {
