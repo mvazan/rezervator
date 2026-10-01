@@ -137,11 +137,15 @@ class Profile {
     this.phone,
     this.showEmail = true,
     this.showPhone = true,
+    this.regnum,
   });
 
   final String id;
   final String displayName;
   final String email;
+
+  /// Registration number in the ČKA register (0057), null until found.
+  final String? regnum;
 
   /// The player's phone in E.164 (`+420777123456`, 0048), null when they
   /// gave none. Shown formatted (`formatPhone`).
@@ -235,6 +239,7 @@ class Profile {
         phone: json['phone'] as String?,
         showEmail: json['show_email'] as bool? ?? true,
         showPhone: json['show_phone'] as bool? ?? true,
+        regnum: json['regnum'] as String?,
       );
 }
 
@@ -513,6 +518,7 @@ class Contact {
     this.clubColor = -1,
     this.email,
     this.phone,
+    this.regnum,
   });
 
   final String id;
@@ -530,6 +536,9 @@ class Contact {
   /// E.164, as stored.
   final String? phone;
 
+  /// Registration number in the ČKA register (0057), null until found.
+  final String? regnum;
+
   factory Contact.fromJson(Map<String, dynamic> json) => Contact(
         id: json['id'] as String,
         displayName: json['display_name'] as String,
@@ -539,6 +548,7 @@ class Contact {
         clubColor: json['club_color'] as int? ?? -1,
         email: json['email'] as String?,
         phone: json['phone'] as String?,
+        regnum: json['regnum'] as String?,
       );
 }
 
@@ -1226,6 +1236,7 @@ class MatchPlayerResult {
     this.lanes = const [],
     this.substituteName,
     this.substituteFromThrow,
+    this.regnum,
   });
 
   final String id;
@@ -1248,6 +1259,31 @@ class MatchPlayerResult {
   /// keeps the starter's line and lists the change apart (0053).
   final String? substituteName;
   final int? substituteFromThrow;
+
+  /// The player's registration number in the ČKA register, when known — not
+  /// part of the site's data: the `regnum-lookup` function finds it and the
+  /// app sets it on the lines with [withRegnum].
+  final String? regnum;
+
+  /// This line with [regnum] set.
+  MatchPlayerResult withRegnum(String? regnum) => MatchPlayerResult(
+        id: id,
+        matchId: matchId,
+        side: side,
+        position: position,
+        playerName: playerName,
+        playerSlug: playerSlug,
+        fulls: fulls,
+        spares: spares,
+        errors: errors,
+        total: total,
+        setPoints: setPoints,
+        teamPoints: teamPoints,
+        lanes: lanes,
+        substituteName: substituteName,
+        substituteFromThrow: substituteFromThrow,
+        regnum: regnum,
+      );
 
   /// „od 41. hodu Miloš Vážan“ — the site's own wording; null without a
   /// change. Without a known throw it is just „Miloš Vážan“.

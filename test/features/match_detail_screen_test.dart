@@ -213,6 +213,9 @@ void main() {
     int? siteMatchId,
     List<LeagueMatch> league = const [],
     List<MatchPlayerResult> leaguePlayers = const [],
+    // What the regnum-lookup function would answer for the Zápis.
+    Map<String, String> regnums = const {},
+    void Function()? onRegnumsAsked,
   }) {
     final screen = MatchDetailScreen(
       matchId: matchId,
@@ -249,6 +252,10 @@ void main() {
         venuesProvider.overrideWith((ref) => Stream.value(venues)),
         nowProvider.overrideWith((ref) => Stream.value(now)),
         myTeamColorsProvider.overrideWith((ref) => Stream.value(teamColors)),
+        matchRegnumsProvider.overrideWith((ref, key) async {
+          onRegnumsAsked?.call();
+          return regnums;
+        }),
         if (view != null)
           matchDetailViewProvider.overrideWith(() => _FixedView(view)),
       ],
@@ -1196,6 +1203,7 @@ void main() {
     Widget rudna({
       MatchDetailView? view = MatchDetailView.souboje,
       Map<String, int> teamColors = const {},
+      Map<String, String> regnums = const {},
     }) => app(
       matchId: 'rv',
       slots: [rudnaSlot],
@@ -1203,6 +1211,7 @@ void main() {
       players: rudnaPlayers,
       view: view,
       teamColors: teamColors,
+      regnums: regnums,
     );
 
     testWidgets(
@@ -1267,6 +1276,37 @@ void main() {
 
       expect(find.byType(LegacyScoreSheet), findsOneWidget);
       expect(find.byType(DuelCard), findsNothing);
+    });
+
+    testWidgets('the Zápis shows each player\'s registration number under '
+        'the name', (tester) async {
+      _tall(tester);
+      final first = rudnaPlayers.first.playerName;
+      await tester.pumpWidget(
+        rudna(view: MatchDetailView.zapis, regnums: {first: '787'}),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byType(LegacyScoreSheet), findsOneWidget);
+      expect(find.text('787'), findsOneWidget);
+    });
+
+    testWidgets('Souboje does not ask for registration numbers',
+        (tester) async {
+      _tall(tester);
+      var asked = 0;
+      await tester.pumpWidget(
+        app(
+          matchId: 'rv',
+          slots: [rudnaSlot],
+          results: {'rv': rudnaResult},
+          players: rudnaPlayers,
+          view: MatchDetailView.souboje,
+          onRegnumsAsked: () => asked++,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(asked, 0);
     });
 
     testWidgets(

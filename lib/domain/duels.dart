@@ -416,6 +416,7 @@ List<MatchPlayerResult> withWalkoverPoints(List<MatchPlayerResult> players) {
           ],
           substituteName: p.substituteName,
           substituteFromThrow: p.substituteFromThrow,
+          regnum: p.regnum,
         )
       else
         p,

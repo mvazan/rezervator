@@ -20,6 +20,7 @@ class DayHeader extends StatelessWidget {
     this.closedReason,
     this.interactive = true,
     this.menu = const [],
+    this.watch,
   });
 
   final Day date;
@@ -41,6 +42,10 @@ class DayHeader extends StatelessWidget {
   /// duty): „Přidat blok…“, „Zavřít den…“, „Obnovit týdenní rozvrh“.
   /// Empty = no ⋮.
   final List<({String label, VoidCallback onTap})> menu;
+
+  /// The freed-spot bell (0058), right after the free-spot chip; null = none
+  /// (a closed or past day, the kiosk, the public overview).
+  final Widget? watch;
 
   @override
   Widget build(BuildContext context) {
@@ -87,6 +92,10 @@ class DayHeader extends StatelessWidget {
                 foreground: chipFg,
                 bold: true,
               ),
+            if (reason == null && watch != null) ...[
+              const SizedBox(width: 4),
+              watch!,
+            ],
             if (menu.isNotEmpty)
               PopupMenuButton<VoidCallback>(
                 icon: const Icon(Icons.more_vert),

@@ -355,11 +355,15 @@ class BoardColumnHeader extends StatelessWidget {
     this.subtitle,
     this.onAdd,
     this.interactive = true,
+    this.watch,
   });
 
   final Day date;
   final bool isToday;
   final List<PrioritySlot> priority;
+
+  /// The freed-spot bell (0058), beside the [subtitle]; null = none.
+  final Widget? watch;
 
   /// Shared per-board header height — [boardHeaderHeight] of the busiest
   /// visible day, so every event line fits without clipping.
@@ -454,17 +458,29 @@ class BoardColumnHeader extends StatelessWidget {
                     ),
                   )
                 : subtitle != null
-                    ? Text(
-                        subtitle!,
-                        textAlign: TextAlign.center,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: isToday
-                              ? Colors.white.withValues(alpha: 0.85)
-                              : scheme.onSurfaceVariant.withValues(alpha: 0.7),
-                        ),
+                    ? Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Flexible(
+                            child: Text(
+                              subtitle!,
+                              textAlign: TextAlign.center,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: isToday
+                                    ? Colors.white.withValues(alpha: 0.85)
+                                    : scheme.onSurfaceVariant
+                                        .withValues(alpha: 0.7),
+                              ),
+                            ),
+                          ),
+                          if (watch != null) ...[
+                            const SizedBox(width: 2),
+                            watch!,
+                          ],
+                        ],
                       )
                     : const SizedBox.shrink(),
           ),

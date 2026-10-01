@@ -1400,7 +1400,14 @@ class _ScoreTableBody extends StatelessWidget {
               // stretched height holds full screen.
               height: _celkemRowHeight,
               bg: _kRegCellBlue,
-              text: !nameInLaneRows && !changed ? (player?.playerName ?? '') : '',
+              // With the name up in the lane rows this is the registration
+              // number's cell; without them the name sits here and there is
+              // no room for both.
+              text: nameInLaneRows
+                  ? (player?.regnum ?? '')
+                  : !changed
+                      ? (player?.playerName ?? '')
+                      : '',
               span: !nameInLaneRows && changed
                   ? _nameSpan(player, _s16w700.copyWith(color: _kBlack))
                   : null,

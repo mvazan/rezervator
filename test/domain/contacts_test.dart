@@ -14,7 +14,7 @@ void main() {
       ),
       Contact(id: 'c', displayName: 'Čeněk Černý', clubName: 'TJ Sokol'),
       Contact(id: 'h', displayName: 'Chalupa Jan'),
-      Contact(id: 'a', displayName: 'Adam Admin', nick: 'Áďa'),
+      Contact(id: 'a', displayName: 'Adam Admin', nick: 'Áďa', regnum: '787'),
     ];
 
     List<String> names(List<Contact> list) =>
@@ -43,6 +43,10 @@ void main() {
     test('the club', () {
       expect(names(contactsMatching(contacts, 'rosice')), ['Šárka Svobodová']);
       expect(names(contactsMatching(contacts, 'sokol')), ['Čeněk Černý']);
+    });
+
+    test('the registration number', () {
+      expect(names(contactsMatching(contacts, '787')), ['Adam Admin']);
     });
 
     test('nobody matches', () {

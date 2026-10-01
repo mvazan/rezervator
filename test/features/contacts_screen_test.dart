@@ -101,6 +101,23 @@ void main() {
     expect(tester.widget<ListTile>(rowOf('Chalupa Jan')).subtitle, isNull);
   });
 
+  testWidgets('the registration number rides in the subtitle', (tester) async {
+    const withNumber = Contact(
+      id: 'r',
+      displayName: 'Radek Číslo',
+      clubName: 'Oddíl E',
+      regnum: '787',
+    );
+    await tester.pumpWidget(app(() async => [withNumber, adam]));
+    await tester.pumpAndSettle();
+
+    expect(
+      inRow('Radek Číslo', find.text('Oddíl E · reg. č. 787')),
+      findsOneWidget,
+    );
+    expect(find.textContaining('reg. č.'), findsOneWidget);
+  });
+
   testWidgets('each row offers what its player shows, and the actions call '
       'the launchers — WhatsApp through wa.me', (tester) async {
     await tester.pumpWidget(app(() async => [adam, bela, cenek, chalupa]));

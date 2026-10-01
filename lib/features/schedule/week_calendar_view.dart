@@ -17,6 +17,7 @@ import '../../domain/models.dart';
 import '../../domain/schedule.dart';
 import 'schedule_callbacks.dart';
 import 'widgets/calendar_board.dart';
+import 'widgets/day_watch_button.dart';
 import 'widgets/schedule_day_column.dart';
 import 'widgets/slot_tile.dart';
 
@@ -244,6 +245,28 @@ class _WeekCalendarViewState extends State<WeekCalendarView> {
               height: headerHeight,
               collapsed: _collapsed,
               subtitle: _freeLabel(day),
+              watch: _freeLabel(day) != null &&
+                      canWatchDay(
+                        date: day.date,
+                        today: widget.today,
+                        settings: widget.settings,
+                        me: widget.me,
+                        interactive: widget.interactive,
+                      )
+                  ? DayWatchButton(
+                      date: day.date,
+                      blocks: watchableBlocks(
+                        (day as OpenDay).blocks,
+                        date: day.date,
+                        today: widget.today,
+                        now: widget.now,
+                      ),
+                      size: 16,
+                      dense: true,
+                      // White on today's gradient, like the subtitle.
+                      color: day.date == widget.today ? Colors.white : null,
+                    )
+                  : null,
               onAdd: _addForDay(day.date),
               interactive: widget.matchLinks,
             ),

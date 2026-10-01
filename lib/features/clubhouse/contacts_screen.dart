@@ -106,6 +106,7 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
     final subtitle = [
       if (contact.nick.isNotEmpty) '„${contact.nick}“',
       ?contact.clubName,
+      if (contact.regnum != null) 'reg. č. ${contact.regnum}',
     ].join(' · ');
     final email = contact.email;
     final phone = contact.phone;
@@ -186,6 +187,11 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
       body = const Center(child: CircularProgressIndicator());
     } else {
       final all = contactsAsync.value!;
+      // Finds the numbers still missing in the ČKA register (the server
+      // remembers them); the list reloads when it filled some.
+      if (all.any((c) => c.regnum == null)) {
+        ref.watch(profileRegnumsProvider);
+      }
       final shown = contactsMatching(all, _query);
       body = RefreshIndicator(
         onRefresh: _refresh,
