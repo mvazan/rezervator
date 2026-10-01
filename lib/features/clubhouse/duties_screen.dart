@@ -15,6 +15,7 @@ import '../../domain/duties.dart';
 import '../../domain/models.dart';
 import '../admin/duties_admin_screen.dart';
 import 'widgets/duty_cards.dart';
+import '../../core/push_screen.dart';
 
 Widget _adminPage(BuildContext _) => const DutiesAdminScreen();
 
@@ -60,9 +61,7 @@ class DutiesScreen extends ConsumerWidget {
         actions: [
           if (isAdmin)
             TextButton(
-              onPressed: () => Navigator.of(
-                context,
-              ).push(MaterialPageRoute<void>(builder: adminPage)),
+              onPressed: () => pushScreen<void>(context, adminPage),
               child: const Text('Spravovat'),
             ),
         ],

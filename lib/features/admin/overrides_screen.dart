@@ -12,6 +12,7 @@ import 'widgets/admin_scaffold.dart';
 import 'widgets/blockage_dialog.dart';
 import 'widgets/override_dialog.dart';
 import 'widgets/rental_occurrence_dialog.dart';
+import '../../core/push_screen.dart';
 
 /// Admin: manage per-day closures that take precedence over the weekly
 /// training-day rule. An override closes a day with a reason (e.g. "Malování
@@ -252,10 +253,7 @@ class OverridesScreen extends ConsumerWidget {
                     IconButton(
                       icon: const Icon(Icons.tune),
                       tooltip: 'Typy blokací',
-                      onPressed: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                            builder: (_) => const SlotTypesScreen()),
-                      ),
+                      onPressed: () => pushScreen(context, (_) => const SlotTypesScreen()),
                     ),
                     IconButton(
                       icon: const Icon(Icons.add),

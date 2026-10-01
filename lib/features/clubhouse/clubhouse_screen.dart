@@ -16,6 +16,7 @@ import 'messages_screen.dart';
 import 'notice_board_screen.dart';
 import 'results_screen.dart';
 import 'venues_screen.dart';
+import '../../core/push_screen.dart';
 
 class ClubhouseScreen extends ConsumerWidget {
   const ClubhouseScreen({super.key, this.trailing = const []});
@@ -46,54 +47,42 @@ class ClubhouseScreen extends ConsumerWidget {
                 icon: Icons.scoreboard_outlined,
                 subtitle: 'Zápasy a výsledky našich týmů',
                 badge: null,
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const ResultsScreen()),
-                ),
+                onTap: () => pushScreen(context, (_) => const ResultsScreen()),
               ),
               (
                 label: 'Kuželny',
                 icon: Icons.location_on_outlined,
                 subtitle: 'Adresy a vybavení kuželen',
                 badge: null,
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const VenuesScreen()),
-                ),
+                onTap: () => pushScreen(context, (_) => const VenuesScreen()),
               ),
               (
                 label: 'Služby',
                 icon: Icons.local_cafe_outlined,
                 subtitle: 'Kdo slouží na kantýně',
                 badge: null,
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const DutiesScreen()),
-                ),
+                onTap: () => pushScreen(context, (_) => const DutiesScreen()),
               ),
               (
                 label: 'Kontakty',
                 icon: Icons.contacts_outlined,
                 subtitle: 'Hráči kuželny — e-mail a telefon',
                 badge: null,
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const ContactsScreen()),
-                ),
+                onTap: () => pushScreen(context, (_) => const ContactsScreen()),
               ),
               (
                 label: 'Nástěnka',
                 icon: Icons.campaign_outlined,
                 subtitle: 'Oznámení správce',
                 badge: unreadNotices,
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const NoticeBoardScreen()),
-                ),
+                onTap: () => pushScreen(context, (_) => const NoticeBoardScreen()),
               ),
               (
                 label: 'Zprávy',
                 icon: Icons.forum_outlined,
                 subtitle: 'Zprávy pro tebe a od tebe',
                 badge: unreadMessages,
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const MessagesScreen()),
-                ),
+                onTap: () => pushScreen(context, (_) => const MessagesScreen()),
               ),
             ]..sort((a, b) => compareCzech(a.label, b.label)),
           ),

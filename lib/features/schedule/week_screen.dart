@@ -10,6 +10,7 @@ import '../clubhouse/duties_screen.dart';
 import 'schedule_actions.dart';
 import 'week_board.dart';
 import 'widgets/week_header.dart';
+import '../../core/push_screen.dart';
 
 /// Live week view: grid computed by buildWeekSchedule, booking via RPCs.
 /// Acts as the "shell": owns navigation (week offset) and all provider
@@ -64,9 +65,7 @@ class _WeekScreenState extends ConsumerState<WeekScreen> with WeekNavigation {
       onGo: goWeek,
       trailing: widget.trailing,
       duty: ref.watch(weekDutyHeaderProvider(monday)),
-      onDutyTap: () => Navigator.of(context).push(
-        MaterialPageRoute<void>(builder: (_) => const DutiesScreen()),
-      ),
+      onDutyTap: () => pushScreen<void>(context, (_) => const DutiesScreen()),
     );
 
     if (view.isLoading) {

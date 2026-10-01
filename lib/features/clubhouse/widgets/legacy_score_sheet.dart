@@ -15,6 +15,7 @@ import '../../../core/theme.dart' show appFontFamily;
 import '../../../domain/duels.dart';
 import '../../../domain/models.dart';
 import '../../../domain/results.dart';
+import '../../../core/push_screen.dart';
 
 // kuzelky.com's own fixed sheet colours (measured via getComputedStyle on a
 // real match page) — a literal replica, not app theming. Never route these
@@ -214,15 +215,11 @@ class LegacyScoreSheet extends StatelessWidget {
                 IconButton(
                   icon: const Icon(Icons.open_in_full),
                   tooltip: 'Zvětšit',
-                  onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => LegacyScoreSheetPage(
+                  onPressed: () => pushScreen(context, (_) => LegacyScoreSheetPage(
                         slot: slot,
                         result: result,
                         players: shown,
-                      ),
-                    ),
-                  ),
+                      )),
                 ),
             ],
           ),

@@ -20,6 +20,7 @@ import '../../../domain/results.dart';
 import '../../clubhouse/match_detail_screen.dart';
 import '../../clubhouse/widgets/match_title.dart';
 import '../../clubhouse/widgets/match_video_icon.dart';
+import '../../../core/push_screen.dart';
 
 /// Lists [events] (the header's own `headerEvents` — matches and blockages,
 /// no úklid children) for [date] in full. No-op when [events] is empty.
@@ -74,11 +75,9 @@ Future<void> showDayMatchesDialog(
                         interactive && m.fromFederation
                             ? () {
                                 navigator.pop();
-                                navigator.push(
-                                  MaterialPageRoute(
-                                    builder: (_) =>
-                                        MatchDetailScreen(matchId: m.id),
-                                  ),
+                                pushScreen(
+                                  navigator.context,
+                                  (_) => MatchDetailScreen(matchId: m.id),
                                 );
                               }
                             : null,

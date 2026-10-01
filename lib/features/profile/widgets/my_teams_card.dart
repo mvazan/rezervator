@@ -8,6 +8,7 @@ import '../../../domain/models.dart';
 import '../../../domain/upcoming.dart';
 import '../match_exceptions_screen.dart';
 import 'my_teams_sheet.dart';
+import '../../../core/push_screen.dart';
 
 /// The one place teams are set up: which teams' matches show in Můj přehled
 /// (0029, `profiles.followed_teams`), which go to Google Calendar (0032,
@@ -99,9 +100,7 @@ class MyTeamsCard extends ConsumerWidget {
                 ? 'Jednotlivé zápasy navíc nebo skryté.'
                 : _exceptionCount(overruledCount)),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const MatchExceptionsScreen()),
-            ),
+            onTap: () => pushScreen(context, (_) => const MatchExceptionsScreen()),
           ),
         ],
       ),

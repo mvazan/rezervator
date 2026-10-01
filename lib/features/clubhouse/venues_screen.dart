@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/providers.dart';
 import '../../domain/results.dart';
 import 'venue_detail_screen.dart';
+import '../../core/push_screen.dart';
 
 class VenuesScreen extends ConsumerStatefulWidget {
   const VenuesScreen({super.key});
@@ -67,12 +68,8 @@ class _VenuesScreenState extends ConsumerState<VenuesScreen> {
                             ? null
                             : Text(venue.address!),
                         trailing: const Icon(Icons.chevron_right),
-                        onTap: () => Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) =>
-                                VenueDetailScreen(slug: venue.slug),
-                          ),
-                        ),
+                        onTap: () => pushScreen(context, (_) =>
+                                VenueDetailScreen(slug: venue.slug)),
                       );
                     },
                   ),

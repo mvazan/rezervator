@@ -7,8 +7,10 @@ import 'package:sentry_flutter/sentry_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'config.dart';
+import 'core/app_scroll_behavior.dart';
 import 'core/auth_redirect.dart';
 import 'core/error_reporting.dart';
+import 'core/push_screen.dart';
 import 'core/text_size.dart';
 import 'core/theme.dart';
 import 'core/theme_choice.dart';
@@ -62,6 +64,9 @@ Future<void> _bootstrap() async {
   final appearanceOverrides = await loadPersistedAppearance();
   // The same for Výsledky's saved mode / competition (see loadPersistedResultsView).
   final resultsViewOverrides = await loadPersistedResultsView();
+  // Without this a pushed screen leaves the address bar alone, so the web has
+  // no history entry for it and the browser's back button leaves the site.
+  GoRouter.optionURLReflectsImperativeAPIs = true;
   runApp(ProviderScope(
     overrides: [...appearanceOverrides, ...resultsViewOverrides],
     child: const RezervatorApp(),
@@ -75,6 +80,14 @@ final _router = GoRouter(
       path: '/',
       builder: (_, _) =>
           AppConfig.hasSupabase ? const AuthGate() : const _NotConfigured(),
+    ),
+    // Screens opened with pushScreen (core/push_screen.dart); the builder
+    // travels as `extra`, which a reload or a forward step has lost — that
+    // lands on the home screen.
+    GoRoute(
+      path: pushedScreenPath,
+      redirect: (_, state) => state.extra is WidgetBuilder ? null : '/',
+      builder: (context, state) => (state.extra! as WidgetBuilder)(context),
     ),
     GoRoute(
       path: '/kiosk-login',
@@ -181,6 +194,7 @@ class RezervatorApp extends ConsumerWidget {
       darkTheme:
           buildTheme(Brightness.dark, contrastLevel: plan.contrastLevel),
       themeMode: plan.mode,
+      scrollBehavior: const AppScrollBehavior(),
       routerConfig: _router,
     );
   }

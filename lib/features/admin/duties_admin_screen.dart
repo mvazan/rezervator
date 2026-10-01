@@ -20,6 +20,7 @@ import 'widgets/duty_generator_dialog.dart';
 import 'widgets/duty_parts.dart';
 import 'widgets/duty_period_dialog.dart';
 import 'widgets/duty_season_dialog.dart';
+import '../../core/push_screen.dart';
 
 class DutiesAdminScreen extends ConsumerWidget {
   const DutiesAdminScreen({super.key, this.api = const DutyAdminApi()});
@@ -198,9 +199,7 @@ class DutiesAdminScreen extends ConsumerWidget {
         case 'new':
           _newSeason(context, ref, data!, today);
         case 'history':
-          Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const DutiesHistoryScreen()),
-          );
+          pushScreen(context, (_) => const DutiesHistoryScreen());
         case 'undo':
           _undoSeason(context, ref, data!.seasons);
       }
