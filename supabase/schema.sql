@@ -1130,6 +1130,93 @@ $$;
 ALTER FUNCTION "public"."cascade_schedule_change"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."claim_freed_spot_watchers"("p_reservation" "uuid") RETURNS TABLE("user_id" "uuid", "email" "text", "fcm_token" "text")
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_r reservations;
+  v_block time_blocks;
+  v_settings schedule_settings;
+  v_today date := (now() at time zone 'Europe/Prague')::date;
+  v_now time := (now() at time zone 'Europe/Prague')::time;
+begin
+  select * into v_r from reservations where id = p_reservation;
+  if not found or v_r.cancelled_at is null then
+    return;
+  end if;
+  select * into v_block from time_blocks where id = v_r.block_id;
+  if not found then
+    return;
+  end if;
+  select * into v_settings from schedule_settings where tenant_id = v_r.tenant_id;
+
+  -- Nobody can book a block that has started, or a day that is over.
+  if v_r.date < v_today or (v_r.date = v_today and v_block.starts_at <= v_now) then
+    return;
+  end if;
+  -- The cell must be bookable again: the day open for the block, no match and
+  -- no rental on the lane, and not booked by somebody else already.
+  if block_day_status(v_r.tenant_id, v_r.date, v_r.block_id) is distinct from 'open' then
+    return;
+  end if;
+  if exists (
+    select 1 from priority_slots s
+    join priority_slot_types t on t.id = s.type_id
+    where s.date = v_r.date and s.tenant_id = v_r.tenant_id and not s.is_away
+      and (t.lanes is null or v_r.lane = any (t.lanes))
+      and s.starts_at < v_block.ends_at and s.ends_at > v_block.starts_at
+  ) then
+    return;
+  end if;
+  if exists (
+    select 1 from rental_occurrences(v_r.tenant_id, v_r.date) o
+    where v_r.lane = any (o.lanes)
+      and o.starts_at < v_block.ends_at and o.ends_at > v_block.starts_at
+  ) then
+    return;
+  end if;
+  if exists (
+    select 1 from reservations x
+    where x.date = v_r.date and x.block_id = v_r.block_id
+      and x.lane = v_r.lane and x.cancelled_at is null
+  ) then
+    return;
+  end if;
+
+  return query
+  with claimed as (
+    update slot_watches w
+       set last_notified_at = now()
+      from profiles p
+     where w.date = v_r.date
+       and w.tenant_id = v_r.tenant_id
+       and p.id = w.user_id
+       and p.status = 'approved'
+       and p.role <> 'kiosk'
+       and w.user_id <> v_r.player_id
+       and (w.last_notified_at is null
+            or w.last_notified_at < now() - interval '10 minutes')
+       and (p.role = 'admin'
+            or (v_r.date <= v_today + v_settings.booking_horizon_days
+                and (select count(*) from reservations a
+                      where a.player_id = p.id and a.cancelled_at is null
+                        and a.date >= v_today) < v_settings.max_active_reservations))
+       and not exists (
+         select 1 from reservations h
+          where h.player_id = p.id and h.date = v_r.date
+            and h.block_id = v_r.block_id and h.cancelled_at is null)
+    returning w.user_id as uid
+  )
+  select p.id, p.email, p.fcm_token
+    from claimed c join profiles p on p.id = c.uid;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."claim_freed_spot_watchers"("p_reservation" "uuid") OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."consume_calendar_nonce"("p_nonce" "text") RETURNS "uuid"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -3245,6 +3332,24 @@ $$;
 ALTER FUNCTION "public"."prune_messages"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."prune_slot_watches"() RETURNS integer
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_n integer;
+begin
+  delete from slot_watches
+   where date < (now() at time zone 'Europe/Prague')::date;
+  get diagnostics v_n = row_count;
+  return v_n;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."prune_slot_watches"() OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."public_tenant_id"("p_slug" "text") RETURNS "uuid"
     LANGUAGE "plpgsql" STABLE SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -4439,6 +4544,20 @@ $$;
 ALTER FUNCTION "public"."set_training_color_for"("p_user" "uuid", "p_color" smallint) OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."slot_watches_end_on_booking"() RETURNS "trigger"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  delete from slot_watches where user_id = new.player_id and date = new.date;
+  return new;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."slot_watches_end_on_booking"() OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."start_calendar_link"() RETURNS "text"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -4579,6 +4698,19 @@ $$;
 
 
 ALTER FUNCTION "public"."trigger_notification_jobs"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."unwatch_day"("p_date" "date") RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  delete from slot_watches where user_id = auth.uid() and date = p_date;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."unwatch_day"("p_date" "date") OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."update_team"("p_id" "uuid", "p_name" "text", "p_club_id" "uuid", "p_active" boolean) RETURNS "void"
@@ -4765,6 +4897,43 @@ $$;
 
 
 ALTER FUNCTION "public"."visible_recipient_message_ids"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."watch_day"("p_date" "date") RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_uid uuid := auth.uid();
+  v_caller profiles;
+  v_settings schedule_settings;
+  v_today date := (now() at time zone 'Europe/Prague')::date;
+begin
+  select * into v_caller from profiles where id = v_uid;
+  if not found or v_caller.status <> 'approved' or v_caller.role = 'kiosk' then
+    raise exception 'not_allowed';
+  end if;
+  select * into v_settings from schedule_settings
+   where tenant_id = v_caller.tenant_id;
+  if p_date < v_today then
+    raise exception 'date_past';
+  end if;
+  -- Beyond the horizon nothing is bookable yet, so nothing can be freed.
+  if v_caller.role <> 'admin' and p_date > v_today + v_settings.booking_horizon_days then
+    raise exception 'beyond_horizon';
+  end if;
+  if (select count(*) from slot_watches
+       where user_id = v_uid and date >= v_today) >= 30 then
+    raise exception 'too_many_watches';
+  end if;
+  insert into slot_watches (user_id, tenant_id, date)
+  values (v_uid, v_caller.tenant_id, p_date)
+  on conflict (user_id, date) do nothing;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."watch_day"("p_date" "date") OWNER TO "postgres";
 
 
 CREATE TABLE IF NOT EXISTS "public"."app_config" (
@@ -5361,6 +5530,20 @@ COMMENT ON COLUMN "public"."schedule_settings"."duty_reminder_days" IS 'How many
 
 
 
+CREATE TABLE IF NOT EXISTS "public"."slot_watches" (
+    "user_id" "uuid" NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "date" "date" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "last_notified_at" timestamp with time zone
+);
+
+ALTER TABLE ONLY "public"."slot_watches" REPLICA IDENTITY FULL;
+
+
+ALTER TABLE "public"."slot_watches" OWNER TO "postgres";
+
+
 CREATE TABLE IF NOT EXISTS "public"."team_colors" (
     "user_id" "uuid" NOT NULL,
     "team" "text" NOT NULL,
@@ -5639,6 +5822,11 @@ ALTER TABLE ONLY "public"."schedule_settings"
 
 
 
+ALTER TABLE ONLY "public"."slot_watches"
+    ADD CONSTRAINT "slot_watches_pkey" PRIMARY KEY ("user_id", "date");
+
+
+
 ALTER TABLE ONLY "public"."team_colors"
     ADD CONSTRAINT "team_colors_pkey" PRIMARY KEY ("user_id", "team");
 
@@ -5765,6 +5953,10 @@ CREATE UNIQUE INDEX "reservations_slot_live_idx" ON "public"."reservations" USIN
 
 
 
+CREATE INDEX "slot_watches_day_idx" ON "public"."slot_watches" USING "btree" ("tenant_id", "date");
+
+
+
 CREATE OR REPLACE TRIGGER "block_deactivated" AFTER UPDATE OF "active" ON "public"."time_blocks" FOR EACH ROW WHEN (("old"."active" AND (NOT "new"."active"))) EXECUTE FUNCTION "public"."cascade_schedule_change"();
 
 
@@ -5846,6 +6038,10 @@ CREATE OR REPLACE TRIGGER "rental_group_prune" AFTER DELETE ON "public"."rentals
 
 
 CREATE OR REPLACE TRIGGER "rental_series_changed" AFTER UPDATE ON "public"."rentals" FOR EACH ROW WHEN (("old"."parent_id" IS NULL)) EXECUTE FUNCTION "public"."rental_series_changed"();
+
+
+
+CREATE OR REPLACE TRIGGER "reservations_end_watch" AFTER INSERT ON "public"."reservations" FOR EACH ROW EXECUTE FUNCTION "public"."slot_watches_end_on_booking"();
 
 
 
@@ -6164,6 +6360,16 @@ ALTER TABLE ONLY "public"."schedule_settings"
 
 
 
+ALTER TABLE ONLY "public"."slot_watches"
+    ADD CONSTRAINT "slot_watches_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."slot_watches"
+    ADD CONSTRAINT "slot_watches_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "public"."profiles"("id") ON DELETE CASCADE;
+
+
+
 ALTER TABLE ONLY "public"."team_colors"
     ADD CONSTRAINT "team_colors_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "public"."profiles"("id") ON DELETE CASCADE;
 
@@ -6467,6 +6673,13 @@ CREATE POLICY "slot_types_update" ON "public"."priority_slot_types" FOR UPDATE U
 
 
 
+ALTER TABLE "public"."slot_watches" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "slot_watches_select" ON "public"."slot_watches" FOR SELECT USING (("user_id" = "auth"."uid"()));
+
+
+
 ALTER TABLE "public"."team_colors" ENABLE ROW LEVEL SECURITY;
 
 
@@ -6582,6 +6795,11 @@ GRANT ALL ON FUNCTION "public"."cancel_stranded_reservations"("p_tenant" "uuid",
 GRANT ALL ON FUNCTION "public"."cascade_schedule_change"() TO "anon";
 GRANT ALL ON FUNCTION "public"."cascade_schedule_change"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."cascade_schedule_change"() TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."claim_freed_spot_watchers"("p_reservation" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."claim_freed_spot_watchers"("p_reservation" "uuid") TO "service_role";
 
 
 
@@ -6949,6 +7167,11 @@ GRANT ALL ON FUNCTION "public"."prune_messages"() TO "service_role";
 
 
 
+REVOKE ALL ON FUNCTION "public"."prune_slot_watches"() FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."prune_slot_watches"() TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."public_tenant_id"("p_slug" "text") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."public_tenant_id"("p_slug" "text") TO "service_role";
 
@@ -7107,6 +7330,11 @@ GRANT ALL ON FUNCTION "public"."set_training_color_for"("p_user" "uuid", "p_colo
 
 
 
+REVOKE ALL ON FUNCTION "public"."slot_watches_end_on_booking"() FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."slot_watches_end_on_booking"() TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."start_calendar_link"() TO "anon";
 GRANT ALL ON FUNCTION "public"."start_calendar_link"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."start_calendar_link"() TO "service_role";
@@ -7127,6 +7355,12 @@ GRANT ALL ON FUNCTION "public"."time_blocks_enqueue_calendar"() TO "service_role
 
 REVOKE ALL ON FUNCTION "public"."trigger_notification_jobs"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."trigger_notification_jobs"() TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."unwatch_day"("p_date" "date") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."unwatch_day"("p_date" "date") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."unwatch_day"("p_date" "date") TO "service_role";
 
 
 
@@ -7166,6 +7400,12 @@ GRANT ALL ON FUNCTION "public"."visible_message_ids"() TO "service_role";
 REVOKE ALL ON FUNCTION "public"."visible_recipient_message_ids"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."visible_recipient_message_ids"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."visible_recipient_message_ids"() TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."watch_day"("p_date" "date") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."watch_day"("p_date" "date") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."watch_day"("p_date" "date") TO "service_role";
 
 
 
@@ -7318,6 +7558,11 @@ GRANT ALL ON TABLE "public"."rental_groups" TO "service_role";
 
 GRANT ALL ON TABLE "public"."schedule_settings" TO "authenticated";
 GRANT ALL ON TABLE "public"."schedule_settings" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."slot_watches" TO "service_role";
+GRANT SELECT ON TABLE "public"."slot_watches" TO "authenticated";
 
 
 

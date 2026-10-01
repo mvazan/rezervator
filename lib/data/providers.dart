@@ -767,6 +767,23 @@ final myTeamColorsProvider = StreamProvider<Map<String, int>>((ref) {
           });
 });
 
+/// The days the caller switched the „Hlídat uvolněná místa“ bell on for
+/// (`slot_watches`, 0058): when somebody cancels a training that day, the
+/// server pushes a notice. Own rows only (RLS); written through
+/// [Api.watchDay] / [Api.unwatchDay], which repaint the bell at once.
+final myDayWatchesProvider = StreamProvider<Set<Day>>((ref) {
+  final uid = ref.watch(_authUidProvider);
+  if (uid == null) return Stream.value(const {});
+  return cachedRows(
+          uid,
+          cacheKeySlotWatches,
+          () => _db
+              .from('slot_watches')
+              .stream(primaryKey: ['user_id', 'date'])
+              .eq('user_id', uid))
+      .map((rows) => {for (final row in rows) Day.parse(row['date'] as String)});
+});
+
 // ---------------------------------------------------------------------------
 // Actions (writes)
 // ---------------------------------------------------------------------------
@@ -976,6 +993,30 @@ class Api {
         .gte('date', Day.fromDateTime(DateTime.now()).toSql());
     return rows.length;
   }
+
+  /// Switches the freed-spot bell on for [day] (0058): the server pushes a
+  /// notice when somebody cancels a training that day and the caller could
+  /// book it. Optimistic — the bell flips before the call returns.
+  static Future<void> watchDay(Day day) => optimisticWrite(
+        currentUserId!,
+        cacheKeySlotWatches,
+        (rows) => [
+          ...rows.where((r) => r['date'] != day.toSql()),
+          {'user_id': currentUserId, 'date': day.toSql()},
+        ],
+        () => _db.rpc('watch_day', params: {'p_date': day.toSql()}),
+      );
+
+  /// Switches the bell off for [day].
+  static Future<void> unwatchDay(Day day) => optimisticWrite(
+        currentUserId!,
+        cacheKeySlotWatches,
+        (rows) => [
+          for (final r in rows)
+            if (r['date'] != day.toSql()) r,
+        ],
+        () => _db.rpc('unwatch_day', params: {'p_date': day.toSql()}),
+      );
 
   static Future<void> cancelReservation(String id,
           {String note = '', bool notify = true}) =>

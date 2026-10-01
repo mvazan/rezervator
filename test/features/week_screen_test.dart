@@ -12,6 +12,7 @@ import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/domain/schedule.dart' show FreeSlot;
 import 'package:rezervator/features/admin/widgets/block_dialog.dart';
 import 'package:rezervator/features/clubhouse/match_detail_screen.dart';
+import 'package:rezervator/features/schedule/widgets/day_watch_button.dart';
 import 'package:rezervator/features/schedule/widgets/slot_tile.dart';
 import 'package:rezervator/features/schedule/week_calendar_view.dart';
 import 'package:rezervator/features/schedule/schedule_callbacks.dart';
@@ -271,6 +272,32 @@ void main() {
     expect(find.text('Petr Novák'), findsNothing);
     expect(find.byType(SnackBar), findsOneWidget);
     await tester.pumpAndSettle(const Duration(seconds: 10));
+  });
+
+  testWidgets('the freed-spot bell sits by the free-spot count on the wide '
+      'board, for a player and not for the kiosk', (tester) async {
+    wideSurface(tester);
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+    expect(find.textContaining('volných'), findsWidgets);
+    expect(find.byType(DayWatchButton), findsWidgets);
+  });
+
+  testWidgets('no bell on the kiosk\'s calendar', (tester) async {
+    wideSurface(tester);
+    await tester.pumpWidget(
+      app(
+        profile: const Profile(
+          id: 'k',
+          displayName: 'Tablet',
+          email: 'k@example.com',
+          role: Role.kiosk,
+          status: ProfileStatus.approved,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(DayWatchButton), findsNothing);
   });
 
   testWidgets('tap on own reservation opens cancel dialog', (tester) async {

@@ -11247,4 +11247,169 @@ begin
   raise notice 'OK: registration numbers — the cache is service-role only, profiles.regnum is not the app''s to write and is checked (0057)';
 end $$;
 
+-- 24. „Hlídat uvolněná místa“ (0058): who hears about a freed spot, and who
+-- does not. An alley of its own, W; a block 17:00–18:00, a cap of two.
+reset role;
+do $$
+declare
+  w constant uuid := '00000000-0000-0000-0000-0000000000f1';
+  u1 constant uuid := '71000000-0000-0000-0000-000000000001'; -- cancels
+  u2 constant uuid := '71000000-0000-0000-0000-000000000002'; -- watcher
+  u3 constant uuid := '71000000-0000-0000-0000-000000000003'; -- watcher at the cap
+  u4 constant uuid := '71000000-0000-0000-0000-000000000004'; -- watcher, booked this block
+  u5 constant uuid := '71000000-0000-0000-0000-000000000005'; -- admin watcher
+  u6 constant uuid := '71000000-0000-0000-0000-000000000006'; -- watcher, other day
+  u7 constant uuid := '71000000-0000-0000-0000-000000000007'; -- pending watcher
+  v_today date := (now() at time zone 'Europe/Prague')::date;
+  v_blk uuid;
+  v_weekdays smallint[];
+  d date;
+  v_res uuid;
+  v_ids uuid[];
+  v_pruned integer;
+begin
+  insert into tenants (id, name) values (w, 'Kuželna W (0058)');
+  update schedule_settings set lane_count = 4, max_active_reservations = 2,
+         booking_horizon_days = 30
+   where tenant_id = w;
+  insert into time_blocks (tenant_id, starts_at, ends_at, position)
+  values (w, '17:00', '18:00', 0) returning id into v_blk;
+  select training_weekdays into v_weekdays from schedule_settings where tenant_id = w;
+  d := v_today + 2;
+  while not (extract(isodow from d)::smallint = any (v_weekdays)) loop
+    d := d + 1;
+  end loop;
+
+  insert into auth.users (id, email) values
+    (u1, 'w1@example.com'), (u2, 'w2@example.com'), (u3, 'w3@example.com'),
+    (u4, 'w4@example.com'), (u5, 'w5@example.com'), (u6, 'w6@example.com'),
+    (u7, 'w7@example.com')
+  on conflict do nothing;
+  insert into profiles (id, tenant_id, display_name, email, role, status) values
+    (u1, w, 'W1', 'w1@example.com', 'player', 'approved'),
+    (u2, w, 'W2', 'w2@example.com', 'player', 'approved'),
+    (u3, w, 'W3', 'w3@example.com', 'player', 'approved'),
+    (u4, w, 'W4', 'w4@example.com', 'player', 'approved'),
+    (u5, w, 'W5', 'w5@example.com', 'admin', 'approved'),
+    (u6, w, 'W6', 'w6@example.com', 'player', 'approved'),
+    (u7, w, 'W7', 'w7@example.com', 'player', 'pending');
+
+  -- u1 holds lane 1, u4 holds lane 3 of the same block; u3 is at the cap on
+  -- two other days.
+  insert into reservations (tenant_id, player_id, date, block_id, lane, created_via, created_by)
+  values (w, u1, d, v_blk, 1, 'app', u1),
+         (w, u4, d, v_blk, 3, 'app', u4),
+         (w, u3, d + 7, v_blk, 1, 'app', u3),
+         (w, u3, d + 14, v_blk, 1, 'app', u3);
+  insert into slot_watches (user_id, tenant_id, date) values
+    (u1, w, d), (u2, w, d), (u3, w, d), (u4, w, d), (u5, w, d), (u6, w, d + 1), (u7, w, d);
+
+  -- u1 cancels lane 1: only u2 (can book it) and u5 (admin, no cap) hear.
+  update reservations set cancelled_at = now(), cancelled_via = 'app', cancelled_by = u1
+   where player_id = u1 and date = d returning id into v_res;
+  select array_agg(c.user_id order by c.user_id) into v_ids from claim_freed_spot_watchers(v_res) c;
+  if v_ids is distinct from array[u2, u5] then
+    raise exception 'FAIL: freed-spot watchers were % (expected u2, u5)', v_ids;
+  end if;
+  -- The throttle: the same watchers are not claimed again within ten minutes.
+  if exists (select 1 from claim_freed_spot_watchers(v_res)) then
+    raise exception 'FAIL: a watcher was claimed twice inside the throttle window';
+  end if;
+  -- Ten minutes later they are again.
+  update slot_watches set last_notified_at = now() - interval '11 minutes' where date = d;
+  select array_agg(c.user_id order by c.user_id) into v_ids from claim_freed_spot_watchers(v_res) c;
+  if v_ids is distinct from array[u2, u5] then
+    raise exception 'FAIL: the throttle did not lift after ten minutes (%)', v_ids;
+  end if;
+
+  -- Booked by somebody else already: nothing is free.
+  update slot_watches set last_notified_at = null;
+  insert into reservations (tenant_id, player_id, date, block_id, lane, created_via, created_by)
+  values (w, u6, d, v_blk, 1, 'app', u6);
+  if exists (select 1 from claim_freed_spot_watchers(v_res)) then
+    raise exception 'FAIL: a retaken lane told the watchers it was free';
+  end if;
+  delete from reservations where player_id = u6 and date = d;
+  delete from slot_watches where user_id = u6 and date = d;   -- u6's own booking ended it
+
+  -- A still-live reservation claims nothing.
+  if exists (select 1 from claim_freed_spot_watchers(
+       (select id from reservations where player_id = u4 and date = d))) then
+    raise exception 'FAIL: a live reservation counted as a freed spot';
+  end if;
+
+  -- A closed day frees nothing (closing it cancels the day's reservations).
+  insert into day_overrides (tenant_id, date, closed, reason, created_by) values (w, d, true, 'test', u5);
+  update slot_watches set last_notified_at = null;
+  if exists (select 1 from claim_freed_spot_watchers(v_res)) then
+    raise exception 'FAIL: a closed day told the watchers a spot was free';
+  end if;
+  delete from day_overrides where tenant_id = w and date = d;
+
+  -- Booking ends the day's watch (u2 books lane 2).
+  insert into reservations (tenant_id, player_id, date, block_id, lane, created_via, created_by)
+  values (w, u2, d, v_blk, 2, 'app', u2);
+  if exists (select 1 from slot_watches where user_id = u2 and date = d) then
+    raise exception 'FAIL: a booking left the watch of its day on';
+  end if;
+  if not exists (select 1 from slot_watches where user_id = u5 and date = d) then
+    raise exception 'FAIL: one player''s booking ended another''s watch';
+  end if;
+
+  -- The app's side: watch_day / unwatch_day and the own-row read.
+  perform set_config('request.jwt.claims',
+    '{"sub":"71000000-0000-0000-0000-000000000006","role":"authenticated"}', true);
+  set local role authenticated;
+  perform watch_day(d + 2);
+  perform watch_day(d + 2);   -- idempotent
+  if (select count(*) from slot_watches) <> 2 then   -- d + 1 and d + 2, nobody else's
+    raise exception 'FAIL: a player reads % watch rows (expected their own 2)',
+      (select count(*) from slot_watches);
+  end if;
+  begin
+    perform watch_day(v_today - 1);
+    raise exception 'FAIL: a watch on a past day was accepted';
+  exception when others then
+    if sqlerrm <> 'date_past' then raise; end if;
+  end;
+  begin
+    perform watch_day(v_today + 31);
+    raise exception 'FAIL: a watch beyond the horizon was accepted';
+  exception when others then
+    if sqlerrm <> 'beyond_horizon' then raise; end if;
+  end;
+  begin
+    insert into slot_watches (user_id, tenant_id, date) values (u6, w, d + 3);
+    raise exception 'FAIL: a player wrote slot_watches directly';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform claim_freed_spot_watchers(v_res);
+    raise exception 'FAIL: a player called claim_freed_spot_watchers';
+  exception when insufficient_privilege then null;
+  end;
+  perform unwatch_day(d + 2);
+  if exists (select 1 from slot_watches where date = d + 2) then
+    raise exception 'FAIL: unwatch_day left the watch';
+  end if;
+  -- A pending account cannot watch.
+  perform set_config('request.jwt.claims',
+    '{"sub":"71000000-0000-0000-0000-000000000007","role":"authenticated"}', true);
+  begin
+    perform watch_day(d);
+    raise exception 'FAIL: a pending player watched a day';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  reset role;
+
+  -- The nightly prune drops the days that are over and keeps the rest.
+  insert into slot_watches (user_id, tenant_id, date) values (u2, w, v_today - 3);
+  v_pruned := prune_slot_watches();
+  if v_pruned < 1 or exists (select 1 from slot_watches where date < v_today) then
+    raise exception 'FAIL: prune_slot_watches kept a past day';
+  end if;
+  raise notice 'OK: slot watches — who hears about a freed spot (cap, own booking, closed day, retaken lane, throttle), the end on booking, the RPCs, privileges and the prune (0058)';
+end $$;
+
 rollback;

@@ -14,6 +14,7 @@ import '../../domain/schedule.dart';
 import 'schedule_callbacks.dart';
 import 'widgets/day_chip_strip.dart';
 import 'widgets/day_header.dart';
+import 'widgets/day_watch_button.dart';
 import 'widgets/gap_rows.dart';
 import 'widgets/slot_tile.dart';
 
@@ -408,6 +409,15 @@ class _DayPage extends StatelessWidget {
               chipLabel: '$freeCount volných',
               interactive: matchLinks,
               menu: _menu(),
+              watch: canWatchDay(
+                date: day.date,
+                today: today,
+                settings: settings,
+                me: me,
+                interactive: interactive,
+              )
+                  ? DayWatchButton(date: day.date)
+                  : null,
             ),
             const SizedBox(height: 10),
             // Lane header + block rows always stay column-aligned: lanes flex
