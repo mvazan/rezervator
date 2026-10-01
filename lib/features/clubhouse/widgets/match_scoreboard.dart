@@ -34,6 +34,7 @@ class MatchScoreboard extends StatelessWidget {
     this.onVenueTap,
     this.homeColor,
     this.awayColor,
+    this.video,
   });
 
   /// The match: its date and start, the teams and the venue.
@@ -58,6 +59,10 @@ class MatchScoreboard extends StatelessWidget {
   /// The sides' colours the pin lead is printed in; null = green and red.
   final Color? homeColor;
   final Color? awayColor;
+
+  /// The video button (live / recording), when it stands where the status
+  /// chip would be; null = the chip.
+  final Widget? video;
 
   /// The chip's word for a match that is not live.
   static String _statusLabel(MatchStatus status) => switch (status) {
@@ -111,6 +116,7 @@ class MatchScoreboard extends StatelessWidget {
                   ? 'Živě · ${freshnessLabel(result.fetchedAt, now)}'
                   : _statusLabel(result.status),
               live: live,
+              action: video,
             ),
             const SizedBox(height: 12),
             _ScoreLine(slot: slot, result: result, running: running),
@@ -145,7 +151,12 @@ class MatchScoreboard extends StatelessWidget {
 /// The date and start on the left, the status chip on the right (it drops
 /// under the date when the two don't fit on one line).
 class _TopLine extends StatelessWidget {
-  const _TopLine({required this.date, required this.chip, required this.live});
+  const _TopLine({
+    required this.date,
+    required this.chip,
+    required this.live,
+    this.action,
+  });
 
   /// „středa 16. 9. · 17:30“.
   final String date;
@@ -156,6 +167,9 @@ class _TopLine extends StatelessWidget {
   /// A live chip sits on errorContainer, so it stands out, with an 8dp dot
   /// before its text (an icon: Manrope has no „●“).
   final bool live;
+
+  /// Stands instead of the chip when set: the video button.
+  final Widget? action;
 
   @override
   Widget build(BuildContext context) {
@@ -175,7 +189,9 @@ class _TopLine extends StatelessWidget {
             fontFeatures: _tabular,
           ),
         ),
-        if (chip != null)
+        if (action != null)
+          action!
+        else if (chip != null)
           _Pill(
             label: chip,
             leading: live

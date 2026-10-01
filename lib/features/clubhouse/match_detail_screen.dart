@@ -142,37 +142,50 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     return parts.isEmpty ? slot.title : parts.join(' · ');
   }
 
+  /// The video button is the scoreboard's status while the match is live
+  /// or recorded („Sledovat živě“ / „Záznam“ say what „Živě“ / „Dokončeno“
+  /// did); in any other state the chip stays and the button sits below it.
+  bool _videoInScoreboard(PrioritySlot slot, MatchResult? result, bool live) =>
+      slot.videoUrl != null && (live || result?.status == MatchStatus.finished);
+
+  Widget _videoButton(
+    BuildContext context,
+    String videoUrl,
+    MatchResult? result,
+    bool live,
+  ) {
+    final recorded =
+        result?.status == MatchStatus.finished ||
+        result?.status == MatchStatus.forfeit;
+    return FilledButton.icon(
+      style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
+      onPressed: () => widget.launch(videoUrl),
+      icon: live
+          ? Icon(
+              Icons.circle,
+              size: 12,
+              color: Theme.of(context).colorScheme.error,
+            )
+          : const Icon(Icons.play_circle_fill),
+      label: Text(live ? 'Sledovat živě' : (recorded ? 'Záznam' : 'Video')),
+    );
+  }
+
   Widget _buttonsRow(
     BuildContext context,
     PrioritySlot slot,
     MatchResult? result,
-    DateTime now,
+    bool live,
   ) {
     final videoUrl = slot.videoUrl;
-    if (videoUrl == null) return const SizedBox.shrink();
-    final live = isLive(slot, result, now);
-    final recorded =
-        result?.status == MatchStatus.finished ||
-        result?.status == MatchStatus.forfeit;
+    if (videoUrl == null || _videoInScoreboard(slot, result, live)) {
+      return const SizedBox.shrink();
+    }
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
       child: Wrap(
         spacing: 8,
-        children: [
-          FilledButton.icon(
-            onPressed: () => widget.launch(videoUrl),
-            icon: live
-                ? Icon(
-                    Icons.circle,
-                    size: 12,
-                    color: Theme.of(context).colorScheme.error,
-                  )
-                : const Icon(Icons.play_circle_fill),
-            label: Text(
-              live ? 'Sledovat živě' : (recorded ? 'Záznam' : 'Video'),
-            ),
-          ),
-        ],
+        children: [_videoButton(context, videoUrl, result, live)],
       ),
     );
   }
@@ -473,6 +486,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     const homeColor = homeSideColor;
     const awayColor = awaySideColor;
     final duels = duelsOf(players);
+    final videoInScoreboard = _videoInScoreboard(slot, result, live);
 
     final children = <Widget>[
       for (final child in [
@@ -491,12 +505,25 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
                 ),
           homeColor: homeColor,
           awayColor: awayColor,
+          video: videoInScoreboard
+              ? _videoButton(context, slot.videoUrl!, result, live)
+              : null,
         ),
-        // While live the freshness sits in the scoreboard's „Živě“ chip.
-        // Na webu ČKA is on the same row, at the right (alone while live).
-        if (result == null || !live || slot.siteUrl != null)
-          _freshnessRow(theme, slot.siteUrl, result, live, now),
-        _buttonsRow(context, slot, result, now),
+        // While live the freshness sits in the scoreboard's „Živě“ chip —
+        // unless the video button took the chip's place. Na webu ČKA is on
+        // the same row, at the right (alone while live).
+        if (result == null ||
+            !live ||
+            videoInScoreboard ||
+            slot.siteUrl != null)
+          _freshnessRow(
+            theme,
+            slot.siteUrl,
+            result,
+            live && !videoInScoreboard,
+            now,
+          ),
+        _buttonsRow(context, slot, result, live),
         _switchRow(view, duels),
       ])
         _centred(child),
