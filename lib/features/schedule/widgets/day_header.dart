@@ -92,7 +92,10 @@ class DayHeader extends StatelessWidget {
                 foreground: chipFg,
                 bold: true,
               ),
-            if (reason == null && watch != null) watch!,
+            if (reason == null && watch != null) ...[
+              const SizedBox(width: 4),
+              watch!,
+            ],
             if (menu.isNotEmpty)
               PopupMenuButton<VoidCallback>(
                 icon: const Icon(Icons.more_vert),

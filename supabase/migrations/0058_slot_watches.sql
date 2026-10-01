@@ -2,7 +2,8 @@
 -- somebody cancels a training that day — a spot nobody holds any more — the
 -- player gets a push (e-mail without a token) and can book it.
 --
--- slot_watches: one row per (player, day). Read by its owner (the bell's
+-- slot_watches: one row per (player, day), for the whole day (`block_ids` null)
+-- or for the blocks the player picked. Read by its owner (the bell's
 -- state), written only through watch_day / unwatch_day. `last_notified_at`
 -- is the throttle: a burst of cancellations (an admin clearing a block) tells
 -- a watcher once per ten minutes, not once per spot.
@@ -18,13 +19,16 @@
 -- `last_notified_at` in the same statement, so two cancellations at once do
 -- not both claim the same watcher.
 --
--- A watcher who books anything that day is done (trigger below): they got
--- what they came for. Past days are pruned nightly.
+-- A watcher who books what they watch is done (trigger below): they got what
+-- they came for — any booking that day for a whole-day watch, a booking in
+-- one of the picked blocks for a block watch. Past days are pruned nightly.
 
 create table if not exists slot_watches (
   user_id uuid not null references profiles(id) on delete cascade,
   tenant_id uuid not null references tenants(id) on delete cascade,
   date date not null,
+  -- the blocks of that day the player cares about; null = the whole day
+  block_ids uuid[] check (block_ids is null or cardinality(block_ids) between 1 and 24),
   created_at timestamptz not null default now(),
   last_notified_at timestamptz,
   primary key (user_id, date)
@@ -53,13 +57,15 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------- watch_day
-create or replace function watch_day(p_date date) returns void
+create or replace function watch_day(p_date date, p_block_ids uuid[] default null)
+returns void
 language plpgsql security definer set search_path = public as $$
 declare
   v_uid uuid := auth.uid();
   v_caller profiles;
   v_settings schedule_settings;
   v_today date := (now() at time zone 'Europe/Prague')::date;
+  v_blocks uuid[];
 begin
   select * into v_caller from profiles where id = v_uid;
   if not found or v_caller.status <> 'approved' or v_caller.role = 'kiosk' then
@@ -74,13 +80,24 @@ begin
   if v_caller.role <> 'admin' and p_date > v_today + v_settings.booking_horizon_days then
     raise exception 'beyond_horizon';
   end if;
+  -- An empty pick is the whole day; a pick must be blocks of the caller's alley.
+  v_blocks := case when p_block_ids is null or cardinality(p_block_ids) = 0
+                   then null else p_block_ids end;
+  if v_blocks is not null and (
+       cardinality(v_blocks) > 24
+       or exists (select 1 from unnest(v_blocks) b(id)
+                   where not exists (select 1 from time_blocks t
+                                      where t.id = b.id and t.tenant_id = v_caller.tenant_id))) then
+    raise exception 'unknown_block';
+  end if;
   if (select count(*) from slot_watches
-       where user_id = v_uid and date >= v_today) >= 30 then
+       where user_id = v_uid and date >= v_today and date <> p_date) >= 30 then
     raise exception 'too_many_watches';
   end if;
-  insert into slot_watches (user_id, tenant_id, date)
-  values (v_uid, v_caller.tenant_id, p_date)
-  on conflict (user_id, date) do nothing;
+  insert into slot_watches (user_id, tenant_id, date, block_ids)
+  values (v_uid, v_caller.tenant_id, p_date, v_blocks)
+  on conflict (user_id, date)
+    do update set block_ids = excluded.block_ids, last_notified_at = null;
 end;
 $$;
 
@@ -156,6 +173,7 @@ begin
        and p.status = 'approved'
        and p.role <> 'kiosk'
        and w.user_id <> v_r.player_id
+       and (w.block_ids is null or v_r.block_id = any (w.block_ids))
        and (w.last_notified_at is null
             or w.last_notified_at < now() - interval '10 minutes')
        and (p.role = 'admin'
@@ -174,8 +192,8 @@ begin
 end;
 $$;
 
-revoke all on function watch_day(date), unwatch_day(date) from public, anon;
-grant execute on function watch_day(date), unwatch_day(date) to authenticated;
+revoke all on function watch_day(date, uuid[]), unwatch_day(date) from public, anon;
+grant execute on function watch_day(date, uuid[]), unwatch_day(date) to authenticated;
 revoke all on function claim_freed_spot_watchers(uuid) from public, anon, authenticated;
 grant execute on function claim_freed_spot_watchers(uuid) to service_role;
 
@@ -183,7 +201,9 @@ grant execute on function claim_freed_spot_watchers(uuid) to service_role;
 create or replace function slot_watches_end_on_booking() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
-  delete from slot_watches where user_id = new.player_id and date = new.date;
+  delete from slot_watches
+   where user_id = new.player_id and date = new.date
+     and (block_ids is null or new.block_id = any (block_ids));
   return new;
 end;
 $$;

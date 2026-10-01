@@ -1195,6 +1195,7 @@ begin
        and p.status = 'approved'
        and p.role <> 'kiosk'
        and w.user_id <> v_r.player_id
+       and (w.block_ids is null or v_r.block_id = any (w.block_ids))
        and (w.last_notified_at is null
             or w.last_notified_at < now() - interval '10 minutes')
        and (p.role = 'admin'
@@ -4549,7 +4550,9 @@ CREATE OR REPLACE FUNCTION "public"."slot_watches_end_on_booking"() RETURNS "tri
     SET "search_path" TO 'public'
     AS $$
 begin
-  delete from slot_watches where user_id = new.player_id and date = new.date;
+  delete from slot_watches
+   where user_id = new.player_id and date = new.date
+     and (block_ids is null or new.block_id = any (block_ids));
   return new;
 end;
 $$;
@@ -4899,7 +4902,7 @@ $$;
 ALTER FUNCTION "public"."visible_recipient_message_ids"() OWNER TO "postgres";
 
 
-CREATE OR REPLACE FUNCTION "public"."watch_day"("p_date" "date") RETURNS "void"
+CREATE OR REPLACE FUNCTION "public"."watch_day"("p_date" "date", "p_block_ids" "uuid"[] DEFAULT NULL::"uuid"[]) RETURNS "void"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
     AS $$
@@ -4908,6 +4911,7 @@ declare
   v_caller profiles;
   v_settings schedule_settings;
   v_today date := (now() at time zone 'Europe/Prague')::date;
+  v_blocks uuid[];
 begin
   select * into v_caller from profiles where id = v_uid;
   if not found or v_caller.status <> 'approved' or v_caller.role = 'kiosk' then
@@ -4922,18 +4926,29 @@ begin
   if v_caller.role <> 'admin' and p_date > v_today + v_settings.booking_horizon_days then
     raise exception 'beyond_horizon';
   end if;
+  -- An empty pick is the whole day; a pick must be blocks of the caller's alley.
+  v_blocks := case when p_block_ids is null or cardinality(p_block_ids) = 0
+                   then null else p_block_ids end;
+  if v_blocks is not null and (
+       cardinality(v_blocks) > 24
+       or exists (select 1 from unnest(v_blocks) b(id)
+                   where not exists (select 1 from time_blocks t
+                                      where t.id = b.id and t.tenant_id = v_caller.tenant_id))) then
+    raise exception 'unknown_block';
+  end if;
   if (select count(*) from slot_watches
-       where user_id = v_uid and date >= v_today) >= 30 then
+       where user_id = v_uid and date >= v_today and date <> p_date) >= 30 then
     raise exception 'too_many_watches';
   end if;
-  insert into slot_watches (user_id, tenant_id, date)
-  values (v_uid, v_caller.tenant_id, p_date)
-  on conflict (user_id, date) do nothing;
+  insert into slot_watches (user_id, tenant_id, date, block_ids)
+  values (v_uid, v_caller.tenant_id, p_date, v_blocks)
+  on conflict (user_id, date)
+    do update set block_ids = excluded.block_ids, last_notified_at = null;
 end;
 $$;
 
 
-ALTER FUNCTION "public"."watch_day"("p_date" "date") OWNER TO "postgres";
+ALTER FUNCTION "public"."watch_day"("p_date" "date", "p_block_ids" "uuid"[]) OWNER TO "postgres";
 
 
 CREATE TABLE IF NOT EXISTS "public"."app_config" (
@@ -5534,8 +5549,10 @@ CREATE TABLE IF NOT EXISTS "public"."slot_watches" (
     "user_id" "uuid" NOT NULL,
     "tenant_id" "uuid" NOT NULL,
     "date" "date" NOT NULL,
+    "block_ids" "uuid"[],
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
-    "last_notified_at" timestamp with time zone
+    "last_notified_at" timestamp with time zone,
+    CONSTRAINT "slot_watches_block_ids_check" CHECK ((("block_ids" IS NULL) OR (("cardinality"("block_ids") >= 1) AND ("cardinality"("block_ids") <= 24))))
 );
 
 ALTER TABLE ONLY "public"."slot_watches" REPLICA IDENTITY FULL;
@@ -7403,9 +7420,9 @@ GRANT ALL ON FUNCTION "public"."visible_recipient_message_ids"() TO "service_rol
 
 
 
-REVOKE ALL ON FUNCTION "public"."watch_day"("p_date" "date") FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."watch_day"("p_date" "date") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."watch_day"("p_date" "date") TO "service_role";
+REVOKE ALL ON FUNCTION "public"."watch_day"("p_date" "date", "p_block_ids" "uuid"[]) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."watch_day"("p_date" "date", "p_block_ids" "uuid"[]) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."watch_day"("p_date" "date", "p_block_ids" "uuid"[]) TO "service_role";
 
 
 

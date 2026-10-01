@@ -768,10 +768,11 @@ final myTeamColorsProvider = StreamProvider<Map<String, int>>((ref) {
 });
 
 /// The days the caller switched the „Hlídat uvolněná místa“ bell on for
-/// (`slot_watches`, 0058): when somebody cancels a training that day, the
-/// server pushes a notice. Own rows only (RLS); written through
-/// [Api.watchDay] / [Api.unwatchDay], which repaint the bell at once.
-final myDayWatchesProvider = StreamProvider<Set<Day>>((ref) {
+/// (`slot_watches`, 0058), each with the ids of the blocks picked — empty
+/// for the whole day: when somebody cancels a training that day (in one of
+/// those blocks), the server pushes a notice. Own rows only (RLS); written
+/// through [Api.watchDay] / [Api.unwatchDay], which repaint the bell at once.
+final myDayWatchesProvider = StreamProvider<Map<Day, Set<String>>>((ref) {
   final uid = ref.watch(_authUidProvider);
   if (uid == null) return Stream.value(const {});
   return cachedRows(
@@ -781,7 +782,13 @@ final myDayWatchesProvider = StreamProvider<Set<Day>>((ref) {
               .from('slot_watches')
               .stream(primaryKey: ['user_id', 'date'])
               .eq('user_id', uid))
-      .map((rows) => {for (final row in rows) Day.parse(row['date'] as String)});
+      .map((rows) => {
+            for (final row in rows)
+              Day.parse(row['date'] as String): {
+                for (final id in row['block_ids'] as List? ?? const [])
+                  id as String,
+              },
+          });
 });
 
 // ---------------------------------------------------------------------------
@@ -994,17 +1001,27 @@ class Api {
     return rows.length;
   }
 
-  /// Switches the freed-spot bell on for [day] (0058): the server pushes a
-  /// notice when somebody cancels a training that day and the caller could
-  /// book it. Optimistic — the bell flips before the call returns.
-  static Future<void> watchDay(Day day) => optimisticWrite(
+  /// Switches the freed-spot bell on for [day] (0058), for the [blocks] with
+  /// these ids — empty: the whole day. The server pushes a notice when
+  /// somebody cancels a training there and the caller could book it. Calling
+  /// it again changes the pick. Optimistic — the bell flips before the call
+  /// returns.
+  static Future<void> watchDay(Day day, {Set<String> blocks = const {}}) =>
+      optimisticWrite(
         currentUserId!,
         cacheKeySlotWatches,
         (rows) => [
           ...rows.where((r) => r['date'] != day.toSql()),
-          {'user_id': currentUserId, 'date': day.toSql()},
+          {
+            'user_id': currentUserId,
+            'date': day.toSql(),
+            'block_ids': blocks.isEmpty ? null : blocks.toList(),
+          },
         ],
-        () => _db.rpc('watch_day', params: {'p_date': day.toSql()}),
+        () => _db.rpc('watch_day', params: {
+          'p_date': day.toSql(),
+          'p_block_ids': blocks.isEmpty ? null : blocks.toList(),
+        }),
       );
 
   /// Switches the bell off for [day].

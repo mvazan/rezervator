@@ -11260,8 +11260,11 @@ declare
   u5 constant uuid := '71000000-0000-0000-0000-000000000005'; -- admin watcher
   u6 constant uuid := '71000000-0000-0000-0000-000000000006'; -- watcher, other day
   u7 constant uuid := '71000000-0000-0000-0000-000000000007'; -- pending watcher
+  u8 constant uuid := '71000000-0000-0000-0000-000000000008'; -- watches the 18:00 block only
+  u9 constant uuid := '71000000-0000-0000-0000-000000000009'; -- watches the 17:00 block only
   v_today date := (now() at time zone 'Europe/Prague')::date;
   v_blk uuid;
+  v_blk2 uuid;
   v_weekdays smallint[];
   d date;
   v_res uuid;
@@ -11274,6 +11277,8 @@ begin
    where tenant_id = w;
   insert into time_blocks (tenant_id, starts_at, ends_at, position)
   values (w, '17:00', '18:00', 0) returning id into v_blk;
+  insert into time_blocks (tenant_id, starts_at, ends_at, position)
+  values (w, '18:00', '19:00', 1) returning id into v_blk2;
   select training_weekdays into v_weekdays from schedule_settings where tenant_id = w;
   d := v_today + 2;
   while not (extract(isodow from d)::smallint = any (v_weekdays)) loop
@@ -11283,7 +11288,7 @@ begin
   insert into auth.users (id, email) values
     (u1, 'w1@example.com'), (u2, 'w2@example.com'), (u3, 'w3@example.com'),
     (u4, 'w4@example.com'), (u5, 'w5@example.com'), (u6, 'w6@example.com'),
-    (u7, 'w7@example.com')
+    (u7, 'w7@example.com'), (u8, 'w8@example.com'), (u9, 'w9@example.com')
   on conflict do nothing;
   insert into profiles (id, tenant_id, display_name, email, role, status) values
     (u1, w, 'W1', 'w1@example.com', 'player', 'approved'),
@@ -11292,7 +11297,9 @@ begin
     (u4, w, 'W4', 'w4@example.com', 'player', 'approved'),
     (u5, w, 'W5', 'w5@example.com', 'admin', 'approved'),
     (u6, w, 'W6', 'w6@example.com', 'player', 'approved'),
-    (u7, w, 'W7', 'w7@example.com', 'player', 'pending');
+    (u7, w, 'W7', 'w7@example.com', 'player', 'pending'),
+    (u8, w, 'W8', 'w8@example.com', 'player', 'approved'),
+    (u9, w, 'W9', 'w9@example.com', 'player', 'approved');
 
   -- u1 holds lane 1, u4 holds lane 3 of the same block; u3 is at the cap on
   -- two other days.
@@ -11301,15 +11308,17 @@ begin
          (w, u4, d, v_blk, 3, 'app', u4),
          (w, u3, d + 7, v_blk, 1, 'app', u3),
          (w, u3, d + 14, v_blk, 1, 'app', u3);
-  insert into slot_watches (user_id, tenant_id, date) values
-    (u1, w, d), (u2, w, d), (u3, w, d), (u4, w, d), (u5, w, d), (u6, w, d + 1), (u7, w, d);
+  insert into slot_watches (user_id, tenant_id, date, block_ids) values
+    (u1, w, d, null), (u2, w, d, null), (u3, w, d, null), (u4, w, d, null), (u5, w, d, null),
+    (u6, w, d + 1, null), (u7, w, d, null), (u8, w, d, array[v_blk2]), (u9, w, d, array[v_blk]);
 
-  -- u1 cancels lane 1: only u2 (can book it) and u5 (admin, no cap) hear.
+  -- u1 cancels lane 1: only u2 (can book it), u5 (admin, no cap) and u9 (watches
+  -- exactly this block) hear; u8 watches the other block.
   update reservations set cancelled_at = now(), cancelled_via = 'app', cancelled_by = u1
    where player_id = u1 and date = d returning id into v_res;
   select array_agg(c.user_id order by c.user_id) into v_ids from claim_freed_spot_watchers(v_res) c;
-  if v_ids is distinct from array[u2, u5] then
-    raise exception 'FAIL: freed-spot watchers were % (expected u2, u5)', v_ids;
+  if v_ids is distinct from array[u2, u5, u9] then
+    raise exception 'FAIL: freed-spot watchers were % (expected u2, u5, u9)', v_ids;
   end if;
   -- The throttle: the same watchers are not claimed again within ten minutes.
   if exists (select 1 from claim_freed_spot_watchers(v_res)) then
@@ -11318,7 +11327,7 @@ begin
   -- Ten minutes later they are again.
   update slot_watches set last_notified_at = now() - interval '11 minutes' where date = d;
   select array_agg(c.user_id order by c.user_id) into v_ids from claim_freed_spot_watchers(v_res) c;
-  if v_ids is distinct from array[u2, u5] then
+  if v_ids is distinct from array[u2, u5, u9] then
     raise exception 'FAIL: the throttle did not lift after ten minutes (%)', v_ids;
   end if;
 
@@ -11356,12 +11365,32 @@ begin
     raise exception 'FAIL: one player''s booking ended another''s watch';
   end if;
 
+  -- A watch of one block ends only with a booking in that block.
+  insert into reservations (tenant_id, player_id, date, block_id, lane, created_via, created_by)
+  values (w, u9, d, v_blk2, 1, 'app', u9);
+  if not exists (select 1 from slot_watches where user_id = u9 and date = d) then
+    raise exception 'FAIL: booking another block ended a one-block watch';
+  end if;
+  insert into reservations (tenant_id, player_id, date, block_id, lane, created_via, created_by)
+  values (w, u9, d, v_blk, 4, 'app', u9);
+  if exists (select 1 from slot_watches where user_id = u9 and date = d) then
+    raise exception 'FAIL: booking the watched block left its watch on';
+  end if;
+
   -- The app's side: watch_day / unwatch_day and the own-row read.
   perform set_config('request.jwt.claims',
     '{"sub":"71000000-0000-0000-0000-000000000006","role":"authenticated"}', true);
   set local role authenticated;
   perform watch_day(d + 2);
   perform watch_day(d + 2);   -- idempotent
+  perform watch_day(d + 2, array[v_blk]);   -- a pick replaces the whole-day watch
+  if (select block_ids from slot_watches where user_id = u6 and date = d + 2) is distinct from array[v_blk] then
+    raise exception 'FAIL: watch_day did not store the picked blocks';
+  end if;
+  perform watch_day(d + 2, '{}');   -- an empty pick is the whole day again
+  if (select block_ids from slot_watches where user_id = u6 and date = d + 2) is not null then
+    raise exception 'FAIL: an empty pick did not mean the whole day';
+  end if;
   if (select count(*) from slot_watches) <> 2 then   -- d + 1 and d + 2, nobody else's
     raise exception 'FAIL: a player reads % watch rows (expected their own 2)',
       (select count(*) from slot_watches);
@@ -11377,6 +11406,12 @@ begin
     raise exception 'FAIL: a watch beyond the horizon was accepted';
   exception when others then
     if sqlerrm <> 'beyond_horizon' then raise; end if;
+  end;
+  begin
+    perform watch_day(d + 2, array[gen_random_uuid()]);
+    raise exception 'FAIL: a watch of an unknown block was accepted';
+  exception when others then
+    if sqlerrm <> 'unknown_block' then raise; end if;
   end;
   begin
     insert into slot_watches (user_id, tenant_id, date) values (u6, w, d + 3);

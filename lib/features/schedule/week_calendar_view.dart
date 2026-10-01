@@ -255,6 +255,12 @@ class _WeekCalendarViewState extends State<WeekCalendarView> {
                       )
                   ? DayWatchButton(
                       date: day.date,
+                      blocks: watchableBlocks(
+                        (day as OpenDay).blocks,
+                        date: day.date,
+                        today: widget.today,
+                        now: widget.now,
+                      ),
                       size: 16,
                       dense: true,
                       // White on today's gradient, like the subtitle.
