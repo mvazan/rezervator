@@ -49,10 +49,26 @@ String changelogHeading(Release r, {required bool web}) {
 }
 
 const appChangelog = <Release>[
-  Release(null, '1. 10. 2026', [
+  Release('2.0.1', '1. 10. 2026', [
+    'Zvoneček u volných míst ve dni hlídá uvolněné termíny — celý den, '
+        'nebo jen bloky, které si vybereš.',
     'Zápas, kde družstvo nenastoupilo v plném počtu: Souboje ukážou hráče '
         '„bez soupeře“ s jeho výkonem a Zápis dopočítá hráči dva dílčí body '
         'a bod za souboj, které web ČKA nechává prázdné.',
+    'Registrační čísla hráčů z registru ČKA jsou ve Zápisu, v profilu '
+        'a v kontaktech.',
+    'Klubovnu si můžeš nastavit jako obrazovku, na které se appka otevře.',
+    'Přidělení služby na kantýně: dá se filtrovat podle klubu a appka si '
+        'pamatuje naposledy zvolený klub.',
+    'Na počítači (web): posun touchpadem i tažením myší a tlačítko Zpět '
+        'v prohlížeči zavře otevřenou obrazovku místo opuštění stránky.',
+  ], store: [
+    'Zvoneček u volných míst ve dni hlídá uvolněné termíny.',
+    'Souboje „bez soupeře“ a dopočtené body, když družstvo nenastoupilo '
+        'v plném počtu.',
+    'Registrační čísla hráčů z registru ČKA.',
+    'Klubovnu lze nastavit jako úvodní obrazovku.',
+    'Přidělení služby: filtr podle klubu.',
   ]),
   Release('2.0.0', '30. 9. 2026', [
     'Zápasy a výsledky se nově stahují z výsledkového servisu ČKA — '
