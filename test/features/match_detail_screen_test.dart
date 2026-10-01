@@ -1304,8 +1304,7 @@ void main() {
     );
 
     testWidgets(
-      'each side takes its colour from my team colours, else green for home '
-      'and red for the guests',
+      'green for home and red for the guests, whatever my team colours are',
       (tester) async {
         _tall(tester);
         await tester.pumpWidget(
@@ -1314,22 +1313,10 @@ void main() {
         await tester.pumpAndSettle();
 
         final card = tester.widget<DuelCard>(find.byType(DuelCard).first);
-        expect(card.homeColor, googleEventColorOf(5));
+        expect(card.homeColor, homeSideColor);
         expect(card.awayColor, awaySideColor);
       },
     );
-
-    testWidgets('without team colours: green for home, red for the guests', (
-      tester,
-    ) async {
-      _tall(tester);
-      await tester.pumpWidget(rudna());
-      await tester.pumpAndSettle();
-
-      final card = tester.widget<DuelCard>(find.byType(DuelCard).first);
-      expect(card.homeColor, homeSideColor);
-      expect(card.awayColor, awaySideColor);
-    });
 
     testWidgets('on a wide window the column is centred, at most 720dp', (
       tester,

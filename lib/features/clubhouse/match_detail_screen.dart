@@ -362,21 +362,6 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     final playersLoading = !playersAsync.hasValue && !playersAsync.hasError;
     final venues = ref.watch(venuesProvider).value ?? const <Venue>[];
     final view = ref.watch(matchDetailViewProvider);
-    var teamColors =
-        ref.watch(myTeamColorsProvider).value ?? const <String, int>{};
-    if (fromLeague) {
-      // A side takes the viewer's team colour only when it IS one of our
-      // teams (active or not) — a foreign team that shares a followed
-      // team's name stays neutral.
-      final ours = {
-        for (final t in ref.watch(teamsProvider).value ?? const <Team>[])
-          t.name,
-      };
-      teamColors = {
-        for (final e in teamColors.entries)
-          if (ours.contains(e.key)) e.key: e.value,
-      };
-    }
 
     PrioritySlot? slot = leagueMatch?.asSlot() ?? becameOurs;
     if (!isLeague) {
@@ -460,7 +445,6 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
               playersLoading: playersLoading,
               venueMatch: venueMatch,
               view: view,
-              teamColors: teamColors,
               now: now,
               live: live,
               // Pulling is the ⟳ button's twin: gone together once a
@@ -479,18 +463,15 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     required bool playersLoading,
     required Venue? venueMatch,
     required MatchDetailView view,
-    required Map<String, int> teamColors,
     required DateTime now,
     required bool live,
     required bool pullToRefresh,
   }) {
     final theme = Theme.of(context);
-    // The viewer's own colour for a team (the one Výsledky and the calendar
-    // use), else green for home and red for the guests.
-    final homeColor =
-        googleEventColorOf(teamColors[slot.homeTeam]) ?? homeSideColor;
-    final awayColor =
-        googleEventColorOf(teamColors[slot.awayTeam]) ?? awaySideColor;
+    // Always green for the hosts and red for the guests — never a team's
+    // own colour, so a side reads the same on every match.
+    const homeColor = homeSideColor;
+    const awayColor = awaySideColor;
     final duels = duelsOf(players);
 
     final children = <Widget>[
