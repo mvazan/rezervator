@@ -151,6 +151,33 @@ void main() {
     expect(nickEdit, findsOneWidget);
   });
 
+  testWidgets('shows the registration number next to the name once found',
+      (tester) async {
+    await tester.pumpWidget(
+      app(
+        const Profile(
+          id: 'me',
+          displayName: 'Já Hráč',
+          clubId: 'c1',
+          email: 'me@example.com',
+          role: Role.player,
+          status: ProfileStatus.approved,
+          nick: 'Já H.',
+          regnum: '787',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('reg. č. 787'), findsOneWidget);
+  });
+
+  testWidgets('shows no registration number until one is found',
+      (tester) async {
+    await tester.pumpWidget(app(me));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('reg. č.'), findsNothing);
+  });
+
   testWidgets('shows "nenastavena" when nick is empty', (tester) async {
     await tester.pumpWidget(
       app(

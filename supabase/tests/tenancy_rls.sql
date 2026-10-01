@@ -11199,4 +11199,52 @@ begin
   raise notice 'OK: league matches — RLS, refresh_match on a league id (windows, gates, the job write, other alleys), privileges, dead competitions and orphan jobs (0055)';
 end $$;
 
+-- 22. Registration numbers (0057): the lookup cache is the function's alone,
+-- a number is not the app's to write, and a malformed one is refused.
+reset role;
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_id uuid;
+begin
+  if has_table_privilege('authenticated', 'public.player_regnums', 'select')
+     or has_table_privilege('anon', 'public.player_regnums', 'select')
+     or has_table_privilege('authenticated', 'public.player_regnums', 'insert') then
+    raise exception 'FAIL: the app can reach player_regnums';
+  end if;
+  if not has_table_privilege('service_role', 'public.player_regnums', 'insert') then
+    raise exception 'FAIL: the function cannot write player_regnums';
+  end if;
+  if has_column_privilege('authenticated', 'public.profiles', 'regnum', 'update')
+     or has_column_privilege('anon', 'public.profiles', 'regnum', 'update') then
+    raise exception 'FAIL: the app can write profiles.regnum';
+  end if;
+  if pg_get_function_result('public.contacts()'::regprocedure) not like '%regnum text%' then
+    raise exception 'FAIL: contacts() does not return regnum';
+  end if;
+
+  insert into player_regnums (name_key, club_key, regnum, status)
+  values ('pavel strnad', 'tj sokol rudna', '787', 'found'),
+         ('jan novak', '', null, 'ambiguous');
+  begin
+    insert into player_regnums (name_key, regnum, status) values ('x y', '12a', 'found');
+    raise exception 'FAIL: a malformed number went into player_regnums';
+  exception when check_violation then null;
+  end;
+  begin
+    insert into player_regnums (name_key, regnum, status) values ('x y', null, 'found');
+    raise exception 'FAIL: a found row without a number went into player_regnums';
+  exception when check_violation then null;
+  end;
+
+  select id into v_id from profiles where tenant_id = v_a limit 1;
+  update profiles set regnum = '787' where id = v_id;
+  begin
+    update profiles set regnum = 'abc' where id = v_id;
+    raise exception 'FAIL: a malformed profiles.regnum was accepted';
+  exception when check_violation then null;
+  end;
+  raise notice 'OK: registration numbers — the cache is service-role only, profiles.regnum is not the app''s to write and is checked (0057)';
+end $$;
+
 rollback;

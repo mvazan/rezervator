@@ -51,3 +51,8 @@ jobs:
         # the platform verifies their JWT before the function runs; who may
         # reset which kiosk is then decided by kiosk_password_target (0028).
         run: supabase functions deploy kiosk-password
+      - name: Deploy regnum-lookup function
+        # Also WITHOUT --no-verify-jwt: a signed-in member calls it from the
+        # app. It answers only for the players of the caller's own alley
+        # (a match read as the caller; the caller's own tenant's profiles).
+        run: supabase functions deploy regnum-lookup

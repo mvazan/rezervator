@@ -371,10 +371,27 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     final playersAsync = fromLeague
         ? ref.watch(leaguePlayerResultsProvider(widget.matchId))
         : ref.watch(matchPlayerResultsProvider(_matchId));
-    final players = playersAsync.value ?? const <MatchPlayerResult>[];
+    final lineup = playersAsync.value ?? const <MatchPlayerResult>[];
     final playersLoading = !playersAsync.hasValue && !playersAsync.hasError;
     final venues = ref.watch(venuesProvider).value ?? const <Venue>[];
     final view = ref.watch(matchDetailViewProvider);
+    // The registration numbers only the Zápis shows; looked up on its first
+    // open and remembered by the server.
+    final regnums = view == MatchDetailView.zapis && lineup.isNotEmpty
+        ? ref
+                  .watch(
+                    matchRegnumsProvider((
+                      matchId: _matchId,
+                      league: fromLeague,
+                      lineup: lineup.length,
+                    )),
+                  )
+                  .value ??
+              const <String, String>{}
+        : const <String, String>{};
+    final players = [
+      for (final p in lineup) p.withRegnum(regnums[p.playerName]),
+    ];
 
     PrioritySlot? slot = leagueMatch?.asSlot() ?? becameOurs;
     if (!isLeague) {

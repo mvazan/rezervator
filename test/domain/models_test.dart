@@ -200,6 +200,28 @@ void main() {
           reason: 'an unknown value falls back to the calendar');
     });
 
+    test('fromJson reads regnum (0057), null when absent', () {
+      final p = Profile.fromJson({
+        'id': 'u1',
+        'display_name': 'Já',
+        'role': 'player',
+        'status': 'approved',
+        'regnum': '787',
+      });
+      expect(p.regnum, '787');
+      final bare = Profile.fromJson({
+        'id': 'u2',
+        'display_name': 'Ty',
+        'role': 'player',
+        'status': 'approved',
+      });
+      expect(bare.regnum, isNull);
+      expect(
+        Contact.fromJson({'id': 'c', 'display_name': 'X', 'regnum': '5'}).regnum,
+        '5',
+      );
+    });
+
     test('fromJson reads phone, show_email and show_phone (0048)', () {
       final p = Profile.fromJson({
         'id': 'u1',

@@ -7,6 +7,7 @@ library;
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -1967,6 +1968,46 @@ class Api {
         ),
       );
 
+  /// The registration numbers of a match's players, from the ČKA register
+  /// (`regnum-lookup`, 0057): `{player name: number}`, the found ones only.
+  /// The server remembers what the register said, so a number is looked up
+  /// once. [more]: the server ran out of budget before every name — ask again.
+  static Future<({Map<String, String> regnums, bool more})> matchRegnums(
+    String matchId, {
+    bool league = false,
+  }) async {
+    final response = await _db.functions.invoke(
+      'regnum-lookup',
+      body: {'mode': 'match', 'match_id': matchId, 'league': league},
+    );
+    final data = response.data;
+    final raw = data is Map ? data['regnums'] : null;
+    return (
+      regnums: {
+        if (raw is Map)
+          for (final e in raw.entries)
+            if (e.key is String && e.value is String)
+              e.key as String: e.value as String,
+      },
+      more: data is Map && data['more'] == true,
+    );
+  }
+
+  /// Asks the server to find the registration numbers of the alley's players
+  /// that have none yet and store them on their profiles (`regnum-lookup`,
+  /// 0057). Returns how many it filled and whether more are left to ask.
+  static Future<({int filled, bool more})> fillProfileRegnums() async {
+    final response = await _db.functions.invoke(
+      'regnum-lookup',
+      body: {'mode': 'profiles'},
+    );
+    final data = response.data;
+    return (
+      filled: data is Map && data['filled'] is int ? data['filled'] as int : 0,
+      more: data is Map && data['more'] == true,
+    );
+  }
+
   /// Sets a NEW password for a kiosk account and returns it — the old one
   /// is gone. Reading the current one is impossible (Supabase keeps only a
   /// hash), so this is how an admin gets credentials for a tablet. Who may
@@ -2156,6 +2197,56 @@ final contactsProvider = FutureProvider.autoDispose<List<Contact>>(
   (ref) async {
     if (ref.watch(_authUidProvider) == null) return const [];
     return Api.contacts();
+  },
+  retry: (_, _) => null,
+);
+
+/// The registration numbers on a match's Zápis: `{player name: number}`,
+/// found by the server in the ČKA register and remembered there. Best
+/// effort — offline, or the register down, the cells stay empty. [lineup]
+/// (the number of lines) only makes the lookup run again when the lineup
+/// grows while the match goes on.
+final matchRegnumsProvider = FutureProvider.autoDispose
+    .family<Map<String, String>, ({String matchId, bool league, int lineup})>(
+  (ref, key) async {
+    if (ref.watch(_authUidProvider) == null) return const {};
+    try {
+      final found = <String, String>{};
+      // The server asks the register for a limited number of names per call.
+      for (var round = 0; round < 3; round++) {
+        final answer = await Api.matchRegnums(key.matchId, league: key.league);
+        found.addAll(answer.regnums);
+        if (!answer.more) break;
+      }
+      return found;
+    } catch (e) {
+      debugPrint('Registrační čísla zápasu ${key.matchId}: $e');
+      return const {};
+    }
+  },
+  retry: (_, _) => null,
+);
+
+/// Finds the registration numbers of the alley's players that have none
+/// (once per screen visit — the server remembers what the register said and
+/// asks it for each name at most once a week), then reloads Kontakty. Best
+/// effort: its value is only how many numbers it filled.
+final profileRegnumsProvider = FutureProvider.autoDispose<int>(
+  (ref) async {
+    if (ref.watch(_authUidProvider) == null) return 0;
+    try {
+      var filled = 0;
+      for (var round = 0; round < 4; round++) {
+        final answer = await Api.fillProfileRegnums();
+        filled += answer.filled;
+        if (!answer.more) break;
+      }
+      if (filled > 0 && ref.mounted) ref.invalidate(contactsProvider);
+      return filled;
+    } catch (e) {
+      debugPrint('Registrační čísla hráčů: $e');
+      return 0;
+    }
   },
   retry: (_, _) => null,
 );

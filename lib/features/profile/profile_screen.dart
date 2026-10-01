@@ -87,6 +87,11 @@ class ProfileScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final profile = ref.watch(myProfileProvider).value;
     final clubs = ref.watch(clubsProvider).value ?? const <Club>[];
+    // The registration number is looked up in the ČKA register by name and
+    // club, once; the profile row updates when the server found it.
+    if (profile != null && profile.regnum == null) {
+      ref.watch(profileRegnumsProvider);
+    }
 
     return Scaffold(
       appBar: AppBar(title: const Text('Můj profil')),
@@ -101,6 +106,13 @@ class ProfileScreen extends ConsumerWidget {
                       ListTile(
                         title: const Text('Jméno'),
                         subtitle: Text(profile.displayName),
+                        // The ČKA register's number, once found (0057).
+                        trailing: profile.regnum == null
+                            ? null
+                            : Text(
+                                'reg. č. ${profile.regnum}',
+                                style: Theme.of(context).textTheme.bodyMedium,
+                              ),
                       ),
                       ListTile(
                         title: const Text('E-mail'),
@@ -129,8 +141,9 @@ class ProfileScreen extends ConsumerWidget {
                         child: Align(
                           alignment: Alignment.centerLeft,
                           child: Text(
-                            'Jméno a oddíl nastavuje správce; e-mail je ten, '
-                            'kterým se přihlašuješ.',
+                            'Jméno a oddíl nastavuje správce; registrační číslo '
+                            'se hledá v evidenci ČKA podle jména a oddílu; '
+                            'e-mail je ten, kterým se přihlašuješ.',
                             style: TextStyle(
                               fontSize: 12,
                               color: Colors.grey,

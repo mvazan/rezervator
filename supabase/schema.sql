@@ -1151,7 +1151,7 @@ $$;
 ALTER FUNCTION "public"."consume_calendar_nonce"("p_nonce" "text") OWNER TO "postgres";
 
 
-CREATE OR REPLACE FUNCTION "public"."contacts"() RETURNS TABLE("id" "uuid", "display_name" "text", "nick" "text", "club_id" "uuid", "club_name" "text", "club_color" integer, "email" "text", "phone" "text")
+CREATE OR REPLACE FUNCTION "public"."contacts"() RETURNS TABLE("id" "uuid", "display_name" "text", "nick" "text", "club_id" "uuid", "club_name" "text", "club_color" integer, "email" "text", "phone" "text", "regnum" "text")
     LANGUAGE "plpgsql" STABLE SECURITY DEFINER
     SET "search_path" TO 'public'
     AS $$
@@ -1163,7 +1163,8 @@ begin
     select p.id, p.display_name, p.nick, p.club_id, c.name,
            coalesce(c.color, -1),
            case when p.show_email then nullif(p.email, '') end,
-           case when p.show_phone then p.phone end
+           case when p.show_phone then p.phone end,
+           p.regnum
       from profiles p
       left join clubs c on c.id = p.club_id
      where p.tenant_id = current_tenant_id()
@@ -1354,6 +1355,7 @@ CREATE TABLE IF NOT EXISTS "public"."profiles" (
     "phone" "text",
     "show_email" boolean DEFAULT true NOT NULL,
     "show_phone" boolean DEFAULT true NOT NULL,
+    "regnum" "text",
     CONSTRAINT "profiles_default_view_check" CHECK (("default_view" = ANY (ARRAY['calendar'::"text", 'trainings'::"text", 'clubhouse'::"text"]))),
     CONSTRAINT "profiles_followed_teams_check" CHECK ((COALESCE("array_length"("followed_teams", 1), 0) <= 20)),
     CONSTRAINT "profiles_nick_check" CHECK (("char_length"("nick") <= 14)),
@@ -1361,6 +1363,7 @@ CREATE TABLE IF NOT EXISTS "public"."profiles" (
     CONSTRAINT "profiles_own_color_check" CHECK (((("own_color" >= '-1'::integer) AND ("own_color" <= 8)) OR (("own_color" >= 16777216) AND ("own_color" <= 33554431)))),
     CONSTRAINT "profiles_phone_check" CHECK ((("phone" IS NULL) OR ("phone" ~ '^\+[1-9][0-9]{7,14}$'::"text"))),
     CONSTRAINT "profiles_placeholder_check" CHECK (((NOT "placeholder") OR (("role" = 'player'::"text") AND ("status" = 'approved'::"text") AND (NOT "superadmin")))),
+    CONSTRAINT "profiles_regnum_check" CHECK ((("regnum" IS NULL) OR ("regnum" ~ '^[0-9]{1,8}$'::"text"))),
     CONSTRAINT "profiles_role_check" CHECK (("role" = ANY (ARRAY['player'::"text", 'admin'::"text", 'kiosk'::"text"]))),
     CONSTRAINT "profiles_status_check" CHECK (("status" = ANY (ARRAY['pending'::"text", 'approved'::"text"])))
 );
@@ -1398,6 +1401,10 @@ COMMENT ON COLUMN "public"."profiles"."show_email" IS 'Whether contacts() hands 
 
 
 COMMENT ON COLUMN "public"."profiles"."show_phone" IS 'Whether contacts() hands this player''s phone to the other players of the alley (0048). On by default, for existing players too.';
+
+
+
+COMMENT ON COLUMN "public"."profiles"."regnum" IS 'Registration number from the ČKA register (evidence.kuzelky.cz), looked up by name and club by the regnum-lookup function (0057); null until found. Not updatable by the app.';
 
 
 
@@ -5233,6 +5240,21 @@ COMMENT ON TABLE "public"."player_groups" IS 'A group of players who may book an
 
 
 
+CREATE TABLE IF NOT EXISTS "public"."player_regnums" (
+    "name_key" "text" NOT NULL,
+    "club_key" "text" DEFAULT ''::"text" NOT NULL,
+    "regnum" "text",
+    "status" "text" NOT NULL,
+    "looked_up_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "player_regnums_check" CHECK ((("status" = 'found'::"text") = ("regnum" IS NOT NULL))),
+    CONSTRAINT "player_regnums_regnum_check" CHECK ((("regnum" IS NULL) OR ("regnum" ~ '^[0-9]{1,8}$'::"text"))),
+    CONSTRAINT "player_regnums_status_check" CHECK (("status" = ANY (ARRAY['found'::"text", 'none'::"text", 'ambiguous'::"text"])))
+);
+
+
+ALTER TABLE "public"."player_regnums" OWNER TO "postgres";
+
+
 CREATE OR REPLACE VIEW "public"."players" AS
  SELECT "p"."id",
     "p"."display_name",
@@ -5569,6 +5591,11 @@ ALTER TABLE ONLY "public"."player_group_members"
 
 ALTER TABLE ONLY "public"."player_groups"
     ADD CONSTRAINT "player_groups_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."player_regnums"
+    ADD CONSTRAINT "player_regnums_pkey" PRIMARY KEY ("name_key", "club_key");
 
 
 
@@ -6327,6 +6354,9 @@ CREATE POLICY "player_group_members_select" ON "public"."player_group_members" F
 
 
 ALTER TABLE "public"."player_groups" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."player_regnums" ENABLE ROW LEVEL SECURITY;
 
 
 CREATE POLICY "priority_delete" ON "public"."priority_slots" FOR DELETE USING ((("tenant_id" = "public"."current_tenant_id"()) AND "public"."is_admin"()));
@@ -7248,6 +7278,10 @@ GRANT ALL ON TABLE "public"."player_group_members" TO "service_role";
 
 
 GRANT ALL ON TABLE "public"."player_groups" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."player_regnums" TO "service_role";
 
 
 
