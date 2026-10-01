@@ -2023,8 +2023,8 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('Slouží: Petr Novák'), findsOneWidget);
-      await tester.tap(find.text('Slouží: Petr Novák'));
+      expect(find.text('Služba: Petr Novák'), findsOneWidget);
+      await tester.tap(find.text('Služba: Petr Novák'));
       await tester.pumpAndSettle();
       expect(find.widgetWithText(AppBar, 'Služby'), findsOneWidget);
     });
@@ -2044,7 +2044,7 @@ void main() {
       await tester.pumpWidget(const SizedBox());
       await tester.pumpWidget(app());
       await tester.pumpAndSettle();
-      expect(find.textContaining('Slouží'), findsNothing);
+      expect(find.textContaining('Služba'), findsNothing);
     });
   });
 

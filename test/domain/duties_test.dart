@@ -371,13 +371,13 @@ void main() {
     );
 
     test(
-      'one period for the whole week: „Slouží: Jan Novák a Petr Svoboda“',
+      'one period for the whole week: „Služba: Jan Novák a Petr Svoboda“',
       () {
         final h = label(
           [period('a', monday, monday.addDays(6))],
           [assign('a', 'petr'), assign('a', 'jan')],
         );
-        expect(h?.text, 'Slouží: Jan Novák a Petr Svoboda');
+        expect(h?.text, 'Služba: Jan Novák a Petr Svoboda');
         expect(h?.mine, isFalse);
       },
     );
@@ -387,7 +387,7 @@ void main() {
         [period('a', Day(2026, 10, 1), Day(2026, 10, 14))],
         [assign('a', 'jan'), assign('a', 'petr'), assign('a', 'adam')],
       );
-      expect(h?.text, 'Slouží: Adam Beneš, Jan Novák a Petr Svoboda');
+      expect(h?.text, 'Služba: Adam Beneš, Jan Novák a Petr Svoboda');
     });
 
     test('names are sorted Czech-alphabetically (Č after C)', () {
@@ -395,7 +395,7 @@ void main() {
         [period('a', monday, monday.addDays(6))],
         [assign('a', 'cyril'), assign('a', 'jan')],
       );
-      expect(h?.text, 'Slouží: Čestmír Cimrman a Jan Novák');
+      expect(h?.text, 'Služba: Čestmír Cimrman a Jan Novák');
     });
 
     test(
@@ -408,7 +408,7 @@ void main() {
           ],
           [assign('a', 'jan'), assign('b', 'petr')],
         );
-        expect(h?.text, 'Slouží: po–st Jan Novák · čt–ne Petr Svoboda');
+        expect(h?.text, 'Služba: po–st Jan Novák · čt–ne Petr Svoboda');
       },
     );
 
@@ -422,7 +422,7 @@ void main() {
         [assign('a', 'jan'), assign('b', 'jan')],
         me: 'jan',
       );
-      expect(h?.text, 'Slouží: po–ne ty');
+      expect(h?.text, 'Služba: po–ne ty');
     });
 
     test('adjacent periods with the same names merge; the names keep their '
@@ -438,7 +438,7 @@ void main() {
         ],
         me: 'jan',
       );
-      expect(same?.text, 'Slouží: po–ne Petr Svoboda a ty');
+      expect(same?.text, 'Služba: po–ne Petr Svoboda a ty');
       final firstDays = label(
         [
           period('a', Day(2026, 10, 1), Day(2026, 10, 5)),
@@ -447,7 +447,7 @@ void main() {
         ],
         [assign('a', 'jan'), assign('b', 'jan'), assign('c', 'petr')],
       );
-      expect(firstDays?.text, 'Slouží: po–čt Jan Novák · pá–ne Petr Svoboda');
+      expect(firstDays?.text, 'Služba: po–čt Jan Novák · pá–ne Petr Svoboda');
     });
 
     test('three adjacent periods with the same names are one part', () {
@@ -459,7 +459,7 @@ void main() {
         ],
         [assign('a', 'jan'), assign('b', 'jan'), assign('c', 'jan')],
       );
-      expect(h?.text, 'Slouží: po–ne Jan Novák');
+      expect(h?.text, 'Služba: po–ne Jan Novák');
     });
 
     test('the same names with a gap between the periods stay two parts', () {
@@ -470,7 +470,7 @@ void main() {
         ],
         [assign('a', 'jan'), assign('b', 'jan')],
       );
-      expect(h?.text, 'Slouží: po–út Jan Novák · čt–pá Jan Novák');
+      expect(h?.text, 'Služba: po–út Jan Novák · čt–pá Jan Novák');
     });
 
     test('a merge of the same names hides no other part between them', () {
@@ -483,7 +483,7 @@ void main() {
         [assign('a', 'jan'), assign('b', 'petr'), assign('c', 'jan')],
       );
       expect(h?.text,
-          'Slouží: po–út Jan Novák · st–čt Petr Svoboda · pá–ne Jan Novák');
+          'Služba: po–út Jan Novák · st–čt Petr Svoboda · pá–ne Jan Novák');
     });
 
     test('a one-day part names its day once', () {
@@ -494,7 +494,7 @@ void main() {
         ],
         [assign('a', 'jan'), assign('b', 'petr')],
       );
-      expect(h?.text, 'Slouží: po Jan Novák · út–ne Petr Svoboda');
+      expect(h?.text, 'Služba: po Jan Novák · út–ne Petr Svoboda');
     });
 
     test('a period covering part of the week alone keeps its days', () {
@@ -502,7 +502,7 @@ void main() {
         [period('a', Day(2026, 10, 8), Day(2026, 10, 14))],
         [assign('a', 'petr')],
       );
-      expect(h?.text, 'Slouží: čt–ne Petr Svoboda');
+      expect(h?.text, 'Služba: čt–ne Petr Svoboda');
     });
 
     test('an unassigned period says nothing; no period, no line', () {
@@ -515,7 +515,7 @@ void main() {
         ],
         [assign('a', 'jan')],
       );
-      expect(h?.text, 'Slouží: po–st Jan Novák');
+      expect(h?.text, 'Služba: po–st Jan Novák');
     });
 
     test('periods outside the week are ignored', () {
@@ -533,7 +533,7 @@ void main() {
         [period('a', monday, monday.addDays(6))],
         [assign('a', 'jan'), assign('a', 'unknown')],
       );
-      expect(h?.text, 'Slouží: Jan Novák');
+      expect(h?.text, 'Služba: Jan Novák');
     });
 
     test('me on duty in the week with today: „Sloužíš ty · do st 7. 10.“', () {
@@ -586,7 +586,7 @@ void main() {
       final assignments = [assign('a', 'jan')];
       // Next week's duty, seen today (not in the week).
       final ahead = label(periods, assignments, me: 'jan', today: Day(2026, 9, 30));
-      expect(ahead?.text, 'Slouží: ty');
+      expect(ahead?.text, 'Služba: ty');
       // Not tinted: „Sloužíš ty“ is the running duty's line.
       expect(ahead?.mine, isFalse);
       // On duty today, looking at the week after.
@@ -610,7 +610,7 @@ void main() {
         me: 'jan',
         today: Day(2026, 10, 6),
       );
-      expect(h?.text, 'Slouží: po–st Petr Svoboda · čt–ne ty');
+      expect(h?.text, 'Služba: po–st Petr Svoboda · čt–ne ty');
       expect(h?.mine, isFalse);
     });
 
@@ -623,11 +623,11 @@ void main() {
       final assignments = [assign('a', 'jan'), assign('b', 'petr')];
       expect(
         label(periods, assignments, me: 'jan')?.text,
-        'Slouží: po–st ty · čt–ne Petr Svoboda',
+        'Služba: po–st ty · čt–ne Petr Svoboda',
       );
       expect(
         label(periods, assignments, me: 'petr')?.text,
-        'Slouží: po–st Jan Novák · čt–ne ty',
+        'Služba: po–st Jan Novák · čt–ne ty',
       );
     });
 
@@ -637,7 +637,7 @@ void main() {
       // Jan sorts after Adam and before Petr; „ty“ is still last.
       expect(
         label(periods, [assign('a', 'jan'), assign('a', 'petr')], me: 'jan')?.text,
-        'Slouží: Petr Svoboda a ty',
+        'Služba: Petr Svoboda a ty',
       );
       expect(
         label(
@@ -645,7 +645,7 @@ void main() {
           [assign('a', 'jan'), assign('a', 'petr'), assign('a', 'adam')],
           me: 'jan',
         )?.text,
-        'Slouží: Adam Beneš, Petr Svoboda a ty',
+        'Služba: Adam Beneš, Petr Svoboda a ty',
       );
     });
 
@@ -658,7 +658,7 @@ void main() {
         'me',
         today: farToday,
       );
-      expect(h?.text, 'Slouží: Jan Novák a ty');
+      expect(h?.text, 'Služba: Jan Novák a ty');
     });
 
     test('someone else\'s view names me as anyone', () {
@@ -667,7 +667,7 @@ void main() {
         [assign('a', 'jan'), assign('a', 'petr')],
         me: 'adam',
       );
-      expect(h?.text, 'Slouží: Jan Novák a Petr Svoboda');
+      expect(h?.text, 'Služba: Jan Novák a Petr Svoboda');
     });
   });
 

@@ -324,8 +324,8 @@ class DutyHeader {
 
 /// Who serves in the week of [monday], for the line under the week range:
 ///
-/// * one period for the whole week: „Slouží: Jan Novák a Petr Svoboda“;
-/// * a change inside the week: „Slouží: po–st Jan Novák · čt–ne Petr
+/// * one period for the whole week: „Služba: Jan Novák a Petr Svoboda“;
+/// * a change inside the week: „Služba: po–st Jan Novák · čt–ne Petr
 ///   Svoboda“ — each period's days within the week (one day named once);
 /// * when [meId] is on duty [today] and the week holds today: „Sloužíš ty ·
 ///   do ne 11. 10.“, plus „ · spolu s: …“ (Czech-sorted) when others share
@@ -333,7 +333,7 @@ class DutyHeader {
 /// * null when no one serves that week — no period, or only unassigned ones.
 ///
 /// Wherever the lines list who serves, I am „ty“, not my name — after the
-/// others, whatever the alphabet says („Slouží: Petr Svoboda a ty“, „Slouží:
+/// others, whatever the alphabet says („Služba: Petr Svoboda a ty“, „Služba:
 /// po–st ty · čt–ne Petr Svoboda“) — even when the roster does not know me.
 ///
 /// [names] maps user ids to display names (placeholders included); an id
@@ -398,7 +398,7 @@ DutyHeader? dutyHeaderLabel(
   if (parts.length == 1) {
     final (from, to, who) = parts.single;
     if (from == monday && to == sunday && inWeek.length == 1) {
-      return DutyHeader('Slouží: $who');
+      return DutyHeader('Služba: $who');
     }
   }
   String days(Day from, Day to) {
@@ -407,7 +407,7 @@ DutyHeader? dutyHeaderLabel(
   }
 
   return DutyHeader(
-    'Slouží: ${[for (final (from, to, who) in parts) '${days(from, to)} $who'].join(' · ')}',
+    'Služba: ${[for (final (from, to, who) in parts) '${days(from, to)} $who'].join(' · ')}',
   );
 }
 

@@ -35,7 +35,7 @@ void main() {
 
   testWidgets('no one serves: no line', (tester) async {
     await tester.pumpWidget(app(null));
-    expect(find.textContaining('Slouží'), findsNothing);
+    expect(find.textContaining('Služba'), findsNothing);
     expect(find.textContaining('Sloužíš'), findsNothing);
   });
 
@@ -49,12 +49,12 @@ void main() {
       var taps = 0;
       await tester.pumpWidget(
         app(
-          const DutyHeader('Slouží: Jan Novák a Petr Svoboda'),
+          const DutyHeader('Služba: Jan Novák a Petr Svoboda'),
           onTap: () => taps++,
         ),
       );
 
-      final text = line(tester, 'Slouží: Jan Novák a Petr Svoboda');
+      final text = line(tester, 'Služba: Jan Novák a Petr Svoboda');
       final theme = Theme.of(tester.element(find.byType(WeekHeader)));
       expect(text.maxLines, 1);
       expect(text.overflow, TextOverflow.ellipsis);
@@ -62,11 +62,11 @@ void main() {
       expect(text.style!.color, theme.colorScheme.onSurfaceVariant);
       // Under the range, not beside it.
       expect(
-        tester.getTopLeft(find.text('Slouží: Jan Novák a Petr Svoboda')).dy,
+        tester.getTopLeft(find.text('Služba: Jan Novák a Petr Svoboda')).dy,
         greaterThan(tester.getBottomLeft(find.textContaining('10.')).dy - 1),
       );
 
-      await tester.tap(find.text('Slouží: Jan Novák a Petr Svoboda'));
+      await tester.tap(find.text('Služba: Jan Novák a Petr Svoboda'));
       expect(taps, 1);
     });
 
@@ -75,10 +75,10 @@ void main() {
       size(tester, screen);
       var taps = 0;
       await tester.pumpWidget(
-        app(const DutyHeader('Slouží: Jan Novák'), onTap: () => taps++),
+        app(const DutyHeader('Služba: Jan Novák'), onTap: () => taps++),
       );
 
-      final text = find.text('Slouží: Jan Novák');
+      final text = find.text('Služba: Jan Novák');
       expect(
         find.ancestor(
           of: text,
@@ -105,12 +105,12 @@ void main() {
   testWidgets('without onDutyTap the line is no button to a screen reader',
       (tester) async {
     await tester.pumpWidget(
-      app(const DutyHeader('Slouží: Jan Novák'), tappable: false),
+      app(const DutyHeader('Služba: Jan Novák'), tappable: false),
     );
-    expect(find.text('Slouží: Jan Novák'), findsOneWidget);
+    expect(find.text('Služba: Jan Novák'), findsOneWidget);
     expect(
       find.ancestor(
-        of: find.text('Slouží: Jan Novák'),
+        of: find.text('Služba: Jan Novák'),
         matching: find.byWidgetPredicate(
           (w) => w is Semantics && w.properties.button == true,
         ),
