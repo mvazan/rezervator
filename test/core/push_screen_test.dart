@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rezervator/core/push_screen.dart';
@@ -27,8 +30,9 @@ void main() {
       ),
       GoRoute(
         path: pushedScreenPath,
-        redirect: (_, state) => state.extra is WidgetBuilder ? null : '/',
-        builder: (context, state) => (state.extra! as WidgetBuilder)(context),
+        redirect: (_, state) =>
+            pushedScreenBuilder(state.extra) == null ? '/' : null,
+        builder: (context, state) => buildPushedScreen(context, state.extra),
       ),
     ]);
     await tester.pumpWidget(MaterialApp.router(routerConfig: router));
@@ -50,7 +54,8 @@ void main() {
       GoRoute(path: '/', builder: (_, _) => const Text('home')),
       GoRoute(
         path: pushedScreenPath,
-        redirect: (_, state) => state.extra is WidgetBuilder ? null : '/',
+        redirect: (_, state) =>
+            pushedScreenBuilder(state.extra) == null ? '/' : null,
         builder: (context, state) => const Text('never'),
       ),
     ]);
@@ -72,5 +77,63 @@ void main() {
     await tester.tap(find.text('go'));
     await tester.pumpAndSettle();
     expect(find.text('x'), findsOneWidget);
+  });
+
+  // The browser's back button rebuilds the page from the history state,
+  // which holds only what survives JSON: the builder must not be in it.
+  testWidgets('a history step back restores a pushed screen', (tester) async {
+    GoRouter.optionURLReflectsImperativeAPIs = true;
+    addTearDown(() => GoRouter.optionURLReflectsImperativeAPIs = false);
+    late GoRouter router;
+    router = GoRouter(routes: [
+      GoRoute(
+        path: '/',
+        builder: (_, _) => Builder(
+          builder: (context) => TextButton(
+            onPressed: () => pushScreen<void>(
+              context,
+              (_) => Builder(
+                builder: (context) => TextButton(
+                  onPressed: () => pushScreen<void>(
+                      context, (_) => const Scaffold(body: Text('detail'))),
+                  child: const Text('list'),
+                ),
+              ),
+            ),
+            child: const Text('home'),
+          ),
+        ),
+      ),
+      GoRoute(
+        path: pushedScreenPath,
+        redirect: (_, state) =>
+            pushedScreenBuilder(state.extra) == null ? '/' : null,
+        builder: (context, state) => buildPushedScreen(context, state.extra),
+      ),
+    ]);
+    await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+    await tester.tap(find.text('home'));
+    await tester.pumpAndSettle();
+    // What the browser stores for the entry showing the list.
+    final listEntry = router.routeInformationParser
+        .restoreRouteInformation(router.routerDelegate.currentConfiguration)!;
+    await tester.tap(find.text('list'));
+    await tester.pumpAndSettle();
+    expect(find.text('detail'), findsOneWidget);
+
+    // The back button: the list's entry comes back, JSON-encoded.
+    final state = jsonDecode(jsonEncode(listEntry.state));
+    await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+      'flutter/navigation',
+      const JSONMethodCodec().encodeMethodCall(MethodCall(
+        'pushRouteInformation',
+        {'location': listEntry.uri.toString(), 'state': state},
+      )),
+      (_) {},
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.text('list'), findsOneWidget);
+    expect(find.text('detail'), findsNothing);
   });
 }

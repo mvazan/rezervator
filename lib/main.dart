@@ -81,13 +81,13 @@ final _router = GoRouter(
       builder: (_, _) =>
           AppConfig.hasSupabase ? const AuthGate() : const _NotConfigured(),
     ),
-    // Screens opened with pushScreen (core/push_screen.dart); the builder
-    // travels as `extra`, which a reload or a forward step has lost — that
-    // lands on the home screen.
+    // Screens opened with pushScreen (core/push_screen.dart); `extra` is the
+    // id of the builder. After a reload the ids are gone: home screen.
     GoRoute(
       path: pushedScreenPath,
-      redirect: (_, state) => state.extra is WidgetBuilder ? null : '/',
-      builder: (context, state) => (state.extra! as WidgetBuilder)(context),
+      redirect: (_, state) =>
+          pushedScreenBuilder(state.extra) == null ? '/' : null,
+      builder: (context, state) => buildPushedScreen(context, state.extra),
     ),
     GoRoute(
       path: '/kiosk-login',
