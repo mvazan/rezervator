@@ -231,6 +231,48 @@ void main() {
     expect(find.text('Petr Novák'), findsNothing);
   });
 
+  testWidgets('tapping another player at once replaces the full-name snack, '
+      'not queues behind it', (tester) async {
+    wideSurface(tester);
+    await tester.pumpWidget(
+      app(
+        roster: const [
+          PlayerName(id: 'me', displayName: 'Já Hráč'),
+          PlayerName(id: 'p2', displayName: 'Petr Novák', nick: 'Péťa'),
+          PlayerName(id: 'p3', displayName: 'Dalibor Dvorník', nick: 'Dalas'),
+        ],
+        reservations: [
+          res('r2', 'p2', tomorrow),
+          Reservation(
+            id: 'r3',
+            playerId: 'p3',
+            date: tomorrow,
+            blockId: 'b1',
+            lane: 1,
+            createdVia: 'app',
+            createdAt: DateTime.utc(2026, 1, 1),
+          ),
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+    for (final nick in ['Péťa', 'Dalas']) {
+      await tester.ensureVisible(find.text(nick));
+      await tester.pumpAndSettle();
+    }
+
+    await tester.tap(find.text('Péťa'));
+    await tester.pump();
+    await tester.tap(find.text('Dalas'));
+    await tester.pump();
+    // One frame later the first is gone, not animating out ahead of the
+    // second — a queued snack would show only the first for ~4 seconds.
+    expect(find.text('Dalibor Dvorník'), findsOneWidget);
+    expect(find.text('Petr Novák'), findsNothing);
+    expect(find.byType(SnackBar), findsOneWidget);
+    await tester.pumpAndSettle(const Duration(seconds: 10));
+  });
+
   testWidgets('tap on own reservation opens cancel dialog', (tester) async {
     wideSurface(tester);
     await tester.pumpWidget(app(reservations: [res('r1', 'me', tomorrow)]));

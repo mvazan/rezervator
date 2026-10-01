@@ -328,8 +328,12 @@ class ScheduleActions {
 
   /// A player taps a reservation that is not theirs and they cannot cancel:
   /// the board only had room for a nick, so a quiet snack with the full
-  /// name is all this needs — no dialog, nothing to decide.
-  void _info(Reservation r) => snack(context, _displayNameOf(r.playerId));
+  /// name is all this needs — no dialog, nothing to decide. A tap on the
+  /// next tile replaces the snack at once rather than queueing behind it.
+  void _info(Reservation r) {
+    ScaffoldMessenger.of(context).removeCurrentSnackBar();
+    snack(context, _displayNameOf(r.playerId));
+  }
 
   Future<void> _cancel(
     Day date,
