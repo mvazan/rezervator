@@ -1354,7 +1354,7 @@ CREATE TABLE IF NOT EXISTS "public"."profiles" (
     "phone" "text",
     "show_email" boolean DEFAULT true NOT NULL,
     "show_phone" boolean DEFAULT true NOT NULL,
-    CONSTRAINT "profiles_default_view_check" CHECK (("default_view" = ANY (ARRAY['calendar'::"text", 'trainings'::"text"]))),
+    CONSTRAINT "profiles_default_view_check" CHECK (("default_view" = ANY (ARRAY['calendar'::"text", 'trainings'::"text", 'clubhouse'::"text"]))),
     CONSTRAINT "profiles_followed_teams_check" CHECK ((COALESCE("array_length"("followed_teams", 1), 0) <= 20)),
     CONSTRAINT "profiles_nick_check" CHECK (("char_length"("nick") <= 14)),
     CONSTRAINT "profiles_notify_before_minutes_check" CHECK (((COALESCE("array_length"("notify_before_minutes", 1), 0) <= 5) AND (0 <= ALL ("notify_before_minutes")) AND (40320 >= ALL ("notify_before_minutes")))),
@@ -1381,7 +1381,7 @@ COMMENT ON COLUMN "public"."profiles"."followed_teams" IS 'Teams whose matches t
 
 
 
-COMMENT ON COLUMN "public"."profiles"."default_view" IS 'View the app opens at launch: calendar | trainings.';
+COMMENT ON COLUMN "public"."profiles"."default_view" IS 'View the app opens at launch: calendar | trainings | clubhouse.';
 
 
 
