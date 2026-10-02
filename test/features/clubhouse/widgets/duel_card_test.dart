@@ -617,15 +617,14 @@ void main() {
     expect(colon(2), closeTo(colon(4), 0.01));
   });
 
-  testWidgets('a split point: no stripe, no bar, the lead „:“', (tester) async {
+  testWidgets('a split point: no stripe, no bar, the lead 0', (tester) async {
     await tester.pumpWidget(_host(_card(_split, expanded: true)));
     // A split has no pill and no winner weight: just the lead „:“.
     expect(find.text('½'), findsNothing);
     expect(find.text('bod'), findsNothing);
-    // The header's lead is the colon of a tie; the tied lane in the open
-    // table reads 0.
-    expect(find.text(':'), findsOneWidget);
-    expect(find.text('0'), findsOneWidget);
+    // A tie reads 0 in the header and on the tied lane in the open table.
+    expect(find.text(':'), findsNothing);
+    expect(find.text('0'), findsNWidgets(2));
     expect(find.byKey(const Key('duel-1-stripe')), findsNothing);
     expect(find.byKey(const Key('duel-1-bar-fill')), findsNothing);
     expect(find.textContaining('body'), findsNothing);
