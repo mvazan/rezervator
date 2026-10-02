@@ -287,7 +287,7 @@ void main() {
     expect(find.byType(AlertDialog), findsNothing);
   });
 
-  testWidgets('a member menu: Jméno… first, then the four items of before',
+  testWidgets('a member menu: Jméno… and Reg. č.… first, then the four items of before',
       (tester) async {
     await tester.pumpWidget(
         app([admin, placeholder, player('p1', 'Adam', clubId: 'c1')]));
@@ -297,6 +297,7 @@ void main() {
     await tester.pumpAndSettle();
     for (final item in [
       'Jméno…',
+      'Reg. č.…',
       'Oddíl…',
       'Udělat správcem',
       'Nastavit jako kiosk',
@@ -304,7 +305,7 @@ void main() {
     ]) {
       expect(find.text(item), findsOneWidget);
     }
-    expect(find.byType(PopupMenuItem<String>), findsNWidgets(5));
+    expect(find.byType(PopupMenuItem<String>), findsNWidgets(6));
     expect(find.text('Upravit…'), findsNothing);
     expect(find.text('Sloučit do účtu…'), findsNothing);
     expect(find.text('Smazat'), findsNothing);

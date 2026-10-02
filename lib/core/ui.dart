@@ -131,6 +131,7 @@ String friendlyDbError(Object error, {bool wasOnDuty = false}) {
     'unknown_club': 'Tenhle oddíl už neexistuje — vyber jiný.',
     'empty_tenant_name': 'Napiš název nové kuželny.',
     'empty_display_name': 'Vyplň své jméno.',
+    'invalid_regnum': 'Registrační číslo má jen číslice (nejvýš 8).',
     'display_name_too_long': 'Jméno je moc dlouhé (max 60 znaků).',
     'unknown_reservation': 'Tahle rezervace už neexistuje.',
     'unknown_rental': 'Tenhle pronájem už neexistuje.',

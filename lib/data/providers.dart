@@ -531,6 +531,20 @@ final venuesProvider = StreamProvider<List<Venue>>((ref) {
         ..sort((a, b) => compareCzech(a.name, b.name)));
 });
 
+/// The competitions each alley hosts, by the alley's slug: the competition
+/// of every federation match of ours played there (home or away). An alley
+/// can be in several.
+final venueCompetitionsProvider = Provider<Map<String, Set<String>>>((ref) {
+  final byVenue = <String, Set<String>>{};
+  for (final s in ref.watch(prioritySlotsProvider)) {
+    final slug = s.venueSlug;
+    final name = s.competition;
+    if (slug == null || slug.isEmpty || name == null || name.isEmpty) continue;
+    byVenue.putIfAbsent(slug, () => {}).add(name);
+  }
+  return byVenue;
+});
+
 final timeBlocksProvider = StreamProvider<List<TimeBlock>>((ref) {
   final uid = ref.watch(_authUidProvider);
   if (uid == null) return Stream.value(const []);
@@ -1414,6 +1428,10 @@ class Api {
   // --- admin: a player's name (0060) ---
   static Future<void> setDisplayName(String userId, String name) =>
       _db.rpc('set_display_name', params: {'p_user_id': userId, 'p_name': name});
+
+  // --- admin: a player's registration number, by hand (0061) ---
+  static Future<void> setRegnum(String userId, String regnum) =>
+      _db.rpc('set_regnum', params: {'p_user_id': userId, 'p_regnum': regnum});
 
   // --- admin: nick (board short name) ---
   static Future<void> setNick(String userId, String nick) =>

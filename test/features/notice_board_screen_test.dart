@@ -182,7 +182,7 @@ void main() {
     expect(find.text('Platí do: do odvolání'), findsOneWidget);
   });
 
-  testWidgets('„Kdo si to zobrazil“ lists who has not opened it', (tester) async {
+  testWidgets('„Kdo si to zobrazil“ lists who has and has not opened it', (tester) async {
     await tester.pumpWidget(app(
       profile: admin,
       notices: [notice('a1')],
@@ -193,9 +193,10 @@ void main() {
     await openMenu(tester);
     await tester.tap(find.text('Kdo si to zobrazil'));
     await tester.pumpAndSettle();
+    expect(find.text('Zobrazili:'), findsOneWidget);
+    expect(find.text('Petr'), findsOneWidget);
     expect(find.text('Ještě nezobrazili:'), findsOneWidget);
     expect(find.text('Tomáš'), findsOneWidget);
-    expect(find.text('Petr'), findsNothing);
   });
 
   // „Zobrazilo 0 z 0“ would say the notice reached nobody.

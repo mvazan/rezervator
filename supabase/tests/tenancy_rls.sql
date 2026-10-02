@@ -11527,4 +11527,68 @@ begin
   raise notice 'OK: set_display_name — admin only, own alley only, trimmed, never empty, a rename re-arms the registration lookup (0060)';
 end $$;
 
+-- 26. An admin sets a player's registration number by hand (0061): admin
+-- only, own alley only, digits only, unique per alley; empty clears it.
+reset role;
+do $$
+declare
+  c constant uuid := '10000000-0000-0000-0000-000000000003';  -- A, pending
+  a constant uuid := '10000000-0000-0000-0000-000000000001';  -- A, admin
+begin
+  update profiles set regnum = null, regnum_checked_at = null where id in (a, c);
+  set local role authenticated;
+  perform set_config('request.jwt.claims',
+    '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}', true);
+  perform set_regnum(c, ' 12345 ');
+  reset role;
+  if (select regnum from profiles where id = c) is distinct from '12345' then
+    raise exception 'FAIL: the number was not stored';
+  end if;
+  if (select regnum_checked_at from profiles where id = c) is null then
+    raise exception 'FAIL: a typed number is not marked settled';
+  end if;
+
+  set local role authenticated;
+  perform set_config('request.jwt.claims',
+    '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}', true);
+  begin
+    perform set_regnum(a, '12345');
+    raise exception 'FAIL: a number of another player was accepted';
+  exception when others then
+    if sqlerrm <> 'regnum_taken' then raise; end if;
+  end;
+  begin
+    perform set_regnum(c, '12a');
+    raise exception 'FAIL: a number with a letter was accepted';
+  exception when others then
+    if sqlerrm <> 'invalid_regnum' then raise; end if;
+  end;
+  begin
+    perform set_regnum('10000000-0000-0000-0000-000000000002', '777');
+    raise exception 'FAIL: an admin set a number of another alley''s player';
+  exception when others then
+    if sqlerrm <> 'unknown_player' then raise; end if;
+  end;
+  perform set_config('request.jwt.claims',
+    '{"sub":"10000000-0000-0000-0000-000000000003","role":"authenticated"}', true);
+  begin
+    perform set_regnum(c, '999');
+    raise exception 'FAIL: a non-admin set a number';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  perform set_config('request.jwt.claims',
+    '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}', true);
+  perform set_regnum(c, '  ');
+  reset role;
+  if (select regnum from profiles where id = c) is not null
+     or (select regnum_checked_at from profiles where id = c) is not null then
+    raise exception 'FAIL: an empty value did not clear the number';
+  end if;
+  if has_function_privilege('anon', 'public.set_regnum(uuid, text)', 'execute') then
+    raise exception 'FAIL: anon can call set_regnum';
+  end if;
+  raise notice 'OK: set_regnum — admin only, own alley only, digits only, unique, empty clears (0061)';
+end $$;
+
 rollback;

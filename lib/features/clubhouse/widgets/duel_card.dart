@@ -28,10 +28,9 @@ import 'lead_color.dart';
 /// Digits of one width, so a number doesn't jump when a live value changes.
 const _tabular = [FontFeature.tabularFigures()];
 
-/// The lead of one lane in the expanded table: „+3“, „-11“ and a plain „0“
-/// for a tie (the header's colon stands between two scores, a difference of
-/// nothing reads as 0 here).
-String _laneLead(int diff) => diff == 0 ? '0' : leadLabel(diff);
+/// A lead as printed on the card: „+3“, „-11“ and a plain „0“ for a tie
+/// (the colon stands between two scores; a difference of nothing reads as 0).
+String _laneLead(int? diff) => diff == 0 ? '0' : leadLabel(diff);
 
 /// A side's colour as a mark painted straight on the card (the stripe, a
 /// lane dot, the bar): its legible shade, which keeps at least 3:1 against
@@ -418,7 +417,7 @@ class _Totals extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8),
           child: Text(
-            leadLabel(duel.diff),
+            _laneLead(duel.diff),
             style: text.titleLarge?.copyWith(
               fontSize: 20,
               fontWeight: FontWeight.w800,

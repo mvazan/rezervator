@@ -62,8 +62,12 @@ void main() {
   Widget app({
     required Widget home,
     List<Venue> venues = const [],
+    Map<String, Set<String>> competitions = const {},
   }) => ProviderScope(
-    overrides: [venuesProvider.overrideWith((ref) => Stream.value(venues))],
+    overrides: [
+      venuesProvider.overrideWith((ref) => Stream.value(venues)),
+      venueCompetitionsProvider.overrideWithValue(competitions),
+    ],
     child: MaterialApp(home: home),
   );
 
@@ -81,6 +85,35 @@ void main() {
       expect((tiles[0].title as Text).data, 'TJ Sokol Brno IV');
       expect((tiles[1].title as Text).data, 'TJ Sokol Husovice');
       expect((tiles[0].subtitle as Text).data, brnoIv.address);
+    });
+
+    testWidgets('a competition chip narrows the list; an alley can be in '
+        'several competitions', (tester) async {
+      await tester.pumpWidget(
+        app(
+          home: const VenuesScreen(),
+          venues: [husovice, brnoIv],
+          competitions: {
+            'tj-sokol-brno-iv': {'1. liga', '2. liga'},
+            'tj-sokol-husovice': {'2. liga'},
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(ListTile), findsNWidgets(2));
+
+      await tester.tap(find.widgetWithText(ChoiceChip, '1. liga'));
+      await tester.pumpAndSettle();
+      expect(find.text('TJ Sokol Brno IV'), findsOneWidget);
+      expect(find.text('TJ Sokol Husovice'), findsNothing);
+
+      await tester.tap(find.widgetWithText(ChoiceChip, '2. liga'));
+      await tester.pumpAndSettle();
+      expect(find.byType(ListTile), findsNWidgets(2));
+
+      await tester.tap(find.widgetWithText(ChoiceChip, 'Vše'));
+      await tester.pumpAndSettle();
+      expect(find.byType(ListTile), findsNWidgets(2));
     });
 
     testWidgets('search filters accent-insensitively', (tester) async {
