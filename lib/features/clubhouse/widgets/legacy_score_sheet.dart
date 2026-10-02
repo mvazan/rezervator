@@ -33,6 +33,10 @@ const _kPositiveGreen = Color(0xFF008000);
 const _kNegativeRed = Color(0xFFFF0000);
 const _kCelkemTotalRed = Color(0xFF8B0000);
 const _kBlack = Color(0xFF000000);
+
+/// Lane rows every pairing block has at least — two lanes of 50, the usual
+/// game; a name needs that height, see [_laneRowCounts].
+const _minLaneRows = 2;
 const _kWhite = Color(0xFFFFFFFF);
 
 // Every text role this table ever renders, as ONE shared constant each —
@@ -866,11 +870,16 @@ class _SheetGeometry {
   }
 
   /// Per position (1..N): how many lane rows its pairing block has — the
-  /// side that threw more lanes decides.
+  /// side that threw more lanes decides, and never fewer than
+  /// [_minLaneRows]: the name needs two lane rows to sit in, so the
+  /// registration number has the Celkem row's cell to itself.
   static Map<int, int> _laneRowCounts(List<MatchPlayerResult> players) {
     final counts = <int, int>{};
     for (final p in players) {
-      counts[p.position] = math.max(counts[p.position] ?? 0, p.lanes.length);
+      counts[p.position] = math.max(
+        counts[p.position] ?? _minLaneRows,
+        p.lanes.length,
+      );
     }
     return counts;
   }
@@ -1262,9 +1271,11 @@ class _ScoreTableBody extends StatelessWidget {
     String pts(num? v) => empty ? '' : numLabel(v);
 
     final realLaneCount = player?.lanes.length ?? 0;
-    // A lone 23px lane row can't hold the 16px name — it goes into the Celkem
-    // row then, the same as with no lane rows at all.
-    final nameInLaneRows = laneRowCount >= 2;
+    // A lone 23px lane row can't hold the 16px name, hence the block always
+    // has [_minLaneRows] of them: the name sits up there and the Celkem row's
+    // cell holds the registration number — also while the match is young and
+    // fewer lanes have been thrown (the rest are blank filler rows).
+    final nameInLaneRows = laneRowCount >= _minLaneRows;
     final changed = player != null && _nameLines(player) > 1;
 
     Widget laneRow(PlayerLane? lane) {
@@ -1448,7 +1459,7 @@ class _ScoreTableBody extends StatelessWidget {
         : null;
     final homeLanes = home?.lanes.length ?? 0;
     final awayLanes = away?.lanes.length ?? 0;
-    final laneRowCount = math.max(homeLanes, awayLanes);
+    final laneRowCount = math.max(_minLaneRows, math.max(homeLanes, awayLanes));
     final blockHeight = laneRowCount * _laneRowHeight + _celkemRowHeight;
 
     return Row(
