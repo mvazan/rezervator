@@ -4282,6 +4282,40 @@ $$;
 ALTER FUNCTION "public"."set_day_override"("p_date" "date", "p_closed" boolean, "p_reason" "text", "p_block_ids" "uuid"[]) OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."set_display_name"("p_user_id" "uuid", "p_name" "text") RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_name text := regexp_replace(trim(coalesce(p_name, '')), '\s+', ' ', 'g');
+begin
+  if auth.uid() is null then
+    raise exception 'not_authenticated';
+  end if;
+  if not is_admin() then
+    raise exception 'not_allowed';
+  end if;
+  if v_name = '' then
+    raise exception 'empty_display_name';
+  end if;
+  if char_length(v_name) > 60 then
+    raise exception 'display_name_too_long';
+  end if;
+  update profiles
+     set display_name = v_name,
+         regnum_checked_at = case when display_name is distinct from v_name
+                                  then null else regnum_checked_at end
+   where id = p_user_id and tenant_id = current_tenant_id();
+  if not found then
+    raise exception 'unknown_player';
+  end if;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."set_display_name"("p_user_id" "uuid", "p_name" "text") OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."set_federation_sync"("p_venue_slug" "text", "p_enabled" boolean) RETURNS "void"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -7329,6 +7363,12 @@ GRANT ALL ON FUNCTION "public"."set_calendar_reminders_for"("p_user" "uuid", "p_
 
 REVOKE ALL ON FUNCTION "public"."set_calendar_teams_for"("p_user" "uuid", "p_teams" "jsonb") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."set_calendar_teams_for"("p_user" "uuid", "p_teams" "jsonb") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."set_display_name"("p_user_id" "uuid", "p_name" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."set_display_name"("p_user_id" "uuid", "p_name" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."set_display_name"("p_user_id" "uuid", "p_name" "text") TO "service_role";
 
 
 

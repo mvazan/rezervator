@@ -68,6 +68,30 @@ class PlayersScreen extends ConsumerWidget {
     await _setRole(context, ref, p, Role.kiosk);
   }
 
+  /// „Jméno…“: the admin corrects an account's name (a typo from the
+  /// registration, a name that changed); the player's reservations, group and
+  /// the rest follow the id, so only what is shown changes.
+  Future<void> _editName(
+      BuildContext context, WidgetRef ref, Profile p) async {
+    final input = await promptText(
+      context,
+      title: 'Jméno hráče',
+      message: 'Tak se hráč jmenuje v seznamech, rezervacích a kontaktech. '
+          'Zkratka na tabuli zůstává, jak je.',
+      hint: 'Jméno a příjmení',
+      initial: p.displayName,
+    );
+    if (input == null || !context.mounted) return;
+    // An empty name is not a rename: nothing to send.
+    if (input.trim().isEmpty || input.trim() == p.displayName) return;
+    await _change(
+      context,
+      ref,
+      () => Api.setDisplayName(p.id, input),
+      success: 'Uloženo.',
+    );
+  }
+
   Future<void> _editNick(
       BuildContext context, WidgetRef ref, Profile p) async {
     final input = await promptText(
@@ -287,9 +311,10 @@ class PlayersScreen extends ConsumerWidget {
     return lines.isEmpty ? null : lines.join('\n');
   }
 
-  /// The member menu: roles, kiosk, club, nick, and — for someone in a
+  /// The member menu: name, roles, kiosk, club, nick, and — for someone in a
   /// group (0044) — a way for the admin to undo it.
   List<PopupMenuEntry<String>> _memberMenu(Profile p, {required bool inGroup}) => [
+        const PopupMenuItem(value: 'edit_name', child: Text('Jméno…')),
         const PopupMenuItem(value: 'club', child: Text('Oddíl…')),
         PopupMenuItem(
           value: p.role == Role.admin ? 'remove_admin' : 'make_admin',
@@ -350,6 +375,8 @@ class PlayersScreen extends ConsumerWidget {
               _setRole(context, ref, p, Role.player);
             case 'make_kiosk':
               _makeKiosk(context, ref, p);
+            case 'edit_name':
+              _editName(context, ref, p);
             case 'edit_nick':
               _editNick(context, ref, p);
             case 'remove_from_group':

@@ -1411,6 +1411,10 @@ class Api {
   static Future<void> setRole(String userId, Role role) =>
       _db.rpc('set_role', params: {'p_user_id': userId, 'p_role': role.name});
 
+  // --- admin: a player's name (0060) ---
+  static Future<void> setDisplayName(String userId, String name) =>
+      _db.rpc('set_display_name', params: {'p_user_id': userId, 'p_name': name});
+
   // --- admin: nick (board short name) ---
   static Future<void> setNick(String userId, String nick) =>
       _db.rpc('set_nick', params: {'p_user_id': userId, 'p_nick': nick});

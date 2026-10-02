@@ -95,6 +95,61 @@ void main() {
   Map<String, dynamic> bodyOf(http.Request r) =>
       jsonDecode(r.body) as Map<String, dynamic>;
 
+  testWidgets('Jméno… of an account posts set_display_name with the new name',
+      (tester) async {
+    const adam = Profile(
+      id: 'p1',
+      displayName: 'Adam Nvoák',
+      email: 'adam@example.com',
+      role: Role.player,
+      status: ProfileStatus.approved,
+    );
+    await tester.pumpWidget(app([admin, adam]));
+    await tester.pumpAndSettle();
+
+    await tester.tap(menuOf('Adam Nvoák'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Jméno…'));
+    await tester.pumpAndSettle();
+    // Prefilled with the current name.
+    expect(find.widgetWithText(TextField, 'Adam Nvoák'), findsOneWidget);
+    await tester.enterText(find.byType(TextField), '  Adam Novák ');
+    await tester.tap(find.text('Uložit'));
+    await tester.pumpAndSettle();
+
+    expect(bodyOf(rpc('set_display_name')), {
+      'p_user_id': 'p1',
+      'p_name': 'Adam Novák',
+    });
+  });
+
+  testWidgets('Jméno… with the name unchanged or empty sends nothing',
+      (tester) async {
+    const adam = Profile(
+      id: 'p1',
+      displayName: 'Adam Novák',
+      email: 'adam@example.com',
+      role: Role.player,
+      status: ProfileStatus.approved,
+    );
+    await tester.pumpWidget(app([admin, adam]));
+    await tester.pumpAndSettle();
+
+    for (final typed in ['Adam Novák', '   ']) {
+      await tester.tap(menuOf('Adam Novák'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Jméno…'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), typed);
+      await tester.tap(find.text('Uložit'));
+      await tester.pumpAndSettle();
+    }
+    expect(
+      requests.where((r) => r.url.path.endsWith('/rpc/set_display_name')),
+      isEmpty,
+    );
+  });
+
   testWidgets('Smazat → Ano posts delete_placeholder_player', (tester) async {
     await tester.pumpWidget(app([admin, placeholder]));
     await tester.pumpAndSettle();
