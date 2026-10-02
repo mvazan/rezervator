@@ -574,9 +574,8 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     );
     if (!pullToRefresh) return list;
     return RefreshIndicator(
-      onRefresh: () async {
-        await _refreshQuietly();
-      },
+      // The ⟳ button's twin: the same forced refresh, the same waiting.
+      onRefresh: () => _onRefreshTap(context, result?.fetchedAt),
       child: list,
     );
   }
