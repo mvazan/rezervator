@@ -292,7 +292,7 @@ void main() {
       expect(find.text('-3'), findsOneWidget);
       expect(_text(tester, '434').style?.fontWeight, FontWeight.w800);
       expect(_text(tester, '431').style?.fontWeight, FontWeight.w500);
-      expect(_laneRow(tester, 6, 1), ['215', ' = ', '215']);
+      expect(_laneRow(tester, 6, 1), ['215', ' : ', '215']);
       // A tie has no dot and no winner weight.
       expect(find.byKey(const Key('duel-6-lane-1-dot')), findsNothing);
       for (final t in tester.widgetList<Text>(find.descendant(
@@ -318,11 +318,12 @@ void main() {
       expect(_rect(tester, 'duel-6-stripe').right, closeTo(card.right, 0.01));
     });
 
-    testWidgets('expanded: the lane leads are signed, a tie is „:“', (
+    testWidgets('expanded: the lane leads are signed, a tie is a plain 0', (
       tester,
     ) async {
       await tester.pumpWidget(_host(_card(_rudna[5], expanded: true)));
-      expect(find.text(':'), findsOneWidget);
+      expect(find.text('0'), findsOneWidget);
+      expect(find.text(':'), findsNothing);
       expect(find.text('-3'), findsNWidgets(2), reason: 'the lead and lane 2');
       expect(find.textContaining('bod '), findsNothing);
     });
@@ -621,8 +622,10 @@ void main() {
     // A split has no pill and no winner weight: just the lead „:“.
     expect(find.text('½'), findsNothing);
     expect(find.text('bod'), findsNothing);
-    // The lead and the tied lane in the open table.
-    expect(find.text(':'), findsNWidgets(2));
+    // The header's lead is the colon of a tie; the tied lane in the open
+    // table reads 0.
+    expect(find.text(':'), findsOneWidget);
+    expect(find.text('0'), findsOneWidget);
     expect(find.byKey(const Key('duel-1-stripe')), findsNothing);
     expect(find.byKey(const Key('duel-1-bar-fill')), findsNothing);
     expect(find.textContaining('body'), findsNothing);
