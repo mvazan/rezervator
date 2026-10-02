@@ -408,7 +408,7 @@ class PlayersScreen extends ConsumerWidget {
 
           return ListView(
             // Room under the last row for the extended FAB.
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 88),
+            padding: padWithSystemInset(context, const EdgeInsets.fromLTRB(12, 12, 12, 88)),
             children: [
               if (pending.isNotEmpty) ...[
                 Text(

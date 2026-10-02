@@ -175,6 +175,31 @@ void main() {
     expect(find.text('reg. č. 787'), findsOneWidget);
   });
 
+  testWidgets('scrolled to the end, „Odhlásit se“ clears the navigation bar',
+      (tester) async {
+    // A phone with three-button navigation: 48 px of bar the app draws under.
+    tester.view.physicalSize = const Size(800, 900);
+    tester.view.devicePixelRatio = 1.0;
+    tester.view.padding = const FakeViewPadding(bottom: 48);
+    tester.view.viewPadding = const FakeViewPadding(bottom: 48);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPadding);
+    addTearDown(tester.view.resetViewPadding);
+    await tester.pumpWidget(app(me));
+    await tester.pumpAndSettle();
+
+    await tester.drag(find.byType(ListView).first, const Offset(0, -8000));
+    await tester.pumpAndSettle();
+    final logout = find.widgetWithText(ListTile, 'Odhlásit se');
+    expect(logout, findsOneWidget);
+    expect(
+      tester.getBottomLeft(logout).dy,
+      lessThanOrEqualTo(900 - 48),
+      reason: 'the last card stays under the navigation bar',
+    );
+  });
+
   testWidgets('without a number: no number, a „Doplnit reg. č.“ button',
       (tester) async {
     await tester.pumpWidget(app(me));

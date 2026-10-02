@@ -144,7 +144,7 @@ class _MatchExceptionsScreenState extends ConsumerState<MatchExceptionsScreen> {
     }
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(8, 4, 8, 24),
+      padding: padWithSystemInset(context, const EdgeInsets.fromLTRB(8, 4, 8, 24)),
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
@@ -239,7 +239,7 @@ class _MatchExceptionsScreenState extends ConsumerState<MatchExceptionsScreen> {
                 shrinkWrap: true,
                 children: [
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+                    padding: padWithSystemInset(context, const EdgeInsets.fromLTRB(16, 16, 16, 4)),
                     child: Text('Tvoje výjimky',
                         style: theme.textTheme.titleMedium),
                   ),

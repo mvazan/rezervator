@@ -171,7 +171,7 @@ class VenueDetailScreen extends ConsumerWidget {
           : venue == null
           ? const Center(child: Text('Kuželna nenalezena.'))
           : ListView(
-              padding: const EdgeInsets.only(bottom: 8),
+              padding: padWithSystemInset(context, const EdgeInsets.only(bottom: 8)),
               children: [
                 _actionsRow(venue),
                 ..._contactTiles(venue),

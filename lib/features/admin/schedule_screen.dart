@@ -205,7 +205,7 @@ class _ScheduleAdminScreenState extends ConsumerState<ScheduleAdminScreen> {
           }
 
           return ListView(
-            padding: const EdgeInsets.all(16),
+            padding: padWithSystemInset(context, const EdgeInsets.all(16)),
             children: [
               TextField(
                 controller: _laneCount,

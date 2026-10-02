@@ -49,7 +49,7 @@ class SlotTypesScreen extends ConsumerWidget {
         builder: (types) => types.isEmpty
             ? const Center(child: Text('Zatím žádné typy.'))
             : ListView(
-                padding: const EdgeInsets.all(12),
+                padding: padWithSystemInset(context, const EdgeInsets.all(12)),
                 children: [
                   for (final type in types)
                     ListTile(

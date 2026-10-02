@@ -143,7 +143,7 @@ class _DutyList extends ConsumerWidget {
         !(nowIds.length == 1 && nowIds.single == meId);
 
     return ListView(
-      padding: const EdgeInsets.only(bottom: 24),
+      padding: padWithSystemInset(context, const EdgeInsets.only(bottom: 24)),
       children: [
         if (mine.current != null || mine.next != null)
           MyDutyCard(

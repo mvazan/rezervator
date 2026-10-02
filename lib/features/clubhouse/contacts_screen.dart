@@ -208,7 +208,7 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                 : ListView.builder(
                     key: const Key('contacts-list'),
                     physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.only(bottom: 24),
+                    padding: padWithSystemInset(context, const EdgeInsets.only(bottom: 24)),
                     itemCount: shown.length,
                     itemBuilder: (context, i) => _row(theme, shown[i]),
                   ),

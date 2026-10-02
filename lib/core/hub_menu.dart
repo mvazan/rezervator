@@ -5,6 +5,8 @@ library;
 
 import 'package:flutter/material.dart';
 
+import 'ui.dart';
+
 /// One hub tile: label + icon + optional subtitle + optional badge count
 /// (null or 0 = none; Klubovna's unread notices/messages, 0051) + what a
 /// tap does. A record, so every literal spells out `badge` — `null` where
@@ -94,7 +96,7 @@ class HubMenu extends StatelessWidget {
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 960),
               child: GridView(
-                padding: const EdgeInsets.all(24),
+                padding: padWithSystemInset(context, const EdgeInsets.all(24)),
                 gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
                   maxCrossAxisExtent: 300,
                   mainAxisExtent: 96,

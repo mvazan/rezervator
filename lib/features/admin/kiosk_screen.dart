@@ -112,7 +112,7 @@ class KioskSettingsScreen extends ConsumerWidget {
         // The settings row is null until the backend is seeded — the
         // switches then show the defaults, disabled.
         builder: (settings) => ListView(
-          padding: const EdgeInsets.all(16),
+          padding: padWithSystemInset(context, const EdgeInsets.all(16)),
           children: [
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
