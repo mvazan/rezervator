@@ -66,15 +66,17 @@ void main() {
     List<DutyPeriod>? periods,
     Map<String, List<String>>? who,
     ScheduleSettings settings = ScheduleSettings.defaults,
+    void Function()? onPeriodsSubscribed,
   }) => ProviderScope(
     overrides: [
       myProfileProvider.overrideWith((ref) => Stream.value(profile ?? me)),
       nowProvider.overrideWith(
         (ref) => Stream.value(DateTime(2026, 10, 7, 18, 0)),
       ),
-      dutyPeriodsProvider.overrideWith(
-        (ref) => Stream.value(periods ?? [next2, past, now, empty, next1]),
-      ),
+      dutyPeriodsProvider.overrideWith((ref) {
+        onPeriodsSubscribed?.call();
+        return Stream.value(periods ?? [next2, past, now, empty, next1]);
+      }),
       dutyAssignmentsProvider.overrideWith(
         (ref) => Stream.value(
           assign(
@@ -375,5 +377,16 @@ void main() {
     await tester.tap(find.text('Spravovat'));
     await tester.pumpAndSettle();
     expect(find.text('Správa služeb'), findsOneWidget);
+  });
+
+  testWidgets('a pull on the plan reads it again', (tester) async {
+    var subscribed = 0;
+    await tester.pumpWidget(app(onPeriodsSubscribed: () => subscribed++));
+    await tester.pumpAndSettle();
+    expect(subscribed, 1);
+
+    await tester.fling(find.byType(ListView), const Offset(0, 400), 1000);
+    await tester.pumpAndSettle();
+    expect(subscribed, 2);
   });
 }

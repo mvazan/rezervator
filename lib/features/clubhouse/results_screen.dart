@@ -156,20 +156,70 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
     }
   }
 
-  Future<void> _refresh(BuildContext context, List<PrioritySlot> live) async {
-    if (live.isEmpty) {
-      snack(context, 'Nic právě neprobíhá.');
-      return;
+  /// A pull: the data is asked for again — the streams are re-subscribed,
+  /// so a socket that dropped in the background cannot leave the list as it
+  /// was — and the matches that can change meanwhile ([live]) are looked up on
+  /// the site. [competition]: the slug of the competition on screen, whose
+  /// foreign matches are streamed apart.
+  Future<void> _refresh(
+    BuildContext context,
+    List<PrioritySlot> live, {
+    String? competition,
+  }) async {
+    final resynced = _resubscribe(competition);
+    if (live.isNotEmpty) {
+      await tryAction(
+        context,
+        () =>
+            Future.wait([
+              for (final slot in live)
+                widget.refreshMatch(slot.id, force: true),
+            ]),
+        errorText: friendlyDbError,
+      );
     }
-    await tryAction(
-      context,
-      () =>
-          Future.wait([
-            for (final slot in live) widget.refreshMatch(slot.id, force: true),
-          ]),
-      errorText: friendlyDbError,
-    );
+    await resynced;
   }
+
+  /// Re-subscribes the streams Výsledky reads and waits (at most a few
+  /// seconds, and never failing) for the first answer of the new ones.
+  Future<void> _resubscribe(String? competition) async {
+    retryPrioritySlots(ref);
+    ref.invalidate(matchResultsProvider);
+    // Only a competition's stream somebody is listening to (the by-team
+    // list never opens one): reading an autoDispose one nobody listens to
+    // would dispose it again before it could answer.
+    final league = competition != null &&
+            ref.exists(leagueMatchesProvider(competition))
+        ? leagueMatchesProvider(competition)
+        : null;
+    if (league != null) ref.invalidate(league);
+    try {
+      await Future.wait<Object?>([
+        ref.read(matchResultsProvider.future),
+        if (league != null) ref.read(league.future),
+      ]).timeout(const Duration(seconds: 6));
+    } catch (e) {
+      debugPrint('Výsledky: re-subscribing failed: $e');
+    }
+  }
+
+  /// [child] (an empty state) in a scroll view that can always be pulled:
+  /// the list has the same gesture, and an empty screen is where one most
+  /// wants to try again.
+  Widget _pullable(Future<void> Function() onRefresh, Widget child) =>
+      RefreshIndicator(
+        onRefresh: onRefresh,
+        child: LayoutBuilder(
+          builder: (context, constraints) => SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              child: Center(child: child),
+            ),
+          ),
+        ),
+      );
 
   Widget _modeSwitch(ResultsMode mode) => Padding(
     padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
@@ -532,10 +582,14 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
             child: loading
                 ? const Center(child: CircularProgressIndicator())
                 : !anyMatches && leagueFailed
-                ? const SizedBox.shrink()
+                ? _pullable(
+                    () => _refresh(context, const [], competition: slug),
+                    const SizedBox.shrink(),
+                  )
                 : !anyMatches
-                ? Center(
-                    child: Padding(
+                ? _pullable(
+                    () => _refresh(context, const [], competition: slug),
+                    Padding(
                       padding: const EdgeInsets.all(24),
                       child: Text(
                         inCompetitions
@@ -547,24 +601,22 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
                     ),
                   )
                 : sections.isEmpty
-                ? const Center(child: Text('Žádné zápasy pro tento výběr.'))
+                ? _pullable(
+                    () => _refresh(context, const [], competition: slug),
+                    const Text('Žádné zápasy pro tento výběr.'),
+                  )
                 : RefreshIndicator(
-                    onRefresh: () {
-                      // A failed league stream is re-subscribed at once.
-                      if (leagueFailed) {
-                        ref.invalidate(leagueMatchesProvider(slug));
-                      }
-                      return _refresh(
-                        context,
-                        _liveMatches(
-                          sections,
-                          listResults,
-                          now,
-                          foreignIds: foreignIds,
-                          refreshableForeign: refreshableForeign,
-                        ),
-                      );
-                    },
+                    onRefresh: () => _refresh(
+                      context,
+                      _liveMatches(
+                        sections,
+                        listResults,
+                        now,
+                        foreignIds: foreignIds,
+                        refreshableForeign: refreshableForeign,
+                      ),
+                      competition: slug,
+                    ),
                     // A plain, eagerly built scroll view (not a lazy
                     // ListView) — a season's federation matches for one
                     // alley are few enough that building them all is

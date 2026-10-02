@@ -142,68 +142,86 @@ class _DutyList extends ConsumerWidget {
         namesOf(nowIds).isNotEmpty &&
         !(nowIds.length == 1 && nowIds.single == meId);
 
-    return ListView(
-      padding: padWithSystemInset(context, const EdgeInsets.only(bottom: 24)),
-      children: [
-        if (mine.current != null || mine.next != null)
-          MyDutyCard(
-            duty: mine,
-            coNames: namesOf(mine.coAssignees),
-            reminderDays: settings.dutyReminderEnabled
-                ? settings.dutyReminderDays
-                : null,
-          ),
-        if (showNow)
-          NowServingCard(
-            period: current!,
-            names: [
-              if (nowIds.contains(meId)) 'ty',
-              ...namesOf(nowIds.where((id) => id != meId)),
-            ],
-          ),
-        const SizedBox(height: 8),
-        // A running period no card shows (nobody the roster knows serves
-        // it) heads the plan as a plain tile, „Neobsazeno“ when unassigned.
-        if (current case final p? when !showNow && !nowIds.contains(meId))
-          tile(p),
-        for (final p in split.upcoming) tile(p),
-        if (current == null && split.upcoming.isEmpty)
-          const Padding(
-            padding: EdgeInsets.all(24),
-            child: Text(
-              'Služby zatím nejsou naplánované.',
-              textAlign: TextAlign.center,
+    return RefreshIndicator(
+      // A pull re-subscribes the three streams and waits for their first
+      // answer, so a plan a dropped socket left stale is read again.
+      onRefresh: () async {
+        _refresh(ref);
+        try {
+          await Future.wait<Object?>([
+            ref.read(dutyPeriodsProvider.future),
+            ref.read(dutyAssignmentsProvider.future),
+            ref.read(playersProvider.future),
+          ]).timeout(const Duration(seconds: 6));
+        } catch (_) {
+          // The list keeps what it had; the screen's own error state shows
+          // a failure that outlasts this.
+        }
+      },
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: padWithSystemInset(context, const EdgeInsets.only(bottom: 24)),
+        children: [
+          if (mine.current != null || mine.next != null)
+            MyDutyCard(
+              duty: mine,
+              coNames: namesOf(mine.coAssignees),
+              reminderDays: settings.dutyReminderEnabled
+                  ? settings.dutyReminderDays
+                  : null,
             ),
-          ),
-        if (split.past.isNotEmpty)
-          ExpansionTile(
-            title: const Text('Minulé služby'),
-            children: [for (final p in split.past) tile(p)],
-          ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(
-                Icons.info_outline,
-                size: 18,
-                color: theme.colorScheme.onSurfaceVariant,
+          if (showNow)
+            NowServingCard(
+              period: current!,
+              names: [
+                if (nowIds.contains(meId)) 'ty',
+                ...namesOf(nowIds.where((id) => id != meId)),
+              ],
+            ),
+          const SizedBox(height: 8),
+          // A running period no card shows (nobody the roster knows serves
+          // it) heads the plan as a plain tile, „Neobsazeno“ when unassigned.
+          if (current case final p? when !showNow && !nowIds.contains(meId))
+            tile(p),
+          for (final p in split.upcoming) tile(p),
+          if (current == null && split.upcoming.isEmpty)
+            const Padding(
+              padding: EdgeInsets.all(24),
+              child: Text(
+                'Služby zatím nejsou naplánované.',
+                textAlign: TextAlign.center,
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Během služby můžeš rezervovat a rušit tréninky ostatním '
-                  'a upravovat bloky v jednotlivých dnech.',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
+            ),
+          if (split.past.isNotEmpty)
+            ExpansionTile(
+              title: const Text('Minulé služby'),
+              children: [for (final p in split.past) tile(p)],
+            ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.info_outline,
+                  size: 18,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Během služby můžeš rezervovat a rušit tréninky ostatním '
+                    'a upravovat bloky v jednotlivých dnech.',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

@@ -118,14 +118,18 @@ void main() {
     Map<String, List<LeagueMatch>> league = const {},
     Map<String, List<MatchPlayerResult>> leaguePlayers = const {},
     Stream<DateTime>? nowStream,
+    // Called each time the match results stream is (re-)subscribed.
+    void Function()? onResultsSubscribed,
+    void Function(String slug)? onLeagueSubscribed,
   }) {
     return ProviderScope(
       overrides: [
         leagueCompetitionsProvider.overrideWithValue(competitions),
         teamsProvider.overrideWith((ref) => Stream.value(const [])),
-        leagueMatchesProvider.overrideWith(
-          (ref, slug) => Stream.value(league[slug] ?? const []),
-        ),
+        leagueMatchesProvider.overrideWith((ref, slug) {
+          onLeagueSubscribed?.call(slug);
+          return Stream.value(league[slug] ?? const []);
+        }),
         leaguePlayerResultsProvider.overrideWith(
           (ref, id) => Stream.value(leaguePlayers[id] ?? const []),
         ),
@@ -143,7 +147,10 @@ void main() {
           prioritySlotsProvider.overrideWithValue(slots),
           prioritySlotsLoadingProvider.overrideWithValue(false),
         ],
-        matchResultsProvider.overrideWith((ref) => Stream.value(results)),
+        matchResultsProvider.overrideWith((ref) {
+          onResultsSubscribed?.call();
+          return Stream.value(results);
+        }),
         // MatchDetailScreen (pushed on row tap) watches these two as well.
         matchPlayerResultsProvider.overrideWith(
           (ref, id) => Stream.value(const []),
@@ -442,11 +449,14 @@ void main() {
     expect(forced, [true], reason: 'a pull is the user asking: always look');
   });
 
-  testWidgets('pull-to-refresh with nothing live shows a snackbar', (
-    tester,
-  ) async {
-    await tester.pumpWidget(app(slots: [finishedYesterday]));
+  testWidgets('pull-to-refresh with nothing live re-subscribes the data, '
+      'with no „nothing is live“ snack', (tester) async {
+    var subscribed = 0;
+    await tester.pumpWidget(
+      app(slots: [finishedYesterday], onResultsSubscribed: () => subscribed++),
+    );
     await tester.pumpAndSettle();
+    expect(subscribed, 1);
 
     await tester.fling(
       find.byKey(const Key('results-list')),
@@ -455,7 +465,27 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Nic právě neprobíhá.'), findsOneWidget);
+    expect(subscribed, 2, reason: 'a pull asks for the results again');
+    expect(find.byType(SnackBar), findsNothing);
+    expect(find.text('Nic právě neprobíhá.'), findsNothing);
+  });
+
+  testWidgets('an empty screen can be pulled too', (tester) async {
+    var subscribed = 0;
+    await tester.pumpWidget(
+      app(onResultsSubscribed: () => subscribed++),
+    );
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Zatím žádné zápasy'), findsOneWidget);
+    expect(subscribed, 1);
+
+    await tester.fling(
+      find.textContaining('Zatím žádné zápasy'),
+      const Offset(0, 300),
+      1000,
+    );
+    await tester.pumpAndSettle();
+    expect(subscribed, 2);
   });
 
   testWidgets('a failed pull-to-refresh shows the Czech error copy', (
@@ -1103,6 +1133,34 @@ void main() {
       await tester.pumpAndSettle();
       expect(tester.getTopLeft(firstRound).dy, before);
       expect(refreshed, isEmpty);
+    });
+
+    testWidgets('a pull re-subscribes the competition\'s foreign matches too',
+        (tester) async {
+      final subscribed = <String>[];
+      await tester.pumpWidget(app(
+        competitions: competitions,
+        league: {liga: season()},
+        onLeagueSubscribed: subscribed.add,
+      ));
+      await tester.pumpAndSettle();
+      final before = subscribed.length;
+      expect(before, greaterThan(0));
+
+      await tester.fling(
+        find.byKey(const Key('results-list')),
+        const Offset(0, 8000),
+        8000,
+      );
+      await tester.pumpAndSettle();
+      await tester.fling(
+        find.byKey(const Key('results-list')),
+        const Offset(0, 300),
+        1000,
+      );
+      await tester.pumpAndSettle();
+      expect(subscribed.length, greaterThan(before));
+      expect(subscribed.last, liga);
     });
 
     testWidgets('pull-to-refresh asks for a foreign match in its window, '
