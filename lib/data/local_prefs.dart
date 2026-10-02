@@ -14,6 +14,7 @@ const _themeChoiceKey = 'theme_choice';
 const _textSizeKey = 'text_size';
 const _matchDetailViewKey = 'match_detail_view';
 const _dutyClubFilterKey = 'duty_club_filter';
+const _venueCompetitionKey = 'venue_competition_filter';
 
 /// The appearance chosen in Settings. Device-local: it's about how the
 /// screen looks, not about the team.
@@ -327,4 +328,40 @@ Future<List<Override>> loadPersistedResultsView() async {
     resultsCompetitionProvider
         .overrideWith(() => _PreloadedResultsCompetition(competition)),
   ];
+}
+
+/// The competition chip picked last in Klubovna → Kuželny (its name), null
+/// for „Vše“. Device-local.
+final venueCompetitionFilterProvider =
+    NotifierProvider<VenueCompetitionFilterNotifier, String?>(
+        VenueCompetitionFilterNotifier.new);
+
+class VenueCompetitionFilterNotifier extends Notifier<String?> {
+  @override
+  String? build() {
+    _load();
+    return null;
+  }
+
+  Future<void> _load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (!ref.mounted) return;
+      state = prefs.getString(_venueCompetitionKey);
+    } catch (_) {
+      // Best effort only — the default (all alleys) applies.
+    }
+  }
+
+  Future<void> set(String? competition) async {
+    state = competition;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (competition == null) {
+        await prefs.remove(_venueCompetitionKey);
+      } else {
+        await prefs.setString(_venueCompetitionKey, competition);
+      }
+    } catch (_) {}
+  }
 }
