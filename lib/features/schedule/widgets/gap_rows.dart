@@ -82,10 +82,19 @@ List<DayGridItem> dayGridItems(DaySchedule day) {
 
 /// Full-width banner for an off-block match/rental, showing its real times.
 class GapEventBanner extends StatelessWidget {
-  const GapEventBanner({super.key, required this.event, this.compact = true});
+  const GapEventBanner({
+    super.key,
+    required this.event,
+    this.compact = true,
+    this.onTap,
+  });
 
   final OffBlockEvent event;
   final bool compact;
+
+  /// A tap on the banner — the pager opens a match's detail; null = not
+  /// tappable (a blockage, a rental, or no match links on this screen).
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -101,11 +110,8 @@ class GapEventBanner extends StatelessWidget {
           fallbackFg: scheme.onTertiaryContainer),
     };
     final text = eventBandLabel(event);
-    return Container(
+    final banner = Container(
       constraints: const BoxConstraints(minHeight: 36),
-      // Bottom matches the lane rows' own 8px bottom padding, so a banner
-      // and the block row under it don't visually fuse.
-      margin: EdgeInsets.only(top: 3, bottom: compact ? 3 : 8),
       alignment: Alignment.center,
       decoration: BoxDecoration(
         color: background,
@@ -123,6 +129,21 @@ class GapEventBanner extends StatelessWidget {
           color: foreground,
         ),
       ),
+    );
+    return Padding(
+      // Bottom matches the lane rows' own 8px bottom padding, so a banner
+      // and the block row under it don't visually fuse.
+      padding: EdgeInsets.only(top: 3, bottom: compact ? 3 : 8),
+      child: onTap == null
+          ? banner
+          : Semantics(
+              button: true,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: onTap,
+                child: banner,
+              ),
+            ),
     );
   }
 }
