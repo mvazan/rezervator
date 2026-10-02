@@ -49,6 +49,20 @@ String changelogHeading(Release r, {required bool web}) {
 }
 
 const appChangelog = <Release>[
+  Release('2.0.3', '2. 10. 2026', [
+    'Výsledky zápasu: remíza v souboji se píše nulou. Potažení dolů obnoví '
+        'výsledky stejně jako tlačítko ⟳ vpravo nahoře.',
+    'Nástěnka: správce vidí i seznam těch, kdo si oznam zobrazili. '
+        '„Více“ se ukáže jen u textu, který se opravdu nevejde.',
+    'Kuželny: filtr podle soutěže, výběr si appka pamatuje.',
+    'Správce může zadat registrační číslo hráče ručně (Správa → Hráči → ⋮ → '
+        'Reg. č.…).',
+  ], store: [
+    'Výsledky: remíza souboje nulou, tažení dolů jako ⟳.',
+    'Nástěnka: seznam, kdo si oznam zobrazil.',
+    'Kuželny: filtr podle soutěže.',
+    'Správce zadá registrační číslo ručně.',
+  ]),
   Release('2.0.2', '2. 10. 2026', [
     'Horní pruh kalendáře s týdnem jde posouvat do stran — doleva na další '
         'týden, doprava na předchozí.',
