@@ -11453,4 +11453,78 @@ begin
   raise notice 'OK: slot watches — who hears about a freed spot (cap, own booking, closed day, retaken lane, throttle), the end on booking, the RPCs, privileges and the prune (0058)';
 end $$;
 
+-- 25. An admin edits a player's name (0060): only an admin, only his own
+-- alley, trimmed and never empty; a renamed player is looked for in the
+-- register again.
+reset role;
+do $$
+declare
+  c constant uuid := '10000000-0000-0000-0000-000000000003';  -- A, pending
+  v_name text;
+  v_checked timestamptz;
+begin
+  update profiles set regnum_checked_at = now() where id = c;
+  set local role authenticated;
+  perform set_config('request.jwt.claims',
+    '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}', true);
+  perform set_display_name(c, '   Čeněk   Nový ');
+  reset role;
+  select display_name, regnum_checked_at into v_name, v_checked from profiles where id = c;
+  if v_name <> 'Čeněk Nový' then
+    raise exception 'FAIL: the name was stored as "%"', v_name;
+  end if;
+  if v_checked is not null then
+    raise exception 'FAIL: a rename left the registration lookup state as it was';
+  end if;
+
+  -- The same name again keeps the lookup state.
+  update profiles set regnum_checked_at = now() where id = c;
+  set local role authenticated;
+  perform set_config('request.jwt.claims',
+    '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}', true);
+  perform set_display_name(c, 'Čeněk Nový');
+  reset role;
+  if (select regnum_checked_at from profiles where id = c) is null then
+    raise exception 'FAIL: saving the same name re-armed the registration lookup';
+  end if;
+
+  set local role authenticated;
+  perform set_config('request.jwt.claims',
+    '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}', true);
+  begin
+    perform set_display_name(c, '   ');
+    raise exception 'FAIL: an empty name was accepted';
+  exception when others then
+    if sqlerrm <> 'empty_display_name' then raise; end if;
+  end;
+  begin
+    perform set_display_name(c, repeat('x', 61));
+    raise exception 'FAIL: a 61-character name was accepted';
+  exception when others then
+    if sqlerrm <> 'display_name_too_long' then raise; end if;
+  end;
+  -- Another alley's player is nobody of this admin's.
+  begin
+    perform set_display_name('10000000-0000-0000-0000-000000000002', 'Cizí');
+    raise exception 'FAIL: an admin renamed a player of another alley';
+  exception when others then
+    if sqlerrm <> 'unknown_player' then raise; end if;
+  end;
+  -- Not an admin: the other alley's admin cannot rename this alley's player,
+  -- and a plain account cannot rename anybody.
+  perform set_config('request.jwt.claims',
+    '{"sub":"10000000-0000-0000-0000-000000000003","role":"authenticated"}', true);
+  begin
+    perform set_display_name(c, 'Já sám');
+    raise exception 'FAIL: a non-admin renamed a player';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+  reset role;
+  if has_function_privilege('anon', 'public.set_display_name(uuid, text)', 'execute') then
+    raise exception 'FAIL: anon can call set_display_name';
+  end if;
+  raise notice 'OK: set_display_name — admin only, own alley only, trimmed, never empty, a rename re-arms the registration lookup (0060)';
+end $$;
+
 rollback;
