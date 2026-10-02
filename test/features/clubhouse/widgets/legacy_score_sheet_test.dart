@@ -1571,8 +1571,8 @@ void main() {
     );
 
     testWidgets(
-      'a player with zero lanes gets a single-line name that fits the '
-      '31px Celkem row without wrapping',
+      'a player with zero lanes still has two lane rows: the name sits in '
+      'them unclipped and the registration number in the Celkem row',
       (tester) async {
         final noLaneHome = MatchPlayerResult.fromJson(const {
           'id': 'nl',
@@ -1581,21 +1581,25 @@ void main() {
           'position': 1,
           'player_name': 'Živě Bez Drah',
           'total': 500,
-        });
+        }).withRegnum('17390');
         await tester.pumpWidget(app(players: [noLaneHome]));
         await tester.pumpAndSettle();
 
         final nameFinder = find.text('Živě Bez Drah');
         expect(nameFinder, findsOneWidget);
-        expect(tester.widget<Text>(nameFinder).maxLines, 1);
-        final rp = tester.renderObject<RenderParagraph>(nameFinder);
-        expect(rp.didExceedMaxLines, isFalse);
+        expect(tester.renderObject<RenderParagraph>(nameFinder).didExceedMaxLines,
+            isFalse);
+        final number = find.text('17390');
+        expect(number, findsOneWidget);
+        // The number is under the name, in the same column.
+        expect(tester.getTopLeft(number).dy,
+            greaterThan(tester.getBottomLeft(nameFinder).dy));
+        expect(tester.getTopLeft(number).dx, tester.getTopLeft(nameFinder).dx);
       },
     );
 
     testWidgets(
-      'a player with a single lane also gets the name in the 31px Celkem '
-      'row — a 23px lane row cannot hold the 16px name unclipped',
+      'a player with a single lane gets the same: name up, number under it',
       (tester) async {
         final oneLaneHome = MatchPlayerResult.fromJson(const {
           'id': 'ol',
@@ -1607,7 +1611,7 @@ void main() {
           'lanes': [
             {'lane': 1, 'total': 250},
           ],
-        });
+        }).withRegnum('6879');
         await tester.pumpWidget(app(players: [oneLaneHome]));
         await tester.pumpAndSettle();
 
@@ -1616,6 +1620,10 @@ void main() {
         final rp = tester.renderObject<RenderParagraph>(nameFinder);
         expect(rp.didExceedMaxLines, isFalse);
         expect(rp.size.height, greaterThanOrEqualTo(16));
+        final number = find.text('6879');
+        expect(number, findsOneWidget);
+        expect(tester.getTopLeft(number).dy,
+            greaterThan(tester.getBottomLeft(nameFinder).dy));
       },
     );
   });
