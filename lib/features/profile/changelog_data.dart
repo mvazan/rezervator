@@ -49,6 +49,33 @@ String changelogHeading(Release r, {required bool web}) {
 }
 
 const appChangelog = <Release>[
+  Release('2.0.2', '2. 10. 2026', [
+    'Horní pruh kalendáře s týdnem jde posouvat do stran — doleva na další '
+        'týden, doprava na předchozí.',
+    'Klepnutí na pruh zápasu v kalendáři otevře výsledky zápasu.',
+    'Registrační čísla: appka rozliší jmenovce podle klubu a věku. Když '
+        'v profilu číslo chybí, tlačítko „Doplnit reg. č.“ nabídne lidi '
+        'z registru ČKA a ty se poznáš. V Zápisu mají čísla svoji buňku '
+        'i za běhu zápasu; v Kontaktech je číslo bez popisku.',
+    'Výsledky: potažením dolů se data načtou znovu, i na prázdné obrazovce. '
+        'Totéž jde na plánu služeb.',
+    'Souboje: u vítěze je tučně i číslo v závorce a remíza se píše dvojtečkou '
+        '(v rozbalené tabulce dráhy nulou). Jméno týmu a skóre stojí '
+        'na jedné řádce.',
+    '„Navigovat“ na kuželnu nabídne mapové aplikace v telefonu '
+        '(Google Maps, Mapy.cz, Waze…), ne jen Google Maps.',
+    'Poslední řádky dlouhých obrazovek (Můj profil, Kontakty, Kuželny, '
+        'Výsledky, Správa) už nezakrývá systémová navigační lišta.',
+    'Správce může upravit jméno hráče (Správa → Hráči → ⋮ → Jméno…).',
+  ], store: [
+    'Pruh s týdnem v kalendáři jde posouvat do stran.',
+    'Klepnutí na pruh zápasu otevře výsledky.',
+    'Registrační čísla: rozlišení jmenovců a „Doplnit reg. č.“ v profilu.',
+    'Výsledky a služby: potažením dolů se data načtou znovu.',
+    '„Navigovat“ nabídne mapové aplikace v telefonu.',
+    'Lišta telefonu už nezakrývá konec obrazovek.',
+    'Správce může upravit jméno hráče.',
+  ]),
   Release('2.0.1', '1. 10. 2026', [
     'Zvoneček u volných míst ve dni hlídá uvolněné termíny — celý den, '
         'nebo jen bloky, které si vybereš.',
