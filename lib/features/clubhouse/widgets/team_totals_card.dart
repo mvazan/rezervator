@@ -128,10 +128,13 @@ class TeamTotalsCard extends StatelessWidget {
     );
   }
 
-  /// [leadLabel] of home − away („+234“, „-100“, „=“); '' when either
-  /// side is unknown.
+  /// [leadLabel] of home − away („+234“, „-100“); '' when either side is
+  /// unknown — and on a tie: a colon after a row's name would read as a
+  /// label's, so a tie leaves the name bare.
   static String _lead(int? home, int? away) =>
-      home == null || away == null ? '' : leadLabel(home - away);
+      home == null || away == null || home == away
+      ? ''
+      : leadLabel(home - away);
 }
 
 /// One mirrored row, at least 44dp tall: the home value on the left, „name

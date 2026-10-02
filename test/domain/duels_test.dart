@@ -106,7 +106,7 @@ void main() {
   test('leadLabel: + for the home side, - for the guests', () {
     expect(leadLabel(22), '+22');
     expect(leadLabel(-3), '-3');
-    expect(leadLabel(0), '=');
+    expect(leadLabel(0), ':');
     expect(leadLabel(null), '');
   });
 

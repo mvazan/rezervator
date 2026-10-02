@@ -314,13 +314,14 @@ int diffScale(List<Duel> duels) {
   return any ? (home: home, away: away) : null;
 }
 
-/// '+22' (home leads), '-3' (away leads), '=' (0), '' (null).
+/// '+22' (home leads), '-3' (away leads), ':' (0, a tie — the colon that
+/// stands between the two scores everywhere else), '' (null).
 ///
 /// The sign is the home side's point of view: + is in favour of the home
 /// team (left), - in favour of the guests (right).
 String leadLabel(int? diff) {
   if (diff == null) return '';
-  if (diff == 0) return '=';
+  if (diff == 0) return ':';
   return diff > 0 ? '+$diff' : '-${-diff}';
 }
 

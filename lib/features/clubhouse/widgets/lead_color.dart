@@ -5,7 +5,7 @@ import '../../../domain/palette.dart';
 
 /// The colour a lead label („+22“, „-3“) is printed in: its side's — the
 /// home side's for „+“, the guests' for „-“ — as text that stays legible on
-/// the card (see [legibleSideText]); null for „=“ or no lead. [homeColor] and
+/// the card (see [legibleSideText]); null for a tie („:“) or no lead. [homeColor] and
 /// [awayColor] default to green and red.
 Color? leadColor(
   BuildContext context,

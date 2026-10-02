@@ -283,7 +283,7 @@ void main() {
 
   });
 
-  testWidgets('a tie on points: the lead is „=“, both names w500', (
+  testWidgets('a tie on points: the lead is „:“, both names w500', (
     tester,
   ) async {
     final players = [
@@ -310,7 +310,7 @@ void main() {
         ),
       ),
     );
-    expect(find.text('='), findsOneWidget);
+    expect(find.text(':'), findsOneWidget);
     // A tie on points: both names w500.
     expect(
       _text(tester, 'TJ Sokol Rudná A').style?.fontWeight,
