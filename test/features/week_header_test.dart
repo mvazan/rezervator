@@ -128,4 +128,95 @@ void main() {
     expect(text.style!.color, theme.colorScheme.primary);
     expect(text.style!.fontWeight, FontWeight.w700);
   });
+
+  group('swiping the strip turns the week', () {
+    // A host that keeps the week it is told to, like the calendar does.
+    Widget host(List<int> moves, {DutyHeader? duty}) => MaterialApp(
+          home: Scaffold(
+            body: StatefulBuilder(
+              builder: (context, setState) => _Calendar(moves: moves, duty: duty),
+            ),
+          ),
+        );
+
+    testWidgets('left: the next week, right: the previous one',
+        (tester) async {
+      final moves = <int>[];
+      await tester.pumpWidget(host(moves));
+      await tester.pumpAndSettle();
+      expect(find.text('5.10.–11.10.'), findsOneWidget);
+
+      await tester.fling(find.text('5.10.–11.10.'), const Offset(-200, 0), 800);
+      await tester.pumpAndSettle();
+      expect(moves, [1]);
+      expect(find.text('12.10.–18.10.'), findsOneWidget);
+      expect(find.text('5.10.–11.10.'), findsNothing);
+
+      await tester.fling(find.text('12.10.–18.10.'), const Offset(200, 0), 800);
+      await tester.pumpAndSettle();
+      expect(moves, [1, -1]);
+      expect(find.text('5.10.–11.10.'), findsOneWidget);
+    });
+
+    testWidgets('a swipe on the duty line turns the week too',
+        (tester) async {
+      final moves = <int>[];
+      await tester.pumpWidget(
+        host(moves, duty: const DutyHeader('Služba: Jan Novák')),
+      );
+      await tester.pumpAndSettle();
+      await tester.fling(find.text('Služba: Jan Novák'), const Offset(-200, 0), 800);
+      await tester.pumpAndSettle();
+      expect(moves, [1]);
+    });
+
+    testWidgets('a slow drag turns nothing', (tester) async {
+      final moves = <int>[];
+      await tester.pumpWidget(host(moves));
+      await tester.pumpAndSettle();
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.text('5.10.–11.10.')),
+      );
+      await gesture.moveBy(const Offset(-40, 0));
+      await tester.pump(const Duration(seconds: 2));
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(moves, isEmpty);
+    });
+
+    testWidgets('the arrows still work', (tester) async {
+      final moves = <int>[];
+      await tester.pumpWidget(host(moves));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.chevron_right));
+      await tester.pumpAndSettle();
+      expect(moves, [1]);
+    });
+  });
+}
+
+class _Calendar extends StatefulWidget {
+  const _Calendar({required this.moves, this.duty});
+
+  final List<int> moves;
+  final DutyHeader? duty;
+
+  @override
+  State<_Calendar> createState() => _CalendarState();
+}
+
+class _CalendarState extends State<_Calendar> {
+  int _offset = 0;
+
+  @override
+  Widget build(BuildContext context) => WeekHeader(
+        monday: Day(2026, 10, 5).addDays(7 * _offset),
+        weekOffset: _offset,
+        onGo: (d) => setState(() {
+          widget.moves.add(d);
+          _offset += d;
+        }),
+        trailing: const [],
+        duty: widget.duty,
+      );
 }

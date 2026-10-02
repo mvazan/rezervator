@@ -9,7 +9,7 @@ import 'week_range_nav.dart';
 /// navigation in its middle slot. The strip itself — title, padding, the
 /// icons at the right edge — is the shared one, so it lines up with Můj
 /// přehled's to the pixel.
-class WeekHeader extends StatelessWidget {
+class WeekHeader extends StatefulWidget {
   const WeekHeader({
     super.key,
     required this.monday,
@@ -40,22 +40,87 @@ class WeekHeader extends StatelessWidget {
   final VoidCallback? onDutyTap;
 
   @override
+  State<WeekHeader> createState() => _WeekHeaderState();
+}
+
+class _WeekHeaderState extends State<WeekHeader> {
+  /// Which way the last move went: +1 a later week, -1 an earlier one — the
+  /// range slides in from that side.
+  int _direction = 1;
+
+  /// A swipe faster than this (logical px/s) turns the week.
+  static const _swipeVelocity = 250.0;
+
+  @override
+  void didUpdateWidget(WeekHeader old) {
+    super.didUpdateWidget(old);
+    if (widget.monday != old.monday) {
+      _direction = widget.monday.isAfter(old.monday) ? 1 : -1;
+    }
+  }
+
+  /// Dragging the strip sideways turns the week, as swiping the days below
+  /// turns the day: left for the next week, right for the previous one.
+  void _onSwipe(DragEndDetails details) {
+    final v = details.primaryVelocity ?? 0;
+    if (v <= -_swipeVelocity) {
+      widget.onGo(1);
+    } else if (v >= _swipeVelocity) {
+      widget.onGo(-1);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) => HomeHeader(
-        trailing: trailing,
-        middle: (stacked) => _weekNav(context, stacked),
-      );
+    trailing: widget.trailing,
+    middle: (stacked) => GestureDetector(
+      // The arrows and the duty line keep their taps; only a sideways
+      // drag is taken here.
+      behavior: HitTestBehavior.translucent,
+      onHorizontalDragEnd: _onSwipe,
+      child: ClipRect(
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 220),
+          switchOutCurve: Curves.easeIn,
+          transitionBuilder: (child, animation) {
+            final incoming = child.key == ValueKey(widget.monday);
+            // The new week enters from the side it is on, the old one
+            // leaves to the other (its animation runs backwards).
+            final from = Offset(
+              incoming ? _direction * 0.6 : -_direction * 0.6,
+              0,
+            );
+            return FadeTransition(
+              opacity: animation,
+              child: SlideTransition(
+                position: Tween(
+                  begin: from,
+                  end: Offset.zero,
+                ).animate(animation),
+                child: child,
+              ),
+            );
+          },
+          child: KeyedSubtree(
+            key: ValueKey(widget.monday),
+            child: _weekNav(context, stacked),
+          ),
+        ),
+      ),
+    ),
+  );
 
   // On one line the week selector sits centred between the title and the
   // icons; stacked it has the second line to itself, so the range can take
   // all the width between the two arrows.
   Widget _weekNav(BuildContext context, bool stacked) {
     final nav = WeekRangeNav(
-      monday: monday,
-      weekOffset: weekOffset,
-      onGo: onGo,
+      monday: widget.monday,
+      weekOffset: widget.weekOffset,
+      onGo: widget.onGo,
       stacked: stacked,
     );
-    final duty = this.duty;
+    final duty = widget.duty;
     if (duty == null) return nav;
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
@@ -67,9 +132,9 @@ class WeekHeader extends StatelessWidget {
         // area spans the nav's width and is 32dp tall, the line itself
         // stays one small centred row.
         Semantics(
-          button: onDutyTap != null,
+          button: widget.onDutyTap != null,
           child: InkWell(
-            onTap: onDutyTap,
+            onTap: widget.onDutyTap,
             child: ConstrainedBox(
               constraints: const BoxConstraints(
                 minWidth: double.infinity,
