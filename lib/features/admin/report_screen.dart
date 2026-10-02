@@ -129,7 +129,7 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
                       for (final (club, members)
                           in attendanceByClub(report)) ...[
                         Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 2),
+                          padding: padWithSystemInset(context, const EdgeInsets.fromLTRB(16, 12, 16, 2)),
                           child: Text(
                             '$club — '
                             '${members.fold(0, (s, r) => s + r.attended)}× / '

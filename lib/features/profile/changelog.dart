@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
+import '../../core/ui.dart' show padWithSystemInset;
+
 import 'changelog_data.dart';
 
 // Release-notes data (Release, appChangelog) lives in changelog_data.dart
@@ -23,7 +25,10 @@ void showChangelog(BuildContext context, {bool web = kIsWeb}) {
       initialChildSize: 0.6,
       builder: (context, controller) => ListView(
         controller: controller,
-        padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+        padding: padWithSystemInset(
+          context,
+          const EdgeInsets.fromLTRB(20, 0, 20, 24),
+        ),
         children: [
           Text('Co je nového',
               style: Theme.of(context).textTheme.titleLarge),

@@ -148,7 +148,7 @@ class ProfileScreen extends ConsumerWidget {
       body: profile == null
           ? const Center(child: CircularProgressIndicator())
           : ListView(
-              padding: const EdgeInsets.all(12),
+              padding: padWithSystemInset(context, const EdgeInsets.all(12)),
               children: [
                 Card(
                   child: Column(

@@ -7,6 +7,8 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../ui.dart';
+
 /// Radial gradient backdrop: indigo-tinted in light mode, slate→indigo in
 /// dark — subtle enough that the centered [AuthCard] stays the focal point.
 class AuthBackground extends StatelessWidget {
@@ -46,7 +48,7 @@ class AuthCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Center(
       child: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
+        padding: padWithSystemInset(context, const EdgeInsets.all(24)),
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 420),
           child: Card(

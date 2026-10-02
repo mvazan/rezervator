@@ -491,6 +491,15 @@ Future<HourMinute?> pickTime(
   return HourMinute(picked.hour, picked.minute);
 }
 
+/// [base] with the system's bottom inset added to its bottom. The app draws
+/// edge to edge, under the navigation bar (three buttons or a gesture strip);
+/// a scrollable with NO `padding` gets that inset from MediaQuery by itself,
+/// but an explicit `padding` replaces it — the last rows then stay under the
+/// bar with no way to scroll them clear. Inside a Scaffold with a bottom bar
+/// (the home's tabs) the inset is already used up and this adds nothing.
+EdgeInsets padWithSystemInset(BuildContext context, EdgeInsets base) =>
+    base.copyWith(bottom: base.bottom + MediaQuery.paddingOf(context).bottom);
+
 void launchEmail(String address) =>
     _launchExternal(Uri.parse('mailto:$address'));
 

@@ -72,7 +72,7 @@ class _PublicOverviewScreenState extends ConsumerState<PublicOverviewScreen> {
           _seed(o);
           final slug = o.slug;
           return ListView(
-            padding: const EdgeInsets.all(16),
+            padding: padWithSystemInset(context, const EdgeInsets.all(16)),
             children: [
               const Text(
                 'Rozvrh kuželny na vlastní adrese — pro kohokoli, bez '

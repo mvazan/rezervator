@@ -51,7 +51,15 @@ class ListActionBar extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        Expanded(child: child),
+        // The strip below takes the system inset itself (its SafeArea), so
+        // the list above must not add it a second time.
+        Expanded(
+          child: MediaQuery.removePadding(
+            context: context,
+            removeBottom: true,
+            child: child,
+          ),
+        ),
         // `minimum`, not a plain Padding: on a phone with a gesture nav bar
         // the OS inset alone can exceed 16px, and a fixed Padding would
         // then sit the button under the home-indicator strip.

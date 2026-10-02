@@ -569,7 +569,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
       key: const PageStorageKey('match-detail'),
       // A short list (no lineup yet) still has to pull.
       physics: pullToRefresh ? const AlwaysScrollableScrollPhysics() : null,
-      padding: const EdgeInsets.only(bottom: 24),
+      padding: padWithSystemInset(context, const EdgeInsets.only(bottom: 24)),
       children: children,
     );
     if (!pullToRefresh) return list;

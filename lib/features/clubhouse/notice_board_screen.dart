@@ -205,7 +205,7 @@ class _NoticeListState extends ConsumerState<_NoticeList> {
         );
     return ListView(
       // Room for the admin's FAB below the last card.
-      padding: const EdgeInsets.only(bottom: 88),
+      padding: padWithSystemInset(context, const EdgeInsets.only(bottom: 88)),
       children: [
         for (final n in split.active) tile(n),
         if (split.expired.isNotEmpty)

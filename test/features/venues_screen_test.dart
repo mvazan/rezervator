@@ -360,6 +360,33 @@ void main() {
       }
     });
 
+    testWidgets('scrolled to the end, the footer clears the navigation bar', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(600, 500);
+      tester.view.devicePixelRatio = 1.0;
+      tester.view.padding = const FakeViewPadding(bottom: 48);
+      tester.view.viewPadding = const FakeViewPadding(bottom: 48);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPadding);
+      addTearDown(tester.view.resetViewPadding);
+      await tester.pumpWidget(
+        app(
+          home: const VenueDetailScreen(slug: 'tj-sokol-brno-iv'),
+          venues: [brnoIv],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.drag(find.byType(ListView), const Offset(0, -9000));
+      await tester.pumpAndSettle();
+      expect(
+        tester.getBottomLeft(find.text('Na webu ČKA')).dy,
+        lessThanOrEqualTo(500 - 48),
+      );
+    });
+
     testWidgets('footer shows the source and fetched-at day, with a link '
         'to the site', (tester) async {
       final launched = <String>[];

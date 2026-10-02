@@ -101,6 +101,31 @@ void main() {
     expect(tester.widget<ListTile>(rowOf('Chalupa Jan')).subtitle, isNull);
   });
 
+  testWidgets('scrolled to the end, the last contact clears the navigation bar',
+      (tester) async {
+    tester.view.physicalSize = const Size(600, 800);
+    tester.view.devicePixelRatio = 1.0;
+    tester.view.padding = const FakeViewPadding(bottom: 48);
+    tester.view.viewPadding = const FakeViewPadding(bottom: 48);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPadding);
+    addTearDown(tester.view.resetViewPadding);
+    final many = [
+      for (var i = 0; i < 30; i++)
+        Contact(id: 'c$i', displayName: 'Hráč ${i.toString().padLeft(2, '0')}'),
+    ];
+    await tester.pumpWidget(app(() async => many));
+    await tester.pumpAndSettle();
+
+    await tester.drag(find.byType(ListView), const Offset(0, -9000));
+    await tester.pumpAndSettle();
+    expect(
+      tester.getBottomLeft(find.text('Hráč 29')).dy,
+      lessThanOrEqualTo(800 - 48),
+    );
+  });
+
   testWidgets('the registration number, bare, ends the subtitle', (tester) async {
     const withNumber = Contact(
       id: 'r',

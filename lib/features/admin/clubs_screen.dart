@@ -123,7 +123,7 @@ class ClubsScreen extends ConsumerWidget {
                 team,
           ];
           return ListView(
-            padding: const EdgeInsets.all(12),
+            padding: padWithSystemInset(context, const EdgeInsets.all(12)),
             children: [
               FederationCard(
                 saveFederation: saveFederation,

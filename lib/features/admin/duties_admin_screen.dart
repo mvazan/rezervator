@@ -325,7 +325,7 @@ class DutiesAdminScreen extends ConsumerWidget {
     }
 
     return ListView(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: padWithSystemInset(context, const EdgeInsets.symmetric(vertical: 8)),
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),

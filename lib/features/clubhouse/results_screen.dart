@@ -579,7 +579,7 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
                       // needs to arm — a well-known SingleChildScrollView/
                       // RefreshIndicator gotcha.
                       physics: const AlwaysScrollableScrollPhysics(),
-                      padding: const EdgeInsets.fromLTRB(8, 4, 8, 24),
+                      padding: padWithSystemInset(context, const EdgeInsets.fromLTRB(8, 4, 8, 24)),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
