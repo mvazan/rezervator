@@ -101,7 +101,7 @@ void main() {
     expect(tester.widget<ListTile>(rowOf('Chalupa Jan')).subtitle, isNull);
   });
 
-  testWidgets('the registration number rides in the subtitle', (tester) async {
+  testWidgets('the registration number, bare, ends the subtitle', (tester) async {
     const withNumber = Contact(
       id: 'r',
       displayName: 'Radek Číslo',
@@ -112,10 +112,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(
-      inRow('Radek Číslo', find.text('Oddíl E · reg. č. 787')),
+      inRow('Radek Číslo', find.text('Oddíl E · 787')),
       findsOneWidget,
     );
-    expect(find.textContaining('reg. č.'), findsOneWidget);
+    expect(find.textContaining('787'), findsOneWidget);
   });
 
   testWidgets('each row offers what its player shows, and the actions call '

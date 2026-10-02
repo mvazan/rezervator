@@ -96,6 +96,8 @@ void main() {
         updateMyContact,
     List<PrioritySlot> matches = const [],
     Map<String, bool> exceptions = const {},
+    Future<List<RegnumCandidate>> Function()? loadRegnumCandidates,
+    Future<String> Function(RegnumCandidate candidate)? confirmRegnum,
   }) {
     return ProviderScope(
       overrides: [
@@ -113,6 +115,8 @@ void main() {
       ],
       child: MaterialApp(
         home: ProfileScreen(
+          loadRegnumCandidates: loadRegnumCandidates ?? () async => const [],
+          confirmRegnum: confirmRegnum ?? (_) async => '0',
           setOwnColor:
               setOwnColor ?? (_) async => throw StateError('unexpected'),
           setFollowedTeams:
@@ -171,11 +175,117 @@ void main() {
     expect(find.text('reg. č. 787'), findsOneWidget);
   });
 
-  testWidgets('shows no registration number until one is found',
+  testWidgets('without a number: no number, a „Doplnit reg. č.“ button',
       (tester) async {
     await tester.pumpWidget(app(me));
     await tester.pumpAndSettle();
-    expect(find.textContaining('reg. č.'), findsNothing);
+    expect(find.textContaining('reg. č. '), findsNothing);
+    expect(find.text('Doplnit reg. č.'), findsOneWidget);
+  });
+
+  testWidgets('with a number the button is gone', (tester) async {
+    await tester.pumpWidget(
+      app(
+        const Profile(
+          id: 'me',
+          displayName: 'Já Hráč',
+          clubId: 'c1',
+          email: 'me@example.com',
+          role: Role.player,
+          status: ProfileStatus.approved,
+          regnum: '787',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Doplnit reg. č.'), findsNothing);
+  });
+
+  group('Doplnit reg. č.', () {
+    const father = RegnumCandidate(id: '1', club: 'TJ Sokol Rudná', age: 59);
+    const son = RegnumCandidate(id: '2', club: 'TJ Sokol Rudná', age: 31);
+
+    testWidgets('the player picks himself by club and age and confirms',
+        (tester) async {
+      final confirmed = <String>[];
+      await tester.pumpWidget(
+        app(
+          me,
+          loadRegnumCandidates: () async => [father, son],
+          confirmRegnum: (c) async {
+            confirmed.add(c.id);
+            return '200';
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Doplnit reg. č.'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Která osoba jsi ty?'), findsOneWidget);
+      expect(find.text('59 let'), findsOneWidget);
+      expect(find.text('31 let'), findsOneWidget);
+      // Nothing is chosen for him.
+      expect(
+        tester
+            .widget<FilledButton>(find.widgetWithText(FilledButton, 'To jsem já'))
+            .onPressed,
+        isNull,
+      );
+      await tester.tap(find.text('31 let'));
+      await tester.pump();
+      await tester.tap(find.text('To jsem já'));
+      await tester.pumpAndSettle();
+      expect(confirmed, ['2']);
+      expect(find.text('Registrační číslo uloženo.'), findsOneWidget);
+    });
+
+    testWidgets('nobody of his name: says so', (tester) async {
+      await tester.pumpWidget(app(me, loadRegnumCandidates: () async => const []));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Doplnit reg. č.'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('V evidenci ČKA nikdo'), findsOneWidget);
+      await tester.tap(find.text('Zavřít'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
+    });
+
+    testWidgets('closing the sheet confirms nothing', (tester) async {
+      final confirmed = <String>[];
+      await tester.pumpWidget(
+        app(
+          me,
+          loadRegnumCandidates: () async => [father, son],
+          confirmRegnum: (c) async {
+            confirmed.add(c.id);
+            return '1';
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Doplnit reg. č.'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('59 let'));
+      await tester.pump();
+      await tester.tapAt(const Offset(10, 10));
+      await tester.pumpAndSettle();
+      expect(confirmed, isEmpty);
+    });
+
+    testWidgets('a failing lookup reads as Czech copy, no sheet', (tester) async {
+      await tester.pumpWidget(
+        app(
+          me,
+          loadRegnumCandidates: () async => throw Exception('network'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Doplnit reg. č.'));
+      await tester.pumpAndSettle();
+      expect(find.text('Která osoba jsi ty?'), findsNothing);
+      expect(find.byType(SnackBar), findsOneWidget);
+    });
   });
 
   testWidgets('shows "nenastavena" when nick is empty', (tester) async {

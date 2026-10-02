@@ -391,7 +391,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
               const <String, String>{}
         : const <String, String>{};
     final players = [
-      for (final p in lineup) p.withRegnum(regnums[p.playerName]),
+      for (final p in lineup) p.withRegnum(regnums[p.playerSlug]),
     ];
 
     PrioritySlot? slot = leagueMatch?.asSlot() ?? becameOurs;

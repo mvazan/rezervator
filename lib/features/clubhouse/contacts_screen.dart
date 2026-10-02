@@ -106,7 +106,7 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
     final subtitle = [
       if (contact.nick.isNotEmpty) '„${contact.nick}“',
       ?contact.clubName,
-      if (contact.regnum != null) 'reg. č. ${contact.regnum}',
+      ?contact.regnum,
     ].join(' · ');
     final email = contact.email;
     final phone = contact.phone;
