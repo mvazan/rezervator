@@ -225,9 +225,8 @@ class _NoticeListState extends ConsumerState<_NoticeList> {
   }
 }
 
-/// Bodies longer than this (or with more than three lines) start cut to
-/// three lines with a „Více“ toggle.
-const _cutAfter = 160;
+/// Bodies longer than this many lines start cut with a „Více“ toggle.
+const _cutLines = 3;
 
 /// One notice: title, body (cut to three lines with „Více“ when long),
 /// footer; for the admin also the seen count and the ⋮ actions.
@@ -266,10 +265,6 @@ class _NoticeCardState extends ConsumerState<_NoticeCard> {
         ? null
         : seenLabel(rows.where((r) => r.readAt != null).length, rows.length);
     final footer = [noticeFooter(notice, widget.now), ?seen].join(' · ');
-    // More than three lines means at least three line breaks.
-    final long = notice.body.length > _cutAfter ||
-        '\n'.allMatches(notice.body).length >= 3;
-    final cut = long && !_expanded;
     return Card(
       margin: const EdgeInsets.fromLTRB(12, 8, 12, 4),
       child: ListTile(
@@ -277,19 +272,42 @@ class _NoticeCardState extends ConsumerState<_NoticeCard> {
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              notice.body,
-              maxLines: cut ? 3 : null,
-              overflow: cut ? TextOverflow.ellipsis : null,
+            // „Více“ only when the body really is longer than three lines
+            // at this width: on a wide screen a long text may fit, and a
+            // toggle that changes nothing is noise.
+            LayoutBuilder(
+              builder: (context, box) {
+                final style = DefaultTextStyle.of(context).style;
+                final painter = TextPainter(
+                  text: TextSpan(text: notice.body, style: style),
+                  textDirection: Directionality.of(context),
+                  textScaler: MediaQuery.textScalerOf(context),
+                  maxLines: _cutLines,
+                )..layout(maxWidth: box.maxWidth);
+                final long = painter.didExceedMaxLines;
+                painter.dispose();
+                final cut = long && !_expanded;
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      notice.body,
+                      maxLines: cut ? _cutLines : null,
+                      overflow: cut ? TextOverflow.ellipsis : null,
+                    ),
+                    if (long)
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton(
+                          onPressed: () =>
+                              setState(() => _expanded = !_expanded),
+                          child: Text(_expanded ? 'Méně' : 'Více'),
+                        ),
+                      ),
+                  ],
+                );
+              },
             ),
-            if (long)
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(
-                  onPressed: () => setState(() => _expanded = !_expanded),
-                  child: Text(_expanded ? 'Méně' : 'Více'),
-                ),
-              ),
             const SizedBox(height: 4),
             Text(footer, style: Theme.of(context).textTheme.bodySmall),
           ],

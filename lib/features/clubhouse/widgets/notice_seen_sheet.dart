@@ -50,7 +50,11 @@ class _SeenSheet extends ConsumerWidget {
     final rows = loaded;
     final players = ref.watch(playersProvider).value ?? const [];
     final names = {for (final p in players) p.id: p.displayName};
-    final seen = rows.where((r) => r.readAt != null).length;
+    final seenCount = rows.where((r) => r.readAt != null).length;
+    final seen = [
+      for (final r in rows)
+        if (r.readAt != null) ?names[r.userId],
+    ]..sort(compareCzech);
     // Known names only; an id the roster lacks is left out.
     final unseen = [
       for (final r in rows)
@@ -67,9 +71,15 @@ class _SeenSheet extends ConsumerWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              seenLabel(seen, rows.length),
+              seenLabel(seenCount, rows.length),
               style: Theme.of(context).textTheme.titleMedium,
             ),
+            if (seen.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              const Text('Zobrazili:'),
+              const SizedBox(height: 4),
+              Text(seen.join(', ')),
+            ],
             if (unseen.isNotEmpty) ...[
               const SizedBox(height: 12),
               const Text('Ještě nezobrazili:'),
