@@ -1444,6 +1444,7 @@ CREATE TABLE IF NOT EXISTS "public"."profiles" (
     "show_email" boolean DEFAULT true NOT NULL,
     "show_phone" boolean DEFAULT true NOT NULL,
     "regnum" "text",
+    "regnum_checked_at" timestamp with time zone,
     CONSTRAINT "profiles_default_view_check" CHECK (("default_view" = ANY (ARRAY['calendar'::"text", 'trainings'::"text", 'clubhouse'::"text"]))),
     CONSTRAINT "profiles_followed_teams_check" CHECK ((COALESCE("array_length"("followed_teams", 1), 0) <= 20)),
     CONSTRAINT "profiles_nick_check" CHECK (("char_length"("nick") <= 14)),
@@ -1493,6 +1494,10 @@ COMMENT ON COLUMN "public"."profiles"."show_phone" IS 'Whether contacts() hands 
 
 
 COMMENT ON COLUMN "public"."profiles"."regnum" IS 'Registration number from the ČKA register (evidence.kuzelky.cz), looked up by name and club by the regnum-lookup function (0057); null until found. Not updatable by the app.';
+
+
+
+COMMENT ON COLUMN "public"."profiles"."regnum_checked_at" IS 'When regnum-lookup last looked for this profile''s registration number without settling it (0059); asked again after a week. Not updatable by the app.';
 
 
 
@@ -5424,21 +5429,6 @@ COMMENT ON TABLE "public"."player_groups" IS 'A group of players who may book an
 
 
 
-CREATE TABLE IF NOT EXISTS "public"."player_regnums" (
-    "name_key" "text" NOT NULL,
-    "club_key" "text" DEFAULT ''::"text" NOT NULL,
-    "regnum" "text",
-    "status" "text" NOT NULL,
-    "looked_up_at" timestamp with time zone DEFAULT "now"() NOT NULL,
-    CONSTRAINT "player_regnums_check" CHECK ((("status" = 'found'::"text") = ("regnum" IS NOT NULL))),
-    CONSTRAINT "player_regnums_regnum_check" CHECK ((("regnum" IS NULL) OR ("regnum" ~ '^[0-9]{1,8}$'::"text"))),
-    CONSTRAINT "player_regnums_status_check" CHECK (("status" = ANY (ARRAY['found'::"text", 'none'::"text", 'ambiguous'::"text"])))
-);
-
-
-ALTER TABLE "public"."player_regnums" OWNER TO "postgres";
-
-
 CREATE OR REPLACE VIEW "public"."players" AS
  SELECT "p"."id",
     "p"."display_name",
@@ -5542,6 +5532,25 @@ COMMENT ON COLUMN "public"."schedule_settings"."duty_reminder_enabled" IS 'Wheth
 
 
 COMMENT ON COLUMN "public"."schedule_settings"."duty_reminder_days" IS 'How many days before a canteen duty the reminder goes out, at 18:00 Prague (0050), 1–14.';
+
+
+
+CREATE TABLE IF NOT EXISTS "public"."site_player_regnums" (
+    "slug" "text" NOT NULL,
+    "regnum" "text",
+    "status" "text" NOT NULL,
+    "looked_up_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "site_player_regnums_check" CHECK ((("status" = 'found'::"text") = ("regnum" IS NOT NULL))),
+    CONSTRAINT "site_player_regnums_regnum_check" CHECK ((("regnum" IS NULL) OR ("regnum" ~ '^[0-9]{1,8}$'::"text"))),
+    CONSTRAINT "site_player_regnums_slug_check" CHECK (("slug" ~ '^[a-z0-9][a-z0-9-]{0,99}$'::"text")),
+    CONSTRAINT "site_player_regnums_status_check" CHECK (("status" = ANY (ARRAY['found'::"text", 'none'::"text", 'ambiguous'::"text"])))
+);
+
+
+ALTER TABLE "public"."site_player_regnums" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."site_player_regnums" IS 'regnum-lookup cache of MATCH players, by results-service player slug (0059): resolved by the service page''s club and age against the register. Service role only.';
 
 
 
@@ -5794,11 +5803,6 @@ ALTER TABLE ONLY "public"."player_groups"
 
 
 
-ALTER TABLE ONLY "public"."player_regnums"
-    ADD CONSTRAINT "player_regnums_pkey" PRIMARY KEY ("name_key", "club_key");
-
-
-
 ALTER TABLE ONLY "public"."priority_slot_types"
     ADD CONSTRAINT "priority_slot_types_pkey" PRIMARY KEY ("id");
 
@@ -5836,6 +5840,11 @@ ALTER TABLE ONLY "public"."reservations"
 
 ALTER TABLE ONLY "public"."schedule_settings"
     ADD CONSTRAINT "schedule_settings_pkey" PRIMARY KEY ("tenant_id");
+
+
+
+ALTER TABLE ONLY "public"."site_player_regnums"
+    ADD CONSTRAINT "site_player_regnums_pkey" PRIMARY KEY ("slug");
 
 
 
@@ -5943,6 +5952,10 @@ CREATE UNIQUE INDEX "priority_slots_import_key_idx" ON "public"."priority_slots"
 
 
 CREATE INDEX "priority_slots_parent_idx" ON "public"."priority_slots" USING "btree" ("parent_id");
+
+
+
+CREATE UNIQUE INDEX "profiles_regnum_tenant_idx" ON "public"."profiles" USING "btree" ("tenant_id", "regnum") WHERE ("regnum" IS NOT NULL);
 
 
 
@@ -6579,9 +6592,6 @@ CREATE POLICY "player_group_members_select" ON "public"."player_group_members" F
 ALTER TABLE "public"."player_groups" ENABLE ROW LEVEL SECURITY;
 
 
-ALTER TABLE "public"."player_regnums" ENABLE ROW LEVEL SECURITY;
-
-
 CREATE POLICY "priority_delete" ON "public"."priority_slots" FOR DELETE USING ((("tenant_id" = "public"."current_tenant_id"()) AND "public"."is_admin"()));
 
 
@@ -6672,6 +6682,9 @@ CREATE POLICY "settings_select" ON "public"."schedule_settings" FOR SELECT USING
 
 CREATE POLICY "settings_update" ON "public"."schedule_settings" FOR UPDATE USING ((("tenant_id" = "public"."current_tenant_id"()) AND "public"."is_admin"())) WITH CHECK ((("tenant_id" = "public"."current_tenant_id"()) AND "public"."is_admin"()));
 
+
+
+ALTER TABLE "public"."site_player_regnums" ENABLE ROW LEVEL SECURITY;
 
 
 CREATE POLICY "slot_types_delete" ON "public"."priority_slot_types" FOR DELETE USING ((("tenant_id" = "public"."current_tenant_id"()) AND "public"."is_admin"() AND (NOT "builtin")));
@@ -7538,10 +7551,6 @@ GRANT ALL ON TABLE "public"."player_groups" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."player_regnums" TO "service_role";
-
-
-
 GRANT SELECT ON TABLE "public"."players" TO "authenticated";
 GRANT ALL ON TABLE "public"."players" TO "service_role";
 
@@ -7575,6 +7584,10 @@ GRANT ALL ON TABLE "public"."rental_groups" TO "service_role";
 
 GRANT ALL ON TABLE "public"."schedule_settings" TO "authenticated";
 GRANT ALL ON TABLE "public"."schedule_settings" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."site_player_regnums" TO "service_role";
 
 
 

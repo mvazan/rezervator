@@ -102,6 +102,8 @@ MatchPlayerResult _player(
   'side': id.startsWith('h') ? 'home' : 'away',
   'position': position,
   'player_name': name,
+  // The results service's own slug (what the registration numbers key on).
+  'player_slug': 'slug-$id',
   'fulls': fulls,
   'spares': spares,
   'errors': errors,

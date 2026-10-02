@@ -102,6 +102,7 @@ String friendlyDbError(Object error, {bool wasOnDuty = false}) {
     'limit_reached': 'Máš už maximální počet rezervací.',
     'beyond_horizon': 'Tak daleko dopředu zatím rezervovat nejde.',
     'date_past': 'Tenhle termín už je v minulosti.',
+    'regnum_taken': 'Tohle číslo už má jiný hráč kuželny.',
     'too_many_watches': 'Hlídáš už 30 dní — některé vypni.',
     'day_closed': 'V tento den je zavřeno.',
     'blocked_by_match': 'V tomhle čase se hraje zápas.',

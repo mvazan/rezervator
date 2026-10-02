@@ -34,6 +34,8 @@ class ProfileScreen extends ConsumerWidget {
     this.setTeamColors = Api.setTeamColors,
     this.setDefaultView = Api.setDefaultView,
     this.updateMyContact = Api.updateMyContact,
+    this.loadRegnumCandidates = Api.regnumCandidates,
+    this.confirmRegnum = Api.confirmRegnum,
   });
 
   /// Injectable for widget tests (the Api ones need a live Supabase client).
@@ -46,6 +48,8 @@ class ProfileScreen extends ConsumerWidget {
   final Future<void> Function(HomeView view) setDefaultView;
   final Future<void> Function({String? phone, bool? showEmail, bool? showPhone})
       updateMyContact;
+  final Future<List<RegnumCandidate>> Function() loadRegnumCandidates;
+  final Future<String> Function(RegnumCandidate candidate) confirmRegnum;
 
   Future<void> _editNick(BuildContext context, String currentNick) async {
     final input = await promptText(
@@ -62,6 +66,52 @@ class ProfileScreen extends ConsumerWidget {
       context,
       () => Api.setNick(currentUserId!, input),
       success: 'Uloženo.',
+      errorText: friendlyDbError,
+    );
+  }
+
+  /// „Doplnit reg. č.“: the people of the player's name in the ČKA register,
+  /// and he says which one is he (0059). The server fills the number in by
+  /// itself only when his club leaves one person; a namesake — a parent or a
+  /// child of the club — needs this.
+  Future<void> _pickRegnum(BuildContext context) async {
+    List<RegnumCandidate>? candidates;
+    final loaded = await tryAction(
+      context,
+      () async => candidates = await loadRegnumCandidates(),
+      errorText: friendlyDbError,
+    );
+    if (!loaded || !context.mounted) return;
+    if (candidates!.isEmpty) {
+      await showDialog<void>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Registrační číslo'),
+          content: const Text(
+            'V evidenci ČKA nikdo s tvým jménem není, nebo už číslo máš. '
+            'Případně ti jméno opraví správce.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Zavřít'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+    final picked = await showModalBottomSheet<RegnumCandidate>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => RegnumCandidatesSheet(candidates: candidates!),
+    );
+    if (picked == null || !context.mounted) return;
+    await tryAction(
+      context,
+      () => confirmRegnum(picked),
+      success: 'Registrační číslo uloženo.',
       errorText: friendlyDbError,
     );
   }
@@ -108,7 +158,10 @@ class ProfileScreen extends ConsumerWidget {
                         subtitle: Text(profile.displayName),
                         // The ČKA register's number, once found (0057).
                         trailing: profile.regnum == null
-                            ? null
+                            ? TextButton(
+                                onPressed: () => _pickRegnum(context),
+                                child: const Text('Doplnit reg. č.'),
+                              )
                             : Text(
                                 'reg. č. ${profile.regnum}',
                                 style: Theme.of(context).textTheme.bodyMedium,
@@ -353,6 +406,73 @@ class ProfileScreen extends ConsumerWidget {
                   ),
               ],
             ),
+    );
+  }
+}
+
+/// „Která osoba jsi ty?“ (0059): the register's people of the player's name,
+/// by club and age; he picks himself and confirms. The register's number is
+/// not shown — it goes to his profile once he has chosen.
+class RegnumCandidatesSheet extends StatefulWidget {
+  const RegnumCandidatesSheet({super.key, required this.candidates});
+
+  final List<RegnumCandidate> candidates;
+
+  @override
+  State<RegnumCandidatesSheet> createState() => _RegnumCandidatesSheetState();
+}
+
+class _RegnumCandidatesSheetState extends State<RegnumCandidatesSheet> {
+  RegnumCandidate? _picked;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Která osoba jsi ty?', style: theme.textTheme.titleMedium),
+            const SizedBox(height: 4),
+            Text(
+              'V evidenci ČKA je víc lidí s tvým jménem. Poznáš se podle '
+              'klubu a věku.',
+              style: theme.textTheme.bodySmall,
+            ),
+            const SizedBox(height: 12),
+            Flexible(
+              child: RadioGroup<RegnumCandidate>(
+                groupValue: _picked,
+                onChanged: (c) => setState(() => _picked = c),
+                child: ListView(
+                  shrinkWrap: true,
+                  children: [
+                    for (final c in widget.candidates)
+                      RadioListTile<RegnumCandidate>(
+                        value: c,
+                        title: Text(c.club.isEmpty ? '—' : c.club),
+                        subtitle: Text(c.age == null ? 'věk neuveden' : '${c.age} let'),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton(
+                onPressed: _picked == null
+                    ? null
+                    : () => Navigator.of(context).pop(_picked),
+                child: const Text('To jsem já'),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

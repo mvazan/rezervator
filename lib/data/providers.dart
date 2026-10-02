@@ -2027,7 +2027,9 @@ class Api {
       );
 
   /// The registration numbers of a match's players, from the ČKA register
-  /// (`regnum-lookup`, 0057): `{player name: number}`, the found ones only.
+  /// (`regnum-lookup`, 0057, 0059): `{player slug: number}`, the found ones
+  /// only — by the results service's slug, so two players of one name in a
+  /// match are two entries.
   /// The server remembers what the register said, so a number is looked up
   /// once. [more]: the server ran out of budget before every name — ask again.
   static Future<({Map<String, String> regnums, bool more})> matchRegnums(
@@ -2064,6 +2066,39 @@ class Api {
       filled: data is Map && data['filled'] is int ? data['filled'] as int : 0,
       more: data is Map && data['more'] == true,
     );
+  }
+
+  /// The people of the caller's own name in the ČKA register, to pick himself
+  /// from when his registration number could not be settled by name and club
+  /// (`regnum-lookup`, 0059). Empty: nobody of that name — or he already has a
+  /// number.
+  static Future<List<RegnumCandidate>> regnumCandidates() async {
+    final response = await _db.functions.invoke(
+      'regnum-lookup',
+      body: {'mode': 'profile_candidates'},
+    );
+    final data = response.data;
+    final raw = data is Map ? data['candidates'] : null;
+    return [
+      if (raw is List)
+        for (final c in raw)
+          if (c is Map) RegnumCandidate.fromJson(c.cast<String, dynamic>()),
+    ];
+  }
+
+  /// Says [candidate] is the caller: the server puts that person's number on
+  /// his profile and returns it.
+  static Future<String> confirmRegnum(RegnumCandidate candidate) async {
+    final response = await _db.functions.invoke(
+      'regnum-lookup',
+      body: {'mode': 'profile_confirm', 'candidate_id': candidate.id},
+    );
+    final data = response.data;
+    final regnum = data is Map ? data['regnum'] : null;
+    if (regnum is! String || regnum.isEmpty) {
+      throw StateError('regnum-lookup vrátila prázdné číslo');
+    }
+    return regnum;
   }
 
   /// Sets a NEW password for a kiosk account and returns it — the old one

@@ -1281,7 +1281,7 @@ void main() {
     testWidgets('the Zápis shows each player\'s registration number under '
         'the name', (tester) async {
       _tall(tester);
-      final first = rudnaPlayers.first.playerName;
+      final first = rudnaPlayers.first.playerSlug!;
       await tester.pumpWidget(
         rudna(view: MatchDetailView.zapis, regnums: {first: '787'}),
       );

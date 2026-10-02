@@ -552,6 +552,24 @@ class Contact {
       );
 }
 
+/// One person of the caller's name in the ČKA register (0059): enough for the
+/// caller to recognise himself — club and age, no number, no birth date.
+class RegnumCandidate {
+  const RegnumCandidate({required this.id, required this.club, this.age});
+
+  /// The register's own row id: only to point at this candidate.
+  final String id;
+  final String club;
+  final int? age;
+
+  factory RegnumCandidate.fromJson(Map<String, dynamic> json) =>
+      RegnumCandidate(
+        id: json['id'] as String,
+        club: json['club'] as String? ?? '',
+        age: (json['age'] as num?)?.toInt(),
+      );
+}
+
 /// One alley (kuželna): fully isolated tenant. Players pick theirs at
 /// registration; everything else scopes server-side by the profile's tenant.
 class Tenant {

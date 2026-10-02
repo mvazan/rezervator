@@ -11207,44 +11207,50 @@ declare
   v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
   v_id uuid;
 begin
-  if has_table_privilege('authenticated', 'public.player_regnums', 'select')
-     or has_table_privilege('anon', 'public.player_regnums', 'select')
-     or has_table_privilege('authenticated', 'public.player_regnums', 'insert') then
-    raise exception 'FAIL: the app can reach player_regnums';
+  if has_table_privilege('authenticated', 'public.site_player_regnums', 'select')
+     or has_table_privilege('anon', 'public.site_player_regnums', 'select')
+     or has_table_privilege('authenticated', 'public.site_player_regnums', 'insert') then
+    raise exception 'FAIL: the app can reach site_player_regnums';
   end if;
-  if not has_table_privilege('service_role', 'public.player_regnums', 'insert') then
-    raise exception 'FAIL: the function cannot write player_regnums';
+  if not has_table_privilege('service_role', 'public.site_player_regnums', 'insert') then
+    raise exception 'FAIL: the function cannot write site_player_regnums';
   end if;
+  begin
+    insert into site_player_regnums (slug, regnum, status) values ('../x', '1', 'found');
+    raise exception 'FAIL: a slug that is no slug went into site_player_regnums';
+  exception when check_violation then null;
+  end;
+  begin
+    insert into site_player_regnums (slug, regnum, status) values ('jan-novak', null, 'found');
+    raise exception 'FAIL: a found row without a number went into site_player_regnums';
+  exception when check_violation then null;
+  end;
+  insert into site_player_regnums (slug, regnum, status) values ('jan-novak', '5', 'found');
   if has_column_privilege('authenticated', 'public.profiles', 'regnum', 'update')
-     or has_column_privilege('anon', 'public.profiles', 'regnum', 'update') then
-    raise exception 'FAIL: the app can write profiles.regnum';
+     or has_column_privilege('anon', 'public.profiles', 'regnum', 'update')
+     or has_column_privilege('authenticated', 'public.profiles', 'regnum_checked_at', 'update') then
+    raise exception 'FAIL: the app can write profiles.regnum or regnum_checked_at';
   end if;
   if pg_get_function_result('public.contacts()'::regprocedure) not like '%regnum text%' then
     raise exception 'FAIL: contacts() does not return regnum';
   end if;
 
-  insert into player_regnums (name_key, club_key, regnum, status)
-  values ('pavel strnad', 'tj sokol rudna', '787', 'found'),
-         ('jan novak', '', null, 'ambiguous');
-  begin
-    insert into player_regnums (name_key, regnum, status) values ('x y', '12a', 'found');
-    raise exception 'FAIL: a malformed number went into player_regnums';
-  exception when check_violation then null;
-  end;
-  begin
-    insert into player_regnums (name_key, regnum, status) values ('x y', null, 'found');
-    raise exception 'FAIL: a found row without a number went into player_regnums';
-  exception when check_violation then null;
-  end;
-
   select id into v_id from profiles where tenant_id = v_a limit 1;
   update profiles set regnum = '787' where id = v_id;
+  -- One number, one player of the alley (0059).
+  begin
+    update profiles set regnum = '787'
+     where id = (select id from profiles where tenant_id = (select tenant_id from profiles where id = v_id)
+                   and id <> v_id limit 1);
+    raise exception 'FAIL: two players of one alley got the same registration number';
+  exception when unique_violation then null;
+  end;
   begin
     update profiles set regnum = 'abc' where id = v_id;
     raise exception 'FAIL: a malformed profiles.regnum was accepted';
   exception when check_violation then null;
   end;
-  raise notice 'OK: registration numbers — the cache is service-role only, profiles.regnum is not the app''s to write and is checked (0057)';
+  raise notice 'OK: registration numbers — the match-player cache is service-role only, profiles.regnum / regnum_checked_at are not the app''s to write, regnum is checked and unique per alley (0057, 0059)';
 end $$;
 
 -- 24. „Hlídat uvolněná místa“ (0058): who hears about a freed spot, and who
