@@ -9,8 +9,10 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../../core/push_screen.dart';
 import '../../domain/models.dart';
 import '../../domain/schedule.dart';
+import '../clubhouse/match_detail_screen.dart';
 import 'schedule_callbacks.dart';
 import 'widgets/day_chip_strip.dart';
 import 'widgets/day_header.dart';
@@ -466,8 +468,20 @@ class _DayPage extends StatelessWidget {
         for (final item in dayGridItems(day))
           switch (item) {
             BlockItem(:final block) => _laneRow(context, day, block),
-            EventItem(:final event) =>
-              GapEventBanner(event: event, compact: false),
+            EventItem(:final event) => GapEventBanner(
+                event: event,
+                compact: false,
+                // A match of the federation opens its detail, as in the
+                // header's list — not on the public overview or the kiosk.
+                onTap: matchLinks &&
+                        event is OffBlockPriority &&
+                        event.slot.fromFederation
+                    ? () => pushScreen(
+                          context,
+                          (_) => MatchDetailScreen(matchId: event.slot.id),
+                        )
+                    : null,
+              ),
             final EmptyGapItem gap => EmptyGapRow(item: gap),
           },
       ];

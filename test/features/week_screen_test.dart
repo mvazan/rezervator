@@ -13,6 +13,7 @@ import 'package:rezervator/domain/schedule.dart' show FreeSlot;
 import 'package:rezervator/features/admin/widgets/block_dialog.dart';
 import 'package:rezervator/features/clubhouse/match_detail_screen.dart';
 import 'package:rezervator/features/schedule/widgets/day_watch_button.dart';
+import 'package:rezervator/features/schedule/widgets/gap_rows.dart';
 import 'package:rezervator/features/schedule/widgets/slot_tile.dart';
 import 'package:rezervator/features/schedule/week_calendar_view.dart';
 import 'package:rezervator/features/schedule/schedule_callbacks.dart';
@@ -896,6 +897,58 @@ void main() {
     expect(find.byType(AlertDialog), findsNothing);
     expect(find.byType(SnackBar), findsOneWidget);
     expect(find.text('Petr Novák'), findsOneWidget);
+  });
+
+  group('the match bar in the day card', () {
+    PrioritySlot match({String? importKey}) => PrioritySlot(
+          id: 'm1',
+          date: tomorrow,
+          startsAt: const HourMinute(18, 0),
+          endsAt: const HourMinute(21, 0),
+          type: PrioritySlot.fallbackMatchType,
+          homeTeam: 'Brno IV',
+          awayTeam: 'Dubňany',
+          importKey: importKey,
+        );
+
+    Future<void> openTomorrow(WidgetTester tester) async {
+      final chips = find.descendant(
+        of: find.byType(DayChipStrip),
+        matching: find.byType(InkWell),
+      );
+      await tester.tap(chips.at(t.weekday));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('a federation match opens its detail on a tap', (
+      tester,
+    ) async {
+      portraitSurface(tester);
+      await tester.pumpWidget(app(matches: [match(importKey: 'cka:m1')]));
+      await tester.pumpAndSettle();
+      await openTomorrow(tester);
+
+      final bar = find.byType(GapEventBanner);
+      expect(bar, findsOneWidget);
+      await tester.ensureVisible(bar);
+      await tester.tap(bar);
+      await tester.pumpAndSettle();
+      expect(find.byType(MatchDetailScreen), findsOneWidget);
+    });
+
+    testWidgets('a match of our own entering is no federation match: no '
+        'tap-through', (tester) async {
+      portraitSurface(tester);
+      await tester.pumpWidget(app(matches: [match()]));
+      await tester.pumpAndSettle();
+      await openTomorrow(tester);
+
+      final bar = find.byType(GapEventBanner);
+      await tester.ensureVisible(bar);
+      await tester.tap(bar);
+      await tester.pumpAndSettle();
+      expect(find.byType(MatchDetailScreen), findsNothing);
+    });
   });
 
   testWidgets('whole-alley match cancels the touched block for its day and '
