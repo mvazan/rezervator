@@ -203,6 +203,40 @@ void main() {
           'https://www.google.com/maps/search/?api=1&query=Kotl%C3%A1%C5%99sk%C3%A1%2021%2C%20Brno');
     });
 
+    test('geoUri: coordinates win over address', () {
+      final v = Venue.fromJson(const {
+        'id': 'v3',
+        'slug': 's',
+        'name': 'N',
+        'address': 'Nějaká 1, Brno',
+        'lat': 49.2075,
+        'lng': 16.6088,
+        'fetched_at': '2026-09-23T01:00:00+00:00',
+      });
+      expect(v.geoUri, 'geo:49.2075,16.6088?q=49.2075,16.6088');
+    });
+
+    test('geoUri: address only, URL-encoded', () {
+      final v = Venue.fromJson(const {
+        'id': 'v4',
+        'slug': 's',
+        'name': 'N',
+        'address': 'Kotlářská 21, Brno',
+        'fetched_at': '2026-09-23T01:00:00+00:00',
+      });
+      expect(v.geoUri, 'geo:0,0?q=Kotl%C3%A1%C5%99sk%C3%A1%2021%2C%20Brno');
+    });
+
+    test('geoUri: neither coordinates nor address → null', () {
+      final v = Venue.fromJson(const {
+        'id': 'v5',
+        'slug': 's',
+        'name': 'N',
+        'fetched_at': '2026-09-23T01:00:00+00:00',
+      });
+      expect(v.geoUri, isNull);
+    });
+
     test('mapsUrl: neither coordinates nor address → null', () {
       final v = Venue.fromJson(const {
         'id': 'v5',

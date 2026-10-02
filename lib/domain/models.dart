@@ -1366,6 +1366,18 @@ class Venue {
   final List<String> clubs;
   final DateTime fetchedAt;
 
+  /// The same place as an Android `geo:` URI: the system offers its maps
+  /// apps (Google Maps, Mapy.cz, Waze, …) and the chosen one navigates there.
+  /// Coordinates when the site's link had them, else a text search on the
+  /// address, else null.
+  String? get geoUri {
+    if (lat != null && lng != null) return 'geo:$lat,$lng?q=$lat,$lng';
+    if (address != null && address!.isNotEmpty) {
+      return 'geo:0,0?q=${Uri.encodeComponent(address!)}';
+    }
+    return null;
+  }
+
   /// Opens the venue on Google Maps: coordinates when the site's link had
   /// them, else a text search on the address, else null (nothing to show).
   String? get mapsUrl {
