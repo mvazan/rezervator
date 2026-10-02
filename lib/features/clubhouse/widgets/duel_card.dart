@@ -28,6 +28,11 @@ import 'lead_color.dart';
 /// Digits of one width, so a number doesn't jump when a live value changes.
 const _tabular = [FontFeature.tabularFigures()];
 
+/// The lead of one lane in the expanded table: „+3“, „-11“ and a plain „0“
+/// for a tie (the header's colon stands between two scores, a difference of
+/// nothing reads as 0 here).
+String _laneLead(int diff) => diff == 0 ? '0' : leadLabel(diff);
+
 /// A side's colour as a mark painted straight on the card (the stripe, a
 /// lane dot, the bar): its legible shade, which keeps at least 3:1 against
 /// the card in light and dark for every team colour a viewer can pick
@@ -583,7 +588,8 @@ double _threeDigits(BuildContext context, TextStyle? style) {
 }
 
 /// „1.  213 : 216•“: the lane winner's number w800 with a 6dp dot on its
-/// outer side; a tie „215 = 215“; a lane not thrown by both a plain „– : –“. Left-aligned in its cell.
+/// outer side; a tie is „215 : 215“ with no winner and no dot; a lane not
+/// thrown by both a plain „– : –“. Left-aligned in its cell.
 class _LaneEntry extends StatelessWidget {
   const _LaneEntry({
     required this.position,
@@ -671,7 +677,7 @@ class _LaneEntry extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             number0(shown ? lanePins(lane.home) : '–', MatchSide.home),
-            Text(lane.tie ? ' = ' : ' : ', style: shown ? base : muted),
+            Text(' : ', style: shown ? base : muted),
             number0(shown ? lanePins(lane.away) : '–', MatchSide.away),
           ],
         ),
@@ -804,7 +810,7 @@ class _LaneTable extends StatelessWidget {
               ),
               // The lane's lead: +3 for home, -3 for the guests.
               lane.played
-                  ? leadLabel(lane.home!.total! - lane.away!.total!)
+                  ? _laneLead(lane.home!.total! - lane.away!.total!)
                   : '',
               side(
                 lane.away?.fulls,
