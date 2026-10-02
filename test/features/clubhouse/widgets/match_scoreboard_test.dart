@@ -491,6 +491,32 @@ void main() {
       }
     });
 
+    testWidgets('stack: a name and its score share one baseline', (
+      tester,
+    ) async {
+      await pump(tester, slotWith(kostelec));
+      expect(stacked, findsOneWidget);
+
+      // The y of the alphabetic baseline of the first line of [finder].
+      double baseline(Finder finder) {
+        final paragraph = tester.renderObject<RenderParagraph>(finder);
+        final top = paragraph.localToGlobal(Offset.zero).dy;
+        return top + paragraph.computeDistanceToActualBaseline(TextBaseline.alphabetic);
+      }
+
+      for (final (name, points) in [
+        (kostelec, '7'),
+        ('TJ Sokol Vršovice A', '1'),
+      ]) {
+        final score = find.descendant(of: stacked, matching: find.text(points));
+        expect(
+          baseline(find.text(name)),
+          closeTo(baseline(score), 0.6),
+          reason: '$name and $points are not on one line',
+        );
+      }
+    });
+
     testWidgets('names that fit keep the side-by-side layout', (tester) async {
       // At 1.3 even „TJ Sokol Vršovice A“ would need a third line on 360dp;
       // at 1.0 both fit 2.

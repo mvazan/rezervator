@@ -352,6 +352,11 @@ class _ScoreLine extends StatelessWidget {
         // Stacked: one row per team, its score at the right.
         Widget row(MatchSide side, String name, num? points) => MergeSemantics(
           child: Row(
+            // Name and score sit on ONE baseline (a centred row put the small
+            // name above the big digit's foot); a two-line name keeps its
+            // first line on it.
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
             children: [
               Expanded(
                 child: Text(
