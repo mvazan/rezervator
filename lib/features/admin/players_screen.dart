@@ -92,6 +92,30 @@ class PlayersScreen extends ConsumerWidget {
     );
   }
 
+  /// The registration number by hand, for a player the register lookup could
+  /// not settle (0061). Empty clears it; a typed number is never looked up
+  /// again.
+  Future<void> _editRegnum(
+      BuildContext context, WidgetRef ref, Profile p) async {
+    final input = await promptText(
+      context,
+      title: 'Registrační číslo',
+      message: 'Číslo z evidence ČKA. Prázdné pole číslo smaže; zadané číslo '
+          'se už nehledá v evidenci.',
+      hint: 'např. 12345',
+      initial: p.regnum ?? '',
+      keyboardType: TextInputType.number,
+    );
+    if (input == null || !context.mounted) return;
+    if (input.trim() == (p.regnum ?? '')) return;
+    await _change(
+      context,
+      ref,
+      () => Api.setRegnum(p.id, input),
+      success: 'Uloženo.',
+    );
+  }
+
   Future<void> _editNick(
       BuildContext context, WidgetRef ref, Profile p) async {
     final input = await promptText(
@@ -315,6 +339,7 @@ class PlayersScreen extends ConsumerWidget {
   /// group (0044) — a way for the admin to undo it.
   List<PopupMenuEntry<String>> _memberMenu(Profile p, {required bool inGroup}) => [
         const PopupMenuItem(value: 'edit_name', child: Text('Jméno…')),
+        const PopupMenuItem(value: 'edit_regnum', child: Text('Reg. č.…')),
         const PopupMenuItem(value: 'club', child: Text('Oddíl…')),
         PopupMenuItem(
           value: p.role == Role.admin ? 'remove_admin' : 'make_admin',
@@ -341,6 +366,7 @@ class PlayersScreen extends ConsumerWidget {
   /// whole, merged into an account, or deleted.
   List<PopupMenuEntry<String>> _placeholderMenu() => const [
         PopupMenuItem(value: 'edit', child: Text('Upravit…')),
+        PopupMenuItem(value: 'edit_regnum', child: Text('Reg. č.…')),
         PopupMenuItem(value: 'club', child: Text('Oddíl…')),
         PopupMenuItem(value: 'edit_nick', child: Text('Zkratka na tabuli…')),
         PopupMenuItem(value: 'merge', child: Text('Sloučit do účtu…')),
@@ -377,6 +403,8 @@ class PlayersScreen extends ConsumerWidget {
               _makeKiosk(context, ref, p);
             case 'edit_name':
               _editName(context, ref, p);
+            case 'edit_regnum':
+              _editRegnum(context, ref, p);
             case 'edit_nick':
               _editNick(context, ref, p);
             case 'remove_from_group':
