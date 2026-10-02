@@ -2,6 +2,8 @@
 /// launches.
 library;
 
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -496,6 +498,30 @@ void launchPhone(String number) =>
 
 void launchWeb(String url) =>
     _launchExternal(Uri.parse(url.contains('://') ? url : 'https://$url'));
+
+/// Navigates to [venue]. On Android the `geo:` URI opens the system's chooser
+/// of maps apps (Google Maps, Mapy.cz, Waze, …), as in Termínátor; where
+/// there is none — the web, iOS — or nothing answers it, the Google Maps link
+/// opens in the browser.
+Future<void> launchVenueMap(Venue venue) async {
+  final geo = venue.geoUri;
+  if (geo != null &&
+      !kIsWeb &&
+      defaultTargetPlatform == TargetPlatform.android) {
+    try {
+      if (await launchUrl(
+        Uri.parse(geo),
+        mode: LaunchMode.externalApplication,
+      )) {
+        return;
+      }
+    } catch (_) {
+      // No app takes geo: — the link below.
+    }
+  }
+  final url = venue.mapsUrl;
+  if (url != null) launchWeb(url);
+}
 
 void _launchExternal(Uri uri) =>
     launchUrl(uri, mode: LaunchMode.externalApplication);

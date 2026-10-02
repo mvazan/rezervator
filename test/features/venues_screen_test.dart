@@ -196,7 +196,7 @@ void main() {
                 slug: 'tj-sokol-brno-iv',
                 callPhone: (v) => called.add('call:$v'),
                 sendEmail: (v) => called.add('email:$v'),
-                openUrl: (v) => called.add('url:$v'),
+                openMap: (v) => called.add('map:${v.slug}'),
               ),
             ),
           ),
@@ -215,7 +215,7 @@ void main() {
         expect(called, [
           'call:736435492',
           'email:kuzelkybrnoiv@email.cz',
-          'url:https://www.google.com/maps/search/?api=1&query=49.1891783,16.6354503',
+          'map:tj-sokol-brno-iv',
         ]);
       },
     );

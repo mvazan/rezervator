@@ -17,6 +17,7 @@ class VenueDetailScreen extends ConsumerWidget {
     this.callPhone = launchPhone,
     this.sendEmail = launchEmail,
     this.openUrl = launchWeb,
+    this.openMap = launchVenueMap,
   });
 
   final String slug;
@@ -25,6 +26,9 @@ class VenueDetailScreen extends ConsumerWidget {
   final void Function(String number) callPhone;
   final void Function(String address) sendEmail;
   final void Function(String url) openUrl;
+
+  /// Navigation to the venue ([launchVenueMap]: the system's maps chooser).
+  final void Function(Venue venue) openMap;
 
   Widget _actionsRow(Venue venue) {
     final buttons = [
@@ -42,7 +46,7 @@ class VenueDetailScreen extends ConsumerWidget {
         ),
       if (venue.mapsUrl != null)
         FilledButton.tonalIcon(
-          onPressed: () => openUrl(venue.mapsUrl!),
+          onPressed: () => openMap(venue),
           icon: const Icon(Icons.directions),
           label: const Text('Navigovat'),
         ),
@@ -59,7 +63,7 @@ class VenueDetailScreen extends ConsumerWidget {
       ListTile(
         title: const Text('Adresa'),
         subtitle: Text(venue.address!),
-        onTap: venue.mapsUrl == null ? null : () => openUrl(venue.mapsUrl!),
+        onTap: venue.mapsUrl == null ? null : () => openMap(venue),
       ),
     if (venue.phone != null)
       ListTile(
