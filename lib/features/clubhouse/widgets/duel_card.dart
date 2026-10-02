@@ -358,7 +358,7 @@ class _Totals extends StatelessWidget {
 
 
     // 120 throws: „1 (550)  +28  (578) 3“ — the set points big, the pins in
-    // brackets beside them. Until both sides have set points (a duel just
+    // brackets beside them; the winner's bracket is as bold as his points. Until both sides have set points (a duel just
     // started) the plain pins are printed as at 100 throws.
     final homeSb = duel.home?.setPoints;
     final awaySb = duel.away?.setPoints;
@@ -380,7 +380,13 @@ class _Totals extends StatelessWidget {
       );
       final pins = TextSpan(
         text: '(${home ? homeTotal : awayTotal})',
-        style: bracket,
+        // The winner's pins stand out with his set points.
+        style: winner == side
+            ? bracket?.copyWith(
+                fontWeight: FontWeight.w800,
+                color: scheme.onSurface,
+              )
+            : bracket,
       );
       const gap = TextSpan(text: ' ');
       return Text.rich(

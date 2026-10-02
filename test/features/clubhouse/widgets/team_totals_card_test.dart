@@ -220,7 +220,7 @@ void main() {
     });
   });
 
-  testWidgets('an away lead points right; a tie is „=“ with no leader', (
+  testWidgets('an away lead points right; a tie leaves the name bare, with no leader', (
     tester,
   ) async {
     await tester.pumpWidget(
@@ -247,7 +247,7 @@ void main() {
     expect(_weight(tester, '2400'), FontWeight.w800);
     expect(_weight(tester, '2300'), FontWeight.w500);
     // Equal fulls and equal set points: nobody leads, both w500.
-    expect(find.text('Plné ='), findsOneWidget);
+    expect(find.text('Plné'), findsOneWidget);
     expect(find.text('1600'), findsNWidgets(2));
     for (final element in find.text('1600').evaluate()) {
       expect((element.widget as Text).style?.fontWeight, FontWeight.w500);

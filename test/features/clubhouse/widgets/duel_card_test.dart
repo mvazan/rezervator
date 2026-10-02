@@ -318,11 +318,11 @@ void main() {
       expect(_rect(tester, 'duel-6-stripe').right, closeTo(card.right, 0.01));
     });
 
-    testWidgets('expanded: the lane leads are signed, a tie is „=“', (
+    testWidgets('expanded: the lane leads are signed, a tie is „:“', (
       tester,
     ) async {
       await tester.pumpWidget(_host(_card(_rudna[5], expanded: true)));
-      expect(find.text('='), findsOneWidget);
+      expect(find.text(':'), findsOneWidget);
       expect(find.text('-3'), findsNWidgets(2), reason: 'the lead and lane 2');
       expect(find.textContaining('bod '), findsNothing);
     });
@@ -564,6 +564,19 @@ void main() {
     expect(find.text('600'), findsOneWidget);
   });
 
+  testWidgets('T120: the winner\'s pins in brackets are as bold as his set '
+      'points, the loser\'s stay light', (tester) async {
+    await tester.pumpWidget(_host(_card(_t120, showSetPoints: true)));
+    TextSpan span(String text) =>
+        tester.widget<Text>(find.text(text)).textSpan! as TextSpan;
+    // Home won 4 : 0 — spans are [set points, gap, pins] / [pins, gap, set points].
+    final winner = span('4 (600)').children![2] as TextSpan;
+    final loser = span('(560) 0').children![0] as TextSpan;
+    expect(winner.style?.fontWeight, FontWeight.w800);
+    expect(loser.style?.fontWeight, FontWeight.w400);
+    expect(winner.style?.color, isNot(loser.style?.color));
+  });
+
   testWidgets('T120: 1. and 3. (2. and 4.) start in one column, thrown or not', (
     tester,
   ) async {
@@ -603,13 +616,13 @@ void main() {
     expect(colon(2), closeTo(colon(4), 0.01));
   });
 
-  testWidgets('a split point: no stripe, no bar, the lead „=“', (tester) async {
+  testWidgets('a split point: no stripe, no bar, the lead „:“', (tester) async {
     await tester.pumpWidget(_host(_card(_split, expanded: true)));
-    // A split has no pill and no winner weight: just the lead „=“.
+    // A split has no pill and no winner weight: just the lead „:“.
     expect(find.text('½'), findsNothing);
     expect(find.text('bod'), findsNothing);
     // The lead and the tied lane in the open table.
-    expect(find.text('='), findsNWidgets(2));
+    expect(find.text(':'), findsNWidgets(2));
     expect(find.byKey(const Key('duel-1-stripe')), findsNothing);
     expect(find.byKey(const Key('duel-1-bar-fill')), findsNothing);
     expect(find.textContaining('body'), findsNothing);
