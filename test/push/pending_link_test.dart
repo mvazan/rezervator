@@ -27,6 +27,47 @@ void main() {
       );
     });
 
+    test('a freed-spot push carries the day and the cell', () {
+      expect(
+        pendingLinkFromData(const {
+          'kind': 'freed_spot',
+          'date': '2026-10-08',
+          'block_id': 'b1',
+          'lane': '2',
+          'tenant_id': 't1',
+        }),
+        const PendingLink(
+          kind: PendingLinkKind.freedSpot,
+          tenantId: 't1',
+          date: '2026-10-08',
+          blockId: 'b1',
+          lane: 2,
+        ),
+      );
+    });
+
+    test('an older freed-spot push opens the day alone; a bad day nothing', () {
+      expect(
+        pendingLinkFromData(const {'kind': 'freed_spot', 'date': '2026-10-08'}),
+        const PendingLink(kind: PendingLinkKind.freedSpot, date: '2026-10-08'),
+      );
+      // A block without a usable lane is no cell.
+      expect(
+        pendingLinkFromData(const {
+          'kind': 'freed_spot',
+          'date': '2026-10-08',
+          'block_id': 'b1',
+          'lane': 'x',
+        }),
+        const PendingLink(kind: PendingLinkKind.freedSpot, date: '2026-10-08'),
+      );
+      expect(pendingLinkFromData(const {'kind': 'freed_spot'}), isNull);
+      expect(
+        pendingLinkFromData(const {'kind': 'freed_spot', 'date': 'zítra'}),
+        isNull,
+      );
+    });
+
     test('the approval pushes map to their lists, with no message id', () {
       expect(
         pendingLinkFromData(const {'kind': 'pending_player', 'tenant_id': 't1'}),

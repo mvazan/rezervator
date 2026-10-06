@@ -621,7 +621,15 @@ async function notifyFreedSpot(record: Record<string, unknown>) {
           m.title,
           m.body,
           {
-            data: { kind: "freed_spot", date: String(record.date) },
+            // The day, and the cell itself: the app opens the calendar there
+            // and outlines the spot while it is still free.
+            data: {
+              kind: "freed_spot",
+              date: String(record.date),
+              block_id: String(record.block_id),
+              lane: String(record.lane),
+              tenant_id: String(record.tenant_id),
+            },
             html: `<p>${escapeHtml(m.body)}</p>`,
           },
         )

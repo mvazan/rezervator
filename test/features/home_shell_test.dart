@@ -15,6 +15,7 @@ import 'package:rezervator/features/clubhouse/message_detail_screen.dart';
 import 'package:rezervator/features/admin/players_screen.dart';
 import 'package:rezervator/features/admin/tenants_screen.dart';
 import 'package:rezervator/features/clubhouse/notice_board_screen.dart';
+import 'package:rezervator/features/schedule/calendar_focus.dart';
 import 'package:rezervator/features/schedule/home_shell.dart';
 import 'package:rezervator/features/schedule/my_trainings_screen.dart';
 import 'package:rezervator/features/schedule/week_screen.dart';
@@ -879,6 +880,38 @@ void main() {
               kind: PendingLinkKind.message, id: 'm1', tenantId: 't-demo'));
       await tester.pumpAndSettle();
       expect(find.byType(MessageDetailScreen), findsOneWidget);
+    });
+
+    testWidgets('a freed-spot link brings the calendar up at that spot; one '
+        'sent for another alley is dropped', (tester) async {
+      await tester.pumpWidget(app(profile: visiting));
+      await tester.pumpAndSettle();
+      final container =
+          ProviderScope.containerOf(tester.element(find.byType(HomeShell)));
+      container.read(pendingLinkProvider.notifier).set(const PendingLink(
+          kind: PendingLinkKind.freedSpot,
+          tenantId: 't-home',
+          date: '2026-09-10',
+          blockId: 'b1',
+          lane: 1));
+      await tester.pump();
+      await tester.pump();
+      expect(container.read(calendarFocusProvider), isNull);
+      expect(container.read(pendingLinkProvider), isNull);
+
+      container.read(pendingLinkProvider.notifier).set(const PendingLink(
+          kind: PendingLinkKind.freedSpot,
+          tenantId: 't-demo',
+          date: '2026-09-10',
+          blockId: 'b1',
+          lane: 1));
+      await tester.pump();
+      await tester.pump();
+      final focus = container.read(calendarFocusProvider);
+      expect(focus?.date, Day(2026, 9, 10));
+      expect(focus?.blockId, 'b1');
+      expect(focus?.lane, 1);
+      await tester.pumpAndSettle(const Duration(seconds: 10));
     });
 
     testWidgets('a „new player waits“ link opens the admin\'s players list; '
