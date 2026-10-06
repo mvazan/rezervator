@@ -49,6 +49,19 @@ void main() {
       expect(names(contactsMatching(contacts, '787')), ['Adam Admin']);
     });
 
+    test('words in any order and across fields', () {
+      expect(names(contactsMatching(contacts, 'jan chalupa')), ['Chalupa Jan']);
+      expect(names(contactsMatching(contacts, 'svobodova rosice')),
+          ['Šárka Svobodová'], reason: 'the name and the club together');
+      expect(names(contactsMatching(contacts, 'sara svo')),
+          ['Šárka Svobodová'], reason: 'the nick and the name');
+      expect(names(contactsMatching(contacts, 'cerny praha')), isEmpty);
+    });
+
+    test('a letter is the start of a word: „s sv“ is Šárka Svobodová', () {
+      expect(names(contactsMatching(contacts, 's sv')), ['Šárka Svobodová']);
+    });
+
     test('nobody matches', () {
       expect(contactsMatching(contacts, 'Havířov'), isEmpty);
     });

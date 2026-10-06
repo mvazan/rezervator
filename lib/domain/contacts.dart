@@ -6,20 +6,17 @@ import 'collation.dart';
 import 'models.dart';
 
 /// The Czech-sorted [contacts] whose name, board nick, club or registration
-/// number matches
-/// [query] — accent- and case-insensitive, the same folding as the other
-/// searches (`venuesMatching`, `upcomingMatches`); an empty query keeps
-/// everyone.
+/// number fit
+/// [query] by words ([matchesWordsAcross]: „novak jan“, „novak veverky“) —
+/// accent- and case-insensitive, like the other searches; an empty query
+/// keeps everyone.
 List<Contact> contactsMatching(List<Contact> contacts, String query) {
-  final q = foldDiacritics(query.trim()).toLowerCase();
-  bool hit(String s) => foldDiacritics(s).toLowerCase().contains(q);
   return [
     for (final c in contacts)
-      if (q.isEmpty ||
-          hit(c.displayName) ||
-          hit(c.nick) ||
-          hit(c.clubName ?? '') ||
-          hit(c.regnum ?? ''))
+      if (matchesWordsAcross(
+        [c.displayName, c.nick, c.clubName ?? '', c.regnum ?? ''],
+        query,
+      ))
         c,
   ]..sort((a, b) => compareCzech(a.displayName, b.displayName));
 }
