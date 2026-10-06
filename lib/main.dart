@@ -35,9 +35,19 @@ Future<void> main() async {
         options.environment = kIsWeb ? 'web' : 'app';
         options.sendDefaultPii = false; // no IP/user data beyond the error
         // Drop transient connectivity errors — the app handles offline
-        // gracefully, so these are false alarms, not bugs.
-        options.beforeSend = (event, hint) =>
-            isTransientNetworkError(event.throwable) ? null : event;
+        // gracefully, so these are false alarms, not bugs — and the
+        // browser's contentless „Script error.“ of another origin's script.
+        options.beforeSend = (event, hint) {
+          if (isTransientNetworkError(event.throwable)) return null;
+          if (isOpaqueScriptError([
+            event.message?.formatted,
+            for (final e in event.exceptions ?? const <SentryException>[])
+              e.value,
+          ])) {
+            return null;
+          }
+          return event;
+        };
       },
       appRunner: _bootstrap,
     );
