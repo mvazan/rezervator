@@ -36,6 +36,17 @@ mixin WeekNavigation<T extends StatefulWidget> on State<T> {
     });
   }
 
+  /// Shows [date]: its week, and in the portrait pager its day — what a
+  /// „uvolnilo se místo“ push asks for. [today] is the app's own clock.
+  void showDay(Day date, {required Day today}) {
+    final todayMonday = today.addDays(1 - today.weekday);
+    final monday = date.addDays(1 - date.weekday);
+    setState(() {
+      weekOffset = monday.differenceInDays(todayMonday) ~/ 7;
+      dayIndex = date.weekday - 1;
+    });
+  }
+
   /// Called by [DayPagerView] when a swipe crosses the Monday/Sunday edge:
   /// [weekDelta] is +1/-1 and [landingDayIndex] (0=Mon..6=Sun) is the day to
   /// land on in the adjacent week (Sunday when moving back, Monday when

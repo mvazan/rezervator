@@ -17,6 +17,7 @@ import '../clubhouse/clubhouse_screen.dart';
 import '../clubhouse/message_detail_screen.dart';
 import '../clubhouse/notice_board_screen.dart';
 import '../profile/profile_screen.dart';
+import 'calendar_focus.dart';
 import 'my_trainings_screen.dart';
 import 'week_screen.dart';
 import '../../core/push_screen.dart';
@@ -106,6 +107,18 @@ class _HomeShellState extends ConsumerState<HomeShell> {
         // every player sees every notice there.
         pushScreen<void>(context, (_) => const NoticeBoardScreen());
         unawaited(_snackIfNoticeGone(link.id));
+      case PendingLinkKind.freedSpot:
+        // The calendar, at the spot's day: WeekScreen moves there and says
+        // what it finds (still free: the cell is outlined; taken again:
+        // a snack).
+        setState(() => _chosen = HomeView.calendar);
+        ref.read(calendarFocusProvider.notifier).request(
+              CalendarFocus(
+                date: Day.parse(link.date!),
+                blockId: link.blockId,
+                lane: link.lane,
+              ),
+            );
       case PendingLinkKind.pendingPlayer:
         // The admin's list, where the new player waits for approval.
         pushScreen<void>(context, (_) => const PlayersScreen());

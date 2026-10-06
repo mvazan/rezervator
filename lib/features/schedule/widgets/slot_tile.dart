@@ -13,6 +13,7 @@ import '../../../domain/labels.dart';
 import '../../../domain/models.dart';
 import '../../../domain/palette.dart';
 import '../../../domain/schedule.dart';
+import '../calendar_focus.dart';
 import '../schedule_callbacks.dart';
 
 enum SlotTileSize {
@@ -379,6 +380,39 @@ class SlotTile extends StatelessWidget {
 /// week calendar view (compact tiles) and the day pager view (large tiles) so
 /// the policy has exactly one implementation regardless of layout.
 Widget slotTileFor({
+  required OpenDay day,
+  required TimeBlock block,
+  required int lane,
+  required SlotTileSize size,
+  required Profile? me,
+  required int myCount,
+  required ScheduleSettings settings,
+  required Map<String, String> nameById,
+  required Map<String, int> clubColorById,
+  required bool interactive,
+  required SlotCallbacks slot,
+}) =>
+    // A „uvolnilo se místo“ push outlines the cell it was about.
+    CellHighlight(
+      date: day.date,
+      blockId: block.id,
+      lane: lane,
+      child: _slotTile(
+        day: day,
+        block: block,
+        lane: lane,
+        size: size,
+        me: me,
+        myCount: myCount,
+        settings: settings,
+        nameById: nameById,
+        clubColorById: clubColorById,
+        interactive: interactive,
+        slot: slot,
+      ),
+    );
+
+Widget _slotTile({
   required OpenDay day,
   required TimeBlock block,
   required int lane,

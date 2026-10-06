@@ -14,6 +14,7 @@ import 'package:rezervator/features/admin/widgets/block_dialog.dart';
 import 'package:rezervator/features/clubhouse/match_detail_screen.dart';
 import 'package:rezervator/features/schedule/widgets/day_watch_button.dart';
 import 'package:rezervator/features/schedule/widgets/gap_rows.dart';
+import 'package:rezervator/features/schedule/calendar_focus.dart';
 import 'package:rezervator/features/schedule/widgets/slot_tile.dart';
 import 'package:rezervator/features/schedule/week_calendar_view.dart';
 import 'package:rezervator/features/schedule/schedule_callbacks.dart';
@@ -1622,6 +1623,104 @@ void main() {
       expect(rangeLabelText(), isNot(equals(before)));
     },
   );
+
+  group('a „uvolnilo se místo“ push', () {
+    // Next week's Thursday: another week than the one the screen opens on.
+    final target = t.addDays(8);
+
+    CalendarFocusNotifier focusOf(WidgetTester tester) => ProviderScope
+        .containerOf(tester.element(find.byType(WeekScreen)))
+        .read(calendarFocusProvider.notifier);
+
+    CalendarFocus? focusState(WidgetTester tester) => ProviderScope
+        .containerOf(tester.element(find.byType(WeekScreen)))
+        .read(calendarFocusProvider);
+
+    Finder cellOf(int lane) => find.byWidgetPredicate(
+      (w) =>
+          w is CellHighlight &&
+          w.date == target &&
+          w.blockId == 'b1' &&
+          w.lane == lane,
+    );
+
+    Finder outline(int lane) => find.descendant(
+      of: cellOf(lane),
+      matching: find.byWidgetPredicate(
+        (w) => w is DecoratedBox && w.position == DecorationPosition.foreground,
+      ),
+    );
+
+    testWidgets('opens that day and outlines the cell while it is free', (
+      tester,
+    ) async {
+      portraitSurface(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+
+      focusOf(tester).request(
+        CalendarFocus(date: target, blockId: 'b1', lane: 1),
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(milliseconds: 400));
+      // The day is on screen at once…
+      expect(cellOf(1), findsOneWidget);
+      expect(outline(1), findsNothing);
+      // …and the answer comes a moment later, from the data as it is then.
+      await tester.pump(const Duration(milliseconds: 1300));
+      await tester.pump();
+      expect(outline(1), findsOneWidget);
+      expect(find.byType(SnackBar), findsNothing);
+
+      // The outline goes away by itself.
+      await tester.pump(const Duration(seconds: 9));
+      await tester.pump();
+      expect(outline(1), findsNothing);
+      expect(focusState(tester), isNull);
+    });
+
+    testWidgets('a spot taken again is said so, with what is left', (
+      tester,
+    ) async {
+      portraitSurface(tester);
+      await tester.pumpWidget(app(reservations: [res('r1', 'p2', target)]));
+      await tester.pumpAndSettle();
+
+      // Lane 2 of b1 is the reservation `res` makes.
+      focusOf(tester).request(
+        CalendarFocus(date: target, blockId: 'b1', lane: 2),
+      );
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 1300));
+      await tester.pump();
+
+      expect(find.textContaining('Místo už je zase obsazené'), findsOneWidget);
+      expect(find.textContaining('zbývá ještě 1 volné místo'), findsOneWidget);
+      expect(outline(2), findsNothing);
+      expect(focusState(tester), isNull);
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('a push that names only the day just opens it', (
+      tester,
+    ) async {
+      portraitSurface(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+
+      focusOf(tester).request(CalendarFocus(date: target));
+      await tester.pump();
+      await tester.pump();
+      expect(cellOf(1), findsOneWidget);
+      await tester.pump(const Duration(milliseconds: 1300));
+      await tester.pump();
+      expect(find.byType(SnackBar), findsNothing);
+      expect(outline(1), findsNothing);
+      expect(focusState(tester), isNull);
+    });
+  });
 
   testWidgets('cells stay inert while weekReservationsProvider never emits', (
     tester,

@@ -1,13 +1,19 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/ui.dart' show snack;
 import '../../data/clock.dart';
 import '../../data/providers.dart';
 import '../../data/week_schedule.dart';
+import '../../domain/freed_spot.dart';
 import '../../domain/models.dart';
 import '../../domain/schedule.dart';
 import '../clubhouse/duties_screen.dart';
+import 'calendar_focus.dart';
 import 'schedule_actions.dart';
+import 'schedule_callbacks.dart';
 import 'week_board.dart';
 import 'widgets/week_header.dart';
 import '../../core/push_screen.dart';
@@ -33,6 +39,69 @@ class WeekScreen extends ConsumerStatefulWidget {
 }
 
 class _WeekScreenState extends ConsumerState<WeekScreen> with WeekNavigation {
+  /// A „uvolnilo se místo“ push (calendar_focus.dart): the answer is given
+  /// a moment after the day is on screen, from the data as it stands THEN —
+  /// the first frame may still show the cached week, in which the spot
+  /// looks taken though it was freed a minute ago. [_settleFocus] always
+  /// holds the latest build's closure.
+  Timer? _focusTimer;
+  Timer? _highlightTimer;
+  VoidCallback? _settleFocus;
+
+  static const _focusDelay = Duration(milliseconds: 1200);
+  static const _highlightFor = Duration(seconds: 8);
+
+  @override
+  void dispose() {
+    _focusTimer?.cancel();
+    _highlightTimer?.cancel();
+    super.dispose();
+  }
+
+  /// Says what the push's spot is now and, when it is free, outlines it.
+  void _answerFocus(
+    CalendarFocus focus,
+    DaySchedule day, {
+    required Profile? me,
+    required int myCount,
+    required ScheduleSettings settings,
+    required SlotCallbacks slot,
+  }) {
+    final current = ref.read(calendarFocusProvider);
+    if (!mounted || current == null || current.handled) return;
+    final notifier = ref.read(calendarFocusProvider.notifier);
+    final blockId = focus.blockId;
+    final lane = focus.lane;
+    if (blockId == null || lane == null) {
+      // An older push names only the day: showing it is the whole answer.
+      notifier.clear();
+      return;
+    }
+    final result = freedSpotResult(
+      day,
+      blockId: blockId,
+      lane: lane,
+      myPlayerId: me?.id,
+      myActiveCount: myCount,
+      settings: settings,
+      isAdmin: me?.isAdmin ?? false,
+      forGroup: slot.groupMateIds.isNotEmpty,
+      onDuty: slot.onDuty,
+    );
+    final free = result.outcome == FreedSpotOutcome.free;
+    final message = result.message;
+    if (message != null) snack(context, message);
+    if (!free) {
+      notifier.clear();
+      return;
+    }
+    notifier.markHandled(highlight: true);
+    _highlightTimer?.cancel();
+    _highlightTimer = Timer(_highlightFor, () {
+      if (mounted) notifier.clear();
+    });
+  }
+
   /// The app's clock read afresh — the duty's day edits ask it again right
   /// before writing (0050), long after this build.
   HourMinute _clockNow() {
@@ -42,6 +111,13 @@ class _WeekScreenState extends ConsumerState<WeekScreen> with WeekNavigation {
 
   @override
   Widget build(BuildContext context) {
+    // A push asks for a spot: move to its week and day (the answer comes
+    // from the build below, once the day is on screen).
+    ref.listen(calendarFocusProvider, (_, next) {
+      if (next == null || next.handled) return;
+      final clock = ref.read(nowProvider).value ?? DateTime.now();
+      showDay(next.date, today: Day.fromDateTime(clock));
+    });
     final nowDt = ref.watch(nowProvider).value ?? DateTime.now();
     final todayDay = Day.fromDateTime(nowDt);
     final now = HourMinute(nowDt.hour, nowDt.minute);
@@ -153,6 +229,26 @@ class _WeekScreenState extends ConsumerState<WeekScreen> with WeekNavigation {
       duty: duty,
       clock: _clockNow,
     );
+
+    final focus = ref.watch(calendarFocusProvider);
+    if (focus != null &&
+        !focus.handled &&
+        interactive &&
+        week.days[dayIndex].date == focus.date) {
+      final shown = week.days[dayIndex];
+      _settleFocus = () => _answerFocus(
+        focus,
+        shown,
+        me: me,
+        myCount: myCount,
+        settings: settings,
+        slot: actions.slot,
+      );
+      _focusTimer ??= Timer(_focusDelay, () {
+        _focusTimer = null;
+        _settleFocus?.call();
+      });
+    }
 
     return Column(
       children: [

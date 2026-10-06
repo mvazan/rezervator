@@ -1,7 +1,8 @@
 /// What a push tap (or an e-mail deep link, or a foreground local
 /// notification) should open once the app is signed in and ready (0051):
-/// a message, a notice, or — for an admin — the registrations waiting for
-/// approval (a new player, a new kuželna for the superadmin). `Push.init()` runs before any `ProviderScope`
+/// a message, a notice, the calendar at a spot that was freed, or — for an
+/// admin — the registrations waiting for approval (a new player, a new
+/// kuželna for the superadmin). `Push.init()` runs before any `ProviderScope`
 /// exists, so it cannot write into a Riverpod provider directly — it
 /// publishes onto [PendingLinkSource], a plain broadcast stream, which
 /// [PendingLinkNotifier] subscribes to from inside the widget tree.
@@ -13,12 +14,25 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 /// Which screen a [PendingLink] opens.
-enum PendingLinkKind { message, notice, pendingPlayer, pendingTenant }
+enum PendingLinkKind {
+  message,
+  notice,
+  freedSpot,
+  pendingPlayer,
+  pendingTenant,
+}
 
 /// One deep link waiting to be opened: the kind and the `messages.id`,
 /// and — from a push — the alley it was sent for.
 class PendingLink {
-  const PendingLink({required this.kind, this.id = '', this.tenantId});
+  const PendingLink({
+    required this.kind,
+    this.id = '',
+    this.tenantId,
+    this.date,
+    this.blockId,
+    this.lane,
+  });
 
   final PendingLinkKind kind;
 
@@ -31,18 +45,28 @@ class PendingLink {
   /// may open it, and RLS decides what shows.
   final String? tenantId;
 
+  /// A freed spot (0058): the day (`YYYY-MM-DD`) and — when the push names
+  /// them — the block and the lane. Null for every other kind.
+  final String? date;
+  final String? blockId;
+  final int? lane;
+
   @override
   bool operator ==(Object other) =>
       other is PendingLink &&
       other.kind == kind &&
       other.id == id &&
-      other.tenantId == tenantId;
+      other.tenantId == tenantId &&
+      other.date == date &&
+      other.blockId == blockId &&
+      other.lane == lane;
 
   @override
-  int get hashCode => Object.hash(kind, id, tenantId);
+  int get hashCode => Object.hash(kind, id, tenantId, date, blockId, lane);
 
   @override
-  String toString() => 'PendingLink($kind, $id, $tenantId)';
+  String toString() =>
+      'PendingLink($kind, $id, $tenantId, $date, $blockId, $lane)';
 }
 
 /// A push `data` payload -> what to open, or null for a push this app
@@ -58,6 +82,23 @@ PendingLink? pendingLinkFromData(Map<String, dynamic> data) {
       return PendingLink(kind: PendingLinkKind.pendingPlayer, tenantId: tenantId);
     case 'pending_tenant':
       return const PendingLink(kind: PendingLinkKind.pendingTenant);
+    case 'freed_spot':
+      // The day is the one thing the calendar cannot do without; the block
+      // and the lane only let it outline the cell, so an older push that
+      // lacks them still opens the day.
+      final date = data['date'];
+      if (date is! String || DateTime.tryParse(date) == null) return null;
+      final block = data['block_id'];
+      final rawLane = data['lane'];
+      final lane = rawLane is String ? int.tryParse(rawLane) : null;
+      final cell = block is String && lane != null;
+      return PendingLink(
+        kind: PendingLinkKind.freedSpot,
+        tenantId: tenantId,
+        date: date,
+        blockId: cell ? block : null,
+        lane: cell ? lane : null,
+      );
   }
   final id = data['message_id'];
   if (id is! String) return null;
