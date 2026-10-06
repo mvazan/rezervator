@@ -91,7 +91,7 @@ class _SeasonEndState extends State<SeasonEnd>
           ),
           const SizedBox(height: 4),
           Text(
-            'Nemáš dost? Zkus Termínátora…',
+            'Nemáš dost? Hraješ i turnaje? Zkus Termínátora…',
             textAlign: TextAlign.center,
             style: theme.textTheme.bodyMedium?.copyWith(
               color: scheme.onSurfaceVariant,
