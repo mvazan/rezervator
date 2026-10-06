@@ -48,6 +48,12 @@ final _refresh = StreamController<String>.broadcast();
 
 String _key(String uid, String name) => '$uid.$name';
 
+/// Asks the stream of (uid, name) to subscribe afresh right away, with no
+/// write behind it — for rows that became readable without changing
+/// themselves (RLS opened them to the caller), which realtime never sends:
+/// only a new initial read brings them. See [groupRowsStream].
+void requestRefresh(String uid, String name) => _refresh.add(_key(uid, name));
+
 /// [rows], jak by je viděl volající, když se na klíč (uid, name) právě
 /// vztahuje probíhající nebo potvrzený optimistický zápis — jinak beze
 /// změny.
