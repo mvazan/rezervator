@@ -53,6 +53,23 @@ void main() {
       expect(isTransientNetworkError(null), isFalse);
     });
   });
+
+  group('isOpaqueScriptError — the browser\'s contentless error', () {
+    test('„Script error.“ in an exception value or the message', () {
+      expect(isOpaqueScriptError(['Script error.']), isTrue);
+      expect(isOpaqueScriptError([null, ' Script error. ']), isTrue);
+      expect(isOpaqueScriptError(['script error']), isTrue);
+    });
+
+    test('a real error, even one that mentions it, is kept', () {
+      expect(isOpaqueScriptError(const []), isFalse);
+      expect(isOpaqueScriptError([null]), isFalse);
+      expect(isOpaqueScriptError(['Null check operator used on a null value']),
+          isFalse);
+      expect(isOpaqueScriptError(['Script error. at main.dart.js:1:1']),
+          isFalse);
+    });
+  });
 }
 
 /// A throwable whose toString() is a fixed message — mirrors how wrapped
