@@ -1624,6 +1624,40 @@ void main() {
     },
   );
 
+  testWidgets(
+    'day view: swiping the day chips turns the week and keeps the weekday',
+    (tester) async {
+      portraitSurface(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+
+      String rangeLabelText() => tester
+          .widgetList<Text>(find.byType(Text))
+          .map((t) => t.data)
+          .whereType<String>()
+          .firstWhere((s) => s.contains('–'));
+      final before = rangeLabelText();
+      final chip = find.descendant(
+        of: find.byType(DayChipStrip),
+        matching: find.byType(InkWell),
+      );
+
+      await tester.fling(find.byType(DayChipStrip), const Offset(-200, 0), 800);
+      await tester.pumpAndSettle();
+      final next = rangeLabelText();
+      expect(next, isNot(equals(before)));
+      // A tap on a chip is still a tap, not a swipe.
+      await tester.tap(chip.at(2));
+      await tester.pumpAndSettle();
+      expect(rangeLabelText(), next);
+
+      await tester.fling(find.byType(DayChipStrip), const Offset(200, 0), 800);
+      await tester.pumpAndSettle();
+      expect(rangeLabelText(), before);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   group('a „uvolnilo se místo“ push', () {
     // Next week's Thursday: another week than the one the screen opens on.
     final target = t.addDays(8);
