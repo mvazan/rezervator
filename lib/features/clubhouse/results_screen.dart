@@ -22,6 +22,7 @@ import '../schedule/my_trainings_screen.dart' show MatchTrophy;
 import 'match_detail_screen.dart';
 import 'widgets/match_title.dart';
 import 'widgets/match_video_icon.dart';
+import 'widgets/season_end.dart';
 import '../../core/push_screen.dart';
 
 class ResultsScreen extends ConsumerStatefulWidget {
@@ -660,6 +661,9 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
                                 competitionSlug: slug,
                               ),
                           ],
+                          // The end of the list: a high five and a pointer
+                          // to Termínátor (tournaments).
+                          const SeasonEnd(),
                         ],
                       ),
                     ),
