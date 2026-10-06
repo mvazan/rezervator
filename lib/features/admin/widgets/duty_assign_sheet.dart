@@ -131,8 +131,6 @@ class _DutyAssignSheetState extends ConsumerState<DutyAssignSheet> {
     super.dispose();
   }
 
-  static String _fold(String s) => foldDiacritics(s).toLowerCase();
-
   /// The clubs with a player in the roster, Czech-sorted — a club nobody
   /// of the roster belongs to would be a chip to an empty list.
   List<Club> get _chipClubs {
@@ -158,19 +156,14 @@ class _DutyAssignSheetState extends ConsumerState<DutyAssignSheet> {
     return p.clubId == club;
   }
 
-  /// The roster narrowed by the club and the search, name or nick, accent-
-  /// and case-insensitive. Hidden ticks stay ticked.
-  List<Profile> get _matches {
-    final q = _fold(_query.text.trim());
-    return [
-      for (final p in widget.roster)
-        if (_inClub(p) &&
-            (q.isEmpty ||
-                _fold(p.displayName).contains(q) ||
-                _fold(p.nick).contains(q)))
-          p,
-    ];
-  }
+  /// The roster narrowed by the club and the search, by words of the name
+  /// and the nick, accent- and case-insensitive. Hidden ticks stay ticked.
+  List<Profile> get _matches => [
+    for (final p in widget.roster)
+      if (_inClub(p) &&
+          matchesWordsAcross([p.displayName, p.nick], _query.text))
+        p,
+  ];
 
   /// „Všichni“ and a chip per club; empty when there is nothing to choose
   /// between (one club or none).

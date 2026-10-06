@@ -542,5 +542,31 @@ void main() {
       expect(ids(upcomingMatches(slots: slots, today: today, query: 'nikdo')),
           isEmpty);
     });
+
+    test('the search takes words of ONE team, so „Veverky A“ finds that team '
+        'and nothing else', () {
+      final a = match('a', today.addDays(1), const HourMinute(10, 0),
+          home: 'SKK Veverky Brno A', away: 'KK MS Brno D');
+      final b = match('b', today.addDays(1), const HourMinute(12, 0),
+          home: 'SKK Veverky Brno B', away: 'KK Blansko');
+      final away = match('away', today.addDays(2), const HourMinute(12, 0),
+          home: 'KK Znojmo', away: 'SKK Veverky Brno A');
+      // The words are spread over two teams: Veverky B at home, an A team
+      // away. Neither team is „Veverky A“.
+      final mixed = match('mixed', today.addDays(3), const HourMinute(12, 0),
+          home: 'SKK Veverky Brno B', away: 'TJ Sokol Husovice A');
+      final slots = [a, b, away, mixed];
+      List<String> find(String q) =>
+          ids(upcomingMatches(slots: slots, today: today, query: q));
+      expect(find('Veverky A'), ['a', 'away']);
+      expect(find('veverky a'), ['a', 'away']);
+      expect(find('vev a'), ['a', 'away']);
+      expect(find('a veverky'), ['a', 'away']);
+      expect(find('veverky b'), ['b', 'mixed']);
+      expect(find('veverky'), ['a', 'b', 'away', 'mixed']);
+      expect(find('brno d'), ['a'], reason: 'the guests: KK MS Brno D');
+      expect(find('veverky husovice'), isEmpty,
+          reason: 'two different teams are not one name');
+    });
   });
 }

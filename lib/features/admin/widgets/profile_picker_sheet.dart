@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../domain/collation.dart';
 import '../../../domain/models.dart';
 
 /// A searchable modal sheet over [candidates]; resolves to the tapped
@@ -46,17 +47,11 @@ class _ProfilePickerSheetState extends State<_ProfilePickerSheet> {
     super.dispose();
   }
 
-  /// Case-insensitive substring match on the name or the nick.
-  List<Profile> get _matches {
-    final q = _query.text.trim().toLowerCase();
-    if (q.isEmpty) return widget.candidates;
-    return [
-      for (final p in widget.candidates)
-        if (p.displayName.toLowerCase().contains(q) ||
-            p.nick.toLowerCase().contains(q))
-          p,
-    ];
-  }
+  /// Words of the name or the nick, accent- and case-insensitive.
+  List<Profile> get _matches => [
+    for (final p in widget.candidates)
+      if (matchesWordsAcross([p.displayName, p.nick], _query.text)) p,
+  ];
 
   Widget? _subtitle(Profile p) {
     final club = clubNameOf(p.clubId, widget.clubs);

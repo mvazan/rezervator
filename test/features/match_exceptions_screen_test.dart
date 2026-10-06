@@ -333,6 +333,33 @@ void main() {
     expect(find.text('Nikdo neodpovídá hledání'), findsOneWidget);
   });
 
+  testWidgets('„Veverky A“ finds that team, not its B team', (tester) async {
+    await tester.pumpWidget(app(
+      slots: [
+        match('a', today.addDays(1), const HourMinute(18, 0),
+            home: 'SKK Veverky Brno A', away: 'KK MS Brno D'),
+        match('b', today.addDays(1), const HourMinute(9, 0),
+            home: 'SKK Veverky Brno B', away: 'KK Blansko'),
+      ],
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField), 'Veverky A');
+    await tester.pumpAndSettle();
+    expect(rowOf('a'), findsOneWidget);
+    expect(rowOf('b'), findsNothing);
+  });
+
+  testWidgets('the search field says what can be typed', (tester) async {
+    await tester.pumpWidget(app(
+      slots: [match('m1', today.addDays(1), const HourMinute(18, 0))],
+    ));
+    await tester.pumpAndSettle();
+    final field = tester.widget<TextField>(find.byType(TextField));
+    expect(field.decoration?.labelText, 'Hledat tým nebo soupeře');
+    expect(field.decoration?.hintText, 'např. Veverky A');
+  });
+
   testWidgets('the promise names the main calendar only when there are two',
       (tester) async {
     await tester.pumpWidget(app(

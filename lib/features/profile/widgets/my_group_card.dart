@@ -175,15 +175,11 @@ class _InvitePickerState extends State<_InvitePicker> {
     super.dispose();
   }
 
-  static String _fold(String s) => foldDiacritics(s).toLowerCase();
-
   @override
   Widget build(BuildContext context) {
-    final q = _fold(_query.text.trim());
     final shown = [
       for (final p in widget.candidates)
-        if (q.isEmpty || _fold(p.displayName).contains(q) || _fold(p.nick).contains(q))
-          p,
+        if (matchesWordsAcross([p.displayName, p.nick], _query.text)) p,
     ];
     return AlertDialog(
       title: const Text('Pozvat do skupiny'),

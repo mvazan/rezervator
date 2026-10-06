@@ -360,6 +360,18 @@ void main() {
     expect(inSheet('Adam'), findsNothing);
     expect(inSheet('Správce'), findsNothing);
 
+    // Words in any order, and accents do not count (the picker used to ask
+    // for them: „sprav“ found no „Správce“).
+    await tester.enterText(search, 'kroupa b');
+    await tester.pumpAndSettle();
+    expect(inSheet('B. Kroupa'), findsOneWidget);
+    await tester.enterText(search, 'sprav');
+    await tester.pumpAndSettle();
+    expect(inSheet('Správce'), findsOneWidget);
+    expect(inSheet('B. Kroupa'), findsNothing);
+    await tester.enterText(search, 'KROU');
+    await tester.pumpAndSettle();
+
     await tester.tap(inSheet('B. Kroupa'));
     await tester.pumpAndSettle();
     expect(find.byType(BottomSheet), findsNothing);

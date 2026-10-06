@@ -23,6 +23,46 @@ String foldDiacritics(String value) {
   return out.toString();
 }
 
+final _nonWord = RegExp(r'[^\p{L}\p{N}]+', unicode: true);
+
+/// The words of [value], lower case and without diacritics; anything that is
+/// not a letter or a digit separates them.
+List<String> _words(String value) => [
+  for (final w in foldDiacritics(value).toLowerCase().split(_nonWord))
+    if (w.isNotEmpty) w,
+];
+
+/// Whether [text] fits the search [query], word by word: every word of the
+/// query must start a word of the text, in any order, ignoring case and
+/// diacritics. „sokol iv“ finds „TJ Sokol Brno IV“ though the two are not
+/// one stretch of the name, and „novak jan“ finds „Jan Novák“. A blank query
+/// (no words) matches everything.
+///
+/// A single letter is the start of a word like any other („jan k“ finds
+/// „Jan Kovář“). With [teamLetter] it is a team letter instead and must be a
+/// whole word beside other words: „veverky a“ finds „SKK Veverky Brno A“ but
+/// not „Veverky Brno B“, nor „Veverky Adamov“ where A merely starts a word.
+/// Alone, a letter is still text being typed — or nothing would show until
+/// the second one.
+bool matchesWords(String text, String query, {bool teamLetter = false}) =>
+    _fits(_words(text), _words(query), teamLetter);
+
+/// [matchesWords] over several fields of one thing — a person's name, nick
+/// and club: the words of the query may come from different fields
+/// („novak veverky“), each only has to start a word of ANY of them.
+bool matchesWordsAcross(Iterable<String> fields, String query) =>
+    _fits([for (final f in fields) ..._words(f)], _words(query), false);
+
+bool _fits(List<String> have, List<String> wanted, bool teamLetter) {
+  if (wanted.isEmpty) return true;
+  final letterIsWhole = teamLetter && wanted.length > 1;
+  return wanted.every(
+    (w) => have.any(
+      (h) => letterIsWhole && w.length == 1 ? h == w : h.startsWith(w),
+    ),
+  );
+}
+
 /// The letters the Czech alphabet treats as their own (č after every c,
 /// ř, š, ž likewise, ch after h); every other accent is a tie-break only.
 const _ownLetters = {'č': 'c{', 'ř': 'r{', 'š': 's{', 'ž': 'z{'};
