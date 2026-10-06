@@ -111,14 +111,39 @@ final myMatchExceptionsProvider = StreamProvider<Map<String, bool>>((ref) {
 final groupRowsProvider = StreamProvider<List<GroupRow>>((ref) {
   final uid = ref.watch(_authUidProvider);
   if (uid == null) return Stream.value(const []);
-  return cachedRows(
-          uid,
-          cacheKeyGroups,
-          () => _db
-              .from('player_group_members')
-              .stream(primaryKey: ['group_id', 'user_id']))
-      .map((rows) => rows.map(GroupRow.fromJson).toList());
+  return groupRowsStream(
+    uid,
+    () => _db
+        .from('player_group_members')
+        .stream(primaryKey: ['group_id', 'user_id']),
+  );
 });
+
+/// [groupRowsProvider]'s rows for [uid], read afresh whenever [uid] joins a
+/// group. RLS shows a player the other members only once they are a member
+/// themselves, and those rows do not change when the player accepts — so
+/// realtime never sends them: the stream saw only its own row turn
+/// 'member', and booking for the group waited for a restart. A new
+/// subscription's first read brings them. The first rows of the stream are
+/// a full read already, so a player who is in a group from the start costs
+/// nothing extra.
+Stream<List<GroupRow>> groupRowsStream(
+  String uid,
+  Stream<List<Map<String, dynamic>>> Function() live,
+) {
+  var first = true;
+  String? group;
+  return cachedRows(uid, cacheKeyGroups, live).map((raw) {
+    final rows = raw.map(GroupRow.fromJson).toList();
+    final now = myGroupOf(rows, uid).groupId;
+    if (!first && now != null && now != group) {
+      requestRefresh(uid, cacheKeyGroups);
+    }
+    first = false;
+    group = now;
+    return rows;
+  });
+}
 
 /// The signed-in player's group, pending invites included.
 final myGroupProvider = Provider<MyGroup>((ref) {

@@ -277,6 +277,41 @@ void main() {
       }
     });
 
+    test('requestRefresh re-subscribes THIS stream at once, without a write',
+        () async {
+      final controllers = <StreamController<List<Map<String, dynamic>>>>[];
+      Stream<List<Map<String, dynamic>>> live() {
+        final c = StreamController<List<Map<String, dynamic>>>();
+        controllers.add(c);
+        return c.stream;
+      }
+
+      var otherSubscriptions = 0;
+      Stream<List<Map<String, dynamic>>> other() {
+        otherSubscriptions++;
+        return const Stream.empty();
+      }
+
+      final sub = cachedRows('u1', 'refresh-me', live).listen((_) {});
+      final subOther = cachedRows('u1', 'refresh-other', other).listen((_) {});
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      controllers.last.add(const []);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(controllers, hasLength(1));
+      final otherBefore = otherSubscriptions;
+
+      requestRefresh('u1', 'refresh-me');
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(controllers, hasLength(2), reason: 'asked = re-subscribe now');
+      expect(otherSubscriptions, otherBefore, reason: 'only the key asked for');
+
+      unawaited(sub.cancel());
+      unawaited(subOther.cancel());
+      for (final c in controllers) {
+        await c.close();
+      }
+    });
+
     test('a failed write leaves cachedRows on the last real rows', () async {
       final live = StreamController<List<Map<String, dynamic>>>();
       final emissions = <List<Map<String, dynamic>>>[];
