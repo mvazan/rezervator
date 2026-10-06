@@ -844,6 +844,18 @@ void main() {
       );
       await tester.pumpAndSettle();
       refreshed.clear(); // drop the open-time refresh, isolate the pull
+      // The footer made the list taller than the test window, and opening
+      // scrolls to today: start the pull from the top, as a user would.
+      tester
+          .state<ScrollableState>(
+            find.descendant(
+              of: find.byKey(const Key('results-list')),
+              matching: find.byType(Scrollable),
+            ),
+          )
+          .position
+          .jumpTo(0);
+      await tester.pump();
 
       await tester.fling(
         find.byKey(const Key('results-list')),
