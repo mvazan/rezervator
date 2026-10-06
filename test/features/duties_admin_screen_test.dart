@@ -874,9 +874,15 @@ void main() {
       await tester.pump();
       expect(rows(), ['Jan Novák', '—', 'Jana Nováková']);
 
-      await tester.enterText(inSheet(find.byType(TextField)), 'ek');
+      // A word is matched from its start („c“ is also the Č of Čeněk).
+      await tester.enterText(inSheet(find.byType(TextField)), 'c');
       await tester.pump();
-      expect(rows(), ['Čeněk Dvořák', 'Zdeněk Šimek']);
+      expect(rows(), ['Cyril Hudec', 'Čeněk Dvořák']);
+
+      // Words in any order, whole name and nick alike.
+      await tester.enterText(inSheet(find.byType(TextField)), 'hudec cy');
+      await tester.pump();
+      expect(rows(), ['Cyril Hudec']);
     });
 
     testWidgets('Uložit a další sorts the next duty by its own counts', (
