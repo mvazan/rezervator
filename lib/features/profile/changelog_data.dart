@@ -49,6 +49,26 @@ String changelogHeading(Release r, {required bool web}) {
 }
 
 const appChangelog = <Release>[
+  Release('2.0.4', '6. 10. 2026', [
+    'Skupiny: po přijetí pozvánky hned vidíš ostatní členy a můžeš rezervovat '
+        'i za ně — dřív to šlo až po restartu appky.',
+    'Upozornění „Uvolnilo se místo“ po klepnutí otevře kalendář na tom dni '
+        'a místo orámuje. Když ho mezitím někdo vzal, appka to řekne a '
+        'napíše, kolik míst ten den ještě zbývá.',
+    'Hledání po slovech: „Veverky A“ ve Výjimkách najde jen tým Veverky A. '
+        'Stejně funguje hledání v Kuželnách, Kontaktech a při výběru hráče '
+        '(slova v libovolném pořadí, „novák jan“, „jan k“). Hledá se od '
+        'začátku slova.',
+    'Řádek s dny v kalendáři jde posouvat do stran: přepne týden a nechá '
+        'stejný den v týdnu.',
+    'Výsledky: pod seznamem zápasů je odkaz na Termínátora, naši appku '
+        'na turnaje.',
+  ], store: [
+    'Skupiny: po přijetí pozvánky hned vidíš členy skupiny.',
+    '„Uvolnilo se místo“ otevře kalendář na daném místě.',
+    'Hledání po slovech („Veverky A“) ve Výjimkách, Kuželnách a Kontaktech.',
+    'Dny v kalendáři jde posouvat: přepnou týden.',
+  ]),
   Release('2.0.3', '2. 10. 2026', [
     'Výsledky zápasu: remíza v souboji se píše nulou. Potažení dolů obnoví '
         'výsledky stejně jako tlačítko ⟳ vpravo nahoře.',
