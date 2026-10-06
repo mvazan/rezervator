@@ -4,6 +4,7 @@ import '../../../domain/duties.dart';
 import '../../../domain/models.dart';
 import 'home_header.dart';
 import 'week_range_nav.dart';
+import 'week_swipe.dart';
 
 /// The calendar's take on the home's top strip: [HomeHeader] with the week
 /// navigation in its middle slot. The strip itself — title, padding, the
@@ -48,9 +49,6 @@ class _WeekHeaderState extends State<WeekHeader> {
   /// range slides in from that side.
   int _direction = 1;
 
-  /// A swipe faster than this (logical px/s) turns the week.
-  static const _swipeVelocity = 250.0;
-
   @override
   void didUpdateWidget(WeekHeader old) {
     super.didUpdateWidget(old);
@@ -59,25 +57,13 @@ class _WeekHeaderState extends State<WeekHeader> {
     }
   }
 
-  /// Dragging the strip sideways turns the week, as swiping the days below
-  /// turns the day: left for the next week, right for the previous one.
-  void _onSwipe(DragEndDetails details) {
-    final v = details.primaryVelocity ?? 0;
-    if (v <= -_swipeVelocity) {
-      widget.onGo(1);
-    } else if (v >= _swipeVelocity) {
-      widget.onGo(-1);
-    }
-  }
-
   @override
   Widget build(BuildContext context) => HomeHeader(
     trailing: widget.trailing,
-    middle: (stacked) => GestureDetector(
+    middle: (stacked) => WeekSwipe(
       // The arrows and the duty line keep their taps; only a sideways
       // drag is taken here.
-      behavior: HitTestBehavior.translucent,
-      onHorizontalDragEnd: _onSwipe,
+      onGo: widget.onGo,
       child: ClipRect(
         child: AnimatedSwitcher(
           duration: const Duration(milliseconds: 220),

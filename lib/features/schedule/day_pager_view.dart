@@ -19,6 +19,7 @@ import 'widgets/day_header.dart';
 import 'widgets/day_watch_button.dart';
 import 'widgets/gap_rows.dart';
 import 'widgets/slot_tile.dart';
+import 'widgets/week_swipe.dart';
 
 /// Real pages are indices 1..7 (Monday..Sunday of [week]); index 0 and 8 are
 /// sentinels previewing the adjacent week's last/first day mid-swipe.
@@ -224,24 +225,28 @@ class _DayPagerViewState extends State<DayPagerView> {
       children: [
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          child: DayChipStrip(
-            days: widget.week.days,
-            selectedIndex: widget.dayIndex,
-            myCountByIndex: widget.myCountByIndex,
-            onSelect: (index) {
-              final target = _firstRealPage + index;
-              widget.onSelectDay(index);
-              _animatingToPage = target;
-              _controller
-                  .animateToPage(
-                    target,
-                    duration: const Duration(milliseconds: 250),
-                    curve: Curves.easeOut,
-                  )
-                  .then((_) {
-                    if (_animatingToPage == target) _animatingToPage = null;
-                  });
-            },
+          // Swiping the chips turns the week, on the same weekday.
+          child: WeekSwipe(
+            onGo: (delta) => widget.onShiftWeek(delta, widget.dayIndex),
+            child: DayChipStrip(
+              days: widget.week.days,
+              selectedIndex: widget.dayIndex,
+              myCountByIndex: widget.myCountByIndex,
+              onSelect: (index) {
+                final target = _firstRealPage + index;
+                widget.onSelectDay(index);
+                _animatingToPage = target;
+                _controller
+                    .animateToPage(
+                      target,
+                      duration: const Duration(milliseconds: 250),
+                      curve: Curves.easeOut,
+                    )
+                    .then((_) {
+                      if (_animatingToPage == target) _animatingToPage = null;
+                    });
+              },
+            ),
           ),
         ),
         Expanded(
