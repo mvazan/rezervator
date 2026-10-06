@@ -143,15 +143,13 @@ String freshnessLabel(DateTime fetchedAt, DateTime now) {
   return diff.inDays == 1 ? 'před 1 dnem' : 'před ${diff.inDays} dny';
 }
 
-/// The Czech-sorted [venues] whose name, address or a club matches [query]
-/// (accent- and case-insensitive); an empty query keeps everything.
+/// The Czech-sorted [venues] whose name, address or clubs fit [query] by
+/// words ([matchesWordsAcross]: „sokol iv“, „brno stolcova“; accent- and
+/// case-insensitive); an empty query keeps everything.
 List<Venue> venuesMatching(List<Venue> venues, String query) {
-  final q = foldDiacritics(query.trim()).toLowerCase();
-  bool hit(String s) => foldDiacritics(s).toLowerCase().contains(q);
   return [
     for (final v in venues)
-      if (q.isEmpty || hit(v.name) || hit(v.address ?? '') || v.clubs.any(hit))
-        v,
+      if (matchesWordsAcross([v.name, v.address ?? '', ...v.clubs], query)) v,
   ]..sort((a, b) => compareCzech(a.name, b.name));
 }
 
