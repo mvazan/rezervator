@@ -836,18 +836,17 @@ class _BookingDialogState extends ConsumerState<_BookingDialog> {
     super.dispose();
   }
 
-  static String _fold(String s) => foldDiacritics(s).toLowerCase();
-
-  /// 'já' first, then every other player whose name or board nick contains
-  /// the query (case- and diacritics-insensitive); empty query lists all.
+  /// 'já' first, then every other player whose name or board nick fits the
+  /// query by words (case- and diacritics-insensitive); empty query lists
+  /// all.
   List<({String id, String title, String nick})> _candidates() {
-    final q = _fold(_query.text.trim());
-    bool hit(String s) => q.isEmpty || _fold(s).contains(q);
+    final q = _query.text;
     return [
-      if (hit('já') || hit(widget.me.displayName))
+      if (matchesWordsAcross(['já', widget.me.displayName], q))
         (id: widget.me.id, title: 'já', nick: ''),
       for (final p in widget.players)
-        if (p.id != widget.me.id && (hit(p.displayName) || hit(p.nick)))
+        if (p.id != widget.me.id &&
+            matchesWordsAcross([p.displayName, p.nick], q))
           (
             id: p.id,
             title: p.hasAccount ? p.displayName : '${p.displayName} · bez účtu',
