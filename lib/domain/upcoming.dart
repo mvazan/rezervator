@@ -125,13 +125,16 @@ List<(PrioritySlot, bool)> overruledMatches(
 /// list whose CONTENTS changed with the player's teams would shift under
 /// them every time they picked one, and hiding a match would need it to be
 /// there in the first place.
+///
+/// [query] is searched by words ([matchesWords]) within ONE team name or the
+/// description: „Veverky A“ finds that team (home or away), not the B team
+/// and not a match of Veverky B against another A.
 List<PrioritySlot> upcomingMatches({
   required List<PrioritySlot> slots,
   required Day today,
   String query = '',
 }) {
-  final q = foldDiacritics(query.trim()).toLowerCase();
-  bool hit(String s) => q.isEmpty || foldDiacritics(s).toLowerCase().contains(q);
+  bool hit(String s) => matchesWords(s, query);
   return [
     for (final s in slots)
       if (s.type.isMatch && s.parentId == null && !s.date.isBefore(today))

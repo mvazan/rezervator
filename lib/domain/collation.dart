@@ -23,6 +23,37 @@ String foldDiacritics(String value) {
   return out.toString();
 }
 
+final _nonWord = RegExp(r'[^\p{L}\p{N}]+', unicode: true);
+
+/// The words of [value], lower case and without diacritics; anything that is
+/// not a letter or a digit separates them.
+List<String> _words(String value) => [
+  for (final w in foldDiacritics(value).toLowerCase().split(_nonWord))
+    if (w.isNotEmpty) w,
+];
+
+/// Whether [text] fits the search [query], word by word: every word of the
+/// query must start a word of the text, in any order, ignoring case and
+/// diacritics. „veverky a“ finds „SKK Veverky Brno A“ though the two are not
+/// one stretch of the name; „brno veverky“ and „vev brno“ find it too.
+///
+/// A single letter beside other words is a team letter, so it must be a
+/// whole word: „veverky a“ does not find „Veverky Brno B“ (nor „Veverky
+/// Adamov“, where A merely starts a word). A letter on its own is still
+/// text being typed — the start of a word — or nothing would show until the
+/// second one. A blank query (no words) matches everything.
+bool matchesWords(String text, String query) {
+  final wanted = _words(query);
+  if (wanted.isEmpty) return true;
+  final have = _words(text);
+  final letterIsWhole = wanted.length > 1;
+  return wanted.every(
+    (w) => have.any(
+      (h) => letterIsWhole && w.length == 1 ? h == w : h.startsWith(w),
+    ),
+  );
+}
+
 /// The letters the Czech alphabet treats as their own (č after every c,
 /// ř, š, ž likewise, ch after h); every other accent is a tie-break only.
 const _ownLetters = {'č': 'c{', 'ř': 'r{', 'š': 's{', 'ž': 'z{'};

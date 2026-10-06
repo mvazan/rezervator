@@ -189,7 +189,8 @@ class _MatchExceptionsScreenState extends ConsumerState<MatchExceptionsScreen> {
           child: TextField(
             controller: _query,
             decoration: const InputDecoration(
-              labelText: 'Hledat tým',
+              labelText: 'Hledat tým nebo soupeře',
+              hintText: 'např. Veverky A',
               prefixIcon: Icon(Icons.search),
               isDense: true,
             ),
