@@ -34,19 +34,28 @@ List<String> _words(String value) => [
 
 /// Whether [text] fits the search [query], word by word: every word of the
 /// query must start a word of the text, in any order, ignoring case and
-/// diacritics. „veverky a“ finds „SKK Veverky Brno A“ though the two are not
-/// one stretch of the name; „brno veverky“ and „vev brno“ find it too.
+/// diacritics. „sokol iv“ finds „TJ Sokol Brno IV“ though the two are not
+/// one stretch of the name, and „novak jan“ finds „Jan Novák“. A blank query
+/// (no words) matches everything.
 ///
-/// A single letter beside other words is a team letter, so it must be a
-/// whole word: „veverky a“ does not find „Veverky Brno B“ (nor „Veverky
-/// Adamov“, where A merely starts a word). A letter on its own is still
-/// text being typed — the start of a word — or nothing would show until the
-/// second one. A blank query (no words) matches everything.
-bool matchesWords(String text, String query) {
-  final wanted = _words(query);
+/// A single letter is the start of a word like any other („jan k“ finds
+/// „Jan Kovář“). With [teamLetter] it is a team letter instead and must be a
+/// whole word beside other words: „veverky a“ finds „SKK Veverky Brno A“ but
+/// not „Veverky Brno B“, nor „Veverky Adamov“ where A merely starts a word.
+/// Alone, a letter is still text being typed — or nothing would show until
+/// the second one.
+bool matchesWords(String text, String query, {bool teamLetter = false}) =>
+    _fits(_words(text), _words(query), teamLetter);
+
+/// [matchesWords] over several fields of one thing — a person's name, nick
+/// and club: the words of the query may come from different fields
+/// („novak veverky“), each only has to start a word of ANY of them.
+bool matchesWordsAcross(Iterable<String> fields, String query) =>
+    _fits([for (final f in fields) ..._words(f)], _words(query), false);
+
+bool _fits(List<String> have, List<String> wanted, bool teamLetter) {
   if (wanted.isEmpty) return true;
-  final have = _words(text);
-  final letterIsWhole = wanted.length > 1;
+  final letterIsWhole = teamLetter && wanted.length > 1;
   return wanted.every(
     (w) => have.any(
       (h) => letterIsWhole && w.length == 1 ? h == w : h.startsWith(w),

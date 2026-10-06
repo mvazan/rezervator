@@ -134,7 +134,7 @@ List<PrioritySlot> upcomingMatches({
   required Day today,
   String query = '',
 }) {
-  bool hit(String s) => matchesWords(s, query);
+  bool hit(String s) => matchesWords(s, query, teamLetter: true);
   return [
     for (final s in slots)
       if (s.type.isMatch && s.parentId == null && !s.date.isBefore(today))
