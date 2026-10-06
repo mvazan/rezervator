@@ -57,6 +57,11 @@ void main() {
     await tester.enterText(find.byType(TextField), 'jan');
     await tester.pumpAndSettle();
     expect(find.text('Petr Starý'), findsNothing);
+    // Words in any order, the first letter of a word is enough.
+    await tester.enterText(find.byType(TextField), 'nova j');
+    await tester.pumpAndSettle();
+    expect(find.text('Jana Nová'), findsOneWidget);
+    expect(find.text('Petr Starý'), findsNothing);
     await tester.tap(find.text('Jana Nová'));
     await tester.pumpAndSettle();
     expect(calls, ['invite:jana']);
