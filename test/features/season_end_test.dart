@@ -14,7 +14,7 @@ void main() {
 
   testWidgets('says it is the end and points to Termínátor', (tester) async {
     await tester.pumpWidget(host());
-    expect(find.text('You made it to the end!'), findsOneWidget);
+    expect(find.text('Dojeli jsme do cíle!'), findsOneWidget);
     expect(find.text('Termínátor – appka na turnaje'), findsOneWidget);
     expect(find.text('Zdarma na Google Play'), findsOneWidget);
     expect(
