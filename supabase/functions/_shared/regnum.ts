@@ -1,19 +1,20 @@
 // Registration numbers from the ČKA member register (https://evidence.kuzelky.cz).
 //
-// The register is a PHP page: a POST to `/` with `ffulltext` answers 302 and
-// sets a `filter` cookie; `/?aajax=t` then returns the list for that filter as
-// JSON — and the WHOLE register, every member, when the cookie is missing.
-// Each row carries far more than a number (birth date and number, …); only the
-// name, club, age, number and the register's own row id are ever read, and
-// nothing else is kept, logged or returned.
+// The register is a web app over a JSON API: `GET /frontend-api/members
+// ?fulltext=<name>` answers `{ data: [...] }` — and the WHOLE register, every
+// member, without a filter. (Until October 2026 it was a PHP page with a
+// filter cookie; that page is gone.) Each row carries more than a number;
+// only the name, club, age category, state, number and the register's own row
+// id are ever read, and nothing else is kept, logged or returned.
 //
 // Who is who: the results service (vysledky.kuzelky.cz) and the register share
 // no id, and the results service publishes no number. Its player page does
-// show the club („Oddíl“) and the age („Věk“) — enough to tell a parent from a
-// child of the same name in the same club. A match's player is therefore
-// resolved against his page ([resolveSitePlayer]); a profile has no such page,
-// so it is filled only when the club leaves one candidate, and otherwise the
-// player picks from [profileCandidates] himself.
+// show the club („Oddíl“) and the age („Věk“); the register shows the age
+// CATEGORY (dorostenci, muži, senioři, …) — enough to tell a senior father from
+// his son, though not two men of one name, one club and one category. A
+// match's player is therefore resolved against his page ([resolveSitePlayer]);
+// a profile has no such page, so it is filled only when the club leaves one
+// candidate, and otherwise the player picks from [profileCandidates] himself.
 //
 // IO is injected (`fetchFn`), so the matching is testable without the sites.
 
@@ -21,13 +22,47 @@ const BASE = "https://evidence.kuzelky.cz/";
 const SITE = "https://vysledky.kuzelky.cz";
 const USER_AGENT = "rezervator/1.0 (+https://rezervator.online)";
 
-/** A filtered answer is a handful of rows; a long one means the filter was
- * not applied, and the answer is the whole register — dropped unread. */
-export const MAX_ROWS = 50;
+/** A filtered answer is a handful of rows (a common surname alone some
+ * dozens); a long one means the filter was not applied, and the answer is the
+ * whole register (thousands) — dropped unread. */
+export const MAX_ROWS = 200;
 
-/** Years of difference between the ages the two sites print that still count
- * as the same person (each computes the age on the day it is asked). */
+/** No answer from a site in this long is a failure, not a wait: one stuck
+ * request would otherwise hold the whole call until the platform kills it. */
+export const TIMEOUT_MS = 10_000;
+
+/** Years by which a page's age may miss a category's range and still count:
+ * the two sites compute the age on different days (and the register by the
+ * season), so a player at the edge sits on either side. */
 export const AGE_TOLERANCE = 1;
+
+/** The register's age categories, in order, with the ages they span — read
+ * off the register against the results service's ages (senioři from 60, muži
+ * below; the youth bounds are ČKA's usual ones). [AGE_TOLERANCE] covers the
+ * edges. */
+const CATEGORIES: { prefix: string; from: number; to: number }[] = [
+  { prefix: "zaci ml", from: 0, to: 10 },
+  { prefix: "zaci st", from: 11, to: 14 },
+  { prefix: "doros", from: 15, to: 18 },
+  { prefix: "junior", from: 19, to: 22 },
+  { prefix: "muzi", from: 23, to: 59 },
+  { prefix: "senior", from: 60, to: 150 },
+];
+
+/** The category's index in [CATEGORIES] from the register's label
+ * („senioři, seniorky“), or null when the label is empty or unknown. */
+export function categoryOf(label: string): number | null {
+  const key = foldName(label);
+  const i = CATEGORIES.findIndex((c) => key.startsWith(c.prefix));
+  return i < 0 ? null : i;
+}
+
+/** Whether a player of [age] can be in [category] ([AGE_TOLERANCE] at the
+ * edges). */
+export function ageFits(category: number, age: number): boolean {
+  const c = CATEGORIES[category];
+  return age >= c.from - AGE_TOLERANCE && age <= c.to + AGE_TOLERANCE;
+}
 
 export type RegisterRow = {
   /** The register's own row id: opaque, only to point at one candidate. */
@@ -35,7 +70,10 @@ export type RegisterRow = {
   name: string;
   club: string;
   regnum: string;
-  age: number | null;
+  /** Index into [CATEGORIES], null when the register gives none. */
+  category: number | null;
+  /** The register's own label of it, for a player to recognise himself. */
+  categoryName: string;
 };
 
 export type Resolved =
@@ -91,10 +129,10 @@ export function sharedNames(names: string[]): Set<string> {
 }
 
 /** The number of a MATCH's player, who is known by his page on the results
- * service. Of the rows of that name the ones of his age stay (a namesake of
- * another age is somebody else, and none of the age means he is not in the
- * register — nobody is guessed); one number among them is the answer; with
- * several the club decides, else `ambiguous`. */
+ * service. Of the rows of that name the ones whose age category fits his age
+ * stay (a namesake of another category is somebody else, and none that fits
+ * means he is not in the register — nobody is guessed); one number among them
+ * is the answer; with several the club decides, else `ambiguous`. */
 export function pickForSitePlayer(
   rows: RegisterRow[],
   name: string,
@@ -105,7 +143,7 @@ export function pickForSitePlayer(
   const age = site.age;
   if (age !== null) {
     candidates = candidates.filter(
-      (r) => r.age !== null && Math.abs(r.age - age) <= AGE_TOLERANCE,
+      (r) => r.category !== null && ageFits(r.category, age),
     );
   }
   if (candidates.length === 0) return { status: "none" };
@@ -162,55 +200,37 @@ export function parseRows(json: unknown): RegisterRow[] {
   const rows: RegisterRow[] = [];
   for (const raw of data) {
     const r = raw as Record<string, unknown>;
-    const regnum = String(r.reg_no ?? "").trim();
+    const regnum = String(r.registrationNumber ?? "").trim();
     if (!/^[0-9]{1,8}$/.test(regnum)) continue;
     // An archived row is a former member; the live one wins when both exist.
-    if (r.archived) continue;
+    if (r.state === "archived") continue;
     const first = String(r.name ?? "").trim();
     const last = String(r.surname ?? "").trim();
-    const age = Number(r.age);
+    const categoryName = String(r.ageCategory ?? "").trim();
     rows.push({
       id: String(r.id ?? "").trim(),
       name: `${first} ${last}`.trim(),
       club: String(r.club ?? "").trim(),
       regnum,
-      age: Number.isInteger(age) && age >= 0 && age < 130 ? age : null,
+      category: categoryOf(categoryName),
+      categoryName,
     });
   }
   return rows;
 }
 
-/** Asks the register for [name]. Two requests: the filter, then its list. */
+/** Asks the register for [name]: one request. */
 export async function searchRegister(
   name: string,
   fetchFn: Fetch = fetch,
 ): Promise<RegisterRow[]> {
-  const set = await fetchFn(BASE, {
-    method: "POST",
-    redirect: "manual",
-    headers: {
-      "User-Agent": USER_AGENT,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: new URLSearchParams({ ffulltext: name, setFFilter: "1" }),
-  });
-  await set.body?.cancel();
-  const cookie = cookieOf(set.headers, "filter");
-  if (cookie === null) throw new Error("register: no filter cookie");
-  const list = await fetchFn(`${BASE}?aajax=t`, {
-    headers: { "User-Agent": USER_AGENT, Cookie: cookie },
+  const url = `${BASE}frontend-api/members?fulltext=${encodeURIComponent(name)}`;
+  const list = await fetchFn(url, {
+    headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
+    signal: AbortSignal.timeout(TIMEOUT_MS),
   });
   if (!list.ok) throw new Error(`register: HTTP ${list.status}`);
   return parseRows(await list.json());
-}
-
-/** `name=value` of the Set-Cookie called [name], or null. */
-function cookieOf(headers: Headers, name: string): string | null {
-  for (const line of headers.getSetCookie()) {
-    const pair = line.split(";")[0];
-    if (pair.startsWith(`${name}=`)) return pair;
-  }
-  return null;
 }
 
 /** The club and the age out of a results-service player page: its text reads
@@ -241,6 +261,7 @@ export async function fetchSitePlayer(
   if (!isSiteSlug(slug)) throw new Error("site: bad slug");
   const res = await fetchFn(`${SITE}/detail-hrace/${slug}`, {
     headers: { "User-Agent": USER_AGENT },
+    signal: AbortSignal.timeout(TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`site: HTTP ${res.status}`);
   return parseSitePlayer(await res.text());
