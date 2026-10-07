@@ -49,6 +49,18 @@ String changelogHeading(Release r, {required bool web}) {
 }
 
 const appChangelog = <Release>[
+  Release('2.0.5', '7. 10. 2026', [
+    'Registrační čísla hráčů se zase načítají — evidence ČKA změnila web '
+        'a od 3. 10. se nenačetlo žádné. „Doplnit reg. č.“ v profilu '
+        'ukazuje u kandidátů věkovou kategorii.',
+    'Výsledky: tlačítko ⟳ a tažení dolů fungují i po skončení zápasu '
+        '(do 14 dní) — opravený výsledek nebo doplněná dráha z webu ČKA se '
+        'tak do appky dostanou.',
+    'Výsledky: pod seznamem zápasů je patička „Konec sezóny“.',
+  ], store: [
+    'Registrační čísla hráčů se zase načítají.',
+    'Výsledky: ⟳ a tažení dolů i po skončení zápasu (do 14 dní).',
+  ]),
   Release('2.0.4', '6. 10. 2026', [
     'Skupiny: po přijetí pozvánky hned vidíš ostatní členy a můžeš rezervovat '
         'i za ně — dřív to šlo až po restartu appky.',
