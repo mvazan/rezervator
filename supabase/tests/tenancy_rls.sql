@@ -41,6 +41,11 @@ values
 update profiles set superadmin = true,
   home_tenant_id = '00000000-0000-0000-0000-00000000000a'
 where id = '10000000-0000-0000-0000-000000000004';
+-- A new alley has no training day (0063); the suite's alleys train on
+-- Monday, Tuesday and Thursday, as the alleys did before.
+update schedule_settings set training_weekdays = '{1,2,4}'
+ where tenant_id in ('00000000-0000-0000-0000-00000000000a',
+                     '00000000-0000-0000-0000-000000000002');
 
 -- Privileges as code (0017/0020): anon has nothing, the players view is
 -- read-only, app tables carry plain DML for authenticated.
@@ -11361,7 +11366,7 @@ declare
 begin
   insert into tenants (id, name) values (w, 'Kuželna W (0058)');
   update schedule_settings set lane_count = 4, max_active_reservations = 2,
-         booking_horizon_days = 30
+         booking_horizon_days = 30, training_weekdays = '{1,2,4}'
    where tenant_id = w;
   insert into time_blocks (tenant_id, starts_at, ends_at, position)
   values (w, '17:00', '18:00', 0) returning id into v_blk;
@@ -11671,6 +11676,21 @@ begin
     raise exception 'FAIL: anon can call set_regnum';
   end if;
   raise notice 'OK: set_regnum — admin only, own alley only, digits only, unique, empty clears (0061)';
+end $$;
+
+
+-- 0063: a new kuželna starts with no training day.
+reset role;
+do $$
+declare
+  v_t uuid;
+begin
+  insert into tenants (name) values ('Nová kuželna 0063') returning id into v_t;
+  if (select training_weekdays from schedule_settings where tenant_id = v_t) <> '{}'::smallint[] then
+    raise exception 'FAIL: a new kuželna started with training days %',
+      (select training_weekdays from schedule_settings where tenant_id = v_t);
+  end if;
+  raise notice 'OK: a new kuželna starts with no training day (0063)';
 end $$;
 
 rollback;
