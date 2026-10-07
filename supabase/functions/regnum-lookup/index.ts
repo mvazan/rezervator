@@ -23,8 +23,10 @@
 //
 //   { mode: "profile_candidates" }
 //       The caller's OWN profile, when it has no number: the people of that
-//       name in the register as { candidates: [{ id, club, age }] } — no
-//       number, no birth date: the player recognises himself by club and age.
+//       name in the register as { candidates: [{ id, club, category, age }] }
+//       — no number, no birth date: the player recognises himself by club and
+//       age category („muži, ženy“). `age` is always null since the register
+//       stopped publishing ages (October 2026); it stays for older apps.
 //
 //   { mode: "profile_confirm", candidate_id }
 //       The caller says which candidate he is: the number goes to his own
@@ -33,8 +35,8 @@
 //       player of the alley already has is refused (409 regnum_taken).
 //
 // The register is asked at most BUDGET times per call, one name at a time. Its
-// rows carry personal data far beyond a number: only id, name, club, age and
-// number are read, and only club and age leave this function.
+// rows carry personal data beyond a number: only id, name, club, age category,
+// state and number are read, and only club and category leave this function.
 //
 // Deployed WITHOUT --no-verify-jwt, like kiosk-password: the app calls it
 // through functions.invoke and the platform checks the JWT first; inside,
@@ -310,7 +312,8 @@ Deno.serve(async (request) => {
       const candidates = named(await searchRegister(me.name), me.name).map((r) => ({
         id: r.id,
         club: r.club,
-        age: r.age,
+        category: r.categoryName,
+        age: null,
       }));
       return json({ candidates });
     }

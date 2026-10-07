@@ -786,4 +786,29 @@ void main() {
       expect(MatchPlayerResult.fromJson(row()).substituteLabel, isNull);
     });
   });
+
+  group('RegnumCandidate', () {
+    test('the register\'s category tells the candidate apart', () {
+      final c = RegnumCandidate.fromJson(const {
+        'id': '7',
+        'club': 'TJ Sokol Rudná',
+        'category': 'senioři, seniorky',
+        'age': null,
+      });
+      expect(c.club, 'TJ Sokol Rudná');
+      expect(c.detail, 'senioři, seniorky');
+    });
+
+    test('an older server\'s age still shows; neither says so', () {
+      expect(
+        RegnumCandidate.fromJson(const {'id': '7', 'club': 'TJ', 'age': 59})
+            .detail,
+        '59 let',
+      );
+      expect(
+        RegnumCandidate.fromJson(const {'id': '7', 'club': 'TJ'}).detail,
+        'věk neuveden',
+      );
+    });
+  });
 }
