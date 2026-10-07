@@ -5589,7 +5589,7 @@ COMMENT ON COLUMN "public"."rental_groups"."color" IS 'Group colour, the same do
 
 CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     "lane_count" smallint DEFAULT 4 NOT NULL,
-    "training_weekdays" smallint[] DEFAULT '{1,2,4}'::smallint[] NOT NULL,
+    "training_weekdays" smallint[] DEFAULT '{}'::smallint[] NOT NULL,
     "booking_horizon_days" smallint DEFAULT 14 NOT NULL,
     "max_active_reservations" smallint DEFAULT 3 NOT NULL,
     "kiosk_dark" boolean DEFAULT true NOT NULL,
