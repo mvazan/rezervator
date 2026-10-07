@@ -83,7 +83,7 @@ class _SeasonEndState extends State<SeasonEnd>
           ),
           const SizedBox(height: 12),
           Text(
-            'Dojeli jsme do cíle!',
+            'Konec sezóny',
             textAlign: TextAlign.center,
             style: theme.textTheme.titleMedium?.copyWith(
               fontWeight: FontWeight.w700,
