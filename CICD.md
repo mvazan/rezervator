@@ -128,3 +128,21 @@ One-time Play Console / signing-key / service-account setup lives in
   A few minutes later the signed `rezervator-v1.1.0.apk` is on the **Releases**
   page (share that link) and the AAB waits as a **draft** on Play's internal
   track — review and roll it out in Play Console.
+
+## Deleting a test kuželna
+
+A plain `delete from tenants` fails: ten tables point at a kuželna without
+a cascade, and a fresh kuželna already has match types and settings.
+[`tool/delete_tenant.sql`](tool/delete_tenant.sql) deletes one kuželna by
+name together with everything that belongs to it, in one transaction (all or
+nothing), and refuses when the name is not unique or a superadmin lives
+there. Set the name on the `v_name` line, take a backup first (it cannot be
+undone), then run it in the Supabase SQL editor or:
+
+```bash
+supabase db query --linked -f tool/delete_tenant.sql
+```
+
+It leaves the founder's login (`auth.users`) alone: delete a throwaway one in
+Supabase → Authentication → Users. Verified on a copy of production: nothing
+of the other kuželny changed.
