@@ -113,6 +113,55 @@ void main() {
     });
   });
 
+  group('isCorrectable', () {
+    PrioritySlot slot() => PrioritySlot.fromJson(const {
+      'id': 'm1',
+      'date': '2026-09-27',
+      'starts_at': '10:00:00',
+      'ends_at': '13:00:00',
+      'home_team': 'A',
+      'away_team': 'B',
+      'description': '',
+      'import_key': 'cka:1',
+    }, const {});
+
+    MatchResult result(String status) => MatchResult.fromJson({
+      'match_id': 'm1',
+      'status': status,
+      'fetched_at': '2026-09-27T09:00:00+00:00',
+    });
+
+    final start = DateTime(2026, 9, 27, 10, 0);
+
+    test('a finished match or a forfeit, within 14 days of its start', () {
+      final later = start.add(const Duration(days: 3));
+      expect(isCorrectable(slot(), result('finished'), later), isTrue);
+      expect(isCorrectable(slot(), result('forfeit'), later), isTrue);
+      expect(
+        isCorrectable(
+          slot(),
+          result('finished'),
+          start.add(const Duration(days: 13, hours: 23)),
+        ),
+        isTrue,
+      );
+    });
+
+    test('not after 14 days, and never a match that is not final', () {
+      expect(
+        isCorrectable(
+          slot(),
+          result('finished'),
+          start.add(const Duration(days: 14, minutes: 1)),
+        ),
+        isFalse,
+      );
+      expect(isCorrectable(slot(), result('in_progress'), start), isFalse);
+      expect(isCorrectable(slot(), result('scheduled'), start), isFalse);
+      expect(isCorrectable(slot(), null, start), isFalse);
+    });
+  });
+
   group('isLive', () {
     PrioritySlot slot() => PrioritySlot.fromJson(const {
       'id': 'm1',

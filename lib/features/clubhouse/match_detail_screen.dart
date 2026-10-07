@@ -441,7 +441,11 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     }
     final showWaiting = _waiting && !resultChanged;
     final live = slot != null && liveNow(slot);
-    final showRefreshButton = (live || askable) && !_hiddenByNotLive;
+    // A finished match can still be corrected on the site; nothing polls for
+    // that, so the button asks (0062).
+    final correctable = slot != null && isCorrectable(slot, result, now);
+    final showRefreshButton =
+        (live || askable || correctable) && !_hiddenByNotLive;
 
     return Scaffold(
       appBar: AppBar(

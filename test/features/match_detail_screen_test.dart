@@ -410,7 +410,7 @@ void main() {
   });
 
   testWidgets(
-    'a forfeit reads 8 : 0 · Kontumace, without pins, a refresh or a lineup',
+    'a forfeit reads 8 : 0 · Kontumace, without pins or a lineup',
     (tester) async {
       final forfeit = MatchResult.fromJson(const {
         'match_id': 'm1',
@@ -422,7 +422,7 @@ void main() {
         'fetched_at': '2026-09-23T10:00:00+00:00',
       });
       // Today, half an hour after kickoff: a scheduled match would be live
-      // here, so only the forfeit status keeps the refresh away.
+      // here; a forfeit is final, so only ⟳ can ask again (0062).
       await tester.pumpWidget(
         app(
           slots: [
@@ -456,8 +456,7 @@ void main() {
         findsNothing,
       );
       expect(find.text('Družstva'), findsNothing);
-      expect(find.byIcon(Icons.refresh), findsNothing);
-      expect(find.byType(RefreshIndicator), findsNothing);
+      expect(find.byIcon(Icons.refresh), findsOneWidget);
       expect(find.text('Záznam'), findsOneWidget);
       // The scoreboard tells the forfeit instead of the missing lineup.
       expect(find.text('Sestavy zatím nejsou k dispozici.'), findsNothing);
@@ -804,11 +803,36 @@ void main() {
     },
   );
 
-  testWidgets('a finished match never shows the refresh icon, nor pulls to '
-      'refresh', (tester) async {
+  testWidgets('a finished match is not asked for on open, but ⟳ and the '
+      'pull ask again — a correction on the site (0062)', (tester) async {
+    final refreshed = <(String, bool)>[];
     await tester.pumpWidget(
       app(
         slots: [match(id: 'm1', date: today.addDays(-1))],
+        results: {'m1': finishedResult},
+        refresh: (id, {force = false}) async {
+          refreshed.add((id, force));
+          return 'queued';
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(refreshed, isEmpty, reason: 'opening a finished match asks nothing');
+
+    expect(find.byIcon(Icons.refresh), findsOneWidget);
+    expect(find.byType(RefreshIndicator), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.refresh));
+    await tester.pump();
+    expect(refreshed, [('m1', true)]);
+    await tester.pumpAndSettle(const Duration(seconds: 21));
+  });
+
+  testWidgets('a match finished more than two weeks ago has no ⟳', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(
+        slots: [match(id: 'm1', date: today.addDays(-15))],
         results: {'m1': finishedResult},
       ),
     );
@@ -860,16 +884,20 @@ void main() {
     },
   );
 
-  testWidgets('a match that ends while watched keeps its scroll offset as the '
-      'pull-to-refresh goes away', (tester) async {
+  testWidgets('a match that ends while watched keeps its pull (a finished '
+      'one can be asked again) and its scroll offset when the pull goes away', (
+    tester,
+  ) async {
     final resultsCtrl = StreamController<Map<String, MatchResult>>();
     addTearDown(resultsCtrl.close);
+    var answer = 'queued';
     await tester.pumpWidget(
       app(
         matchId: 'm2',
         slots: [match(id: 'm2', date: today)],
         resultsStream: resultsCtrl.stream,
         players: rudnaPlayers,
+        refresh: (id, {force = false}) async => answer,
       ),
     );
     resultsCtrl.add({'m2': liveResultWith()});
@@ -899,7 +927,14 @@ void main() {
       ),
     });
     await tester.pumpAndSettle();
+    expect(find.byType(RefreshIndicator), findsOneWidget);
+    expect(offset(), scrolled);
 
+    // The server says there is nothing to ask for: the pull goes away, the
+    // list stays where it was.
+    answer = 'not_live';
+    await tester.tap(find.byIcon(Icons.refresh));
+    await tester.pumpAndSettle();
     expect(find.byType(RefreshIndicator), findsNothing);
     expect(offset(), scrolled);
   });
@@ -1547,7 +1582,9 @@ void main() {
       expect(find.text('Liga X · 3. kolo'), findsOneWidget);
     });
 
-    testWidgets('one whose lines are in does not ask at all', (tester) async {
+    testWidgets('one whose lines are in does not ask on open; ⟳ can', (
+      tester,
+    ) async {
       final asked = <String>[];
       await tester.pumpWidget(
         app(
@@ -1562,7 +1599,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(asked, isEmpty);
-      expect(find.byIcon(Icons.refresh), findsNothing);
+      expect(find.byIcon(Icons.refresh), findsOneWidget);
     });
 
     testWidgets('a match with no time yet shows its date only, is not live '

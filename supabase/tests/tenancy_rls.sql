@@ -4710,6 +4710,54 @@ begin
 end $$;
 reset role;
 
+-- 0062: the ⟳ button (force) asks again for a finished match — a correction
+-- on the site — within 14 days of its start; opening it (no force) does not.
+reset role;
+do $$
+begin
+  delete from notification_jobs
+   where dedupe_key = 'federation_match:00000000-0000-0000-0000-00000000000a:103';
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+begin
+  if refresh_match(current_setting('probe.fed_103')::uuid, true) <> 'queued' then
+    raise exception 'FAIL: the button could not ask again for a finished match';
+  end if;
+end $$;
+reset role;
+do $$
+begin
+  if not exists (select 1 from notification_jobs
+                 where dedupe_key = 'federation_match:00000000-0000-0000-0000-00000000000a:103') then
+    raise exception 'FAIL: a forced refresh of a finished match queued no fetch';
+  end if;
+  delete from notification_jobs
+   where dedupe_key = 'federation_match:00000000-0000-0000-0000-00000000000a:103';
+  perform set_config('probe.fed_103_date',
+    (select date::text from priority_slots where id = current_setting('probe.fed_103')::uuid), true);
+  update priority_slots set date = date - 20
+   where id = current_setting('probe.fed_103')::uuid;
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+begin
+  if refresh_match(current_setting('probe.fed_103')::uuid, true) <> 'not_live' then
+    raise exception 'FAIL: a match finished three weeks ago was asked for again';
+  end if;
+end $$;
+reset role;
+do $$
+begin
+  update priority_slots set date = current_setting('probe.fed_103_date')::date
+   where id = current_setting('probe.fed_103')::uuid;
+  raise notice 'OK: the button asks again for a finished match within 14 days, opening it does not (0062)';
+end $$;
+
 -- 10b. The site shows PREPARATION days before some matches: until an hour
 -- before the start it is not live, like SCHEDULED.
 do $$
@@ -10983,6 +11031,40 @@ end $$;
 reset role;
 do $$
 begin
+  if exists (select 1 from notification_jobs where kind = 'federation_league_match') then
+    raise exception 'FAIL: a refused league refresh queued a job';
+  end if;
+end $$;
+-- 0062: the button asks again for a final league match with its lines (a
+-- correction on the site), within 14 days of its date.
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+begin
+  if refresh_match(current_setting('probe.lg_9001')::uuid, true) <> 'queued' then
+    raise exception 'FAIL: the button could not ask again for a final league match';
+  end if;
+end $$;
+reset role;
+do $$
+begin
+  delete from notification_jobs where kind = 'federation_league_match';
+  update league_matches set date = date - 30 where site_match_id = 9001;
+end $$;
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
+do $$
+begin
+  if refresh_match(current_setting('probe.lg_9001')::uuid, true) <> 'not_live' then
+    raise exception 'FAIL: a league match a month old was asked for again';
+  end if;
+end $$;
+reset role;
+do $$
+begin
+  update league_matches set date = date + 30 where site_match_id = 9001;
   if exists (select 1 from notification_jobs where kind = 'federation_league_match') then
     raise exception 'FAIL: a refused league refresh queued a job';
   end if;

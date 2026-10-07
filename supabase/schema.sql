@@ -3492,6 +3492,9 @@ declare
   v_start timestamptz;
   v_job bigint;
   v_gap interval := case when p_force then interval '15 seconds' else interval '5 minutes' end;
+  -- How long after its start a finished match may still be corrected on the
+  -- site — and asked for again by the ⟳ button (0062).
+  v_corrections interval := interval '14 days';
 begin
   if not is_approved_or_kiosk() then
     raise exception 'not_allowed';
@@ -3507,8 +3510,12 @@ begin
     end if;
     v_fetched := v_league.detail_fetched_at;
     if v_league.status in ('finished', 'forfeit') then
-      -- Final: only a missing detail is worth a fetch.
-      if v_league.detail_status in ('finished', 'forfeit') then
+      -- Final: a missing detail is worth a fetch; a fetched one only when
+      -- somebody taps ⟳ (a correction on the site) within v_corrections.
+      if v_league.detail_status in ('finished', 'forfeit') and not (
+           p_force
+           and now() < (v_league.date + coalesce(v_league.starts_at, time '00:00'))
+                         at time zone 'Europe/Prague' + v_corrections) then
         return 'not_live';
       end if;
     else
@@ -3566,11 +3573,16 @@ begin
   v_start := (v_slot.date + v_slot.starts_at) at time zone 'Europe/Prague';
   -- The site shows 'preparation' days before some matches: like
   -- 'scheduled', it is live only from an hour before the start.
+  -- A finished match is never polled again, so a correction on the site
+  -- (a result, a missing lane) reaches us only when somebody taps ⟳ — within
+  -- v_corrections of the start (0062). Opening it alone asks nothing.
   if not ((v_status = 'in_progress' and now() < v_start + interval '12 hours')
           or (v_status = 'preparation'
               and now() between v_start - interval '1 hour' and v_start + interval '12 hours')
           or (v_status = 'scheduled'
-              and now() between v_start - interval '1 hour' and v_start + interval '6 hours')) then
+              and now() between v_start - interval '1 hour' and v_start + interval '6 hours')
+          or (p_force and v_status in ('finished', 'forfeit')
+              and now() < v_start + v_corrections)) then
     return 'not_live';
   end if;
   if v_fetched is not null and v_fetched > now() - v_gap then
