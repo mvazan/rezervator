@@ -2343,26 +2343,26 @@ final contactsProvider = FutureProvider.autoDispose<List<Contact>>(
 
 /// The registration numbers on a match's Zápis: `{player name: number}`,
 /// found by the server in the ČKA register and remembered there. Best
-/// effort — offline, or the register down, the cells stay empty. [lineup]
-/// (the number of lines) only makes the lookup run again when the lineup
-/// grows while the match goes on.
+/// effort — offline, or the register down, the cells stay empty; a round
+/// that fails keeps what the rounds before it found. [lineup] (the number of
+/// lines) only makes the lookup run again when the lineup grows while the
+/// match goes on.
 final matchRegnumsProvider = FutureProvider.autoDispose
     .family<Map<String, String>, ({String matchId, bool league, int lineup})>(
   (ref, key) async {
     if (ref.watch(_authUidProvider) == null) return const {};
+    final found = <String, String>{};
     try {
-      final found = <String, String>{};
       // The server asks the register for a limited number of names per call.
       for (var round = 0; round < 3; round++) {
         final answer = await Api.matchRegnums(key.matchId, league: key.league);
         found.addAll(answer.regnums);
         if (!answer.more) break;
       }
-      return found;
     } catch (e) {
       debugPrint('Registrační čísla zápasu ${key.matchId}: $e');
-      return const {};
     }
+    return found;
   },
   retry: (_, _) => null,
 );
@@ -2374,19 +2374,19 @@ final matchRegnumsProvider = FutureProvider.autoDispose
 final profileRegnumsProvider = FutureProvider.autoDispose<int>(
   (ref) async {
     if (ref.watch(_authUidProvider) == null) return 0;
+    var filled = 0;
     try {
-      var filled = 0;
       for (var round = 0; round < 4; round++) {
         final answer = await Api.fillProfileRegnums();
         filled += answer.filled;
         if (!answer.more) break;
       }
-      if (filled > 0 && ref.mounted) ref.invalidate(contactsProvider);
-      return filled;
     } catch (e) {
       debugPrint('Registrační čísla hráčů: $e');
-      return 0;
     }
+    // What a round before a failed one filled is on the profiles already.
+    if (filled > 0 && ref.mounted) ref.invalidate(contactsProvider);
+    return filled;
   },
   retry: (_, _) => null,
 );

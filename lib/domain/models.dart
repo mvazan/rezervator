@@ -555,17 +555,38 @@ class Contact {
 /// One person of the caller's name in the ČKA register (0059): enough for the
 /// caller to recognise himself — club and age, no number, no birth date.
 class RegnumCandidate {
-  const RegnumCandidate({required this.id, required this.club, this.age});
+  const RegnumCandidate({
+    required this.id,
+    required this.club,
+    this.category = '',
+    this.age,
+  });
 
   /// The register's own row id: only to point at this candidate.
   final String id;
   final String club;
+
+  /// The register's age category („muži, ženy“, „senioři, seniorky“); empty
+  /// when it gives none. Since October 2026 the register publishes this
+  /// instead of an age.
+  final String category;
+
+  /// The age, from a server of before October 2026; null since.
   final int? age;
+
+  /// What tells this candidate apart under the club: the category, else the
+  /// age, else that the register says neither.
+  String get detail => category.isNotEmpty
+      ? category
+      : age == null
+          ? 'věk neuveden'
+          : '$age let';
 
   factory RegnumCandidate.fromJson(Map<String, dynamic> json) =>
       RegnumCandidate(
         id: json['id'] as String,
         club: json['club'] as String? ?? '',
+        category: json['category'] as String? ?? '',
         age: (json['age'] as num?)?.toInt(),
       );
 }

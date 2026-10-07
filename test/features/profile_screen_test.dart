@@ -227,10 +227,12 @@ void main() {
   });
 
   group('Doplnit reg. č.', () {
-    const father = RegnumCandidate(id: '1', club: 'TJ Sokol Rudná', age: 59);
-    const son = RegnumCandidate(id: '2', club: 'TJ Sokol Rudná', age: 31);
+    const father = RegnumCandidate(
+        id: '1', club: 'TJ Sokol Rudná', category: 'senioři, seniorky');
+    const son =
+        RegnumCandidate(id: '2', club: 'TJ Sokol Rudná', category: 'muži, ženy');
 
-    testWidgets('the player picks himself by club and age and confirms',
+    testWidgets('the player picks himself by club and age category and confirms',
         (tester) async {
       final confirmed = <String>[];
       await tester.pumpWidget(
@@ -248,8 +250,8 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Která osoba jsi ty?'), findsOneWidget);
-      expect(find.text('59 let'), findsOneWidget);
-      expect(find.text('31 let'), findsOneWidget);
+      expect(find.text('senioři, seniorky'), findsOneWidget);
+      expect(find.text('muži, ženy'), findsOneWidget);
       // Nothing is chosen for him.
       expect(
         tester
@@ -257,7 +259,7 @@ void main() {
             .onPressed,
         isNull,
       );
-      await tester.tap(find.text('31 let'));
+      await tester.tap(find.text('muži, ženy'));
       await tester.pump();
       await tester.tap(find.text('To jsem já'));
       await tester.pumpAndSettle();
@@ -291,7 +293,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Doplnit reg. č.'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('59 let'));
+      await tester.tap(find.text('senioři, seniorky'));
       await tester.pump();
       await tester.tapAt(const Offset(10, 10));
       await tester.pumpAndSettle();

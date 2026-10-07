@@ -439,7 +439,7 @@ class _RegnumCandidatesSheetState extends State<RegnumCandidatesSheet> {
             const SizedBox(height: 4),
             Text(
               'V evidenci ČKA je víc lidí s tvým jménem. Poznáš se podle '
-              'klubu a věku.',
+              'klubu a věkové kategorie.',
               style: theme.textTheme.bodySmall,
             ),
             const SizedBox(height: 12),
@@ -454,7 +454,7 @@ class _RegnumCandidatesSheetState extends State<RegnumCandidatesSheet> {
                       RadioListTile<RegnumCandidate>(
                         value: c,
                         title: Text(c.club.isEmpty ? '—' : c.club),
-                        subtitle: Text(c.age == null ? 'věk neuveden' : '${c.age} let'),
+                        subtitle: Text(c.detail),
                       ),
                   ],
                 ),
