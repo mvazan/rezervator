@@ -8,6 +8,25 @@ import 'collation.dart';
 import 'models.dart';
 import 'upcoming.dart' show matchIsMine;
 
+/// How long after its start a finished match may still be asked for again
+/// with ⟳ — a correction on the site (a result, a missing lane or player
+/// line), which nothing polls for (refresh_match, 0062).
+const matchCorrectionWindow = Duration(days: 14);
+
+/// Whether ⟳ may ask again for a FINISHED match: [result] final (or a
+/// forfeit) and [slot] started less than [matchCorrectionWindow] ago —
+/// mirrors refresh_match's forced branch (0062). Only the button and the
+/// pull ask; opening the match does not.
+bool isCorrectable(PrioritySlot slot, MatchResult? result, DateTime now) {
+  final status = result?.status;
+  if (status != MatchStatus.finished && status != MatchStatus.forfeit) {
+    return false;
+  }
+  final start = DateTime(slot.date.year, slot.date.month, slot.date.day,
+      slot.startsAt.hour, slot.startsAt.minute);
+  return now.isBefore(start.add(matchCorrectionWindow));
+}
+
 /// Whether [slot]'s live score/video are worth polling right now — mirrors
 /// `refresh_match`'s own gate (0045) so the button and the background fetch
 /// agree on what "live" means. [result] null (nothing fetched yet) reads as
