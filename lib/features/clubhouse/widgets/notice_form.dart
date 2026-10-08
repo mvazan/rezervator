@@ -71,7 +71,14 @@ Future<void> noticeApiWrite(Message? existing, NoticeDraft d) async {
     body: d.body,
     expiresAt: d.expiresAt,
   );
-  if (d.visibleFrom != existing.visibleFrom) {
+  // The same instant in another zone (the form holds local time, the row
+  // UTC) is no change: DateTime's == minds the zone, isAtSameMomentAs not.
+  final was = existing.visibleFrom;
+  final now = d.visibleFrom;
+  final unchanged = was == null
+      ? now == null
+      : now != null && now.isAtSameMomentAs(was);
+  if (!unchanged) {
     await Api.messageSetVisibleFrom(existing.id, d.visibleFrom);
   }
 }
