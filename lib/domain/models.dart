@@ -1878,6 +1878,7 @@ class Message {
     required this.createdAt,
     required this.updatedAt,
     this.showOnKiosk = true,
+    this.visibleFrom,
   });
 
   final String id;
@@ -1917,6 +1918,10 @@ class Message {
   /// can hide one from the wall tablet.
   final bool showOnKiosk;
 
+  /// Notice only: posted ahead of time, shown from then on (0064); null =
+  /// at once. Until then only the admin sees it (the app hides it).
+  final DateTime? visibleFrom;
+
   factory Message.fromJson(Map<String, dynamic> json) => Message(
         id: json['id'] as String,
         kind: (json['kind'] as String) == 'notice'
@@ -1940,6 +1945,9 @@ class Message {
         createdAt: DateTime.parse(json['created_at'] as String),
         updatedAt: DateTime.parse(json['updated_at'] as String),
         showOnKiosk: json['show_on_kiosk'] as bool? ?? true,
+        visibleFrom: json['visible_from'] == null
+            ? null
+            : DateTime.parse(json['visible_from'] as String),
       );
 }
 

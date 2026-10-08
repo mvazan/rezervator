@@ -320,6 +320,28 @@ void main() {
     expect(calls.last, ('h1', true));
   });
 
+  testWidgets('a notice posted ahead of time: the admin sees it under '
+      '„Naplánované“, a player not yet', (tester) async {
+    final scheduled = Message(
+      id: 's1', kind: MessageKind.notice, audience: MessageAudience.all,
+      authorId: 'admin', authorRole: MessageAuthorRole.admin, onDate: null,
+      blockId: null, title: 'Brigáda', body: 'Text.', expiresAt: null,
+      notify: true, visibleFrom: DateTime(2026, 10, 5, 8),
+      createdAt: DateTime(2026, 10, 1), updatedAt: DateTime(2026, 10, 1),
+    );
+    await tester.pumpWidget(app(profile: admin, notices: [notice('a1'), scheduled]));
+    await tester.pumpAndSettle();
+    expect(find.text('Naplánované (1)'), findsOneWidget);
+    expect(find.text('Brigáda'), findsOneWidget);
+    expect(find.textContaining('zobrazí se 5. 10. v 8:00'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+
+    await tester.pumpWidget(app(notices: [notice('a1'), scheduled]));
+    await tester.pumpAndSettle();
+    expect(find.text('Brigáda'), findsNothing);
+    expect(find.textContaining('Naplánované'), findsNothing);
+  });
+
   testWidgets('a player has no kiosk menu', (tester) async {
     await tester.pumpWidget(app(notices: [notice('a1')]));
     await tester.pumpAndSettle();

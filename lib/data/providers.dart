@@ -1807,6 +1807,21 @@ class Api {
   static Future<void> messageSetKiosk(String id, bool show) =>
       _db.rpc('message_set_kiosk', params: {'p_id': id, 'p_show': show});
 
+  /// When a notice shows (admin): [from] null or gone by = now; [notify]
+  /// also sets whether it pings (null keeps it). A pinging notice that
+  /// shows later gets its push and e-mail then (a notice_visible job,
+  /// 0064).
+  static Future<void> messageSetVisibleFrom(
+    String id,
+    DateTime? from, {
+    bool? notify,
+  }) =>
+      _db.rpc('message_set_visible_from', params: {
+        'p_id': id,
+        'p_from': from?.toUtc().toIso8601String(),
+        'p_notify': notify,
+      });
+
   /// Whether [id] is a message or notice I may still read: the same
   /// RLS-scoped table [messagesProvider] streams, asked by
   /// `MessageDetailScreen` when its (possibly cached) snapshot lacks the

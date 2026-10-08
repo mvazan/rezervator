@@ -23,6 +23,9 @@ typedef NoticeDraft = ({
   String body,
   DateTime? expiresAt,
   bool notify,
+
+  /// Shown from then on; null = at once.
+  DateTime? visibleFrom,
 });
 
 /// Opens the notice form; true once a notice was posted or saved. [write]
@@ -41,24 +44,37 @@ Future<bool> showNoticeForm(
 }
 
 /// The form's own write: a new notice ([Api.messageSend], kind notice to
-/// everyone) or [existing]'s full new state ([Api.messageUpdate]).
+/// everyone) or [existing]'s full new state ([Api.messageUpdate]), then
+/// when it shows ([Api.messageSetVisibleFrom]). A notice posted ahead of
+/// time is sent without its ping, and the ping is set with the time — it
+/// then goes out when the notice shows, not now.
 @visibleForTesting
-Future<void> noticeApiWrite(Message? existing, NoticeDraft d) =>
-    existing == null
-    ? Api.messageSend(
-        kind: MessageKind.notice,
-        audience: MessageAudience.all,
-        title: d.title,
-        body: d.body,
-        expiresAt: d.expiresAt,
-        notify: d.notify,
-      )
-    : Api.messageUpdate(
-        existing.id,
-        title: d.title,
-        body: d.body,
-        expiresAt: d.expiresAt,
-      );
+Future<void> noticeApiWrite(Message? existing, NoticeDraft d) async {
+  final later = d.visibleFrom != null && d.visibleFrom!.isAfter(DateTime.now());
+  if (existing == null) {
+    final id = await Api.messageSend(
+      kind: MessageKind.notice,
+      audience: MessageAudience.all,
+      title: d.title,
+      body: d.body,
+      expiresAt: d.expiresAt,
+      notify: d.notify && !later,
+    );
+    if (later) {
+      await Api.messageSetVisibleFrom(id, d.visibleFrom, notify: d.notify);
+    }
+    return;
+  }
+  await Api.messageUpdate(
+    existing.id,
+    title: d.title,
+    body: d.body,
+    expiresAt: d.expiresAt,
+  );
+  if (d.visibleFrom != existing.visibleFrom) {
+    await Api.messageSetVisibleFrom(existing.id, d.visibleFrom);
+  }
+}
 
 /// „Platí do 16. 10.“ means through that day: the notice expires at its
 /// last second, local time, not at the midnight that starts it.
@@ -84,7 +100,8 @@ class _NoticeFormState extends ConsumerState<_NoticeForm> {
   // +14 calendar days from the app clock (nowProvider), so tests pin the
   // default. Not `now.add(Duration(days: 14))`: 336 hours fall a day short
   // when the clocks go back in between.
-  late DateTime _expiresAt = widget.existing?.expiresAt?.toLocal() ??
+  late DateTime _expiresAt =
+      widget.existing?.expiresAt?.toLocal() ??
       _endOfDay(() {
         final now = ref.read(nowProvider).value ?? DateTime.now();
         return Day.fromDateTime(DateTime(now.year, now.month, now.day + 14));
@@ -92,6 +109,9 @@ class _NoticeFormState extends ConsumerState<_NoticeForm> {
   late bool _forever =
       widget.existing != null && widget.existing!.expiresAt == null;
   bool _notify = true;
+
+  /// When the notice shows; null = at once. Kept only while in the future.
+  late DateTime? _visibleFrom = widget.existing?.visibleFrom?.toLocal();
 
   @override
   void dispose() {
@@ -110,6 +130,32 @@ class _NoticeFormState extends ConsumerState<_NoticeForm> {
     if (picked != null) setState(() => _expiresAt = _endOfDay(picked));
   }
 
+  Future<void> _pickVisibleFrom() async {
+    final now = DateTime.now();
+    final start = _visibleFrom ?? DateTime(now.year, now.month, now.day + 1, 8);
+    final day = await pickDay(
+      context,
+      initial: Day.fromDateTime(start),
+      first: today(),
+      last: today().addDays(365),
+    );
+    if (day == null || !mounted) return;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(start),
+    );
+    if (time == null) return;
+    setState(
+      () => _visibleFrom = DateTime(
+        day.year,
+        day.month,
+        day.day,
+        time.hour,
+        time.minute,
+      ),
+    );
+  }
+
   /// FormDialog's onSave: true closes the form (through `closeDialog`),
   /// null keeps it open — [tryAction] already showed the error.
   Future<bool?> _save() async {
@@ -119,6 +165,7 @@ class _NoticeFormState extends ConsumerState<_NoticeForm> {
       body: _body.text.trim(),
       expiresAt: _forever ? null : _expiresAt,
       notify: _notify,
+      visibleFrom: _visibleFrom,
     );
     final write = widget.write ?? (d) => noticeApiWrite(existing, d);
     final ok = await tryAction(
@@ -144,7 +191,8 @@ class _NoticeFormState extends ConsumerState<_NoticeForm> {
       onSave: _save,
       // Over the server's limit (code points, see withServerLimit) the
       // save could only earn title_too_long / body_too_long.
-      saveEnabled: !overLimit(_title.text, noticeTitleMax) &&
+      saveEnabled:
+          !overLimit(_title.text, noticeTitleMax) &&
           !overLimit(_body.text, noticeBodyMax),
       children: [
         // The fields set the form's width (400, less on a narrow phone):
@@ -185,9 +233,30 @@ class _NoticeFormState extends ConsumerState<_NoticeForm> {
           children: [
             Expanded(child: Text('Platí do: $until')),
             if (!_forever)
-              TextButton(
-                onPressed: _pickExpiry,
-                child: const Text('Změnit'),
+              TextButton(onPressed: _pickExpiry, child: const Text('Změnit')),
+          ],
+        ),
+        // A notice posted ahead of time: shows (and pings) from then on.
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                _visibleFrom == null
+                    ? 'Zobrazit: hned'
+                    : 'Zobrazit od: ${_visibleFrom!.day}. '
+                          '${_visibleFrom!.month}. v ${_visibleFrom!.hour}:'
+                          '${_visibleFrom!.minute.toString().padLeft(2, '0')}',
+              ),
+            ),
+            TextButton(
+              onPressed: _pickVisibleFrom,
+              child: Text(_visibleFrom == null ? 'Naplánovat' : 'Změnit'),
+            ),
+            if (_visibleFrom != null)
+              IconButton(
+                tooltip: 'Zobrazit hned',
+                icon: const Icon(Icons.close),
+                onPressed: () => setState(() => _visibleFrom = null),
               ),
           ],
         ),

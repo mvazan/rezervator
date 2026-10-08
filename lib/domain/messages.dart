@@ -43,10 +43,16 @@ Day keyDay(Message m) => m.onDate ?? Day.fromDateTime(m.createdAt.toLocal());
   );
 }
 
-/// Notices split into active (not expired) and expired, oldest posted
-/// first in each group — the Nástěnka order (ties by id, see
-/// [splitMessages]).
-({List<Message> active, List<Message> expired}) splitNotices(
+/// Whether [m] is a notice posted ahead of time that does not show yet.
+bool isScheduled(Message m, DateTime now) =>
+    m.visibleFrom != null && m.visibleFrom!.isAfter(now);
+
+/// Notices split into active (showing, not expired), expired and
+/// scheduled (posted ahead of time, not showing yet — the admin's alone),
+/// oldest posted first in each group — the Nástěnka order (ties by id, see
+/// [splitMessages]); the scheduled ones by when they show.
+({List<Message> active, List<Message> expired, List<Message> scheduled})
+splitNotices(
   Iterable<Message> notices,
   DateTime now,
 ) {
@@ -58,8 +64,15 @@ Day keyDay(Message m) => m.onDate ?? Day.fromDateTime(m.createdAt.toLocal());
   bool isExpired(Message m) =>
       m.expiresAt != null && !m.expiresAt!.isAfter(now);
   return (
-    active: [for (final m in sorted) if (!isExpired(m)) m],
+    active: [
+      for (final m in sorted)
+        if (!isExpired(m) && !isScheduled(m, now)) m,
+    ],
     expired: [for (final m in sorted) if (isExpired(m)) m],
+    scheduled: [
+      for (final m in sorted)
+        if (!isExpired(m) && isScheduled(m, now)) m,
+    ]..sort((a, b) => a.visibleFrom!.compareTo(b.visibleFrom!)),
   );
 }
 
@@ -223,7 +236,10 @@ String _silentNames(
     if (m == null) continue;
     if (m.kind == MessageKind.notice) {
       final expiresAt = m.expiresAt;
-      if (expiresAt == null || expiresAt.isAfter(now)) notices++;
+      if ((expiresAt == null || expiresAt.isAfter(now)) &&
+          !isScheduled(m, now)) {
+        notices++;
+      }
     } else {
       messages++;
     }
@@ -282,6 +298,13 @@ String? contextLabel(Message m, TimeBlock? block) {
 /// odvolání“ — the Nástěnka card footer, in local calendar days; the
 /// expiry is written without its weekday, as the spec writes it.
 String noticeFooter(Message m, DateTime now) {
+  if (isScheduled(m, now)) {
+    final from = m.visibleFrom!.toLocal();
+    final until = m.expiresAt?.toLocal();
+    return 'zobrazí se ${from.day}. ${from.month}. v ${from.hour}:'
+        '${from.minute.toString().padLeft(2, '0')} · '
+        '${until == null ? 'do odvolání' : 'platí do ${until.day}. ${until.month}.'}';
+  }
   final posted = dutyDayLabel(Day.fromDateTime(m.createdAt.toLocal()));
   final expires = m.expiresAt?.toLocal();
   final until = expires == null

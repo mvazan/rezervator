@@ -191,7 +191,9 @@ class _NoticeListState extends ConsumerState<_NoticeList> {
   Widget build(BuildContext context) {
     final now = ref.watch(nowProvider).value ?? DateTime.now();
     final split = splitNotices(widget.data.notices, now);
-    if (split.active.isEmpty && split.expired.isEmpty) {
+    // Notices posted ahead of time are the admin's until they show.
+    final scheduled = widget.isAdmin ? split.scheduled : const <Message>[];
+    if (split.active.isEmpty && split.expired.isEmpty && scheduled.isEmpty) {
       return const Center(
         child: Padding(
           padding: EdgeInsets.all(24),
@@ -215,6 +217,15 @@ class _NoticeListState extends ConsumerState<_NoticeList> {
       // Room for the admin's FAB below the last card.
       padding: padWithSystemInset(context, const EdgeInsets.only(bottom: 88)),
       children: [
+        if (scheduled.isNotEmpty) ...[
+          ListTile(
+            dense: true,
+            leading: const Icon(Icons.schedule),
+            title: Text('Naplánované (${scheduled.length})'),
+          ),
+          for (final n in scheduled) tile(n),
+          const Divider(),
+        ],
         for (final n in split.active) tile(n),
         if (split.expired.isNotEmpty)
           ListTile(

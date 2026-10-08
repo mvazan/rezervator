@@ -423,6 +423,84 @@ async function jobCalendarSync(
   }
 }
 
+/** A new notice or message to its recipients — on the INSERT, or (a notice
+ * posted ahead of time) when it shows. */
+async function deliverNewMessage(message: MessageRow) {
+  const author = await profileOf(message.author_id);
+  // A failed load is logged and thrown — the webhook answers 500, which
+  // net._http_response shows — never read as "nobody to tell".
+  let recipientIds: string[] = [];
+  {
+    const { data, error } = await supabase.from("message_recipients")
+      .select("user_id").eq("message_id", message.id);
+    if (error) {
+      console.error(`message ${message.id}: recipients not loaded:`, error);
+      throw error;
+    }
+    recipientIds = (data ?? []).map((r) => r.user_id as string);
+  }
+  if (recipientIds.length === 0) return;
+  const { data: recipients, error: profilesError } = await supabase.from("profiles")
+    .select("id, email, fcm_token").in("id", recipientIds);
+  if (profilesError) {
+    console.error(`message ${message.id}: recipient profiles not loaded:`, profilesError);
+    throw profilesError;
+  }
+  let blockTimes: { starts_at: string; ends_at: string } | null = null;
+  if (message.block_id) {
+    const { data: block } = await supabase.from("time_blocks")
+      .select("starts_at, ends_at").eq("id", message.block_id).maybeSingle();
+    blockTimes = block as { starts_at: string; ends_at: string } | null;
+  }
+  const context = messageContext({
+    audience: message.audience,
+    onDate: message.on_date,
+    blockStart: blockTimes?.starts_at ?? null,
+    blockEnd: blockTimes?.ends_at ?? null,
+  });
+  // Fail closed, as the kiosk branch: signing the 👍/👎 links with an
+  // empty key would mint links anyone could forge. Checked once here,
+  // not in reactLink — deliverMessage logs and skips a recipient whose
+  // link throws, which would turn this deployment bug into quiet
+  // per-recipient log lines instead of a 500.
+  const cancelSecret = Deno.env.get("CANCEL_TOKEN_SECRET");
+  if (message.kind === "message" && !cancelSecret) {
+    throw new Error("CANCEL_TOKEN_SECRET is not set");
+  }
+  await deliverMessage(
+    message,
+    {
+      authorName: author?.display_name ?? "?",
+      authorIsAdmin: message.author_role === "admin",
+      context,
+    },
+    (recipients ?? []) as Recipient[],
+    {
+      // notifyRecipient's own choice, so push goes through it.
+      byPush: (r) => firebaseConfigured() && !!r.fcm_token,
+      push: (r, title, body, opts) => notifyRecipient(r, title, body, opts),
+      // One request per 100 e-mails (Resend's per-second rate limit is
+      // not in play, and the usual fan-out ends inside the 5 s pg_net
+      // waits), under deliverMessage's idempotency key; one by one only
+      // as the fallback for a batch refused as invalid — rare, and
+      // slower than those 5 s: pg_net records a timeout (no retry)
+      // while this runs on. A refusal that is not about the address
+      // stops that fallback after its first e-mail (sendOneByOne).
+      sendEmails: (emails, key) => resendBatch(emails, key, resendConfig()),
+      sendEmail: (email, key) => resendOneOfBatch(email, resendConfig(), key),
+      pause: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+      reactLink: async (userId, reaction) => {
+        if (!cancelSecret) throw new Error("CANCEL_TOKEN_SECRET is not set");
+        const token = await signReactToken(
+          { m: message.id, u: userId, r: reaction },
+          cancelSecret,
+        );
+        return `${Deno.env.get("SUPABASE_URL")}/functions/v1/react?t=${token}`;
+      },
+    },
+  );
+}
+
 const CALENDAR_KINDS = new Set(["calendar_sync"]);
 const CALENDAR_MAX_ATTEMPTS = 5;
 /** How many calendar jobs run at once. Each touches Google twice, so 100
@@ -445,9 +523,29 @@ async function processJobs() {
   const calendarJobs = (jobs ?? []).filter((job) =>
     CALENDAR_KINDS.has(job.kind as string)
   );
-  const otherJobs = (jobs ?? []).filter((job) =>
-    !CALENDAR_KINDS.has(job.kind as string)
+  const noticeJobs = (jobs ?? []).filter((job) =>
+    job.kind === "notice_visible"
   );
+  const otherJobs = (jobs ?? []).filter((job) =>
+    !CALENDAR_KINDS.has(job.kind as string) && job.kind !== "notice_visible"
+  );
+
+  // A notice posted ahead of time (0064) pings when it shows. Run once and
+  // dropped, like the webhook it stands in for: a moved time re-armed the
+  // job, a deleted notice or one switched to silent has nothing to send.
+  for (const job of noticeJobs) {
+    try {
+      const id = (job.payload as { message_id?: string }).message_id;
+      const { data: message } = await supabase.from("messages")
+        .select("*").eq("id", id).maybeSingle();
+      if (message && message.notify) {
+        await deliverNewMessage(message as unknown as MessageRow);
+      }
+    } catch (error) {
+      console.error(`job ${job.kind}/${job.id} failed:`, error);
+    }
+    await supabase.from("notification_jobs").delete().eq("id", job.id);
+  }
 
   for (const job of otherJobs) {
     console.error(`unknown job kind: ${job.kind}`);
@@ -906,83 +1004,12 @@ async function handle(payload: WebhookPayload) {
     case "messages": {
       // A new notice or message (0051): message_send inserted its
       // recipients in the same transaction, and pg_net posts only after
-      // the commit, so they are all there by now.
+      // the commit, so they are all there by now. A notice posted ahead of
+      // time is sent without its ping; it goes out as a notice_visible job.
       if (payload.type !== "INSERT") return;
       const message = record as unknown as MessageRow;
       if (!message.notify) return;
-      const author = await profileOf(message.author_id);
-      // A failed load is logged and thrown — the webhook answers 500, which
-      // net._http_response shows — never read as "nobody to tell".
-      let recipientIds: string[] = [];
-      {
-        const { data, error } = await supabase.from("message_recipients")
-          .select("user_id").eq("message_id", message.id);
-        if (error) {
-          console.error(`message ${message.id}: recipients not loaded:`, error);
-          throw error;
-        }
-        recipientIds = (data ?? []).map((r) => r.user_id as string);
-      }
-      if (recipientIds.length === 0) return;
-      const { data: recipients, error: profilesError } = await supabase.from("profiles")
-        .select("id, email, fcm_token").in("id", recipientIds);
-      if (profilesError) {
-        console.error(`message ${message.id}: recipient profiles not loaded:`, profilesError);
-        throw profilesError;
-      }
-      let blockTimes: { starts_at: string; ends_at: string } | null = null;
-      if (message.block_id) {
-        const { data: block } = await supabase.from("time_blocks")
-          .select("starts_at, ends_at").eq("id", message.block_id).maybeSingle();
-        blockTimes = block as { starts_at: string; ends_at: string } | null;
-      }
-      const context = messageContext({
-        audience: message.audience,
-        onDate: message.on_date,
-        blockStart: blockTimes?.starts_at ?? null,
-        blockEnd: blockTimes?.ends_at ?? null,
-      });
-      // Fail closed, as the kiosk branch: signing the 👍/👎 links with an
-      // empty key would mint links anyone could forge. Checked once here,
-      // not in reactLink — deliverMessage logs and skips a recipient whose
-      // link throws, which would turn this deployment bug into quiet
-      // per-recipient log lines instead of a 500.
-      const cancelSecret = Deno.env.get("CANCEL_TOKEN_SECRET");
-      if (message.kind === "message" && !cancelSecret) {
-        throw new Error("CANCEL_TOKEN_SECRET is not set");
-      }
-      await deliverMessage(
-        message,
-        {
-          authorName: author?.display_name ?? "?",
-          authorIsAdmin: message.author_role === "admin",
-          context,
-        },
-        (recipients ?? []) as Recipient[],
-        {
-          // notifyRecipient's own choice, so push goes through it.
-          byPush: (r) => firebaseConfigured() && !!r.fcm_token,
-          push: (r, title, body, opts) => notifyRecipient(r, title, body, opts),
-          // One request per 100 e-mails (Resend's per-second rate limit is
-          // not in play, and the usual fan-out ends inside the 5 s pg_net
-          // waits), under deliverMessage's idempotency key; one by one only
-          // as the fallback for a batch refused as invalid — rare, and
-          // slower than those 5 s: pg_net records a timeout (no retry)
-          // while this runs on. A refusal that is not about the address
-          // stops that fallback after its first e-mail (sendOneByOne).
-          sendEmails: (emails, key) => resendBatch(emails, key, resendConfig()),
-          sendEmail: (email, key) => resendOneOfBatch(email, resendConfig(), key),
-          pause: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-          reactLink: async (userId, reaction) => {
-            if (!cancelSecret) throw new Error("CANCEL_TOKEN_SECRET is not set");
-            const token = await signReactToken(
-              { m: message.id, u: userId, r: reaction },
-              cancelSecret,
-            );
-            return `${Deno.env.get("SUPABASE_URL")}/functions/v1/react?t=${token}`;
-          },
-        },
-      );
+      await deliverNewMessage(message);
       return;
     }
 

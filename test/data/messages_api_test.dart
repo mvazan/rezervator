@@ -170,7 +170,13 @@ void main() {
   test('the notice form posts a new notice to everyone, „do odvolání“ as no '
       'expiry', () async {
     const NoticeDraft draft =
-        (title: 'Klíč', body: 'Je u Petra.', expiresAt: null, notify: false);
+        (
+      title: 'Klíč',
+      body: 'Je u Petra.',
+      expiresAt: null,
+      notify: false,
+      visibleFrom: null,
+    );
     await noticeApiWrite(null, draft);
     expect(rpcCall('message_send'), {
       'p_kind': 'notice',
@@ -197,6 +203,7 @@ void main() {
       body: 'Je u Petra.',
       expiresAt: DateTime.utc(2026, 10, 20, 21, 59, 59),
       notify: true,
+      visibleFrom: null,
     );
     await noticeApiWrite(existing, draft);
     expect(requests.where((r) => r.url.path.endsWith('/rpc/message_send')), isEmpty);

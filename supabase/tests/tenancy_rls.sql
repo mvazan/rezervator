@@ -11783,4 +11783,72 @@ begin
   raise notice 'OK: anon cannot toggle, and the public overview hides the kiosk panel settings (0064)';
 end $$;
 
+-- 0064: a notice posted ahead of time — only the alley's admin sets when it
+-- shows; with its ping on, a notice_visible job waits for that time (one
+-- per notice, moved with it, gone when it shows at once).
+reset role;
+set local role authenticated;
+do $$
+declare
+  v_notice constant uuid := current_setting('probe.kiosk_notice')::uuid;
+  v_at constant timestamptz := now() + interval '2 days';
+begin
+  perform set_config('request.jwt.claims',
+    '{"sub":"51000000-0000-0000-0000-000000000010","role":"authenticated"}', true);
+  perform message_set_visible_from(v_notice, v_at, true);
+  if (select visible_from from messages where id = v_notice) is distinct from v_at
+     or not (select notify from messages where id = v_notice) then
+    raise exception 'FAIL: the admin could not schedule the notice';
+  end if;
+  perform message_set_visible_from(v_notice, v_at + interval '1 day');
+  perform set_config('request.jwt.claims',
+    '{"sub":"51000000-0000-0000-0000-000000000013","role":"authenticated"}', true);
+  begin
+    perform message_set_visible_from(v_notice, null);
+    raise exception 'FAIL: a player scheduled a notice';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+end $$;
+reset role;
+do $$
+declare
+  v_notice constant uuid := current_setting('probe.kiosk_notice')::uuid;
+begin
+  if (select count(*) from notification_jobs
+       where kind = 'notice_visible' and payload->>'message_id' = v_notice::text) <> 1
+     or (select run_at from notification_jobs
+          where kind = 'notice_visible' and payload->>'message_id' = v_notice::text)
+        < now() + interval '2 days 23 hours' then
+    raise exception 'FAIL: expected one notice_visible job, moved with the notice';
+  end if;
+end $$;
+set local role authenticated;
+do $$
+declare
+  v_notice constant uuid := current_setting('probe.kiosk_notice')::uuid;
+begin
+  perform set_config('request.jwt.claims',
+    '{"sub":"51000000-0000-0000-0000-000000000010","role":"authenticated"}', true);
+  -- A time gone by is now: no schedule, no job.
+  perform message_set_visible_from(v_notice, now() - interval '1 hour');
+end $$;
+reset role;
+do $$
+declare
+  v_notice constant uuid := current_setting('probe.kiosk_notice')::uuid;
+begin
+  if (select visible_from from messages where id = v_notice) is not null
+     or exists (select 1 from notification_jobs
+                 where kind = 'notice_visible'
+                   and payload->>'message_id' = v_notice::text) then
+    raise exception 'FAIL: a notice shown now kept its schedule or its job';
+  end if;
+  if has_function_privilege('anon',
+       'public.message_set_visible_from(uuid, timestamptz, boolean)', 'execute') then
+    raise exception 'FAIL: anon can schedule a notice';
+  end if;
+  raise notice 'OK: only the alley''s admin schedules a notice; its ping waits as one job (0064)';
+end $$;
+
 rollback;
