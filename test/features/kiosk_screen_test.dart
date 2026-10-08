@@ -358,6 +358,25 @@ void main() {
         {'kiosk_idle_seconds': 300});
   });
 
+  testWidgets('the live match\'s drawing is chosen from a list', (tester) async {
+    tall(tester);
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+    Map<String, dynamic> lastPatch() => jsonDecode(
+          requests.lastWhere((r) => r.method == 'PATCH').body,
+        ) as Map<String, dynamic>;
+    await tester.ensureVisible(find.text('Zobrazení aktuálního zápasu'));
+    // The default: the cards. Zápis is the app's own layout, never offered.
+    await tester.tap(find.text('Podrobné — karty soubojů').first);
+    await tester.pumpAndSettle();
+    expect(find.text('Kompaktní — bez posouvání'), findsOneWidget);
+    expect(find.text('Tabulka — souboj na řádek'), findsOneWidget);
+    expect(find.text('Zápis'), findsNothing);
+    await tester.tap(find.text('Tabulka — souboj na řádek').last);
+    await tester.pumpAndSettle();
+    expect(lastPatch(), {'kiosk_live_layout': 'table'});
+  });
+
   testWidgets('the ranges say they are only the default', (tester) async {
     tall(tester);
     await tester.pumpWidget(app());

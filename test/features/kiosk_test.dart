@@ -1291,7 +1291,7 @@ void main() {
       bool Function()? socketOpen,
       void Function(String id)? onRefresh,
       int liveRefresh = 60,
-      KioskLiveLayout liveLayout = KioskLiveLayout.full,
+      MatchLayout liveLayout = MatchLayout.full,
       Stream<Map<String, MatchResult>>? resultsStream,
       Map<String, List<MatchPlayerResult>> lineups = const {},
     }) => ProviderScope(
@@ -2243,7 +2243,7 @@ void main() {
       await finish(tester);
     });
 
-    for (final layout in [KioskLiveLayout.compact, KioskLiveLayout.table]) {
+    for (final layout in [MatchLayout.compact, MatchLayout.table]) {
       testWidgets('the ${layout.name} live view fits six duels without '
           'scrolling and opens one duel at a time', (tester) async {
         fullHd(tester);
@@ -2338,7 +2338,7 @@ void main() {
       });
     }
 
-    for (final layout in KioskLiveLayout.values) {
+    for (final layout in MatchLayout.values) {
       testWidgets('${layout.name}: a tap on the live score opens the Zápis', (
         tester,
       ) async {
@@ -2357,7 +2357,7 @@ void main() {
               .descendant(
                 of: find.byType(KioskDrawer),
                 // The full scoreboard sets the points as separate digits.
-                matching: layout == KioskLiveLayout.full
+                matching: layout == MatchLayout.full
                     ? find.text('průběžně')
                     : find.text('2 : 1'),
               )
@@ -2369,6 +2369,65 @@ void main() {
         await finish(tester);
       });
     }
+
+    testWidgets('full: a tap on a duel card opens its lanes, a tap on one '
+        'not started does nothing', (tester) async {
+      fullHd(tester);
+      MatchPlayerResult withLanes(String side, int pos) => MatchPlayerResult(
+        id: 'm-$side-$pos',
+        matchId: 'm',
+        side: side,
+        position: pos,
+        playerName: '${side == 'home' ? 'Dom' : 'Hos'} $pos',
+        total: 400 + pos,
+        lanes: [
+          for (var l = 1; l <= 4; l++)
+            PlayerLane(lane: l, total: side == 'home' ? 101 : 99),
+        ],
+      );
+      await tester.pumpWidget(
+        app(
+          slots: [fed('m', day, 'Hrají')],
+          results: {'m': res('m', 'in_progress', 2, 1)},
+          lineups: {
+            'm': [
+              for (final side in ['home', 'away']) withLanes(side, 1),
+              // Position 2 has not thrown: no total, no lanes.
+              for (final side in ['home', 'away'])
+                MatchPlayerResult(
+                  id: 'm-$side-2',
+                  matchId: 'm',
+                  side: side,
+                  position: 2,
+                  playerName: '${side == 'home' ? 'Dom' : 'Hos'} 2',
+                ),
+            ],
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+      final cards = find.descendant(
+        of: find.byType(KioskDrawer),
+        matching: find.byType(DuelCard),
+      );
+      expect(cards, findsNWidgets(2));
+      expect(tester.widget<DuelCard>(cards.first).expanded, isFalse);
+
+      await tester.tap(cards.first);
+      await tester.pumpAndSettle();
+      expect(tester.widget<DuelCard>(cards.first).expanded, isTrue);
+      expect(find.text('Plné'), findsWidgets);
+
+      await tester.tap(cards.last);
+      await tester.pumpAndSettle();
+      expect(tester.widget<DuelCard>(cards.last).expanded, isFalse);
+
+      await tester.tap(cards.first);
+      await tester.pumpAndSettle();
+      expect(tester.widget<DuelCard>(cards.first).expanded, isFalse);
+
+      await finish(tester);
+    });
 
     testWidgets('a tap on the dots locks the match until it ends', (
       tester,
