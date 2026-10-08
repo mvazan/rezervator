@@ -252,6 +252,7 @@ class _KioskShellState extends ConsumerState<KioskShell> {
                 onReserve: _openPicker,
                 onClearSelection: _clearSelection,
                 onOpenNotice: _openNotice,
+                onOpenMatch: _openMatchIfScored,
               ),
               Expanded(child: _boardWithPanel()),
             ],
@@ -270,6 +271,7 @@ class _StatusBar extends ConsumerWidget {
     required this.onReserve,
     required this.onClearSelection,
     required this.onOpenNotice,
+    required this.onOpenMatch,
   });
 
   final PlayerName? selected;
@@ -277,16 +279,22 @@ class _StatusBar extends ConsumerWidget {
   final VoidCallback onClearSelection;
   final void Function(Message notice) onOpenNotice;
 
+  /// A tap on one of today's matches: its Zápis, once it has a score.
+  final void Function(PrioritySlot match) onOpenMatch;
+
+  /// Today's matches, start-ordered; Úklid children are plumbing (their
+  /// match already announces).
+  List<PrioritySlot> _todaysMatches(WidgetRef ref, Day todayDay) =>
+      ref
+          .watch(prioritySlotsProvider)
+          .where((m) => m.date == todayDay && m.parentId == null)
+          .toList()
+        ..sort((a, b) => a.startsAt.compareTo(b.startsAt));
+
   String _infoLine(WidgetRef ref, Day todayDay) {
-    final priority = ref.watch(prioritySlotsProvider);
-    // Úklid children are plumbing (their match already announces); the
-    // shared label gives home matches the 🏠, away matches no icon.
-    final todaysMatches =
-        priority.where((m) => m.date == todayDay && m.parentId == null).toList()
-          ..sort((a, b) => a.startsAt.compareTo(b.startsAt));
-    if (todaysMatches.isNotEmpty) {
-      return todaysMatches.map(headerEventLabel).join('  ·  ');
-    }
+    // Today's matches are not a line of text: [build] lists them, each
+    // one tappable.
+    if (_todaysMatches(ref, todayDay).isNotEmpty) return '';
 
     final settings =
         ref.watch(settingsProvider).value ?? ScheduleSettings.defaults;
@@ -330,6 +338,11 @@ class _StatusBar extends ConsumerWidget {
     final now = ref.watch(nowProvider).value ?? DateTime.now();
     final todayDay = Day.fromDateTime(now);
     final info = _infoLine(ref, todayDay);
+    final todays = _todaysMatches(ref, todayDay);
+    // Kept listened to: a tap on a match reads it to decide whether there
+    // is a Zápis, and with the drawer closed nothing else may hold it.
+    ref.watch(matchResultsProvider);
+    final infoStyle = TextStyle(fontSize: 14, color: scheme.onSurfaceVariant);
     final notices =
         (ref.watch(settingsProvider).value?.kioskNoticesInHeader ?? true)
         ? kioskNotices(ref.watch(messagesProvider).value ?? const [], now)
@@ -366,11 +379,41 @@ class _StatusBar extends ConsumerWidget {
             Expanded(
               child: Row(
                 children: [
+                  // Today's matches, one tap target each: a match with a score
+                  // opens its Zápis, as everywhere else on the kiosk.
+                  if (todays.isNotEmpty)
+                    Expanded(
+                      flex: notices.isEmpty ? 1 : 2,
+                      child: Wrap(
+                        alignment: WrapAlignment.center,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          for (var i = 0; i < todays.length; i++) ...[
+                            if (i > 0) Text('  ·  ', style: infoStyle),
+                            InkWell(
+                              onTap: () => onOpenMatch(todays[i]),
+                              borderRadius: BorderRadius.circular(6),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 4,
+                                  vertical: 2,
+                                ),
+                                child: EmojiText(
+                                  headerEventLabel(todays[i]),
+                                  style: infoStyle,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
                   if (info.isNotEmpty)
-                    Flexible(
+                    Expanded(
                       flex: notices.isEmpty ? 1 : 2,
                       child: EmojiText(
                         info,
+                        textAlign: TextAlign.center,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -379,7 +422,8 @@ class _StatusBar extends ConsumerWidget {
                         ),
                       ),
                     ),
-                  if (info.isNotEmpty && notices.isNotEmpty)
+                  if ((info.isNotEmpty || todays.isNotEmpty) &&
+                      notices.isNotEmpty)
                     const SizedBox(width: 24),
                   // One notice's title at a time, in what is left.
                   if (notices.isNotEmpty)

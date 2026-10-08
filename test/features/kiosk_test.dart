@@ -2309,6 +2309,37 @@ void main() {
       await finish(tester);
     });
 
+    testWidgets('a match of today in the status bar opens its Zápis once it '
+        'is being played or done', (tester) async {
+      fullHd(tester);
+      await tester.pumpWidget(
+        app(
+          slots: [
+            fed('m', day, 'Hrají', hour: 9),
+            fed('n', day, 'Později', hour: 18),
+          ],
+          results: {'m': res('m', 'in_progress', 2, 1)},
+          lineups: {'m': lineup},
+          liveMode: false,
+        ),
+      );
+      await tester.pumpAndSettle();
+      Finder inBar(String t) => find.descendant(
+        of: find.byType(Wrap),
+        matching: find.textContaining(t),
+      );
+      // Not started yet: nothing to open.
+      await tester.tap(inBar('Později'));
+      await tester.pumpAndSettle();
+      expect(find.byType(LegacyScoreSheetPage), findsNothing);
+      // Being played: its Zápis.
+      await tester.tap(inBar('Hrají'));
+      await tester.pumpAndSettle();
+      expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
+
+      await finish(tester);
+    });
+
     testWidgets('no notice, no headline', (tester) async {
       fullHd(tester);
       await tester.pumpWidget(app());
