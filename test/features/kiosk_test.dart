@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -1284,6 +1286,7 @@ void main() {
       int pastDays = 0,
       int idleSeconds = 60,
       KioskLiveLayout liveLayout = KioskLiveLayout.full,
+      Stream<Map<String, MatchResult>>? resultsStream,
       Map<String, List<MatchPlayerResult>> lineups = const {},
     }) => ProviderScope(
       overrides: [
@@ -1328,7 +1331,9 @@ void main() {
         ),
         playersProvider.overrideWith((ref) async => players),
         messagesProvider.overrideWith((ref) => Stream.value(notices)),
-        matchResultsProvider.overrideWith((ref) => Stream.value(results)),
+        matchResultsProvider.overrideWith(
+          (ref) => resultsStream ?? Stream.value(results),
+        ),
         matchPlayerResultsProvider.overrideWith(
           (ref, id) => Stream.value(lineups[id] ?? const []),
         ),
@@ -2204,21 +2209,47 @@ void main() {
         final last = find.textContaining('Hráč6').first;
         expect(tester.getRect(last).bottom, lessThan(drawer.bottom));
 
-        // A tap opens one duel — compact: as the full card with its lane
-        // table; table: its lanes under the row. Another tap moves it.
-        Finder opened() => layout == KioskLiveLayout.compact
-            ? find.byType(DuelCard)
-            : find.textContaining('1. 51');
-        expect(opened(), findsNothing);
+        // A tap opens a duel as the full card with its lane table. More
+        // may be open while they fit; past that the first opened folds.
+        expect(find.byType(DuelCard), findsNothing);
         await tester.tap(find.textContaining('Hráč1').first);
         await tester.pumpAndSettle();
-        expect(opened(), findsOneWidget);
+        expect(find.byType(DuelCard), findsOneWidget);
+        expect(find.text('Plné'), findsWidgets);
         await tester.tap(find.textContaining('Hráč2').first);
         await tester.pumpAndSettle();
-        expect(opened(), findsOneWidget, reason: 'one duel open at a time');
-        if (layout == KioskLiveLayout.compact) {
-          expect(find.text('Plné'), findsWidgets);
+        expect(find.byType(DuelCard), findsNWidgets(2));
+        for (var pos = 3; pos <= 6; pos++) {
+          await tester.tap(find.textContaining('Hráč$pos').first);
+          await tester.pumpAndSettle();
         }
+        final scroll = tester
+            .state<ScrollableState>(
+              find.descendant(
+                of: find.byType(KioskDrawer),
+                matching: find.byType(Scrollable),
+              ).last,
+            )
+            .position;
+        // Never a scrollbar: the oldest opened ones folded back…
+        expect(scroll.maxScrollExtent, 0);
+        expect(find.byType(DuelCard).evaluate().length, lessThan(6));
+        // …and the last one tapped is open.
+        expect(
+          find.descendant(
+            of: find.byType(DuelCard),
+            matching: find.textContaining('Hráč6'),
+          ),
+          findsWidgets,
+        );
+        // Hráč1, opened first, was the first to fold.
+        expect(
+          find.descendant(
+            of: find.byType(DuelCard),
+            matching: find.textContaining('Hráč1'),
+          ),
+          findsNothing,
+        );
 
         await finish(tester);
       });
@@ -2255,6 +2286,57 @@ void main() {
         await finish(tester);
       });
     }
+
+    testWidgets('a tap on the dots locks the match until it ends', (
+      tester,
+    ) async {
+      fullHd(tester);
+      final second = [
+        for (final side in ['home', 'away']) player('n', side, 1),
+      ];
+      final results = StreamController<Map<String, MatchResult>>();
+      addTearDown(results.close);
+      await tester.pumpWidget(
+        app(
+          slots: [fed('m', day, 'Prvníci'), fed('n', day, 'Druzí', hour: 17)],
+          resultsStream: results.stream,
+          lineups: {'m': lineup, 'n': second},
+          liveRotation: 6,
+        ),
+      );
+      results.add({
+        'm': res('m', 'in_progress', 2, 1),
+        'n': res('n', 'in_progress', 1, 2),
+      });
+      await tester.pumpAndSettle();
+      bool inDrawer(String t) => find
+          .descendant(
+            of: find.byType(KioskDrawer),
+            matching: find.textContaining(t),
+          )
+          .evaluate()
+          .isNotEmpty;
+      expect(inDrawer('Prvníci'), isTrue);
+
+      await tester.tap(find.byIcon(Icons.lock_open));
+      await tester.pumpAndSettle();
+      expect(find.byIcon(Icons.lock), findsOneWidget);
+      // Turns go by; the locked match stays.
+      await tester.pump(const Duration(seconds: 20));
+      await tester.pumpAndSettle();
+      expect(inDrawer('Prvníci'), isTrue);
+      expect(inDrawer('Druzí'), isFalse);
+
+      // It ends: the lock goes with it, the other match is shown.
+      results.add({
+        'm': res('m', 'finished', 5, 3),
+        'n': res('n', 'in_progress', 1, 2),
+      });
+      await tester.pumpAndSettle();
+      expect(inDrawer('Druzí'), isTrue);
+
+      await finish(tester);
+    });
 
     testWidgets('a swipe turns the live matches', (tester) async {
       fullHd(tester);

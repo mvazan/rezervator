@@ -809,6 +809,10 @@ class _LiveViewState extends ConsumerState<_LiveView> {
   /// cards slide in from that side.
   int _direction = 1;
 
+  /// The match a visitor pinned (a tap on the dots): no turns until it ends
+  /// — it then drops out of the live matches, and the lock with it.
+  String? _lockedId;
+
   @override
   void initState() {
     super.initState();
@@ -830,12 +834,23 @@ class _LiveViewState extends ConsumerState<_LiveView> {
 
   /// To the next ([direction] 1) or previous (-1) live match — on the timer
   /// or by a swipe; either way the next turn is a whole turn away.
-  void _step(int direction) {
+  void _step(int direction, {bool byHand = false}) {
     if (!mounted || widget.matches.length < 2) return;
+    if (_locked && !byHand) return;
     setState(() {
+      // A swipe moves on, and takes the lock off.
+      _lockedId = null;
       _direction = direction;
       _index = (_index + direction) % widget.matches.length;
     });
+    _start();
+  }
+
+  bool get _locked =>
+      _lockedId != null && widget.matches.any((m) => m.id == _lockedId);
+
+  void _toggleLock(String id) {
+    setState(() => _lockedId = _lockedId == id ? null : id);
     _start();
   }
 
@@ -849,8 +864,14 @@ class _LiveViewState extends ConsumerState<_LiveView> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final matches = widget.matches;
+    // A locked match stays on screen wherever the list puts it.
+    final lockedAt = _locked
+        ? matches.indexWhere((m) => m.id == _lockedId)
+        : -1;
+    if (lockedAt >= 0) _index = lockedAt;
     final slot = matches[_index.clamp(0, matches.length - 1)];
     final current = ValueKey(slot.id);
+    final locked = lockedAt >= 0;
     final full =
         (ref.watch(settingsProvider).value?.kioskLiveLayout ??
             KioskLiveLayout.full) ==
@@ -864,7 +885,7 @@ class _LiveViewState extends ConsumerState<_LiveView> {
           return false;
         },
         child: _Swipe(
-          onSwipe: _step,
+          onSwipe: (d) => _step(d, byHand: true),
           child: Padding(
             padding: const EdgeInsets.all(12),
             child: Column(
@@ -890,23 +911,58 @@ class _LiveViewState extends ConsumerState<_LiveView> {
                         ),
                         const Spacer(),
                       ],
-                      for (
-                        var i = 0;
-                        matches.length > 1 && i < matches.length;
-                        i++
-                      )
-                        AnimatedContainer(
-                          duration: const Duration(milliseconds: 300),
-                          width: i == _index ? 18 : 8,
-                          height: 8,
-                          margin: const EdgeInsets.only(left: 6),
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(4),
-                            color: i == _index
-                                ? scheme.primary
-                                : scheme.onSurfaceVariant.withValues(
-                                    alpha: 0.35,
+                      // The dots say how many matches take turns; a tap
+                      // pins the one on screen until it ends (or another
+                      // tap, or a swipe).
+                      if (matches.length > 1)
+                        Semantics(
+                          button: true,
+                          label: locked
+                              ? 'Odemknout zápas'
+                              : 'Zamknout tento zápas',
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: () => _toggleLock(slot.id),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 8,
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  AnimatedSwitcher(
+                                    duration: const Duration(milliseconds: 200),
+                                    child: Icon(
+                                      locked ? Icons.lock : Icons.lock_open,
+                                      key: ValueKey(locked),
+                                      size: 16,
+                                      color: locked
+                                          ? scheme.primary
+                                          : scheme.onSurfaceVariant.withValues(
+                                              alpha: 0.5,
+                                            ),
+                                    ),
                                   ),
+                                  for (var i = 0; i < matches.length; i++)
+                                    AnimatedContainer(
+                                      duration: const Duration(
+                                        milliseconds: 300,
+                                      ),
+                                      width: i == _index ? 18 : 8,
+                                      height: 8,
+                                      margin: const EdgeInsets.only(left: 6),
+                                      decoration: BoxDecoration(
+                                        borderRadius: BorderRadius.circular(4),
+                                        color: i == _index
+                                            ? scheme.primary
+                                            : scheme.onSurfaceVariant
+                                                  .withValues(alpha: 0.35),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
                           ),
                         ),
                     ],

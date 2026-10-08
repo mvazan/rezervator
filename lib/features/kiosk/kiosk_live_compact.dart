@@ -3,9 +3,11 @@
 ///
 /// - [KioskLiveCompact]: the score, then one block per duel — the two
 ///   names, the totals and the lead; a tap opens that duel as the match
-///   detail's full card with its lane table, one duel at a time.
+///   detail's full card with its lane table.
 /// - [KioskLiveTable]: the score, then every duel a single table row; a tap
-///   opens the lanes under the row, one at a time.
+///   opens it as the same full card.
+///
+/// Several duels may be open while they fit; see [_FifoOpen].
 ///
 /// No date, live chip, format line or difference bar: on the wall the
 /// score and the totals are what is read from across the room.
@@ -102,62 +104,44 @@ class KioskLiveScore extends StatelessWidget {
   }
 }
 
-/// The lanes of one duel on one line: „1. 62 : 68 · 2. 59 : 60 · …“, the
-/// lane winner's total in bold.
-class _Lanes extends StatelessWidget {
-  const _Lanes({required this.duel});
-
-  final Duel duel;
+/// Several duels may be open at once, as long as they all fit: when the
+/// list would have to scroll, the duel opened first folds back (first in,
+/// first out) until it fits again or one duel is left open.
+mixin _FifoOpen<T extends StatefulWidget> on State<T> {
+  final opened = <int>[];
+  final scroll = ScrollController();
 
   @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final spans = <InlineSpan>[];
-    for (final l in duel.lanes) {
-      final h = l.home?.total;
-      final a = l.away?.total;
-      if (spans.isNotEmpty) {
-        spans.add(
-          TextSpan(
-            text: '   ',
-            style: TextStyle(color: scheme.onSurfaceVariant),
-          ),
-        );
-      }
-      spans
-        ..add(
-          TextSpan(
-            text: '${l.lane}. ',
-            style: TextStyle(color: scheme.onSurfaceVariant),
-          ),
-        )
-        ..add(
-          TextSpan(
-            text: h?.toString() ?? '–',
-            style: TextStyle(
-              fontWeight: h != null && a != null && h > a
-                  ? FontWeight.w800
-                  : FontWeight.w400,
-            ),
-          ),
-        )
-        ..add(const TextSpan(text: ' : '))
-        ..add(
-          TextSpan(
-            text: a?.toString() ?? '–',
-            style: TextStyle(
-              fontWeight: h != null && a != null && a > h
-                  ? FontWeight.w800
-                  : FontWeight.w400,
-            ),
-          ),
-        );
-    }
-    return Text.rich(
-      TextSpan(children: spans),
-      style: const TextStyle(fontSize: 15, fontFeatures: _tabular),
-    );
+  void dispose() {
+    scroll.dispose();
+    super.dispose();
   }
+
+  void toggle(int position) {
+    setState(() {
+      if (!opened.remove(position)) opened.add(position);
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _fit());
+  }
+
+  void _fit() {
+    if (!mounted || !scroll.hasClients || opened.length < 2) return;
+    if (scroll.position.maxScrollExtent <= 0) return;
+    setState(() => opened.removeAt(0));
+    WidgetsBinding.instance.addPostFrameCallback((_) => _fit());
+  }
+
+  /// The full card of an open duel — the match detail's, with its lane
+  /// table; a tap folds it.
+  Widget openCard(Duel duel, List<Duel> duels, MatchResult? result) => DuelCard(
+    duel: duel,
+    scale: diffScale(duels),
+    expanded: true,
+    onTap: () => toggle(duel.position),
+    homeColor: homeSideColor,
+    awayColor: awaySideColor,
+    showSetPoints: setPointsMatter(result?.discipline),
+  );
 }
 
 /// The compact view: a block per duel, one opened to its lanes at a time.
@@ -181,9 +165,7 @@ class KioskLiveCompact extends StatefulWidget {
   State<KioskLiveCompact> createState() => _KioskLiveCompactState();
 }
 
-class _KioskLiveCompactState extends State<KioskLiveCompact> {
-  int? _open;
-
+class _KioskLiveCompactState extends State<KioskLiveCompact> with _FifoOpen {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -201,6 +183,7 @@ class _KioskLiveCompactState extends State<KioskLiveCompact> {
         ),
         Expanded(
           child: SingleChildScrollView(
+            controller: scroll,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -218,20 +201,8 @@ class _KioskLiveCompactState extends State<KioskLiveCompact> {
 
   Widget _compactDuel(BuildContext context, ColorScheme scheme, Duel duel) {
     final waiting = duel.state == DuelState.waiting;
-    final open = _open == duel.position;
-    // The one opened duel is the match detail's full card with its lane
-    // table (Plné, Dor., Ch., Celkem); a tap folds it back.
-    if (open) {
-      final scale = diffScale(widget.duels);
-      return DuelCard(
-        duel: duel,
-        scale: scale,
-        expanded: true,
-        onTap: () => setState(() => _open = null),
-        homeColor: homeSideColor,
-        awayColor: awaySideColor,
-        showSetPoints: setPointsMatter(widget.result?.discipline),
-      );
+    if (opened.contains(duel.position)) {
+      return openCard(duel, widget.duels, widget.result);
     }
     final lead = leadLabel(duel.diff);
     final done = duel.state == DuelState.done;
@@ -254,9 +225,7 @@ class _KioskLiveCompactState extends State<KioskLiveCompact> {
       ),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: waiting
-            ? null
-            : () => setState(() => _open = open ? null : duel.position),
+        onTap: waiting ? null : () => toggle(duel.position),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(12, 6, 8, 6),
           child: Column(
@@ -348,9 +317,7 @@ class KioskLiveTable extends StatefulWidget {
   State<KioskLiveTable> createState() => _KioskLiveTableState();
 }
 
-class _KioskLiveTableState extends State<KioskLiveTable> {
-  int? _open;
-
+class _KioskLiveTableState extends State<KioskLiveTable> with _FifoOpen {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -369,6 +336,7 @@ class _KioskLiveTableState extends State<KioskLiveTable> {
         const SizedBox(height: 8),
         Expanded(
           child: SingleChildScrollView(
+            controller: scroll,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -384,7 +352,12 @@ class _KioskLiveTableState extends State<KioskLiveTable> {
 
   Widget _row(BuildContext context, ColorScheme scheme, Duel duel, bool odd) {
     final waiting = duel.state == DuelState.waiting;
-    final open = _open == duel.position;
+    if (opened.contains(duel.position)) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: openCard(duel, widget.duels, widget.result),
+      );
+    }
     final lead = leadLabel(duel.diff);
     final done = duel.state == DuelState.done;
     final homeWins = (duel.diff ?? 0) > 0;
@@ -400,9 +373,7 @@ class _KioskLiveTableState extends State<KioskLiveTable> {
           ? scheme.surfaceContainerHighest.withValues(alpha: 0.4)
           : Colors.transparent,
       child: InkWell(
-        onTap: waiting
-            ? null
-            : () => setState(() => _open = open ? null : duel.position),
+        onTap: waiting ? null : () => toggle(duel.position),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
           child: Column(
@@ -462,16 +433,6 @@ class _KioskLiveTableState extends State<KioskLiveTable> {
                     ),
                   ),
                 ],
-              ),
-              AnimatedSize(
-                duration: const Duration(milliseconds: 200),
-                alignment: Alignment.topCenter,
-                child: open
-                    ? Padding(
-                        padding: const EdgeInsets.only(top: 4),
-                        child: _Lanes(duel: duel),
-                      )
-                    : const SizedBox(width: double.infinity),
               ),
             ],
           ),
