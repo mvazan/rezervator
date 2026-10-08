@@ -7,7 +7,9 @@ import 'package:rezervator/data/clock.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/clubhouse/match_detail_screen.dart';
+import 'package:rezervator/features/clubhouse/widgets/duel_card.dart';
 import 'package:rezervator/features/clubhouse/widgets/legacy_score_sheet.dart';
+import 'package:rezervator/features/clubhouse/widgets/match_scoreboard.dart';
 import 'package:rezervator/features/kiosk/kiosk_board_view.dart';
 import 'package:rezervator/features/kiosk/kiosk_info_panel.dart';
 import 'package:rezervator/features/kiosk/kiosk_shell.dart';
@@ -2094,6 +2096,70 @@ void main() {
       await tester.tap(drawerText('Krátký'));
       await tester.pumpAndSettle();
       expect(find.byType(AlertDialog), findsNothing);
+
+      await finish(tester);
+    });
+
+    testWidgets('a touch in the live view restarts the wait for the next '
+        'match', (tester) async {
+      fullHd(tester);
+      final second = [
+        for (final side in ['home', 'away']) player('n', side, 1),
+      ];
+      await tester.pumpWidget(
+        app(
+          slots: [fed('m', day, 'Prvníci'), fed('n', day, 'Druzí', hour: 17)],
+          results: {
+            'm': res('m', 'in_progress', 2, 1),
+            'n': res('n', 'in_progress', 1, 2),
+          },
+          lineups: {'m': lineup, 'n': second},
+          liveRotation: 10,
+        ),
+      );
+      await tester.pumpAndSettle();
+      bool inDrawer(String t) => find
+          .descendant(
+            of: find.byType(KioskDrawer),
+            matching: find.textContaining(t),
+          )
+          .evaluate()
+          .isNotEmpty;
+      expect(inDrawer('Prvníci'), isTrue);
+      // Touch every 6 s: the 10 s turn never comes.
+      for (var i = 0; i < 4; i++) {
+        await tester.pump(const Duration(seconds: 6));
+        await tester.tap(find.text('PRÁVĚ SE HRAJE'));
+      }
+      await tester.pumpAndSettle();
+      expect(inDrawer('Prvníci'), isTrue);
+      expect(inDrawer('Druzí'), isFalse);
+
+      await finish(tester);
+    });
+
+    testWidgets('the live scoreboard stays put while the duels scroll', (
+      tester,
+    ) async {
+      fullHd(tester);
+      tester.view.physicalSize = const Size(1920, 700);
+      final many = [
+        for (var pos = 1; pos <= 6; pos++)
+          for (final side in ['home', 'away']) player('m', side, pos),
+      ];
+      await tester.pumpWidget(
+        app(
+          slots: [fed('m', day, 'Hrají')],
+          results: {'m': res('m', 'in_progress', 2, 1)},
+          lineups: {'m': many},
+        ),
+      );
+      await tester.pumpAndSettle();
+      final board = find.byType(MatchScoreboard);
+      final top = tester.getTopLeft(board);
+      await tester.drag(find.byType(DuelCard).first, const Offset(0, -300));
+      await tester.pumpAndSettle();
+      expect(tester.getTopLeft(board), top);
 
       await finish(tester);
     });

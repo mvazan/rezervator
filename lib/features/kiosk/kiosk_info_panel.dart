@@ -666,9 +666,7 @@ class _MatchesCardState extends ConsumerState<_MatchesCard> {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!_controller.hasClients) return;
         final p = _controller.position;
-        _controller.jumpTo(
-          math.max(-p.viewportDimension, p.minScrollExtent),
-        );
+        _controller.jumpTo(math.max(-p.viewportDimension, p.minScrollExtent));
       });
     }
     // Index 0 of the part before the centre is the last match above it.
@@ -795,8 +793,9 @@ class _LiveViewState extends ConsumerState<_LiveView> {
   Timer? _timer;
   int _index = 0;
 
-  /// Duels opened to their lane tables, by position.
-  final _expanded = <int>{};
+  /// The way the last change went: 1 to the next match, -1 back — the
+  /// cards slide in from that side.
+  int _direction = 1;
 
   @override
   void initState() {
@@ -810,6 +809,8 @@ class _LiveViewState extends ConsumerState<_LiveView> {
     if (old.turn != widget.turn) _start();
   }
 
+  /// (Re)starts the wait for the next turn — also on every touch or scroll
+  /// in the view: whoever is reading a match keeps it on screen.
   void _start() {
     _timer?.cancel();
     _timer = Timer.periodic(widget.turn, (_) => _step(1));
@@ -820,8 +821,8 @@ class _LiveViewState extends ConsumerState<_LiveView> {
   void _step(int direction) {
     if (!mounted || widget.matches.length < 2) return;
     setState(() {
+      _direction = direction;
       _index = (_index + direction) % widget.matches.length;
-      _expanded.clear();
     });
     _start();
   }
@@ -837,6 +838,115 @@ class _LiveViewState extends ConsumerState<_LiveView> {
     final scheme = Theme.of(context).colorScheme;
     final matches = widget.matches;
     final slot = matches[_index.clamp(0, matches.length - 1)];
+    final current = ValueKey(slot.id);
+    return Listener(
+      onPointerDown: (_) => _start(),
+      behavior: HitTestBehavior.translucent,
+      child: NotificationListener<ScrollNotification>(
+        onNotification: (n) {
+          if (n is UserScrollNotification) _start();
+          return false;
+        },
+        child: _Swipe(
+          onSwipe: _step,
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.circle, size: 12, color: scheme.error),
+                    const SizedBox(width: 8),
+                    Text(
+                      'PRÁVĚ SE HRAJE',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.4,
+                        color: scheme.primary,
+                      ),
+                    ),
+                    const Spacer(),
+                    for (
+                      var i = 0;
+                      matches.length > 1 && i < matches.length;
+                      i++
+                    )
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 300),
+                        width: i == _index ? 18 : 8,
+                        height: 8,
+                        margin: const EdgeInsets.only(left: 6),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(4),
+                          color: i == _index
+                              ? scheme.primary
+                              : scheme.onSurfaceVariant.withValues(alpha: 0.35),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Expanded(
+                  child: ClipRect(
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 380),
+                      switchInCurve: Curves.easeOutCubic,
+                      switchOutCurve: Curves.easeInCubic,
+                      layoutBuilder: (current, previous) => Stack(
+                        fit: StackFit.expand,
+                        children: [...previous, ?current],
+                      ),
+                      // The new match slides in from the side it comes from,
+                      // the old one out the other way, both fading.
+                      transitionBuilder: (child, animation) {
+                        final incoming = child.key == current;
+                        final from = incoming ? _direction : -_direction;
+                        return SlideTransition(
+                          position: Tween(
+                            begin: Offset(0.35 * from, 0),
+                            end: Offset.zero,
+                          ).animate(animation),
+                          child: FadeTransition(
+                            opacity: animation,
+                            child: child,
+                          ),
+                        );
+                      },
+                      child: _LiveMatch(key: current, slot: slot),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// One live match: its scoreboard stays on top, the duels and the team
+/// totals scroll under it — opened on the last duel played or being
+/// played, the earlier ones above it.
+class _LiveMatch extends ConsumerStatefulWidget {
+  const _LiveMatch({super.key, required this.slot});
+
+  final PrioritySlot slot;
+
+  @override
+  ConsumerState<_LiveMatch> createState() => _LiveMatchState();
+}
+
+class _LiveMatchState extends ConsumerState<_LiveMatch> {
+  final _expanded = <int>{};
+  final _duelKeys = <int, GlobalKey>{};
+  bool _scrolled = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final slot = widget.slot;
     final now = ref.watch(nowProvider).value ?? DateTime.now();
     final result = ref.watch(
       matchResultsProvider.select((r) => r.value?[slot.id]),
@@ -845,79 +955,70 @@ class _LiveViewState extends ConsumerState<_LiveView> {
         ref.watch(matchPlayerResultsProvider(slot.id)).value ?? const [];
     final duels = duelsOf(players);
     final scale = diffScale(duels);
-    return _Swipe(
-      onSwipe: _step,
-      child: ListView(
-        padding: const EdgeInsets.all(12),
-        children: [
-          Row(
-            children: [
-              Icon(Icons.circle, size: 12, color: scheme.error),
-              const SizedBox(width: 8),
-              Text(
-                'PRÁVĚ SE HRAJE',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.4,
-                  color: scheme.primary,
-                ),
-              ),
-              const Spacer(),
-              for (var i = 0; matches.length > 1 && i < matches.length; i++)
-                Container(
-                  width: 8,
-                  height: 8,
-                  margin: const EdgeInsets.only(left: 6),
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: i == _index
-                        ? scheme.primary
-                        : scheme.onSurfaceVariant.withValues(alpha: 0.35),
+
+    final lastPlayed = duels
+        .where((d) => d.state != DuelState.waiting)
+        .lastOrNull;
+    if (!_scrolled && lastPlayed != null) {
+      _scrolled = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final target = _duelKeys[lastPlayed.position]?.currentContext;
+        if (target == null || !target.mounted) return;
+        Scrollable.ensureVisible(target, alignment: 1);
+      });
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        MatchScoreboard(
+          slot: slot,
+          result: result,
+          players: players,
+          now: now,
+          homeColor: homeSideColor,
+          awayColor: awaySideColor,
+        ),
+        Expanded(
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (final duel in duels)
+                  Padding(
+                    key: _duelKeys.putIfAbsent(duel.position, GlobalKey.new),
+                    padding: const EdgeInsets.only(top: 8),
+                    child: DuelCard(
+                      duel: duel,
+                      scale: scale,
+                      expanded: _expanded.contains(duel.position),
+                      onTap: duel.state == DuelState.waiting
+                          ? () {}
+                          : () => setState(() {
+                              if (!_expanded.remove(duel.position)) {
+                                _expanded.add(duel.position);
+                              }
+                            }),
+                      homeColor: homeSideColor,
+                      awayColor: awaySideColor,
+                      showSetPoints: setPointsMatter(result?.discipline),
+                    ),
                   ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          MatchScoreboard(
-            slot: slot,
-            result: result,
-            players: players,
-            now: now,
-            homeColor: homeSideColor,
-            awayColor: awaySideColor,
-          ),
-          for (final duel in duels)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: DuelCard(
-                duel: duel,
-                scale: scale,
-                expanded: _expanded.contains(duel.position),
-                onTap: duel.state == DuelState.waiting
-                    ? () {}
-                    : () => setState(() {
-                        if (!_expanded.remove(duel.position)) {
-                          _expanded.add(duel.position);
-                        }
-                      }),
-                homeColor: homeSideColor,
-                awayColor: awaySideColor,
-                showSetPoints: setPointsMatter(result?.discipline),
-              ),
+                if (result != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: TeamTotalsCard(
+                      result: result,
+                      homeColor: homeSideColor,
+                      awayColor: awaySideColor,
+                      showSetPoints: setPointsMatter(result.discipline),
+                    ),
+                  ),
+              ],
             ),
-          if (result != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: TeamTotalsCard(
-                result: result,
-                homeColor: homeSideColor,
-                awayColor: awaySideColor,
-                showSetPoints: setPointsMatter(result.discipline),
-              ),
-            ),
-        ],
-      ),
+          ),
+        ),
+      ],
     );
   }
 }
