@@ -60,6 +60,10 @@ class _KioskShellState extends ConsumerState<KioskShell>
   /// Bumped on every idle reset; the drawer's match list starts over on it.
   int _resets = 0;
 
+  /// A visitor switched from the match being played to the list of
+  /// matches; the idle reset brings the live match back.
+  bool _liveHidden = false;
+
   /// The days a visitor scrolled the board to; null = never (or reset).
   ({Day first, Day last})? _boardDays;
   final _boardKey = GlobalKey<KioskBoardViewState>();
@@ -103,6 +107,7 @@ class _KioskShellState extends ConsumerState<KioskShell>
       _selected = null;
       _drawerOverride = null;
       _boardDays = null;
+      _liveHidden = false;
       _resets++;
     });
     // Board horizontal scroll resets to today too (spec §1) — imperative
@@ -237,6 +242,8 @@ class _KioskShellState extends ConsumerState<KioskShell>
               onOpenNotice: _openNotice,
               onOpenMatch: _openMatch,
               resetToken: _resets,
+              showLive: !_liveHidden,
+              onShowLive: (live) => setState(() => _liveHidden = !live),
               boardDays: (settings?.kioskFollowBoard ?? true)
                   ? _boardDays
                   : null,
@@ -303,10 +310,9 @@ class _KioskShellState extends ConsumerState<KioskShell>
                             // child takes the smallest height it may — 0.
                             heightFactor: 1,
                             child: ColoredBox(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .primary
-                                  .withValues(alpha: 0.7),
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.primary.withValues(alpha: 0.7),
                             ),
                           ),
                         )

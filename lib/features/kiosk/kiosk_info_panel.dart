@@ -38,6 +38,19 @@ double kioskDrawerWidthFor(double screenWidth, int chosen) =>
 const _resultRowHeight = 64.0;
 const _moreRowHeight = 52.0;
 
+/// Asks the server for a fresh score of the match [id] (refresh_match,
+/// forced: the kiosk's own clock decides how often). Errors are swallowed —
+/// a failed ask leaves the score as it was, and the age line says how old.
+final kioskRefreshMatchProvider = Provider<Future<void> Function(String id)>(
+  (ref) => (id) async {
+    try {
+      await Api.refreshMatch(id, force: true);
+    } catch (e) {
+      debugPrint('Kiosk: refresh of $id failed: $e');
+    }
+  },
+);
+
 /// The matches being played whose players the site has delivered — empty
 /// with live mode off. A match marked as playing but without data is not
 /// here ([kioskLiveMatches]).
@@ -110,7 +123,16 @@ class KioskDrawer extends ConsumerWidget {
     required this.onOpenMatch,
     this.resetToken = 0,
     this.boardDays,
+    this.showLive = true,
+    this.onShowLive,
   });
+
+  /// False after a visitor switched from the match being played to the
+  /// list of matches; the idle reset turns it back.
+  final bool showLive;
+
+  /// Between the live view and the list: true = the live match.
+  final void Function(bool live)? onShowLive;
 
   /// Bumped by the shell on every idle reset.
   final int resetToken;
@@ -153,6 +175,10 @@ class KioskDrawer extends ConsumerWidget {
             key: ValueKey(resetToken),
             onOpen: onOpenMatch,
             boardDays: boardDays,
+            // Back to the match being played, when one is.
+            onShowLive: content.live.isEmpty || onShowLive == null
+                ? null
+                : () => onShowLive!(true),
           )
         : null;
     return AnimatedContainer(
@@ -169,11 +195,14 @@ class KioskDrawer extends ConsumerWidget {
         maxWidth: width,
         child: !open
             ? const SizedBox.shrink()
-            : content.live.isNotEmpty
+            : content.live.isNotEmpty && (showLive || matches == null)
             ? _LiveView(
                 matches: content.live,
                 turn: liveTurn,
                 onOpenMatch: onOpenMatch,
+                onShowList: matches == null || onShowLive == null
+                    ? null
+                    : () => onShowLive!(false),
               )
             : Padding(
                 padding: const EdgeInsets.all(12),
@@ -320,12 +349,16 @@ class _Card extends StatelessWidget {
     required this.title,
     required this.child,
     this.fill = false,
+    this.action,
   });
 
   final IconData icon;
   final String title;
   final Widget child;
   final bool fill;
+
+  /// At the right of the title row.
+  final Widget? action;
 
   @override
   Widget build(BuildContext context) {
@@ -353,6 +386,7 @@ class _Card extends StatelessWidget {
                   color: scheme.primary,
                 ),
               ),
+              if (action != null) ...[const Spacer(), action!],
             ],
           ),
           const SizedBox(height: 10),
@@ -575,9 +609,17 @@ class _NoticesCardState extends State<_NoticesCard> {
 /// at either end brings one more week of the season; a tap on a finished
 /// match opens its Zápis.
 class _MatchesCard extends ConsumerStatefulWidget {
-  const _MatchesCard({super.key, required this.onOpen, this.boardDays});
+  const _MatchesCard({
+    super.key,
+    required this.onOpen,
+    this.boardDays,
+    this.onShowLive,
+  });
 
   final void Function(PrioritySlot match) onOpen;
+
+  /// Back to the match being played; null when none is.
+  final VoidCallback? onShowLive;
 
   /// The days the board shows after a visitor scrolled it; the list turns
   /// to the first match among them.
@@ -622,7 +664,8 @@ class _MatchesCardState extends ConsumerState<_MatchesCard> {
       final w = _window(back, ahead, watch: false);
       target = w.matches.where(inDays).firstOrNull;
       if (target != null) break;
-      final earlier = w.matches.isEmpty || days.first.isBefore(w.matches.first.date);
+      final earlier =
+          w.matches.isEmpty || days.first.isBefore(w.matches.first.date);
       if (earlier && w.moreBefore) {
         back++;
       } else if (!earlier && w.moreAfter) {
@@ -752,9 +795,19 @@ class _MatchesCardState extends ConsumerState<_MatchesCard> {
       ),
     );
 
+    final showLive = widget.onShowLive;
     return _Card(
       icon: Icons.emoji_events_outlined,
       title: 'ZÁPASY',
+      // A match is being played: back to it.
+      action: showLive == null
+          ? null
+          : ActionChip(
+              avatar: Icon(Icons.circle, size: 10, color: scheme.error),
+              label: const Text('Právě se hraje'),
+              visualDensity: VisualDensity.compact,
+              onPressed: showLive,
+            ),
       fill: true,
       child: matches.isEmpty
           ? Text(
@@ -854,7 +907,11 @@ class _LiveView extends ConsumerStatefulWidget {
     required this.matches,
     required this.turn,
     required this.onOpenMatch,
+    this.onShowList,
   });
+
+  /// To the list of matches; null when there is none to show.
+  final VoidCallback? onShowList;
 
   /// A tap on the score: the match's Zápis.
   final void Function(PrioritySlot match) onOpenMatch;
@@ -877,6 +934,29 @@ class _LiveViewState extends ConsumerState<_LiveView> {
   /// The match a visitor pinned (a tap on the dots): no turns until it ends
   /// — it then drops out of the live matches, and the lock with it.
   String? _lockedId;
+
+  /// Asks the server for fresh scores of the matches being played, every
+  /// [_refreshEvery] (the admin's choice).
+  Timer? _refresh;
+  Duration? _refreshEvery;
+
+  void _armRefresh(Duration every) {
+    if (_refreshEvery == every) return;
+    _refreshEvery = every;
+    _refresh?.cancel();
+    void ask() {
+      final ask = ref.read(kioskRefreshMatchProvider);
+      for (final m in widget.matches) {
+        unawaited(ask(m.id));
+      }
+    }
+
+    _refresh = Timer.periodic(every, (_) => ask());
+    // And once now: the score on screen is as old as it is.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) ask();
+    });
+  }
 
   @override
   void initState() {
@@ -922,6 +1002,7 @@ class _LiveViewState extends ConsumerState<_LiveView> {
   @override
   void dispose() {
     _timer?.cancel();
+    _refresh?.cancel();
     super.dispose();
   }
 
@@ -929,6 +1010,10 @@ class _LiveViewState extends ConsumerState<_LiveView> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final matches = widget.matches;
+    final refreshEvery = Duration(
+      seconds: ref.watch(settingsProvider).value?.kioskLiveRefreshSeconds ?? 60,
+    );
+    _armRefresh(refreshEvery);
     // A locked match stays on screen wherever the list puts it.
     final lockedAt = _locked
         ? matches.indexWhere((m) => m.id == _lockedId)
@@ -1067,11 +1152,68 @@ class _LiveViewState extends ConsumerState<_LiveView> {
                     ),
                   ),
                 ),
+                const SizedBox(height: 6),
+                _LiveFooter(
+                  slot: slot,
+                  every: refreshEvery,
+                  onShowList: widget.onShowList,
+                ),
               ],
             ),
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Under the match being played: how old its score is and how often the
+/// kiosk asks for a new one; and the way to the list of matches.
+class _LiveFooter extends ConsumerWidget {
+  const _LiveFooter({
+    required this.slot,
+    required this.every,
+    required this.onShowList,
+  });
+
+  final PrioritySlot slot;
+  final Duration every;
+  final VoidCallback? onShowList;
+
+  static String everyLabel(Duration d) {
+    final s = d.inSeconds;
+    if (s < 60) return 'každých $s s';
+    if (s == 60) return 'každou minutu';
+    return 'každé ${s ~/ 60} min';
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final scheme = Theme.of(context).colorScheme;
+    final now = ref.watch(nowProvider).value ?? DateTime.now();
+    final fetched = ref.watch(
+      matchResultsProvider.select((r) => r.value?[slot.id]?.fetchedAt),
+    );
+    final style = TextStyle(fontSize: 12, color: scheme.onSurfaceVariant);
+    return Row(
+      children: [
+        Icon(Icons.update, size: 14, color: scheme.onSurfaceVariant),
+        const SizedBox(width: 4),
+        Expanded(
+          child: Text(
+            '${fetched == null ? 'Výsledky zatím nejsou' : 'Aktualizováno ${freshnessLabel(fetched, now)}'}'
+            ' · kontrola ${everyLabel(every)}',
+            maxLines: 2,
+            style: style,
+          ),
+        ),
+        if (onShowList != null)
+          TextButton.icon(
+            onPressed: onShowList,
+            icon: const Icon(Icons.list, size: 18),
+            label: const Text('Všechny zápasy'),
+          ),
+      ],
     );
   }
 }

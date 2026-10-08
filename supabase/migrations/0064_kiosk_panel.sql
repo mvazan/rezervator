@@ -159,6 +159,11 @@ alter table schedule_settings
   add column if not exists kiosk_live_rotation_seconds smallint not null default 12
     constraint schedule_settings_kiosk_live_rotation_check
     check (kiosk_live_rotation_seconds between 3 and 120),
+  -- How often the kiosk asks for a fresh score of a match being played
+  -- (refresh_match; the server still fetches at most once a minute).
+  add column if not exists kiosk_live_refresh_seconds smallint not null default 60
+    constraint schedule_settings_kiosk_live_refresh_check
+    check (kiosk_live_refresh_seconds between 30 and 600),
   -- The Zápis modal's share of the screen (100 = full, with a close button).
   add column if not exists kiosk_zapis_percent smallint not null default 80
     constraint schedule_settings_kiosk_zapis_check
@@ -197,6 +202,7 @@ begin
                           - 'kiosk_live_rotation_seconds'
                           - 'kiosk_idle_seconds'
                           - 'kiosk_live_layout' - 'kiosk_follow_board'
+                          - 'kiosk_live_refresh_seconds'
                    from schedule_settings s where s.tenant_id = v_tenant),
     'blocks', coalesce((
       select jsonb_agg(to_jsonb(b) - 'tenant_id')

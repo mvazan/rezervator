@@ -454,6 +454,20 @@ class KioskSettingsScreen extends ConsumerWidget {
                 _choice(
                   context,
                   settings,
+                  'Kontrola výsledků hraného zápasu',
+                  settings?.kioskLiveRefreshSeconds ?? 60,
+                  'kiosk_live_refresh_seconds',
+                  const [30, 60, 120, 300],
+                  (n) => n < 60
+                      ? 'každých $n s'
+                      : n == 60
+                          ? 'každou minutu'
+                          : 'každé ${n ~/ 60} min',
+                ),
+              if (settings?.kioskLiveMode ?? true)
+                _choice(
+                  context,
+                  settings,
                   'Střídání aktuálních zápasů',
                   settings?.kioskLiveRotationSeconds ?? 12,
                   'kiosk_live_rotation_seconds',

@@ -1289,6 +1289,8 @@ void main() {
       int idleSeconds = 60,
       bool followBoard = true,
       bool Function()? socketOpen,
+      void Function(String id)? onRefresh,
+      int liveRefresh = 60,
       KioskLiveLayout liveLayout = KioskLiveLayout.full,
       Stream<Map<String, MatchResult>>? resultsStream,
       Map<String, List<MatchPlayerResult>> lineups = const {},
@@ -1322,6 +1324,7 @@ void main() {
               kioskPastDays: pastDays,
               kioskIdleSeconds: idleSeconds,
               kioskFollowBoard: followBoard,
+              kioskLiveRefreshSeconds: liveRefresh,
               kioskLiveLayout: liveLayout,
             ),
           ),
@@ -1337,6 +1340,9 @@ void main() {
         playersProvider.overrideWith((ref) async => players),
         messagesProvider.overrideWith((ref) => Stream.value(notices)),
         kioskSocketOpenProvider.overrideWithValue(socketOpen ?? () => true),
+        kioskRefreshMatchProvider.overrideWithValue(
+          (id) async => onRefresh?.call(id),
+        ),
         matchResultsProvider.overrideWith(
           (ref) => resultsStream ?? Stream.value(results),
         ),
@@ -2405,6 +2411,47 @@ void main() {
       });
       await tester.pumpAndSettle();
       expect(inDrawer('Druzí'), isTrue);
+
+      await finish(tester);
+    });
+
+    testWidgets('the live view: how old the score is, a fresh one asked for '
+        'at the admin\'s pace, and the way to all matches and back', (
+      tester,
+    ) async {
+      fullHd(tester);
+      final asked = <String>[];
+      await tester.pumpWidget(
+        app(
+          slots: [fed('m', day, 'Hrají'), fed('next', day.addDays(2), 'Příští')],
+          results: {'m': res('m', 'in_progress', 2, 1)},
+          lineups: {'m': lineup},
+          liveRefresh: 30,
+          onRefresh: asked.add,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Aktualizováno'), findsOneWidget);
+      expect(find.textContaining('kontrola každých 30 s'), findsOneWidget);
+      // Asked once on opening, then every 30 s.
+      expect(asked, ['m']);
+      await tester.pump(const Duration(seconds: 31));
+      expect(asked, ['m', 'm']);
+
+      // To all matches…
+      await tester.tap(find.text('Všechny zápasy'));
+      await tester.pumpAndSettle();
+      expect(find.text('ZÁPASY'), findsOneWidget);
+      expect(find.text('PRÁVĚ SE HRAJE'), findsNothing);
+      // …and back by the chip, or by the idle reset.
+      await tester.tap(find.text('Právě se hraje'));
+      await tester.pumpAndSettle();
+      expect(find.text('PRÁVĚ SE HRAJE'), findsOneWidget);
+      await tester.tap(find.text('Všechny zápasy'));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 61));
+      await tester.pumpAndSettle();
+      expect(find.text('PRÁVĚ SE HRAJE'), findsOneWidget);
 
       await finish(tester);
     });

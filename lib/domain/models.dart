@@ -651,6 +651,7 @@ class ScheduleSettings {
     this.kioskShowMatches = true,
     this.kioskShowUpcoming = true,
     this.kioskFollowBoard = true,
+    this.kioskLiveRefreshSeconds = 60,
     this.kioskLiveMode = true,
     this.kioskWeeksBack = 2,
     this.kioskWeeksAhead = 1,
@@ -705,6 +706,9 @@ class ScheduleSettings {
   /// The match list follows the board: a visitor who scrolls the board to
   /// other days sees the list turn to their matches (0064).
   final bool kioskFollowBoard;
+
+  /// How often the kiosk asks for a fresh score of a match being played.
+  final int kioskLiveRefreshSeconds;
   final bool kioskLiveMode;
   final int kioskWeeksBack;
   final int kioskWeeksAhead;
@@ -778,6 +782,8 @@ class ScheduleSettings {
         kioskShowMatches: json['kiosk_show_matches'] as bool? ?? true,
         kioskShowUpcoming: json['kiosk_show_upcoming'] as bool? ?? true,
         kioskFollowBoard: json['kiosk_follow_board'] as bool? ?? true,
+        kioskLiveRefreshSeconds:
+            json['kiosk_live_refresh_seconds'] as int? ?? 60,
         kioskLiveMode: json['kiosk_live_mode'] as bool? ?? true,
         kioskWeeksBack: json['kiosk_weeks_back'] as int? ?? 2,
         kioskWeeksAhead: json['kiosk_weeks_ahead'] as int? ?? 1,
