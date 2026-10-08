@@ -75,9 +75,7 @@ class KioskLiveScore extends StatelessWidget {
                   ),
                 ),
               ),
-              Expanded(
-                child: Text(slot.awayTeam, maxLines: 2, style: team),
-              ),
+              Expanded(child: Text(slot.awayTeam, maxLines: 2, style: team)),
             ],
           ),
           if (pinsHome != null && pinsAway != null)
@@ -169,7 +167,11 @@ class KioskLiveCompact extends StatefulWidget {
     required this.slot,
     required this.result,
     required this.duels,
+    this.onOpenZapis,
   });
+
+  /// A tap on the score; null when there is no Zápis to show.
+  final VoidCallback? onOpenZapis;
 
   final PrioritySlot slot;
   final MatchResult? result;
@@ -185,21 +187,32 @@ class _KioskLiveCompactState extends State<KioskLiveCompact> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return SingleChildScrollView(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          KioskLiveScore(
+    // The score stays put; the duels scroll under it if they must.
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        GestureDetector(
+          onTap: widget.onOpenZapis,
+          child: KioskLiveScore(
             slot: widget.slot,
             result: widget.result,
             duels: widget.duels,
           ),
-          for (final duel in widget.duels) ...[
-            const SizedBox(height: 6),
-            _compactDuel(context, scheme, duel),
-          ],
-        ],
-      ),
+        ),
+        Expanded(
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (final duel in widget.duels) ...[
+                  const SizedBox(height: 6),
+                  _compactDuel(context, scheme, duel),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -223,10 +236,10 @@ class _KioskLiveCompactState extends State<KioskLiveCompact> {
     final lead = leadLabel(duel.diff);
     final done = duel.state == DuelState.done;
     TextStyle total(bool winner) => TextStyle(
-          fontSize: 26,
-          fontWeight: done && winner ? FontWeight.w800 : FontWeight.w400,
-          fontFeatures: _tabular,
-        );
+      fontSize: 26,
+      fontWeight: done && winner ? FontWeight.w800 : FontWeight.w400,
+      fontFeatures: _tabular,
+    );
     final homeWins = (duel.diff ?? 0) > 0;
     final awayWins = (duel.diff ?? 0) < 0;
     return Material(
@@ -321,7 +334,11 @@ class KioskLiveTable extends StatefulWidget {
     required this.slot,
     required this.result,
     required this.duels,
+    this.onOpenZapis,
   });
+
+  /// A tap on the score; null when there is no Zápis to show.
+  final VoidCallback? onOpenZapis;
 
   final PrioritySlot slot;
   final MatchResult? result;
@@ -337,20 +354,31 @@ class _KioskLiveTableState extends State<KioskLiveTable> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return SingleChildScrollView(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          KioskLiveScore(
+    // The score stays put; the rows scroll under it if they must.
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        GestureDetector(
+          onTap: widget.onOpenZapis,
+          child: KioskLiveScore(
             slot: widget.slot,
             result: widget.result,
             duels: widget.duels,
           ),
-          const SizedBox(height: 8),
-          for (var i = 0; i < widget.duels.length; i++)
-            _row(context, scheme, widget.duels[i], i.isOdd),
-        ],
-      ),
+        ),
+        const SizedBox(height: 8),
+        Expanded(
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (var i = 0; i < widget.duels.length; i++)
+                  _row(context, scheme, widget.duels[i], i.isOdd),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -362,10 +390,10 @@ class _KioskLiveTableState extends State<KioskLiveTable> {
     final homeWins = (duel.diff ?? 0) > 0;
     final awayWins = (duel.diff ?? 0) < 0;
     TextStyle total(bool winner) => TextStyle(
-          fontSize: 18,
-          fontWeight: done && winner ? FontWeight.w800 : FontWeight.w500,
-          fontFeatures: _tabular,
-        );
+      fontSize: 18,
+      fontWeight: done && winner ? FontWeight.w800 : FontWeight.w500,
+      fontFeatures: _tabular,
+    );
     String surname(MatchPlayerResult? p) => surnameOf(p?.playerName);
     return Material(
       color: odd
@@ -411,8 +439,8 @@ class _KioskLiveTableState extends State<KioskLiveTable> {
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w700,
-                        color: leadColor(context, lead) ??
-                            scheme.onSurfaceVariant,
+                        color:
+                            leadColor(context, lead) ?? scheme.onSurfaceVariant,
                       ),
                     ),
                   ),

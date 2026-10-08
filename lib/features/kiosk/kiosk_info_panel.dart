@@ -162,7 +162,11 @@ class KioskDrawer extends ConsumerWidget {
         child: !open
             ? const SizedBox.shrink()
             : content.live.isNotEmpty
-            ? _LiveView(matches: content.live, turn: liveTurn)
+            ? _LiveView(
+                matches: content.live,
+                turn: liveTurn,
+                onOpenMatch: onOpenMatch,
+              )
             : Padding(
                 padding: const EdgeInsets.all(12),
                 child: Column(
@@ -781,7 +785,14 @@ class _MatchRow extends StatelessWidget {
 /// match detail: the scoreboard, one card per duel, the team totals. Several
 /// live matches take turns every [turn].
 class _LiveView extends ConsumerStatefulWidget {
-  const _LiveView({required this.matches, required this.turn});
+  const _LiveView({
+    required this.matches,
+    required this.turn,
+    required this.onOpenMatch,
+  });
+
+  /// A tap on the score: the match's Zápis.
+  final void Function(PrioritySlot match) onOpenMatch;
 
   final List<PrioritySlot> matches;
   final Duration turn;
@@ -927,7 +938,11 @@ class _LiveViewState extends ConsumerState<_LiveView> {
                           ),
                         );
                       },
-                      child: _LiveMatch(key: current, slot: slot),
+                      child: _LiveMatch(
+                        key: current,
+                        slot: slot,
+                        onOpenMatch: widget.onOpenMatch,
+                      ),
                     ),
                   ),
                 ),
@@ -944,7 +959,9 @@ class _LiveViewState extends ConsumerState<_LiveView> {
 /// totals scroll under it — opened on the last duel played or being
 /// played, the earlier ones above it.
 class _LiveMatch extends ConsumerStatefulWidget {
-  const _LiveMatch({super.key, required this.slot});
+  const _LiveMatch({super.key, required this.slot, required this.onOpenMatch});
+
+  final void Function(PrioritySlot match) onOpenMatch;
 
   final PrioritySlot slot;
 
@@ -985,25 +1002,40 @@ class _LiveMatchState extends ConsumerState<_LiveMatch> {
       });
     }
 
+    // The score opens the Zápis — when there are players to put in it.
+    final zapis = players.isEmpty ? null : () => widget.onOpenMatch(slot);
     switch (ref.watch(settingsProvider).value?.kioskLiveLayout ??
         KioskLiveLayout.full) {
       case KioskLiveLayout.compact:
-        return KioskLiveCompact(slot: slot, result: result, duels: duels);
+        return KioskLiveCompact(
+          slot: slot,
+          result: result,
+          duels: duels,
+          onOpenZapis: zapis,
+        );
       case KioskLiveLayout.table:
-        return KioskLiveTable(slot: slot, result: result, duels: duels);
+        return KioskLiveTable(
+          slot: slot,
+          result: result,
+          duels: duels,
+          onOpenZapis: zapis,
+        );
       case KioskLiveLayout.full:
         break;
     }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        MatchScoreboard(
-          slot: slot,
-          result: result,
-          players: players,
-          now: now,
-          homeColor: homeSideColor,
-          awayColor: awaySideColor,
+        GestureDetector(
+          onTap: zapis,
+          child: MatchScoreboard(
+            slot: slot,
+            result: result,
+            players: players,
+            now: now,
+            homeColor: homeSideColor,
+            awayColor: awaySideColor,
+          ),
         ),
         Expanded(
           child: SingleChildScrollView(

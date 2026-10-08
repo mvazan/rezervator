@@ -2224,6 +2224,38 @@ void main() {
       });
     }
 
+    for (final layout in KioskLiveLayout.values) {
+      testWidgets('${layout.name}: a tap on the live score opens the Zápis', (
+        tester,
+      ) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            slots: [fed('m', day, 'Hrají')],
+            results: {'m': res('m', 'in_progress', 2, 1)},
+            lineups: {'m': lineup},
+            liveLayout: layout,
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find
+              .descendant(
+                of: find.byType(KioskDrawer),
+                // The full scoreboard sets the points as separate digits.
+                matching: layout == KioskLiveLayout.full
+                    ? find.text('průběžně')
+                    : find.text('2 : 1'),
+              )
+              .first,
+        );
+        await tester.pumpAndSettle();
+        expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
+
+        await finish(tester);
+      });
+    }
+
     testWidgets('a swipe turns the live matches', (tester) async {
       fullHd(tester);
       final second = [
