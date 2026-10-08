@@ -5,14 +5,11 @@ library;
 import 'messages.dart' show splitNotices;
 import 'models.dart';
 
-/// How many finished matches the panel lists.
-const kioskRecentMatches = 3;
-
-/// The notices on the wall right now: kind notice, not expired, oldest
-/// posted first (the Nástěnka order).
+/// The notices on the wall right now: kind notice, not expired, not hidden
+/// from the kiosk by the admin, oldest posted first (the Nástěnka order).
 List<Message> kioskNotices(Iterable<Message> messages, DateTime now) =>
     splitNotices(
-      messages.where((m) => m.kind == MessageKind.notice),
+      messages.where((m) => m.kind == MessageKind.notice && m.showOnKiosk),
       now,
     ).active;
 
@@ -21,12 +18,14 @@ bool _decided(MatchResult? r) =>
 
 /// The alley's federation matches for the panel: [next] is the first match
 /// not decided yet that is today or later (a match in progress counts —
-/// it is "now"), [recent] the last [kioskRecentMatches] decided ones up to
-/// today, oldest first (chronological, like every list in the app).
+/// it is "now"), [recent] the decided ones of the last [historyDays] days up
+/// to today, oldest first (chronological, like every list in the app).
+/// [historyDays] 0 lists none.
 ({PrioritySlot? next, List<PrioritySlot> recent}) kioskMatches({
   required List<PrioritySlot> slots,
   required Map<String, MatchResult> results,
   required Day today,
+  required int historyDays,
 }) {
   final matches =
       [
@@ -43,12 +42,14 @@ bool _decided(MatchResult? r) =>
       break;
     }
   }
-  final decided = [
+  final since = today.addDays(-historyDays);
+  final recent = [
     for (final s in matches)
-      if (!s.date.isAfter(today) && _decided(results[s.id])) s,
+      if (historyDays > 0 &&
+          !s.date.isBefore(since) &&
+          !s.date.isAfter(today) &&
+          _decided(results[s.id]))
+        s,
   ];
-  final recent = decided.length > kioskRecentMatches
-      ? decided.sublist(decided.length - kioskRecentMatches)
-      : decided;
   return (next: next, recent: recent);
 }

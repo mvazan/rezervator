@@ -6,7 +6,9 @@ import 'package:rezervator/core/ui.dart' show today;
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/clubhouse/match_detail_screen.dart';
+import 'package:rezervator/features/clubhouse/widgets/legacy_score_sheet.dart';
 import 'package:rezervator/features/kiosk/kiosk_board_view.dart';
+import 'package:rezervator/features/kiosk/kiosk_info_panel.dart';
 import 'package:rezervator/features/kiosk/kiosk_shell.dart';
 import 'package:rezervator/features/kiosk/name_picker.dart';
 import 'package:rezervator/features/schedule/widgets/calendar_board.dart';
@@ -1176,19 +1178,20 @@ void main() {
     },
   );
 
-  group('side panel (notices and matches)', () {
-    final notice = Message(
-      id: 'n1',
+  group('side drawer (notices and matches)', () {
+    Message notice(String id, String title, {bool show = true}) => Message(
+      id: id,
       kind: MessageKind.notice,
       audience: MessageAudience.all,
       authorId: 'a',
       authorRole: MessageAuthorRole.admin,
       onDate: null,
       blockId: null,
-      title: 'Brigáda v sobotu',
+      title: title,
       body: 'Sejdeme se v devět na dráhách.',
       expiresAt: null,
       notify: true,
+      showOnKiosk: show,
       createdAt: DateTime(2026, 9, 1),
       updatedAt: DateTime(2026, 9, 1),
     );
@@ -1202,14 +1205,38 @@ void main() {
       awayTeam: 'Soupeř',
       importKey: 'cka:$id',
     );
+    final finished = MatchResult.fromJson({
+      'match_id': 'old',
+      'status': 'finished',
+      'home_points': 6,
+      'away_points': 2,
+      'fetched_at': '2026-09-17T21:00:00+00:00',
+    });
 
     Widget app({
       List<Message> notices = const [],
       List<PrioritySlot> slots = const [],
       Map<String, MatchResult> results = const {},
+      bool drawerOpen = false,
+      bool showNotices = true,
+      bool showMatches = true,
+      int historyDays = 21,
     }) => ProviderScope(
       overrides: [
-        settingsProvider.overrideWith((ref) => Stream.value(settings)),
+        settingsProvider.overrideWith(
+          (ref) => Stream.value(
+            ScheduleSettings(
+              laneCount: settings.laneCount,
+              trainingWeekdays: settings.trainingWeekdays,
+              bookingHorizonDays: settings.bookingHorizonDays,
+              maxActiveReservations: settings.maxActiveReservations,
+              kioskDrawerOpen: drawerOpen,
+              kioskShowNotices: showNotices,
+              kioskShowMatches: showMatches,
+              kioskMatchesHistoryDays: historyDays,
+            ),
+          ),
+        ),
         timeBlocksProvider.overrideWith((ref) => Stream.value(const [b1])),
         dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
         prioritySlotsProvider.overrideWithValue(slots),
@@ -1220,78 +1247,209 @@ void main() {
         playersProvider.overrideWith((ref) async => players),
         messagesProvider.overrideWith((ref) => Stream.value(notices)),
         matchResultsProvider.overrideWith((ref) => Stream.value(results)),
+        matchPlayerResultsProvider.overrideWith(
+          (ref, id) => Stream.value(const <MatchPlayerResult>[]),
+        ),
       ],
       child: const MaterialApp(home: KioskShell()),
     );
 
-    testWidgets('shows the notice, the next match and the last result', (
-      tester,
-    ) async {
-      tester.view.physicalSize = const Size(1600, 900);
+    void fullHd(WidgetTester tester) {
+      tester.view.physicalSize = const Size(1920, 1080);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
+    }
+
+    testWidgets('closed by default: a strip, tap opens it, tap closes it', (
+      tester,
+    ) async {
+      fullHd(tester);
+      await tester.pumpWidget(app(notices: [notice('n1', 'Brigáda')]));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Brigáda'), findsNothing);
+      expect(find.byIcon(Icons.chevron_left), findsOneWidget);
+
+      await tester.tap(find.byIcon(Icons.chevron_left));
+      await tester.pumpAndSettle();
+      expect(find.text('Brigáda'), findsOneWidget);
+
+      await tester.tap(find.byIcon(Icons.chevron_right));
+      await tester.pumpAndSettle();
+      expect(find.text('Brigáda'), findsNothing);
+
+      await finish(tester);
+    });
+
+    testWidgets('after a minute without a touch it returns to its default', (
+      tester,
+    ) async {
+      fullHd(tester);
+      await tester.pumpWidget(app(notices: [notice('n1', 'Brigáda')]));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.chevron_left));
+      await tester.pumpAndSettle();
+      expect(find.text('Brigáda'), findsOneWidget);
+
+      await tester.pump(const Duration(seconds: 61));
+      await tester.pumpAndSettle();
+      expect(find.text('Brigáda'), findsNothing);
+
+      await finish(tester);
+    });
+
+    testWidgets('open by default when the admin says so; idle reopens it', (
+      tester,
+    ) async {
+      fullHd(tester);
+      await tester.pumpWidget(
+        app(notices: [notice('n1', 'Brigáda')], drawerOpen: true),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Brigáda'), findsOneWidget);
+
+      await tester.tap(find.byIcon(Icons.chevron_right));
+      await tester.pumpAndSettle();
+      expect(find.text('Brigáda'), findsNothing);
+
+      await tester.pump(const Duration(seconds: 61));
+      await tester.pumpAndSettle();
+      expect(find.text('Brigáda'), findsOneWidget);
+
+      await finish(tester);
+    });
+
+    testWidgets('a notice hidden from the kiosk is not shown', (tester) async {
+      fullHd(tester);
       await tester.pumpWidget(
         app(
-          notices: [notice],
-          slots: [
-            fed('old', t.addDays(-3), 'Domácí'),
-            fed('next', t.addDays(2), 'Příští'),
-          ],
-          results: {
-            'old': MatchResult.fromJson(const {
-              'match_id': 'old',
-              'status': 'finished',
-              'home_points': 6,
-              'away_points': 2,
-              'fetched_at': '2026-09-17T21:00:00+00:00',
-            }),
-          },
+          notices: [notice('n1', 'Vidět'), notice('n2', 'Skryté', show: false)],
+          drawerOpen: true,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Vidět'), findsOneWidget);
+      expect(find.text('Skryté'), findsNothing);
+
+      await finish(tester);
+    });
+
+    testWidgets('the admin switches the notices and the matches off', (
+      tester,
+    ) async {
+      fullHd(tester);
+      await tester.pumpWidget(
+        app(
+          notices: [notice('n1', 'Brigáda')],
+          slots: [fed('next', t.addDays(2), 'Příští')],
+          drawerOpen: true,
+          showNotices: false,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Brigáda'), findsNothing);
+      expect(find.text('PŘÍŠTÍ ZÁPAS'), findsOneWidget);
+      await finish(tester);
+
+      await tester.pumpWidget(
+        app(
+          notices: [notice('n1', 'Brigáda')],
+          slots: [fed('next', t.addDays(2), 'Příští')],
+          drawerOpen: true,
+          showMatches: false,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Brigáda'), findsOneWidget);
+      expect(find.text('PŘÍŠTÍ ZÁPAS'), findsNothing);
+
+      await finish(tester);
+    });
+
+    testWidgets('history days decide which finished matches are listed', (
+      tester,
+    ) async {
+      fullHd(tester);
+      final slots = [
+        fed('old', t.addDays(-3), 'Čerstvý'),
+        fed('older', t.addDays(-20), 'Starší'),
+      ];
+      final results = {
+        'old': finished,
+        'older': MatchResult.fromJson({
+          'match_id': 'older',
+          'status': 'finished',
+          'home_points': 1,
+          'away_points': 7,
+          'fetched_at': '2026-09-17T21:00:00+00:00',
+        }),
+      };
+      await tester.pumpWidget(
+        app(slots: slots, results: results, drawerOpen: true, historyDays: 7),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('6 : 2'), findsOneWidget);
+      expect(find.text('1 : 7'), findsNothing);
+      await finish(tester);
+
+      await tester.pumpWidget(
+        app(slots: slots, results: results, drawerOpen: true, historyDays: 28),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('6 : 2'), findsOneWidget);
+      expect(find.text('1 : 7'), findsOneWidget);
+
+      await finish(tester);
+    });
+
+    testWidgets('a finished match opens its Zápis; the idle reset closes it', (
+      tester,
+    ) async {
+      fullHd(tester);
+      await tester.pumpWidget(
+        app(
+          slots: [fed('old', t.addDays(-3), 'Domácí')],
+          results: {'old': finished},
+          drawerOpen: true,
         ),
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('Brigáda v sobotu'), findsOneWidget);
-      expect(find.text('PŘÍŠTÍ ZÁPAS'), findsOneWidget);
-      expect(find.text('POSLEDNÍ VÝSLEDKY'), findsOneWidget);
-      expect(find.text('6 : 2'), findsOneWidget);
-
-      // Tapping the notice reads it in full, and nothing here books.
-      await tester.tap(find.text('Brigáda v sobotu'));
+      await tester.tap(find.text('6 : 2'));
       await tester.pumpAndSettle();
-      expect(find.byType(AlertDialog), findsOneWidget);
-      expect(find.text('Sejdeme se v devět na dráhách.'), findsWidgets);
+      expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
+
+      await tester.pump(const Duration(seconds: 61));
+      await tester.pumpAndSettle();
+      expect(find.byType(LegacyScoreSheetPage), findsNothing);
 
       await finish(tester);
     });
 
-    testWidgets('an alley with no notice and no match gets no panel', (
-      tester,
-    ) async {
-      tester.view.physicalSize = const Size(1600, 900);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.reset);
+    testWidgets('a match without a score has no Zápis to open', (tester) async {
+      fullHd(tester);
+      await tester.pumpWidget(
+        app(slots: [fed('next', t.addDays(2), 'Příští')], drawerOpen: true),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.descendant(
+          of: find.byType(KioskDrawer),
+          matching: find.textContaining('Příští'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(LegacyScoreSheetPage), findsNothing);
+
+      await finish(tester);
+    });
+
+    testWidgets('an alley with nothing to show gets no drawer', (tester) async {
+      fullHd(tester);
       await tester.pumpWidget(app());
       await tester.pumpAndSettle();
-
-      expect(find.text('NÁSTĚNKA'), findsNothing);
-      expect(find.text('ZÁPASY'), findsNothing);
-
-      await finish(tester);
-    });
-
-    testWidgets('a narrow screen puts the panel under the board', (
-      tester,
-    ) async {
-      tester.view.physicalSize = const Size(800, 900);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.reset);
-      await tester.pumpWidget(app(notices: [notice]));
-      await tester.pumpAndSettle();
-
-      expect(find.text('NÁSTĚNKA'), findsOneWidget);
-      final card = tester.getTopLeft(find.text('NÁSTĚNKA'));
-      final board = tester.getTopLeft(find.byType(KioskBoardView));
-      expect(card.dy, greaterThan(board.dy));
+      expect(find.byIcon(Icons.chevron_left), findsNothing);
+      expect(find.byIcon(Icons.chevron_right), findsNothing);
 
       await finish(tester);
     });

@@ -2886,6 +2886,26 @@ $_$;
 ALTER FUNCTION "public"."message_send"("p_kind" "text", "p_audience" "text", "p_on_date" "date", "p_block_id" "uuid", "p_title" "text", "p_body" "text", "p_expires_at" timestamp with time zone, "p_notify" boolean) OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."message_set_kiosk"("p_id" "uuid", "p_show" boolean) RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  if not is_admin() then
+    raise exception 'not_allowed';
+  end if;
+  update messages set show_on_kiosk = coalesce(p_show, true)
+   where id = p_id and tenant_id = current_tenant_id() and kind = 'notice';
+  if not found then
+    raise exception 'unknown_message';
+  end if;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."message_set_kiosk"("p_id" "uuid", "p_show" boolean) OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."message_update"("p_id" "uuid", "p_title" "text", "p_body" "text", "p_expires_at" timestamp with time zone) RETURNS "void"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -3394,6 +3414,8 @@ begin
     'tenant_name', (select name from tenants where id = v_tenant),
     'settings', (select to_jsonb(s) - 'tenant_id'
                           - 'duty_reminder_enabled' - 'duty_reminder_days'
+                          - 'kiosk_show_notices' - 'kiosk_show_matches'
+                          - 'kiosk_matches_history_days' - 'kiosk_drawer_open'
                    from schedule_settings s where s.tenant_id = v_tenant),
     'blocks', coalesce((
       select jsonb_agg(to_jsonb(b) - 'tenant_id')
@@ -5408,6 +5430,7 @@ CREATE TABLE IF NOT EXISTS "public"."messages" (
     "notify" boolean DEFAULT true NOT NULL,
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "show_on_kiosk" boolean DEFAULT true NOT NULL,
     CONSTRAINT "messages_audience_check" CHECK (("audience" = ANY (ARRAY['all'::"text", 'day'::"text", 'block'::"text", 'admins'::"text", 'duty'::"text"]))),
     CONSTRAINT "messages_author_role_check" CHECK (("author_role" = ANY (ARRAY['admin'::"text", 'player'::"text"]))),
     CONSTRAINT "messages_body_check" CHECK ((("char_length"(TRIM(BOTH FROM "body")) >= 1) AND ("char_length"(TRIM(BOTH FROM "body")) <=
@@ -5599,8 +5622,13 @@ CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     "kiosk_fit_day" boolean DEFAULT true NOT NULL,
     "duty_reminder_enabled" boolean DEFAULT false NOT NULL,
     "duty_reminder_days" smallint DEFAULT 1 NOT NULL,
+    "kiosk_show_notices" boolean DEFAULT true NOT NULL,
+    "kiosk_show_matches" boolean DEFAULT true NOT NULL,
+    "kiosk_matches_history_days" smallint DEFAULT 21 NOT NULL,
+    "kiosk_drawer_open" boolean DEFAULT false NOT NULL,
     CONSTRAINT "schedule_settings_booking_horizon_days_check" CHECK ((("booking_horizon_days" >= 1) AND ("booking_horizon_days" <= 90))),
     CONSTRAINT "schedule_settings_duty_reminder_days_check" CHECK ((("duty_reminder_days" >= 1) AND ("duty_reminder_days" <= 14))),
+    CONSTRAINT "schedule_settings_kiosk_history_check" CHECK ((("kiosk_matches_history_days" >= 0) AND ("kiosk_matches_history_days" <= 120))),
     CONSTRAINT "schedule_settings_lane_count_check" CHECK ((("lane_count" >= 1) AND ("lane_count" <= 12))),
     CONSTRAINT "schedule_settings_max_active_reservations_check" CHECK ((("max_active_reservations" >= 1) AND ("max_active_reservations" <= 50)))
 );
@@ -7216,6 +7244,12 @@ GRANT ALL ON FUNCTION "public"."message_recipients_stamp_reacted"() TO "service_
 REVOKE ALL ON FUNCTION "public"."message_send"("p_kind" "text", "p_audience" "text", "p_on_date" "date", "p_block_id" "uuid", "p_title" "text", "p_body" "text", "p_expires_at" timestamp with time zone, "p_notify" boolean) FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."message_send"("p_kind" "text", "p_audience" "text", "p_on_date" "date", "p_block_id" "uuid", "p_title" "text", "p_body" "text", "p_expires_at" timestamp with time zone, "p_notify" boolean) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."message_send"("p_kind" "text", "p_audience" "text", "p_on_date" "date", "p_block_id" "uuid", "p_title" "text", "p_body" "text", "p_expires_at" timestamp with time zone, "p_notify" boolean) TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."message_set_kiosk"("p_id" "uuid", "p_show" boolean) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."message_set_kiosk"("p_id" "uuid", "p_show" boolean) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."message_set_kiosk"("p_id" "uuid", "p_show" boolean) TO "service_role";
 
 
 

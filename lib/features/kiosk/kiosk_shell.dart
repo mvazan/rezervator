@@ -20,6 +20,7 @@ import '../../domain/schedule.dart'
     show headerEventLabel, isDayOpen, nextTrainingDay;
 import 'kiosk_board_view.dart';
 import 'kiosk_info_panel.dart';
+import 'kiosk_zapis_page.dart';
 import 'name_picker.dart';
 
 const _idleTimeout = Duration(seconds: 60);
@@ -34,6 +35,10 @@ class KioskShell extends ConsumerStatefulWidget {
 class _KioskShellState extends ConsumerState<KioskShell> {
   Timer? _idleTimer;
   PlayerName? _selected;
+
+  /// What a visitor did to the drawer (true = open); null = the admin's
+  /// resting state. The idle reset puts it back.
+  bool? _drawerOverride;
   final _boardKey = GlobalKey<KioskBoardViewState>();
 
   @override
@@ -60,7 +65,10 @@ class _KioskShellState extends ConsumerState<KioskShell> {
     // dialog, which captured the previously selected player and would let
     // the next visitor book under their name.
     Navigator.of(context, rootNavigator: true).popUntil((r) => r.isFirst);
-    setState(() => _selected = null);
+    setState(() {
+      _selected = null;
+      _drawerOverride = null;
+    });
     // Board horizontal scroll resets to today too (spec §1) — imperative
     // because the board owns its own PageController; there's no offset
     // field on this shell to reset via rebuild the way _weekOffset used to.
@@ -81,35 +89,72 @@ class _KioskShellState extends ConsumerState<KioskShell> {
 
   void _clearSelection() => setState(() => _selected = null);
 
-  /// The board, with the notices and matches beside it on a wide screen
-  /// and under it on a narrow one — nothing at all when there is none.
-  Widget _boardWithPanel() {
-    final board = KioskBoardView(key: _boardKey, selected: _selected);
-    if (!ref.watch(kioskPanelHasContentProvider)) return board;
-    return LayoutBuilder(
-      builder: (context, c) {
-        if (c.maxWidth >= 1000) {
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Expanded(child: board),
-              const SizedBox(
-                width: kioskRailWidth,
-                child: KioskInfoPanel(rail: true),
-              ),
-            ],
-          );
-        }
-        return Column(
-          children: [
-            Expanded(child: board),
-            const SizedBox(
-              height: kioskStripHeight,
-              child: KioskInfoPanel(rail: false),
+  /// The kiosk's own theme — dialogs and routes are pushed on the root
+  /// navigator, outside the [Theme] this shell wraps around itself.
+  ThemeData _kioskTheme() => buildTheme(
+        (ref.read(settingsProvider).value?.kioskDark ?? true)
+            ? Brightness.dark
+            : Brightness.light,
+      );
+
+  /// A route or dialog above the shell is outside its idle [Listener]:
+  /// give it its own, so reading a Zápis counts as touching the kiosk.
+  Widget _touchable(Widget child) => Listener(
+        onPointerDown: (_) => _touch(),
+        behavior: HitTestBehavior.translucent,
+        child: Theme(data: _kioskTheme(), child: child),
+      );
+
+  void _openNotice(Message notice) {
+    showDialog<void>(
+      context: context,
+      builder: (context) => _touchable(
+        AlertDialog(
+          title: Text(notice.title ?? ''),
+          content: SizedBox(
+            width: 560,
+            child: SingleChildScrollView(child: Text(notice.body)),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Zavřít'),
             ),
           ],
-        );
-      },
+        ),
+      ),
+    );
+  }
+
+  void _openMatch(PrioritySlot match) {
+    Navigator.of(context, rootNavigator: true).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _touchable(KioskZapisPage(slot: match)),
+      ),
+    );
+  }
+
+  /// The board with the drawer (notices and matches) on its right — no
+  /// drawer at all when there is nothing to put in it.
+  Widget _boardWithPanel() {
+    final board = KioskBoardView(key: _boardKey, selected: _selected);
+    final content = ref.watch(kioskPanelContentProvider);
+    if (content == null) return board;
+    final restingOpen =
+        ref.watch(settingsProvider).value?.kioskDrawerOpen ?? false;
+    final open = _drawerOverride ?? restingOpen;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(child: board),
+        KioskDrawer(
+          content: content,
+          open: open,
+          onToggle: () => setState(() => _drawerOverride = !open),
+          onOpenNotice: _openNotice,
+          onOpenMatch: _openMatch,
+        ),
+      ],
     );
   }
 

@@ -45,6 +45,7 @@ void main() {
     Stream<List<Message>>? noticeStream,
     NoticeUpdate? updateNotice,
     Future<void> Function(String id)? deleteNotice,
+    Future<void> Function(String id, bool show)? setOnKiosk,
   }) =>
       ProviderScope(
         overrides: [
@@ -63,6 +64,7 @@ void main() {
             updateNotice: updateNotice ??
                 (id, {required title, required body, expiresAt}) async {},
             deleteNotice: deleteNotice ?? (_) async {},
+            setOnKiosk: setOnKiosk ?? (_, _) async {},
           ),
         ),
       );
@@ -286,6 +288,44 @@ void main() {
           lessThanOrEqualTo(tester.getBottomLeft(sheet).dy));
     });
   }
+
+  testWidgets('the admin hides a notice from the kiosk and shows it again',
+      (tester) async {
+    final calls = <(String, bool)>[];
+    final hidden = Message(
+      id: 'h1', kind: MessageKind.notice, audience: MessageAudience.all,
+      authorId: 'admin', authorRole: MessageAuthorRole.admin, onDate: null,
+      blockId: null, title: 'Skrytý', body: 'Text.', expiresAt: null,
+      notify: true, showOnKiosk: false,
+      createdAt: DateTime(2026, 9, 2), updatedAt: DateTime(2026, 9, 2),
+    );
+    await tester.pumpWidget(app(
+      profile: admin,
+      notices: [notice('a1'), hidden],
+      setOnKiosk: (id, show) async => calls.add((id, show)),
+    ));
+    await tester.pumpAndSettle();
+    // The hidden one says so; the other does not.
+    expect(find.textContaining('skrytý na kiosku'), findsOneWidget);
+
+    await openMenu(tester);
+    await tester.tap(find.text('Skrýt na kiosku'));
+    await tester.pumpAndSettle();
+    expect(calls, [('a1', false)]);
+
+    await tester.tap(find.byType(PopupMenuButton<String>).last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Zobrazit na kiosku'));
+    await tester.pumpAndSettle();
+    expect(calls.last, ('h1', true));
+  });
+
+  testWidgets('a player has no kiosk menu', (tester) async {
+    await tester.pumpWidget(app(notices: [notice('a1')]));
+    await tester.pumpAndSettle();
+    expect(find.byType(PopupMenuButton<String>), findsNothing);
+    expect(find.textContaining('kiosku'), findsNothing);
+  });
 
   testWidgets('„Sejmout“ and „Smazat“ both ask first', (tester) async {
     await tester.pumpWidget(app(profile: admin, notices: [notice('a1')]));

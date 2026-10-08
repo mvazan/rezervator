@@ -56,6 +56,14 @@ void main() {
 
   setUp(() => requests = []);
 
+  // The page is long (the panel options sit above the address): a tall
+  // window keeps every section built.
+  void tall(WidgetTester tester) {
+    tester.view.physicalSize = const Size(800, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+  }
+
   Widget app({
     List<Profile> roster = const [admin],
     Future<String> Function(String)? resetPassword,
@@ -81,6 +89,7 @@ void main() {
   testWidgets(
       'toggling "Kiosk: tmavý režim" PATCHes schedule_settings.kiosk_dark',
       (tester) async {
+    tall(tester);
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
 
@@ -100,6 +109,7 @@ void main() {
   testWidgets(
       'toggling "Kiosk: celý den na obrazovku" PATCHes '
       'schedule_settings.kiosk_fit_day', (tester) async {
+    tall(tester);
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
 
@@ -123,6 +133,7 @@ void main() {
 
   testWidgets('kiosk accounts are administered here, not among Hráči',
       (tester) async {
+    tall(tester);
     const kiosk = Profile(
       id: 'k1',
       displayName: 'Kiosk u dráhy',
@@ -151,6 +162,7 @@ void main() {
 
   testWidgets('a new kiosk password is asked for, then shown once',
       (tester) async {
+    tall(tester);
     const kiosk = Profile(
       id: 'k1',
       displayName: 'Kiosk u dráhy',
@@ -187,6 +199,7 @@ void main() {
   });
 
   testWidgets('a refused reset shows why and no password', (tester) async {
+    tall(tester);
     const kiosk = Profile(
       id: 'k1',
       displayName: 'Kiosk u dráhy',
@@ -217,6 +230,7 @@ void main() {
   // the clipboard, not a hard-coded host.
   testWidgets('the kiosk address is shown and copies to the clipboard',
       (tester) async {
+    tall(tester);
     String? copied;
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
       SystemChannels.platform,
@@ -247,11 +261,50 @@ void main() {
 
   testWidgets('without a kiosk account the section explains how to make one',
       (tester) async {
+    tall(tester);
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
 
     expect(find.text('Kioskové účty'), findsOneWidget);
     expect(find.textContaining('Nastavit jako kiosk'), findsOneWidget);
     expect(find.text('Vrátit mezi hráče'), findsNothing);
+  });
+
+  testWidgets('the panel options PATCH their own columns', (tester) async {
+    tall(tester);
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+
+    Map<String, dynamic> lastPatch() => jsonDecode(
+          requests.lastWhere((r) => r.method == 'PATCH').body,
+        ) as Map<String, dynamic>;
+
+    await tester.tap(find.widgetWithText(SwitchListTile, 'Nástěnka v panelu'));
+    await tester.pumpAndSettle();
+    expect(lastPatch(), {'kiosk_show_notices': false});
+
+    await tester.tap(find.widgetWithText(SwitchListTile, 'Zápasy v panelu'));
+    await tester.pumpAndSettle();
+    expect(lastPatch(), {'kiosk_show_matches': false});
+
+    await tester.tap(
+        find.widgetWithText(SwitchListTile, 'Panel je výchozně rozbalený'));
+    await tester.pumpAndSettle();
+    expect(lastPatch(), {'kiosk_drawer_open': true});
+  });
+
+  testWidgets('the history of matches is chosen in weeks', (tester) async {
+    tall(tester);
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+
+    // 21 days by default.
+    expect(find.text('3 týdny'), findsOneWidget);
+    await tester.tap(find.text('3 týdny'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('8 týdnů').last);
+    await tester.pumpAndSettle();
+    final patch = requests.lastWhere((r) => r.method == 'PATCH');
+    expect(jsonDecode(patch.body), {'kiosk_matches_history_days': 56});
   });
 }

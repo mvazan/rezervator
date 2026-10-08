@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/kiosk_url.dart';
 import '../../core/ui.dart';
 import '../../data/providers.dart';
+import '../../domain/labels.dart' show czechCount;
 import '../../domain/models.dart';
 import '../auth/update_screen.dart' show UpdateScreen;
 import 'widgets/admin_scaffold.dart';
@@ -92,6 +93,22 @@ class KioskSettingsScreen extends ConsumerWidget {
     );
   }
 
+  /// How far back the panel lists finished matches, in days (0 = only the
+  /// next match), as the dropdown offers it.
+  static const _historyChoices = [0, 7, 14, 21, 28, 56, 84];
+
+  static String _historyLabel(int days) => days == 0
+      ? 'Jen příští zápas'
+      : czechCount(days ~/ 7, 'týden', 'týdny', 'týdnů');
+
+  Future<void> _panel(BuildContext context, ScheduleSettings settings,
+          Map<String, Object> changes) =>
+      tryAction(
+        context,
+        () => Api.setKioskPanel(changes, tenantId: settings.tenantId),
+        errorText: friendlyDbError,
+      );
+
   /// Where the app is running (the web build knows; an alley hosting its
   /// own copy under a sub-path included) — or, on Android, where the public
   /// web app lives, because a phone has no address to offer a tablet.
@@ -145,6 +162,78 @@ class KioskSettingsScreen extends ConsumerWidget {
                           tenantId: settings.tenantId),
                       errorText: friendlyDbError,
                     ),
+            ),
+            const SizedBox(height: 24),
+            Text('Panel vpravo',
+                style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 4),
+            const Text(
+              'Postranní panel kiosku ukazuje nástěnku a zápasy. Návštěvník '
+              'ho rozbalí a sbalí, po minutě bez dotyku se vrátí do výchozího '
+              'stavu. Které oznamy se na kiosku ukážou, volíš přímo na '
+              'nástěnce (⋮ u oznamu).',
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Nástěnka v panelu'),
+              value: settings?.kioskShowNotices ?? true,
+              onChanged: settings == null
+                  ? null
+                  : (value) =>
+                      _panel(context, settings, {'kiosk_show_notices': value}),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Zápasy v panelu'),
+              subtitle: const Text(
+                'Příští zápas a odehrané zápasy; klepnutím na odehraný se '
+                'otevře jeho zápis.',
+              ),
+              value: settings?.kioskShowMatches ?? true,
+              onChanged: settings == null
+                  ? null
+                  : (value) =>
+                      _panel(context, settings, {'kiosk_show_matches': value}),
+            ),
+            if (settings?.kioskShowMatches ?? true)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: DropdownButtonFormField<int>(
+                  initialValue: _historyChoices
+                          .contains(settings?.kioskMatchesHistoryDays ?? 21)
+                      ? settings?.kioskMatchesHistoryDays ?? 21
+                      : 21,
+                  decoration: const InputDecoration(
+                    labelText: 'Odehrané zápasy z posledních',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: [
+                    for (final days in _historyChoices)
+                      DropdownMenuItem(
+                        value: days,
+                        child: Text(_historyLabel(days)),
+                      ),
+                  ],
+                  onChanged: settings == null
+                      ? null
+                      : (days) => days == null
+                          ? null
+                          : _panel(context, settings,
+                              {'kiosk_matches_history_days': days}),
+                ),
+              ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Panel je výchozně rozbalený'),
+              subtitle: const Text(
+                'Vypnuto = na kiosku je jen úzký pruh, panel se rozbalí '
+                'klepnutím.',
+              ),
+              value: settings?.kioskDrawerOpen ?? false,
+              onChanged: settings == null
+                  ? null
+                  : (value) =>
+                      _panel(context, settings, {'kiosk_drawer_open': value}),
             ),
             const SizedBox(height: 24),
             Text('Adresa pro tablet',

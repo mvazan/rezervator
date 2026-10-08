@@ -10561,6 +10561,10 @@ begin
   raise notice 'OK: running 0051 again leaves every privilege and its ACL order as it was (0051)';
 end $$;
 
+-- Running 0051 again put back its two read-rule functions: bring back the
+-- kiosk's notices (0064), which later checks rely on.
+\ir ../migrations/0064_kiosk_reads_notices.sql
+
 -- 0052 One device token, one profile ----------------------------------------
 -- 20. notify pushes to every profile holding a token, so a token the last
 -- account on a device kept (signed out offline, session expired, an older
@@ -11700,6 +11704,83 @@ begin
       (select training_weekdays from schedule_settings where tenant_id = v_t);
   end if;
   raise notice 'OK: a new kuželna starts with no training day (0063)';
+end $$;
+
+-- 0065: a notice is hidden from, or shown on, the kiosk by its alley's admin
+-- only; the kiosk still READS it (the app does the hiding, see the
+-- migration), and the public overview hands out none of the new settings.
+reset role;
+do $$
+declare
+  v_id uuid;
+begin
+  insert into messages (tenant_id, author_role, kind, audience, title, body)
+    values ('00000000-0000-0000-0000-000000000051', 'admin', 'notice', 'all', 'Pro kiosek', 'Text.')
+    returning id into v_id;
+  perform set_config('probe.kiosk_notice', v_id::text, true);
+end $$;
+set local role authenticated;
+do $$
+declare
+  v_notice constant uuid := current_setting('probe.kiosk_notice')::uuid;
+  v_who text;
+begin
+  perform set_config('request.jwt.claims',
+    '{"sub":"51000000-0000-0000-0000-000000000010","role":"authenticated"}', true);
+  perform message_set_kiosk(v_notice, false);
+  if (select show_on_kiosk from messages where id = v_notice) then
+    raise exception 'FAIL: the admin could not hide the notice from the kiosk';
+  end if;
+
+  perform set_config('request.jwt.claims',
+    '{"sub":"51000000-0000-0000-0000-000000000015","role":"authenticated"}', true);
+  if (select show_on_kiosk from messages where id = v_notice) is distinct from false then
+    raise exception 'FAIL: the kiosk cannot read the notice and its flag';
+  end if;
+
+  for v_who in select unnest(array[
+      '51000000-0000-0000-0000-000000000015',   -- the kiosk
+      '51000000-0000-0000-0000-000000000013',   -- a player
+      '51000000-0000-0000-0000-000000000016'])  -- a pending account
+  loop
+    perform set_config('request.jwt.claims',
+      '{"sub":"' || v_who || '","role":"authenticated"}', true);
+    begin
+      perform message_set_kiosk(v_notice, true);
+      raise exception 'FAIL: % toggled a notice on the kiosk', v_who;
+    exception when others then
+      if sqlerrm <> 'not_allowed' then raise; end if;
+    end;
+  end loop;
+
+  perform set_config('request.jwt.claims',
+    '{"sub":"52000000-0000-0000-0000-000000000010","role":"authenticated"}', true);
+  begin
+    perform message_set_kiosk(v_notice, true);
+    raise exception 'FAIL: another alley''s admin toggled the notice';
+  exception when others then
+    if sqlerrm <> 'unknown_message' then raise; end if;
+  end;
+
+  perform set_config('request.jwt.claims',
+    '{"sub":"51000000-0000-0000-0000-000000000010","role":"authenticated"}', true);
+  perform message_set_kiosk(v_notice, true);
+  if not (select show_on_kiosk from messages where id = v_notice) then
+    raise exception 'FAIL: the admin could not show the notice again';
+  end if;
+  raise notice 'OK: only the alley''s admin hides or shows a notice on the kiosk (0065)';
+end $$;
+reset role;
+do $$
+begin
+  if has_function_privilege('anon', 'public.message_set_kiosk(uuid, boolean)', 'execute') then
+    raise exception 'FAIL: anon can call message_set_kiosk';
+  end if;
+  if exists (select 1 from jsonb_object_keys(public_week('kuzelna-a', current_date)->'settings') k
+              where k like 'kiosk_show%' or k in ('kiosk_matches_history_days', 'kiosk_drawer_open')) then
+    raise exception 'FAIL: the public overview hands out a kiosk panel setting';
+  end if;
+  raise notice 'OK: anon cannot toggle, and the public overview hides the kiosk panel settings (0065)';
 end $$;
 
 rollback;

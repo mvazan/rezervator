@@ -639,6 +639,10 @@ class ScheduleSettings {
     required this.maxActiveReservations,
     this.kioskDark = true,
     this.kioskFitDay = true,
+    this.kioskShowNotices = true,
+    this.kioskShowMatches = true,
+    this.kioskMatchesHistoryDays = 21,
+    this.kioskDrawerOpen = false,
     this.tenantId = '',
     this.dutyReminderEnabled = false,
     this.dutyReminderDays = 1,
@@ -658,6 +662,17 @@ class ScheduleSettings {
   /// scrolling); false uses a fixed comfortable scale (lane rows sized like
   /// the app's week view) and lets the board scroll vertically.
   final bool kioskFitDay;
+
+  /// What the kiosk's side drawer lists (0065): the active notices, and the
+  /// matches — the next one plus the finished ones of the last
+  /// [kioskMatchesHistoryDays] days (0 = only the next).
+  final bool kioskShowNotices;
+  final bool kioskShowMatches;
+  final int kioskMatchesHistoryDays;
+
+  /// Whether the drawer is open when nobody has touched the kiosk for a
+  /// minute; a visitor may open or close it meanwhile.
+  final bool kioskDrawerOpen;
 
   /// The settings row's tenant — the update key since 0005 (one row per
   /// tenant instead of the old singleton).
@@ -689,6 +704,11 @@ class ScheduleSettings {
         maxActiveReservations: json['max_active_reservations'] as int,
         kioskDark: json['kiosk_dark'] as bool? ?? true,
         kioskFitDay: json['kiosk_fit_day'] as bool? ?? true,
+        kioskShowNotices: json['kiosk_show_notices'] as bool? ?? true,
+        kioskShowMatches: json['kiosk_show_matches'] as bool? ?? true,
+        kioskMatchesHistoryDays:
+            json['kiosk_matches_history_days'] as int? ?? 21,
+        kioskDrawerOpen: json['kiosk_drawer_open'] as bool? ?? false,
         tenantId: json['tenant_id'] as String? ?? '',
         dutyReminderEnabled: json['duty_reminder_enabled'] as bool? ?? false,
         dutyReminderDays: json['duty_reminder_days'] as int? ?? 1,
@@ -1776,6 +1796,7 @@ class Message {
     required this.notify,
     required this.createdAt,
     required this.updatedAt,
+    this.showOnKiosk = true,
   });
 
   final String id;
@@ -1811,6 +1832,10 @@ class Message {
   final DateTime createdAt;
   final DateTime updatedAt;
 
+  /// Notice only: whether the kiosk's drawer shows it (0065); the admin
+  /// can hide one from the wall tablet.
+  final bool showOnKiosk;
+
   factory Message.fromJson(Map<String, dynamic> json) => Message(
         id: json['id'] as String,
         kind: (json['kind'] as String) == 'notice'
@@ -1833,6 +1858,7 @@ class Message {
         notify: json['notify'] as bool? ?? true,
         createdAt: DateTime.parse(json['created_at'] as String),
         updatedAt: DateTime.parse(json['updated_at'] as String),
+        showOnKiosk: json['show_on_kiosk'] as bool? ?? true,
       );
 }
 

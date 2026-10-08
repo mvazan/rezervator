@@ -29,7 +29,12 @@ void main() {
     fetchedAt: DateTime(2026, 10, 1),
   );
 
-  Message notice(String id, {DateTime? expiresAt, MessageKind? kind}) =>
+  Message notice(
+    String id, {
+    DateTime? expiresAt,
+    MessageKind? kind,
+    bool showOnKiosk = true,
+  }) =>
       Message(
         id: id,
         kind: kind ?? MessageKind.notice,
@@ -42,6 +47,7 @@ void main() {
         body: 'b',
         expiresAt: expiresAt,
         notify: true,
+        showOnKiosk: showOnKiosk,
         createdAt: DateTime(2026, 9, 1),
         updatedAt: DateTime(2026, 9, 1),
       );
@@ -49,7 +55,7 @@ void main() {
   final today = Day(2026, 10, 8);
 
   test(
-    'kioskNotices keeps active notices, drops expired ones and messages',
+    'kioskNotices keeps active notices, drops expired, hidden and message ones',
     () {
       final now = DateTime(2026, 10, 8, 12);
       final got = kioskNotices([
@@ -57,6 +63,7 @@ void main() {
         notice('b-later', expiresAt: DateTime(2026, 10, 9)),
         notice('gone', expiresAt: DateTime(2026, 10, 7)),
         notice('msg', kind: MessageKind.message),
+      notice('hidden', showOnKiosk: false),
       ], now);
       expect([for (final m in got) m.id], ['a-open', 'b-later']);
     },
@@ -76,23 +83,40 @@ void main() {
           'now': result('now', MatchStatus.inProgress),
         },
         today: today,
+        historyDays: 21,
       );
       expect(m.next?.id, 'now');
       expect([for (final s in m.recent) s.id], ['old']);
     },
   );
 
-  test('recent keeps the last three decided matches, oldest first', () {
-    final slots = [for (var i = 1; i <= 5; i++) match('m$i', Day(2026, 9, i))];
+  test('recent keeps the decided matches of the history window, oldest first',
+      () {
+    final slots = [
+      for (var i = 1; i <= 5; i++) match('m$i', today.addDays(-i * 7)),
+    ];
     final m = kioskMatches(
       slots: slots,
       results: {
         for (final s in slots) s.id: result(s.id, MatchStatus.finished),
       },
       today: today,
+      historyDays: 21,
     );
-    expect([for (final s in m.recent) s.id], ['m3', 'm4', 'm5']);
+    // 21 days back: m3 (21 days ago), m2, m1 — oldest first.
+    expect([for (final s in m.recent) s.id], ['m3', 'm2', 'm1']);
     expect(m.next, isNull);
+  });
+
+  test('history 0 lists no finished match, only the next', () {
+    final m = kioskMatches(
+      slots: [match('old', today.addDays(-1)), match('new', today.addDays(2))],
+      results: {'old': result('old', MatchStatus.finished)},
+      today: today,
+      historyDays: 0,
+    );
+    expect(m.recent, isEmpty);
+    expect(m.next?.id, 'new');
   });
 
   test('manual matches, úklid children and a forfeit are handled', () {
@@ -104,6 +128,7 @@ void main() {
       ],
       results: {'ff': result('ff', MatchStatus.forfeit)},
       today: today,
+      historyDays: 21,
     );
     expect(m.next, isNull);
     expect([for (final s in m.recent) s.id], ['ff']);
