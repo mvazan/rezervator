@@ -162,17 +162,11 @@ List<PrioritySlot> headerEvents(DaySchedule day) => [
         if (m.parentId == null) m,
     ]..sort((a, b) => a.startsAt.compareTo(b.startsAt));
 
-/// The house that marks a home match. Followed by the emoji variation
-/// selector: without it a font may pick the plain black-and-white house
-/// instead of the coloured one — and a list does, once it is scrolled and
-/// its rows are laid out again.
-const homeMarker = '🏠\uFE0F';
-
 /// One header line for a priority slot: home matches get the house icon,
 /// away matches no icon at all (that IS the away marker), blockages keep ⛔ —
 /// always with the od–do times.
 String headerEventLabel(PrioritySlot m) {
-  final prefix = !m.type.isMatch ? '⛔ ' : (m.isAway ? '' : '$homeMarker ');
+  final prefix = !m.type.isMatch ? '⛔ ' : (m.isAway ? '' : '🏠 ');
   return '$prefix${m.title} · '
       '${m.startsAt.display()}–${m.endsAt.display()}';
 }

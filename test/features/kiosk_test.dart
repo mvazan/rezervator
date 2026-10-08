@@ -6,7 +6,6 @@ import 'package:rezervator/core/ui.dart' show today;
 import 'package:rezervator/data/clock.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
-import 'package:rezervator/domain/schedule.dart' show homeMarker;
 import 'package:rezervator/features/clubhouse/match_detail_screen.dart';
 import 'package:rezervator/features/clubhouse/widgets/legacy_score_sheet.dart';
 import 'package:rezervator/features/kiosk/kiosk_board_view.dart';
@@ -2067,24 +2066,35 @@ void main() {
       await finish(tester);
     });
 
-    testWidgets('a home match is marked with the coloured house, always', (
+    testWidgets('a home match has the house icon, an away match none', (
       tester,
     ) async {
       fullHd(tester);
+      final away = PrioritySlot(
+        type: PrioritySlot.fallbackMatchType,
+        id: 'a',
+        date: day.addDays(2),
+        startsAt: const HourMinute(14, 0),
+        endsAt: const HourMinute(17, 0),
+        homeTeam: 'Hosté',
+        awayTeam: 'Soupeř',
+        isAway: true,
+        importKey: 'cka:a',
+      );
       await tester.pumpWidget(
-        app(slots: [fed('m', day.addDays(1), 'Domácí')], drawerOpen: true),
+        app(
+          slots: [fed('m', day.addDays(1), 'Domácí'), away],
+          drawerOpen: true,
+        ),
       );
       await tester.pumpAndSettle();
-      // The variation selector asks for the coloured emoji; without it a
-      // scrolled list may fall back to the black-and-white glyph.
       expect(
         find.descendant(
           of: find.byType(KioskDrawer),
-          matching: find.textContaining('\u{1F3E0}\uFE0F'),
+          matching: find.byIcon(Icons.home_rounded),
         ),
         findsOneWidget,
       );
-      expect(homeMarker, '\u{1F3E0}\uFE0F');
 
       await finish(tester);
     });

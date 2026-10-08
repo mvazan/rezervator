@@ -23,7 +23,6 @@ import '../../domain/kiosk_panel.dart';
 import '../../domain/models.dart';
 import '../../domain/palette.dart';
 import '../../domain/results.dart';
-import '../../domain/schedule.dart' show homeMarker;
 import '../clubhouse/widgets/duel_card.dart';
 import '../clubhouse/widgets/match_scoreboard.dart';
 import '../clubhouse/widgets/match_title.dart';
@@ -33,6 +32,9 @@ import '../clubhouse/widgets/team_totals_card.dart';
 /// at most 60 % of the screen.
 double kioskDrawerWidthFor(double screenWidth, int chosen) =>
     math.min(chosen.toDouble(), screenWidth * 0.6);
+
+/// The warm colour of the house that marks a home match.
+const _homeMatchColor = Color(0xFFF2A03D);
 
 const _resultRowHeight = 64.0;
 const _moreRowHeight = 52.0;
@@ -684,9 +686,29 @@ class _MatchRow extends StatelessWidget {
                 winner: displayWinner(result),
                 style: const TextStyle(fontSize: 15),
               ),
-              Text(
-                '${slot.isAway ? '' : '$homeMarker '}$when',
-                style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+              // The home mark is a drawn icon, not the 🏠 emoji: an emoji is
+              // set in whichever fallback font the engine has loaded by the
+              // time a row is built, so a scrolled list got two different
+              // houses. The Material icon font is bundled — same house in
+              // every row.
+              Row(
+                children: [
+                  if (!slot.isAway) ...[
+                    const Icon(
+                      Icons.home_rounded,
+                      size: 14,
+                      color: _homeMatchColor,
+                    ),
+                    const SizedBox(width: 4),
+                  ],
+                  Text(
+                    when,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
