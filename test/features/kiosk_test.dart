@@ -2657,6 +2657,41 @@ void main() {
       await finish(tester);
     });
 
+    testWidgets('a thin bar runs out in the last ten seconds before the idle '
+        'reset — only after a touch', (tester) async {
+      fullHd(tester);
+      await tester.pumpWidget(app(notices: [notice('1', 'Brigáda')]));
+      await tester.pumpAndSettle();
+      Finder bar() => find.byWidgetPredicate(
+        (w) => w is FractionallySizedBox && w.child is ColoredBox,
+      );
+      // Untouched: nothing to reset, no bar ever.
+      await tester.pump(const Duration(seconds: 55));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(bar(), findsNothing);
+
+      await tester.tap(openButton);
+      await tester.pumpAndSettle();
+      // (Settling ran the clock a little: the drawer's slide, the button's
+      // breath.)
+      await tester.pump(const Duration(seconds: 44));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(bar(), findsNothing);
+      await tester.pump(const Duration(seconds: 6));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(bar(), findsOneWidget);
+      expect(
+        tester.widget<FractionallySizedBox>(bar()).widthFactor,
+        lessThan(1),
+      );
+      // A touch puts it away.
+      await tester.tap(find.text('Brigáda').last);
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(bar(), findsNothing);
+
+      await finish(tester);
+    });
+
     testWidgets('an alley with nothing to show gets no drawer', (tester) async {
       fullHd(tester);
       await tester.pumpWidget(app());

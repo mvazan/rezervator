@@ -27,6 +27,9 @@ import 'kiosk_zapis_page.dart';
 import 'name_picker.dart';
 import '../../core/widgets/emoji_text.dart';
 
+/// How long before the idle reset the bar starts running out.
+const _warnFor = Duration(seconds: 10);
+
 class KioskShell extends ConsumerStatefulWidget {
   const KioskShell({super.key});
 
@@ -34,8 +37,19 @@ class KioskShell extends ConsumerStatefulWidget {
   ConsumerState<KioskShell> createState() => _KioskShellState();
 }
 
-class _KioskShellState extends ConsumerState<KioskShell> {
+class _KioskShellState extends ConsumerState<KioskShell>
+    with SingleTickerProviderStateMixin {
   Timer? _idleTimer;
+
+  /// The last seconds before the idle reset, drawn as a thin bar running
+  /// out under the status line — so a visitor is not surprised when the
+  /// kiosk starts over. Only after a touch: an untouched kiosk has nothing
+  /// to reset.
+  Timer? _warnTimer;
+  late final AnimationController _warning = AnimationController(
+    vsync: this,
+    duration: _warnFor,
+  );
   PlayerName? _selected;
 
   /// What a visitor did to the drawer (true = open); null = the admin's
@@ -52,19 +66,29 @@ class _KioskShellState extends ConsumerState<KioskShell> {
   @override
   void initState() {
     super.initState();
-    _touch();
+    _touch(byHand: false);
   }
 
   @override
   void dispose() {
     _idleTimer?.cancel();
+    _warnTimer?.cancel();
+    _warning.dispose();
     super.dispose();
   }
 
-  void _touch() {
+  void _touch({bool byHand = true}) {
     _idleTimer?.cancel();
+    _warnTimer?.cancel();
+    _warning.reset();
     final seconds = ref.read(settingsProvider).value?.kioskIdleSeconds ?? 60;
-    _idleTimer = Timer(Duration(seconds: seconds), _onIdle);
+    final idle = Duration(seconds: seconds);
+    _idleTimer = Timer(idle, _onIdle);
+    if (byHand && idle > _warnFor) {
+      _warnTimer = Timer(idle - _warnFor, () {
+        if (mounted) _warning.forward(from: 0);
+      });
+    }
   }
 
   void _onIdle() {
@@ -262,6 +286,27 @@ class _KioskShellState extends ConsumerState<KioskShell> {
                 onClearSelection: _clearSelection,
                 onOpenNotice: _openNotice,
                 onOpenMatch: _openMatchIfScored,
+              ),
+              // The idle bar: thin, full width, running out right to left.
+              AnimatedBuilder(
+                animation: _warning,
+                builder: (context, _) => SizedBox(
+                  height: 3,
+                  child: _warning.isAnimating
+                      ? Align(
+                          alignment: Alignment.centerLeft,
+                          child: FractionallySizedBox(
+                            widthFactor: 1 - _warning.value,
+                            child: ColoredBox(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .primary
+                                  .withValues(alpha: 0.7),
+                            ),
+                          ),
+                        )
+                      : null,
+                ),
               ),
               Expanded(child: _boardWithPanel()),
             ],
