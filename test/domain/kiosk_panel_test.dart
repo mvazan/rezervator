@@ -179,7 +179,7 @@ void main() {
     expect(ids(w), ['ok']);
   });
 
-  test('the list ends on the first coming match; played and playing above',
+  test('the first coming match opens just below the list; played and playing above',
       () {
     final slots = [
       match('old', Day(2026, 10, 1)),
@@ -192,9 +192,9 @@ void main() {
       'playing': result('playing', MatchStatus.inProgress),
     };
     expect(kioskFirstUpcomingIndex(slots, results, today), 2);
-    // Nothing coming any more: the last one.
-    expect(kioskFirstUpcomingIndex(slots.sublist(0, 2), results, today), 1);
-    expect(kioskFirstUpcomingIndex(const [], const {}, today), -1);
+    // Nothing coming any more: past the end.
+    expect(kioskFirstUpcomingIndex(slots.sublist(0, 2), results, today), 2);
+    expect(kioskFirstUpcomingIndex(const [], const {}, today), 0);
   });
 
   test('a live match needs data, not just the status', () {

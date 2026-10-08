@@ -83,10 +83,10 @@ KioskMatchWindow kioskMatchWindow({
   );
 }
 
-/// The match the list ends on when it opens (Výsledky's rule: as many
-/// played and playing matches as fit above it): the first coming match —
-/// from today on, neither decided nor being played — else the last one.
-/// -1 for no match at all.
+/// Where the list opens (Výsledky's rule): the first coming match — from
+/// today on, neither decided nor being played — is the first row hidden
+/// below the bottom edge, as many played and playing matches as fit above
+/// it. [matches]'s length when nothing is coming any more.
 int kioskFirstUpcomingIndex(
   List<PrioritySlot> matches,
   Map<String, MatchResult> results,
@@ -100,7 +100,7 @@ int kioskFirstUpcomingIndex(
       return i;
     }
   }
-  return matches.length - 1;
+  return matches.length;
 }
 
 /// The matches being played whose figures the drawer can show: status in

@@ -1659,17 +1659,17 @@ void main() {
       await finish(tester);
     });
 
-    testWidgets('the list opens like Výsledky: the first coming match at the '
-        'bottom, played ones above; idle scrolls it back', (tester) async {
+    testWidgets('the list opens like Výsledky: the first coming match just '
+        'below the bottom, played ones above; idle scrolls it back', (tester) async {
       fullHd(tester);
       final slots = [
-        for (var i = 14; i >= 1; i--) fed('p$i', day.addDays(-i), 'Hráno$i'),
+        for (var i = 25; i >= 1; i--) fed('p$i', day.addDays(-i), 'Hráno$i'),
         fed('n1', day.addDays(1), 'Příští1'),
         fed('n2', day.addDays(2), 'Příští2'),
         fed('n3', day.addDays(3), 'Příští3'),
       ];
       final results = {
-        for (var i = 1; i <= 14; i++) 'p$i': res('p$i', 'finished', 5, 3),
+        for (var i = 1; i <= 25; i++) 'p$i': res('p$i', 'finished', 5, 3),
       };
       await tester.pumpWidget(
         app(
@@ -1677,7 +1677,7 @@ void main() {
           results: results,
           drawerOpen: true,
           showNotices: false,
-          weeksBack: 2,
+          weeksBack: 4,
           weeksAhead: 1,
         ),
       );
@@ -1700,9 +1700,15 @@ void main() {
         return r != null && r.top >= listBox.top && r.bottom <= listBox.bottom;
       }
 
-      // The first coming match is the last row in view…
-      expect(visible('Příští1'), isTrue);
-      expect(visible('Příští2'), isFalse);
+      // The first coming match is the first row below the edge…
+      expect(visible('Příští1'), isFalse);
+      // Exactly one viewport above the start of the coming ones.
+      ScrollPosition position() => tester
+          .state<ScrollableState>(
+            find.descendant(of: list, matching: find.byType(Scrollable)),
+          )
+          .position;
+      expect(position().pixels, -position().viewportDimension);
       // …with the played ones filling the list above it.
       expect(visible('Hráno1 '), isTrue);
       expect(visible('Hráno3 '), isTrue);
@@ -1710,11 +1716,11 @@ void main() {
       // A visitor scrolls away; the idle reset brings the list back.
       await tester.drag(list, const Offset(0, 500));
       await tester.pumpAndSettle();
-      expect(visible('Příští1'), isFalse);
+      expect(visible('Hráno1 '), isFalse);
       await tester.pump(const Duration(seconds: 61));
       await tester.pumpAndSettle();
-      expect(visible('Příští1'), isTrue);
-      expect(visible('Příští2'), isFalse);
+      expect(visible('Hráno1 '), isTrue);
+      expect(position().pixels, -position().viewportDimension);
 
       await finish(tester);
     });

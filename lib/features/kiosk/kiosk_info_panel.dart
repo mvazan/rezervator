@@ -574,8 +574,8 @@ class _MatchesCardState extends ConsumerState<_MatchesCard> {
   int _extraBack = 0;
   int _extraAhead = 0;
 
-  /// The match the list opened at the bottom edge of (see
-  /// [kioskFirstUpcomingIndex]); the list grows away from it in both
+  /// The first match below the bottom edge when the list opened (see
+  /// [kioskFirstUpcomingIndex]); null when none is coming. The list grows away from it in both
   /// directions, so what was on screen stays where it was when more weeks
   /// load (older matches grow upwards from here, not by shifting the rest).
   String? _anchorId;
@@ -650,14 +650,17 @@ class _MatchesCardState extends ConsumerState<_MatchesCard> {
     // Like Výsledky: opens with the first coming match at the bottom edge
     // and as many played (and playing) ones as fit above it. Afterwards the
     // same match stays the anchor (found by id, as more weeks are added).
-    var anchor = matches.indexWhere((m) => m.id == _anchorId);
-    if (anchor < 0 && matches.isNotEmpty) {
-      anchor = kioskFirstUpcomingIndex(matches, results, today);
-      _anchorId = matches[anchor].id;
+    if (!_opened && matches.isNotEmpty) {
+      final first = kioskFirstUpcomingIndex(matches, results, today);
+      _anchorId = first < matches.length ? matches[first].id : null;
     }
-    // The centre sliver starts right below the anchor; offset 0 puts it at
-    // the top edge, so the opening jump goes up one viewport.
-    final split = anchor + 1;
+    final anchor = _anchorId == null
+        ? -1
+        : matches.indexWhere((m) => m.id == _anchorId);
+    // The centre sliver starts with the first coming match; offset 0 puts
+    // it at the top edge, so the opening jump goes up one viewport and
+    // leaves it just below the bottom one.
+    final split = anchor < 0 ? matches.length : anchor;
     if (!_opened && matches.isNotEmpty) {
       _opened = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -668,7 +671,7 @@ class _MatchesCardState extends ConsumerState<_MatchesCard> {
         );
       });
     }
-    // Index 0 of the part before the centre is the anchor itself.
+    // Index 0 of the part before the centre is the last match above it.
     final older = matches.sublist(0, split).reversed.toList();
     final newer = matches.sublist(split);
 
