@@ -296,7 +296,7 @@ class _KioskShellState extends ConsumerState<KioskShell>
                 onOpenMatch: _openMatchIfScored,
               ),
               const KioskOfflineBanner(),
-              // The idle bar: thin, full width, running out right to left.
+              // The idle bar: thin, filling from left to right until the reset.
               AnimatedBuilder(
                 animation: _warning,
                 builder: (context, _) => SizedBox(
@@ -305,7 +305,7 @@ class _KioskShellState extends ConsumerState<KioskShell>
                       ? Align(
                           alignment: Alignment.centerLeft,
                           child: FractionallySizedBox(
-                            widthFactor: 1 - _warning.value,
+                            widthFactor: _warning.value,
                             // The bar's full 3 px: a ColoredBox without a
                             // child takes the smallest height it may — 0.
                             heightFactor: 1,

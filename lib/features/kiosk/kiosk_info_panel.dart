@@ -1022,10 +1022,6 @@ class _LiveViewState extends ConsumerState<_LiveView> {
     final slot = matches[_index.clamp(0, matches.length - 1)];
     final current = ValueKey(slot.id);
     final locked = lockedAt >= 0;
-    final full =
-        (ref.watch(settingsProvider).value?.kioskLiveLayout ??
-            KioskLiveLayout.full) ==
-        KioskLiveLayout.full;
     return Listener(
       onPointerDown: (_) => _start(),
       behavior: HitTestBehavior.translucent,
@@ -1041,83 +1037,77 @@ class _LiveViewState extends ConsumerState<_LiveView> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // The compact views drop the title; with several matches the
-                // dots stay — they say there is more.
-                if (full || matches.length > 1)
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      if (full) ...[
-                        Icon(Icons.circle, size: 12, color: scheme.error),
-                        const SizedBox(width: 8),
-                        Text(
-                          'PRÁVĚ SE HRAJE',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 0.4,
-                            color: scheme.primary,
-                          ),
-                        ),
-                        const Spacer(),
-                      ],
-                      // The dots say how many matches take turns; a tap
-                      // pins the one on screen until it ends (or another
-                      // tap, or a swipe).
-                      if (matches.length > 1)
-                        Semantics(
-                          button: true,
-                          label: locked
-                              ? 'Odemknout zápas'
-                              : 'Zamknout tento zápas',
-                          child: GestureDetector(
-                            behavior: HitTestBehavior.opaque,
-                            onTap: () => _toggleLock(slot.id),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 8,
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  AnimatedSwitcher(
-                                    duration: const Duration(milliseconds: 200),
-                                    child: Icon(
-                                      locked ? Icons.lock : Icons.lock_open,
-                                      key: ValueKey(locked),
-                                      size: 16,
-                                      color: locked
+                // Back to all matches on the left, the dots (how many take
+                // turns; the lock) in the middle, how old the score is on
+                // the right. (The scoreboard's own chip says it is live.)
+                Row(
+                  children: [
+                    if (widget.onShowList != null)
+                      IconButton(
+                        tooltip: 'Všechny zápasy',
+                        visualDensity: VisualDensity.compact,
+                        icon: const Icon(Icons.arrow_back),
+                        onPressed: widget.onShowList,
+                      ),
+                    const Spacer(),
+                    // The dots say how many matches take turns; a tap
+                    // pins the one on screen until it ends (or another
+                    // tap, or a swipe).
+                    if (matches.length > 1)
+                      Semantics(
+                        button: true,
+                        label: locked
+                            ? 'Odemknout zápas'
+                            : 'Zamknout tento zápas',
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () => _toggleLock(slot.id),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 8,
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                AnimatedSwitcher(
+                                  duration: const Duration(milliseconds: 200),
+                                  child: Icon(
+                                    locked ? Icons.lock : Icons.lock_open,
+                                    key: ValueKey(locked),
+                                    size: 16,
+                                    color: locked
+                                        ? scheme.primary
+                                        : scheme.onSurfaceVariant.withValues(
+                                            alpha: 0.5,
+                                          ),
+                                  ),
+                                ),
+                                for (var i = 0; i < matches.length; i++)
+                                  AnimatedContainer(
+                                    duration: const Duration(milliseconds: 300),
+                                    width: i == _index ? 18 : 8,
+                                    height: 8,
+                                    margin: const EdgeInsets.only(left: 6),
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(4),
+                                      color: i == _index
                                           ? scheme.primary
                                           : scheme.onSurfaceVariant.withValues(
-                                              alpha: 0.5,
+                                              alpha: 0.35,
                                             ),
                                     ),
                                   ),
-                                  for (var i = 0; i < matches.length; i++)
-                                    AnimatedContainer(
-                                      duration: const Duration(
-                                        milliseconds: 300,
-                                      ),
-                                      width: i == _index ? 18 : 8,
-                                      height: 8,
-                                      margin: const EdgeInsets.only(left: 6),
-                                      decoration: BoxDecoration(
-                                        borderRadius: BorderRadius.circular(4),
-                                        color: i == _index
-                                            ? scheme.primary
-                                            : scheme.onSurfaceVariant
-                                                  .withValues(alpha: 0.35),
-                                      ),
-                                    ),
-                                ],
-                              ),
+                              ],
                             ),
                           ),
                         ),
-                    ],
-                  ),
-                if (full || matches.length > 1) const SizedBox(height: 8),
+                      ),
+                    const Spacer(),
+                    _LiveAge(slot: slot),
+                  ],
+                ),
+                const SizedBox(height: 8),
                 Expanded(
                   child: ClipRect(
                     child: AnimatedSwitcher(
@@ -1152,12 +1142,6 @@ class _LiveViewState extends ConsumerState<_LiveView> {
                     ),
                   ),
                 ),
-                const SizedBox(height: 6),
-                _LiveFooter(
-                  slot: slot,
-                  every: refreshEvery,
-                  onShowList: widget.onShowList,
-                ),
               ],
             ),
           ),
@@ -1167,25 +1151,11 @@ class _LiveViewState extends ConsumerState<_LiveView> {
   }
 }
 
-/// Under the match being played: how old its score is and how often the
-/// kiosk asks for a new one; and the way to the list of matches.
-class _LiveFooter extends ConsumerWidget {
-  const _LiveFooter({
-    required this.slot,
-    required this.every,
-    required this.onShowList,
-  });
+/// How old the score on screen is: „⟳ před 3 min“.
+class _LiveAge extends ConsumerWidget {
+  const _LiveAge({required this.slot});
 
   final PrioritySlot slot;
-  final Duration every;
-  final VoidCallback? onShowList;
-
-  static String everyLabel(Duration d) {
-    final s = d.inSeconds;
-    if (s < 60) return 'každých $s s';
-    if (s == 60) return 'každou minutu';
-    return 'každé ${s ~/ 60} min';
-  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -1194,25 +1164,16 @@ class _LiveFooter extends ConsumerWidget {
     final fetched = ref.watch(
       matchResultsProvider.select((r) => r.value?[slot.id]?.fetchedAt),
     );
-    final style = TextStyle(fontSize: 12, color: scheme.onSurfaceVariant);
+    if (fetched == null) return const SizedBox.shrink();
     return Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(Icons.update, size: 14, color: scheme.onSurfaceVariant),
+        Icon(Icons.refresh, size: 14, color: scheme.onSurfaceVariant),
         const SizedBox(width: 4),
-        Expanded(
-          child: Text(
-            '${fetched == null ? 'Výsledky zatím nejsou' : 'Aktualizováno ${freshnessLabel(fetched, now)}'}'
-            ' · kontrola ${everyLabel(every)}',
-            maxLines: 2,
-            style: style,
-          ),
+        Text(
+          freshnessLabel(fetched, now),
+          style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
         ),
-        if (onShowList != null)
-          TextButton.icon(
-            onPressed: onShowList,
-            icon: const Icon(Icons.list, size: 18),
-            label: const Text('Všechny zápasy'),
-          ),
       ],
     );
   }

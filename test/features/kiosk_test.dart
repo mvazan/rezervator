@@ -1361,6 +1361,12 @@ void main() {
 
     final openButton = find.byIcon(Icons.keyboard_double_arrow_left);
     final closeButton = find.byIcon(Icons.keyboard_double_arrow_right);
+    // The match being played across the drawer: its scoreboard there (the
+    // full view's; the compact ones draw their own score).
+    final liveView = find.descendant(
+      of: find.byType(KioskDrawer),
+      matching: find.byType(MatchScoreboard),
+    );
     // A notice title is in the status bar too; these tests are the drawer's.
     Finder drawerText(String t) =>
         find.descendant(of: find.byType(KioskDrawer), matching: find.text(t));
@@ -1813,17 +1819,17 @@ void main() {
       );
       await tester.pumpAndSettle();
       // Open although the default is closed; nothing but the live match.
-      expect(find.text('PRÁVĚ SE HRAJE'), findsOneWidget);
+      expect(liveView, findsOneWidget);
       expect(drawerText('Brigáda'), findsNothing);
       expect(find.text('ZÁPASY'), findsNothing);
 
       // A visitor may close it; a minute later it is back.
       await tester.tap(closeButton);
       await tester.pumpAndSettle();
-      expect(find.text('PRÁVĚ SE HRAJE'), findsNothing);
+      expect(liveView, findsNothing);
       await tester.pump(const Duration(seconds: 61));
       await tester.pumpAndSettle();
-      expect(find.text('PRÁVĚ SE HRAJE'), findsOneWidget);
+      expect(liveView, findsOneWidget);
 
       await finish(tester);
     });
@@ -1840,7 +1846,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('PRÁVĚ SE HRAJE'), findsNothing);
+      expect(liveView, findsNothing);
       // The drawer rests closed, as the admin set it.
       expect(drawerText('Brigáda'), findsNothing);
 
@@ -1862,7 +1868,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('PRÁVĚ SE HRAJE'), findsNothing);
+      expect(liveView, findsNothing);
       expect(drawerText('Brigáda'), findsOneWidget);
 
       await finish(tester);
@@ -2124,7 +2130,7 @@ void main() {
       expect(openButton, findsNothing);
       expect(closeButton, findsNothing);
       expect(drawerText('Brigáda'), findsNothing);
-      expect(find.text('PRÁVĚ SE HRAJE'), findsNothing);
+      expect(liveView, findsNothing);
 
       await finish(tester);
     });
@@ -2202,7 +2208,7 @@ void main() {
       // Touch every 6 s: the 10 s turn never comes.
       for (var i = 0; i < 4; i++) {
         await tester.pump(const Duration(seconds: 6));
-        await tester.tap(find.text('PRÁVĚ SE HRAJE'));
+        await tester.tap(find.byIcon(Icons.refresh));
       }
       await tester.pumpAndSettle();
       expect(inDrawer('Prvníci'), isTrue);
@@ -2268,7 +2274,7 @@ void main() {
         );
         await tester.pumpAndSettle();
         // No title, no duel card shown: the compact drawing.
-        expect(find.text('PRÁVĚ SE HRAJE'), findsNothing);
+        expect(liveView, findsNothing);
         expect(find.byType(DuelCard).hitTestable(), findsNothing);
         // All six duels in view, without scrolling.
         final drawer = tester.getRect(find.byType(KioskDrawer));
@@ -2416,7 +2422,7 @@ void main() {
     });
 
     testWidgets('the live view: how old the score is, a fresh one asked for '
-        'at the admin\'s pace, and the way to all matches and back', (
+        'at the admin\'s pace, and back to all matches and again', (
       tester,
     ) async {
       fullHd(tester);
@@ -2431,27 +2437,28 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.textContaining('Aktualizováno'), findsOneWidget);
-      expect(find.textContaining('kontrola každých 30 s'), findsOneWidget);
+      // How old the score is, next to the dots.
+      expect(find.byIcon(Icons.refresh), findsOneWidget);
+      expect(find.textContaining('před'), findsWidgets);
       // Asked once on opening, then every 30 s.
       expect(asked, ['m']);
       await tester.pump(const Duration(seconds: 31));
       expect(asked, ['m', 'm']);
 
       // To all matches…
-      await tester.tap(find.text('Všechny zápasy'));
+      await tester.tap(find.byTooltip('Všechny zápasy'));
       await tester.pumpAndSettle();
       expect(find.text('ZÁPASY'), findsOneWidget);
-      expect(find.text('PRÁVĚ SE HRAJE'), findsNothing);
+      expect(liveView, findsNothing);
       // …and back by the chip, or by the idle reset.
       await tester.tap(find.text('Právě se hraje'));
       await tester.pumpAndSettle();
-      expect(find.text('PRÁVĚ SE HRAJE'), findsOneWidget);
-      await tester.tap(find.text('Všechny zápasy'));
+      expect(liveView, findsOneWidget);
+      await tester.tap(find.byTooltip('Všechny zápasy'));
       await tester.pumpAndSettle();
       await tester.pump(const Duration(seconds: 61));
       await tester.pumpAndSettle();
-      expect(find.text('PRÁVĚ SE HRAJE'), findsOneWidget);
+      expect(liveView, findsOneWidget);
 
       await finish(tester);
     });
@@ -2482,7 +2489,7 @@ void main() {
       expect(inDrawer('Prvníci'), isTrue);
 
       await tester.fling(
-        find.text('PRÁVĚ SE HRAJE'),
+        find.byType(MatchScoreboard),
         const Offset(-300, 0),
         1000,
       );
