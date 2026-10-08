@@ -56,6 +56,7 @@ class KioskBoardView extends ConsumerStatefulWidget {
     required this.selected,
     this.onOpenMatch,
     this.columnBasisWidth,
+    this.onVisibleDays,
   });
 
   /// The currently selected player, or null when the board is display-only.
@@ -71,6 +72,10 @@ class KioskBoardView extends ConsumerStatefulWidget {
   /// columns keep one width while the drawer slides in and out — sized to
   /// the board's changing width they were re-laid out on every frame.
   final double? columnBasisWidth;
+
+  /// A visitor scrolled the board: the first and the last day now in view.
+  /// Not called for the idle reset's own scroll back to today.
+  final void Function(Day first, Day last)? onVisibleDays;
 
   @override
   ConsumerState<KioskBoardView> createState() => KioskBoardViewState();
@@ -102,6 +107,9 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
   // locate "now" without threading a HourMinute through the shell's
   // imperative reset call — the shell only holds a GlobalKey to this state,
   // no board-shaped data of its own to pass.
+  /// Whether the horizontal scroll that is running was started by a hand.
+  bool _dragged = false;
+
   CalendarWindow? _window;
   double _pxPerMinute = 0;
 
@@ -431,7 +439,34 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
                       Expanded(
                         child: SizedBox(
                           height: bodyHeight,
-                          child: ListView.builder(
+                          child: NotificationListener<ScrollNotification>(
+                            onNotification: (n) {
+                              if (n.metrics.axis != Axis.horizontal) {
+                                return false;
+                              }
+                              if (n is ScrollStartNotification &&
+                                  n.dragDetails != null) {
+                                _dragged = true;
+                              } else if (n is ScrollEndNotification &&
+                                  _dragged) {
+                                _dragged = false;
+                                final first = (n.metrics.pixels / columnWidth)
+                                    .round()
+                                    .clamp(0, days.length - 1);
+                                final count =
+                                    (n.metrics.viewportDimension / columnWidth)
+                                        .floor()
+                                        .clamp(1, days.length);
+                                final last = (first + count - 1)
+                                    .clamp(0, days.length - 1);
+                                widget.onVisibleDays?.call(
+                                  days[first].date,
+                                  days[last].date,
+                                );
+                              }
+                              return false;
+                            },
+                            child: ListView.builder(
                             scrollDirection: Axis.horizontal,
                             controller: _hScroll,
                             physics: ColumnSnapPhysics(
@@ -483,6 +518,7 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
                                 ),
                               ),
                             ),
+                          ),
                           ),
                         ),
                       ),

@@ -44,6 +44,9 @@ class _KioskShellState extends ConsumerState<KioskShell> {
 
   /// Bumped on every idle reset; the drawer's match list starts over on it.
   int _resets = 0;
+
+  /// The days a visitor scrolled the board to; null = never (or reset).
+  ({Day first, Day last})? _boardDays;
   final _boardKey = GlobalKey<KioskBoardViewState>();
 
   @override
@@ -74,6 +77,7 @@ class _KioskShellState extends ConsumerState<KioskShell> {
     setState(() {
       _selected = null;
       _drawerOverride = null;
+      _boardDays = null;
       _resets++;
     });
     // Board horizontal scroll resets to today too (spec §1) — imperative
@@ -186,6 +190,8 @@ class _KioskShellState extends ConsumerState<KioskShell> {
       // With a drawer, the columns are sized for the room beside it open —
       // the same width open or closed, so they never resize mid-slide.
       columnBasisWidth: content == null ? null : screenWidth - drawerWidth,
+      onVisibleDays: (first, last) =>
+          setState(() => _boardDays = (first: first, last: last)),
     );
     if (content == null) return board;
     // A match being played keeps the drawer open: a visitor may close it,
@@ -206,6 +212,9 @@ class _KioskShellState extends ConsumerState<KioskShell> {
               onOpenNotice: _openNotice,
               onOpenMatch: _openMatch,
               resetToken: _resets,
+              boardDays: (settings?.kioskFollowBoard ?? true)
+                  ? _boardDays
+                  : null,
             ),
           ],
         ),

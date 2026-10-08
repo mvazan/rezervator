@@ -372,6 +372,15 @@ class KioskSettingsScreen extends ConsumerWidget {
                   settings?.kioskShowUpcoming ?? true,
                   'kiosk_show_upcoming',
                 ),
+                _switch(
+                  context,
+                  settings,
+                  'Zápasy sledují tabuli',
+                  settings?.kioskFollowBoard ?? true,
+                  'kiosk_follow_board',
+                  subtitle: 'Když návštěvník posune tabuli na jiné dny, '
+                      'seznam zápasů naskočí na zápasy těch dnů.',
+                ),
                 _choice(
                   context,
                   settings,

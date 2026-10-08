@@ -18,6 +18,7 @@ import 'package:rezervator/features/kiosk/kiosk_shell.dart';
 import 'package:rezervator/features/kiosk/kiosk_headline.dart';
 import 'package:rezervator/features/kiosk/name_picker.dart';
 import 'package:rezervator/features/schedule/widgets/calendar_board.dart';
+import 'package:rezervator/features/schedule/widgets/schedule_day_column.dart';
 
 void main() {
   const settings = ScheduleSettings(
@@ -1285,6 +1286,7 @@ void main() {
       bool panelEnabled = true,
       int pastDays = 0,
       int idleSeconds = 60,
+      bool followBoard = true,
       KioskLiveLayout liveLayout = KioskLiveLayout.full,
       Stream<Map<String, MatchResult>>? resultsStream,
       Map<String, List<MatchPlayerResult>> lineups = const {},
@@ -1317,6 +1319,7 @@ void main() {
               kioskPanelEnabled: panelEnabled,
               kioskPastDays: pastDays,
               kioskIdleSeconds: idleSeconds,
+              kioskFollowBoard: followBoard,
               kioskLiveLayout: liveLayout,
             ),
           ),
@@ -1733,6 +1736,60 @@ void main() {
 
       await finish(tester);
     });
+
+    for (final follow in [true, false]) {
+      testWidgets('the match list ${follow ? 'follows' : 'ignores'} the '
+          'board scrolled to past days', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            slots: [
+              fed('old', day.addDays(-13), 'DávnýZápas'),
+              fed('cur', day.addDays(1), 'Tento'),
+            ],
+            results: {'old': res('old', 'finished', 5, 3)},
+            drawerOpen: true,
+            showNotices: false,
+            weeksBack: 0,
+            weeksAhead: 0,
+            pastDays: 14,
+            followBoard: follow,
+          ),
+        );
+        await tester.pumpAndSettle();
+        Finder inList(String t) => find.descendant(
+          of: find.byType(KioskDrawer),
+          matching: find.textContaining(t),
+        );
+        expect(inList('DávnýZápas'), findsNothing);
+
+        // Drag the board two weeks back, to the match's day.
+        for (var i = 0; i < 4 && find.textContaining('25.9.').evaluate().isEmpty; i++) {
+          await tester.drag(
+            find.byType(ScheduleDayColumn).first,
+            const Offset(900, 0),
+          );
+          await tester.pumpAndSettle();
+        }
+        expect(find.textContaining('25.9.'), findsWidgets);
+
+        if (follow) {
+          final list = tester.getRect(
+            find.descendant(
+              of: find.byType(KioskDrawer),
+              matching: find.byType(CustomScrollView),
+            ),
+          );
+          final row = tester.getRect(inList('DávnýZápas').first);
+          expect(row.top, greaterThanOrEqualTo(list.top - 1));
+          expect(row.bottom, lessThanOrEqualTo(list.bottom + 1));
+        } else {
+          expect(inList('DávnýZápas'), findsNothing);
+        }
+
+        await finish(tester);
+      });
+    }
 
     testWidgets('a match being played takes the whole drawer, even closed by '
         'default, and reopens it after a minute', (tester) async {

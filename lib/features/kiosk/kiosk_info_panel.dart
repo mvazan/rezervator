@@ -109,10 +109,14 @@ class KioskDrawer extends ConsumerWidget {
     required this.onOpenNotice,
     required this.onOpenMatch,
     this.resetToken = 0,
+    this.boardDays,
   });
 
   /// Bumped by the shell on every idle reset.
   final int resetToken;
+
+  /// The days a visitor scrolled the board to, when the list follows it.
+  final ({Day first, Day last})? boardDays;
 
   final KioskPanelContent content;
   final bool open;
@@ -145,7 +149,11 @@ class KioskDrawer extends ConsumerWidget {
     final matches = content.hasMatches
         // A new key after every idle reset: the list starts over (its
         // weeks and its scroll) like the rest of the kiosk.
-        ? _MatchesCard(key: ValueKey(resetToken), onOpen: onOpenMatch)
+        ? _MatchesCard(
+            key: ValueKey(resetToken),
+            onOpen: onOpenMatch,
+            boardDays: boardDays,
+          )
         : null;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 250),
@@ -567,9 +575,13 @@ class _NoticesCardState extends State<_NoticesCard> {
 /// at either end brings one more week of the season; a tap on a finished
 /// match opens its Zápis.
 class _MatchesCard extends ConsumerStatefulWidget {
-  const _MatchesCard({super.key, required this.onOpen});
+  const _MatchesCard({super.key, required this.onOpen, this.boardDays});
 
   final void Function(PrioritySlot match) onOpen;
+
+  /// The days the board shows after a visitor scrolled it; the list turns
+  /// to the first match among them.
+  final ({Day first, Day last})? boardDays;
 
   @override
   ConsumerState<_MatchesCard> createState() => _MatchesCardState();
@@ -587,6 +599,56 @@ class _MatchesCardState extends ConsumerState<_MatchesCard> {
   final _centerKey = GlobalKey();
   final _controller = ScrollController();
   bool _opened = false;
+
+  /// One key per match row, to scroll a row into view.
+  final _rowKeys = <String, GlobalKey>{};
+
+  @override
+  void didUpdateWidget(_MatchesCard old) {
+    super.didUpdateWidget(old);
+    final days = widget.boardDays;
+    if (days != null && days != old.boardDays) _follow(days);
+  }
+
+  /// Turns the list to the first match the board now shows — widening the
+  /// list by whole weeks when that match lies outside it.
+  void _follow(({Day first, Day last}) days) {
+    bool inDays(PrioritySlot s) =>
+        !s.date.isBefore(days.first) && !s.date.isAfter(days.last);
+    var back = _extraBack;
+    var ahead = _extraAhead;
+    PrioritySlot? target;
+    for (var i = 0; i < 60; i++) {
+      final w = _window(back, ahead, watch: false);
+      target = w.matches.where(inDays).firstOrNull;
+      if (target != null) break;
+      final earlier = w.matches.isEmpty || days.first.isBefore(w.matches.first.date);
+      if (earlier && w.moreBefore) {
+        back++;
+      } else if (!earlier && w.moreAfter) {
+        ahead++;
+      } else {
+        break;
+      }
+    }
+    final found = target;
+    if (found == null) return;
+    if (back != _extraBack || ahead != _extraAhead) {
+      setState(() {
+        _extraBack = back;
+        _extraAhead = ahead;
+      });
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final row = _rowKeys[found.id]?.currentContext;
+      if (row == null || !row.mounted) return;
+      Scrollable.ensureVisible(
+        row,
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeInOutCubic,
+      );
+    });
+  }
 
   @override
   void dispose() {
@@ -679,6 +741,7 @@ class _MatchesCardState extends ConsumerState<_MatchesCard> {
     final newer = matches.sublist(split);
 
     Widget row(PrioritySlot s) => SizedBox(
+      key: _rowKeys.putIfAbsent(s.id, GlobalKey.new),
       height: _resultRowHeight,
       child: _MatchRow(slot: s, result: results[s.id], onOpen: widget.onOpen),
     );
@@ -701,6 +764,8 @@ class _MatchesCardState extends ConsumerState<_MatchesCard> {
           : CustomScrollView(
               controller: _controller,
               center: _centerKey,
+              // Every row built, so following the board can scroll to any.
+              cacheExtent: 100000,
               slivers: [
                 SliverList.builder(
                   itemCount: older.length + (window.moreBefore ? 1 : 0),
