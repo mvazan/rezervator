@@ -1,8 +1,9 @@
 /// The match detail's scoreboard (Souboje, Task 3): who won and how the
-/// score came about. The date and a status chip; the team names around a big
-/// score (each over its own score when a name needs more than 2 lines); the
-/// pin totals with the lead between them. Both views of the match detail
-/// share it, so the score never jumps when the view switches.
+/// score came about. The date, how old the score is („⟳ před 3 min“) and a
+/// status chip; the team names around a big score (each over its own score
+/// when a name needs more than 2 lines); the pin totals with the lead
+/// between them; the format, the venue and the match's page on the site.
+/// Every layout of the match detail shares it, so the score never jumps.
 ///
 /// Every number is set in tabular figures, so live values don't jump as
 /// they change, and a winner is never told by colour alone: the name's
@@ -32,6 +33,7 @@ class MatchScoreboard extends StatelessWidget {
     this.playersLoading = false,
     required this.now,
     this.onVenueTap,
+    this.onSiteTap,
     this.homeColor,
     this.awayColor,
     this.video,
@@ -55,6 +57,10 @@ class MatchScoreboard extends StatelessWidget {
 
   /// Null = the venue is plain text (no known venue page).
   final VoidCallback? onVenueTap;
+
+  /// Opens the match's page on the site (vysledky.kuzelky.cz), as „ČKA“
+  /// after the venue; null = the match has no page there.
+  final VoidCallback? onSiteTap;
 
   /// The sides' colours the pin lead is printed in; null = green and red.
   final Color? homeColor;
@@ -110,10 +116,13 @@ class MatchScoreboard extends StatelessWidget {
               date: slot.timeKnown
                   ? '${dayFull(slot.date)} · ${slot.startsAt.display()}'
                   : dayFull(slot.date),
+              freshness: result == null
+                  ? null
+                  : freshnessLabel(result.fetchedAt, now),
               chip: result == null
                   ? null
                   : live
-                  ? 'Živě · ${freshnessLabel(result.fetchedAt, now)}'
+                  ? 'Živě'
                   : _statusLabel(result.status),
               live: live,
               action: video,
@@ -140,6 +149,7 @@ class MatchScoreboard extends StatelessWidget {
               ),
               venue: slot.venue ?? '',
               onVenueTap: onVenueTap,
+              onSiteTap: onSiteTap,
             ),
           ],
         ),
@@ -148,11 +158,13 @@ class MatchScoreboard extends StatelessWidget {
   }
 }
 
-/// The date and start on the left, the status chip on the right (it drops
-/// under the date when the two don't fit on one line).
+/// The date and start, then how old the score is („⟳ před 3 min“), on
+/// the left; the status chip on the right (it drops under the date when
+/// the two don't fit on one line).
 class _TopLine extends StatelessWidget {
   const _TopLine({
     required this.date,
+    required this.freshness,
     required this.chip,
     required this.live,
     this.action,
@@ -160,6 +172,10 @@ class _TopLine extends StatelessWidget {
 
   /// „středa 16. 9. · 17:30“.
   final String date;
+
+  /// When the score was last read from the site, as „před 3 min“; null =
+  /// nothing fetched yet.
+  final String? freshness;
 
   /// The chip's text; null = no chip (nothing fetched yet).
   final String? chip;
@@ -176,18 +192,36 @@ class _TopLine extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final text = Theme.of(context).textTheme;
     final chip = this.chip;
+    final small = text.bodySmall?.copyWith(
+      fontWeight: FontWeight.w400,
+      fontFeatures: _tabular,
+    );
     return Wrap(
       alignment: WrapAlignment.spaceBetween,
       crossAxisAlignment: WrapCrossAlignment.center,
       spacing: 8,
       runSpacing: 4,
       children: [
-        Text(
-          date,
-          style: text.bodySmall?.copyWith(
-            fontWeight: FontWeight.w400,
-            fontFeatures: _tabular,
-          ),
+        Wrap(
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 8,
+          runSpacing: 4,
+          children: [
+            Text(date, style: small),
+            if (freshness case final freshness?)
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.refresh,
+                    size: 14,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 3),
+                  Text(freshness, style: small),
+                ],
+              ),
+          ],
         ),
         if (action != null)
           action!
@@ -552,13 +586,16 @@ class _Pill extends StatelessWidget {
   );
 }
 
-/// „6 hráčů · 100 HS · TJ Sokol Rudná“: the format, then the venue — a link
-/// with a chevron when [onVenueTap] is set. Nothing when both are empty.
+/// „6 hráčů · 100 HS · TJ Sokol Rudná › · ČKA ↗“: the format, then the
+/// venue — a link with a chevron when [onVenueTap] is set — then „ČKA“,
+/// the match's page on the site, when [onSiteTap] is set. Nothing when all
+/// are empty.
 class _Footer extends StatelessWidget {
   const _Footer({
     required this.format,
     required this.venue,
     required this.onVenueTap,
+    required this.onSiteTap,
   });
 
   /// [formatLabel]'s „6 hráčů · 100 HS“, or '' when unknown.
@@ -568,59 +605,68 @@ class _Footer extends StatelessWidget {
   final String venue;
 
   final VoidCallback? onVenueTap;
+  final VoidCallback? onSiteTap;
 
   @override
   Widget build(BuildContext context) {
-    if (format.isEmpty && venue.isEmpty) return const SizedBox.shrink();
+    final onVenueTap = this.onVenueTap;
+    final onSiteTap = this.onSiteTap;
+    if (format.isEmpty && venue.isEmpty && onSiteTap == null) {
+      return const SizedBox.shrink();
+    }
     final scheme = Theme.of(context).colorScheme;
     final style = Theme.of(context).textTheme.bodySmall?.copyWith(
       fontWeight: FontWeight.w400,
       color: scheme.onSurfaceVariant,
       fontFeatures: _tabular,
     );
-    final onVenueTap = this.onVenueTap;
-    final Widget line;
-    if (onVenueTap == null || venue.isEmpty) {
-      line = Text(
-        [format, venue].where((s) => s.isNotEmpty).join(' · '),
-        textAlign: TextAlign.center,
-        style: style,
-      );
-    } else {
-      line = Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          if (format.isNotEmpty)
-            Flexible(child: Text('$format · ', style: style)),
-          Flexible(
-            child: InkWell(
-              onTap: onVenueTap,
-              borderRadius: BorderRadius.circular(4),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Flexible(
-                      child: Text(
-                        venue,
-                        overflow: TextOverflow.ellipsis,
-                        style: style,
-                      ),
-                    ),
-                    Icon(
-                      Icons.chevron_right,
-                      size: 16,
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ],
-                ),
-              ),
+
+    /// [label] with a trailing [icon], tappable; 4dp of padding keeps the
+    /// tap target off the text's edge.
+    Widget link(String label, IconData icon, VoidCallback onTap) => InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(4),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // The Wrap bounds the row's width: a long name is cut, not
+            // overflowed.
+            Flexible(
+              child: Text(label, overflow: TextOverflow.ellipsis, style: style),
             ),
-          ),
-        ],
-      );
-    }
-    return Padding(padding: const EdgeInsets.only(top: 8), child: line);
+            Icon(icon, size: 14, color: scheme.onSurfaceVariant),
+          ],
+        ),
+      ),
+    );
+
+    // The plain pieces as one text; a link breaks it. A Wrap, so at a
+    // large text size the ČKA link drops under the venue instead of
+    // overflowing.
+    final plain = [
+      format,
+      if (onVenueTap == null) venue,
+    ].where((s) => s.isNotEmpty).join(' · ');
+    final children = <Widget>[
+      if (plain.isNotEmpty) Text(plain, style: style),
+      if (onVenueTap != null && venue.isNotEmpty) ...[
+        if (plain.isNotEmpty) Text(' · ', style: style),
+        link(venue, Icons.chevron_right, onVenueTap),
+      ],
+      if (onSiteTap != null) ...[
+        if (plain.isNotEmpty || venue.isNotEmpty) Text(' · ', style: style),
+        link('ČKA', Icons.open_in_new, onSiteTap),
+      ],
+    ];
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Wrap(
+        alignment: WrapAlignment.center,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: children,
+      ),
+    );
   }
 }

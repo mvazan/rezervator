@@ -35,16 +35,15 @@ void main() {
     expect(settings('zapis').kioskLiveLayout, MatchLayout.full);
   });
 
-  test('parseMatchLayoutPrefs: both names, Zápis for portrait is the cards',
-      () {
+  test('parseMatchLayoutPrefs: both names, Zápis in either', () {
     expect(
       parseMatchLayoutPrefs('compact', 'zapis'),
       (portrait: MatchLayout.compact, landscape: MatchLayout.zapis),
     );
     expect(parseMatchLayoutPrefs(null, null), defaultMatchLayoutPrefs);
     expect(
-      parseMatchLayoutPrefs('zapis', 'table'),
-      (portrait: MatchLayout.full, landscape: MatchLayout.table),
+      parseMatchLayoutPrefs('zapis', 'x'),
+      (portrait: MatchLayout.zapis, landscape: MatchLayout.full),
     );
   });
 
@@ -79,17 +78,5 @@ void main() {
         .read(matchLayoutPrefsProvider.notifier)
         .set(landscape: MatchLayout.full);
     expect(prefs.getString('match_layout_landscape'), 'full');
-  });
-
-  test('Zápis asked for portrait is saved as the cards', () async {
-    SharedPreferences.setMockInitialValues({});
-    final container = ProviderContainer();
-    addTearDown(container.dispose);
-    await container
-        .read(matchLayoutPrefsProvider.notifier)
-        .set(portrait: MatchLayout.zapis);
-    expect(container.read(matchLayoutPrefsProvider).portrait, MatchLayout.full);
-    final prefs = await SharedPreferences.getInstance();
-    expect(prefs.getString('match_layout_portrait'), 'full');
   });
 }

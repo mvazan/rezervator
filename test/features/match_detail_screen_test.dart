@@ -23,20 +23,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../support/rudna_vrsovice.dart';
 
-/// The Souboje/Zápis choice pinned to one view: no SharedPreferences, and a
-/// switch only moves the state, so a test can read what was picked.
-class _FixedView extends MatchDetailViewNotifier {
-  _FixedView(this._view);
-
-  final MatchDetailView _view;
-
-  @override
-  MatchDetailView build() => _view;
-
-  @override
-  Future<void> set(MatchDetailView view) async => state = view;
-}
-
 /// The duels' layout per orientation pinned (no SharedPreferences).
 class _FixedLayouts extends MatchLayoutPrefsNotifier {
   _FixedLayouts(this._prefs);
@@ -45,14 +31,43 @@ class _FixedLayouts extends MatchLayoutPrefsNotifier {
 
   @override
   MatchLayoutPrefs build() => _prefs;
+
+  @override
+  Future<void> set({MatchLayout? portrait, MatchLayout? landscape}) async {
+    state = (
+      portrait: portrait ?? state.portrait,
+      landscape: landscape ?? state.landscape,
+    );
+  }
 }
 
-/// The „Zápis“ segment of the view switch (the score sheet's own heading
-/// reads „Zápis“ too).
-final _zapisSegment = find.descendant(
-  of: find.byType(SegmentedButton<MatchDetailView>),
-  matching: find.text('Zápis'),
-);
+/// Switches the open match detail to the Zápis (the upright layout),
+/// as Můj profil → Detail zápasu would.
+Future<void> _showZapis(WidgetTester tester) async {
+  // Upright: sideways the Zápis is the full-screen page, not the sheet in
+  // place.
+  final size = tester.view.physicalSize / tester.view.devicePixelRatio;
+  if (size.width > size.height) {
+    tester.view.physicalSize = Size(size.width, size.width * 2);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+  }
+  final container = ProviderScope.containerOf(
+    tester.element(find.byType(MatchDetailScreen)),
+  );
+  await container
+      .read(matchLayoutPrefsProvider.notifier)
+      .set(portrait: MatchLayout.zapis);
+  await tester.pumpAndSettle();
+}
+
+/// The layouts with the Zápis upright.
+const _zapisUpright = (portrait: MatchLayout.zapis, landscape: MatchLayout.full);
+
+/// The AppBar's ⟳ (the scoreboard carries a small ⟳ of its own, before
+/// the freshness).
+final _refreshButton = find.byTooltip('Obnovit');
 
 /// [text] inside the scoreboard only.
 Finder _inBoard(String text) => find.descendant(
@@ -207,11 +222,8 @@ void main() {
     Stream<List<MatchPlayerResult>>? playersStream,
     List<Venue> venues = const [],
     Map<String, int> teamColors = const {},
-    // The view the screen opens on, pinned by _FixedView; null leaves the
-    // real notifier (SharedPreferences) in place.
-    MatchDetailView? view = MatchDetailView.souboje,
-    // The duels' layout per orientation, pinned; null leaves the real
-    // notifier in place.
+    // The layout per orientation, pinned; null leaves the real notifier
+    // (SharedPreferences) in place.
     MatchLayoutPrefs? layouts = defaultMatchLayoutPrefs,
     Future<String> Function(String matchId, {bool force})? refresh,
     void Function(String url)? launch,
@@ -270,8 +282,6 @@ void main() {
           onRegnumsAsked?.call();
           return regnums;
         }),
-        if (view != null)
-          matchDetailViewProvider.overrideWith(() => _FixedView(view)),
         if (layouts != null)
           matchLayoutPrefsProvider.overrideWith(() => _FixedLayouts(layouts)),
       ],
@@ -349,8 +359,7 @@ void main() {
 
     // Zápis: the legacy score sheet — team names (again, in the summary
     // row), player names with position prefix, and the lane totals.
-    await tester.tap(_zapisSegment);
-    await tester.pumpAndSettle();
+    await _showZapis(tester);
 
     expect(find.text(home), findsNWidgets(2));
     expect(find.text(away), findsNWidgets(2));
@@ -382,8 +391,7 @@ void main() {
         findsOneWidget,
       );
 
-      await tester.tap(_zapisSegment);
-      await tester.pumpAndSettle();
+      await _showZapis(tester);
 
       // The result has team-level data even with no lineup yet — Fix
       // round 1: this used to disappear along with the per-player section.
@@ -417,8 +425,7 @@ void main() {
     expect(find.text(noLineup), findsOneWidget);
     expect(find.text('Rozbalit vše'), findsNothing);
 
-    await tester.tap(_zapisSegment);
-    await tester.pumpAndSettle();
+    await _showZapis(tester);
 
     expect(find.byType(LegacyScoreSheet), findsOneWidget);
     expect(_inBoard(noLineup), findsOneWidget);
@@ -472,13 +479,12 @@ void main() {
         findsNothing,
       );
       expect(find.text('Družstva'), findsNothing);
-      expect(find.byIcon(Icons.refresh), findsOneWidget);
+      expect(_refreshButton, findsOneWidget);
       expect(find.text('Záznam'), findsOneWidget);
       // The scoreboard tells the forfeit instead of the missing lineup.
       expect(find.text('Sestavy zatím nejsou k dispozici.'), findsNothing);
 
-      await tester.tap(_zapisSegment);
-      await tester.pumpAndSettle();
+      await _showZapis(tester);
 
       expect(
         find.descendant(
@@ -533,9 +539,8 @@ void main() {
     expect(find.text('156'), findsNothing, reason: 'still collapsed');
   });
 
-  testWidgets('Video and Na webu ČKA buttons show only when the data exists', (
-    tester,
-  ) async {
+  testWidgets('the video button and the ČKA link show only when the data '
+      'exists', (tester) async {
     await tester.pumpWidget(
       app(
         slots: [
@@ -544,6 +549,7 @@ void main() {
             date: today.addDays(-1),
             videoUrl: 'https://vysledky.kuzelky.cz/video/m1',
             siteSlug: 'zapas-m1',
+            venue: 'TJ Sokol Rudná',
           ),
         ],
         results: {'m1': finishedResult},
@@ -554,23 +560,45 @@ void main() {
     // finishedResult's status is 'finished' — never live — so the button
     // reads "Záznam" (a recording), not the plain "Video" label.
     expect(find.text('Záznam'), findsOneWidget);
-    expect(find.text('Na webu ČKA'), findsOneWidget);
     expect(find.byIcon(Icons.play_circle_fill), findsOneWidget);
+    // „ČKA“ after the venue in the scoreboard's last line; the old
+    // „Výsledky z webu“ row is gone.
+    expect(_inBoard('ČKA'), findsOneWidget);
     expect(find.byIcon(Icons.open_in_new), findsOneWidget);
-
-    // Na webu ČKA sits at the right of the „Výsledky z webu“ line, on its
-    // row; the video button stands in the scoreboard, where the status chip
-    // („Dokončeno“) would be, so above that line.
-    final site = tester.getRect(find.text('Na webu ČKA'));
-    final fresh = tester.getRect(find.textContaining('Výsledky z webu'));
-    expect((site.center.dy - fresh.center.dy).abs(), lessThan(12));
-    expect(site.left, greaterThan(fresh.right));
+    expect(find.textContaining('Výsledky z webu'), findsNothing);
+    expect(find.text('Na webu ČKA'), findsNothing);
+    final venue = tester.getRect(
+      find.descendant(
+        of: find.byType(MatchScoreboard),
+        matching: find.textContaining('TJ Sokol Rudná'),
+      ),
+    );
+    final site = tester.getRect(_inBoard('ČKA'));
+    expect((site.center.dy - venue.center.dy).abs(), lessThan(12));
+    expect(site.left, greaterThan(venue.right));
+    // The video button stands in the scoreboard, where the status chip
+    // („Dokončeno“) would be, on the date's row.
     expect(find.text('Dokončeno'), findsNothing);
     final date = tester.getRect(find.textContaining('·').first);
     final record = tester.getRect(find.text('Záznam'));
-    expect(record.center.dy, lessThan(fresh.top));
     expect((record.center.dy - date.center.dy).abs(), lessThan(24));
     expect(record.left, greaterThan(date.right));
+  });
+
+  testWidgets('the ČKA link opens the match\'s page on the site', (
+    tester,
+  ) async {
+    final launched = <String>[];
+    await tester.pumpWidget(
+      app(
+        slots: [match(id: 'm1', date: today.addDays(-1), siteSlug: 'zapas-m1')],
+        results: {'m1': finishedResult},
+        launch: launched.add,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(_inBoard('ČKA'));
+    expect(launched, ['https://vysledky.kuzelky.cz/detail-zapasu/zapas-m1']);
   });
 
   testWidgets('no video/site data hides the buttons', (tester) async {
@@ -584,7 +612,8 @@ void main() {
 
     expect(find.text('Záznam'), findsNothing);
     expect(find.text('Video'), findsNothing);
-    expect(find.text('Na webu ČKA'), findsNothing);
+    expect(find.text('ČKA'), findsNothing);
+    expect(find.byIcon(Icons.open_in_new), findsNothing);
   });
 
   testWidgets('the Záznam button launches the video url', (tester) async {
@@ -673,14 +702,15 @@ void main() {
         findsOneWidget,
       );
       expect(find.byIcon(Icons.play_circle_fill), findsNothing);
-      // The button took the „Živě · …“ chip's place, so the freshness
-      // moves to the line below.
-      expect(find.textContaining('Živě ·'), findsNothing);
-      expect(find.textContaining('Výsledky z webu'), findsOneWidget);
+      // The button took the „Živě“ chip's place; the freshness stays on
+      // the date's row.
+      expect(find.text('Živě'), findsNothing);
+      expect(_inBoard('před 20 min'), findsOneWidget);
     },
   );
 
-  testWidgets('freshness line reads relative to nowProvider', (tester) async {
+  testWidgets('the freshness reads relative to nowProvider, after the date '
+      'with a ⟳', (tester) async {
     final fetched = now.subtract(const Duration(minutes: 20));
     final result = MatchResult.fromJson({
       'match_id': 'm1',
@@ -695,12 +725,23 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Výsledky z webu: před 20 min'), findsOneWidget);
+    expect(_inBoard('před 20 min'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(MatchScoreboard),
+        matching: find.byIcon(Icons.refresh),
+      ),
+      findsOneWidget,
+    );
+    final date = tester.getRect(find.textContaining('·').first);
+    final fresh = tester.getRect(_inBoard('před 20 min'));
+    expect((fresh.center.dy - date.center.dy).abs(), lessThan(4));
+    expect(fresh.left, greaterThan(date.right));
+    expect(find.textContaining('Výsledky z webu'), findsNothing);
   });
 
   testWidgets(
-    'a live match keeps its freshness in the Živě chip, not in a line '
-    'under the scoreboard',
+    'a live match: the „Živě“ chip, the freshness after the date',
     (tester) async {
       await tester.pumpWidget(
         app(
@@ -711,13 +752,13 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(_inBoard('Živě · před 20 min'), findsOneWidget);
+      expect(_inBoard('Živě'), findsOneWidget);
+      expect(_inBoard('před 20 min'), findsOneWidget);
       expect(find.textContaining('Výsledky z webu'), findsNothing);
-      expect(find.text('Výsledky zatím nejsou.'), findsNothing);
     },
   );
 
-  testWidgets('no result yet shows the no-results line', (tester) async {
+  testWidgets('no result yet: no freshness, no chip', (tester) async {
     await tester.pumpWidget(
       app(
         slots: [match(id: 'm1', date: today.addDays(5))],
@@ -725,7 +766,15 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Výsledky zatím nejsou.'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(MatchScoreboard),
+        matching: find.byIcon(Icons.refresh),
+      ),
+      findsNothing,
+    );
+    expect(find.textContaining('před '), findsNothing);
+    expect(find.text('Naplánováno'), findsNothing);
   });
 
   testWidgets('while slots are loading shows a progress indicator', (
@@ -765,7 +814,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(refreshed, ['m2']);
-    expect(find.byIcon(Icons.refresh), findsOneWidget);
+    expect(_refreshButton, findsOneWidget);
     final button = tester.widget<IconButton>(
       find.widgetWithIcon(IconButton, Icons.refresh),
     );
@@ -773,7 +822,7 @@ void main() {
 
     // The open-time poke keeps the 5 min gate; the button always looks.
     expect(forced, [false]);
-    await tester.tap(find.byIcon(Icons.refresh));
+    await tester.tap(_refreshButton);
     await tester.pump();
     expect(refreshed, ['m2', 'm2']);
     expect(forced, [false, true]);
@@ -835,9 +884,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(refreshed, isEmpty, reason: 'opening a finished match asks nothing');
 
-    expect(find.byIcon(Icons.refresh), findsOneWidget);
+    expect(_refreshButton, findsOneWidget);
     expect(find.byType(RefreshIndicator), findsOneWidget);
-    await tester.tap(find.byIcon(Icons.refresh));
+    await tester.tap(_refreshButton);
     await tester.pump();
     expect(refreshed, [('m1', true)]);
     await tester.pumpAndSettle(const Duration(seconds: 21));
@@ -854,7 +903,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.byIcon(Icons.refresh), findsNothing);
+    expect(_refreshButton, findsNothing);
     expect(find.byType(RefreshIndicator), findsNothing);
   });
 
@@ -949,7 +998,7 @@ void main() {
     // The server says there is nothing to ask for: the pull goes away, the
     // list stays where it was.
     answer = 'not_live';
-    await tester.tap(find.byIcon(Icons.refresh));
+    await tester.tap(_refreshButton);
     await tester.pumpAndSettle();
     expect(find.byType(RefreshIndicator), findsNothing);
     expect(offset(), scrolled);
@@ -975,12 +1024,12 @@ void main() {
       await tester.pumpAndSettle();
       expect(refreshed, ['m2']);
 
-      await tester.tap(find.byIcon(Icons.refresh));
+      await tester.tap(_refreshButton);
       await tester.pump();
 
       expect(refreshed, ['m2', 'm2']);
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
-      expect(find.byIcon(Icons.refresh), findsNothing);
+      expect(_refreshButton, findsNothing);
     },
   );
 
@@ -1005,7 +1054,7 @@ void main() {
       resultsCtrl.add({'m2': liveResultWith()});
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byIcon(Icons.refresh));
+      await tester.tap(_refreshButton);
       await tester.pump();
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
 
@@ -1016,7 +1065,7 @@ void main() {
       await tester.pump();
 
       expect(find.byType(CircularProgressIndicator), findsNothing);
-      expect(find.byIcon(Icons.refresh), findsOneWidget);
+      expect(_refreshButton, findsOneWidget);
     },
   );
 
@@ -1039,7 +1088,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byIcon(Icons.refresh));
+      await tester.tap(_refreshButton);
       await tester.pump();
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
 
@@ -1047,7 +1096,7 @@ void main() {
       await tester.pump();
 
       expect(find.byType(CircularProgressIndicator), findsNothing);
-      expect(find.byIcon(Icons.refresh), findsOneWidget);
+      expect(_refreshButton, findsOneWidget);
     },
   );
 
@@ -1066,7 +1115,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byIcon(Icons.refresh));
+    await tester.tap(_refreshButton);
     await tester.pumpAndSettle();
 
     expect(find.text('Výsledky jsou čerstvé.'), findsOneWidget);
@@ -1088,12 +1137,12 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.byIcon(Icons.refresh), findsOneWidget);
+    expect(_refreshButton, findsOneWidget);
 
-    await tester.tap(find.byIcon(Icons.refresh));
+    await tester.tap(_refreshButton);
     await tester.pumpAndSettle();
 
-    expect(find.byIcon(Icons.refresh), findsNothing);
+    expect(_refreshButton, findsNothing);
   });
 
   testWidgets('a refresh error on tap shows a friendly snackbar', (
@@ -1114,7 +1163,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byIcon(Icons.refresh));
+    await tester.tap(_refreshButton);
     await tester.pumpAndSettle();
 
     expect(
@@ -1173,7 +1222,7 @@ void main() {
       await tester.pumpAndSettle();
 
       // The scoreboard's last line: the format, then the venue as a link.
-      expect(_inBoard('6 hráčů · 120 HS · '), findsOneWidget);
+      expect(_inBoard('6 hráčů · 120 HS'), findsOneWidget);
       expect(_inBoard('TJ Sokol Brno IV'), findsOneWidget);
       expect(find.byIcon(Icons.chevron_right), findsOneWidget);
 
@@ -1231,7 +1280,7 @@ void main() {
       await tester.tap(find.text('open'));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byIcon(Icons.refresh));
+      await tester.tap(_refreshButton);
       await tester.pump();
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
 
@@ -1252,7 +1301,7 @@ void main() {
 
   group('Souboje on the real Rudná A 7 : 1 Vršovice A', () {
     Widget rudna({
-      MatchDetailView? view = MatchDetailView.souboje,
+      MatchLayoutPrefs? layouts = defaultMatchLayoutPrefs,
       Map<String, int> teamColors = const {},
       Map<String, String> regnums = const {},
     }) => app(
@@ -1260,19 +1309,19 @@ void main() {
       slots: [rudnaSlot],
       results: {'rv': rudnaResult},
       players: rudnaPlayers,
-      view: view,
+      layouts: layouts,
       teamColors: teamColors,
       regnums: regnums,
     );
 
     testWidgets(
-      'Souboje is the default: six duel cards in position order on one '
+      'the cards are the default: six duel cards in position order on one '
       'shared scale, then the Družstva card, and no score sheet',
       (tester) async {
         _tall(tester);
         // The real notifier, with nothing saved on the device yet.
         SharedPreferences.setMockInitialValues({});
-        await tester.pumpWidget(rudna(view: null));
+        await tester.pumpWidget(rudna(layouts: null));
         await tester.pumpAndSettle();
 
         final cards = tester
@@ -1285,44 +1334,31 @@ void main() {
         expect(cards.every((c) => !c.expanded), isTrue);
         expect(find.byType(TeamTotalsCard), findsOneWidget);
         expect(find.byType(LegacyScoreSheet), findsNothing);
-        expect(
-          tester
-              .widget<SegmentedButton<MatchDetailView>>(
-                find.byType(SegmentedButton<MatchDetailView>),
-              )
-              .selected,
-          {MatchDetailView.souboje},
-        );
         expect(find.text('Rozbalit vše'), findsOneWidget);
       },
     );
 
     testWidgets(
-      'tapping Zápis shows the score sheet instead of the cards, keeps the '
-      'scoreboard, and remembers the choice',
+      'the Zápis upright shows the score sheet instead of the cards and '
+      'keeps the scoreboard',
       (tester) async {
         _tall(tester);
         await tester.pumpWidget(rudna());
         await tester.pumpAndSettle();
 
-        await tester.tap(_zapisSegment);
-        await tester.pumpAndSettle();
+        await _showZapis(tester);
 
         expect(find.byType(LegacyScoreSheet), findsOneWidget);
         expect(find.byType(DuelCard), findsNothing);
         expect(find.byType(TeamTotalsCard), findsNothing);
         expect(find.text('Rozbalit vše'), findsNothing);
         expect(find.byType(MatchScoreboard), findsOneWidget);
-        final container = ProviderScope.containerOf(
-          tester.element(find.byType(MatchDetailScreen)),
-        );
-        expect(container.read(matchDetailViewProvider), MatchDetailView.zapis);
       },
     );
 
     testWidgets('a saved Zápis opens on the score sheet', (tester) async {
       _tall(tester);
-      await tester.pumpWidget(rudna(view: MatchDetailView.zapis));
+      await tester.pumpWidget(rudna(layouts: _zapisUpright));
       await tester.pumpAndSettle();
 
       expect(find.byType(LegacyScoreSheet), findsOneWidget);
@@ -1334,7 +1370,7 @@ void main() {
       _tall(tester);
       final first = rudnaPlayers.first.playerSlug!;
       await tester.pumpWidget(
-        rudna(view: MatchDetailView.zapis, regnums: {first: '787'}),
+        rudna(layouts: _zapisUpright, regnums: {first: '787'}),
       );
       await tester.pumpAndSettle();
 
@@ -1342,7 +1378,7 @@ void main() {
       expect(find.text('787'), findsOneWidget);
     });
 
-    testWidgets('Souboje does not ask for registration numbers',
+    testWidgets('the cards do not ask for registration numbers',
         (tester) async {
       _tall(tester);
       var asked = 0;
@@ -1352,7 +1388,6 @@ void main() {
           slots: [rudnaSlot],
           results: {'rv': rudnaResult},
           players: rudnaPlayers,
-          view: MatchDetailView.souboje,
           onRegnumsAsked: () => asked++,
         ),
       );
@@ -1436,7 +1471,7 @@ void main() {
       'scoreboard stays at 720dp',
       (tester) async {
         _tall(tester, width: 1400);
-        await tester.pumpWidget(rudna(view: MatchDetailView.zapis));
+        await tester.pumpWidget(rudna(layouts: _zapisUpright));
         await tester.pumpAndSettle();
 
         // The sheet is about 1000dp at its natural width: capped at 720 it
@@ -1448,14 +1483,11 @@ void main() {
       },
     );
 
-    group('the switch row, in the app\'s theme', () {
+    group('„Rozbalit vše“ and the ČKA link, in the app\'s theme', () {
       setUpAll(_loadManrope);
 
-      final segments = find.byType(SegmentedButton<MatchDetailView>);
-      final button = find.widgetWithText(TextButton, 'Rozbalit vše');
-
-      testWidgets('at 360dp the switch and „Rozbalit vše“ share one row, '
-          'the button at the right', (tester) async {
+      testWidgets('at 360dp „Rozbalit vše“ sits at the right, under the '
+          'scoreboard, without an overflow', (tester) async {
         _tall(tester, width: 360);
         await tester.pumpWidget(
           app(
@@ -1469,71 +1501,45 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(tester.takeException(), isNull);
-        expect(
-          tester
-              .widget<SegmentedButton<MatchDetailView>>(segments)
-              .showSelectedIcon,
-          isFalse,
-        );
-        expect(
-          tester.getCenter(button).dy,
-          closeTo(tester.getCenter(segments).dy, 4),
-        );
-        expect(tester.getRect(segments).left, 12);
+        final button = find.widgetWithText(TextButton, 'Rozbalit vše');
         expect(tester.getRect(button).right, 360 - 12);
+        expect(
+          tester.getRect(button).top,
+          greaterThanOrEqualTo(
+            tester.getRect(find.byType(MatchScoreboard)).bottom,
+          ),
+        );
       });
 
-      testWidgets('at 360dp and text scale 2.0 the button drops under the '
-          'switch instead of overflowing', (tester) async {
+      testWidgets('at 360dp and text scale 2.0 the scoreboard\'s last line '
+          '(format, venue, ČKA) does not overflow', (tester) async {
         _tall(tester, width: 360);
         tester.platformDispatcher.textScaleFactorTestValue = 2.0;
         addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
         await tester.pumpWidget(
           app(
             matchId: 'rv',
-            slots: [rudnaSlot],
+            slots: [
+              match(
+                id: 'rv',
+                date: rudnaSlot.date,
+                siteSlug: 'zapas-rv',
+                venue: 'TJ Sokol Rudná',
+                venueSlug: 'rudna',
+              ),
+            ],
             results: {'rv': rudnaResult},
             players: rudnaPlayers,
+            venues: [Venue(id: 'v1', slug: 'rudna', name: 'TJ Sokol Rudná', fetchedAt: now)],
             theme: buildTheme(Brightness.light),
           ),
         );
         await tester.pumpAndSettle();
 
         expect(tester.takeException(), isNull);
-        expect(
-          tester.getRect(button).top,
-          greaterThanOrEqualTo(tester.getRect(segments).bottom),
-        );
-        expect(tester.getRect(button).right, lessThanOrEqualTo(360 - 12));
+        expect(_inBoard('ČKA'), findsOneWidget);
+        expect(tester.getRect(_inBoard('ČKA')).right, lessThanOrEqualTo(360));
       });
-    });
-
-    testWidgets('portrait: „Na webu ČKA“ shares the row of „Výsledky z webu“, '
-        'at the right, without an overflow', (tester) async {
-      _tall(tester, width: 360);
-      await tester.pumpWidget(
-        app(
-          matchId: 'rv',
-          slots: [
-            match(id: 'rv', date: rudnaSlot.date, siteSlug: 'zapas-rv'),
-          ],
-          results: {'rv': rudnaResult},
-          players: rudnaPlayers,
-          theme: buildTheme(Brightness.light),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      expect(tester.takeException(), isNull);
-      final site = tester.getRect(find.byType(OutlinedButton));
-      final fresh = tester.getRect(find.textContaining('Výsledky z webu'));
-      expect((site.center.dy - fresh.center.dy).abs(), lessThan(12));
-      expect(site.right, 360 - 12);
-      // „Rozbalit vše“ stays in the switch row.
-      expect(
-        tester.getRect(find.text('Rozbalit vše')).center.dy,
-        greaterThan(site.bottom),
-      );
     });
 
     testWidgets('at 360dp every duel opens without an overflow', (
@@ -1615,7 +1621,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(asked, isEmpty);
-      expect(find.byIcon(Icons.refresh), findsOneWidget);
+      expect(_refreshButton, findsOneWidget);
     });
 
     testWidgets('a match with no time yet shows its date only, is not live '
@@ -1637,7 +1643,7 @@ void main() {
       expect(find.textContaining('0:00'), findsNothing);
       expect(find.text('Živě'), findsNothing);
       expect(find.textContaining('Živě'), findsNothing);
-      expect(find.byIcon(Icons.refresh), findsNothing);
+      expect(_refreshButton, findsNothing);
       expect(tester.takeException(), isNull);
     });
 
@@ -1667,7 +1673,7 @@ void main() {
       await tester.pumpAndSettle();
       // Asked on open, and the refresh button is there for the next ask.
       expect(asked, ['lg1:false']);
-      expect(find.byIcon(Icons.refresh), findsOneWidget);
+      expect(_refreshButton, findsOneWidget);
     });
 
     testWidgets('a match that meanwhile became one of ours shows our slot, '
@@ -1719,13 +1725,12 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
     }
 
-    Widget rudna(MatchLayoutPrefs layouts, {MatchDetailView? view}) => app(
+    Widget rudna(MatchLayoutPrefs layouts) => app(
       matchId: 'rv',
       slots: [rudnaSlot],
       results: {'rv': rudnaResult},
       players: rudnaPlayers,
       layouts: layouts,
-      view: view ?? MatchDetailView.souboje,
     );
 
     const portrait = (portrait: MatchLayout.compact, landscape: MatchLayout.full);
@@ -1743,7 +1748,6 @@ void main() {
 
       expect(find.byType(DuelsCompact), findsOneWidget);
       expect(find.byType(MatchScoreboard), findsOneWidget);
-      expect(find.byType(SegmentedButton<MatchDetailView>), findsOneWidget);
       expect(find.text('Rozbalit vše'), findsNothing);
       expect(find.byType(TeamTotalsCard), findsNothing);
       expect(find.byType(DuelCard).hitTestable(), findsNothing);
@@ -1778,15 +1782,15 @@ void main() {
       expect(find.text('Rozbalit vše'), findsNothing);
     });
 
-    testWidgets('the Zápis switch still works over a fitted layout',
+    testWidgets('the Zápis upright replaces a fitted layout in place',
         (tester) async {
       window(tester, 400, 900);
       await tester.pumpWidget(rudna(portrait));
       await tester.pumpAndSettle();
-      await tester.tap(_zapisSegment);
-      await tester.pumpAndSettle();
+      await _showZapis(tester);
       expect(find.byType(LegacyScoreSheet), findsOneWidget);
       expect(find.byType(DuelsCompact), findsNothing);
+      expect(find.byType(LegacyScoreSheetPage), findsNothing);
     });
 
     testWidgets('sideways takes the landscape choice, and a turn switches',

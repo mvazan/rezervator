@@ -13,7 +13,6 @@ import '../domain/models.dart' show MatchLayout, parseMatchLayout;
 
 const _themeChoiceKey = 'theme_choice';
 const _textSizeKey = 'text_size';
-const _matchDetailViewKey = 'match_detail_view';
 const _matchLayoutPortraitKey = 'match_layout_portrait';
 const _matchLayoutLandscapeKey = 'match_layout_landscape';
 const _dutyClubFilterKey = 'duty_club_filter';
@@ -131,60 +130,12 @@ Future<List<Override>> loadPersistedAppearance() async {
   ];
 }
 
-/// How the match detail shows a match: [souboje] is the duel cards, [zapis]
-/// the kuzelky.com-style score sheet (`LegacyScoreSheet`).
-///
-/// These names are persisted (SharedPreferences) — do not rename a value, or
-/// every user with that view saved silently falls back to
-/// [MatchDetailView.souboje] via [parseMatchDetailView]'s fallback.
-enum MatchDetailView { souboje, zapis }
-
-/// Persisted name → view; anything unknown falls back to
-/// [MatchDetailView.souboje].
-MatchDetailView parseMatchDetailView(String? name) => MatchDetailView.values
-    .firstWhere((v) => v.name == name, orElse: () => MatchDetailView.souboje);
-
-/// The last view picked on the match detail (Souboje or Zápis), remembered
-/// on the device so the next match opens the same way. Defaults to Souboje.
-final matchDetailViewProvider =
-    NotifierProvider<MatchDetailViewNotifier, MatchDetailView>(
-        MatchDetailViewNotifier.new);
-
-class MatchDetailViewNotifier extends Notifier<MatchDetailView> {
-  @override
-  MatchDetailView build() {
-    _load();
-    return MatchDetailView.souboje;
-  }
-
-  Future<void> _load() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      if (!ref.mounted) return; // disposed while awaiting — nothing to set
-      state = parseMatchDetailView(prefs.getString(_matchDetailViewKey));
-    } catch (_) {
-      // Best effort only (like data/cache.dart) — e.g. web with storage
-      // blocked. The default already returned by build() still applies.
-    }
-  }
-
-  /// Switches to [view] now and remembers it for the next match.
-  Future<void> set(MatchDetailView view) async {
-    state = view;
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_matchDetailViewKey, view.name);
-    } catch (_) {
-      // Best effort only — the in-memory choice still applies this session.
-    }
-  }
-}
-
-/// How the match detail draws the duels, by the way the device is held
-/// (Můj profil → Detail zápasu): [MatchLayout.full] (the cards, scrolling),
-/// [MatchLayout.compact] or [MatchLayout.table] (fitted to the screen) —
-/// and, held sideways only, [MatchLayout.zapis]: the score sheet opens
-/// full screen the moment the phone turns, and closes when it turns back.
+/// How the match detail draws a match, by the way the device is held
+/// (Můj profil → Detail zápasu): [MatchLayout.full] (the duel cards,
+/// scrolling), [MatchLayout.compact] or [MatchLayout.table] (fitted to the
+/// screen), or [MatchLayout.zapis] — the score sheet: upright in place of
+/// the duels, sideways full screen the moment the phone turns (closed when
+/// it turns back).
 ///
 /// Device-local (a phone and a tablet are held differently), persisted by
 /// name — see [MatchLayout].
@@ -195,10 +146,9 @@ const defaultMatchLayoutPrefs = (
   landscape: MatchLayout.full,
 );
 
-/// Persisted names → prefs; anything unknown is [MatchLayout.full], and a
-/// Zápis saved for portrait (never offered; an older build) reads as full.
+/// Persisted names → prefs; anything unknown is [MatchLayout.full].
 MatchLayoutPrefs parseMatchLayoutPrefs(String? portrait, String? landscape) => (
-  portrait: parseMatchLayout(portrait, allowZapis: false),
+  portrait: parseMatchLayout(portrait),
   landscape: parseMatchLayout(landscape),
 );
 
@@ -223,14 +173,12 @@ class MatchLayoutPrefsNotifier extends Notifier<MatchLayoutPrefs> {
         prefs.getString(_matchLayoutLandscapeKey),
       );
     } catch (_) {
-      // Best effort only — see MatchDetailViewNotifier._load.
+      // Best effort only — see ThemeChoiceNotifier._load.
     }
   }
 
-  /// Sets the layout for one orientation now and remembers it. Zápis is a
-  /// landscape layout only: asked for portrait it reads as the cards.
+  /// Sets the layout for one orientation now and remembers it.
   Future<void> set({MatchLayout? portrait, MatchLayout? landscape}) async {
-    if (portrait == MatchLayout.zapis) portrait = MatchLayout.full;
     state = (
       portrait: portrait ?? state.portrait,
       landscape: landscape ?? state.landscape,

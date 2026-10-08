@@ -171,6 +171,26 @@ void main() {
     });
   });
 
+  testWidgets('one open card taller than the list: it stays open and the '
+      'list scrolls, so no row is out of reach', (tester) async {
+    await tester.pumpWidget(
+      host(DuelsCompact(duels: duels, result: result(2, 0)), height: 260),
+    );
+    await tester.tap(find.text('Dom Hráč1').hitTestable());
+    for (var i = 0; i < 6; i++) {
+      await tester.pump(const Duration(milliseconds: 320));
+      await tester.pumpAndSettle();
+    }
+    expect(find.byType(DuelCard).hitTestable(), findsOneWidget);
+    final scroll = tester
+        .state<ScrollableState>(find.byType(Scrollable).first)
+        .position;
+    expect(scroll.maxScrollExtent, greaterThan(0));
+    await tester.drag(find.byType(DuelCard).hitTestable(), const Offset(0, -400));
+    await tester.pumpAndSettle();
+    expect(find.text('Hos Hráč3').hitTestable(), findsOneWidget);
+  });
+
   group('DuelsTable', () {
     testWidgets('a row per duel with surnames, a dot on the one being played, '
         'and alternate rows shaded', (tester) async {

@@ -2,18 +2,17 @@
 /// stats, players with a per-lane breakdown, video/web links and a live
 /// refresh — pushed from `results_screen.dart`'s row tap.
 ///
-/// Top to bottom: the scoreboard (shared by both views, so the score never
-/// jumps), the video and web buttons, a [Souboje | Zápis] switch remembered
-/// on the device, and the chosen view — the duels, or the kuzelky.com-style
-/// score sheet.
-///
-/// The duels are drawn the way the device's owner chose for the way it is
-/// held (Můj profil → Detail zápasu, [matchLayoutPrefsProvider]): the cards
-/// and the Družstva card, scrolling ([MatchLayout.full]), or fitted to the
-/// screen with the scoreboard pinned on top ([MatchLayout.compact],
-/// [MatchLayout.table] — the kiosk's drawings, `duels_compact.dart`). Held
-/// sideways, [MatchLayout.zapis] opens the score sheet full screen the
-/// moment the phone turns ([ZapisPage]), and closes it when it turns back.
+/// Top to bottom: the scoreboard (with how old the score is and the match's
+/// page on the site), the video button when it is not in the scoreboard,
+/// and the match drawn the way the device's owner chose for the way it is
+/// held (Můj profil → Detail zápasu, [matchLayoutPrefsProvider]): the duel
+/// cards and the Družstva card, scrolling ([MatchLayout.full]); the duels
+/// fitted to the screen with the scoreboard pinned on top
+/// ([MatchLayout.compact], [MatchLayout.table] — the kiosk's drawings,
+/// `duels_compact.dart`); or the kuzelky.com-style score sheet
+/// ([MatchLayout.zapis]) — upright in place of the duels, sideways full
+/// screen the moment the phone turns ([ZapisPage]), closed when it turns
+/// back.
 library;
 
 import 'dart:async';
@@ -258,97 +257,33 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     );
   }
 
-  /// „Výsledky z webu: před 5 dny“ on the left and the „Na webu ČKA“ button
-  /// on the right, on one row. The button drops under the text, still at the
-  /// right, when the row is too narrow.
-  Widget _freshnessRow(
-    ThemeData theme,
-    String? siteUrl,
-    MatchResult? result,
-    bool live,
-    DateTime now,
-  ) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 12, 0),
-      child: OverflowBar(
-        alignment: MainAxisAlignment.spaceBetween,
-        spacing: 8,
-        overflowSpacing: 4,
-        overflowAlignment: OverflowBarAlignment.end,
-        children: [
-          if (result == null || !live)
-            Text(
-              result == null
-                  ? 'Výsledky zatím nejsou.'
-                  : 'Výsledky z webu: ${freshnessLabel(result.fetchedAt, now)}',
-              style: theme.textTheme.bodySmall,
-            )
-          else
-            const SizedBox.shrink(),
-          if (siteUrl != null)
-            OutlinedButton.icon(
-              onPressed: () => widget.launch(siteUrl),
-              icon: const Icon(Icons.open_in_new),
-              label: const Text('Na webu ČKA'),
-            ),
-        ],
-      ),
-    );
-  }
-
-  /// [Souboje | Zápis] on the left, bound to [matchDetailViewProvider]; in
-  /// Souboje „Rozbalit vše“ / „Sbalit vše“ on the right, on the same row —
-  /// the switch has no check icon, so on a 360dp phone both fit up to text
-  /// scale 1.3. With larger text the button drops under the switch instead
-  /// of overflowing (OverflowBar: a row pushed apart when both fit, else a
-  /// column).
-  Widget _switchRow(MatchDetailView view, List<Duel> duels, MatchLayout layout) {
+  /// „Rozbalit vše“ / „Sbalit vše“ at the right, over the scrolling cards
+  /// (the fitted layouts fold cards to fit, so they have no such button).
+  Widget _expandAllRow(List<Duel> duels) {
     // A duel nobody has started never opens: it neither needs the button
     // nor keeps it from reading „Sbalit vše“ once the rest are open.
     final openable = [
       for (final duel in duels)
         if (duel.state != DuelState.waiting) duel.position,
     ];
-    final allOpen = openable.isNotEmpty && openable.every(_expanded.contains);
+    if (openable.isEmpty) return const SizedBox.shrink();
+    final allOpen = openable.every(_expanded.contains);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 16, 12, 0),
-      child: OverflowBar(
-        alignment: MainAxisAlignment.spaceBetween,
-        spacing: 8,
-        overflowSpacing: 4,
-        children: [
-          SegmentedButton<MatchDetailView>(
-            showSelectedIcon: false,
-            segments: const [
-              ButtonSegment(
-                value: MatchDetailView.souboje,
-                label: Text('Souboje'),
-              ),
-              ButtonSegment(value: MatchDetailView.zapis, label: Text('Zápis')),
-            ],
-            selected: {view},
-            onSelectionChanged: (chosen) => unawaited(
-              ref.read(matchDetailViewProvider.notifier).set(chosen.first),
-            ),
-          ),
-          // The fitted layouts fold cards to fit; „Rozbalit vše“ is the
-          // scrolling cards' button.
-          if (view == MatchDetailView.souboje &&
-              layout == MatchLayout.full &&
-              openable.isNotEmpty)
-            TextButton(
-              onPressed: () => setState(() {
-                if (allOpen) {
-                  _expanded.clear();
-                } else {
-                  // Every position, the waiting ones too: a duel that
-                  // starts later opens already expanded, as asked.
-                  _expanded.addAll(duels.map((duel) => duel.position));
-                }
-              }),
-              child: Text(allOpen ? 'Sbalit vše' : 'Rozbalit vše'),
-            ),
-        ],
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: Align(
+        alignment: Alignment.centerRight,
+        child: TextButton(
+          onPressed: () => setState(() {
+            if (allOpen) {
+              _expanded.clear();
+            } else {
+              // Every position, the waiting ones too: a duel that
+              // starts later opens already expanded, as asked.
+              _expanded.addAll(duels.map((duel) => duel.position));
+            }
+          }),
+          child: Text(allOpen ? 'Sbalit vše' : 'Rozbalit vše'),
+        ),
       ),
     );
   }
@@ -446,10 +381,19 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     final lineup = playersAsync.value ?? const <MatchPlayerResult>[];
     final playersLoading = !playersAsync.hasValue && !playersAsync.hasError;
     final venues = ref.watch(venuesProvider).value ?? const <Venue>[];
-    final view = ref.watch(matchDetailViewProvider);
+    // The match drawn the way the owner wants it for this way of holding
+    // the device; sideways with Zápis the sheet opens on its own and what
+    // is under it is the upright choice.
+    final landscape =
+        MediaQuery.orientationOf(context) == Orientation.landscape;
+    final layoutPrefs = ref.watch(matchLayoutPrefsProvider);
+    final layout = landscape ? layoutPrefs.landscape : layoutPrefs.portrait;
+    final inlineLayout = landscape && layout == MatchLayout.zapis
+        ? layoutPrefs.portrait
+        : layout;
     // The registration numbers only the Zápis shows; looked up on its first
     // open and remembered by the server.
-    final regnums = view == MatchDetailView.zapis && lineup.isNotEmpty
+    final regnums = inlineLayout == MatchLayout.zapis && lineup.isNotEmpty
         ? ref
                   .watch(
                     matchRegnumsProvider((
@@ -518,22 +462,12 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     final showRefreshButton =
         (live || askable || correctable) && !_hiddenByNotLive;
 
-    // The duels the way the owner wants them for this way of holding the
-    // device; sideways with Zápis the sheet opens on its own and the cards
-    // under it are the portrait choice.
-    final landscape =
-        MediaQuery.orientationOf(context) == Orientation.landscape;
-    final layoutPrefs = ref.watch(matchLayoutPrefsProvider);
-    final layout = landscape ? layoutPrefs.landscape : layoutPrefs.portrait;
     _syncAutoZapis(
       landscape: landscape,
       wanted: layout == MatchLayout.zapis && players.isNotEmpty,
       slot: slot,
       league: fromLeague,
     );
-    final duelsLayout = layout == MatchLayout.zapis
-        ? layoutPrefs.portrait
-        : layout;
 
     return Scaffold(
       appBar: AppBar(
@@ -567,8 +501,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
               players: players,
               playersLoading: playersLoading,
               venueMatch: venueMatch,
-              view: view,
-              layout: duelsLayout,
+              layout: inlineLayout,
               now: now,
               live: live,
               // Pulling is the ⟳ button's twin: gone together once a
@@ -586,13 +519,11 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     required List<MatchPlayerResult> players,
     required bool playersLoading,
     required Venue? venueMatch,
-    required MatchDetailView view,
     required MatchLayout layout,
     required DateTime now,
     required bool live,
     required bool pullToRefresh,
   }) {
-    final theme = Theme.of(context);
     // Always green for the hosts and red for the guests — never a team's
     // own colour, so a side reads the same on every match.
     const homeColor = homeSideColor;
@@ -611,33 +542,22 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
           onVenueTap: venueMatch == null
               ? null
               : () => pushScreen(context, (_) => VenueDetailScreen(slug: venueMatch.slug)),
+          onSiteTap: slot.siteUrl == null
+              ? null
+              : () => widget.launch(slot.siteUrl!),
           homeColor: homeColor,
           awayColor: awayColor,
           video: videoInScoreboard
               ? _videoButton(context, slot.videoUrl!, result, live)
               : null,
         ),
-        // While live the freshness sits in the scoreboard's „Živě“ chip —
-        // unless the video button took the chip's place. Na webu ČKA is on
-        // the same row, at the right (alone while live).
-        if (result == null ||
-            !live ||
-            videoInScoreboard ||
-            slot.siteUrl != null)
-          _freshnessRow(
-            theme,
-            slot.siteUrl,
-            result,
-            live && !videoInScoreboard,
-            now,
-          ),
         _buttonsRow(context, slot, result, live),
-        _switchRow(view, duels, layout),
+        if (layout == MatchLayout.full) _expandAllRow(duels),
       ])
         _centred(child),
     ];
 
-    if (view == MatchDetailView.souboje && layout != MatchLayout.full) {
+    if (layout == MatchLayout.compact || layout == MatchLayout.table) {
       return _fitted(
         context,
         layout: layout,
@@ -648,24 +568,24 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
       );
     }
 
-    children.addAll(switch (view) {
-        MatchDetailView.souboje => [
-          for (final child in _souboje(
-            duels: duels,
-            result: result,
-            homeColor: homeColor,
-            awayColor: awayColor,
-          ))
-            _centred(child),
-        ],
-        MatchDetailView.zapis => [
-          // Not centred: the sheet keeps the whole width, as before
-          // Souboje. At its natural size (about 1000dp) it fits a wide
-          // window whole instead of hiding a third behind a sideways
-          // scroll. Without a lineup it still shows its team summary row
-          // (as long as `result` has team-level data).
-          LegacyScoreSheet(slot: slot, result: result, players: players),
-        ],
+    children.addAll(switch (layout) {
+      MatchLayout.full || MatchLayout.compact || MatchLayout.table => [
+        for (final child in _souboje(
+          duels: duels,
+          result: result,
+          homeColor: homeColor,
+          awayColor: awayColor,
+        ))
+          _centred(child),
+      ],
+      MatchLayout.zapis => [
+        // Not centred: the sheet keeps the whole width. At its natural
+        // size (about 1000dp) it fits a wide window whole instead of
+        // hiding a third behind a sideways scroll. Without a lineup it
+        // still shows its team summary row (as long as `result` has
+        // team-level data).
+        LegacyScoreSheet(slot: slot, result: result, players: players),
+      ],
     });
 
     final list = ListView(

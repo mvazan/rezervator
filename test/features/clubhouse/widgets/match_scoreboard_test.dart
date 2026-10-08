@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/core/theme.dart';
 import 'package:rezervator/domain/models.dart';
+import 'package:rezervator/domain/results.dart';
 import 'package:rezervator/domain/palette.dart';
 import 'package:rezervator/features/clubhouse/widgets/match_scoreboard.dart';
 
@@ -137,18 +138,22 @@ Text _text(WidgetTester tester, String data) =>
 
 void main() {
   group('the finished Rudná A 7 : 1 Vršovice A', () {
-    Future<void> pump(WidgetTester tester, {VoidCallback? onVenueTap}) =>
-        tester.pumpWidget(
-          _host(
-            MatchScoreboard(
-              slot: rudnaSlot,
-              result: rudnaResult,
-              players: rudnaPlayers,
-              now: _now,
-              onVenueTap: onVenueTap,
-            ),
-          ),
-        );
+    Future<void> pump(
+      WidgetTester tester, {
+      VoidCallback? onVenueTap,
+      VoidCallback? onSiteTap,
+    }) => tester.pumpWidget(
+      _host(
+        MatchScoreboard(
+          slot: rudnaSlot,
+          result: rudnaResult,
+          players: rudnaPlayers,
+          now: _now,
+          onVenueTap: onVenueTap,
+          onSiteTap: onSiteTap,
+        ),
+      ),
+    );
 
     testWidgets('the date, the status, the score and the pins', (tester) async {
       await pump(tester);
@@ -180,6 +185,30 @@ void main() {
       expect(find.byIcon(Icons.chevron_right), findsOneWidget);
       await tester.tap(find.text('TJ Sokol Rudná'));
       expect(taps, 1);
+      expect(find.text('ČKA'), findsNothing);
+    });
+
+    testWidgets('the match\'s page on the site is „ČKA“ after the venue', (
+      tester,
+    ) async {
+      var taps = 0;
+      await pump(tester, onSiteTap: () => taps++);
+      expect(find.text('6 hráčů · 100 HS · TJ Sokol Rudná'), findsOneWidget);
+      expect(find.text('ČKA'), findsOneWidget);
+      expect(find.byIcon(Icons.open_in_new), findsOneWidget);
+      expect(
+        tester.getRect(find.text('ČKA')).left,
+        greaterThan(tester.getRect(find.text('6 hráčů · 100 HS · TJ Sokol Rudná')).right),
+      );
+      await tester.tap(find.text('ČKA'));
+      expect(taps, 1);
+    });
+
+    testWidgets('a finished match says how old its score is after the date',
+        (tester) async {
+      await pump(tester);
+      expect(find.byIcon(Icons.refresh), findsOneWidget);
+      expect(find.text(freshnessLabel(rudnaResult.fetchedAt, _now)), findsOneWidget);
     });
 
     testWidgets("the winner's name is w800, the loser's w400", (tester) async {
@@ -218,17 +247,23 @@ void main() {
       ),
     );
 
-    testWidgets('the chip says Živě with the freshness, after an 8dp dot', (
-      tester,
-    ) async {
+    testWidgets('the chip says Živě after an 8dp dot; the freshness sits '
+        'after the date with a ⟳', (tester) async {
       await pump(tester);
-      expect(find.text('Živě · před 2 min'), findsOneWidget);
+      expect(find.text('Živě'), findsOneWidget);
       expect(find.text('Dokončeno'), findsNothing);
+      expect(find.text('před 2 min'), findsOneWidget);
+      final fresh = tester.getRect(find.text('před 2 min'));
+      final arrow = tester.getRect(find.byIcon(Icons.refresh));
+      expect(arrow.right, lessThanOrEqualTo(fresh.left));
+      expect(arrow.center.dy, closeTo(fresh.center.dy, 2));
+      final date = tester.getRect(find.textContaining('·').first);
+      expect(date.right, lessThanOrEqualTo(arrow.left));
       // The dot is an icon, not a „●“ Manrope lacks.
       expect(find.textContaining('●'), findsNothing);
       final dot = find.byIcon(Icons.circle);
       expect(tester.widget<Icon>(dot).size, 8);
-      final label = tester.getRect(find.text('Živě · před 2 min'));
+      final label = tester.getRect(find.text('Živě'));
       expect(tester.getRect(dot).right, lessThanOrEqualTo(label.left));
       expect(tester.getCenter(dot).dy, closeTo(label.center.dy, 2));
     });
@@ -556,6 +591,7 @@ void main() {
                     players: state.players,
                     now: _now,
                     onVenueTap: () {},
+                    onSiteTap: () {},
                   ),
                 ),
               ),

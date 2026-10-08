@@ -635,13 +635,14 @@ class AdminTenant {
 /// all, in the drawer, one title at a time in the status bar, or both.
 enum KioskNoticesMode { off, drawer, header, both }
 
-/// How a match's duels are drawn — the kiosk's live match (0064,
+/// How a match is drawn — the kiosk's live match (0064,
 /// `kiosk_live_layout`) and the app's match detail (a device preference per
 /// orientation, see `matchLayoutPrefsProvider`): the duel cards that scroll
 /// ([full]), one compact block per duel ([compact]) or one table row per
-/// duel ([table]) — both of those fit the match to the screen — or, the
-/// app's landscape only, the score sheet full screen ([zapis]). The kiosk
-/// never gets [zapis]: its column is checked to the first three.
+/// duel ([table]) — both of those fit the match to the screen — or the
+/// score sheet ([zapis]; the app only: upright in place of the duels,
+/// sideways full screen). The kiosk never gets [zapis]: its column is
+/// checked to the first three.
 ///
 /// The names are persisted (the database column, SharedPreferences) — do
 /// not rename a value.

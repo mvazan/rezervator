@@ -361,8 +361,9 @@ void main() {
 
   testWidgets('shows a logout action', (tester) async {
     // Tall enough for Odhlásit se to land inside ListView's build+cache
-    // window without scrolling — Moje skupina (0044) added a card above it.
-    tester.view.physicalSize = const Size(800, 2200);
+    // window without scrolling — Moje skupina (0044) and Detail zápasu
+    // added cards above it.
+    tester.view.physicalSize = const Size(800, 2700);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -377,8 +378,9 @@ void main() {
     tester,
   ) async {
     // Tall enough for Odhlásit se to land inside ListView's build+cache
-    // window without scrolling — Moje skupina (0044) added a card above it.
-    tester.view.physicalSize = const Size(800, 2200);
+    // window without scrolling — Moje skupina (0044) and Detail zápasu
+    // added cards above it.
+    tester.view.physicalSize = const Size(800, 2700);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -399,8 +401,9 @@ void main() {
     tester,
   ) async {
     // Tall enough for Odhlásit se to land inside ListView's build+cache
-    // window without scrolling — Moje skupina (0044) added a card above it.
-    tester.view.physicalSize = const Size(800, 2200);
+    // window without scrolling — Moje skupina (0044) and Detail zápasu
+    // added cards above it.
+    tester.view.physicalSize = const Size(800, 2700);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -2216,7 +2219,7 @@ void main() {
 
     Finder chip(String label) => find.widgetWithText(ChoiceChip, label);
 
-    testWidgets('offers the three drawings upright, the Zápis too sideways, '
+    testWidgets('offers the four drawings for each way of holding the phone, '
         'the cards chosen by default', (tester) async {
       tall(tester);
       SharedPreferences.setMockInitialValues({});
@@ -2229,11 +2232,11 @@ void main() {
       expect(chip('Karty'), findsNWidgets(2));
       expect(chip('Kompaktně'), findsNWidgets(2));
       expect(chip('Tabulka'), findsNWidgets(2));
-      expect(chip('Zápis'), findsOneWidget);
+      expect(chip('Zápis'), findsNWidgets(2));
       bool selected(Finder f) => tester.widget<ChoiceChip>(f).selected;
       expect(selected(chip('Karty').first), isTrue);
       expect(selected(chip('Karty').last), isTrue);
-      expect(selected(chip('Zápis')), isFalse);
+      expect(selected(chip('Zápis').last), isFalse);
       expect(find.textContaining('Otočením telefonu'), findsNothing);
     });
 
@@ -2247,7 +2250,7 @@ void main() {
 
       await tester.tap(chip('Tabulka').first);
       await tester.pumpAndSettle();
-      await tester.tap(chip('Zápis'));
+      await tester.tap(chip('Zápis').last);
       await tester.pumpAndSettle();
 
       final container = ProviderScope.containerOf(
@@ -2264,7 +2267,8 @@ void main() {
       bool selected(Finder f) => tester.widget<ChoiceChip>(f).selected;
       expect(selected(chip('Tabulka').first), isTrue);
       expect(selected(chip('Karty').first), isFalse);
-      expect(selected(chip('Zápis')), isTrue);
+      expect(selected(chip('Zápis').last), isTrue);
+      expect(selected(chip('Zápis').first), isFalse);
     });
 
     testWidgets('the saved choice is shown', (tester) async {

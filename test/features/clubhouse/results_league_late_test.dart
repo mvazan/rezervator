@@ -436,7 +436,7 @@ void main() {
     for (var i = 0; i < 5; i++) {
       await tester.pump(const Duration(milliseconds: 100));
     }
-    await tester.tap(find.byIcon(Icons.refresh));
+    await tester.tap(find.byTooltip('Obnovit'));
     for (var i = 0; i < 5; i++) {
       await tester.pump(const Duration(milliseconds: 100));
     }
