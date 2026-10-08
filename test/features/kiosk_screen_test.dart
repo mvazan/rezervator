@@ -291,9 +291,12 @@ void main() {
           requests.lastWhere((r) => r.method == 'PATCH').body,
         ) as Map<String, dynamic>;
 
-    await tester.tap(find.widgetWithText(SwitchListTile, 'Nástěnka v panelu'));
+    await tester.ensureVisible(find.text('Nástěnka na kiosku'));
+    await tester.tap(find.text('V záhlaví i v panelu'));
     await tester.pumpAndSettle();
-    expect(lastPatch(), {'kiosk_show_notices': false});
+    await tester.tap(find.text('V záhlaví').last);
+    await tester.pumpAndSettle();
+    expect(lastPatch(), {'kiosk_notices_mode': 'header'});
 
     await tester.tap(find.widgetWithText(SwitchListTile, 'Zápasy v panelu'));
     await tester.pumpAndSettle();
@@ -371,13 +374,14 @@ void main() {
     expect(find.widgetWithText(SwitchListTile, 'Panel vpravo'), findsOneWidget);
     for (final dependent in [
       'Panel je výchozně rozbalený',
-      'Nástěnka v panelu',
       'Zápasy v panelu',
       'Aktuální zápas přes celý panel',
     ]) {
       expect(find.widgetWithText(SwitchListTile, dependent), findsNothing);
     }
     expect(find.text('Šířka panelu'), findsNothing);
+    // The notices can still go to the status bar without the panel.
+    expect(find.text('Nástěnka na kiosku'), findsOneWidget);
 
     await tester.tap(find.widgetWithText(SwitchListTile, 'Panel vpravo'));
     await tester.pumpAndSettle();
@@ -393,7 +397,7 @@ void main() {
         trainingWeekdays: {1},
         bookingHorizonDays: 14,
         maxActiveReservations: 3,
-        kioskShowNotices: false,
+        kioskNoticesMode: KioskNoticesMode.off,
         kioskLiveMode: false,
         tenantId: 't',
       ),

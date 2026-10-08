@@ -321,10 +321,10 @@ class _StatusBar extends ConsumerWidget {
     final now = ref.watch(nowProvider).value ?? DateTime.now();
     final todayDay = Day.fromDateTime(now);
     final info = _infoLine(ref, todayDay);
-    final notices = kioskNotices(
-      ref.watch(messagesProvider).value ?? const [],
-      now,
-    );
+    final notices =
+        (ref.watch(settingsProvider).value?.kioskNoticesInHeader ?? true)
+        ? kioskNotices(ref.watch(messagesProvider).value ?? const [], now)
+        : const <Message>[];
     final clock =
         '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
 
@@ -379,7 +379,8 @@ class _StatusBar extends ConsumerWidget {
                       child: KioskHeadline(
                         notices: notices,
                         turn: Duration(
-                          seconds: ref
+                          seconds:
+                              ref
                                   .watch(settingsProvider)
                                   .value
                                   ?.kioskNoticesRotationSeconds ??

@@ -69,6 +69,7 @@ class _KioskHeadlineState extends State<KioskHeadline> {
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(Icons.campaign_outlined, size: 26, color: scheme.primary),
             const SizedBox(width: 10),

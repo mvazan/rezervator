@@ -97,6 +97,13 @@ class KioskSettingsScreen extends ConsumerWidget {
     );
   }
 
+  static String _noticesLabel(KioskNoticesMode m) => switch (m) {
+    KioskNoticesMode.off => 'Nezobrazovat',
+    KioskNoticesMode.drawer => 'V panelu',
+    KioskNoticesMode.header => 'V záhlaví',
+    KioskNoticesMode.both => 'V záhlaví i v panelu',
+  };
+
   static const _weekChoices = [0, 1, 2, 3, 4];
 
   static String _weeksLabel(int n, String direction) => n == 0
@@ -270,6 +277,44 @@ class KioskSettingsScreen extends ConsumerWidget {
               const [60, 70, 80, 90, 100],
               (n) => n == 100 ? 'Celá obrazovka (s křížkem)' : '$n % obrazovky',
             ),
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: DropdownButtonFormField<KioskNoticesMode>(
+                initialValue:
+                    settings?.kioskNoticesMode ?? KioskNoticesMode.both,
+                decoration: const InputDecoration(
+                  labelText: 'Nástěnka na kiosku',
+                  helperText:
+                      'Záhlaví = nadpis jednoho oznamu nahoře mezi '
+                      'časem a Rezervovat, oznamy se střídají.',
+                  helperMaxLines: 2,
+                  border: OutlineInputBorder(),
+                ),
+                items: [
+                  for (final m in KioskNoticesMode.values)
+                    DropdownMenuItem(value: m, child: Text(_noticesLabel(m))),
+                ],
+                onChanged: settings == null
+                    ? null
+                    : (m) => m == null
+                          ? null
+                          : _panel(context, settings, {
+                              'kiosk_notices_mode': m.name,
+                            }),
+              ),
+            ),
+            if ((settings?.kioskNoticesMode ?? KioskNoticesMode.both) !=
+                KioskNoticesMode.off)
+              _choice(
+                context,
+                settings,
+                'Střídání oznamů',
+                settings?.kioskNoticesRotationSeconds ?? 12,
+                'kiosk_notices_rotation_seconds',
+                const [6, 8, 12, 20, 30, 60],
+                (n) => 'po $n s',
+              ),
             const SizedBox(height: 24),
             Text(
               'Panel vpravo',
@@ -309,23 +354,6 @@ class KioskSettingsScreen extends ConsumerWidget {
                     'Vypnuto = panel je skrytý a rozbalí se '
                     'tlačítkem na okraji obrazovky.',
               ),
-              _switch(
-                context,
-                settings,
-                'Nástěnka v panelu',
-                settings?.kioskShowNotices ?? true,
-                'kiosk_show_notices',
-              ),
-              if (settings?.kioskShowNotices ?? true)
-                _choice(
-                  context,
-                  settings,
-                  'Střídání oznamů',
-                  settings?.kioskNoticesRotationSeconds ?? 12,
-                  'kiosk_notices_rotation_seconds',
-                  const [6, 8, 12, 20, 30, 60],
-                  (n) => 'po $n s',
-                ),
               _switch(
                 context,
                 settings,

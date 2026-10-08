@@ -3414,7 +3414,7 @@ begin
     'tenant_name', (select name from tenants where id = v_tenant),
     'settings', (select to_jsonb(s) - 'tenant_id'
                           - 'duty_reminder_enabled' - 'duty_reminder_days'
-                          - 'kiosk_show_notices' - 'kiosk_show_matches'
+                          - 'kiosk_notices_mode' - 'kiosk_show_matches'
                           - 'kiosk_show_upcoming' - 'kiosk_live_mode'
                           - 'kiosk_drawer_open' - 'kiosk_drawer_width'
                           - 'kiosk_notices_share' - 'kiosk_zapis_percent'
@@ -5629,7 +5629,6 @@ CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     "kiosk_fit_day" boolean DEFAULT true NOT NULL,
     "duty_reminder_enabled" boolean DEFAULT false NOT NULL,
     "duty_reminder_days" smallint DEFAULT 1 NOT NULL,
-    "kiosk_show_notices" boolean DEFAULT true NOT NULL,
     "kiosk_show_matches" boolean DEFAULT true NOT NULL,
     "kiosk_drawer_open" boolean DEFAULT false NOT NULL,
     "kiosk_show_upcoming" boolean DEFAULT true NOT NULL,
@@ -5644,12 +5643,14 @@ CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     "kiosk_live_rotation_seconds" smallint DEFAULT 12 NOT NULL,
     "kiosk_past_days" smallint DEFAULT 0 NOT NULL,
     "kiosk_idle_seconds" smallint DEFAULT 60 NOT NULL,
+    "kiosk_notices_mode" "text" DEFAULT 'both'::"text" NOT NULL,
     CONSTRAINT "schedule_settings_booking_horizon_days_check" CHECK ((("booking_horizon_days" >= 1) AND ("booking_horizon_days" <= 90))),
     CONSTRAINT "schedule_settings_duty_reminder_days_check" CHECK ((("duty_reminder_days" >= 1) AND ("duty_reminder_days" <= 14))),
     CONSTRAINT "schedule_settings_kiosk_ahead_check" CHECK ((("kiosk_weeks_ahead" >= 0) AND ("kiosk_weeks_ahead" <= 12))),
     CONSTRAINT "schedule_settings_kiosk_back_check" CHECK ((("kiosk_weeks_back" >= 0) AND ("kiosk_weeks_back" <= 12))),
     CONSTRAINT "schedule_settings_kiosk_idle_check" CHECK ((("kiosk_idle_seconds" >= 15) AND ("kiosk_idle_seconds" <= 600))),
     CONSTRAINT "schedule_settings_kiosk_live_rotation_check" CHECK ((("kiosk_live_rotation_seconds" >= 3) AND ("kiosk_live_rotation_seconds" <= 120))),
+    CONSTRAINT "schedule_settings_kiosk_notices_mode_check" CHECK (("kiosk_notices_mode" = ANY (ARRAY['off'::"text", 'drawer'::"text", 'header'::"text", 'both'::"text"]))),
     CONSTRAINT "schedule_settings_kiosk_notices_rotation_check" CHECK ((("kiosk_notices_rotation_seconds" >= 3) AND ("kiosk_notices_rotation_seconds" <= 120))),
     CONSTRAINT "schedule_settings_kiosk_past_check" CHECK ((("kiosk_past_days" >= 0) AND ("kiosk_past_days" <= 60))),
     CONSTRAINT "schedule_settings_kiosk_share_check" CHECK ((("kiosk_notices_share" >= 10) AND ("kiosk_notices_share" <= 90))),

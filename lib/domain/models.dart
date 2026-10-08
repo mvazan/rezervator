@@ -631,6 +631,10 @@ class AdminTenant {
       );
 }
 
+/// Where the kiosk shows the notices (0069, `kiosk_notices_mode`): not at
+/// all, in the drawer, one title at a time in the status bar, or both.
+enum KioskNoticesMode { off, drawer, header, both }
+
 class ScheduleSettings {
   const ScheduleSettings({
     required this.laneCount,
@@ -639,7 +643,7 @@ class ScheduleSettings {
     required this.maxActiveReservations,
     this.kioskDark = true,
     this.kioskFitDay = true,
-    this.kioskShowNotices = true,
+    this.kioskNoticesMode = KioskNoticesMode.both,
     this.kioskShowMatches = true,
     this.kioskShowUpcoming = true,
     this.kioskLiveMode = true,
@@ -678,7 +682,17 @@ class ScheduleSettings {
   /// and the matches — of the current week plus [kioskWeeksBack] weeks
   /// back and (when [kioskShowUpcoming]) [kioskWeeksAhead] weeks ahead. A
   /// match being played takes the whole drawer when [kioskLiveMode].
-  final bool kioskShowNotices;
+  final KioskNoticesMode kioskNoticesMode;
+
+  /// The drawer lists the notices.
+  bool get kioskShowNotices =>
+      kioskNoticesMode == KioskNoticesMode.drawer ||
+      kioskNoticesMode == KioskNoticesMode.both;
+
+  /// The status bar shows one notice's title at a time.
+  bool get kioskNoticesInHeader =>
+      kioskNoticesMode == KioskNoticesMode.header ||
+      kioskNoticesMode == KioskNoticesMode.both;
   final bool kioskShowMatches;
   final bool kioskShowUpcoming;
   final bool kioskLiveMode;
@@ -744,7 +758,10 @@ class ScheduleSettings {
         maxActiveReservations: json['max_active_reservations'] as int,
         kioskDark: json['kiosk_dark'] as bool? ?? true,
         kioskFitDay: json['kiosk_fit_day'] as bool? ?? true,
-        kioskShowNotices: json['kiosk_show_notices'] as bool? ?? true,
+        kioskNoticesMode: KioskNoticesMode.values.firstWhere(
+          (m) => m.name == json['kiosk_notices_mode'],
+          orElse: () => KioskNoticesMode.both,
+        ),
         kioskShowMatches: json['kiosk_show_matches'] as bool? ?? true,
         kioskShowUpcoming: json['kiosk_show_upcoming'] as bool? ?? true,
         kioskLiveMode: json['kiosk_live_mode'] as bool? ?? true,

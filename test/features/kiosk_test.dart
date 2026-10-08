@@ -1267,6 +1267,7 @@ void main() {
       Map<String, MatchResult> results = const {},
       bool drawerOpen = false,
       bool showNotices = true,
+      bool headerNotices = true,
       bool showMatches = true,
       bool showUpcoming = true,
       bool liveMode = true,
@@ -1291,7 +1292,12 @@ void main() {
               bookingHorizonDays: settings.bookingHorizonDays,
               maxActiveReservations: settings.maxActiveReservations,
               kioskDrawerOpen: drawerOpen,
-              kioskShowNotices: showNotices,
+              kioskNoticesMode: switch ((showNotices, headerNotices)) {
+                (true, true) => KioskNoticesMode.both,
+                (true, false) => KioskNoticesMode.drawer,
+                (false, true) => KioskNoticesMode.header,
+                (false, false) => KioskNoticesMode.off,
+              },
               kioskShowMatches: showMatches,
               kioskShowUpcoming: showUpcoming,
               kioskLiveMode: liveMode,
@@ -2200,6 +2206,19 @@ void main() {
       await tester.tap(inBar('Zámek'));
       await tester.pumpAndSettle();
       expect(find.byType(AlertDialog), findsOneWidget);
+
+      await finish(tester);
+    });
+
+    testWidgets('notices only in the drawer: no headline in the status bar', (
+      tester,
+    ) async {
+      fullHd(tester);
+      await tester.pumpWidget(
+        app(notices: [notice('1', 'Brigáda')], headerNotices: false),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(KioskHeadline), findsNothing);
 
       await finish(tester);
     });

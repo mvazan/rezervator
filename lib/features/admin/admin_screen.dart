@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/hub_menu.dart';
 import '../../core/ui.dart';
 import '../../data/providers.dart';
+import '../clubhouse/notice_board_screen.dart';
 import 'clubs_screen.dart';
 import 'duties_admin_screen.dart';
 import 'kiosk_screen.dart';
@@ -72,6 +73,12 @@ class AdminScreen extends ConsumerWidget {
       icon: Icons.tablet_mac_outlined,
       screen: () => const KioskSettingsScreen(),
     ),
+    // The same board as Klubovna's — the admin's own way in to post.
+    (
+      label: 'Nástěnka',
+      icon: Icons.campaign_outlined,
+      screen: () => const NoticeBoardScreen(),
+    ),
     (
       label: 'Veřejný přehled',
       icon: Icons.public,
@@ -79,7 +86,8 @@ class AdminScreen extends ConsumerWidget {
     ),
   ];
 
-  void _open(BuildContext context, _Entry entry) => pushScreen(context, (_) => entry.screen());
+  void _open(BuildContext context, _Entry entry) =>
+      pushScreen(context, (_) => entry.screen());
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -91,10 +99,7 @@ class AdminScreen extends ConsumerWidget {
     // renders as its OWN visually distinct section — tinted tile under a
     // "Správce aplikace" divider, never mixed among the kuželna admin
     // tiles.
-    const superEntry = (
-      label: 'Kuželny',
-      icon: Icons.apartment_outlined,
-    );
+    const superEntry = (label: 'Kuželny', icon: Icons.apartment_outlined);
     final isSuperadmin = profile?.isSuperadmin == true;
     // Visiting a foreign kuželna (0015) adds a second tile straight back
     // home — the same action the HomeShell banner offers, for when you are
@@ -119,8 +124,9 @@ class AdminScreen extends ConsumerWidget {
     // The kuželna name is an apposition after the declined common noun
     // ('do kuželny X'), never inside the preposition itself — 'Zpět do
     // Zkouska' would be broken Czech for most names.
-    final homeSubtitle =
-        homeName == null ? 'teď prohlížíš cizí kuželnu' : 'do kuželny $homeName';
+    final homeSubtitle = homeName == null
+        ? 'teď prohlížíš cizí kuželnu'
+        : 'do kuželny $homeName';
 
     return AdminScaffold(
       title: 'Správa kuželny',
@@ -173,9 +179,9 @@ class AdminScreen extends ConsumerWidget {
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
           child: Text(
             'Správce aplikace',
-            style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                  color: scheme.tertiary,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.labelLarge?.copyWith(color: scheme.tertiary),
           ),
         ),
         ListTile(
@@ -219,10 +225,9 @@ class AdminScreen extends ConsumerWidget {
                       ),
                       Text(
                         'správce aplikace',
-                        style: Theme.of(context)
-                            .textTheme
-                            .labelSmall
-                            ?.copyWith(color: scheme.tertiary),
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: scheme.tertiary,
+                        ),
                       ),
                     ],
                   ),
@@ -257,9 +262,7 @@ class AdminScreen extends ConsumerWidget {
                           homeSubtitle,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context)
-                              .textTheme
-                              .labelSmall
+                          style: Theme.of(context).textTheme.labelSmall
                               ?.copyWith(color: scheme.tertiary),
                         ),
                       ],
