@@ -69,15 +69,18 @@ void main() {
     expect([for (final m in got) m.id], ['a-open', 'b-later']);
   });
 
-  test('the season runs from 1 August to 31 July', () {
+  test('the competition year runs from 1 July to 30 June', () {
     expect(kioskSeason(Day(2026, 10, 8)), (
-      start: Day(2026, 8, 1),
-      end: Day(2027, 7, 31),
+      start: Day(2026, 7, 1),
+      end: Day(2027, 6, 30),
     ));
     expect(kioskSeason(Day(2027, 3, 1)), (
-      start: Day(2026, 8, 1),
-      end: Day(2027, 7, 31),
+      start: Day(2026, 7, 1),
+      end: Day(2027, 6, 30),
     ));
+    // The turn of the year: 30 June is still the old one, 1 July the new.
+    expect(kioskSeason(Day(2027, 6, 30)).start, Day(2026, 7, 1));
+    expect(kioskSeason(Day(2027, 7, 1)).start, Day(2027, 7, 1));
   });
 
   test('the window is the current week plus the weeks asked for', () {
@@ -145,9 +148,9 @@ void main() {
   test('the season is a wall: no match of another season, ever', () {
     final w = kioskMatchWindow(
       slots: [
-        match('last-season', Day(2026, 5, 20)),
+        match('last-season', Day(2026, 6, 20)),
         match('now', Day(2026, 10, 8)),
-        match('next-season', Day(2027, 9, 10)),
+        match('next-season', Day(2027, 7, 10)),
       ],
       today: today,
       weeksBack: 1,

@@ -41,7 +41,10 @@ const _moreRowHeight = 52.0;
 /// here ([kioskLiveMatches]).
 final kioskLiveProvider = Provider<List<PrioritySlot>>((ref) {
   final settings = ref.watch(settingsProvider).value;
-  if (!(settings?.kioskLiveMode ?? true)) return const [];
+  if (!(settings?.kioskPanelEnabled ?? true) ||
+      !(settings?.kioskLiveMode ?? true)) {
+    return const [];
+  }
   final slots = ref.watch(prioritySlotsProvider);
   final results = ref.watch(matchResultsProvider).value ?? const {};
   final withData = <String>{};
@@ -59,12 +62,14 @@ final kioskLiveProvider = Provider<List<PrioritySlot>>((ref) {
 /// settings — null when there is nothing (the shell then draws no drawer).
 final kioskPanelContentProvider = Provider<KioskPanelContent?>((ref) {
   final settings = ref.watch(settingsProvider).value;
+  if (!(settings?.kioskPanelEnabled ?? true)) return null;
   final now = ref.watch(nowProvider).value ?? DateTime.now();
   final live = ref.watch(kioskLiveProvider);
   final notices = (settings?.kioskShowNotices ?? true)
       ? kioskNotices(ref.watch(messagesProvider).value ?? const [], now)
       : const <Message>[];
-  final hasMatches = (settings?.kioskShowMatches ?? true) &&
+  final hasMatches =
+      (settings?.kioskShowMatches ?? true) &&
       kioskMatchWindow(
         slots: ref.watch(prioritySlotsProvider),
         today: Day.fromDateTime(now),
@@ -116,13 +121,18 @@ class KioskDrawer extends ConsumerWidget {
       MediaQuery.sizeOf(context).width,
       settings?.kioskDrawerWidth ?? 440,
     );
-    final turn = Duration(seconds: settings?.kioskRotationSeconds ?? 12);
+    final noticeTurn = Duration(
+      seconds: settings?.kioskNoticesRotationSeconds ?? 12,
+    );
+    final liveTurn = Duration(
+      seconds: settings?.kioskLiveRotationSeconds ?? 12,
+    );
     final share = settings?.kioskNoticesShare ?? 40;
     final notices = content.notices.isEmpty
         ? null
         : _NoticesCard(
             notices: content.notices,
-            turn: turn,
+            turn: noticeTurn,
             fill: content.hasMatches,
             onOpen: onOpenNotice,
           );
@@ -144,23 +154,23 @@ class KioskDrawer extends ConsumerWidget {
         child: !open
             ? const SizedBox.shrink()
             : content.live.isNotEmpty
-                ? _LiveView(matches: content.live, turn: turn)
-                : Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        if (notices != null && matches != null) ...[
-                          Expanded(flex: share, child: notices),
-                          const SizedBox(height: 12),
-                          Expanded(flex: 100 - share, child: matches),
-                        ] else if (matches != null)
-                          Expanded(child: matches)
-                        else if (notices != null)
-                          Flexible(child: notices),
-                      ],
-                    ),
-                  ),
+            ? _LiveView(matches: content.live, turn: liveTurn)
+            : Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (notices != null && matches != null) ...[
+                      Expanded(flex: share, child: notices),
+                      const SizedBox(height: 12),
+                      Expanded(flex: 100 - share, child: matches),
+                    ] else if (matches != null)
+                      Expanded(child: matches)
+                    else if (notices != null)
+                      Flexible(child: notices),
+                  ],
+                ),
+              ),
       ),
     );
   }
@@ -172,11 +182,7 @@ class KioskDrawer extends ConsumerWidget {
 /// — a soft glow and a little more opacity — so a tablet on the wall shows
 /// that there is something to open, without ever moving.
 class KioskDrawerButton extends StatefulWidget {
-  const KioskDrawerButton({
-    super.key,
-    required this.open,
-    required this.onTap,
-  });
+  const KioskDrawerButton({super.key, required this.open, required this.onTap});
 
   final bool open;
   final VoidCallback onTap;
@@ -245,8 +251,9 @@ class _KioskDrawerButtonState extends State<KioskDrawerButton>
                       ? Icons.keyboard_double_arrow_right
                       : Icons.keyboard_double_arrow_left,
                   size: 44,
-                  color: scheme.onSurfaceVariant
-                      .withValues(alpha: 0.4 + 0.35 * glow),
+                  color: scheme.onSurfaceVariant.withValues(
+                    alpha: 0.4 + 0.35 * glow,
+                  ),
                   shadows: [
                     Shadow(
                       color: scheme.primary.withValues(alpha: 0.75 * glow),
@@ -261,6 +268,27 @@ class _KioskDrawerButtonState extends State<KioskDrawerButton>
       ),
     );
   }
+}
+
+/// A horizontal swipe over [child]: a fling to the left asks for the next
+/// item ([onSwipe] 1), to the right for the previous one (-1). Vertical
+/// scrolling inside [child] is untouched.
+class _Swipe extends StatelessWidget {
+  const _Swipe({required this.onSwipe, required this.child});
+
+  final void Function(int direction) onSwipe;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    behavior: HitTestBehavior.translucent,
+    onHorizontalDragEnd: (details) {
+      final v = details.primaryVelocity ?? 0;
+      if (v.abs() < 200) return;
+      onSwipe(v < 0 ? 1 : -1);
+    },
+    child: child,
+  );
 }
 
 /// A rounded card with a title; [fill] makes its body take all the height
@@ -357,10 +385,16 @@ class _NoticesCardState extends State<_NoticesCard> {
 
   void _start() {
     _timer?.cancel();
-    _timer = Timer.periodic(widget.turn, (_) {
-      if (!mounted || widget.notices.length < 2) return;
-      setState(() => _index = (_index + 1) % widget.notices.length);
-    });
+    _timer = Timer.periodic(widget.turn, (_) => _step(1));
+  }
+
+  /// To the next ([direction] 1) or previous (-1) notice — on the timer or
+  /// by a swipe; either way the next turn is a whole [turn] away.
+  void _step(int direction) {
+    if (!mounted || widget.notices.length < 2) return;
+    final n = widget.notices.length;
+    setState(() => _index = (_index + direction) % n);
+    _start();
   }
 
   @override
@@ -378,88 +412,101 @@ class _NoticesCardState extends State<_NoticesCard> {
       icon: Icons.campaign_outlined,
       title: 'NÁSTĚNKA',
       fill: widget.fill,
-      child: InkWell(
-        onTap: () => widget.onOpen(m),
-        borderRadius: BorderRadius.circular(8),
+      child: _Swipe(
+        onSwipe: _step,
         child: LayoutBuilder(
           builder: (context, box) {
             final fit = _fitNotice(context, m, box);
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              mainAxisSize: widget.fill ? MainAxisSize.max : MainAxisSize.min,
-              children: [
-                SizedBox(
-                  height: fit.height,
-                  child: ClipRect(
-                    child: AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 300),
-                      layoutBuilder: (current, previous) => Stack(
-                        alignment: Alignment.topLeft,
-                        children: [...previous, ?current],
-                      ),
-                      child: Column(
-                        key: ValueKey(m.id),
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            m.title ?? '',
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: _noticeTitleStyle,
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            m.body,
-                            maxLines: fit.bodyLines,
-                            // An ellipsis without a line limit makes Skia
-                            // cut the text to its first line.
-                            overflow: fit.bodyLines == null
-                                ? TextOverflow.clip
-                                : TextOverflow.ellipsis,
-                            style: _noticeBodyStyle,
-                          ),
-                        ],
+            // Only a cut notice has more to read; a whole one is not a link.
+            return InkWell(
+              onTap: fit.truncated ? () => widget.onOpen(m) : null,
+              borderRadius: BorderRadius.circular(8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: widget.fill ? MainAxisSize.max : MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    height: fit.height,
+                    child: ClipRect(
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 300),
+                        layoutBuilder: (current, previous) => Stack(
+                          alignment: Alignment.topLeft,
+                          children: [...previous, ?current],
+                        ),
+                        child: Column(
+                          key: ValueKey(m.id),
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              m.title ?? '',
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: _noticeTitleStyle,
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              m.body,
+                              maxLines: fit.bodyLines,
+                              // An ellipsis without a line limit makes Skia
+                              // cut the text to its first line.
+                              overflow: fit.bodyLines == null
+                                  ? TextOverflow.clip
+                                  : TextOverflow.ellipsis,
+                              style: _noticeBodyStyle,
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                ),
-                if (widget.fill) const Spacer() else const SizedBox(height: 8),
-                SizedBox(
-                  height: _noticeFooterHeight - 8,
-                  child: Row(
-                    children: [
-                      for (var i = 0;
+                  if (widget.fill)
+                    const Spacer()
+                  else
+                    const SizedBox(height: 8),
+                  SizedBox(
+                    height: _noticeFooterHeight - 8,
+                    child: Row(
+                      children: [
+                        for (
+                          var i = 0;
                           notices.length > 1 && i < notices.length;
-                          i++)
-                        Container(
-                          width: 8,
-                          height: 8,
-                          margin: const EdgeInsets.only(right: 6),
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: i == _index
-                                ? scheme.primary
-                                : scheme.onSurfaceVariant
-                                    .withValues(alpha: 0.35),
+                          i++
+                        )
+                          Container(
+                            width: 8,
+                            height: 8,
+                            margin: const EdgeInsets.only(right: 6),
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: i == _index
+                                  ? scheme.primary
+                                  : scheme.onSurfaceVariant.withValues(
+                                      alpha: 0.35,
+                                    ),
+                            ),
                           ),
-                        ),
-                      const Spacer(),
-                      if (fit.truncated) ...[
-                        Text(
-                          'Více',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
+                        const Spacer(),
+                        if (fit.truncated) ...[
+                          Text(
+                            'Více',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              color: scheme.primary,
+                            ),
+                          ),
+                          Icon(
+                            Icons.expand_more,
+                            size: 20,
                             color: scheme.primary,
                           ),
-                        ),
-                        Icon(Icons.expand_more,
-                            size: 20, color: scheme.primary),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             );
           },
         ),
@@ -499,11 +546,7 @@ class _NoticesCardState extends State<_NoticesCard> {
     }
     final line = paint('A', _noticeBodyStyle, 1).height;
     final lines = math.max(1, ((available - title.height - 6) / line).floor());
-    return (
-      height: math.max(available, 0),
-      bodyLines: lines,
-      truncated: true,
-    );
+    return (height: math.max(available, 0), bodyLines: lines, truncated: true);
   }
 }
 
@@ -561,7 +604,8 @@ class _MatchesCardState extends ConsumerState<_MatchesCard> {
       // On the first match not decided yet, with the one before it in view.
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!_controller.hasClients) return;
-        final top = (window.moreBefore ? _moreRowHeight : 0) +
+        final top =
+            (window.moreBefore ? _moreRowHeight : 0) +
             math.max(0, nowIndex - 1) * _resultRowHeight;
         _controller.jumpTo(top.clamp(0, _controller.position.maxScrollExtent));
       });
@@ -578,11 +622,11 @@ class _MatchesCardState extends ConsumerState<_MatchesCard> {
     }
 
     Widget more(String label, VoidCallback onTap) => SizedBox(
-          height: _moreRowHeight,
-          child: Center(
-            child: TextButton(onPressed: onTap, child: Text(label)),
-          ),
-        );
+      height: _moreRowHeight,
+      child: Center(
+        child: TextButton(onPressed: onTap, child: Text(label)),
+      ),
+    );
 
     final items = <Widget>[
       if (window.moreBefore)
@@ -617,11 +661,7 @@ class _MatchesCardState extends ConsumerState<_MatchesCard> {
 }
 
 class _MatchRow extends StatelessWidget {
-  const _MatchRow({
-    required this.slot,
-    required this.onOpen,
-    this.result,
-  });
+  const _MatchRow({required this.slot, required this.onOpen, this.result});
 
   final PrioritySlot slot;
   final MatchResult? result;
@@ -634,7 +674,8 @@ class _MatchRow extends StatelessWidget {
     final score = hasScore
         ? pointsLabel(result!.homePoints, result!.awayPoints)
         : null;
-    final when = '${dayLabel(slot.date)}'
+    final when =
+        '${dayLabel(slot.date)}'
         '${slot.timeKnown ? ' ${slot.startsAt.display()}' : ''}';
     final row = Row(
       children: [
@@ -712,13 +753,18 @@ class _LiveViewState extends ConsumerState<_LiveView> {
 
   void _start() {
     _timer?.cancel();
-    _timer = Timer.periodic(widget.turn, (_) {
-      if (!mounted || widget.matches.length < 2) return;
-      setState(() {
-        _index = (_index + 1) % widget.matches.length;
-        _expanded.clear();
-      });
+    _timer = Timer.periodic(widget.turn, (_) => _step(1));
+  }
+
+  /// To the next ([direction] 1) or previous (-1) live match — on the timer
+  /// or by a swipe; either way the next turn is a whole turn away.
+  void _step(int direction) {
+    if (!mounted || widget.matches.length < 2) return;
+    setState(() {
+      _index = (_index + direction) % widget.matches.length;
+      _expanded.clear();
     });
+    _start();
   }
 
   @override
@@ -740,76 +786,79 @@ class _LiveViewState extends ConsumerState<_LiveView> {
         ref.watch(matchPlayerResultsProvider(slot.id)).value ?? const [];
     final duels = duelsOf(players);
     final scale = diffScale(duels);
-    return ListView(
-      padding: const EdgeInsets.all(12),
-      children: [
-        Row(
-          children: [
-            Icon(Icons.circle, size: 12, color: scheme.error),
-            const SizedBox(width: 8),
-            Text(
-              'PRÁVĚ SE HRAJE',
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 0.4,
-                color: scheme.primary,
-              ),
-            ),
-            const Spacer(),
-            for (var i = 0; matches.length > 1 && i < matches.length; i++)
-              Container(
-                width: 8,
-                height: 8,
-                margin: const EdgeInsets.only(left: 6),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: i == _index
-                      ? scheme.primary
-                      : scheme.onSurfaceVariant.withValues(alpha: 0.35),
+    return _Swipe(
+      onSwipe: _step,
+      child: ListView(
+        padding: const EdgeInsets.all(12),
+        children: [
+          Row(
+            children: [
+              Icon(Icons.circle, size: 12, color: scheme.error),
+              const SizedBox(width: 8),
+              Text(
+                'PRÁVĚ SE HRAJE',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.4,
+                  color: scheme.primary,
                 ),
               ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        MatchScoreboard(
-          slot: slot,
-          result: result,
-          players: players,
-          now: now,
-          homeColor: homeSideColor,
-          awayColor: awaySideColor,
-        ),
-        for (final duel in duels)
-          Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: DuelCard(
-              duel: duel,
-              scale: scale,
-              expanded: _expanded.contains(duel.position),
-              onTap: duel.state == DuelState.waiting
-                  ? () {}
-                  : () => setState(() {
+              const Spacer(),
+              for (var i = 0; matches.length > 1 && i < matches.length; i++)
+                Container(
+                  width: 8,
+                  height: 8,
+                  margin: const EdgeInsets.only(left: 6),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: i == _index
+                        ? scheme.primary
+                        : scheme.onSurfaceVariant.withValues(alpha: 0.35),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          MatchScoreboard(
+            slot: slot,
+            result: result,
+            players: players,
+            now: now,
+            homeColor: homeSideColor,
+            awayColor: awaySideColor,
+          ),
+          for (final duel in duels)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: DuelCard(
+                duel: duel,
+                scale: scale,
+                expanded: _expanded.contains(duel.position),
+                onTap: duel.state == DuelState.waiting
+                    ? () {}
+                    : () => setState(() {
                         if (!_expanded.remove(duel.position)) {
                           _expanded.add(duel.position);
                         }
                       }),
-              homeColor: homeSideColor,
-              awayColor: awaySideColor,
-              showSetPoints: setPointsMatter(result?.discipline),
+                homeColor: homeSideColor,
+                awayColor: awaySideColor,
+                showSetPoints: setPointsMatter(result?.discipline),
+              ),
             ),
-          ),
-        if (result != null)
-          Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: TeamTotalsCard(
-              result: result,
-              homeColor: homeSideColor,
-              awayColor: awaySideColor,
-              showSetPoints: setPointsMatter(result.discipline),
+          if (result != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: TeamTotalsCard(
+                result: result,
+                homeColor: homeSideColor,
+                awayColor: awaySideColor,
+                showSetPoints: setPointsMatter(result.discipline),
+              ),
             ),
-          ),
-      ],
+        ],
+      ),
     );
   }
 }

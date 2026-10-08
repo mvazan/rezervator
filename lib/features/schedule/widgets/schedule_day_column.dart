@@ -67,6 +67,7 @@ class ScheduleDayColumn extends StatelessWidget {
     required this.nowMinute,
     required this.laneRow,
     this.admin = CalendarAdminHooks.none,
+    this.onOpenMatch,
   });
 
   final DaySchedule day;
@@ -82,6 +83,10 @@ class ScheduleDayColumn extends StatelessWidget {
   /// Admin gestures ([CalendarAdminHooks.none] = read-only column; the
   /// header-level onAddForDay is the board's business, not the column's).
   final CalendarAdminHooks admin;
+
+  /// The kiosk's: a tap on a federation match's band opens its Zápis. Null
+  /// everywhere else, where the band's tap is the admin's edit or nothing.
+  final void Function(PrioritySlot match)? onOpenMatch;
 
   void Function(Day date, TimeBlock block)? get onEditBlock =>
       admin.onEditBlock;
@@ -285,6 +290,10 @@ class ScheduleDayColumn extends StatelessWidget {
             onTap: () => onEditPrioritySlot!(day.date, m),
             child: w,
           );
+        }
+        final open = onOpenMatch;
+        if (open != null && m.type.isMatch && m.fromFederation) {
+          w = InkWell(onTap: () => open(m), child: w);
         }
         // HOLD = move. Úklid children follow their match, they don't move
         // on their own.

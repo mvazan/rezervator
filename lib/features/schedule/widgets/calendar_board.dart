@@ -356,6 +356,7 @@ class BoardColumnHeader extends StatelessWidget {
     this.onAdd,
     this.interactive = true,
     this.watch,
+    this.onOpenMatch,
   });
 
   final Day date;
@@ -383,6 +384,10 @@ class BoardColumnHeader extends StatelessWidget {
   /// Passed straight through to [showDayMatchesDialog]: false on the kiosk
   /// board and the public overview (see its own doc for why).
   final bool interactive;
+
+  /// The kiosk's: a finished match of the day's list opens its Zápis (see
+  /// [showDayMatchesDialog]).
+  final void Function(PrioritySlot match)? onOpenMatch;
 
   @override
   Widget build(BuildContext context) {
@@ -437,6 +442,7 @@ class BoardColumnHeader extends StatelessWidget {
                               date,
                               priority,
                               interactive: interactive,
+                              onOpenMatch: onOpenMatch,
                             ),
                     child: Column(
                       children: [

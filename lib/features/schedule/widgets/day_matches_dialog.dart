@@ -32,12 +32,15 @@ import '../../../core/push_screen.dart';
 /// never sees touches on a pushed route, and an external video browser on a
 /// kiosk tablet is undesirable) and on the public, unauthenticated overview
 /// (whose slots are auth-gated, so the detail screen would be a dead end).
+/// [onOpenMatch] is the kiosk's own way in: a match with a score opens its
+/// Zápis modal, with no navigation off the kiosk.
 Future<void> showDayMatchesDialog(
   BuildContext context,
   Day date,
   List<PrioritySlot> events, {
   void Function(String url) launch = launchWeb,
   bool interactive = true,
+  void Function(PrioritySlot match)? onOpenMatch,
 }) {
   if (events.isEmpty) return Future.value();
   // Captured before the dialog opens: the same Navigator that will host the
@@ -80,7 +83,16 @@ Future<void> showDayMatchesDialog(
                                   (_) => MatchDetailScreen(matchId: m.id),
                                 );
                               }
-                            : null,
+                            // The kiosk: a match with a score opens its Zápis
+                            // in the kiosk's own modal.
+                            : onOpenMatch != null &&
+                                    m.fromFederation &&
+                                    hasScoreData(results[m.id])
+                                ? () {
+                                    navigator.pop();
+                                    onOpenMatch(m);
+                                  }
+                                : null,
                       ),
                   ],
                 );

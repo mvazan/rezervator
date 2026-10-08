@@ -25,7 +25,7 @@ void main() {
     status: ProfileStatus.approved,
   );
 
-  const settings = ScheduleSettings(
+  const defaults0 = ScheduleSettings(
     laneCount: 4,
     trainingWeekdays: {1, 2, 4},
     bookingHorizonDays: 14,
@@ -67,11 +67,23 @@ void main() {
   Widget app({
     List<Profile> roster = const [admin],
     Future<String> Function(String)? resetPassword,
+    ScheduleSettings? settings,
+    bool? panelEnabled,
   }) {
+    final shown = settings ??
+        (panelEnabled == null
+            ? defaults0
+            : ScheduleSettings(
+                laneCount: 4,
+                trainingWeekdays: const {1, 2, 4},
+                bookingHorizonDays: 14,
+                maxActiveReservations: 3,
+                kioskPanelEnabled: panelEnabled,
+              ));
     return ProviderScope(
       overrides: [
         myProfileProvider.overrideWith((ref) => Stream.value(admin)),
-        settingsProvider.overrideWith((ref) => Stream.value(settings)),
+        settingsProvider.overrideWith((ref) => Stream.value(shown)),
         clubsProvider.overrideWith((ref) => Stream.value(const [])),
         profilesProvider.overrideWith((ref) => Stream.value(roster)),
       ],
@@ -293,15 +305,15 @@ void main() {
     expect(lastPatch(), {'kiosk_drawer_open': true});
   });
 
-  testWidgets('the weeks of matches, width, share, Zápis size and rotation '
-      'are chosen from lists', (tester) async {
+  testWidgets('the weeks of matches, width, share, Zápis size and the two '
+      'rotations are chosen from lists', (tester) async {
     tall(tester);
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
 
     Future<void> pick(String field, String current, String wanted) async {
       await tester.ensureVisible(find.text(field));
-      await tester.tap(find.text(current));
+      await tester.tap(find.text(current).first);
       await tester.pumpAndSettle();
       await tester.tap(find.text(wanted).last);
       await tester.pumpAndSettle();
@@ -311,7 +323,7 @@ void main() {
           requests.lastWhere((r) => r.method == 'PATCH').body,
         ) as Map<String, dynamic>;
 
-    // The defaults: 2 weeks back, 1 ahead, 440 px, 40 %, 80 %, 12 s.
+    // The defaults: 2 weeks back, 1 ahead, 440 px, 40 %, 80 %, 12 s each.
     await pick('Odehrané zápasy', '2 týdny zpět', 'Jen aktuální týden');
     expect(lastPatch(), {'kiosk_weeks_back': 0});
     await pick('Budoucí zápasy', '1 týden dopředu', '3 týdny dopředu');
@@ -320,10 +332,81 @@ void main() {
     expect(lastPatch(), {'kiosk_drawer_width': 600});
     await pick('Podíl nástěnky na výšce panelu', '40 %', '60 %');
     expect(lastPatch(), {'kiosk_notices_share': 60});
-    await pick('Velikost zápisu', '80 % obrazovky', 'Celá obrazovka (s křížkem)');
+    await pick('Velikost zápisu', '80 % obrazovky',
+        'Celá obrazovka (s křížkem)');
     expect(lastPatch(), {'kiosk_zapis_percent': 100});
-    await pick('Střídání oznamů a zápasů', 'po 12 s', 'po 20 s');
-    expect(lastPatch(), {'kiosk_rotation_seconds': 20});
+    await pick('Střídání oznamů', 'po 12 s', 'po 20 s');
+    expect(lastPatch(), {'kiosk_notices_rotation_seconds': 20});
+    await pick('Střídání aktuálních zápasů', 'po 12 s', 'po 30 s');
+    expect(lastPatch(), {'kiosk_live_rotation_seconds': 30});
+  });
+
+  testWidgets('the ranges say they are only the default', (tester) async {
+    tall(tester);
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Jen výchozí rozsah'), findsNWidgets(2));
+  });
+
+  testWidgets('the panel switch comes first, and what needs it hides with it',
+      (tester) async {
+    tall(tester);
+    await tester.pumpWidget(app(panelEnabled: false));
+    await tester.pumpAndSettle();
+
+    expect(find.widgetWithText(SwitchListTile, 'Panel vpravo'), findsOneWidget);
+    for (final dependent in [
+      'Panel je výchozně rozbalený',
+      'Nástěnka v panelu',
+      'Zápasy v panelu',
+      'Aktuální zápas přes celý panel',
+    ]) {
+      expect(find.widgetWithText(SwitchListTile, dependent), findsNothing);
+    }
+    expect(find.text('Šířka panelu'), findsNothing);
+
+    await tester.tap(find.widgetWithText(SwitchListTile, 'Panel vpravo'));
+    await tester.pumpAndSettle();
+    expect(jsonDecode(requests.lastWhere((r) => r.method == 'PATCH').body),
+        {'kiosk_panel_enabled': true});
+  });
+
+  testWidgets('a rotation shows only with what it rotates', (tester) async {
+    tall(tester);
+    await tester.pumpWidget(app(
+      settings: const ScheduleSettings(
+        laneCount: 4,
+        trainingWeekdays: {1},
+        bookingHorizonDays: 14,
+        maxActiveReservations: 3,
+        kioskShowNotices: false,
+        kioskLiveMode: false,
+        tenantId: 't',
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('Střídání oznamů'), findsNothing);
+    expect(find.text('Střídání aktuálních zápasů'), findsNothing);
+    // Without the notices the notices' share has nothing to share either.
+    expect(find.text('Podíl nástěnky na výšce panelu'), findsNothing);
+  });
+
+  testWidgets('the look back into the past is an on/off and a number of days',
+      (tester) async {
+    tall(tester);
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+
+    Map<String, dynamic> lastPatch() => jsonDecode(
+          requests.lastWhere((r) => r.method == 'PATCH').body,
+        ) as Map<String, dynamic>;
+
+    // Off by default: no number to choose.
+    expect(find.text('Jak daleko zpět'), findsNothing);
+    await tester.tap(
+        find.widgetWithText(SwitchListTile, 'Kiosk: posun do minulosti'));
+    await tester.pumpAndSettle();
+    expect(lastPatch(), {'kiosk_past_days': 7});
   });
 
   testWidgets('the upcoming matches and the live match have their switches',

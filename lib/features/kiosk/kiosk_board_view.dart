@@ -51,10 +51,15 @@ double _minPxPerMinute(Iterable<TimeBlock> blocks, int laneCount) {
 }
 
 class KioskBoardView extends ConsumerStatefulWidget {
-  const KioskBoardView({super.key, required this.selected});
+  const KioskBoardView({super.key, required this.selected, this.onOpenMatch});
 
   /// The currently selected player, or null when the board is display-only.
   final PlayerName? selected;
+
+  /// A tap on a match — in a day's header list or its band in the grid —
+  /// asks to open its Zápis. Only a match with a score has one; the kiosk
+  /// shell decides what a tap on any other does (nothing).
+  final void Function(PrioritySlot match)? onOpenMatch;
 
   @override
   ConsumerState<KioskBoardView> createState() => KioskBoardViewState();
@@ -89,6 +94,15 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
   CalendarWindow? _window;
   double _pxPerMinute = 0;
 
+  /// Where today's column starts in the horizontal scroll — the columns of
+  /// the days the admin lets a visitor look back at lie before it. The idle
+  /// reset scrolls here.
+  double _todayOffset = 0;
+
+  /// The geometry [_todayOffset] was last applied for: the board opens on
+  /// today, not on the oldest day, and again when that changes.
+  (int, double)? _alignedFor;
+
   /// Today's block spans in minutes-from-midnight — the idle reset anchors
   /// on the START of the block containing "now" (the board doesn't creep
   /// down mid-block; it advances when the block ends).
@@ -112,7 +126,11 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
   /// block stays in view until it ends — no mid-block creep).
   void resetToNow(HourMinute now) {
     if (_hScroll.hasClients) {
-      _hScroll.animateTo(0, duration: _scrollDuration, curve: _scrollCurve);
+      _hScroll.animateTo(
+        _todayOffset,
+        duration: _scrollDuration,
+        curve: _scrollCurve,
+      );
     }
     final window = _window;
     if (_vScroll.hasClients && window != null) {
@@ -178,10 +196,13 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
     final nowDt = ref.watch(nowProvider).value ?? DateTime.now();
     final todayDay = Day.fromDateTime(nowDt);
     final now = HourMinute(nowDt.hour, nowDt.minute);
-    final thisMonday = todayDay.addDays(1 - todayDay.weekday);
 
     final settings =
         ref.watch(settingsProvider).value ?? ScheduleSettings.defaults;
+    // The days a visitor may look back at (0 = none): columns before today.
+    final pastDays = settings.kioskPastDays;
+    final firstDay = todayDay.addDays(-pastDays);
+    final firstMonday = firstDay.addDays(1 - firstDay.weekday);
 
     // The board shows today..today+horizonDays inclusive (horizonDays+1
     // days total — matches buildWeekSchedule's own beyondHorizon predicate:
@@ -193,9 +214,9 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
     // starting approximation would assume.
     final lastDay = todayDay.addDays(settings.bookingHorizonDays);
     final lastMonday = lastDay.addDays(1 - lastDay.weekday);
-    final mondayCount = lastMonday.differenceInDays(thisMonday) ~/ 7 + 1;
+    final mondayCount = lastMonday.differenceInDays(firstMonday) ~/ 7 + 1;
     final mondays = [
-      for (var w = 0; w < mondayCount; w++) thisMonday.addDays(7 * w),
+      for (var w = 0; w < mondayCount; w++) firstMonday.addDays(7 * w),
     ];
     final viewByMonday = {
       for (final monday in mondays)
@@ -250,9 +271,12 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
       }
     }
     final days = <DaySchedule>[
-      for (var offset = 0; offset <= settings.bookingHorizonDays; offset++)
+      for (var offset = -pastDays;
+          offset <= settings.bookingHorizonDays;
+          offset++)
         dayByDate[todayDay.addDays(offset)]!,
     ];
+    final todayIndex = pastDays;
 
     final nameById = views.first.nameById;
     final clubColorById = views.first.clubColorById;
@@ -320,8 +344,15 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
         // rebuild loop.
         _window = window;
         _pxPerMinute = pxPerMinute;
+        _todayOffset = todayIndex * columnWidth;
+        if (_alignedFor != (pastDays, columnWidth)) {
+          _alignedFor = (pastDays, columnWidth);
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (_hScroll.hasClients) _hScroll.jumpTo(_todayOffset);
+          });
+        }
         _todayBlockSpans = [
-          if (days.first case OpenDay(:final blocks))
+          if (days[todayIndex] case OpenDay(:final blocks))
             for (final b in blocks)
               (b.startsAt.minutesFromMidnight, b.endsAt.minutesFromMidnight),
         ];
@@ -347,9 +378,10 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
                           margin: const EdgeInsets.symmetric(horizontal: 2),
                           child: BoardColumnHeader(
                             date: days[index].date,
-                            isToday: index == 0,
+                            isToday: index == todayIndex,
                             priority: headerEvents(days[index]),
                             height: headerHeight,
+                            onOpenMatch: widget.onOpenMatch,
                             // Never a tap-through to MatchDetailScreen or a
                             // video button here: the kiosk's own 60 s
                             // idle-reset Listener doesn't see touches on a
@@ -396,12 +428,17 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
                                 clipBehavior: Clip.antiAlias,
                                 decoration: BoxDecoration(
                                     borderRadius: BorderRadius.circular(10)),
-                                child: ScheduleDayColumn(
+                                // A day gone by reads quieter than today and
+                                // what is ahead.
+                                child: Opacity(
+                                  opacity: index < todayIndex ? 0.65 : 1,
+                                  child: ScheduleDayColumn(
+                                  onOpenMatch: widget.onOpenMatch,
                                   day: days[index],
                                   window: window,
                                   pxPerMinute: pxPerMinute,
                                   halfHourMarks: halfHourMarks,
-                                  nowMinute: index == 0 &&
+                                  nowMinute: index == todayIndex &&
                                           now.minutesFromMidnight >=
                                               window.startMinute &&
                                           now.minutesFromMidnight <
@@ -419,6 +456,7 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
                                     interactive: interactive,
                                     selectedCount: selectedCount,
                                   ),
+                                ),
                                 ),
                               ),
                             ),

@@ -17,11 +17,11 @@ List<Message> kioskNotices(Iterable<Message> messages, DateTime now) =>
 bool _decided(MatchResult? r) =>
     r?.status == MatchStatus.finished || r?.status == MatchStatus.forfeit;
 
-/// The sports season [today] is in: from 1 August to 31 July. The drawer
-/// never lists a match outside it.
+/// The competition year [today] is in: from 1 July to 30 June of the next
+/// calendar year. The drawer never lists a match outside it.
 ({Day start, Day end}) kioskSeason(Day today) {
-  final year = today.month >= 8 ? today.year : today.year - 1;
-  return (start: Day(year, 8, 1), end: Day(year + 1, 7, 31));
+  final year = today.month >= 7 ? today.year : today.year - 1;
+  return (start: Day(year, 7, 1), end: Day(year + 1, 6, 30));
 }
 
 /// The Monday of [day]'s ISO week.

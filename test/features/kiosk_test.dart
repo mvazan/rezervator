@@ -223,10 +223,12 @@ void main() {
         await tester.pumpAndSettle();
         // Scoped to the picker: with her reservation on the board, Anna's
         // name is also a reserved cell behind the dialog.
-        await tester.tap(find.descendant(
-          of: find.byType(NamePicker),
-          matching: find.text(anna.displayName),
-        ));
+        await tester.tap(
+          find.descendant(
+            of: find.byType(NamePicker),
+            matching: find.text(anna.displayName),
+          ),
+        );
         await tester.pumpAndSettle();
         expect(
           find.textContaining('Rezervuje: ${anna.displayName}'),
@@ -324,9 +326,15 @@ void main() {
     // (measuring a live column's width rather than hardcoding the
     // clamp(160, (w-rail)/7, 220) constant keeps this test independent of
     // that formula's exact numbers).
-    final columnWidth = tester.getSize(find.byType(BoardColumnHeader).first).width;
-    await tester.drag(find.byWidgetPredicate(
-            (w) => w is ListView && w.physics is ColumnSnapPhysics), Offset(-columnWidth, 0));
+    final columnWidth = tester
+        .getSize(find.byType(BoardColumnHeader).first)
+        .width;
+    await tester.drag(
+      find.byWidgetPredicate(
+        (w) => w is ListView && w.physics is ColumnSnapPhysics,
+      ),
+      Offset(-columnWidth, 0),
+    );
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.text(petr.displayName).first);
     await tester.pumpAndSettle();
@@ -359,7 +367,9 @@ void main() {
       // BoardColumnHeader's date (measuring a live column's width rather
       // than hardcoding the clamp(160, (w-rail)/7, 220) constant keeps this
       // test independent of that formula's exact numbers).
-      final columnWidth = tester.getSize(find.byType(BoardColumnHeader).first).width;
+      final columnWidth = tester
+          .getSize(find.byType(BoardColumnHeader).first)
+          .width;
       final seenDates = <Day>{};
       void collect() {
         for (final header in tester.widgetList<BoardColumnHeader>(
@@ -371,14 +381,21 @@ void main() {
 
       collect();
       for (var i = 0; i < 6; i++) {
-        await tester.drag(find.byWidgetPredicate(
-            (w) => w is ListView && w.physics is ColumnSnapPhysics), Offset(-columnWidth, 0));
+        await tester.drag(
+          find.byWidgetPredicate(
+            (w) => w is ListView && w.physics is ColumnSnapPhysics,
+          ),
+          Offset(-columnWidth, 0),
+        );
         await tester.pumpAndSettle();
         collect();
       }
       // Every one of today's next 6 days was visited (the board's 7
       // originally-visible-without-scroll columns, spec §1)…
-      expect(seenDates.containsAll({for (var i = 0; i < 7; i++) t.addDays(i)}), isTrue);
+      expect(
+        seenDates.containsAll({for (var i = 0; i < 7; i++) t.addDays(i)}),
+        isTrue,
+      );
       // …and the ListView's look-ahead cache may have also mounted columns
       // further out, but never one before today — "days from DNES", never
       // the past (unlike the old week view, which always started on
@@ -389,39 +406,38 @@ void main() {
     },
   );
 
-  testWidgets(
-    'g: NamePicker renders dark even when the app theme is light',
-    (tester) async {
-      // Unlike every other test in this file (which relies on this
-      // harness's implicit default theme), this one must pin the ambient
-      // MaterialApp theme to light explicitly — mirroring main.dart's
-      // `theme: buildTheme(Brightness.light)` — so a pass here can't be
-      // credited to the test harness happening to already be dark; only
-      // NamePicker's own Theme(dark) wrap (name_picker.dart) should make it
-      // render dark. No darkTheme is supplied, so MaterialApp's ThemeMode
-      // .system resolution (see _themeBuilder in the framework's app.dart)
-      // always falls through to `theme` regardless of the test platform's
-      // own brightness — the ambient theme here is deterministically light.
-      await tester.pumpWidget(kioskApp(theme: buildTheme(Brightness.light)));
-      await tester.pumpAndSettle();
+  testWidgets('g: NamePicker renders dark even when the app theme is light', (
+    tester,
+  ) async {
+    // Unlike every other test in this file (which relies on this
+    // harness's implicit default theme), this one must pin the ambient
+    // MaterialApp theme to light explicitly — mirroring main.dart's
+    // `theme: buildTheme(Brightness.light)` — so a pass here can't be
+    // credited to the test harness happening to already be dark; only
+    // NamePicker's own Theme(dark) wrap (name_picker.dart) should make it
+    // render dark. No darkTheme is supplied, so MaterialApp's ThemeMode
+    // .system resolution (see _themeBuilder in the framework's app.dart)
+    // always falls through to `theme` regardless of the test platform's
+    // own brightness — the ambient theme here is deterministically light.
+    await tester.pumpWidget(kioskApp(theme: buildTheme(Brightness.light)));
+    await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Rezervovat'));
-      await tester.pumpAndSettle();
+    await tester.tap(find.text('Rezervovat'));
+    await tester.pumpAndSettle();
 
-      // showNamePicker(context) in kiosk_shell.dart uses the shell State's
-      // own context, which sits *above* KioskShell's Theme(dark) wrap — so
-      // without name_picker.dart's own Theme(dark) wrap around the dialog
-      // content, this would inherit the ambient light theme instead.
-      expect(
-        Theme.of(tester.element(find.text('Kdo si rezervuje?'))).brightness,
-        Brightness.dark,
-      );
+    // showNamePicker(context) in kiosk_shell.dart uses the shell State's
+    // own context, which sits *above* KioskShell's Theme(dark) wrap — so
+    // without name_picker.dart's own Theme(dark) wrap around the dialog
+    // content, this would inherit the ambient light theme instead.
+    expect(
+      Theme.of(tester.element(find.text('Kdo si rezervuje?'))).brightness,
+      Brightness.dark,
+    );
 
-      await tester.tap(find.byIcon(Icons.close));
-      await tester.pumpAndSettle();
-      await finish(tester);
-    },
-  );
+    await tester.tap(find.byIcon(Icons.close));
+    await tester.pumpAndSettle();
+    await finish(tester);
+  });
 
   testWidgets(
     'g2: NamePicker follows the admin light kiosk theme when kioskDark=false',
@@ -537,8 +553,9 @@ void main() {
         ProviderScope(
           overrides: [
             settingsProvider.overrideWith((ref) => Stream.value(settings)),
-            timeBlocksProvider
-                .overrideWith((ref) => Stream.value(const [bPrep, bMatch])),
+            timeBlocksProvider.overrideWith(
+              (ref) => Stream.value(const [bPrep, bMatch]),
+            ),
             dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
             prioritySlotsProvider.overrideWithValue([match, uklid]),
             rentalsProvider.overrideWith((ref) => Stream.value(const [])),
@@ -553,10 +570,7 @@ void main() {
       await tester.pumpAndSettle();
 
       // Both bands render at their real windows, once (slots are today only).
-      expect(
-        find.text('⛔ Úklid před zápasem\n20:00–21:00'),
-        findsOneWidget,
-      );
+      expect(find.text('⛔ Úklid před zápasem\n20:00–21:00'), findsOneWidget);
       expect(
         find.text(
           '🏆 ${match.title}\n'
@@ -567,12 +581,17 @@ void main() {
 
       // Today's cancelled blocks render no cards — tomorrow's still do, so
       // exactly one fewer card than visible columns exists per block id.
-      final visibleDays =
-          tester.widgetList(find.byType(BoardColumnHeader)).length;
-      expect(find.byKey(const ValueKey('cal-block-bPrep')),
-          findsNWidgets(visibleDays - 1));
-      expect(find.byKey(const ValueKey('cal-block-bMatch')),
-          findsNWidgets(visibleDays - 1));
+      final visibleDays = tester
+          .widgetList(find.byType(BoardColumnHeader))
+          .length;
+      expect(
+        find.byKey(const ValueKey('cal-block-bPrep')),
+        findsNWidgets(visibleDays - 1),
+      );
+      expect(
+        find.byKey(const ValueKey('cal-block-bMatch')),
+        findsNWidgets(visibleDays - 1),
+      );
 
       await finish(tester);
     },
@@ -613,12 +632,13 @@ void main() {
         ProviderScope(
           overrides: [
             settingsProvider.overrideWith((ref) => Stream.value(settings)),
-            timeBlocksProvider
-                .overrideWith((ref) => Stream.value(const [b1, bOther])),
+            timeBlocksProvider.overrideWith(
+              (ref) => Stream.value(const [b1, bOther]),
+            ),
             dayOverridesProvider.overrideWith(
-              (ref) => Stream.value(
-                [DayOverride(date: t, closed: true, reason: '')],
-              ),
+              (ref) => Stream.value([
+                DayOverride(date: t, closed: true, reason: ''),
+              ]),
             ),
             prioritySlotsProvider.overrideWithValue([match]),
             rentalsProvider.overrideWith((ref) => Stream.value(const [])),
@@ -672,8 +692,9 @@ void main() {
         ProviderScope(
           overrides: [
             settingsProvider.overrideWith((ref) => Stream.value(settings)),
-            timeBlocksProvider
-                .overrideWith((ref) => Stream.value(const [bMorning, bEvening])),
+            timeBlocksProvider.overrideWith(
+              (ref) => Stream.value(const [bMorning, bEvening]),
+            ),
             dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
             prioritySlotsProvider.overrideWithValue(const []),
             rentalsProvider.overrideWith((ref) => Stream.value(const [])),
@@ -732,8 +753,9 @@ void main() {
         ProviderScope(
           overrides: [
             settingsProvider.overrideWith((ref) => Stream.value(settings)),
-            timeBlocksProvider
-                .overrideWith((ref) => Stream.value(const [bShort, bLong])),
+            timeBlocksProvider.overrideWith(
+              (ref) => Stream.value(const [bShort, bLong]),
+            ),
             dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
             prioritySlotsProvider.overrideWithValue(const []),
             rentalsProvider.overrideWith((ref) => Stream.value(const [])),
@@ -809,8 +831,9 @@ void main() {
         ProviderScope(
           overrides: [
             settingsProvider.overrideWith((ref) => Stream.value(settings)),
-            timeBlocksProvider
-                .overrideWith((ref) => Stream.value(const [bShort, bLong])),
+            timeBlocksProvider.overrideWith(
+              (ref) => Stream.value(const [bShort, bLong]),
+            ),
             dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
             prioritySlotsProvider.overrideWithValue(const []),
             rentalsProvider.overrideWith((ref) => Stream.value([rental])),
@@ -834,9 +857,9 @@ void main() {
       final band = find.text('🔒 Firma X\n8:45–9:30');
       final pxPerMinute = tester.getSize(shortCard).height / 30;
       final bandTop = tester
-          .getTopLeft(find
-              .ancestor(of: band, matching: find.byType(Container))
-              .first)
+          .getTopLeft(
+            find.ancestor(of: band, matching: find.byType(Container)).first,
+          )
           .dy;
       expect(
         bandTop - tester.getTopLeft(shortCard).dy,
@@ -900,10 +923,7 @@ void main() {
 
       // The window must reach 19:00 or the band would render above it.
       expect(find.text('19:00'), findsWidgets);
-      expect(
-        find.text('⛔ Úklid před zápasem\n19:00–20:00'),
-        findsOneWidget,
-      );
+      expect(find.text('⛔ Úklid před zápasem\n19:00–20:00'), findsOneWidget);
 
       await finish(tester);
     },
@@ -1017,7 +1037,8 @@ void main() {
             dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
             prioritySlotsProvider.overrideWithValue([match]),
             rentalsProvider.overrideWith(
-                (ref) => Stream.value([insideRental, spillRental])),
+              (ref) => Stream.value([insideRental, spillRental]),
+            ),
             weekReservationsProvider.overrideWith(
               (ref, monday) => Stream.value(const []),
             ),
@@ -1030,10 +1051,7 @@ void main() {
 
       // The match band renders; the fully-covered rental does not (priority
       // wins, first-emitted band keeps the space)…
-      expect(
-        find.text('🏆 ${match.title}\n20:00–22:00'),
-        findsOneWidget,
-      );
+      expect(find.text('🏆 ${match.title}\n20:00–22:00'), findsOneWidget);
       expect(find.textContaining('Firma X'), findsNothing);
       // …and the spilling rental shows only via its outside piece.
       expect(find.textContaining('Firma Y'), findsOneWidget);
@@ -1042,24 +1060,21 @@ void main() {
     },
   );
 
-  testWidgets(
-    'q: kiosk_fit_day=false switches to the comfortable fixed scale '
-    '(60 min = laneCount × 40 px) instead of fit-to-screen',
-    (tester) async {
-      await tester.pumpWidget(kioskApp(kioskFitDay: false));
-      await tester.pumpAndSettle();
+  testWidgets('q: kiosk_fit_day=false switches to the comfortable fixed scale '
+      '(60 min = laneCount × 40 px) instead of fit-to-screen', (tester) async {
+    await tester.pumpWidget(kioskApp(kioskFitDay: false));
+    await tester.pumpAndSettle();
 
-      // b1 is 61 minutes; at laneCount(2) × 40 / 60 px per minute the card
-      // is 61 × 1.333… ≈ 81.3px tall — independent of the viewport height.
-      final card = find.byKey(const ValueKey('cal-block-b1')).first;
-      expect(
-        tester.getSize(card).height,
-        closeTo(61 * settings.laneCount * 40.0 / 60, 0.7),
-      );
+    // b1 is 61 minutes; at laneCount(2) × 40 / 60 px per minute the card
+    // is 61 × 1.333… ≈ 81.3px tall — independent of the viewport height.
+    final card = find.byKey(const ValueKey('cal-block-b1')).first;
+    expect(
+      tester.getSize(card).height,
+      closeTo(61 * settings.laneCount * 40.0 / 60, 0.7),
+    );
 
-      await finish(tester);
-    },
-  );
+    await finish(tester);
+  });
 
   testWidgets(
     'r: half-hour block boundaries get half-hour ruler labels and the '
@@ -1076,8 +1091,9 @@ void main() {
         ProviderScope(
           overrides: [
             settingsProvider.overrideWith((ref) => Stream.value(settings)),
-            timeBlocksProvider
-                .overrideWith((ref) => Stream.value(const [bHalf])),
+            timeBlocksProvider.overrideWith(
+              (ref) => Stream.value(const [bHalf]),
+            ),
             dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
             prioritySlotsProvider.overrideWithValue(const []),
             rentalsProvider.overrideWith((ref) => Stream.value(const [])),
@@ -1138,8 +1154,9 @@ void main() {
               (ref, monday) => Stream.value(const []),
             ),
             playersProvider.overrideWith((ref) async => players),
-            matchResultsProvider
-                .overrideWith((ref) => Stream.value({'mFed': result})),
+            matchResultsProvider.overrideWith(
+              (ref) => Stream.value({'mFed': result}),
+            ),
           ],
           child: const MaterialApp(home: KioskShell()),
         ),
@@ -1149,10 +1166,14 @@ void main() {
       // KioskShell's own status bar also summarises today's matches with
       // headerEventLabel — scope to the board's header so the tap lands on
       // the actual (tappable) BoardColumnHeader strip, not that status line.
-      await tester.tap(find.descendant(
-        of: find.byType(BoardColumnHeader),
-        matching: find.textContaining('Naši'),
-      ).first);
+      await tester.tap(
+        find
+            .descendant(
+              of: find.byType(BoardColumnHeader),
+              matching: find.textContaining('Naši'),
+            )
+            .first,
+      );
       await tester.pumpAndSettle();
 
       expect(find.byType(AlertDialog), findsOneWidget);
@@ -1166,14 +1187,16 @@ void main() {
       expect(find.byIcon(Icons.play_circle_fill), findsNothing);
       expect(find.byIcon(Icons.videocam), findsNothing);
 
-      // Tapping the match row does nothing — no tap-through, dialog stays.
+      // Tapping the match row never leaves the kiosk for the app's match
+      // detail: it opens the kiosk's own Zápis modal (no players here, so
+      // the note that there is no sheet yet).
       await tester.tap(
         find.descendant(of: dialog, matching: find.text('Naši – Soupeř')),
       );
       await tester.pumpAndSettle();
 
       expect(find.byType(MatchDetailScreen), findsNothing);
-      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(find.text('Zápis zápasu zatím není k dispozici.'), findsOneWidget);
 
       await finish(tester);
     },
@@ -1184,24 +1207,27 @@ void main() {
     final day = Day(2026, 10, 8);
     final nowAt = DateTime(2026, 10, 8, 12);
 
-    Message notice(String id, String title,
-            {bool show = true, String body = 'Sejdeme se v devět.'}) =>
-        Message(
-          id: id,
-          kind: MessageKind.notice,
-          audience: MessageAudience.all,
-          authorId: 'a',
-          authorRole: MessageAuthorRole.admin,
-          onDate: null,
-          blockId: null,
-          title: title,
-          body: body,
-          expiresAt: null,
-          notify: true,
-          showOnKiosk: show,
-          createdAt: DateTime(2026, 9, int.tryParse(id) ?? 1),
-          updatedAt: DateTime(2026, 9, 1),
-        );
+    Message notice(
+      String id,
+      String title, {
+      bool show = true,
+      String body = 'Sejdeme se v devět.',
+    }) => Message(
+      id: id,
+      kind: MessageKind.notice,
+      audience: MessageAudience.all,
+      authorId: 'a',
+      authorRole: MessageAuthorRole.admin,
+      onDate: null,
+      blockId: null,
+      title: title,
+      body: body,
+      expiresAt: null,
+      notify: true,
+      showOnKiosk: show,
+      createdAt: DateTime(2026, 9, int.tryParse(id) ?? 1),
+      updatedAt: DateTime(2026, 9, 1),
+    );
     PrioritySlot fed(String id, Day date, String home, {int hour = 14}) =>
         PrioritySlot(
           type: PrioritySlot.fallbackMatchType,
@@ -1248,49 +1274,54 @@ void main() {
       int width = 440,
       int share = 40,
       int zapisPercent = 80,
-      int rotation = 12,
+      int noticeRotation = 12,
+      int liveRotation = 12,
+      bool panelEnabled = true,
+      int pastDays = 0,
       Map<String, List<MatchPlayerResult>> lineups = const {},
-    }) =>
-        ProviderScope(
-          overrides: [
-            settingsProvider.overrideWith(
-              (ref) => Stream.value(
-                ScheduleSettings(
-                  laneCount: settings.laneCount,
-                  trainingWeekdays: settings.trainingWeekdays,
-                  bookingHorizonDays: settings.bookingHorizonDays,
-                  maxActiveReservations: settings.maxActiveReservations,
-                  kioskDrawerOpen: drawerOpen,
-                  kioskShowNotices: showNotices,
-                  kioskShowMatches: showMatches,
-                  kioskShowUpcoming: showUpcoming,
-                  kioskLiveMode: liveMode,
-                  kioskWeeksBack: weeksBack,
-                  kioskWeeksAhead: weeksAhead,
-                  kioskDrawerWidth: width,
-                  kioskNoticesShare: share,
-                  kioskZapisPercent: zapisPercent,
-                  kioskRotationSeconds: rotation,
-                ),
-              ),
+    }) => ProviderScope(
+      overrides: [
+        settingsProvider.overrideWith(
+          (ref) => Stream.value(
+            ScheduleSettings(
+              laneCount: settings.laneCount,
+              trainingWeekdays: settings.trainingWeekdays,
+              bookingHorizonDays: settings.bookingHorizonDays,
+              maxActiveReservations: settings.maxActiveReservations,
+              kioskDrawerOpen: drawerOpen,
+              kioskShowNotices: showNotices,
+              kioskShowMatches: showMatches,
+              kioskShowUpcoming: showUpcoming,
+              kioskLiveMode: liveMode,
+              kioskWeeksBack: weeksBack,
+              kioskWeeksAhead: weeksAhead,
+              kioskDrawerWidth: width,
+              kioskNoticesShare: share,
+              kioskZapisPercent: zapisPercent,
+              kioskNoticesRotationSeconds: noticeRotation,
+              kioskLiveRotationSeconds: liveRotation,
+              kioskPanelEnabled: panelEnabled,
+              kioskPastDays: pastDays,
             ),
-            nowProvider.overrideWith((ref) => Stream.value(nowAt)),
-            timeBlocksProvider.overrideWith((ref) => Stream.value(const [b1])),
-            dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
-            prioritySlotsProvider.overrideWithValue(slots),
-            rentalsProvider.overrideWith((ref) => Stream.value(const [])),
-            weekReservationsProvider.overrideWith(
-              (ref, monday) => Stream.value(const []),
-            ),
-            playersProvider.overrideWith((ref) async => players),
-            messagesProvider.overrideWith((ref) => Stream.value(notices)),
-            matchResultsProvider.overrideWith((ref) => Stream.value(results)),
-            matchPlayerResultsProvider.overrideWith(
-              (ref, id) => Stream.value(lineups[id] ?? const []),
-            ),
-          ],
-          child: const MaterialApp(home: KioskShell()),
-        );
+          ),
+        ),
+        nowProvider.overrideWith((ref) => Stream.value(nowAt)),
+        timeBlocksProvider.overrideWith((ref) => Stream.value(const [b1])),
+        dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
+        prioritySlotsProvider.overrideWithValue(slots),
+        rentalsProvider.overrideWith((ref) => Stream.value(const [])),
+        weekReservationsProvider.overrideWith(
+          (ref, monday) => Stream.value(const []),
+        ),
+        playersProvider.overrideWith((ref) async => players),
+        messagesProvider.overrideWith((ref) => Stream.value(notices)),
+        matchResultsProvider.overrideWith((ref) => Stream.value(results)),
+        matchPlayerResultsProvider.overrideWith(
+          (ref, id) => Stream.value(lineups[id] ?? const []),
+        ),
+      ],
+      child: const MaterialApp(home: KioskShell()),
+    );
 
     void fullHd(WidgetTester tester) {
       tester.view.physicalSize = const Size(1920, 1080);
@@ -1376,10 +1407,7 @@ void main() {
       fullHd(tester);
       await tester.pumpWidget(
         app(
-          notices: [
-            notice('1', 'Vidět'),
-            notice('2', 'Skryté', show: false),
-          ],
+          notices: [notice('1', 'Vidět'), notice('2', 'Skryté', show: false)],
           drawerOpen: true,
         ),
       );
@@ -1597,7 +1625,7 @@ void main() {
             'n': res('n', 'in_progress', 1, 2),
           },
           lineups: {'m': lineup, 'n': second},
-          rotation: 6,
+          liveRotation: 6,
         ),
       );
       await tester.pumpAndSettle();
@@ -1776,8 +1804,9 @@ void main() {
       await finish(tester);
     });
 
-    testWidgets('a match without players says so instead of drawing a sheet',
-        (tester) async {
+    testWidgets('a match without players says so instead of drawing a sheet', (
+      tester,
+    ) async {
       fullHd(tester);
       await tester.pumpWidget(
         app(
@@ -1804,16 +1833,202 @@ void main() {
     testWidgets('a match without a score has no Zápis to open', (tester) async {
       fullHd(tester);
       await tester.pumpWidget(
-        app(
-          slots: [fed('next', day.addDays(1), 'Příští')],
-          drawerOpen: true,
-        ),
+        app(slots: [fed('next', day.addDays(1), 'Příští')], drawerOpen: true),
       );
       await tester.pumpAndSettle();
       await tester.tap(
         find.descendant(
           of: find.byType(KioskDrawer),
           matching: find.textContaining('Příští'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(LegacyScoreSheetPage), findsNothing);
+      expect(find.text('Zápis zápasu zatím není k dispozici.'), findsNothing);
+
+      await finish(tester);
+    });
+
+    testWidgets('with the panel switched off there is no drawer and no live '
+        'view', (tester) async {
+      fullHd(tester);
+      await tester.pumpWidget(
+        app(
+          notices: [notice('1', 'Brigáda')],
+          slots: [fed('m', day, 'Hrají')],
+          results: {'m': res('m', 'in_progress', 2, 1)},
+          lineups: {'m': lineup},
+          panelEnabled: false,
+          drawerOpen: true,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(openButton, findsNothing);
+      expect(closeButton, findsNothing);
+      expect(find.text('Brigáda'), findsNothing);
+      expect(find.text('PRÁVĚ SE HRAJE'), findsNothing);
+
+      await finish(tester);
+    });
+
+    testWidgets('a swipe turns the notices, in both directions', (
+      tester,
+    ) async {
+      fullHd(tester);
+      await tester.pumpWidget(
+        app(
+          notices: [notice('1', 'První'), notice('2', 'Druhý')],
+          drawerOpen: true,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('První'), findsOneWidget);
+
+      await tester.fling(find.text('První'), const Offset(-300, 0), 1000);
+      await tester.pumpAndSettle();
+      expect(find.text('Druhý'), findsOneWidget);
+      expect(find.text('První'), findsNothing);
+
+      await tester.fling(find.text('Druhý'), const Offset(300, 0), 1000);
+      await tester.pumpAndSettle();
+      expect(find.text('První'), findsOneWidget);
+
+      await finish(tester);
+    });
+
+    testWidgets('a whole notice is no link; only a cut one opens', (
+      tester,
+    ) async {
+      fullHd(tester);
+      await tester.pumpWidget(
+        app(
+          notices: [notice('1', 'Krátký', body: 'Ahoj.')],
+          slots: [fed('next', day.addDays(1), 'Příští')],
+          drawerOpen: true,
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Krátký'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
+
+      await finish(tester);
+    });
+
+    testWidgets('a swipe turns the live matches', (tester) async {
+      fullHd(tester);
+      final second = [
+        for (final side in ['home', 'away']) player('n', side, 1),
+      ];
+      await tester.pumpWidget(
+        app(
+          slots: [fed('m', day, 'Prvníci'), fed('n', day, 'Druzí', hour: 17)],
+          results: {
+            'm': res('m', 'in_progress', 2, 1),
+            'n': res('n', 'in_progress', 1, 2),
+          },
+          lineups: {'m': lineup, 'n': second},
+        ),
+      );
+      await tester.pumpAndSettle();
+      bool inDrawer(String t) => find
+          .descendant(
+            of: find.byType(KioskDrawer),
+            matching: find.textContaining(t),
+          )
+          .evaluate()
+          .isNotEmpty;
+      expect(inDrawer('Prvníci'), isTrue);
+
+      await tester.fling(
+        find.text('PRÁVĚ SE HRAJE'),
+        const Offset(-300, 0),
+        1000,
+      );
+      await tester.pumpAndSettle();
+      expect(inDrawer('Druzí'), isTrue);
+      expect(inDrawer('Prvníci'), isFalse);
+
+      await finish(tester);
+    });
+
+    testWidgets('the board looks back as far as the admin allows', (
+      tester,
+    ) async {
+      fullHd(tester);
+      Future<bool> canReach(int pastDays) async {
+        await tester.pumpWidget(app(pastDays: pastDays));
+        await tester.pumpAndSettle();
+        // The board opens on today, whatever lies before it.
+        expect(find.text('DNES · čt 8.10.'), findsOneWidget);
+        // Two days back is Tuesday 6 October; drag the board that way.
+        await tester.drag(find.byType(ListView).last, const Offset(900, 0));
+        await tester.pumpAndSettle();
+        final found = find.text('út 6.10.').evaluate().isNotEmpty;
+        await finish(tester);
+        return found;
+      }
+
+      expect(await canReach(0), isFalse);
+      expect(await canReach(3), isTrue);
+    });
+
+    testWidgets('a finished match of the board opens its Zápis, from its band '
+        'and from the day header', (tester) async {
+      fullHd(tester);
+      final slots = [fed('m', day, 'Domácí')];
+      final results = {'m': res('m', 'finished', 6, 2)};
+      await tester.pumpWidget(
+        app(slots: slots, results: results, lineups: {'m': lineup}),
+      );
+      await tester.pumpAndSettle();
+
+      // The band in the grid.
+      await tester.tap(
+        find.descendant(
+          of: find.byType(CalendarEventBand),
+          matching: find.textContaining('Domácí'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
+      await tester.tapAt(const Offset(20, 20));
+      await tester.pumpAndSettle();
+      expect(find.byType(LegacyScoreSheetPage), findsNothing);
+
+      // The day header: its list first, then the match in it.
+      await tester.tap(
+        find
+            .descendant(
+              of: find.byType(BoardColumnHeader),
+              matching: find.textContaining('Domácí'),
+            )
+            .first,
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsOneWidget);
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.text('6 : 2'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
+      expect(find.byType(AlertDialog), findsNothing);
+
+      await finish(tester);
+    });
+
+    testWidgets('a match without a score does nothing when tapped on the '
+        'board', (tester) async {
+      fullHd(tester);
+      await tester.pumpWidget(app(slots: [fed('m', day, 'Domácí')]));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.descendant(
+          of: find.byType(CalendarEventBand),
+          matching: find.textContaining('Domácí'),
         ),
       );
       await tester.pumpAndSettle();

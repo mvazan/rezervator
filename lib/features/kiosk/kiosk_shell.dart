@@ -16,6 +16,7 @@ import '../../core/widgets/gradient_button.dart';
 import '../../data/clock.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
+import '../../domain/results.dart' show hasScoreData;
 import '../../domain/schedule.dart'
     show headerEventLabel, isDayOpen, nextTrainingDay;
 import 'kiosk_board_view.dart';
@@ -142,6 +143,12 @@ class _KioskShellState extends ConsumerState<KioskShell> {
     );
   }
 
+  /// A tap on a match of the board: only one with a score has a Zápis.
+  void _openMatchIfScored(PrioritySlot match) {
+    final result = ref.read(matchResultsProvider).value?[match.id];
+    if (hasScoreData(result)) _openMatch(match);
+  }
+
   void _openMatch(PrioritySlot match) {
     unawaited(
       showKioskZapis(
@@ -159,7 +166,11 @@ class _KioskShellState extends ConsumerState<KioskShell> {
   /// The board with the drawer (notices and matches) on its right — no
   /// drawer at all when there is nothing to put in it.
   Widget _boardWithPanel() {
-    final board = KioskBoardView(key: _boardKey, selected: _selected);
+    final board = KioskBoardView(
+      key: _boardKey,
+      selected: _selected,
+      onOpenMatch: _openMatchIfScored,
+    );
     final content = ref.watch(kioskPanelContentProvider);
     if (content == null) return board;
     final settings = ref.watch(settingsProvider).value;

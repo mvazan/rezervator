@@ -649,7 +649,10 @@ class ScheduleSettings {
     this.kioskDrawerWidth = 440,
     this.kioskNoticesShare = 40,
     this.kioskZapisPercent = 80,
-    this.kioskRotationSeconds = 12,
+    this.kioskNoticesRotationSeconds = 12,
+    this.kioskLiveRotationSeconds = 12,
+    this.kioskPanelEnabled = true,
+    this.kioskPastDays = 0,
     this.tenantId = '',
     this.dutyReminderEnabled = false,
     this.dutyReminderDays = 1,
@@ -696,8 +699,16 @@ class ScheduleSettings {
   /// a close button.
   final int kioskZapisPercent;
 
-  /// Seconds a notice or a live match stays up before the next one.
-  final int kioskRotationSeconds;
+  /// Seconds a notice, or a live match, stays up before the next one.
+  final int kioskNoticesRotationSeconds;
+  final int kioskLiveRotationSeconds;
+
+  /// The whole drawer on or off (0067); the options above matter only while
+  /// it is on.
+  final bool kioskPanelEnabled;
+
+  /// How many days back the board can be scrolled (0067); 0 = not at all.
+  final int kioskPastDays;
 
   /// The settings row's tenant — the update key since 0005 (one row per
   /// tenant instead of the old singleton).
@@ -739,7 +750,12 @@ class ScheduleSettings {
         kioskDrawerWidth: json['kiosk_drawer_width'] as int? ?? 440,
         kioskNoticesShare: json['kiosk_notices_share'] as int? ?? 40,
         kioskZapisPercent: json['kiosk_zapis_percent'] as int? ?? 80,
-        kioskRotationSeconds: json['kiosk_rotation_seconds'] as int? ?? 12,
+        kioskNoticesRotationSeconds:
+            json['kiosk_notices_rotation_seconds'] as int? ?? 12,
+        kioskLiveRotationSeconds:
+            json['kiosk_live_rotation_seconds'] as int? ?? 12,
+        kioskPanelEnabled: json['kiosk_panel_enabled'] as bool? ?? true,
+        kioskPastDays: json['kiosk_past_days'] as int? ?? 0,
         tenantId: json['tenant_id'] as String? ?? '',
         dutyReminderEnabled: json['duty_reminder_enabled'] as bool? ?? false,
         dutyReminderDays: json['duty_reminder_days'] as int? ?? 1,
