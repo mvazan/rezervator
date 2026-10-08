@@ -168,23 +168,27 @@ class _KioskShellState extends ConsumerState<KioskShell> {
   /// The board with the drawer (notices and matches) on its right — no
   /// drawer at all when there is nothing to put in it.
   Widget _boardWithPanel() {
+    final content = ref.watch(kioskPanelContentProvider);
+    final settings = ref.watch(settingsProvider).value;
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final drawerWidth = kioskDrawerWidthFor(
+      screenWidth,
+      settings?.kioskDrawerWidth ?? 440,
+    );
     final board = KioskBoardView(
       key: _boardKey,
       selected: _selected,
       onOpenMatch: _openMatchIfScored,
+      // With a drawer, the columns are sized for the room beside it open —
+      // the same width open or closed, so they never resize mid-slide.
+      columnBasisWidth: content == null ? null : screenWidth - drawerWidth,
     );
-    final content = ref.watch(kioskPanelContentProvider);
     if (content == null) return board;
-    final settings = ref.watch(settingsProvider).value;
     // A match being played keeps the drawer open: a visitor may close it,
     // and it opens again after the idle time.
     final restingOpen =
         (settings?.kioskDrawerOpen ?? false) || content.live.isNotEmpty;
     final open = _drawerOverride ?? restingOpen;
-    final drawerWidth = kioskDrawerWidthFor(
-      MediaQuery.sizeOf(context).width,
-      settings?.kioskDrawerWidth ?? 440,
-    );
     void toggle() => setState(() => _drawerOverride = !open);
     return Stack(
       children: [

@@ -51,7 +51,12 @@ double _minPxPerMinute(Iterable<TimeBlock> blocks, int laneCount) {
 }
 
 class KioskBoardView extends ConsumerStatefulWidget {
-  const KioskBoardView({super.key, required this.selected, this.onOpenMatch});
+  const KioskBoardView({
+    super.key,
+    required this.selected,
+    this.onOpenMatch,
+    this.columnBasisWidth,
+  });
 
   /// The currently selected player, or null when the board is display-only.
   final PlayerName? selected;
@@ -60,6 +65,12 @@ class KioskBoardView extends ConsumerStatefulWidget {
   /// asks to open its Zápis. Only a match with a score has one; the kiosk
   /// shell decides what a tap on any other does (nothing).
   final void Function(PrioritySlot match)? onOpenMatch;
+
+  /// The width the day columns are sized for, instead of the board's own.
+  /// The kiosk shell passes the width left beside the OPEN drawer, so the
+  /// columns keep one width while the drawer slides in and out — sized to
+  /// the board's changing width they were re-laid out on every frame.
+  final double? columnBasisWidth;
 
   @override
   ConsumerState<KioskBoardView> createState() => KioskBoardViewState();
@@ -144,7 +155,8 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
       }
       // The header strip is sticky (outside the scroll), so the target is
       // pure body geometry.
-      final target = window.topFor(hourMinuteAt(anchorMin), _pxPerMinute) -
+      final target =
+          window.topFor(hourMinuteAt(anchorMin), _pxPerMinute) -
           40; // a little context above the line
       _vScroll.animateTo(
         target.clamp(0.0, _vScroll.position.maxScrollExtent),
@@ -271,9 +283,11 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
       }
     }
     final days = <DaySchedule>[
-      for (var offset = -pastDays;
-          offset <= settings.bookingHorizonDays;
-          offset++)
+      for (
+        var offset = -pastDays;
+        offset <= settings.bookingHorizonDays;
+        offset++
+      )
         dayByDate[todayDay.addDays(offset)]!,
     ];
     final todayIndex = pastDays;
@@ -296,15 +310,18 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
           for (final r in day.rentals) (r.startsAt, r.endsAt),
       ],
     ];
-    final window =
-        calendarWindowFor(blocks: windowBlocks, eventWindows: eventWindows);
+    final window = calendarWindowFor(
+      blocks: windowBlocks,
+      eventWindows: eventWindows,
+    );
     if (window == null) {
       return const Center(child: Text('Rozvrh je prázdný.'));
     }
     // Half-hour ruler labels/gridlines only when the alley actually uses
     // half-hour block boundaries.
-    final halfHourMarks = windowBlocks
-        .any((b) => b.startsAt.minute == 30 || b.endsAt.minute == 30);
+    final halfHourMarks = windowBlocks.any(
+      (b) => b.startsAt.minute == 30 || b.endsAt.minute == 30,
+    );
 
     // Shared header height: the busiest visible day dictates it for every
     // column AND the ruler offset, so all event lines fit without clipping.
@@ -320,7 +337,9 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
     // something to happen — looks like a screen that will not work. Say why.
     final board = LayoutBuilder(
       builder: (context, constraints) {
-        final columnWidth = boardColumnWidth(constraints.maxWidth);
+        final columnWidth = boardColumnWidth(
+          widget.columnBasisWidth ?? constraints.maxWidth,
+        );
         // Two admin-selectable modes (settings.kioskFitDay):
         // - fit-height: the whole window stretches to the viewport, floored
         //   at the legibility scale (then the board scrolls anyway);
@@ -329,7 +348,7 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
         //   idle reset brings the board back to "now".
         final fitScale =
             (constraints.maxHeight - headerHeight - _bottomLabelPad) /
-                window.minutes;
+            window.minutes;
         final minScale = _minPxPerMinute(windowBlocks, settings.laneCount);
         final comfortableScale = settings.laneCount * laneRowRefHeight / 60;
         final pxPerMinute = settings.kioskFitDay
@@ -415,48 +434,52 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
                           child: ListView.builder(
                             scrollDirection: Axis.horizontal,
                             controller: _hScroll,
-                            physics:
-                                ColumnSnapPhysics(columnWidth: columnWidth),
+                            physics: ColumnSnapPhysics(
+                              columnWidth: columnWidth,
+                            ),
                             itemCount: days.length,
                             itemBuilder: (context, index) => SizedBox(
                               width: columnWidth,
                               // The kiosk column is read-only: no admin
                               // hooks, rows resolved by _laneRow.
                               child: Container(
-                                margin:
-                                    const EdgeInsets.symmetric(horizontal: 2),
+                                margin: const EdgeInsets.symmetric(
+                                  horizontal: 2,
+                                ),
                                 clipBehavior: Clip.antiAlias,
                                 decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(10)),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
                                 // A day gone by reads quieter than today and
                                 // what is ahead.
                                 child: Opacity(
                                   opacity: index < todayIndex ? 0.65 : 1,
                                   child: ScheduleDayColumn(
-                                  onOpenMatch: widget.onOpenMatch,
-                                  day: days[index],
-                                  window: window,
-                                  pxPerMinute: pxPerMinute,
-                                  halfHourMarks: halfHourMarks,
-                                  nowMinute: index == todayIndex &&
-                                          now.minutesFromMidnight >=
-                                              window.startMinute &&
-                                          now.minutesFromMidnight <
-                                              window.endMinute
-                                      ? now.minutesFromMidnight
-                                      : null,
-                                  laneRow: (context, day, block, lane) =>
-                                      _laneRow(
-                                    day,
-                                    block,
-                                    lane,
-                                    settings: settings,
-                                    nameById: nameById,
-                                    clubColorById: clubColorById,
-                                    interactive: interactive,
-                                    selectedCount: selectedCount,
+                                    onOpenMatch: widget.onOpenMatch,
+                                    day: days[index],
+                                    window: window,
+                                    pxPerMinute: pxPerMinute,
+                                    halfHourMarks: halfHourMarks,
+                                    nowMinute:
+                                        index == todayIndex &&
+                                            now.minutesFromMidnight >=
+                                                window.startMinute &&
+                                            now.minutesFromMidnight <
+                                                window.endMinute
+                                        ? now.minutesFromMidnight
+                                        : null,
+                                    laneRow: (context, day, block, lane) =>
+                                        _laneRow(
+                                          day,
+                                          block,
+                                          lane,
+                                          settings: settings,
+                                          nameById: nameById,
+                                          clubColorById: clubColorById,
+                                          interactive: interactive,
+                                          selectedCount: selectedCount,
+                                        ),
                                   ),
-                                ),
                                 ),
                               ),
                             ),
@@ -473,8 +496,7 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
       },
     );
 
-    if (selected == null ||
-        !atReservationLimit(selectedCount, settings)) {
+    if (selected == null || !atReservationLimit(selectedCount, settings)) {
       return board;
     }
     return Column(
@@ -522,7 +544,8 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
           clubColorIndex: clubColorById[reservation.playerId] ?? -1,
         );
       case FreeSlot():
-        final bookable = interactive &&
+        final bookable =
+            interactive &&
             selected != null &&
             canBook(
               state: state,

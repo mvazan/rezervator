@@ -101,10 +101,7 @@ class _KioskHeadlineState extends State<KioskHeadline> {
               const SizedBox(width: 12),
               Text(
                 '${_index % notices.length + 1}/${notices.length}',
-                style: TextStyle(
-                  fontSize: 13,
-                  color: scheme.onSurfaceVariant,
-                ),
+                style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
               ),
             ],
           ],

@@ -1366,6 +1366,26 @@ void main() {
       await finish(tester);
     });
 
+    testWidgets('the day columns keep their width while the drawer slides', (
+      tester,
+    ) async {
+      fullHd(tester);
+      await tester.pumpWidget(app(notices: [notice('1', 'Brigáda')]));
+      await tester.pumpAndSettle();
+      double column() =>
+          tester.getSize(find.byType(BoardColumnHeader).first).width;
+      final closed = column();
+
+      await tester.tap(openButton);
+      // Mid-slide and settled: the same width throughout.
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(column(), closed);
+      await tester.pumpAndSettle();
+      expect(column(), closed);
+
+      await finish(tester);
+    });
+
     testWidgets('after a minute without a touch it returns to its default', (
       tester,
     ) async {
