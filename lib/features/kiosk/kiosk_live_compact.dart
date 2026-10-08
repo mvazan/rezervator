@@ -13,6 +13,8 @@
 /// score and the totals are what is read from across the room.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../domain/duels.dart';
@@ -23,6 +25,9 @@ import '../clubhouse/widgets/duel_card.dart';
 import '../clubhouse/widgets/lead_color.dart';
 
 const _tabular = [FontFeature.tabularFigures()];
+
+/// How long a duel takes to open or fold.
+const _expandDuration = Duration(milliseconds: 260);
 
 /// The score of the match: the teams around the points, „průběžně“, and
 /// the pins with their lead.
@@ -110,9 +115,11 @@ class KioskLiveScore extends StatelessWidget {
 mixin _FifoOpen<T extends StatefulWidget> on State<T> {
   final opened = <int>[];
   final scroll = ScrollController();
+  Timer? _settle;
 
   @override
   void dispose() {
+    _settle?.cancel();
     scroll.dispose();
     super.dispose();
   }
@@ -121,15 +128,50 @@ mixin _FifoOpen<T extends StatefulWidget> on State<T> {
     setState(() {
       if (!opened.remove(position)) opened.add(position);
     });
-    WidgetsBinding.instance.addPostFrameCallback((_) => _fit());
+    _fitWhenSettled();
+  }
+
+  /// Measures once the opening has animated to its full height — again on
+  /// every change of the list's height (a card still growing, a live score
+  /// adding a lane), so the check runs after the last one.
+  void _fitWhenSettled() {
+    _settle?.cancel();
+    _settle = Timer(_expandDuration + const Duration(milliseconds: 60), _fit);
   }
 
   void _fit() {
     if (!mounted || !scroll.hasClients || opened.length < 2) return;
     if (scroll.position.maxScrollExtent <= 0) return;
     setState(() => opened.removeAt(0));
-    WidgetsBinding.instance.addPostFrameCallback((_) => _fit());
+    _fitWhenSettled();
   }
+
+  /// [scrollView] watched for its height: whenever it would have to
+  /// scroll, the fit is checked once it settles.
+  Widget fitting(Widget scrollView) =>
+      NotificationListener<ScrollMetricsNotification>(
+        onNotification: (n) {
+          if (n.metrics.maxScrollExtent > 0) _fitWhenSettled();
+          return false;
+        },
+        child: scrollView,
+      );
+
+  /// [closed] or [open] by [isOpen], the change animated: the height grows
+  /// or shrinks while the two cross-fade.
+  Widget animatedDuel({
+    required bool isOpen,
+    required Widget closed,
+    required Widget open,
+  }) => AnimatedCrossFade(
+    duration: _expandDuration,
+    sizeCurve: Curves.easeInOutCubic,
+    crossFadeState: isOpen
+        ? CrossFadeState.showSecond
+        : CrossFadeState.showFirst,
+    firstChild: closed,
+    secondChild: open,
+  );
 
   /// The full card of an open duel — the match detail's, with its lane
   /// table; a tap folds it.
@@ -182,16 +224,18 @@ class _KioskLiveCompactState extends State<KioskLiveCompact> with _FifoOpen {
           ),
         ),
         Expanded(
-          child: SingleChildScrollView(
-            controller: scroll,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                for (final duel in widget.duels) ...[
-                  const SizedBox(height: 6),
-                  _compactDuel(context, scheme, duel),
+          child: fitting(
+            SingleChildScrollView(
+              controller: scroll,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (final duel in widget.duels) ...[
+                    const SizedBox(height: 6),
+                    _compactDuel(context, scheme, duel),
+                  ],
                 ],
-              ],
+              ),
             ),
           ),
         ),
@@ -199,11 +243,15 @@ class _KioskLiveCompactState extends State<KioskLiveCompact> with _FifoOpen {
     );
   }
 
-  Widget _compactDuel(BuildContext context, ColorScheme scheme, Duel duel) {
+  Widget _compactDuel(BuildContext context, ColorScheme scheme, Duel duel) =>
+      animatedDuel(
+        isOpen: opened.contains(duel.position),
+        closed: _closedDuel(context, scheme, duel),
+        open: openCard(duel, widget.duels, widget.result),
+      );
+
+  Widget _closedDuel(BuildContext context, ColorScheme scheme, Duel duel) {
     final waiting = duel.state == DuelState.waiting;
-    if (opened.contains(duel.position)) {
-      return openCard(duel, widget.duels, widget.result);
-    }
     final lead = leadLabel(duel.diff);
     final done = duel.state == DuelState.done;
     TextStyle total(bool winner) => TextStyle(
@@ -335,14 +383,16 @@ class _KioskLiveTableState extends State<KioskLiveTable> with _FifoOpen {
         ),
         const SizedBox(height: 8),
         Expanded(
-          child: SingleChildScrollView(
-            controller: scroll,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                for (var i = 0; i < widget.duels.length; i++)
-                  _row(context, scheme, widget.duels[i], i.isOdd),
-              ],
+          child: fitting(
+            SingleChildScrollView(
+              controller: scroll,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (var i = 0; i < widget.duels.length; i++)
+                    _row(context, scheme, widget.duels[i], i.isOdd),
+                ],
+              ),
             ),
           ),
         ),
@@ -350,14 +400,23 @@ class _KioskLiveTableState extends State<KioskLiveTable> with _FifoOpen {
     );
   }
 
-  Widget _row(BuildContext context, ColorScheme scheme, Duel duel, bool odd) {
-    final waiting = duel.state == DuelState.waiting;
-    if (opened.contains(duel.position)) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: openCard(duel, widget.duels, widget.result),
+  Widget _row(BuildContext context, ColorScheme scheme, Duel duel, bool odd) =>
+      animatedDuel(
+        isOpen: opened.contains(duel.position),
+        closed: _closedRow(context, scheme, duel, odd),
+        open: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: openCard(duel, widget.duels, widget.result),
+        ),
       );
-    }
+
+  Widget _closedRow(
+    BuildContext context,
+    ColorScheme scheme,
+    Duel duel,
+    bool odd,
+  ) {
+    final waiting = duel.state == DuelState.waiting;
     final lead = leadLabel(duel.diff);
     final done = duel.state == DuelState.done;
     final homeWins = (duel.diff ?? 0) > 0;

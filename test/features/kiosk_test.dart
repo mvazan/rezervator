@@ -2201,27 +2201,38 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        // No title, no duel cards: the compact drawing.
+        // No title, no duel card shown: the compact drawing.
         expect(find.text('PRÁVĚ SE HRAJE'), findsNothing);
-        expect(find.byType(DuelCard), findsNothing);
+        expect(find.byType(DuelCard).hitTestable(), findsNothing);
         // All six duels in view, without scrolling.
         final drawer = tester.getRect(find.byType(KioskDrawer));
         final last = find.textContaining('Hráč6').first;
         expect(tester.getRect(last).bottom, lessThan(drawer.bottom));
 
+        // The folded duel's card stays in the tree (cross-fade), hidden:
+        // only the visible ones count.
+        final openCards = find.byType(DuelCard).hitTestable();
         // A tap opens a duel as the full card with its lane table. More
         // may be open while they fit; past that the first opened folds.
-        expect(find.byType(DuelCard), findsNothing);
+        expect(openCards, findsNothing);
         await tester.tap(find.textContaining('Hráč1').first);
         await tester.pumpAndSettle();
-        expect(find.byType(DuelCard), findsOneWidget);
+        expect(openCards, findsOneWidget);
         expect(find.text('Plné'), findsWidgets);
         await tester.tap(find.textContaining('Hráč2').first);
         await tester.pumpAndSettle();
-        expect(find.byType(DuelCard), findsNWidgets(2));
+        expect(openCards, findsNWidgets(2));
+        // Each opening animates; the fit is measured once it has.
+        Future<void> settle() async {
+          for (var i = 0; i < 6; i++) {
+            await tester.pump(const Duration(milliseconds: 320));
+            await tester.pumpAndSettle();
+          }
+        }
+
         for (var pos = 3; pos <= 6; pos++) {
           await tester.tap(find.textContaining('Hráč$pos').first);
-          await tester.pumpAndSettle();
+          await settle();
         }
         final scroll = tester
             .state<ScrollableState>(
@@ -2233,11 +2244,11 @@ void main() {
             .position;
         // Never a scrollbar: the oldest opened ones folded back…
         expect(scroll.maxScrollExtent, 0);
-        expect(find.byType(DuelCard).evaluate().length, lessThan(6));
+        expect(openCards.evaluate().length, lessThan(6));
         // …and the last one tapped is open.
         expect(
           find.descendant(
-            of: find.byType(DuelCard),
+            of: openCards,
             matching: find.textContaining('Hráč6'),
           ),
           findsWidgets,
@@ -2245,7 +2256,7 @@ void main() {
         // Hráč1, opened first, was the first to fold.
         expect(
           find.descendant(
-            of: find.byType(DuelCard),
+            of: openCards,
             matching: find.textContaining('Hráč1'),
           ),
           findsNothing,
