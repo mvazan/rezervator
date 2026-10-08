@@ -1154,13 +1154,19 @@ void main() {
 
       expect(find.byType(AlertDialog), findsOneWidget);
       // The score still renders non-interactively.
-      expect(find.text('5 : 3'), findsOneWidget);
+      final dialog = find.byType(AlertDialog);
+      expect(
+        find.descendant(of: dialog, matching: find.text('5 : 3')),
+        findsOneWidget,
+      );
       // No video control at all — the fallback trophy/block icon instead.
       expect(find.byIcon(Icons.play_circle_fill), findsNothing);
       expect(find.byIcon(Icons.videocam), findsNothing);
 
       // Tapping the match row does nothing — no tap-through, dialog stays.
-      await tester.tap(find.text('Naši – Soupeř'));
+      await tester.tap(
+        find.descendant(of: dialog, matching: find.text('Naši – Soupeř')),
+      );
       await tester.pumpAndSettle();
 
       expect(find.byType(MatchDetailScreen), findsNothing);
@@ -1169,4 +1175,125 @@ void main() {
       await finish(tester);
     },
   );
+
+  group('side panel (notices and matches)', () {
+    final notice = Message(
+      id: 'n1',
+      kind: MessageKind.notice,
+      audience: MessageAudience.all,
+      authorId: 'a',
+      authorRole: MessageAuthorRole.admin,
+      onDate: null,
+      blockId: null,
+      title: 'Brigáda v sobotu',
+      body: 'Sejdeme se v devět na dráhách.',
+      expiresAt: null,
+      notify: true,
+      createdAt: DateTime(2026, 9, 1),
+      updatedAt: DateTime(2026, 9, 1),
+    );
+    PrioritySlot fed(String id, Day date, String home) => PrioritySlot(
+      type: PrioritySlot.fallbackMatchType,
+      id: id,
+      date: date,
+      startsAt: const HourMinute(14, 0),
+      endsAt: const HourMinute(17, 0),
+      homeTeam: home,
+      awayTeam: 'Soupeř',
+      importKey: 'cka:$id',
+    );
+
+    Widget app({
+      List<Message> notices = const [],
+      List<PrioritySlot> slots = const [],
+      Map<String, MatchResult> results = const {},
+    }) => ProviderScope(
+      overrides: [
+        settingsProvider.overrideWith((ref) => Stream.value(settings)),
+        timeBlocksProvider.overrideWith((ref) => Stream.value(const [b1])),
+        dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
+        prioritySlotsProvider.overrideWithValue(slots),
+        rentalsProvider.overrideWith((ref) => Stream.value(const [])),
+        weekReservationsProvider.overrideWith(
+          (ref, monday) => Stream.value(const []),
+        ),
+        playersProvider.overrideWith((ref) async => players),
+        messagesProvider.overrideWith((ref) => Stream.value(notices)),
+        matchResultsProvider.overrideWith((ref) => Stream.value(results)),
+      ],
+      child: const MaterialApp(home: KioskShell()),
+    );
+
+    testWidgets('shows the notice, the next match and the last result', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1600, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        app(
+          notices: [notice],
+          slots: [
+            fed('old', t.addDays(-3), 'Domácí'),
+            fed('next', t.addDays(2), 'Příští'),
+          ],
+          results: {
+            'old': MatchResult.fromJson(const {
+              'match_id': 'old',
+              'status': 'finished',
+              'home_points': 6,
+              'away_points': 2,
+              'fetched_at': '2026-09-17T21:00:00+00:00',
+            }),
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Brigáda v sobotu'), findsOneWidget);
+      expect(find.text('PŘÍŠTÍ ZÁPAS'), findsOneWidget);
+      expect(find.text('POSLEDNÍ VÝSLEDKY'), findsOneWidget);
+      expect(find.text('6 : 2'), findsOneWidget);
+
+      // Tapping the notice reads it in full, and nothing here books.
+      await tester.tap(find.text('Brigáda v sobotu'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(find.text('Sejdeme se v devět na dráhách.'), findsWidgets);
+
+      await finish(tester);
+    });
+
+    testWidgets('an alley with no notice and no match gets no panel', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1600, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+
+      expect(find.text('NÁSTĚNKA'), findsNothing);
+      expect(find.text('ZÁPASY'), findsNothing);
+
+      await finish(tester);
+    });
+
+    testWidgets('a narrow screen puts the panel under the board', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(800, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(app(notices: [notice]));
+      await tester.pumpAndSettle();
+
+      expect(find.text('NÁSTĚNKA'), findsOneWidget);
+      final card = tester.getTopLeft(find.text('NÁSTĚNKA'));
+      final board = tester.getTopLeft(find.byType(KioskBoardView));
+      expect(card.dy, greaterThan(board.dy));
+
+      await finish(tester);
+    });
+  });
 }

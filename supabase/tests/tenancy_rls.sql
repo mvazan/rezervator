@@ -9766,8 +9766,16 @@ begin
   end loop;
   perform set_config('request.jwt.claims',
     '{"sub":"51000000-0000-0000-0000-000000000015","role":"authenticated"}', true);
-  if (select count(*) from messages where tenant_id = '00000000-0000-0000-0000-000000000051') <> 0 then
-    raise exception 'FAIL: the kiosk reads messages or notices';
+  -- The kiosk reads the alley's notices (0064), never a message.
+  if (select count(*) from messages
+       where tenant_id = '00000000-0000-0000-0000-000000000051'
+         and kind = 'message') <> 0
+     or (select count(*) from messages where id = v_notice) <> 1 then
+    raise exception 'FAIL: the kiosk reads messages, or not the notice';
+  end if;
+  if (select count(*) from message_recipients
+       where tenant_id = '00000000-0000-0000-0000-000000000051') <> 0 then
+    raise exception 'FAIL: the kiosk reads recipient rows';
   end if;
   -- Filip, pending: an unvetted self-registration of this alley, so not
   -- the notice (it may say where the spare key is), nor any recipient row.
@@ -9897,8 +9905,8 @@ update profiles set status = 'pending'
  where id = '51000000-0000-0000-0000-000000000016';
 set local role authenticated;
 
--- 23o, continued. The kiosk reads nothing here, not even what it once got
--- as a player: Adam sets Dana — a recipient of the day message and of the
+-- 23o, continued. The kiosk reads no message or recipient row (only notices,
+-- 0064), not even what it once got as a player: Adam sets Dana — a recipient of the day message and of the
 -- notice — as the kiosk („Nastavit jako kiosk“). She then sees no message
 -- and no recipient row, and her own rows take no reply. Back to a player.
 do $$
@@ -9923,7 +9931,8 @@ begin
     raise exception 'FAIL: expected Dana to be the kiosk now';
   end if;
   if (select count(*) from messages
-       where tenant_id = '00000000-0000-0000-0000-000000000051') <> 0
+       where tenant_id = '00000000-0000-0000-0000-000000000051'
+         and kind = 'message') <> 0
      or (select count(*) from message_recipients
           where tenant_id = '00000000-0000-0000-0000-000000000051') <> 0 then
     raise exception 'FAIL: a recipient set as the kiosk still reads her messages';

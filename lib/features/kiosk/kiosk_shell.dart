@@ -19,6 +19,7 @@ import '../../domain/models.dart';
 import '../../domain/schedule.dart'
     show headerEventLabel, isDayOpen, nextTrainingDay;
 import 'kiosk_board_view.dart';
+import 'kiosk_info_panel.dart';
 import 'name_picker.dart';
 
 const _idleTimeout = Duration(seconds: 60);
@@ -80,6 +81,38 @@ class _KioskShellState extends ConsumerState<KioskShell> {
 
   void _clearSelection() => setState(() => _selected = null);
 
+  /// The board, with the notices and matches beside it on a wide screen
+  /// and under it on a narrow one — nothing at all when there is none.
+  Widget _boardWithPanel() {
+    final board = KioskBoardView(key: _boardKey, selected: _selected);
+    if (!ref.watch(kioskPanelHasContentProvider)) return board;
+    return LayoutBuilder(
+      builder: (context, c) {
+        if (c.maxWidth >= 1000) {
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(child: board),
+              const SizedBox(
+                width: kioskRailWidth,
+                child: KioskInfoPanel(rail: true),
+              ),
+            ],
+          );
+        }
+        return Column(
+          children: [
+            Expanded(child: board),
+            const SizedBox(
+              height: kioskStripHeight,
+              child: KioskInfoPanel(rail: false),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     // The kiosk is a shared, always-on tablet whose brightness is an admin
@@ -87,8 +120,7 @@ class _KioskShellState extends ConsumerState<KioskShell> {
     // the rest of the app (which follows light/dark via MaterialApp.theme/
     // darkTheme). Defaults to dark — the historical kiosk look — until the
     // settings stream resolves.
-    final kioskDark =
-        ref.watch(settingsProvider).value?.kioskDark ?? true;
+    final kioskDark = ref.watch(settingsProvider).value?.kioskDark ?? true;
     // Deliberately half-in on appearance Settings: no `contrastLevel`, so
     // the kiosk opts OUT of the personal theme choice — kioskDark above is
     // the only brightness knob a shared tablet gets, admin-controlled, and
@@ -108,12 +140,7 @@ class _KioskShellState extends ConsumerState<KioskShell> {
                 onReserve: _openPicker,
                 onClearSelection: _clearSelection,
               ),
-              Expanded(
-                child: KioskBoardView(
-                  key: _boardKey,
-                  selected: _selected,
-                ),
-              ),
+              Expanded(child: _boardWithPanel()),
             ],
           ),
         ),
@@ -139,10 +166,9 @@ class _StatusBar extends ConsumerWidget {
     final priority = ref.watch(prioritySlotsProvider);
     // Úklid children are plumbing (their match already announces); the
     // shared label gives home matches the 🏠, away matches no icon.
-    final todaysMatches = priority
-        .where((m) => m.date == todayDay && m.parentId == null)
-        .toList()
-      ..sort((a, b) => a.startsAt.compareTo(b.startsAt));
+    final todaysMatches =
+        priority.where((m) => m.date == todayDay && m.parentId == null).toList()
+          ..sort((a, b) => a.startsAt.compareTo(b.startsAt));
     if (todaysMatches.isNotEmpty) {
       return todaysMatches.map(headerEventLabel).join('  ·  ');
     }
