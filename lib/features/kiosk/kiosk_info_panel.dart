@@ -574,23 +574,62 @@ class _MatchesCardState extends ConsumerState<_MatchesCard> {
   String? _anchorId;
   final _centerKey = GlobalKey();
 
+  /// The window for [extraBack]/[extraAhead] more weeks, from the current
+  /// providers; [watch] subscribes the build, a tap only reads.
+  KioskMatchWindow _window(
+    int extraBack,
+    int extraAhead, {
+    required bool watch,
+  }) {
+    final settings =
+        (watch ? ref.watch(settingsProvider) : ref.read(settingsProvider))
+            .value;
+    final now = (watch ? ref.watch(nowProvider) : ref.read(nowProvider)).value;
+    return kioskMatchWindow(
+      slots: watch
+          ? ref.watch(prioritySlotsProvider)
+          : ref.read(prioritySlotsProvider),
+      today: Day.fromDateTime(now ?? DateTime.now()),
+      weeksBack: settings?.kioskWeeksBack ?? 2,
+      weeksAhead: settings?.kioskWeeksAhead ?? 1,
+      showUpcoming: settings?.kioskShowUpcoming ?? true,
+      extraBack: extraBack,
+      extraAhead: extraAhead,
+    );
+  }
+
+  /// „Zobrazit předchozí/další“: widens the window by whole weeks until a
+  /// match shows up — a week with none (a holiday, a free round) would
+  /// otherwise answer a tap with nothing — or the season has no more.
+  void _more({required bool older}) {
+    final shown = _window(_extraBack, _extraAhead, watch: false).matches.length;
+    var back = _extraBack;
+    var ahead = _extraAhead;
+    while (true) {
+      if (older) {
+        back++;
+      } else {
+        ahead++;
+      }
+      final w = _window(back, ahead, watch: false);
+      if (w.matches.length > shown || !(older ? w.moreBefore : w.moreAfter)) {
+        break;
+      }
+    }
+    setState(() {
+      _extraBack = back;
+      _extraAhead = ahead;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final settings = ref.watch(settingsProvider).value;
     final now = ref.watch(nowProvider).value ?? DateTime.now();
     final today = Day.fromDateTime(now);
     final results =
         ref.watch(matchResultsProvider).value ?? const <String, MatchResult>{};
-    final window = kioskMatchWindow(
-      slots: ref.watch(prioritySlotsProvider),
-      today: today,
-      weeksBack: settings?.kioskWeeksBack ?? 2,
-      weeksAhead: settings?.kioskWeeksAhead ?? 1,
-      showUpcoming: settings?.kioskShowUpcoming ?? true,
-      extraBack: _extraBack,
-      extraAhead: _extraAhead,
-    );
+    final window = _window(_extraBack, _extraAhead, watch: true);
     final matches = window.matches;
 
     // Opens on the first match not decided yet, with the one before it in
@@ -633,20 +672,14 @@ class _MatchesCardState extends ConsumerState<_MatchesCard> {
                   itemCount: older.length + (window.moreBefore ? 1 : 0),
                   itemBuilder: (context, i) => i < older.length
                       ? row(older[i])
-                      : more(
-                          'Zobrazit předchozí',
-                          () => setState(() => _extraBack++),
-                        ),
+                      : more('Zobrazit předchozí', () => _more(older: true)),
                 ),
                 SliverList.list(
                   key: _centerKey,
                   children: [
                     for (final s in newer) row(s),
                     if (window.moreAfter)
-                      more(
-                        'Zobrazit další',
-                        () => setState(() => _extraAhead++),
-                      ),
+                      more('Zobrazit další', () => _more(older: false)),
                   ],
                 ),
               ],

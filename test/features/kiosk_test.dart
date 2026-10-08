@@ -1570,6 +1570,40 @@ void main() {
       await finish(tester);
     });
 
+    testWidgets('„Zobrazit předchozí“ skips weeks with no match', (
+      tester,
+    ) async {
+      fullHd(tester);
+      // Nothing for five weeks (a break), then two matches in one week.
+      final slots = [
+        fed('far1', Day(2026, 8, 25), 'PřesPrázdniny'),
+        fed('far2', Day(2026, 8, 27), 'PřesPrázdniny2'),
+        fed('cur', Day(2026, 10, 9), 'Tento'),
+      ];
+      await tester.pumpWidget(
+        app(slots: slots, drawerOpen: true, weeksBack: 0, weeksAhead: 0),
+      );
+      await tester.pumpAndSettle();
+      final list = find.descendant(
+        of: find.byType(KioskDrawer),
+        matching: find.byType(CustomScrollView),
+      );
+      await tester.drag(list, const Offset(0, 200));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('PřesPrázdniny'), findsNothing);
+
+      // One tap crosses the empty weeks and brings the whole next week.
+      await tester.tap(find.text('Zobrazit předchozí'));
+      await tester.pumpAndSettle();
+      await tester.drag(list, const Offset(0, 400));
+      await tester.pumpAndSettle();
+      // Both matches of that week (the first name is a prefix of the second).
+      expect(find.textContaining('PřesPrázdniny'), findsNWidgets(2));
+      expect(find.textContaining('PřesPrázdniny2'), findsOneWidget);
+
+      await finish(tester);
+    });
+
     testWidgets('a match being played takes the whole drawer, even closed by '
         'default, and reopens it after a minute', (tester) async {
       fullHd(tester);
