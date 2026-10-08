@@ -143,16 +143,35 @@ class _KioskShellState extends ConsumerState<KioskShell> {
     final restingOpen =
         ref.watch(settingsProvider).value?.kioskDrawerOpen ?? false;
     final open = _drawerOverride ?? restingOpen;
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    final drawerWidth =
+        kioskDrawerWidthFor(MediaQuery.sizeOf(context).width);
+    void toggle() => setState(() => _drawerOverride = !open);
+    return Stack(
       children: [
-        Expanded(child: board),
-        KioskDrawer(
-          content: content,
-          open: open,
-          onToggle: () => setState(() => _drawerOverride = !open),
-          onOpenNotice: _openNotice,
-          onOpenMatch: _openMatch,
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(child: board),
+            KioskDrawer(
+              content: content,
+              open: open,
+              onOpenNotice: _openNotice,
+              onOpenMatch: _openMatch,
+            ),
+          ],
+        ),
+        // Floats over the board at the drawer's left edge — or at the
+        // screen's, once the drawer is gone.
+        AnimatedPositioned(
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOutCubic,
+          top: 12,
+          right: (open ? drawerWidth : 0) + KioskDrawerButton.margin,
+          child: KioskDrawerButton(
+            open: open,
+            noticeCount: content.notices.length,
+            onTap: toggle,
+          ),
         ),
       ],
     );

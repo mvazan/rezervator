@@ -2,9 +2,10 @@
 /// there are several; a tap reads one in full) and the matches — the next
 /// one, and the finished ones of the last few days; a tap on a finished one
 /// opens its Zápis. Display only, like the board: nothing here books or
-/// writes. Closed it is a thin strip with what it holds; the admin picks the
-/// resting state and what it lists (Správa → Kiosk), and the shell closes
-/// or reopens it to that state after a minute without a touch.
+/// writes. Closed it is gone entirely, leaving only a round button floating
+/// at the screen's edge; the admin picks the resting state and what it lists
+/// (Správa → Kiosk), and the shell closes or reopens it to that state after
+/// a minute without a touch.
 library;
 
 import 'dart:async';
@@ -23,13 +24,13 @@ import '../clubhouse/widgets/match_title.dart';
 /// How long one notice stays up before the next takes its place.
 const kioskNoticeTurn = Duration(seconds: 12);
 
-/// Open drawer width on a full-HD screen (narrower screens get 40 %), and
-/// the strip left when it is closed.
+/// Open drawer width on a full-HD screen (narrower screens get 40 %).
 const kioskDrawerWidth = 440.0;
-const kioskHandleWidth = 64.0;
 
-/// How many finished-match rows show before the list scrolls.
-const _visibleResultRows = 5;
+/// The drawer's width for a screen [screenWidth] wide.
+double kioskDrawerWidthFor(double screenWidth) =>
+    (screenWidth * 0.4).clamp(300.0, kioskDrawerWidth);
+
 const _resultRowHeight = 64.0;
 
 /// What the drawer would show now, from the providers and the admin's
@@ -72,40 +73,42 @@ class KioskPanelContent {
   bool get hasMatches => next != null || recent.isNotEmpty;
 }
 
-class KioskDrawer extends ConsumerWidget {
+/// The drawer itself: [open] it is [kioskDrawerWidthFor] wide, closed it
+/// has no width at all. The button that opens and closes it is
+/// [KioskDrawerButton], floating outside of it.
+class KioskDrawer extends StatelessWidget {
   const KioskDrawer({
     super.key,
     required this.content,
     required this.open,
-    required this.onToggle,
     required this.onOpenNotice,
     required this.onOpenMatch,
   });
 
   final KioskPanelContent content;
   final bool open;
-  final VoidCallback onToggle;
   final void Function(Message notice) onOpenNotice;
   final void Function(PrioritySlot match) onOpenMatch;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final screen = MediaQuery.sizeOf(context).width;
-    final openWidth = (screen * 0.4).clamp(300.0, kioskDrawerWidth);
+    final width = kioskDrawerWidthFor(MediaQuery.sizeOf(context).width);
     return AnimatedContainer(
       duration: const Duration(milliseconds: 250),
       curve: Curves.easeOutCubic,
-      width: open ? openWidth : kioskHandleWidth,
-      color: scheme.surfaceContainer,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _Handle(content: content, open: open, onTap: onToggle),
-          if (open)
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(0, 12, 12, 12),
+      width: open ? width : 0,
+      clipBehavior: Clip.hardEdge,
+      decoration: BoxDecoration(color: scheme.surfaceContainer),
+      // Laid out at its full width even while it grows or shrinks, so the
+      // text does not reflow during the animation.
+      child: OverflowBox(
+        alignment: Alignment.centerLeft,
+        minWidth: width,
+        maxWidth: width,
+        child: open
+            ? Padding(
+                padding: const EdgeInsets.all(12),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -116,75 +119,70 @@ class KioskDrawer extends ConsumerWidget {
                       ),
                     if (content.notices.isNotEmpty && content.hasMatches)
                       const SizedBox(height: 12),
+                    // The matches take what the notices leave and scroll.
                     if (content.hasMatches)
-                      _MatchesCard(
-                        next: content.next,
-                        recent: content.recent,
-                        onOpen: onOpenMatch,
+                      Flexible(
+                        child: _MatchesCard(
+                          next: content.next,
+                          recent: content.recent,
+                          onOpen: onOpenMatch,
+                        ),
                       ),
                   ],
                 ),
-              ),
-            ),
-        ],
+              )
+            : const SizedBox.shrink(),
       ),
     );
   }
 }
 
-/// The strip on the drawer's left edge: the whole of it is the toggle, big
-/// enough for a finger, with a chevron and — when closed — one icon per
-/// thing inside, the notice count on its icon.
-class _Handle extends StatelessWidget {
-  const _Handle({
-    required this.content,
+/// The round button that opens and closes the drawer, floating over the
+/// board at the drawer's left edge (or the screen's, while it is closed).
+/// Place it in a [Stack] with [KioskDrawerButton.positioned].
+class KioskDrawerButton extends StatelessWidget {
+  const KioskDrawerButton({
+    super.key,
     required this.open,
+    required this.noticeCount,
     required this.onTap,
   });
 
-  final KioskPanelContent content;
   final bool open;
+
+  /// Shown on the button while the drawer is closed.
+  final int noticeCount;
   final VoidCallback onTap;
+
+  static const size = 56.0;
+  static const margin = 12.0;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final icon = Icon(
+      open ? Icons.chevron_right : Icons.chevron_left,
+      size: 36,
+      color: scheme.onPrimaryContainer,
+    );
     return Semantics(
       button: true,
       label: open ? 'Skrýt panel' : 'Zobrazit nástěnku a zápasy',
-      child: InkWell(
-        onTap: onTap,
-        child: SizedBox(
-          width: kioskHandleWidth,
-          child: Column(
-            children: [
-              const SizedBox(height: 16),
-              Icon(
-                open ? Icons.chevron_right : Icons.chevron_left,
-                size: 36,
-                color: scheme.primary,
-              ),
-              if (!open) ...[
-                const SizedBox(height: 24),
-                if (content.notices.isNotEmpty)
-                  Badge(
-                    label: Text('${content.notices.length}'),
-                    child: Icon(
-                      Icons.campaign_outlined,
-                      size: 32,
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ),
-                if (content.notices.isNotEmpty && content.hasMatches)
-                  const SizedBox(height: 28),
-                if (content.hasMatches)
-                  Icon(
-                    Icons.emoji_events_outlined,
-                    size: 32,
-                    color: scheme.onSurfaceVariant,
-                  ),
-              ],
-            ],
+      child: Material(
+        color: scheme.primaryContainer,
+        elevation: 6,
+        shape: const CircleBorder(),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onTap,
+          child: SizedBox(
+            width: size,
+            height: size,
+            child: Center(
+              child: !open && noticeCount > 0
+                  ? Badge(label: Text('$noticeCount'), child: icon)
+                  : icon,
+            ),
           ),
         ),
       ),
@@ -228,7 +226,7 @@ class _Card extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 10),
-          child,
+          Flexible(child: child),
         ],
       ),
     );
@@ -394,7 +392,13 @@ class _MatchesCard extends ConsumerWidget {
           if (recent.isNotEmpty) ...[
             Text('POSLEDNÍ VÝSLEDKY', style: label),
             const SizedBox(height: 4),
-            _RecentList(recent: recent, results: results, onOpen: onOpen),
+            Flexible(
+              child: _RecentList(
+                recent: recent,
+                results: results,
+                onOpen: onOpen,
+              ),
+            ),
           ],
         ],
       ),
@@ -449,26 +453,21 @@ class _RecentListState extends State<_RecentList> {
   @override
   Widget build(BuildContext context) {
     final rows = widget.recent.length;
-    return ConstrainedBox(
-      constraints: BoxConstraints(
-        maxHeight: _visibleResultRows * _resultRowHeight,
-      ),
-      child: ListView.builder(
-        controller: _controller,
-        shrinkWrap: true,
-        itemCount: rows,
-        itemBuilder: (context, i) {
-          final s = widget.recent[i];
-          return SizedBox(
-            height: _resultRowHeight,
-            child: _MatchRow(
-              slot: s,
-              result: widget.results[s.id],
-              onOpen: widget.onOpen,
-            ),
-          );
-        },
-      ),
+    return ListView.builder(
+      controller: _controller,
+      shrinkWrap: true,
+      itemCount: rows,
+      itemBuilder: (context, i) {
+        final s = widget.recent[i];
+        return SizedBox(
+          height: _resultRowHeight,
+          child: _MatchRow(
+            slot: s,
+            result: widget.results[s.id],
+            onOpen: widget.onOpen,
+          ),
+        );
+      },
     );
   }
 }

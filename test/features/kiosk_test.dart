@@ -1260,7 +1260,7 @@ void main() {
       addTearDown(tester.view.reset);
     }
 
-    testWidgets('closed by default: a strip, tap opens it, tap closes it', (
+    testWidgets('closed by default: only the button shows, tap opens it, tap closes it', (
       tester,
     ) async {
       fullHd(tester);
@@ -1269,6 +1269,8 @@ void main() {
 
       expect(find.text('Brigáda'), findsNothing);
       expect(find.byIcon(Icons.chevron_left), findsOneWidget);
+      // Closed, the drawer takes no room at all.
+      expect(tester.getSize(find.byType(KioskDrawer)).width, 0);
 
       await tester.tap(find.byIcon(Icons.chevron_left));
       await tester.pumpAndSettle();
@@ -1398,6 +1400,42 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('6 : 2'), findsOneWidget);
       expect(find.text('1 : 7'), findsOneWidget);
+
+      await finish(tester);
+    });
+
+    testWidgets('many finished matches scroll inside the drawer, newest last',
+        (tester) async {
+      tester.view.physicalSize = const Size(1920, 700);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final slots = [
+        for (var i = 1; i <= 12; i++) fed('m$i', t.addDays(-i), 'Tým $i'),
+      ];
+      final results = {
+        for (final s in slots)
+          s.id: MatchResult.fromJson({
+            'match_id': s.id,
+            'status': 'finished',
+            'home_points': 5,
+            'away_points': 3,
+            'fetched_at': '2026-09-17T21:00:00+00:00',
+          }),
+      };
+      await tester.pumpWidget(
+        app(
+          notices: [notice('n1', 'Brigáda')],
+          slots: slots,
+          results: results,
+          drawerOpen: true,
+          historyDays: 28,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      // Opened on the newest (yesterday), the oldest is scrolled away.
+      expect(find.textContaining('Tým 1 '), findsWidgets);
+      expect(find.textContaining('Tým 12 '), findsNothing);
 
       await finish(tester);
     });
