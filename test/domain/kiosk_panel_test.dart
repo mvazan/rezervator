@@ -1,7 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/domain/kiosk_panel.dart';
 import 'package:rezervator/domain/models.dart';
-import 'package:rezervator/features/kiosk/kiosk_ticker.dart';
 
 void main() {
   const matchType = PrioritySlotType(
@@ -218,30 +217,5 @@ void main() {
       withData: {'playing', 'scheduled', 'done'},
     );
     expect([for (final s in live) s.id], ['playing']);
-  });
-
-  test('the ticker line: title and text, one line, bullets between', () {
-    Message note(String title, String body) => Message(
-          id: title,
-          kind: MessageKind.notice,
-          audience: MessageAudience.all,
-          authorId: 'a',
-          authorRole: MessageAuthorRole.admin,
-          onDate: null,
-          blockId: null,
-          title: title,
-          body: body,
-          expiresAt: null,
-          notify: true,
-          createdAt: DateTime(2026, 9, 1),
-          updatedAt: DateTime(2026, 9, 1),
-        );
-    expect(
-      kioskTickerText([
-        note('Brigáda', 'V  sobotu\n9:00'),
-        note(' ', 'Jen text'),
-      ]),
-      'Brigáda: V sobotu 9:00   •   Jen text',
-    );
   });
 }

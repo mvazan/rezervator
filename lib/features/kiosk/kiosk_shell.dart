@@ -22,7 +22,7 @@ import '../../domain/schedule.dart'
     show headerEventLabel, isDayOpen, nextTrainingDay;
 import 'kiosk_board_view.dart';
 import 'kiosk_info_panel.dart';
-import 'kiosk_ticker.dart';
+import 'kiosk_headline.dart';
 import 'kiosk_zapis_page.dart';
 import 'name_picker.dart';
 import '../../core/widgets/emoji_text.dart';
@@ -242,6 +242,7 @@ class _KioskShellState extends ConsumerState<KioskShell> {
                 selected: _selected,
                 onReserve: _openPicker,
                 onClearSelection: _clearSelection,
+                onOpenNotice: _openNotice,
               ),
               Expanded(child: _boardWithPanel()),
             ],
@@ -259,11 +260,13 @@ class _StatusBar extends ConsumerWidget {
     required this.selected,
     required this.onReserve,
     required this.onClearSelection,
+    required this.onOpenNotice,
   });
 
   final PlayerName? selected;
   final VoidCallback onReserve;
   final VoidCallback onClearSelection;
+  final void Function(Message notice) onOpenNotice;
 
   String _infoLine(WidgetRef ref, Day todayDay) {
     final priority = ref.watch(prioritySlotsProvider);
@@ -369,9 +372,22 @@ class _StatusBar extends ConsumerWidget {
                     ),
                   if (info.isNotEmpty && notices.isNotEmpty)
                     const SizedBox(width: 24),
-                  // The notices as a news strip in what is left.
+                  // One notice's title at a time, in what is left.
                   if (notices.isNotEmpty)
-                    Expanded(flex: 3, child: KioskTicker(notices: notices)),
+                    Expanded(
+                      flex: 3,
+                      child: KioskHeadline(
+                        notices: notices,
+                        turn: Duration(
+                          seconds: ref
+                                  .watch(settingsProvider)
+                                  .value
+                                  ?.kioskNoticesRotationSeconds ??
+                              12,
+                        ),
+                        onOpen: onOpenNotice,
+                      ),
+                    ),
                 ],
               ),
             ),

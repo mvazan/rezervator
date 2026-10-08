@@ -11,7 +11,7 @@ import 'package:rezervator/features/clubhouse/widgets/legacy_score_sheet.dart';
 import 'package:rezervator/features/kiosk/kiosk_board_view.dart';
 import 'package:rezervator/features/kiosk/kiosk_info_panel.dart';
 import 'package:rezervator/features/kiosk/kiosk_shell.dart';
-import 'package:rezervator/features/kiosk/kiosk_ticker.dart';
+import 'package:rezervator/features/kiosk/kiosk_headline.dart';
 import 'package:rezervator/features/kiosk/name_picker.dart';
 import 'package:rezervator/features/schedule/widgets/calendar_board.dart';
 
@@ -1280,7 +1280,6 @@ void main() {
       bool panelEnabled = true,
       int pastDays = 0,
       int idleSeconds = 60,
-      bool ticker = false,
       Map<String, List<MatchPlayerResult>> lineups = const {},
     }) => ProviderScope(
       overrides: [
@@ -1319,7 +1318,6 @@ void main() {
         ),
         playersProvider.overrideWith((ref) async => players),
         messagesProvider.overrideWith((ref) => Stream.value(notices)),
-        kioskTickerRunningProvider.overrideWithValue(ticker),
         matchResultsProvider.overrideWith((ref) => Stream.value(results)),
         matchPlayerResultsProvider.overrideWith(
           (ref, id) => Stream.value(lineups[id] ?? const []),
@@ -1336,6 +1334,9 @@ void main() {
 
     final openButton = find.byIcon(Icons.keyboard_double_arrow_left);
     final closeButton = find.byIcon(Icons.keyboard_double_arrow_right);
+    // A notice title is in the status bar too; these tests are the drawer's.
+    Finder drawerText(String t) =>
+        find.descendant(of: find.byType(KioskDrawer), matching: find.text(t));
 
     testWidgets('closed by default: only the button shows, tap opens it, tap '
         'closes it', (tester) async {
@@ -1343,18 +1344,18 @@ void main() {
       await tester.pumpWidget(app(notices: [notice('1', 'Brigáda')]));
       await tester.pumpAndSettle();
 
-      expect(find.text('Brigáda'), findsNothing);
+      expect(drawerText('Brigáda'), findsNothing);
       expect(openButton, findsOneWidget);
       expect(tester.getSize(find.byType(KioskDrawer)).width, 0);
 
       await tester.tap(openButton);
       await tester.pumpAndSettle();
-      expect(find.text('Brigáda'), findsOneWidget);
+      expect(drawerText('Brigáda'), findsOneWidget);
       expect(tester.getSize(find.byType(KioskDrawer)).width, 440);
 
       await tester.tap(closeButton);
       await tester.pumpAndSettle();
-      expect(find.text('Brigáda'), findsNothing);
+      expect(drawerText('Brigáda'), findsNothing);
 
       await finish(tester);
     });
@@ -1367,11 +1368,11 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(openButton);
       await tester.pumpAndSettle();
-      expect(find.text('Brigáda'), findsOneWidget);
+      expect(drawerText('Brigáda'), findsOneWidget);
 
       await tester.pump(const Duration(seconds: 61));
       await tester.pumpAndSettle();
-      expect(find.text('Brigáda'), findsNothing);
+      expect(drawerText('Brigáda'), findsNothing);
 
       await finish(tester);
     });
@@ -1385,16 +1386,16 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(openButton);
       await tester.pumpAndSettle();
-      expect(find.text('Brigáda'), findsOneWidget);
+      expect(drawerText('Brigáda'), findsOneWidget);
 
       // A minute is not enough any more…
       await tester.pump(const Duration(seconds: 61));
       await tester.pumpAndSettle();
-      expect(find.text('Brigáda'), findsOneWidget);
+      expect(drawerText('Brigáda'), findsOneWidget);
       // …two are.
       await tester.pump(const Duration(seconds: 61));
       await tester.pumpAndSettle();
-      expect(find.text('Brigáda'), findsNothing);
+      expect(drawerText('Brigáda'), findsNothing);
 
       await finish(tester);
     });
@@ -1407,15 +1408,15 @@ void main() {
         app(notices: [notice('1', 'Brigáda')], drawerOpen: true),
       );
       await tester.pumpAndSettle();
-      expect(find.text('Brigáda'), findsOneWidget);
+      expect(drawerText('Brigáda'), findsOneWidget);
 
       await tester.tap(closeButton);
       await tester.pumpAndSettle();
-      expect(find.text('Brigáda'), findsNothing);
+      expect(drawerText('Brigáda'), findsNothing);
 
       await tester.pump(const Duration(seconds: 61));
       await tester.pumpAndSettle();
-      expect(find.text('Brigáda'), findsOneWidget);
+      expect(drawerText('Brigáda'), findsOneWidget);
 
       await finish(tester);
     });
@@ -1440,8 +1441,8 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('Vidět'), findsOneWidget);
-      expect(find.text('Skryté'), findsNothing);
+      expect(drawerText('Vidět'), findsOneWidget);
+      expect(drawerText('Skryté'), findsNothing);
 
       await finish(tester);
     });
@@ -1460,7 +1461,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('Brigáda'), findsNothing);
+      expect(drawerText('Brigáda'), findsNothing);
       expect(find.text('ZÁPASY'), findsOneWidget);
       await finish(tester);
 
@@ -1473,7 +1474,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('Brigáda'), findsOneWidget);
+      expect(drawerText('Brigáda'), findsOneWidget);
       expect(find.text('ZÁPASY'), findsNothing);
 
       await finish(tester);
@@ -1646,7 +1647,7 @@ void main() {
       await tester.pumpAndSettle();
       // Open although the default is closed; nothing but the live match.
       expect(find.text('PRÁVĚ SE HRAJE'), findsOneWidget);
-      expect(find.text('Brigáda'), findsNothing);
+      expect(drawerText('Brigáda'), findsNothing);
       expect(find.text('ZÁPASY'), findsNothing);
 
       // A visitor may close it; a minute later it is back.
@@ -1674,7 +1675,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('PRÁVĚ SE HRAJE'), findsNothing);
       // The drawer rests closed, as the admin set it.
-      expect(find.text('Brigáda'), findsNothing);
+      expect(drawerText('Brigáda'), findsNothing);
 
       await finish(tester);
     });
@@ -1695,7 +1696,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('PRÁVĚ SE HRAJE'), findsNothing);
-      expect(find.text('Brigáda'), findsOneWidget);
+      expect(drawerText('Brigáda'), findsOneWidget);
 
       await finish(tester);
     });
@@ -1789,7 +1790,7 @@ void main() {
 
       await tester.pump(const Duration(seconds: 13));
       await tester.pumpAndSettle();
-      expect(find.text('Krátký'), findsNothing);
+      expect(drawerText('Krátký'), findsNothing);
       expect(tester.getTopLeft(find.text('ZÁPASY')), before);
 
       await finish(tester);
@@ -1955,7 +1956,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(openButton, findsNothing);
       expect(closeButton, findsNothing);
-      expect(find.text('Brigáda'), findsNothing);
+      expect(drawerText('Brigáda'), findsNothing);
       expect(find.text('PRÁVĚ SE HRAJE'), findsNothing);
 
       await finish(tester);
@@ -1972,16 +1973,16 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('První'), findsOneWidget);
+      expect(drawerText('První'), findsOneWidget);
 
-      await tester.fling(find.text('První'), const Offset(-300, 0), 1000);
+      await tester.fling(drawerText('První'), const Offset(-300, 0), 1000);
       await tester.pumpAndSettle();
-      expect(find.text('Druhý'), findsOneWidget);
-      expect(find.text('První'), findsNothing);
+      expect(drawerText('Druhý'), findsOneWidget);
+      expect(drawerText('První'), findsNothing);
 
-      await tester.fling(find.text('Druhý'), const Offset(300, 0), 1000);
+      await tester.fling(drawerText('Druhý'), const Offset(300, 0), 1000);
       await tester.pumpAndSettle();
-      expect(find.text('První'), findsOneWidget);
+      expect(drawerText('První'), findsOneWidget);
 
       await finish(tester);
     });
@@ -1998,7 +1999,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Krátký'));
+      await tester.tap(drawerText('Krátký'));
       await tester.pumpAndSettle();
       expect(find.byType(AlertDialog), findsNothing);
 
@@ -2161,73 +2162,53 @@ void main() {
       await finish(tester);
     });
 
-    testWidgets('the notices run as a news strip in the status bar', (
-      tester,
-    ) async {
+    testWidgets('the status bar shows one notice title at a time, in turn',
+        (tester) async {
       fullHd(tester);
       await tester.pumpWidget(
         app(
           notices: [
-            notice('1', 'Brigáda', body: 'Sejdeme se v devět.'),
+            notice('1', 'Brigáda'),
             notice('2', 'Skryté', show: false),
-            notice('3', 'Zámek', body: 'Nový\n  zámek   na šatně.'),
+            notice('3', 'Zámek'),
           ],
+          noticeRotation: 6,
         ),
       );
       await tester.pumpAndSettle();
-      // The drawer is closed; the strip is there regardless.
-      final strip = find.byType(KioskTicker);
-      expect(strip, findsOneWidget);
-      expect(
-        find.descendant(
-          of: strip,
-          matching: find.text(
-            'Brigáda: Sejdeme se v devět.   •   Zámek: Nový zámek na šatně.',
-          ),
-        ),
-        findsOneWidget,
-      );
+      final bar = find.byType(KioskHeadline);
+      Finder inBar(String t) => find.descendant(of: bar, matching: find.text(t));
+      expect(inBar('Brigáda'), findsOneWidget);
+      expect(inBar('1/2'), findsOneWidget);
       expect(find.textContaining('Skryté'), findsNothing);
-      // It sits in the status bar, left of „Rezervovat“.
+      // Left of „Rezervovat“.
       expect(
-        tester.getCenter(strip).dx,
+        tester.getCenter(bar).dx,
         lessThan(tester.getCenter(find.text('Rezervovat')).dx),
       );
 
-      await finish(tester);
-    });
+      // Within one turn (settling already ran part of the clock) it fades
+      // to the next.
+      for (var i = 0; i < 7 && inBar('Zámek').evaluate().isEmpty; i++) {
+        await tester.pump(const Duration(seconds: 1));
+        await tester.pump(const Duration(milliseconds: 700));
+      }
+      expect(inBar('Zámek'), findsOneWidget);
+      expect(inBar('Brigáda'), findsNothing);
 
-    testWidgets('a text too long for the strip runs, and loops without a seam', (
-      tester,
-    ) async {
-      fullHd(tester);
-      await tester.pumpWidget(
-        app(
-          notices: [notice('1', 'Dlouhý', body: 'Dlouhý text oznamu. ' * 30)],
-          ticker: true,
-        ),
-      );
-      await tester.pump();
-      final line = find.descendant(
-        of: find.byType(KioskTicker),
-        matching: find.textContaining('Dlouhý: '),
-      );
-      // Two rounds side by side.
-      expect(line, findsNWidgets(2));
-      final before = tester.getTopLeft(line.first).dx;
-      await tester.pump(const Duration(seconds: 2));
-      final after = tester.getTopLeft(line.first).dx;
-      // 70 px per second, to the left.
-      expect(before - after, closeTo(2 * kioskTickerSpeed, 5));
+      // A tap reads the notice in full.
+      await tester.tap(inBar('Zámek'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsOneWidget);
 
       await finish(tester);
     });
 
-    testWidgets('no notice, no strip', (tester) async {
+    testWidgets('no notice, no headline', (tester) async {
       fullHd(tester);
       await tester.pumpWidget(app());
       await tester.pumpAndSettle();
-      expect(find.byType(KioskTicker), findsNothing);
+      expect(find.byType(KioskHeadline), findsNothing);
 
       await finish(tester);
     });
