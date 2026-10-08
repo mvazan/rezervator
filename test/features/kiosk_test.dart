@@ -1268,15 +1268,15 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Brigáda'), findsNothing);
-      expect(find.byIcon(Icons.chevron_left), findsOneWidget);
+      expect(find.byIcon(Icons.keyboard_double_arrow_left), findsOneWidget);
       // Closed, the drawer takes no room at all.
       expect(tester.getSize(find.byType(KioskDrawer)).width, 0);
 
-      await tester.tap(find.byIcon(Icons.chevron_left));
+      await tester.tap(find.byIcon(Icons.keyboard_double_arrow_left));
       await tester.pumpAndSettle();
       expect(find.text('Brigáda'), findsOneWidget);
 
-      await tester.tap(find.byIcon(Icons.chevron_right));
+      await tester.tap(find.byIcon(Icons.keyboard_double_arrow_right));
       await tester.pumpAndSettle();
       expect(find.text('Brigáda'), findsNothing);
 
@@ -1289,7 +1289,7 @@ void main() {
       fullHd(tester);
       await tester.pumpWidget(app(notices: [notice('n1', 'Brigáda')]));
       await tester.pumpAndSettle();
-      await tester.tap(find.byIcon(Icons.chevron_left));
+      await tester.tap(find.byIcon(Icons.keyboard_double_arrow_left));
       await tester.pumpAndSettle();
       expect(find.text('Brigáda'), findsOneWidget);
 
@@ -1310,7 +1310,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Brigáda'), findsOneWidget);
 
-      await tester.tap(find.byIcon(Icons.chevron_right));
+      await tester.tap(find.byIcon(Icons.keyboard_double_arrow_right));
       await tester.pumpAndSettle();
       expect(find.text('Brigáda'), findsNothing);
 
@@ -1486,8 +1486,8 @@ void main() {
       fullHd(tester);
       await tester.pumpWidget(app());
       await tester.pumpAndSettle();
-      expect(find.byIcon(Icons.chevron_left), findsNothing);
-      expect(find.byIcon(Icons.chevron_right), findsNothing);
+      expect(find.byIcon(Icons.keyboard_double_arrow_left), findsNothing);
+      expect(find.byIcon(Icons.keyboard_double_arrow_right), findsNothing);
 
       await finish(tester);
     });

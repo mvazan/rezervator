@@ -160,17 +160,16 @@ class _KioskShellState extends ConsumerState<KioskShell> {
             ),
           ],
         ),
-        // Floats over the board at the drawer's left edge — or at the
-        // screen's, once the drawer is gone.
+        // Floats over the board, vertically centred, at the drawer's left
+        // edge — or at the screen's, once the drawer is gone.
         AnimatedPositioned(
           duration: const Duration(milliseconds: 250),
           curve: Curves.easeOutCubic,
-          top: 12,
+          top: 0,
+          bottom: 0,
           right: (open ? drawerWidth : 0) + KioskDrawerButton.margin,
-          child: KioskDrawerButton(
-            open: open,
-            noticeCount: content.notices.length,
-            onTap: toggle,
+          child: Center(
+            child: KioskDrawerButton(open: open, onTap: toggle),
           ),
         ),
       ],

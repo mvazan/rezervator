@@ -137,51 +137,55 @@ class KioskDrawer extends StatelessWidget {
   }
 }
 
-/// The round button that opens and closes the drawer, floating over the
-/// board at the drawer's left edge (or the screen's, while it is closed).
-/// Place it in a [Stack] with [KioskDrawerButton.positioned].
+/// The button that opens and closes the drawer: a bare double arrow, gray
+/// and half see-through, floating over the board at the drawer's left edge
+/// (or the screen's, while it is closed). Place it in a [Stack] with
+/// [KioskDrawerButton.positioned]; the arrow turns over as the drawer moves.
 class KioskDrawerButton extends StatelessWidget {
   const KioskDrawerButton({
     super.key,
     required this.open,
-    required this.noticeCount,
     required this.onTap,
   });
 
   final bool open;
-
-  /// Shown on the button while the drawer is closed.
-  final int noticeCount;
   final VoidCallback onTap;
 
   static const size = 56.0;
-  static const margin = 12.0;
+  static const margin = 8.0;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final icon = Icon(
-      open ? Icons.chevron_right : Icons.chevron_left,
-      size: 36,
-      color: scheme.onPrimaryContainer,
-    );
     return Semantics(
       button: true,
       label: open ? 'Skrýt panel' : 'Zobrazit nástěnku a zápasy',
-      child: Material(
-        color: scheme.primaryContainer,
-        elevation: 6,
-        shape: const CircleBorder(),
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          onTap: onTap,
-          child: SizedBox(
-            width: size,
-            height: size,
-            child: Center(
-              child: !open && noticeCount > 0
-                  ? Badge(label: Text('$noticeCount'), child: icon)
-                  : icon,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: SizedBox(
+          width: size,
+          height: size,
+          child: Center(
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 300),
+              switchInCurve: Curves.easeOutCubic,
+              switchOutCurve: Curves.easeInCubic,
+              transitionBuilder: (child, animation) => FadeTransition(
+                opacity: animation,
+                child: ScaleTransition(
+                  scale: Tween(begin: 0.7, end: 1.0).animate(animation),
+                  child: child,
+                ),
+              ),
+              child: Icon(
+                open
+                    ? Icons.keyboard_double_arrow_right
+                    : Icons.keyboard_double_arrow_left,
+                key: ValueKey(open),
+                size: 44,
+                color: scheme.onSurfaceVariant.withValues(alpha: 0.5),
+              ),
             ),
           ),
         ),
