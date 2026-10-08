@@ -15,12 +15,14 @@ import '../../core/ui.dart';
 import '../../core/widgets/gradient_button.dart';
 import '../../data/clock.dart';
 import '../../data/providers.dart';
+import '../../domain/kiosk_panel.dart' show kioskNotices;
 import '../../domain/models.dart';
 import '../../domain/results.dart' show hasScoreData;
 import '../../domain/schedule.dart'
     show headerEventLabel, isDayOpen, nextTrainingDay;
 import 'kiosk_board_view.dart';
 import 'kiosk_info_panel.dart';
+import 'kiosk_ticker.dart';
 import 'kiosk_zapis_page.dart';
 import 'name_picker.dart';
 import '../../core/widgets/emoji_text.dart';
@@ -315,6 +317,11 @@ class _StatusBar extends ConsumerWidget {
     final scheme = Theme.of(context).colorScheme;
     final now = ref.watch(nowProvider).value ?? DateTime.now();
     final todayDay = Day.fromDateTime(now);
+    final info = _infoLine(ref, todayDay);
+    final notices = kioskNotices(
+      ref.watch(messagesProvider).value ?? const [],
+      now,
+    );
     final clock =
         '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
 
@@ -345,11 +352,27 @@ class _StatusBar extends ConsumerWidget {
             ),
             const SizedBox(width: 16),
             Expanded(
-              child: EmojiText(
-                _infoLine(ref, todayDay),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 14, color: scheme.onSurfaceVariant),
+              child: Row(
+                children: [
+                  if (info.isNotEmpty)
+                    Flexible(
+                      flex: notices.isEmpty ? 1 : 2,
+                      child: EmojiText(
+                        info,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  if (info.isNotEmpty && notices.isNotEmpty)
+                    const SizedBox(width: 24),
+                  // The notices as a news strip in what is left.
+                  if (notices.isNotEmpty)
+                    Expanded(flex: 3, child: KioskTicker(notices: notices)),
+                ],
               ),
             ),
             const SizedBox(width: 16),

@@ -11,6 +11,7 @@ import 'package:rezervator/features/clubhouse/widgets/legacy_score_sheet.dart';
 import 'package:rezervator/features/kiosk/kiosk_board_view.dart';
 import 'package:rezervator/features/kiosk/kiosk_info_panel.dart';
 import 'package:rezervator/features/kiosk/kiosk_shell.dart';
+import 'package:rezervator/features/kiosk/kiosk_ticker.dart';
 import 'package:rezervator/features/kiosk/name_picker.dart';
 import 'package:rezervator/features/schedule/widgets/calendar_board.dart';
 
@@ -1279,6 +1280,7 @@ void main() {
       bool panelEnabled = true,
       int pastDays = 0,
       int idleSeconds = 60,
+      bool ticker = false,
       Map<String, List<MatchPlayerResult>> lineups = const {},
     }) => ProviderScope(
       overrides: [
@@ -1317,6 +1319,7 @@ void main() {
         ),
         playersProvider.overrideWith((ref) async => players),
         messagesProvider.overrideWith((ref) => Stream.value(notices)),
+        kioskTickerRunningProvider.overrideWithValue(ticker),
         matchResultsProvider.overrideWith((ref) => Stream.value(results)),
         matchPlayerResultsProvider.overrideWith(
           (ref, id) => Stream.value(lineups[id] ?? const []),
@@ -2154,6 +2157,77 @@ void main() {
         ),
         findsOneWidget,
       );
+
+      await finish(tester);
+    });
+
+    testWidgets('the notices run as a news strip in the status bar', (
+      tester,
+    ) async {
+      fullHd(tester);
+      await tester.pumpWidget(
+        app(
+          notices: [
+            notice('1', 'Brigáda', body: 'Sejdeme se v devět.'),
+            notice('2', 'Skryté', show: false),
+            notice('3', 'Zámek', body: 'Nový\n  zámek   na šatně.'),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+      // The drawer is closed; the strip is there regardless.
+      final strip = find.byType(KioskTicker);
+      expect(strip, findsOneWidget);
+      expect(
+        find.descendant(
+          of: strip,
+          matching: find.text(
+            'Brigáda: Sejdeme se v devět.   •   Zámek: Nový zámek na šatně.',
+          ),
+        ),
+        findsOneWidget,
+      );
+      expect(find.textContaining('Skryté'), findsNothing);
+      // It sits in the status bar, left of „Rezervovat“.
+      expect(
+        tester.getCenter(strip).dx,
+        lessThan(tester.getCenter(find.text('Rezervovat')).dx),
+      );
+
+      await finish(tester);
+    });
+
+    testWidgets('a text too long for the strip runs, and loops without a seam', (
+      tester,
+    ) async {
+      fullHd(tester);
+      await tester.pumpWidget(
+        app(
+          notices: [notice('1', 'Dlouhý', body: 'Dlouhý text oznamu. ' * 30)],
+          ticker: true,
+        ),
+      );
+      await tester.pump();
+      final line = find.descendant(
+        of: find.byType(KioskTicker),
+        matching: find.textContaining('Dlouhý: '),
+      );
+      // Two rounds side by side.
+      expect(line, findsNWidgets(2));
+      final before = tester.getTopLeft(line.first).dx;
+      await tester.pump(const Duration(seconds: 2));
+      final after = tester.getTopLeft(line.first).dx;
+      // 70 px per second, to the left.
+      expect(before - after, closeTo(2 * kioskTickerSpeed, 5));
+
+      await finish(tester);
+    });
+
+    testWidgets('no notice, no strip', (tester) async {
+      fullHd(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+      expect(find.byType(KioskTicker), findsNothing);
 
       await finish(tester);
     });
