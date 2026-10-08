@@ -10563,7 +10563,7 @@ end $$;
 
 -- Running 0051 again put back its two read-rule functions: bring back the
 -- kiosk's notices (0064), which later checks rely on.
-\ir ../migrations/0064_kiosk_reads_notices.sql
+\ir ../migrations/0064_kiosk_panel.sql
 
 -- 0052 One device token, one profile ----------------------------------------
 -- 20. notify pushes to every profile holding a token, so a token the last
@@ -11706,7 +11706,7 @@ begin
   raise notice 'OK: a new kuželna starts with no training day (0063)';
 end $$;
 
--- 0065: a notice is hidden from, or shown on, the kiosk by its alley's admin
+-- 0064: a notice is hidden from, or shown on, the kiosk by its alley's admin
 -- only; the kiosk still READS it (the app does the hiding, see the
 -- migration), and the public overview hands out none of the new settings.
 reset role;
@@ -11768,7 +11768,7 @@ begin
   if not (select show_on_kiosk from messages where id = v_notice) then
     raise exception 'FAIL: the admin could not show the notice again';
   end if;
-  raise notice 'OK: only the alley''s admin hides or shows a notice on the kiosk (0065)';
+  raise notice 'OK: only the alley''s admin hides or shows a notice on the kiosk (0064)';
 end $$;
 reset role;
 do $$
@@ -11780,7 +11780,7 @@ begin
               where k like 'kiosk\_%' and k not in ('kiosk_dark', 'kiosk_fit_day')) then
     raise exception 'FAIL: the public overview hands out a kiosk panel setting';
   end if;
-  raise notice 'OK: anon cannot toggle, and the public overview hides the kiosk panel settings (0065)';
+  raise notice 'OK: anon cannot toggle, and the public overview hides the kiosk panel settings (0064)';
 end $$;
 
 rollback;

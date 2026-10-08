@@ -631,11 +631,11 @@ class AdminTenant {
       );
 }
 
-/// Where the kiosk shows the notices (0069, `kiosk_notices_mode`): not at
+/// Where the kiosk shows the notices (0064, `kiosk_notices_mode`): not at
 /// all, in the drawer, one title at a time in the status bar, or both.
 enum KioskNoticesMode { off, drawer, header, both }
 
-/// How the kiosk draws a match being played (0070, `kiosk_live_layout`):
+/// How the kiosk draws a match being played (0064, `kiosk_live_layout`):
 /// the match detail's duel cards, one compact line per duel, or a table.
 enum KioskLiveLayout { full, compact, table }
 
@@ -683,7 +683,7 @@ class ScheduleSettings {
   /// the app's week view) and lets the board scroll vertically.
   final bool kioskFitDay;
 
-  /// What the kiosk's side drawer lists (0065, 0066): the active notices
+  /// What the kiosk's side drawer lists (0064): the active notices
   /// and the matches — of the current week plus [kioskWeeksBack] weeks
   /// back and (when [kioskShowUpcoming]) [kioskWeeksAhead] weeks ahead. A
   /// match being played takes the whole drawer when [kioskLiveMode].
@@ -723,17 +723,17 @@ class ScheduleSettings {
   final int kioskNoticesRotationSeconds;
   final int kioskLiveRotationSeconds;
 
-  /// The whole drawer on or off (0067); the options above matter only while
+  /// The whole drawer on or off (0064); the options above matter only while
   /// it is on.
   final bool kioskPanelEnabled;
 
-  /// How many days back the board can be scrolled (0067); 0 = not at all.
+  /// How many days back the board can be scrolled (0064); 0 = not at all.
   final int kioskPastDays;
 
-  /// Seconds without a touch after which the kiosk starts over (0068).
+  /// Seconds without a touch after which the kiosk starts over (0064).
   final int kioskIdleSeconds;
 
-  /// How a match being played is drawn in the drawer (0070).
+  /// How a match being played is drawn in the drawer (0064).
   final KioskLiveLayout kioskLiveLayout;
 
   /// The settings row's tenant — the update key since 0005 (one row per
@@ -1913,7 +1913,7 @@ class Message {
   final DateTime createdAt;
   final DateTime updatedAt;
 
-  /// Notice only: whether the kiosk's drawer shows it (0065); the admin
+  /// Notice only: whether the kiosk's drawer shows it (0064); the admin
   /// can hide one from the wall tablet.
   final bool showOnKiosk;
 

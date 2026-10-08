@@ -1116,7 +1116,7 @@ class Api {
     );
   }
 
-  /// Writes the kiosk drawer's options (0065) — the keys of
+  /// Writes the kiosk drawer's options (0064) — the keys of
   /// `schedule_settings` (`kiosk_notices_mode`, `kiosk_show_matches`,
   /// `kiosk_matches_history_days`, `kiosk_drawer_open`). Optimistic, same
   /// reasoning as [setKioskFitDay].
