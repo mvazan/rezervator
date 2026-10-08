@@ -969,15 +969,19 @@ class _LiveMatchState extends ConsumerState<_LiveMatch> {
     final duels = duelsOf(players);
     final scale = diffScale(duels);
 
-    final lastPlayed = duels
-        .where((d) => d.state != DuelState.waiting)
-        .lastOrNull;
-    if (!_scrolled && lastPlayed != null) {
+    // Duels are played in groups, two on a four-lane alley, three on a
+    // six-lane one: open on the group the play has reached, its first card
+    // whole at the top (a card cut at the bottom is the lesser evil).
+    final target = kioskLiveScrollTarget(
+      duels,
+      laneCount: ref.watch(settingsProvider).value?.laneCount ?? 4,
+    );
+    if (!_scrolled && target != null) {
       _scrolled = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        final target = _duelKeys[lastPlayed.position]?.currentContext;
-        if (target == null || !target.mounted) return;
-        Scrollable.ensureVisible(target, alignment: 1);
+        final card = _duelKeys[target]?.currentContext;
+        if (card == null || !card.mounted) return;
+        Scrollable.ensureVisible(card);
       });
     }
 
