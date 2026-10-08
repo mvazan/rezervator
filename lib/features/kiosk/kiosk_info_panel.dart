@@ -9,6 +9,7 @@
 library;
 
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -140,8 +141,10 @@ class KioskDrawer extends StatelessWidget {
 /// The button that opens and closes the drawer: a bare double arrow, gray
 /// and half see-through, floating over the board at the drawer's left edge
 /// (or the screen's, while it is closed). Place it in a [Stack] with
-/// [KioskDrawerButton.positioned]; the arrow turns over as the drawer moves.
-class KioskDrawerButton extends StatelessWidget {
+/// [KioskDrawerButton.positioned]. Every few seconds it breathes once — a
+/// soft glow and a little more opacity — so a tablet on the wall shows that
+/// there is something to open, without ever moving.
+class KioskDrawerButton extends StatefulWidget {
   const KioskDrawerButton({
     super.key,
     required this.open,
@@ -154,38 +157,77 @@ class KioskDrawerButton extends StatelessWidget {
   static const size = 56.0;
   static const margin = 8.0;
 
+  /// One breath, and the rest between two.
+  static const pulse = Duration(milliseconds: 2400);
+  static const pause = Duration(milliseconds: 1800);
+
+  @override
+  State<KioskDrawerButton> createState() => _KioskDrawerButtonState();
+}
+
+class _KioskDrawerButtonState extends State<KioskDrawerButton>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: KioskDrawerButton.pulse,
+  );
+  Timer? _rest;
+
+  @override
+  void initState() {
+    super.initState();
+    _breathe();
+  }
+
+  /// One breath, then a rest on a timer (not a repeating animation, which
+  /// would keep a test's pumpAndSettle from ever settling).
+  void _breathe() {
+    _controller.forward(from: 0).whenComplete(() {
+      if (!mounted) return;
+      _rest = Timer(KioskDrawerButton.pause, _breathe);
+    });
+  }
+
+  @override
+  void dispose() {
+    _rest?.cancel();
+    _controller.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Semantics(
       button: true,
-      label: open ? 'Skrýt panel' : 'Zobrazit nástěnku a zápasy',
+      label: widget.open ? 'Skrýt panel' : 'Zobrazit nástěnku a zápasy',
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: onTap,
+        onTap: widget.onTap,
         child: SizedBox(
-          width: size,
-          height: size,
+          width: KioskDrawerButton.size,
+          height: KioskDrawerButton.size,
           child: Center(
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 300),
-              switchInCurve: Curves.easeOutCubic,
-              switchOutCurve: Curves.easeInCubic,
-              transitionBuilder: (child, animation) => FadeTransition(
-                opacity: animation,
-                child: ScaleTransition(
-                  scale: Tween(begin: 0.7, end: 1.0).animate(animation),
-                  child: child,
-                ),
-              ),
-              child: Icon(
-                open
-                    ? Icons.keyboard_double_arrow_right
-                    : Icons.keyboard_double_arrow_left,
-                key: ValueKey(open),
-                size: 44,
-                color: scheme.onSurfaceVariant.withValues(alpha: 0.5),
-              ),
+            child: AnimatedBuilder(
+              animation: _controller,
+              builder: (context, child) {
+                // 0 → 1 → 0 over one breath.
+                final glow = math.sin(_controller.value * math.pi);
+                return Icon(
+                  widget.open
+                      ? Icons.keyboard_double_arrow_right
+                      : Icons.keyboard_double_arrow_left,
+                  size: 44,
+                  color: scheme.onSurfaceVariant
+                      .withValues(alpha: 0.4 + 0.35 * glow),
+                  shadows: [
+                    Shadow(
+                      color: scheme.primary.withValues(alpha: 0.75 * glow),
+                      blurRadius: 4 + 16 * glow,
+                    ),
+                  ],
+                );
+              },
             ),
           ),
         ),
