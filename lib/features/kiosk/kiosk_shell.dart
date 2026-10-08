@@ -41,6 +41,9 @@ class _KioskShellState extends ConsumerState<KioskShell> {
   /// What a visitor did to the drawer (true = open); null = the admin's
   /// resting state. The idle reset puts it back.
   bool? _drawerOverride;
+
+  /// Bumped on every idle reset; the drawer's match list starts over on it.
+  int _resets = 0;
   final _boardKey = GlobalKey<KioskBoardViewState>();
 
   @override
@@ -71,6 +74,7 @@ class _KioskShellState extends ConsumerState<KioskShell> {
     setState(() {
       _selected = null;
       _drawerOverride = null;
+      _resets++;
     });
     // Board horizontal scroll resets to today too (spec §1) — imperative
     // because the board owns its own PageController; there's no offset
@@ -201,6 +205,7 @@ class _KioskShellState extends ConsumerState<KioskShell> {
               open: open,
               onOpenNotice: _openNotice,
               onOpenMatch: _openMatch,
+              resetToken: _resets,
             ),
           ],
         ),

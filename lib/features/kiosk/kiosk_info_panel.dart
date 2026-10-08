@@ -107,7 +107,11 @@ class KioskDrawer extends ConsumerWidget {
     required this.open,
     required this.onOpenNotice,
     required this.onOpenMatch,
+    this.resetToken = 0,
   });
+
+  /// Bumped by the shell on every idle reset.
+  final int resetToken;
 
   final KioskPanelContent content;
   final bool open;
@@ -138,7 +142,9 @@ class KioskDrawer extends ConsumerWidget {
             onOpen: onOpenNotice,
           );
     final matches = content.hasMatches
-        ? _MatchesCard(onOpen: onOpenMatch)
+        // A new key after every idle reset: the list starts over (its
+        // weeks and its scroll) like the rest of the kiosk.
+        ? _MatchesCard(key: ValueKey(resetToken), onOpen: onOpenMatch)
         : null;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 250),
@@ -556,7 +562,7 @@ class _NoticesCardState extends State<_NoticesCard> {
 /// at either end brings one more week of the season; a tap on a finished
 /// match opens its Zápis.
 class _MatchesCard extends ConsumerStatefulWidget {
-  const _MatchesCard({required this.onOpen});
+  const _MatchesCard({super.key, required this.onOpen});
 
   final void Function(PrioritySlot match) onOpen;
 
@@ -568,11 +574,20 @@ class _MatchesCardState extends ConsumerState<_MatchesCard> {
   int _extraBack = 0;
   int _extraAhead = 0;
 
-  /// The match the list opened on; the list grows away from it in both
+  /// The match the list opened at the bottom edge of (see
+  /// [kioskFirstUpcomingIndex]); the list grows away from it in both
   /// directions, so what was on screen stays where it was when more weeks
   /// load (older matches grow upwards from here, not by shifting the rest).
   String? _anchorId;
   final _centerKey = GlobalKey();
+  final _controller = ScrollController();
+  bool _opened = false;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
   /// The window for [extraBack]/[extraAhead] more weeks, from the current
   /// providers; [watch] subscribes the build, a tap only reads.
@@ -632,16 +647,28 @@ class _MatchesCardState extends ConsumerState<_MatchesCard> {
     final window = _window(_extraBack, _extraAhead, watch: true);
     final matches = window.matches;
 
-    // Opens on the first match not decided yet, with the one before it in
-    // view; afterwards the same match stays the anchor (found by id, as more
-    // weeks are added before it).
-    var split = matches.indexWhere((m) => m.id == _anchorId);
-    if (split < 0 && matches.isNotEmpty) {
-      split = math.max(0, kioskNowIndex(matches, results, today) - 1);
-      _anchorId = matches[split].id;
+    // Like Výsledky: opens with the first coming match at the bottom edge
+    // and as many played (and playing) ones as fit above it. Afterwards the
+    // same match stays the anchor (found by id, as more weeks are added).
+    var anchor = matches.indexWhere((m) => m.id == _anchorId);
+    if (anchor < 0 && matches.isNotEmpty) {
+      anchor = kioskFirstUpcomingIndex(matches, results, today);
+      _anchorId = matches[anchor].id;
     }
-    split = math.max(split, 0);
-    // Index 0 of the part before the anchor is the match right above it.
+    // The centre sliver starts right below the anchor; offset 0 puts it at
+    // the top edge, so the opening jump goes up one viewport.
+    final split = anchor + 1;
+    if (!_opened && matches.isNotEmpty) {
+      _opened = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!_controller.hasClients) return;
+        final p = _controller.position;
+        _controller.jumpTo(
+          math.max(-p.viewportDimension, p.minScrollExtent),
+        );
+      });
+    }
+    // Index 0 of the part before the centre is the anchor itself.
     final older = matches.sublist(0, split).reversed.toList();
     final newer = matches.sublist(split);
 
@@ -666,6 +693,7 @@ class _MatchesCardState extends ConsumerState<_MatchesCard> {
               style: TextStyle(color: scheme.onSurfaceVariant),
             )
           : CustomScrollView(
+              controller: _controller,
               center: _centerKey,
               slivers: [
                 SliverList.builder(

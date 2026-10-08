@@ -179,23 +179,22 @@ void main() {
     expect(ids(w), ['ok']);
   });
 
-  test('the list opens on the first match not decided from today on', () {
+  test('the list ends on the first coming match; played and playing above',
+      () {
     final slots = [
       match('old', Day(2026, 10, 1)),
-      match('done-today', Day(2026, 10, 8)),
+      match('playing', Day(2026, 10, 8)),
       match('next', Day(2026, 10, 9)),
+      match('later', Day(2026, 10, 15)),
     ];
     final results = {
       'old': result('old', MatchStatus.finished),
-      'done-today': result('done-today', MatchStatus.finished),
+      'playing': result('playing', MatchStatus.inProgress),
     };
-    expect(kioskNowIndex(slots, results, today), 2);
-    // Everything decided: the last one.
-    expect(
-      kioskNowIndex(slots.sublist(0, 2), results, today),
-      1,
-    );
-    expect(kioskNowIndex(const [], const {}, today), 0);
+    expect(kioskFirstUpcomingIndex(slots, results, today), 2);
+    // Nothing coming any more: the last one.
+    expect(kioskFirstUpcomingIndex(slots.sublist(0, 2), results, today), 1);
+    expect(kioskFirstUpcomingIndex(const [], const {}, today), -1);
   });
 
   test('a live match needs data, not just the status', () {

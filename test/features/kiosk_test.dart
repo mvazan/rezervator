@@ -1659,6 +1659,66 @@ void main() {
       await finish(tester);
     });
 
+    testWidgets('the list opens like Výsledky: the first coming match at the '
+        'bottom, played ones above; idle scrolls it back', (tester) async {
+      fullHd(tester);
+      final slots = [
+        for (var i = 14; i >= 1; i--) fed('p$i', day.addDays(-i), 'Hráno$i'),
+        fed('n1', day.addDays(1), 'Příští1'),
+        fed('n2', day.addDays(2), 'Příští2'),
+        fed('n3', day.addDays(3), 'Příští3'),
+      ];
+      final results = {
+        for (var i = 1; i <= 14; i++) 'p$i': res('p$i', 'finished', 5, 3),
+      };
+      await tester.pumpWidget(
+        app(
+          slots: slots,
+          results: results,
+          drawerOpen: true,
+          showNotices: false,
+          weeksBack: 2,
+          weeksAhead: 1,
+        ),
+      );
+      await tester.pumpAndSettle();
+      final list = find.descendant(
+        of: find.byType(KioskDrawer),
+        matching: find.byType(CustomScrollView),
+      );
+      final listBox = tester.getRect(list);
+      Rect? rowOf(String t) {
+        final f = find.descendant(
+          of: find.byType(KioskDrawer),
+          matching: find.textContaining(t),
+        );
+        return f.evaluate().isEmpty ? null : tester.getRect(f.first);
+      }
+
+      bool visible(String t) {
+        final r = rowOf(t);
+        return r != null && r.top >= listBox.top && r.bottom <= listBox.bottom;
+      }
+
+      // The first coming match is the last row in view…
+      expect(visible('Příští1'), isTrue);
+      expect(visible('Příští2'), isFalse);
+      // …with the played ones filling the list above it.
+      expect(visible('Hráno1 '), isTrue);
+      expect(visible('Hráno3 '), isTrue);
+
+      // A visitor scrolls away; the idle reset brings the list back.
+      await tester.drag(list, const Offset(0, 500));
+      await tester.pumpAndSettle();
+      expect(visible('Příští1'), isFalse);
+      await tester.pump(const Duration(seconds: 61));
+      await tester.pumpAndSettle();
+      expect(visible('Příští1'), isTrue);
+      expect(visible('Příští2'), isFalse);
+
+      await finish(tester);
+    });
+
     testWidgets('a match being played takes the whole drawer, even closed by '
         'default, and reopens it after a minute', (tester) async {
       fullHd(tester);

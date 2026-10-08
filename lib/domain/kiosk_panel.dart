@@ -83,19 +83,24 @@ KioskMatchWindow kioskMatchWindow({
   );
 }
 
-/// The index to open the list on: the first match not decided yet from
-/// today on (the one coming up or being played), else the last match.
-int kioskNowIndex(
+/// The match the list ends on when it opens (Výsledky's rule: as many
+/// played and playing matches as fit above it): the first coming match —
+/// from today on, neither decided nor being played — else the last one.
+/// -1 for no match at all.
+int kioskFirstUpcomingIndex(
   List<PrioritySlot> matches,
   Map<String, MatchResult> results,
   Day today,
 ) {
   for (var i = 0; i < matches.length; i++) {
-    if (!matches[i].date.isBefore(today) && !_decided(results[matches[i].id])) {
+    final r = results[matches[i].id];
+    if (!matches[i].date.isBefore(today) &&
+        !_decided(r) &&
+        r?.status != MatchStatus.inProgress) {
       return i;
     }
   }
-  return matches.isEmpty ? 0 : matches.length - 1;
+  return matches.length - 1;
 }
 
 /// The matches being played whose figures the drawer can show: status in
