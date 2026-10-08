@@ -1797,6 +1797,13 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.byType(DuelsTable), findsOneWidget);
+      // Sideways there is no height for both: the scoreboard and its rows
+      // sit to the left of the duels, which take the whole height.
+      final board = tester.getRect(find.byType(MatchScoreboard));
+      final table = tester.getRect(find.byType(DuelsTable));
+      expect(board.right, lessThanOrEqualTo(table.left));
+      expect(table.top, lessThan(board.bottom));
+      expect(table.height, greaterThan(300));
 
       tester.view.physicalSize = const Size(450, 900);
       await tester.pumpAndSettle();

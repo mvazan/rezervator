@@ -689,6 +689,8 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
   /// The compact or table layout: [header] (the scoreboard and its rows)
   /// pinned, the duels fitted under it — the kiosk's drawing, as wide as
   /// the list but at most 720dp like the rest, and with the list's pull.
+  /// Held sideways there is no height for both: the header then goes to
+  /// the left of the duels, scrolling on its own.
   Widget _fitted(
     BuildContext context, {
     required MatchLayout layout,
@@ -702,30 +704,50 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
       const EdgeInsets.fromLTRB(12, 2, 12, 24),
     );
     Future<void> refresh() => _onRefreshTap(context, result?.fetchedAt);
-    final fitted = switch (layout) {
+    Widget fitted(Widget? pinned) => switch (layout) {
       MatchLayout.compact => DuelsCompact(
         duels: duels,
         result: result,
-        header: header,
+        header: pinned,
         listPadding: padding,
         onRefresh: pullToRefresh ? refresh : null,
       ),
       MatchLayout.table || MatchLayout.full || MatchLayout.zapis => DuelsTable(
         duels: duels,
         result: result,
-        header: header,
+        header: pinned,
         listPadding: padding,
         onRefresh: pullToRefresh ? refresh : null,
       ),
     };
     return LayoutBuilder(
-      builder: (context, constraints) => Center(
-        child: SizedBox(
-          width: math.min(constraints.maxWidth, 720),
-          height: constraints.maxHeight,
-          child: fitted,
-        ),
-      ),
+      builder: (context, constraints) {
+        if (constraints.maxWidth > constraints.maxHeight) {
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                flex: 4,
+                child: SingleChildScrollView(
+                  padding: padWithSystemInset(
+                    context,
+                    const EdgeInsets.only(bottom: 12),
+                  ),
+                  child: header,
+                ),
+              ),
+              Expanded(flex: 5, child: fitted(null)),
+            ],
+          );
+        }
+        return Center(
+          child: SizedBox(
+            width: math.min(constraints.maxWidth, 720),
+            height: constraints.maxHeight,
+            child: fitted(header),
+          ),
+        );
+      },
     );
   }
 }
