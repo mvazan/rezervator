@@ -9,10 +9,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/text_size.dart';
 import '../core/theme_choice.dart';
+import '../domain/models.dart' show MatchLayout, parseMatchLayout;
 
 const _themeChoiceKey = 'theme_choice';
 const _textSizeKey = 'text_size';
 const _matchDetailViewKey = 'match_detail_view';
+const _matchLayoutPortraitKey = 'match_layout_portrait';
+const _matchLayoutLandscapeKey = 'match_layout_landscape';
 const _dutyClubFilterKey = 'duty_club_filter';
 const _venueCompetitionKey = 'venue_competition_filter';
 
@@ -171,6 +174,71 @@ class MatchDetailViewNotifier extends Notifier<MatchDetailView> {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_matchDetailViewKey, view.name);
+    } catch (_) {
+      // Best effort only — the in-memory choice still applies this session.
+    }
+  }
+}
+
+/// How the match detail draws the duels, by the way the device is held
+/// (Můj profil → Detail zápasu): [MatchLayout.full] (the cards, scrolling),
+/// [MatchLayout.compact] or [MatchLayout.table] (fitted to the screen) —
+/// and, held sideways only, [MatchLayout.zapis]: the score sheet opens
+/// full screen the moment the phone turns, and closes when it turns back.
+///
+/// Device-local (a phone and a tablet are held differently), persisted by
+/// name — see [MatchLayout].
+typedef MatchLayoutPrefs = ({MatchLayout portrait, MatchLayout landscape});
+
+const defaultMatchLayoutPrefs = (
+  portrait: MatchLayout.full,
+  landscape: MatchLayout.full,
+);
+
+/// Persisted names → prefs; anything unknown is [MatchLayout.full], and a
+/// Zápis saved for portrait (never offered; an older build) reads as full.
+MatchLayoutPrefs parseMatchLayoutPrefs(String? portrait, String? landscape) => (
+  portrait: parseMatchLayout(portrait, allowZapis: false),
+  landscape: parseMatchLayout(landscape),
+);
+
+final matchLayoutPrefsProvider =
+    NotifierProvider<MatchLayoutPrefsNotifier, MatchLayoutPrefs>(
+      MatchLayoutPrefsNotifier.new,
+    );
+
+class MatchLayoutPrefsNotifier extends Notifier<MatchLayoutPrefs> {
+  @override
+  MatchLayoutPrefs build() {
+    _load();
+    return defaultMatchLayoutPrefs;
+  }
+
+  Future<void> _load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (!ref.mounted) return; // disposed while awaiting — nothing to set
+      state = parseMatchLayoutPrefs(
+        prefs.getString(_matchLayoutPortraitKey),
+        prefs.getString(_matchLayoutLandscapeKey),
+      );
+    } catch (_) {
+      // Best effort only — see MatchDetailViewNotifier._load.
+    }
+  }
+
+  /// Sets the layout for one orientation now and remembers it. Zápis is a
+  /// landscape layout only: asked for portrait it reads as the cards.
+  Future<void> set({MatchLayout? portrait, MatchLayout? landscape}) async {
+    if (portrait == MatchLayout.zapis) portrait = MatchLayout.full;
+    state = (
+      portrait: portrait ?? state.portrait,
+      landscape: landscape ?? state.landscape,
+    );
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_matchLayoutPortraitKey, state.portrait.name);
+      await prefs.setString(_matchLayoutLandscapeKey, state.landscape.name);
     } catch (_) {
       // Best effort only — the in-memory choice still applies this session.
     }

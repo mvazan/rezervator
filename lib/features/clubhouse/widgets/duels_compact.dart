@@ -1,11 +1,15 @@
-/// The kiosk's denser ways to draw a match being played (Správa → Kiosk →
-/// Zobrazení aktuálního zápasu): the whole match without scrolling.
+/// The denser ways to draw a match's duels, shared by the kiosk's live
+/// match (Správa → Kiosk → Zobrazení aktuálního zápasu) and the app's match
+/// detail (Můj profil → Detail zápasu): the whole match fitted to the
+/// screen, no scrolling while it is not needed.
 ///
-/// - [KioskLiveCompact]: the score, then one block per duel — the two
-///   names, the totals and the lead; a tap opens that duel as the match
-///   detail's full card with its lane table.
-/// - [KioskLiveTable]: the score, then every duel a single table row; a tap
-///   opens it as the same full card.
+/// - [DuelsCompact]: one block per duel — the two names, the totals and the
+///   lead; a tap opens that duel as the match detail's full card with its
+///   lane table.
+/// - [DuelsTable]: every duel a single table row; a tap opens it as the
+///   same full card.
+/// - [MatchScoreLine]: the score the kiosk pins above either (the app pins
+///   its own scoreboard instead).
 ///
 /// Several duels may be open while they fit; see [_FifoOpen].
 ///
@@ -17,22 +21,22 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../../domain/duels.dart';
-import '../../domain/models.dart';
-import '../../domain/results.dart';
-import '../../domain/palette.dart';
-import '../clubhouse/widgets/duel_card.dart';
-import '../clubhouse/widgets/lead_color.dart';
+import '../../../domain/duels.dart';
+import '../../../domain/models.dart';
+import '../../../domain/palette.dart';
+import '../../../domain/results.dart';
+import 'duel_card.dart';
+import 'lead_color.dart';
 
 const _tabular = [FontFeature.tabularFigures()];
 
 /// How long a duel takes to open or fold.
 const _expandDuration = Duration(milliseconds: 260);
 
-/// The score of the match: the teams around the points, „průběžně“, and
-/// the pins with their lead.
-class KioskLiveScore extends StatelessWidget {
-  const KioskLiveScore({
+/// The score of the match: the teams around the points, and the pins with
+/// their lead.
+class MatchScoreLine extends StatelessWidget {
+  const MatchScoreLine({
     super.key,
     required this.slot,
     required this.result,
@@ -52,7 +56,7 @@ class KioskLiveScore extends StatelessWidget {
     final lead = pinsHome == null || pinsAway == null
         ? ''
         : leadLabel(pinsHome - pinsAway);
-    TextStyle team = const TextStyle(fontSize: 17, fontWeight: FontWeight.w600);
+    const team = TextStyle(fontSize: 17, fontWeight: FontWeight.w600);
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: BoxDecoration(
@@ -186,71 +190,131 @@ mixin _FifoOpen<T extends StatefulWidget> on State<T> {
   );
 }
 
-/// The compact view: a block per duel, one opened to its lanes at a time.
-class KioskLiveCompact extends StatefulWidget {
-  const KioskLiveCompact({
-    super.key,
-    required this.slot,
-    required this.result,
+/// What a closed duel looks like in one of the fitted lists: [duel] at
+/// [index], [toggle] opens it.
+typedef _ClosedDuelBuilder =
+    Widget Function(BuildContext context, Duel duel, int index, VoidCallback toggle);
+
+/// The frame both fitted lists share: [header] pinned on top, the duels
+/// under it in a list that scrolls only if it must — and folds open duels
+/// until it need not ([_FifoOpen]). With [onRefresh] the list pulls to
+/// refresh, like the match detail's own.
+class _FittedDuels extends StatefulWidget {
+  const _FittedDuels({
     required this.duels,
-    this.onOpenZapis,
+    required this.result,
+    required this.header,
+    required this.closed,
+    this.gapBeforeEach = 0,
+    this.gapAfterHeader = 0,
+    this.openPadding = EdgeInsets.zero,
+    required this.onRefresh,
   });
 
-  /// A tap on the score; null when there is no Zápis to show.
-  final VoidCallback? onOpenZapis;
-
-  final PrioritySlot slot;
-  final MatchResult? result;
   final List<Duel> duels;
+  final MatchResult? result;
+  final Widget? header;
+  final _ClosedDuelBuilder closed;
+
+  /// Space above every duel ([DuelsCompact]), and between the header and
+  /// the first row ([DuelsTable]).
+  final double gapBeforeEach;
+  final double gapAfterHeader;
+
+  /// Around an open card, when the closed rows have none of their own.
+  final EdgeInsets openPadding;
+  final Future<void> Function()? onRefresh;
 
   @override
-  State<KioskLiveCompact> createState() => _KioskLiveCompactState();
+  State<_FittedDuels> createState() => _FittedDuelsState();
 }
 
-class _KioskLiveCompactState extends State<KioskLiveCompact> with _FifoOpen {
+class _FittedDuelsState extends State<_FittedDuels> with _FifoOpen {
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    // The score stays put; the duels scroll under it if they must.
+    Widget list = SingleChildScrollView(
+      controller: scroll,
+      physics: widget.onRefresh == null
+          ? null
+          : const AlwaysScrollableScrollPhysics(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (widget.gapAfterHeader > 0)
+            SizedBox(height: widget.gapAfterHeader),
+          for (var i = 0; i < widget.duels.length; i++) ...[
+            if (widget.gapBeforeEach > 0)
+              SizedBox(height: widget.gapBeforeEach),
+            animatedDuel(
+              isOpen: opened.contains(widget.duels[i].position),
+              closed: widget.closed(
+                context,
+                widget.duels[i],
+                i,
+                () => toggle(widget.duels[i].position),
+              ),
+              open: Padding(
+                padding: widget.openPadding,
+                child: openCard(widget.duels[i], widget.duels, widget.result),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+    if (widget.onRefresh case final refresh?) {
+      list = RefreshIndicator(onRefresh: refresh, child: list);
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        GestureDetector(
-          onTap: widget.onOpenZapis,
-          child: KioskLiveScore(
-            slot: widget.slot,
-            result: widget.result,
-            duels: widget.duels,
-          ),
-        ),
-        Expanded(
-          child: fitting(
-            SingleChildScrollView(
-              controller: scroll,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  for (final duel in widget.duels) ...[
-                    const SizedBox(height: 6),
-                    _compactDuel(context, scheme, duel),
-                  ],
-                ],
-              ),
-            ),
-          ),
-        ),
+        ?widget.header,
+        Expanded(child: fitting(list)),
       ],
     );
   }
+}
 
-  Widget _compactDuel(BuildContext context, ColorScheme scheme, Duel duel) =>
-      animatedDuel(
-        isOpen: opened.contains(duel.position),
-        closed: _closedDuel(context, scheme, duel),
-        open: openCard(duel, widget.duels, widget.result),
-      );
+/// The compact view: a block per duel, the open ones as full cards.
+class DuelsCompact extends StatelessWidget {
+  const DuelsCompact({
+    super.key,
+    required this.duels,
+    required this.result,
+    this.header,
+    this.onRefresh,
+  });
 
-  Widget _closedDuel(BuildContext context, ColorScheme scheme, Duel duel) {
+  final List<Duel> duels;
+  final MatchResult? result;
+
+  /// Pinned above the duels: the kiosk's [MatchScoreLine], the app's
+  /// scoreboard and buttons.
+  final Widget? header;
+
+  /// Pull to refresh on the duels, when the caller has a refresh.
+  final Future<void> Function()? onRefresh;
+
+  @override
+  Widget build(BuildContext context) => _FittedDuels(
+    duels: duels,
+    result: result,
+    header: header,
+    gapBeforeEach: 6,
+    onRefresh: onRefresh,
+    closed: (context, duel, _, toggle) => _CompactDuel(duel: duel, onTap: toggle),
+  );
+}
+
+class _CompactDuel extends StatelessWidget {
+  const _CompactDuel({required this.duel, required this.onTap});
+
+  final Duel duel;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final waiting = duel.state == DuelState.waiting;
     final lead = leadLabel(duel.diff);
     final done = duel.state == DuelState.done;
@@ -273,7 +337,8 @@ class _KioskLiveCompactState extends State<KioskLiveCompact> with _FifoOpen {
       ),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: waiting ? null : () => toggle(duel.position),
+        // A duel nobody has started has nothing to open.
+        onTap: waiting ? null : onTap,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(12, 6, 8, 6),
           child: Column(
@@ -343,79 +408,53 @@ class _KioskLiveCompactState extends State<KioskLiveCompact> with _FifoOpen {
   }
 }
 
-/// The table view: every duel one row — names, totals, lead — and one
-/// opened to its lanes at a time.
-class KioskLiveTable extends StatefulWidget {
-  const KioskLiveTable({
+/// The table view: every duel one row — names, totals, lead — the open
+/// ones as full cards.
+class DuelsTable extends StatelessWidget {
+  const DuelsTable({
     super.key,
-    required this.slot,
-    required this.result,
     required this.duels,
-    this.onOpenZapis,
+    required this.result,
+    this.header,
+    this.onRefresh,
   });
 
-  /// A tap on the score; null when there is no Zápis to show.
-  final VoidCallback? onOpenZapis;
-
-  final PrioritySlot slot;
-  final MatchResult? result;
   final List<Duel> duels;
+  final MatchResult? result;
+
+  /// Pinned above the rows; see [DuelsCompact.header].
+  final Widget? header;
+
+  /// Pull to refresh on the rows, when the caller has a refresh.
+  final Future<void> Function()? onRefresh;
 
   @override
-  State<KioskLiveTable> createState() => _KioskLiveTableState();
+  Widget build(BuildContext context) => _FittedDuels(
+    duels: duels,
+    result: result,
+    header: header,
+    gapAfterHeader: header == null ? 0 : 8,
+    openPadding: const EdgeInsets.symmetric(vertical: 4),
+    onRefresh: onRefresh,
+    closed: (context, duel, index, toggle) =>
+        _TableRow(duel: duel, odd: index.isOdd, onTap: toggle),
+  );
 }
 
-class _KioskLiveTableState extends State<KioskLiveTable> with _FifoOpen {
+class _TableRow extends StatelessWidget {
+  const _TableRow({
+    required this.duel,
+    required this.odd,
+    required this.onTap,
+  });
+
+  final Duel duel;
+  final bool odd;
+  final VoidCallback onTap;
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    // The score stays put; the rows scroll under it if they must.
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        GestureDetector(
-          onTap: widget.onOpenZapis,
-          child: KioskLiveScore(
-            slot: widget.slot,
-            result: widget.result,
-            duels: widget.duels,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Expanded(
-          child: fitting(
-            SingleChildScrollView(
-              controller: scroll,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  for (var i = 0; i < widget.duels.length; i++)
-                    _row(context, scheme, widget.duels[i], i.isOdd),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _row(BuildContext context, ColorScheme scheme, Duel duel, bool odd) =>
-      animatedDuel(
-        isOpen: opened.contains(duel.position),
-        closed: _closedRow(context, scheme, duel, odd),
-        open: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          child: openCard(duel, widget.duels, widget.result),
-        ),
-      );
-
-  Widget _closedRow(
-    BuildContext context,
-    ColorScheme scheme,
-    Duel duel,
-    bool odd,
-  ) {
     final waiting = duel.state == DuelState.waiting;
     final lead = leadLabel(duel.diff);
     final done = duel.state == DuelState.done;
@@ -432,66 +471,61 @@ class _KioskLiveTableState extends State<KioskLiveTable> with _FifoOpen {
           ? scheme.surfaceContainerHighest.withValues(alpha: 0.4)
           : Colors.transparent,
       child: InkWell(
-        onTap: waiting ? null : () => toggle(duel.position),
+        onTap: waiting ? null : onTap,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-          child: Column(
+          child: Row(
             children: [
-              Row(
-                children: [
-                  if (duel.state == DuelState.playing)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 6),
-                      child: Icon(Icons.circle, size: 8, color: scheme.error),
-                    ),
-                  Expanded(
-                    flex: 3,
-                    child: Text(
-                      surname(duel.home),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 15),
-                    ),
+              if (duel.state == DuelState.playing)
+                Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: Icon(Icons.circle, size: 8, color: scheme.error),
+                ),
+              Expanded(
+                flex: 3,
+                child: Text(
+                  surname(duel.home),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 15),
+                ),
+              ),
+              SizedBox(
+                width: 44,
+                child: Text(
+                  duel.shownHome?.toString() ?? '–',
+                  textAlign: TextAlign.right,
+                  style: total(homeWins),
+                ),
+              ),
+              SizedBox(
+                width: 52,
+                child: Text(
+                  waiting ? '–' : (lead == ':' ? '0' : lead),
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: leadColor(context, lead) ?? scheme.onSurfaceVariant,
                   ),
-                  SizedBox(
-                    width: 44,
-                    child: Text(
-                      duel.shownHome?.toString() ?? '–',
-                      textAlign: TextAlign.right,
-                      style: total(homeWins),
-                    ),
-                  ),
-                  SizedBox(
-                    width: 52,
-                    child: Text(
-                      waiting ? '–' : (lead == ':' ? '0' : lead),
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color:
-                            leadColor(context, lead) ?? scheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-                  SizedBox(
-                    width: 44,
-                    child: Text(
-                      duel.shownAway?.toString() ?? '–',
-                      style: total(awayWins),
-                    ),
-                  ),
-                  Expanded(
-                    flex: 3,
-                    child: Text(
-                      surname(duel.away),
-                      textAlign: TextAlign.right,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 15),
-                    ),
-                  ),
-                ],
+                ),
+              ),
+              SizedBox(
+                width: 44,
+                child: Text(
+                  duel.shownAway?.toString() ?? '–',
+                  style: total(awayWins),
+                ),
+              ),
+              Expanded(
+                flex: 3,
+                child: Text(
+                  surname(duel.away),
+                  textAlign: TextAlign.right,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 15),
+                ),
               ),
             ],
           ),

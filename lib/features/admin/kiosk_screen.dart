@@ -418,24 +418,24 @@ class KioskSettingsScreen extends ConsumerWidget {
               if (settings?.kioskLiveMode ?? true)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 12),
-                  child: DropdownButtonFormField<KioskLiveLayout>(
+                  child: DropdownButtonFormField<MatchLayout>(
                     initialValue:
-                        settings?.kioskLiveLayout ?? KioskLiveLayout.full,
+                        settings?.kioskLiveLayout ?? MatchLayout.full,
                     decoration: const InputDecoration(
                       labelText: 'Zobrazení aktuálního zápasu',
                       border: OutlineInputBorder(),
                     ),
                     items: const [
                       DropdownMenuItem(
-                        value: KioskLiveLayout.full,
+                        value: MatchLayout.full,
                         child: Text('Podrobné — karty soubojů'),
                       ),
                       DropdownMenuItem(
-                        value: KioskLiveLayout.compact,
+                        value: MatchLayout.compact,
                         child: Text('Kompaktní — bez posouvání'),
                       ),
                       DropdownMenuItem(
-                        value: KioskLiveLayout.table,
+                        value: MatchLayout.table,
                         child: Text('Tabulka — souboj na řádek'),
                       ),
                     ],

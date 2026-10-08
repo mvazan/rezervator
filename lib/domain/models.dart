@@ -635,9 +635,31 @@ class AdminTenant {
 /// all, in the drawer, one title at a time in the status bar, or both.
 enum KioskNoticesMode { off, drawer, header, both }
 
-/// How the kiosk draws a match being played (0064, `kiosk_live_layout`):
-/// the match detail's duel cards, one compact line per duel, or a table.
-enum KioskLiveLayout { full, compact, table }
+/// How a match's duels are drawn — the kiosk's live match (0064,
+/// `kiosk_live_layout`) and the app's match detail (a device preference per
+/// orientation, see `matchLayoutPrefsProvider`): the duel cards that scroll
+/// ([full]), one compact block per duel ([compact]) or one table row per
+/// duel ([table]) — both of those fit the match to the screen — or, the
+/// app's landscape only, the score sheet full screen ([zapis]). The kiosk
+/// never gets [zapis]: its column is checked to the first three.
+///
+/// The names are persisted (the database column, SharedPreferences) — do
+/// not rename a value.
+enum MatchLayout { full, compact, table, zapis }
+
+/// Persisted name → layout; anything unknown — and [MatchLayout.zapis]
+/// where it is not allowed — falls back to [fallback].
+MatchLayout parseMatchLayout(
+  String? name, {
+  bool allowZapis = true,
+  MatchLayout fallback = MatchLayout.full,
+}) {
+  final found = MatchLayout.values.firstWhere(
+    (m) => m.name == name,
+    orElse: () => fallback,
+  );
+  return found == MatchLayout.zapis && !allowZapis ? fallback : found;
+}
 
 class ScheduleSettings {
   const ScheduleSettings({
@@ -664,7 +686,7 @@ class ScheduleSettings {
     this.kioskPanelEnabled = true,
     this.kioskPastDays = 0,
     this.kioskIdleSeconds = 60,
-    this.kioskLiveLayout = KioskLiveLayout.full,
+    this.kioskLiveLayout = MatchLayout.full,
     this.tenantId = '',
     this.dutyReminderEnabled = false,
     this.dutyReminderDays = 1,
@@ -743,7 +765,7 @@ class ScheduleSettings {
   final int kioskIdleSeconds;
 
   /// How a match being played is drawn in the drawer (0064).
-  final KioskLiveLayout kioskLiveLayout;
+  final MatchLayout kioskLiveLayout;
 
   /// The settings row's tenant — the update key since 0005 (one row per
   /// tenant instead of the old singleton).
@@ -798,9 +820,9 @@ class ScheduleSettings {
         kioskPanelEnabled: json['kiosk_panel_enabled'] as bool? ?? true,
         kioskPastDays: json['kiosk_past_days'] as int? ?? 0,
         kioskIdleSeconds: json['kiosk_idle_seconds'] as int? ?? 60,
-        kioskLiveLayout: KioskLiveLayout.values.firstWhere(
-          (m) => m.name == json['kiosk_live_layout'],
-          orElse: () => KioskLiveLayout.full,
+        kioskLiveLayout: parseMatchLayout(
+          json['kiosk_live_layout'] as String?,
+          allowZapis: false,
         ),
         tenantId: json['tenant_id'] as String? ?? '',
         dutyReminderEnabled: json['duty_reminder_enabled'] as bool? ?? false,

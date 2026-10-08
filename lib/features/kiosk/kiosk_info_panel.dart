@@ -25,10 +25,10 @@ import '../../domain/models.dart';
 import '../../domain/palette.dart';
 import '../../domain/results.dart';
 import '../clubhouse/widgets/duel_card.dart';
+import '../clubhouse/widgets/duels_compact.dart';
 import '../clubhouse/widgets/match_scoreboard.dart';
 import '../clubhouse/widgets/match_title.dart';
 import '../clubhouse/widgets/team_totals_card.dart';
-import 'kiosk_live_compact.dart';
 
 /// The drawer's width for a screen [screenWidth] wide: what the admin chose,
 /// at most 60 % of the screen.
@@ -1228,24 +1228,19 @@ class _LiveMatchState extends ConsumerState<_LiveMatch> {
 
     // The score opens the Zápis — when there are players to put in it.
     final zapis = players.isEmpty ? null : () => widget.onOpenMatch(slot);
-    switch (ref.watch(settingsProvider).value?.kioskLiveLayout ??
-        KioskLiveLayout.full) {
-      case KioskLiveLayout.compact:
-        return KioskLiveCompact(
-          slot: slot,
-          result: result,
-          duels: duels,
-          onOpenZapis: zapis,
-        );
-      case KioskLiveLayout.table:
-        return KioskLiveTable(
-          slot: slot,
-          result: result,
-          duels: duels,
-          onOpenZapis: zapis,
-        );
-      case KioskLiveLayout.full:
-        break;
+    final layout =
+        ref.watch(settingsProvider).value?.kioskLiveLayout ?? MatchLayout.full;
+    if (layout != MatchLayout.full) {
+      // The score pinned on top (a tap opens the Zápis), the duels fitted
+      // under it. Zápis is not a kiosk layout (0064's check); drawn as the
+      // table should a row ever carry it.
+      final score = GestureDetector(
+        onTap: zapis,
+        child: MatchScoreLine(slot: slot, result: result, duels: duels),
+      );
+      return layout == MatchLayout.compact
+          ? DuelsCompact(duels: duels, result: result, header: score)
+          : DuelsTable(duels: duels, result: result, header: score);
     }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
