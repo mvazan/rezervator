@@ -315,7 +315,6 @@ class _NoticesCardState extends State<_NoticesCard> {
     final notices = widget.notices;
     final scheme = Theme.of(context).colorScheme;
     final m = notices[_index.clamp(0, notices.length - 1)];
-    final until = m.expiresAt?.toLocal();
     return _Card(
       icon: Icons.campaign_outlined,
       title: 'NÁSTĚNKA',
@@ -323,69 +322,87 @@ class _NoticesCardState extends State<_NoticesCard> {
         onTap: () => widget.onOpen(m),
         borderRadius: BorderRadius.circular(8),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
           children: [
-            AnimatedSwitcher(
-              duration: const Duration(milliseconds: 300),
-              child: KeyedSubtree(
-                key: ValueKey(m.id),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      m.title ?? '',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      m.body,
-                      maxLines: 8,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 16, height: 1.3),
-                    ),
-                    if (until != null) ...[
-                      const SizedBox(height: 6),
-                      Text(
-                        'Platí do ${until.day}. ${until.month}.',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: scheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ],
-                  ],
+            // A fixed height, so the notices taking turns never move the
+            // matches below them; what does not fit is cut and read in full
+            // with „Více“.
+            SizedBox(
+              height: _noticeTextHeight,
+              child: ClipRect(
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 300),
+                  layoutBuilder: (current, previous) => Stack(
+                    alignment: Alignment.topLeft,
+                    children: [...previous, ?current],
+                  ),
+                  child: _NoticeText(key: ValueKey(m.id), notice: m),
                 ),
               ),
             ),
-            if (notices.length > 1) ...[
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  for (var i = 0; i < notices.length; i++)
-                    Container(
-                      width: 8,
-                      height: 8,
-                      margin: const EdgeInsets.only(right: 6),
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: i == _index
-                            ? scheme.primary
-                            : scheme.onSurfaceVariant.withValues(alpha: 0.35),
-                      ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                for (var i = 0; notices.length > 1 && i < notices.length; i++)
+                  Container(
+                    width: 8,
+                    height: 8,
+                    margin: const EdgeInsets.only(right: 6),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: i == _index
+                          ? scheme.primary
+                          : scheme.onSurfaceVariant.withValues(alpha: 0.35),
                     ),
-                ],
-              ),
-            ],
+                  ),
+                const Spacer(),
+                Text(
+                  'Více',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: scheme.primary,
+                  ),
+                ),
+                Icon(Icons.expand_more, size: 20, color: scheme.primary),
+              ],
+            ),
           ],
         ),
       ),
+    );
+  }
+}
+
+/// The height of a notice's title and text in the drawer: two lines of
+/// title, four of body.
+const _noticeTextHeight = 148.0;
+
+class _NoticeText extends StatelessWidget {
+  const _NoticeText({super.key, required this.notice});
+
+  final Message notice;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          notice.title ?? '',
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          notice.body,
+          maxLines: 4,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 16, height: 1.3),
+        ),
+      ],
     );
   }
 }
@@ -570,8 +587,6 @@ class _MatchRow extends StatelessWidget {
               color: scheme.primary,
             ),
           ),
-          const SizedBox(width: 4),
-          Icon(Icons.chevron_right, color: scheme.onSurfaceVariant),
         ],
       ],
     );

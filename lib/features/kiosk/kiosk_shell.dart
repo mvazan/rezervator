@@ -113,7 +113,23 @@ class _KioskShellState extends ConsumerState<KioskShell> {
           title: Text(notice.title ?? ''),
           content: SizedBox(
             width: 560,
-            child: SingleChildScrollView(child: Text(notice.body)),
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(notice.body),
+                  if (notice.expiresAt != null) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      'Platí do ${notice.expiresAt!.toLocal().day}. '
+                      '${notice.expiresAt!.toLocal().month}.',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ],
+              ),
+            ),
           ),
           actions: [
             TextButton(
@@ -127,9 +143,14 @@ class _KioskShellState extends ConsumerState<KioskShell> {
   }
 
   void _openMatch(PrioritySlot match) {
-    Navigator.of(context, rootNavigator: true).push(
-      MaterialPageRoute<void>(
-        builder: (_) => _touchable(KioskZapisPage(slot: match)),
+    unawaited(
+      showKioskZapis(
+        context,
+        slot: match,
+        brightness: (ref.read(settingsProvider).value?.kioskDark ?? true)
+            ? Brightness.dark
+            : Brightness.light,
+        onTouch: _touch,
       ),
     );
   }

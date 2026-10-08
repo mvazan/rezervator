@@ -1221,6 +1221,7 @@ void main() {
       bool showNotices = true,
       bool showMatches = true,
       int historyDays = 21,
+      List<MatchPlayerResult> lineup = const [],
     }) => ProviderScope(
       overrides: [
         settingsProvider.overrideWith(
@@ -1248,7 +1249,7 @@ void main() {
         messagesProvider.overrideWith((ref) => Stream.value(notices)),
         matchResultsProvider.overrideWith((ref) => Stream.value(results)),
         matchPlayerResultsProvider.overrideWith(
-          (ref, id) => Stream.value(const <MatchPlayerResult>[]),
+          (ref, id) => Stream.value(lineup),
         ),
       ],
       child: const MaterialApp(home: KioskShell()),
@@ -1440,7 +1441,44 @@ void main() {
       await finish(tester);
     });
 
-    testWidgets('a finished match opens its Zápis; the idle reset closes it', (
+    testWidgets('a finished match opens its Zápis in a modal; idle closes it', (
+      tester,
+    ) async {
+      fullHd(tester);
+      await tester.pumpWidget(
+        app(
+          slots: [fed('old', t.addDays(-3), 'Domácí')],
+          results: {'old': finished},
+          drawerOpen: true,
+          lineup: const [
+            MatchPlayerResult(
+              id: 'p1',
+              matchId: 'old',
+              side: 'home',
+              position: 1,
+              playerName: 'Jana Nováková',
+            ),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('6 : 2'));
+      await tester.pumpAndSettle();
+      expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
+      // A modal over 80 % of the screen, not a page.
+      final sheet = tester.getSize(find.byType(LegacyScoreSheetPage));
+      expect(sheet.width, closeTo(1920 * 0.8, 1));
+      expect(sheet.height, closeTo(1080 * 0.8, 1));
+
+      await tester.pump(const Duration(seconds: 61));
+      await tester.pumpAndSettle();
+      expect(find.byType(LegacyScoreSheetPage), findsNothing);
+
+      await finish(tester);
+    });
+
+    testWidgets('a match without players says so instead of drawing a sheet', (
       tester,
     ) async {
       fullHd(tester);
@@ -1455,11 +1493,57 @@ void main() {
 
       await tester.tap(find.text('6 : 2'));
       await tester.pumpAndSettle();
-      expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
-
-      await tester.pump(const Duration(seconds: 61));
-      await tester.pumpAndSettle();
       expect(find.byType(LegacyScoreSheetPage), findsNothing);
+      expect(find.text('Zápis zápasu zatím není k dispozici.'), findsOneWidget);
+
+      await tester.tap(find.byIcon(Icons.close));
+      await tester.pumpAndSettle();
+      expect(find.text('Zápis zápasu zatím není k dispozici.'), findsNothing);
+
+      await finish(tester);
+    });
+
+    testWidgets('notices taking turns never move the matches below', (
+      tester,
+    ) async {
+      fullHd(tester);
+      Message long(String id, String title, String body) => Message(
+        id: id,
+        kind: MessageKind.notice,
+        audience: MessageAudience.all,
+        authorId: 'a',
+        authorRole: MessageAuthorRole.admin,
+        onDate: null,
+        blockId: null,
+        title: title,
+        body: body,
+        expiresAt: null,
+        notify: true,
+        createdAt: DateTime(2026, 9, int.parse(id)),
+        updatedAt: DateTime(2026, 9, 1),
+      );
+      await tester.pumpWidget(
+        app(
+          notices: [
+            long('1', 'Krátký', 'Ahoj.'),
+            long('2', 'Dlouhý oznam ' * 6, 'Dlouhý text oznamu. ' * 60),
+          ],
+          slots: [fed('next', t.addDays(2), 'Příští')],
+          drawerOpen: true,
+        ),
+      );
+      await tester.pumpAndSettle();
+      final before = tester.getTopLeft(find.text('ZÁPASY'));
+      expect(find.text('Více'), findsOneWidget);
+
+      await tester.pump(kioskNoticeTurn + const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+      expect(find.text('Krátký'), findsNothing);
+      expect(tester.getTopLeft(find.text('ZÁPASY')), before);
+
+      await tester.tap(find.text('Více'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsOneWidget);
 
       await finish(tester);
     });
