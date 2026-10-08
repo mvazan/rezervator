@@ -24,10 +24,10 @@ void main() {
       );
 
   MatchResult result(String id, MatchStatus status) => MatchResult(
-    matchId: id,
-    status: status,
-    fetchedAt: DateTime(2026, 10, 1),
-  );
+        matchId: id,
+        status: status,
+        fetchedAt: DateTime(2026, 10, 1),
+      );
 
   Message notice(
     String id, {
@@ -52,85 +52,167 @@ void main() {
         updatedAt: DateTime(2026, 9, 1),
       );
 
+  // Thursday 8 October 2026: its week is Mon 5 – Sun 11 October.
   final today = Day(2026, 10, 8);
+  List<String> ids(KioskMatchWindow w) => [for (final s in w.matches) s.id];
 
-  test(
-    'kioskNotices keeps active notices, drops expired, hidden and message ones',
-    () {
-      final now = DateTime(2026, 10, 8, 12);
-      final got = kioskNotices([
-        notice('a-open'),
-        notice('b-later', expiresAt: DateTime(2026, 10, 9)),
-        notice('gone', expiresAt: DateTime(2026, 10, 7)),
-        notice('msg', kind: MessageKind.message),
-      notice('hidden', showOnKiosk: false),
-      ], now);
-      expect([for (final m in got) m.id], ['a-open', 'b-later']);
-    },
-  );
-
-  test(
-    'next is the first undecided match from today, in progress included',
-    () {
-      final m = kioskMatches(
-        slots: [
-          match('old', Day(2026, 10, 1)),
-          match('now', today),
-          match('later', Day(2026, 10, 15)),
-        ],
-        results: {
-          'old': result('old', MatchStatus.finished),
-          'now': result('now', MatchStatus.inProgress),
-        },
-        today: today,
-        historyDays: 21,
-      );
-      expect(m.next?.id, 'now');
-      expect([for (final s in m.recent) s.id], ['old']);
-    },
-  );
-
-  test('recent keeps the decided matches of the history window, oldest first',
+  test('kioskNotices keeps active ones, drops expired, hidden and messages',
       () {
+    final now = DateTime(2026, 10, 8, 12);
+    final got = kioskNotices([
+      notice('a-open'),
+      notice('b-later', expiresAt: DateTime(2026, 10, 9)),
+      notice('gone', expiresAt: DateTime(2026, 10, 7)),
+      notice('msg', kind: MessageKind.message),
+      notice('hidden', showOnKiosk: false),
+    ], now);
+    expect([for (final m in got) m.id], ['a-open', 'b-later']);
+  });
+
+  test('the season runs from 1 August to 31 July', () {
+    expect(kioskSeason(Day(2026, 10, 8)), (
+      start: Day(2026, 8, 1),
+      end: Day(2027, 7, 31),
+    ));
+    expect(kioskSeason(Day(2027, 3, 1)), (
+      start: Day(2026, 8, 1),
+      end: Day(2027, 7, 31),
+    ));
+  });
+
+  test('the window is the current week plus the weeks asked for', () {
     final slots = [
-      for (var i = 1; i <= 5; i++) match('m$i', today.addDays(-i * 7)),
+      match('far-back', Day(2026, 9, 14)), // 3 weeks back
+      match('back2', Day(2026, 9, 24)), // 2 weeks back (week of 21.9.)
+      match('back1', Day(2026, 10, 1)),
+      match('mon', Day(2026, 10, 5)), // this week, already past
+      match('sun', Day(2026, 10, 11)), // this week, still ahead
+      match('ahead1', Day(2026, 10, 15)),
+      match('ahead2', Day(2026, 10, 22)),
     ];
-    final m = kioskMatches(
+    final w = kioskMatchWindow(
       slots: slots,
-      results: {
-        for (final s in slots) s.id: result(s.id, MatchStatus.finished),
-      },
       today: today,
-      historyDays: 21,
+      weeksBack: 2,
+      weeksAhead: 1,
+      showUpcoming: true,
     );
-    // 21 days back: m3 (21 days ago), m2, m1 — oldest first.
-    expect([for (final s in m.recent) s.id], ['m3', 'm2', 'm1']);
-    expect(m.next, isNull);
+    expect(ids(w), ['back2', 'back1', 'mon', 'sun', 'ahead1']);
+    expect(w.moreBefore, isTrue);
+    expect(w.moreAfter, isTrue);
+
+    final onlyThisWeek = kioskMatchWindow(
+      slots: slots,
+      today: today,
+      weeksBack: 0,
+      weeksAhead: 0,
+      showUpcoming: true,
+    );
+    expect(ids(onlyThisWeek), ['mon', 'sun']);
   });
 
-  test('history 0 lists no finished match, only the next', () {
-    final m = kioskMatches(
-      slots: [match('old', today.addDays(-1)), match('new', today.addDays(2))],
-      results: {'old': result('old', MatchStatus.finished)},
+  test('„Zobrazit další“ widens the window by whole weeks', () {
+    final slots = [
+      match('far-back', Day(2026, 9, 14)),
+      match('ahead2', Day(2026, 10, 22)),
+    ];
+    final w = kioskMatchWindow(
+      slots: slots,
       today: today,
-      historyDays: 0,
+      weeksBack: 0,
+      weeksAhead: 0,
+      showUpcoming: true,
+      extraBack: 4,
+      extraAhead: 2,
     );
-    expect(m.recent, isEmpty);
-    expect(m.next?.id, 'new');
+    expect(ids(w), ['far-back', 'ahead2']);
+    expect(w.moreBefore, isFalse);
+    expect(w.moreAfter, isFalse);
   });
 
-  test('manual matches, úklid children and a forfeit are handled', () {
-    final m = kioskMatches(
+  test('without upcoming matches nothing after today is listed', () {
+    final w = kioskMatchWindow(
+      slots: [match('mon', Day(2026, 10, 5)), match('sun', Day(2026, 10, 11))],
+      today: today,
+      weeksBack: 1,
+      weeksAhead: 2,
+      showUpcoming: false,
+    );
+    expect(ids(w), ['mon']);
+    expect(w.moreAfter, isFalse);
+  });
+
+  test('the season is a wall: no match of another season, ever', () {
+    final w = kioskMatchWindow(
+      slots: [
+        match('last-season', Day(2026, 5, 20)),
+        match('now', Day(2026, 10, 8)),
+        match('next-season', Day(2027, 9, 10)),
+      ],
+      today: today,
+      weeksBack: 1,
+      weeksAhead: 1,
+      showUpcoming: true,
+      extraBack: 100,
+      extraAhead: 100,
+    );
+    expect(ids(w), ['now']);
+    expect(w.moreBefore, isFalse);
+    expect(w.moreAfter, isFalse);
+  });
+
+  test('manual matches and úklid children are not listed', () {
+    final w = kioskMatchWindow(
       slots: [
         match('hand', Day(2026, 10, 9), key: 'xlsx:1'),
         match('child', Day(2026, 10, 9), parent: 'x'),
-        match('ff', Day(2026, 10, 2)),
+        match('ok', Day(2026, 10, 9)),
       ],
-      results: {'ff': result('ff', MatchStatus.forfeit)},
       today: today,
-      historyDays: 21,
+      weeksBack: 0,
+      weeksAhead: 0,
+      showUpcoming: true,
     );
-    expect(m.next, isNull);
-    expect([for (final s in m.recent) s.id], ['ff']);
+    expect(ids(w), ['ok']);
+  });
+
+  test('the list opens on the first match not decided from today on', () {
+    final slots = [
+      match('old', Day(2026, 10, 1)),
+      match('done-today', Day(2026, 10, 8)),
+      match('next', Day(2026, 10, 9)),
+    ];
+    final results = {
+      'old': result('old', MatchStatus.finished),
+      'done-today': result('done-today', MatchStatus.finished),
+    };
+    expect(kioskNowIndex(slots, results, today), 2);
+    // Everything decided: the last one.
+    expect(
+      kioskNowIndex(slots.sublist(0, 2), results, today),
+      1,
+    );
+    expect(kioskNowIndex(const [], const {}, today), 0);
+  });
+
+  test('a live match needs data, not just the status', () {
+    final slots = [
+      match('playing', today),
+      match('playing-no-data', today),
+      match('scheduled', today),
+      match('done', today),
+    ];
+    final results = {
+      'playing': result('playing', MatchStatus.inProgress),
+      'playing-no-data': result('playing-no-data', MatchStatus.inProgress),
+      'scheduled': result('scheduled', MatchStatus.scheduled),
+      'done': result('done', MatchStatus.finished),
+    };
+    final live = kioskLiveMatches(
+      slots: slots,
+      results: results,
+      withData: {'playing', 'scheduled', 'done'},
+    );
+    expect([for (final s in live) s.id], ['playing']);
   });
 }

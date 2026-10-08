@@ -93,13 +93,53 @@ class KioskSettingsScreen extends ConsumerWidget {
     );
   }
 
-  /// How far back the panel lists finished matches, in days (0 = only the
-  /// next match), as the dropdown offers it.
-  static const _historyChoices = [0, 7, 14, 21, 28, 56, 84];
+  static const _weekChoices = [0, 1, 2, 3, 4];
 
-  static String _historyLabel(int days) => days == 0
-      ? 'Jen příští zápas'
-      : czechCount(days ~/ 7, 'týden', 'týdny', 'týdnů');
+  static String _weeksLabel(int n, String direction) => n == 0
+      ? 'Jen aktuální týden'
+      : '${czechCount(n, 'týden', 'týdny', 'týdnů')} $direction';
+
+  Widget _switch(BuildContext context, ScheduleSettings? settings,
+          String title, bool value, String column, {String? subtitle}) =>
+      SwitchListTile(
+        contentPadding: EdgeInsets.zero,
+        title: Text(title),
+        subtitle: subtitle == null ? null : Text(subtitle),
+        value: value,
+        onChanged: settings == null
+            ? null
+            : (v) => _panel(context, settings, {column: v}),
+      );
+
+  Widget _choice(
+    BuildContext context,
+    ScheduleSettings? settings,
+    String label,
+    int value,
+    String column,
+    List<int> choices,
+    String Function(int) text,
+  ) =>
+      Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: DropdownButtonFormField<int>(
+          // A value the list does not offer (set by hand) still shows.
+          initialValue: value,
+          decoration: InputDecoration(
+            labelText: label,
+            border: const OutlineInputBorder(),
+          ),
+          items: [
+            for (final n in {...choices, value}.toList()..sort())
+              DropdownMenuItem(value: n, child: Text(text(n))),
+          ],
+          onChanged: settings == null
+              ? null
+              : (n) => n == null
+                  ? null
+                  : _panel(context, settings, {column: n}),
+        ),
+      );
 
   Future<void> _panel(BuildContext context, ScheduleSettings settings,
           Map<String, Object> changes) =>
@@ -173,68 +213,49 @@ class KioskSettingsScreen extends ConsumerWidget {
               'stavu. Které oznamy se na kiosku ukážou, volíš přímo na '
               'nástěnce (⋮ u oznamu).',
             ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Nástěnka v panelu'),
-              value: settings?.kioskShowNotices ?? true,
-              onChanged: settings == null
-                  ? null
-                  : (value) =>
-                      _panel(context, settings, {'kiosk_show_notices': value}),
-            ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Zápasy v panelu'),
-              subtitle: const Text(
-                'Příští zápas a odehrané zápasy; klepnutím na odehraný se '
-                'otevře jeho zápis.',
-              ),
-              value: settings?.kioskShowMatches ?? true,
-              onChanged: settings == null
-                  ? null
-                  : (value) =>
-                      _panel(context, settings, {'kiosk_show_matches': value}),
-            ),
-            if (settings?.kioskShowMatches ?? true)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: DropdownButtonFormField<int>(
-                  initialValue: _historyChoices
-                          .contains(settings?.kioskMatchesHistoryDays ?? 21)
-                      ? settings?.kioskMatchesHistoryDays ?? 21
-                      : 21,
-                  decoration: const InputDecoration(
-                    labelText: 'Odehrané zápasy z posledních',
-                    border: OutlineInputBorder(),
-                  ),
-                  items: [
-                    for (final days in _historyChoices)
-                      DropdownMenuItem(
-                        value: days,
-                        child: Text(_historyLabel(days)),
-                      ),
-                  ],
-                  onChanged: settings == null
-                      ? null
-                      : (days) => days == null
-                          ? null
-                          : _panel(context, settings,
-                              {'kiosk_matches_history_days': days}),
-                ),
-              ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Panel je výchozně rozbalený'),
-              subtitle: const Text(
-                'Vypnuto = na kiosku je jen úzký pruh, panel se rozbalí '
-                'klepnutím.',
-              ),
-              value: settings?.kioskDrawerOpen ?? false,
-              onChanged: settings == null
-                  ? null
-                  : (value) =>
-                      _panel(context, settings, {'kiosk_drawer_open': value}),
-            ),
+            _switch(context, settings, 'Nástěnka v panelu',
+                settings?.kioskShowNotices ?? true, 'kiosk_show_notices'),
+            _switch(context, settings, 'Zápasy v panelu',
+                settings?.kioskShowMatches ?? true, 'kiosk_show_matches',
+                subtitle: 'Klepnutím na odehraný zápas se otevře jeho zápis.'),
+            if (settings?.kioskShowMatches ?? true) ...[
+              _switch(context, settings, 'Následující zápasy',
+                  settings?.kioskShowUpcoming ?? true, 'kiosk_show_upcoming'),
+              _choice(context, settings, 'Odehrané zápasy',
+                  settings?.kioskWeeksBack ?? 2, 'kiosk_weeks_back',
+                  _weekChoices, (n) => _weeksLabel(n, 'zpět')),
+              if (settings?.kioskShowUpcoming ?? true)
+                _choice(context, settings, 'Budoucí zápasy',
+                    settings?.kioskWeeksAhead ?? 1, 'kiosk_weeks_ahead',
+                    _weekChoices, (n) => _weeksLabel(n, 'dopředu')),
+            ],
+            _switch(context, settings, 'Aktuální zápas přes celý panel',
+                settings?.kioskLiveMode ?? true, 'kiosk_live_mode',
+                subtitle: 'Zápas, který se hraje a má data, zabere celý panel '
+                    '(souboje) a panel zůstane rozbalený — i když ho '
+                    'návštěvník zavře, po minutě bez dotyku se rozbalí '
+                    'znovu. Víc zápasů se střídá.'),
+            _switch(context, settings, 'Panel je výchozně rozbalený',
+                settings?.kioskDrawerOpen ?? false, 'kiosk_drawer_open',
+                subtitle: 'Vypnuto = panel je skrytý a rozbalí se tlačítkem '
+                    'na okraji obrazovky.'),
+            const SizedBox(height: 8),
+            _choice(context, settings, 'Šířka panelu',
+                settings?.kioskDrawerWidth ?? 440, 'kiosk_drawer_width',
+                const [360, 440, 520, 600, 720], (n) => '$n px'),
+            if ((settings?.kioskShowNotices ?? true) &&
+                (settings?.kioskShowMatches ?? true))
+              _choice(context, settings, 'Podíl nástěnky na výšce panelu',
+                  settings?.kioskNoticesShare ?? 40, 'kiosk_notices_share',
+                  const [20, 30, 40, 50, 60, 70], (n) => '$n %'),
+            _choice(context, settings, 'Velikost zápisu',
+                settings?.kioskZapisPercent ?? 80, 'kiosk_zapis_percent',
+                const [60, 70, 80, 90, 100],
+                (n) => n == 100 ? 'Celá obrazovka (s křížkem)' : '$n % obrazovky'),
+            _choice(context, settings, 'Střídání oznamů a zápasů',
+                settings?.kioskRotationSeconds ?? 12,
+                'kiosk_rotation_seconds', const [6, 8, 12, 20, 30, 60],
+                (n) => 'po $n s'),
             const SizedBox(height: 24),
             Text('Adresa pro tablet',
                 style: Theme.of(context).textTheme.titleMedium),

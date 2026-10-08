@@ -19,12 +19,15 @@ import '../../domain/models.dart';
 import '../../domain/results.dart';
 import '../clubhouse/widgets/legacy_score_sheet.dart';
 
-/// Opens [slot]'s Zápis in a modal covering 80 % of the screen, fading in
-/// (no slide). [onTouch] is the shell's „somebody touched the kiosk“.
+/// Opens [slot]'s Zápis in a modal covering [percent] of the screen, fading
+/// in (no slide); a tap outside closes it. At 100 % there is no outside, so
+/// a close button appears. [onTouch] is the shell's „somebody touched the
+/// kiosk“.
 Future<void> showKioskZapis(
   BuildContext context, {
   required PrioritySlot slot,
   required Brightness brightness,
+  required int percent,
   required VoidCallback onTouch,
 }) {
   return showGeneralDialog<void>(
@@ -39,6 +42,7 @@ Future<void> showKioskZapis(
     ),
     pageBuilder: (context, _, _) {
       final size = MediaQuery.sizeOf(context);
+      final full = percent >= 100;
       return Listener(
         onPointerDown: (_) => onTouch(),
         behavior: HitTestBehavior.translucent,
@@ -46,13 +50,13 @@ Future<void> showKioskZapis(
           data: buildTheme(brightness),
           child: Center(
             child: SizedBox(
-              width: size.width * 0.8,
-              height: size.height * 0.8,
+              width: size.width * percent / 100,
+              height: size.height * percent / 100,
               child: Material(
                 clipBehavior: Clip.antiAlias,
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(full ? 0 : 16),
                 elevation: 8,
-                child: KioskZapisPage(slot: slot),
+                child: KioskZapisPage(slot: slot, closeButton: full),
               ),
             ),
           ),
@@ -63,9 +67,16 @@ Future<void> showKioskZapis(
 }
 
 class KioskZapisPage extends ConsumerWidget {
-  const KioskZapisPage({super.key, required this.slot});
+  const KioskZapisPage({
+    super.key,
+    required this.slot,
+    this.closeButton = false,
+  });
 
   final PrioritySlot slot;
+
+  /// The × — only when the modal covers the whole screen.
+  final bool closeButton;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -77,18 +88,30 @@ class KioskZapisPage extends ConsumerWidget {
       return const Center(child: CircularProgressIndicator());
     }
     final players = lineup.value ?? const <MatchPlayerResult>[];
-    if (players.isEmpty) return _NoSheet(slot: slot, result: result);
-    return LegacyScoreSheetPage(slot: slot, result: result, players: players);
+    if (players.isEmpty) {
+      return _NoSheet(slot: slot, result: result, closeButton: closeButton);
+    }
+    return LegacyScoreSheetPage(
+      slot: slot,
+      result: result,
+      players: players,
+      showCloseButton: closeButton,
+    );
   }
 }
 
 /// What a match without players shows instead of a sheet: its teams, the
 /// score the site has, and why there is no more.
 class _NoSheet extends StatelessWidget {
-  const _NoSheet({required this.slot, required this.result});
+  const _NoSheet({
+    required this.slot,
+    required this.result,
+    required this.closeButton,
+  });
 
   final PrioritySlot slot;
   final MatchResult? result;
+  final bool closeButton;
 
   @override
   Widget build(BuildContext context) {
@@ -140,15 +163,16 @@ class _NoSheet extends StatelessWidget {
             ),
           ),
         ),
-        Positioned(
-          top: 8,
-          left: 8,
-          child: IconButton.filledTonal(
-            icon: const Icon(Icons.close),
-            tooltip: 'Zavřít',
-            onPressed: () => Navigator.of(context).maybePop(),
+        if (closeButton)
+          Positioned(
+            top: 8,
+            left: 8,
+            child: IconButton.filledTonal(
+              icon: const Icon(Icons.close),
+              tooltip: 'Zavřít',
+              onPressed: () => Navigator.of(context).maybePop(),
+            ),
           ),
-        ),
       ],
     );
   }

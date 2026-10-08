@@ -641,8 +641,15 @@ class ScheduleSettings {
     this.kioskFitDay = true,
     this.kioskShowNotices = true,
     this.kioskShowMatches = true,
-    this.kioskMatchesHistoryDays = 21,
+    this.kioskShowUpcoming = true,
+    this.kioskLiveMode = true,
+    this.kioskWeeksBack = 2,
+    this.kioskWeeksAhead = 1,
     this.kioskDrawerOpen = false,
+    this.kioskDrawerWidth = 440,
+    this.kioskNoticesShare = 40,
+    this.kioskZapisPercent = 80,
+    this.kioskRotationSeconds = 12,
     this.tenantId = '',
     this.dutyReminderEnabled = false,
     this.dutyReminderDays = 1,
@@ -663,16 +670,34 @@ class ScheduleSettings {
   /// the app's week view) and lets the board scroll vertically.
   final bool kioskFitDay;
 
-  /// What the kiosk's side drawer lists (0065): the active notices, and the
-  /// matches — the next one plus the finished ones of the last
-  /// [kioskMatchesHistoryDays] days (0 = only the next).
+  /// What the kiosk's side drawer lists (0065, 0066): the active notices
+  /// and the matches — of the current week plus [kioskWeeksBack] weeks
+  /// back and (when [kioskShowUpcoming]) [kioskWeeksAhead] weeks ahead. A
+  /// match being played takes the whole drawer when [kioskLiveMode].
   final bool kioskShowNotices;
   final bool kioskShowMatches;
-  final int kioskMatchesHistoryDays;
+  final bool kioskShowUpcoming;
+  final bool kioskLiveMode;
+  final int kioskWeeksBack;
+  final int kioskWeeksAhead;
 
   /// Whether the drawer is open when nobody has touched the kiosk for a
-  /// minute; a visitor may open or close it meanwhile.
+  /// minute (a live match opens it regardless); a visitor may open or
+  /// close it meanwhile.
   final bool kioskDrawerOpen;
+
+  /// The drawer's width in px (on a narrower screen it takes at most 60 %).
+  final int kioskDrawerWidth;
+
+  /// Percent of the drawer's height the notices get beside the matches.
+  final int kioskNoticesShare;
+
+  /// Percent of the screen the Zápis modal covers; 100 = full screen, with
+  /// a close button.
+  final int kioskZapisPercent;
+
+  /// Seconds a notice or a live match stays up before the next one.
+  final int kioskRotationSeconds;
 
   /// The settings row's tenant — the update key since 0005 (one row per
   /// tenant instead of the old singleton).
@@ -706,9 +731,15 @@ class ScheduleSettings {
         kioskFitDay: json['kiosk_fit_day'] as bool? ?? true,
         kioskShowNotices: json['kiosk_show_notices'] as bool? ?? true,
         kioskShowMatches: json['kiosk_show_matches'] as bool? ?? true,
-        kioskMatchesHistoryDays:
-            json['kiosk_matches_history_days'] as int? ?? 21,
+        kioskShowUpcoming: json['kiosk_show_upcoming'] as bool? ?? true,
+        kioskLiveMode: json['kiosk_live_mode'] as bool? ?? true,
+        kioskWeeksBack: json['kiosk_weeks_back'] as int? ?? 2,
+        kioskWeeksAhead: json['kiosk_weeks_ahead'] as int? ?? 1,
         kioskDrawerOpen: json['kiosk_drawer_open'] as bool? ?? false,
+        kioskDrawerWidth: json['kiosk_drawer_width'] as int? ?? 440,
+        kioskNoticesShare: json['kiosk_notices_share'] as int? ?? 40,
+        kioskZapisPercent: json['kiosk_zapis_percent'] as int? ?? 80,
+        kioskRotationSeconds: json['kiosk_rotation_seconds'] as int? ?? 12,
         tenantId: json['tenant_id'] as String? ?? '',
         dutyReminderEnabled: json['duty_reminder_enabled'] as bool? ?? false,
         dutyReminderDays: json['duty_reminder_days'] as int? ?? 1,

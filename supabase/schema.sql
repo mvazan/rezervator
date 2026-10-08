@@ -3415,7 +3415,11 @@ begin
     'settings', (select to_jsonb(s) - 'tenant_id'
                           - 'duty_reminder_enabled' - 'duty_reminder_days'
                           - 'kiosk_show_notices' - 'kiosk_show_matches'
-                          - 'kiosk_matches_history_days' - 'kiosk_drawer_open'
+                          - 'kiosk_show_upcoming' - 'kiosk_live_mode'
+                          - 'kiosk_drawer_open' - 'kiosk_drawer_width'
+                          - 'kiosk_notices_share' - 'kiosk_zapis_percent'
+                          - 'kiosk_weeks_back' - 'kiosk_weeks_ahead'
+                          - 'kiosk_rotation_seconds'
                    from schedule_settings s where s.tenant_id = v_tenant),
     'blocks', coalesce((
       select jsonb_agg(to_jsonb(b) - 'tenant_id')
@@ -5624,11 +5628,23 @@ CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     "duty_reminder_days" smallint DEFAULT 1 NOT NULL,
     "kiosk_show_notices" boolean DEFAULT true NOT NULL,
     "kiosk_show_matches" boolean DEFAULT true NOT NULL,
-    "kiosk_matches_history_days" smallint DEFAULT 21 NOT NULL,
     "kiosk_drawer_open" boolean DEFAULT false NOT NULL,
+    "kiosk_show_upcoming" boolean DEFAULT true NOT NULL,
+    "kiosk_live_mode" boolean DEFAULT true NOT NULL,
+    "kiosk_drawer_width" smallint DEFAULT 440 NOT NULL,
+    "kiosk_notices_share" smallint DEFAULT 40 NOT NULL,
+    "kiosk_zapis_percent" smallint DEFAULT 80 NOT NULL,
+    "kiosk_weeks_back" smallint DEFAULT 2 NOT NULL,
+    "kiosk_weeks_ahead" smallint DEFAULT 1 NOT NULL,
+    "kiosk_rotation_seconds" smallint DEFAULT 12 NOT NULL,
     CONSTRAINT "schedule_settings_booking_horizon_days_check" CHECK ((("booking_horizon_days" >= 1) AND ("booking_horizon_days" <= 90))),
     CONSTRAINT "schedule_settings_duty_reminder_days_check" CHECK ((("duty_reminder_days" >= 1) AND ("duty_reminder_days" <= 14))),
-    CONSTRAINT "schedule_settings_kiosk_history_check" CHECK ((("kiosk_matches_history_days" >= 0) AND ("kiosk_matches_history_days" <= 120))),
+    CONSTRAINT "schedule_settings_kiosk_ahead_check" CHECK ((("kiosk_weeks_ahead" >= 0) AND ("kiosk_weeks_ahead" <= 12))),
+    CONSTRAINT "schedule_settings_kiosk_back_check" CHECK ((("kiosk_weeks_back" >= 0) AND ("kiosk_weeks_back" <= 12))),
+    CONSTRAINT "schedule_settings_kiosk_rotation_check" CHECK ((("kiosk_rotation_seconds" >= 3) AND ("kiosk_rotation_seconds" <= 120))),
+    CONSTRAINT "schedule_settings_kiosk_share_check" CHECK ((("kiosk_notices_share" >= 10) AND ("kiosk_notices_share" <= 90))),
+    CONSTRAINT "schedule_settings_kiosk_width_check" CHECK ((("kiosk_drawer_width" >= 280) AND ("kiosk_drawer_width" <= 800))),
+    CONSTRAINT "schedule_settings_kiosk_zapis_check" CHECK ((("kiosk_zapis_percent" >= 50) AND ("kiosk_zapis_percent" <= 100))),
     CONSTRAINT "schedule_settings_lane_count_check" CHECK ((("lane_count" >= 1) AND ("lane_count" <= 12))),
     CONSTRAINT "schedule_settings_max_active_reservations_check" CHECK ((("max_active_reservations" >= 1) AND ("max_active_reservations" <= 50)))
 );

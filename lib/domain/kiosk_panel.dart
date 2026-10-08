@@ -1,5 +1,6 @@
-/// The kiosk's side panel, the pure half: which notices are up and which
-/// matches it lists. Pure Dart, unit-tested; `KioskInfoPanel` only renders it.
+/// The kiosk's side panel, the pure half: which notices are up, which matches
+/// the list shows and which one is being played. Pure Dart, unit-tested;
+/// `KioskInfoPanel` only renders it.
 library;
 
 import 'messages.dart' show splitNotices;
@@ -16,40 +17,106 @@ List<Message> kioskNotices(Iterable<Message> messages, DateTime now) =>
 bool _decided(MatchResult? r) =>
     r?.status == MatchStatus.finished || r?.status == MatchStatus.forfeit;
 
-/// The alley's federation matches for the panel: [next] is the first match
-/// not decided yet that is today or later (a match in progress counts —
-/// it is "now"), [recent] the decided ones of the last [historyDays] days up
-/// to today, oldest first (chronological, like every list in the app).
-/// [historyDays] 0 lists none.
-({PrioritySlot? next, List<PrioritySlot> recent}) kioskMatches({
+/// The sports season [today] is in: from 1 August to 31 July. The drawer
+/// never lists a match outside it.
+({Day start, Day end}) kioskSeason(Day today) {
+  final year = today.month >= 8 ? today.year : today.year - 1;
+  return (start: Day(year, 8, 1), end: Day(year + 1, 7, 31));
+}
+
+/// The Monday of [day]'s ISO week.
+Day mondayOf(Day day) => day.addDays(1 - day.weekday);
+
+/// The matches the drawer lists, chronological.
+typedef KioskMatchWindow = ({
+  List<PrioritySlot> matches,
+
+  /// There are matches of the season before the first listed day.
+  bool moreBefore,
+
+  /// There are matches of the season after the last listed day.
+  bool moreAfter,
+});
+
+/// The alley's federation matches from [weeksBack] weeks before the current
+/// week to [weeksAhead] weeks after it (the league plays in rounds a week
+/// apart), both counted from the current Monday/Sunday and widened by
+/// [extraBack]/[extraAhead] weeks the visitor asked for with „Zobrazit
+/// další“. With [showUpcoming] off nothing after today is listed. Never
+/// outside the current season ([kioskSeason]).
+KioskMatchWindow kioskMatchWindow({
   required List<PrioritySlot> slots,
-  required Map<String, MatchResult> results,
   required Day today,
-  required int historyDays,
+  required int weeksBack,
+  required int weeksAhead,
+  required bool showUpcoming,
+  int extraBack = 0,
+  int extraAhead = 0,
 }) {
-  final matches =
-      [
-        for (final s in slots)
-          if (s.type.isMatch && s.parentId == null && s.fromFederation) s,
-      ]..sort((a, b) {
-        final byDay = a.date.compareTo(b.date);
-        return byDay != 0 ? byDay : a.startsAt.compareTo(b.startsAt);
-      });
-  PrioritySlot? next;
-  for (final s in matches) {
-    if (!s.date.isBefore(today) && !_decided(results[s.id])) {
-      next = s;
-      break;
+  final season = kioskSeason(today);
+  final thisMonday = mondayOf(today);
+  var from = thisMonday.addDays(-7 * (weeksBack + extraBack));
+  var to = showUpcoming
+      ? thisMonday.addDays(6 + 7 * (weeksAhead + extraAhead))
+      : today;
+  if (from.isBefore(season.start)) from = season.start;
+  if (to.isAfter(season.end)) to = season.end;
+  final all = [
+    for (final s in slots)
+      if (s.type.isMatch &&
+          s.parentId == null &&
+          s.fromFederation &&
+          !s.date.isBefore(season.start) &&
+          !s.date.isAfter(season.end))
+        s,
+  ]..sort((a, b) {
+      final byDay = a.date.compareTo(b.date);
+      return byDay != 0 ? byDay : a.startsAt.compareTo(b.startsAt);
+    });
+  return (
+    matches: [
+      for (final s in all)
+        if (!s.date.isBefore(from) && !s.date.isAfter(to)) s,
+    ],
+    moreBefore: all.any((s) => s.date.isBefore(from)),
+    moreAfter: showUpcoming && all.any((s) => s.date.isAfter(to)),
+  );
+}
+
+/// The index to open the list on: the first match not decided yet from
+/// today on (the one coming up or being played), else the last match.
+int kioskNowIndex(
+  List<PrioritySlot> matches,
+  Map<String, MatchResult> results,
+  Day today,
+) {
+  for (var i = 0; i < matches.length; i++) {
+    if (!matches[i].date.isBefore(today) && !_decided(results[matches[i].id])) {
+      return i;
     }
   }
-  final since = today.addDays(-historyDays);
-  final recent = [
-    for (final s in matches)
-      if (historyDays > 0 &&
-          !s.date.isBefore(since) &&
-          !s.date.isAfter(today) &&
-          _decided(results[s.id]))
+  return matches.isEmpty ? 0 : matches.length - 1;
+}
+
+/// The matches being played whose figures the drawer can show: status in
+/// progress AND [withData] says the site has delivered their players — a
+/// match merely marked as playing has nothing to put on the drawer yet.
+/// Chronological, so the rotation order is stable.
+List<PrioritySlot> kioskLiveMatches({
+  required List<PrioritySlot> slots,
+  required Map<String, MatchResult> results,
+  required Set<String> withData,
+}) {
+  return [
+    for (final s in slots)
+      if (s.type.isMatch &&
+          s.parentId == null &&
+          s.fromFederation &&
+          results[s.id]?.status == MatchStatus.inProgress &&
+          withData.contains(s.id))
         s,
-  ];
-  return (next: next, recent: recent);
+  ]..sort((a, b) {
+      final byDay = a.date.compareTo(b.date);
+      return byDay != 0 ? byDay : a.startsAt.compareTo(b.startsAt);
+    });
 }

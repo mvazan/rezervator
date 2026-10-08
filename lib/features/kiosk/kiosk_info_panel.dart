@@ -1,11 +1,12 @@
 /// The kiosk's side drawer: the alley's active notices (they take turns when
-/// there are several; a tap reads one in full) and the matches — the next
-/// one, and the finished ones of the last few days; a tap on a finished one
-/// opens its Zápis. Display only, like the board: nothing here books or
-/// writes. Closed it is gone entirely, leaving only a round button floating
-/// at the screen's edge; the admin picks the resting state and what it lists
-/// (Správa → Kiosk), and the shell closes or reopens it to that state after
-/// a minute without a touch.
+/// there are several; a tap reads one in full), the matches of the last and
+/// next weeks (a tap on a finished one opens its Zápis) — and, while a match
+/// is being played, that match across the whole drawer in the Souboje view
+/// (several live matches take turns too). Display only, like the board:
+/// nothing here books or writes. Closed it is gone entirely, leaving only a
+/// button floating at the screen's edge. The admin picks what it lists and
+/// how it looks (Správa → Kiosk); the shell closes or reopens it to its
+/// resting state after a minute without a touch.
 library;
 
 import 'dart:async';
@@ -17,67 +18,83 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/ui.dart';
 import '../../data/clock.dart';
 import '../../data/providers.dart';
+import '../../domain/duels.dart';
 import '../../domain/kiosk_panel.dart';
 import '../../domain/models.dart';
+import '../../domain/palette.dart';
 import '../../domain/results.dart';
+import '../clubhouse/widgets/duel_card.dart';
+import '../clubhouse/widgets/match_scoreboard.dart';
 import '../clubhouse/widgets/match_title.dart';
+import '../clubhouse/widgets/team_totals_card.dart';
 
-/// How long one notice stays up before the next takes its place.
-const kioskNoticeTurn = Duration(seconds: 12);
-
-/// Open drawer width on a full-HD screen (narrower screens get 40 %).
-const kioskDrawerWidth = 440.0;
-
-/// The drawer's width for a screen [screenWidth] wide.
-double kioskDrawerWidthFor(double screenWidth) =>
-    (screenWidth * 0.4).clamp(300.0, kioskDrawerWidth);
+/// The drawer's width for a screen [screenWidth] wide: what the admin chose,
+/// at most 60 % of the screen.
+double kioskDrawerWidthFor(double screenWidth, int chosen) =>
+    math.min(chosen.toDouble(), screenWidth * 0.6);
 
 const _resultRowHeight = 64.0;
+const _moreRowHeight = 52.0;
+
+/// The matches being played whose players the site has delivered — empty
+/// with live mode off. A match marked as playing but without data is not
+/// here ([kioskLiveMatches]).
+final kioskLiveProvider = Provider<List<PrioritySlot>>((ref) {
+  final settings = ref.watch(settingsProvider).value;
+  if (!(settings?.kioskLiveMode ?? true)) return const [];
+  final slots = ref.watch(prioritySlotsProvider);
+  final results = ref.watch(matchResultsProvider).value ?? const {};
+  final withData = <String>{};
+  for (final s in slots) {
+    if (results[s.id]?.status != MatchStatus.inProgress) continue;
+    if (ref.watch(matchPlayerResultsProvider(s.id)).value?.isNotEmpty ??
+        false) {
+      withData.add(s.id);
+    }
+  }
+  return kioskLiveMatches(slots: slots, results: results, withData: withData);
+});
 
 /// What the drawer would show now, from the providers and the admin's
 /// settings — null when there is nothing (the shell then draws no drawer).
 final kioskPanelContentProvider = Provider<KioskPanelContent?>((ref) {
   final settings = ref.watch(settingsProvider).value;
   final now = ref.watch(nowProvider).value ?? DateTime.now();
+  final live = ref.watch(kioskLiveProvider);
   final notices = (settings?.kioskShowNotices ?? true)
       ? kioskNotices(ref.watch(messagesProvider).value ?? const [], now)
       : const <Message>[];
-  final matches = (settings?.kioskShowMatches ?? true)
-      ? kioskMatches(
-          slots: ref.watch(prioritySlotsProvider),
-          results: ref.watch(matchResultsProvider).value ?? const {},
-          today: Day.fromDateTime(now),
-          historyDays: settings?.kioskMatchesHistoryDays ?? 21,
-        )
-      : (next: null, recent: const <PrioritySlot>[]);
-  if (notices.isEmpty && matches.next == null && matches.recent.isEmpty) {
-    return null;
-  }
+  final hasMatches = (settings?.kioskShowMatches ?? true) &&
+      kioskMatchWindow(
+        slots: ref.watch(prioritySlotsProvider),
+        today: Day.fromDateTime(now),
+        weeksBack: settings?.kioskWeeksBack ?? 2,
+        weeksAhead: settings?.kioskWeeksAhead ?? 1,
+        showUpcoming: settings?.kioskShowUpcoming ?? true,
+      ).matches.isNotEmpty;
+  if (live.isEmpty && notices.isEmpty && !hasMatches) return null;
   return KioskPanelContent(
     notices: notices,
-    next: matches.next,
-    recent: matches.recent,
+    hasMatches: hasMatches,
+    live: live,
   );
 });
 
 class KioskPanelContent {
   const KioskPanelContent({
     required this.notices,
-    required this.next,
-    required this.recent,
+    required this.hasMatches,
+    required this.live,
   });
 
   final List<Message> notices;
-  final PrioritySlot? next;
-  final List<PrioritySlot> recent;
+  final bool hasMatches;
 
-  bool get hasMatches => next != null || recent.isNotEmpty;
+  /// Matches being played, with data; non-empty = the drawer shows only them.
+  final List<PrioritySlot> live;
 }
 
-/// The drawer itself: [open] it is [kioskDrawerWidthFor] wide, closed it
-/// has no width at all. The button that opens and closes it is
-/// [KioskDrawerButton], floating outside of it.
-class KioskDrawer extends StatelessWidget {
+class KioskDrawer extends ConsumerWidget {
   const KioskDrawer({
     super.key,
     required this.content,
@@ -92,9 +109,26 @@ class KioskDrawer extends StatelessWidget {
   final void Function(PrioritySlot match) onOpenMatch;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
-    final width = kioskDrawerWidthFor(MediaQuery.sizeOf(context).width);
+    final settings = ref.watch(settingsProvider).value;
+    final width = kioskDrawerWidthFor(
+      MediaQuery.sizeOf(context).width,
+      settings?.kioskDrawerWidth ?? 440,
+    );
+    final turn = Duration(seconds: settings?.kioskRotationSeconds ?? 12);
+    final share = settings?.kioskNoticesShare ?? 40;
+    final notices = content.notices.isEmpty
+        ? null
+        : _NoticesCard(
+            notices: content.notices,
+            turn: turn,
+            fill: content.hasMatches,
+            onOpen: onOpenNotice,
+          );
+    final matches = content.hasMatches
+        ? _MatchesCard(onOpen: onOpenMatch)
+        : null;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 250),
       curve: Curves.easeOutCubic,
@@ -107,32 +141,26 @@ class KioskDrawer extends StatelessWidget {
         alignment: Alignment.centerLeft,
         minWidth: width,
         maxWidth: width,
-        child: open
-            ? Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    if (content.notices.isNotEmpty)
-                      _NoticesCard(
-                        notices: content.notices,
-                        onOpen: onOpenNotice,
-                      ),
-                    if (content.notices.isNotEmpty && content.hasMatches)
-                      const SizedBox(height: 12),
-                    // The matches take what the notices leave and scroll.
-                    if (content.hasMatches)
-                      Flexible(
-                        child: _MatchesCard(
-                          next: content.next,
-                          recent: content.recent,
-                          onOpen: onOpenMatch,
-                        ),
-                      ),
-                  ],
-                ),
-              )
-            : const SizedBox.shrink(),
+        child: !open
+            ? const SizedBox.shrink()
+            : content.live.isNotEmpty
+                ? _LiveView(matches: content.live, turn: turn)
+                : Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (notices != null && matches != null) ...[
+                          Expanded(flex: share, child: notices),
+                          const SizedBox(height: 12),
+                          Expanded(flex: 100 - share, child: matches),
+                        ] else if (matches != null)
+                          Expanded(child: matches)
+                        else if (notices != null)
+                          Flexible(child: notices),
+                      ],
+                    ),
+                  ),
       ),
     );
   }
@@ -140,10 +168,9 @@ class KioskDrawer extends StatelessWidget {
 
 /// The button that opens and closes the drawer: a bare double arrow, gray
 /// and half see-through, floating over the board at the drawer's left edge
-/// (or the screen's, while it is closed). Place it in a [Stack] with
-/// [KioskDrawerButton.positioned]. Every few seconds it breathes once — a
-/// soft glow and a little more opacity — so a tablet on the wall shows that
-/// there is something to open, without ever moving.
+/// (or the screen's, while it is closed). Every few seconds it breathes once
+/// — a soft glow and a little more opacity — so a tablet on the wall shows
+/// that there is something to open, without ever moving.
 class KioskDrawerButton extends StatefulWidget {
   const KioskDrawerButton({
     super.key,
@@ -236,12 +263,21 @@ class _KioskDrawerButtonState extends State<KioskDrawerButton>
   }
 }
 
+/// A rounded card with a title; [fill] makes its body take all the height
+/// the card is given (a slot of the drawer), otherwise it is as tall as its
+/// content.
 class _Card extends StatelessWidget {
-  const _Card({required this.icon, required this.title, required this.child});
+  const _Card({
+    required this.icon,
+    required this.title,
+    required this.child,
+    this.fill = false,
+  });
 
   final IconData icon;
   final String title;
   final Widget child;
+  final bool fill;
 
   @override
   Widget build(BuildContext context) {
@@ -253,8 +289,8 @@ class _Card extends StatelessWidget {
         borderRadius: BorderRadius.circular(14),
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: fill ? MainAxisSize.max : MainAxisSize.min,
         children: [
           Row(
             children: [
@@ -272,19 +308,31 @@ class _Card extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 10),
-          Flexible(child: child),
+          fill ? Expanded(child: child) : Flexible(child: child),
         ],
       ),
     );
   }
 }
 
+const _noticeTitleStyle = TextStyle(fontSize: 20, fontWeight: FontWeight.w800);
+const _noticeBodyStyle = TextStyle(fontSize: 16, height: 1.3);
+const _noticeFooterHeight = 32.0;
+
 /// The notices, one at a time. A single notice just stays; several take
-/// turns every [kioskNoticeTurn], with dots to say how many there are.
+/// turns every [turn], with dots to say how many there are. What does not
+/// fit the card is cut, and only then „Více“ offers the full text.
 class _NoticesCard extends StatefulWidget {
-  const _NoticesCard({required this.notices, required this.onOpen});
+  const _NoticesCard({
+    required this.notices,
+    required this.turn,
+    required this.fill,
+    required this.onOpen,
+  });
 
   final List<Message> notices;
+  final Duration turn;
+  final bool fill;
   final void Function(Message notice) onOpen;
 
   @override
@@ -298,7 +346,18 @@ class _NoticesCardState extends State<_NoticesCard> {
   @override
   void initState() {
     super.initState();
-    _timer = Timer.periodic(kioskNoticeTurn, (_) {
+    _start();
+  }
+
+  @override
+  void didUpdateWidget(_NoticesCard old) {
+    super.didUpdateWidget(old);
+    if (old.turn != widget.turn) _start();
+  }
+
+  void _start() {
+    _timer?.cancel();
+    _timer = Timer.periodic(widget.turn, (_) {
       if (!mounted || widget.notices.length < 2) return;
       setState(() => _index = (_index + 1) % widget.notices.length);
     });
@@ -318,194 +377,158 @@ class _NoticesCardState extends State<_NoticesCard> {
     return _Card(
       icon: Icons.campaign_outlined,
       title: 'NÁSTĚNKA',
+      fill: widget.fill,
       child: InkWell(
         onTap: () => widget.onOpen(m),
         borderRadius: BorderRadius.circular(8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // A fixed height, so the notices taking turns never move the
-            // matches below them; what does not fit is cut and read in full
-            // with „Více“.
-            SizedBox(
-              height: _noticeTextHeight,
-              child: ClipRect(
-                child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 300),
-                  layoutBuilder: (current, previous) => Stack(
-                    alignment: Alignment.topLeft,
-                    children: [...previous, ?current],
-                  ),
-                  child: _NoticeText(key: ValueKey(m.id), notice: m),
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Row(
+        child: LayoutBuilder(
+          builder: (context, box) {
+            final fit = _fitNotice(context, m, box);
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: widget.fill ? MainAxisSize.max : MainAxisSize.min,
               children: [
-                for (var i = 0; notices.length > 1 && i < notices.length; i++)
-                  Container(
-                    width: 8,
-                    height: 8,
-                    margin: const EdgeInsets.only(right: 6),
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: i == _index
-                          ? scheme.primary
-                          : scheme.onSurfaceVariant.withValues(alpha: 0.35),
+                SizedBox(
+                  height: fit.height,
+                  child: ClipRect(
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 300),
+                      layoutBuilder: (current, previous) => Stack(
+                        alignment: Alignment.topLeft,
+                        children: [...previous, ?current],
+                      ),
+                      child: Column(
+                        key: ValueKey(m.id),
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            m.title ?? '',
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: _noticeTitleStyle,
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            m.body,
+                            maxLines: fit.bodyLines,
+                            // An ellipsis without a line limit makes Skia
+                            // cut the text to its first line.
+                            overflow: fit.bodyLines == null
+                                ? TextOverflow.clip
+                                : TextOverflow.ellipsis,
+                            style: _noticeBodyStyle,
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                const Spacer(),
-                Text(
-                  'Více',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: scheme.primary,
+                ),
+                if (widget.fill) const Spacer() else const SizedBox(height: 8),
+                SizedBox(
+                  height: _noticeFooterHeight - 8,
+                  child: Row(
+                    children: [
+                      for (var i = 0;
+                          notices.length > 1 && i < notices.length;
+                          i++)
+                        Container(
+                          width: 8,
+                          height: 8,
+                          margin: const EdgeInsets.only(right: 6),
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: i == _index
+                                ? scheme.primary
+                                : scheme.onSurfaceVariant
+                                    .withValues(alpha: 0.35),
+                          ),
+                        ),
+                      const Spacer(),
+                      if (fit.truncated) ...[
+                        Text(
+                          'Více',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: scheme.primary,
+                          ),
+                        ),
+                        Icon(Icons.expand_more,
+                            size: 20, color: scheme.primary),
+                      ],
+                    ],
                   ),
                 ),
-                Icon(Icons.expand_more, size: 20, color: scheme.primary),
               ],
-            ),
-          ],
+            );
+          },
         ),
       ),
     );
   }
-}
 
-/// The height of a notice's title and text in the drawer: two lines of
-/// title, four of body.
-const _noticeTextHeight = 148.0;
+  /// How much of [m] fits [box] (the card's interior): the height of the
+  /// text block, the body lines that fit, and whether anything is cut. An
+  /// unbounded box (a lone notice card) shows everything.
+  ({double height, int? bodyLines, bool truncated}) _fitNotice(
+    BuildContext context,
+    Message m,
+    BoxConstraints box,
+  ) {
+    final scaler = MediaQuery.textScalerOf(context);
+    final direction = Directionality.of(context);
+    // The same style the Text widgets resolve: theirs merged into the
+    // ambient one, or the measure would differ from what is drawn.
+    final base = DefaultTextStyle.of(context).style;
+    TextPainter paint(String text, TextStyle style, int? maxLines) =>
+        TextPainter(
+          text: TextSpan(text: text, style: base.merge(style)),
+          textDirection: direction,
+          textScaler: scaler,
+          maxLines: maxLines,
+        )..layout(maxWidth: box.maxWidth);
 
-class _NoticeText extends StatelessWidget {
-  const _NoticeText({super.key, required this.notice});
-
-  final Message notice;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          notice.title ?? '',
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          notice.body,
-          maxLines: 4,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontSize: 16, height: 1.3),
-        ),
-      ],
-    );
-  }
-}
-
-class _MatchesCard extends ConsumerWidget {
-  const _MatchesCard({
-    required this.next,
-    required this.recent,
-    required this.onOpen,
-  });
-
-  final PrioritySlot? next;
-  final List<PrioritySlot> recent;
-  final void Function(PrioritySlot match) onOpen;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final scheme = Theme.of(context).colorScheme;
-    final results =
-        ref.watch(matchResultsProvider).value ?? const <String, MatchResult>{};
-    final label = TextStyle(
-      fontSize: 12,
-      fontWeight: FontWeight.w700,
-      color: scheme.onSurfaceVariant,
-    );
-    final n = next;
-    return _Card(
-      icon: Icons.emoji_events_outlined,
-      title: 'ZÁPASY',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (n != null) ...[
-            Text(
-              results[n.id]?.status == MatchStatus.inProgress
-                  ? 'PRÁVĚ SE HRAJE'
-                  : 'PŘÍŠTÍ ZÁPAS',
-              style: label,
-            ),
-            const SizedBox(height: 2),
-            _MatchRow(
-              slot: n,
-              result: results[n.id],
-              upcoming: true,
-              onOpen: onOpen,
-            ),
-          ],
-          if (n != null && recent.isNotEmpty) const SizedBox(height: 12),
-          if (recent.isNotEmpty) ...[
-            Text('POSLEDNÍ VÝSLEDKY', style: label),
-            const SizedBox(height: 4),
-            Flexible(
-              child: _RecentList(
-                recent: recent,
-                results: results,
-                onOpen: onOpen,
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-/// The finished matches, chronological, opened on the newest: a long
-/// history scrolls inside its own box rather than pushing the notices away.
-class _RecentList extends StatefulWidget {
-  const _RecentList({
-    required this.recent,
-    required this.results,
-    required this.onOpen,
-  });
-
-  final List<PrioritySlot> recent;
-  final Map<String, MatchResult> results;
-  final void Function(PrioritySlot match) onOpen;
-
-  @override
-  State<_RecentList> createState() => _RecentListState();
-}
-
-class _RecentListState extends State<_RecentList> {
-  final _controller = ScrollController();
-
-  @override
-  void initState() {
-    super.initState();
-    _toNewest();
-  }
-
-  @override
-  void didUpdateWidget(_RecentList old) {
-    super.didUpdateWidget(old);
-    if (old.recent.length != widget.recent.length) _toNewest();
-  }
-
-  void _toNewest() => WidgetsBinding.instance.addPostFrameCallback((_) {
-    if (_controller.hasClients) {
-      _controller.jumpTo(_controller.position.maxScrollExtent);
+    final title = paint(m.title ?? '', _noticeTitleStyle, 2);
+    final body = paint(m.body, _noticeBodyStyle, null);
+    final natural = title.height + 6 + body.height;
+    final available = box.hasBoundedHeight
+        ? box.maxHeight - _noticeFooterHeight
+        : double.infinity;
+    if (natural <= available) {
+      return (height: natural, bodyLines: null, truncated: false);
     }
-  });
+    final line = paint('A', _noticeBodyStyle, 1).height;
+    final lines = math.max(1, ((available - title.height - 6) / line).floor());
+    return (
+      height: math.max(available, 0),
+      bodyLines: lines,
+      truncated: true,
+    );
+  }
+}
+
+/// The finished and the coming matches of the weeks the admin chose,
+/// chronological, opened on the first one not decided yet. „Zobrazit další“
+/// at either end brings one more week of the season; a tap on a finished
+/// match opens its Zápis.
+class _MatchesCard extends ConsumerStatefulWidget {
+  const _MatchesCard({required this.onOpen});
+
+  final void Function(PrioritySlot match) onOpen;
+
+  @override
+  ConsumerState<_MatchesCard> createState() => _MatchesCardState();
+}
+
+class _MatchesCardState extends ConsumerState<_MatchesCard> {
+  final _controller = ScrollController();
+  int _extraBack = 0;
+  int _extraAhead = 0;
+  bool _opened = false;
+
+  /// Set when older matches were just added: the list length before, so the
+  /// view can stay on what it showed.
+  int? _lengthBeforeOlder;
 
   @override
   void dispose() {
@@ -515,22 +538,80 @@ class _RecentListState extends State<_RecentList> {
 
   @override
   Widget build(BuildContext context) {
-    final rows = widget.recent.length;
-    return ListView.builder(
-      controller: _controller,
-      shrinkWrap: true,
-      itemCount: rows,
-      itemBuilder: (context, i) {
-        final s = widget.recent[i];
-        return SizedBox(
+    final scheme = Theme.of(context).colorScheme;
+    final settings = ref.watch(settingsProvider).value;
+    final now = ref.watch(nowProvider).value ?? DateTime.now();
+    final today = Day.fromDateTime(now);
+    final results =
+        ref.watch(matchResultsProvider).value ?? const <String, MatchResult>{};
+    final window = kioskMatchWindow(
+      slots: ref.watch(prioritySlotsProvider),
+      today: today,
+      weeksBack: settings?.kioskWeeksBack ?? 2,
+      weeksAhead: settings?.kioskWeeksAhead ?? 1,
+      showUpcoming: settings?.kioskShowUpcoming ?? true,
+      extraBack: _extraBack,
+      extraAhead: _extraAhead,
+    );
+    final matches = window.matches;
+    final nowIndex = kioskNowIndex(matches, results, today);
+
+    if (!_opened) {
+      _opened = true;
+      // On the first match not decided yet, with the one before it in view.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!_controller.hasClients) return;
+        final top = (window.moreBefore ? _moreRowHeight : 0) +
+            math.max(0, nowIndex - 1) * _resultRowHeight;
+        _controller.jumpTo(top.clamp(0, _controller.position.maxScrollExtent));
+      });
+    }
+    final before = _lengthBeforeOlder;
+    if (before != null) {
+      _lengthBeforeOlder = null;
+      final added = matches.length - before;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_controller.hasClients) {
+          _controller.jumpTo(_controller.offset + added * _resultRowHeight);
+        }
+      });
+    }
+
+    Widget more(String label, VoidCallback onTap) => SizedBox(
+          height: _moreRowHeight,
+          child: Center(
+            child: TextButton(onPressed: onTap, child: Text(label)),
+          ),
+        );
+
+    final items = <Widget>[
+      if (window.moreBefore)
+        more('Zobrazit další', () {
+          _lengthBeforeOlder = matches.length;
+          setState(() => _extraBack++);
+        }),
+      for (final s in matches)
+        SizedBox(
           height: _resultRowHeight,
           child: _MatchRow(
             slot: s,
-            result: widget.results[s.id],
+            result: results[s.id],
             onOpen: widget.onOpen,
           ),
-        );
-      },
+        ),
+      if (window.moreAfter)
+        more('Zobrazit další', () => setState(() => _extraAhead++)),
+    ];
+    return _Card(
+      icon: Icons.emoji_events_outlined,
+      title: 'ZÁPASY',
+      fill: true,
+      child: matches.isEmpty
+          ? Text(
+              'V tomhle období není žádný zápas.',
+              style: TextStyle(color: scheme.onSurfaceVariant),
+            )
+          : ListView(controller: _controller, children: items),
     );
   }
 }
@@ -540,12 +621,10 @@ class _MatchRow extends StatelessWidget {
     required this.slot,
     required this.onOpen,
     this.result,
-    this.upcoming = false,
   });
 
   final PrioritySlot slot;
   final MatchResult? result;
-  final bool upcoming;
   final void Function(PrioritySlot match) onOpen;
 
   @override
@@ -555,8 +634,7 @@ class _MatchRow extends StatelessWidget {
     final score = hasScore
         ? pointsLabel(result!.homePoints, result!.awayPoints)
         : null;
-    final when =
-        '${dayLabel(slot.date)}'
+    final when = '${dayLabel(slot.date)}'
         '${slot.timeKnown ? ' ${slot.startsAt.display()}' : ''}';
     final row = Row(
       children: [
@@ -582,7 +660,7 @@ class _MatchRow extends StatelessWidget {
           Text(
             score,
             style: TextStyle(
-              fontSize: upcoming ? 18 : 20,
+              fontSize: 20,
               fontWeight: FontWeight.w800,
               color: scheme.primary,
             ),
@@ -596,6 +674,142 @@ class _MatchRow extends StatelessWidget {
       onTap: () => onOpen(slot),
       borderRadius: BorderRadius.circular(8),
       child: row,
+    );
+  }
+}
+
+/// The match being played across the whole drawer, the Souboje view of the
+/// match detail: the scoreboard, one card per duel, the team totals. Several
+/// live matches take turns every [turn].
+class _LiveView extends ConsumerStatefulWidget {
+  const _LiveView({required this.matches, required this.turn});
+
+  final List<PrioritySlot> matches;
+  final Duration turn;
+
+  @override
+  ConsumerState<_LiveView> createState() => _LiveViewState();
+}
+
+class _LiveViewState extends ConsumerState<_LiveView> {
+  Timer? _timer;
+  int _index = 0;
+
+  /// Duels opened to their lane tables, by position.
+  final _expanded = <int>{};
+
+  @override
+  void initState() {
+    super.initState();
+    _start();
+  }
+
+  @override
+  void didUpdateWidget(_LiveView old) {
+    super.didUpdateWidget(old);
+    if (old.turn != widget.turn) _start();
+  }
+
+  void _start() {
+    _timer?.cancel();
+    _timer = Timer.periodic(widget.turn, (_) {
+      if (!mounted || widget.matches.length < 2) return;
+      setState(() {
+        _index = (_index + 1) % widget.matches.length;
+        _expanded.clear();
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final matches = widget.matches;
+    final slot = matches[_index.clamp(0, matches.length - 1)];
+    final now = ref.watch(nowProvider).value ?? DateTime.now();
+    final result = ref.watch(
+      matchResultsProvider.select((r) => r.value?[slot.id]),
+    );
+    final players =
+        ref.watch(matchPlayerResultsProvider(slot.id)).value ?? const [];
+    final duels = duelsOf(players);
+    final scale = diffScale(duels);
+    return ListView(
+      padding: const EdgeInsets.all(12),
+      children: [
+        Row(
+          children: [
+            Icon(Icons.circle, size: 12, color: scheme.error),
+            const SizedBox(width: 8),
+            Text(
+              'PRÁVĚ SE HRAJE',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.4,
+                color: scheme.primary,
+              ),
+            ),
+            const Spacer(),
+            for (var i = 0; matches.length > 1 && i < matches.length; i++)
+              Container(
+                width: 8,
+                height: 8,
+                margin: const EdgeInsets.only(left: 6),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: i == _index
+                      ? scheme.primary
+                      : scheme.onSurfaceVariant.withValues(alpha: 0.35),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        MatchScoreboard(
+          slot: slot,
+          result: result,
+          players: players,
+          now: now,
+          homeColor: homeSideColor,
+          awayColor: awaySideColor,
+        ),
+        for (final duel in duels)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: DuelCard(
+              duel: duel,
+              scale: scale,
+              expanded: _expanded.contains(duel.position),
+              onTap: duel.state == DuelState.waiting
+                  ? () {}
+                  : () => setState(() {
+                        if (!_expanded.remove(duel.position)) {
+                          _expanded.add(duel.position);
+                        }
+                      }),
+              homeColor: homeSideColor,
+              awayColor: awaySideColor,
+              showSetPoints: setPointsMatter(result?.discipline),
+            ),
+          ),
+        if (result != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: TeamTotalsCard(
+              result: result,
+              homeColor: homeSideColor,
+              awayColor: awaySideColor,
+              showSetPoints: setPointsMatter(result.discipline),
+            ),
+          ),
+      ],
     );
   }
 }

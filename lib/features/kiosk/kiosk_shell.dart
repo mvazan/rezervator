@@ -150,6 +150,7 @@ class _KioskShellState extends ConsumerState<KioskShell> {
         brightness: (ref.read(settingsProvider).value?.kioskDark ?? true)
             ? Brightness.dark
             : Brightness.light,
+        percent: ref.read(settingsProvider).value?.kioskZapisPercent ?? 80,
         onTouch: _touch,
       ),
     );
@@ -161,11 +162,16 @@ class _KioskShellState extends ConsumerState<KioskShell> {
     final board = KioskBoardView(key: _boardKey, selected: _selected);
     final content = ref.watch(kioskPanelContentProvider);
     if (content == null) return board;
+    final settings = ref.watch(settingsProvider).value;
+    // A match being played keeps the drawer open: a visitor may close it,
+    // and it opens again after a minute without a touch.
     final restingOpen =
-        ref.watch(settingsProvider).value?.kioskDrawerOpen ?? false;
+        (settings?.kioskDrawerOpen ?? false) || content.live.isNotEmpty;
     final open = _drawerOverride ?? restingOpen;
-    final drawerWidth =
-        kioskDrawerWidthFor(MediaQuery.sizeOf(context).width);
+    final drawerWidth = kioskDrawerWidthFor(
+      MediaQuery.sizeOf(context).width,
+      settings?.kioskDrawerWidth ?? 440,
+    );
     void toggle() => setState(() => _drawerOverride = !open);
     return Stack(
       children: [

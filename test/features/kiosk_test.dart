@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/core/theme.dart';
 import 'package:rezervator/core/ui.dart' show today;
+import 'package:rezervator/data/clock.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/clubhouse/match_detail_screen.dart';
@@ -1178,40 +1179,60 @@ void main() {
     },
   );
 
-  group('side drawer (notices and matches)', () {
-    Message notice(String id, String title, {bool show = true}) => Message(
-      id: id,
-      kind: MessageKind.notice,
-      audience: MessageAudience.all,
-      authorId: 'a',
-      authorRole: MessageAuthorRole.admin,
-      onDate: null,
-      blockId: null,
-      title: title,
-      body: 'Sejdeme se v devět na dráhách.',
-      expiresAt: null,
-      notify: true,
-      showOnKiosk: show,
-      createdAt: DateTime(2026, 9, 1),
-      updatedAt: DateTime(2026, 9, 1),
-    );
-    PrioritySlot fed(String id, Day date, String home) => PrioritySlot(
-      type: PrioritySlot.fallbackMatchType,
-      id: id,
-      date: date,
-      startsAt: const HourMinute(14, 0),
-      endsAt: const HourMinute(17, 0),
-      homeTeam: home,
-      awayTeam: 'Soupeř',
-      importKey: 'cka:$id',
-    );
-    final finished = MatchResult.fromJson({
-      'match_id': 'old',
-      'status': 'finished',
-      'home_points': 6,
-      'away_points': 2,
-      'fetched_at': '2026-09-17T21:00:00+00:00',
-    });
+  group('side drawer (notices, matches, live match)', () {
+    // Thursday 8 October 2026 (season 2026/27); its week is 5.–11. 10.
+    final day = Day(2026, 10, 8);
+    final nowAt = DateTime(2026, 10, 8, 12);
+
+    Message notice(String id, String title,
+            {bool show = true, String body = 'Sejdeme se v devět.'}) =>
+        Message(
+          id: id,
+          kind: MessageKind.notice,
+          audience: MessageAudience.all,
+          authorId: 'a',
+          authorRole: MessageAuthorRole.admin,
+          onDate: null,
+          blockId: null,
+          title: title,
+          body: body,
+          expiresAt: null,
+          notify: true,
+          showOnKiosk: show,
+          createdAt: DateTime(2026, 9, int.tryParse(id) ?? 1),
+          updatedAt: DateTime(2026, 9, 1),
+        );
+    PrioritySlot fed(String id, Day date, String home, {int hour = 14}) =>
+        PrioritySlot(
+          type: PrioritySlot.fallbackMatchType,
+          id: id,
+          date: date,
+          startsAt: HourMinute(hour, 0),
+          endsAt: HourMinute(hour + 3, 0),
+          homeTeam: home,
+          awayTeam: 'Soupeř',
+          importKey: 'cka:$id',
+        );
+    MatchResult res(String id, String status, num home, num away) =>
+        MatchResult.fromJson({
+          'match_id': id,
+          'status': status,
+          'home_points': home,
+          'away_points': away,
+          'fetched_at': '2026-09-17T21:00:00+00:00',
+        });
+    MatchPlayerResult player(String matchId, String side, int pos) =>
+        MatchPlayerResult(
+          id: '$matchId-$side-$pos',
+          matchId: matchId,
+          side: side,
+          position: pos,
+          playerName: '${side == 'home' ? 'Dom' : 'Hos'} $pos',
+          total: 400 + pos,
+        );
+    final lineup = [
+      for (final side in ['home', 'away']) player('m', side, 1),
+    ];
 
     Widget app({
       List<Message> notices = const [],
@@ -1220,40 +1241,56 @@ void main() {
       bool drawerOpen = false,
       bool showNotices = true,
       bool showMatches = true,
-      int historyDays = 21,
-      List<MatchPlayerResult> lineup = const [],
-    }) => ProviderScope(
-      overrides: [
-        settingsProvider.overrideWith(
-          (ref) => Stream.value(
-            ScheduleSettings(
-              laneCount: settings.laneCount,
-              trainingWeekdays: settings.trainingWeekdays,
-              bookingHorizonDays: settings.bookingHorizonDays,
-              maxActiveReservations: settings.maxActiveReservations,
-              kioskDrawerOpen: drawerOpen,
-              kioskShowNotices: showNotices,
-              kioskShowMatches: showMatches,
-              kioskMatchesHistoryDays: historyDays,
+      bool showUpcoming = true,
+      bool liveMode = true,
+      int weeksBack = 2,
+      int weeksAhead = 1,
+      int width = 440,
+      int share = 40,
+      int zapisPercent = 80,
+      int rotation = 12,
+      Map<String, List<MatchPlayerResult>> lineups = const {},
+    }) =>
+        ProviderScope(
+          overrides: [
+            settingsProvider.overrideWith(
+              (ref) => Stream.value(
+                ScheduleSettings(
+                  laneCount: settings.laneCount,
+                  trainingWeekdays: settings.trainingWeekdays,
+                  bookingHorizonDays: settings.bookingHorizonDays,
+                  maxActiveReservations: settings.maxActiveReservations,
+                  kioskDrawerOpen: drawerOpen,
+                  kioskShowNotices: showNotices,
+                  kioskShowMatches: showMatches,
+                  kioskShowUpcoming: showUpcoming,
+                  kioskLiveMode: liveMode,
+                  kioskWeeksBack: weeksBack,
+                  kioskWeeksAhead: weeksAhead,
+                  kioskDrawerWidth: width,
+                  kioskNoticesShare: share,
+                  kioskZapisPercent: zapisPercent,
+                  kioskRotationSeconds: rotation,
+                ),
+              ),
             ),
-          ),
-        ),
-        timeBlocksProvider.overrideWith((ref) => Stream.value(const [b1])),
-        dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
-        prioritySlotsProvider.overrideWithValue(slots),
-        rentalsProvider.overrideWith((ref) => Stream.value(const [])),
-        weekReservationsProvider.overrideWith(
-          (ref, monday) => Stream.value(const []),
-        ),
-        playersProvider.overrideWith((ref) async => players),
-        messagesProvider.overrideWith((ref) => Stream.value(notices)),
-        matchResultsProvider.overrideWith((ref) => Stream.value(results)),
-        matchPlayerResultsProvider.overrideWith(
-          (ref, id) => Stream.value(lineup),
-        ),
-      ],
-      child: const MaterialApp(home: KioskShell()),
-    );
+            nowProvider.overrideWith((ref) => Stream.value(nowAt)),
+            timeBlocksProvider.overrideWith((ref) => Stream.value(const [b1])),
+            dayOverridesProvider.overrideWith((ref) => Stream.value(const [])),
+            prioritySlotsProvider.overrideWithValue(slots),
+            rentalsProvider.overrideWith((ref) => Stream.value(const [])),
+            weekReservationsProvider.overrideWith(
+              (ref, monday) => Stream.value(const []),
+            ),
+            playersProvider.overrideWith((ref) async => players),
+            messagesProvider.overrideWith((ref) => Stream.value(notices)),
+            matchResultsProvider.overrideWith((ref) => Stream.value(results)),
+            matchPlayerResultsProvider.overrideWith(
+              (ref, id) => Stream.value(lineups[id] ?? const []),
+            ),
+          ],
+          child: const MaterialApp(home: KioskShell()),
+        );
 
     void fullHd(WidgetTester tester) {
       tester.view.physicalSize = const Size(1920, 1080);
@@ -1261,23 +1298,25 @@ void main() {
       addTearDown(tester.view.reset);
     }
 
-    testWidgets('closed by default: only the button shows, tap opens it, tap closes it', (
-      tester,
-    ) async {
+    final openButton = find.byIcon(Icons.keyboard_double_arrow_left);
+    final closeButton = find.byIcon(Icons.keyboard_double_arrow_right);
+
+    testWidgets('closed by default: only the button shows, tap opens it, tap '
+        'closes it', (tester) async {
       fullHd(tester);
-      await tester.pumpWidget(app(notices: [notice('n1', 'Brigáda')]));
+      await tester.pumpWidget(app(notices: [notice('1', 'Brigáda')]));
       await tester.pumpAndSettle();
 
       expect(find.text('Brigáda'), findsNothing);
-      expect(find.byIcon(Icons.keyboard_double_arrow_left), findsOneWidget);
-      // Closed, the drawer takes no room at all.
+      expect(openButton, findsOneWidget);
       expect(tester.getSize(find.byType(KioskDrawer)).width, 0);
 
-      await tester.tap(find.byIcon(Icons.keyboard_double_arrow_left));
+      await tester.tap(openButton);
       await tester.pumpAndSettle();
       expect(find.text('Brigáda'), findsOneWidget);
+      expect(tester.getSize(find.byType(KioskDrawer)).width, 440);
 
-      await tester.tap(find.byIcon(Icons.keyboard_double_arrow_right));
+      await tester.tap(closeButton);
       await tester.pumpAndSettle();
       expect(find.text('Brigáda'), findsNothing);
 
@@ -1288,9 +1327,9 @@ void main() {
       tester,
     ) async {
       fullHd(tester);
-      await tester.pumpWidget(app(notices: [notice('n1', 'Brigáda')]));
+      await tester.pumpWidget(app(notices: [notice('1', 'Brigáda')]));
       await tester.pumpAndSettle();
-      await tester.tap(find.byIcon(Icons.keyboard_double_arrow_left));
+      await tester.tap(openButton);
       await tester.pumpAndSettle();
       expect(find.text('Brigáda'), findsOneWidget);
 
@@ -1306,12 +1345,12 @@ void main() {
     ) async {
       fullHd(tester);
       await tester.pumpWidget(
-        app(notices: [notice('n1', 'Brigáda')], drawerOpen: true),
+        app(notices: [notice('1', 'Brigáda')], drawerOpen: true),
       );
       await tester.pumpAndSettle();
       expect(find.text('Brigáda'), findsOneWidget);
 
-      await tester.tap(find.byIcon(Icons.keyboard_double_arrow_right));
+      await tester.tap(closeButton);
       await tester.pumpAndSettle();
       expect(find.text('Brigáda'), findsNothing);
 
@@ -1322,11 +1361,25 @@ void main() {
       await finish(tester);
     });
 
+    testWidgets('the admin picks the drawer width', (tester) async {
+      fullHd(tester);
+      await tester.pumpWidget(
+        app(notices: [notice('1', 'Brigáda')], drawerOpen: true, width: 600),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.getSize(find.byType(KioskDrawer)).width, 600);
+
+      await finish(tester);
+    });
+
     testWidgets('a notice hidden from the kiosk is not shown', (tester) async {
       fullHd(tester);
       await tester.pumpWidget(
         app(
-          notices: [notice('n1', 'Vidět'), notice('n2', 'Skryté', show: false)],
+          notices: [
+            notice('1', 'Vidět'),
+            notice('2', 'Skryté', show: false),
+          ],
           drawerOpen: true,
         ),
       );
@@ -1341,124 +1394,320 @@ void main() {
       tester,
     ) async {
       fullHd(tester);
+      final slots = [fed('next', day.addDays(1), 'Příští')];
       await tester.pumpWidget(
         app(
-          notices: [notice('n1', 'Brigáda')],
-          slots: [fed('next', t.addDays(2), 'Příští')],
+          notices: [notice('1', 'Brigáda')],
+          slots: slots,
           drawerOpen: true,
           showNotices: false,
         ),
       );
       await tester.pumpAndSettle();
       expect(find.text('Brigáda'), findsNothing);
-      expect(find.text('PŘÍŠTÍ ZÁPAS'), findsOneWidget);
+      expect(find.text('ZÁPASY'), findsOneWidget);
       await finish(tester);
 
       await tester.pumpWidget(
         app(
-          notices: [notice('n1', 'Brigáda')],
-          slots: [fed('next', t.addDays(2), 'Příští')],
+          notices: [notice('1', 'Brigáda')],
+          slots: slots,
           drawerOpen: true,
           showMatches: false,
         ),
       );
       await tester.pumpAndSettle();
       expect(find.text('Brigáda'), findsOneWidget);
-      expect(find.text('PŘÍŠTÍ ZÁPAS'), findsNothing);
+      expect(find.text('ZÁPASY'), findsNothing);
 
       await finish(tester);
     });
 
-    testWidgets('history days decide which finished matches are listed', (
+    testWidgets('the matches list covers the weeks the admin chose', (
       tester,
     ) async {
       fullHd(tester);
       final slots = [
-        fed('old', t.addDays(-3), 'Čerstvý'),
-        fed('older', t.addDays(-20), 'Starší'),
+        fed('b2', Day(2026, 9, 24), 'DvaZpět'),
+        fed('b1', Day(2026, 10, 1), 'JedenZpět'),
+        fed('cur', Day(2026, 10, 9), 'Tento'),
+        fed('a1', Day(2026, 10, 15), 'JedenVpřed'),
+        fed('a2', Day(2026, 10, 22), 'DvaVpřed'),
       ];
-      final results = {
-        'old': finished,
-        'older': MatchResult.fromJson({
-          'match_id': 'older',
-          'status': 'finished',
-          'home_points': 1,
-          'away_points': 7,
-          'fetched_at': '2026-09-17T21:00:00+00:00',
-        }),
-      };
-      await tester.pumpWidget(
-        app(slots: slots, results: results, drawerOpen: true, historyDays: 7),
-      );
-      await tester.pumpAndSettle();
-      expect(find.text('6 : 2'), findsOneWidget);
-      expect(find.text('1 : 7'), findsNothing);
+      Future<void> pumpWith({
+        required int back,
+        required int ahead,
+        bool upcoming = true,
+      }) async {
+        await tester.pumpWidget(
+          app(
+            slots: slots,
+            drawerOpen: true,
+            weeksBack: back,
+            weeksAhead: ahead,
+            showUpcoming: upcoming,
+          ),
+        );
+        await tester.pumpAndSettle();
+      }
+
+      bool shown(String team) =>
+          find.textContaining(team).evaluate().any((e) {
+            final w = e.widget;
+            return w is Text || w is RichText;
+          }) &&
+          find
+              .descendant(
+                of: find.byType(KioskDrawer),
+                matching: find.textContaining(team),
+              )
+              .evaluate()
+              .isNotEmpty;
+
+      await pumpWith(back: 2, ahead: 1);
+      expect(shown('DvaZpět'), isTrue);
+      expect(shown('Tento'), isTrue);
+      expect(shown('JedenVpřed'), isTrue);
+      expect(shown('DvaVpřed'), isFalse);
       await finish(tester);
 
-      await tester.pumpWidget(
-        app(slots: slots, results: results, drawerOpen: true, historyDays: 28),
-      );
-      await tester.pumpAndSettle();
-      expect(find.text('6 : 2'), findsOneWidget);
-      expect(find.text('1 : 7'), findsOneWidget);
+      await pumpWith(back: 0, ahead: 0);
+      expect(shown('Tento'), isTrue);
+      expect(shown('JedenZpět'), isFalse);
+      expect(shown('JedenVpřed'), isFalse);
+      await finish(tester);
+
+      await pumpWith(back: 2, ahead: 2, upcoming: false);
+      expect(shown('JedenZpět'), isTrue);
+      // Upcoming off: nothing after today, not even this week's match.
+      expect(shown('Tento'), isFalse);
+      expect(shown('JedenVpřed'), isFalse);
 
       await finish(tester);
     });
 
-    testWidgets('many finished matches scroll inside the drawer, newest last',
-        (tester) async {
-      tester.view.physicalSize = const Size(1920, 700);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.reset);
+    testWidgets('„Zobrazit další“ brings one more older week', (tester) async {
+      fullHd(tester);
       final slots = [
-        for (var i = 1; i <= 12; i++) fed('m$i', t.addDays(-i), 'Tým $i'),
+        fed('b2', Day(2026, 9, 24), 'DvaZpět'),
+        fed('b1', Day(2026, 10, 1), 'JedenZpět'),
+        fed('cur', Day(2026, 10, 9), 'Tento'),
       ];
-      final results = {
-        for (final s in slots)
-          s.id: MatchResult.fromJson({
-            'match_id': s.id,
-            'status': 'finished',
-            'home_points': 5,
-            'away_points': 3,
-            'fetched_at': '2026-09-17T21:00:00+00:00',
-          }),
-      };
+      await tester.pumpWidget(
+        app(slots: slots, drawerOpen: true, weeksBack: 0, weeksAhead: 0),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Zobrazit další'), findsOneWidget);
+      expect(find.textContaining('JedenZpět'), findsNothing);
+
+      await tester.tap(find.text('Zobrazit další'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('JedenZpět'), findsWidgets);
+      expect(find.textContaining('DvaZpět'), findsNothing);
+
+      await tester.tap(find.text('Zobrazit další'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('DvaZpět'), findsWidgets);
+      // The season has nothing older: no more button.
+      expect(find.text('Zobrazit další'), findsNothing);
+
+      await finish(tester);
+    });
+
+    testWidgets('a match being played takes the whole drawer, even closed by '
+        'default, and reopens it after a minute', (tester) async {
+      fullHd(tester);
       await tester.pumpWidget(
         app(
-          notices: [notice('n1', 'Brigáda')],
-          slots: slots,
-          results: results,
+          notices: [notice('1', 'Brigáda')],
+          slots: [fed('m', day, 'Hrají')],
+          results: {'m': res('m', 'in_progress', 2, 1)},
+          lineups: {'m': lineup},
+        ),
+      );
+      await tester.pumpAndSettle();
+      // Open although the default is closed; nothing but the live match.
+      expect(find.text('PRÁVĚ SE HRAJE'), findsOneWidget);
+      expect(find.text('Brigáda'), findsNothing);
+      expect(find.text('ZÁPASY'), findsNothing);
+
+      // A visitor may close it; a minute later it is back.
+      await tester.tap(closeButton);
+      await tester.pumpAndSettle();
+      expect(find.text('PRÁVĚ SE HRAJE'), findsNothing);
+      await tester.pump(const Duration(seconds: 61));
+      await tester.pumpAndSettle();
+      expect(find.text('PRÁVĚ SE HRAJE'), findsOneWidget);
+
+      await finish(tester);
+    });
+
+    testWidgets('no data, no live view: a status alone is not enough', (
+      tester,
+    ) async {
+      fullHd(tester);
+      await tester.pumpWidget(
+        app(
+          notices: [notice('1', 'Brigáda')],
+          slots: [fed('m', day, 'Hrají')],
+          results: {'m': res('m', 'in_progress', 2, 1)},
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('PRÁVĚ SE HRAJE'), findsNothing);
+      // The drawer rests closed, as the admin set it.
+      expect(find.text('Brigáda'), findsNothing);
+
+      await finish(tester);
+    });
+
+    testWidgets('live mode off keeps the notices and the matches', (
+      tester,
+    ) async {
+      fullHd(tester);
+      await tester.pumpWidget(
+        app(
+          notices: [notice('1', 'Brigáda')],
+          slots: [fed('m', day, 'Hrají')],
+          results: {'m': res('m', 'in_progress', 2, 1)},
+          lineups: {'m': lineup},
+          liveMode: false,
           drawerOpen: true,
-          historyDays: 28,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('PRÁVĚ SE HRAJE'), findsNothing);
+      expect(find.text('Brigáda'), findsOneWidget);
+
+      await finish(tester);
+    });
+
+    testWidgets('several live matches take turns at the admin\'s speed', (
+      tester,
+    ) async {
+      fullHd(tester);
+      final second = [
+        for (final side in ['home', 'away']) player('n', side, 1),
+      ];
+      await tester.pumpWidget(
+        app(
+          slots: [fed('m', day, 'Prvníci'), fed('n', day, 'Druzí', hour: 17)],
+          results: {
+            'm': res('m', 'in_progress', 2, 1),
+            'n': res('n', 'in_progress', 1, 2),
+          },
+          lineups: {'m': lineup, 'n': second},
+          rotation: 6,
+        ),
+      );
+      await tester.pumpAndSettle();
+      bool inDrawer(String t) => find
+          .descendant(
+            of: find.byType(KioskDrawer),
+            matching: find.textContaining(t),
+          )
+          .evaluate()
+          .isNotEmpty;
+      expect(inDrawer('Prvníci'), isTrue);
+      expect(inDrawer('Druzí'), isFalse);
+
+      // Settling already ran the clock a few seconds; turn is 6 s.
+      await tester.pump(const Duration(seconds: 2));
+      expect(inDrawer('Druzí'), isFalse);
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpAndSettle();
+      expect(inDrawer('Druzí'), isTrue);
+
+      await finish(tester);
+    });
+
+    testWidgets('a notice that fits has no „Více“; a cut one has, and opens '
+        'in a modal', (tester) async {
+      fullHd(tester);
+      await tester.pumpWidget(
+        app(
+          notices: [notice('1', 'Krátký', body: 'Ahoj.')],
+          slots: [fed('next', day.addDays(1), 'Příští')],
+          drawerOpen: true,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Více'), findsNothing);
+      await finish(tester);
+
+      await tester.pumpWidget(
+        app(
+          notices: [notice('1', 'Dlouhý', body: 'Dlouhý text oznamu. ' * 80)],
+          slots: [fed('next', day.addDays(1), 'Příští')],
+          drawerOpen: true,
         ),
       );
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
-      // Opened on the newest (yesterday), the oldest is scrolled away.
-      expect(find.textContaining('Tým 1 '), findsWidgets);
-      expect(find.textContaining('Tým 12 '), findsNothing);
+      expect(find.text('Více'), findsOneWidget);
+      await tester.tap(find.text('Více'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsOneWidget);
 
       await finish(tester);
     });
 
-    testWidgets('a finished match opens its Zápis in a modal; idle closes it', (
+    testWidgets('notices taking turns never move the matches below', (
       tester,
     ) async {
       fullHd(tester);
       await tester.pumpWidget(
         app(
-          slots: [fed('old', t.addDays(-3), 'Domácí')],
-          results: {'old': finished},
-          drawerOpen: true,
-          lineup: const [
-            MatchPlayerResult(
-              id: 'p1',
-              matchId: 'old',
-              side: 'home',
-              position: 1,
-              playerName: 'Jana Nováková',
-            ),
+          notices: [
+            notice('1', 'Krátký', body: 'Ahoj.'),
+            notice('2', 'Dlouhý', body: 'Dlouhý text oznamu. ' * 80),
           ],
+          slots: [fed('next', day.addDays(1), 'Příští')],
+          drawerOpen: true,
+        ),
+      );
+      await tester.pumpAndSettle();
+      final before = tester.getTopLeft(find.text('ZÁPASY'));
+
+      await tester.pump(const Duration(seconds: 13));
+      await tester.pumpAndSettle();
+      expect(find.text('Krátký'), findsNothing);
+      expect(tester.getTopLeft(find.text('ZÁPASY')), before);
+
+      await finish(tester);
+    });
+
+    testWidgets('the admin sets the share of the notices', (tester) async {
+      fullHd(tester);
+      Future<double> matchesTop(int share) async {
+        await tester.pumpWidget(
+          app(
+            notices: [notice('1', 'Brigáda')],
+            slots: [fed('next', day.addDays(1), 'Příští')],
+            drawerOpen: true,
+            share: share,
+          ),
+        );
+        await tester.pumpAndSettle();
+        final top = tester.getTopLeft(find.text('ZÁPASY')).dy;
+        await finish(tester);
+        return top;
+      }
+
+      final small = await matchesTop(20);
+      final big = await matchesTop(60);
+      expect(big, greaterThan(small));
+    });
+
+    testWidgets('a finished match opens its Zápis in a modal of the chosen '
+        'size, no ×, a tap outside closes it', (tester) async {
+      fullHd(tester);
+      await tester.pumpWidget(
+        app(
+          slots: [fed('m', day.addDays(-3), 'Domácí')],
+          results: {'m': res('m', 'finished', 6, 2)},
+          lineups: {'m': lineup},
+          drawerOpen: true,
         ),
       );
       await tester.pumpAndSettle();
@@ -1466,10 +1715,59 @@ void main() {
       await tester.tap(find.text('6 : 2'));
       await tester.pumpAndSettle();
       expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
-      // A modal over 80 % of the screen, not a page.
       final sheet = tester.getSize(find.byType(LegacyScoreSheetPage));
       expect(sheet.width, closeTo(1920 * 0.8, 1));
       expect(sheet.height, closeTo(1080 * 0.8, 1));
+      expect(find.byIcon(Icons.close), findsNothing);
+
+      await tester.tapAt(const Offset(20, 20));
+      await tester.pumpAndSettle();
+      expect(find.byType(LegacyScoreSheetPage), findsNothing);
+
+      await finish(tester);
+    });
+
+    testWidgets('at 100 % the Zápis fills the screen and has a ×', (
+      tester,
+    ) async {
+      fullHd(tester);
+      await tester.pumpWidget(
+        app(
+          slots: [fed('m', day.addDays(-3), 'Domácí')],
+          results: {'m': res('m', 'finished', 6, 2)},
+          lineups: {'m': lineup},
+          drawerOpen: true,
+          zapisPercent: 100,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('6 : 2'));
+      await tester.pumpAndSettle();
+      final sheet = tester.getSize(find.byType(LegacyScoreSheetPage));
+      expect(sheet, const Size(1920, 1080));
+      expect(find.byIcon(Icons.close), findsOneWidget);
+      await tester.tap(find.byIcon(Icons.close));
+      await tester.pumpAndSettle();
+      expect(find.byType(LegacyScoreSheetPage), findsNothing);
+
+      await finish(tester);
+    });
+
+    testWidgets('the idle reset closes the Zápis', (tester) async {
+      fullHd(tester);
+      await tester.pumpWidget(
+        app(
+          slots: [fed('m', day.addDays(-3), 'Domácí')],
+          results: {'m': res('m', 'finished', 6, 2)},
+          lineups: {'m': lineup},
+          drawerOpen: true,
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('6 : 2'));
+      await tester.pumpAndSettle();
+      expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
 
       await tester.pump(const Duration(seconds: 61));
       await tester.pumpAndSettle();
@@ -1478,14 +1776,13 @@ void main() {
       await finish(tester);
     });
 
-    testWidgets('a match without players says so instead of drawing a sheet', (
-      tester,
-    ) async {
+    testWidgets('a match without players says so instead of drawing a sheet',
+        (tester) async {
       fullHd(tester);
       await tester.pumpWidget(
         app(
-          slots: [fed('old', t.addDays(-3), 'Domácí')],
-          results: {'old': finished},
+          slots: [fed('m', day.addDays(-3), 'Domácí')],
+          results: {'m': res('m', 'finished', 6, 2)},
           drawerOpen: true,
         ),
       );
@@ -1495,55 +1792,11 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(LegacyScoreSheetPage), findsNothing);
       expect(find.text('Zápis zápasu zatím není k dispozici.'), findsOneWidget);
+      expect(find.byIcon(Icons.close), findsNothing);
 
-      await tester.tap(find.byIcon(Icons.close));
+      await tester.tapAt(const Offset(20, 20));
       await tester.pumpAndSettle();
       expect(find.text('Zápis zápasu zatím není k dispozici.'), findsNothing);
-
-      await finish(tester);
-    });
-
-    testWidgets('notices taking turns never move the matches below', (
-      tester,
-    ) async {
-      fullHd(tester);
-      Message long(String id, String title, String body) => Message(
-        id: id,
-        kind: MessageKind.notice,
-        audience: MessageAudience.all,
-        authorId: 'a',
-        authorRole: MessageAuthorRole.admin,
-        onDate: null,
-        blockId: null,
-        title: title,
-        body: body,
-        expiresAt: null,
-        notify: true,
-        createdAt: DateTime(2026, 9, int.parse(id)),
-        updatedAt: DateTime(2026, 9, 1),
-      );
-      await tester.pumpWidget(
-        app(
-          notices: [
-            long('1', 'Krátký', 'Ahoj.'),
-            long('2', 'Dlouhý oznam ' * 6, 'Dlouhý text oznamu. ' * 60),
-          ],
-          slots: [fed('next', t.addDays(2), 'Příští')],
-          drawerOpen: true,
-        ),
-      );
-      await tester.pumpAndSettle();
-      final before = tester.getTopLeft(find.text('ZÁPASY'));
-      expect(find.text('Více'), findsOneWidget);
-
-      await tester.pump(kioskNoticeTurn + const Duration(seconds: 1));
-      await tester.pumpAndSettle();
-      expect(find.text('Krátký'), findsNothing);
-      expect(tester.getTopLeft(find.text('ZÁPASY')), before);
-
-      await tester.tap(find.text('Více'));
-      await tester.pumpAndSettle();
-      expect(find.byType(AlertDialog), findsOneWidget);
 
       await finish(tester);
     });
@@ -1551,7 +1804,10 @@ void main() {
     testWidgets('a match without a score has no Zápis to open', (tester) async {
       fullHd(tester);
       await tester.pumpWidget(
-        app(slots: [fed('next', t.addDays(2), 'Příští')], drawerOpen: true),
+        app(
+          slots: [fed('next', day.addDays(1), 'Příští')],
+          drawerOpen: true,
+        ),
       );
       await tester.pumpAndSettle();
       await tester.tap(
@@ -1562,6 +1818,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.byType(LegacyScoreSheetPage), findsNothing);
+      expect(find.text('Zápis zápasu zatím není k dispozici.'), findsNothing);
 
       await finish(tester);
     });
@@ -1570,8 +1827,8 @@ void main() {
       fullHd(tester);
       await tester.pumpWidget(app());
       await tester.pumpAndSettle();
-      expect(find.byIcon(Icons.keyboard_double_arrow_left), findsNothing);
-      expect(find.byIcon(Icons.keyboard_double_arrow_right), findsNothing);
+      expect(openButton, findsNothing);
+      expect(closeButton, findsNothing);
 
       await finish(tester);
     });

@@ -11777,7 +11777,7 @@ begin
     raise exception 'FAIL: anon can call message_set_kiosk';
   end if;
   if exists (select 1 from jsonb_object_keys(public_week('kuzelna-a', current_date)->'settings') k
-              where k like 'kiosk_show%' or k in ('kiosk_matches_history_days', 'kiosk_drawer_open')) then
+              where k like 'kiosk\_%' and k not in ('kiosk_dark', 'kiosk_fit_day')) then
     raise exception 'FAIL: the public overview hands out a kiosk panel setting';
   end if;
   raise notice 'OK: anon cannot toggle, and the public overview hides the kiosk panel settings (0065)';

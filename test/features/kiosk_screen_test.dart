@@ -293,18 +293,56 @@ void main() {
     expect(lastPatch(), {'kiosk_drawer_open': true});
   });
 
-  testWidgets('the history of matches is chosen in weeks', (tester) async {
+  testWidgets('the weeks of matches, width, share, Zápis size and rotation '
+      'are chosen from lists', (tester) async {
     tall(tester);
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
 
-    // 21 days by default.
-    expect(find.text('3 týdny'), findsOneWidget);
-    await tester.tap(find.text('3 týdny'));
+    Future<void> pick(String field, String current, String wanted) async {
+      await tester.ensureVisible(find.text(field));
+      await tester.tap(find.text(current));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(wanted).last);
+      await tester.pumpAndSettle();
+    }
+
+    Map<String, dynamic> lastPatch() => jsonDecode(
+          requests.lastWhere((r) => r.method == 'PATCH').body,
+        ) as Map<String, dynamic>;
+
+    // The defaults: 2 weeks back, 1 ahead, 440 px, 40 %, 80 %, 12 s.
+    await pick('Odehrané zápasy', '2 týdny zpět', 'Jen aktuální týden');
+    expect(lastPatch(), {'kiosk_weeks_back': 0});
+    await pick('Budoucí zápasy', '1 týden dopředu', '3 týdny dopředu');
+    expect(lastPatch(), {'kiosk_weeks_ahead': 3});
+    await pick('Šířka panelu', '440 px', '600 px');
+    expect(lastPatch(), {'kiosk_drawer_width': 600});
+    await pick('Podíl nástěnky na výšce panelu', '40 %', '60 %');
+    expect(lastPatch(), {'kiosk_notices_share': 60});
+    await pick('Velikost zápisu', '80 % obrazovky', 'Celá obrazovka (s křížkem)');
+    expect(lastPatch(), {'kiosk_zapis_percent': 100});
+    await pick('Střídání oznamů a zápasů', 'po 12 s', 'po 20 s');
+    expect(lastPatch(), {'kiosk_rotation_seconds': 20});
+  });
+
+  testWidgets('the upcoming matches and the live match have their switches',
+      (tester) async {
+    tall(tester);
+    await tester.pumpWidget(app());
     await tester.pumpAndSettle();
-    await tester.tap(find.text('8 týdnů').last);
+
+    Map<String, dynamic> lastPatch() => jsonDecode(
+          requests.lastWhere((r) => r.method == 'PATCH').body,
+        ) as Map<String, dynamic>;
+
+    await tester.tap(find.widgetWithText(SwitchListTile, 'Následující zápasy'));
     await tester.pumpAndSettle();
-    final patch = requests.lastWhere((r) => r.method == 'PATCH');
-    expect(jsonDecode(patch.body), {'kiosk_matches_history_days': 56});
+    expect(lastPatch(), {'kiosk_show_upcoming': false});
+
+    await tester.tap(find.widgetWithText(
+        SwitchListTile, 'Aktuální zápas přes celý panel'));
+    await tester.pumpAndSettle();
+    expect(lastPatch(), {'kiosk_live_mode': false});
   });
 }
