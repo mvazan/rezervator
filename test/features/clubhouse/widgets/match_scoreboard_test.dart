@@ -211,6 +211,24 @@ void main() {
       expect(find.text(freshnessLabel(rudnaResult.fetchedAt, _now)), findsOneWidget);
     });
 
+    testWidgets('showFreshness: false leaves the age out (the kiosk has its '
+        'own)', (tester) async {
+      await tester.pumpWidget(
+        _host(
+          MatchScoreboard(
+            slot: rudnaSlot,
+            result: rudnaResult,
+            players: rudnaPlayers,
+            now: _now,
+            showFreshness: false,
+          ),
+        ),
+      );
+      expect(find.byIcon(Icons.refresh), findsNothing);
+      expect(find.text(freshnessLabel(rudnaResult.fetchedAt, _now)), findsNothing);
+      expect(find.text('Dokončeno'), findsOneWidget);
+    });
+
     testWidgets("the winner's name is w800, the loser's w400", (tester) async {
       await pump(tester);
       expect(

@@ -59,7 +59,7 @@ void main() {
   // The page is long (the panel options sit above the address): a tall
   // window keeps every section built.
   void tall(WidgetTester tester) {
-    tester.view.physicalSize = const Size(800, 2400);
+    tester.view.physicalSize = const Size(800, 4200);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
   }
@@ -99,15 +99,15 @@ void main() {
   }
 
   testWidgets(
-      'toggling "Kiosk: tmavý režim" PATCHes schedule_settings.kiosk_dark',
+      'toggling "Tmavý režim" PATCHes schedule_settings.kiosk_dark',
       (tester) async {
     tall(tester);
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
 
-    expect(find.text('Kiosk: tmavý režim'), findsOneWidget);
+    expect(find.text('Tmavý režim'), findsOneWidget);
 
-    await tester.tap(find.widgetWithText(SwitchListTile, 'Kiosk: tmavý režim'));
+    await tester.tap(find.widgetWithText(SwitchListTile, 'Tmavý režim'));
     await tester.pumpAndSettle();
 
     final patch = requests.firstWhere(
@@ -119,14 +119,14 @@ void main() {
   });
 
   testWidgets(
-      'toggling "Kiosk: celý den na obrazovku" PATCHes '
+      'toggling "Celý den na obrazovku" PATCHes '
       'schedule_settings.kiosk_fit_day', (tester) async {
     tall(tester);
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
 
     final tile =
-        find.widgetWithText(SwitchListTile, 'Kiosk: celý den na obrazovku');
+        find.widgetWithText(SwitchListTile, 'Celý den na obrazovku');
     expect(tile, findsOneWidget);
     await tester.ensureVisible(tile);
     await tester.tap(tile);
@@ -291,10 +291,10 @@ void main() {
           requests.lastWhere((r) => r.method == 'PATCH').body,
         ) as Map<String, dynamic>;
 
-    await tester.ensureVisible(find.text('Nástěnka na kiosku'));
+    await tester.ensureVisible(find.text('Kde se oznamy zobrazí'));
     await tester.tap(find.text('V záhlaví i v panelu'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('V záhlaví').last);
+    await tester.tap(find.text('Jen v záhlaví').last);
     await tester.pumpAndSettle();
     expect(lastPatch(), {'kiosk_notices_mode': 'header'});
 
@@ -303,59 +303,109 @@ void main() {
     expect(lastPatch(), {'kiosk_show_matches': false});
 
     await tester.tap(
-        find.widgetWithText(SwitchListTile, 'Panel je výchozně rozbalený'));
+        find.widgetWithText(SwitchListTile, 'Výchozně rozbalený'));
     await tester.pumpAndSettle();
     expect(lastPatch(), {'kiosk_drawer_open': true});
   });
 
-  testWidgets('the weeks of matches, width, share, Zápis size and the two '
-      'rotations are chosen from lists', (tester) async {
+  /// Types [text] into the number field [label] and presses Enter.
+  Future<void> enter(WidgetTester tester, String label, String text) async {
+    final field = find.widgetWithText(TextField, label);
+    await tester.ensureVisible(field);
+    await tester.enterText(field, text);
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('the numbers are typed in: each PATCHes its own column on '
+      'Enter', (tester) async {
     tall(tester);
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
-
-    Future<void> pick(String field, String current, String wanted) async {
-      await tester.ensureVisible(find.text(field));
-      await tester.tap(find.text(current).first);
-      await tester.pumpAndSettle();
-      await tester.tap(find.text(wanted).last);
-      await tester.pumpAndSettle();
-    }
 
     Map<String, dynamic> lastPatch() => jsonDecode(
           requests.lastWhere((r) => r.method == 'PATCH').body,
         ) as Map<String, dynamic>;
 
-    // The defaults: 2 weeks back, 1 ahead, 440 px, 40 %, 80 %, 12 s each.
-    await pick('Odehrané zápasy', '2 týdny zpět', 'Jen aktuální týden');
-    expect(lastPatch(), {'kiosk_weeks_back': 0});
-    await pick('Budoucí zápasy', '1 týden dopředu', '3 týdny dopředu');
-    expect(lastPatch(), {'kiosk_weeks_ahead': 3});
-    await pick('Šířka panelu', '440 px', '600 px');
-    expect(lastPatch(), {'kiosk_drawer_width': 600});
-    await pick('Podíl nástěnky na výšce panelu', '40 %', '60 %');
-    expect(lastPatch(), {'kiosk_notices_share': 60});
-    await pick('Velikost zápisu', '80 % obrazovky',
-        'Celá obrazovka (s křížkem)');
-    expect(lastPatch(), {'kiosk_zapis_percent': 100});
-    await pick('Střídání oznamů', 'po 12 s', 'po 20 s');
+    // The defaults are in the fields: 60 s, 440 px, 2 weeks back.
+    String shown(String label) =>
+        tester.widget<TextField>(find.widgetWithText(TextField, label))
+            .controller!.text;
+    expect(shown('Doba nečinnosti'), '60');
+    expect(shown('Šířka panelu'), '440');
+    expect(shown('Odehrané zápasy: týdnů zpět'), '2');
+
+    await enter(tester, 'Doba nečinnosti', '300');
+    expect(lastPatch(), {'kiosk_idle_seconds': 300});
+    await enter(tester, 'Střídání oznamů', '20');
     expect(lastPatch(), {'kiosk_notices_rotation_seconds': 20});
-    await pick('Střídání aktuálních zápasů', 'po 12 s', 'po 30 s');
+    await enter(tester, 'Šířka panelu', '600');
+    expect(lastPatch(), {'kiosk_drawer_width': 600});
+    await enter(tester, 'Podíl nástěnky na výšce panelu', '60');
+    expect(lastPatch(), {'kiosk_notices_share': 60});
+    await enter(tester, 'Odehrané zápasy: týdnů zpět', '0');
+    expect(lastPatch(), {'kiosk_weeks_back': 0});
+    await enter(tester, 'Budoucí zápasy: týdnů dopředu', '3');
+    expect(lastPatch(), {'kiosk_weeks_ahead': 3});
+    await enter(tester, 'Kontrola výsledků', '120');
+    expect(lastPatch(), {'kiosk_live_refresh_seconds': 120});
+    await enter(tester, 'Střídání hraných zápasů', '30');
     expect(lastPatch(), {'kiosk_live_rotation_seconds': 30});
+    await enter(tester, 'Velikost zápisu', '100');
+    expect(lastPatch(), {'kiosk_zapis_percent': 100});
   });
 
-  testWidgets('the idle time is chosen from a list', (tester) async {
+  testWidgets('a number out of its range is refused: the field says the '
+      'range and nothing is written; the same number writes nothing either',
+      (tester) async {
     tall(tester);
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
-    // The default is a minute.
-    await tester.ensureVisible(find.text('Doba nečinnosti'));
-    await tester.tap(find.text('1 min').first);
+    int patches() => requests.where((r) => r.method == 'PATCH').length;
+
+    await enter(tester, 'Velikost zápisu', '120');
+    expect(find.text('Zadej číslo od 50 do 100.'), findsOneWidget);
+    expect(patches(), 0);
+    await enter(tester, 'Doba nečinnosti', '');
+    expect(find.text('Zadej číslo od 10 do 3600.'), findsOneWidget);
+    expect(patches(), 0);
+    // The default again: no write, and the error goes away.
+    await enter(tester, 'Doba nečinnosti', '60');
+    expect(find.text('Zadej číslo od 10 do 3600.'), findsNothing);
+    expect(patches(), 0);
+  });
+
+  testWidgets('leaving a number field writes it too', (tester) async {
+    tall(tester);
+    await tester.pumpWidget(app());
     await tester.pumpAndSettle();
-    await tester.tap(find.text('5 min').last);
+    final field = find.widgetWithText(TextField, 'Šířka panelu');
+    await tester.ensureVisible(field);
+    await tester.enterText(field, '520');
+    // Focus moves on to another field: the first one commits.
+    await tester.tap(find.widgetWithText(TextField, 'Doba nečinnosti'));
     await tester.pumpAndSettle();
     expect(jsonDecode(requests.lastWhere((r) => r.method == 'PATCH').body),
-        {'kiosk_idle_seconds': 300});
+        {'kiosk_drawer_width': 520});
+  });
+
+  testWidgets('the options come in sections: screen, notices, panel, live '
+      'match, then the address and the accounts', (tester) async {
+    tall(tester);
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+    double top(String text) => tester.getTopLeft(find.text(text)).dy;
+    final order = [
+      top('Obrazovka kiosku'),
+      top('Nástěnka'),
+      top('Postranní panel'),
+      top('Hraný zápas'),
+      top('Adresa pro tablet'),
+      top('Kioskové účty'),
+    ];
+    for (var i = 1; i < order.length; i++) {
+      expect(order[i - 1], lessThan(order[i]), reason: 'section $i');
+    }
   });
 
   testWidgets('the live match\'s drawing is chosen from a list', (tester) async {
@@ -365,7 +415,7 @@ void main() {
     Map<String, dynamic> lastPatch() => jsonDecode(
           requests.lastWhere((r) => r.method == 'PATCH').body,
         ) as Map<String, dynamic>;
-    await tester.ensureVisible(find.text('Zobrazení aktuálního zápasu'));
+    await tester.ensureVisible(find.text('Zobrazení hraného zápasu'));
     // The default: the cards. Zápis is the app's own layout, never offered.
     await tester.tap(find.text('Podrobné — karty soubojů').first);
     await tester.pumpAndSettle();
@@ -390,19 +440,20 @@ void main() {
     await tester.pumpWidget(app(panelEnabled: false));
     await tester.pumpAndSettle();
 
-    expect(find.widgetWithText(SwitchListTile, 'Panel vpravo'), findsOneWidget);
+    expect(find.widgetWithText(SwitchListTile, 'Panel zapnutý'), findsOneWidget);
     for (final dependent in [
-      'Panel je výchozně rozbalený',
+      'Výchozně rozbalený',
       'Zápasy v panelu',
-      'Aktuální zápas přes celý panel',
+      'Hraný zápas přes celý panel',
     ]) {
       expect(find.widgetWithText(SwitchListTile, dependent), findsNothing);
     }
     expect(find.text('Šířka panelu'), findsNothing);
+    expect(find.text('Hraný zápas'), findsNothing);
     // The notices can still go to the status bar without the panel.
-    expect(find.text('Nástěnka na kiosku'), findsOneWidget);
+    expect(find.text('Kde se oznamy zobrazí'), findsOneWidget);
 
-    await tester.tap(find.widgetWithText(SwitchListTile, 'Panel vpravo'));
+    await tester.tap(find.widgetWithText(SwitchListTile, 'Panel zapnutý'));
     await tester.pumpAndSettle();
     expect(jsonDecode(requests.lastWhere((r) => r.method == 'PATCH').body),
         {'kiosk_panel_enabled': true});
@@ -423,9 +474,13 @@ void main() {
     ));
     await tester.pumpAndSettle();
     expect(find.text('Střídání oznamů'), findsNothing);
-    expect(find.text('Střídání aktuálních zápasů'), findsNothing);
+    expect(find.text('Střídání hraných zápasů'), findsNothing);
+    expect(find.text('Kontrola výsledků'), findsNothing);
     // Without the notices the notices' share has nothing to share either.
     expect(find.text('Podíl nástěnky na výšce panelu'), findsNothing);
+    // The Zápis size is not the live match's alone: a finished match in the
+    // list opens one too.
+    expect(find.text('Velikost zápisu'), findsOneWidget);
   });
 
   testWidgets('the look back into the past is an on/off and a number of days',
@@ -438,12 +493,30 @@ void main() {
           requests.lastWhere((r) => r.method == 'PATCH').body,
         ) as Map<String, dynamic>;
 
-    // Off by default: no number to choose.
-    expect(find.text('Jak daleko zpět'), findsNothing);
+    // Off by default: no number to type.
+    expect(find.text('Kolik dní zpět'), findsNothing);
     await tester.tap(
-        find.widgetWithText(SwitchListTile, 'Kiosk: posun do minulosti'));
+        find.widgetWithText(SwitchListTile, 'Posun tabule do minulosti'));
     await tester.pumpAndSettle();
     expect(lastPatch(), {'kiosk_past_days': 7});
+
+    // On: the number shows and is typed in. (A fresh scope: a ProviderScope
+    // keeps the overrides it was born with.)
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(app(
+      settings: const ScheduleSettings(
+        laneCount: 4,
+        trainingWeekdays: {1},
+        bookingHorizonDays: 14,
+        maxActiveReservations: 3,
+        kioskPastDays: 7,
+        tenantId: 't',
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await enter(tester, 'Kolik dní zpět', '14');
+    expect(lastPatch(), {'kiosk_past_days': 14});
   });
 
   testWidgets('the upcoming matches and the live match have their switches',
@@ -456,12 +529,12 @@ void main() {
           requests.lastWhere((r) => r.method == 'PATCH').body,
         ) as Map<String, dynamic>;
 
-    await tester.tap(find.widgetWithText(SwitchListTile, 'Následující zápasy'));
+    await tester.tap(find.widgetWithText(SwitchListTile, 'I budoucí zápasy'));
     await tester.pumpAndSettle();
     expect(lastPatch(), {'kiosk_show_upcoming': false});
 
     await tester.tap(find.widgetWithText(
-        SwitchListTile, 'Aktuální zápas přes celý panel'));
+        SwitchListTile, 'Hraný zápas přes celý panel'));
     await tester.pumpAndSettle();
     expect(lastPatch(), {'kiosk_live_mode': false});
   });

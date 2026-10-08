@@ -1254,6 +1254,8 @@ class _LiveMatchState extends ConsumerState<_LiveMatch> {
             now: now,
             homeColor: homeSideColor,
             awayColor: awaySideColor,
+            // The row above says how old the score is.
+            showFreshness: false,
           ),
         ),
         Expanded(

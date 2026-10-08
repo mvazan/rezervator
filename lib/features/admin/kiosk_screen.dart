@@ -6,11 +6,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/kiosk_url.dart';
 import '../../core/ui.dart';
 import '../../data/providers.dart';
-import '../../domain/labels.dart' show czechCount;
 import '../../domain/models.dart';
 import '../auth/update_screen.dart' show UpdateScreen;
 import 'widgets/admin_scaffold.dart';
 import 'widgets/copyable_address.dart';
+import 'widgets/number_setting_field.dart';
 
 /// Admin: kiosk-specific settings (the board theme) and the kiosk accounts
 /// themselves. The accounts live here, not among Hráči: a kiosk is the
@@ -99,21 +99,35 @@ class KioskSettingsScreen extends ConsumerWidget {
 
   static String _noticesLabel(KioskNoticesMode m) => switch (m) {
     KioskNoticesMode.off => 'Nezobrazovat',
-    KioskNoticesMode.drawer => 'V panelu',
-    KioskNoticesMode.header => 'V záhlaví',
+    KioskNoticesMode.drawer => 'Jen v panelu',
+    KioskNoticesMode.header => 'Jen v záhlaví',
     KioskNoticesMode.both => 'V záhlaví i v panelu',
   };
-
-  static const _weekChoices = [0, 1, 2, 3, 4];
-
-  static String _weeksLabel(int n, String direction) => n == 0
-      ? 'Jen aktuální týden'
-      : '${czechCount(n, 'týden', 'týdny', 'týdnů')} $direction';
 
   /// The note under the two ranges: they are only where the list opens.
   static const _rangeNote =
       'Jen výchozí rozsah — na kiosku jde posouvat celou sezónu '
       '(„Zobrazit další“).';
+
+  /// A section: its title, a line on what it is about, and its options.
+  Widget _section(
+    BuildContext context,
+    String title,
+    String about,
+    List<Widget> children,
+  ) => Padding(
+    padding: const EdgeInsets.only(bottom: 24),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 4),
+        Text(about, style: Theme.of(context).textTheme.bodyMedium),
+        const SizedBox(height: 8),
+        ...children,
+      ],
+    ),
+  );
 
   /// A switch writing [column]: the bool itself, or — for a number column —
   /// what [toValue] makes of it.
@@ -137,33 +151,31 @@ class KioskSettingsScreen extends ConsumerWidget {
           }),
   );
 
-  Widget _choice(
+  /// A number the admin types, between [min] and [max], written to
+  /// [column] on Enter or when the field loses focus.
+  Widget _number(
     BuildContext context,
     ScheduleSettings? settings,
     String label,
     int value,
-    String column,
-    List<int> choices,
-    String Function(int) text, {
+    String column, {
+    required String unit,
+    required int min,
+    required int max,
     String? helper,
   }) => Padding(
     padding: const EdgeInsets.only(bottom: 12),
-    child: DropdownButtonFormField<int>(
-      // A value the list does not offer (set by hand) still shows.
-      initialValue: value,
-      decoration: InputDecoration(
-        labelText: label,
-        helperText: helper,
-        helperMaxLines: 2,
-        border: const OutlineInputBorder(),
-      ),
-      items: [
-        for (final n in {...choices, value}.toList()..sort())
-          DropdownMenuItem(value: n, child: Text(text(n))),
-      ],
+    child: NumberSettingField(
+      key: ValueKey(column),
+      label: label,
+      value: value,
+      unit: unit,
+      min: min,
+      max: max,
+      helper: helper,
       onChanged: settings == null
           ? null
-          : (n) => n == null ? null : _panel(context, settings, {column: n}),
+          : (n) => _panel(context, settings, {column: n}),
     ),
   );
 
@@ -199,294 +211,350 @@ class KioskSettingsScreen extends ConsumerWidget {
         builder: (settings) => ListView(
           padding: padWithSystemInset(context, const EdgeInsets.all(16)),
           children: [
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Kiosk: tmavý režim'),
-              subtitle: const Text('Vypnuto = kiosková obrazovka světlá.'),
-              value: settings?.kioskDark ?? true,
-              onChanged: settings == null
-                  ? null
-                  : (value) => tryAction(
-                      context,
-                      () =>
-                          Api.setKioskDark(value, tenantId: settings.tenantId),
-                      errorText: friendlyDbError,
-                    ),
-            ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Kiosk: celý den na obrazovku'),
-              subtitle: const Text(
-                'Zapnuto = celý rozvrh dne se vejde na obrazovku bez '
-                'posouvání. Vypnuto = sloty mají pohodlnou velikost a tabule '
-                'se posouvá (po nečinnosti se sama vrátí na aktuální čas).',
-              ),
-              value: settings?.kioskFitDay ?? true,
-              onChanged: settings == null
-                  ? null
-                  : (value) => tryAction(
-                      context,
-                      () => Api.setKioskFitDay(
-                        value,
-                        tenantId: settings.tenantId,
-                      ),
-                      errorText: friendlyDbError,
-                    ),
-            ),
-            _choice(
+            _section(
               context,
-              settings,
-              'Doba nečinnosti',
-              settings?.kioskIdleSeconds ?? 60,
-              'kiosk_idle_seconds',
-              const [30, 60, 120, 300],
-              (n) => n < 60 ? '$n s' : '${n ~/ 60} min',
-              helper:
-                  'Po ní kiosk zapomene vybraného hráče, zavře okna a '
-                  'zápis, vrátí tabuli na dnešek a panel do výchozího stavu.',
-            ),
-            _switch(
-              context,
-              settings,
-              'Kiosk: posun do minulosti',
-              (settings?.kioskPastDays ?? 0) > 0,
-              'kiosk_past_days',
-              subtitle:
-                  'Návštěvník může tabuli posunout o pár dní zpět '
-                  'a podívat se, kdo trénoval. Po době nečinnosti se '
-                  'tabule vrátí na dnešek.',
-              toValue: (on) => on ? 7 : 0,
-            ),
-            if ((settings?.kioskPastDays ?? 0) > 0)
-              _choice(
-                context,
-                settings,
-                'Jak daleko zpět',
-                settings?.kioskPastDays ?? 7,
-                'kiosk_past_days',
-                const [1, 2, 3, 7, 14, 30],
-                (n) => czechCount(n, 'den', 'dny', 'dní'),
-              ),
-            const SizedBox(height: 8),
-            _choice(
-              context,
-              settings,
-              'Velikost zápisu',
-              settings?.kioskZapisPercent ?? 80,
-              'kiosk_zapis_percent',
-              const [60, 70, 80, 90, 100],
-              (n) => n == 100 ? 'Celá obrazovka (s křížkem)' : '$n % obrazovky',
-            ),
-            const SizedBox(height: 8),
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: DropdownButtonFormField<KioskNoticesMode>(
-                initialValue:
-                    settings?.kioskNoticesMode ?? KioskNoticesMode.both,
-                decoration: const InputDecoration(
-                  labelText: 'Nástěnka na kiosku',
-                  helperText:
-                      'Záhlaví = nadpis jednoho oznamu nahoře mezi '
-                      'časem a Rezervovat, oznamy se střídají.',
-                  helperMaxLines: 2,
-                  border: OutlineInputBorder(),
+              'Obrazovka kiosku',
+              'Tablet na zdi kuželny: jak vypadá tabule a co se stane, když '
+                  'se ho nikdo nedotýká.',
+              [
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Tmavý režim'),
+                  subtitle: const Text('Vypnuto = světlá obrazovka.'),
+                  value: settings?.kioskDark ?? true,
+                  onChanged: settings == null
+                      ? null
+                      : (value) => tryAction(
+                          context,
+                          () => Api.setKioskDark(
+                            value,
+                            tenantId: settings.tenantId,
+                          ),
+                          errorText: friendlyDbError,
+                        ),
                 ),
-                items: [
-                  for (final m in KioskNoticesMode.values)
-                    DropdownMenuItem(value: m, child: Text(_noticesLabel(m))),
-                ],
-                onChanged: settings == null
-                    ? null
-                    : (m) => m == null
-                          ? null
-                          : _panel(context, settings, {
-                              'kiosk_notices_mode': m.name,
-                            }),
-              ),
-            ),
-            if ((settings?.kioskNoticesMode ?? KioskNoticesMode.both) !=
-                KioskNoticesMode.off)
-              _choice(
-                context,
-                settings,
-                'Střídání oznamů',
-                settings?.kioskNoticesRotationSeconds ?? 12,
-                'kiosk_notices_rotation_seconds',
-                const [6, 8, 12, 20, 30, 60],
-                (n) => 'po $n s',
-              ),
-            const SizedBox(height: 24),
-            Text(
-              'Panel vpravo',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              'Postranní panel kiosku ukazuje nástěnku a zápasy. Návštěvník '
-              'ho rozbalí a sbalí, po době nečinnosti se vrátí do výchozího '
-              'stavu. Které oznamy se na kiosku ukážou, volíš přímo na '
-              'nástěnce (⋮ u oznamu).',
-            ),
-            _switch(
-              context,
-              settings,
-              'Panel vpravo',
-              settings?.kioskPanelEnabled ?? true,
-              'kiosk_panel_enabled',
-            ),
-            if (settings?.kioskPanelEnabled ?? true) ...[
-              _choice(
-                context,
-                settings,
-                'Šířka panelu',
-                settings?.kioskDrawerWidth ?? 440,
-                'kiosk_drawer_width',
-                const [360, 440, 520, 600, 720],
-                (n) => '$n px',
-              ),
-              _switch(
-                context,
-                settings,
-                'Panel je výchozně rozbalený',
-                settings?.kioskDrawerOpen ?? false,
-                'kiosk_drawer_open',
-                subtitle:
-                    'Vypnuto = panel je skrytý a rozbalí se '
-                    'tlačítkem na okraji obrazovky.',
-              ),
-              _switch(
-                context,
-                settings,
-                'Zápasy v panelu',
-                settings?.kioskShowMatches ?? true,
-                'kiosk_show_matches',
-                subtitle:
-                    'Klepnutím na odehraný zápas se otevře jeho '
-                    'zápis.',
-              ),
-              if (settings?.kioskShowMatches ?? true) ...[
-                _switch(
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Celý den na obrazovku'),
+                  subtitle: const Text(
+                    'Zapnuto = rozvrh celého dne se vejde na obrazovku bez '
+                    'posouvání. Vypnuto = sloty mají pohodlnou velikost a '
+                    'tabule se posouvá; po době nečinnosti se vrátí na '
+                    'aktuální čas.',
+                  ),
+                  value: settings?.kioskFitDay ?? true,
+                  onChanged: settings == null
+                      ? null
+                      : (value) => tryAction(
+                          context,
+                          () => Api.setKioskFitDay(
+                            value,
+                            tenantId: settings.tenantId,
+                          ),
+                          errorText: friendlyDbError,
+                        ),
+                ),
+                _number(
                   context,
                   settings,
-                  'Následující zápasy',
-                  settings?.kioskShowUpcoming ?? true,
-                  'kiosk_show_upcoming',
+                  'Doba nečinnosti',
+                  settings?.kioskIdleSeconds ?? 60,
+                  'kiosk_idle_seconds',
+                  unit: 's',
+                  min: 10,
+                  max: 3600,
+                  helper:
+                      'Po tolika sekundách bez dotyku kiosk zapomene '
+                      'vybraného hráče, zavře okna i zápis, vrátí tabuli na '
+                      'dnešek a panel do výchozího stavu.',
                 ),
                 _switch(
                   context,
                   settings,
-                  'Zápasy sledují tabuli',
-                  settings?.kioskFollowBoard ?? true,
-                  'kiosk_follow_board',
-                  subtitle: 'Když návštěvník posune tabuli na jiné dny, '
-                      'seznam zápasů naskočí na zápasy těch dnů.',
+                  'Posun tabule do minulosti',
+                  (settings?.kioskPastDays ?? 0) > 0,
+                  'kiosk_past_days',
+                  subtitle:
+                      'Návštěvník může tabuli posunout o pár dní zpět a '
+                      'podívat se, kdo trénoval.',
+                  toValue: (on) => on ? 7 : 0,
                 ),
-                _choice(
-                  context,
-                  settings,
-                  'Odehrané zápasy',
-                  settings?.kioskWeeksBack ?? 2,
-                  'kiosk_weeks_back',
-                  _weekChoices,
-                  (n) => _weeksLabel(n, 'zpět'),
-                  helper: _rangeNote,
-                ),
-                if (settings?.kioskShowUpcoming ?? true)
-                  _choice(
+                if ((settings?.kioskPastDays ?? 0) > 0)
+                  _number(
                     context,
                     settings,
-                    'Budoucí zápasy',
-                    settings?.kioskWeeksAhead ?? 1,
-                    'kiosk_weeks_ahead',
-                    _weekChoices,
-                    (n) => _weeksLabel(n, 'dopředu'),
-                    helper: _rangeNote,
+                    'Kolik dní zpět',
+                    settings?.kioskPastDays ?? 7,
+                    'kiosk_past_days',
+                    unit: 'dní',
+                    min: 1,
+                    max: 365,
                   ),
               ],
-              _switch(
-                context,
-                settings,
-                'Aktuální zápas přes celý panel',
-                settings?.kioskLiveMode ?? true,
-                'kiosk_live_mode',
-                subtitle:
-                    'Zápas, který se hraje a má data, zabere celý '
-                    'panel (souboje) a panel zůstane rozbalený — i když '
-                    'ho návštěvník zavře, po době nečinnosti se rozbalí '
-                    'znovu.',
-              ),
-              if (settings?.kioskLiveMode ?? true)
+            ),
+            _section(
+              context,
+              'Nástěnka',
+              'Oznamy z nástěnky klubu. Který oznam se na kiosku ukáže, '
+                  'volíš přímo na nástěnce (⋮ u oznamu).',
+              [
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: DropdownButtonFormField<MatchLayout>(
+                  padding: const EdgeInsets.only(top: 8, bottom: 12),
+                  child: DropdownButtonFormField<KioskNoticesMode>(
                     initialValue:
-                        settings?.kioskLiveLayout ?? MatchLayout.full,
+                        settings?.kioskNoticesMode ?? KioskNoticesMode.both,
                     decoration: const InputDecoration(
-                      labelText: 'Zobrazení aktuálního zápasu',
+                      labelText: 'Kde se oznamy zobrazí',
+                      helperText:
+                          'Záhlaví = stavový řádek nahoře, nadpis jednoho '
+                          'oznamu. Panel = postranní panel vpravo (níž).',
+                      helperMaxLines: 3,
                       border: OutlineInputBorder(),
                     ),
-                    items: const [
-                      DropdownMenuItem(
-                        value: MatchLayout.full,
-                        child: Text('Podrobné — karty soubojů'),
-                      ),
-                      DropdownMenuItem(
-                        value: MatchLayout.compact,
-                        child: Text('Kompaktní — bez posouvání'),
-                      ),
-                      DropdownMenuItem(
-                        value: MatchLayout.table,
-                        child: Text('Tabulka — souboj na řádek'),
-                      ),
+                    items: [
+                      for (final m in KioskNoticesMode.values)
+                        DropdownMenuItem(
+                          value: m,
+                          child: Text(_noticesLabel(m)),
+                        ),
                     ],
                     onChanged: settings == null
                         ? null
                         : (m) => m == null
-                            ? null
-                            : _panel(
-                                context,
-                                settings,
-                                {'kiosk_live_layout': m.name},
-                              ),
+                              ? null
+                              : _panel(context, settings, {
+                                  'kiosk_notices_mode': m.name,
+                                }),
                   ),
                 ),
-              if (settings?.kioskLiveMode ?? true)
-                _choice(
+                if ((settings?.kioskNoticesMode ?? KioskNoticesMode.both) !=
+                    KioskNoticesMode.off)
+                  _number(
+                    context,
+                    settings,
+                    'Střídání oznamů',
+                    settings?.kioskNoticesRotationSeconds ?? 12,
+                    'kiosk_notices_rotation_seconds',
+                    unit: 's',
+                    min: 3,
+                    max: 600,
+                    helper:
+                        'Po kolika sekundách se ukáže další oznam '
+                        '(v záhlaví i v panelu).',
+                  ),
+              ],
+            ),
+            _section(
+              context,
+              'Postranní panel',
+              'Panel vpravo vedle tabule s nástěnkou a zápasy. Návštěvník '
+                  'ho rozbalí a sbalí tlačítkem na okraji obrazovky; po době '
+                  'nečinnosti se vrátí do výchozího stavu.',
+              [
+                _switch(
                   context,
                   settings,
-                  'Kontrola výsledků hraného zápasu',
-                  settings?.kioskLiveRefreshSeconds ?? 60,
-                  'kiosk_live_refresh_seconds',
-                  const [30, 60, 120, 300],
-                  (n) => n < 60
-                      ? 'každých $n s'
-                      : n == 60
-                          ? 'každou minutu'
-                          : 'každé ${n ~/ 60} min',
+                  'Panel zapnutý',
+                  settings?.kioskPanelEnabled ?? true,
+                  'kiosk_panel_enabled',
+                  subtitle: 'Vypnuto = kiosk ukazuje jen tabuli.',
                 ),
-              if (settings?.kioskLiveMode ?? true)
-                _choice(
-                  context,
-                  settings,
-                  'Střídání aktuálních zápasů',
-                  settings?.kioskLiveRotationSeconds ?? 12,
-                  'kiosk_live_rotation_seconds',
-                  const [6, 8, 12, 20, 30, 60],
-                  (n) => 'po $n s',
-                ),
-              if ((settings?.kioskShowNotices ?? true) &&
-                  (settings?.kioskShowMatches ?? true))
-                _choice(
-                  context,
-                  settings,
-                  'Podíl nástěnky na výšce panelu',
-                  settings?.kioskNoticesShare ?? 40,
-                  'kiosk_notices_share',
-                  const [20, 30, 40, 50, 60, 70],
-                  (n) => '$n %',
-                ),
-            ],
-            const SizedBox(height: 24),
+                if (settings?.kioskPanelEnabled ?? true) ...[
+                  _switch(
+                    context,
+                    settings,
+                    'Výchozně rozbalený',
+                    settings?.kioskDrawerOpen ?? false,
+                    'kiosk_drawer_open',
+                    subtitle:
+                        'Vypnuto = po době nečinnosti je panel skrytý a '
+                        'čeká na tlačítko.',
+                  ),
+                  _number(
+                    context,
+                    settings,
+                    'Šířka panelu',
+                    settings?.kioskDrawerWidth ?? 440,
+                    'kiosk_drawer_width',
+                    unit: 'px',
+                    min: 240,
+                    max: 1200,
+                    helper: 'Na užší obrazovce zabere nejvýš 60 % šířky.',
+                  ),
+                  if ((settings?.kioskShowNotices ?? true) &&
+                      (settings?.kioskShowMatches ?? true))
+                    _number(
+                      context,
+                      settings,
+                      'Podíl nástěnky na výšce panelu',
+                      settings?.kioskNoticesShare ?? 40,
+                      'kiosk_notices_share',
+                      unit: '%',
+                      min: 10,
+                      max: 90,
+                      helper:
+                          'Kolik výšky panelu dostanou oznamy; zbytek mají '
+                          'zápasy.',
+                    ),
+                  _switch(
+                    context,
+                    settings,
+                    'Zápasy v panelu',
+                    settings?.kioskShowMatches ?? true,
+                    'kiosk_show_matches',
+                    subtitle:
+                        'Seznam zápasů kuželny. Klepnutím na odehraný '
+                        'zápas se otevře jeho zápis.',
+                  ),
+                  if (settings?.kioskShowMatches ?? true) ...[
+                    _switch(
+                      context,
+                      settings,
+                      'I budoucí zápasy',
+                      settings?.kioskShowUpcoming ?? true,
+                      'kiosk_show_upcoming',
+                      subtitle: 'Vypnuto = jen odehrané a dnešní zápasy.',
+                    ),
+                    _switch(
+                      context,
+                      settings,
+                      'Seznam sleduje tabuli',
+                      settings?.kioskFollowBoard ?? true,
+                      'kiosk_follow_board',
+                      subtitle:
+                          'Když návštěvník posune tabuli na jiné dny, '
+                          'seznam zápasů naskočí na zápasy těch dnů.',
+                    ),
+                    _number(
+                      context,
+                      settings,
+                      'Odehrané zápasy: týdnů zpět',
+                      settings?.kioskWeeksBack ?? 2,
+                      'kiosk_weeks_back',
+                      unit: 'týdnů',
+                      min: 0,
+                      max: 52,
+                      helper:
+                          'Kolik týdnů před tím aktuálním seznam otevře. '
+                          '${KioskSettingsScreen._rangeNote}',
+                    ),
+                    if (settings?.kioskShowUpcoming ?? true)
+                      _number(
+                        context,
+                        settings,
+                        'Budoucí zápasy: týdnů dopředu',
+                        settings?.kioskWeeksAhead ?? 1,
+                        'kiosk_weeks_ahead',
+                        unit: 'týdnů',
+                        min: 0,
+                        max: 52,
+                        helper:
+                            'Kolik týdnů po tom aktuálním seznam otevře. '
+                            '${KioskSettingsScreen._rangeNote}',
+                      ),
+                  ],
+                ],
+              ],
+            ),
+            if (settings?.kioskPanelEnabled ?? true)
+              _section(
+                context,
+                'Hraný zápas',
+                'Zápas, který se právě hraje a má na webu ČKA průběžné '
+                    'výsledky.',
+                [
+                  _switch(
+                    context,
+                    settings,
+                    'Hraný zápas přes celý panel',
+                    settings?.kioskLiveMode ?? true,
+                    'kiosk_live_mode',
+                    subtitle:
+                        'Souboje hraného zápasu zaberou celý panel a panel '
+                        'zůstane rozbalený — i když ho návštěvník zavře, po '
+                        'době nečinnosti se rozbalí znovu. Vypnuto = hraný '
+                        'zápas je jen řádek v seznamu.',
+                  ),
+                  if (settings?.kioskLiveMode ?? true) ...[
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8, bottom: 12),
+                      child: DropdownButtonFormField<MatchLayout>(
+                        initialValue:
+                            settings?.kioskLiveLayout ?? MatchLayout.full,
+                        decoration: const InputDecoration(
+                          labelText: 'Zobrazení hraného zápasu',
+                          helperText:
+                              'Kompaktní a tabulkové zobrazení vejdou celý '
+                              'zápas do panelu; klepnutí na souboj ho '
+                              'rozbalí.',
+                          helperMaxLines: 3,
+                          border: OutlineInputBorder(),
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: MatchLayout.full,
+                            child: Text('Podrobné — karty soubojů'),
+                          ),
+                          DropdownMenuItem(
+                            value: MatchLayout.compact,
+                            child: Text('Kompaktní — bez posouvání'),
+                          ),
+                          DropdownMenuItem(
+                            value: MatchLayout.table,
+                            child: Text('Tabulka — souboj na řádek'),
+                          ),
+                        ],
+                        onChanged: settings == null
+                            ? null
+                            : (m) => m == null
+                                  ? null
+                                  : _panel(context, settings, {
+                                      'kiosk_live_layout': m.name,
+                                    }),
+                      ),
+                    ),
+                    _number(
+                      context,
+                      settings,
+                      'Kontrola výsledků',
+                      settings?.kioskLiveRefreshSeconds ?? 60,
+                      'kiosk_live_refresh_seconds',
+                      unit: 's',
+                      min: 15,
+                      max: 3600,
+                      helper:
+                          'Po kolika sekundách se kiosk zeptá webu ČKA na '
+                          'nové skóre hraného zápasu.',
+                    ),
+                    _number(
+                      context,
+                      settings,
+                      'Střídání hraných zápasů',
+                      settings?.kioskLiveRotationSeconds ?? 12,
+                      'kiosk_live_rotation_seconds',
+                      unit: 's',
+                      min: 3,
+                      max: 600,
+                      helper:
+                          'Hraje-li se víc zápasů najednou, po kolika '
+                          'sekundách se ukáže další.',
+                    ),
+                  ],
+                  _number(
+                    context,
+                    settings,
+                    'Velikost zápisu',
+                    settings?.kioskZapisPercent ?? 80,
+                    'kiosk_zapis_percent',
+                    unit: '%',
+                    min: 50,
+                    max: 100,
+                    helper:
+                        'Kolik obrazovky zabere zápis otevřený klepnutím na '
+                        'zápas; 100 = celá obrazovka s křížkem.',
+                  ),
+                ],
+              ),
             Text(
               'Adresa pro tablet',
               style: Theme.of(context).textTheme.titleMedium,

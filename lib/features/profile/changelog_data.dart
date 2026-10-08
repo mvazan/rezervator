@@ -50,13 +50,16 @@ String changelogHeading(Release r, {required bool web}) {
 
 const appChangelog = <Release>[
   Release(null, '8. 10. 2026', [
-    'Detail zápasu: v Mém profilu si vyberete, jak se souboje vykreslí '
-        'na výšku a na šířku — karty pod sebou, kompaktně nebo jako '
-        'tabulka tak, aby se celý zápas vešel na obrazovku. Na šířku může '
-        'po otočení telefonu rovnou naskočit zápis na celou obrazovku.',
+    'Detail zápasu: v Mém profilu si vyberete, jak se zápas vykreslí na '
+        'výšku a na šířku — karty soubojů pod sebou, kompaktně nebo jako '
+        'tabulka tak, aby se celý zápas vešel na obrazovku, anebo rovnou '
+        'zápis (na šířku po otočení telefonu na celou obrazovku). '
+        'Přepínač Souboje | Zápis tím odpadá; stáří výsledků a odkaz na '
+        'web ČKA jsou ve skóre nahoře.',
     'Kiosk: vedle rozvrhu je panel s nástěnkou a zápasy — hraný zápas '
         'běží živě, odehrané otevřou zápis. Co panel ukazuje, volí správce '
-        've Správě → Kiosk.',
+        've Správě → Kiosk; nastavení je v blocích s popisem a čísla '
+        '(doba nečinnosti, šířka panelu, střídání…) se píšou rovnou.',
     'Nástěnka: oznam jde naplánovat — zobrazí se a upozorní až od zadaného '
         'času; správce ho může skrýt z kiosku.',
   ], store: [

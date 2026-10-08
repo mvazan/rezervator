@@ -37,6 +37,7 @@ class MatchScoreboard extends StatelessWidget {
     this.homeColor,
     this.awayColor,
     this.video,
+    this.showFreshness = true,
   });
 
   /// The match: its date and start, the teams and the venue.
@@ -69,6 +70,10 @@ class MatchScoreboard extends StatelessWidget {
   /// The video button (live / recording), when it stands where the status
   /// chip would be; null = the chip.
   final Widget? video;
+
+  /// „⟳ před 3 min“ after the date; off where the caller shows it itself
+  /// (the kiosk's live view has it in its own row).
+  final bool showFreshness;
 
   /// The chip's word for a match that is not live.
   static String _statusLabel(MatchStatus status) => switch (status) {
@@ -116,7 +121,7 @@ class MatchScoreboard extends StatelessWidget {
               date: slot.timeKnown
                   ? '${dayFull(slot.date)} · ${slot.startsAt.display()}'
                   : dayFull(slot.date),
-              freshness: result == null
+              freshness: result == null || !showFreshness
                   ? null
                   : freshnessLabel(result.fetchedAt, now),
               chip: result == null
