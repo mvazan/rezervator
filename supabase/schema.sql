@@ -3423,6 +3423,7 @@ begin
                           - 'kiosk_notices_rotation_seconds'
                           - 'kiosk_live_rotation_seconds'
                           - 'kiosk_idle_seconds'
+                          - 'kiosk_live_layout'
                    from schedule_settings s where s.tenant_id = v_tenant),
     'blocks', coalesce((
       select jsonb_agg(to_jsonb(b) - 'tenant_id')
@@ -5644,11 +5645,13 @@ CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     "kiosk_past_days" smallint DEFAULT 0 NOT NULL,
     "kiosk_idle_seconds" smallint DEFAULT 60 NOT NULL,
     "kiosk_notices_mode" "text" DEFAULT 'both'::"text" NOT NULL,
+    "kiosk_live_layout" "text" DEFAULT 'full'::"text" NOT NULL,
     CONSTRAINT "schedule_settings_booking_horizon_days_check" CHECK ((("booking_horizon_days" >= 1) AND ("booking_horizon_days" <= 90))),
     CONSTRAINT "schedule_settings_duty_reminder_days_check" CHECK ((("duty_reminder_days" >= 1) AND ("duty_reminder_days" <= 14))),
     CONSTRAINT "schedule_settings_kiosk_ahead_check" CHECK ((("kiosk_weeks_ahead" >= 0) AND ("kiosk_weeks_ahead" <= 12))),
     CONSTRAINT "schedule_settings_kiosk_back_check" CHECK ((("kiosk_weeks_back" >= 0) AND ("kiosk_weeks_back" <= 12))),
     CONSTRAINT "schedule_settings_kiosk_idle_check" CHECK ((("kiosk_idle_seconds" >= 15) AND ("kiosk_idle_seconds" <= 600))),
+    CONSTRAINT "schedule_settings_kiosk_live_layout_check" CHECK (("kiosk_live_layout" = ANY (ARRAY['full'::"text", 'compact'::"text", 'table'::"text"]))),
     CONSTRAINT "schedule_settings_kiosk_live_rotation_check" CHECK ((("kiosk_live_rotation_seconds" >= 3) AND ("kiosk_live_rotation_seconds" <= 120))),
     CONSTRAINT "schedule_settings_kiosk_notices_mode_check" CHECK (("kiosk_notices_mode" = ANY (ARRAY['off'::"text", 'drawer'::"text", 'header'::"text", 'both'::"text"]))),
     CONSTRAINT "schedule_settings_kiosk_notices_rotation_check" CHECK ((("kiosk_notices_rotation_seconds" >= 3) AND ("kiosk_notices_rotation_seconds" <= 120))),

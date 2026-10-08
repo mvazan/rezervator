@@ -28,6 +28,7 @@ import '../clubhouse/widgets/duel_card.dart';
 import '../clubhouse/widgets/match_scoreboard.dart';
 import '../clubhouse/widgets/match_title.dart';
 import '../clubhouse/widgets/team_totals_card.dart';
+import 'kiosk_live_compact.dart';
 
 /// The drawer's width for a screen [screenWidth] wide: what the admin chose,
 /// at most 60 % of the screen.
@@ -839,6 +840,10 @@ class _LiveViewState extends ConsumerState<_LiveView> {
     final matches = widget.matches;
     final slot = matches[_index.clamp(0, matches.length - 1)];
     final current = ValueKey(slot.id);
+    final full =
+        (ref.watch(settingsProvider).value?.kioskLiveLayout ??
+            KioskLiveLayout.full) ==
+        KioskLiveLayout.full;
     return Listener(
       onPointerDown: (_) => _start(),
       behavior: HitTestBehavior.translucent,
@@ -854,40 +859,48 @@ class _LiveViewState extends ConsumerState<_LiveView> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Row(
-                  children: [
-                    Icon(Icons.circle, size: 12, color: scheme.error),
-                    const SizedBox(width: 8),
-                    Text(
-                      'PRÁVĚ SE HRAJE',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 0.4,
-                        color: scheme.primary,
-                      ),
-                    ),
-                    const Spacer(),
-                    for (
-                      var i = 0;
-                      matches.length > 1 && i < matches.length;
-                      i++
-                    )
-                      AnimatedContainer(
-                        duration: const Duration(milliseconds: 300),
-                        width: i == _index ? 18 : 8,
-                        height: 8,
-                        margin: const EdgeInsets.only(left: 6),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(4),
-                          color: i == _index
-                              ? scheme.primary
-                              : scheme.onSurfaceVariant.withValues(alpha: 0.35),
+                // The compact views drop the title; with several matches the
+                // dots stay — they say there is more.
+                if (full || matches.length > 1)
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      if (full) ...[
+                        Icon(Icons.circle, size: 12, color: scheme.error),
+                        const SizedBox(width: 8),
+                        Text(
+                          'PRÁVĚ SE HRAJE',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.4,
+                            color: scheme.primary,
+                          ),
                         ),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 8),
+                        const Spacer(),
+                      ],
+                      for (
+                        var i = 0;
+                        matches.length > 1 && i < matches.length;
+                        i++
+                      )
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 300),
+                          width: i == _index ? 18 : 8,
+                          height: 8,
+                          margin: const EdgeInsets.only(left: 6),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(4),
+                            color: i == _index
+                                ? scheme.primary
+                                : scheme.onSurfaceVariant.withValues(
+                                    alpha: 0.35,
+                                  ),
+                          ),
+                        ),
+                    ],
+                  ),
+                if (full || matches.length > 1) const SizedBox(height: 8),
                 Expanded(
                   child: ClipRect(
                     child: AnimatedSwitcher(
@@ -968,6 +981,15 @@ class _LiveMatchState extends ConsumerState<_LiveMatch> {
       });
     }
 
+    switch (ref.watch(settingsProvider).value?.kioskLiveLayout ??
+        KioskLiveLayout.full) {
+      case KioskLiveLayout.compact:
+        return KioskLiveCompact(slot: slot, result: result, duels: duels);
+      case KioskLiveLayout.table:
+        return KioskLiveTable(slot: slot, result: result, duels: duels);
+      case KioskLiveLayout.full:
+        break;
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [

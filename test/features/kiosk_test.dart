@@ -1283,6 +1283,7 @@ void main() {
       bool panelEnabled = true,
       int pastDays = 0,
       int idleSeconds = 60,
+      KioskLiveLayout liveLayout = KioskLiveLayout.full,
       Map<String, List<MatchPlayerResult>> lineups = const {},
     }) => ProviderScope(
       overrides: [
@@ -1313,6 +1314,7 @@ void main() {
               kioskPanelEnabled: panelEnabled,
               kioskPastDays: pastDays,
               kioskIdleSeconds: idleSeconds,
+              kioskLiveLayout: liveLayout,
             ),
           ),
         ),
@@ -2163,6 +2165,62 @@ void main() {
 
       await finish(tester);
     });
+
+    for (final layout in [KioskLiveLayout.compact, KioskLiveLayout.table]) {
+      testWidgets('the ${layout.name} live view fits six duels without '
+          'scrolling and opens one duel at a time', (tester) async {
+        fullHd(tester);
+        MatchPlayerResult played(String side, int pos) => MatchPlayerResult(
+          id: 'm-$side-$pos',
+          matchId: 'm',
+          side: side,
+          position: pos,
+          playerName: '${side == 'home' ? 'Domácí' : 'Host'} Hráč$pos',
+          total: 200 + pos,
+          lanes: [
+            for (var l = 1; l <= 4; l++)
+              PlayerLane(lane: l, total: side == 'home' ? 50 + l : 48 + l),
+          ],
+        );
+        await tester.pumpWidget(
+          app(
+            slots: [fed('m', day, 'Hrají')],
+            results: {'m': res('m', 'in_progress', 3, 1)},
+            lineups: {
+              'm': [
+                for (var pos = 1; pos <= 6; pos++)
+                  for (final side in ['home', 'away']) played(side, pos),
+              ],
+            },
+            liveLayout: layout,
+          ),
+        );
+        await tester.pumpAndSettle();
+        // No title, no duel cards: the compact drawing.
+        expect(find.text('PRÁVĚ SE HRAJE'), findsNothing);
+        expect(find.byType(DuelCard), findsNothing);
+        // All six duels in view, without scrolling.
+        final drawer = tester.getRect(find.byType(KioskDrawer));
+        final last = find.textContaining('Hráč6').first;
+        expect(tester.getRect(last).bottom, lessThan(drawer.bottom));
+
+        // A tap opens a duel's lanes; another tap on another duel moves it.
+        expect(find.textContaining('1. 51'), findsNothing);
+        await tester.tap(find.textContaining('Hráč1').first);
+        await tester.pumpAndSettle();
+        expect(find.textContaining('1. 51'), findsOneWidget);
+        await tester.tap(find.textContaining('Hráč2').first);
+        await tester.pumpAndSettle();
+        expect(find.textContaining('1. 51'), findsOneWidget);
+        expect(
+          find.textContaining('1. 51').evaluate().length,
+          1,
+          reason: 'only one duel open at a time',
+        );
+
+        await finish(tester);
+      });
+    }
 
     testWidgets('a swipe turns the live matches', (tester) async {
       fullHd(tester);

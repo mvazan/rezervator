@@ -407,6 +407,41 @@ class KioskSettingsScreen extends ConsumerWidget {
                     'znovu.',
               ),
               if (settings?.kioskLiveMode ?? true)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: DropdownButtonFormField<KioskLiveLayout>(
+                    initialValue:
+                        settings?.kioskLiveLayout ?? KioskLiveLayout.full,
+                    decoration: const InputDecoration(
+                      labelText: 'Zobrazení aktuálního zápasu',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: KioskLiveLayout.full,
+                        child: Text('Podrobné — karty soubojů'),
+                      ),
+                      DropdownMenuItem(
+                        value: KioskLiveLayout.compact,
+                        child: Text('Kompaktní — bez posouvání'),
+                      ),
+                      DropdownMenuItem(
+                        value: KioskLiveLayout.table,
+                        child: Text('Tabulka — souboj na řádek'),
+                      ),
+                    ],
+                    onChanged: settings == null
+                        ? null
+                        : (m) => m == null
+                            ? null
+                            : _panel(
+                                context,
+                                settings,
+                                {'kiosk_live_layout': m.name},
+                              ),
+                  ),
+                ),
+              if (settings?.kioskLiveMode ?? true)
                 _choice(
                   context,
                   settings,

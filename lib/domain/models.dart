@@ -635,6 +635,10 @@ class AdminTenant {
 /// all, in the drawer, one title at a time in the status bar, or both.
 enum KioskNoticesMode { off, drawer, header, both }
 
+/// How the kiosk draws a match being played (0070, `kiosk_live_layout`):
+/// the match detail's duel cards, one compact line per duel, or a table.
+enum KioskLiveLayout { full, compact, table }
+
 class ScheduleSettings {
   const ScheduleSettings({
     required this.laneCount,
@@ -658,6 +662,7 @@ class ScheduleSettings {
     this.kioskPanelEnabled = true,
     this.kioskPastDays = 0,
     this.kioskIdleSeconds = 60,
+    this.kioskLiveLayout = KioskLiveLayout.full,
     this.tenantId = '',
     this.dutyReminderEnabled = false,
     this.dutyReminderDays = 1,
@@ -728,6 +733,9 @@ class ScheduleSettings {
   /// Seconds without a touch after which the kiosk starts over (0068).
   final int kioskIdleSeconds;
 
+  /// How a match being played is drawn in the drawer (0070).
+  final KioskLiveLayout kioskLiveLayout;
+
   /// The settings row's tenant — the update key since 0005 (one row per
   /// tenant instead of the old singleton).
   final String tenantId;
@@ -778,6 +786,10 @@ class ScheduleSettings {
         kioskPanelEnabled: json['kiosk_panel_enabled'] as bool? ?? true,
         kioskPastDays: json['kiosk_past_days'] as int? ?? 0,
         kioskIdleSeconds: json['kiosk_idle_seconds'] as int? ?? 60,
+        kioskLiveLayout: KioskLiveLayout.values.firstWhere(
+          (m) => m.name == json['kiosk_live_layout'],
+          orElse: () => KioskLiveLayout.full,
+        ),
         tenantId: json['tenant_id'] as String? ?? '',
         dutyReminderEnabled: json['duty_reminder_enabled'] as bool? ?? false,
         dutyReminderDays: json['duty_reminder_days'] as int? ?? 1,
