@@ -2204,19 +2204,21 @@ void main() {
         final last = find.textContaining('Hráč6').first;
         expect(tester.getRect(last).bottom, lessThan(drawer.bottom));
 
-        // A tap opens a duel's lanes; another tap on another duel moves it.
-        expect(find.textContaining('1. 51'), findsNothing);
+        // A tap opens one duel — compact: as the full card with its lane
+        // table; table: its lanes under the row. Another tap moves it.
+        Finder opened() => layout == KioskLiveLayout.compact
+            ? find.byType(DuelCard)
+            : find.textContaining('1. 51');
+        expect(opened(), findsNothing);
         await tester.tap(find.textContaining('Hráč1').first);
         await tester.pumpAndSettle();
-        expect(find.textContaining('1. 51'), findsOneWidget);
+        expect(opened(), findsOneWidget);
         await tester.tap(find.textContaining('Hráč2').first);
         await tester.pumpAndSettle();
-        expect(find.textContaining('1. 51'), findsOneWidget);
-        expect(
-          find.textContaining('1. 51').evaluate().length,
-          1,
-          reason: 'only one duel open at a time',
-        );
+        expect(opened(), findsOneWidget, reason: 'one duel open at a time');
+        if (layout == KioskLiveLayout.compact) {
+          expect(find.text('Plné'), findsWidgets);
+        }
 
         await finish(tester);
       });

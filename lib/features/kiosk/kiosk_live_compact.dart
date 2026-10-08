@@ -2,8 +2,8 @@
 /// Zobrazení aktuálního zápasu): the whole match without scrolling.
 ///
 /// - [KioskLiveCompact]: the score, then one block per duel — the two
-///   names, the totals and the lead; a tap opens that duel's lanes, one
-///   duel at a time.
+///   names, the totals and the lead; a tap opens that duel as the match
+///   detail's full card with its lane table, one duel at a time.
 /// - [KioskLiveTable]: the score, then every duel a single table row; a tap
 ///   opens the lanes under the row, one at a time.
 ///
@@ -16,6 +16,8 @@ import 'package:flutter/material.dart';
 import '../../domain/duels.dart';
 import '../../domain/models.dart';
 import '../../domain/results.dart';
+import '../../domain/palette.dart';
+import '../clubhouse/widgets/duel_card.dart';
 import '../clubhouse/widgets/lead_color.dart';
 
 const _tabular = [FontFeature.tabularFigures()];
@@ -204,6 +206,20 @@ class _KioskLiveCompactState extends State<KioskLiveCompact> {
   Widget _compactDuel(BuildContext context, ColorScheme scheme, Duel duel) {
     final waiting = duel.state == DuelState.waiting;
     final open = _open == duel.position;
+    // The one opened duel is the match detail's full card with its lane
+    // table (Plné, Dor., Ch., Celkem); a tap folds it back.
+    if (open) {
+      final scale = diffScale(widget.duels);
+      return DuelCard(
+        duel: duel,
+        scale: scale,
+        expanded: true,
+        onTap: () => setState(() => _open = null),
+        homeColor: homeSideColor,
+        awayColor: awaySideColor,
+        showSetPoints: setPointsMatter(widget.result?.discipline),
+      );
+    }
     final lead = leadLabel(duel.diff);
     final done = duel.state == DuelState.done;
     TextStyle total(bool winner) => TextStyle(
@@ -276,7 +292,7 @@ class _KioskLiveCompactState extends State<KioskLiveCompact> {
                         ),
                         if (!waiting)
                           Icon(
-                            open ? Icons.expand_less : Icons.expand_more,
+                            Icons.expand_more,
                             size: 20,
                             color: scheme.onSurfaceVariant,
                           ),
@@ -288,16 +304,6 @@ class _KioskLiveCompactState extends State<KioskLiveCompact> {
                     style: total(awayWins),
                   ),
                 ],
-              ),
-              AnimatedSize(
-                duration: const Duration(milliseconds: 200),
-                alignment: Alignment.topCenter,
-                child: open
-                    ? Padding(
-                        padding: const EdgeInsets.only(top: 4),
-                        child: Center(child: _Lanes(duel: duel)),
-                      )
-                    : const SizedBox(width: double.infinity),
               ),
             ],
           ),
