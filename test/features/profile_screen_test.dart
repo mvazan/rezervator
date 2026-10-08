@@ -13,6 +13,8 @@ import 'package:rezervator/features/profile/widgets/reservation_color_picker.dar
 import 'package:rezervator/features/profile/match_exceptions_screen.dart';
 import 'package:rezervator/features/profile/widgets/calendar_link_card.dart';
 import 'package:rezervator/features/profile/widgets/event_color_picker.dart';
+import 'package:rezervator/features/profile/widgets/match_layout_card.dart';
+import 'package:rezervator/data/local_prefs.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Stubs for the card's injected backend calls: a test that reaches one it
@@ -495,7 +497,7 @@ void main() {
     // calendar they go to — and only then the app's own looks, which has
     // nothing to do with kuželky at all.
     testWidgets('the cards run: name, Tabule, Po spuštění, Moje týmy, '
-        'Připomínky, Google kalendář, Vzhled', (tester) async {
+        'Připomínky, Google kalendář, Vzhled, Detail zápasu', (tester) async {
       // Tall enough for every card to be built (the ListView is lazy).
       tester.view.physicalSize = const Size(800, 2400);
       tester.view.devicePixelRatio = 1.0;
@@ -513,6 +515,7 @@ void main() {
         top('Připomínky z appky'),
         top('Google kalendář'),
         top('Vzhled'),
+        top('Detail zápasu'),
         top('Odhlásit se'),
       ];
       for (var i = 1; i < order.length; i++) {
@@ -2200,6 +2203,82 @@ void main() {
         'phone=null showEmail=false showPhone=null',
         'phone=null showEmail=null showPhone=false',
       ]);
+    });
+  });
+
+  group('Detail zápasu card', () {
+    void tall(WidgetTester tester) {
+      tester.view.physicalSize = const Size(800, 2600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+    }
+
+    Finder chip(String label) => find.widgetWithText(ChoiceChip, label);
+
+    testWidgets('offers the three drawings upright, the Zápis too sideways, '
+        'the cards chosen by default', (tester) async {
+      tall(tester);
+      SharedPreferences.setMockInitialValues({});
+      await tester.pumpWidget(app(me));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byType(MatchLayoutCard));
+
+      expect(find.text('Na výšku'), findsOneWidget);
+      expect(find.text('Na šířku'), findsOneWidget);
+      expect(chip('Karty'), findsNWidgets(2));
+      expect(chip('Kompaktně'), findsNWidgets(2));
+      expect(chip('Tabulka'), findsNWidgets(2));
+      expect(chip('Zápis'), findsOneWidget);
+      bool selected(Finder f) => tester.widget<ChoiceChip>(f).selected;
+      expect(selected(chip('Karty').first), isTrue);
+      expect(selected(chip('Karty').last), isTrue);
+      expect(selected(chip('Zápis')), isFalse);
+      expect(find.textContaining('Otočením telefonu'), findsNothing);
+    });
+
+    testWidgets('a tap remembers the drawing for that way of holding the '
+        'phone; Zápis sideways explains itself', (tester) async {
+      tall(tester);
+      SharedPreferences.setMockInitialValues({});
+      await tester.pumpWidget(app(me));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byType(MatchLayoutCard));
+
+      await tester.tap(chip('Tabulka').first);
+      await tester.pumpAndSettle();
+      await tester.tap(chip('Zápis'));
+      await tester.pumpAndSettle();
+
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(ProfileScreen)),
+      );
+      expect(
+        container.read(matchLayoutPrefsProvider),
+        (portrait: MatchLayout.table, landscape: MatchLayout.zapis),
+      );
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('match_layout_portrait'), 'table');
+      expect(prefs.getString('match_layout_landscape'), 'zapis');
+      expect(find.textContaining('Otočením telefonu'), findsOneWidget);
+      bool selected(Finder f) => tester.widget<ChoiceChip>(f).selected;
+      expect(selected(chip('Tabulka').first), isTrue);
+      expect(selected(chip('Karty').first), isFalse);
+      expect(selected(chip('Zápis')), isTrue);
+    });
+
+    testWidgets('the saved choice is shown', (tester) async {
+      tall(tester);
+      SharedPreferences.setMockInitialValues({
+        'match_layout_portrait': 'compact',
+        'match_layout_landscape': 'table',
+      });
+      await tester.pumpWidget(app(me));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byType(MatchLayoutCard));
+      bool selected(Finder f) => tester.widget<ChoiceChip>(f).selected;
+      expect(selected(chip('Kompaktně').first), isTrue);
+      expect(selected(chip('Tabulka').last), isTrue);
     });
   });
 }

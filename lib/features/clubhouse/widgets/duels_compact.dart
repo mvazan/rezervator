@@ -208,6 +208,7 @@ class _FittedDuels extends StatefulWidget {
     this.gapBeforeEach = 0,
     this.gapAfterHeader = 0,
     this.openPadding = EdgeInsets.zero,
+    required this.listPadding,
     required this.onRefresh,
   });
 
@@ -215,6 +216,9 @@ class _FittedDuels extends StatefulWidget {
   final MatchResult? result;
   final Widget? header;
   final _ClosedDuelBuilder closed;
+
+  /// Around the scrolling duels (not the header).
+  final EdgeInsets listPadding;
 
   /// Space above every duel ([DuelsCompact]), and between the header and
   /// the first row ([DuelsTable]).
@@ -234,6 +238,7 @@ class _FittedDuelsState extends State<_FittedDuels> with _FifoOpen {
   Widget build(BuildContext context) {
     Widget list = SingleChildScrollView(
       controller: scroll,
+      padding: widget.listPadding,
       physics: widget.onRefresh == null
           ? null
           : const AlwaysScrollableScrollPhysics(),
@@ -282,6 +287,7 @@ class DuelsCompact extends StatelessWidget {
     required this.duels,
     required this.result,
     this.header,
+    this.listPadding = EdgeInsets.zero,
     this.onRefresh,
   });
 
@@ -292,6 +298,9 @@ class DuelsCompact extends StatelessWidget {
   /// scoreboard and buttons.
   final Widget? header;
 
+  /// Around the duels: the app keeps them off the screen's edges.
+  final EdgeInsets listPadding;
+
   /// Pull to refresh on the duels, when the caller has a refresh.
   final Future<void> Function()? onRefresh;
 
@@ -300,6 +309,7 @@ class DuelsCompact extends StatelessWidget {
     duels: duels,
     result: result,
     header: header,
+    listPadding: listPadding,
     gapBeforeEach: 6,
     onRefresh: onRefresh,
     closed: (context, duel, _, toggle) => _CompactDuel(duel: duel, onTap: toggle),
@@ -416,6 +426,7 @@ class DuelsTable extends StatelessWidget {
     required this.duels,
     required this.result,
     this.header,
+    this.listPadding = EdgeInsets.zero,
     this.onRefresh,
   });
 
@@ -425,6 +436,9 @@ class DuelsTable extends StatelessWidget {
   /// Pinned above the rows; see [DuelsCompact.header].
   final Widget? header;
 
+  /// Around the rows; see [DuelsCompact.listPadding].
+  final EdgeInsets listPadding;
+
   /// Pull to refresh on the rows, when the caller has a refresh.
   final Future<void> Function()? onRefresh;
 
@@ -433,6 +447,7 @@ class DuelsTable extends StatelessWidget {
     duels: duels,
     result: result,
     header: header,
+    listPadding: listPadding,
     gapAfterHeader: header == null ? 0 : 8,
     openPadding: const EdgeInsets.symmetric(vertical: 4),
     onRefresh: onRefresh,

@@ -4,11 +4,20 @@
 ///
 /// Top to bottom: the scoreboard (shared by both views, so the score never
 /// jumps), the video and web buttons, a [Souboje | Zápis] switch remembered
-/// on the device, and the chosen view — one card per duel and the Družstva
-/// card, or the kuzelky.com-style score sheet.
+/// on the device, and the chosen view — the duels, or the kuzelky.com-style
+/// score sheet.
+///
+/// The duels are drawn the way the device's owner chose for the way it is
+/// held (Můj profil → Detail zápasu, [matchLayoutPrefsProvider]): the cards
+/// and the Družstva card, scrolling ([MatchLayout.full]), or fitted to the
+/// screen with the scoreboard pinned on top ([MatchLayout.compact],
+/// [MatchLayout.table] — the kiosk's drawings, `duels_compact.dart`). Held
+/// sideways, [MatchLayout.zapis] opens the score sheet full screen the
+/// moment the phone turns ([ZapisPage]), and closes it when it turns back.
 library;
 
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -23,9 +32,11 @@ import '../../domain/palette.dart';
 import '../../domain/results.dart';
 import 'venue_detail_screen.dart';
 import 'widgets/duel_card.dart';
+import 'widgets/duels_compact.dart';
 import 'widgets/legacy_score_sheet.dart';
 import 'widgets/match_scoreboard.dart';
 import 'widgets/team_totals_card.dart';
+import 'widgets/zapis_page.dart';
 import '../../core/push_screen.dart';
 
 class MatchDetailScreen extends ConsumerStatefulWidget {
@@ -87,10 +98,66 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
   /// refresh and a trip to Zápis and back.
   final Set<int> _expanded = {};
 
+  /// The full-screen Zápis this screen opened on a turn to landscape, while
+  /// it is up; see [_syncAutoZapis].
+  Route<void>? _autoZapis;
+
+  /// Set when that Zápis was closed by hand while the phone stayed
+  /// sideways: it then waits for the next turn instead of opening again.
+  bool _autoZapisDismissed = false;
+
   @override
   void dispose() {
     _waitTimer?.cancel();
     super.dispose();
+  }
+
+  /// Opens the Zápis full screen when the phone is held sideways and that
+  /// is the owner's landscape layout, and closes it again when the phone is
+  /// turned back — once per frame, from [build].
+  void _syncAutoZapis({
+    required bool landscape,
+    required bool wanted,
+    required PrioritySlot? slot,
+    required bool league,
+  }) {
+    if (!landscape) _autoZapisDismissed = false;
+    if (wanted && slot != null && _autoZapis == null && !_autoZapisDismissed) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || _autoZapis != null) return;
+        final route = MaterialPageRoute<void>(
+          fullscreenDialog: true,
+          builder: (_) => ZapisPage(
+            slot: slot,
+            closeButton: true,
+            competitionSlug: league ? widget.competitionSlug : null,
+            withRegnums: true,
+          ),
+        );
+        _autoZapis = route;
+        unawaited(
+          Navigator.of(context).push(route).whenComplete(() {
+            if (!mounted) return;
+            _autoZapis = null;
+            if (MediaQuery.orientationOf(context) == Orientation.landscape) {
+              _autoZapisDismissed = true;
+            }
+          }),
+        );
+      });
+    } else if (!landscape && _autoZapis != null) {
+      final route = _autoZapis!;
+      _autoZapis = null;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final navigator = Navigator.of(context);
+        if (route.isCurrent) {
+          navigator.pop();
+        } else {
+          navigator.removeRoute(route);
+        }
+      });
+    }
   }
 
   // Same reasoning as results_screen's own _refreshQuietly: a background
@@ -235,7 +302,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
   /// scale 1.3. With larger text the button drops under the switch instead
   /// of overflowing (OverflowBar: a row pushed apart when both fit, else a
   /// column).
-  Widget _switchRow(MatchDetailView view, List<Duel> duels) {
+  Widget _switchRow(MatchDetailView view, List<Duel> duels, MatchLayout layout) {
     // A duel nobody has started never opens: it neither needs the button
     // nor keeps it from reading „Sbalit vše“ once the rest are open.
     final openable = [
@@ -264,7 +331,11 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
               ref.read(matchDetailViewProvider.notifier).set(chosen.first),
             ),
           ),
-          if (view == MatchDetailView.souboje && openable.isNotEmpty)
+          // The fitted layouts fold cards to fit; „Rozbalit vše“ is the
+          // scrolling cards' button.
+          if (view == MatchDetailView.souboje &&
+              layout == MatchLayout.full &&
+              openable.isNotEmpty)
             TextButton(
               onPressed: () => setState(() {
                 if (allOpen) {
@@ -447,6 +518,23 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     final showRefreshButton =
         (live || askable || correctable) && !_hiddenByNotLive;
 
+    // The duels the way the owner wants them for this way of holding the
+    // device; sideways with Zápis the sheet opens on its own and the cards
+    // under it are the portrait choice.
+    final landscape =
+        MediaQuery.orientationOf(context) == Orientation.landscape;
+    final layoutPrefs = ref.watch(matchLayoutPrefsProvider);
+    final layout = landscape ? layoutPrefs.landscape : layoutPrefs.portrait;
+    _syncAutoZapis(
+      landscape: landscape,
+      wanted: layout == MatchLayout.zapis && players.isNotEmpty,
+      slot: slot,
+      league: fromLeague,
+    );
+    final duelsLayout = layout == MatchLayout.zapis
+        ? layoutPrefs.portrait
+        : layout;
+
     return Scaffold(
       appBar: AppBar(
         title: Text(_appBarTitle(slot)),
@@ -480,6 +568,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
               playersLoading: playersLoading,
               venueMatch: venueMatch,
               view: view,
+              layout: duelsLayout,
               now: now,
               live: live,
               // Pulling is the ⟳ button's twin: gone together once a
@@ -498,6 +587,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     required bool playersLoading,
     required Venue? venueMatch,
     required MatchDetailView view,
+    required MatchLayout layout,
     required DateTime now,
     required bool live,
     required bool pullToRefresh,
@@ -542,10 +632,23 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
             now,
           ),
         _buttonsRow(context, slot, result, live),
-        _switchRow(view, duels),
+        _switchRow(view, duels, layout),
       ])
         _centred(child),
-      ...switch (view) {
+    ];
+
+    if (view == MatchDetailView.souboje && layout != MatchLayout.full) {
+      return _fitted(
+        context,
+        layout: layout,
+        header: Column(mainAxisSize: MainAxisSize.min, children: children),
+        duels: duels,
+        result: result,
+        pullToRefresh: pullToRefresh,
+      );
+    }
+
+    children.addAll(switch (view) {
         MatchDetailView.souboje => [
           for (final child in _souboje(
             duels: duels,
@@ -563,8 +666,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
           // (as long as `result` has team-level data).
           LegacyScoreSheet(slot: slot, result: result, players: players),
         ],
-      },
-    ];
+    });
 
     final list = ListView(
       // Keeps the scroll offset when the pull-to-refresh around the list
@@ -581,6 +683,49 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
       // The ⟳ button's twin: the same forced refresh, the same waiting.
       onRefresh: () => _onRefreshTap(context, result?.fetchedAt),
       child: list,
+    );
+  }
+
+  /// The compact or table layout: [header] (the scoreboard and its rows)
+  /// pinned, the duels fitted under it — the kiosk's drawing, as wide as
+  /// the list but at most 720dp like the rest, and with the list's pull.
+  Widget _fitted(
+    BuildContext context, {
+    required MatchLayout layout,
+    required Widget header,
+    required List<Duel> duels,
+    required MatchResult? result,
+    required bool pullToRefresh,
+  }) {
+    final padding = padWithSystemInset(
+      context,
+      const EdgeInsets.fromLTRB(12, 2, 12, 24),
+    );
+    Future<void> refresh() => _onRefreshTap(context, result?.fetchedAt);
+    final fitted = switch (layout) {
+      MatchLayout.compact => DuelsCompact(
+        duels: duels,
+        result: result,
+        header: header,
+        listPadding: padding,
+        onRefresh: pullToRefresh ? refresh : null,
+      ),
+      MatchLayout.table || MatchLayout.full || MatchLayout.zapis => DuelsTable(
+        duels: duels,
+        result: result,
+        header: header,
+        listPadding: padding,
+        onRefresh: pullToRefresh ? refresh : null,
+      ),
+    };
+    return LayoutBuilder(
+      builder: (context, constraints) => Center(
+        child: SizedBox(
+          width: math.min(constraints.maxWidth, 720),
+          height: constraints.maxHeight,
+          child: fitted,
+        ),
+      ),
     );
   }
 }

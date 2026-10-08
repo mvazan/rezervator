@@ -9,6 +9,7 @@ import '../../domain/models.dart';
 import 'changelog.dart';
 import 'widgets/reservation_color_picker.dart';
 import 'widgets/appearance_card.dart';
+import 'widgets/match_layout_card.dart';
 import 'widgets/calendar_link_card.dart';
 import 'widgets/contact_card.dart';
 import 'widgets/my_group_card.dart';
@@ -365,10 +366,12 @@ class ProfileScreen extends ConsumerWidget {
                   const CalendarLinkCard(),
                   const SizedBox(height: 16),
                 ],
-                // Appearance (theme, text size) last: it is about the app
-                // rather than about the player's kuželky, and nothing above
-                // it depends on it.
+                // Appearance (theme, text size) and the match detail's
+                // layout last: they are about the app rather than about the
+                // player's kuželky, and nothing above them depends on them.
                 const AppearanceCard(),
+                const SizedBox(height: 16),
+                const MatchLayoutCard(),
                 const SizedBox(height: 16),
                 Card(
                   child: ListTile(

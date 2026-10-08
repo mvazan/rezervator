@@ -15,6 +15,7 @@ import 'package:rezervator/domain/palette.dart';
 import 'package:rezervator/features/clubhouse/match_detail_screen.dart';
 import 'package:rezervator/features/clubhouse/venue_detail_screen.dart';
 import 'package:rezervator/features/clubhouse/widgets/duel_card.dart';
+import 'package:rezervator/features/clubhouse/widgets/duels_compact.dart';
 import 'package:rezervator/features/clubhouse/widgets/legacy_score_sheet.dart';
 import 'package:rezervator/features/clubhouse/widgets/match_scoreboard.dart';
 import 'package:rezervator/features/clubhouse/widgets/team_totals_card.dart';
@@ -34,6 +35,16 @@ class _FixedView extends MatchDetailViewNotifier {
 
   @override
   Future<void> set(MatchDetailView view) async => state = view;
+}
+
+/// The duels' layout per orientation pinned (no SharedPreferences).
+class _FixedLayouts extends MatchLayoutPrefsNotifier {
+  _FixedLayouts(this._prefs);
+
+  final MatchLayoutPrefs _prefs;
+
+  @override
+  MatchLayoutPrefs build() => _prefs;
 }
 
 /// The „Zápis“ segment of the view switch (the score sheet's own heading
@@ -199,6 +210,9 @@ void main() {
     // The view the screen opens on, pinned by _FixedView; null leaves the
     // real notifier (SharedPreferences) in place.
     MatchDetailView? view = MatchDetailView.souboje,
+    // The duels' layout per orientation, pinned; null leaves the real
+    // notifier in place.
+    MatchLayoutPrefs? layouts = defaultMatchLayoutPrefs,
     Future<String> Function(String matchId, {bool force})? refresh,
     void Function(String url)? launch,
     // When true, MatchDetailScreen is pushed on top of a host route (via a
@@ -258,6 +272,8 @@ void main() {
         }),
         if (view != null)
           matchDetailViewProvider.overrideWith(() => _FixedView(view)),
+        if (layouts != null)
+          matchLayoutPrefsProvider.overrideWith(() => _FixedLayouts(layouts)),
       ],
       child: MaterialApp(
         theme: theme,
@@ -1692,6 +1708,238 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('Zápas už v rozpisu není.'), findsOneWidget);
+    });
+  });
+
+  group('the duels drawn the owner\'s way (Můj profil → Detail zápasu)', () {
+    void window(WidgetTester tester, double width, double height) {
+      tester.view.physicalSize = Size(width, height);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+    }
+
+    Widget rudna(MatchLayoutPrefs layouts, {MatchDetailView? view}) => app(
+      matchId: 'rv',
+      slots: [rudnaSlot],
+      results: {'rv': rudnaResult},
+      players: rudnaPlayers,
+      layouts: layouts,
+      view: view ?? MatchDetailView.souboje,
+    );
+
+    const portrait = (portrait: MatchLayout.compact, landscape: MatchLayout.full);
+    const sheetSideways = (
+      portrait: MatchLayout.full,
+      landscape: MatchLayout.zapis,
+    );
+
+    testWidgets('compact upright: the scoreboard and its rows pinned, the '
+        'duels fitted under them, no „Rozbalit vše“ and no Družstva card; a '
+        'tap opens a duel as its card', (tester) async {
+      window(tester, 400, 900);
+      await tester.pumpWidget(rudna(portrait));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(DuelsCompact), findsOneWidget);
+      expect(find.byType(MatchScoreboard), findsOneWidget);
+      expect(find.byType(SegmentedButton<MatchDetailView>), findsOneWidget);
+      expect(find.text('Rozbalit vše'), findsNothing);
+      expect(find.byType(TeamTotalsCard), findsNothing);
+      expect(find.byType(DuelCard).hitTestable(), findsNothing);
+      // A match finished days ago can still be corrected on the site: the
+      // pull stays, around the fitted duels.
+      expect(find.byType(RefreshIndicator), findsOneWidget);
+      // The scoreboard is above the first duel: pinned, not in the list.
+      final board = tester.getTopLeft(find.byType(MatchScoreboard)).dy;
+      // (The folded cards hold the names too, hidden in the cross-fade.)
+      final names = find
+          .descendant(
+            of: find.byType(DuelsCompact),
+            matching: find.textContaining(rudnaPlayers.first.playerName),
+          )
+          .hitTestable();
+      expect(board, lessThan(tester.getTopLeft(names.first).dy));
+
+      await tester.tap(names.first);
+      await tester.pumpAndSettle();
+      expect(find.byType(DuelCard).hitTestable(), findsOneWidget);
+      expect(find.text('Plné'), findsWidgets);
+    });
+
+    testWidgets('table upright: a row per duel', (tester) async {
+      window(tester, 400, 900);
+      await tester.pumpWidget(
+        rudna((portrait: MatchLayout.table, landscape: MatchLayout.full)),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(DuelsTable), findsOneWidget);
+      expect(find.byType(DuelsCompact), findsNothing);
+      expect(find.text('Rozbalit vše'), findsNothing);
+    });
+
+    testWidgets('the Zápis switch still works over a fitted layout',
+        (tester) async {
+      window(tester, 400, 900);
+      await tester.pumpWidget(rudna(portrait));
+      await tester.pumpAndSettle();
+      await tester.tap(_zapisSegment);
+      await tester.pumpAndSettle();
+      expect(find.byType(LegacyScoreSheet), findsOneWidget);
+      expect(find.byType(DuelsCompact), findsNothing);
+    });
+
+    testWidgets('sideways takes the landscape choice, and a turn switches',
+        (tester) async {
+      window(tester, 900, 450);
+      await tester.pumpWidget(
+        rudna((portrait: MatchLayout.full, landscape: MatchLayout.table)),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(DuelsTable), findsOneWidget);
+
+      tester.view.physicalSize = const Size(450, 900);
+      await tester.pumpAndSettle();
+      expect(find.byType(DuelsTable), findsNothing);
+      expect(find.byType(DuelCard), findsWidgets);
+      expect(find.text('Rozbalit vše'), findsOneWidget);
+    });
+
+    testWidgets('a fitted layout of a live match pulls to refresh',
+        (tester) async {
+      window(tester, 400, 900);
+      var refreshes = 0;
+      await tester.pumpWidget(
+        app(
+          matchId: 'm2',
+          slots: [match(id: 'm2', date: today)],
+          results: {'m2': liveResultWith()},
+          players: [homePlayer, awayPlayer],
+          layouts: portrait,
+          refresh: (_, {force = false}) async {
+            refreshes++;
+            return 'queued';
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(DuelsCompact), findsOneWidget);
+      expect(find.byType(RefreshIndicator), findsOneWidget);
+      // One on open (live); the pull is a forced one more.
+      expect(refreshes, 1);
+      await tester.fling(
+        find.text('Jan Novák').hitTestable(),
+        const Offset(0, 300),
+        1000,
+      );
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      expect(refreshes, 2);
+      await tester.pump(const Duration(seconds: 20));
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('Zápis sideways: the sheet opens full screen on the turn, '
+        'with a ×, and closes on the turn back', (tester) async {
+      window(tester, 450, 900);
+      await tester.pumpWidget(rudna(sheetSideways));
+      await tester.pumpAndSettle();
+      expect(find.byType(LegacyScoreSheetPage), findsNothing);
+      expect(find.byType(DuelCard), findsWidgets);
+
+      tester.view.physicalSize = const Size(900, 450);
+      await tester.pumpAndSettle();
+      expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
+      expect(find.byIcon(Icons.close), findsOneWidget);
+      // The registration numbers were asked for, as the inline Zápis does.
+      expect(find.byType(MatchDetailScreen), findsNothing);
+
+      tester.view.physicalSize = const Size(450, 900);
+      await tester.pumpAndSettle();
+      expect(find.byType(LegacyScoreSheetPage), findsNothing);
+      expect(find.byType(MatchDetailScreen), findsOneWidget);
+      // The cards under it are the upright choice.
+      expect(find.byType(DuelCard), findsWidgets);
+    });
+
+    testWidgets('opened sideways: the sheet is there from the start',
+        (tester) async {
+      window(tester, 900, 450);
+      await tester.pumpWidget(rudna(sheetSideways));
+      await tester.pumpAndSettle();
+      expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
+    });
+
+    testWidgets('closed by its × while still sideways, it waits for the next '
+        'turn', (tester) async {
+      window(tester, 900, 450);
+      await tester.pumpWidget(rudna(sheetSideways));
+      await tester.pumpAndSettle();
+      expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
+
+      await tester.tap(find.byIcon(Icons.close));
+      await tester.pumpAndSettle();
+      expect(find.byType(LegacyScoreSheetPage), findsNothing);
+      // Under it: the upright choice, sideways.
+      expect(find.byType(DuelCard), findsWidgets);
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+      expect(find.byType(LegacyScoreSheetPage), findsNothing);
+
+      tester.view.physicalSize = const Size(450, 900);
+      await tester.pumpAndSettle();
+      tester.view.physicalSize = const Size(900, 450);
+      await tester.pumpAndSettle();
+      expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
+    });
+
+    testWidgets('without players there is no sheet to open', (tester) async {
+      window(tester, 900, 450);
+      await tester.pumpWidget(
+        app(
+          matchId: 'm1',
+          slots: [match(id: 'm1', date: today.addDays(-7))],
+          results: {'m1': finishedResult},
+          layouts: sheetSideways,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(LegacyScoreSheetPage), findsNothing);
+      expect(find.byType(MatchDetailScreen), findsOneWidget);
+    });
+
+    testWidgets('a foreign match reads its sheet from the league', (tester) async {
+      window(tester, 900, 450);
+      final leagueMatch = LeagueMatch.fromJson({
+        'id': 'lm1',
+        'site_match_id': 777,
+        'site_slug': 'kp1-2026-kolo-3-a-b',
+        'competition_slug': 'kp1',
+        'competition': 'KP I',
+        'round': 3,
+        'date': today.addDays(-3).toSql(),
+        'starts_at': '10:00:00',
+        'home_team': 'Cizí A',
+        'away_team': 'Cizí B',
+        'status': 'finished',
+        'home_points': 6,
+        'away_points': 2,
+        'home_total': 3200,
+        'away_total': 3100,
+        'fetched_at': '2026-09-20T10:00:00+00:00',
+      });
+      await tester.pumpWidget(
+        app(
+          matchId: 'lm1',
+          competitionSlug: 'kp1',
+          league: [leagueMatch],
+          leaguePlayers: [homePlayer, awayPlayer],
+          layouts: sheetSideways,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
+      expect(find.text('Jan Novák'), findsWidgets);
     });
   });
 }
