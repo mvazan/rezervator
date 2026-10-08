@@ -1477,6 +1477,15 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
+        // The list opens on the current match; look at what lies above it.
+        await tester.drag(
+          find.descendant(
+            of: find.byType(KioskDrawer),
+            matching: find.byType(CustomScrollView),
+          ),
+          const Offset(0, 400),
+        );
+        await tester.pumpAndSettle();
       }
 
       bool shown(String team) =>
@@ -1514,7 +1523,8 @@ void main() {
       await finish(tester);
     });
 
-    testWidgets('„Zobrazit další“ brings one more older week', (tester) async {
+    testWidgets('„Zobrazit předchozí“ brings one more older week, '
+        'without moving what is on screen', (tester) async {
       fullHd(tester);
       final slots = [
         fed('b2', Day(2026, 9, 24), 'DvaZpět'),
@@ -1525,19 +1535,37 @@ void main() {
         app(slots: slots, drawerOpen: true, weeksBack: 0, weeksAhead: 0),
       );
       await tester.pumpAndSettle();
-      expect(find.text('Zobrazit další'), findsOneWidget);
-      expect(find.textContaining('JedenZpět'), findsNothing);
-
-      await tester.tap(find.text('Zobrazit další'));
-      await tester.pumpAndSettle();
-      expect(find.textContaining('JedenZpět'), findsWidgets);
-      expect(find.textContaining('DvaZpět'), findsNothing);
-
-      await tester.tap(find.text('Zobrazit další'));
-      await tester.pumpAndSettle();
-      expect(find.textContaining('DvaZpět'), findsWidgets);
-      // The season has nothing older: no more button.
+      // The list opens on the current match; the older ones lie above it.
       expect(find.text('Zobrazit další'), findsNothing);
+      expect(find.textContaining('JedenZpět'), findsNothing);
+      final list = find.descendant(
+        of: find.byType(KioskDrawer),
+        matching: find.byType(CustomScrollView),
+      );
+      await tester.drag(list, const Offset(0, 200));
+      await tester.pumpAndSettle();
+      Finder inDrawer(String t) => find.descendant(
+        of: find.byType(KioskDrawer),
+        matching: find.textContaining(t),
+      );
+      final before = tester.getTopLeft(inDrawer('Tento').first);
+
+      await tester.tap(find.text('Zobrazit předchozí'));
+      await tester.pumpAndSettle();
+      expect(inDrawer('JedenZpět'), findsWidgets);
+      expect(inDrawer('DvaZpět'), findsNothing);
+      // What was on screen has not moved: no jump, no flicker.
+      expect(tester.getTopLeft(inDrawer('Tento').first), before);
+
+      await tester.drag(list, const Offset(0, 300));
+      await tester.pumpAndSettle();
+      final beforeSecond = tester.getTopLeft(inDrawer('Tento').first);
+      await tester.tap(find.text('Zobrazit předchozí'));
+      await tester.pumpAndSettle();
+      expect(inDrawer('DvaZpět'), findsWidgets);
+      expect(tester.getTopLeft(inDrawer('Tento').first), beforeSecond);
+      // The season has nothing older: no button any more.
+      expect(find.text('Zobrazit předchozí'), findsNothing);
 
       await finish(tester);
     });

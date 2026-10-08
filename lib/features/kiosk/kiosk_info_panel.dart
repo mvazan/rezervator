@@ -564,20 +564,14 @@ class _MatchesCard extends ConsumerStatefulWidget {
 }
 
 class _MatchesCardState extends ConsumerState<_MatchesCard> {
-  final _controller = ScrollController();
   int _extraBack = 0;
   int _extraAhead = 0;
-  bool _opened = false;
 
-  /// Set when older matches were just added: the list length before, so the
-  /// view can stay on what it showed.
-  int? _lengthBeforeOlder;
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
+  /// The match the list opened on; the list grows away from it in both
+  /// directions, so what was on screen stays where it was when more weeks
+  /// load (older matches grow upwards from here, not by shifting the rest).
+  String? _anchorId;
+  final _centerKey = GlobalKey();
 
   @override
   Widget build(BuildContext context) {
@@ -597,30 +591,24 @@ class _MatchesCardState extends ConsumerState<_MatchesCard> {
       extraAhead: _extraAhead,
     );
     final matches = window.matches;
-    final nowIndex = kioskNowIndex(matches, results, today);
 
-    if (!_opened) {
-      _opened = true;
-      // On the first match not decided yet, with the one before it in view.
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!_controller.hasClients) return;
-        final top =
-            (window.moreBefore ? _moreRowHeight : 0) +
-            math.max(0, nowIndex - 1) * _resultRowHeight;
-        _controller.jumpTo(top.clamp(0, _controller.position.maxScrollExtent));
-      });
+    // Opens on the first match not decided yet, with the one before it in
+    // view; afterwards the same match stays the anchor (found by id, as more
+    // weeks are added before it).
+    var split = matches.indexWhere((m) => m.id == _anchorId);
+    if (split < 0 && matches.isNotEmpty) {
+      split = math.max(0, kioskNowIndex(matches, results, today) - 1);
+      _anchorId = matches[split].id;
     }
-    final before = _lengthBeforeOlder;
-    if (before != null) {
-      _lengthBeforeOlder = null;
-      final added = matches.length - before;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (_controller.hasClients) {
-          _controller.jumpTo(_controller.offset + added * _resultRowHeight);
-        }
-      });
-    }
+    split = math.max(split, 0);
+    // Index 0 of the part before the anchor is the match right above it.
+    final older = matches.sublist(0, split).reversed.toList();
+    final newer = matches.sublist(split);
 
+    Widget row(PrioritySlot s) => SizedBox(
+      height: _resultRowHeight,
+      child: _MatchRow(slot: s, result: results[s.id], onOpen: widget.onOpen),
+    );
     Widget more(String label, VoidCallback onTap) => SizedBox(
       height: _moreRowHeight,
       child: Center(
@@ -628,24 +616,6 @@ class _MatchesCardState extends ConsumerState<_MatchesCard> {
       ),
     );
 
-    final items = <Widget>[
-      if (window.moreBefore)
-        more('Zobrazit další', () {
-          _lengthBeforeOlder = matches.length;
-          setState(() => _extraBack++);
-        }),
-      for (final s in matches)
-        SizedBox(
-          height: _resultRowHeight,
-          child: _MatchRow(
-            slot: s,
-            result: results[s.id],
-            onOpen: widget.onOpen,
-          ),
-        ),
-      if (window.moreAfter)
-        more('Zobrazit další', () => setState(() => _extraAhead++)),
-    ];
     return _Card(
       icon: Icons.emoji_events_outlined,
       title: 'ZÁPASY',
@@ -655,7 +625,31 @@ class _MatchesCardState extends ConsumerState<_MatchesCard> {
               'V tomhle období není žádný zápas.',
               style: TextStyle(color: scheme.onSurfaceVariant),
             )
-          : ListView(controller: _controller, children: items),
+          : CustomScrollView(
+              center: _centerKey,
+              slivers: [
+                SliverList.builder(
+                  itemCount: older.length + (window.moreBefore ? 1 : 0),
+                  itemBuilder: (context, i) => i < older.length
+                      ? row(older[i])
+                      : more(
+                          'Zobrazit předchozí',
+                          () => setState(() => _extraBack++),
+                        ),
+                ),
+                SliverList.list(
+                  key: _centerKey,
+                  children: [
+                    for (final s in newer) row(s),
+                    if (window.moreAfter)
+                      more(
+                        'Zobrazit další',
+                        () => setState(() => _extraAhead++),
+                      ),
+                  ],
+                ),
+              ],
+            ),
     );
   }
 }
