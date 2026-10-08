@@ -6,6 +6,7 @@ import 'package:rezervator/core/ui.dart' show today;
 import 'package:rezervator/data/clock.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
+import 'package:rezervator/domain/schedule.dart' show homeMarker;
 import 'package:rezervator/features/clubhouse/match_detail_screen.dart';
 import 'package:rezervator/features/clubhouse/widgets/legacy_score_sheet.dart';
 import 'package:rezervator/features/kiosk/kiosk_board_view.dart';
@@ -2062,6 +2063,28 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(LegacyScoreSheetPage), findsNothing);
       expect(find.text('Zápis zápasu zatím není k dispozici.'), findsNothing);
+
+      await finish(tester);
+    });
+
+    testWidgets('a home match is marked with the coloured house, always', (
+      tester,
+    ) async {
+      fullHd(tester);
+      await tester.pumpWidget(
+        app(slots: [fed('m', day.addDays(1), 'Domácí')], drawerOpen: true),
+      );
+      await tester.pumpAndSettle();
+      // The variation selector asks for the coloured emoji; without it a
+      // scrolled list may fall back to the black-and-white glyph.
+      expect(
+        find.descendant(
+          of: find.byType(KioskDrawer),
+          matching: find.textContaining('\u{1F3E0}\uFE0F'),
+        ),
+        findsOneWidget,
+      );
+      expect(homeMarker, '\u{1F3E0}\uFE0F');
 
       await finish(tester);
     });

@@ -23,6 +23,7 @@ import '../../domain/kiosk_panel.dart';
 import '../../domain/models.dart';
 import '../../domain/palette.dart';
 import '../../domain/results.dart';
+import '../../domain/schedule.dart' show homeMarker;
 import '../clubhouse/widgets/duel_card.dart';
 import '../clubhouse/widgets/match_scoreboard.dart';
 import '../clubhouse/widgets/match_title.dart';
@@ -684,7 +685,7 @@ class _MatchRow extends StatelessWidget {
                 style: const TextStyle(fontSize: 15),
               ),
               Text(
-                '${slot.isAway ? '' : '🏠 '}$when',
+                '${slot.isAway ? '' : '$homeMarker '}$when',
                 style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
               ),
             ],

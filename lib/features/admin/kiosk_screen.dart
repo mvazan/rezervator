@@ -17,7 +17,10 @@ import 'widgets/copyable_address.dart';
 /// alley's tablet, not a person, and this is the only place one can be
 /// turned back into a player.
 class KioskSettingsScreen extends ConsumerWidget {
-  const KioskSettingsScreen({super.key, this.resetPassword = Api.resetKioskPassword});
+  const KioskSettingsScreen({
+    super.key,
+    this.resetPassword = Api.resetKioskPassword,
+  });
 
   /// Injectable so a widget test can drive the dialogs without the edge
   /// function (functions.invoke encodes its body on an isolate, which a
@@ -25,11 +28,11 @@ class KioskSettingsScreen extends ConsumerWidget {
   final Future<String> Function(String userId) resetPassword;
 
   Future<void> _returnToPlayer(BuildContext context, Profile p) => tryAction(
-        context,
-        () => Api.setRole(p.id, Role.player),
-        success: 'Účet vrácen mezi hráče.',
-        errorText: friendlyDbError,
-      );
+    context,
+    () => Api.setRole(p.id, Role.player),
+    success: 'Účet vrácen mezi hráče.',
+    errorText: friendlyDbError,
+  );
 
   /// Sets a new password and shows it — the current one cannot be read
   /// back (Supabase keeps only a hash), so this is the way to credentials
@@ -38,7 +41,8 @@ class KioskSettingsScreen extends ConsumerWidget {
     final confirmed = await confirmDialog(
       context,
       title: 'Nastavit nové heslo?',
-      message: 'Kiosku „${p.displayName}“ se nastaví nové heslo a to '
+      message:
+          'Kiosku „${p.displayName}“ se nastaví nové heslo a to '
           'dosavadní přestane platit. Už přihlášený tablet běží dál, nové '
           'heslo bude potřebovat až při dalším přihlášení.',
       confirmLabel: 'Nastavit',
@@ -106,19 +110,25 @@ class KioskSettingsScreen extends ConsumerWidget {
 
   /// A switch writing [column]: the bool itself, or — for a number column —
   /// what [toValue] makes of it.
-  Widget _switch(BuildContext context, ScheduleSettings? settings,
-          String title, bool value, String column,
-          {String? subtitle, Object Function(bool on)? toValue}) =>
-      SwitchListTile(
-        contentPadding: EdgeInsets.zero,
-        title: Text(title),
-        subtitle: subtitle == null ? null : Text(subtitle),
-        value: value,
-        onChanged: settings == null
-            ? null
-            : (v) => _panel(
-                context, settings, {column: toValue == null ? v : toValue(v)}),
-      );
+  Widget _switch(
+    BuildContext context,
+    ScheduleSettings? settings,
+    String title,
+    bool value,
+    String column, {
+    String? subtitle,
+    Object Function(bool on)? toValue,
+  }) => SwitchListTile(
+    contentPadding: EdgeInsets.zero,
+    title: Text(title),
+    subtitle: subtitle == null ? null : Text(subtitle),
+    value: value,
+    onChanged: settings == null
+        ? null
+        : (v) => _panel(context, settings, {
+            column: toValue == null ? v : toValue(v),
+          }),
+  );
 
   Widget _choice(
     BuildContext context,
@@ -129,37 +139,36 @@ class KioskSettingsScreen extends ConsumerWidget {
     List<int> choices,
     String Function(int) text, {
     String? helper,
-  }) =>
-      Padding(
-        padding: const EdgeInsets.only(bottom: 12),
-        child: DropdownButtonFormField<int>(
-          // A value the list does not offer (set by hand) still shows.
-          initialValue: value,
-          decoration: InputDecoration(
-            labelText: label,
-            helperText: helper,
-            helperMaxLines: 2,
-            border: const OutlineInputBorder(),
-          ),
-          items: [
-            for (final n in {...choices, value}.toList()..sort())
-              DropdownMenuItem(value: n, child: Text(text(n))),
-          ],
-          onChanged: settings == null
-              ? null
-              : (n) => n == null
-                  ? null
-                  : _panel(context, settings, {column: n}),
-        ),
-      );
+  }) => Padding(
+    padding: const EdgeInsets.only(bottom: 12),
+    child: DropdownButtonFormField<int>(
+      // A value the list does not offer (set by hand) still shows.
+      initialValue: value,
+      decoration: InputDecoration(
+        labelText: label,
+        helperText: helper,
+        helperMaxLines: 2,
+        border: const OutlineInputBorder(),
+      ),
+      items: [
+        for (final n in {...choices, value}.toList()..sort())
+          DropdownMenuItem(value: n, child: Text(text(n))),
+      ],
+      onChanged: settings == null
+          ? null
+          : (n) => n == null ? null : _panel(context, settings, {column: n}),
+    ),
+  );
 
-  Future<void> _panel(BuildContext context, ScheduleSettings settings,
-          Map<String, Object> changes) =>
-      tryAction(
-        context,
-        () => Api.setKioskPanel(changes, tenantId: settings.tenantId),
-        errorText: friendlyDbError,
-      );
+  Future<void> _panel(
+    BuildContext context,
+    ScheduleSettings settings,
+    Map<String, Object> changes,
+  ) => tryAction(
+    context,
+    () => Api.setKioskPanel(changes, tenantId: settings.tenantId),
+    errorText: friendlyDbError,
+  );
 
   /// Where the app is running (the web build knows; an alley hosting its
   /// own copy under a sub-path included) — or, on Android, where the public
@@ -210,25 +219,50 @@ class KioskSettingsScreen extends ConsumerWidget {
                   ? null
                   : (value) => tryAction(
                       context,
-                      () => Api.setKioskFitDay(value,
-                          tenantId: settings.tenantId),
+                      () => Api.setKioskFitDay(
+                        value,
+                        tenantId: settings.tenantId,
+                      ),
                       errorText: friendlyDbError,
                     ),
             ),
-            _switch(context, settings, 'Kiosk: posun do minulosti',
-                (settings?.kioskPastDays ?? 0) > 0, 'kiosk_past_days',
-                subtitle: 'Návštěvník může tabuli posunout o pár dní zpět '
-                    'a podívat se, kdo trénoval. Po minutě bez dotyku se '
-                    'tabule vrátí na dnešek.',
-                toValue: (on) => on ? 7 : 0),
+            _switch(
+              context,
+              settings,
+              'Kiosk: posun do minulosti',
+              (settings?.kioskPastDays ?? 0) > 0,
+              'kiosk_past_days',
+              subtitle:
+                  'Návštěvník může tabuli posunout o pár dní zpět '
+                  'a podívat se, kdo trénoval. Po minutě bez dotyku se '
+                  'tabule vrátí na dnešek.',
+              toValue: (on) => on ? 7 : 0,
+            ),
             if ((settings?.kioskPastDays ?? 0) > 0)
-              _choice(context, settings, 'Jak daleko zpět',
-                  settings?.kioskPastDays ?? 7, 'kiosk_past_days',
-                  const [1, 2, 3, 7, 14, 30],
-                  (n) => czechCount(n, 'den', 'dny', 'dní')),
+              _choice(
+                context,
+                settings,
+                'Jak daleko zpět',
+                settings?.kioskPastDays ?? 7,
+                'kiosk_past_days',
+                const [1, 2, 3, 7, 14, 30],
+                (n) => czechCount(n, 'den', 'dny', 'dní'),
+              ),
+            const SizedBox(height: 8),
+            _choice(
+              context,
+              settings,
+              'Velikost zápisu',
+              settings?.kioskZapisPercent ?? 80,
+              'kiosk_zapis_percent',
+              const [60, 70, 80, 90, 100],
+              (n) => n == 100 ? 'Celá obrazovka (s křížkem)' : '$n % obrazovky',
+            ),
             const SizedBox(height: 24),
-            Text('Panel vpravo',
-                style: Theme.of(context).textTheme.titleMedium),
+            Text(
+              'Panel vpravo',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
             const SizedBox(height: 4),
             const Text(
               'Postranní panel kiosku ukazuje nástěnku a zápasy. Návštěvník '
@@ -236,68 +270,129 @@ class KioskSettingsScreen extends ConsumerWidget {
               'stavu. Které oznamy se na kiosku ukážou, volíš přímo na '
               'nástěnce (⋮ u oznamu).',
             ),
-            _switch(context, settings, 'Panel vpravo',
-                settings?.kioskPanelEnabled ?? true, 'kiosk_panel_enabled'),
+            _switch(
+              context,
+              settings,
+              'Panel vpravo',
+              settings?.kioskPanelEnabled ?? true,
+              'kiosk_panel_enabled',
+            ),
             if (settings?.kioskPanelEnabled ?? true) ...[
-              _switch(context, settings, 'Panel je výchozně rozbalený',
-                  settings?.kioskDrawerOpen ?? false, 'kiosk_drawer_open',
-                  subtitle: 'Vypnuto = panel je skrytý a rozbalí se '
-                      'tlačítkem na okraji obrazovky.'),
-              _switch(context, settings, 'Nástěnka v panelu',
-                  settings?.kioskShowNotices ?? true, 'kiosk_show_notices'),
+              _choice(
+                context,
+                settings,
+                'Šířka panelu',
+                settings?.kioskDrawerWidth ?? 440,
+                'kiosk_drawer_width',
+                const [360, 440, 520, 600, 720],
+                (n) => '$n px',
+              ),
+              _switch(
+                context,
+                settings,
+                'Panel je výchozně rozbalený',
+                settings?.kioskDrawerOpen ?? false,
+                'kiosk_drawer_open',
+                subtitle:
+                    'Vypnuto = panel je skrytý a rozbalí se '
+                    'tlačítkem na okraji obrazovky.',
+              ),
+              _switch(
+                context,
+                settings,
+                'Nástěnka v panelu',
+                settings?.kioskShowNotices ?? true,
+                'kiosk_show_notices',
+              ),
               if (settings?.kioskShowNotices ?? true)
-                _choice(context, settings, 'Střídání oznamů',
-                    settings?.kioskNoticesRotationSeconds ?? 12,
-                    'kiosk_notices_rotation_seconds',
-                    const [6, 8, 12, 20, 30, 60], (n) => 'po $n s'),
-              _switch(context, settings, 'Zápasy v panelu',
-                  settings?.kioskShowMatches ?? true, 'kiosk_show_matches',
-                  subtitle: 'Klepnutím na odehraný zápas se otevře jeho '
-                      'zápis.'),
+                _choice(
+                  context,
+                  settings,
+                  'Střídání oznamů',
+                  settings?.kioskNoticesRotationSeconds ?? 12,
+                  'kiosk_notices_rotation_seconds',
+                  const [6, 8, 12, 20, 30, 60],
+                  (n) => 'po $n s',
+                ),
+              _switch(
+                context,
+                settings,
+                'Zápasy v panelu',
+                settings?.kioskShowMatches ?? true,
+                'kiosk_show_matches',
+                subtitle:
+                    'Klepnutím na odehraný zápas se otevře jeho '
+                    'zápis.',
+              ),
               if (settings?.kioskShowMatches ?? true) ...[
-                _switch(context, settings, 'Následující zápasy',
-                    settings?.kioskShowUpcoming ?? true,
-                    'kiosk_show_upcoming'),
-                _choice(context, settings, 'Odehrané zápasy',
-                    settings?.kioskWeeksBack ?? 2, 'kiosk_weeks_back',
-                    _weekChoices, (n) => _weeksLabel(n, 'zpět'),
-                    helper: _rangeNote),
+                _switch(
+                  context,
+                  settings,
+                  'Následující zápasy',
+                  settings?.kioskShowUpcoming ?? true,
+                  'kiosk_show_upcoming',
+                ),
+                _choice(
+                  context,
+                  settings,
+                  'Odehrané zápasy',
+                  settings?.kioskWeeksBack ?? 2,
+                  'kiosk_weeks_back',
+                  _weekChoices,
+                  (n) => _weeksLabel(n, 'zpět'),
+                  helper: _rangeNote,
+                ),
                 if (settings?.kioskShowUpcoming ?? true)
-                  _choice(context, settings, 'Budoucí zápasy',
-                      settings?.kioskWeeksAhead ?? 1, 'kiosk_weeks_ahead',
-                      _weekChoices, (n) => _weeksLabel(n, 'dopředu'),
-                      helper: _rangeNote),
+                  _choice(
+                    context,
+                    settings,
+                    'Budoucí zápasy',
+                    settings?.kioskWeeksAhead ?? 1,
+                    'kiosk_weeks_ahead',
+                    _weekChoices,
+                    (n) => _weeksLabel(n, 'dopředu'),
+                    helper: _rangeNote,
+                  ),
               ],
-              _switch(context, settings, 'Aktuální zápas přes celý panel',
-                  settings?.kioskLiveMode ?? true, 'kiosk_live_mode',
-                  subtitle: 'Zápas, který se hraje a má data, zabere celý '
-                      'panel (souboje) a panel zůstane rozbalený — i když '
-                      'ho návštěvník zavře, po minutě bez dotyku se rozbalí '
-                      'znovu.'),
+              _switch(
+                context,
+                settings,
+                'Aktuální zápas přes celý panel',
+                settings?.kioskLiveMode ?? true,
+                'kiosk_live_mode',
+                subtitle:
+                    'Zápas, který se hraje a má data, zabere celý '
+                    'panel (souboje) a panel zůstane rozbalený — i když '
+                    'ho návštěvník zavře, po minutě bez dotyku se rozbalí '
+                    'znovu.',
+              ),
               if (settings?.kioskLiveMode ?? true)
-                _choice(context, settings, 'Střídání aktuálních zápasů',
-                    settings?.kioskLiveRotationSeconds ?? 12,
-                    'kiosk_live_rotation_seconds',
-                    const [6, 8, 12, 20, 30, 60], (n) => 'po $n s'),
-              const SizedBox(height: 8),
-              _choice(context, settings, 'Šířka panelu',
-                  settings?.kioskDrawerWidth ?? 440, 'kiosk_drawer_width',
-                  const [360, 440, 520, 600, 720], (n) => '$n px'),
+                _choice(
+                  context,
+                  settings,
+                  'Střídání aktuálních zápasů',
+                  settings?.kioskLiveRotationSeconds ?? 12,
+                  'kiosk_live_rotation_seconds',
+                  const [6, 8, 12, 20, 30, 60],
+                  (n) => 'po $n s',
+                ),
               if ((settings?.kioskShowNotices ?? true) &&
                   (settings?.kioskShowMatches ?? true))
-                _choice(context, settings, 'Podíl nástěnky na výšce panelu',
-                    settings?.kioskNoticesShare ?? 40, 'kiosk_notices_share',
-                    const [20, 30, 40, 50, 60, 70], (n) => '$n %'),
-              _choice(context, settings, 'Velikost zápisu',
-                  settings?.kioskZapisPercent ?? 80, 'kiosk_zapis_percent',
-                  const [60, 70, 80, 90, 100],
-                  (n) => n == 100
-                      ? 'Celá obrazovka (s křížkem)'
-                      : '$n % obrazovky'),
+                _choice(
+                  context,
+                  settings,
+                  'Podíl nástěnky na výšce panelu',
+                  settings?.kioskNoticesShare ?? 40,
+                  'kiosk_notices_share',
+                  const [20, 30, 40, 50, 60, 70],
+                  (n) => '$n %',
+                ),
             ],
             const SizedBox(height: 24),
-            Text('Adresa pro tablet',
-                style: Theme.of(context).textTheme.titleMedium),
+            Text(
+              'Adresa pro tablet',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
             const SizedBox(height: 4),
             const Text(
               'Otevři ji v prohlížeči tabletu a přihlas se kioskovým účtem '
@@ -307,8 +402,10 @@ class KioskSettingsScreen extends ConsumerWidget {
             const SizedBox(height: 8),
             CopyableAddress(url: _kioskUrl()),
             const SizedBox(height: 24),
-            Text('Kioskové účty',
-                style: Theme.of(context).textTheme.titleMedium),
+            Text(
+              'Kioskové účty',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
             const SizedBox(height: 4),
             if (kiosks.isEmpty)
               const Text(
