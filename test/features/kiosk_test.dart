@@ -1278,6 +1278,7 @@ void main() {
       int liveRotation = 12,
       bool panelEnabled = true,
       int pastDays = 0,
+      int idleSeconds = 60,
       Map<String, List<MatchPlayerResult>> lineups = const {},
     }) => ProviderScope(
       overrides: [
@@ -1302,6 +1303,7 @@ void main() {
               kioskLiveRotationSeconds: liveRotation,
               kioskPanelEnabled: panelEnabled,
               kioskPastDays: pastDays,
+              kioskIdleSeconds: idleSeconds,
             ),
           ),
         ),
@@ -1364,6 +1366,29 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Brigáda'), findsOneWidget);
 
+      await tester.pump(const Duration(seconds: 61));
+      await tester.pumpAndSettle();
+      expect(find.text('Brigáda'), findsNothing);
+
+      await finish(tester);
+    });
+
+    testWidgets('the admin sets how long the kiosk idles before starting over',
+        (tester) async {
+      fullHd(tester);
+      await tester.pumpWidget(
+        app(notices: [notice('1', 'Brigáda')], idleSeconds: 120),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(openButton);
+      await tester.pumpAndSettle();
+      expect(find.text('Brigáda'), findsOneWidget);
+
+      // A minute is not enough any more…
+      await tester.pump(const Duration(seconds: 61));
+      await tester.pumpAndSettle();
+      expect(find.text('Brigáda'), findsOneWidget);
+      // …two are.
       await tester.pump(const Duration(seconds: 61));
       await tester.pumpAndSettle();
       expect(find.text('Brigáda'), findsNothing);

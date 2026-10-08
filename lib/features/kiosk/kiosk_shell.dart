@@ -25,8 +25,6 @@ import 'kiosk_zapis_page.dart';
 import 'name_picker.dart';
 import '../../core/widgets/emoji_text.dart';
 
-const _idleTimeout = Duration(seconds: 60);
-
 class KioskShell extends ConsumerStatefulWidget {
   const KioskShell({super.key});
 
@@ -57,7 +55,8 @@ class _KioskShellState extends ConsumerState<KioskShell> {
 
   void _touch() {
     _idleTimer?.cancel();
-    _idleTimer = Timer(_idleTimeout, _onIdle);
+    final seconds = ref.read(settingsProvider).value?.kioskIdleSeconds ?? 60;
+    _idleTimer = Timer(Duration(seconds: seconds), _onIdle);
   }
 
   void _onIdle() {
@@ -176,7 +175,7 @@ class _KioskShellState extends ConsumerState<KioskShell> {
     if (content == null) return board;
     final settings = ref.watch(settingsProvider).value;
     // A match being played keeps the drawer open: a visitor may close it,
-    // and it opens again after a minute without a touch.
+    // and it opens again after the idle time.
     final restingOpen =
         (settings?.kioskDrawerOpen ?? false) || content.live.isNotEmpty;
     final open = _drawerOverride ?? restingOpen;

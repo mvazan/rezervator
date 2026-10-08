@@ -653,6 +653,7 @@ class ScheduleSettings {
     this.kioskLiveRotationSeconds = 12,
     this.kioskPanelEnabled = true,
     this.kioskPastDays = 0,
+    this.kioskIdleSeconds = 60,
     this.tenantId = '',
     this.dutyReminderEnabled = false,
     this.dutyReminderDays = 1,
@@ -710,6 +711,9 @@ class ScheduleSettings {
   /// How many days back the board can be scrolled (0067); 0 = not at all.
   final int kioskPastDays;
 
+  /// Seconds without a touch after which the kiosk starts over (0068).
+  final int kioskIdleSeconds;
+
   /// The settings row's tenant — the update key since 0005 (one row per
   /// tenant instead of the old singleton).
   final String tenantId;
@@ -756,6 +760,7 @@ class ScheduleSettings {
             json['kiosk_live_rotation_seconds'] as int? ?? 12,
         kioskPanelEnabled: json['kiosk_panel_enabled'] as bool? ?? true,
         kioskPastDays: json['kiosk_past_days'] as int? ?? 0,
+        kioskIdleSeconds: json['kiosk_idle_seconds'] as int? ?? 60,
         tenantId: json['tenant_id'] as String? ?? '',
         dutyReminderEnabled: json['duty_reminder_enabled'] as bool? ?? false,
         dutyReminderDays: json['duty_reminder_days'] as int? ?? 1,

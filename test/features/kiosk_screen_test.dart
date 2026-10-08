@@ -341,6 +341,20 @@ void main() {
     expect(lastPatch(), {'kiosk_live_rotation_seconds': 30});
   });
 
+  testWidgets('the idle time is chosen from a list', (tester) async {
+    tall(tester);
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+    // The default is a minute.
+    await tester.ensureVisible(find.text('Doba nečinnosti'));
+    await tester.tap(find.text('1 min').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('5 min').last);
+    await tester.pumpAndSettle();
+    expect(jsonDecode(requests.lastWhere((r) => r.method == 'PATCH').body),
+        {'kiosk_idle_seconds': 300});
+  });
+
   testWidgets('the ranges say they are only the default', (tester) async {
     tall(tester);
     await tester.pumpWidget(app());

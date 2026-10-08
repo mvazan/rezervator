@@ -226,6 +226,18 @@ class KioskSettingsScreen extends ConsumerWidget {
                       errorText: friendlyDbError,
                     ),
             ),
+            _choice(
+              context,
+              settings,
+              'Doba nečinnosti',
+              settings?.kioskIdleSeconds ?? 60,
+              'kiosk_idle_seconds',
+              const [30, 60, 120, 300],
+              (n) => n < 60 ? '$n s' : '${n ~/ 60} min',
+              helper:
+                  'Po ní kiosk zapomene vybraného hráče, zavře okna a '
+                  'zápis, vrátí tabuli na dnešek a panel do výchozího stavu.',
+            ),
             _switch(
               context,
               settings,
@@ -234,7 +246,7 @@ class KioskSettingsScreen extends ConsumerWidget {
               'kiosk_past_days',
               subtitle:
                   'Návštěvník může tabuli posunout o pár dní zpět '
-                  'a podívat se, kdo trénoval. Po minutě bez dotyku se '
+                  'a podívat se, kdo trénoval. Po době nečinnosti se '
                   'tabule vrátí na dnešek.',
               toValue: (on) => on ? 7 : 0,
             ),
@@ -266,7 +278,7 @@ class KioskSettingsScreen extends ConsumerWidget {
             const SizedBox(height: 4),
             const Text(
               'Postranní panel kiosku ukazuje nástěnku a zápasy. Návštěvník '
-              'ho rozbalí a sbalí, po minutě bez dotyku se vrátí do výchozího '
+              'ho rozbalí a sbalí, po době nečinnosti se vrátí do výchozího '
               'stavu. Které oznamy se na kiosku ukážou, volíš přímo na '
               'nástěnce (⋮ u oznamu).',
             ),
@@ -363,7 +375,7 @@ class KioskSettingsScreen extends ConsumerWidget {
                 subtitle:
                     'Zápas, který se hraje a má data, zabere celý '
                     'panel (souboje) a panel zůstane rozbalený — i když '
-                    'ho návštěvník zavře, po minutě bez dotyku se rozbalí '
+                    'ho návštěvník zavře, po době nečinnosti se rozbalí '
                     'znovu.',
               ),
               if (settings?.kioskLiveMode ?? true)
