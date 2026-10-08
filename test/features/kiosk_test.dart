@@ -13,6 +13,7 @@ import 'package:rezervator/features/clubhouse/widgets/duel_card.dart';
 import 'package:rezervator/features/clubhouse/widgets/legacy_score_sheet.dart';
 import 'package:rezervator/features/clubhouse/widgets/match_scoreboard.dart';
 import 'package:rezervator/features/kiosk/kiosk_board_view.dart';
+import 'package:rezervator/features/kiosk/kiosk_connection.dart';
 import 'package:rezervator/features/kiosk/kiosk_info_panel.dart';
 import 'package:rezervator/features/kiosk/kiosk_shell.dart';
 import 'package:rezervator/features/kiosk/kiosk_headline.dart';
@@ -1287,6 +1288,7 @@ void main() {
       int pastDays = 0,
       int idleSeconds = 60,
       bool followBoard = true,
+      bool Function()? socketOpen,
       KioskLiveLayout liveLayout = KioskLiveLayout.full,
       Stream<Map<String, MatchResult>>? resultsStream,
       Map<String, List<MatchPlayerResult>> lineups = const {},
@@ -1334,6 +1336,7 @@ void main() {
         ),
         playersProvider.overrideWith((ref) async => players),
         messagesProvider.overrideWith((ref) => Stream.value(notices)),
+        kioskSocketOpenProvider.overrideWithValue(socketOpen ?? () => true),
         matchResultsProvider.overrideWith(
           (ref) => resultsStream ?? Stream.value(results),
         ),
@@ -2688,6 +2691,34 @@ void main() {
       await tester.tap(find.text('Brigáda').last);
       await tester.pump(const Duration(milliseconds: 100));
       expect(bar(), findsNothing);
+
+      await finish(tester);
+    });
+
+    testWidgets('a connection lost for a while is said; a blip is not', (
+      tester,
+    ) async {
+      fullHd(tester);
+      var open = true;
+      await tester.pumpWidget(app(socketOpen: () => open));
+      await tester.pumpAndSettle();
+      expect(find.byIcon(Icons.cloud_off), findsNothing);
+
+      open = false;
+      // A reconnect's moment: still quiet.
+      await tester.pump(const Duration(seconds: 6));
+      await tester.pumpAndSettle();
+      expect(find.byIcon(Icons.cloud_off), findsNothing);
+      // Down for good: the strip.
+      await tester.pump(const Duration(seconds: 20));
+      await tester.pumpAndSettle();
+      expect(find.byIcon(Icons.cloud_off), findsOneWidget);
+      expect(find.textContaining('bez spojení'), findsOneWidget);
+
+      open = true;
+      await tester.pump(const Duration(seconds: 6));
+      await tester.pumpAndSettle();
+      expect(find.byIcon(Icons.cloud_off), findsNothing);
 
       await finish(tester);
     });

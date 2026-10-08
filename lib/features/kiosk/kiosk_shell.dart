@@ -22,6 +22,7 @@ import '../../domain/schedule.dart'
     show headerEventLabel, isDayOpen, nextTrainingDay;
 import 'kiosk_board_view.dart';
 import 'kiosk_info_panel.dart';
+import 'kiosk_connection.dart';
 import 'kiosk_headline.dart';
 import 'kiosk_zapis_page.dart';
 import 'name_picker.dart';
@@ -287,6 +288,7 @@ class _KioskShellState extends ConsumerState<KioskShell>
                 onOpenNotice: _openNotice,
                 onOpenMatch: _openMatchIfScored,
               ),
+              const KioskOfflineBanner(),
               // The idle bar: thin, full width, running out right to left.
               AnimatedBuilder(
                 animation: _warning,
