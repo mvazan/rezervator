@@ -299,6 +299,9 @@ class _KioskShellState extends ConsumerState<KioskShell>
                           alignment: Alignment.centerLeft,
                           child: FractionallySizedBox(
                             widthFactor: 1 - _warning.value,
+                            // The bar's full 3 px: a ColoredBox without a
+                            // child takes the smallest height it may — 0.
+                            heightFactor: 1,
                             child: ColoredBox(
                               color: Theme.of(context)
                                   .colorScheme

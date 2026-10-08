@@ -2687,6 +2687,8 @@ void main() {
         tester.widget<FractionallySizedBox>(bar()).widthFactor,
         lessThan(1),
       );
+      // Really drawn: its 3 px, not a zero-height box.
+      expect(tester.getSize(bar()).height, 3);
       // A touch puts it away.
       await tester.tap(find.text('Brigáda').last);
       await tester.pump(const Duration(milliseconds: 100));
