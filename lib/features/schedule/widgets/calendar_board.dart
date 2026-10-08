@@ -9,6 +9,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../../../core/widgets/emoji_text.dart';
 import '../../../core/theme.dart';
 import '../../../core/ui.dart';
 import '../../../domain/calendar_layout.dart';
@@ -447,7 +448,7 @@ class BoardColumnHeader extends StatelessWidget {
                     child: Column(
                       children: [
                         for (final m in priority)
-                          Text(
+                          EmojiText(
                             headerEventLabel(m),
                             textAlign: TextAlign.center,
                             maxLines: 1,

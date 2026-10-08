@@ -2066,7 +2066,7 @@ void main() {
       await finish(tester);
     });
 
-    testWidgets('a home match has the house icon, an away match none', (
+    testWidgets('a home match has the house image, an away match none', (
       tester,
     ) async {
       fullHd(tester);
@@ -2091,7 +2091,7 @@ void main() {
       expect(
         find.descendant(
           of: find.byType(KioskDrawer),
-          matching: find.byIcon(Icons.home_rounded),
+          matching: find.byType(Image),
         ),
         findsOneWidget,
       );

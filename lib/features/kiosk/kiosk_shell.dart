@@ -23,6 +23,7 @@ import 'kiosk_board_view.dart';
 import 'kiosk_info_panel.dart';
 import 'kiosk_zapis_page.dart';
 import 'name_picker.dart';
+import '../../core/widgets/emoji_text.dart';
 
 const _idleTimeout = Duration(seconds: 60);
 
@@ -93,18 +94,18 @@ class _KioskShellState extends ConsumerState<KioskShell> {
   /// The kiosk's own theme — dialogs and routes are pushed on the root
   /// navigator, outside the [Theme] this shell wraps around itself.
   ThemeData _kioskTheme() => buildTheme(
-        (ref.read(settingsProvider).value?.kioskDark ?? true)
-            ? Brightness.dark
-            : Brightness.light,
-      );
+    (ref.read(settingsProvider).value?.kioskDark ?? true)
+        ? Brightness.dark
+        : Brightness.light,
+  );
 
   /// A route or dialog above the shell is outside its idle [Listener]:
   /// give it its own, so reading a Zápis counts as touching the kiosk.
   Widget _touchable(Widget child) => Listener(
-        onPointerDown: (_) => _touch(),
-        behavior: HitTestBehavior.translucent,
-        child: Theme(data: _kioskTheme(), child: child),
-      );
+    onPointerDown: (_) => _touch(),
+    behavior: HitTestBehavior.translucent,
+    child: Theme(data: _kioskTheme(), child: child),
+  );
 
   void _openNotice(Message notice) {
     showDialog<void>(
@@ -345,7 +346,7 @@ class _StatusBar extends ConsumerWidget {
             ),
             const SizedBox(width: 16),
             Expanded(
-              child: Text(
+              child: EmojiText(
                 _infoLine(ref, todayDay),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,

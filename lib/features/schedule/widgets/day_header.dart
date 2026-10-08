@@ -5,6 +5,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../../../core/widgets/emoji_text.dart';
 import '../../../core/theme.dart';
 import '../../../core/ui.dart';
 import '../../../domain/models.dart';
@@ -125,7 +126,7 @@ class DayHeader extends StatelessWidget {
                 for (final m in priority)
                   Padding(
                     padding: const EdgeInsets.only(top: 5, left: 52),
-                    child: Text(
+                    child: EmojiText(
                       headerEventLabel(m),
                       style: TextStyle(color: scheme.primary, fontSize: 13),
                     ),
