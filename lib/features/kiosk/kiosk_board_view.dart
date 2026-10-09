@@ -345,12 +345,12 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
     // something to happen — looks like a screen that will not work. Say why.
     final board = LayoutBuilder(
       builder: (context, constraints) {
-        // The admin's width, or as wide as a week fits (0064).
-        final columnWidth = settings.kioskColumnWidth > 0
-            ? settings.kioskColumnWidth.toDouble()
-            : boardColumnWidth(
-                widget.columnBasisWidth ?? constraints.maxWidth,
-              );
+        // As many day columns as the admin wants on the screen, or as fit
+        // at 160–220 px (0064).
+        final basis = widget.columnBasisWidth ?? constraints.maxWidth;
+        final columnWidth = settings.kioskVisibleDays > 0
+            ? (basis - calendarRulerWidth) / settings.kioskVisibleDays
+            : boardColumnWidth(basis);
         // Two admin-selectable modes (settings.kioskFitDay):
         // - fit-height: the whole window stretches to the viewport, floored
         //   at the legibility scale (then the board scrolls anyway);

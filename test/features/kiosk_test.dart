@@ -1292,7 +1292,7 @@ void main() {
       void Function(String id)? onRefresh,
       int liveRefresh = 60,
       MatchLayout liveLayout = MatchLayout.full,
-      int columnWidth = 0,
+      int visibleDays = 0,
       int rowHeight = 40,
       bool fitDay = true,
       Stream<Map<String, MatchResult>>? resultsStream,
@@ -1329,7 +1329,7 @@ void main() {
               kioskFollowBoard: followBoard,
               kioskLiveRefreshSeconds: liveRefresh,
               kioskLiveLayout: liveLayout,
-              kioskColumnWidth: columnWidth,
+              kioskVisibleDays: visibleDays,
               kioskRowHeight: rowHeight,
               kioskFitDay: fitDay,
             ),
@@ -1399,8 +1399,8 @@ void main() {
       await finish(tester);
     });
 
-    testWidgets('the admin\'s column width replaces the automatic one; 0 '
-        'is automatic', (tester) async {
+    testWidgets('the admin\'s number of days on the screen sets the column '
+        'width; 0 is automatic', (tester) async {
       fullHd(tester);
       double column() =>
           tester.getSize(find.byType(BoardColumnHeader).first).width;
@@ -1411,9 +1411,10 @@ void main() {
       expect(automatic, inInclusiveRange(150, 220));
       await finish(tester);
 
-      await tester.pumpWidget(app(columnWidth: 320));
+      // Four days on 1920 px (the drawer closed): (1920 − 46) / 4 each.
+      await tester.pumpWidget(app(visibleDays: 4));
       await tester.pumpAndSettle();
-      expect(column(), inInclusiveRange(310, 320));
+      expect(column(), inInclusiveRange((1920 - 46) / 4 - 10, (1920 - 46) / 4));
       await finish(tester);
     });
 

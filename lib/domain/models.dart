@@ -686,7 +686,7 @@ class ScheduleSettings {
     this.kioskPanelEnabled = true,
     this.kioskPastDays = 0,
     this.kioskIdleSeconds = 60,
-    this.kioskColumnWidth = 0,
+    this.kioskVisibleDays = 0,
     this.kioskRowHeight = 40,
     this.kioskLiveLayout = MatchLayout.full,
     this.tenantId = '',
@@ -766,9 +766,9 @@ class ScheduleSettings {
   /// Seconds without a touch after which the kiosk starts over (0064).
   final int kioskIdleSeconds;
 
-  /// The board's day column width in px (0064); 0 = as wide as a week fits
-  /// the screen (160 to 220 px).
-  final int kioskColumnWidth;
+  /// How many day columns the board fits on the screen (0064); 0 = as many
+  /// as fit at 160 to 220 px a column (about a week).
+  final int kioskVisibleDays;
 
   /// One lane row's height in px per hour while the day scrolls
   /// ([kioskFitDay] off; 0064); the app's week view uses 40.
@@ -830,7 +830,7 @@ class ScheduleSettings {
         kioskPanelEnabled: json['kiosk_panel_enabled'] as bool? ?? true,
         kioskPastDays: json['kiosk_past_days'] as int? ?? 0,
         kioskIdleSeconds: json['kiosk_idle_seconds'] as int? ?? 60,
-        kioskColumnWidth: json['kiosk_column_width'] as int? ?? 0,
+        kioskVisibleDays: json['kiosk_visible_days'] as int? ?? 0,
         kioskRowHeight: json['kiosk_row_height'] as int? ?? 40,
         kioskLiveLayout: parseMatchLayout(
           json['kiosk_live_layout'] as String?,

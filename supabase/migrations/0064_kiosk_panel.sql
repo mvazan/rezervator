@@ -176,12 +176,13 @@ alter table schedule_settings
   add column if not exists kiosk_idle_seconds smallint not null default 60
     constraint schedule_settings_kiosk_idle_check
     check (kiosk_idle_seconds between 15 and 600),
-  -- The board's day columns: 0 = as wide as a week fits the screen (160 to
-  -- 220 px), else this many px. And, when the day does not fit the screen
-  -- (kiosk_fit_day off), one lane row's height in px per hour.
-  add column if not exists kiosk_column_width smallint not null default 0
-    constraint schedule_settings_kiosk_column_width_check
-    check (kiosk_column_width = 0 or kiosk_column_width between 120 and 600),
+  -- How many day columns the board fits on the screen: 0 = as many as fit
+  -- at 160 to 220 px a column (about a week), else exactly this many. And,
+  -- when the day does not fit the screen (kiosk_fit_day off), one lane
+  -- row's height in px per hour.
+  add column if not exists kiosk_visible_days smallint not null default 0
+    constraint schedule_settings_kiosk_visible_days_check
+    check (kiosk_visible_days between 0 and 14),
   add column if not exists kiosk_row_height smallint not null default 40
     constraint schedule_settings_kiosk_row_height_check
     check (kiosk_row_height between 20 and 120);
@@ -212,7 +213,7 @@ begin
                           - 'kiosk_idle_seconds'
                           - 'kiosk_live_layout' - 'kiosk_follow_board'
                           - 'kiosk_live_refresh_seconds'
-                          - 'kiosk_column_width' - 'kiosk_row_height'
+                          - 'kiosk_visible_days' - 'kiosk_row_height'
                    from schedule_settings s where s.tenant_id = v_tenant),
     'blocks', coalesce((
       select jsonb_agg(to_jsonb(b) - 'tenant_id')

@@ -3459,7 +3459,7 @@ begin
                           - 'kiosk_idle_seconds'
                           - 'kiosk_live_layout' - 'kiosk_follow_board'
                           - 'kiosk_live_refresh_seconds'
-                          - 'kiosk_column_width' - 'kiosk_row_height'
+                          - 'kiosk_visible_days' - 'kiosk_row_height'
                    from schedule_settings s where s.tenant_id = v_tenant),
     'blocks', coalesce((
       select jsonb_agg(to_jsonb(b) - 'tenant_id')
@@ -5685,13 +5685,12 @@ CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     "kiosk_zapis_percent" smallint DEFAULT 80 NOT NULL,
     "kiosk_past_days" smallint DEFAULT 0 NOT NULL,
     "kiosk_idle_seconds" smallint DEFAULT 60 NOT NULL,
-    "kiosk_column_width" smallint DEFAULT 0 NOT NULL,
+    "kiosk_visible_days" smallint DEFAULT 0 NOT NULL,
     "kiosk_row_height" smallint DEFAULT 40 NOT NULL,
     CONSTRAINT "schedule_settings_booking_horizon_days_check" CHECK ((("booking_horizon_days" >= 1) AND ("booking_horizon_days" <= 90))),
     CONSTRAINT "schedule_settings_duty_reminder_days_check" CHECK ((("duty_reminder_days" >= 1) AND ("duty_reminder_days" <= 14))),
     CONSTRAINT "schedule_settings_kiosk_ahead_check" CHECK ((("kiosk_weeks_ahead" >= 0) AND ("kiosk_weeks_ahead" <= 52))),
     CONSTRAINT "schedule_settings_kiosk_back_check" CHECK ((("kiosk_weeks_back" >= 0) AND ("kiosk_weeks_back" <= 52))),
-    CONSTRAINT "schedule_settings_kiosk_column_width_check" CHECK ((("kiosk_column_width" = 0) OR (("kiosk_column_width" >= 120) AND ("kiosk_column_width" <= 600)))),
     CONSTRAINT "schedule_settings_kiosk_idle_check" CHECK ((("kiosk_idle_seconds" >= 15) AND ("kiosk_idle_seconds" <= 600))),
     CONSTRAINT "schedule_settings_kiosk_live_layout_check" CHECK (("kiosk_live_layout" = ANY (ARRAY['full'::"text", 'compact'::"text", 'table'::"text"]))),
     CONSTRAINT "schedule_settings_kiosk_live_refresh_check" CHECK ((("kiosk_live_refresh_seconds" >= 30) AND ("kiosk_live_refresh_seconds" <= 600))),
@@ -5701,6 +5700,7 @@ CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     CONSTRAINT "schedule_settings_kiosk_past_check" CHECK ((("kiosk_past_days" >= 0) AND ("kiosk_past_days" <= 60))),
     CONSTRAINT "schedule_settings_kiosk_row_height_check" CHECK ((("kiosk_row_height" >= 20) AND ("kiosk_row_height" <= 120))),
     CONSTRAINT "schedule_settings_kiosk_share_check" CHECK ((("kiosk_notices_share" >= 10) AND ("kiosk_notices_share" <= 90))),
+    CONSTRAINT "schedule_settings_kiosk_visible_days_check" CHECK ((("kiosk_visible_days" >= 0) AND ("kiosk_visible_days" <= 14))),
     CONSTRAINT "schedule_settings_kiosk_width_check" CHECK ((("kiosk_drawer_width" >= 280) AND ("kiosk_drawer_width" <= 800))),
     CONSTRAINT "schedule_settings_kiosk_zapis_check" CHECK ((("kiosk_zapis_percent" >= 50) AND ("kiosk_zapis_percent" <= 100))),
     CONSTRAINT "schedule_settings_lane_count_check" CHECK ((("lane_count" >= 1) AND ("lane_count" <= 12))),

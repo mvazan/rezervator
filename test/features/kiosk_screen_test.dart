@@ -376,7 +376,7 @@ void main() {
   });
 
   testWidgets('the screen block: dark mode, then the idle time and the Zápis '
-      'size, then the day on the screen and the column width', (tester) async {
+      'size, then the day on the screen and the days on the screen', (tester) async {
     tall(tester);
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
@@ -386,7 +386,7 @@ void main() {
       top(find.widgetWithText(TextField, 'Doba nečinnosti')),
       top(find.widgetWithText(TextField, 'Velikost zápisu')),
       top(find.text('Celý den na obrazovku')),
-      top(find.widgetWithText(TextField, 'Šířka sloupce dne')),
+      top(find.widgetWithText(TextField, 'Dní na obrazovce')),
       top(find.text('Posun tabule do minulosti')),
       top(find.text('Nástěnka')),
     ];
@@ -397,8 +397,9 @@ void main() {
     expect(find.widgetWithText(TextField, 'Velikost zápisu'), findsOneWidget);
   });
 
-  testWidgets('the column width: 0 = automatic, else 120–600 px; anything '
-      'between is refused', (tester) async {
+  testWidgets('the days on the screen: 0 = automatic, else 1–14', (
+    tester,
+  ) async {
     tall(tester);
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
@@ -408,13 +409,13 @@ void main() {
     String shown(String label) =>
         tester.widget<TextField>(find.widgetWithText(TextField, label))
             .controller!.text;
-    expect(shown('Šířka sloupce dne'), '0');
+    expect(shown('Dní na obrazovce'), '0');
 
-    await enter(tester, 'Šířka sloupce dne', '50');
-    expect(find.text('Zadej 0 nebo číslo od 120 do 600.'), findsOneWidget);
+    await enter(tester, 'Dní na obrazovce', '20');
+    expect(find.text('Zadej 0 nebo číslo od 1 do 14.'), findsOneWidget);
     expect(requests.where((r) => r.method == 'PATCH'), isEmpty);
-    await enter(tester, 'Šířka sloupce dne', '260');
-    expect(lastPatch(), {'kiosk_column_width': 260});
+    await enter(tester, 'Dní na obrazovce', '5');
+    expect(lastPatch(), {'kiosk_visible_days': 5});
   });
 
   testWidgets('the lane row height shows only while the day scrolls', (

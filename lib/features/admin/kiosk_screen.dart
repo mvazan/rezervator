@@ -302,17 +302,17 @@ class KioskSettingsScreen extends ConsumerWidget {
                 _number(
                   context,
                   settings,
-                  'Šířka sloupce dne',
-                  settings?.kioskColumnWidth ?? 0,
-                  'kiosk_column_width',
-                  unit: 'px',
-                  min: 120,
-                  max: 600,
+                  'Dní na obrazovce',
+                  settings?.kioskVisibleDays ?? 0,
+                  'kiosk_visible_days',
+                  unit: 'dní',
+                  min: 1,
+                  max: 14,
                   zeroAllowed: true,
                   helper:
-                      '0 = automaticky, aby se na obrazovku vešel celý týden '
-                      '(160–220 px). Širší sloupce = méně dní najednou, '
-                      'tabule se posouvá do stran.',
+                      'Kolik dní (sloupců) je na obrazovce najednou; další '
+                      'jsou o kus vedle. 0 = automaticky, kolik se jich vejde '
+                      '(zhruba týden).',
                 ),
                 _switch(
                   context,
