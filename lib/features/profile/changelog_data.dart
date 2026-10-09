@@ -52,10 +52,10 @@ const appChangelog = <Release>[
   Release(null, '8. 10. 2026', [
     'Detail zápasu: v Mém profilu si vyberete, jak se zápas vykreslí na '
         'výšku a na šířku — karty soubojů pod sebou, kompaktně nebo jako '
-        'tabulka tak, aby se celý zápas vešel na obrazovku, anebo rovnou '
-        'zápis (na šířku po otočení telefonu na celou obrazovku). '
-        'Přepínač Souboje | Zápis tím odpadá; stáří výsledků a odkaz na '
-        'web ČKA jsou ve skóre nahoře.',
+        'tabulka tak, aby se celý zápas vešel na obrazovku. Na šířku je '
+        'výchozí zápis, který po otočení telefonu naskočí na celou '
+        'obrazovku. Přepínač Souboje | Zápis odpadá; stáří výsledků a '
+        'odkaz na web ČKA jsou ve skóre nahoře.',
     'Kiosk: vedle rozvrhu je panel s nástěnkou a zápasy — hraný zápas '
         'běží živě, odehrané otevřou zápis. Co panel ukazuje, volí správce '
         've Správě → Kiosk; nastavení je v blocích s popisem a čísla '
@@ -64,8 +64,8 @@ const appChangelog = <Release>[
         'času; správce ho může skrýt z kiosku.',
   ], store: [
     'Detail zápasu: v Mém profilu si vyberete, jak se souboje vykreslí na '
-        'výšku a na šířku (karty, kompaktně, tabulka; na šířku i zápis na '
-        'celou obrazovku po otočení telefonu).',
+        'výšku a na šířku (karty, kompaktně, tabulka; na šířku výchozí zápis '
+        'na celou obrazovku po otočení telefonu).',
     'Kiosk: panel s nástěnkou a zápasy vedle rozvrhu, hraný zápas živě.',
     'Nástěnka: oznam jde naplánovat na zadaný čas.',
   ]),

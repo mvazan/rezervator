@@ -640,9 +640,8 @@ enum KioskNoticesMode { off, drawer, header, both }
 /// orientation, see `matchLayoutPrefsProvider`): the duel cards that scroll
 /// ([full]), one compact block per duel ([compact]) or one table row per
 /// duel ([table]) — both of those fit the match to the screen — or the
-/// score sheet ([zapis]; the app only: upright in place of the duels,
-/// sideways full screen). The kiosk never gets [zapis]: its column is
-/// checked to the first three.
+/// score sheet ([zapis]; the app, held sideways only: full screen). The
+/// kiosk never gets [zapis]: its column is checked to the first three.
 ///
 /// The names are persisted (the database column, SharedPreferences) — do
 /// not rename a value.

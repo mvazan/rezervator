@@ -35,23 +35,32 @@ void main() {
     expect(settings('zapis').kioskLiveLayout, MatchLayout.full);
   });
 
-  test('parseMatchLayoutPrefs: both names, Zápis in either', () {
+  test('parseMatchLayoutPrefs: both names; upright never Zápis; unknown '
+      'is the default — cards upright, Zápis sideways', () {
     expect(
-      parseMatchLayoutPrefs('compact', 'zapis'),
-      (portrait: MatchLayout.compact, landscape: MatchLayout.zapis),
+      parseMatchLayoutPrefs('compact', 'table'),
+      (portrait: MatchLayout.compact, landscape: MatchLayout.table),
     );
     expect(parseMatchLayoutPrefs(null, null), defaultMatchLayoutPrefs);
+    expect(defaultMatchLayoutPrefs, (
+      portrait: MatchLayout.full,
+      landscape: MatchLayout.zapis,
+    ));
     expect(
       parseMatchLayoutPrefs('zapis', 'x'),
-      (portrait: MatchLayout.zapis, landscape: MatchLayout.full),
+      (portrait: MatchLayout.full, landscape: MatchLayout.zapis),
+    );
+    expect(
+      parseMatchLayoutPrefs('x', 'full'),
+      (portrait: MatchLayout.full, landscape: MatchLayout.full),
     );
   });
 
-  test('defaults to the cards, loads the saved choice, saves a new one',
+  test('defaults to cards upright and Zápis sideways, loads the saved choice, saves a new one',
       () async {
     SharedPreferences.setMockInitialValues({
       'match_layout_portrait': 'table',
-      'match_layout_landscape': 'zapis',
+      'match_layout_landscape': 'compact',
     });
     final container = ProviderContainer();
     addTearDown(container.dispose);
@@ -59,7 +68,7 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect(
       container.read(matchLayoutPrefsProvider),
-      (portrait: MatchLayout.table, landscape: MatchLayout.zapis),
+      (portrait: MatchLayout.table, landscape: MatchLayout.compact),
     );
 
     // One orientation at a time; the other stays.
@@ -68,15 +77,27 @@ void main() {
         .set(portrait: MatchLayout.compact);
     expect(
       container.read(matchLayoutPrefsProvider),
-      (portrait: MatchLayout.compact, landscape: MatchLayout.zapis),
+      (portrait: MatchLayout.compact, landscape: MatchLayout.compact),
     );
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getString('match_layout_portrait'), 'compact');
-    expect(prefs.getString('match_layout_landscape'), 'zapis');
+    expect(prefs.getString('match_layout_landscape'), 'compact');
 
     await container
         .read(matchLayoutPrefsProvider.notifier)
         .set(landscape: MatchLayout.full);
     expect(prefs.getString('match_layout_landscape'), 'full');
+  });
+
+  test('Zápis asked for upright is saved as the cards', () async {
+    SharedPreferences.setMockInitialValues({});
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    await container
+        .read(matchLayoutPrefsProvider.notifier)
+        .set(portrait: MatchLayout.zapis);
+    expect(container.read(matchLayoutPrefsProvider).portrait, MatchLayout.full);
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('match_layout_portrait'), 'full');
   });
 }

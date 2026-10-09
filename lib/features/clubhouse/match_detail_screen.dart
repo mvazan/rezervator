@@ -9,10 +9,9 @@
 /// cards and the Družstva card, scrolling ([MatchLayout.full]); the duels
 /// fitted to the screen with the scoreboard pinned on top
 /// ([MatchLayout.compact], [MatchLayout.table] — the kiosk's drawings,
-/// `duels_compact.dart`); or the kuzelky.com-style score sheet
-/// ([MatchLayout.zapis]) — upright in place of the duels, sideways full
-/// screen the moment the phone turns ([ZapisPage]), closed when it turns
-/// back.
+/// `duels_compact.dart`); or, held sideways only, the kuzelky.com-style
+/// score sheet ([MatchLayout.zapis]) full screen the moment the phone turns
+/// ([ZapisPage], no transition), closed when it turns back.
 library;
 
 import 'dart:async';
@@ -32,7 +31,6 @@ import '../../domain/results.dart';
 import 'venue_detail_screen.dart';
 import 'widgets/duel_card.dart';
 import 'widgets/duels_compact.dart';
-import 'widgets/legacy_score_sheet.dart';
 import 'widgets/match_scoreboard.dart';
 import 'widgets/team_totals_card.dart';
 import 'widgets/zapis_page.dart';
@@ -124,9 +122,12 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     if (wanted && slot != null && _autoZapis == null && !_autoZapisDismissed) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || _autoZapis != null) return;
-        final route = MaterialPageRoute<void>(
-          fullscreenDialog: true,
-          builder: (_) => ZapisPage(
+        // No transition either way: a turn of the phone is the animation.
+        final route = PageRouteBuilder<void>(
+          opaque: true,
+          transitionDuration: Duration.zero,
+          reverseTransitionDuration: Duration.zero,
+          pageBuilder: (_, _, _) => ZapisPage(
             slot: slot,
             closeButton: true,
             competitionSlug: league ? widget.competitionSlug : null,
@@ -388,26 +389,10 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
         MediaQuery.orientationOf(context) == Orientation.landscape;
     final layoutPrefs = ref.watch(matchLayoutPrefsProvider);
     final layout = landscape ? layoutPrefs.landscape : layoutPrefs.portrait;
-    final inlineLayout = landscape && layout == MatchLayout.zapis
+    final inlineLayout = layout == MatchLayout.zapis
         ? layoutPrefs.portrait
         : layout;
-    // The registration numbers only the Zápis shows; looked up on its first
-    // open and remembered by the server.
-    final regnums = inlineLayout == MatchLayout.zapis && lineup.isNotEmpty
-        ? ref
-                  .watch(
-                    matchRegnumsProvider((
-                      matchId: _matchId,
-                      league: fromLeague,
-                      lineup: lineup.length,
-                    )),
-                  )
-                  .value ??
-              const <String, String>{}
-        : const <String, String>{};
-    final players = [
-      for (final p in lineup) p.withRegnum(regnums[p.playerSlug]),
-    ];
+    final players = lineup;
 
     PrioritySlot? slot = leagueMatch?.asSlot() ?? becameOurs;
     if (!isLeague) {
@@ -569,7 +554,10 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     }
 
     children.addAll(switch (layout) {
-      MatchLayout.full || MatchLayout.compact || MatchLayout.table => [
+      MatchLayout.full ||
+      MatchLayout.compact ||
+      MatchLayout.table ||
+      MatchLayout.zapis => [
         for (final child in _souboje(
           duels: duels,
           result: result,
@@ -577,14 +565,6 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
           awayColor: awayColor,
         ))
           _centred(child),
-      ],
-      MatchLayout.zapis => [
-        // Not centred: the sheet keeps the whole width. At its natural
-        // size (about 1000dp) it fits a wide window whole instead of
-        // hiding a third behind a sideways scroll. Without a lineup it
-        // still shows its team summary row (as long as `result` has
-        // team-level data).
-        LegacyScoreSheet(slot: slot, result: result, players: players),
       ],
     });
 
@@ -628,6 +608,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
       MatchLayout.compact => DuelsCompact(
         duels: duels,
         result: result,
+        singleOpen: true,
         header: pinned,
         listPadding: padding,
         onRefresh: pullToRefresh ? refresh : null,
@@ -635,6 +616,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
       MatchLayout.table || MatchLayout.full || MatchLayout.zapis => DuelsTable(
         duels: duels,
         result: result,
+        singleOpen: true,
         header: pinned,
         listPadding: padding,
         onRefresh: pullToRefresh ? refresh : null,

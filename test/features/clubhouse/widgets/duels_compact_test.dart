@@ -191,6 +191,46 @@ void main() {
     expect(find.text('Hos Hráč3').hitTestable(), findsOneWidget);
   });
 
+  for (final table in [false, true]) {
+    testWidgets('${table ? 'table' : 'compact'} with singleOpen: opening '
+        'another duel folds the first in the same moment', (tester) async {
+      final view = table
+          ? DuelsTable(duels: duels, result: result(2, 0), singleOpen: true)
+          : DuelsCompact(duels: duels, result: result(2, 0), singleOpen: true);
+      await tester.pumpWidget(host(view));
+      String name(int pos) => table ? 'Hráč$pos' : 'Dom Hráč$pos';
+      await tester.tap(find.text(name(1)).hitTestable().first);
+      await tester.pumpAndSettle();
+      expect(find.byType(DuelCard).hitTestable(), findsOneWidget);
+
+      await tester.tap(find.text(name(2)).hitTestable().first);
+      // One frame: no waiting for the first to settle — it is already
+      // folding while the second opens.
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      final states = [
+        for (final f in tester.widgetList<AnimatedCrossFade>(
+          find.byType(AnimatedCrossFade),
+        ))
+          f.crossFadeState,
+      ];
+      expect(
+        states.where((s) => s == CrossFadeState.showSecond),
+        hasLength(1),
+        reason: 'one duel open, the other already folding',
+      );
+      await tester.pumpAndSettle();
+      final card = find.byType(DuelCard).hitTestable();
+      expect(card, findsOneWidget);
+      expect(tester.widget<DuelCard>(card).duel.position, 2);
+
+      // A tap on the open card folds it, leaving none.
+      await tester.tap(card);
+      await tester.pumpAndSettle();
+      expect(find.byType(DuelCard).hitTestable(), findsNothing);
+    });
+  }
+
   group('DuelsTable', () {
     testWidgets('a row per duel with surnames, a dot on the one being played, '
         'and alternate rows shaded', (tester) async {

@@ -133,9 +133,9 @@ Future<List<Override>> loadPersistedAppearance() async {
 /// How the match detail draws a match, by the way the device is held
 /// (Můj profil → Detail zápasu): [MatchLayout.full] (the duel cards,
 /// scrolling), [MatchLayout.compact] or [MatchLayout.table] (fitted to the
-/// screen), or [MatchLayout.zapis] — the score sheet: upright in place of
-/// the duels, sideways full screen the moment the phone turns (closed when
-/// it turns back).
+/// screen); sideways also [MatchLayout.zapis] — the score sheet full
+/// screen the moment the phone turns (closed when it turns back), the
+/// default.
 ///
 /// Device-local (a phone and a tablet are held differently), persisted by
 /// name — see [MatchLayout].
@@ -143,13 +143,15 @@ typedef MatchLayoutPrefs = ({MatchLayout portrait, MatchLayout landscape});
 
 const defaultMatchLayoutPrefs = (
   portrait: MatchLayout.full,
-  landscape: MatchLayout.full,
+  landscape: MatchLayout.zapis,
 );
 
-/// Persisted names → prefs; anything unknown is [MatchLayout.full].
+/// Persisted names → prefs; anything unknown is the default — the cards
+/// upright, the Zápis sideways. Zápis is a sideways layout only: saved for
+/// upright (never offered) it reads as the cards.
 MatchLayoutPrefs parseMatchLayoutPrefs(String? portrait, String? landscape) => (
-  portrait: parseMatchLayout(portrait),
-  landscape: parseMatchLayout(landscape),
+  portrait: parseMatchLayout(portrait, allowZapis: false),
+  landscape: parseMatchLayout(landscape, fallback: MatchLayout.zapis),
 );
 
 final matchLayoutPrefsProvider =
@@ -177,8 +179,10 @@ class MatchLayoutPrefsNotifier extends Notifier<MatchLayoutPrefs> {
     }
   }
 
-  /// Sets the layout for one orientation now and remembers it.
+  /// Sets the layout for one orientation now and remembers it. Zápis asked
+  /// for upright reads as the cards.
   Future<void> set({MatchLayout? portrait, MatchLayout? landscape}) async {
+    if (portrait == MatchLayout.zapis) portrait = MatchLayout.full;
     state = (
       portrait: portrait ?? state.portrait,
       landscape: landscape ?? state.landscape,

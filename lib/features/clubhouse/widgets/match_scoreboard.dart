@@ -163,9 +163,9 @@ class MatchScoreboard extends StatelessWidget {
   }
 }
 
-/// The date and start, then how old the score is („⟳ před 3 min“), on
-/// the left; the status chip on the right (it drops under the date when
-/// the two don't fit on one line).
+/// The date and start on the first line; under it, on one line, how old the
+/// score is („⟳ před 3 min“) on the left and the status chip (or the video
+/// button) on the right — they drop onto two lines when they don't fit.
 class _TopLine extends StatelessWidget {
   const _TopLine({
     required this.date,
@@ -201,49 +201,48 @@ class _TopLine extends StatelessWidget {
       fontWeight: FontWeight.w400,
       fontFeatures: _tabular,
     );
-    return Wrap(
-      alignment: WrapAlignment.spaceBetween,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      spacing: 8,
-      runSpacing: 4,
+    final status = action ??
+        (chip == null
+            ? null
+            : _Pill(
+                label: chip,
+                leading: live
+                    ? Icon(Icons.circle, size: 8, color: scheme.onErrorContainer)
+                    : null,
+                fill: live
+                    ? scheme.errorContainer
+                    : scheme.surfaceContainerHighest,
+                style: text.labelMedium?.copyWith(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: live ? scheme.onErrorContainer : scheme.onSurface,
+                  fontFeatures: _tabular,
+                ),
+              ));
+    final age = freshness == null
+        ? null
+        : Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.refresh, size: 14, color: scheme.onSurfaceVariant),
+              const SizedBox(width: 3),
+              Text(freshness!, style: small),
+            ],
+          );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Wrap(
-          crossAxisAlignment: WrapCrossAlignment.center,
-          spacing: 8,
-          runSpacing: 4,
-          children: [
-            Text(date, style: small),
-            if (freshness case final freshness?)
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.refresh,
-                    size: 14,
-                    color: scheme.onSurfaceVariant,
-                  ),
-                  const SizedBox(width: 3),
-                  Text(freshness, style: small),
-                ],
-              ),
-          ],
-        ),
-        if (action != null)
-          action!
-        else if (chip != null)
-          _Pill(
-            label: chip,
-            leading: live
-                ? Icon(Icons.circle, size: 8, color: scheme.onErrorContainer)
-                : null,
-            fill: live ? scheme.errorContainer : scheme.surfaceContainerHighest,
-            style: text.labelMedium?.copyWith(
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-              color: live ? scheme.onErrorContainer : scheme.onSurface,
-              fontFeatures: _tabular,
-            ),
+        Text(date, style: small),
+        if (age != null || status != null) ...[
+          const SizedBox(height: 6),
+          Wrap(
+            alignment: age == null ? WrapAlignment.end : WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            runSpacing: 4,
+            children: [?age, ?status],
           ),
+        ],
       ],
     );
   }

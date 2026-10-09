@@ -2219,8 +2219,9 @@ void main() {
 
     Finder chip(String label) => find.widgetWithText(ChoiceChip, label);
 
-    testWidgets('offers the four drawings for each way of holding the phone, '
-        'the cards chosen by default', (tester) async {
+    testWidgets('upright offers three drawings, sideways four with Zápis; '
+        'the cards upright and the Zápis sideways are chosen by default',
+        (tester) async {
       tall(tester);
       SharedPreferences.setMockInitialValues({});
       await tester.pumpWidget(app(me));
@@ -2232,16 +2233,18 @@ void main() {
       expect(chip('Karty'), findsNWidgets(2));
       expect(chip('Kompaktně'), findsNWidgets(2));
       expect(chip('Tabulka'), findsNWidgets(2));
-      expect(chip('Zápis'), findsNWidgets(2));
+      // Only the sideways row has the Zápis.
+      expect(chip('Zápis'), findsOneWidget);
       bool selected(Finder f) => tester.widget<ChoiceChip>(f).selected;
       expect(selected(chip('Karty').first), isTrue);
-      expect(selected(chip('Karty').last), isTrue);
-      expect(selected(chip('Zápis').last), isFalse);
-      expect(find.textContaining('Otočením telefonu'), findsNothing);
+      expect(selected(chip('Karty').last), isFalse);
+      expect(selected(chip('Zápis')), isTrue);
+      expect(find.textContaining('Otočením telefonu'), findsOneWidget);
     });
 
     testWidgets('a tap remembers the drawing for that way of holding the '
-        'phone; Zápis sideways explains itself', (tester) async {
+        'phone; the note about the turn is there only with the Zápis',
+        (tester) async {
       tall(tester);
       SharedPreferences.setMockInitialValues({});
       await tester.pumpWidget(app(me));
@@ -2250,7 +2253,7 @@ void main() {
 
       await tester.tap(chip('Tabulka').first);
       await tester.pumpAndSettle();
-      await tester.tap(chip('Zápis').last);
+      await tester.tap(chip('Kompaktně').last);
       await tester.pumpAndSettle();
 
       final container = ProviderScope.containerOf(
@@ -2258,17 +2261,22 @@ void main() {
       );
       expect(
         container.read(matchLayoutPrefsProvider),
-        (portrait: MatchLayout.table, landscape: MatchLayout.zapis),
+        (portrait: MatchLayout.table, landscape: MatchLayout.compact),
       );
       final prefs = await SharedPreferences.getInstance();
       expect(prefs.getString('match_layout_portrait'), 'table');
-      expect(prefs.getString('match_layout_landscape'), 'zapis');
-      expect(find.textContaining('Otočením telefonu'), findsOneWidget);
+      expect(prefs.getString('match_layout_landscape'), 'compact');
+      expect(find.textContaining('Otočením telefonu'), findsNothing);
       bool selected(Finder f) => tester.widget<ChoiceChip>(f).selected;
       expect(selected(chip('Tabulka').first), isTrue);
       expect(selected(chip('Karty').first), isFalse);
-      expect(selected(chip('Zápis').last), isTrue);
-      expect(selected(chip('Zápis').first), isFalse);
+      expect(selected(chip('Kompaktně').last), isTrue);
+      expect(selected(chip('Zápis')), isFalse);
+
+      await tester.tap(chip('Zápis'));
+      await tester.pumpAndSettle();
+      expect(prefs.getString('match_layout_landscape'), 'zapis');
+      expect(find.textContaining('Otočením telefonu'), findsOneWidget);
     });
 
     testWidgets('the saved choice is shown', (tester) async {

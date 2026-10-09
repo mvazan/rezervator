@@ -11,7 +11,9 @@
 /// - [MatchScoreLine]: the score the kiosk pins above either (the app pins
 ///   its own scoreboard instead).
 ///
-/// Several duels may be open while they fit; see [_FifoOpen].
+/// The kiosk lets several duels be open while they fit ([_FifoOpen]); the
+/// app ([DuelsCompact.singleOpen]) keeps one, the old one folding as the
+/// new one opens.
 ///
 /// No date, live chip, format line or difference bar: on the wall the
 /// score and the totals are what is read from across the room.
@@ -128,11 +130,21 @@ mixin _FifoOpen<T extends StatefulWidget> on State<T> {
     super.dispose();
   }
 
+  /// Only one duel open at a time: opening another folds the first in the
+  /// same moment, both animating together.
+  bool get singleOpen;
+
   void toggle(int position) {
     setState(() {
-      if (!opened.remove(position)) opened.add(position);
+      if (singleOpen) {
+        final wasOpen = opened.contains(position);
+        opened.clear();
+        if (!wasOpen) opened.add(position);
+      } else if (!opened.remove(position)) {
+        opened.add(position);
+      }
     });
-    _fitWhenSettled();
+    if (!singleOpen) _fitWhenSettled();
   }
 
   /// Measures once the opening has animated to its full height — again on
@@ -205,6 +217,7 @@ class _FittedDuels extends StatefulWidget {
     required this.result,
     required this.header,
     required this.closed,
+    required this.singleOpen,
     this.gapBeforeEach = 0,
     this.gapAfterHeader = 0,
     this.openPadding = EdgeInsets.zero,
@@ -216,6 +229,7 @@ class _FittedDuels extends StatefulWidget {
   final MatchResult? result;
   final Widget? header;
   final _ClosedDuelBuilder closed;
+  final bool singleOpen;
 
   /// Around the scrolling duels (not the header).
   final EdgeInsets listPadding;
@@ -234,6 +248,9 @@ class _FittedDuels extends StatefulWidget {
 }
 
 class _FittedDuelsState extends State<_FittedDuels> with _FifoOpen {
+  @override
+  bool get singleOpen => widget.singleOpen;
+
   @override
   Widget build(BuildContext context) {
     Widget list = SingleChildScrollView(
@@ -286,6 +303,7 @@ class DuelsCompact extends StatelessWidget {
     super.key,
     required this.duels,
     required this.result,
+    this.singleOpen = false,
     this.header,
     this.listPadding = EdgeInsets.zero,
     this.onRefresh,
@@ -293,6 +311,9 @@ class DuelsCompact extends StatelessWidget {
 
   final List<Duel> duels;
   final MatchResult? result;
+
+  /// One open duel at a time (the app); false = as many as fit (the kiosk).
+  final bool singleOpen;
 
   /// Pinned above the duels: the kiosk's [MatchScoreLine], the app's
   /// scoreboard and buttons.
@@ -308,6 +329,7 @@ class DuelsCompact extends StatelessWidget {
   Widget build(BuildContext context) => _FittedDuels(
     duels: duels,
     result: result,
+    singleOpen: singleOpen,
     header: header,
     listPadding: listPadding,
     gapBeforeEach: 6,
@@ -425,6 +447,7 @@ class DuelsTable extends StatelessWidget {
     super.key,
     required this.duels,
     required this.result,
+    this.singleOpen = false,
     this.header,
     this.listPadding = EdgeInsets.zero,
     this.onRefresh,
@@ -432,6 +455,9 @@ class DuelsTable extends StatelessWidget {
 
   final List<Duel> duels;
   final MatchResult? result;
+
+  /// See [DuelsCompact.singleOpen].
+  final bool singleOpen;
 
   /// Pinned above the rows; see [DuelsCompact.header].
   final Widget? header;
@@ -446,6 +472,7 @@ class DuelsTable extends StatelessWidget {
   Widget build(BuildContext context) => _FittedDuels(
     duels: duels,
     result: result,
+    singleOpen: singleOpen,
     header: header,
     listPadding: listPadding,
     gapAfterHeader: header == null ? 0 : 8,

@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/core/ui.dart' show dayFull;
 import 'package:rezervator/data/clock.dart';
+import 'package:rezervator/data/local_prefs.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/clubhouse/match_detail_screen.dart';
@@ -13,6 +14,13 @@ import 'package:rezervator/features/clubhouse/widgets/match_video_icon.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rezervator/features/schedule/my_trainings_screen.dart'
     show MatchTrophy;
+
+/// The match detail's layout pinned to the cards both ways up.
+class _CardsOnly extends MatchLayoutPrefsNotifier {
+  @override
+  MatchLayoutPrefs build() =>
+      (portrait: MatchLayout.full, landscape: MatchLayout.full);
+}
 
 void main() {
   final now = DateTime(2026, 9, 23, 18, 0); // středa
@@ -151,6 +159,9 @@ void main() {
           onResultsSubscribed?.call();
           return Stream.value(results);
         }),
+        // The detail (pushed on row tap) in this sideways test window would
+        // open its Zápis over itself by default: the cards instead.
+        matchLayoutPrefsProvider.overrideWith(_CardsOnly.new),
         // MatchDetailScreen (pushed on row tap) watches these two as well.
         matchPlayerResultsProvider.overrideWith(
           (ref, id) => Stream.value(const []),

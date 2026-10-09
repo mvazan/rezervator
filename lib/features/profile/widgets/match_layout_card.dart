@@ -1,9 +1,8 @@
 /// Můj profil → „Detail zápasu“: how the match detail draws a match when
 /// the device is held upright and when sideways ([matchLayoutPrefsProvider],
 /// device-local). The same three drawings the kiosk's admin picks from —
-/// the cards, the compact blocks, the table — and the Zápis: upright the
-/// score sheet in place of the duels, sideways full screen the moment the
-/// phone turns.
+/// the cards, the compact blocks, the table — and, sideways only, the Zápis:
+/// the score sheet full screen the moment the phone turns.
 library;
 
 import 'package:flutter/material.dart';
@@ -13,8 +12,13 @@ import '../../../data/local_prefs.dart';
 import '../../../domain/models.dart';
 
 /// The layouts offered, in the order they are offered: least to most
-/// dense, the Zápis last.
-const matchLayoutChoices = MatchLayout.values;
+/// dense; the Zápis, sideways only, last.
+const portraitMatchLayouts = [
+  MatchLayout.full,
+  MatchLayout.compact,
+  MatchLayout.table,
+];
+const landscapeMatchLayouts = MatchLayout.values;
 
 /// The chip's label of [layout] (the admin's kiosk dropdown spells the
 /// same three out longer).
@@ -41,22 +45,22 @@ class MatchLayoutCard extends ConsumerWidget {
             title: Text('Detail zápasu'),
             subtitle: Text(
               'Jak se zápas vykreslí: karty soubojů pod sebou, kompaktně '
-              'nebo jako tabulka tak, aby se celý zápas vešel na obrazovku, '
-              'anebo rovnou zápis. Na šířku zápis po otočení telefonu '
-              'naskočí na celou obrazovku.',
+              'nebo jako tabulka tak, aby se celý zápas vešel na obrazovku. '
+              'Na šířku může po otočení telefonu rovnou naskočit zápis na '
+              'celou obrazovku.',
             ),
           ),
           _OrientationRow(
             label: 'Na výšku',
             icon: Icons.stay_current_portrait,
-            layouts: matchLayoutChoices,
+            layouts: portraitMatchLayouts,
             selected: prefs.portrait,
             onSelected: (l) => notifier.set(portrait: l),
           ),
           _OrientationRow(
             label: 'Na šířku',
             icon: Icons.stay_current_landscape,
-            layouts: matchLayoutChoices,
+            layouts: landscapeMatchLayouts,
             selected: prefs.landscape,
             onSelected: (l) => notifier.set(landscape: l),
           ),

@@ -204,7 +204,7 @@ void main() {
       expect(taps, 1);
     });
 
-    testWidgets('a finished match says how old its score is after the date',
+    testWidgets('a finished match says how old its score is under the date',
         (tester) async {
       await pump(tester);
       expect(find.byIcon(Icons.refresh), findsOneWidget);
@@ -266,7 +266,7 @@ void main() {
     );
 
     testWidgets('the chip says Živě after an 8dp dot; the freshness sits '
-        'after the date with a ⟳', (tester) async {
+        'under the date with a ⟳, on the chip\'s row', (tester) async {
       await pump(tester);
       expect(find.text('Živě'), findsOneWidget);
       expect(find.text('Dokončeno'), findsNothing);
@@ -275,8 +275,11 @@ void main() {
       final arrow = tester.getRect(find.byIcon(Icons.refresh));
       expect(arrow.right, lessThanOrEqualTo(fresh.left));
       expect(arrow.center.dy, closeTo(fresh.center.dy, 2));
+      // Under the date and time, on the row of the chip, which is at the
+      // right.
       final date = tester.getRect(find.textContaining('·').first);
-      expect(date.right, lessThanOrEqualTo(arrow.left));
+      expect(arrow.top, greaterThanOrEqualTo(date.bottom));
+      expect(tester.getRect(find.text('Živě')).left, greaterThan(fresh.right));
       // The dot is an icon, not a „●“ Manrope lacks.
       expect(find.textContaining('●'), findsNothing);
       final dot = find.byIcon(Icons.circle);
