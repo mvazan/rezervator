@@ -49,7 +49,7 @@ String changelogHeading(Release r, {required bool web}) {
 }
 
 const appChangelog = <Release>[
-  Release(null, '9. 10. 2026', [
+  Release('2.0.7', '9. 10. 2026', [
     'Notifikace o rezervaci, kterou za vás udělal kiosk, spoluhráč ze '
         'skupiny nebo služba, otevře kalendář přímo na tom dni a termín na '
         'chvíli zvýrazní. Když už je rezervace zrušená, aplikace to řekne. '
