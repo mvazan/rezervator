@@ -10,8 +10,8 @@
 /// fitted to the screen with the scoreboard pinned on top
 /// ([MatchLayout.compact], [MatchLayout.table] — the kiosk's drawings,
 /// `duels_compact.dart`); or, held sideways only, the kuzelky.com-style
-/// score sheet ([MatchLayout.zapis]) full screen the moment the phone turns
-/// ([ZapisPage], no transition), closed when it turns back.
+/// score sheet ([MatchLayout.zapis]) full screen in place of the detail the
+/// moment the phone turns ([ZapisPage]), gone when it turns back.
 library;
 
 import 'dart:async';
@@ -95,69 +95,15 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
   /// refresh and a trip to Zápis and back.
   final Set<int> _expanded = {};
 
-  /// The full-screen Zápis this screen opened on a turn to landscape, while
-  /// it is up; see [_syncAutoZapis].
-  Route<void>? _autoZapis;
-
-  /// Set when that Zápis was closed by hand while the phone stayed
-  /// sideways: it then waits for the next turn instead of opening again.
-  bool _autoZapisDismissed = false;
+  /// Set when the Zápis shown on a turn to landscape was closed by its ×
+  /// while the phone stayed sideways: the detail then shows until the next
+  /// turn instead of the sheet coming back.
+  bool _zapisDismissed = false;
 
   @override
   void dispose() {
     _waitTimer?.cancel();
     super.dispose();
-  }
-
-  /// Opens the Zápis full screen when the phone is held sideways and that
-  /// is the owner's landscape layout, and closes it again when the phone is
-  /// turned back — once per frame, from [build].
-  void _syncAutoZapis({
-    required bool landscape,
-    required bool wanted,
-    required PrioritySlot? slot,
-    required bool league,
-  }) {
-    if (!landscape) _autoZapisDismissed = false;
-    if (wanted && slot != null && _autoZapis == null && !_autoZapisDismissed) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || _autoZapis != null) return;
-        // No transition either way: a turn of the phone is the animation.
-        final route = PageRouteBuilder<void>(
-          opaque: true,
-          transitionDuration: Duration.zero,
-          reverseTransitionDuration: Duration.zero,
-          pageBuilder: (_, _, _) => ZapisPage(
-            slot: slot,
-            closeButton: true,
-            competitionSlug: league ? widget.competitionSlug : null,
-            withRegnums: true,
-          ),
-        );
-        _autoZapis = route;
-        unawaited(
-          Navigator.of(context).push(route).whenComplete(() {
-            if (!mounted) return;
-            _autoZapis = null;
-            if (MediaQuery.orientationOf(context) == Orientation.landscape) {
-              _autoZapisDismissed = true;
-            }
-          }),
-        );
-      });
-    } else if (!landscape && _autoZapis != null) {
-      final route = _autoZapis!;
-      _autoZapis = null;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        final navigator = Navigator.of(context);
-        if (route.isCurrent) {
-          navigator.pop();
-        } else {
-          navigator.removeRoute(route);
-        }
-      });
-    }
   }
 
   // Same reasoning as results_screen's own _refreshQuietly: a background
@@ -447,12 +393,22 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     final showRefreshButton =
         (live || askable || correctable) && !_hiddenByNotLive;
 
-    _syncAutoZapis(
-      landscape: landscape,
-      wanted: layout == MatchLayout.zapis && players.isNotEmpty,
-      slot: slot,
-      league: fromLeague,
-    );
+    if (!landscape) _zapisDismissed = false;
+    // Held sideways with the Zápis chosen, the sheet takes the whole screen
+    // in place of the detail — built in the very frame of the turn, so the
+    // detail is never drawn sideways first.
+    if (layout == MatchLayout.zapis &&
+        players.isNotEmpty &&
+        slot != null &&
+        !_zapisDismissed) {
+      return ZapisPage(
+        slot: slot,
+        closeButton: true,
+        competitionSlug: fromLeague ? widget.competitionSlug : null,
+        withRegnums: true,
+        onClose: () => setState(() => _zapisDismissed = true),
+      );
+    }
 
     return Scaffold(
       appBar: AppBar(

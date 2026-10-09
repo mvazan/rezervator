@@ -1795,8 +1795,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
       expect(find.byIcon(Icons.close), findsOneWidget);
-      // The registration numbers were asked for, as the inline Zápis does.
-      expect(find.byType(MatchDetailScreen), findsNothing);
+      // In place of the detail: its scoreboard is not on screen.
+      expect(find.byType(MatchScoreboard), findsNothing);
 
       tester.view.physicalSize = const Size(450, 900);
       await tester.pumpAndSettle();
@@ -1814,27 +1814,24 @@ void main() {
       expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
     });
 
-    testWidgets('a turn to and from the Zápis has no transition: the sheet '
-        'is whole the frame after the turn, and gone the frame after the '
-        'turn back', (tester) async {
+    testWidgets('the turn shows the sheet in the very frame of the turn — '
+        'the detail is never built sideways first — and the turn back the '
+        'detail again', (tester) async {
       window(tester, 450, 900);
       await tester.pumpWidget(rudna(sheetSideways));
       await tester.pumpAndSettle();
+      expect(find.byType(DuelCard), findsWidgets);
 
       tester.view.physicalSize = const Size(900, 450);
-      // Two frames: the route is pushed after the one that saw the turn.
-      await tester.pump();
       await tester.pump();
       expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
-      expect(find.byType(FadeTransition).evaluate().where((e) {
-        final route = ModalRoute.of(e);
-        return route != null && route.animation?.isCompleted == false;
-      }), isEmpty);
+      expect(find.byType(DuelCard), findsNothing);
+      expect(find.byType(MatchScoreboard), findsNothing);
 
       tester.view.physicalSize = const Size(450, 900);
       await tester.pump();
-      await tester.pump();
       expect(find.byType(LegacyScoreSheetPage), findsNothing);
+      expect(find.byType(DuelCard), findsWidgets);
     });
 
     testWidgets('the app keeps one duel open in a fitted layout: opening '

@@ -25,6 +25,7 @@ class ZapisPage extends ConsumerWidget {
     this.closeButton = false,
     this.competitionSlug,
     this.withRegnums = false,
+    this.onClose,
   });
 
   final PrioritySlot slot;
@@ -40,6 +41,9 @@ class ZapisPage extends ConsumerWidget {
   /// Look up the players' registration numbers for the sheet (the app; the
   /// kiosk's account may not).
   final bool withRegnums;
+
+  /// What the × does; null = pop the route the page is on.
+  final VoidCallback? onClose;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -64,7 +68,12 @@ class ZapisPage extends ConsumerWidget {
     }
     var players = lineup.value ?? const <MatchPlayerResult>[];
     if (players.isEmpty) {
-      return _NoSheet(slot: slot, result: result, closeButton: closeButton);
+      return _NoSheet(
+        slot: slot,
+        result: result,
+        closeButton: closeButton,
+        onClose: onClose,
+      );
     }
     if (withRegnums) {
       final regnums =
@@ -85,6 +94,7 @@ class ZapisPage extends ConsumerWidget {
       result: result,
       players: players,
       showCloseButton: closeButton,
+      onClose: onClose,
     );
   }
 }
@@ -96,11 +106,13 @@ class _NoSheet extends StatelessWidget {
     required this.slot,
     required this.result,
     required this.closeButton,
+    required this.onClose,
   });
 
   final PrioritySlot slot;
   final MatchResult? result;
   final bool closeButton;
+  final VoidCallback? onClose;
 
   @override
   Widget build(BuildContext context) {
@@ -161,7 +173,7 @@ class _NoSheet extends StatelessWidget {
                 child: IconButton.filledTonal(
                   icon: const Icon(Icons.close),
                   tooltip: 'Zavřít',
-                  onPressed: () => Navigator.of(context).maybePop(),
+                  onPressed: onClose ?? () => Navigator.of(context).maybePop(),
                 ),
               ),
             ),
