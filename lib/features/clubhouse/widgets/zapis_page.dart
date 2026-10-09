@@ -25,13 +25,12 @@ class ZapisPage extends ConsumerWidget {
     this.closeButton = false,
     this.competitionSlug,
     this.withRegnums = false,
-    this.onClose,
+    this.backButton = false,
   });
 
   final PrioritySlot slot;
 
-  /// The × — the kiosk only when its modal covers the whole screen; the app
-  /// always (a turn back of the phone closes the page too).
+  /// The × — the kiosk only when its modal covers the whole screen.
   final bool closeButton;
 
   /// Set for a foreign match (0055): its result and players are read from
@@ -42,8 +41,10 @@ class ZapisPage extends ConsumerWidget {
   /// kiosk's account may not).
   final bool withRegnums;
 
-  /// What the × does; null = pop the route the page is on.
-  final VoidCallback? onClose;
+  /// The corner button is ← „Zpět“ instead of × „Zavřít“: the app's
+  /// sideways Zápis stands in for the match detail, so it goes back to
+  /// where the match was opened from. Either one pops the route.
+  final bool backButton;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -71,8 +72,8 @@ class ZapisPage extends ConsumerWidget {
       return _NoSheet(
         slot: slot,
         result: result,
-        closeButton: closeButton,
-        onClose: onClose,
+        closeButton: closeButton || backButton,
+        backButton: backButton,
       );
     }
     if (withRegnums) {
@@ -93,8 +94,8 @@ class ZapisPage extends ConsumerWidget {
       slot: slot,
       result: result,
       players: players,
-      showCloseButton: closeButton,
-      onClose: onClose,
+      showCloseButton: closeButton || backButton,
+      backButton: backButton,
     );
   }
 }
@@ -106,13 +107,13 @@ class _NoSheet extends StatelessWidget {
     required this.slot,
     required this.result,
     required this.closeButton,
-    required this.onClose,
+    required this.backButton,
   });
 
   final PrioritySlot slot;
   final MatchResult? result;
   final bool closeButton;
-  final VoidCallback? onClose;
+  final bool backButton;
 
   @override
   Widget build(BuildContext context) {
@@ -171,9 +172,9 @@ class _NoSheet extends StatelessWidget {
               left: 8,
               child: SafeArea(
                 child: IconButton.filledTonal(
-                  icon: const Icon(Icons.close),
-                  tooltip: 'Zavřít',
-                  onPressed: onClose ?? () => Navigator.of(context).maybePop(),
+                  icon: Icon(backButton ? Icons.arrow_back : Icons.close),
+                  tooltip: backButton ? 'Zpět' : 'Zavřít',
+                  onPressed: () => Navigator.of(context).maybePop(),
                 ),
               ),
             ),

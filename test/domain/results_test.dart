@@ -32,20 +32,27 @@ void main() {
     );
   });
 
-  group('formatLabel', () {
-    test(
-      'TEAMS_OF_6 + T120',
-      () => expect(formatLabel('TEAMS_OF_6', 'T120'), '6 hráčů · 120 HS'),
-    );
-    test(
-      'TEAMS_OF_4 alone (Czech 2–4 agreement)',
-      () => expect(formatLabel('TEAMS_OF_4', ''), '4 hráči'),
-    );
-    test(
-      'unknown match type is omitted, discipline still shows',
-      () => expect(formatLabel('', 'T100'), '100 HS'),
-    );
-    test('both unknown is empty', () => expect(formatLabel('', ''), ''));
+  group('formatParts', () {
+    test('TEAMS_OF_6 + T120', () {
+      final f = formatParts('TEAMS_OF_6', 'T120');
+      expect(f.players, 6);
+      expect(f.throws, '120 HS');
+    });
+    test('TEAMS_OF_4 alone', () {
+      final f = formatParts('TEAMS_OF_4', '');
+      expect(f.players, 4);
+      expect(f.throws, isNull);
+    });
+    test('unknown match type is null, discipline still reads', () {
+      final f = formatParts('', 'T100');
+      expect(f.players, isNull);
+      expect(f.throws, '100 HS');
+    });
+    test('codes it does not know are null', () {
+      final f = formatParts('MIXED', 'X1');
+      expect(f.players, isNull);
+      expect(f.throws, isNull);
+    });
   });
 
   group('winningSide', () {
@@ -614,6 +621,25 @@ void main() {
         mostRecentDecidedMatchId(days, results, Day.parse('2026-09-27')),
         'b',
       );
+    });
+  });
+
+  group('ageLabel', () {
+    final fetched = DateTime.utc(2026, 9, 23, 10, 0);
+    String age(Duration d) => ageLabel(fetched, fetched.add(d));
+
+    test('without „před“: teď, minutes, hours', () {
+      expect(age(const Duration(seconds: 30)), 'teď');
+      expect(age(const Duration(minutes: 20)), '20 min');
+      expect(age(const Duration(minutes: 59)), '59 min');
+      expect(age(const Duration(hours: 1)), '1 h');
+      expect(age(const Duration(hours: 23, minutes: 59)), '23 h');
+    });
+
+    test('days in the nominative, Czech agreement', () {
+      expect(age(const Duration(days: 1)), '1 den');
+      expect(age(const Duration(days: 3)), '3 dny');
+      expect(age(const Duration(days: 5)), '5 dní');
     });
   });
 

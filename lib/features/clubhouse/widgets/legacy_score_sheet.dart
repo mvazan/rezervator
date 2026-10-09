@@ -1506,7 +1506,7 @@ class LegacyScoreSheetPage extends StatefulWidget {
     required this.result,
     required this.players,
     this.showCloseButton = true,
-    this.onClose,
+    this.backButton = false,
   });
 
   final PrioritySlot slot;
@@ -1516,8 +1516,9 @@ class LegacyScoreSheetPage extends StatefulWidget {
   /// The floating „×“. A tap on the sheet toggles it.
   final bool showCloseButton;
 
-  /// What the × does; null = pop the route the page is on.
-  final VoidCallback? onClose;
+  /// The floating button reads ← „Zpět“ instead of × „Zavřít“ (see
+  /// `ZapisPage.backButton`); either one pops the route.
+  final bool backButton;
 
   @override
   State<LegacyScoreSheetPage> createState() => _LegacyScoreSheetPageState();
@@ -1574,9 +1575,11 @@ class _LegacyScoreSheetPageState extends State<LegacyScoreSheetPage> {
                     color: scheme.surface.withValues(alpha: 0.85),
                     elevation: 2,
                     child: IconButton(
-                      icon: const Icon(Icons.close),
-                      tooltip: 'Zavřít',
-                      onPressed: widget.onClose ?? () => Navigator.of(context).maybePop(),
+                      icon: Icon(
+                        widget.backButton ? Icons.arrow_back : Icons.close,
+                      ),
+                      tooltip: widget.backButton ? 'Zpět' : 'Zavřít',
+                      onPressed: () => Navigator.of(context).maybePop(),
                     ),
                   ),
                 ),

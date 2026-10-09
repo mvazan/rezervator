@@ -231,6 +231,47 @@ void main() {
     });
   }
 
+  for (final table in [false, true]) {
+    testWidgets('${table ? 'table' : 'compact'}: a footer comes after the '
+        'duels and scrolls with them', (tester) async {
+      const footer = Text('DRUŽSTVA');
+      await tester.pumpWidget(
+        host(
+          table
+              ? DuelsTable(
+                  duels: duels,
+                  result: result(2, 0),
+                  header: const Text('HLAVIČKA'),
+                  footer: footer,
+                )
+              : DuelsCompact(
+                  duels: duels,
+                  result: result(2, 0),
+                  header: const Text('HLAVIČKA'),
+                  footer: footer,
+                ),
+          // Too low for all of it: the list has to scroll.
+          height: 140,
+        ),
+      );
+      final lastDuel = find.textContaining('Hráč3').first;
+      expect(
+        tester.getTopLeft(find.text('DRUŽSTVA')).dy,
+        greaterThan(tester.getTopLeft(lastDuel).dy),
+      );
+      // In the scrolling part: a drag moves it, the header stays.
+      final header = tester.getTopLeft(find.text('HLAVIČKA')).dy;
+      final before = tester.getTopLeft(find.text('DRUŽSTVA')).dy;
+      await tester.drag(
+        find.textContaining('Hráč1').hitTestable().first,
+        const Offset(0, -200),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.getTopLeft(find.text('HLAVIČKA')).dy, header);
+      expect(tester.getTopLeft(find.text('DRUŽSTVA')).dy, lessThan(before));
+    });
+  }
+
   group('DuelsTable', () {
     testWidgets('a row per duel with surnames, a dot on the one being played, '
         'and alternate rows shaded', (tester) async {

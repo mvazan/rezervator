@@ -1,9 +1,11 @@
 /// The match detail's scoreboard (Souboje, Task 3): who won and how the
-/// score came about. The date, how old the score is („⟳ před 3 min“) and a
-/// status chip; the team names around a big score (each over its own score
-/// when a name needs more than 2 lines); the pin totals with the lead
-/// between them; the format, the venue and the match's page on the site.
-/// Every layout of the match detail shares it, so the score never jumps.
+/// score came about. The date and a status chip; the team names around a
+/// big score (each over its own score when a name needs more than 2
+/// lines); the pin totals with the lead between them; a last line with the
+/// format (a team icon and the players a side fields, the throws), the
+/// venue, how old the score is („⟳ 22 h“) and the match's page on the site
+/// („ČKA“). Every layout of the match detail shares it, so the score never
+/// jumps.
 ///
 /// Every number is set in tabular figures, so live values don't jump as
 /// they change, and a winner is never told by colour alone: the name's
@@ -71,8 +73,8 @@ class MatchScoreboard extends StatelessWidget {
   /// chip would be; null = the chip.
   final Widget? video;
 
-  /// „⟳ před 3 min“ after the date; off where the caller shows it itself
-  /// (the kiosk's live view has it in its own row).
+  /// „⟳ 22 h“ in the last line, before „ČKA“; off where the caller shows
+  /// it itself (the kiosk's live view has it in its own row).
   final bool showFreshness;
 
   /// The chip's word for a match that is not live.
@@ -121,9 +123,6 @@ class MatchScoreboard extends StatelessWidget {
               date: slot.timeKnown
                   ? '${dayFull(slot.date)} · ${slot.startsAt.display()}'
                   : dayFull(slot.date),
-              freshness: result == null || !showFreshness
-                  ? null
-                  : freshnessLabel(result.fetchedAt, now),
               chip: result == null
                   ? null
                   : live
@@ -148,12 +147,15 @@ class MatchScoreboard extends StatelessWidget {
               ),
             ],
             _Footer(
-              format: formatLabel(
+              format: formatParts(
                 result?.matchType ?? '',
                 result?.discipline ?? '',
               ),
               venue: slot.venue ?? '',
               onVenueTap: onVenueTap,
+              age: result == null || !showFreshness
+                  ? null
+                  : ageLabel(result.fetchedAt, now),
               onSiteTap: onSiteTap,
             ),
           ],
@@ -163,13 +165,12 @@ class MatchScoreboard extends StatelessWidget {
   }
 }
 
-/// The date and start on the first line; under it, on one line, how old the
-/// score is („⟳ před 3 min“) on the left and the status chip (or the video
-/// button) on the right — they drop onto two lines when they don't fit.
+/// The date and start on the left, the status chip (or the video button)
+/// on the right; the chip drops under the date when the two don't fit on
+/// one line.
 class _TopLine extends StatelessWidget {
   const _TopLine({
     required this.date,
-    required this.freshness,
     required this.chip,
     required this.live,
     this.action,
@@ -177,10 +178,6 @@ class _TopLine extends StatelessWidget {
 
   /// „středa 16. 9. · 17:30“.
   final String date;
-
-  /// When the score was last read from the site, as „před 3 min“; null =
-  /// nothing fetched yet.
-  final String? freshness;
 
   /// The chip's text; null = no chip (nothing fetched yet).
   final String? chip;
@@ -197,52 +194,35 @@ class _TopLine extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final text = Theme.of(context).textTheme;
     final chip = this.chip;
-    final small = text.bodySmall?.copyWith(
-      fontWeight: FontWeight.w400,
-      fontFeatures: _tabular,
-    );
-    final status = action ??
-        (chip == null
-            ? null
-            : _Pill(
-                label: chip,
-                leading: live
-                    ? Icon(Icons.circle, size: 8, color: scheme.onErrorContainer)
-                    : null,
-                fill: live
-                    ? scheme.errorContainer
-                    : scheme.surfaceContainerHighest,
-                style: text.labelMedium?.copyWith(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: live ? scheme.onErrorContainer : scheme.onSurface,
-                  fontFeatures: _tabular,
-                ),
-              ));
-    final age = freshness == null
-        ? null
-        : Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.refresh, size: 14, color: scheme.onSurfaceVariant),
-              const SizedBox(width: 3),
-              Text(freshness!, style: small),
-            ],
-          );
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    return Wrap(
+      alignment: WrapAlignment.spaceBetween,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      spacing: 8,
+      runSpacing: 4,
       children: [
-        Text(date, style: small),
-        if (age != null || status != null) ...[
-          const SizedBox(height: 6),
-          Wrap(
-            alignment: age == null ? WrapAlignment.end : WrapAlignment.spaceBetween,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            spacing: 8,
-            runSpacing: 4,
-            children: [?age, ?status],
+        Text(
+          date,
+          style: text.bodySmall?.copyWith(
+            fontWeight: FontWeight.w400,
+            fontFeatures: _tabular,
           ),
-        ],
+        ),
+        if (action != null)
+          action!
+        else if (chip != null)
+          _Pill(
+            label: chip,
+            leading: live
+                ? Icon(Icons.circle, size: 8, color: scheme.onErrorContainer)
+                : null,
+            fill: live ? scheme.errorContainer : scheme.surfaceContainerHighest,
+            style: text.labelMedium?.copyWith(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: live ? scheme.onErrorContainer : scheme.onSurface,
+              fontFeatures: _tabular,
+            ),
+          ),
       ],
     );
   }
@@ -590,34 +570,41 @@ class _Pill extends StatelessWidget {
   );
 }
 
-/// „6 hráčů · 100 HS · TJ Sokol Rudná › · ČKA ↗“: the format, then the
-/// venue — a link with a chevron when [onVenueTap] is set — then „ČKA“,
-/// the match's page on the site, when [onSiteTap] is set. Nothing when all
-/// are empty.
+/// „👥 6 · 120 HS · TJ Sokol Rudná › · ⟳ 22 h · ČKA ↗“: the players a side
+/// fields (the team icon is Klubovna's) and the throws, the venue — a link
+/// with a chevron when [onVenueTap] is set — how old the score is, and the
+/// match's page on the site. Whatever is unknown is left out; nothing at all
+/// when everything is. A Wrap: at a large text size the pieces flow onto a
+/// second line instead of overflowing.
 class _Footer extends StatelessWidget {
   const _Footer({
     required this.format,
     required this.venue,
     required this.onVenueTap,
+    required this.age,
     required this.onSiteTap,
   });
 
-  /// [formatLabel]'s „6 hráčů · 100 HS“, or '' when unknown.
-  final String format;
+  /// [formatParts] of the match; either half may be null.
+  final ({int? players, String? throws}) format;
 
   /// The venue's name, or '' when the slot has none.
   final String venue;
 
   final VoidCallback? onVenueTap;
+
+  /// [ageLabel] of the score; null = not shown.
+  final String? age;
+
   final VoidCallback? onSiteTap;
 
   @override
   Widget build(BuildContext context) {
     final onVenueTap = this.onVenueTap;
     final onSiteTap = this.onSiteTap;
-    if (format.isEmpty && venue.isEmpty && onSiteTap == null) {
-      return const SizedBox.shrink();
-    }
+    final players = format.players;
+    final throws = format.throws;
+    final age = this.age;
     final scheme = Theme.of(context).colorScheme;
     final style = Theme.of(context).textTheme.bodySmall?.copyWith(
       fontWeight: FontWeight.w400,
@@ -625,51 +612,74 @@ class _Footer extends StatelessWidget {
       fontFeatures: _tabular,
     );
 
-    /// [label] with a trailing [icon], tappable; 4dp of padding keeps the
-    /// tap target off the text's edge.
-    Widget link(String label, IconData icon, VoidCallback onTap) => InkWell(
+    /// [label] after or before an [icon], 14dp, in the line's colour.
+    Widget withIcon(IconData icon, String label, {bool iconFirst = true}) {
+      final glyph = Icon(icon, size: 14, color: scheme.onSurfaceVariant);
+      final text = Flexible(
+        child: Text(label, overflow: TextOverflow.ellipsis, style: style),
+      );
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: iconFirst
+            ? [glyph, const SizedBox(width: 3), text]
+            : [text, glyph],
+      );
+    }
+
+    /// A tappable [child]; 4dp of padding keeps the tap target off the
+    /// text's edge.
+    Widget link(Widget child, VoidCallback onTap) => InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(4),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 4),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // The Wrap bounds the row's width: a long name is cut, not
-            // overflowed.
-            Flexible(
-              child: Text(label, overflow: TextOverflow.ellipsis, style: style),
-            ),
-            Icon(icon, size: 14, color: scheme.onSurfaceVariant),
-          ],
-        ),
+        child: child,
       ),
     );
 
-    // The plain pieces as one text; a link breaks it. A Wrap, so at a
-    // large text size the ČKA link drops under the venue instead of
-    // overflowing.
-    final plain = [
-      format,
-      if (onVenueTap == null) venue,
-    ].where((s) => s.isNotEmpty).join(' · ');
-    final children = <Widget>[
-      if (plain.isNotEmpty) Text(plain, style: style),
-      if (onVenueTap != null && venue.isNotEmpty) ...[
-        if (plain.isNotEmpty) Text(' · ', style: style),
-        link(venue, Icons.chevron_right, onVenueTap),
-      ],
-      if (onSiteTap != null) ...[
-        if (plain.isNotEmpty || venue.isNotEmpty) Text(' · ', style: style),
-        link('ČKA', Icons.open_in_new, onSiteTap),
-      ],
+    final pieces = <Widget>[
+      if (players != null)
+        Semantics(
+          label:
+              '$players ${players == 1
+                  ? 'hráč'
+                  : players <= 4
+                  ? 'hráči'
+                  : 'hráčů'}',
+          excludeSemantics: true,
+          child: withIcon(Icons.groups, '$players'),
+        ),
+      if (throws != null) Text(throws, style: style),
+      if (venue.isNotEmpty)
+        if (onVenueTap == null)
+          Text(venue, style: style)
+        else
+          link(
+            withIcon(Icons.chevron_right, venue, iconFirst: false),
+            onVenueTap,
+          ),
+      if (age != null)
+        Semantics(
+          container: true,
+          label: 'výsledky z webu: $age',
+          excludeSemantics: true,
+          child: withIcon(Icons.refresh, age),
+        ),
+      if (onSiteTap != null)
+        link(withIcon(Icons.open_in_new, 'ČKA', iconFirst: false), onSiteTap),
     ];
+    if (pieces.isEmpty) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.only(top: 8),
       child: Wrap(
         alignment: WrapAlignment.center,
         crossAxisAlignment: WrapCrossAlignment.center,
-        children: children,
+        children: [
+          for (var i = 0; i < pieces.length; i++) ...[
+            if (i > 0) Text(' · ', style: style),
+            pieces[i],
+          ],
+        ],
       ),
     );
   }

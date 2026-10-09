@@ -5,6 +5,7 @@
 library;
 
 import 'collation.dart';
+import 'labels.dart' show czechCount;
 import 'models.dart';
 import 'upcoming.dart' show matchIsMine;
 
@@ -110,20 +111,20 @@ num? teamBonusPoints(
   return any ? sidePoints - duels : null;
 }
 
-/// "6 hráčů · 120 HS" from the site's own codes (`TEAMS_OF_6`/`TEAMS_OF_4`,
-/// `T100`/`T120`) — Czech numeral agreement (2–4 "hráči", else "hráčů").
-/// Either half is simply omitted when its code is empty or unrecognised.
-String formatLabel(String matchType, String discipline) {
+/// The match's format from the site's own codes: how many players a side
+/// fields (`TEAMS_OF_6` → 6) and the throws per player (`T120` → „120 HS“).
+/// Either half is null when its code is empty or unrecognised. The
+/// scoreboard shows the players as a team icon and the number.
+({int? players, String? throws}) formatParts(
+  String matchType,
+  String discipline,
+) {
   final playersMatch = RegExp(r'^TEAMS_OF_(\d+)$').firstMatch(matchType);
-  String? players;
-  if (playersMatch != null) {
-    final n = int.parse(playersMatch.group(1)!);
-    final word = n == 1 ? 'hráč' : (n >= 2 && n <= 4 ? 'hráči' : 'hráčů');
-    players = '$n $word';
-  }
   final hsMatch = RegExp(r'^T(\d+)$').firstMatch(discipline);
-  final hs = hsMatch == null ? null : '${hsMatch.group(1)} HS';
-  return [?players, ?hs].join(' · ');
+  return (
+    players: playersMatch == null ? null : int.parse(playersMatch.group(1)!),
+    throws: hsMatch == null ? null : '${hsMatch.group(1)} HS',
+  );
 }
 
 /// Whether set points (SB, „dílčí body“) play a role in a match of
@@ -153,13 +154,24 @@ MatchSide? displayWinner(MatchResult? r) =>
     hasScoreData(r) ? winningSide(r!.homePoints, r.awayPoints) : null;
 
 /// "právě teď" / "před N min" / "před N h" / "před N dny" — how long ago
-/// [fetchedAt] was, for the match detail's "Výsledky z webu:" line.
+/// [fetchedAt] was, for the kiosk's live view („⟳ před 3 min“).
 String freshnessLabel(DateTime fetchedAt, DateTime now) {
   final diff = now.difference(fetchedAt);
   if (diff.inMinutes < 1) return 'právě teď';
   if (diff.inMinutes < 60) return 'před ${diff.inMinutes} min';
   if (diff.inHours < 24) return 'před ${diff.inHours} h';
   return diff.inDays == 1 ? 'před 1 dnem' : 'před ${diff.inDays} dny';
+}
+
+/// How old a score read at [fetchedAt] is, without „před“ — the match
+/// detail prints it after a ⟳ in the scoreboard's last line: „teď“,
+/// „3 min“, „22 h“, „1 den“, „3 dny“, „5 dní“.
+String ageLabel(DateTime fetchedAt, DateTime now) {
+  final diff = now.difference(fetchedAt);
+  if (diff.inMinutes < 1) return 'teď';
+  if (diff.inMinutes < 60) return '${diff.inMinutes} min';
+  if (diff.inHours < 24) return '${diff.inHours} h';
+  return czechCount(diff.inDays, 'den', 'dny', 'dní');
 }
 
 /// The Czech-sorted [venues] whose name, address or clubs fit [query] by

@@ -173,9 +173,36 @@ void main() {
       expect(find.text('průběžně'), findsNothing);
     });
 
-    testWidgets('the format and the venue, as plain text', (tester) async {
+    testWidgets('the last line: the team icon and the players, the throws, '
+        'the venue, the age — left to right on one line', (tester) async {
+      final semantics = tester.ensureSemantics();
       await pump(tester);
-      expect(find.text('6 hráčů · 100 HS · TJ Sokol Rudná'), findsOneWidget);
+      // Not „6 hráčů“ on screen: Klubovna's team icon and the number; a
+      // screen reader still hears „6 hráčů“.
+      expect(find.textContaining('hráč'), findsNothing);
+      expect(find.byIcon(Icons.groups), findsOneWidget);
+      // A screen reader hears the players in words, and what the age is.
+      expect(
+        tester.getSemantics(find.byIcon(Icons.groups)).label,
+        contains('6 hráčů'),
+      );
+      expect(find.bySemanticsLabel(RegExp('výsledky z webu: ')), findsOneWidget);
+      semantics.dispose();
+      final age = ageLabel(rudnaResult.fetchedAt, _now);
+      final order = [
+        _left(tester, find.byIcon(Icons.groups)),
+        _left(tester, find.text('6')),
+        _left(tester, find.text('100 HS')),
+        _left(tester, find.text('TJ Sokol Rudná')),
+        _left(tester, find.byIcon(Icons.refresh)),
+        _left(tester, find.text(age)),
+      ];
+      for (var i = 1; i < order.length; i++) {
+        expect(order[i - 1], lessThan(order[i]), reason: 'piece $i');
+      }
+      final row = tester.getCenter(find.text('100 HS')).dy;
+      expect(tester.getCenter(find.text(age)).dy, closeTo(row, 2));
+      // A venue without a page is plain text.
       expect(find.byIcon(Icons.chevron_right), findsNothing);
     });
 
@@ -188,27 +215,32 @@ void main() {
       expect(find.text('ČKA'), findsNothing);
     });
 
-    testWidgets('the match\'s page on the site is „ČKA“ after the venue', (
-      tester,
-    ) async {
+    testWidgets('the match\'s page on the site is „ČKA“, last — after the age',
+        (tester) async {
       var taps = 0;
       await pump(tester, onSiteTap: () => taps++);
-      expect(find.text('6 hráčů · 100 HS · TJ Sokol Rudná'), findsOneWidget);
       expect(find.text('ČKA'), findsOneWidget);
       expect(find.byIcon(Icons.open_in_new), findsOneWidget);
       expect(
-        tester.getRect(find.text('ČKA')).left,
-        greaterThan(tester.getRect(find.text('6 hráčů · 100 HS · TJ Sokol Rudná')).right),
+        _left(tester, find.text('ČKA')),
+        greaterThan(_left(tester, find.text(ageLabel(rudnaResult.fetchedAt, _now)))),
       );
       await tester.tap(find.text('ČKA'));
       expect(taps, 1);
     });
 
-    testWidgets('a finished match says how old its score is under the date',
+    testWidgets('the age has no „před“; the date row has the chip and no age',
         (tester) async {
       await pump(tester);
-      expect(find.byIcon(Icons.refresh), findsOneWidget);
-      expect(find.text(freshnessLabel(rudnaResult.fetchedAt, _now)), findsOneWidget);
+      expect(find.textContaining('před'), findsNothing);
+      final date = tester.getRect(find.textContaining('·').first);
+      final chip = tester.getRect(find.text('Dokončeno'));
+      expect(chip.center.dy, closeTo(date.center.dy, 4));
+      expect(chip.left, greaterThan(date.right));
+      expect(
+        tester.getTopLeft(find.byIcon(Icons.refresh)).dy,
+        greaterThan(chip.bottom),
+      );
     });
 
     testWidgets('showFreshness: false leaves the age out (the kiosk has its '
@@ -225,7 +257,7 @@ void main() {
         ),
       );
       expect(find.byIcon(Icons.refresh), findsNothing);
-      expect(find.text(freshnessLabel(rudnaResult.fetchedAt, _now)), findsNothing);
+      expect(find.text(ageLabel(rudnaResult.fetchedAt, _now)), findsNothing);
       expect(find.text('Dokončeno'), findsOneWidget);
     });
 
@@ -265,21 +297,21 @@ void main() {
       ),
     );
 
-    testWidgets('the chip says Živě after an 8dp dot; the freshness sits '
-        'under the date with a ⟳, on the chip\'s row', (tester) async {
+    testWidgets('the chip says Živě after an 8dp dot, on the date\'s row; the '
+        'age „⟳ 2 min“ is in the last line', (tester) async {
       await pump(tester);
       expect(find.text('Živě'), findsOneWidget);
       expect(find.text('Dokončeno'), findsNothing);
-      expect(find.text('před 2 min'), findsOneWidget);
-      final fresh = tester.getRect(find.text('před 2 min'));
+      expect(find.text('2 min'), findsOneWidget);
+      final fresh = tester.getRect(find.text('2 min'));
       final arrow = tester.getRect(find.byIcon(Icons.refresh));
       expect(arrow.right, lessThanOrEqualTo(fresh.left));
       expect(arrow.center.dy, closeTo(fresh.center.dy, 2));
-      // Under the date and time, on the row of the chip, which is at the
-      // right.
       final date = tester.getRect(find.textContaining('·').first);
-      expect(arrow.top, greaterThanOrEqualTo(date.bottom));
-      expect(tester.getRect(find.text('Živě')).left, greaterThan(fresh.right));
+      final chip = tester.getRect(find.text('Živě'));
+      expect(chip.center.dy, closeTo(date.center.dy, 4));
+      expect(chip.left, greaterThan(date.right));
+      expect(arrow.top, greaterThan(chip.bottom));
       // The dot is an icon, not a „●“ Manrope lacks.
       expect(find.textContaining('●'), findsNothing);
       final dot = find.byIcon(Icons.circle);
@@ -628,3 +660,6 @@ void main() {
     }
   }
 }
+
+/// Where [f] starts horizontally: the last line's pieces run left to right.
+double _left(WidgetTester tester, Finder f) => tester.getTopLeft(f).dx;

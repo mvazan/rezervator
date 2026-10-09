@@ -208,9 +208,9 @@ typedef _ClosedDuelBuilder =
     Widget Function(BuildContext context, Duel duel, int index, VoidCallback toggle);
 
 /// The frame both fitted lists share: [header] pinned on top, the duels
-/// under it in a list that scrolls only if it must — and folds open duels
-/// until it need not ([_FifoOpen]). With [onRefresh] the list pulls to
-/// refresh, like the match detail's own.
+/// (and [footer] after them) under it in a list that scrolls only if it
+/// must — and folds open duels until it need not ([_FifoOpen]). With
+/// [onRefresh] the list pulls to refresh, like the match detail's own.
 class _FittedDuels extends StatefulWidget {
   const _FittedDuels({
     required this.duels,
@@ -223,11 +223,13 @@ class _FittedDuels extends StatefulWidget {
     this.openPadding = EdgeInsets.zero,
     required this.listPadding,
     required this.onRefresh,
+    required this.footer,
   });
 
   final List<Duel> duels;
   final MatchResult? result;
   final Widget? header;
+  final Widget? footer;
   final _ClosedDuelBuilder closed;
   final bool singleOpen;
 
@@ -281,6 +283,7 @@ class _FittedDuelsState extends State<_FittedDuels> with _FifoOpen {
               ),
             ),
           ],
+          ?widget.footer,
         ],
       ),
     );
@@ -305,6 +308,7 @@ class DuelsCompact extends StatelessWidget {
     required this.result,
     this.singleOpen = false,
     this.header,
+    this.footer,
     this.listPadding = EdgeInsets.zero,
     this.onRefresh,
   });
@@ -319,6 +323,10 @@ class DuelsCompact extends StatelessWidget {
   /// scoreboard and buttons.
   final Widget? header;
 
+  /// After the duels, scrolling with them: the app's Družstva card, as
+  /// under the full cards.
+  final Widget? footer;
+
   /// Around the duels: the app keeps them off the screen's edges.
   final EdgeInsets listPadding;
 
@@ -331,6 +339,7 @@ class DuelsCompact extends StatelessWidget {
     result: result,
     singleOpen: singleOpen,
     header: header,
+    footer: footer,
     listPadding: listPadding,
     gapBeforeEach: 6,
     onRefresh: onRefresh,
@@ -449,6 +458,7 @@ class DuelsTable extends StatelessWidget {
     required this.result,
     this.singleOpen = false,
     this.header,
+    this.footer,
     this.listPadding = EdgeInsets.zero,
     this.onRefresh,
   });
@@ -462,6 +472,9 @@ class DuelsTable extends StatelessWidget {
   /// Pinned above the rows; see [DuelsCompact.header].
   final Widget? header;
 
+  /// After the rows; see [DuelsCompact.footer].
+  final Widget? footer;
+
   /// Around the rows; see [DuelsCompact.listPadding].
   final EdgeInsets listPadding;
 
@@ -474,6 +487,7 @@ class DuelsTable extends StatelessWidget {
     result: result,
     singleOpen: singleOpen,
     header: header,
+    footer: footer,
     listPadding: listPadding,
     gapAfterHeader: header == null ? 0 : 8,
     openPadding: const EdgeInsets.symmetric(vertical: 4),

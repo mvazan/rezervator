@@ -9,7 +9,8 @@
 /// cards and the Družstva card, scrolling ([MatchLayout.full]); the duels
 /// fitted to the screen with the scoreboard pinned on top
 /// ([MatchLayout.compact], [MatchLayout.table] — the kiosk's drawings,
-/// `duels_compact.dart`); or, held sideways only, the kuzelky.com-style
+/// `duels_compact.dart`, with the Družstva card after the duels); or, held
+/// sideways only, the kuzelky.com-style
 /// score sheet ([MatchLayout.zapis]) full screen in place of the detail the
 /// moment the phone turns ([ZapisPage]), gone when it turns back.
 library;
@@ -98,11 +99,6 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen>
   /// position, not by card, so an opened duel stays open through a live
   /// refresh and a trip to Zápis and back.
   final Set<int> _expanded = {};
-
-  /// Set when the Zápis shown on a turn to landscape was closed by its ×
-  /// while the phone stayed sideways: the detail then shows until the next
-  /// turn instead of the sheet coming back.
-  bool _zapisDismissed = false;
 
   /// The turn of the phone, smoothed over: the frame after a turn is slow
   /// (the whole screen laid out anew), and the browser meanwhile shows the
@@ -514,15 +510,11 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen>
     final showRefreshButton =
         (live || askable || correctable) && !_hiddenByNotLive;
 
-    if (!landscape) _zapisDismissed = false;
     // Held sideways with the Zápis chosen, the sheet takes the whole screen
     // in place of the detail — chosen in the very frame of the turn, so the
     // detail is never drawn sideways on its own, and the two cross-fade.
     final sheet =
-        layout == MatchLayout.zapis &&
-        players.isNotEmpty &&
-        slot != null &&
-        !_zapisDismissed;
+        layout == MatchLayout.zapis && players.isNotEmpty && slot != null;
 
     _orientation ??= landscape ? Orientation.landscape : Orientation.portrait;
     final background = Theme.of(context).scaffoldBackgroundColor;
@@ -530,10 +522,11 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen>
     final Widget page = sheet
         ? ZapisPage(
             slot: slot,
-            closeButton: true,
+            // The sheet stands in for the duels: its corner button goes
+            // back to where the match was opened from, like the AppBar's.
+            backButton: true,
             competitionSlug: fromLeague ? widget.competitionSlug : null,
             withRegnums: true,
-            onClose: () => setState(() => _zapisDismissed = true),
           )
         : _detail(
             context,
@@ -720,12 +713,25 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen>
       const EdgeInsets.fromLTRB(12, 2, 12, 24),
     );
     Future<void> refresh() => _onRefreshTap(context, result?.fetchedAt);
+    // Under the duels the Družstva card, as under the full cards.
+    final totals = result == null
+        ? null
+        : Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: TeamTotalsCard(
+              result: result,
+              homeColor: homeSideColor,
+              awayColor: awaySideColor,
+              showSetPoints: setPointsMatter(result.discipline),
+            ),
+          );
     Widget fitted(Widget? pinned) => switch (layout) {
       MatchLayout.compact => DuelsCompact(
         duels: duels,
         result: result,
         singleOpen: true,
         header: pinned,
+        footer: totals,
         listPadding: padding,
         onRefresh: pullToRefresh ? refresh : null,
       ),
@@ -734,6 +740,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen>
         result: result,
         singleOpen: true,
         header: pinned,
+        footer: totals,
         listPadding: padding,
         onRefresh: pullToRefresh ? refresh : null,
       ),
