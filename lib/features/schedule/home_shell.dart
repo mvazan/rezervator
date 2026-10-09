@@ -119,8 +119,9 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                 lane: link.lane,
               ),
             );
-      case PendingLinkKind.kioskBooking:
-        // The calendar, at the new reservation: outlined while it is still
+      case PendingLinkKind.booking:
+        // The calendar, at the reservation made for the player (kiosk,
+        // group mate, duty): outlined while it is still
         // booked, a snack once it has been cancelled.
         setState(() => _chosen = HomeView.calendar);
         ref.read(calendarFocusProvider.notifier).request(

@@ -926,7 +926,7 @@ void main() {
           .read(pendingLinkProvider.notifier)
           .set(
             const PendingLink(
-              kind: PendingLinkKind.kioskBooking,
+              kind: PendingLinkKind.booking,
               tenantId: 't-demo',
               date: '2026-09-10',
               blockId: 'b1',

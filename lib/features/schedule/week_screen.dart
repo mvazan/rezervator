@@ -59,7 +59,7 @@ class _WeekScreenState extends ConsumerState<WeekScreen> with WeekNavigation {
   }
 
   /// Says what the push's spot is now and, when it is as the push said
-  /// (free, or holding the kiosk booking), outlines it.
+  /// (free, or holding the booking), outlines it.
   void _answerFocus(
     CalendarFocus focus,
     DaySchedule day, {
@@ -80,7 +80,8 @@ class _WeekScreenState extends ConsumerState<WeekScreen> with WeekNavigation {
     }
     final reservationId = focus.reservationId;
     if (reservationId != null) {
-      // A kiosk booking: outline it while the spot still holds it.
+      // A booking made for the player: outline it while the spot still
+      // holds it.
       final booked = day is OpenDay &&
           day.blocks.any((b) => b.id == blockId) &&
           lane >= 1 &&
