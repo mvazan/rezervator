@@ -121,9 +121,11 @@ alter table schedule_settings
   -- The drawer on/off, and whether it rests open after the idle time.
   add column if not exists kiosk_panel_enabled boolean not null default true,
   add column if not exists kiosk_drawer_open boolean not null default false,
-  add column if not exists kiosk_drawer_width smallint not null default 440
-    constraint schedule_settings_kiosk_width_check
-    check (kiosk_drawer_width between 280 and 800),
+  -- How many of the board's day columns the drawer covers when open
+  -- (the app keeps it at most one fewer than kiosk_visible_days).
+  add column if not exists kiosk_drawer_columns smallint not null default 2
+    constraint schedule_settings_kiosk_drawer_columns_check
+    check (kiosk_drawer_columns between 1 and 13),
   -- Where the notices show: nowhere, in the drawer, one title at a time in
   -- the status line (header), or both; how fast they take turns; and the
   -- share of the drawer's height they get beside the matches.
@@ -176,13 +178,12 @@ alter table schedule_settings
   add column if not exists kiosk_idle_seconds smallint not null default 60
     constraint schedule_settings_kiosk_idle_check
     check (kiosk_idle_seconds between 15 and 600),
-  -- How many day columns the board fits on the screen: 0 = as many as fit
-  -- at 160 to 220 px a column (about a week), else exactly this many. And,
-  -- when the day does not fit the screen (kiosk_fit_day off), one lane
-  -- row's height in px per hour.
-  add column if not exists kiosk_visible_days smallint not null default 0
+  -- How many day columns the board fits on the whole screen (the drawer
+  -- covers kiosk_drawer_columns of them). And, when the day does not fit
+  -- the screen (kiosk_fit_day off), one lane row's height in px per hour.
+  add column if not exists kiosk_visible_days smallint not null default 7
     constraint schedule_settings_kiosk_visible_days_check
-    check (kiosk_visible_days between 0 and 14),
+    check (kiosk_visible_days between 2 and 14),
   add column if not exists kiosk_row_height smallint not null default 40
     constraint schedule_settings_kiosk_row_height_check
     check (kiosk_row_height between 20 and 120);
@@ -204,7 +205,7 @@ begin
                           - 'duty_reminder_enabled' - 'duty_reminder_days'
                           - 'kiosk_notices_mode' - 'kiosk_show_matches'
                           - 'kiosk_show_upcoming' - 'kiosk_live_mode'
-                          - 'kiosk_drawer_open' - 'kiosk_drawer_width'
+                          - 'kiosk_drawer_open' - 'kiosk_drawer_columns'
                           - 'kiosk_notices_share' - 'kiosk_zapis_percent'
                           - 'kiosk_weeks_back' - 'kiosk_weeks_ahead'
                           - 'kiosk_panel_enabled' - 'kiosk_past_days'

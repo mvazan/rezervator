@@ -327,20 +327,20 @@ void main() {
           requests.lastWhere((r) => r.method == 'PATCH').body,
         ) as Map<String, dynamic>;
 
-    // The defaults are in the fields: 60 s, 440 px, 2 weeks back.
+    // The defaults are in the fields: 60 s, 2 columns, 2 weeks back.
     String shown(String label) =>
         tester.widget<TextField>(find.widgetWithText(TextField, label))
             .controller!.text;
     expect(shown('Doba nečinnosti'), '60');
-    expect(shown('Šířka panelu'), '440');
+    expect(shown('Šířka panelu'), '2');
     expect(shown('Odehrané zápasy: týdnů zpět'), '2');
 
     await enter(tester, 'Doba nečinnosti', '300');
     expect(lastPatch(), {'kiosk_idle_seconds': 300});
     await enter(tester, 'Střídání oznamů', '20');
     expect(lastPatch(), {'kiosk_notices_rotation_seconds': 20});
-    await enter(tester, 'Šířka panelu', '600');
-    expect(lastPatch(), {'kiosk_drawer_width': 600});
+    await enter(tester, 'Šířka panelu', '3');
+    expect(lastPatch(), {'kiosk_drawer_columns': 3});
     await enter(tester, 'Podíl nástěnky na výšce panelu', '60');
     expect(lastPatch(), {'kiosk_notices_share': 60});
     await enter(tester, 'Odehrané zápasy: týdnů zpět', '0');
@@ -397,7 +397,7 @@ void main() {
     expect(find.widgetWithText(TextField, 'Velikost zápisu'), findsOneWidget);
   });
 
-  testWidgets('the days on the screen: 0 = automatic, else 1–14', (
+  testWidgets('the days on the screen: 2–14, a week by default', (
     tester,
   ) async {
     tall(tester);
@@ -409,10 +409,10 @@ void main() {
     String shown(String label) =>
         tester.widget<TextField>(find.widgetWithText(TextField, label))
             .controller!.text;
-    expect(shown('Dní na obrazovce'), '0');
+    expect(shown('Dní na obrazovce'), '7');
 
-    await enter(tester, 'Dní na obrazovce', '20');
-    expect(find.text('Zadej 0 nebo číslo od 1 do 14.'), findsOneWidget);
+    await enter(tester, 'Dní na obrazovce', '1');
+    expect(find.text('Zadej číslo od 2 do 14.'), findsOneWidget);
     expect(requests.where((r) => r.method == 'PATCH'), isEmpty);
     await enter(tester, 'Dní na obrazovce', '5');
     expect(lastPatch(), {'kiosk_visible_days': 5});
@@ -457,12 +457,12 @@ void main() {
     await tester.pumpAndSettle();
     final field = find.widgetWithText(TextField, 'Šířka panelu');
     await tester.ensureVisible(field);
-    await tester.enterText(field, '520');
+    await tester.enterText(field, '3');
     // Focus moves on to another field: the first one commits.
     await tester.tap(find.widgetWithText(TextField, 'Doba nečinnosti'));
     await tester.pumpAndSettle();
     expect(jsonDecode(requests.lastWhere((r) => r.method == 'PATCH').body),
-        {'kiosk_drawer_width': 520});
+        {'kiosk_drawer_columns': 3});
   });
 
   testWidgets('the options come in sections: screen, notices, panel, live '

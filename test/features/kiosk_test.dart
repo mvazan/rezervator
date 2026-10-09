@@ -1280,7 +1280,7 @@ void main() {
       bool liveMode = true,
       int weeksBack = 2,
       int weeksAhead = 1,
-      int width = 440,
+      int drawerColumns = 2,
       int share = 40,
       int zapisPercent = 80,
       int noticeRotation = 12,
@@ -1293,7 +1293,7 @@ void main() {
       void Function(String id)? onRefresh,
       int liveRefresh = 60,
       MatchLayout liveLayout = MatchLayout.full,
-      int visibleDays = 0,
+      int visibleDays = 7,
       int rowHeight = 40,
       bool fitDay = true,
       Stream<Map<String, MatchResult>>? resultsStream,
@@ -1319,7 +1319,7 @@ void main() {
               kioskLiveMode: liveMode,
               kioskWeeksBack: weeksBack,
               kioskWeeksAhead: weeksAhead,
-              kioskDrawerWidth: width,
+              kioskDrawerColumns: drawerColumns,
               kioskNoticesShare: share,
               kioskZapisPercent: zapisPercent,
               kioskNoticesRotationSeconds: noticeRotation,
@@ -1391,7 +1391,11 @@ void main() {
       await tester.tap(openButton);
       await tester.pumpAndSettle();
       expect(drawerText('Brigáda'), findsOneWidget);
-      expect(tester.getSize(find.byType(KioskDrawer)).width, 440);
+      // Two of seven day columns over 1920 − 46 px.
+      expect(
+        tester.getSize(find.byType(KioskDrawer)).width,
+        closeTo(2 * (1920 - 46) / 7, 0.5),
+      );
 
       await tester.tap(closeButton);
       await tester.pumpAndSettle();
@@ -1401,38 +1405,37 @@ void main() {
     });
 
     testWidgets('the admin\'s number of days on the screen sets the column '
-        'width; 0 is automatic', (tester) async {
+        'width, on the whole screen', (tester) async {
       fullHd(tester);
       double column() =>
           tester.getSize(find.byType(BoardColumnHeader).first).width;
-      await tester.pumpWidget(app());
-      await tester.pumpAndSettle();
-      // The header sits in the column with a small margin.
-      final automatic = column();
-      expect(automatic, inInclusiveRange(150, 220));
-      await finish(tester);
-
-      // Four days on 1920 px (the drawer closed): (1920 − 46) / 4 each.
-      await tester.pumpWidget(app(visibleDays: 4));
-      await tester.pumpAndSettle();
-      expect(column(), inInclusiveRange((1920 - 46) / 4 - 10, (1920 - 46) / 4));
-      await finish(tester);
+      for (final days in [7, 4]) {
+        await tester.pumpWidget(app(visibleDays: days));
+        await tester.pumpAndSettle();
+        // The header sits in the column with a small margin.
+        final width = (1920 - 46) / days;
+        expect(column(), inInclusiveRange(width - 10, width));
+        await finish(tester);
+      }
     });
 
-    testWidgets('with a set number of days the drawer is whole columns: '
-        'open or closed, no day is cut at its edge', (tester) async {
+    testWidgets('the drawer is whole day columns, at most all but one: open '
+        'or closed, no day is cut at its edge', (tester) async {
       fullHd(tester);
-      // Six columns over 1920 − 46 px, about 312 px each.
       const column = (1920 - 46) / 6;
-      Future<double> drawerFor(int width) async {
+      Future<double> drawerFor(int columns) async {
         await tester.pumpWidget(
-          app(notices: [notice('1', 'Brigáda')], visibleDays: 6, width: width),
+          app(
+            notices: [notice('1', 'Brigáda')],
+            visibleDays: 6,
+            drawerColumns: columns,
+          ),
         );
         await tester.pumpAndSettle();
         await tester.tap(openButton);
         await tester.pumpAndSettle();
         final drawer = tester.getSize(find.byType(KioskDrawer)).width;
-        // The columns are sized on the whole screen, open as closed.
+        // The columns keep their width with the drawer open.
         expect(
           tester.getSize(find.byType(BoardColumnHeader).first).width,
           inInclusiveRange(column - 10, column),
@@ -1441,9 +1444,10 @@ void main() {
         return drawer;
       }
 
-      // The admin's px round to the nearest whole column.
-      expect(await drawerFor(440), closeTo(column, 0.5));
-      expect(await drawerFor(600), closeTo(2 * column, 0.5));
+      expect(await drawerFor(1), closeTo(column, 0.5));
+      expect(await drawerFor(2), closeTo(2 * column, 0.5));
+      // More than the board has: one day stays in view.
+      expect(await drawerFor(9), closeTo(5 * column, 0.5));
     });
 
     testWidgets('a mouse wheel counts as touching the kiosk: the idle reset '
@@ -1579,13 +1583,18 @@ void main() {
       await finish(tester);
     });
 
-    testWidgets('the admin picks the drawer width', (tester) async {
+    testWidgets('the admin picks the drawer width in day columns', (
+      tester,
+    ) async {
       fullHd(tester);
       await tester.pumpWidget(
-        app(notices: [notice('1', 'Brigáda')], drawerOpen: true, width: 600),
+        app(notices: [notice('1', 'Brigáda')], drawerOpen: true, drawerColumns: 3),
       );
       await tester.pumpAndSettle();
-      expect(tester.getSize(find.byType(KioskDrawer)).width, 600);
+      expect(
+        tester.getSize(find.byType(KioskDrawer)).width,
+        closeTo(3 * (1920 - 46) / 7, 0.5),
+      );
 
       await finish(tester);
     });
@@ -1884,11 +1893,10 @@ void main() {
         expect(inList('DávnýZápas'), findsNothing);
 
         // Drag the board two weeks back, to the match's day.
-        for (var i = 0; i < 4 && find.textContaining('25.9.').evaluate().isEmpty; i++) {
-          await tester.drag(
-            find.byType(ScheduleDayColumn).first,
-            const Offset(900, 0),
-          );
+        // (From a point on the board: the first built column may lie
+        // off screen, left of the cache edge.)
+        for (var i = 0; i < 8 && find.textContaining('25.9.').evaluate().isEmpty; i++) {
+          await tester.dragFrom(const Offset(400, 600), const Offset(900, 0));
           await tester.pumpAndSettle();
         }
         expect(find.textContaining('25.9.'), findsWidgets);

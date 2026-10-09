@@ -678,7 +678,7 @@ class ScheduleSettings {
     this.kioskWeeksBack = 2,
     this.kioskWeeksAhead = 1,
     this.kioskDrawerOpen = false,
-    this.kioskDrawerWidth = 440,
+    this.kioskDrawerColumns = 2,
     this.kioskNoticesShare = 40,
     this.kioskZapisPercent = 80,
     this.kioskNoticesRotationSeconds = 12,
@@ -686,7 +686,7 @@ class ScheduleSettings {
     this.kioskPanelEnabled = true,
     this.kioskPastDays = 0,
     this.kioskIdleSeconds = 60,
-    this.kioskVisibleDays = 0,
+    this.kioskVisibleDays = 7,
     this.kioskRowHeight = 40,
     this.kioskLiveLayout = MatchLayout.full,
     this.tenantId = '',
@@ -742,8 +742,9 @@ class ScheduleSettings {
   /// close it meanwhile.
   final bool kioskDrawerOpen;
 
-  /// The drawer's width in px (on a narrower screen it takes at most 60 %).
-  final int kioskDrawerWidth;
+  /// How many of the board's day columns the open drawer covers (0064) —
+  /// at most one fewer than [kioskVisibleDays], see `kioskDrawerWidthFor`.
+  final int kioskDrawerColumns;
 
   /// Percent of the drawer's height the notices get beside the matches.
   final int kioskNoticesShare;
@@ -766,8 +767,8 @@ class ScheduleSettings {
   /// Seconds without a touch after which the kiosk starts over (0064).
   final int kioskIdleSeconds;
 
-  /// How many day columns the board fits on the screen (0064); 0 = as many
-  /// as fit at 160 to 220 px a column (about a week).
+  /// How many day columns the board fits on the whole screen (0064); the
+  /// open drawer covers [kioskDrawerColumns] of them.
   final int kioskVisibleDays;
 
   /// One lane row's height in px per hour while the day scrolls
@@ -820,7 +821,7 @@ class ScheduleSettings {
         kioskWeeksBack: json['kiosk_weeks_back'] as int? ?? 2,
         kioskWeeksAhead: json['kiosk_weeks_ahead'] as int? ?? 1,
         kioskDrawerOpen: json['kiosk_drawer_open'] as bool? ?? false,
-        kioskDrawerWidth: json['kiosk_drawer_width'] as int? ?? 440,
+        kioskDrawerColumns: json['kiosk_drawer_columns'] as int? ?? 2,
         kioskNoticesShare: json['kiosk_notices_share'] as int? ?? 40,
         kioskZapisPercent: json['kiosk_zapis_percent'] as int? ?? 80,
         kioskNoticesRotationSeconds:
@@ -830,7 +831,7 @@ class ScheduleSettings {
         kioskPanelEnabled: json['kiosk_panel_enabled'] as bool? ?? true,
         kioskPastDays: json['kiosk_past_days'] as int? ?? 0,
         kioskIdleSeconds: json['kiosk_idle_seconds'] as int? ?? 60,
-        kioskVisibleDays: json['kiosk_visible_days'] as int? ?? 0,
+        kioskVisibleDays: json['kiosk_visible_days'] as int? ?? 7,
         kioskRowHeight: json['kiosk_row_height'] as int? ?? 40,
         kioskLiveLayout: parseMatchLayout(
           json['kiosk_live_layout'] as String?,

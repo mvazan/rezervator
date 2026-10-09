@@ -36,11 +36,6 @@ double boardHeaderHeight(int maxEvents) =>
 /// would leave a sliver of the first event line peeking through the clip.
 const double collapsedHeaderHeight = 20.0;
 
-/// Equal day-column width: `clamp(160, (width−ruler)/7, 220)` so a typical
-/// tablet shows exactly 7 days without horizontal scroll.
-double boardColumnWidth(double availableWidth) =>
-    ((availableWidth - calendarRulerWidth) / 7).clamp(160.0, 220.0);
-
 /// One time-positioned widget inside a [CalendarColumn].
 class CalendarEntry {
   const CalendarEntry({

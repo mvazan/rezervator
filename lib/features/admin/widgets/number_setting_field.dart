@@ -16,7 +16,6 @@ class NumberSettingField extends StatefulWidget {
     required this.min,
     required this.max,
     this.helper,
-    this.zeroAllowed = false,
     required this.onChanged,
   });
 
@@ -31,9 +30,6 @@ class NumberSettingField extends StatefulWidget {
   final int min;
   final int max;
   final String? helper;
-
-  /// 0 is allowed besides [min]..[max] — „automatically“.
-  final bool zeroAllowed;
 
   /// Null = read-only (no settings row yet).
   final ValueChanged<int>? onChanged;
@@ -76,13 +72,9 @@ class _NumberSettingFieldState extends State<NumberSettingField> {
   void _commit() {
     final text = _controller.text.trim();
     final n = int.tryParse(text);
-    final inRange = n != null &&
-        ((n >= widget.min && n <= widget.max) || (widget.zeroAllowed && n == 0));
-    if (!inRange) {
+    if (n == null || n < widget.min || n > widget.max) {
       setState(
-        () => _error = widget.zeroAllowed
-            ? 'Zadej 0 nebo číslo od ${widget.min} do ${widget.max}.'
-            : 'Zadej číslo od ${widget.min} do ${widget.max}.',
+        () => _error = 'Zadej číslo od ${widget.min} do ${widget.max}.',
       );
       return;
     }

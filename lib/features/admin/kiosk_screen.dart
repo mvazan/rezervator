@@ -164,7 +164,6 @@ class KioskSettingsScreen extends ConsumerWidget {
     required int min,
     required int max,
     String? helper,
-    bool zeroAllowed = false,
   }) => Padding(
     padding: const EdgeInsets.only(bottom: 12),
     child: NumberSettingField(
@@ -175,7 +174,6 @@ class KioskSettingsScreen extends ConsumerWidget {
       min: min,
       max: max,
       helper: helper,
-      zeroAllowed: zeroAllowed,
       onChanged: settings == null
           ? null
           : (n) => _panel(context, settings, {column: n}),
@@ -303,16 +301,15 @@ class KioskSettingsScreen extends ConsumerWidget {
                   context,
                   settings,
                   'Dní na obrazovce',
-                  settings?.kioskVisibleDays ?? 0,
+                  settings?.kioskVisibleDays ?? 7,
                   'kiosk_visible_days',
                   unit: 'dní',
-                  min: 1,
+                  min: 2,
                   max: 14,
-                  zeroAllowed: true,
                   helper:
-                      'Kolik dní (sloupců) je na obrazovce najednou; další '
-                      'jsou o kus vedle. 0 = automaticky, kolik se jich vejde '
-                      '(zhruba týden).',
+                      'Kolik dní (sloupců) je na celé obrazovce najednou; '
+                      'další jsou o kus vedle. Rozbalený panel z nich zakryje '
+                      'tolik, kolik je jeho šířka.',
                 ),
                 _switch(
                   context,
@@ -420,16 +417,15 @@ class KioskSettingsScreen extends ConsumerWidget {
                     context,
                     settings,
                     'Šířka panelu',
-                    settings?.kioskDrawerWidth ?? 440,
-                    'kiosk_drawer_width',
-                    unit: 'px',
-                    min: 280,
-                    max: 800,
+                    settings?.kioskDrawerColumns ?? 2,
+                    'kiosk_drawer_columns',
+                    unit: 'dní',
+                    min: 1,
+                    max: 13,
                     helper:
-                        'Na užší obrazovce zabere nejvýš 60 % šířky. Je-li '
-                        'nastaven počet dní na obrazovce, zaokrouhlí se na '
-                        'celé sloupce dní — zavřený i otevřený panel pak '
-                        'nechá na tabuli jen celé dny.',
+                        'Kolik sloupců dní rozbalený panel zakryje; nejvýš o '
+                        'jeden méně, než je dní na obrazovce. Zavřený i '
+                        'otevřený panel tak nechá na tabuli jen celé dny.',
                   ),
                   if ((settings?.kioskShowNotices ?? true) &&
                       (settings?.kioskShowMatches ?? true))
