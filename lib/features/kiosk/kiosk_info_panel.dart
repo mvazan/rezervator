@@ -818,6 +818,10 @@ class _MatchesCardState extends ConsumerState<_MatchesCard> {
               controller: _controller,
               center: _centerKey,
               // Every row built, so following the board can scroll to any.
+              // (Deprecated on newer stable Flutter for scrollCacheExtent,
+              // which the SDK this repo builds with locally lacks — CI runs
+              // the newer one.)
+              // ignore: deprecated_member_use
               cacheExtent: 100000,
               slivers: [
                 SliverList.builder(
