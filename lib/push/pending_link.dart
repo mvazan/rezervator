@@ -1,6 +1,7 @@
 /// What a push tap (or an e-mail deep link, or a foreground local
 /// notification) should open once the app is signed in and ready (0051):
-/// a message, a notice, the calendar at a spot that was freed, or — for an
+/// a message, a notice, the calendar at a spot that was freed or booked
+/// on the kiosk, or — for an
 /// admin — the registrations waiting for approval (a new player, a new
 /// kuželna for the superadmin). `Push.init()` runs before any `ProviderScope`
 /// exists, so it cannot write into a Riverpod provider directly — it
@@ -18,6 +19,7 @@ enum PendingLinkKind {
   message,
   notice,
   freedSpot,
+  kioskBooking,
   pendingPlayer,
   pendingTenant,
 }
@@ -32,6 +34,7 @@ class PendingLink {
     this.date,
     this.blockId,
     this.lane,
+    this.reservationId,
   });
 
   final PendingLinkKind kind;
@@ -51,6 +54,9 @@ class PendingLink {
   final String? blockId;
   final int? lane;
 
+  /// A kiosk booking: the reservation the spot holds. Null otherwise.
+  final String? reservationId;
+
   @override
   bool operator ==(Object other) =>
       other is PendingLink &&
@@ -59,18 +65,20 @@ class PendingLink {
       other.tenantId == tenantId &&
       other.date == date &&
       other.blockId == blockId &&
-      other.lane == lane;
+      other.lane == lane &&
+      other.reservationId == reservationId;
 
   @override
-  int get hashCode => Object.hash(kind, id, tenantId, date, blockId, lane);
+  int get hashCode => Object.hash(kind, id, tenantId, date, blockId, lane, reservationId);
 
   @override
   String toString() =>
-      'PendingLink($kind, $id, $tenantId, $date, $blockId, $lane)';
+      'PendingLink($kind, $id, $tenantId, $date, $blockId, $lane, '
+      '$reservationId)';
 }
 
 /// A push `data` payload -> what to open, or null for a push this app
-/// doesn't deep-link (duty/booking/reservation pushes stay OS-open-only).
+/// doesn't deep-link (duty/group booking pushes stay OS-open-only).
 /// A malformed payload (a non-string id) opens nothing rather than
 /// throwing inside the push handler.
 PendingLink? pendingLinkFromData(Map<String, dynamic> data) {
@@ -98,6 +106,24 @@ PendingLink? pendingLinkFromData(Map<String, dynamic> data) {
         date: date,
         blockId: cell ? block : null,
         lane: cell ? lane : null,
+      );
+    case 'kiosk_booking':
+      // The calendar at the new reservation. An older push carried only
+      // the reservation id: it opens nothing, as it always did.
+      final date = data['date'];
+      if (date is! String || DateTime.tryParse(date) == null) return null;
+      final block = data['block_id'];
+      final rawLane = data['lane'];
+      final lane = rawLane is String ? int.tryParse(rawLane) : null;
+      final reservation = data['reservation_id'];
+      final cell = block is String && lane != null && reservation is String;
+      return PendingLink(
+        kind: PendingLinkKind.kioskBooking,
+        tenantId: tenantId,
+        date: date,
+        blockId: cell ? block : null,
+        lane: cell ? lane : null,
+        reservationId: cell ? reservation : null,
       );
   }
   final id = data['message_id'];

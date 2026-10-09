@@ -914,6 +914,36 @@ void main() {
       await tester.pumpAndSettle(const Duration(seconds: 10));
     });
 
+    testWidgets('a kiosk-booking link brings the calendar up at the booking', (
+      tester,
+    ) async {
+      await tester.pumpWidget(app(profile: visiting));
+      await tester.pumpAndSettle();
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(HomeShell)),
+      );
+      container
+          .read(pendingLinkProvider.notifier)
+          .set(
+            const PendingLink(
+              kind: PendingLinkKind.kioskBooking,
+              tenantId: 't-demo',
+              date: '2026-09-10',
+              blockId: 'b1',
+              lane: 1,
+              reservationId: 'r1',
+            ),
+          );
+      await tester.pump();
+      await tester.pump();
+      final focus = container.read(calendarFocusProvider);
+      expect(focus?.date, Day(2026, 9, 10));
+      expect(focus?.lane, 1);
+      expect(focus?.reservationId, 'r1');
+      expect(container.read(pendingLinkProvider), isNull);
+      await tester.pumpAndSettle(const Duration(seconds: 10));
+    });
+
     testWidgets('a „new player waits“ link opens the admin\'s players list; '
         'one sent for another alley is dropped', (tester) async {
       await tester.pumpWidget(app(profile: visiting));

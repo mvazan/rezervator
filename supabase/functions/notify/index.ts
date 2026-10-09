@@ -858,9 +858,15 @@ async function handle(payload: WebhookPayload) {
           "Rezervace z kiosku 🎳",
           `${ctx.when}. Pokud jsi to nebyl ty, zruš ji v aplikaci.`,
           {
+            // The app opens the calendar at the new reservation and
+            // outlines it while it is still booked.
             data: {
               kind: "kiosk_booking",
               reservation_id: String(record.id),
+              date: String(record.date),
+              block_id: String(record.block_id),
+              lane: String(record.lane),
+              tenant_id: String(record.tenant_id),
             },
             html: `<p>Na kiosku na kuzelně vznikla rezervace na tvé jméno:</p>` +
               `<p><b>${escapeHtml(ctx.when)}</b></p>` +

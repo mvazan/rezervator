@@ -1,6 +1,7 @@
 /// A request to show one spot of the calendar — what a „uvolnilo se místo“
 /// push asks for: the week and the day of the spot, and its cell outlined
-/// while it is still free. A plain provider, because the tap arrives in
+/// while it is still free. A „rezervace z kiosku“ push asks the same for the
+/// player's new reservation: its cell outlined while it is still booked. A plain provider, because the tap arrives in
 /// [HomeShell] and the week it moves belongs to [WeekScreen].
 library;
 
@@ -14,6 +15,7 @@ class CalendarFocus {
     required this.date,
     this.blockId,
     this.lane,
+    this.reservationId,
     this.handled = false,
     this.highlight = false,
   });
@@ -24,16 +26,22 @@ class CalendarFocus {
   final String? blockId;
   final int? lane;
 
+  /// A kiosk booking: the reservation the spot should hold. Null for a freed
+  /// spot, which should be free instead.
+  final String? reservationId;
+
   /// The screen has moved to [date] and said what it found.
   final bool handled;
 
-  /// The spot is free: its cell is outlined until the focus is cleared.
+  /// The spot is as the push said (free, or holding [reservationId]): its
+  /// cell is outlined until the focus is cleared.
   final bool highlight;
 
   CalendarFocus copyWith({bool? handled, bool? highlight}) => CalendarFocus(
     date: date,
     blockId: blockId,
     lane: lane,
+    reservationId: reservationId,
     handled: handled ?? this.handled,
     highlight: highlight ?? this.highlight,
   );
