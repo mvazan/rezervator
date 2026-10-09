@@ -1814,14 +1814,17 @@ void main() {
       expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
     });
 
-    testWidgets('the turn cross-fades the detail and the sheet: both on '
-        'screen mid-fade, only the sheet after it, and back', (tester) async {
+    testWidgets('the turn cross-fades the detail and the sheet — started a '
+        'frame after the slow one of the turn: both on screen mid-fade, '
+        'only the sheet after it, and back', (tester) async {
       window(tester, 450, 900);
       await tester.pumpWidget(rudna(sheetSideways));
       await tester.pumpAndSettle();
       expect(find.byType(DuelCard), findsWidgets);
 
       tester.view.physicalSize = const Size(900, 450);
+      // The first frame builds the sheet; the fade starts in the next one.
+      await tester.pump();
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 150));
       // Mid-fade: the sheet is in, the detail is still going out.
@@ -1832,6 +1835,7 @@ void main() {
       expect(find.byType(MatchScoreboard), findsNothing);
 
       tester.view.physicalSize = const Size(450, 900);
+      await tester.pump();
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 150));
       expect(find.byType(LegacyScoreSheetPage), findsOneWidget);

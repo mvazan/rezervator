@@ -18,6 +18,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/ui.dart';
@@ -70,7 +71,8 @@ class MatchDetailScreen extends ConsumerStatefulWidget {
   ConsumerState<MatchDetailScreen> createState() => _MatchDetailScreenState();
 }
 
-class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
+class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen>
+    with SingleTickerProviderStateMixin {
   bool _didOpenRefresh = false;
 
   /// The id the refresh calls use: the widget's, or — once a foreign match
@@ -100,8 +102,42 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
   /// turn instead of the sheet coming back.
   bool _zapisDismissed = false;
 
+  /// 0 = the detail, 1 = the Zápis: the cross-fade of a turn of the phone.
+  /// Started a frame after the one that built the sheet — the first frame
+  /// of a turn is slow (the sheet and the detail laid out at the new
+  /// size), and an animation started in a slow frame jumps to its end.
+  late final AnimationController _fade = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 300),
+  );
+
+  /// Whether the sheet is wanted now, and the last one built — it stays up
+  /// while it fades out.
+  bool? _sheetWanted;
+  Widget? _sheetPage;
+
+  void _fadeTo(bool sheet) {
+    if (_sheetWanted == null) {
+      // The first build: no animation, straight to what is wanted.
+      _sheetWanted = sheet;
+      _fade.value = sheet ? 1 : 0;
+      return;
+    }
+    if (_sheetWanted == sheet) return;
+    _sheetWanted = sheet;
+    SchedulerBinding.instance.scheduleFrameCallback((_) {
+      if (!mounted) return;
+      if (_sheetWanted == true) {
+        unawaited(_fade.forward());
+      } else {
+        unawaited(_fade.reverse());
+      }
+    });
+  }
+
   @override
   void dispose() {
+    _fade.dispose();
     _waitTimer?.cancel();
     super.dispose();
   }
@@ -405,60 +441,73 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
         slot != null &&
         !_zapisDismissed;
 
-    final Widget page = sheet
-        ? ZapisPage(
-            key: const ValueKey('zapis'),
-            slot: slot,
-            closeButton: true,
-            competitionSlug: fromLeague ? widget.competitionSlug : null,
-            withRegnums: true,
-            onClose: () => setState(() => _zapisDismissed = true),
-          )
-        : Scaffold(
-            key: const ValueKey('detail'),
-            appBar: AppBar(
-              title: Text(_appBarTitle(slot)),
-              actions: [
-                if (showRefreshButton)
-                  showWaiting
-                      ? const Padding(
-                          padding: EdgeInsets.all(16),
-                          child: SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          ),
-                        )
-                      : IconButton(
-                          icon: const Icon(Icons.refresh),
-                          tooltip: 'Obnovit',
-                          onPressed: () =>
-                              _onRefreshTap(context, result?.fetchedAt),
-                        ),
-              ],
-            ),
-            body: slotsLoading
-                ? const Center(child: CircularProgressIndicator())
-                : slot == null
-                ? const Center(child: Text('Zápas už v rozpisu není.'))
-                : _body(
-                    context,
-                    slot: slot,
-                    result: result,
-                    players: players,
-                    playersLoading: playersLoading,
-                    venueMatch: venueMatch,
-                    layout: inlineLayout,
-                    now: now,
-                    live: live,
-                    // Pulling is the ⟳ button's twin: gone together once a
-                    // refresh has answered not_live.
-                    pullToRefresh: showRefreshButton,
+    _fadeTo(sheet);
+    if (sheet) {
+      _sheetPage = ZapisPage(
+        slot: slot,
+        closeButton: true,
+        competitionSlug: fromLeague ? widget.competitionSlug : null,
+        withRegnums: true,
+        onClose: () => setState(() => _zapisDismissed = true),
+      );
+    }
+
+    final detail = Scaffold(
+      appBar: AppBar(
+        title: Text(_appBarTitle(slot)),
+        actions: [
+          if (showRefreshButton)
+            showWaiting
+                ? const Padding(
+                    padding: EdgeInsets.all(16),
+                    child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  )
+                : IconButton(
+                    icon: const Icon(Icons.refresh),
+                    tooltip: 'Obnovit',
+                    onPressed: () => _onRefreshTap(context, result?.fetchedAt),
                   ),
-          );
-    return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 300),
-      child: page,
+        ],
+      ),
+      body: slotsLoading
+          ? const Center(child: CircularProgressIndicator())
+          : slot == null
+          ? const Center(child: Text('Zápas už v rozpisu není.'))
+          : _body(
+              context,
+              slot: slot,
+              result: result,
+              players: players,
+              playersLoading: playersLoading,
+              venueMatch: venueMatch,
+              layout: inlineLayout,
+              now: now,
+              live: live,
+              // Pulling is the ⟳ button's twin: gone together once a
+              // refresh has answered not_live.
+              pullToRefresh: showRefreshButton,
+            ),
+    );
+    // The detail stays built under the sheet (hidden once the sheet is
+    // whole), so the turn back has nothing to build; the sheet fades in
+    // over it and out again.
+    return AnimatedBuilder(
+      animation: _fade,
+      builder: (context, _) {
+        final sheetUp =
+            _sheetPage != null && (_sheetWanted == true || _fade.value > 0);
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            Offstage(offstage: _fade.value == 1, child: detail),
+            if (sheetUp) FadeTransition(opacity: _fade, child: _sheetPage),
+          ],
+        );
+      },
     );
   }
 
