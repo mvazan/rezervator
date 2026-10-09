@@ -14,6 +14,7 @@ import 'package:rezervator/features/clubhouse/widgets/duel_card.dart';
 import 'package:rezervator/features/clubhouse/widgets/legacy_score_sheet.dart';
 import 'package:rezervator/features/clubhouse/widgets/match_scoreboard.dart';
 import 'package:rezervator/features/kiosk/kiosk_board_view.dart';
+import 'package:rezervator/features/schedule/widgets/slot_tile.dart';
 import 'package:rezervator/features/kiosk/kiosk_connection.dart';
 import 'package:rezervator/features/kiosk/kiosk_info_panel.dart';
 import 'package:rezervator/features/kiosk/kiosk_shell.dart';
@@ -1294,7 +1295,7 @@ void main() {
       int liveRefresh = 60,
       MatchLayout liveLayout = MatchLayout.full,
       int visibleDays = 7,
-      int rowHeight = 40,
+      int fontSize = 11,
       bool fitDay = true,
       Stream<Map<String, MatchResult>>? resultsStream,
       Map<String, List<MatchPlayerResult>> lineups = const {},
@@ -1331,7 +1332,7 @@ void main() {
               kioskLiveRefreshSeconds: liveRefresh,
               kioskLiveLayout: liveLayout,
               kioskVisibleDays: visibleDays,
-              kioskRowHeight: rowHeight,
+              kioskFontSize: fontSize,
               kioskFitDay: fitDay,
             ),
           ),
@@ -1480,26 +1481,53 @@ void main() {
       await finish(tester);
     });
 
-    testWidgets('while the day scrolls, the admin\'s lane row height sets '
-        'the scale; with the day on the screen it does not', (tester) async {
+    testWidgets('while the day scrolls, the admin\'s font size sets the '
+        'text and the rows grow with it', (tester) async {
       fullHd(tester);
-      double day() =>
-          tester.getSize(find.byType(ScheduleDayColumn).first).height;
-      Future<double> heightWith({required bool fit, required int row}) async {
-        await tester.pumpWidget(app(fitDay: fit, rowHeight: row));
+      Future<({double day, double scale})> boardWith(int font) async {
+        await tester.pumpWidget(app(fitDay: false, fontSize: font));
         await tester.pumpAndSettle();
-        final h = day();
+        final result = (
+          day: tester.getSize(find.byType(ScheduleDayColumn).first).height,
+          scale: tester.widget<SlotTile>(find.byType(SlotTile).first).textScale,
+        );
         await finish(tester);
-        return h;
+        return result;
       }
 
-      final at40 = await heightWith(fit: false, row: 40);
-      final at80 = await heightWith(fit: false, row: 80);
-      expect(at80, greaterThan(at40 * 1.5));
-      expect(
-        await heightWith(fit: true, row: 80),
-        await heightWith(fit: true, row: 40),
-      );
+      final at11 = await boardWith(11);
+      final at22 = await boardWith(22);
+      expect(at11.scale, 1);
+      expect(at22.scale, 2);
+      // Twice the text, about twice the rows.
+      expect(at22.day, greaterThan(at11.day * 1.5));
+    });
+
+    testWidgets('with the day on the screen the font follows the rows: the '
+        'admin\'s size is not used', (tester) async {
+      fullHd(tester);
+      Future<double> scaleWith(int font) async {
+        await tester.pumpWidget(app(fontSize: font));
+        await tester.pumpAndSettle();
+        final scale =
+            tester.widget<SlotTile>(find.byType(SlotTile).first).textScale;
+        await finish(tester);
+        return scale;
+      }
+
+      final a = await scaleWith(9);
+      final b = await scaleWith(24);
+      expect(a, b);
+      // Within reason: 9 to 20 px.
+      expect(a * kioskRowFontRef, inInclusiveRange(9, 20));
+    });
+
+    test('the row height follows the font, the fitted font follows the row', () {
+      expect(kioskRowHeightFor(11), 40);
+      expect(kioskRowHeightFor(22), 80);
+      expect(kioskRowFont(40), 11);
+      expect(kioskRowFont(10), 9);
+      expect(kioskRowFont(400), 20);
     });
 
     testWidgets('the day columns keep their width while the drawer slides', (

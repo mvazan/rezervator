@@ -418,14 +418,14 @@ void main() {
     expect(lastPatch(), {'kiosk_visible_days': 5});
   });
 
-  testWidgets('the lane row height shows only while the day scrolls', (
+  testWidgets('the font size of the board shows only while the day scrolls', (
     tester,
   ) async {
     tall(tester);
-    // Fit day on (the default): no row height.
+    // Fit day on (the default): the font follows the rows, no field.
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
-    expect(find.widgetWithText(TextField, 'Výška řádku dráhy'), findsNothing);
+    expect(find.widgetWithText(TextField, 'Velikost písma na tabuli'), findsNothing);
     await tester.pumpWidget(const SizedBox());
 
     await tester.pumpWidget(app(
@@ -441,14 +441,14 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       tester
-          .widget<TextField>(find.widgetWithText(TextField, 'Výška řádku dráhy'))
+          .widget<TextField>(find.widgetWithText(TextField, 'Velikost písma na tabuli'))
           .controller!
           .text,
-      '40',
+      '11',
     );
-    await enter(tester, 'Výška řádku dráhy', '56');
+    await enter(tester, 'Velikost písma na tabuli', '16');
     expect(jsonDecode(requests.lastWhere((r) => r.method == 'PATCH').body),
-        {'kiosk_row_height': 56});
+        {'kiosk_font_size': 16});
   });
 
   testWidgets('leaving a number field writes it too', (tester) async {

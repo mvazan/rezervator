@@ -286,16 +286,16 @@ class KioskSettingsScreen extends ConsumerWidget {
                   _number(
                     context,
                     settings,
-                    'Výška řádku dráhy',
-                    settings?.kioskRowHeight ?? 40,
-                    'kiosk_row_height',
+                    'Velikost písma na tabuli',
+                    settings?.kioskFontSize ?? 11,
+                    'kiosk_font_size',
                     unit: 'px',
-                    min: 20,
-                    max: 120,
+                    min: 9,
+                    max: 24,
                     helper:
-                        'Výška jedné dráhy v hodinovém bloku, když se den '
-                        'nevejde na obrazovku a tabule se posouvá. Appka '
-                        'má 40.',
+                        'Jména v řádcích drah; řádky se písmu přizpůsobí. '
+                        'Appka má 11. Při celém dni na obrazovce se písmo '
+                        'řídí výškou řádků samo.',
                   ),
                 _number(
                   context,

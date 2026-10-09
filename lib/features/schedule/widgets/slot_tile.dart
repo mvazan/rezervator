@@ -39,6 +39,7 @@ class SlotTile extends StatelessWidget {
     this.quiet = false,
     this.onTap,
     this.laneDigit,
+    this.textScale = 1.0,
   });
 
   final SlotState state;
@@ -70,6 +71,10 @@ class SlotTile extends StatelessWidget {
 
   /// [SlotTileSize.row] only: the lane number drawn inside the cell.
   final int? laneDigit;
+
+  /// [SlotTileSize.row] only: the row's text at this multiple of its size
+  /// (the kiosk's font size, 0064; 1 = 11 px names).
+  final double textScale;
 
   bool get _compact => size == SlotTileSize.compact;
 
@@ -257,7 +262,7 @@ class SlotTile extends StatelessWidget {
             rentalLabel(rental),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: 11, color: fg),
+            style: TextStyle(fontSize: 11 * textScale, color: fg),
           ),
         );
       case ReservedSlot():
@@ -284,7 +289,7 @@ class SlotTile extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              fontSize: 11,
+              fontSize: 11 * textScale,
               fontWeight: isMine ? FontWeight.w700 : FontWeight.w500,
               color: cellFg,
             ),
@@ -302,7 +307,7 @@ class SlotTile extends StatelessWidget {
               ? Text(
                   '＋',
                   style: TextStyle(
-                    fontSize: 13,
+                    fontSize: 13 * textScale,
                     fontWeight: FontWeight.w700,
                     color: scheme.secondary,
                   ),
@@ -324,7 +329,7 @@ class SlotTile extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-                fontSize: 11, fontWeight: FontWeight.w600, color: fg),
+                fontSize: 11 * textScale, fontWeight: FontWeight.w600, color: fg),
           ),
         );
     }
@@ -351,17 +356,17 @@ class SlotTile extends StatelessWidget {
       child: Row(
         children: [
           SizedBox(
-            width: 14,
+            width: 14 * textScale,
             child: Text(
               '${laneDigit ?? ''}',
               style: TextStyle(
-                fontSize: 10,
+                fontSize: 10 * textScale,
                 fontWeight: FontWeight.w700,
                 color: scheme.onSurfaceVariant.withValues(alpha: 0.5),
               ),
             ),
           ),
-          const SizedBox(width: 4),
+          SizedBox(width: 4 * textScale),
           if (child != null) Expanded(child: child),
         ],
       ),

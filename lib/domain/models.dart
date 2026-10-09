@@ -687,7 +687,7 @@ class ScheduleSettings {
     this.kioskPastDays = 0,
     this.kioskIdleSeconds = 60,
     this.kioskVisibleDays = 7,
-    this.kioskRowHeight = 40,
+    this.kioskFontSize = 11,
     this.kioskLiveLayout = MatchLayout.full,
     this.tenantId = '',
     this.dutyReminderEnabled = false,
@@ -771,9 +771,10 @@ class ScheduleSettings {
   /// open drawer covers [kioskDrawerColumns] of them.
   final int kioskVisibleDays;
 
-  /// One lane row's height in px per hour while the day scrolls
-  /// ([kioskFitDay] off; 0064); the app's week view uses 40.
-  final int kioskRowHeight;
+  /// The lane rows' font size in px while the day scrolls ([kioskFitDay]
+  /// off; 0064) — the rows grow with it. With the day on the screen the
+  /// font follows the rows instead (`kioskRowFont`).
+  final int kioskFontSize;
 
   /// How a match being played is drawn in the drawer (0064).
   final MatchLayout kioskLiveLayout;
@@ -832,7 +833,7 @@ class ScheduleSettings {
         kioskPastDays: json['kiosk_past_days'] as int? ?? 0,
         kioskIdleSeconds: json['kiosk_idle_seconds'] as int? ?? 60,
         kioskVisibleDays: json['kiosk_visible_days'] as int? ?? 7,
-        kioskRowHeight: json['kiosk_row_height'] as int? ?? 40,
+        kioskFontSize: json['kiosk_font_size'] as int? ?? 11,
         kioskLiveLayout: parseMatchLayout(
           json['kiosk_live_layout'] as String?,
           allowZapis: false,

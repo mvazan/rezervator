@@ -180,13 +180,15 @@ alter table schedule_settings
     check (kiosk_idle_seconds between 15 and 600),
   -- How many day columns the board fits on the whole screen (the drawer
   -- covers kiosk_drawer_columns of them). And, when the day does not fit
-  -- the screen (kiosk_fit_day off), one lane row's height in px per hour.
+  -- the screen (kiosk_fit_day off), the lane rows' font size in px — the
+  -- rows grow with it (with the day on the screen the font follows the
+  -- rows instead).
   add column if not exists kiosk_visible_days smallint not null default 7
     constraint schedule_settings_kiosk_visible_days_check
     check (kiosk_visible_days between 2 and 14),
-  add column if not exists kiosk_row_height smallint not null default 40
-    constraint schedule_settings_kiosk_row_height_check
-    check (kiosk_row_height between 20 and 120);
+  add column if not exists kiosk_font_size smallint not null default 11
+    constraint schedule_settings_kiosk_font_size_check
+    check (kiosk_font_size between 9 and 24);
 
 -- The public overview (0043) keeps handing out only what it always did:
 -- the kiosk's choices are the admin's, not anon's.
@@ -214,7 +216,7 @@ begin
                           - 'kiosk_idle_seconds'
                           - 'kiosk_live_layout' - 'kiosk_follow_board'
                           - 'kiosk_live_refresh_seconds'
-                          - 'kiosk_visible_days' - 'kiosk_row_height'
+                          - 'kiosk_visible_days' - 'kiosk_font_size'
                    from schedule_settings s where s.tenant_id = v_tenant),
     'blocks', coalesce((
       select jsonb_agg(to_jsonb(b) - 'tenant_id')

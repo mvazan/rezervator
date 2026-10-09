@@ -50,6 +50,19 @@ double _minPxPerMinute(Iterable<TimeBlock> blocks, int laneCount) {
   return floor < 0.9 ? 0.9 : floor;
 }
 
+/// The lane rows' name size at the app's row height ([laneRowRefHeight]).
+const double kioskRowFontRef = 11;
+
+/// A lane row's height (one hour) for the admin's [fontSize] — 11 px is
+/// the app's 40 px; the row grows in step with its text.
+double kioskRowHeightFor(int fontSize) =>
+    fontSize * laneRowRefHeight / kioskRowFontRef;
+
+/// The font for a lane row [rowHeight] tall (an hour), when the day is
+/// fitted to the screen: in step with the row, between 9 and 20 px.
+double kioskRowFont(double rowHeight) =>
+    (rowHeight * kioskRowFontRef / laneRowRefHeight).clamp(9.0, 20.0);
+
 class KioskBoardView extends ConsumerStatefulWidget {
   const KioskBoardView({
     super.key,
@@ -352,22 +365,29 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
         // Two admin-selectable modes (settings.kioskFitDay):
         // - fit-height: the whole window stretches to the viewport, floored
         //   at the legibility scale (then the board scrolls anyway);
-        // - comfortable scroll: the same fixed scale as the app's week view
-        //   (a 60-min block = laneCount × 40 px — or the admin's row height,
-        //   0064), scrolling vertically; the idle reset brings the board back
-        //   to "now".
+        // - comfortable scroll: the rows as tall as the admin's font size
+        //   needs (0064; 11 px = the app's 40 px a lane and hour),
+        //   scrolling vertically; the idle reset brings the board back to
+        //   "now".
         final fitScale =
             (constraints.maxHeight - headerHeight - _bottomLabelPad) /
             window.minutes;
         final minScale = _minPxPerMinute(windowBlocks, settings.laneCount);
         final comfortableScale =
-            settings.laneCount * settings.kioskRowHeight / 60;
+            settings.laneCount * kioskRowHeightFor(settings.kioskFontSize) / 60;
         final pxPerMinute = settings.kioskFitDay
             ? (fitScale < minScale ? minScale : fitScale)
             // The tappability floor applies here too: a very short block
             // must not squash its lane rows below reach in scroll mode
             // either.
             : (comfortableScale < minScale ? minScale : comfortableScale);
+        // The rows' text: the admin's size while the day scrolls; with the
+        // day on the screen it follows the rows, within reason.
+        final rowTextScale =
+            (settings.kioskFitDay
+                ? kioskRowFont(pxPerMinute * 60 / settings.laneCount)
+                : settings.kioskFontSize.toDouble()) /
+            kioskRowFontRef;
         final bodyHeight = window.minutes * pxPerMinute + _bottomLabelPad;
         // Snapshot for resetToNow's imperative scroll-target math (see field
         // docs above) — assignment only, no setState, so it can't trigger a
@@ -516,6 +536,7 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
                                           clubColorById: clubColorById,
                                           interactive: interactive,
                                           selectedCount: selectedCount,
+                                          textScale: rowTextScale,
                                         ),
                                   ),
                                 ),
@@ -566,18 +587,25 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
     required Map<String, int> clubColorById,
     required bool interactive,
     required int selectedCount,
+    required double textScale,
   }) {
     final selected = widget.selected;
     final state = day.slot(block.id, lane);
     switch (state) {
       case RentedSlot():
       case PrioritySlotState():
-        return SlotTile(state: state, size: SlotTileSize.row, laneDigit: lane);
+        return SlotTile(
+          state: state,
+          size: SlotTileSize.row,
+          laneDigit: lane,
+          textScale: textScale,
+        );
       case ReservedSlot(:final reservation):
         return SlotTile(
           state: state,
           size: SlotTileSize.row,
           laneDigit: lane,
+          textScale: textScale,
           playerName: nameById[reservation.playerId] ?? '?',
           isMine: selected != null && reservation.playerId == selected.id,
           clubColorIndex: clubColorById[reservation.playerId] ?? -1,
@@ -595,6 +623,7 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
           state: state,
           size: SlotTileSize.row,
           laneDigit: lane,
+          textScale: textScale,
           onTap: bookable
               ? () => _book(context, ref, day.date, block, lane, selected)
               : null,
