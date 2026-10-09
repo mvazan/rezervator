@@ -46,6 +46,8 @@ dependencies:
   sentry_flutter: ^9.24.0
   flutter_local_notifications: ^22.0.1
   shared_preferences: ^2.5.5
+  # The page behind the app on the web (core/web/page_background.dart).
+  web: ^1.1.0
   package_info_plus: ^10.2.0
   flex_color_picker: ^3.8.0
 

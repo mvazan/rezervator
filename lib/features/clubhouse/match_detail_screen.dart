@@ -104,13 +104,15 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen>
   /// turn instead of the sheet coming back.
   bool _zapisDismissed = false;
 
-  /// The turn of the phone, hidden: the frame after a turn is slow (the
-  /// whole screen laid out anew), and the browser meanwhile shows the old
-  /// frame stretched into the new shape. So the moment the metrics change,
-  /// the screen as it was is captured as an image ([_snapshot]); the first
-  /// frame at the new size draws only that image over the theme's
-  /// background (cheap), the next frame builds the new content under it,
-  /// and the image fades out — the old view flowing into the new one.
+  /// The turn of the phone, smoothed over: the frame after a turn is slow
+  /// (the whole screen laid out anew), and the browser meanwhile shows the
+  /// last frame shrunk to fit the new shape, top left, over the page's
+  /// background (the theme's, see `PageBackground`). So the moment the
+  /// metrics change, the screen as it was is captured as an image
+  /// ([_snapshot]); the first frame at the new size draws only that image,
+  /// placed as the browser placed it (cheap, and nothing visibly changes);
+  /// the next frame builds the new content under it, and the image fades
+  /// out — the old view flowing into the new one.
   final _screen = GlobalKey();
   ui.Image? _snapshot;
   Orientation? _orientation;
@@ -140,9 +142,11 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen>
     final was = _orientation;
     _orientation = orientation;
     if (was == null || was == orientation || _turning) return;
+    // (Not debugNeedsPaint: a debug-only getter, it throws in a release
+    // build.)
     final boundary =
         _screen.currentContext?.findRenderObject() as RenderRepaintBoundary?;
-    if (boundary == null || boundary.debugNeedsPaint) return;
+    if (boundary == null) return;
     _fade.stop();
     _fade.value = 1;
     setState(() => _turning = true);
@@ -152,10 +156,10 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen>
   Future<void> _capture(RenderRepaintBoundary boundary) async {
     ui.Image? image;
     try {
-      // The layer tree still holds the frame before the turn.
-      image = await boundary.toImage(
-        pixelRatio: View.of(context).devicePixelRatio,
-      );
+      // The layer tree still holds the frame before the turn. At one pixel
+      // per dp — the image is shown shrunk and briefly, and the raster is a
+      // quarter of the work of the device's own ratio.
+      image = await boundary.toImage();
     } catch (_) {
       // No image: the content still comes in a frame, just without the
       // old one flowing into it.
@@ -198,9 +202,12 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen>
           IgnorePointer(
             child: FadeTransition(
               opacity: _fade,
+              // Shrunk to fit, at the top left: where the browser already
+              // put the last frame while this one was being made, so the
+              // two line up and the fade starts from the same picture.
               child: RawImage(
                 image: snapshot,
-                fit: BoxFit.cover,
+                fit: BoxFit.contain,
                 alignment: Alignment.topLeft,
               ),
             ),
