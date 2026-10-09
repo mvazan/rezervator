@@ -425,7 +425,11 @@ class KioskSettingsScreen extends ConsumerWidget {
                     unit: 'px',
                     min: 280,
                     max: 800,
-                    helper: 'Na užší obrazovce zabere nejvýš 60 % šířky.',
+                    helper:
+                        'Na užší obrazovce zabere nejvýš 60 % šířky. Je-li '
+                        'nastaven počet dní na obrazovce, zaokrouhlí se na '
+                        'celé sloupce dní — zavřený i otevřený panel pak '
+                        'nechá na tabuli jen celé dny.',
                   ),
                   if ((settings?.kioskShowNotices ?? true) &&
                       (settings?.kioskShowMatches ?? true))

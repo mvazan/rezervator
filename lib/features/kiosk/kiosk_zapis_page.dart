@@ -35,6 +35,8 @@ Future<void> showKioskZapis(
       final full = percent >= 100;
       return Listener(
         onPointerDown: (_) => onTouch(),
+        onPointerSignal: (_) => onTouch(),
+        onPointerPanZoomStart: (_) => onTouch(),
         behavior: HitTestBehavior.translucent,
         child: Theme(
           data: buildTheme(brightness),

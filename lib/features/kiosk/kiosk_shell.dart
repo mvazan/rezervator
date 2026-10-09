@@ -142,6 +142,8 @@ class _KioskShellState extends ConsumerState<KioskShell>
   /// give it its own, so reading a Zápis counts as touching the kiosk.
   Widget _touchable(Widget child) => Listener(
     onPointerDown: (_) => _touch(),
+    onPointerSignal: (_) => _touch(),
+    onPointerPanZoomStart: (_) => _touch(),
     behavior: HitTestBehavior.translucent,
     child: Theme(data: _kioskTheme(), child: child),
   );
@@ -209,17 +211,25 @@ class _KioskShellState extends ConsumerState<KioskShell>
     final content = ref.watch(kioskPanelContentProvider);
     final settings = ref.watch(settingsProvider).value;
     final screenWidth = MediaQuery.sizeOf(context).width;
+    final visibleDays = settings?.kioskVisibleDays ?? 0;
     final drawerWidth = kioskDrawerWidthFor(
       screenWidth,
       settings?.kioskDrawerWidth ?? 440,
+      visibleDays: visibleDays,
     );
     final board = KioskBoardView(
       key: _boardKey,
       selected: _selected,
       onOpenMatch: _openMatchIfScored,
       // With a drawer, the columns are sized for the room beside it open —
-      // the same width open or closed, so they never resize mid-slide.
-      columnBasisWidth: content == null ? null : screenWidth - drawerWidth,
+      // the same width open or closed, so they never resize mid-slide. With
+      // a set number of days they are sized on the whole screen instead,
+      // and the drawer is a whole number of them (kioskDrawerWidthFor).
+      columnBasisWidth: visibleDays >= 2
+          ? screenWidth
+          : content == null
+          ? null
+          : screenWidth - drawerWidth,
       onVisibleDays: (first, last) =>
           setState(() => _boardDays = (first: first, last: last)),
     );
@@ -284,6 +294,11 @@ class _KioskShellState extends ConsumerState<KioskShell>
       data: buildTheme(kioskDark ? Brightness.dark : Brightness.light),
       child: Listener(
         onPointerDown: (_) => _touch(),
+        // A mouse wheel or a trackpad scrolls without a pointer down: it
+        // counts as touching the kiosk too, or the idle reset never comes
+        // to put the board back.
+        onPointerSignal: (_) => _touch(),
+        onPointerPanZoomStart: (_) => _touch(),
         behavior: HitTestBehavior.translucent,
         child: Scaffold(
           body: Column(

@@ -5,6 +5,7 @@ library;
 
 import 'messages.dart' show splitNotices;
 import 'models.dart';
+import 'results.dart' show isLive;
 
 /// The notices on the wall right now: kind notice, not expired, not hidden
 /// from the kiosk by the admin, oldest posted first (the Nástěnka order).
@@ -104,12 +105,15 @@ int kioskFirstUpcomingIndex(
 }
 
 /// The matches being played whose figures the drawer can show: status in
-/// progress AND [withData] says the site has delivered their players — a
-/// match merely marked as playing has nothing to put on the drawer yet.
-/// Chronological, so the rotation order is stable.
+/// progress, still within the live window at [now] ([isLive]: a row the
+/// site left „in progress“ is not live the next day), AND [withData] says
+/// the site has delivered their players — a match merely marked as playing
+/// has nothing to put on the drawer yet. Chronological, so the rotation
+/// order is stable.
 List<PrioritySlot> kioskLiveMatches({
   required List<PrioritySlot> slots,
   required Map<String, MatchResult> results,
+  required DateTime now,
   required Set<String> withData,
 }) {
   return [
@@ -118,6 +122,7 @@ List<PrioritySlot> kioskLiveMatches({
           s.parentId == null &&
           s.fromFederation &&
           results[s.id]?.status == MatchStatus.inProgress &&
+          isLive(s, results[s.id], now) &&
           withData.contains(s.id))
         s,
   ]..sort((a, b) {

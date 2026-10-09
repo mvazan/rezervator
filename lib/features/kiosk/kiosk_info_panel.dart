@@ -29,11 +29,24 @@ import '../clubhouse/widgets/duels_compact.dart';
 import '../clubhouse/widgets/match_scoreboard.dart';
 import '../clubhouse/widgets/match_title.dart';
 import '../clubhouse/widgets/team_totals_card.dart';
+import '../schedule/widgets/calendar_board.dart' show calendarRulerWidth;
 
 /// The drawer's width for a screen [screenWidth] wide: what the admin chose,
-/// at most 60 % of the screen.
-double kioskDrawerWidthFor(double screenWidth, int chosen) =>
-    math.min(chosen.toDouble(), screenWidth * 0.6);
+/// at most 60 % of the screen. With a set number of [visibleDays] (two or
+/// more) the board's columns are sized on the whole screen, and the drawer
+/// snaps to the nearest whole number of them (at least one, never all) —
+/// so open or closed, no column is cut at the drawer's edge.
+double kioskDrawerWidthFor(
+  double screenWidth,
+  int chosen, {
+  int visibleDays = 0,
+}) {
+  final width = math.min(chosen.toDouble(), screenWidth * 0.6);
+  if (visibleDays < 2) return width;
+  final column = (screenWidth - calendarRulerWidth) / visibleDays;
+  final columns = (width / column).round().clamp(1, visibleDays - 1);
+  return columns * column;
+}
 
 const _resultRowHeight = 64.0;
 const _moreRowHeight = 52.0;
@@ -70,7 +83,12 @@ final kioskLiveProvider = Provider<List<PrioritySlot>>((ref) {
       withData.add(s.id);
     }
   }
-  return kioskLiveMatches(slots: slots, results: results, withData: withData);
+  return kioskLiveMatches(
+    slots: slots,
+    results: results,
+    withData: withData,
+    now: ref.watch(nowProvider).value ?? DateTime.now(),
+  );
 });
 
 /// What the drawer would show now, from the providers and the admin's
@@ -152,6 +170,7 @@ class KioskDrawer extends ConsumerWidget {
     final width = kioskDrawerWidthFor(
       MediaQuery.sizeOf(context).width,
       settings?.kioskDrawerWidth ?? 440,
+      visibleDays: settings?.kioskVisibleDays ?? 0,
     );
     final noticeTurn = Duration(
       seconds: settings?.kioskNoticesRotationSeconds ?? 12,

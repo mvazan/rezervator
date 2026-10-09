@@ -214,7 +214,32 @@ void main() {
       slots: slots,
       results: results,
       withData: {'playing', 'scheduled', 'done'},
+      now: DateTime(2026, 10, 8, 15),
     );
     expect([for (final s in live) s.id], ['playing']);
+  });
+
+  test('a match the site left „in progress“ is not live the next day', () {
+    final slots = [
+      match('yesterday', today.addDays(-1)),
+      match('today', today),
+    ];
+    final results = {
+      'yesterday': result('yesterday', MatchStatus.inProgress),
+      'today': result('today', MatchStatus.inProgress),
+    };
+    List<String> liveAt(DateTime now) => [
+      for (final s in kioskLiveMatches(
+        slots: slots,
+        results: results,
+        withData: {'yesterday', 'today'},
+        now: now,
+      ))
+        s.id,
+    ];
+    // Today 15:00: yesterday's 14:00 start is 25 h ago.
+    expect(liveAt(DateTime(2026, 10, 8, 15)), ['today']);
+    // Yesterday evening it was within its twelve hours.
+    expect(liveAt(DateTime(2026, 10, 7, 20)), contains('yesterday'));
   });
 }

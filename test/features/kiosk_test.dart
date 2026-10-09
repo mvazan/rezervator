@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -1418,6 +1419,63 @@ void main() {
       await finish(tester);
     });
 
+    testWidgets('with a set number of days the drawer is whole columns: '
+        'open or closed, no day is cut at its edge', (tester) async {
+      fullHd(tester);
+      // Six columns over 1920 − 46 px, about 312 px each.
+      const column = (1920 - 46) / 6;
+      Future<double> drawerFor(int width) async {
+        await tester.pumpWidget(
+          app(notices: [notice('1', 'Brigáda')], visibleDays: 6, width: width),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(openButton);
+        await tester.pumpAndSettle();
+        final drawer = tester.getSize(find.byType(KioskDrawer)).width;
+        // The columns are sized on the whole screen, open as closed.
+        expect(
+          tester.getSize(find.byType(BoardColumnHeader).first).width,
+          inInclusiveRange(column - 10, column),
+        );
+        await finish(tester);
+        return drawer;
+      }
+
+      // The admin's px round to the nearest whole column.
+      expect(await drawerFor(440), closeTo(column, 0.5));
+      expect(await drawerFor(600), closeTo(2 * column, 0.5));
+    });
+
+    testWidgets('a mouse wheel counts as touching the kiosk: the idle reset '
+        'comes after it', (tester) async {
+      fullHd(tester);
+      await tester.pumpWidget(app(drawerOpen: true, notices: [notice('1', 'Brigáda')], idleSeconds: 30));
+      await tester.pumpAndSettle();
+      // A visitor closes the drawer by hand…
+      await tester.tap(closeButton);
+      await tester.pumpAndSettle();
+      expect(tester.getSize(find.byType(KioskDrawer)).width, 0);
+      // …the idle reset reopens it…
+      await tester.pump(const Duration(seconds: 31));
+      await tester.pumpAndSettle();
+      expect(tester.getSize(find.byType(KioskDrawer)).width, greaterThan(0));
+      // …and after it only a wheel moves: the reset must come again.
+      await tester.tap(closeButton);
+      await tester.pump(const Duration(seconds: 25));
+      final wheel = TestPointer(1, PointerDeviceKind.mouse);
+      await tester.sendEventToBinding(
+        wheel.hover(tester.getCenter(find.byType(ScheduleDayColumn).first)),
+      );
+      await tester.sendEventToBinding(wheel.scroll(const Offset(0, 200)));
+      await tester.pump(const Duration(seconds: 20));
+      // 45 s after the tap, but 20 s after the wheel: not yet.
+      expect(tester.getSize(find.byType(KioskDrawer)).width, 0);
+      await tester.pump(const Duration(seconds: 11));
+      await tester.pumpAndSettle();
+      expect(tester.getSize(find.byType(KioskDrawer)).width, greaterThan(0));
+      await finish(tester);
+    });
+
     testWidgets('while the day scrolls, the admin\'s lane row height sets '
         'the scale; with the day on the screen it does not', (tester) async {
       fullHd(tester);
@@ -2626,6 +2684,41 @@ void main() {
       expect(await canReach(0), isFalse);
       expect(await canReach(3), isTrue);
     });
+
+    for (final panel in [true, false]) {
+      testWidgets('the idle reset brings the board back to today, the panel '
+          '${panel ? 'on' : 'off'}', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            pastDays: 7,
+            panelEnabled: panel,
+            notices: [notice('1', 'Brigáda')],
+            fitDay: false,
+            visibleDays: 6,
+            idleSeconds: 30,
+          ),
+        );
+        await tester.pumpAndSettle();
+        double todayLeft() =>
+            tester.getTopLeft(find.text('DNES · čt 8.10.')).dx;
+        final home = todayLeft();
+        // A visitor drags the board back, and forward past today.
+        await tester.drag(find.byType(ListView).last, const Offset(900, 0));
+        await tester.pumpAndSettle();
+        expect(todayLeft(), isNot(home));
+        await tester.pump(const Duration(seconds: 31));
+        await tester.pumpAndSettle();
+        expect(todayLeft(), closeTo(home, 1));
+
+        await tester.drag(find.byType(ListView).last, const Offset(-900, 0));
+        await tester.pumpAndSettle();
+        await tester.pump(const Duration(seconds: 31));
+        await tester.pumpAndSettle();
+        expect(todayLeft(), closeTo(home, 1));
+        await finish(tester);
+      });
+    }
 
     testWidgets('a finished match of the board opens its Zápis, from its band '
         'and from the day header', (tester) async {
