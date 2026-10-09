@@ -423,3 +423,16 @@ List<MatchPlayerResult> withWalkoverPoints(List<MatchPlayerResult> players) {
         p,
   ];
 }
+
+/// The duel the kiosk's live view opens on: the first of the group the
+/// play has reached. Duels go in groups — as many at once as are being
+/// played now, or, between groups, half the alley's [laneCount] (pairs on
+/// four lanes, threes on six). Null before any duel has started.
+int? kioskLiveScrollTarget(List<Duel> duels, {required int laneCount}) {
+  final started = duels.where((d) => d.state != DuelState.waiting).toList();
+  if (started.isEmpty) return null;
+  final playing = duels.where((d) => d.state == DuelState.playing).length;
+  final group = playing > 0 ? playing : (laneCount ~/ 2).clamp(1, 6);
+  final last = started.last.position;
+  return (last - 1) ~/ group * group + 1;
+}

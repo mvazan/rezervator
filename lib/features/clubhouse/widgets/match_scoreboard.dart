@@ -1,8 +1,11 @@
 /// The match detail's scoreboard (Souboje, Task 3): who won and how the
-/// score came about. The date and a status chip; the team names around a big
-/// score (each over its own score when a name needs more than 2 lines); the
-/// pin totals with the lead between them. Both views of the match detail
-/// share it, so the score never jumps when the view switches.
+/// score came about. The date and a status chip; the team names around a
+/// big score (each over its own score when a name needs more than 2
+/// lines); the pin totals with the lead between them; a last line with the
+/// how old the score is („⟳ 22 h“), the format (a team icon and the
+/// players a side fields, the throws), the venue and the match's page on
+/// the site („ČKA“). Every layout of the match detail shares it, so the score never
+/// jumps.
 ///
 /// Every number is set in tabular figures, so live values don't jump as
 /// they change, and a winner is never told by colour alone: the name's
@@ -32,9 +35,11 @@ class MatchScoreboard extends StatelessWidget {
     this.playersLoading = false,
     required this.now,
     this.onVenueTap,
+    this.onSiteTap,
     this.homeColor,
     this.awayColor,
     this.video,
+    this.showFreshness = true,
   });
 
   /// The match: its date and start, the teams and the venue.
@@ -56,6 +61,10 @@ class MatchScoreboard extends StatelessWidget {
   /// Null = the venue is plain text (no known venue page).
   final VoidCallback? onVenueTap;
 
+  /// Opens the match's page on the site (vysledky.kuzelky.cz), as „ČKA“
+  /// after the venue; null = the match has no page there.
+  final VoidCallback? onSiteTap;
+
   /// The sides' colours the pin lead is printed in; null = green and red.
   final Color? homeColor;
   final Color? awayColor;
@@ -63,6 +72,10 @@ class MatchScoreboard extends StatelessWidget {
   /// The video button (live / recording), when it stands where the status
   /// chip would be; null = the chip.
   final Widget? video;
+
+  /// „⟳ 22 h“ at the start of the last line; off where the caller shows
+  /// it itself (the kiosk's live view has it in its own row).
+  final bool showFreshness;
 
   /// The chip's word for a match that is not live.
   static String _statusLabel(MatchStatus status) => switch (status) {
@@ -113,7 +126,7 @@ class MatchScoreboard extends StatelessWidget {
               chip: result == null
                   ? null
                   : live
-                  ? 'Živě · ${freshnessLabel(result.fetchedAt, now)}'
+                  ? 'Živě'
                   : _statusLabel(result.status),
               live: live,
               action: video,
@@ -134,12 +147,16 @@ class MatchScoreboard extends StatelessWidget {
               ),
             ],
             _Footer(
-              format: formatLabel(
+              format: formatParts(
                 result?.matchType ?? '',
                 result?.discipline ?? '',
               ),
               venue: slot.venue ?? '',
               onVenueTap: onVenueTap,
+              age: result == null || !showFreshness
+                  ? null
+                  : ageLabel(result.fetchedAt, now),
+              onSiteTap: onSiteTap,
             ),
           ],
         ),
@@ -148,8 +165,9 @@ class MatchScoreboard extends StatelessWidget {
   }
 }
 
-/// The date and start on the left, the status chip on the right (it drops
-/// under the date when the two don't fit on one line).
+/// The date and start on the left, the status chip (or the video button)
+/// on the right; the chip drops under the date when the two don't fit on
+/// one line.
 class _TopLine extends StatelessWidget {
   const _TopLine({
     required this.date,
@@ -552,75 +570,117 @@ class _Pill extends StatelessWidget {
   );
 }
 
-/// „6 hráčů · 100 HS · TJ Sokol Rudná“: the format, then the venue — a link
-/// with a chevron when [onVenueTap] is set. Nothing when both are empty.
+/// „⟳ 22 h · 👥 6 · 120 HS · TJ Sokol Rudná › · ČKA ↗“: how old the score
+/// is, the players a side fields (the team icon is Klubovna's) and the
+/// throws, the venue — a link with a chevron when [onVenueTap] is set — and
+/// the match's page on the site. Whatever is unknown is left out; nothing at all
+/// when everything is. A Wrap: at a large text size the pieces flow onto a
+/// second line instead of overflowing.
 class _Footer extends StatelessWidget {
   const _Footer({
     required this.format,
     required this.venue,
     required this.onVenueTap,
+    required this.age,
+    required this.onSiteTap,
   });
 
-  /// [formatLabel]'s „6 hráčů · 100 HS“, or '' when unknown.
-  final String format;
+  /// [formatParts] of the match; either half may be null.
+  final ({int? players, String? throws}) format;
 
   /// The venue's name, or '' when the slot has none.
   final String venue;
 
   final VoidCallback? onVenueTap;
 
+  /// [ageLabel] of the score; null = not shown.
+  final String? age;
+
+  final VoidCallback? onSiteTap;
+
   @override
   Widget build(BuildContext context) {
-    if (format.isEmpty && venue.isEmpty) return const SizedBox.shrink();
+    final onVenueTap = this.onVenueTap;
+    final onSiteTap = this.onSiteTap;
+    final players = format.players;
+    final throws = format.throws;
+    final age = this.age;
     final scheme = Theme.of(context).colorScheme;
     final style = Theme.of(context).textTheme.bodySmall?.copyWith(
       fontWeight: FontWeight.w400,
       color: scheme.onSurfaceVariant,
       fontFeatures: _tabular,
     );
-    final onVenueTap = this.onVenueTap;
-    final Widget line;
-    if (onVenueTap == null || venue.isEmpty) {
-      line = Text(
-        [format, venue].where((s) => s.isNotEmpty).join(' · '),
-        textAlign: TextAlign.center,
-        style: style,
+
+    /// [label] after or before an [icon], 14dp, in the line's colour.
+    Widget withIcon(IconData icon, String label, {bool iconFirst = true}) {
+      final glyph = Icon(icon, size: 14, color: scheme.onSurfaceVariant);
+      final text = Flexible(
+        child: Text(label, overflow: TextOverflow.ellipsis, style: style),
       );
-    } else {
-      line = Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          if (format.isNotEmpty)
-            Flexible(child: Text('$format · ', style: style)),
-          Flexible(
-            child: InkWell(
-              onTap: onVenueTap,
-              borderRadius: BorderRadius.circular(4),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Flexible(
-                      child: Text(
-                        venue,
-                        overflow: TextOverflow.ellipsis,
-                        style: style,
-                      ),
-                    ),
-                    Icon(
-                      Icons.chevron_right,
-                      size: 16,
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ],
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: iconFirst
+            ? [glyph, const SizedBox(width: 3), text]
+            : [text, glyph],
       );
     }
-    return Padding(padding: const EdgeInsets.only(top: 8), child: line);
+
+    /// A tappable [child]; 4dp of padding keeps the tap target off the
+    /// text's edge.
+    Widget link(Widget child, VoidCallback onTap) => InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(4),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: child,
+      ),
+    );
+
+    final pieces = <Widget>[
+      if (age != null)
+        Semantics(
+          container: true,
+          label: 'výsledky z webu: $age',
+          excludeSemantics: true,
+          child: withIcon(Icons.refresh, age),
+        ),
+      if (players != null)
+        Semantics(
+          label:
+              '$players ${players == 1
+                  ? 'hráč'
+                  : players <= 4
+                  ? 'hráči'
+                  : 'hráčů'}',
+          excludeSemantics: true,
+          child: withIcon(Icons.groups, '$players'),
+        ),
+      if (throws != null) Text(throws, style: style),
+      if (venue.isNotEmpty)
+        if (onVenueTap == null)
+          Text(venue, style: style)
+        else
+          link(
+            withIcon(Icons.chevron_right, venue, iconFirst: false),
+            onVenueTap,
+          ),
+      if (onSiteTap != null)
+        link(withIcon(Icons.open_in_new, 'ČKA', iconFirst: false), onSiteTap),
+    ];
+    if (pieces.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Wrap(
+        alignment: WrapAlignment.center,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          for (var i = 0; i < pieces.length; i++) ...[
+            if (i > 0) Text(' · ', style: style),
+            pieces[i],
+          ],
+        ],
+      ),
+    );
   }
 }

@@ -2,15 +2,26 @@
 /// stats, players with a per-lane breakdown, video/web links and a live
 /// refresh — pushed from `results_screen.dart`'s row tap.
 ///
-/// Top to bottom: the scoreboard (shared by both views, so the score never
-/// jumps), the video and web buttons, a [Souboje | Zápis] switch remembered
-/// on the device, and the chosen view — one card per duel and the Družstva
-/// card, or the kuzelky.com-style score sheet.
+/// Top to bottom: the scoreboard (with how old the score is and the match's
+/// page on the site), the video button when it is not in the scoreboard,
+/// and the match drawn the way the device's owner chose for the way it is
+/// held (Můj profil → Detail zápasu, [matchLayoutPrefsProvider]): the duel
+/// cards and the Družstva card, scrolling ([MatchLayout.full]); the duels
+/// fitted to the screen with the scoreboard pinned on top
+/// ([MatchLayout.compact], [MatchLayout.table] — the kiosk's drawings,
+/// `duels_compact.dart`, with the Družstva card after the duels); or, held
+/// sideways only, the kuzelky.com-style
+/// score sheet ([MatchLayout.zapis]) full screen in place of the detail the
+/// moment the phone turns ([ZapisPage]), gone when it turns back.
 library;
 
 import 'dart:async';
+import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/ui.dart';
@@ -23,9 +34,10 @@ import '../../domain/palette.dart';
 import '../../domain/results.dart';
 import 'venue_detail_screen.dart';
 import 'widgets/duel_card.dart';
-import 'widgets/legacy_score_sheet.dart';
+import 'widgets/duels_compact.dart';
 import 'widgets/match_scoreboard.dart';
 import 'widgets/team_totals_card.dart';
+import 'widgets/zapis_page.dart';
 import '../../core/push_screen.dart';
 
 class MatchDetailScreen extends ConsumerStatefulWidget {
@@ -62,7 +74,8 @@ class MatchDetailScreen extends ConsumerStatefulWidget {
   ConsumerState<MatchDetailScreen> createState() => _MatchDetailScreenState();
 }
 
-class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
+class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen>
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   bool _didOpenRefresh = false;
 
   /// The id the refresh calls use: the widget's, or — once a foreign match
@@ -87,8 +100,123 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
   /// refresh and a trip to Zápis and back.
   final Set<int> _expanded = {};
 
+  /// The turn of the phone, smoothed over: the frame after a turn is slow
+  /// (the whole screen laid out anew), and the browser meanwhile shows the
+  /// last frame shrunk to fit the new shape, top left, over the page's
+  /// background (the theme's, see `PageBackground`). So the moment the
+  /// metrics change, the screen as it was is captured as an image
+  /// ([_snapshot]); the first frame at the new size draws only that image,
+  /// placed as the browser placed it (cheap, and nothing visibly changes);
+  /// the next frame builds the new content under it, and the image fades
+  /// out — the old view flowing into the new one.
+  final _screen = GlobalKey();
+  ui.Image? _snapshot;
+  Orientation? _orientation;
+
+  /// True for the one frame right after the turn, which draws no content.
+  bool _turning = false;
+
+  /// The snapshot's opacity: 1 right after the turn, down to 0.
+  late final AnimationController _fade;
+
+  @override
+  void initState() {
+    super.initState();
+    _fade = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 350),
+    );
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeMetrics() {
+    final size = View.of(context).physicalSize;
+    final orientation = size.width > size.height
+        ? Orientation.landscape
+        : Orientation.portrait;
+    final was = _orientation;
+    _orientation = orientation;
+    if (was == null || was == orientation || _turning) return;
+    // (Not debugNeedsPaint: a debug-only getter, it throws in a release
+    // build.)
+    final boundary =
+        _screen.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+    if (boundary == null) return;
+    _fade.stop();
+    _fade.value = 1;
+    setState(() => _turning = true);
+    unawaited(_capture(boundary));
+  }
+
+  Future<void> _capture(RenderRepaintBoundary boundary) async {
+    ui.Image? image;
+    try {
+      // The layer tree still holds the frame before the turn. At one pixel
+      // per dp — the image is shown shrunk and briefly, and the raster is a
+      // quarter of the work of the device's own ratio.
+      image = await boundary.toImage();
+    } catch (_) {
+      // No image: the content still comes in a frame, just without the
+      // old one flowing into it.
+    }
+    if (!mounted) {
+      image?.dispose();
+      return;
+    }
+    _snapshot?.dispose();
+    _snapshot = image;
+    // Shown at once; the content follows in the frame after.
+    setState(() {});
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      setState(() => _turning = false);
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        unawaited(
+          _fade.reverse().whenComplete(() {
+            if (!mounted) return;
+            setState(() {
+              _snapshot?.dispose();
+              _snapshot = null;
+            });
+          }),
+        );
+      });
+    });
+  }
+
+  /// [content] with the turn's snapshot over it, while there is one.
+  Widget _withTurn(Widget content, Color background) {
+    final snapshot = _snapshot;
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        ColoredBox(color: background),
+        if (!_turning) RepaintBoundary(key: _screen, child: content),
+        if (snapshot != null)
+          IgnorePointer(
+            child: FadeTransition(
+              opacity: _fade,
+              // Shrunk to fit, at the top left: where the browser already
+              // put the last frame while this one was being made, so the
+              // two line up and the fade starts from the same picture.
+              child: RawImage(
+                image: snapshot,
+                fit: BoxFit.contain,
+                alignment: Alignment.topLeft,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _fade.dispose();
+    _snapshot?.dispose();
     _waitTimer?.cancel();
     super.dispose();
   }
@@ -191,93 +319,33 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     );
   }
 
-  /// „Výsledky z webu: před 5 dny“ on the left and the „Na webu ČKA“ button
-  /// on the right, on one row. The button drops under the text, still at the
-  /// right, when the row is too narrow.
-  Widget _freshnessRow(
-    ThemeData theme,
-    String? siteUrl,
-    MatchResult? result,
-    bool live,
-    DateTime now,
-  ) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 12, 0),
-      child: OverflowBar(
-        alignment: MainAxisAlignment.spaceBetween,
-        spacing: 8,
-        overflowSpacing: 4,
-        overflowAlignment: OverflowBarAlignment.end,
-        children: [
-          if (result == null || !live)
-            Text(
-              result == null
-                  ? 'Výsledky zatím nejsou.'
-                  : 'Výsledky z webu: ${freshnessLabel(result.fetchedAt, now)}',
-              style: theme.textTheme.bodySmall,
-            )
-          else
-            const SizedBox.shrink(),
-          if (siteUrl != null)
-            OutlinedButton.icon(
-              onPressed: () => widget.launch(siteUrl),
-              icon: const Icon(Icons.open_in_new),
-              label: const Text('Na webu ČKA'),
-            ),
-        ],
-      ),
-    );
-  }
-
-  /// [Souboje | Zápis] on the left, bound to [matchDetailViewProvider]; in
-  /// Souboje „Rozbalit vše“ / „Sbalit vše“ on the right, on the same row —
-  /// the switch has no check icon, so on a 360dp phone both fit up to text
-  /// scale 1.3. With larger text the button drops under the switch instead
-  /// of overflowing (OverflowBar: a row pushed apart when both fit, else a
-  /// column).
-  Widget _switchRow(MatchDetailView view, List<Duel> duels) {
+  /// „Rozbalit vše“ / „Sbalit vše“ at the right, over the scrolling cards
+  /// (the fitted layouts fold cards to fit, so they have no such button).
+  Widget _expandAllRow(List<Duel> duels) {
     // A duel nobody has started never opens: it neither needs the button
     // nor keeps it from reading „Sbalit vše“ once the rest are open.
     final openable = [
       for (final duel in duels)
         if (duel.state != DuelState.waiting) duel.position,
     ];
-    final allOpen = openable.isNotEmpty && openable.every(_expanded.contains);
+    if (openable.isEmpty) return const SizedBox.shrink();
+    final allOpen = openable.every(_expanded.contains);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 16, 12, 0),
-      child: OverflowBar(
-        alignment: MainAxisAlignment.spaceBetween,
-        spacing: 8,
-        overflowSpacing: 4,
-        children: [
-          SegmentedButton<MatchDetailView>(
-            showSelectedIcon: false,
-            segments: const [
-              ButtonSegment(
-                value: MatchDetailView.souboje,
-                label: Text('Souboje'),
-              ),
-              ButtonSegment(value: MatchDetailView.zapis, label: Text('Zápis')),
-            ],
-            selected: {view},
-            onSelectionChanged: (chosen) => unawaited(
-              ref.read(matchDetailViewProvider.notifier).set(chosen.first),
-            ),
-          ),
-          if (view == MatchDetailView.souboje && openable.isNotEmpty)
-            TextButton(
-              onPressed: () => setState(() {
-                if (allOpen) {
-                  _expanded.clear();
-                } else {
-                  // Every position, the waiting ones too: a duel that
-                  // starts later opens already expanded, as asked.
-                  _expanded.addAll(duels.map((duel) => duel.position));
-                }
-              }),
-              child: Text(allOpen ? 'Sbalit vše' : 'Rozbalit vše'),
-            ),
-        ],
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: Align(
+        alignment: Alignment.centerRight,
+        child: TextButton(
+          onPressed: () => setState(() {
+            if (allOpen) {
+              _expanded.clear();
+            } else {
+              // Every position, the waiting ones too: a duel that
+              // starts later opens already expanded, as asked.
+              _expanded.addAll(duels.map((duel) => duel.position));
+            }
+          }),
+          child: Text(allOpen ? 'Sbalit vše' : 'Rozbalit vše'),
+        ),
       ),
     );
   }
@@ -348,7 +416,9 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     // One source of the match: our slots, or (a foreign match) its
     // competition's league matches.
     final slots = ref.watch(prioritySlotsProvider);
-    final leagueAsync = isLeague ? ref.watch(leagueMatchesProvider(leagueSlug)) : null;
+    final leagueAsync = isLeague
+        ? ref.watch(leagueMatchesProvider(leagueSlug))
+        : null;
     LeagueMatch? leagueMatch;
     for (final l in leagueAsync?.value ?? const <LeagueMatch>[]) {
       if (l.id == widget.matchId) leagueMatch = l;
@@ -375,24 +445,17 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     final lineup = playersAsync.value ?? const <MatchPlayerResult>[];
     final playersLoading = !playersAsync.hasValue && !playersAsync.hasError;
     final venues = ref.watch(venuesProvider).value ?? const <Venue>[];
-    final view = ref.watch(matchDetailViewProvider);
-    // The registration numbers only the Zápis shows; looked up on its first
-    // open and remembered by the server.
-    final regnums = view == MatchDetailView.zapis && lineup.isNotEmpty
-        ? ref
-                  .watch(
-                    matchRegnumsProvider((
-                      matchId: _matchId,
-                      league: fromLeague,
-                      lineup: lineup.length,
-                    )),
-                  )
-                  .value ??
-              const <String, String>{}
-        : const <String, String>{};
-    final players = [
-      for (final p in lineup) p.withRegnum(regnums[p.playerSlug]),
-    ];
+    // The match drawn the way the owner wants it for this way of holding
+    // the device; sideways with Zápis the sheet opens on its own and what
+    // is under it is the upright choice.
+    final landscape =
+        MediaQuery.orientationOf(context) == Orientation.landscape;
+    final layoutPrefs = ref.watch(matchLayoutPrefsProvider);
+    final layout = landscape ? layoutPrefs.landscape : layoutPrefs.portrait;
+    final inlineLayout = layout == MatchLayout.zapis
+        ? layoutPrefs.portrait
+        : layout;
+    final players = lineup;
 
     PrioritySlot? slot = leagueMatch?.asSlot() ?? becameOurs;
     if (!isLeague) {
@@ -447,6 +510,56 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     final showRefreshButton =
         (live || askable || correctable) && !_hiddenByNotLive;
 
+    // Held sideways with the Zápis chosen, the sheet takes the whole screen
+    // in place of the detail — chosen in the very frame of the turn, so the
+    // detail is never drawn sideways on its own, and the two cross-fade.
+    final sheet =
+        layout == MatchLayout.zapis && players.isNotEmpty && slot != null;
+
+    _orientation ??= landscape ? Orientation.landscape : Orientation.portrait;
+    final background = Theme.of(context).scaffoldBackgroundColor;
+    if (_turning) return _withTurn(const SizedBox.shrink(), background);
+    final Widget page = sheet
+        ? ZapisPage(
+            slot: slot,
+            // The sheet stands in for the duels: its corner button goes
+            // back to where the match was opened from, like the AppBar's.
+            backButton: true,
+            competitionSlug: fromLeague ? widget.competitionSlug : null,
+            withRegnums: true,
+          )
+        : _detail(
+            context,
+            slot: slot,
+            result: result,
+            players: players,
+            playersLoading: playersLoading,
+            venueMatch: venueMatch,
+            layout: inlineLayout,
+            now: now,
+            live: live,
+            slotsLoading: slotsLoading,
+            showRefreshButton: showRefreshButton,
+            showWaiting: showWaiting,
+          );
+    return _withTurn(page, background);
+  }
+
+  /// The detail itself: the AppBar and the body.
+  Widget _detail(
+    BuildContext context, {
+    required PrioritySlot? slot,
+    required MatchResult? result,
+    required List<MatchPlayerResult> players,
+    required bool playersLoading,
+    required Venue? venueMatch,
+    required MatchLayout layout,
+    required DateTime now,
+    required bool live,
+    required bool slotsLoading,
+    required bool showRefreshButton,
+    required bool showWaiting,
+  }) {
     return Scaffold(
       appBar: AppBar(
         title: Text(_appBarTitle(slot)),
@@ -479,7 +592,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
               players: players,
               playersLoading: playersLoading,
               venueMatch: venueMatch,
-              view: view,
+              layout: layout,
               now: now,
               live: live,
               // Pulling is the ⟳ button's twin: gone together once a
@@ -497,12 +610,11 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     required List<MatchPlayerResult> players,
     required bool playersLoading,
     required Venue? venueMatch,
-    required MatchDetailView view,
+    required MatchLayout layout,
     required DateTime now,
     required bool live,
     required bool pullToRefresh,
   }) {
-    final theme = Theme.of(context);
     // Always green for the hosts and red for the guests — never a team's
     // own colour, so a side reads the same on every match.
     const homeColor = homeSideColor;
@@ -520,51 +632,50 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
           now: now,
           onVenueTap: venueMatch == null
               ? null
-              : () => pushScreen(context, (_) => VenueDetailScreen(slug: venueMatch.slug)),
+              : () => pushScreen(
+                  context,
+                  (_) => VenueDetailScreen(slug: venueMatch.slug),
+                ),
+          onSiteTap: slot.siteUrl == null
+              ? null
+              : () => widget.launch(slot.siteUrl!),
           homeColor: homeColor,
           awayColor: awayColor,
           video: videoInScoreboard
               ? _videoButton(context, slot.videoUrl!, result, live)
               : null,
         ),
-        // While live the freshness sits in the scoreboard's „Živě“ chip —
-        // unless the video button took the chip's place. Na webu ČKA is on
-        // the same row, at the right (alone while live).
-        if (result == null ||
-            !live ||
-            videoInScoreboard ||
-            slot.siteUrl != null)
-          _freshnessRow(
-            theme,
-            slot.siteUrl,
-            result,
-            live && !videoInScoreboard,
-            now,
-          ),
         _buttonsRow(context, slot, result, live),
-        _switchRow(view, duels),
+        if (layout == MatchLayout.full) _expandAllRow(duels),
       ])
         _centred(child),
-      ...switch (view) {
-        MatchDetailView.souboje => [
-          for (final child in _souboje(
-            duels: duels,
-            result: result,
-            homeColor: homeColor,
-            awayColor: awayColor,
-          ))
-            _centred(child),
-        ],
-        MatchDetailView.zapis => [
-          // Not centred: the sheet keeps the whole width, as before
-          // Souboje. At its natural size (about 1000dp) it fits a wide
-          // window whole instead of hiding a third behind a sideways
-          // scroll. Without a lineup it still shows its team summary row
-          // (as long as `result` has team-level data).
-          LegacyScoreSheet(slot: slot, result: result, players: players),
-        ],
-      },
     ];
+
+    if (layout == MatchLayout.compact || layout == MatchLayout.table) {
+      return _fitted(
+        context,
+        layout: layout,
+        header: Column(mainAxisSize: MainAxisSize.min, children: children),
+        duels: duels,
+        result: result,
+        pullToRefresh: pullToRefresh,
+      );
+    }
+
+    children.addAll(switch (layout) {
+      MatchLayout.full ||
+      MatchLayout.compact ||
+      MatchLayout.table ||
+      MatchLayout.zapis => [
+        for (final child in _souboje(
+          duels: duels,
+          result: result,
+          homeColor: homeColor,
+          awayColor: awayColor,
+        ))
+          _centred(child),
+      ],
+    });
 
     final list = ListView(
       // Keeps the scroll offset when the pull-to-refresh around the list
@@ -581,6 +692,87 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
       // The ⟳ button's twin: the same forced refresh, the same waiting.
       onRefresh: () => _onRefreshTap(context, result?.fetchedAt),
       child: list,
+    );
+  }
+
+  /// The compact or table layout: [header] (the scoreboard and its rows)
+  /// pinned, the duels fitted under it — the kiosk's drawing, as wide as
+  /// the list but at most 720dp like the rest, and with the list's pull.
+  /// Held sideways there is no height for both: the header then goes to
+  /// the left of the duels, scrolling on its own.
+  Widget _fitted(
+    BuildContext context, {
+    required MatchLayout layout,
+    required Widget header,
+    required List<Duel> duels,
+    required MatchResult? result,
+    required bool pullToRefresh,
+  }) {
+    final padding = padWithSystemInset(
+      context,
+      const EdgeInsets.fromLTRB(12, 2, 12, 24),
+    );
+    Future<void> refresh() => _onRefreshTap(context, result?.fetchedAt);
+    // Under the duels the Družstva card, as under the full cards.
+    final totals = result == null
+        ? null
+        : Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: TeamTotalsCard(
+              result: result,
+              homeColor: homeSideColor,
+              awayColor: awaySideColor,
+              showSetPoints: setPointsMatter(result.discipline),
+            ),
+          );
+    Widget fitted(Widget? pinned) => switch (layout) {
+      MatchLayout.compact => DuelsCompact(
+        duels: duels,
+        result: result,
+        singleOpen: true,
+        header: pinned,
+        footer: totals,
+        listPadding: padding,
+        onRefresh: pullToRefresh ? refresh : null,
+      ),
+      MatchLayout.table || MatchLayout.full || MatchLayout.zapis => DuelsTable(
+        duels: duels,
+        result: result,
+        singleOpen: true,
+        header: pinned,
+        footer: totals,
+        listPadding: padding,
+        onRefresh: pullToRefresh ? refresh : null,
+      ),
+    };
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth > constraints.maxHeight) {
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                flex: 4,
+                child: SingleChildScrollView(
+                  padding: padWithSystemInset(
+                    context,
+                    const EdgeInsets.only(bottom: 12),
+                  ),
+                  child: header,
+                ),
+              ),
+              Expanded(flex: 5, child: fitted(null)),
+            ],
+          );
+        }
+        return Center(
+          child: SizedBox(
+            width: math.min(constraints.maxWidth, 720),
+            height: constraints.maxHeight,
+            child: fitted(header),
+          ),
+        );
+      },
     );
   }
 }

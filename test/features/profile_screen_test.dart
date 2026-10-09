@@ -13,6 +13,8 @@ import 'package:rezervator/features/profile/widgets/reservation_color_picker.dar
 import 'package:rezervator/features/profile/match_exceptions_screen.dart';
 import 'package:rezervator/features/profile/widgets/calendar_link_card.dart';
 import 'package:rezervator/features/profile/widgets/event_color_picker.dart';
+import 'package:rezervator/features/profile/widgets/match_layout_card.dart';
+import 'package:rezervator/data/local_prefs.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Stubs for the card's injected backend calls: a test that reaches one it
@@ -359,8 +361,9 @@ void main() {
 
   testWidgets('shows a logout action', (tester) async {
     // Tall enough for Odhlásit se to land inside ListView's build+cache
-    // window without scrolling — Moje skupina (0044) added a card above it.
-    tester.view.physicalSize = const Size(800, 2200);
+    // window without scrolling — Moje skupina (0044) and Detail zápasu
+    // added cards above it.
+    tester.view.physicalSize = const Size(800, 2700);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -375,8 +378,9 @@ void main() {
     tester,
   ) async {
     // Tall enough for Odhlásit se to land inside ListView's build+cache
-    // window without scrolling — Moje skupina (0044) added a card above it.
-    tester.view.physicalSize = const Size(800, 2200);
+    // window without scrolling — Moje skupina (0044) and Detail zápasu
+    // added cards above it.
+    tester.view.physicalSize = const Size(800, 2700);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -397,8 +401,9 @@ void main() {
     tester,
   ) async {
     // Tall enough for Odhlásit se to land inside ListView's build+cache
-    // window without scrolling — Moje skupina (0044) added a card above it.
-    tester.view.physicalSize = const Size(800, 2200);
+    // window without scrolling — Moje skupina (0044) and Detail zápasu
+    // added cards above it.
+    tester.view.physicalSize = const Size(800, 2700);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -495,7 +500,7 @@ void main() {
     // calendar they go to — and only then the app's own looks, which has
     // nothing to do with kuželky at all.
     testWidgets('the cards run: name, Tabule, Po spuštění, Moje týmy, '
-        'Připomínky, Google kalendář, Vzhled', (tester) async {
+        'Připomínky, Google kalendář, Vzhled, Detail zápasu', (tester) async {
       // Tall enough for every card to be built (the ListView is lazy).
       tester.view.physicalSize = const Size(800, 2400);
       tester.view.devicePixelRatio = 1.0;
@@ -513,6 +518,7 @@ void main() {
         top('Připomínky z appky'),
         top('Google kalendář'),
         top('Vzhled'),
+        top('Detail zápasu'),
         top('Odhlásit se'),
       ];
       for (var i = 1; i < order.length; i++) {
@@ -2200,6 +2206,91 @@ void main() {
         'phone=null showEmail=false showPhone=null',
         'phone=null showEmail=null showPhone=false',
       ]);
+    });
+  });
+
+  group('Detail zápasu card', () {
+    void tall(WidgetTester tester) {
+      tester.view.physicalSize = const Size(800, 2600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+    }
+
+    Finder chip(String label) => find.widgetWithText(ChoiceChip, label);
+
+    testWidgets('upright offers three drawings, sideways four with Zápis; '
+        'the cards upright and the Zápis sideways are chosen by default',
+        (tester) async {
+      tall(tester);
+      SharedPreferences.setMockInitialValues({});
+      await tester.pumpWidget(app(me));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byType(MatchLayoutCard));
+
+      expect(find.text('Na výšku'), findsOneWidget);
+      expect(find.text('Na šířku'), findsOneWidget);
+      expect(chip('Karty'), findsNWidgets(2));
+      expect(chip('Kompaktně'), findsNWidgets(2));
+      expect(chip('Tabulka'), findsNWidgets(2));
+      // Only the sideways row has the Zápis.
+      expect(chip('Zápis'), findsOneWidget);
+      bool selected(Finder f) => tester.widget<ChoiceChip>(f).selected;
+      expect(selected(chip('Karty').first), isTrue);
+      expect(selected(chip('Karty').last), isFalse);
+      expect(selected(chip('Zápis')), isTrue);
+      expect(find.textContaining('Otočením telefonu'), findsOneWidget);
+    });
+
+    testWidgets('a tap remembers the drawing for that way of holding the '
+        'phone; the note about the turn is there only with the Zápis',
+        (tester) async {
+      tall(tester);
+      SharedPreferences.setMockInitialValues({});
+      await tester.pumpWidget(app(me));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byType(MatchLayoutCard));
+
+      await tester.tap(chip('Tabulka').first);
+      await tester.pumpAndSettle();
+      await tester.tap(chip('Kompaktně').last);
+      await tester.pumpAndSettle();
+
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(ProfileScreen)),
+      );
+      expect(
+        container.read(matchLayoutPrefsProvider),
+        (portrait: MatchLayout.table, landscape: MatchLayout.compact),
+      );
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('match_layout_portrait'), 'table');
+      expect(prefs.getString('match_layout_landscape'), 'compact');
+      expect(find.textContaining('Otočením telefonu'), findsNothing);
+      bool selected(Finder f) => tester.widget<ChoiceChip>(f).selected;
+      expect(selected(chip('Tabulka').first), isTrue);
+      expect(selected(chip('Karty').first), isFalse);
+      expect(selected(chip('Kompaktně').last), isTrue);
+      expect(selected(chip('Zápis')), isFalse);
+
+      await tester.tap(chip('Zápis'));
+      await tester.pumpAndSettle();
+      expect(prefs.getString('match_layout_landscape'), 'zapis');
+      expect(find.textContaining('Otočením telefonu'), findsOneWidget);
+    });
+
+    testWidgets('the saved choice is shown', (tester) async {
+      tall(tester);
+      SharedPreferences.setMockInitialValues({
+        'match_layout_portrait': 'compact',
+        'match_layout_landscape': 'table',
+      });
+      await tester.pumpWidget(app(me));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byType(MatchLayoutCard));
+      bool selected(Finder f) => tester.widget<ChoiceChip>(f).selected;
+      expect(selected(chip('Kompaktně').first), isTrue);
+      expect(selected(chip('Tabulka').last), isTrue);
     });
   });
 }

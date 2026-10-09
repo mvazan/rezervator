@@ -170,7 +170,13 @@ void main() {
   test('the notice form posts a new notice to everyone, „do odvolání“ as no '
       'expiry', () async {
     const NoticeDraft draft =
-        (title: 'Klíč', body: 'Je u Petra.', expiresAt: null, notify: false);
+        (
+      title: 'Klíč',
+      body: 'Je u Petra.',
+      expiresAt: null,
+      notify: false,
+      visibleFrom: null,
+    );
     await noticeApiWrite(null, draft);
     expect(rpcCall('message_send'), {
       'p_kind': 'notice',
@@ -197,6 +203,7 @@ void main() {
       body: 'Je u Petra.',
       expiresAt: DateTime.utc(2026, 10, 20, 21, 59, 59),
       notify: true,
+      visibleFrom: null,
     );
     await noticeApiWrite(existing, draft);
     expect(requests.where((r) => r.url.path.endsWith('/rpc/message_send')), isEmpty);
@@ -206,6 +213,39 @@ void main() {
       'p_body': 'Je u Petra.',
       'p_expires_at': '2026-10-20T21:59:59.000Z',
     });
+  });
+
+  test('the notice form: an edit with the same visible_from in another zone '
+      'does not reset it; a moved one does', () async {
+    Message scheduled(DateTime? from) => Message(
+      id: 'n1', kind: MessageKind.notice, audience: MessageAudience.all,
+      authorId: 'admin', authorRole: MessageAuthorRole.admin, onDate: null,
+      blockId: null, title: 'Klíč', body: 'Text.', expiresAt: null,
+      notify: true, visibleFrom: from, createdAt: DateTime.utc(2026, 9, 1),
+      updatedAt: DateTime.utc(2026, 9, 1),
+    );
+    NoticeDraft draft(DateTime? from) => (
+      title: 'Klíč', body: 'Text.', expiresAt: null, notify: true,
+      visibleFrom: from,
+    );
+    bool setVisibleCalled() =>
+        requests.any((r) => r.url.path.endsWith('/rpc/message_set_visible_from'));
+
+    final utc = DateTime.utc(2026, 10, 5, 6);
+    await noticeApiWrite(scheduled(utc), draft(utc.toLocal()));
+    expect(setVisibleCalled(), isFalse);
+    await noticeApiWrite(scheduled(null), draft(null));
+    expect(setVisibleCalled(), isFalse);
+
+    await noticeApiWrite(scheduled(utc), draft(utc.add(const Duration(hours: 1))));
+    expect(rpcCall('message_set_visible_from'), {
+      'p_id': 'n1',
+      'p_from': '2026-10-05T07:00:00.000Z',
+      'p_notify': null,
+    });
+    requests.clear();
+    await noticeApiWrite(scheduled(utc), draft(null));
+    expect(rpcCall('message_set_visible_from')['p_from'], isNull);
   });
 
   // Last in the file: the session stays for the rest of the isolate.

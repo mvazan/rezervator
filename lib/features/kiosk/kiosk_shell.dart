@@ -15,13 +15,21 @@ import '../../core/ui.dart';
 import '../../core/widgets/gradient_button.dart';
 import '../../data/clock.dart';
 import '../../data/providers.dart';
+import '../../domain/kiosk_panel.dart' show kioskNotices;
 import '../../domain/models.dart';
+import '../../domain/results.dart' show hasScoreData;
 import '../../domain/schedule.dart'
     show headerEventLabel, isDayOpen, nextTrainingDay;
 import 'kiosk_board_view.dart';
+import 'kiosk_info_panel.dart';
+import 'kiosk_connection.dart';
+import 'kiosk_headline.dart';
+import 'kiosk_zapis_page.dart';
 import 'name_picker.dart';
+import '../../core/widgets/emoji_text.dart';
 
-const _idleTimeout = Duration(seconds: 60);
+/// How long before the idle reset the bar starts running out.
+const _warnFor = Duration(seconds: 10);
 
 class KioskShell extends ConsumerStatefulWidget {
   const KioskShell({super.key});
@@ -30,26 +38,62 @@ class KioskShell extends ConsumerStatefulWidget {
   ConsumerState<KioskShell> createState() => _KioskShellState();
 }
 
-class _KioskShellState extends ConsumerState<KioskShell> {
+class _KioskShellState extends ConsumerState<KioskShell>
+    with SingleTickerProviderStateMixin {
   Timer? _idleTimer;
+
+  /// The last seconds before the idle reset, drawn as a thin bar running
+  /// out under the status line — so a visitor is not surprised when the
+  /// kiosk starts over. Only after a touch: an untouched kiosk has nothing
+  /// to reset.
+  Timer? _warnTimer;
+  late final AnimationController _warning = AnimationController(
+    vsync: this,
+    duration: _warnFor,
+  );
   PlayerName? _selected;
+
+  /// What a visitor did to the drawer (true = open); null = the admin's
+  /// resting state. The idle reset puts it back.
+  bool? _drawerOverride;
+
+  /// Bumped on every idle reset; the drawer's match list starts over on it.
+  int _resets = 0;
+
+  /// A visitor switched from the match being played to the list of
+  /// matches; the idle reset brings the live match back.
+  bool _liveHidden = false;
+
+  /// The days a visitor scrolled the board to; null = never (or reset).
+  ({Day first, Day last})? _boardDays;
   final _boardKey = GlobalKey<KioskBoardViewState>();
 
   @override
   void initState() {
     super.initState();
-    _touch();
+    _touch(byHand: false);
   }
 
   @override
   void dispose() {
     _idleTimer?.cancel();
+    _warnTimer?.cancel();
+    _warning.dispose();
     super.dispose();
   }
 
-  void _touch() {
+  void _touch({bool byHand = true}) {
     _idleTimer?.cancel();
-    _idleTimer = Timer(_idleTimeout, _onIdle);
+    _warnTimer?.cancel();
+    _warning.reset();
+    final seconds = ref.read(settingsProvider).value?.kioskIdleSeconds ?? 60;
+    final idle = Duration(seconds: seconds);
+    _idleTimer = Timer(idle, _onIdle);
+    if (byHand && idle > _warnFor) {
+      _warnTimer = Timer(idle - _warnFor, () {
+        if (mounted) _warning.forward(from: 0);
+      });
+    }
   }
 
   void _onIdle() {
@@ -59,7 +103,13 @@ class _KioskShellState extends ConsumerState<KioskShell> {
     // dialog, which captured the previously selected player and would let
     // the next visitor book under their name.
     Navigator.of(context, rootNavigator: true).popUntil((r) => r.isFirst);
-    setState(() => _selected = null);
+    setState(() {
+      _selected = null;
+      _drawerOverride = null;
+      _boardDays = null;
+      _liveHidden = false;
+      _resets++;
+    });
     // Board horizontal scroll resets to today too (spec §1) — imperative
     // because the board owns its own PageController; there's no offset
     // field on this shell to reset via rebuild the way _weekOffset used to.
@@ -80,6 +130,146 @@ class _KioskShellState extends ConsumerState<KioskShell> {
 
   void _clearSelection() => setState(() => _selected = null);
 
+  /// The kiosk's own theme — dialogs and routes are pushed on the root
+  /// navigator, outside the [Theme] this shell wraps around itself.
+  ThemeData _kioskTheme() => buildTheme(
+    (ref.read(settingsProvider).value?.kioskDark ?? true)
+        ? Brightness.dark
+        : Brightness.light,
+  );
+
+  /// A route or dialog above the shell is outside its idle [Listener]:
+  /// give it its own, so reading a Zápis counts as touching the kiosk.
+  Widget _touchable(Widget child) => Listener(
+    onPointerDown: (_) => _touch(),
+    onPointerSignal: (_) => _touch(),
+    onPointerPanZoomStart: (_) => _touch(),
+    behavior: HitTestBehavior.translucent,
+    child: Theme(data: _kioskTheme(), child: child),
+  );
+
+  void _openNotice(Message notice) {
+    showDialog<void>(
+      context: context,
+      builder: (context) => _touchable(
+        AlertDialog(
+          title: Text(notice.title ?? ''),
+          content: SizedBox(
+            width: 560,
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(notice.body),
+                  if (notice.expiresAt != null) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      'Platí do ${notice.expiresAt!.toLocal().day}. '
+                      '${notice.expiresAt!.toLocal().month}.',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Zavřít'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// A tap on a match of the board: only one with a score has a Zápis.
+  void _openMatchIfScored(PrioritySlot match) {
+    final result = ref.read(matchResultsProvider).value?[match.id];
+    if (hasScoreData(result)) _openMatch(match);
+  }
+
+  void _openMatch(PrioritySlot match) {
+    unawaited(
+      showKioskZapis(
+        context,
+        slot: match,
+        brightness: (ref.read(settingsProvider).value?.kioskDark ?? true)
+            ? Brightness.dark
+            : Brightness.light,
+        percent: ref.read(settingsProvider).value?.kioskZapisPercent ?? 80,
+        onTouch: _touch,
+      ),
+    );
+  }
+
+  /// The board with the drawer (notices and matches) on its right — no
+  /// drawer at all when there is nothing to put in it.
+  Widget _boardWithPanel() {
+    final content = ref.watch(kioskPanelContentProvider);
+    final settings = ref.watch(settingsProvider).value;
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final drawerWidth = kioskDrawerWidthFor(
+      screenWidth,
+      columns: settings?.kioskDrawerColumns ?? 2,
+      visibleDays: settings?.kioskVisibleDays ?? 7,
+    );
+    final board = KioskBoardView(
+      key: _boardKey,
+      selected: _selected,
+      onOpenMatch: _openMatchIfScored,
+      // The columns are sized on the whole screen, the drawer is a whole
+      // number of them (kioskDrawerWidthFor): open or closed, the board
+      // shows whole days, and the columns never resize mid-slide.
+      columnBasisWidth: screenWidth,
+      onVisibleDays: (first, last) =>
+          setState(() => _boardDays = (first: first, last: last)),
+    );
+    if (content == null) return board;
+    // A match being played keeps the drawer open: a visitor may close it,
+    // and it opens again after the idle time.
+    final restingOpen =
+        (settings?.kioskDrawerOpen ?? false) || content.live.isNotEmpty;
+    final open = _drawerOverride ?? restingOpen;
+    void toggle() => setState(() => _drawerOverride = !open);
+    return Stack(
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(child: board),
+            KioskDrawer(
+              content: content,
+              open: open,
+              onOpenNotice: _openNotice,
+              onOpenMatch: _openMatch,
+              resetToken: _resets,
+              showLive: !_liveHidden,
+              onShowLive: (live) => setState(() => _liveHidden = !live),
+              boardDays: (settings?.kioskFollowBoard ?? true)
+                  ? _boardDays
+                  : null,
+            ),
+          ],
+        ),
+        // Floats over the board, vertically centred, at the drawer's left
+        // edge — or at the screen's, once the drawer is gone.
+        AnimatedPositioned(
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOutCubic,
+          top: 0,
+          bottom: 0,
+          right: (open ? drawerWidth : 0) + KioskDrawerButton.margin,
+          child: Center(
+            child: KioskDrawerButton(open: open, onTap: toggle),
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     // The kiosk is a shared, always-on tablet whose brightness is an admin
@@ -87,8 +277,7 @@ class _KioskShellState extends ConsumerState<KioskShell> {
     // the rest of the app (which follows light/dark via MaterialApp.theme/
     // darkTheme). Defaults to dark — the historical kiosk look — until the
     // settings stream resolves.
-    final kioskDark =
-        ref.watch(settingsProvider).value?.kioskDark ?? true;
+    final kioskDark = ref.watch(settingsProvider).value?.kioskDark ?? true;
     // Deliberately half-in on appearance Settings: no `contrastLevel`, so
     // the kiosk opts OUT of the personal theme choice — kioskDark above is
     // the only brightness knob a shared tablet gets, admin-controlled, and
@@ -99,6 +288,11 @@ class _KioskShellState extends ConsumerState<KioskShell> {
       data: buildTheme(kioskDark ? Brightness.dark : Brightness.light),
       child: Listener(
         onPointerDown: (_) => _touch(),
+        // A mouse wheel or a trackpad scrolls without a pointer down: it
+        // counts as touching the kiosk too, or the idle reset never comes
+        // to put the board back.
+        onPointerSignal: (_) => _touch(),
+        onPointerPanZoomStart: (_) => _touch(),
         behavior: HitTestBehavior.translucent,
         child: Scaffold(
           body: Column(
@@ -107,13 +301,34 @@ class _KioskShellState extends ConsumerState<KioskShell> {
                 selected: _selected,
                 onReserve: _openPicker,
                 onClearSelection: _clearSelection,
+                onOpenNotice: _openNotice,
+                onOpenMatch: _openMatchIfScored,
               ),
-              Expanded(
-                child: KioskBoardView(
-                  key: _boardKey,
-                  selected: _selected,
+              const KioskOfflineBanner(),
+              // The idle bar: thin, filling from left to right until the reset.
+              AnimatedBuilder(
+                animation: _warning,
+                builder: (context, _) => SizedBox(
+                  height: 3,
+                  child: _warning.isAnimating
+                      ? Align(
+                          alignment: Alignment.centerLeft,
+                          child: FractionallySizedBox(
+                            widthFactor: _warning.value,
+                            // The bar's full 3 px: a ColoredBox without a
+                            // child takes the smallest height it may — 0.
+                            heightFactor: 1,
+                            child: ColoredBox(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.primary.withValues(alpha: 0.7),
+                            ),
+                          ),
+                        )
+                      : null,
                 ),
               ),
+              Expanded(child: _boardWithPanel()),
             ],
           ),
         ),
@@ -129,23 +344,31 @@ class _StatusBar extends ConsumerWidget {
     required this.selected,
     required this.onReserve,
     required this.onClearSelection,
+    required this.onOpenNotice,
+    required this.onOpenMatch,
   });
 
   final PlayerName? selected;
   final VoidCallback onReserve;
   final VoidCallback onClearSelection;
+  final void Function(Message notice) onOpenNotice;
+
+  /// A tap on one of today's matches: its Zápis, once it has a score.
+  final void Function(PrioritySlot match) onOpenMatch;
+
+  /// Today's matches, start-ordered; Úklid children are plumbing (their
+  /// match already announces).
+  List<PrioritySlot> _todaysMatches(WidgetRef ref, Day todayDay) =>
+      ref
+          .watch(prioritySlotsProvider)
+          .where((m) => m.date == todayDay && m.parentId == null)
+          .toList()
+        ..sort((a, b) => a.startsAt.compareTo(b.startsAt));
 
   String _infoLine(WidgetRef ref, Day todayDay) {
-    final priority = ref.watch(prioritySlotsProvider);
-    // Úklid children are plumbing (their match already announces); the
-    // shared label gives home matches the 🏠, away matches no icon.
-    final todaysMatches = priority
-        .where((m) => m.date == todayDay && m.parentId == null)
-        .toList()
-      ..sort((a, b) => a.startsAt.compareTo(b.startsAt));
-    if (todaysMatches.isNotEmpty) {
-      return todaysMatches.map(headerEventLabel).join('  ·  ');
-    }
+    // Today's matches are not a line of text: [build] lists them, each
+    // one tappable.
+    if (_todaysMatches(ref, todayDay).isNotEmpty) return '';
 
     final settings =
         ref.watch(settingsProvider).value ?? ScheduleSettings.defaults;
@@ -188,6 +411,16 @@ class _StatusBar extends ConsumerWidget {
     final scheme = Theme.of(context).colorScheme;
     final now = ref.watch(nowProvider).value ?? DateTime.now();
     final todayDay = Day.fromDateTime(now);
+    final info = _infoLine(ref, todayDay);
+    final todays = _todaysMatches(ref, todayDay);
+    // Kept listened to: a tap on a match reads it to decide whether there
+    // is a Zápis, and with the drawer closed nothing else may hold it.
+    ref.watch(matchResultsProvider);
+    final infoStyle = TextStyle(fontSize: 14, color: scheme.onSurfaceVariant);
+    final notices =
+        (ref.watch(settingsProvider).value?.kioskNoticesInHeader ?? true)
+        ? kioskNotices(ref.watch(messagesProvider).value ?? const [], now)
+        : const <Message>[];
     final clock =
         '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
 
@@ -218,11 +451,72 @@ class _StatusBar extends ConsumerWidget {
             ),
             const SizedBox(width: 16),
             Expanded(
-              child: Text(
-                _infoLine(ref, todayDay),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 14, color: scheme.onSurfaceVariant),
+              child: Row(
+                children: [
+                  // Today's matches, one tap target each: a match with a score
+                  // opens its Zápis, as everywhere else on the kiosk.
+                  if (todays.isNotEmpty)
+                    Expanded(
+                      flex: notices.isEmpty ? 1 : 2,
+                      child: Wrap(
+                        alignment: WrapAlignment.center,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          for (var i = 0; i < todays.length; i++) ...[
+                            if (i > 0) Text('  ·  ', style: infoStyle),
+                            InkWell(
+                              onTap: () => onOpenMatch(todays[i]),
+                              borderRadius: BorderRadius.circular(6),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 4,
+                                  vertical: 2,
+                                ),
+                                child: EmojiText(
+                                  headerEventLabel(todays[i]),
+                                  style: infoStyle,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  if (info.isNotEmpty)
+                    Expanded(
+                      flex: notices.isEmpty ? 1 : 2,
+                      child: EmojiText(
+                        info,
+                        textAlign: TextAlign.center,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  if ((info.isNotEmpty || todays.isNotEmpty) &&
+                      notices.isNotEmpty)
+                    const SizedBox(width: 24),
+                  // One notice's title at a time, in what is left.
+                  if (notices.isNotEmpty)
+                    Expanded(
+                      flex: 3,
+                      child: KioskHeadline(
+                        notices: notices,
+                        turn: Duration(
+                          seconds:
+                              ref
+                                  .watch(settingsProvider)
+                                  .value
+                                  ?.kioskNoticesRotationSeconds ??
+                              12,
+                        ),
+                        onOpen: onOpenNotice,
+                      ),
+                    ),
+                ],
               ),
             ),
             const SizedBox(width: 16),

@@ -12,8 +12,10 @@ void main() {
     String id = 'n1',
     DateTime? expiresAt,
     DateTime? createdAt,
+    DateTime? visibleFrom,
   }) =>
       Message(
+        visibleFrom: visibleFrom,
         id: id,
         kind: MessageKind.notice,
         audience: MessageAudience.all,
@@ -122,6 +124,19 @@ void main() {
       final split = splitNotices([expired, active2, active1], now);
       expect(split.active.map((m) => m.id), ['a1', 'a2']);
       expect(split.expired.map((m) => m.id), ['e1']);
+    });
+
+    test('a notice posted ahead of time waits among the scheduled', () {
+      final now = DateTime(2026, 10, 2, 12);
+      final later = notice(id: 'later', visibleFrom: DateTime(2026, 10, 5, 8));
+      final sooner = notice(id: 'sooner', visibleFrom: DateTime(2026, 10, 3, 8));
+      final shown = notice(id: 'shown', visibleFrom: DateTime(2026, 10, 1, 8));
+      final split = splitNotices([later, sooner, shown], now);
+      expect(split.active.map((m) => m.id), ['shown']);
+      expect(split.scheduled.map((m) => m.id), ['sooner', 'later']);
+      expect(isScheduled(later, now), isTrue);
+      expect(isScheduled(shown, now), isFalse);
+      expect(noticeFooter(later, now), 'zobrazí se 5. 10. v 8:00 · do odvolání');
     });
 
     test('same posting time: by id', () {
@@ -276,6 +291,19 @@ void main() {
         now: DateTime(2026, 10, 2),
       );
       expect(counts, (messages: 1, notices: 1));
+    });
+
+    test('a notice that does not show yet does not count', () {
+      final counts = unreadCounts(
+        all: [notice(id: 'n1', visibleFrom: DateTime(2026, 10, 5))],
+        mine: [
+          MessageRecipient(messageId: 'n1', userId: 'me', readAt: null,
+              reaction: null, reply: null, reactedAt: null),
+        ],
+        meId: 'me',
+        now: DateTime(2026, 10, 2),
+      );
+      expect(counts, (messages: 0, notices: 0));
     });
 
     test('an expired unread notice does not count (the board never marks it)', () {

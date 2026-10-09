@@ -9766,8 +9766,16 @@ begin
   end loop;
   perform set_config('request.jwt.claims',
     '{"sub":"51000000-0000-0000-0000-000000000015","role":"authenticated"}', true);
-  if (select count(*) from messages where tenant_id = '00000000-0000-0000-0000-000000000051') <> 0 then
-    raise exception 'FAIL: the kiosk reads messages or notices';
+  -- The kiosk reads the alley's notices (0064), never a message.
+  if (select count(*) from messages
+       where tenant_id = '00000000-0000-0000-0000-000000000051'
+         and kind = 'message') <> 0
+     or (select count(*) from messages where id = v_notice) <> 1 then
+    raise exception 'FAIL: the kiosk reads messages, or not the notice';
+  end if;
+  if (select count(*) from message_recipients
+       where tenant_id = '00000000-0000-0000-0000-000000000051') <> 0 then
+    raise exception 'FAIL: the kiosk reads recipient rows';
   end if;
   -- Filip, pending: an unvetted self-registration of this alley, so not
   -- the notice (it may say where the spare key is), nor any recipient row.
@@ -9897,8 +9905,8 @@ update profiles set status = 'pending'
  where id = '51000000-0000-0000-0000-000000000016';
 set local role authenticated;
 
--- 23o, continued. The kiosk reads nothing here, not even what it once got
--- as a player: Adam sets Dana — a recipient of the day message and of the
+-- 23o, continued. The kiosk reads no message or recipient row (only notices,
+-- 0064), not even what it once got as a player: Adam sets Dana — a recipient of the day message and of the
 -- notice — as the kiosk („Nastavit jako kiosk“). She then sees no message
 -- and no recipient row, and her own rows take no reply. Back to a player.
 do $$
@@ -9923,7 +9931,8 @@ begin
     raise exception 'FAIL: expected Dana to be the kiosk now';
   end if;
   if (select count(*) from messages
-       where tenant_id = '00000000-0000-0000-0000-000000000051') <> 0
+       where tenant_id = '00000000-0000-0000-0000-000000000051'
+         and kind = 'message') <> 0
      or (select count(*) from message_recipients
           where tenant_id = '00000000-0000-0000-0000-000000000051') <> 0 then
     raise exception 'FAIL: a recipient set as the kiosk still reads her messages';
@@ -10551,6 +10560,10 @@ begin
   end if;
   raise notice 'OK: running 0051 again leaves every privilege and its ACL order as it was (0051)';
 end $$;
+
+-- Running 0051 again put back its two read-rule functions: bring back the
+-- kiosk's notices (0064), which later checks rely on.
+\ir ../migrations/0064_kiosk_panel.sql
 
 -- 0052 One device token, one profile ----------------------------------------
 -- 20. notify pushes to every profile holding a token, so a token the last
@@ -11691,6 +11704,151 @@ begin
       (select training_weekdays from schedule_settings where tenant_id = v_t);
   end if;
   raise notice 'OK: a new kuželna starts with no training day (0063)';
+end $$;
+
+-- 0064: a notice is hidden from, or shown on, the kiosk by its alley's admin
+-- only; the kiosk still READS it (the app does the hiding, see the
+-- migration), and the public overview hands out none of the new settings.
+reset role;
+do $$
+declare
+  v_id uuid;
+begin
+  insert into messages (tenant_id, author_role, kind, audience, title, body)
+    values ('00000000-0000-0000-0000-000000000051', 'admin', 'notice', 'all', 'Pro kiosek', 'Text.')
+    returning id into v_id;
+  perform set_config('probe.kiosk_notice', v_id::text, true);
+end $$;
+set local role authenticated;
+do $$
+declare
+  v_notice constant uuid := current_setting('probe.kiosk_notice')::uuid;
+  v_who text;
+begin
+  perform set_config('request.jwt.claims',
+    '{"sub":"51000000-0000-0000-0000-000000000010","role":"authenticated"}', true);
+  perform message_set_kiosk(v_notice, false);
+  if (select show_on_kiosk from messages where id = v_notice) then
+    raise exception 'FAIL: the admin could not hide the notice from the kiosk';
+  end if;
+
+  perform set_config('request.jwt.claims',
+    '{"sub":"51000000-0000-0000-0000-000000000015","role":"authenticated"}', true);
+  if (select show_on_kiosk from messages where id = v_notice) is distinct from false then
+    raise exception 'FAIL: the kiosk cannot read the notice and its flag';
+  end if;
+
+  for v_who in select unnest(array[
+      '51000000-0000-0000-0000-000000000015',   -- the kiosk
+      '51000000-0000-0000-0000-000000000013',   -- a player
+      '51000000-0000-0000-0000-000000000016'])  -- a pending account
+  loop
+    perform set_config('request.jwt.claims',
+      '{"sub":"' || v_who || '","role":"authenticated"}', true);
+    begin
+      perform message_set_kiosk(v_notice, true);
+      raise exception 'FAIL: % toggled a notice on the kiosk', v_who;
+    exception when others then
+      if sqlerrm <> 'not_allowed' then raise; end if;
+    end;
+  end loop;
+
+  perform set_config('request.jwt.claims',
+    '{"sub":"52000000-0000-0000-0000-000000000010","role":"authenticated"}', true);
+  begin
+    perform message_set_kiosk(v_notice, true);
+    raise exception 'FAIL: another alley''s admin toggled the notice';
+  exception when others then
+    if sqlerrm <> 'unknown_message' then raise; end if;
+  end;
+
+  perform set_config('request.jwt.claims',
+    '{"sub":"51000000-0000-0000-0000-000000000010","role":"authenticated"}', true);
+  perform message_set_kiosk(v_notice, true);
+  if not (select show_on_kiosk from messages where id = v_notice) then
+    raise exception 'FAIL: the admin could not show the notice again';
+  end if;
+  raise notice 'OK: only the alley''s admin hides or shows a notice on the kiosk (0064)';
+end $$;
+reset role;
+do $$
+begin
+  if has_function_privilege('anon', 'public.message_set_kiosk(uuid, boolean)', 'execute') then
+    raise exception 'FAIL: anon can call message_set_kiosk';
+  end if;
+  if exists (select 1 from jsonb_object_keys(public_week('kuzelna-a', current_date)->'settings') k
+              where k like 'kiosk\_%' and k not in ('kiosk_dark', 'kiosk_fit_day')) then
+    raise exception 'FAIL: the public overview hands out a kiosk panel setting';
+  end if;
+  raise notice 'OK: anon cannot toggle, and the public overview hides the kiosk panel settings (0064)';
+end $$;
+
+-- 0064: a notice posted ahead of time — only the alley's admin sets when it
+-- shows; with its ping on, a notice_visible job waits for that time (one
+-- per notice, moved with it, gone when it shows at once).
+reset role;
+set local role authenticated;
+do $$
+declare
+  v_notice constant uuid := current_setting('probe.kiosk_notice')::uuid;
+  v_at constant timestamptz := now() + interval '2 days';
+begin
+  perform set_config('request.jwt.claims',
+    '{"sub":"51000000-0000-0000-0000-000000000010","role":"authenticated"}', true);
+  perform message_set_visible_from(v_notice, v_at, true);
+  if (select visible_from from messages where id = v_notice) is distinct from v_at
+     or not (select notify from messages where id = v_notice) then
+    raise exception 'FAIL: the admin could not schedule the notice';
+  end if;
+  perform message_set_visible_from(v_notice, v_at + interval '1 day');
+  perform set_config('request.jwt.claims',
+    '{"sub":"51000000-0000-0000-0000-000000000013","role":"authenticated"}', true);
+  begin
+    perform message_set_visible_from(v_notice, null);
+    raise exception 'FAIL: a player scheduled a notice';
+  exception when others then
+    if sqlerrm <> 'not_allowed' then raise; end if;
+  end;
+end $$;
+reset role;
+do $$
+declare
+  v_notice constant uuid := current_setting('probe.kiosk_notice')::uuid;
+begin
+  if (select count(*) from notification_jobs
+       where kind = 'notice_visible' and payload->>'message_id' = v_notice::text) <> 1
+     or (select run_at from notification_jobs
+          where kind = 'notice_visible' and payload->>'message_id' = v_notice::text)
+        < now() + interval '2 days 23 hours' then
+    raise exception 'FAIL: expected one notice_visible job, moved with the notice';
+  end if;
+end $$;
+set local role authenticated;
+do $$
+declare
+  v_notice constant uuid := current_setting('probe.kiosk_notice')::uuid;
+begin
+  perform set_config('request.jwt.claims',
+    '{"sub":"51000000-0000-0000-0000-000000000010","role":"authenticated"}', true);
+  -- A time gone by is now: no schedule, no job.
+  perform message_set_visible_from(v_notice, now() - interval '1 hour');
+end $$;
+reset role;
+do $$
+declare
+  v_notice constant uuid := current_setting('probe.kiosk_notice')::uuid;
+begin
+  if (select visible_from from messages where id = v_notice) is not null
+     or exists (select 1 from notification_jobs
+                 where kind = 'notice_visible'
+                   and payload->>'message_id' = v_notice::text) then
+    raise exception 'FAIL: a notice shown now kept its schedule or its job';
+  end if;
+  if has_function_privilege('anon',
+       'public.message_set_visible_from(uuid, timestamptz, boolean)', 'execute') then
+    raise exception 'FAIL: anon can schedule a notice';
+  end if;
+  raise notice 'OK: only the alley''s admin schedules a notice; its ping waits as one job (0064)';
 end $$;
 
 rollback;

@@ -9,6 +9,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../../../core/widgets/emoji_text.dart';
 import '../../../core/theme.dart';
 import '../../../core/ui.dart';
 import '../../../domain/calendar_layout.dart';
@@ -34,11 +35,6 @@ double boardHeaderHeight(int maxEvents) =>
 /// day+date line (2px padding + one 16px line + 2px) — a taller strip
 /// would leave a sliver of the first event line peeking through the clip.
 const double collapsedHeaderHeight = 20.0;
-
-/// Equal day-column width: `clamp(160, (width−ruler)/7, 220)` so a typical
-/// tablet shows exactly 7 days without horizontal scroll.
-double boardColumnWidth(double availableWidth) =>
-    ((availableWidth - calendarRulerWidth) / 7).clamp(160.0, 220.0);
 
 /// One time-positioned widget inside a [CalendarColumn].
 class CalendarEntry {
@@ -356,6 +352,7 @@ class BoardColumnHeader extends StatelessWidget {
     this.onAdd,
     this.interactive = true,
     this.watch,
+    this.onOpenMatch,
   });
 
   final Day date;
@@ -383,6 +380,10 @@ class BoardColumnHeader extends StatelessWidget {
   /// Passed straight through to [showDayMatchesDialog]: false on the kiosk
   /// board and the public overview (see its own doc for why).
   final bool interactive;
+
+  /// The kiosk's: a finished match of the day's list opens its Zápis (see
+  /// [showDayMatchesDialog]).
+  final void Function(PrioritySlot match)? onOpenMatch;
 
   @override
   Widget build(BuildContext context) {
@@ -437,11 +438,12 @@ class BoardColumnHeader extends StatelessWidget {
                               date,
                               priority,
                               interactive: interactive,
+                              onOpenMatch: onOpenMatch,
                             ),
                     child: Column(
                       children: [
                         for (final m in priority)
-                          Text(
+                          EmojiText(
                             headerEventLabel(m),
                             textAlign: TextAlign.center,
                             maxLines: 1,

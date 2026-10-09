@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/data/clock.dart';
 import 'package:rezervator/data/providers.dart';
@@ -45,6 +46,7 @@ void main() {
     Stream<List<Message>>? noticeStream,
     NoticeUpdate? updateNotice,
     Future<void> Function(String id)? deleteNotice,
+    Future<void> Function(String id, bool show)? setOnKiosk,
   }) =>
       ProviderScope(
         overrides: [
@@ -63,6 +65,7 @@ void main() {
             updateNotice: updateNotice ??
                 (id, {required title, required body, expiresAt}) async {},
             deleteNotice: deleteNotice ?? (_) async {},
+            setOnKiosk: setOnKiosk ?? (_, _) async {},
           ),
         ),
       );
@@ -286,6 +289,66 @@ void main() {
           lessThanOrEqualTo(tester.getBottomLeft(sheet).dy));
     });
   }
+
+  testWidgets('the admin hides a notice from the kiosk and shows it again',
+      (tester) async {
+    final calls = <(String, bool)>[];
+    final hidden = Message(
+      id: 'h1', kind: MessageKind.notice, audience: MessageAudience.all,
+      authorId: 'admin', authorRole: MessageAuthorRole.admin, onDate: null,
+      blockId: null, title: 'Skrytý', body: 'Text.', expiresAt: null,
+      notify: true, showOnKiosk: false,
+      createdAt: DateTime(2026, 9, 2), updatedAt: DateTime(2026, 9, 2),
+    );
+    await tester.pumpWidget(app(
+      profile: admin,
+      notices: [notice('a1'), hidden],
+      setOnKiosk: (id, show) async => calls.add((id, show)),
+    ));
+    await tester.pumpAndSettle();
+    // The hidden one says so; the other does not.
+    expect(find.textContaining('skrytý na kiosku'), findsOneWidget);
+
+    await openMenu(tester);
+    await tester.tap(find.text('Skrýt na kiosku'));
+    await tester.pumpAndSettle();
+    expect(calls, [('a1', false)]);
+
+    await tester.tap(find.byType(PopupMenuButton<String>).last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Zobrazit na kiosku'));
+    await tester.pumpAndSettle();
+    expect(calls.last, ('h1', true));
+  });
+
+  testWidgets('a notice posted ahead of time: the admin sees it under '
+      '„Naplánované“, a player not yet', (tester) async {
+    final scheduled = Message(
+      id: 's1', kind: MessageKind.notice, audience: MessageAudience.all,
+      authorId: 'admin', authorRole: MessageAuthorRole.admin, onDate: null,
+      blockId: null, title: 'Brigáda', body: 'Text.', expiresAt: null,
+      notify: true, visibleFrom: DateTime(2026, 10, 5, 8),
+      createdAt: DateTime(2026, 10, 1), updatedAt: DateTime(2026, 10, 1),
+    );
+    await tester.pumpWidget(app(profile: admin, notices: [notice('a1'), scheduled]));
+    await tester.pumpAndSettle();
+    expect(find.text('Naplánované (1)'), findsOneWidget);
+    expect(find.text('Brigáda'), findsOneWidget);
+    expect(find.textContaining('zobrazí se 5. 10. v 8:00'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+
+    await tester.pumpWidget(app(notices: [notice('a1'), scheduled]));
+    await tester.pumpAndSettle();
+    expect(find.text('Brigáda'), findsNothing);
+    expect(find.textContaining('Naplánované'), findsNothing);
+  });
+
+  testWidgets('a player has no kiosk menu', (tester) async {
+    await tester.pumpWidget(app(notices: [notice('a1')]));
+    await tester.pumpAndSettle();
+    expect(find.byType(PopupMenuButton<String>), findsNothing);
+    expect(find.textContaining('kiosku'), findsNothing);
+  });
 
   testWidgets('„Sejmout“ and „Smazat“ both ask first', (tester) async {
     await tester.pumpWidget(app(profile: admin, notices: [notice('a1')]));
@@ -514,6 +577,9 @@ void main() {
                 (ref) => Stream.value(now ?? DateTime(2026, 10, 2, 12))),
           ],
           child: MaterialApp(
+            // The pickers of „Naplánovat“ are the app's own, in Czech.
+            supportedLocales: const [Locale('cs')],
+            localizationsDelegates: GlobalMaterialLocalizations.delegates,
             home: Consumer(builder: (context, ref, _) {
               ref.watch(nowProvider);
               return Scaffold(
@@ -587,6 +653,84 @@ void main() {
       final draft = await saved(tester, existing: notice('a1', expiresAt: expires));
       expect(draft.title, 'Nové dráhy a1');
       expect(draft.expiresAt!.isAtSameMomentAs(expires), isTrue);
+    });
+
+    testWidgets('„Naplánovat“ picks a day and a time: the notice shows from '
+        'then; „Změnit“ moves it; × shows it at once', (tester) async {
+      final tomorrow = DateTime.now().add(const Duration(days: 1));
+      final draft = await saved(tester, change: () async {
+        expect(find.text('Zobrazit: hned'), findsOneWidget);
+        await tester.tap(find.text('Naplánovat'));
+        await tester.pumpAndSettle();
+        // Tomorrow 8:00 is offered; both pickers taken as they are.
+        expect(find.byType(DatePickerDialog), findsOneWidget);
+        await tester.tap(find.text('OK'));
+        await tester.pumpAndSettle();
+        expect(find.byType(TimePickerDialog), findsOneWidget);
+        await tester.tap(find.text('OK'));
+        await tester.pumpAndSettle();
+        expect(
+          find.text('Zobrazit od: ${tomorrow.day}. ${tomorrow.month}. v 8:00'),
+          findsOneWidget,
+        );
+        expect(find.text('Naplánovat'), findsNothing);
+        expect(find.widgetWithText(TextButton, 'Změnit'), findsNWidgets(2));
+      });
+      expect(draft.visibleFrom, DateTime(tomorrow.year, tomorrow.month, tomorrow.day, 8));
+      expect(draft.notify, isTrue);
+    });
+
+    testWidgets('a scheduled time can be cleared: shown at once again',
+        (tester) async {
+      final draft = await saved(tester, change: () async {
+        await tester.tap(find.text('Naplánovat'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('OK'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('OK'));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('Zobrazit od:'), findsOneWidget);
+        await tester.tap(find.byTooltip('Zobrazit hned'));
+        await tester.pumpAndSettle();
+        expect(find.text('Zobrazit: hned'), findsOneWidget);
+      });
+      expect(draft.visibleFrom, isNull);
+    });
+
+    testWidgets('a picker dismissed keeps the time as it was', (tester) async {
+      final draft = await saved(tester, change: () async {
+        // The form has a „Zrušit“ of its own; the picker's is on top.
+        await tester.tap(find.text('Naplánovat'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Zrušit').last);
+        await tester.pumpAndSettle();
+        expect(find.text('Zobrazit: hned'), findsOneWidget);
+        // The day taken, the time not: still at once.
+        await tester.tap(find.text('Naplánovat'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('OK'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Zrušit').last);
+        await tester.pumpAndSettle();
+        expect(find.text('Zobrazit: hned'), findsOneWidget);
+      });
+      expect(draft.visibleFrom, isNull);
+    });
+
+    testWidgets('an edit of a scheduled notice shows its time, local',
+        (tester) async {
+      final from = DateTime(2026, 10, 5, 8, 30);
+      final existing = Message(
+        id: 's1', kind: MessageKind.notice, audience: MessageAudience.all,
+        authorId: 'admin', authorRole: MessageAuthorRole.admin, onDate: null,
+        blockId: null, title: 'Brigáda', body: 'Text.', expiresAt: null,
+        notify: true, visibleFrom: from.toUtc(),
+        createdAt: DateTime(2026, 10, 1), updatedAt: DateTime(2026, 10, 1),
+      );
+      final draft = await saved(tester, existing: existing, change: () async {
+        expect(find.text('Zobrazit od: 5. 10. v 8:30'), findsOneWidget);
+      });
+      expect(draft.visibleFrom!.isAtSameMomentAs(from), isTrue);
     });
 
     Future<void> openForm(WidgetTester tester) async {

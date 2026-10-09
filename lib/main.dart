@@ -13,6 +13,7 @@ import 'core/error_reporting.dart';
 import 'core/push_screen.dart';
 import 'core/text_size.dart';
 import 'core/theme.dart';
+import 'core/web/page_background.dart';
 import 'core/theme_choice.dart';
 import 'data/local_prefs.dart';
 import 'features/auth/auth_gate.dart';
@@ -29,28 +30,25 @@ Future<void> main() async {
   // One Sentry project covers all build targets — the `environment` tag
   // separates the web build from the Android app/kiosk (same package).
   if (AppConfig.hasSentry) {
-    await SentryFlutter.init(
-      (options) {
-        options.dsn = AppConfig.sentryDsn;
-        options.environment = kIsWeb ? 'web' : 'app';
-        options.sendDefaultPii = false; // no IP/user data beyond the error
-        // Drop transient connectivity errors — the app handles offline
-        // gracefully, so these are false alarms, not bugs — and the
-        // browser's contentless „Script error.“ of another origin's script.
-        options.beforeSend = (event, hint) {
-          if (isTransientNetworkError(event.throwable)) return null;
-          if (isOpaqueScriptError([
-            event.message?.formatted,
-            for (final e in event.exceptions ?? const <SentryException>[])
-              e.value,
-          ])) {
-            return null;
-          }
-          return event;
-        };
-      },
-      appRunner: _bootstrap,
-    );
+    await SentryFlutter.init((options) {
+      options.dsn = AppConfig.sentryDsn;
+      options.environment = kIsWeb ? 'web' : 'app';
+      options.sendDefaultPii = false; // no IP/user data beyond the error
+      // Drop transient connectivity errors — the app handles offline
+      // gracefully, so these are false alarms, not bugs — and the
+      // browser's contentless „Script error.“ of another origin's script.
+      options.beforeSend = (event, hint) {
+        if (isTransientNetworkError(event.throwable)) return null;
+        if (isOpaqueScriptError([
+          event.message?.formatted,
+          for (final e in event.exceptions ?? const <SentryException>[])
+            e.value,
+        ])) {
+          return null;
+        }
+        return event;
+      };
+    }, appRunner: _bootstrap);
   } else {
     await _bootstrap();
   }
@@ -77,10 +75,12 @@ Future<void> _bootstrap() async {
   // Without this a pushed screen leaves the address bar alone, so the web has
   // no history entry for it and the browser's back button leaves the site.
   GoRouter.optionURLReflectsImperativeAPIs = true;
-  runApp(ProviderScope(
-    overrides: [...appearanceOverrides, ...resultsViewOverrides],
-    child: const RezervatorApp(),
-  ));
+  runApp(
+    ProviderScope(
+      overrides: [...appearanceOverrides, ...resultsViewOverrides],
+      child: const RezervatorApp(),
+    ),
+  );
 }
 
 final _router = GoRouter(
@@ -191,18 +191,20 @@ class RezervatorApp extends ConsumerWidget {
       // top of whatever the system scale already is.
       builder: (context, child) {
         final mq = MediaQuery.of(context);
-        return MediaQuery(
-          data:
-              mq.copyWith(textScaler: AppTextScaler(mq.textScaler, textSize)),
-          child: child!,
+        return PageBackground(
+          child: MediaQuery(
+            data: mq.copyWith(
+              textScaler: AppTextScaler(mq.textScaler, textSize),
+            ),
+            child: child!,
+          ),
         );
       },
       locale: const Locale('cs'),
       supportedLocales: const [Locale('cs')],
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
       theme: buildTheme(Brightness.light, contrastLevel: plan.contrastLevel),
-      darkTheme:
-          buildTheme(Brightness.dark, contrastLevel: plan.contrastLevel),
+      darkTheme: buildTheme(Brightness.dark, contrastLevel: plan.contrastLevel),
       themeMode: plan.mode,
       scrollBehavior: const AppScrollBehavior(),
       routerConfig: _router,

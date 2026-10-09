@@ -1116,6 +1116,25 @@ class Api {
     );
   }
 
+  /// Writes the kiosk drawer's options (0064) — the keys of
+  /// `schedule_settings` (`kiosk_notices_mode`, `kiosk_show_matches`,
+  /// `kiosk_matches_history_days`, `kiosk_drawer_open`). Optimistic, same
+  /// reasoning as [setKioskFitDay].
+  static Future<void> setKioskPanel(Map<String, Object> changes,
+      {required String tenantId}) {
+    Future<void> write() => _db
+        .from('schedule_settings')
+        .update(changes).eq('tenant_id', tenantId);
+    final uid = currentUserId;
+    if (uid == null) return write();
+    return optimisticWrite(
+      uid,
+      cacheKeySettings,
+      patchRow('tenant_id', tenantId, changes),
+      write,
+    );
+  }
+
   /// Toggles the kiosk board's dark/light theme (spec §4). Optimistic, same
   /// reasoning as [setKioskFitDay].
   static Future<void> setKioskDark(bool kioskDark,
@@ -1780,6 +1799,27 @@ class Api {
         'p_title': title,
         'p_body': body,
         'p_expires_at': expiresAt?.toUtc().toIso8601String(),
+      });
+
+  /// Shows or hides a notice on the kiosk (admin; `not_allowed` otherwise,
+  /// `unknown_message` for anything but a notice of the alley). Its own
+  /// call: [messageUpdate] is the whole-notice edit.
+  static Future<void> messageSetKiosk(String id, bool show) =>
+      _db.rpc('message_set_kiosk', params: {'p_id': id, 'p_show': show});
+
+  /// When a notice shows (admin): [from] null or gone by = now; [notify]
+  /// also sets whether it pings (null keeps it). A pinging notice that
+  /// shows later gets its push and e-mail then (a notice_visible job,
+  /// 0064).
+  static Future<void> messageSetVisibleFrom(
+    String id,
+    DateTime? from, {
+    bool? notify,
+  }) =>
+      _db.rpc('message_set_visible_from', params: {
+        'p_id': id,
+        'p_from': from?.toUtc().toIso8601String(),
+        'p_notify': notify,
       });
 
   /// Whether [id] is a message or notice I may still read: the same

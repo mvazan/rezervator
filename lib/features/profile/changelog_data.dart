@@ -49,6 +49,26 @@ String changelogHeading(Release r, {required bool web}) {
 }
 
 const appChangelog = <Release>[
+  Release(null, '8. 10. 2026', [
+    'Detail zápasu: v Mém profilu si vyberete, jak se zápas vykreslí na '
+        'výšku a na šířku — karty soubojů pod sebou, kompaktně nebo jako '
+        'tabulka tak, aby se celý zápas vešel na obrazovku. Na šířku je '
+        'výchozí zápis, který po otočení telefonu naskočí na celou '
+        'obrazovku. Přepínač Souboje | Zápis odpadá; stáří výsledků a '
+        'odkaz na web ČKA jsou ve skóre nahoře.',
+    'Kiosk: vedle rozvrhu je panel s nástěnkou a zápasy — hraný zápas '
+        'běží živě, odehrané otevřou zápis. Co panel ukazuje, volí správce '
+        've Správě → Kiosk; nastavení je v blocích s popisem a čísla '
+        '(doba nečinnosti, šířka panelu, střídání…) se píšou rovnou.',
+    'Nástěnka: oznam jde naplánovat — zobrazí se a upozorní až od zadaného '
+        'času; správce ho může skrýt z kiosku.',
+  ], store: [
+    'Detail zápasu: v Mém profilu si vyberete, jak se souboje vykreslí na '
+        'výšku a na šířku (karty, kompaktně, tabulka; na šířku výchozí zápis '
+        'na celou obrazovku po otočení telefonu).',
+    'Kiosk: panel s nástěnkou a zápasy vedle rozvrhu, hraný zápas živě.',
+    'Nástěnka: oznam jde naplánovat na zadaný čas.',
+  ]),
   Release('2.0.5', '7. 10. 2026', [
     'Registrační čísla hráčů se zase načítají — evidence ČKA změnila web '
         'a od 3. 10. se nenačetlo žádné. „Doplnit reg. č.“ v profilu '

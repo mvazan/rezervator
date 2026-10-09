@@ -9,10 +9,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/text_size.dart';
 import '../core/theme_choice.dart';
+import '../domain/models.dart' show MatchLayout, parseMatchLayout;
 
 const _themeChoiceKey = 'theme_choice';
 const _textSizeKey = 'text_size';
-const _matchDetailViewKey = 'match_detail_view';
+const _matchLayoutPortraitKey = 'match_layout_portrait';
+const _matchLayoutLandscapeKey = 'match_layout_landscape';
 const _dutyClubFilterKey = 'duty_club_filter';
 const _venueCompetitionKey = 'venue_competition_filter';
 
@@ -128,49 +130,67 @@ Future<List<Override>> loadPersistedAppearance() async {
   ];
 }
 
-/// How the match detail shows a match: [souboje] is the duel cards, [zapis]
-/// the kuzelky.com-style score sheet (`LegacyScoreSheet`).
+/// How the match detail draws a match, by the way the device is held
+/// (Můj profil → Detail zápasu): [MatchLayout.full] (the duel cards,
+/// scrolling), [MatchLayout.compact] or [MatchLayout.table] (fitted to the
+/// screen); sideways also [MatchLayout.zapis] — the score sheet full
+/// screen the moment the phone turns (closed when it turns back), the
+/// default.
 ///
-/// These names are persisted (SharedPreferences) — do not rename a value, or
-/// every user with that view saved silently falls back to
-/// [MatchDetailView.souboje] via [parseMatchDetailView]'s fallback.
-enum MatchDetailView { souboje, zapis }
+/// Device-local (a phone and a tablet are held differently), persisted by
+/// name — see [MatchLayout].
+typedef MatchLayoutPrefs = ({MatchLayout portrait, MatchLayout landscape});
 
-/// Persisted name → view; anything unknown falls back to
-/// [MatchDetailView.souboje].
-MatchDetailView parseMatchDetailView(String? name) => MatchDetailView.values
-    .firstWhere((v) => v.name == name, orElse: () => MatchDetailView.souboje);
+const defaultMatchLayoutPrefs = (
+  portrait: MatchLayout.full,
+  landscape: MatchLayout.zapis,
+);
 
-/// The last view picked on the match detail (Souboje or Zápis), remembered
-/// on the device so the next match opens the same way. Defaults to Souboje.
-final matchDetailViewProvider =
-    NotifierProvider<MatchDetailViewNotifier, MatchDetailView>(
-        MatchDetailViewNotifier.new);
+/// Persisted names → prefs; anything unknown is the default — the cards
+/// upright, the Zápis sideways. Zápis is a sideways layout only: saved for
+/// upright (never offered) it reads as the cards.
+MatchLayoutPrefs parseMatchLayoutPrefs(String? portrait, String? landscape) => (
+  portrait: parseMatchLayout(portrait, allowZapis: false),
+  landscape: parseMatchLayout(landscape, fallback: MatchLayout.zapis),
+);
 
-class MatchDetailViewNotifier extends Notifier<MatchDetailView> {
+final matchLayoutPrefsProvider =
+    NotifierProvider<MatchLayoutPrefsNotifier, MatchLayoutPrefs>(
+      MatchLayoutPrefsNotifier.new,
+    );
+
+class MatchLayoutPrefsNotifier extends Notifier<MatchLayoutPrefs> {
   @override
-  MatchDetailView build() {
+  MatchLayoutPrefs build() {
     _load();
-    return MatchDetailView.souboje;
+    return defaultMatchLayoutPrefs;
   }
 
   Future<void> _load() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       if (!ref.mounted) return; // disposed while awaiting — nothing to set
-      state = parseMatchDetailView(prefs.getString(_matchDetailViewKey));
+      state = parseMatchLayoutPrefs(
+        prefs.getString(_matchLayoutPortraitKey),
+        prefs.getString(_matchLayoutLandscapeKey),
+      );
     } catch (_) {
-      // Best effort only (like data/cache.dart) — e.g. web with storage
-      // blocked. The default already returned by build() still applies.
+      // Best effort only — see ThemeChoiceNotifier._load.
     }
   }
 
-  /// Switches to [view] now and remembers it for the next match.
-  Future<void> set(MatchDetailView view) async {
-    state = view;
+  /// Sets the layout for one orientation now and remembers it. Zápis asked
+  /// for upright reads as the cards.
+  Future<void> set({MatchLayout? portrait, MatchLayout? landscape}) async {
+    if (portrait == MatchLayout.zapis) portrait = MatchLayout.full;
+    state = (
+      portrait: portrait ?? state.portrait,
+      landscape: landscape ?? state.landscape,
+    );
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_matchDetailViewKey, view.name);
+      await prefs.setString(_matchLayoutPortraitKey, state.portrait.name);
+      await prefs.setString(_matchLayoutLandscapeKey, state.landscape.name);
     } catch (_) {
       // Best effort only — the in-memory choice still applies this session.
     }

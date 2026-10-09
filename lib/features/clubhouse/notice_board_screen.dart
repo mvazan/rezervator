@@ -28,6 +28,7 @@ class NoticeBoardScreen extends ConsumerStatefulWidget {
     this.markRead = Api.markMessagesRead,
     this.updateNotice = Api.messageUpdate,
     this.deleteNotice = Api.messageDelete,
+    this.setOnKiosk = Api.messageSetKiosk,
   });
 
   /// Marks the listed notices read — injected like
@@ -40,6 +41,9 @@ class NoticeBoardScreen extends ConsumerStatefulWidget {
 
   /// „Smazat“'s write ([Api.messageDelete]), injected for the same reason.
   final Future<void> Function(String id) deleteNotice;
+
+  /// „Skrýt na kiosku“ / „Zobrazit na kiosku“ ([Api.messageSetKiosk]).
+  final Future<void> Function(String id, bool show) setOnKiosk;
 
   @override
   ConsumerState<NoticeBoardScreen> createState() => _NoticeBoardScreenState();
@@ -87,6 +91,7 @@ class _NoticeBoardScreenState extends ConsumerState<NoticeBoardScreen> {
         isAdmin: isAdmin,
         updateNotice: widget.updateNotice,
         deleteNotice: widget.deleteNotice,
+        setOnKiosk: widget.setOnKiosk,
       );
     }
 
@@ -166,12 +171,14 @@ class _NoticeList extends ConsumerStatefulWidget {
     required this.isAdmin,
     required this.updateNotice,
     required this.deleteNotice,
+    required this.setOnKiosk,
   });
 
   final _Data data;
   final bool isAdmin;
   final NoticeUpdate updateNotice;
   final Future<void> Function(String id) deleteNotice;
+  final Future<void> Function(String id, bool show) setOnKiosk;
 
   @override
   ConsumerState<_NoticeList> createState() => _NoticeListState();
@@ -184,7 +191,9 @@ class _NoticeListState extends ConsumerState<_NoticeList> {
   Widget build(BuildContext context) {
     final now = ref.watch(nowProvider).value ?? DateTime.now();
     final split = splitNotices(widget.data.notices, now);
-    if (split.active.isEmpty && split.expired.isEmpty) {
+    // Notices posted ahead of time are the admin's until they show.
+    final scheduled = widget.isAdmin ? split.scheduled : const <Message>[];
+    if (split.active.isEmpty && split.expired.isEmpty && scheduled.isEmpty) {
       return const Center(
         child: Padding(
           padding: EdgeInsets.all(24),
@@ -202,11 +211,21 @@ class _NoticeListState extends ConsumerState<_NoticeList> {
           isAdmin: widget.isAdmin,
           updateNotice: widget.updateNotice,
           deleteNotice: widget.deleteNotice,
+          setOnKiosk: widget.setOnKiosk,
         );
     return ListView(
       // Room for the admin's FAB below the last card.
       padding: padWithSystemInset(context, const EdgeInsets.only(bottom: 88)),
       children: [
+        if (scheduled.isNotEmpty) ...[
+          ListTile(
+            dense: true,
+            leading: const Icon(Icons.schedule),
+            title: Text('Naplánované (${scheduled.length})'),
+          ),
+          for (final n in scheduled) tile(n),
+          const Divider(),
+        ],
         for (final n in split.active) tile(n),
         if (split.expired.isNotEmpty)
           ListTile(
@@ -238,6 +257,7 @@ class _NoticeCard extends ConsumerStatefulWidget {
     required this.isAdmin,
     required this.updateNotice,
     required this.deleteNotice,
+    required this.setOnKiosk,
   });
 
   final Message notice;
@@ -245,6 +265,7 @@ class _NoticeCard extends ConsumerStatefulWidget {
   final bool isAdmin;
   final NoticeUpdate updateNotice;
   final Future<void> Function(String id) deleteNotice;
+  final Future<void> Function(String id, bool show) setOnKiosk;
 
   @override
   ConsumerState<_NoticeCard> createState() => _NoticeCardState();
@@ -264,7 +285,11 @@ class _NoticeCardState extends ConsumerState<_NoticeCard> {
     final seen = rows == null
         ? null
         : seenLabel(rows.where((r) => r.readAt != null).length, rows.length);
-    final footer = [noticeFooter(notice, widget.now), ?seen].join(' · ');
+    final footer = [
+      noticeFooter(notice, widget.now),
+      ?seen,
+      if (isAdmin && !notice.showOnKiosk) 'skrytý na kiosku',
+    ].join(' · ');
     return Card(
       margin: const EdgeInsets.fromLTRB(12, 8, 12, 4),
       child: ListTile(
@@ -331,6 +356,12 @@ class _NoticeCardState extends ConsumerState<_NoticeCard> {
                       value: 'unpost',
                       child: Text('Sejmout'),
                     ),
+                  PopupMenuItem(
+                    value: 'kiosk',
+                    child: Text(notice.showOnKiosk
+                        ? 'Skrýt na kiosku'
+                        : 'Zobrazit na kiosku'),
+                  ),
                   const PopupMenuItem(value: 'delete', child: Text('Smazat')),
                 ],
               )
@@ -346,6 +377,15 @@ class _NoticeCardState extends ConsumerState<_NoticeCard> {
         await showNoticeForm(context, existing: notice);
       case 'seen':
         await showNoticeSeenSheet(context, notice: notice);
+      case 'kiosk':
+        await tryActionOnPage(
+          context,
+          () => widget.setOnKiosk(notice.id, !notice.showOnKiosk),
+          success: notice.showOnKiosk
+              ? 'Oznam se na kiosku nezobrazuje.'
+              : 'Oznam se zobrazí na kiosku.',
+          errorText: friendlyDbError,
+        );
       case 'unpost':
         final ok = await confirmDialog(
           context,

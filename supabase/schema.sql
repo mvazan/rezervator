@@ -789,12 +789,13 @@ CREATE OR REPLACE FUNCTION "public"."can_read_message"("p_id" "uuid") RETURNS bo
   select exists (
     select 1 from messages m
      where m.id = p_id and m.tenant_id = current_tenant_id()
-       and is_approved() and not is_kiosk()
        and (
-         m.kind = 'notice'
-         or m.author_id = auth.uid()
-         or exists (select 1 from message_recipients r
-                     where r.message_id = m.id and r.user_id = auth.uid())
+         (is_approved() and not is_kiosk()
+          and (m.kind = 'notice'
+               or m.author_id = auth.uid()
+               or exists (select 1 from message_recipients r
+                           where r.message_id = m.id and r.user_id = auth.uid())))
+         or (is_kiosk() and m.kind = 'notice')
        )
   )
 $$;
@@ -2885,6 +2886,60 @@ $_$;
 ALTER FUNCTION "public"."message_send"("p_kind" "text", "p_audience" "text", "p_on_date" "date", "p_block_id" "uuid", "p_title" "text", "p_body" "text", "p_expires_at" timestamp with time zone, "p_notify" boolean) OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."message_set_kiosk"("p_id" "uuid", "p_show" boolean) RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  if not is_admin() then
+    raise exception 'not_allowed';
+  end if;
+  update messages set show_on_kiosk = coalesce(p_show, true)
+   where id = p_id and tenant_id = current_tenant_id() and kind = 'notice';
+  if not found then
+    raise exception 'unknown_message';
+  end if;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."message_set_kiosk"("p_id" "uuid", "p_show" boolean) OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."message_set_visible_from"("p_id" "uuid", "p_from" timestamp with time zone, "p_notify" boolean DEFAULT NULL::boolean) RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_from constant timestamptz := case when p_from > now() then p_from end;
+  v_notify boolean;
+begin
+  if not is_admin() then
+    raise exception 'not_allowed';
+  end if;
+  update messages
+     set visible_from = v_from, notify = coalesce(p_notify, notify)
+   where id = p_id and tenant_id = current_tenant_id() and kind = 'notice'
+  returning notify into v_notify;
+  if not found then
+    raise exception 'unknown_message';
+  end if;
+  delete from notification_jobs
+   where kind = 'notice_visible' and dedupe_key = 'notice_visible:' || p_id;
+  if v_from is not null and v_notify then
+    insert into notification_jobs (kind, dedupe_key, payload, run_at)
+    values ('notice_visible', 'notice_visible:' || p_id,
+            jsonb_build_object('message_id', p_id,
+                               'tenant_id', current_tenant_id()),
+            v_from);
+  end if;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."message_set_visible_from"("p_id" "uuid", "p_from" timestamp with time zone, "p_notify" boolean) OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."message_update"("p_id" "uuid", "p_title" "text", "p_body" "text", "p_expires_at" timestamp with time zone) RETURNS "void"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -3393,6 +3448,18 @@ begin
     'tenant_name', (select name from tenants where id = v_tenant),
     'settings', (select to_jsonb(s) - 'tenant_id'
                           - 'duty_reminder_enabled' - 'duty_reminder_days'
+                          - 'kiosk_notices_mode' - 'kiosk_show_matches'
+                          - 'kiosk_show_upcoming' - 'kiosk_live_mode'
+                          - 'kiosk_drawer_open' - 'kiosk_drawer_columns'
+                          - 'kiosk_notices_share' - 'kiosk_zapis_percent'
+                          - 'kiosk_weeks_back' - 'kiosk_weeks_ahead'
+                          - 'kiosk_panel_enabled' - 'kiosk_past_days'
+                          - 'kiosk_notices_rotation_seconds'
+                          - 'kiosk_live_rotation_seconds'
+                          - 'kiosk_idle_seconds'
+                          - 'kiosk_live_layout' - 'kiosk_follow_board'
+                          - 'kiosk_live_refresh_seconds'
+                          - 'kiosk_visible_days' - 'kiosk_font_size'
                    from schedule_settings s where s.tenant_id = v_tenant),
     'blocks', coalesce((
       select jsonb_agg(to_jsonb(b) - 'tenant_id')
@@ -4956,12 +5023,13 @@ CREATE OR REPLACE FUNCTION "public"."visible_message_ids"() RETURNS SETOF "uuid"
     AS $$
   select m.id from messages m
    where m.tenant_id = (select current_tenant_id())
-     and (select is_approved()) and not (select is_kiosk())
-     and (m.kind = 'notice'
-          or m.author_id = (select auth.uid())
-          or exists (select 1 from message_recipients r
-                      where r.message_id = m.id
-                        and r.user_id = (select auth.uid())))
+     and ((select is_approved()) and not (select is_kiosk())
+          and (m.kind = 'notice'
+               or m.author_id = (select auth.uid())
+               or exists (select 1 from message_recipients r
+                           where r.message_id = m.id
+                             and r.user_id = (select auth.uid())))
+          or (select is_kiosk()) and m.kind = 'notice')
 $$;
 
 
@@ -5406,6 +5474,8 @@ CREATE TABLE IF NOT EXISTS "public"."messages" (
     "notify" boolean DEFAULT true NOT NULL,
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "show_on_kiosk" boolean DEFAULT true NOT NULL,
+    "visible_from" timestamp with time zone,
     CONSTRAINT "messages_audience_check" CHECK (("audience" = ANY (ARRAY['all'::"text", 'day'::"text", 'block'::"text", 'admins'::"text", 'duty'::"text"]))),
     CONSTRAINT "messages_author_role_check" CHECK (("author_role" = ANY (ARRAY['admin'::"text", 'player'::"text"]))),
     CONSTRAINT "messages_body_check" CHECK ((("char_length"(TRIM(BOTH FROM "body")) >= 1) AND ("char_length"(TRIM(BOTH FROM "body")) <=
@@ -5597,8 +5667,42 @@ CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     "kiosk_fit_day" boolean DEFAULT true NOT NULL,
     "duty_reminder_enabled" boolean DEFAULT false NOT NULL,
     "duty_reminder_days" smallint DEFAULT 1 NOT NULL,
+    "kiosk_panel_enabled" boolean DEFAULT true NOT NULL,
+    "kiosk_drawer_open" boolean DEFAULT false NOT NULL,
+    "kiosk_drawer_columns" smallint DEFAULT 2 NOT NULL,
+    "kiosk_notices_mode" "text" DEFAULT 'both'::"text" NOT NULL,
+    "kiosk_notices_rotation_seconds" smallint DEFAULT 12 NOT NULL,
+    "kiosk_notices_share" smallint DEFAULT 40 NOT NULL,
+    "kiosk_show_matches" boolean DEFAULT true NOT NULL,
+    "kiosk_show_upcoming" boolean DEFAULT true NOT NULL,
+    "kiosk_weeks_back" smallint DEFAULT 2 NOT NULL,
+    "kiosk_weeks_ahead" smallint DEFAULT 1 NOT NULL,
+    "kiosk_follow_board" boolean DEFAULT true NOT NULL,
+    "kiosk_live_mode" boolean DEFAULT true NOT NULL,
+    "kiosk_live_layout" "text" DEFAULT 'full'::"text" NOT NULL,
+    "kiosk_live_rotation_seconds" smallint DEFAULT 12 NOT NULL,
+    "kiosk_live_refresh_seconds" smallint DEFAULT 60 NOT NULL,
+    "kiosk_zapis_percent" smallint DEFAULT 80 NOT NULL,
+    "kiosk_past_days" smallint DEFAULT 0 NOT NULL,
+    "kiosk_idle_seconds" smallint DEFAULT 60 NOT NULL,
+    "kiosk_visible_days" smallint DEFAULT 7 NOT NULL,
+    "kiosk_font_size" smallint DEFAULT 11 NOT NULL,
     CONSTRAINT "schedule_settings_booking_horizon_days_check" CHECK ((("booking_horizon_days" >= 1) AND ("booking_horizon_days" <= 90))),
     CONSTRAINT "schedule_settings_duty_reminder_days_check" CHECK ((("duty_reminder_days" >= 1) AND ("duty_reminder_days" <= 14))),
+    CONSTRAINT "schedule_settings_kiosk_ahead_check" CHECK ((("kiosk_weeks_ahead" >= 0) AND ("kiosk_weeks_ahead" <= 52))),
+    CONSTRAINT "schedule_settings_kiosk_back_check" CHECK ((("kiosk_weeks_back" >= 0) AND ("kiosk_weeks_back" <= 52))),
+    CONSTRAINT "schedule_settings_kiosk_drawer_columns_check" CHECK ((("kiosk_drawer_columns" >= 1) AND ("kiosk_drawer_columns" <= 13))),
+    CONSTRAINT "schedule_settings_kiosk_font_size_check" CHECK ((("kiosk_font_size" >= 9) AND ("kiosk_font_size" <= 24))),
+    CONSTRAINT "schedule_settings_kiosk_idle_check" CHECK ((("kiosk_idle_seconds" >= 15) AND ("kiosk_idle_seconds" <= 600))),
+    CONSTRAINT "schedule_settings_kiosk_live_layout_check" CHECK (("kiosk_live_layout" = ANY (ARRAY['full'::"text", 'compact'::"text", 'table'::"text"]))),
+    CONSTRAINT "schedule_settings_kiosk_live_refresh_check" CHECK ((("kiosk_live_refresh_seconds" >= 30) AND ("kiosk_live_refresh_seconds" <= 600))),
+    CONSTRAINT "schedule_settings_kiosk_live_rotation_check" CHECK ((("kiosk_live_rotation_seconds" >= 3) AND ("kiosk_live_rotation_seconds" <= 120))),
+    CONSTRAINT "schedule_settings_kiosk_notices_mode_check" CHECK (("kiosk_notices_mode" = ANY (ARRAY['off'::"text", 'drawer'::"text", 'header'::"text", 'both'::"text"]))),
+    CONSTRAINT "schedule_settings_kiosk_notices_rotation_check" CHECK ((("kiosk_notices_rotation_seconds" >= 3) AND ("kiosk_notices_rotation_seconds" <= 120))),
+    CONSTRAINT "schedule_settings_kiosk_past_check" CHECK ((("kiosk_past_days" >= 0) AND ("kiosk_past_days" <= 60))),
+    CONSTRAINT "schedule_settings_kiosk_share_check" CHECK ((("kiosk_notices_share" >= 10) AND ("kiosk_notices_share" <= 90))),
+    CONSTRAINT "schedule_settings_kiosk_visible_days_check" CHECK ((("kiosk_visible_days" >= 2) AND ("kiosk_visible_days" <= 14))),
+    CONSTRAINT "schedule_settings_kiosk_zapis_check" CHECK ((("kiosk_zapis_percent" >= 50) AND ("kiosk_zapis_percent" <= 100))),
     CONSTRAINT "schedule_settings_lane_count_check" CHECK ((("lane_count" >= 1) AND ("lane_count" <= 12))),
     CONSTRAINT "schedule_settings_max_active_reservations_check" CHECK ((("max_active_reservations" >= 1) AND ("max_active_reservations" <= 50)))
 );
@@ -7214,6 +7318,18 @@ GRANT ALL ON FUNCTION "public"."message_recipients_stamp_reacted"() TO "service_
 REVOKE ALL ON FUNCTION "public"."message_send"("p_kind" "text", "p_audience" "text", "p_on_date" "date", "p_block_id" "uuid", "p_title" "text", "p_body" "text", "p_expires_at" timestamp with time zone, "p_notify" boolean) FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."message_send"("p_kind" "text", "p_audience" "text", "p_on_date" "date", "p_block_id" "uuid", "p_title" "text", "p_body" "text", "p_expires_at" timestamp with time zone, "p_notify" boolean) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."message_send"("p_kind" "text", "p_audience" "text", "p_on_date" "date", "p_block_id" "uuid", "p_title" "text", "p_body" "text", "p_expires_at" timestamp with time zone, "p_notify" boolean) TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."message_set_kiosk"("p_id" "uuid", "p_show" boolean) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."message_set_kiosk"("p_id" "uuid", "p_show" boolean) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."message_set_kiosk"("p_id" "uuid", "p_show" boolean) TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."message_set_visible_from"("p_id" "uuid", "p_from" timestamp with time zone, "p_notify" boolean) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."message_set_visible_from"("p_id" "uuid", "p_from" timestamp with time zone, "p_notify" boolean) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."message_set_visible_from"("p_id" "uuid", "p_from" timestamp with time zone, "p_notify" boolean) TO "service_role";
 
 
 
