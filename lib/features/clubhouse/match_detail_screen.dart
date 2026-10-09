@@ -16,8 +16,10 @@ library;
 
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -72,7 +74,7 @@ class MatchDetailScreen extends ConsumerStatefulWidget {
 }
 
 class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   bool _didOpenRefresh = false;
 
   /// The id the refresh calls use: the widget's, or — once a foreign match
@@ -102,42 +104,116 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen>
   /// turn instead of the sheet coming back.
   bool _zapisDismissed = false;
 
-  /// 0 = the detail, 1 = the Zápis: the cross-fade of a turn of the phone.
-  /// Started a frame after the one that built the sheet — the first frame
-  /// of a turn is slow (the sheet and the detail laid out at the new
-  /// size), and an animation started in a slow frame jumps to its end.
-  late final AnimationController _fade = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 300),
-  );
+  /// The turn of the phone, hidden: the frame after a turn is slow (the
+  /// whole screen laid out anew), and the browser meanwhile shows the old
+  /// frame stretched into the new shape. So the moment the metrics change,
+  /// the screen as it was is captured as an image ([_snapshot]); the first
+  /// frame at the new size draws only that image over the theme's
+  /// background (cheap), the next frame builds the new content under it,
+  /// and the image fades out — the old view flowing into the new one.
+  final _screen = GlobalKey();
+  ui.Image? _snapshot;
+  Orientation? _orientation;
 
-  /// Whether the sheet is wanted now, and the last one built — it stays up
-  /// while it fades out.
-  bool? _sheetWanted;
-  Widget? _sheetPage;
+  /// True for the one frame right after the turn, which draws no content.
+  bool _turning = false;
 
-  void _fadeTo(bool sheet) {
-    if (_sheetWanted == null) {
-      // The first build: no animation, straight to what is wanted.
-      _sheetWanted = sheet;
-      _fade.value = sheet ? 1 : 0;
+  /// The snapshot's opacity: 1 right after the turn, down to 0.
+  late final AnimationController _fade;
+
+  @override
+  void initState() {
+    super.initState();
+    _fade = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 350),
+    );
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeMetrics() {
+    final size = View.of(context).physicalSize;
+    final orientation = size.width > size.height
+        ? Orientation.landscape
+        : Orientation.portrait;
+    final was = _orientation;
+    _orientation = orientation;
+    if (was == null || was == orientation || _turning) return;
+    final boundary =
+        _screen.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+    if (boundary == null || boundary.debugNeedsPaint) return;
+    _fade.stop();
+    _fade.value = 1;
+    setState(() => _turning = true);
+    unawaited(_capture(boundary));
+  }
+
+  Future<void> _capture(RenderRepaintBoundary boundary) async {
+    ui.Image? image;
+    try {
+      // The layer tree still holds the frame before the turn.
+      image = await boundary.toImage(
+        pixelRatio: View.of(context).devicePixelRatio,
+      );
+    } catch (_) {
+      // No image: the content still comes in a frame, just without the
+      // old one flowing into it.
+    }
+    if (!mounted) {
+      image?.dispose();
       return;
     }
-    if (_sheetWanted == sheet) return;
-    _sheetWanted = sheet;
-    SchedulerBinding.instance.scheduleFrameCallback((_) {
+    _snapshot?.dispose();
+    _snapshot = image;
+    // Shown at once; the content follows in the frame after.
+    setState(() {});
+    SchedulerBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      if (_sheetWanted == true) {
-        unawaited(_fade.forward());
-      } else {
-        unawaited(_fade.reverse());
-      }
+      setState(() => _turning = false);
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        unawaited(
+          _fade.reverse().whenComplete(() {
+            if (!mounted) return;
+            setState(() {
+              _snapshot?.dispose();
+              _snapshot = null;
+            });
+          }),
+        );
+      });
     });
+  }
+
+  /// [content] with the turn's snapshot over it, while there is one.
+  Widget _withTurn(Widget content, Color background) {
+    final snapshot = _snapshot;
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        ColoredBox(color: background),
+        if (!_turning) RepaintBoundary(key: _screen, child: content),
+        if (snapshot != null)
+          IgnorePointer(
+            child: FadeTransition(
+              opacity: _fade,
+              child: RawImage(
+                image: snapshot,
+                fit: BoxFit.cover,
+                alignment: Alignment.topLeft,
+              ),
+            ),
+          ),
+      ],
+    );
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _fade.dispose();
+    _snapshot?.dispose();
     _waitTimer?.cancel();
     super.dispose();
   }
@@ -441,18 +517,50 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen>
         slot != null &&
         !_zapisDismissed;
 
-    _fadeTo(sheet);
-    if (sheet) {
-      _sheetPage = ZapisPage(
-        slot: slot,
-        closeButton: true,
-        competitionSlug: fromLeague ? widget.competitionSlug : null,
-        withRegnums: true,
-        onClose: () => setState(() => _zapisDismissed = true),
-      );
-    }
+    _orientation ??= landscape ? Orientation.landscape : Orientation.portrait;
+    final background = Theme.of(context).scaffoldBackgroundColor;
+    if (_turning) return _withTurn(const SizedBox.shrink(), background);
+    final Widget page = sheet
+        ? ZapisPage(
+            slot: slot,
+            closeButton: true,
+            competitionSlug: fromLeague ? widget.competitionSlug : null,
+            withRegnums: true,
+            onClose: () => setState(() => _zapisDismissed = true),
+          )
+        : _detail(
+            context,
+            slot: slot,
+            result: result,
+            players: players,
+            playersLoading: playersLoading,
+            venueMatch: venueMatch,
+            layout: inlineLayout,
+            now: now,
+            live: live,
+            slotsLoading: slotsLoading,
+            showRefreshButton: showRefreshButton,
+            showWaiting: showWaiting,
+          );
+    return _withTurn(page, background);
+  }
 
-    final detail = Scaffold(
+  /// The detail itself: the AppBar and the body.
+  Widget _detail(
+    BuildContext context, {
+    required PrioritySlot? slot,
+    required MatchResult? result,
+    required List<MatchPlayerResult> players,
+    required bool playersLoading,
+    required Venue? venueMatch,
+    required MatchLayout layout,
+    required DateTime now,
+    required bool live,
+    required bool slotsLoading,
+    required bool showRefreshButton,
+    required bool showWaiting,
+  }) {
+    return Scaffold(
       appBar: AppBar(
         title: Text(_appBarTitle(slot)),
         actions: [
@@ -484,30 +592,13 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen>
               players: players,
               playersLoading: playersLoading,
               venueMatch: venueMatch,
-              layout: inlineLayout,
+              layout: layout,
               now: now,
               live: live,
               // Pulling is the ⟳ button's twin: gone together once a
               // refresh has answered not_live.
               pullToRefresh: showRefreshButton,
             ),
-    );
-    // The detail stays built under the sheet (hidden once the sheet is
-    // whole), so the turn back has nothing to build; the sheet fades in
-    // over it and out again.
-    return AnimatedBuilder(
-      animation: _fade,
-      builder: (context, _) {
-        final sheetUp =
-            _sheetPage != null && (_sheetWanted == true || _fade.value > 0);
-        return Stack(
-          fit: StackFit.expand,
-          children: [
-            Offstage(offstage: _fade.value == 1, child: detail),
-            if (sheetUp) FadeTransition(opacity: _fade, child: _sheetPage),
-          ],
-        );
-      },
     );
   }
 

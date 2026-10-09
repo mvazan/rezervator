@@ -1814,35 +1814,47 @@ void main() {
       expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
     });
 
-    testWidgets('the turn cross-fades the detail and the sheet — started a '
-        'frame after the slow one of the turn: both on screen mid-fade, '
-        'only the sheet after it, and back', (tester) async {
+    testWidgets('a turn is hidden behind a snapshot of the screen as it was: '
+        'the first frame draws only that, the content comes in the next '
+        'frame under it, and the snapshot fades out — both ways',
+        (tester) async {
       window(tester, 450, 900);
       await tester.pumpWidget(rudna(sheetSideways));
       await tester.pumpAndSettle();
       expect(find.byType(DuelCard), findsWidgets);
+      expect(find.byType(RawImage), findsNothing);
 
-      tester.view.physicalSize = const Size(900, 450);
-      // The first frame builds the sheet; the fade starts in the next one.
-      await tester.pump();
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 150));
-      // Mid-fade: the sheet is in, the detail is still going out.
-      expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
-      expect(find.byType(MatchScoreboard), findsOneWidget);
-      await tester.pumpAndSettle();
-      expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
-      expect(find.byType(MatchScoreboard), findsNothing);
+      Future<void> turn(Size to, Finder gone, Finder comes) async {
+        tester.view.physicalSize = to;
+        // The frame of the turn: nothing laid out at the new size yet.
+        await tester.pump();
+        expect(gone, findsNothing);
+        expect(comes, findsNothing);
+        // The snapshot, alone; then the content under it.
+        await tester.pump();
+        await tester.pump();
+        expect(find.byType(RawImage), findsOneWidget);
+        expect(comes, findsWidgets);
+        expect(gone, findsNothing);
+        // Mid-fade the snapshot is still there, at the end it is gone.
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 150));
+        expect(find.byType(RawImage), findsOneWidget);
+        await tester.pumpAndSettle();
+        expect(find.byType(RawImage), findsNothing);
+        expect(comes, findsWidgets);
+      }
 
-      tester.view.physicalSize = const Size(450, 900);
-      await tester.pump();
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 150));
-      expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
-      expect(find.byType(MatchScoreboard), findsOneWidget);
-      await tester.pumpAndSettle();
-      expect(find.byType(LegacyScoreSheetPage), findsNothing);
-      expect(find.byType(DuelCard), findsWidgets);
+      await turn(
+        const Size(900, 450),
+        find.byType(DuelCard),
+        find.byType(LegacyScoreSheetPage),
+      );
+      await turn(
+        const Size(450, 900),
+        find.byType(LegacyScoreSheetPage),
+        find.byType(DuelCard),
+      );
     });
 
     testWidgets('the app keeps one duel open in a fitted layout: opening '
