@@ -1814,9 +1814,8 @@ void main() {
       expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
     });
 
-    testWidgets('the turn shows the sheet in the very frame of the turn — '
-        'the detail is never built sideways first — and the turn back the '
-        'detail again', (tester) async {
+    testWidgets('the turn cross-fades the detail and the sheet: both on '
+        'screen mid-fade, only the sheet after it, and back', (tester) async {
       window(tester, 450, 900);
       await tester.pumpWidget(rudna(sheetSideways));
       await tester.pumpAndSettle();
@@ -1824,12 +1823,20 @@ void main() {
 
       tester.view.physicalSize = const Size(900, 450);
       await tester.pump();
+      await tester.pump(const Duration(milliseconds: 150));
+      // Mid-fade: the sheet is in, the detail is still going out.
       expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
-      expect(find.byType(DuelCard), findsNothing);
+      expect(find.byType(MatchScoreboard), findsOneWidget);
+      await tester.pumpAndSettle();
+      expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
       expect(find.byType(MatchScoreboard), findsNothing);
 
       tester.view.physicalSize = const Size(450, 900);
       await tester.pump();
+      await tester.pump(const Duration(milliseconds: 150));
+      expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
+      expect(find.byType(MatchScoreboard), findsOneWidget);
+      await tester.pumpAndSettle();
       expect(find.byType(LegacyScoreSheetPage), findsNothing);
       expect(find.byType(DuelCard), findsWidgets);
     });

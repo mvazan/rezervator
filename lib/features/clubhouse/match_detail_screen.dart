@@ -301,7 +301,9 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
     // One source of the match: our slots, or (a foreign match) its
     // competition's league matches.
     final slots = ref.watch(prioritySlotsProvider);
-    final leagueAsync = isLeague ? ref.watch(leagueMatchesProvider(leagueSlug)) : null;
+    final leagueAsync = isLeague
+        ? ref.watch(leagueMatchesProvider(leagueSlug))
+        : null;
     LeagueMatch? leagueMatch;
     for (final l in leagueAsync?.value ?? const <LeagueMatch>[]) {
       if (l.id == widget.matchId) leagueMatch = l;
@@ -395,60 +397,68 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
 
     if (!landscape) _zapisDismissed = false;
     // Held sideways with the Zápis chosen, the sheet takes the whole screen
-    // in place of the detail — built in the very frame of the turn, so the
-    // detail is never drawn sideways first.
-    if (layout == MatchLayout.zapis &&
+    // in place of the detail — chosen in the very frame of the turn, so the
+    // detail is never drawn sideways on its own, and the two cross-fade.
+    final sheet =
+        layout == MatchLayout.zapis &&
         players.isNotEmpty &&
         slot != null &&
-        !_zapisDismissed) {
-      return ZapisPage(
-        slot: slot,
-        closeButton: true,
-        competitionSlug: fromLeague ? widget.competitionSlug : null,
-        withRegnums: true,
-        onClose: () => setState(() => _zapisDismissed = true),
-      );
-    }
+        !_zapisDismissed;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(_appBarTitle(slot)),
-        actions: [
-          if (showRefreshButton)
-            showWaiting
-                ? const Padding(
-                    padding: EdgeInsets.all(16),
-                    child: SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  )
-                : IconButton(
-                    icon: const Icon(Icons.refresh),
-                    tooltip: 'Obnovit',
-                    onPressed: () => _onRefreshTap(context, result?.fetchedAt),
-                  ),
-        ],
-      ),
-      body: slotsLoading
-          ? const Center(child: CircularProgressIndicator())
-          : slot == null
-          ? const Center(child: Text('Zápas už v rozpisu není.'))
-          : _body(
-              context,
-              slot: slot,
-              result: result,
-              players: players,
-              playersLoading: playersLoading,
-              venueMatch: venueMatch,
-              layout: inlineLayout,
-              now: now,
-              live: live,
-              // Pulling is the ⟳ button's twin: gone together once a
-              // refresh has answered not_live.
-              pullToRefresh: showRefreshButton,
+    final Widget page = sheet
+        ? ZapisPage(
+            key: const ValueKey('zapis'),
+            slot: slot,
+            closeButton: true,
+            competitionSlug: fromLeague ? widget.competitionSlug : null,
+            withRegnums: true,
+            onClose: () => setState(() => _zapisDismissed = true),
+          )
+        : Scaffold(
+            key: const ValueKey('detail'),
+            appBar: AppBar(
+              title: Text(_appBarTitle(slot)),
+              actions: [
+                if (showRefreshButton)
+                  showWaiting
+                      ? const Padding(
+                          padding: EdgeInsets.all(16),
+                          child: SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        )
+                      : IconButton(
+                          icon: const Icon(Icons.refresh),
+                          tooltip: 'Obnovit',
+                          onPressed: () =>
+                              _onRefreshTap(context, result?.fetchedAt),
+                        ),
+              ],
             ),
+            body: slotsLoading
+                ? const Center(child: CircularProgressIndicator())
+                : slot == null
+                ? const Center(child: Text('Zápas už v rozpisu není.'))
+                : _body(
+                    context,
+                    slot: slot,
+                    result: result,
+                    players: players,
+                    playersLoading: playersLoading,
+                    venueMatch: venueMatch,
+                    layout: inlineLayout,
+                    now: now,
+                    live: live,
+                    // Pulling is the ⟳ button's twin: gone together once a
+                    // refresh has answered not_live.
+                    pullToRefresh: showRefreshButton,
+                  ),
+          );
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 300),
+      child: page,
     );
   }
 
@@ -482,7 +492,10 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> {
           now: now,
           onVenueTap: venueMatch == null
               ? null
-              : () => pushScreen(context, (_) => VenueDetailScreen(slug: venueMatch.slug)),
+              : () => pushScreen(
+                  context,
+                  (_) => VenueDetailScreen(slug: venueMatch.slug),
+                ),
           onSiteTap: slot.siteUrl == null
               ? null
               : () => widget.launch(slot.siteUrl!),
