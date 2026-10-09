@@ -119,6 +119,19 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                 lane: link.lane,
               ),
             );
+      case PendingLinkKind.booking:
+        // The calendar, at the reservation made for the player (kiosk,
+        // group mate, duty): outlined while it is still
+        // booked, a snack once it has been cancelled.
+        setState(() => _chosen = HomeView.calendar);
+        ref.read(calendarFocusProvider.notifier).request(
+              CalendarFocus(
+                date: Day.parse(link.date!),
+                blockId: link.blockId,
+                lane: link.lane,
+                reservationId: link.reservationId,
+              ),
+            );
       case PendingLinkKind.pendingPlayer:
         // The admin's list, where the new player waits for approval.
         pushScreen<void>(context, (_) => const PlayersScreen());

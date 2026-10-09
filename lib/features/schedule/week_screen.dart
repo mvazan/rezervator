@@ -58,7 +58,8 @@ class _WeekScreenState extends ConsumerState<WeekScreen> with WeekNavigation {
     super.dispose();
   }
 
-  /// Says what the push's spot is now and, when it is free, outlines it.
+  /// Says what the push's spot is now and, when it is as the push said
+  /// (free, or holding the booking), outlines it.
   void _answerFocus(
     CalendarFocus focus,
     DaySchedule day, {
@@ -75,6 +76,26 @@ class _WeekScreenState extends ConsumerState<WeekScreen> with WeekNavigation {
     if (blockId == null || lane == null) {
       // An older push names only the day: showing it is the whole answer.
       notifier.clear();
+      return;
+    }
+    final reservationId = focus.reservationId;
+    if (reservationId != null) {
+      // A booking made for the player: outline it while the spot still
+      // holds it.
+      final booked = day is OpenDay &&
+          day.blocks.any((b) => b.id == blockId) &&
+          lane >= 1 &&
+          lane <= day.laneCount &&
+          switch (day.slot(blockId, lane)) {
+            ReservedSlot(:final reservation) => reservation.id == reservationId,
+            _ => false,
+          };
+      if (!booked) {
+        snack(context, 'Tahle rezervace už je zrušená.');
+        notifier.clear();
+        return;
+      }
+      _highlight(notifier);
       return;
     }
     final result = freedSpotResult(
@@ -95,6 +116,11 @@ class _WeekScreenState extends ConsumerState<WeekScreen> with WeekNavigation {
       notifier.clear();
       return;
     }
+    _highlight(notifier);
+  }
+
+  /// Outlines the focused cell for [_highlightFor].
+  void _highlight(CalendarFocusNotifier notifier) {
     notifier.markHandled(highlight: true);
     _highlightTimer?.cancel();
     _highlightTimer = Timer(_highlightFor, () {

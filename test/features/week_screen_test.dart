@@ -1737,6 +1737,56 @@ void main() {
       await tester.pumpAndSettle();
     });
 
+    testWidgets('a kiosk booking is outlined while it is still booked', (
+      tester,
+    ) async {
+      portraitSurface(tester);
+      await tester.pumpWidget(app(reservations: [res('r1', 'me', target)]));
+      await tester.pumpAndSettle();
+
+      focusOf(tester).request(
+        CalendarFocus(
+          date: target,
+          blockId: 'b1',
+          lane: 2,
+          reservationId: 'r1',
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 1300));
+      await tester.pump();
+      expect(outline(2), findsOneWidget);
+      expect(find.byType(SnackBar), findsNothing);
+      await tester.pump(const Duration(seconds: 9));
+      await tester.pump();
+      expect(outline(2), findsNothing);
+      expect(focusState(tester), isNull);
+    });
+
+    testWidgets('a cancelled kiosk booking is said so', (tester) async {
+      portraitSurface(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+
+      focusOf(tester).request(
+        CalendarFocus(
+          date: target,
+          blockId: 'b1',
+          lane: 2,
+          reservationId: 'r1',
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 1300));
+      await tester.pump();
+      expect(find.text('Tahle rezervace už je zrušená.'), findsOneWidget);
+      expect(outline(2), findsNothing);
+      expect(focusState(tester), isNull);
+      await tester.pumpAndSettle();
+    });
+
     testWidgets('a push that names only the day just opens it', (
       tester,
     ) async {

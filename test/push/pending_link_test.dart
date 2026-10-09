@@ -46,6 +46,48 @@ void main() {
       );
     });
 
+    test('a kiosk-booking push carries the day, the cell and the booking', () {
+      expect(
+        pendingLinkFromData(const {
+          'kind': 'kiosk_booking',
+          'reservation_id': 'r1',
+          'date': '2026-10-08',
+          'block_id': 'b1',
+          'lane': '2',
+          'tenant_id': 't1',
+        }),
+        const PendingLink(
+          kind: PendingLinkKind.booking,
+          tenantId: 't1',
+          date: '2026-10-08',
+          blockId: 'b1',
+          lane: 2,
+          reservationId: 'r1',
+        ),
+      );
+      // A group mate's and the duty's booking open the same way.
+      for (final kind in ['group_booking', 'duty_booking']) {
+        expect(
+          pendingLinkFromData({
+            'kind': kind,
+            'reservation_id': 'r1',
+            'date': '2026-10-08',
+            'block_id': 'b1',
+            'lane': '2',
+          })?.kind,
+          PendingLinkKind.booking,
+        );
+      }
+      // An older push named the reservation alone: nothing to open.
+      expect(
+        pendingLinkFromData(const {
+          'kind': 'kiosk_booking',
+          'reservation_id': 'r1',
+        }),
+        isNull,
+      );
+    });
+
     test('an older freed-spot push opens the day alone; a bad day nothing', () {
       expect(
         pendingLinkFromData(const {'kind': 'freed_spot', 'date': '2026-10-08'}),

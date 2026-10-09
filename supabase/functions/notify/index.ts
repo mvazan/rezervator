@@ -2,11 +2,12 @@
 //
 // Triggered by Supabase Database Webhooks (triggers in 0001_schema.sql) on:
 //   INSERT profiles      -> "new player waiting for approval" (to admins)
-//   INSERT reservations  -> kiosk booking confirmation (to the player;
-//                           the e-mail variant carries a one-click cancel link);
-//                           or, created_via = 'group' (0044) or 'duty' (0050,
+//   INSERT reservations  -> kiosk booking confirmation to the player; or,
+//                           created_via = 'group' (0044) or 'duty' (0050,
 //                           the player on duty), "X ti zarezervoval(a)
-//                           trénink" to the player it's for
+//                           trénink" to the player it's for. All three: the
+//                           push opens the calendar at the reservation, the
+//                           e-mail carries a one-click cancel link
 //   UPDATE reservations  -> admin cancelled an upcoming reservation, or an
 //                           admin MOVED it ("termín přesunut z X na Y") —
 //                           both honour the per-change notify_player flag +
@@ -737,6 +738,54 @@ async function notifyFreedSpot(record: Record<string, unknown>) {
   }
 }
 
+/// A reservation somebody else made for the player — on the kiosk, by a
+/// group mate (0044) or by the player on duty (0050). The push opens the
+/// app's calendar at it and outlines it while it is still booked; the
+/// e-mail offers a one-click cancel valid until the block starts.
+async function notifyBookedFor(
+  record: Record<string, unknown>,
+  ctx: NonNullable<Awaited<ReturnType<typeof reservationContext>>>,
+  m: {
+    kind: string;
+    title: string;
+    body: string;
+    intro: string;
+    cancelPrompt: string;
+  },
+) {
+  const exp = pragueEpoch(
+    record.date as string,
+    ctx.block.starts_at as string,
+  );
+  // Fail closed: signing with an empty key would mint links anyone
+  // could forge. A missing secret is a deployment bug — surface it
+  // as a 500 in the function logs instead.
+  const cancelSecret = Deno.env.get("CANCEL_TOKEN_SECRET");
+  if (!cancelSecret) throw new Error("CANCEL_TOKEN_SECRET is not set");
+  const token = await signCancelToken(
+    record.id as string,
+    exp,
+    cancelSecret,
+  );
+  const cancelUrl =
+    `${Deno.env.get("SUPABASE_URL")}/functions/v1/cancel?token=${token}`;
+  await notifyRecipient(ctx.player, m.title, m.body, {
+    data: {
+      kind: m.kind,
+      reservation_id: String(record.id),
+      date: String(record.date),
+      block_id: String(record.block_id),
+      lane: String(record.lane),
+      tenant_id: String(record.tenant_id),
+    },
+    html: `<p>${m.intro}</p>` +
+      `<p><b>${escapeHtml(ctx.when)}</b></p>` +
+      `<p>${m.cancelPrompt}</p>` +
+      `<p><a href="${cancelUrl}">Zrušit rezervaci</a></p>` +
+      `<p>Odkaz platí do začátku tréninku.</p>`,
+  });
+}
+
 async function handle(payload: WebhookPayload) {
   if (payload.type === "CRON" && payload.table === "notification_jobs") {
     // The minutely pg_cron tick (0023): process everything that's due — the
@@ -826,49 +875,26 @@ async function handle(payload: WebhookPayload) {
           ]);
           if (!ctx || !by) return;
           const m = groupBookedMessage(by.display_name, ctx.when);
-          await notifyRecipient(ctx.player, m.title, m.body, {
-            data: {
-              kind: record.created_via === "duty" ? "duty_booking" : "group_booking",
-              reservation_id: String(record.id),
-            },
+          await notifyBookedFor(record, ctx, {
+            kind: record.created_via === "duty" ? "duty_booking" : "group_booking",
+            title: m.title,
+            body: m.body,
+            intro: `${escapeHtml(by.display_name)} ti zarezervoval(a) trénink:`,
+            cancelPrompt: "Pokud termín nechceš, zruš ho jedním kliknutím:",
           });
           return;
         }
         if (record.created_via !== "kiosk") return;
         const ctx = await reservationContext(record);
         if (!ctx) return;
-        const exp = pragueEpoch(
-          record.date as string,
-          ctx.block.starts_at as string,
-        );
-        // Fail closed: signing with an empty key would mint links anyone
-        // could forge. A missing secret is a deployment bug — surface it
-        // as a 500 in the function logs instead.
-        const cancelSecret = Deno.env.get("CANCEL_TOKEN_SECRET");
-        if (!cancelSecret) throw new Error("CANCEL_TOKEN_SECRET is not set");
-        const token = await signCancelToken(
-          record.id as string,
-          exp,
-          cancelSecret,
-        );
-        const cancelUrl =
-          `${Deno.env.get("SUPABASE_URL")}/functions/v1/cancel?token=${token}`;
-        await notifyRecipient(
-          ctx.player,
-          "Rezervace z kiosku 🎳",
-          `${ctx.when}. Pokud jsi to nebyl ty, zruš ji v aplikaci.`,
-          {
-            data: {
-              kind: "kiosk_booking",
-              reservation_id: String(record.id),
-            },
-            html: `<p>Na kiosku na kuzelně vznikla rezervace na tvé jméno:</p>` +
-              `<p><b>${escapeHtml(ctx.when)}</b></p>` +
-              `<p>Pokud jsi to nebyl ty — nebo termín nechceš — zruš ji jedním kliknutím:</p>` +
-              `<p><a href="${cancelUrl}">Zrušit rezervaci</a></p>` +
-              `<p>Odkaz platí do začátku tréninku.</p>`,
-          },
-        );
+        await notifyBookedFor(record, ctx, {
+          kind: "kiosk_booking",
+          title: "Rezervace z kiosku 🎳",
+          body: `${ctx.when}. Pokud jsi to nebyl ty, zruš ji v aplikaci.`,
+          intro: "Na kiosku na kuzelně vznikla rezervace na tvé jméno:",
+          cancelPrompt:
+            "Pokud jsi to nebyl ty — nebo termín nechceš — zruš ji jedním kliknutím:",
+        });
         return;
       }
 
