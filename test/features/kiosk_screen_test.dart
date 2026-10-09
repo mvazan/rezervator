@@ -367,12 +367,87 @@ void main() {
     expect(find.text('Zadej číslo od 50 do 100.'), findsOneWidget);
     expect(patches(), 0);
     await enter(tester, 'Doba nečinnosti', '');
-    expect(find.text('Zadej číslo od 10 do 3600.'), findsOneWidget);
+    expect(find.text('Zadej číslo od 15 do 600.'), findsOneWidget);
     expect(patches(), 0);
     // The default again: no write, and the error goes away.
     await enter(tester, 'Doba nečinnosti', '60');
-    expect(find.text('Zadej číslo od 10 do 3600.'), findsNothing);
+    expect(find.text('Zadej číslo od 15 do 600.'), findsNothing);
     expect(patches(), 0);
+  });
+
+  testWidgets('the screen block: dark mode, then the idle time and the Zápis '
+      'size, then the day on the screen and the column width', (tester) async {
+    tall(tester);
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+    double top(Finder f) => tester.getTopLeft(f).dy;
+    final order = [
+      top(find.text('Tmavý režim')),
+      top(find.widgetWithText(TextField, 'Doba nečinnosti')),
+      top(find.widgetWithText(TextField, 'Velikost zápisu')),
+      top(find.text('Celý den na obrazovku')),
+      top(find.widgetWithText(TextField, 'Šířka sloupce dne')),
+      top(find.text('Posun tabule do minulosti')),
+      top(find.text('Nástěnka')),
+    ];
+    for (var i = 1; i < order.length; i++) {
+      expect(order[i - 1], lessThan(order[i]), reason: 'option $i');
+    }
+    // The Zápis size moved out of the live match's block.
+    expect(find.widgetWithText(TextField, 'Velikost zápisu'), findsOneWidget);
+  });
+
+  testWidgets('the column width: 0 = automatic, else 120–600 px; anything '
+      'between is refused', (tester) async {
+    tall(tester);
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+    Map<String, dynamic> lastPatch() => jsonDecode(
+          requests.lastWhere((r) => r.method == 'PATCH').body,
+        ) as Map<String, dynamic>;
+    String shown(String label) =>
+        tester.widget<TextField>(find.widgetWithText(TextField, label))
+            .controller!.text;
+    expect(shown('Šířka sloupce dne'), '0');
+
+    await enter(tester, 'Šířka sloupce dne', '50');
+    expect(find.text('Zadej 0 nebo číslo od 120 do 600.'), findsOneWidget);
+    expect(requests.where((r) => r.method == 'PATCH'), isEmpty);
+    await enter(tester, 'Šířka sloupce dne', '260');
+    expect(lastPatch(), {'kiosk_column_width': 260});
+  });
+
+  testWidgets('the lane row height shows only while the day scrolls', (
+    tester,
+  ) async {
+    tall(tester);
+    // Fit day on (the default): no row height.
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(TextField, 'Výška řádku dráhy'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+
+    await tester.pumpWidget(app(
+      settings: const ScheduleSettings(
+        laneCount: 4,
+        trainingWeekdays: {1},
+        bookingHorizonDays: 14,
+        maxActiveReservations: 3,
+        kioskFitDay: false,
+        tenantId: 't',
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<TextField>(find.widgetWithText(TextField, 'Výška řádku dráhy'))
+          .controller!
+          .text,
+      '40',
+    );
+    await enter(tester, 'Výška řádku dráhy', '56');
+    expect(jsonDecode(requests.lastWhere((r) => r.method == 'PATCH').body),
+        {'kiosk_row_height': 56});
   });
 
   testWidgets('leaving a number field writes it too', (tester) async {
@@ -432,6 +507,9 @@ void main() {
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
     expect(find.textContaining('Jen výchozí rozsah'), findsNWidgets(2));
+    // Each names the kiosk's button for its own direction.
+    expect(find.textContaining('(„Zobrazit předchozí“)'), findsOneWidget);
+    expect(find.textContaining('(„Zobrazit další“)'), findsOneWidget);
   });
 
   testWidgets('the panel switch comes first, and what needs it hides with it',

@@ -345,20 +345,25 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
     // something to happen — looks like a screen that will not work. Say why.
     final board = LayoutBuilder(
       builder: (context, constraints) {
-        final columnWidth = boardColumnWidth(
-          widget.columnBasisWidth ?? constraints.maxWidth,
-        );
+        // The admin's width, or as wide as a week fits (0064).
+        final columnWidth = settings.kioskColumnWidth > 0
+            ? settings.kioskColumnWidth.toDouble()
+            : boardColumnWidth(
+                widget.columnBasisWidth ?? constraints.maxWidth,
+              );
         // Two admin-selectable modes (settings.kioskFitDay):
         // - fit-height: the whole window stretches to the viewport, floored
         //   at the legibility scale (then the board scrolls anyway);
         // - comfortable scroll: the same fixed scale as the app's week view
-        //   (a 60-min block = laneCount × 40 px), scrolling vertically; the
-        //   idle reset brings the board back to "now".
+        //   (a 60-min block = laneCount × 40 px — or the admin's row height,
+        //   0064), scrolling vertically; the idle reset brings the board back
+        //   to "now".
         final fitScale =
             (constraints.maxHeight - headerHeight - _bottomLabelPad) /
             window.minutes;
         final minScale = _minPxPerMinute(windowBlocks, settings.laneCount);
-        final comfortableScale = settings.laneCount * laneRowRefHeight / 60;
+        final comfortableScale =
+            settings.laneCount * settings.kioskRowHeight / 60;
         final pxPerMinute = settings.kioskFitDay
             ? (fitScale < minScale ? minScale : fitScale)
             // The tappability floor applies here too: a very short block

@@ -144,10 +144,10 @@ alter table schedule_settings
   add column if not exists kiosk_show_upcoming boolean not null default true,
   add column if not exists kiosk_weeks_back smallint not null default 2
     constraint schedule_settings_kiosk_back_check
-    check (kiosk_weeks_back between 0 and 12),
+    check (kiosk_weeks_back between 0 and 52),
   add column if not exists kiosk_weeks_ahead smallint not null default 1
     constraint schedule_settings_kiosk_ahead_check
-    check (kiosk_weeks_ahead between 0 and 12),
+    check (kiosk_weeks_ahead between 0 and 52),
   add column if not exists kiosk_follow_board boolean not null default true,
   -- A match being played (with data) across the whole drawer, how it is
   -- drawn (the duel cards, compact, a table) and how fast several take
@@ -175,7 +175,16 @@ alter table schedule_settings
   -- After this long without a touch the kiosk starts over.
   add column if not exists kiosk_idle_seconds smallint not null default 60
     constraint schedule_settings_kiosk_idle_check
-    check (kiosk_idle_seconds between 15 and 600);
+    check (kiosk_idle_seconds between 15 and 600),
+  -- The board's day columns: 0 = as wide as a week fits the screen (160 to
+  -- 220 px), else this many px. And, when the day does not fit the screen
+  -- (kiosk_fit_day off), one lane row's height in px per hour.
+  add column if not exists kiosk_column_width smallint not null default 0
+    constraint schedule_settings_kiosk_column_width_check
+    check (kiosk_column_width = 0 or kiosk_column_width between 120 and 600),
+  add column if not exists kiosk_row_height smallint not null default 40
+    constraint schedule_settings_kiosk_row_height_check
+    check (kiosk_row_height between 20 and 120);
 
 -- The public overview (0043) keeps handing out only what it always did:
 -- the kiosk's choices are the admin's, not anon's.
@@ -203,6 +212,7 @@ begin
                           - 'kiosk_idle_seconds'
                           - 'kiosk_live_layout' - 'kiosk_follow_board'
                           - 'kiosk_live_refresh_seconds'
+                          - 'kiosk_column_width' - 'kiosk_row_height'
                    from schedule_settings s where s.tenant_id = v_tenant),
     'blocks', coalesce((
       select jsonb_agg(to_jsonb(b) - 'tenant_id')

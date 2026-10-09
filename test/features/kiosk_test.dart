@@ -1292,6 +1292,9 @@ void main() {
       void Function(String id)? onRefresh,
       int liveRefresh = 60,
       MatchLayout liveLayout = MatchLayout.full,
+      int columnWidth = 0,
+      int rowHeight = 40,
+      bool fitDay = true,
       Stream<Map<String, MatchResult>>? resultsStream,
       Map<String, List<MatchPlayerResult>> lineups = const {},
     }) => ProviderScope(
@@ -1326,6 +1329,9 @@ void main() {
               kioskFollowBoard: followBoard,
               kioskLiveRefreshSeconds: liveRefresh,
               kioskLiveLayout: liveLayout,
+              kioskColumnWidth: columnWidth,
+              kioskRowHeight: rowHeight,
+              kioskFitDay: fitDay,
             ),
           ),
         ),
@@ -1391,6 +1397,46 @@ void main() {
       expect(drawerText('Brigáda'), findsNothing);
 
       await finish(tester);
+    });
+
+    testWidgets('the admin\'s column width replaces the automatic one; 0 '
+        'is automatic', (tester) async {
+      fullHd(tester);
+      double column() =>
+          tester.getSize(find.byType(BoardColumnHeader).first).width;
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+      // The header sits in the column with a small margin.
+      final automatic = column();
+      expect(automatic, inInclusiveRange(150, 220));
+      await finish(tester);
+
+      await tester.pumpWidget(app(columnWidth: 320));
+      await tester.pumpAndSettle();
+      expect(column(), inInclusiveRange(310, 320));
+      await finish(tester);
+    });
+
+    testWidgets('while the day scrolls, the admin\'s lane row height sets '
+        'the scale; with the day on the screen it does not', (tester) async {
+      fullHd(tester);
+      double day() =>
+          tester.getSize(find.byType(ScheduleDayColumn).first).height;
+      Future<double> heightWith({required bool fit, required int row}) async {
+        await tester.pumpWidget(app(fitDay: fit, rowHeight: row));
+        await tester.pumpAndSettle();
+        final h = day();
+        await finish(tester);
+        return h;
+      }
+
+      final at40 = await heightWith(fit: false, row: 40);
+      final at80 = await heightWith(fit: false, row: 80);
+      expect(at80, greaterThan(at40 * 1.5));
+      expect(
+        await heightWith(fit: true, row: 80),
+        await heightWith(fit: true, row: 40),
+      );
     });
 
     testWidgets('the day columns keep their width while the drawer slides', (

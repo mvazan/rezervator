@@ -104,10 +104,11 @@ class KioskSettingsScreen extends ConsumerWidget {
     KioskNoticesMode.both => 'V záhlaví i v panelu',
   };
 
-  /// The note under the two ranges: they are only where the list opens.
-  static const _rangeNote =
+  /// The note under the two ranges: they are only where the list opens;
+  /// [button] is the kiosk's own button for that direction.
+  static String _rangeNote(String button) =>
       'Jen výchozí rozsah — na kiosku jde posouvat celou sezónu '
-      '(„Zobrazit další“).';
+      '(„$button“).';
 
   /// A section: its title, a line on what it is about, and its options.
   Widget _section(
@@ -163,6 +164,7 @@ class KioskSettingsScreen extends ConsumerWidget {
     required int min,
     required int max,
     String? helper,
+    bool zeroAllowed = false,
   }) => Padding(
     padding: const EdgeInsets.only(bottom: 12),
     child: NumberSettingField(
@@ -173,6 +175,7 @@ class KioskSettingsScreen extends ConsumerWidget {
       min: min,
       max: max,
       helper: helper,
+      zeroAllowed: zeroAllowed,
       onChanged: settings == null
           ? null
           : (n) => _panel(context, settings, {column: n}),
@@ -233,6 +236,33 @@ class KioskSettingsScreen extends ConsumerWidget {
                           errorText: friendlyDbError,
                         ),
                 ),
+                _number(
+                  context,
+                  settings,
+                  'Doba nečinnosti',
+                  settings?.kioskIdleSeconds ?? 60,
+                  'kiosk_idle_seconds',
+                  unit: 's',
+                  min: 15,
+                  max: 600,
+                  helper:
+                      'Po tolika sekundách bez dotyku kiosk zapomene '
+                      'vybraného hráče, zavře okna i zápis, vrátí tabuli na '
+                      'dnešek a panel do výchozího stavu.',
+                ),
+                _number(
+                  context,
+                  settings,
+                  'Velikost zápisu',
+                  settings?.kioskZapisPercent ?? 80,
+                  'kiosk_zapis_percent',
+                  unit: '%',
+                  min: 50,
+                  max: 100,
+                  helper:
+                      'Kolik obrazovky zabere zápis otevřený klepnutím na '
+                      'zápas; 100 = celá obrazovka s křížkem.',
+                ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Celý den na obrazovku'),
@@ -254,19 +284,35 @@ class KioskSettingsScreen extends ConsumerWidget {
                           errorText: friendlyDbError,
                         ),
                 ),
+                if (!(settings?.kioskFitDay ?? true))
+                  _number(
+                    context,
+                    settings,
+                    'Výška řádku dráhy',
+                    settings?.kioskRowHeight ?? 40,
+                    'kiosk_row_height',
+                    unit: 'px',
+                    min: 20,
+                    max: 120,
+                    helper:
+                        'Výška jedné dráhy v hodinovém bloku, když se den '
+                        'nevejde na obrazovku a tabule se posouvá. Appka '
+                        'má 40.',
+                  ),
                 _number(
                   context,
                   settings,
-                  'Doba nečinnosti',
-                  settings?.kioskIdleSeconds ?? 60,
-                  'kiosk_idle_seconds',
-                  unit: 's',
-                  min: 10,
-                  max: 3600,
+                  'Šířka sloupce dne',
+                  settings?.kioskColumnWidth ?? 0,
+                  'kiosk_column_width',
+                  unit: 'px',
+                  min: 120,
+                  max: 600,
+                  zeroAllowed: true,
                   helper:
-                      'Po tolika sekundách bez dotyku kiosk zapomene '
-                      'vybraného hráče, zavře okna i zápis, vrátí tabuli na '
-                      'dnešek a panel do výchozího stavu.',
+                      '0 = automaticky, aby se na obrazovku vešel celý týden '
+                      '(160–220 px). Širší sloupce = méně dní najednou, '
+                      'tabule se posouvá do stran.',
                 ),
                 _switch(
                   context,
@@ -288,7 +334,7 @@ class KioskSettingsScreen extends ConsumerWidget {
                     'kiosk_past_days',
                     unit: 'dní',
                     min: 1,
-                    max: 365,
+                    max: 60,
                   ),
               ],
             ),
@@ -337,7 +383,7 @@ class KioskSettingsScreen extends ConsumerWidget {
                     'kiosk_notices_rotation_seconds',
                     unit: 's',
                     min: 3,
-                    max: 600,
+                    max: 120,
                     helper:
                         'Po kolika sekundách se ukáže další oznam '
                         '(v záhlaví i v panelu).',
@@ -377,8 +423,8 @@ class KioskSettingsScreen extends ConsumerWidget {
                     settings?.kioskDrawerWidth ?? 440,
                     'kiosk_drawer_width',
                     unit: 'px',
-                    min: 240,
-                    max: 1200,
+                    min: 280,
+                    max: 800,
                     helper: 'Na užší obrazovce zabere nejvýš 60 % šířky.',
                   ),
                   if ((settings?.kioskShowNotices ?? true) &&
@@ -436,7 +482,7 @@ class KioskSettingsScreen extends ConsumerWidget {
                       max: 52,
                       helper:
                           'Kolik týdnů před tím aktuálním seznam otevře. '
-                          '${KioskSettingsScreen._rangeNote}',
+                          '${_rangeNote('Zobrazit předchozí')}',
                     ),
                     if (settings?.kioskShowUpcoming ?? true)
                       _number(
@@ -450,7 +496,7 @@ class KioskSettingsScreen extends ConsumerWidget {
                         max: 52,
                         helper:
                             'Kolik týdnů po tom aktuálním seznam otevře. '
-                            '${KioskSettingsScreen._rangeNote}',
+                            '${_rangeNote('Zobrazit další')}',
                       ),
                   ],
                 ],
@@ -520,8 +566,8 @@ class KioskSettingsScreen extends ConsumerWidget {
                       settings?.kioskLiveRefreshSeconds ?? 60,
                       'kiosk_live_refresh_seconds',
                       unit: 's',
-                      min: 15,
-                      max: 3600,
+                      min: 30,
+                      max: 600,
                       helper:
                           'Po kolika sekundách se kiosk zeptá webu ČKA na '
                           'nové skóre hraného zápasu.',
@@ -534,25 +580,12 @@ class KioskSettingsScreen extends ConsumerWidget {
                       'kiosk_live_rotation_seconds',
                       unit: 's',
                       min: 3,
-                      max: 600,
+                      max: 120,
                       helper:
                           'Hraje-li se víc zápasů najednou, po kolika '
                           'sekundách se ukáže další.',
                     ),
                   ],
-                  _number(
-                    context,
-                    settings,
-                    'Velikost zápisu',
-                    settings?.kioskZapisPercent ?? 80,
-                    'kiosk_zapis_percent',
-                    unit: '%',
-                    min: 50,
-                    max: 100,
-                    helper:
-                        'Kolik obrazovky zabere zápis otevřený klepnutím na '
-                        'zápas; 100 = celá obrazovka s křížkem.',
-                  ),
                 ],
               ),
             Text(
