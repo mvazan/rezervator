@@ -541,19 +541,19 @@ void main() {
     // reads "Záznam" (a recording), not the plain "Video" label.
     expect(find.text('Záznam'), findsOneWidget);
     expect(find.byIcon(Icons.play_circle_fill), findsOneWidget);
-    // „ČKA“ after the venue in the scoreboard's last line; the old
-    // „Výsledky z webu“ row is gone.
+    // „ČKA“ at the end of the scoreboard's last line; the old „Výsledky z
+    // webu“ row is gone.
     expect(_inBoard('ČKA'), findsOneWidget);
     expect(find.byIcon(Icons.open_in_new), findsOneWidget);
     expect(find.textContaining('Výsledky z webu'), findsNothing);
     expect(find.text('Na webu ČKA'), findsNothing);
-    // The last line: the venue, the age („⟳ …“), then „ČKA“.
+    // The last line: the age („⟳ …“) first, the venue, then „ČKA“.
     final venue = tester.getRect(_inBoard('TJ Sokol Rudná'));
     final age = tester.getRect(_boardIcon(Icons.refresh));
     final site = tester.getRect(_inBoard('ČKA'));
     expect((site.center.dy - venue.center.dy).abs(), lessThan(12));
-    expect(age.left, greaterThan(venue.right));
-    expect(site.left, greaterThan(age.right));
+    expect(venue.left, greaterThan(age.right));
+    expect(site.left, greaterThan(venue.right));
     // The video button stands in the scoreboard, where the status chip
     // („Dokončeno“) would be: on the date's row, at the right.
     expect(find.text('Dokončeno'), findsNothing);

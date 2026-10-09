@@ -173,8 +173,8 @@ void main() {
       expect(find.text('průběžně'), findsNothing);
     });
 
-    testWidgets('the last line: the team icon and the players, the throws, '
-        'the venue, the age — left to right on one line', (tester) async {
+    testWidgets('the last line: the age, the team icon and the players, the '
+        'throws, the venue — left to right on one line', (tester) async {
       final semantics = tester.ensureSemantics();
       await pump(tester);
       // Not „6 hráčů“ on screen: Klubovna's team icon and the number; a
@@ -189,13 +189,14 @@ void main() {
       expect(find.bySemanticsLabel(RegExp('výsledky z webu: ')), findsOneWidget);
       semantics.dispose();
       final age = ageLabel(rudnaResult.fetchedAt, _now);
+      // The age first, then the format and the venue.
       final order = [
+        _left(tester, find.byIcon(Icons.refresh)),
+        _left(tester, find.text(age)),
         _left(tester, find.byIcon(Icons.groups)),
         _left(tester, find.text('6')),
         _left(tester, find.text('100 HS')),
         _left(tester, find.text('TJ Sokol Rudná')),
-        _left(tester, find.byIcon(Icons.refresh)),
-        _left(tester, find.text(age)),
       ];
       for (var i = 1; i < order.length; i++) {
         expect(order[i - 1], lessThan(order[i]), reason: 'piece $i');
@@ -215,7 +216,7 @@ void main() {
       expect(find.text('ČKA'), findsNothing);
     });
 
-    testWidgets('the match\'s page on the site is „ČKA“, last — after the age',
+    testWidgets('the match\'s page on the site is „ČKA“, last — after the venue',
         (tester) async {
       var taps = 0;
       await pump(tester, onSiteTap: () => taps++);
@@ -223,7 +224,7 @@ void main() {
       expect(find.byIcon(Icons.open_in_new), findsOneWidget);
       expect(
         _left(tester, find.text('ČKA')),
-        greaterThan(_left(tester, find.text(ageLabel(rudnaResult.fetchedAt, _now)))),
+        greaterThan(_left(tester, find.text('TJ Sokol Rudná'))),
       );
       await tester.tap(find.text('ČKA'));
       expect(taps, 1);

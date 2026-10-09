@@ -2,9 +2,9 @@
 /// score came about. The date and a status chip; the team names around a
 /// big score (each over its own score when a name needs more than 2
 /// lines); the pin totals with the lead between them; a last line with the
-/// format (a team icon and the players a side fields, the throws), the
-/// venue, how old the score is („⟳ 22 h“) and the match's page on the site
-/// („ČKA“). Every layout of the match detail shares it, so the score never
+/// how old the score is („⟳ 22 h“), the format (a team icon and the
+/// players a side fields, the throws), the venue and the match's page on
+/// the site („ČKA“). Every layout of the match detail shares it, so the score never
 /// jumps.
 ///
 /// Every number is set in tabular figures, so live values don't jump as
@@ -73,7 +73,7 @@ class MatchScoreboard extends StatelessWidget {
   /// chip would be; null = the chip.
   final Widget? video;
 
-  /// „⟳ 22 h“ in the last line, before „ČKA“; off where the caller shows
+  /// „⟳ 22 h“ at the start of the last line; off where the caller shows
   /// it itself (the kiosk's live view has it in its own row).
   final bool showFreshness;
 
@@ -570,10 +570,10 @@ class _Pill extends StatelessWidget {
   );
 }
 
-/// „👥 6 · 120 HS · TJ Sokol Rudná › · ⟳ 22 h · ČKA ↗“: the players a side
-/// fields (the team icon is Klubovna's) and the throws, the venue — a link
-/// with a chevron when [onVenueTap] is set — how old the score is, and the
-/// match's page on the site. Whatever is unknown is left out; nothing at all
+/// „⟳ 22 h · 👥 6 · 120 HS · TJ Sokol Rudná › · ČKA ↗“: how old the score
+/// is, the players a side fields (the team icon is Klubovna's) and the
+/// throws, the venue — a link with a chevron when [onVenueTap] is set — and
+/// the match's page on the site. Whatever is unknown is left out; nothing at all
 /// when everything is. A Wrap: at a large text size the pieces flow onto a
 /// second line instead of overflowing.
 class _Footer extends StatelessWidget {
@@ -638,6 +638,13 @@ class _Footer extends StatelessWidget {
     );
 
     final pieces = <Widget>[
+      if (age != null)
+        Semantics(
+          container: true,
+          label: 'výsledky z webu: $age',
+          excludeSemantics: true,
+          child: withIcon(Icons.refresh, age),
+        ),
       if (players != null)
         Semantics(
           label:
@@ -658,13 +665,6 @@ class _Footer extends StatelessWidget {
             withIcon(Icons.chevron_right, venue, iconFirst: false),
             onVenueTap,
           ),
-      if (age != null)
-        Semantics(
-          container: true,
-          label: 'výsledky z webu: $age',
-          excludeSemantics: true,
-          child: withIcon(Icons.refresh, age),
-        ),
       if (onSiteTap != null)
         link(withIcon(Icons.open_in_new, 'ČKA', iconFirst: false), onSiteTap),
     ];
