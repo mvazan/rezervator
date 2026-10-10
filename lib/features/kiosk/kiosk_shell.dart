@@ -23,6 +23,7 @@ import '../../domain/schedule.dart'
 import 'kiosk_board_view.dart';
 import 'kiosk_info_panel.dart';
 import 'kiosk_connection.dart';
+import 'kiosk_display.dart';
 import 'kiosk_headline.dart';
 import 'kiosk_zapis_page.dart';
 import 'name_picker.dart';
@@ -68,9 +69,15 @@ class _KioskShellState extends ConsumerState<KioskShell>
   ({Day first, Day last})? _boardDays;
   final _boardKey = GlobalKey<KioskBoardViewState>();
 
+  /// The display, held (screen on, bars hidden) for as long as the shell is
+  /// on it — read once, so dispose does not go through ref.
+  late final KioskDisplay _display;
+
   @override
   void initState() {
     super.initState();
+    _display = ref.read(kioskDisplayProvider);
+    unawaited(_display.hold());
     _touch(byHand: false);
   }
 
@@ -79,6 +86,7 @@ class _KioskShellState extends ConsumerState<KioskShell>
     _idleTimer?.cancel();
     _warnTimer?.cancel();
     _warning.dispose();
+    unawaited(_display.release());
     super.dispose();
   }
 

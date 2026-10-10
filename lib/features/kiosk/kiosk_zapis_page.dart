@@ -48,7 +48,13 @@ Future<void> showKioskZapis(
                 clipBehavior: Clip.antiAlias,
                 borderRadius: BorderRadius.circular(full ? 0 : 16),
                 elevation: 8,
-                child: ZapisPage(slot: slot, closeButton: full, withRegnums: true),
+                child: ZapisPage(
+                  slot: slot,
+                  closeButton: full,
+                  withRegnums: true,
+                  // The shell hides the bars for the kiosk's whole stay.
+                  hideSystemBars: false,
+                ),
               ),
             ),
           ),

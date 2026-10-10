@@ -54,6 +54,8 @@ const appChangelog = <Release>[
     'Ikony v textu (⛔ blokace, 🏆 zápas, 🔒 pronájem, 👍/👎/💬 u zpráv a '
         'další) se kreslí z obrázků jako 🏠 — na webu vypadají všude stejně.',
     'Kiosk: volné místo v kalendáři značí stejné ＋ jako v kalendáři appky.',
+    'Kiosk: displej nezhasne — v aplikaci pro Android i na webu, kde to '
+        'prohlížeč umí — a aplikace pro Android schová systémové lišty.',
   ]),
   Release('2.0.7', '9. 10. 2026', [
     'Notifikace o rezervaci, kterou za vás udělal kiosk, spoluhráč ze '

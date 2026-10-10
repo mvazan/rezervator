@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/core/theme.dart';
@@ -16,6 +17,7 @@ import 'package:rezervator/features/clubhouse/widgets/match_scoreboard.dart';
 import 'package:rezervator/features/kiosk/kiosk_board_view.dart';
 import 'package:rezervator/features/schedule/widgets/slot_tile.dart';
 import 'package:rezervator/features/kiosk/kiosk_connection.dart';
+import 'package:rezervator/features/kiosk/kiosk_display.dart';
 import 'package:rezervator/features/kiosk/kiosk_info_panel.dart';
 import 'package:rezervator/features/kiosk/kiosk_shell.dart';
 import 'package:rezervator/features/kiosk/kiosk_headline.dart';
@@ -23,6 +25,18 @@ import 'package:rezervator/features/kiosk/name_picker.dart';
 import 'package:rezervator/features/schedule/widgets/calendar_board.dart';
 import 'package:rezervator/features/schedule/widgets/schedule_day_column.dart';
 import '../support/emoji_finders.dart';
+
+/// Stands in for the display: records the shell's holds and releases, in
+/// order.
+class _DisplayRecorder extends KioskDisplay {
+  final log = <String>[];
+
+  @override
+  Future<void> hold() async => log.add('hold');
+
+  @override
+  Future<void> release() async => log.add('release');
+}
 
 void main() {
   const settings = ScheduleSettings(
@@ -93,6 +107,7 @@ void main() {
     bool kioskDark = true,
     bool kioskFitDay = true,
     int? maxActiveReservations,
+    KioskDisplay? display,
   }) {
     final effectiveRoster = roster ?? players;
     final effSettings = ScheduleSettings(
@@ -122,6 +137,7 @@ void main() {
           ]),
         ),
         playersProvider.overrideWith((ref) async => effectiveRoster),
+        if (display != null) kioskDisplayProvider.overrideWithValue(display),
       ],
       child: MaterialApp(theme: theme, home: const KioskShell()),
     );
@@ -150,6 +166,17 @@ void main() {
       await finish(tester);
     },
   );
+
+  testWidgets('the shell holds the display while it is up — screen on and '
+      'bars hidden on the way in, given back on the way out', (tester) async {
+    final display = _DisplayRecorder();
+    await tester.pumpWidget(kioskApp(display: display));
+    await tester.pumpAndSettle();
+    expect(display.log, ['hold']);
+
+    await finish(tester);
+    expect(display.log, ['hold', 'release']);
+  });
 
   testWidgets('b: tapping Rezervovat opens picker with first-letter tiles', (
     tester,
@@ -2157,6 +2184,48 @@ void main() {
       await tester.tapAt(const Offset(20, 20));
       await tester.pumpAndSettle();
       expect(find.byType(LegacyScoreSheetPage), findsNothing);
+
+      await finish(tester);
+    });
+
+    testWidgets('the Zápis leaves the system bars to the shell: nothing hidden '
+        'on opening, nothing brought back on closing', (tester) async {
+      fullHd(tester);
+      final calls = <MethodCall>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async {
+          if (call.method.startsWith('SystemChrome.setEnabledSystemUI')) {
+            calls.add(call);
+          }
+          return null;
+        },
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          null,
+        ),
+      );
+      await tester.pumpWidget(
+        app(
+          slots: [fed('m', day.addDays(-3), 'Domácí')],
+          results: {'m': res('m', 'finished', 6, 2)},
+          lineups: {'m': lineup},
+          drawerOpen: true,
+        ),
+      );
+      await tester.pumpAndSettle();
+      // The shell's own hold on the display, nothing else.
+      final atRest = calls.length;
+
+      await tester.tap(find.text('6 : 2'));
+      await tester.pumpAndSettle();
+      expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
+      await tester.tapAt(const Offset(20, 20));
+      await tester.pumpAndSettle();
+      expect(find.byType(LegacyScoreSheetPage), findsNothing);
+      expect(calls, hasLength(atRest));
 
       await finish(tester);
     });
