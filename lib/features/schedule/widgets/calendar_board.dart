@@ -353,6 +353,7 @@ class BoardColumnHeader extends StatelessWidget {
     this.interactive = true,
     this.watch,
     this.onOpenMatch,
+    this.onPlayVideo,
   });
 
   final Day date;
@@ -384,6 +385,10 @@ class BoardColumnHeader extends StatelessWidget {
   /// The kiosk's: a finished match of the day's list opens its Zápis (see
   /// [showDayMatchesDialog]).
   final void Function(PrioritySlot match)? onOpenMatch;
+
+  /// The kiosk's: the video control of a match in the day's list plays it
+  /// in the kiosk's stream window (see [showDayMatchesDialog]).
+  final void Function(PrioritySlot match)? onPlayVideo;
 
   @override
   Widget build(BuildContext context) {
@@ -439,6 +444,7 @@ class BoardColumnHeader extends StatelessWidget {
                               priority,
                               interactive: interactive,
                               onOpenMatch: onOpenMatch,
+                              onPlayVideo: onPlayVideo,
                             ),
                     child: Column(
                       children: [

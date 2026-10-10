@@ -285,6 +285,7 @@ class _KioskShellState extends ConsumerState<KioskShell>
       key: _boardKey,
       selected: _selected,
       onOpenMatch: _openMatchOrStream,
+      onPlayVideo: _openStream,
       // The columns are sized on the whole screen, the drawer is a whole
       // number of them (kioskDrawerWidthFor): open or closed, the board
       // shows whole days, and the columns never resize mid-slide.
