@@ -11,6 +11,7 @@ import '../../domain/weather.dart' show WeatherPlace;
 import '../auth/update_screen.dart' show UpdateScreen;
 import 'widgets/admin_scaffold.dart';
 import 'widgets/copyable_address.dart';
+import 'widgets/kiosk_text_dialog.dart';
 import 'widgets/number_setting_field.dart';
 import 'widgets/weather_place_dialog.dart';
 
@@ -253,6 +254,23 @@ class KioskSettingsScreen extends ConsumerWidget {
   String _kioskUrl() =>
       kioskUrlFrom(kIsWeb ? Uri.base : Uri.parse(UpdateScreen.webUrl));
 
+  /// The note above the name picker's first letters (0070), typed in a
+  /// dialog — a new one starts from the default text; saved trimmed.
+  Future<void> _editPickerNote(
+    BuildContext context,
+    ScheduleSettings settings,
+  ) async {
+    final text = await showKioskTextDialog(
+      context,
+      title: 'Upozornění při rezervaci',
+      label: 'Text upozornění',
+      initial: settings.kioskPickerNote ?? ScheduleSettings.defaultPickerNote,
+      defaultText: ScheduleSettings.defaultPickerNote,
+    );
+    if (text == null || !context.mounted) return;
+    await _panel(context, settings, {'kiosk_picker_note': text});
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final kiosks = [
@@ -327,6 +345,49 @@ class KioskSettingsScreen extends ConsumerWidget {
                   settings?.kioskTodaysMatches ?? true,
                   'kiosk_todays_matches',
                   subtitle: 'Vypnuto = záhlaví kiosku dnešní zápasy neukazuje.',
+                ),
+                // Then the booking's: above the first letters of the name
+                // picker (0070).
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(
+                    Icons.warning_amber_rounded,
+                    color: settings?.kioskPickerNote == null
+                        ? null
+                        : Theme.of(context).colorScheme.error,
+                  ),
+                  title: const Text('Upozornění při rezervaci'),
+                  subtitle: Text(
+                    settings?.kioskPickerNote ??
+                        'Žádné. Upozornění nad písmeny při výběru jména na '
+                            'kiosku.',
+                    // The whole text is one tap away, under „Upravit…“.
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextButton(
+                        onPressed: settings == null
+                            ? null
+                            : () => _editPickerNote(context, settings),
+                        child: Text(
+                          settings?.kioskPickerNote == null
+                              ? 'Přidat…'
+                              : 'Upravit…',
+                        ),
+                      ),
+                      if (settings?.kioskPickerNote != null)
+                        IconButton(
+                          tooltip: 'Odstranit upozornění při rezervaci',
+                          icon: const Icon(Icons.delete_outline),
+                          onPressed: () => _panel(context, settings!, {
+                            'kiosk_picker_note': null,
+                          }),
+                        ),
+                    ],
+                  ),
                 ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,

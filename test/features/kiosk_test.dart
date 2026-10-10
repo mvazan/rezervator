@@ -23,6 +23,7 @@ import 'package:rezervator/features/kiosk/kiosk_info_panel.dart';
 import 'package:rezervator/features/kiosk/kiosk_shell.dart';
 import 'package:rezervator/features/kiosk/kiosk_stream_window.dart';
 import 'package:rezervator/features/kiosk/kiosk_headline.dart';
+import 'package:rezervator/features/kiosk/kiosk_warning.dart';
 import 'package:rezervator/features/kiosk/name_picker.dart';
 import 'package:rezervator/features/schedule/widgets/calendar_board.dart';
 import 'package:rezervator/features/schedule/widgets/schedule_day_column.dart';
@@ -117,6 +118,7 @@ void main() {
     int? maxActiveReservations,
     KioskDisplay? display,
     bool kioskLowRes = false,
+    String? kioskPickerNote,
   }) {
     final effectiveRoster = roster ?? players;
     final effSettings = ScheduleSettings(
@@ -128,6 +130,7 @@ void main() {
       kioskDark: kioskDark,
       kioskFitDay: kioskFitDay,
       kioskLowRes: kioskLowRes,
+      kioskPickerNote: kioskPickerNote,
     );
     return ProviderScope(
       overrides: [
@@ -259,6 +262,134 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text(anna.displayName), findsOneWidget);
     expect(hint, findsNothing);
+    await finish(tester);
+  });
+
+  testWidgets('b3: the admin\'s note (0070) stands above the hint on the '
+      'first letters — the default text or the admin\'s own; none, nothing; '
+      'gone once a letter is picked', (tester) async {
+    tester.view.physicalSize = const Size(1920, 1080);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      kioskApp(kioskPickerNote: ScheduleSettings.defaultPickerNote),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Rezervovat'));
+    await tester.pumpAndSettle();
+
+    final note = find.byType(KioskWarning);
+    final hint = find.text(firstLetterHint);
+    expect(note, findsOneWidget);
+    expect(find.text(ScheduleSettings.defaultPickerNote), findsOneWidget);
+    expect(
+      tester.getBottomLeft(note).dy,
+      lessThan(tester.getTopLeft(hint).dy),
+    );
+    // Not stretched across a wide screen: centred, at most 1000 px.
+    expect(tester.getSize(note).width, lessThanOrEqualTo(1000));
+    expect(tester.getCenter(note).dx, closeTo(960, 1));
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.text('A'));
+    await tester.pumpAndSettle();
+    expect(note, findsNothing);
+    await finish(tester);
+
+    // The fixture has one player per letter, so 'A' above goes straight to
+    // the names; the later pages of letters must go without the note too.
+    // More than `_capacity` (24) players under 'A' keep the picker on
+    // letters for the second one.
+    final aPlayers = [
+      for (var i = 0; i < 25; i++)
+        PlayerName(
+          id: 'a$i',
+          displayName: 'A${String.fromCharCode(66 + i)} Hráč',
+        ),
+    ];
+    await tester.pumpWidget(
+      kioskApp(
+        roster: [...aPlayers, players[10], petr],
+        kioskPickerNote: ScheduleSettings.defaultPickerNote,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Rezervovat'));
+    await tester.pumpAndSettle();
+    expect(note, findsOneWidget);
+    expect(hint, findsOneWidget);
+    expect(find.text('B'), findsNothing);
+
+    await tester.tap(find.text('A'));
+    await tester.pumpAndSettle();
+    // Still letters — the second ones, AB…AZ — but no note, no hint.
+    expect(find.text('A…'), findsOneWidget);
+    expect(find.text('B'), findsOneWidget);
+    expect(find.text('Z'), findsOneWidget);
+    expect(note, findsNothing);
+    expect(hint, findsNothing);
+    await finish(tester);
+
+    await tester.pumpWidget(
+      kioskApp(kioskPickerNote: 'Zrušit jde jen v aplikaci.'),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Rezervovat'));
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: note,
+        matching: find.text('Zrušit jde jen v aplikaci.'),
+      ),
+      findsOneWidget,
+    );
+    await finish(tester);
+
+    await tester.pumpWidget(kioskApp());
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Rezervovat'));
+    await tester.pumpAndSettle();
+    expect(hint, findsOneWidget);
+    expect(note, findsNothing);
+    await finish(tester);
+  });
+
+  testWidgets('b3: on a phone the note keeps to the screen above the hint '
+      'and the letters', (tester) async {
+    tester.view.physicalSize = const Size(375, 812);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    // The picker alone: the shell's status bar is not made for a phone.
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          settingsProvider.overrideWith(
+            (ref) => Stream.value(
+              ScheduleSettings(
+                laneCount: settings.laneCount,
+                trainingWeekdays: settings.trainingWeekdays,
+                bookingHorizonDays: settings.bookingHorizonDays,
+                maxActiveReservations: settings.maxActiveReservations,
+                kioskPickerNote: ScheduleSettings.defaultPickerNote,
+              ),
+            ),
+          ),
+          playersProvider.overrideWith((ref) async => players),
+        ],
+        child: const MaterialApp(home: NamePicker()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final note = find.byType(KioskWarning);
+    expect(note, findsOneWidget);
+    expect(tester.takeException(), isNull);
+    expect(tester.getTopLeft(note).dx, greaterThanOrEqualTo(0));
+    expect(tester.getTopRight(note).dx, lessThanOrEqualTo(375));
+    expect(
+      tester.getBottomLeft(note).dy,
+      lessThan(tester.getTopLeft(find.text(firstLetterHint)).dy),
+    );
     await finish(tester);
   });
 

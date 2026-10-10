@@ -703,6 +703,7 @@ class ScheduleSettings {
     this.kioskIdleSeconds = 60,
     this.kioskVisibleDays = 7,
     this.kioskFontSize = 11,
+    this.kioskPickerNote,
     this.kioskAnimations = true,
     this.kioskLowRes = false,
     this.kioskStream = false,
@@ -840,6 +841,11 @@ class ScheduleSettings {
   /// font follows the rows instead (`kioskRowFont`).
   final int kioskFontSize;
 
+  /// A note above the first letters of the kiosk's name picker (0070) —
+  /// by default [defaultPickerNote], that a training cannot be cancelled
+  /// at the kiosk; null = none.
+  final String? kioskPickerNote;
+
   /// How a match being played is drawn in the drawer (0064).
   final MatchLayout kioskLiveLayout;
 
@@ -862,6 +868,14 @@ class ScheduleSettings {
     bookingHorizonDays: 14,
     maxActiveReservations: 3,
   );
+
+  /// The [kioskPickerNote] every alley starts with — the column's default
+  /// in 0070, letter for letter (a test compares the two); Správa → Kiosk
+  /// offers it back.
+  static const defaultPickerNote =
+      'Na kiosku se z tréninku odhlásit nedá. Zruš rezervaci v aplikaci '
+      'Rezervátor, na webu rezervator.online, u služby v kantýně nebo u '
+      'správce kuželny.';
 
   factory ScheduleSettings.fromJson(Map<String, dynamic> json) =>
       ScheduleSettings(
@@ -898,6 +912,10 @@ class ScheduleSettings {
         kioskIdleSeconds: json['kiosk_idle_seconds'] as int? ?? 60,
         kioskVisibleDays: json['kiosk_visible_days'] as int? ?? 7,
         kioskFontSize: json['kiosk_font_size'] as int? ?? 11,
+        kioskPickerNote: switch (json['kiosk_picker_note']) {
+          final String n when n.trim().isNotEmpty => n.trim(),
+          _ => null,
+        },
         kioskAnimations: json['kiosk_animations'] as bool? ?? true,
         kioskLowRes: json['kiosk_low_res'] as bool? ?? false,
         kioskStream: json['kiosk_stream'] as bool? ?? false,

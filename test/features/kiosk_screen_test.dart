@@ -872,6 +872,111 @@ void main() {
     );
   });
 
+  group('the note when booking (0070)', () {
+    Map<String, dynamic> lastPatch() => jsonDecode(
+          requests.lastWhere((r) => r.method == 'PATCH').body,
+        ) as Map<String, dynamic>;
+    Finder field() => find.widgetWithText(TextField, 'Text upozornění');
+    String fieldText(WidgetTester tester) =>
+        tester.widget<TextField>(field()).controller!.text;
+
+    testWidgets('none: first in the screen block, „Přidat…“ starts from the '
+        'default text, blank cannot be saved, „Výchozí text“ puts it back', (
+      tester,
+    ) async {
+      tall(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Žádné. Upozornění nad písmeny při výběru jména na kiosku.'),
+        findsOneWidget,
+      );
+      expect(find.byTooltip('Odstranit upozornění při rezervaci'), findsNothing);
+      double top(Finder f) => tester.getTopLeft(f).dy;
+      expect(
+        top(find.text('Upozornění při rezervaci')),
+        greaterThan(top(find.text('Obrazovka kiosku'))),
+      );
+      expect(
+        top(find.text('Upozornění při rezervaci')),
+        lessThan(top(find.text('Tmavý režim'))),
+      );
+
+      await tester.tap(inTile('Upozornění při rezervaci', 'Přidat…'));
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.text('Upozornění při rezervaci'),
+        ),
+        findsOneWidget,
+      );
+      expect(fieldText(tester), ScheduleSettings.defaultPickerNote);
+      final restore = find.ancestor(
+        of: find.text('Výchozí text'),
+        matching: find.bySubtype<TextButton>(),
+      );
+      final save = find.widgetWithText(FilledButton, 'Uložit');
+      // Already the default: nothing to put back.
+      expect(tester.widget<TextButton>(restore).onPressed, isNull);
+      expect(tester.widget<FilledButton>(save).onPressed, isNotNull);
+
+      await tester.enterText(field(), '   ');
+      await tester.pump();
+      expect(tester.widget<FilledButton>(save).onPressed, isNull);
+
+      await tester.tap(restore);
+      await tester.pump();
+      expect(fieldText(tester), ScheduleSettings.defaultPickerNote);
+      await tester.tap(save);
+      await tester.pumpAndSettle();
+      expect(lastPatch(), {
+        'kiosk_picker_note': ScheduleSettings.defaultPickerNote,
+      });
+    });
+
+    testWidgets('a note set: shown, „Upravit…“ starts from it and saves it '
+        'trimmed, „Zrušit“ writes nothing, the bin removes it', (
+      tester,
+    ) async {
+      tall(tester);
+      await tester.pumpWidget(
+        app(
+          settings: const ScheduleSettings(
+            laneCount: 4,
+            trainingWeekdays: {1, 2, 4},
+            bookingHorizonDays: 14,
+            maxActiveReservations: 3,
+            kioskPickerNote: 'Zrušit jde jen v aplikaci.',
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Zrušit jde jen v aplikaci.'), findsOneWidget);
+
+      await tester.tap(inTile('Upozornění při rezervaci', 'Upravit…'));
+      await tester.pumpAndSettle();
+      expect(fieldText(tester), 'Zrušit jde jen v aplikaci.');
+      await tester.tap(find.text('Zrušit'));
+      await tester.pumpAndSettle();
+      expect(requests.where((r) => r.method == 'PATCH'), isEmpty);
+
+      await tester.tap(inTile('Upozornění při rezervaci', 'Upravit…'));
+      await tester.pumpAndSettle();
+      await tester.enterText(field(), '  Zrušit jde v aplikaci i na webu. ');
+      await tester.pump();
+      await tester.tap(find.widgetWithText(FilledButton, 'Uložit'));
+      await tester.pumpAndSettle();
+      expect(lastPatch(), {
+        'kiosk_picker_note': 'Zrušit jde v aplikaci i na webu.',
+      });
+
+      await tester.tap(find.byTooltip('Odstranit upozornění při rezervaci'));
+      await tester.pumpAndSettle();
+      expect(lastPatch(), {'kiosk_picker_note': null});
+    });
+  });
+
   testWidgets('the days on the screen: 2–14, a week by default', (
     tester,
   ) async {
