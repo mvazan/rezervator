@@ -66,6 +66,7 @@ begin
                           - 'kiosk_weather' - 'kiosk_weather_place'
                           - 'kiosk_weather_lat' - 'kiosk_weather_lon'
                           - 'kiosk_nameday'
+                          - 'kiosk_warning'
                    from schedule_settings s where s.tenant_id = v_tenant),
     'blocks', coalesce((
       select jsonb_agg(to_jsonb(b) - 'tenant_id')
