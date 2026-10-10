@@ -1,5 +1,7 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../config.dart';
@@ -264,6 +266,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
+                  // The kiosk account signs in with a password. On the web
+                  // its form has an address of its own (#/kiosk-login, shown
+                  // in Správa → Kiosk); the installed app has no address bar
+                  // to type it into, so the way in is here. Pushed, so the
+                  // system back returns to this screen.
+                  if (!kIsWeb) ...[
+                    const SizedBox(height: 8),
+                    TextButton(
+                      onPressed: () => context.push('/kiosk-login'),
+                      child: const Text('Přihlásit kiosk'),
+                    ),
+                  ],
                 ],
               ],
             ),

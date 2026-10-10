@@ -56,6 +56,14 @@ const appChangelog = <Release>[
     'Kiosk: volné místo v kalendáři značí stejné ＋ jako v kalendáři appky.',
     'Kiosk: displej nezhasne — v aplikaci pro Android i na webu, kde to '
         'prohlížeč umí — a aplikace pro Android schová systémové lišty.',
+    'Aplikace pro Android: kiosk účet se přihlásí přes „Přihlásit kiosk“ '
+        'dole na přihlašovací obrazovce (na webu má kiosk svou adresu).',
+  ], store: [
+    'Kiosk: zápis zápasu ukazuje registrační čísla hráčů.',
+    'Emoji v textu se kreslí z obrázků — všude stejně.',
+    'Kiosk: volné místo značí ＋ jako v kalendáři appky.',
+    'Kiosk v aplikaci: displej nezhasne, systémové lišty se schovají; kiosk '
+        'účet se přihlásí tlačítkem „Přihlásit kiosk“.',
   ]),
   Release('2.0.7', '9. 10. 2026', [
     'Notifikace o rezervaci, kterou za vás udělal kiosk, spoluhráč ze '

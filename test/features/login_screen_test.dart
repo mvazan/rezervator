@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:rezervator/data/providers.dart';
@@ -91,6 +92,43 @@ void main() {
     // playersProvider is a FutureProvider; its gated branch returns [] too.
     expect(await container.read(playersProvider.future), isEmpty);
   });
+
+  testWidgets(
+    'the installed app offers the kiosk account its password login — the '
+    'web reaches that form by its address instead',
+    (tester) async {
+      final router = GoRouter(
+        routes: [
+          GoRoute(path: '/', builder: (_, _) => const LoginScreen()),
+          GoRoute(
+            path: '/kiosk-login',
+            builder: (_, _) => const Scaffold(body: Text('kiosk form')),
+          ),
+        ],
+      );
+      addTearDown(router.dispose);
+      await tester.pumpWidget(
+        ProviderScope(
+          child: MaterialApp.router(
+            localizationsDelegates: GlobalMaterialLocalizations.delegates,
+            supportedLocales: const [Locale('cs'), Locale('en')],
+            routerConfig: router,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Přihlásit kiosk'));
+      await tester.pumpAndSettle();
+      expect(find.text('kiosk form'), findsOneWidget);
+
+      // Pushed, not replaced: the system back is the way out of the form.
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(find.text('kiosk form'), findsNothing);
+      expect(find.text('Přihlásit kiosk'), findsOneWidget);
+    },
+  );
 
   testWidgets(
     'the "Zadat kód z e-mailu" button appears in the sent state',

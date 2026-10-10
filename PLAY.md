@@ -129,6 +129,8 @@ zkrátil sám: nechá z každé odrážky první větu a pak odebírá odrážky
 Kiosk může běžet i jako nainstalovaná aplikace (přihlášení kiosk účtem → místo
 appky se ukáže kiosk) — na Android displeji jede plynuleji než web
 v prohlížeči; aplikace sama drží obrazovku zapnutou a schová systémové lišty.
+Kiosk účet se v aplikaci přihlásí tlačítkem **„Přihlásit kiosk“** dole na
+přihlašovací obrazovce (e-mail + heslo jako na webu na `#/kiosk-login`).
 APK libovolné větve, tagu nebo commitu postaví ručně spuštěný workflow
 **Actions → APK → Run workflow** (`ref` = větev/tag/commit; prázdné = větev
 vybraná v dialogu). Výsledek je artefakt `rezervator-<verze>-<commit>.apk`,
