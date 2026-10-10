@@ -132,14 +132,21 @@ List<PrioritySlot> kioskLiveMatches({
     });
 }
 
-/// How long a decided match streams on after its planned end (0066): the
-/// closing minutes of a stream run after the site stamps the result.
+/// How long a decided match streams on after the server read its result
+/// (0066): the closing minutes of a stream run after the site stamps it.
 const streamGrace = Duration(minutes: 30);
+
+/// How far past the planned end a decided match may stream at all: an
+/// overrun keeps its stream, a result re-read the next night does not
+/// reopen the window.
+const streamOverrun = Duration(hours: 2);
 
 /// The matches whose stream the kiosk's window shows (0066): the alley's
 /// own federation matches with a YouTube video that are on air — [isLive]
 /// (from an hour before the start until the site stamps the result, at
 /// most twelve hours), or decided and still within [streamGrace] of the
+/// result's `fetched_at`, from an hour before the start (a forfeit the site
+/// stores days ahead opens nothing) to at most [streamOverrun] past the
 /// planned end. Not gated on the players' data like [kioskLiveMatches]: a
 /// stream starts before the first throw. Chronological.
 List<PrioritySlot> kioskStreamMatches({
@@ -150,7 +157,14 @@ List<PrioritySlot> kioskStreamMatches({
   bool onAir(PrioritySlot s) {
     final r = results[s.id];
     if (isLive(s, r, now)) return true;
-    if (!_decided(r) || !s.timeKnown) return false;
+    if (r == null || !_decided(r) || !s.timeKnown) return false;
+    final start = DateTime(
+      s.date.year,
+      s.date.month,
+      s.date.day,
+      s.startsAt.hour,
+      s.startsAt.minute,
+    );
     final end = DateTime(
       s.date.year,
       s.date.month,
@@ -158,7 +172,10 @@ List<PrioritySlot> kioskStreamMatches({
       s.endsAt.hour,
       s.endsAt.minute,
     );
-    return now.isBefore(end.add(streamGrace));
+    final until = r.fetchedAt.add(streamGrace);
+    final latest = end.add(streamOverrun);
+    return !now.isBefore(start.subtract(const Duration(hours: 1))) &&
+        now.isBefore(until.isBefore(latest) ? until : latest);
   }
 
   return [

@@ -32,10 +32,11 @@ void main() {
     videoUrl: video,
   );
 
-  MatchResult result(String id, MatchStatus status) => MatchResult(
+  MatchResult result(String id, MatchStatus status, {DateTime? fetched}) =>
+      MatchResult(
         matchId: id,
         status: status,
-        fetchedAt: DateTime(2026, 10, 1),
+        fetchedAt: fetched ?? DateTime(2026, 10, 1),
       );
 
   Message notice(
@@ -284,18 +285,44 @@ void main() {
       );
     });
 
-    test('a decided match streams on for half an hour after its planned end',
-        () {
-      final done = {'m': result('m', MatchStatus.finished)};
-      // Decided early: the stream runs to the planned end and a bit.
-      expect(streamsAt(DateTime(2026, 10, 8, 16, 30), results: done), ['m']);
-      expect(streamsAt(DateTime(2026, 10, 8, 17, 20), results: done), ['m']);
-      expect(streamsAt(DateTime(2026, 10, 8, 17, 40), results: done), isEmpty);
-      final forfeit = {'m': result('m', MatchStatus.forfeit)};
-      expect(
-        streamsAt(DateTime(2026, 10, 8, 17, 40), results: forfeit),
-        isEmpty,
-      );
+    test('a decided match streams on for half an hour after the server read '
+        'its result', () {
+      // Decided early, at 16:30: the closing minutes, then gone — not
+      // YouTube's end screen until the planned end.
+      final early = {
+        'm': result('m', MatchStatus.finished,
+            fetched: DateTime(2026, 10, 8, 16, 31)),
+      };
+      expect(streamsAt(DateTime(2026, 10, 8, 16, 50), results: early), ['m']);
+      expect(streamsAt(DateTime(2026, 10, 8, 17, 5), results: early), isEmpty);
+      // An overrun: the result came at 18:01, an hour past the planned end.
+      final late = {
+        'm': result('m', MatchStatus.finished,
+            fetched: DateTime(2026, 10, 8, 18, 1)),
+      };
+      expect(streamsAt(DateTime(2026, 10, 8, 17, 30), results: late), ['m']);
+      expect(streamsAt(DateTime(2026, 10, 8, 18, 20), results: late), ['m']);
+      expect(streamsAt(DateTime(2026, 10, 8, 18, 40), results: late), isEmpty);
+    });
+
+    test('a decided match never streams more than two hours past its planned '
+        'end, nor before its day', () {
+      // The nightly job re-read the result at 02:00 the next day.
+      final reread = {
+        'm': result('m', MatchStatus.finished,
+            fetched: DateTime(2026, 10, 9, 2)),
+      };
+      expect(streamsAt(DateTime(2026, 10, 9, 2, 10), results: reread), isEmpty);
+      // The site stored a forfeit days ahead: nothing opens before the day,
+      // and on the day the stale result is long past its half hour.
+      final forfeit = {
+        'm': result('m', MatchStatus.forfeit,
+            fetched: DateTime(2026, 10, 5, 9)),
+      };
+      expect(streamsAt(DateTime(2026, 10, 5, 9, 10), results: forfeit),
+          isEmpty);
+      expect(streamsAt(DateTime(2026, 10, 8, 13, 30), results: forfeit),
+          isEmpty);
     });
 
     test('no video, another site, an úklid child or a hand-made match: no '
