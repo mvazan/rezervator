@@ -1,0 +1,75 @@
+name: APK
+
+# Builds a signed release APK of any branch, tag or commit on demand — GitHub
+# → Actions → APK → Run workflow — and keeps it as a workflow artifact for
+# 30 days. For a kiosk display that installs apps itself (iiSignage² CMS, a
+# USB stick, Chrome on the display) without cutting a Play release; every
+# tagged release still gets its APK on the Releases page from release.yml.
+# Signed with the same upload keystore, so this APK installs over a Play
+# build and the next Play build installs over it (Android refuses an update
+# signed with another key). See PLAY.md.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or commit to build (empty = the branch picked above)
+        required: false
+        default: ''
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      # The same keystore and secrets as release.yml.
+      - name: Restore signing keystore
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d \
+            > android/app/upload-keystore.jks
+          cat > android/key.properties <<EOF
+          storeFile=upload-keystore.jks
+          storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
+          keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
+          EOF
+
+      - name: Build signed APK
+        env:
+          DEFINES: >-
+            --dart-define=SUPABASE_URL=${{ secrets.SUPABASE_URL }}
+            --dart-define=SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}
+            --dart-define=FIREBASE_API_KEY=${{ secrets.FIREBASE_API_KEY }}
+            --dart-define=FIREBASE_APP_ID=${{ secrets.FIREBASE_APP_ID }}
+            --dart-define=FIREBASE_SENDER_ID=${{ secrets.FIREBASE_SENDER_ID }}
+            --dart-define=FIREBASE_PROJECT_ID=${{ secrets.FIREBASE_PROJECT_ID }}
+            --dart-define=SENTRY_DSN=${{ secrets.SENTRY_DSN }}
+            --dart-define=DEMO_PASSWORD=${{ secrets.DEMO_PASSWORD }}
+            --dart-define=GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
+        run: flutter build apk --release $DEFINES
+
+      # rezervator-2.0.7+31-3de60f2.apk: the version the build reports in
+      # Můj profil and the commit it was built from.
+      - name: Name the artifact
+        id: name
+        run: |
+          VERSION=$(sed -n 's/^version: *//p' pubspec.yaml)
+          NAME="rezervator-${VERSION}-$(git rev-parse --short HEAD).apk"
+          cp build/app/outputs/flutter-apk/app-release.apk "$NAME"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.name.outputs.name }}
+          path: ${{ steps.name.outputs.name }}
+          retention-days: 30
