@@ -68,6 +68,7 @@ class ScheduleDayColumn extends StatelessWidget {
     required this.laneRow,
     this.admin = CalendarAdminHooks.none,
     this.onOpenMatch,
+    this.bandFontSize = 10,
   });
 
   final DaySchedule day;
@@ -87,6 +88,10 @@ class ScheduleDayColumn extends StatelessWidget {
   /// The kiosk's: a tap on a federation match's band opens its Zápis. Null
   /// everywhere else, where the band's tap is the admin's edit or nothing.
   final void Function(PrioritySlot match)? onOpenMatch;
+
+  /// The px size of the bands' text (matches, blockages, rentals): the
+  /// app's 10, the kiosk admin's choice on the kiosk board (0069).
+  final double bandFontSize;
 
   void Function(Day date, TimeBlock block)? get onEditBlock =>
       admin.onEditBlock;
@@ -286,6 +291,7 @@ class ScheduleDayColumn extends StatelessWidget {
           lines: matchBandLines(m),
           time: time,
           bold: true,
+          fontSize: bandFontSize,
         );
         // Click = edit (a click has nothing else to do on a blocking band);
         // an úklid child edits its parent match.
@@ -330,6 +336,7 @@ class ScheduleDayColumn extends StatelessWidget {
             foreground: fg,
             text: '${rentalLabel(r)}\n'
                 '${r.startsAt.display()}–${r.endsAt.display()}',
+            fontSize: bandFontSize,
           );
           // Click = edit that day's occurrence (a weekly rental's "jen
           // tento den" exception, a one-time rental's plain dialog).

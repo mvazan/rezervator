@@ -13,6 +13,7 @@ import '../../../core/widgets/emoji_text.dart';
 import '../../../core/theme.dart';
 import '../../../core/ui.dart';
 import '../../../domain/calendar_layout.dart';
+import '../../../domain/labels.dart' show BandLine;
 import '../../../domain/models.dart';
 import '../../../domain/schedule.dart' show headerEventLabel;
 import 'day_matches_dialog.dart';
@@ -301,6 +302,7 @@ class CalendarEventBand extends StatelessWidget {
     this.bold = false,
     this.lines,
     this.time,
+    this.fontSize = 10,
   });
 
   final Color background;
@@ -310,26 +312,31 @@ class CalendarEventBand extends StatelessWidget {
   final String text;
   final bool bold;
 
-  /// The same, line by line ([matchBandLines]: home, dash, away), with
-  /// [time] under them — shown when the band is tall enough for every
-  /// line; a team's name then wraps within its own line rather than the
-  /// pair breaking in the middle of one.
-  final List<String>? lines;
+  /// The same, line by line ([matchBandLines]: the cup, home, dash, away),
+  /// with [time] under them — shown when the band is tall enough for every
+  /// line; a team's name then wraps within its own line, onto as many as
+  /// the band has to spare, rather than the pair breaking in the middle of
+  /// one.
+  final List<BandLine>? lines;
   final String? time;
 
-  /// One line of the band's 10 px text, as laid out (Manrope's line
-  /// height is about 1.4 of its size).
+  /// The text's size in px — the app's 10, the kiosk admin's choice on the
+  /// kiosk board (0069).
+  final double fontSize;
+
+  /// One line of the band's text, as laid out (Manrope's line height is
+  /// about 1.4 of its size).
   static const _lineFactor = 1.4;
 
   @override
   Widget build(BuildContext context) {
     final style = TextStyle(
-      fontSize: 10,
+      fontSize: fontSize,
       fontWeight: bold ? FontWeight.w700 : FontWeight.w600,
       color: foreground,
     );
     final lineHeight =
-        MediaQuery.textScalerOf(context).scale(10) * _lineFactor;
+        MediaQuery.textScalerOf(context).scale(fontSize) * _lineFactor;
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 3, vertical: 1.5),
       clipBehavior: Clip.antiAlias,
@@ -343,7 +350,10 @@ class CalendarEventBand extends StatelessWidget {
         builder: (context, constraints) {
           final fit = (constraints.maxHeight / lineHeight).floor();
           final stacked = lines;
-          final rows = [...?stacked, ?time];
+          final rows = <BandLine>[
+            ...?stacked,
+            if (time case final t?) (text: t, wraps: false),
+          ];
           if (stacked == null || fit < rows.length) {
             return EmojiText(
               text,
@@ -353,17 +363,20 @@ class CalendarEventBand extends StatelessWidget {
               style: style,
             );
           }
-          // Room for a second line per team only when every row can have
-          // it; else each team keeps to one, ellipsized.
-          final teamLines = fit >= rows.length * 2 ? 2 : 1;
+          // The lines to spare go to the names, shared evenly: a name
+          // wraps onto as many as it gets, then ellipsizes.
+          final wrapping = rows.where((r) => r.wraps).length;
+          final nameLines = wrapping == 0
+              ? 1
+              : 1 + (fit - rows.length) ~/ wrapping;
           return Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               for (final row in rows)
                 EmojiText(
-                  row,
+                  row.text,
                   textAlign: TextAlign.center,
-                  maxLines: row == time ? 1 : teamLines,
+                  maxLines: row.wraps ? nameLines : 1,
                   overflow: TextOverflow.ellipsis,
                   style: style,
                 ),

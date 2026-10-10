@@ -1351,6 +1351,7 @@ void main() {
       MatchLayout liveLayout = MatchLayout.full,
       int visibleDays = 7,
       int fontSize = 11,
+      int bandFontSize = 10,
       bool fitDay = true,
       bool animations = true,
       Stream<Map<String, MatchResult>>? resultsStream,
@@ -1389,6 +1390,7 @@ void main() {
               kioskLiveLayout: liveLayout,
               kioskVisibleDays: visibleDays,
               kioskFontSize: fontSize,
+              kioskBandFontSize: bandFontSize,
               kioskFitDay: fitDay,
               kioskAnimations: animations,
             ),
@@ -2930,10 +2932,26 @@ void main() {
       await tester.pumpAndSettle();
       Finder inBand(Finder f) =>
           find.descendant(of: find.byType(CalendarEventBand), matching: f);
-      expect(inBand(findEmojiText('🏆 Domácí')), findsOneWidget);
+      expect(inBand(findEmojiText('🏆')), findsOneWidget);
+      expect(inBand(find.text('Domácí')), findsOneWidget);
       expect(inBand(find.text('–')), findsOneWidget);
       expect(inBand(find.text('Soupeř')), findsOneWidget);
       expect(inBand(find.text('14:00–17:00')), findsOneWidget);
+      await finish(tester);
+    });
+
+    testWidgets('the admin\'s font size reaches the board\'s bands', (
+      tester,
+    ) async {
+      fullHd(tester);
+      await tester.pumpWidget(
+        app(slots: [fed('m', day, 'Domácí')], bandFontSize: 18),
+      );
+      await tester.pumpAndSettle();
+      final band = tester.widget<CalendarEventBand>(
+        find.byType(CalendarEventBand),
+      );
+      expect(band.fontSize, 18);
       await finish(tester);
     });
 
