@@ -20,6 +20,7 @@ import 'package:rezervator/features/kiosk/kiosk_connection.dart';
 import 'package:rezervator/features/kiosk/kiosk_display.dart';
 import 'package:rezervator/features/kiosk/kiosk_info_panel.dart';
 import 'package:rezervator/features/kiosk/kiosk_shell.dart';
+import 'package:rezervator/features/kiosk/kiosk_stream_window.dart';
 import 'package:rezervator/features/kiosk/kiosk_headline.dart';
 import 'package:rezervator/features/kiosk/name_picker.dart';
 import 'package:rezervator/features/schedule/widgets/calendar_board.dart';
@@ -1292,25 +1293,36 @@ void main() {
       createdAt: DateTime(2026, 9, int.tryParse(id) ?? 1),
       updatedAt: DateTime(2026, 9, 1),
     );
-    PrioritySlot fed(String id, Day date, String home, {int hour = 14}) =>
-        PrioritySlot(
-          type: PrioritySlot.fallbackMatchType,
-          id: id,
-          date: date,
-          startsAt: HourMinute(hour, 0),
-          endsAt: HourMinute(hour + 3, 0),
-          homeTeam: home,
-          awayTeam: 'Soupeř',
-          importKey: 'cka:$id',
-        );
-    MatchResult res(String id, String status, num home, num away) =>
-        MatchResult.fromJson({
-          'match_id': id,
-          'status': status,
-          'home_points': home,
-          'away_points': away,
-          'fetched_at': '2026-09-17T21:00:00+00:00',
-        });
+    PrioritySlot fed(
+      String id,
+      Day date,
+      String home, {
+      int hour = 14,
+      String? video,
+    }) => PrioritySlot(
+      type: PrioritySlot.fallbackMatchType,
+      id: id,
+      date: date,
+      startsAt: HourMinute(hour, 0),
+      endsAt: HourMinute(hour + 3, 0),
+      homeTeam: home,
+      awayTeam: 'Soupeř',
+      importKey: 'cka:$id',
+      videoUrl: video,
+    );
+    MatchResult res(
+      String id,
+      String status,
+      num home,
+      num away, {
+      String fetched = '2026-09-17T21:00:00+00:00',
+    }) => MatchResult.fromJson({
+      'match_id': id,
+      'status': status,
+      'home_points': home,
+      'away_points': away,
+      'fetched_at': fetched,
+    });
     MatchPlayerResult player(String matchId, String side, int pos) =>
         MatchPlayerResult(
           id: '$matchId-$side-$pos',
@@ -1353,6 +1365,7 @@ void main() {
       int fontSize = 11,
       bool fitDay = true,
       bool animations = true,
+      bool stream = false,
       Stream<Map<String, MatchResult>>? resultsStream,
       Map<String, List<MatchPlayerResult>> lineups = const {},
     }) => ProviderScope(
@@ -1391,7 +1404,16 @@ void main() {
               kioskFontSize: fontSize,
               kioskFitDay: fitDay,
               kioskAnimations: animations,
+              kioskStream: stream,
             ),
+          ),
+        ),
+        // The stream's player stands in as text: a platform view does not
+        // run under flutter_test.
+        kioskStreamContentProvider.overrideWithValue(
+          (videoId, {required interactive}) => Text(
+            'player $videoId ${interactive ? 'on' : 'off'}',
+            key: const ValueKey('player'),
           ),
         ),
         nowProvider.overrideWith((ref) => Stream.value(nowAt)),
@@ -1435,6 +1457,214 @@ void main() {
     // A notice title is in the status bar too; these tests are the drawer's.
     Finder drawerText(String t) =>
         find.descendant(of: find.byType(KioskDrawer), matching: find.text(t));
+
+    group('stream window', () {
+      const video = 'https://www.youtube.com/watch?v=wOq9EODb8w8';
+      final player = find.byKey(const ValueKey('player'));
+      // 11:00–14:00, being played at the kiosk's noon.
+      final onAir = [fed('m', day, 'Domácí', hour: 11, video: video)];
+      final playing = {'m': res('m', 'in_progress', 2, 1)};
+
+      testWidgets('with the switch on, the match on air with a video plays '
+          'in the window; off, or without a video, nothing', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(stream: true, slots: onAir, results: playing),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('player wOq9EODb8w8 on'), findsOneWidget);
+        expect(find.text('Domácí – Soupeř'), findsWidgets);
+        await finish(tester);
+
+        await tester.pumpWidget(app(slots: onAir, results: playing));
+        await tester.pumpAndSettle();
+        expect(player, findsNothing);
+        await finish(tester);
+
+        await tester.pumpWidget(
+          app(
+            stream: true,
+            slots: [fed('m', day, 'Domácí', hour: 11)],
+            results: playing,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(player, findsNothing);
+        await finish(tester);
+      });
+
+      testWidgets('a dragged window keeps its place across the idle reset',
+          (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(stream: true, slots: onAir, results: playing, idleSeconds: 30),
+        );
+        await tester.pumpAndSettle();
+        final titleBar = find.descendant(
+          of: find.byType(KioskStreamWindow),
+          matching: find.text('Domácí – Soupeř'),
+        );
+        await tester.drag(titleBar, const Offset(300, -200));
+        await tester.pumpAndSettle();
+        final moved = tester.getRect(player);
+
+        await tester.pump(const Duration(seconds: 31));
+        await tester.pumpAndSettle();
+        expect(tester.getRect(player), moved);
+        await finish(tester);
+      });
+
+      testWidgets('the player takes no touches while a notice is open',
+          (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            stream: true,
+            slots: onAir,
+            results: playing,
+            // A long notice: its „Více“ opens the dialog.
+            notices: [notice('1', 'Brigáda', body: 'Sejdeme se. ' * 120)],
+            drawerOpen: true,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('player wOq9EODb8w8 on'), findsOneWidget);
+
+        await tester.tap(find.text('Více'));
+        await tester.pumpAndSettle();
+        expect(find.byType(AlertDialog), findsOneWidget);
+        expect(find.text('player wOq9EODb8w8 off'), findsOneWidget);
+
+        await tester.tap(find.text('Zavřít'));
+        await tester.pumpAndSettle();
+        expect(find.text('player wOq9EODb8w8 on'), findsOneWidget);
+        await finish(tester);
+      });
+
+      testWidgets('a stream starting leaves the drawer as it was: the same '
+          'element, nothing of its state lost', (tester) async {
+        fullHd(tester);
+        final results = StreamController<Map<String, MatchResult>>();
+        addTearDown(results.close);
+        // 15:00: three hours ahead at the kiosk's noon — on air only once
+        // the site says it is being played.
+        await tester.pumpWidget(
+          app(
+            stream: true,
+            slots: [fed('m', day, 'Domácí', hour: 15, video: video)],
+            resultsStream: results.stream,
+            notices: [notice('1', 'Brigáda')],
+            drawerOpen: true,
+          ),
+        );
+        results.add(const {});
+        await tester.pumpAndSettle();
+        expect(player, findsNothing);
+        final drawer = tester.element(find.byType(KioskDrawer));
+
+        results.add({'m': res('m', 'in_progress', 0, 0)});
+        await tester.pumpAndSettle();
+        expect(player, findsOneWidget);
+        expect(identical(tester.element(find.byType(KioskDrawer)), drawer), isTrue);
+        await finish(tester);
+      });
+
+      testWidgets('the player takes no touches while the name picker is open',
+          (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(stream: true, slots: onAir, results: playing),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Rezervovat'));
+        await tester.pumpAndSettle();
+        expect(find.byType(NamePicker), findsOneWidget);
+        expect(find.text('player wOq9EODb8w8 off'), findsOneWidget);
+
+        await tester.tap(find.byTooltip('Zavřít'));
+        await tester.pumpAndSettle();
+        expect(find.text('player wOq9EODb8w8 on'), findsOneWidget);
+        await finish(tester);
+      });
+
+      testWidgets('the player takes no touches while the booking confirm is '
+          'open', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(stream: true, slots: onAir, results: playing),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Rezervovat'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('A'));
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find.descendant(
+            of: find.byType(NamePicker),
+            matching: find.text(anna.displayName),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('player wOq9EODb8w8 on'), findsOneWidget);
+
+        // A free lane far from the window (the last ＋ is in the last day).
+        final addCell = find.byIcon(Icons.add).last;
+        await tester.ensureVisible(addCell);
+        await tester.tap(addCell);
+        await tester.pumpAndSettle();
+        expect(find.text('Rezervovat termín?'), findsOneWidget);
+        expect(find.text('player wOq9EODb8w8 off'), findsOneWidget);
+
+        await tester.tap(find.text('Zrušit'));
+        await tester.pumpAndSettle();
+        expect(find.text('player wOq9EODb8w8 on'), findsOneWidget);
+        await finish(tester);
+      });
+
+      testWidgets('the player takes no touches while the Zápis is open',
+          (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            stream: true,
+            slots: [...onAir, fed('f', day.addDays(-3), 'Hotovo')],
+            results: {...playing, 'f': res('f', 'finished', 6, 2)},
+            lineups: {'f': lineup},
+            drawerOpen: true,
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('6 : 2'));
+        await tester.pumpAndSettle();
+        expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
+        expect(find.text('player wOq9EODb8w8 off'), findsOneWidget);
+
+        await tester.tapAt(const Offset(20, 20));
+        await tester.pumpAndSettle();
+        expect(find.byType(LegacyScoreSheetPage), findsNothing);
+        expect(find.text('player wOq9EODb8w8 on'), findsOneWidget);
+        await finish(tester);
+      });
+
+      testWidgets('the window goes with the match: decided, and its result '
+          'read more than half an hour ago', (tester) async {
+        fullHd(tester);
+        // Noon at the kiosk is 10:00 UTC; the result was read at 09:20.
+        await tester.pumpWidget(
+          app(
+            stream: true,
+            slots: onAir,
+            results: {
+              'm': res('m', 'finished', 6, 2,
+                  fetched: '2026-10-08T09:20:00+00:00'),
+            },
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(player, findsNothing);
+        await finish(tester);
+      });
+    });
 
     testWidgets('closed by default: only the button shows, tap opens it, tap '
         'closes it', (tester) async {

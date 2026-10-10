@@ -25,6 +25,8 @@ import 'kiosk_info_panel.dart';
 import 'kiosk_connection.dart';
 import 'kiosk_display.dart';
 import 'kiosk_headline.dart';
+import 'kiosk_modals.dart';
+import 'kiosk_stream_window.dart';
 import 'kiosk_zapis_page.dart';
 import 'name_picker.dart';
 import '../../core/widgets/emoji_text.dart';
@@ -129,11 +131,18 @@ class _KioskShellState extends ConsumerState<KioskShell>
     _boardKey.currentState?.resetToToday();
   }
 
+  /// Runs [show] — a route above the shell — with the stream's player
+  /// switched off for touches meanwhile ([KioskModals]).
+  Future<T> _modal<T>(Future<T> Function() show) =>
+      ref.read(kioskModalsProvider.notifier).around(show);
+
   Future<void> _openPicker() async {
     final kioskDark = ref.read(settingsProvider).value?.kioskDark ?? true;
-    final picked = await showNamePicker(
-      context,
-      brightness: kioskDark ? Brightness.dark : Brightness.light,
+    final picked = await _modal(
+      () => showNamePicker(
+        context,
+        brightness: kioskDark ? Brightness.dark : Brightness.light,
+      ),
     );
     if (!mounted) return;
     setState(() {
@@ -161,8 +170,8 @@ class _KioskShellState extends ConsumerState<KioskShell>
     child: Theme(data: _kioskTheme(), child: child),
   );
 
-  void _openNotice(Message notice) {
-    showDialog<void>(
+  Future<void> _openNotice(Message notice) => _modal(
+    () => showDialog<void>(
       context: context,
       builder: (context) => _touchable(
         AlertDialog(
@@ -195,8 +204,8 @@ class _KioskShellState extends ConsumerState<KioskShell>
           ],
         ),
       ),
-    );
-  }
+    ),
+  );
 
   /// A tap on a match of the board: only one with a score has a Zápis.
   void _openMatchIfScored(PrioritySlot match) {
@@ -206,15 +215,44 @@ class _KioskShellState extends ConsumerState<KioskShell>
 
   void _openMatch(PrioritySlot match) {
     unawaited(
-      showKioskZapis(
-        context,
-        slot: match,
-        brightness: (ref.read(settingsProvider).value?.kioskDark ?? true)
-            ? Brightness.dark
-            : Brightness.light,
-        percent: ref.read(settingsProvider).value?.kioskZapisPercent ?? 80,
-        onTouch: _touch,
+      _modal(
+        () => showKioskZapis(
+          context,
+          slot: match,
+          brightness: (ref.read(settingsProvider).value?.kioskDark ?? true)
+              ? Brightness.dark
+              : Brightness.light,
+          percent: ref.read(settingsProvider).value?.kioskZapisPercent ?? 80,
+          onTouch: _touch,
+        ),
       ),
+    );
+  }
+
+  /// The stream window (0066) over [board] while a match with a video is
+  /// on air; [board] alone otherwise. Its own layer: the player and its
+  /// frame move without re-recording the board.
+  Widget _withStream(Widget board) {
+    final streams = ref.watch(kioskStreamProvider);
+    final settings = ref.watch(settingsProvider).value;
+    // The same tree with or without the window — [board] stays in its slot,
+    // so a stream starting or ending never re-inflates the board and the
+    // drawer (the notices' turn, the list's weeks, the live refresh).
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        board,
+        if (streams.isNotEmpty)
+          RepaintBoundary(
+            child: KioskStreamWindow(
+              matches: streams,
+              content: ref.watch(kioskStreamContentProvider),
+              corner: settings?.kioskStreamCorner ?? KioskCorner.bl,
+              widthPercent: settings?.kioskStreamWidth ?? 35,
+              interactive: ref.watch(kioskModalsProvider) == 0,
+            ),
+          ),
+      ],
     );
   }
 
@@ -357,7 +395,7 @@ class _KioskShellState extends ConsumerState<KioskShell>
                       : null,
                 ),
               ),
-              Expanded(child: _boardWithPanel()),
+              Expanded(child: _withStream(_boardWithPanel())),
             ],
           ),
         ),

@@ -590,6 +590,80 @@ class KioskSettingsScreen extends ConsumerWidget {
               ),
             _section(
               context,
+              'Stream zápasu',
+              'Zápas, který má na webu ČKA video (YouTube), se během hraní '
+                  'přehrává v plovoucím okně vedle tabule — potichu; zvuk si '
+                  'návštěvník pustí v přehrávači. Okno jde posouvat, zvětšit '
+                  'na celou obrazovku nebo sbalit; po skončení zápasu zmizí.',
+              [
+                _switch(
+                  context,
+                  settings,
+                  'Stream zápasu na kiosku',
+                  settings?.kioskStream ?? false,
+                  'kiosk_stream',
+                  subtitle:
+                      'Od hodiny před začátkem do půl hodiny po zapsání '
+                      'výsledku. Doba nečinnosti okno nechá, kde ho '
+                      'návštěvník nechal.',
+                ),
+                if (settings?.kioskStream ?? false) ...[
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8, bottom: 12),
+                    child: DropdownButtonFormField<KioskCorner>(
+                      initialValue:
+                          settings?.kioskStreamCorner ?? KioskCorner.bl,
+                      decoration: const InputDecoration(
+                        labelText: 'Kde se okno objeví',
+                        helperText:
+                            'Panel je vpravo; vlevo dole mu okno nepřekáží.',
+                        border: OutlineInputBorder(),
+                      ),
+                      items: const [
+                        DropdownMenuItem(
+                          value: KioskCorner.tl,
+                          child: Text('Vlevo nahoře'),
+                        ),
+                        DropdownMenuItem(
+                          value: KioskCorner.tr,
+                          child: Text('Vpravo nahoře'),
+                        ),
+                        DropdownMenuItem(
+                          value: KioskCorner.bl,
+                          child: Text('Vlevo dole'),
+                        ),
+                        DropdownMenuItem(
+                          value: KioskCorner.br,
+                          child: Text('Vpravo dole'),
+                        ),
+                      ],
+                      onChanged: settings == null
+                          ? null
+                          : (c) => c == null
+                                ? null
+                                : _panel(context, settings, {
+                                    'kiosk_stream_corner': c.name,
+                                  }),
+                    ),
+                  ),
+                  _number(
+                    context,
+                    settings,
+                    'Šířka okna',
+                    settings?.kioskStreamWidth ?? 35,
+                    'kiosk_stream_width',
+                    unit: '%',
+                    min: 20,
+                    max: 60,
+                    helper:
+                        'Procenta šířky obrazovky; výška podle videa 16:9. '
+                        'Návštěvník si okno přesune nebo zvětší sám.',
+                  ),
+                ],
+              ],
+            ),
+            _section(
+              context,
               'Optimalizace výkonu',
               'Pro slabší displej, na kterém se kiosk zadrhává (třeba Android '
                   's kioskem v prohlížeči). Každá volba ubere kreslení za '

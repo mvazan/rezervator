@@ -333,6 +333,65 @@ void main() {
     expect(lastPatch(), {'kiosk_low_res': true});
   });
 
+  testWidgets('the stream options: the switch PATCHes kiosk_stream, the corner '
+      'and the width show only with it on and PATCH their own columns', (
+    tester,
+  ) async {
+    tall(tester);
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+
+    Map<String, dynamic> lastPatch() => jsonDecode(
+          requests.lastWhere((r) => r.method == 'PATCH').body,
+        ) as Map<String, dynamic>;
+
+    // Off by default: no corner, no width.
+    expect(find.text('Kde se okno objeví'), findsNothing);
+    expect(find.text('Šířka okna'), findsNothing);
+    final stream = find.widgetWithText(SwitchListTile, 'Stream zápasu na kiosku');
+    await tester.ensureVisible(stream);
+    await tester.tap(stream);
+    await tester.pumpAndSettle();
+    expect(lastPatch(), {'kiosk_stream': true});
+  });
+
+  // Its own test: a second pumpWidget never swaps the ProviderScope's
+  // overrides, so the switched-on settings need a fresh tree.
+  testWidgets('with the stream on, the corner and the width PATCH their own '
+      'columns', (tester) async {
+    tall(tester);
+    await tester.pumpWidget(
+      app(
+        settings: const ScheduleSettings(
+          laneCount: 4,
+          trainingWeekdays: {1, 2, 4},
+          bookingHorizonDays: 14,
+          maxActiveReservations: 3,
+          kioskStream: true,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    Map<String, dynamic> lastPatch() => jsonDecode(
+          requests.lastWhere((r) => r.method == 'PATCH').body,
+        ) as Map<String, dynamic>;
+
+    await tester.ensureVisible(find.text('Kde se okno objeví'));
+    await tester.tap(find.text('Vlevo dole'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Vpravo nahoře').last);
+    await tester.pumpAndSettle();
+    expect(lastPatch(), {'kiosk_stream_corner': 'tr'});
+
+    final width = find.widgetWithText(TextField, 'Šířka okna');
+    await tester.ensureVisible(width);
+    await tester.enterText(width, '50');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(lastPatch(), {'kiosk_stream_width': 50});
+  });
+
   /// Types [text] into the number field [label] and presses Enter.
   Future<void> enter(WidgetTester tester, String label, String text) async {
     final field = find.widgetWithText(TextField, label);

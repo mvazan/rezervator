@@ -71,4 +71,13 @@ void main() {
     expect(wakelock.log, isEmpty);
     expect(bars, hasLength(1));
   });
+
+  test('a refusal of any kind — a browser denying the wake lock throws a '
+      'bare error — stops neither the bars nor the kiosk', () async {
+    wakelock.refuseWith = StateError('NotAllowedError');
+
+    await const KioskDisplay().hold();
+
+    expect(bars, hasLength(1));
+  });
 }
