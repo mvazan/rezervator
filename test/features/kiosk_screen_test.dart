@@ -17,6 +17,13 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 /// PATCHes `schedule_settings.kiosk_dark` — asserted here by inspecting the
 /// stubbed HTTP request rather than hitting a real backend.
 void main() {
+  /// [text] inside the admin tile titled [title] — the warning and the
+  /// booking note each have their own „Přidat…“ and „Upravit…“.
+  Finder inTile(String title, String text) => find.descendant(
+    of: find.widgetWithText(ListTile, title),
+    matching: find.text(text),
+  );
+
   const admin = Profile(
     id: 'admin1',
     displayName: 'Správce',
@@ -304,7 +311,7 @@ void main() {
       );
       expect(find.byTooltip('Odstranit upozornění'), findsNothing);
 
-      await tester.tap(find.text('Přidat…'));
+      await tester.tap(inTile('Upozornění', 'Přidat…'));
       await tester.pumpAndSettle();
       final save = find.widgetWithText(FilledButton, 'Uložit');
       expect(tester.widget<FilledButton>(save).onPressed, isNull);
@@ -342,7 +349,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Dráha 3 je mimo provoz.'), findsOneWidget);
 
-      await tester.tap(find.text('Upravit…'));
+      await tester.tap(inTile('Upozornění', 'Upravit…'));
       await tester.pumpAndSettle();
       expect(
         tester
