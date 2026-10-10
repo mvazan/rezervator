@@ -62,19 +62,42 @@ class KioskDayInfo extends ConsumerWidget {
 
     final scheme = Theme.of(context).colorScheme;
     final quiet = TextStyle(fontSize: 14, color: scheme.onSurfaceVariant);
-    return Padding(
-      padding: const EdgeInsets.only(left: 24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (weather != null) _Weather(weather: weather, quiet: quiet),
-          if (nameDay != null) Text(nameDay, style: quiet),
-        ],
+    // At most a quarter of the screen: the status bar's middle (today's
+    // matches, the notices) and „Rezervovat“ keep their room on a narrow
+    // kiosk with large text — the weather shrinks, the name day ellipsizes.
+    return ConstrainedBox(
+      constraints: BoxConstraints(
+        maxWidth: MediaQuery.sizeOf(context).width * kioskDayInfoShare,
+      ),
+      child: Padding(
+        padding: const EdgeInsets.only(left: 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (weather != null)
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: _Weather(weather: weather, quiet: quiet),
+              ),
+            if (nameDay != null)
+              Text(
+                nameDay,
+                style: quiet,
+                maxLines: 1,
+                softWrap: false,
+                overflow: TextOverflow.ellipsis,
+              ),
+          ],
+        ),
       ),
     );
   }
 }
+
+/// The share of the screen's width the column may take.
+const kioskDayInfoShare = 0.25;
 
 class _Weather extends StatelessWidget {
   const _Weather({required this.weather, required this.quiet});
@@ -122,6 +145,12 @@ class _Weather extends StatelessWidget {
             const SizedBox(width: 2),
             Text('$chance %', style: quiet),
           ],
+          // The source, where the weather is shown (CC BY 4.0).
+          const SizedBox(width: 10),
+          Text(
+            'Open-Meteo.com',
+            style: quiet.copyWith(fontSize: 10),
+          ),
         ],
       ),
     );

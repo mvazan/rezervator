@@ -47,15 +47,18 @@ void main() {
     fetchedAt: at ?? now.subtract(const Duration(minutes: 10)),
   );
 
-  Widget app(ScheduleSettings s, {KioskWeather? w}) => ProviderScope(
+  Widget app(
+    ScheduleSettings s, {
+    KioskWeather? w,
+    DateTime? at,
+    Widget home = const Scaffold(body: Center(child: KioskDayInfo())),
+  }) => ProviderScope(
     overrides: [
       settingsProvider.overrideWith((ref) => Stream.value(s)),
-      nowProvider.overrideWith((ref) => Stream.value(now)),
+      nowProvider.overrideWith((ref) => Stream.value(at ?? now)),
       kioskWeatherProvider.overrideWith((ref) => Stream.value(w)),
     ],
-    child: const MaterialApp(
-      home: Scaffold(body: Center(child: KioskDayInfo())),
-    ),
+    child: MaterialApp(home: home),
   );
 
   testWidgets('both off: nothing at all', (tester) async {
@@ -111,6 +114,61 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('−3°'), findsNothing);
     expect(find.text('Svátek: Radmila'), findsOneWidget);
+  });
+
+  testWidgets('the weather names its source; the name day alone does not', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(settings(weather: true, nameday: true), w: weather()),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Open-Meteo.com'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+
+    await tester.pumpWidget(app(settings(nameday: true), w: weather()));
+    await tester.pumpAndSettle();
+    expect(find.text('Svátek: Radmila'), findsOneWidget);
+    expect(find.text('Open-Meteo.com'), findsNothing);
+  });
+
+  testWidgets('a narrow kiosk with large text: the column keeps to a quarter '
+      'of the screen and the status bar does not overflow', (tester) async {
+    tester.view.physicalSize = const Size(1024, 600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    // The status bar's shape: the clock, this column, the middle, the
+    // button — the longest name day of the year, the umbrella on.
+    await tester.pumpWidget(
+      MediaQuery(
+        data: const MediaQueryData(
+          size: Size(1024, 600),
+          textScaler: TextScaler.linear(2),
+        ),
+        child: app(
+          settings(weather: true, nameday: true),
+          w: weather(t: -12.4, chance: 100),
+          at: DateTime(2026, 1, 6, 10),
+          home: const Scaffold(
+            body: Row(
+              children: [
+                SizedBox(width: 120, height: 60),
+                KioskDayInfo(),
+                Expanded(child: SizedBox(height: 60)),
+                SizedBox(width: 260, height: 60),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.text('Svátek: Kašpar, Melichar a Baltazar'), findsOneWidget);
+    expect(
+      tester.getSize(find.byType(KioskDayInfo)).width,
+      lessThanOrEqualTo(1024 * kioskDayInfoShare),
+    );
   });
 
   testWidgets('a clear night shows the moon', (tester) async {
