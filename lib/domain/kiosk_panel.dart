@@ -132,8 +132,9 @@ List<PrioritySlot> kioskLiveMatches({
     });
 }
 
-/// How long a decided match streams on after the server read its result
-/// (0066): the closing minutes of a stream run after the site stamps it.
+/// How long a decided match streams on after the server first saw it
+/// decided (0066, `decided_at`; the last read when a row predates it): the
+/// closing minutes of a stream run after the site stamps the result.
 const streamGrace = Duration(minutes: 30);
 
 /// How far past the planned end a decided match may stream at all: an
@@ -145,10 +146,12 @@ const streamOverrun = Duration(hours: 2);
 /// own federation matches with a YouTube video that are on air — [isLive]
 /// (from an hour before the start until the site stamps the result, at
 /// most twelve hours), or decided and still within [streamGrace] of the
-/// result's `fetched_at`, from an hour before the start (a forfeit the site
-/// stores days ahead opens nothing) to at most [streamOverrun] past the
-/// planned end. Not gated on the players' data like [kioskLiveMatches]: a
-/// stream starts before the first throw. Chronological.
+/// moment the server first saw it decided (`decided_at`; a forced re-read
+/// in the app does not reopen the window), from an hour before the start
+/// (a forfeit the site stores days ahead opens nothing) to at most
+/// [streamOverrun] past the planned end. Not gated on the players' data
+/// like [kioskLiveMatches]: a stream starts before the first throw.
+/// Chronological.
 List<PrioritySlot> kioskStreamMatches({
   required List<PrioritySlot> slots,
   required Map<String, MatchResult> results,
@@ -172,7 +175,7 @@ List<PrioritySlot> kioskStreamMatches({
       s.endsAt.hour,
       s.endsAt.minute,
     );
-    final until = r.fetchedAt.add(streamGrace);
+    final until = (r.decidedAt ?? r.fetchedAt).add(streamGrace);
     final latest = end.add(streamOverrun);
     return !now.isBefore(start.subtract(const Duration(hours: 1))) &&
         now.isBefore(until.isBefore(latest) ? until : latest);

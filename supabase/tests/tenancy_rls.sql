@@ -4152,6 +4152,9 @@ begin
      or mr.discipline <> 'T120' then
     raise exception 'FAIL: match_results row wrong: %', to_jsonb(mr);
   end if;
+  if mr.decided_at is null then
+    raise exception 'FAIL: a finished result was not stamped decided_at (0066)';
+  end if;
   if (select count(*) from match_player_results where match_id = s.id) <> 1
      or (select lanes->0->>'total' from match_player_results where match_id = s.id) <> '135' then
     raise exception 'FAIL: player row not stored';
@@ -4173,11 +4176,15 @@ begin
      or (select count(*) from match_results where match_id = s.id) <> 1 then
     raise exception 'FAIL: a repeated result duplicated rows';
   end if;
+  -- A re-read moves fetched_at, never decided_at (0066).
+  if (select decided_at from match_results where match_id = s.id) <> mr.decided_at then
+    raise exception 'FAIL: a re-read of a finished result moved decided_at (0066)';
+  end if;
   if apply_federation_result(v_a, 999, v_res) then
     raise exception 'FAIL: apply_federation_result should answer false for a match with no slot';
   end if;
   perform set_config('import.run', '', true);
-  raise notice 'OK: apply_federation_result upserts the result, replaces players, fixes home/away from the venue; false without a slot (0045); a substitution rides on the starter''s row (0053)';
+  raise notice 'OK: apply_federation_result upserts the result, replaces players, fixes home/away from the venue; false without a slot (0045); a substitution rides on the starter''s row (0053); decided_at is stamped once (0066)';
 end $$;
 
 -- 7. RLS: own alley reads, the other alley sees nothing, nobody writes.

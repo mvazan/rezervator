@@ -362,7 +362,7 @@ begin
     (match_id, tenant_id, status, match_type, discipline,
      home_points, away_points, home_total, away_total, home_fulls, away_fulls,
      home_spares, away_spares, home_errors, away_errors,
-     home_set_points, away_set_points, fetched_at)
+     home_set_points, away_set_points, fetched_at, decided_at)
   values
     (v_row.id, p_tenant, p_result->>'status',
      coalesce(p_result->>'match_type', ''), coalesce(p_result->>'discipline', ''),
@@ -371,7 +371,11 @@ begin
      (v_home->>'fulls')::integer, (v_away->>'fulls')::integer,
      (v_home->>'spares')::integer, (v_away->>'spares')::integer,
      (v_home->>'errors')::integer, (v_away->>'errors')::integer,
-     (v_home->>'set_points')::numeric, (v_away->>'set_points')::numeric, now())
+     (v_home->>'set_points')::numeric, (v_away->>'set_points')::numeric, now(),
+     -- clock_timestamp, not now(): two applies in one transaction (the
+     -- tenancy suite) must be able to tell a stamp kept from one re-set.
+     case when p_result->>'status' in ('finished', 'forfeit')
+          then clock_timestamp() end)
   on conflict (match_id) do update set
     status = excluded.status, match_type = excluded.match_type,
     discipline = excluded.discipline,
@@ -382,7 +386,8 @@ begin
     home_errors = excluded.home_errors, away_errors = excluded.away_errors,
     home_set_points = excluded.home_set_points,
     away_set_points = excluded.away_set_points,
-    fetched_at = now();
+    fetched_at = now(),
+    decided_at = coalesce(r.decided_at, excluded.decided_at);
 
   delete from match_player_results where match_id = v_row.id;
   insert into match_player_results
@@ -5435,6 +5440,7 @@ CREATE TABLE IF NOT EXISTS "public"."match_results" (
     "home_set_points" numeric,
     "away_set_points" numeric,
     "fetched_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "decided_at" timestamp with time zone,
     CONSTRAINT "match_results_status_check" CHECK (("status" = ANY (ARRAY['scheduled'::"text", 'preparation'::"text", 'in_progress'::"text", 'finished'::"text", 'forfeit'::"text"])))
 );
 

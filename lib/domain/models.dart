@@ -1194,6 +1194,7 @@ class MatchResult {
     this.homeSetPoints,
     this.awaySetPoints,
     required this.fetchedAt,
+    this.decidedAt,
   });
 
   final String matchId;
@@ -1212,7 +1213,14 @@ class MatchResult {
   final int? awayErrors;
   final num? homeSetPoints;
   final num? awaySetPoints;
+
+  /// When the server last read the result off the site.
   final DateTime fetchedAt;
+
+  /// When the server first saw the result decided (finished, forfeit; 0066)
+  /// — unlike [fetchedAt] it does not move with a later re-read. Null for
+  /// an undecided match, and for a league match's result (0055).
+  final DateTime? decidedAt;
 
   factory MatchResult.fromJson(Map<String, dynamic> json) => MatchResult(
         matchId: json['match_id'] as String,
@@ -1232,6 +1240,10 @@ class MatchResult {
         homeSetPoints: json['home_set_points'] as num?,
         awaySetPoints: json['away_set_points'] as num?,
         fetchedAt: DateTime.parse(json['fetched_at'] as String),
+        decidedAt: switch (json['decided_at']) {
+          final String s => DateTime.parse(s),
+          _ => null,
+        },
       );
 }
 

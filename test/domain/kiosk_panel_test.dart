@@ -32,12 +32,17 @@ void main() {
     videoUrl: video,
   );
 
-  MatchResult result(String id, MatchStatus status, {DateTime? fetched}) =>
-      MatchResult(
-        matchId: id,
-        status: status,
-        fetchedAt: fetched ?? DateTime(2026, 10, 1),
-      );
+  MatchResult result(
+    String id,
+    MatchStatus status, {
+    DateTime? fetched,
+    DateTime? decided,
+  }) => MatchResult(
+    matchId: id,
+    status: status,
+    fetchedAt: fetched ?? DateTime(2026, 10, 1),
+    decidedAt: decided,
+  );
 
   Message notice(
     String id, {
@@ -303,6 +308,19 @@ void main() {
       expect(streamsAt(DateTime(2026, 10, 8, 17, 30), results: late), ['m']);
       expect(streamsAt(DateTime(2026, 10, 8, 18, 20), results: late), ['m']);
       expect(streamsAt(DateTime(2026, 10, 8, 18, 40), results: late), isEmpty);
+    });
+
+    test('the half hour counts from when the server first saw the result '
+        'decided — a later re-read (the app\'s ⟳) does not reopen the window',
+        () {
+      // Decided at 16:31, read again at 18:01 after a forced refresh.
+      final reread = {
+        'm': result('m', MatchStatus.finished,
+            fetched: DateTime(2026, 10, 8, 18, 1),
+            decided: DateTime(2026, 10, 8, 16, 31)),
+      };
+      expect(streamsAt(DateTime(2026, 10, 8, 16, 50), results: reread), ['m']);
+      expect(streamsAt(DateTime(2026, 10, 8, 18, 10), results: reread), isEmpty);
     });
 
     test('a decided match never streams more than two hours past its planned '
