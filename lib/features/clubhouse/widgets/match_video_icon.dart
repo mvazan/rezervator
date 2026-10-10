@@ -55,8 +55,8 @@ class MatchLeading extends StatefulWidget {
 
   final void Function(String url) launch;
 
-  /// False = the live badge stays still, no ring: the kiosk's „Animace na
-  /// pozadí“ off (0065) — on a slow display every pulse repaints the
+  /// False = the live badge stays still, no ring: the kiosk's „Opakující
+  /// se animace“ off (0065) — on a slow display every pulse repaints the
   /// screen.
   final bool pulse;
 
@@ -211,7 +211,7 @@ class _MatchLeadingState extends State<MatchLeading>
     // needed for "Tooltip + semantics Živý přenos".
     return IconButton(
       // The ring repaints every frame: only the badge, not the row.
-      icon: RepaintBoundary(child: badge),
+      icon: pulsing ? RepaintBoundary(child: badge) : badge,
       tooltip: tooltip,
       padding: EdgeInsets.zero,
       constraints:

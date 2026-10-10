@@ -40,8 +40,8 @@ import '../../../core/push_screen.dart';
 /// match with a YouTube video ([hasKioskVideo]; any other keeps the
 /// trophy): a tap closes the dialog and plays it in the kiosk's stream
 /// window. Only without [interactive] — the app keeps the browser.
-/// [pulseLive] false keeps the live badge still (the kiosk's „Animace na
-/// pozadí“ off).
+/// [pulseLive] false keeps the live badge still (the kiosk's „Opakující se
+/// animace“ off).
 Future<void> showDayMatchesDialog(
   BuildContext context,
   Day date,

@@ -319,7 +319,7 @@ void main() {
         ) as Map<String, dynamic>;
 
     final breathing =
-        find.widgetWithText(SwitchListTile, 'Animace na pozadí');
+        find.widgetWithText(SwitchListTile, 'Opakující se animace');
     await tester.ensureVisible(breathing);
     await tester.tap(breathing);
     await tester.pumpAndSettle();
