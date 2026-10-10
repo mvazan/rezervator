@@ -317,7 +317,7 @@ class CalendarEventBand extends StatelessWidget {
       ),
       alignment: Alignment.center,
       padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: Text(
+      child: EmojiText(
         text,
         textAlign: TextAlign.center,
         maxLines: 2,

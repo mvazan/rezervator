@@ -9,6 +9,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../../../core/widgets/emoji_text.dart';
 import '../../../domain/labels.dart';
 import '../../../domain/models.dart';
 import '../../../domain/palette.dart';
@@ -24,7 +25,7 @@ enum SlotTileSize {
   large,
 
   /// Kiosk board: a single rounded cell with the lane digit inside, 11px
-  /// text, a literal '＋' when bookable.
+  /// text, the add icon when bookable.
   row,
 }
 
@@ -212,7 +213,7 @@ class SlotTile extends StatelessWidget {
   /// text to [_NameText], which wraps between words and shrinks the type
   /// rather than splitting a word in half.
   Widget _sizedText(String text, TextStyle style) => _compact
-      ? Text(
+      ? EmojiText(
           text,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
@@ -258,7 +259,7 @@ class SlotTile extends StatelessWidget {
         return _rowShell(
           context,
           background: bg,
-          child: Text(
+          child: EmojiText(
             rentalLabel(rental),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
@@ -303,13 +304,18 @@ class SlotTile extends StatelessWidget {
           border: bookable
               ? Border.all(color: scheme.secondary.withValues(alpha: 0.5))
               : null,
+          // The Material add icon, as in the week calendar: a bundled font,
+          // the same in every row from the first frame. The fullwidth '＋'
+          // it replaces is in no font of the app, so on the web it was set
+          // in whichever fallback font had loaded by then.
           child: bookable
-              ? Text(
-                  '＋',
-                  style: TextStyle(
-                    fontSize: 13 * textScale,
-                    fontWeight: FontWeight.w700,
+              ? Align(
+                  alignment: Alignment.centerLeft,
+                  child: Icon(
+                    Icons.add,
+                    size: 17 * textScale,
                     color: scheme.secondary,
+                    semanticLabel: '＋',
                   ),
                 )
               : null,
@@ -324,7 +330,7 @@ class SlotTile extends StatelessWidget {
         return _rowShell(
           context,
           background: bg,
-          child: Text(
+          child: EmojiText(
             slotEventLabel(slot),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
@@ -571,7 +577,7 @@ class _NameText extends StatelessWidget {
         final room = constraints.maxWidth - 1;
         final fits = widest <= room || room <= 0 || widest == 0;
         final scale = fits ? 1.0 : (room / widest).clamp(_minScale, 1.0);
-        return Text(
+        return EmojiText(
           name,
           maxLines: 2,
           overflow: TextOverflow.ellipsis,

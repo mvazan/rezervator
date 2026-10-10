@@ -22,6 +22,7 @@ import 'package:rezervator/features/kiosk/kiosk_headline.dart';
 import 'package:rezervator/features/kiosk/name_picker.dart';
 import 'package:rezervator/features/schedule/widgets/calendar_board.dart';
 import 'package:rezervator/features/schedule/widgets/schedule_day_column.dart';
+import '../support/emoji_finders.dart';
 
 void main() {
   const settings = ScheduleSettings(
@@ -207,9 +208,9 @@ void main() {
     await tester.pumpAndSettle();
 
     // Today is the board's first (always-built) column, so the + cell is
-    // already in the tree — the board renders free lanes as a literal '＋'
-    // character (spec §1), not the Material add icon.
-    final addCell = find.text('＋').first;
+    // already in the tree — the board marks a free lane with the Material
+    // add icon (a bundled font: the same in every row on the web).
+    final addCell = find.byIcon(Icons.add).first;
     await tester.ensureVisible(addCell);
     await tester.pumpAndSettle();
     await tester.tap(addCell);
@@ -257,7 +258,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       await selectAnna();
-      expect(find.text('＋'), findsNothing);
+      expect(find.byIcon(Icons.add), findsNothing);
       expect(
         find.textContaining('Máš maximální počet rezervací (1)'),
         findsOneWidget,
@@ -270,7 +271,7 @@ void main() {
       await tester.pumpWidget(kioskApp(maxActiveReservations: 1));
       await tester.pumpAndSettle();
       await selectAnna();
-      expect(find.text('＋'), findsWidgets);
+      expect(find.byIcon(Icons.add), findsWidgets);
       expect(find.textContaining('maximální počet rezervací'), findsNothing);
       await finish(tester);
     },
@@ -305,8 +306,8 @@ void main() {
       );
 
       // Same steps as test d: today's column is always built, free lanes
-      // render as a literal '＋'.
-      final addCell = find.text('＋').first;
+      // show the add icon.
+      final addCell = find.byIcon(Icons.add).first;
       await tester.ensureVisible(addCell);
       await tester.pumpAndSettle();
       await tester.tap(addCell);
@@ -579,11 +580,11 @@ void main() {
       await tester.pumpAndSettle();
 
       // Both bands render at their real windows, once (slots are today only).
-      expect(find.text('⛔ Úklid před zápasem\n20:00–21:00'), findsOneWidget);
+      expect(findEmojiText('⛔ Úklid před zápasem\n20:00–21:00'), findsOneWidget);
       expect(
-        find.text(
+        findEmojiText(
           '🏆 ${match.title}\n'
-          '${match.startsAt.display()}–${match.endsAt.display()}',
+          '${match.startsAt.display()}–${match.endsAt.display()}'
         ),
         findsOneWidget,
       );
@@ -666,9 +667,9 @@ void main() {
       // '🏆 {title}\n{start}–{end}', distinct from the header banner's
       // plain '🏆 {title}'.
       expect(
-        find.text(
+        findEmojiText(
           '🏆 ${match.title}\n'
-          '${match.startsAt.display()}–${match.endsAt.display()}',
+          '${match.startsAt.display()}–${match.endsAt.display()}'
         ),
         findsOneWidget,
       );
@@ -858,12 +859,12 @@ void main() {
 
       // The band shows the renter with its real times, exactly once (the
       // rental is one-time, so only today's column has it).
-      expect(find.text('🔒 Firma X\n8:45–9:30'), findsOneWidget);
+      expect(findEmojiText('🔒 Firma X\n8:45–9:30'), findsOneWidget);
 
       // And it sits at its true time: band top-to-block top distance equals
       // 45 minutes at the shared px/min scale (block card = 30 min).
       final shortCard = find.byKey(const ValueKey('cal-block-bShort')).first;
-      final band = find.text('🔒 Firma X\n8:45–9:30');
+      final band = findEmojiText('🔒 Firma X\n8:45–9:30');
       final pxPerMinute = tester.getSize(shortCard).height / 30;
       final bandTop = tester
           .getTopLeft(
@@ -932,7 +933,7 @@ void main() {
 
       // The window must reach 19:00 or the band would render above it.
       expect(find.text('19:00'), findsWidgets);
-      expect(find.text('⛔ Úklid před zápasem\n19:00–20:00'), findsOneWidget);
+      expect(findEmojiText('⛔ Úklid před zápasem\n19:00–20:00'), findsOneWidget);
 
       await finish(tester);
     },
@@ -1060,7 +1061,7 @@ void main() {
 
       // The match band renders; the fully-covered rental does not (priority
       // wins, first-emitted band keeps the space)…
-      expect(find.text('🏆 ${match.title}\n20:00–22:00'), findsOneWidget);
+      expect(findEmojiText('🏆 ${match.title}\n20:00–22:00'), findsOneWidget);
       expect(find.textContaining('Firma X'), findsNothing);
       // …and the spilling rental shows only via its outside piece.
       expect(find.textContaining('Firma Y'), findsOneWidget);

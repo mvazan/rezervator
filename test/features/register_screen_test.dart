@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/auth/register_screen.dart';
+import '../support/emoji_finders.dart';
 
 void main() {
   /// What the screen sent, one line per backend call.
@@ -68,7 +69,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Kuželna č. 1'), findsWidgets);
     expect(find.text('Kuželna Vracov'), findsWidgets);
-    expect(find.text('➕ Založit novou kuželnu'), findsWidgets);
+    expect(findEmojiText('➕ Založit novou kuželnu'), findsWidgets);
   });
 
   testWidgets('a single alley preselects silently', (tester) async {
@@ -87,7 +88,7 @@ void main() {
 
     await tester.tap(find.text('Kuželna'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('➕ Založit novou kuželnu').last);
+    await tester.tap(findEmojiText('➕ Založit novou kuželnu').last);
     await tester.pumpAndSettle();
 
     expect(find.text('Název nové kuželny'), findsOneWidget);
@@ -246,7 +247,7 @@ void main() {
 
     await tester.tap(find.text('Kuželna'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('➕ Založit novou kuželnu').last);
+    await tester.tap(findEmojiText('➕ Založit novou kuželnu').last);
     await tester.pumpAndSettle();
 
     await tester.enterText(

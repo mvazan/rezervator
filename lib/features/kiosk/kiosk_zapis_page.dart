@@ -48,7 +48,7 @@ Future<void> showKioskZapis(
                 clipBehavior: Clip.antiAlias,
                 borderRadius: BorderRadius.circular(full ? 0 : 16),
                 elevation: 8,
-                child: ZapisPage(slot: slot, closeButton: full),
+                child: ZapisPage(slot: slot, closeButton: full, withRegnums: true),
               ),
             ),
           ),

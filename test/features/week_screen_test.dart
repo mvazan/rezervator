@@ -24,6 +24,7 @@ import 'package:rezervator/features/schedule/widgets/day_chip_strip.dart';
 import 'package:rezervator/features/schedule/widgets/day_header.dart';
 import 'package:rezervator/features/schedule/widgets/schedule_day_column.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../support/emoji_finders.dart';
 
 void main() {
   // WeekScreen reads the schedule_view preference on its first frame
@@ -1020,7 +1021,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(
-      find.text('⛔ Úklid před zápasem\n22:58–23:30'),
+      findEmojiText('⛔ Úklid před zápasem\n22:58–23:30'),
       findsOneWidget,
     );
     // The úklid (whole-alley) cancelled b1 for that day.
@@ -1245,7 +1246,7 @@ void main() {
     );
     await tester.pumpWidget(app(rentals: [rental]));
     await tester.pumpAndSettle();
-    expect(find.text('🔒 Firma X\n12:00–14:00'), findsOneWidget);
+    expect(findEmojiText('🔒 Firma X\n12:00–14:00'), findsOneWidget);
   });
 
   // A weekly 'Firma X' series on lane 1 — by default over the harness block
@@ -1308,7 +1309,7 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    final band = find.text('🔒 Firma X\n12:00–14:00');
+    final band = findEmojiText('🔒 Firma X\n12:00–14:00');
     expect(band, findsOneWidget);
     await tester.ensureVisible(band);
     await tester.pumpAndSettle();
@@ -1876,7 +1877,7 @@ void main() {
     // …and the blocked lane row carries the type's name: once in the day
     // header strip, once in the lane cell — never the generic 'Zápas'.
     // Once in the day header strip (with times), once in the lane cell.
-    expect(find.textContaining('⛔ Údržba'), findsNWidgets(2));
+    expect(findEmojiTextContaining('⛔ Údržba'), findsNWidgets(2));
     expect(find.text('Zápas'), findsNothing);
   });
 
@@ -1992,7 +1993,7 @@ void main() {
     expect(find.textContaining('· 23:30–23:59'), findsWidgets);
     // Once in the day-header strip, once as the gap banner.
     expect(
-      find.textContaining('⛔ Úklid před zápasem · 22:58–23:30'),
+      findEmojiTextContaining('⛔ Úklid před zápasem · 22:58–23:30'),
       findsWidgets,
     );
     expect(find.textContaining('Zavřeno'), findsNothing);
@@ -2188,7 +2189,7 @@ void main() {
     );
     // The úklid still renders as its true-time band in the column below.
     expect(
-      find.text('⛔ Úklid před zápasem\n22:58–23:30'),
+      findEmojiText('⛔ Úklid před zápasem\n22:58–23:30'),
       findsOneWidget,
     );
   });

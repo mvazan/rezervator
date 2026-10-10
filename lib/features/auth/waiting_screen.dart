@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/widgets/auth_background.dart';
+import '../../core/widgets/emoji_text.dart';
 import '../../data/providers.dart';
 
 /// What the user is waiting for.
@@ -59,7 +60,10 @@ class _WaitingScreenState extends ConsumerState<WaitingScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(tenant ? '🏗️' : '🕰️', style: const TextStyle(fontSize: 48)),
+              EmojiText(
+                tenant ? '🏗️' : '🕰️',
+                style: const TextStyle(fontSize: 48),
+              ),
               const SizedBox(height: 16),
               Text(
                 tenant ? 'Kuželna čeká na schválení' : 'Čekáš na schválení',
