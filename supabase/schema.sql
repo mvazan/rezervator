@@ -3461,6 +3461,8 @@ begin
                           - 'kiosk_live_refresh_seconds'
                           - 'kiosk_visible_days' - 'kiosk_font_size'
                           - 'kiosk_animations' - 'kiosk_low_res'
+                          - 'kiosk_stream' - 'kiosk_stream_corner'
+                          - 'kiosk_stream_width'
                    from schedule_settings s where s.tenant_id = v_tenant),
     'blocks', coalesce((
       select jsonb_agg(to_jsonb(b) - 'tenant_id')
@@ -5690,6 +5692,9 @@ CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     "kiosk_font_size" smallint DEFAULT 11 NOT NULL,
     "kiosk_animations" boolean DEFAULT true NOT NULL,
     "kiosk_low_res" boolean DEFAULT false NOT NULL,
+    "kiosk_stream" boolean DEFAULT false NOT NULL,
+    "kiosk_stream_corner" "text" DEFAULT 'bl'::"text" NOT NULL,
+    "kiosk_stream_width" smallint DEFAULT 35 NOT NULL,
     CONSTRAINT "schedule_settings_booking_horizon_days_check" CHECK ((("booking_horizon_days" >= 1) AND ("booking_horizon_days" <= 90))),
     CONSTRAINT "schedule_settings_duty_reminder_days_check" CHECK ((("duty_reminder_days" >= 1) AND ("duty_reminder_days" <= 14))),
     CONSTRAINT "schedule_settings_kiosk_ahead_check" CHECK ((("kiosk_weeks_ahead" >= 0) AND ("kiosk_weeks_ahead" <= 52))),
@@ -5704,6 +5709,8 @@ CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     CONSTRAINT "schedule_settings_kiosk_notices_rotation_check" CHECK ((("kiosk_notices_rotation_seconds" >= 3) AND ("kiosk_notices_rotation_seconds" <= 120))),
     CONSTRAINT "schedule_settings_kiosk_past_check" CHECK ((("kiosk_past_days" >= 0) AND ("kiosk_past_days" <= 60))),
     CONSTRAINT "schedule_settings_kiosk_share_check" CHECK ((("kiosk_notices_share" >= 10) AND ("kiosk_notices_share" <= 90))),
+    CONSTRAINT "schedule_settings_kiosk_stream_corner_check" CHECK (("kiosk_stream_corner" = ANY (ARRAY['tl'::"text", 'tr'::"text", 'bl'::"text", 'br'::"text"]))),
+    CONSTRAINT "schedule_settings_kiosk_stream_width_check" CHECK ((("kiosk_stream_width" >= 20) AND ("kiosk_stream_width" <= 60))),
     CONSTRAINT "schedule_settings_kiosk_visible_days_check" CHECK ((("kiosk_visible_days" >= 2) AND ("kiosk_visible_days" <= 14))),
     CONSTRAINT "schedule_settings_kiosk_zapis_check" CHECK ((("kiosk_zapis_percent" >= 50) AND ("kiosk_zapis_percent" <= 100))),
     CONSTRAINT "schedule_settings_lane_count_check" CHECK ((("lane_count" >= 1) AND ("lane_count" <= 12))),
