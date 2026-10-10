@@ -1353,6 +1353,7 @@ void main() {
       int fontSize = 11,
       bool fitDay = true,
       bool animations = true,
+      bool nameday = false,
       Stream<Map<String, MatchResult>>? resultsStream,
       Map<String, List<MatchPlayerResult>> lineups = const {},
     }) => ProviderScope(
@@ -1391,6 +1392,7 @@ void main() {
               kioskFontSize: fontSize,
               kioskFitDay: fitDay,
               kioskAnimations: animations,
+              kioskNameday: nameday,
             ),
           ),
         ),
@@ -1435,6 +1437,30 @@ void main() {
     // A notice title is in the status bar too; these tests are the drawer's.
     Finder drawerText(String t) =>
         find.descendant(of: find.byType(KioskDrawer), matching: find.text(t));
+
+    testWidgets('the name day sits in the status bar between the clock and '
+        '„Rezervovat“ — only when the admin wants it', (tester) async {
+      fullHd(tester);
+      await tester.pumpWidget(app(nameday: true));
+      await tester.pumpAndSettle();
+      // Thursday 8 October: Věra.
+      final nameday = find.text('Svátek: Věra');
+      expect(nameday, findsOneWidget);
+      expect(
+        tester.getTopLeft(nameday).dx,
+        greaterThan(tester.getTopRight(find.text('12:00')).dx),
+      );
+      expect(
+        tester.getTopRight(nameday).dx,
+        lessThan(tester.getTopLeft(find.text('Rezervovat')).dx),
+      );
+      await finish(tester);
+
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+      expect(find.text('Svátek: Věra'), findsNothing);
+      await finish(tester);
+    });
 
     testWidgets('closed by default: only the button shows, tap opens it, tap '
         'closes it', (tester) async {

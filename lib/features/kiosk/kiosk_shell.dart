@@ -23,6 +23,7 @@ import '../../domain/schedule.dart'
 import 'kiosk_board_view.dart';
 import 'kiosk_info_panel.dart';
 import 'kiosk_connection.dart';
+import 'kiosk_day_info.dart';
 import 'kiosk_display.dart';
 import 'kiosk_headline.dart';
 import 'kiosk_zapis_page.dart';
@@ -478,6 +479,8 @@ class _StatusBar extends ConsumerWidget {
                 ),
               ],
             ),
+            // Today's weather and name day, when the admin wants them.
+            const KioskDayInfo(),
             const SizedBox(width: 16),
             Expanded(
               child: Row(
