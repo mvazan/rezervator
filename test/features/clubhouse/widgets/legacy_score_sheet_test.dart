@@ -635,6 +635,43 @@ void main() {
   );
 
   testWidgets(
+    'with hideSystemBars off the sheet leaves the bars alone — the kiosk '
+    'shell hides them for its whole stay',
+    (tester) async {
+      final calls = <MethodCall>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async {
+          if (call.method.startsWith('SystemChrome.setEnabledSystemUI')) {
+            calls.add(call);
+          }
+          return null;
+        },
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          null,
+        ),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: LegacyScoreSheetPage(
+            slot: slot,
+            result: result,
+            players: [homePlayer, awayPlayer],
+            hideSystemBars: false,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(const SizedBox.shrink());
+
+      expect(calls, isEmpty);
+    },
+  );
+
+  testWidgets(
     'the score sheet ignores the app-wide text-size setting and stays at '
     'its own authored (1.0×) size',
     (tester) async {
