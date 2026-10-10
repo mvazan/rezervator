@@ -1463,6 +1463,39 @@ void main() {
       await finish(tester);
     });
 
+    testWidgets('while a warning hangs, the rest of the status bar steps '
+        'aside: no notice headline, no today\'s matches beside it', (
+      tester,
+    ) async {
+      fullHd(tester);
+      int matchLabels() =>
+          findEmojiTextContaining('Domácí – Soupeř').evaluate().length;
+      await tester.pumpWidget(
+        app(
+          notices: [notice('1', 'Brigáda')],
+          slots: [fed('m', day, 'Domácí')],
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(KioskHeadline), findsOneWidget);
+      final without = matchLabels();
+      await finish(tester);
+
+      await tester.pumpWidget(
+        app(
+          notices: [notice('1', 'Brigáda')],
+          slots: [fed('m', day, 'Domácí')],
+          warning: 'Dráha 3 je mimo provoz.',
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Dráha 3 je mimo provoz.'), findsOneWidget);
+      expect(find.byType(KioskHeadline), findsNothing);
+      // The board's own day header still names the match; the bar does not.
+      expect(matchLabels(), without - 1);
+      await finish(tester);
+    });
+
     testWidgets('closed by default: only the button shows, tap opens it, tap '
         'closes it', (tester) async {
       fullHd(tester);
