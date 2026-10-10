@@ -3460,6 +3460,7 @@ begin
                           - 'kiosk_live_layout' - 'kiosk_follow_board'
                           - 'kiosk_live_refresh_seconds'
                           - 'kiosk_visible_days' - 'kiosk_font_size'
+                          - 'kiosk_animations' - 'kiosk_low_res'
                    from schedule_settings s where s.tenant_id = v_tenant),
     'blocks', coalesce((
       select jsonb_agg(to_jsonb(b) - 'tenant_id')
@@ -5687,6 +5688,8 @@ CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     "kiosk_idle_seconds" smallint DEFAULT 60 NOT NULL,
     "kiosk_visible_days" smallint DEFAULT 7 NOT NULL,
     "kiosk_font_size" smallint DEFAULT 11 NOT NULL,
+    "kiosk_animations" boolean DEFAULT true NOT NULL,
+    "kiosk_low_res" boolean DEFAULT false NOT NULL,
     CONSTRAINT "schedule_settings_booking_horizon_days_check" CHECK ((("booking_horizon_days" >= 1) AND ("booking_horizon_days" <= 90))),
     CONSTRAINT "schedule_settings_duty_reminder_days_check" CHECK ((("duty_reminder_days" >= 1) AND ("duty_reminder_days" <= 14))),
     CONSTRAINT "schedule_settings_kiosk_ahead_check" CHECK ((("kiosk_weeks_ahead" >= 0) AND ("kiosk_weeks_ahead" <= 52))),
