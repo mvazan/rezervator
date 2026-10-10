@@ -47,23 +47,6 @@ final kioskStreamProvider = Provider<List<PrioritySlot>>((ref) {
   );
 });
 
-/// Routes above the kiosk (the name picker, a notice, the Zápis, a booking
-/// confirm): while one is open the player must not take touches — on the
-/// web a dialog over the iframe would be see-through to it. Whoever pushes
-/// one calls [enter] before and [leave] after.
-class KioskModals extends Notifier<int> {
-  @override
-  int build() => 0;
-
-  void enter() => state = state + 1;
-
-  void leave() => state = state - 1;
-}
-
-final kioskModalsProvider = NotifierProvider<KioskModals, int>(
-  KioskModals.new,
-);
-
 class KioskStreamWindow extends StatefulWidget {
   const KioskStreamWindow({
     super.key,
