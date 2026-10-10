@@ -39,6 +39,9 @@ class _DisplayRecorder extends KioskDisplay {
 
   @override
   void lowRes(bool on) => log.add('lowRes:$on');
+
+  @override
+  void forgetLowRes() => log.add('forgetLowRes');
 }
 
 void main() {
@@ -181,8 +184,15 @@ void main() {
     // rozlišení“ (off here) reaches the display as they do.
     expect(display.log, ['hold', 'lowRes:false']);
 
+    // On the way out the stored low-res choice goes too: the browser is
+    // no longer the kiosk's.
     await finish(tester);
-    expect(display.log, ['hold', 'lowRes:false', 'release']);
+    expect(display.log, [
+      'hold',
+      'lowRes:false',
+      'release',
+      'forgetLowRes',
+    ]);
   });
 
   testWidgets('the admin\'s „Nižší rozlišení“ reaches the display as soon as '

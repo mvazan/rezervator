@@ -8,8 +8,17 @@ import 'package:http/testing.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/auth/login_screen.dart';
+import 'package:rezervator/features/kiosk/kiosk_display.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
+/// Stands in for the display: records what the login screen asks of it.
+class _DisplayRecorder extends KioskDisplay {
+  final log = <String>[];
+
+  @override
+  void forgetLowRes() => log.add('forgetLowRes');
+}
 
 /// Stubs every Supabase HTTP call with a 200 so the magic-link send in the
 /// login screen resolves successfully — the login screen then flips to its
@@ -92,6 +101,27 @@ void main() {
     // playersProvider is a FutureProvider; its gated branch returns [] too.
     expect(await container.read(playersProvider.future), isEmpty);
   });
+
+  testWidgets(
+    'the login screen drops the kiosk\'s low-res choice: whoever signs in '
+    'here is not the kiosk',
+    (tester) async {
+      final display = _DisplayRecorder();
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [kioskDisplayProvider.overrideWithValue(display)],
+          child: const MaterialApp(
+            localizationsDelegates: GlobalMaterialLocalizations.delegates,
+            supportedLocales: [Locale('cs'), Locale('en')],
+            home: LoginScreen(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(display.log, ['forgetLowRes']);
+    },
+  );
 
   testWidgets(
     'the installed app offers the kiosk account its password login — the '

@@ -91,6 +91,7 @@ class _KioskShellState extends ConsumerState<KioskShell>
     _warnTimer?.cancel();
     _warning.dispose();
     unawaited(_display.release());
+    _display.forgetLowRes();
     super.dispose();
   }
 

@@ -18,3 +18,11 @@ void setKioskLowRes(bool on) {
     // No storage (a private window): the kiosk keeps the ratio it has.
   }
 }
+
+void forgetKioskLowRes() {
+  try {
+    web.window.localStorage.removeItem(_key);
+  } catch (_) {
+    // No storage: nothing was stored either.
+  }
+}

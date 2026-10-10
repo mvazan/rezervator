@@ -23,6 +23,11 @@ class KioskDisplay {
   /// the app (see core/web/kiosk_low_res.dart).
   void lowRes(bool on) => setKioskLowRes(on);
 
+  /// The kiosk is leaving (a sign-out, a role change) or a plain session is
+  /// starting: the stored choice goes, so the browser does not stay at
+  /// ratio 1 for whoever uses it next. No reload.
+  void forgetLowRes() => forgetKioskLowRes();
+
   /// On entering the kiosk: screen on, bars hidden.
   Future<void> hold() => _each([
     WakelockPlus.enable,

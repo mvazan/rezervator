@@ -13,3 +13,9 @@ import 'kiosk_low_res_io.dart'
 /// Stores [on] for the next start and reloads the page when it differs
 /// from what this start was given.
 void setKioskLowRes(bool on) => impl.setKioskLowRes(on);
+
+/// Drops the stored choice, no reload: the page keeps the ratio it started
+/// with, the next start is plain. For whatever is not the kiosk — a browser
+/// that once ran the kiosk would otherwise stay at ratio 1 for whoever signs
+/// in there next (the admin trying the kiosk on their phone).
+void forgetKioskLowRes() => impl.forgetKioskLowRes();
