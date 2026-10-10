@@ -1653,6 +1653,35 @@ void main() {
         await finish(tester);
       });
 
+      testWidgets('the player takes no touches while a day\'s matches are '
+          'open from the board\'s header', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(stream: true, slots: onAir, results: playing),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('player wOq9EODb8w8 on'), findsOneWidget);
+
+        // The status bar names today's match too: the board's header it is.
+        await tester.tap(
+          find
+              .descendant(
+                of: find.byType(BoardColumnHeader),
+                matching: find.textContaining('Domácí'),
+              )
+              .first,
+        );
+        await tester.pumpAndSettle();
+        expect(find.byType(AlertDialog), findsOneWidget);
+        expect(find.text('player wOq9EODb8w8 off'), findsOneWidget);
+
+        await tester.tap(find.text('Zavřít'));
+        await tester.pumpAndSettle();
+        expect(find.byType(AlertDialog), findsNothing);
+        expect(find.text('player wOq9EODb8w8 on'), findsOneWidget);
+        await finish(tester);
+      });
+
       testWidgets('the window goes with the match: decided, and its result '
           'read more than half an hour ago', (tester) async {
         fullHd(tester);

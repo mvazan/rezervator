@@ -24,7 +24,6 @@ import '../../domain/schedule.dart';
 import '../schedule/widgets/calendar_board.dart';
 import '../schedule/widgets/schedule_day_column.dart';
 import '../schedule/widgets/slot_tile.dart';
-import 'kiosk_modals.dart';
 
 /// Slack under the columns so the bottom hour label (centered on its line)
 /// isn't half-clipped by the viewport in fit-height mode.
@@ -206,17 +205,13 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
     final message =
         '${player.displayName} · ${dayFull(date)} · ${block.label} · Dráha $lane';
     // A route above the kiosk: the stream's player takes no touches
-    // meanwhile (KioskModals).
-    final confirmed = await ref
-        .read(kioskModalsProvider.notifier)
-        .around(
-          () => confirmDialog(
-            context,
-            title: 'Rezervovat termín?',
-            message: message,
-            confirmLabel: 'Rezervovat',
-          ),
-        );
+    // meanwhile (the shell sees its own route is no longer current).
+    final confirmed = await confirmDialog(
+      context,
+      title: 'Rezervovat termín?',
+      message: message,
+      confirmLabel: 'Rezervovat',
+    );
     if (!confirmed || !context.mounted) return;
     await tryAction(
       context,

@@ -26,7 +26,6 @@ import 'kiosk_info_panel.dart';
 import 'kiosk_connection.dart';
 import 'kiosk_display.dart';
 import 'kiosk_headline.dart';
-import 'kiosk_modals.dart';
 import 'kiosk_stream_window.dart';
 import 'kiosk_zapis_page.dart';
 import 'name_picker.dart';
@@ -132,18 +131,11 @@ class _KioskShellState extends ConsumerState<KioskShell>
     _boardKey.currentState?.resetToToday();
   }
 
-  /// Runs [show] — a route above the shell — with the stream's player
-  /// switched off for touches meanwhile ([KioskModals]).
-  Future<T> _modal<T>(Future<T> Function() show) =>
-      ref.read(kioskModalsProvider.notifier).around(show);
-
   Future<void> _openPicker() async {
     final kioskDark = ref.read(settingsProvider).value?.kioskDark ?? true;
-    final picked = await _modal(
-      () => showNamePicker(
-        context,
-        brightness: kioskDark ? Brightness.dark : Brightness.light,
-      ),
+    final picked = await showNamePicker(
+      context,
+      brightness: kioskDark ? Brightness.dark : Brightness.light,
     );
     if (!mounted) return;
     setState(() {
@@ -171,39 +163,37 @@ class _KioskShellState extends ConsumerState<KioskShell>
     child: Theme(data: _kioskTheme(), child: child),
   );
 
-  Future<void> _openNotice(Message notice) => _modal(
-    () => showDialog<void>(
-      context: context,
-      builder: (context) => _touchable(
-        AlertDialog(
-          title: Text(notice.title ?? ''),
-          content: SizedBox(
-            width: 560,
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(notice.body),
-                  if (notice.expiresAt != null) ...[
-                    const SizedBox(height: 12),
-                    Text(
-                      'Platí do ${notice.expiresAt!.toLocal().day}. '
-                      '${notice.expiresAt!.toLocal().month}.',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
+  Future<void> _openNotice(Message notice) => showDialog<void>(
+    context: context,
+    builder: (context) => _touchable(
+      AlertDialog(
+        title: Text(notice.title ?? ''),
+        content: SizedBox(
+          width: 560,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(notice.body),
+                if (notice.expiresAt != null) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    'Platí do ${notice.expiresAt!.toLocal().day}. '
+                    '${notice.expiresAt!.toLocal().month}.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
                 ],
-              ),
+              ],
             ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Zavřít'),
-            ),
-          ],
         ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Zavřít'),
+          ),
+        ],
       ),
     ),
   );
@@ -226,27 +216,25 @@ class _KioskShellState extends ConsumerState<KioskShell>
   void _openMatch(PrioritySlot match) {
     final now = ref.read(nowProvider).value ?? DateTime.now();
     unawaited(
-      _modal(
-        () => showKioskZapis(
-          context,
-          slot: match,
-          brightness: (ref.read(settingsProvider).value?.kioskDark ?? true)
-              ? Brightness.dark
-              : Brightness.light,
-          percent: ref.read(settingsProvider).value?.kioskZapisPercent ?? 80,
-          onTouch: _touch,
-          // The Zápis closes and the stream opens beside the board.
-          play: hasKioskVideo(match)
-              ? (
-                  label: kioskStreamLabel(
-                    match,
-                    ref.read(matchResultsProvider).value?[match.id],
-                    now,
-                  ),
-                  onPlay: () => _openStream(match),
-                )
-              : null,
-        ),
+      showKioskZapis(
+        context,
+        slot: match,
+        brightness: (ref.read(settingsProvider).value?.kioskDark ?? true)
+            ? Brightness.dark
+            : Brightness.light,
+        percent: ref.read(settingsProvider).value?.kioskZapisPercent ?? 80,
+        onTouch: _touch,
+        // The Zápis closes and the stream opens beside the board.
+        play: hasKioskVideo(match)
+            ? (
+                label: kioskStreamLabel(
+                  match,
+                  ref.read(matchResultsProvider).value?[match.id],
+                  now,
+                ),
+                onPlay: () => _openStream(match),
+              )
+            : null,
       ),
     );
   }
@@ -265,9 +253,17 @@ class _KioskShellState extends ConsumerState<KioskShell>
         board,
         if (streams.isNotEmpty)
           RepaintBoundary(
-            child: KioskStreamLayer(
-              streams: streams,
-              interactive: ref.watch(kioskModalsProvider) == 0,
+            // No player takes touches while any route sits above the
+            // shell's own — the name picker, a notice, a day's matches, the
+            // Zápis, a booking confirm: on the web a dialog over an iframe
+            // is see-through to YouTube (spec §5). The route itself says
+            // so, nothing pushed later can be missed; isCurrentOf rebuilds
+            // this builder on a push and a pop, not the board.
+            child: Builder(
+              builder: (context) => KioskStreamLayer(
+                streams: streams,
+                interactive: ModalRoute.isCurrentOf(context) ?? true,
+              ),
             ),
           ),
       ],
