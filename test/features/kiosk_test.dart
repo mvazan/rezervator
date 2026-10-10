@@ -1821,8 +1821,9 @@ void main() {
         await finish(tester);
       });
 
-      testWidgets('two windows at once: each stream its own, side by side; '
-          'what a visitor opens comes before the live one', (tester) async {
+      testWidgets('two windows at once: each stream its own, one above the '
+          'other; what a visitor opens comes before the live one',
+          (tester) async {
         fullHd(tester);
         await tester.pumpWidget(
           app(
@@ -1845,10 +1846,11 @@ void main() {
         expect(player, findsNWidgets(2));
         expect(live, findsOneWidget);
         expect(first, findsOneWidget);
-        // The admin's corner (bottom left), then the one beside it.
-        expect(tester.getRect(first).left,
-            greaterThan(tester.getRect(live).right));
-        expect(tester.getRect(first).bottom, tester.getRect(live).bottom);
+        // The admin's corner (bottom left), then the one above it — the
+        // drawer's side last.
+        expect(tester.getRect(first).left, tester.getRect(live).left);
+        expect(tester.getRect(first).bottom,
+            lessThan(tester.getRect(live).top));
 
         // A second recording: the live one gives way, not the first.
         await tester.tap(find.byTooltip('Přehrát záznam').last);
@@ -1863,6 +1865,136 @@ void main() {
         await tester.pumpAndSettle();
         expect(player, findsNWidgets(2));
         expect(live, findsOneWidget);
+        await finish(tester);
+      });
+
+      KioskStreamsNotifier streams(WidgetTester tester) =>
+          ProviderScope.containerOf(tester.element(find.byType(KioskShell)))
+              .read(kioskStreamsProvider.notifier);
+      // Two windows: the live match by itself, a recording by hand.
+      Widget twoWindows({bool stream = true}) => app(
+        stream: stream,
+        streamMax: 2,
+        slots: [...onAir, ...recorded],
+        results: {...playing, ...decided},
+        drawerOpen: true,
+      );
+
+      testWidgets('a maximized window collapsed gives the area back: the '
+          'other window comes out', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(twoWindows());
+        await tester.pumpAndSettle();
+        streams(tester).open('f1');
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip('Na celou obrazovku').first);
+        await tester.pumpAndSettle();
+        expect(find.byTooltip('Zavřít stream'), findsOneWidget);
+
+        await tester.tap(find.byTooltip('Sbalit'));
+        await tester.pumpAndSettle();
+        // The pill's × and the other window's.
+        expect(find.byTooltip('Zavřít stream'), findsNWidgets(2));
+        final other = find.text('player abcdefghijk on');
+        expect(other, findsOneWidget);
+        expect(tester.getRect(other).width, greaterThan(1));
+        await finish(tester);
+      });
+
+      testWidgets('a ▶ at a stream hidden under a maximized window brings it '
+          'out', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(twoWindows());
+        await tester.pumpAndSettle();
+        streams(tester).open('f1');
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip('Na celou obrazovku').first);
+        await tester.pumpAndSettle();
+        expect(find.byTooltip('Zavřít stream'), findsOneWidget);
+
+        streams(tester).open('f1');
+        await tester.pumpAndSettle();
+        expect(find.byTooltip('Zavřít stream'), findsNWidgets(2));
+        expect(find.byTooltip('Zmenšit'), findsNothing);
+        expect(find.text('player abcdefghijk on'), findsOneWidget);
+        await finish(tester);
+      });
+
+      testWidgets('past the windows, the oldest opened closes for good: '
+          'closing a newer one does not bring it back', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(twoWindows(stream: false));
+        await tester.pumpAndSettle();
+        streams(tester)
+          ..open('m')
+          ..open('f1')
+          ..open('f2');
+        await tester.pumpAndSettle();
+        expect(player, findsNWidgets(2));
+        expect(find.text('player wOq9EODb8w8 on'), findsNothing);
+
+        // The newest (f2, the later window) closes: only f1 stays.
+        await tester.tap(find.byTooltip('Zavřít stream').last);
+        await tester.pumpAndSettle();
+        expect(player, findsOneWidget);
+        expect(find.text('player abcdefghijk on'), findsOneWidget);
+        await finish(tester);
+      });
+
+      testWidgets('a new window takes the corner a closed one gave up',
+          (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(twoWindows(stream: false));
+        await tester.pumpAndSettle();
+        streams(tester).open('f1');
+        await tester.pumpAndSettle();
+        final corner = tester.getRect(find.text('player abcdefghijk on'));
+        streams(tester).open('f2');
+        await tester.pumpAndSettle();
+        final above = tester.getRect(find.text('player ABCDEFGHIJK on'));
+        expect(above.bottom, lessThan(corner.top));
+
+        await tester.tap(find.byTooltip('Zavřít stream').first);
+        await tester.pumpAndSettle();
+        streams(tester).open('m');
+        await tester.pumpAndSettle();
+        expect(tester.getRect(find.text('player wOq9EODb8w8 on')), corner);
+        expect(tester.getRect(find.text('player ABCDEFGHIJK on')), above);
+        await finish(tester);
+      });
+
+      testWidgets('a player under another window takes no touches, nor any '
+          'while a window is dragged', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(twoWindows(stream: false));
+        await tester.pumpAndSettle();
+        streams(tester)
+          ..open('f1')
+          ..open('f2');
+        await tester.pumpAndSettle();
+        expect(find.text('player abcdefghijk on'), findsOneWidget);
+        expect(find.text('player ABCDEFGHIJK on'), findsOneWidget);
+        final upper = find.descendant(
+          of: find.byType(KioskStreamWindow),
+          matching: find.text('Včera – Soupeř'),
+        );
+
+        final drag = await tester.startGesture(tester.getCenter(upper));
+        await drag.moveBy(const Offset(0, 100));
+        await tester.pump();
+        await drag.moveBy(const Offset(0, 100));
+        await tester.pump();
+        expect(find.text('player abcdefghijk off'), findsOneWidget);
+        expect(find.text('player ABCDEFGHIJK off'), findsOneWidget);
+        await drag.up();
+        await tester.pumpAndSettle();
+        // f2's window now lies over f1's: f1 waits, f2 plays on.
+        expect(find.text('player abcdefghijk off'), findsOneWidget);
+        expect(find.text('player ABCDEFGHIJK on'), findsOneWidget);
+
+        await tester.drag(upper, const Offset(0, -200));
+        await tester.pumpAndSettle();
+        expect(find.text('player abcdefghijk on'), findsOneWidget);
         await finish(tester);
       });
 

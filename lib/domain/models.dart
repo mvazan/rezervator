@@ -671,12 +671,14 @@ enum KioskCorner {
   bool get top => this == tl || this == tr;
   bool get left => this == tl || this == bl;
 
-  /// This corner, then the one beside it, the one above or below it, the
-  /// one across: where the kiosk's further stream windows appear (0072).
+  /// This corner, then the one above or below it, the one beside it, the
+  /// one across: where the kiosk's further stream windows appear (0072) —
+  /// the same side first, the drawer's side (the default corner is bottom
+  /// left) last.
   List<KioskCorner> get fromHere => [
     this,
-    _at(top: top, left: !left),
     _at(top: !top, left: left),
+    _at(top: top, left: !left),
     _at(top: !top, left: !left),
   ];
 

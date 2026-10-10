@@ -1,5 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/kiosk/kiosk_stream_window.dart';
 
@@ -189,6 +193,51 @@ void main() {
     await tester.tap(find.byTooltip('Zavřít stream'));
     await tester.pump();
     expect(closed, ['m1', 'm2']);
+  });
+
+  testWidgets('two matches streamed as one video: its end closes both',
+      (tester) async {
+    area(tester);
+    final shared = [match('m1', v1), match('m2', v2), match('m3', v1)];
+    await tester.pumpWidget(app(shared));
+    await tester.pumpAndSettle();
+
+    ended!();
+    await tester.pump();
+    expect(closed, ['m1', 'm3']);
+    expect(find.text('player $v2 on'), findsOneWidget);
+  });
+
+  testWidgets('a maximized window collapsed gives the area back', (
+    tester,
+  ) async {
+    area(tester);
+    await tester.pumpWidget(app(one));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Na celou obrazovku'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Sbalit'));
+    await tester.pumpAndSettle();
+    expect(maximized, [true, false]);
+
+    // Expanded again, it is where it was before, not over the area.
+    await tester.tap(find.byTooltip('Rozbalit stream'));
+    await tester.pumpAndSettle();
+    expect(tester.getRect(playerFinder).width, w);
+  });
+
+  testWidgets('the pill keeps to the window\'s width: its × stays in reach',
+      (tester) async {
+    area(tester);
+    await tester.pumpWidget(
+      app([match('m1', v1, home: 'Velmi dlouhý název domácího družstva ' * 3)]),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Sbalit'));
+    await tester.pumpAndSettle();
+    final x = tester.getRect(find.byTooltip('Zavřít stream'));
+    expect(x.right, lessThanOrEqualTo(8 + w));
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('the collapsed pill has its × too', (tester) async {
@@ -413,4 +462,70 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('player $v1 off'), findsOneWidget);
   });
+
+  group('the streams opened', () {
+    final slots = [
+      for (final id in ['a', 'b', 'c']) match(id, v1),
+      PrioritySlot(
+        id: 'g',
+        date: Day(2026, 10, 8),
+        startsAt: const HourMinute(14, 0),
+        endsAt: const HourMinute(17, 0),
+        type: matchType,
+        homeTeam: 'Bez',
+        awayTeam: 'Videa',
+      ),
+    ];
+
+    Future<(ProviderContainer, StreamController<ScheduleSettings?>)> scope(
+      int max,
+    ) async {
+      final settings = StreamController<ScheduleSettings?>();
+      final container = ProviderContainer(
+        overrides: [
+          settingsProvider.overrideWith((ref) => settings.stream),
+          prioritySlotsProvider.overrideWithValue(slots),
+        ],
+      );
+      addTearDown(container.dispose);
+      addTearDown(settings.close);
+      container.listen(kioskStreamsProvider, (_, _) {});
+      settings.add(withMax(max));
+      await container.read(settingsProvider.future);
+      return (container, settings);
+    }
+
+    test('the admin lowering the windows closes the oldest opened', () async {
+      final (container, settings) = await scope(1);
+      container.read(kioskStreamsProvider.notifier)
+        ..open('a')
+        ..open('b')
+        ..open('c');
+      expect(container.read(kioskStreamsProvider).opened, ['a', 'b', 'c']);
+
+      settings.add(withMax(2));
+      await Future<void>.delayed(Duration.zero);
+      expect(container.read(kioskStreamsProvider).opened, ['b', 'c']);
+      expect(container.read(kioskStreamsProvider).closed, {'a'});
+    });
+
+    test('a stream without a video takes no window: it does not push out '
+        'a playing one', () async {
+      final (container, _) = await scope(2);
+      container.read(kioskStreamsProvider.notifier)
+        ..open('a')
+        ..open('g')
+        ..open('b');
+      expect(container.read(kioskStreamsProvider).opened, ['a', 'g', 'b']);
+      expect(container.read(kioskStreamsProvider).closed, isEmpty);
+    });
+  });
 }
+
+ScheduleSettings withMax(int max) => ScheduleSettings(
+  laneCount: 4,
+  trainingWeekdays: const {1, 2, 4},
+  bookingHorizonDays: 14,
+  maxActiveReservations: 3,
+  kioskStreamMax: max,
+);

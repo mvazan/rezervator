@@ -347,7 +347,7 @@ void main() {
 
     final stream = find.widgetWithText(
       SwitchListTile,
-      'Živý přenos otevřít sám',
+      'Živý přenos se otevře sám',
     );
     await tester.ensureVisible(stream);
     await tester.tap(stream);

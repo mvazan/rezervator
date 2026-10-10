@@ -601,7 +601,7 @@ class KioskSettingsScreen extends ConsumerWidget {
                 _switch(
                   context,
                   settings,
-                  'Živý přenos otevřít sám',
+                  'Živý přenos se otevře sám',
                   settings?.kioskStream ?? false,
                   'kiosk_stream',
                   subtitle:
@@ -618,7 +618,8 @@ class KioskSettingsScreen extends ConsumerWidget {
                       labelText: 'Kde se okno objeví',
                       helperText:
                           'Panel je vpravo; vlevo dole mu okno nepřekáží. '
-                          'Další okna do dalších rohů.',
+                          'Další okna do dalších rohů — nejdřív na stejné '
+                          'straně.',
                       border: OutlineInputBorder(),
                     ),
                     items: const [
@@ -672,9 +673,10 @@ class KioskSettingsScreen extends ConsumerWidget {
                   max: 4,
                   helper:
                       'Při 1 se mezi puštěnými streamy listuje šipkami v '
-                      'okně. Víc = každý stream ve svém okně; další ▶ '
-                      'zavře nejstarší. Každé okno je další přehrávač — '
-                      'na slabším displeji raději 1.',
+                      'okně. Víc = každý stream ve svém okně; když jsou '
+                      'plná, další ▶ zavře nejstarší puštěný (živý přenos '
+                      'jen uvolní místo a pak se vrátí). Každé okno je '
+                      'další přehrávač — na slabším displeji raději 1.',
                 ),
               ],
             ),
