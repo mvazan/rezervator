@@ -82,6 +82,8 @@ const appChangelog = <Release>[
         'Stavový řádek).',
     'Kiosk: ve výběru jména upozornění, že se tam z tréninku odhlásit nedá '
         '(text nastaví správce ve Správě → Kiosk).',
+    'Kiosk: nadpis oznamu v záhlaví se při střídání plynule prolne na svém '
+        'místě, neposkočí.',
   ], store: [
     'Kiosk: video zápasu živě i ze záznamu; počasí, svátek a upozornění v '
         'záhlaví; dnešní zápasy v záhlaví jdou skrýt.',
