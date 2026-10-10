@@ -2923,6 +2923,20 @@ void main() {
       });
     }
 
+    testWidgets('a match band on the board stacks home, dash and away, so '
+        'no team name breaks in half', (tester) async {
+      fullHd(tester);
+      await tester.pumpWidget(app(slots: [fed('m', day, 'Domácí')]));
+      await tester.pumpAndSettle();
+      Finder inBand(Finder f) =>
+          find.descendant(of: find.byType(CalendarEventBand), matching: f);
+      expect(inBand(findEmojiText('🏆 Domácí')), findsOneWidget);
+      expect(inBand(find.text('–')), findsOneWidget);
+      expect(inBand(find.text('Soupeř')), findsOneWidget);
+      expect(inBand(find.text('14:00–17:00')), findsOneWidget);
+      await finish(tester);
+    });
+
     testWidgets('a finished match of the board opens its Zápis, from its band '
         'and from the day header', (tester) async {
       fullHd(tester);

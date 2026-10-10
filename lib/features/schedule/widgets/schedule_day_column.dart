@@ -276,11 +276,15 @@ class ScheduleDayColumn extends StatelessWidget {
       final (bg, fg) = clubTint(m.type.colorIndex, scheme.brightness,
           fallbackBg: matchFallbackBg, fallbackFg: matchFallbackFg);
       Widget band() {
+        final time = '${m.startsAt.display()}–${m.endsAt.display()}';
         Widget w = CalendarEventBand(
           background: bg,
           foreground: fg,
-          text: '${slotEventLabel(m)}\n'
-              '${m.startsAt.display()}–${m.endsAt.display()}',
+          text: '${slotEventLabel(m)}\n$time',
+          // A match: home, dash, away, each on its own line when the band
+          // is tall enough.
+          lines: matchBandLines(m),
+          time: time,
           bold: true,
         );
         // Click = edit (a click has nothing else to do on a blocking band);

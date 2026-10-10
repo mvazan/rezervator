@@ -299,15 +299,37 @@ class CalendarEventBand extends StatelessWidget {
     required this.foreground,
     required this.text,
     this.bold = false,
+    this.lines,
+    this.time,
   });
 
   final Color background;
   final Color foreground;
+
+  /// The band's text in two lines at most — what a short band shows.
   final String text;
   final bool bold;
 
+  /// The same, line by line ([matchBandLines]: home, dash, away), with
+  /// [time] under them — shown when the band is tall enough for every
+  /// line; a team's name then wraps within its own line rather than the
+  /// pair breaking in the middle of one.
+  final List<String>? lines;
+  final String? time;
+
+  /// One line of the band's 10 px text, as laid out (Manrope's line
+  /// height is about 1.4 of its size).
+  static const _lineFactor = 1.4;
+
   @override
   Widget build(BuildContext context) {
+    final style = TextStyle(
+      fontSize: 10,
+      fontWeight: bold ? FontWeight.w700 : FontWeight.w600,
+      color: foreground,
+    );
+    final lineHeight =
+        MediaQuery.textScalerOf(context).scale(10) * _lineFactor;
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 3, vertical: 1.5),
       clipBehavior: Clip.antiAlias,
@@ -317,16 +339,37 @@ class CalendarEventBand extends StatelessWidget {
       ),
       alignment: Alignment.center,
       padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: EmojiText(
-        text,
-        textAlign: TextAlign.center,
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          fontSize: 10,
-          fontWeight: bold ? FontWeight.w700 : FontWeight.w600,
-          color: foreground,
-        ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final fit = (constraints.maxHeight / lineHeight).floor();
+          final stacked = lines;
+          final rows = [...?stacked, ?time];
+          if (stacked == null || fit < rows.length) {
+            return EmojiText(
+              text,
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: style,
+            );
+          }
+          // Room for a second line per team only when every row can have
+          // it; else each team keeps to one, ellipsized.
+          final teamLines = fit >= rows.length * 2 ? 2 : 1;
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final row in rows)
+                EmojiText(
+                  row,
+                  textAlign: TextAlign.center,
+                  maxLines: row == time ? 1 : teamLines,
+                  overflow: TextOverflow.ellipsis,
+                  style: style,
+                ),
+            ],
+          );
+        },
       ),
     );
   }
