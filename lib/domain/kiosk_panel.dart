@@ -6,6 +6,7 @@ library;
 import 'messages.dart' show splitNotices;
 import 'models.dart';
 import 'results.dart' show isLive;
+import 'youtube.dart' show youtubeVideoId;
 
 /// The notices on the wall right now: kind notice, not expired, not hidden
 /// from the kiosk by the admin, oldest posted first (the Nástěnka order).
@@ -124,6 +125,49 @@ List<PrioritySlot> kioskLiveMatches({
           results[s.id]?.status == MatchStatus.inProgress &&
           isLive(s, results[s.id], now) &&
           withData.contains(s.id))
+        s,
+  ]..sort((a, b) {
+      final byDay = a.date.compareTo(b.date);
+      return byDay != 0 ? byDay : a.startsAt.compareTo(b.startsAt);
+    });
+}
+
+/// How long a decided match streams on after its planned end (0066): the
+/// closing minutes of a stream run after the site stamps the result.
+const streamGrace = Duration(minutes: 30);
+
+/// The matches whose stream the kiosk's window shows (0066): the alley's
+/// own federation matches with a YouTube video that are on air — [isLive]
+/// (from an hour before the start until the site stamps the result, at
+/// most twelve hours), or decided and still within [streamGrace] of the
+/// planned end. Not gated on the players' data like [kioskLiveMatches]: a
+/// stream starts before the first throw. Chronological.
+List<PrioritySlot> kioskStreamMatches({
+  required List<PrioritySlot> slots,
+  required Map<String, MatchResult> results,
+  required DateTime now,
+}) {
+  bool onAir(PrioritySlot s) {
+    final r = results[s.id];
+    if (isLive(s, r, now)) return true;
+    if (!_decided(r) || !s.timeKnown) return false;
+    final end = DateTime(
+      s.date.year,
+      s.date.month,
+      s.date.day,
+      s.endsAt.hour,
+      s.endsAt.minute,
+    );
+    return now.isBefore(end.add(streamGrace));
+  }
+
+  return [
+    for (final s in slots)
+      if (s.type.isMatch &&
+          s.parentId == null &&
+          s.fromFederation &&
+          youtubeVideoId(s.videoUrl ?? '') != null &&
+          onAir(s))
         s,
   ]..sort((a, b) {
       final byDay = a.date.compareTo(b.date);

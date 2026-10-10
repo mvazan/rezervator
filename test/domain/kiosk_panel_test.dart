@@ -10,18 +10,27 @@ void main() {
     builtin: true,
   );
 
-  PrioritySlot match(String id, Day date, {String? key, String? parent}) =>
-      PrioritySlot(
-        id: id,
-        date: date,
-        startsAt: const HourMinute(14, 0),
-        endsAt: const HourMinute(17, 0),
-        type: matchType,
-        homeTeam: 'A',
-        awayTeam: 'B',
-        parentId: parent,
-        importKey: key ?? 'cka:$id',
-      );
+  /// A federation match of three hours from [start] (14:00 unless said).
+  PrioritySlot match(
+    String id,
+    Day date, {
+    String? key,
+    String? parent,
+    String? video,
+    bool imported = true,
+    HourMinute start = const HourMinute(14, 0),
+  }) => PrioritySlot(
+    id: id,
+    date: date,
+    startsAt: start,
+    endsAt: HourMinute(start.hour + 3, start.minute),
+    type: matchType,
+    homeTeam: 'A',
+    awayTeam: 'B',
+    parentId: parent,
+    importKey: imported ? key ?? 'cka:$id' : null,
+    videoUrl: video,
+  );
 
   MatchResult result(String id, MatchStatus status) => MatchResult(
         matchId: id,
@@ -241,5 +250,75 @@ void main() {
     expect(liveAt(DateTime(2026, 10, 8, 15)), ['today']);
     // Yesterday evening it was within its twelve hours.
     expect(liveAt(DateTime(2026, 10, 7, 20)), contains('yesterday'));
+  });
+
+  group('kioskStreamMatches', () {
+    const video = 'https://www.youtube.com/watch?v=wOq9EODb8w8';
+    // One match with a video, 14:00–17:00 today, unless [slots] say else.
+    List<String> streamsAt(
+      DateTime now, {
+      Map<String, MatchResult> results = const {},
+      List<PrioritySlot>? slots,
+    }) => [
+      for (final s in kioskStreamMatches(
+        slots: slots ?? [match('m', today, video: video)],
+        results: results,
+        now: now,
+      ))
+        s.id,
+    ];
+
+    test('a match with a video streams from an hour before the start', () {
+      expect(streamsAt(DateTime(2026, 10, 8, 13, 30)), ['m']);
+      expect(streamsAt(DateTime(2026, 10, 8, 12, 30)), isEmpty);
+    });
+
+    test('while it is being played — the players\' data is not waited for',
+        () {
+      expect(
+        streamsAt(
+          DateTime(2026, 10, 8, 15),
+          results: {'m': result('m', MatchStatus.inProgress)},
+        ),
+        ['m'],
+      );
+    });
+
+    test('a decided match streams on for half an hour after its planned end',
+        () {
+      final done = {'m': result('m', MatchStatus.finished)};
+      // Decided early: the stream runs to the planned end and a bit.
+      expect(streamsAt(DateTime(2026, 10, 8, 16, 30), results: done), ['m']);
+      expect(streamsAt(DateTime(2026, 10, 8, 17, 20), results: done), ['m']);
+      expect(streamsAt(DateTime(2026, 10, 8, 17, 40), results: done), isEmpty);
+      final forfeit = {'m': result('m', MatchStatus.forfeit)};
+      expect(
+        streamsAt(DateTime(2026, 10, 8, 17, 40), results: forfeit),
+        isEmpty,
+      );
+    });
+
+    test('no video, another site, an úklid child or a hand-made match: no '
+        'stream', () {
+      final slots = [
+        match('plain', today),
+        match('vimeo', today, video: 'https://vimeo.com/123456789'),
+        match('child', today, video: video, parent: 'plain'),
+        match('hand', today, video: video, imported: false),
+      ];
+      expect(streamsAt(DateTime(2026, 10, 8, 15), slots: slots), isEmpty);
+    });
+
+    test('chronological', () {
+      final slots = [
+        match('later', today, video: video, start: const HourMinute(16, 0)),
+        match('earlier', today, video: video),
+      ];
+      // 15:30: the first is being played, the second an hour before start.
+      expect(
+        streamsAt(DateTime(2026, 10, 8, 15, 30), slots: slots),
+        ['earlier', 'later'],
+      );
+    });
   });
 }
