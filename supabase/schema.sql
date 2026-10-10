@@ -3468,6 +3468,9 @@ begin
                           - 'kiosk_animations' - 'kiosk_low_res'
                           - 'kiosk_stream' - 'kiosk_stream_corner'
                           - 'kiosk_stream_width'
+                          - 'kiosk_weather' - 'kiosk_weather_place'
+                          - 'kiosk_weather_lat' - 'kiosk_weather_lon'
+                          - 'kiosk_nameday'
                    from schedule_settings s where s.tenant_id = v_tenant),
     'blocks', coalesce((
       select jsonb_agg(to_jsonb(b) - 'tenant_id')

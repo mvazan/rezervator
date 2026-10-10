@@ -20,7 +20,10 @@ alter table schedule_settings
     check (kiosk_stream_width between 20 and 60);
 
 -- The public overview (0043) keeps handing out only what it always did:
--- the kiosk's choices are the admin's, not anon's.
+-- the kiosk's choices are the admin's, not anon's. The status line's
+-- columns (0067, weather and name day, a parallel branch) are masked here
+-- too, so whichever of the two migrations runs last, neither set reaches
+-- anon.
 create or replace function public_week(p_slug text, p_monday date) returns jsonb
     language plpgsql stable security definer set search_path = public as $$
 declare
@@ -49,6 +52,9 @@ begin
                           - 'kiosk_animations' - 'kiosk_low_res'
                           - 'kiosk_stream' - 'kiosk_stream_corner'
                           - 'kiosk_stream_width'
+                          - 'kiosk_weather' - 'kiosk_weather_place'
+                          - 'kiosk_weather_lat' - 'kiosk_weather_lon'
+                          - 'kiosk_nameday'
                    from schedule_settings s where s.tenant_id = v_tenant),
     'blocks', coalesce((
       select jsonb_agg(to_jsonb(b) - 'tenant_id')
