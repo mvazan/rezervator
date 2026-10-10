@@ -61,8 +61,9 @@ const appChangelog = <Release>[
     'Správa → Kiosk: nová sekce Optimalizace výkonu pro slabší displej — '
         'vypnutí dýchajícího tlačítka panelu a nižší rozlišení vykreslování '
         'na webu. Minulé dny na tabuli se kreslí levněji, vypadají stejně.',
-    'Kalendář a kiosk: zápas v rozvrhu píše domácí, pomlčku a hosty pod '
-        'sebe — název týmu se už nerozdělí v půlce.',
+    'Kalendář a kiosk: zápas v rozvrhu píše pohár, domácí, pomlčku a hosty '
+        'pod sebe — dlouhý název týmu se zalomí do více řádků, nerozdělí se '
+        'v půlce. Velikost písma pásů na tabuli kiosku nastaví správce.',
   ], store: [
     'Kiosk: zápis zápasu ukazuje registrační čísla hráčů.',
     'Emoji v textu se kreslí z obrázků — všude stejně.',
