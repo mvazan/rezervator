@@ -338,14 +338,6 @@ class KioskSettingsScreen extends ConsumerWidget {
                     ],
                   ),
                 ),
-                _switch(
-                  context,
-                  settings,
-                  'Dnešní zápasy v záhlaví',
-                  settings?.kioskTodaysMatches ?? true,
-                  'kiosk_todays_matches',
-                  subtitle: 'Vypnuto = záhlaví kiosku dnešní zápasy neukazuje.',
-                ),
                 // Then the booking's: above the first letters of the name
                 // picker (0070).
                 ListTile(
@@ -523,8 +515,17 @@ class KioskSettingsScreen extends ConsumerWidget {
             _section(
               context,
               'Stavový řádek',
-              'Co kiosk ukáže vedle hodin: dnešní počasí a kdo má svátek.',
+              'Co kiosk ukáže vedle hodin: dnešní zápasy, počasí a kdo má '
+                  'svátek.',
               [
+                _switch(
+                  context,
+                  settings,
+                  'Dnešní zápasy v záhlaví',
+                  settings?.kioskTodaysMatches ?? true,
+                  'kiosk_todays_matches',
+                  subtitle: 'Vypnuto = záhlaví kiosku dnešní zápasy neukazuje.',
+                ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Počasí'),

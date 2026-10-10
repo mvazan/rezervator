@@ -78,7 +78,7 @@ const appChangelog = <Release>[
         'výstrahy (Správa → Kiosk → Obrazovka kiosku); dokud visí, zbytek '
         'záhlaví ustoupí.',
     'Kiosk: správce může dnešní zápasy v záhlaví skrýt (Správa → Kiosk → '
-        'Obrazovka kiosku).',
+        'Stavový řádek).',
     'Kiosk: ve výběru jména upozornění, že se tam z tréninku odhlásit nedá '
         '(text nastaví správce ve Správě → Kiosk).',
   ], store: [
