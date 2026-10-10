@@ -50,10 +50,16 @@ const firstLetterHint =
     'Vyber první písmeno své přezdívky — nebo křestního jména, pokud '
     'přezdívku nemáš.';
 
-/// The widest the admin's note above the hint gets: two lines of its
-/// 18 px bold hold the column's 200 characters, and a wide screen does
-/// not stretch it into one line nobody reads to the end.
+/// The widest the admin's note above the hint gets: a wide screen does not
+/// stretch it into one line nobody reads to the end (two lines of its
+/// 18 px bold hold the column's 200 characters at this width).
 const _noteMaxWidth = 1000.0;
+
+/// Lines the note may take before an ellipsis: its end says where to
+/// cancel, so a narrower screen gets more lines rather than a cut — the
+/// default text keeps whole down to a phone, 200 characters down to a
+/// portrait tablet.
+const _noteMaxLines = 6;
 
 Future<PlayerName?> showNamePicker(
   BuildContext context, {
@@ -228,7 +234,10 @@ class _NamePickerState extends ConsumerState<NamePicker> {
                                   constraints: const BoxConstraints(
                                     maxWidth: _noteMaxWidth,
                                   ),
-                                  child: KioskWarning(text: note),
+                                  child: KioskWarning(
+                                    text: note,
+                                    maxLines: _noteMaxLines,
+                                  ),
                                 ),
                                 const SizedBox(height: 16),
                               ],

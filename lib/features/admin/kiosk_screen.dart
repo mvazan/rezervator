@@ -251,6 +251,9 @@ class KioskSettingsScreen extends ConsumerWidget {
                     settings?.kioskPickerNote ??
                         'Žádné. Upozornění nad písmeny při výběru jména na '
                             'kiosku.',
+                    // The whole text is one tap away, under „Upravit…“.
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
                   ),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
