@@ -50,8 +50,8 @@ const firstLetterHint =
     'Vyber první písmeno své přezdívky — nebo křestního jména, pokud '
     'přezdívku nemáš.';
 
-/// The widest the admin's note above the hint gets: a wide screen does not
-/// stretch it into one line nobody reads to the end (two lines of its
+/// The widest the admin's note under the letters gets: a wide screen does
+/// not stretch it into one line nobody reads to the end (two lines of its
 /// 18 px bold hold the column's 200 characters at this width).
 const _noteMaxWidth = 1000.0;
 
@@ -227,20 +227,6 @@ class _NamePickerState extends ConsumerState<NamePicker> {
                             // name on the board (nameIndex), a nick when
                             // there is one, not by the surname.
                             if (_prefix.isEmpty) ...[
-                              // Read before a letter is tapped, so above
-                              // the hint; the later pages go without it.
-                              if (note != null) ...[
-                                ConstrainedBox(
-                                  constraints: const BoxConstraints(
-                                    maxWidth: _noteMaxWidth,
-                                  ),
-                                  child: KioskWarning(
-                                    text: note,
-                                    maxLines: _noteMaxLines,
-                                  ),
-                                ),
-                                const SizedBox(height: 16),
-                              ],
                               Text(
                                 firstLetterHint,
                                 textAlign: TextAlign.center,
@@ -266,6 +252,22 @@ class _NamePickerState extends ConsumerState<NamePicker> {
                                   ),
                               ],
                             ),
+                            // The admin's note under the letters: the hint
+                            // and the letters are what the page is for, the
+                            // note is for whoever came to cancel. The later
+                            // pages go without it.
+                            if (_prefix.isEmpty && note != null) ...[
+                              const SizedBox(height: 24),
+                              ConstrainedBox(
+                                constraints: const BoxConstraints(
+                                  maxWidth: _noteMaxWidth,
+                                ),
+                                child: KioskWarning(
+                                  text: note,
+                                  maxLines: _noteMaxLines,
+                                ),
+                              ),
+                            ],
                           ],
                         ),
                       NamesNode(:final players) =>

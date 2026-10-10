@@ -22,7 +22,7 @@ Future<void> _loadManrope() async {
   await loader.load();
 }
 
-/// The admin's booking note above the first letters (0070) is read to its
+/// The admin's booking note under the first letters (0070) is read to its
 /// end — the end says where to cancel — on the kiosk and on narrower
 /// screens alike, never cut by an ellipsis.
 void main() {

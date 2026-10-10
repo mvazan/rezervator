@@ -1,4 +1,4 @@
--- 0070 — a note above the first letters of the kiosk's name picker (Správa
+-- 0070 — a note under the first letters of the kiosk's name picker (Správa
 -- → Kiosk → Obrazovka kiosku → Upozornění při rezervaci): whoever books at
 -- the kiosk learns there that a training cannot be cancelled there, and
 -- where it can. Every alley starts with the default text — the existing

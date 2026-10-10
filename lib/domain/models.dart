@@ -861,7 +861,7 @@ class ScheduleSettings {
   /// font follows the rows instead (`kioskRowFont`).
   final int kioskFontSize;
 
-  /// A note above the first letters of the kiosk's name picker (0070) —
+  /// A note under the first letters of the kiosk's name picker (0070) —
   /// by default [defaultPickerNote], that a training cannot be cancelled
   /// at the kiosk; null = none.
   final String? kioskPickerNote;
