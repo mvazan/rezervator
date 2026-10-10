@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/ui.dart' show launchWeb;
+import '../../../core/widgets/emoji_text.dart';
 
 /// Termínátor's Google Play page — the sister app for tournaments.
 const terminatorPlayUrl =
@@ -156,7 +157,7 @@ class _HighFive extends StatelessWidget {
                 angle: 0.25 * (1 - close) + 0.12,
                 child: Transform.flip(
                   flipX: true,
-                  child: const Text('✋', style: _hand),
+                  child: const EmojiText('✋', style: _hand),
                 ),
               ),
             ),
@@ -164,7 +165,7 @@ class _HighFive extends StatelessWidget {
               offset: Offset(gap / 2 + 22, 0),
               child: Transform.rotate(
                 angle: -(0.25 * (1 - close) + 0.12),
-                child: const Text('✋', style: _hand),
+                child: const EmojiText('✋', style: _hand),
               ),
             ),
             Opacity(
@@ -173,7 +174,7 @@ class _HighFive extends StatelessWidget {
                 offset: const Offset(0, -34),
                 child: Transform.scale(
                   scale: 0.7 + 0.8 * spark,
-                  child: const Text('✨', style: TextStyle(fontSize: 34)),
+                  child: const EmojiText('✨', style: TextStyle(fontSize: 34)),
                 ),
               ),
             ),

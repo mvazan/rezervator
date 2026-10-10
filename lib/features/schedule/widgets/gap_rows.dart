@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/widgets/emoji_text.dart';
 import '../../../domain/labels.dart';
 import '../../../domain/models.dart';
 import '../../../domain/palette.dart';
@@ -118,7 +119,7 @@ class GapEventBanner extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      child: Text(
+      child: EmojiText(
         text,
         textAlign: TextAlign.center,
         maxLines: 2,

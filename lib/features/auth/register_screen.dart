@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/ui.dart';
 import '../../core/widgets/auth_background.dart';
+import '../../core/widgets/emoji_text.dart';
 import '../../data/providers.dart';
 import '../../domain/limits.dart';
 import '../../domain/models.dart';
@@ -150,7 +151,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                     DropdownMenuItem(
                         value: tenant.id, child: Text(tenant.name)),
                   const DropdownMenuItem(
-                      value: _newTenant, child: Text('➕ Založit novou kuželnu')),
+                      value: _newTenant, child: EmojiText('➕ Založit novou kuželnu')),
                 ],
                 onChanged: (id) => setState(() {
                   _tenantId = id;

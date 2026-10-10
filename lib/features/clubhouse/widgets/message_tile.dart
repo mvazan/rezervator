@@ -7,6 +7,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../../../core/widgets/emoji_text.dart';
 import '../../../domain/messages.dart';
 import '../../../domain/models.dart';
 import 'server_limit.dart';
@@ -262,7 +263,7 @@ class _MessageTileState extends State<MessageTile>
             if (onReact != null) ...[
               _receivedRow(onReact),
               if (widget.recipients.isNotEmpty)
-                Text(
+                EmojiText(
                   reactionLine(widget.recipients, widget.names, widget.meId),
                   style: small,
                 ),
@@ -283,7 +284,7 @@ class _MessageTileState extends State<MessageTile>
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Flexible(
-                          child: Text(
+                          child: EmojiText(
                             tallyLabel(tally(widget.recipients)),
                             style: small,
                           ),
@@ -302,7 +303,7 @@ class _MessageTileState extends State<MessageTile>
               if (_expanded)
                 Padding(
                   padding: const EdgeInsets.only(top: 4),
-                  child: Text(
+                  child: EmojiText(
                     reactionLine(widget.recipients, widget.names, widget.meId,
                         namesForNone: true),
                     style: small,
@@ -323,7 +324,7 @@ class _MessageTileState extends State<MessageTile>
     Widget chip(Reaction reaction, String label) => Padding(
           padding: const EdgeInsets.only(right: 8),
           child: FilterChip(
-            label: Text(label),
+            label: EmojiText(label),
             selected: current == reaction,
             onSelected: (_) =>
                 onReact(current == reaction ? null : reaction),

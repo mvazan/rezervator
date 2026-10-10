@@ -19,6 +19,7 @@ import 'package:rezervator/features/clubhouse/messages_screen.dart';
 import 'package:rezervator/features/clubhouse/widgets/message_composers.dart'
     show MessageSend;
 import 'package:rezervator/features/clubhouse/widgets/message_tile.dart';
+import '../support/emoji_finders.dart';
 
 /// Klubovna → Zprávy (0051): the tile's received and sent sides, the list
 /// (read marking, „Starší (N)“, failed reactions) and the detail screen.
@@ -98,8 +99,8 @@ void main() {
         },
         onDelete: null,
       )));
-      final up = find.widgetWithText(FilterChip, '👍');
-      final down = find.widgetWithText(FilterChip, '👎');
+      final up = findWidgetWithEmojiText(FilterChip, '👍');
+      final down = findWidgetWithEmojiText(FilterChip, '👎');
       await tester.pumpWidget(tile(null));
       expect(find.text('Od služby (Bára Kantýnská)'), findsOneWidget);
       // Read off the node's data: containsSemantics is deprecated on the
@@ -127,7 +128,7 @@ void main() {
       await tester.testTextInput.receiveAction(TextInputAction.done);
       expect(replies, ['Přijdu.']);
       // The line reads „👍 Petr Novák, ty · …“ (me, now 👍 too).
-      expect(find.textContaining('👍 Petr Novák'), findsOneWidget);
+      expect(findEmojiTextContaining('👍 Petr Novák'), findsOneWidget);
     });
 
     // A cached snapshot may be older than my reply from another device;
@@ -494,7 +495,7 @@ void main() {
         onDelete: () {},
       ))));
       expect(find.text('Ode mě hráčům'), findsOneWidget);
-      expect(find.text('1× 👍 · 1× 👎'), findsOneWidget);
+      expect(findEmojiText('1× 👍 · 1× 👎'), findsOneWidget);
       expect(find.byType(TextField), findsNothing);
       expect(find.byType(FilterChip), findsNothing);
     });
@@ -513,7 +514,7 @@ void main() {
         onReply: null,
         onDelete: () {},
       ))));
-      final tally = find.text('1× 👍 · 1× 👎');
+      final tally = findEmojiText('1× 👍 · 1× 👎');
       final collapsed = semanticsData(tester, tally).flagsCollection;
       expect(collapsed.isButton, isTrue);
       expect(collapsed.isExpanded, Tristate.isFalse); // has an expanded state, and is collapsed
@@ -523,7 +524,7 @@ void main() {
       await tester.tap(tally);
       await tester.pump();
       expect(semanticsData(tester, tally).flagsCollection.isExpanded, Tristate.isTrue);
-      expect(find.text('👍 Petr · 👎 Tomáš'), findsOneWidget);
+      expect(findEmojiText('👍 Petr · 👎 Tomáš'), findsOneWidget);
     });
   });
 
@@ -632,10 +633,10 @@ void main() {
         react: (_, _) async => throw Exception('offline'),
       ));
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(FilterChip, '👍'));
+      await tester.tap(findWidgetWithEmojiText(FilterChip, '👍'));
       await tester.pumpAndSettle();
       expect(find.byType(SnackBar), findsOneWidget);
-      expect(tester.widget<FilterChip>(find.widgetWithText(FilterChip, '👍')).selected,
+      expect(tester.widget<FilterChip>(findWidgetWithEmojiText(FilterChip, '👍')).selected,
           isFalse);
     });
 
@@ -651,7 +652,7 @@ void main() {
         reply: (id, text) async => replies.add((id, text)),
       ));
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(FilterChip, '👎'));
+      await tester.tap(findWidgetWithEmojiText(FilterChip, '👎'));
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField), 'Nestihnu.');
       await tester.testTextInput.receiveAction(TextInputAction.done);
@@ -733,11 +734,11 @@ void main() {
             PlayerName(id: 'me', displayName: 'Já Hráč')],
       ));
       await tester.pumpAndSettle();
-      expect(find.text('1× 👍 · 1 bez reakce'), findsOneWidget);
-      expect(find.text('👍 Petr · bez reakce: Tomáš'), findsNothing);
-      await tester.tap(find.text('1× 👍 · 1 bez reakce'));
+      expect(findEmojiText('1× 👍 · 1 bez reakce'), findsOneWidget);
+      expect(findEmojiText('👍 Petr · bez reakce: Tomáš'), findsNothing);
+      await tester.tap(findEmojiText('1× 👍 · 1 bez reakce'));
       await tester.pumpAndSettle();
-      expect(find.text('👍 Petr · bez reakce: Tomáš'), findsOneWidget);
+      expect(findEmojiText('👍 Petr · bez reakce: Tomáš'), findsOneWidget);
     });
 
     // The RPC's realtime DELETE can beat its HTTP reply and unmount the
@@ -1318,8 +1319,8 @@ void main() {
             react: (_, _) async {}, reply: (_, _) async {})),
       ));
       await tester.pumpAndSettle();
-      expect(find.text('1× 👍 · 1 bez reakce'), findsOneWidget);
-      expect(find.text('👍 Petr „přijdu“ · bez reakce: Tomáš'), findsOneWidget);
+      expect(findEmojiText('1× 👍 · 1 bez reakce'), findsOneWidget);
+      expect(findEmojiText('👍 Petr „přijdu“ · bez reakce: Tomáš'), findsOneWidget);
     });
 
     testWidgets('opening marks my unread row read, once', (tester) async {
