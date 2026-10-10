@@ -37,8 +37,9 @@ class ZapisPage extends ConsumerWidget {
   /// the competition's league matches, not from the alley's own.
   final String? competitionSlug;
 
-  /// Look up the players' registration numbers for the sheet (the app; the
-  /// kiosk's account may not).
+  /// Look up the players' registration numbers for the sheet (regnum-lookup:
+  /// any signed-in account that can open the match, the kiosk's too). Off
+  /// where nothing is signed in to ask with.
   final bool withRegnums;
 
   /// The corner button is ← „Zpět“ instead of × „Zavřít“: the app's

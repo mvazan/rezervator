@@ -49,6 +49,9 @@ String changelogHeading(Release r, {required bool web}) {
 }
 
 const appChangelog = <Release>[
+  Release(null, '10. 10. 2026', [
+    'Kiosk: zápis zápasu ukazuje i registrační čísla hráčů.',
+  ]),
   Release('2.0.7', '9. 10. 2026', [
     'Notifikace o rezervaci, kterou za vás udělal kiosk, spoluhráč ze '
         'skupiny nebo služba, otevře kalendář přímo na tom dni a termín na '
