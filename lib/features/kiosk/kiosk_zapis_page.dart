@@ -12,9 +12,9 @@ import '../clubhouse/widgets/zapis_page.dart';
 /// Opens [slot]'s Zápis in a modal covering [percent] of the screen, fading
 /// in (no slide); a tap outside closes it. At 100 % there is no outside, so
 /// a close button appears. [onTouch] is the shell's „somebody touched the
-/// kiosk“. [play] — a match with a video — puts a button in the top right
-/// corner („Sledovat živě“, „Přehrát záznam“): it closes the Zápis and
-/// opens the stream.
+/// kiosk“. [play] — a match with a video — puts a button in a strip above
+/// the sheet, on the right („Sledovat živě“, „Přehrát záznam“): it closes
+/// the Zápis and opens the stream.
 Future<void> showKioskZapis(
   BuildContext context, {
   required PrioritySlot slot,
@@ -51,9 +51,31 @@ Future<void> showKioskZapis(
                 clipBehavior: Clip.antiAlias,
                 borderRadius: BorderRadius.circular(full ? 0 : 16),
                 elevation: 8,
-                child: Stack(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Positioned.fill(
+                    // A strip of its own above the sheet: the sheet fills
+                    // its box edge to edge, a button over it would hide
+                    // the away team's totals.
+                    if (play != null)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+                        child: SafeArea(
+                          bottom: false,
+                          child: Align(
+                            alignment: Alignment.centerRight,
+                            child: FilledButton.tonalIcon(
+                              onPressed: () {
+                                Navigator.of(context).pop();
+                                play.onPlay();
+                              },
+                              icon: const Icon(Icons.play_arrow),
+                              label: Text(play.label),
+                            ),
+                          ),
+                        ),
+                      ),
+                    Expanded(
                       child: ZapisPage(
                         slot: slot,
                         closeButton: full,
@@ -63,21 +85,6 @@ Future<void> showKioskZapis(
                         hideSystemBars: false,
                       ),
                     ),
-                    if (play != null)
-                      Positioned(
-                        top: 8,
-                        right: 8,
-                        child: SafeArea(
-                          child: FilledButton.tonalIcon(
-                            onPressed: () {
-                              Navigator.of(context).pop();
-                              play.onPlay();
-                            },
-                            icon: const Icon(Icons.play_arrow),
-                            label: Text(play.label),
-                          ),
-                        ),
-                      ),
                   ],
                 ),
               ),

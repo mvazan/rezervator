@@ -83,10 +83,7 @@ void _register() {
       ..border = 'none'
       ..width = '100%'
       ..height = '100%';
-    iframe.addEventListener(
-      'load',
-      ((web.Event _) => _greet(viewId)).toJS,
-    );
+    iframe.addEventListener('load', ((web.Event _) => _greet(viewId)).toJS);
     _frames[viewId] = iframe;
     return iframe;
   });

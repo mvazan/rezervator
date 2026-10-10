@@ -5,7 +5,7 @@ library;
 
 import 'dart:convert';
 
-final _id =RegExp(r'^[A-Za-z0-9_-]{11}$');
+final _id = RegExp(r'^[A-Za-z0-9_-]{11}$');
 
 /// The video id in [url] — `youtube.com/watch?v=ID` (any other query
 /// parameters, `www.` or `m.`), `youtu.be/ID`, `youtube.com/live/ID`,

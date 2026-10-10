@@ -19,7 +19,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/clock.dart';
 import '../../data/providers.dart';
 import '../../domain/kiosk_panel.dart'
-    show kioskStreamMatches, kioskVisibleStreams;
+    show hasKioskVideo, kioskStreamMatches, kioskVisibleStreams;
 import '../../domain/models.dart';
 import '../../domain/youtube.dart' show youtubeVideoId;
 import 'stream/kiosk_stream_view.dart';
@@ -68,23 +68,56 @@ class KioskStreams {
 
 class KioskStreamsNotifier extends Notifier<KioskStreams> {
   @override
-  KioskStreams build() => const KioskStreams();
+  KioskStreams build() {
+    // Fewer windows than streams opened (the admin lowered the count): the
+    // oldest ones close, or they would come back when a window closes.
+    ref.listen(
+      settingsProvider.select((s) => s.value?.kioskStreamMax ?? 1),
+      (_, max) => state = _trimmed(state.opened, {...state.closed}, max),
+    );
+    return const KioskStreams();
+  }
+
+  /// [opened] with no more playable streams than [max] windows (none to
+  /// trim at one window, which turns through them all): the oldest
+  /// playable ones go to [closed]. A stream whose slot is gone or has lost
+  /// its video takes no window, so it does not count — and stays, should
+  /// it come back.
+  KioskStreams _trimmed(List<String> opened, Set<String> closed, int max) {
+    final playable = {
+      for (final s in ref.read(prioritySlotsProvider))
+        if (hasKioskVideo(s)) s.id,
+    };
+    final counted = [
+      for (final id in opened)
+        if (playable.contains(id)) id,
+    ];
+    if (max <= 1 || counted.length <= max) {
+      return KioskStreams(opened: opened, closed: closed, reveal: state.reveal);
+    }
+    final gone = counted.take(counted.length - max).toSet();
+    return KioskStreams(
+      opened: [
+        for (final id in opened)
+          if (!gone.contains(id)) id,
+      ],
+      closed: {...closed, ...gone},
+      reveal: state.reveal,
+    );
+  }
 
   /// A visitor's ▶ at match [id]. With a window per stream there are never
   /// more opened than windows: the oldest one opened gives way.
   void open(String id) {
     final max = ref.read(settingsProvider).value?.kioskStreamMax ?? 1;
-    var opened = state.opened.contains(id)
-        ? state.opened
-        : [...state.opened, id];
-    final closed = {...state.closed}..remove(id);
-    if (max > 1 && opened.length > max) {
-      closed.addAll(opened.take(opened.length - max));
-      opened = opened.sublist(opened.length - max);
-    }
+    final trimmed = _trimmed(
+      state.opened.contains(id) ? state.opened : [...state.opened, id],
+      {...state.closed}..remove(id),
+      max,
+    );
     state = KioskStreams(
-      opened: opened,
-      closed: closed,
+      opened: trimmed.opened,
+      closed: trimmed.closed,
       reveal: (id: id, seq: (state.reveal?.seq ?? 0) + 1),
     );
   }
@@ -133,7 +166,10 @@ final kioskStreamProvider = Provider<List<PrioritySlot>>((ref) {
 /// then the one beside it, the one above or below, the one across. A
 /// window keeps its place in the stack for as long as its stream is open
 /// (an iframe moved in the page reloads); while one is maximized the
-/// others hide, their players kept running in a pixel.
+/// others hide, their players kept running in a pixel. A player under
+/// another window's frame, and every player while a window is dragged or
+/// resized, takes no touches: on the web the iframe below would take the
+/// touches meant for the frame above it.
 class KioskStreamLayer extends ConsumerStatefulWidget {
   const KioskStreamLayer({
     super.key,
@@ -161,7 +197,24 @@ class _KioskStreamLayerState extends ConsumerState<KioskStreamLayer> {
   String? _maximized;
   KioskStreamReveal? _reveal;
 
-  void _sync() {
+  /// What each window covers now (nothing while hidden), as it last said.
+  final _frames = <String, Rect>{};
+
+  /// The windows a drag or a resize runs on.
+  final _gestures = <String>{};
+
+  /// One window or several, when the layer last built.
+  bool? _single;
+
+  void _sync({required bool single}) {
+    // One window for all, or back: the windows start afresh, none
+    // maximized.
+    if (single != _single) {
+      _single = single;
+      _maximized = null;
+      _frames.clear();
+      _gestures.clear();
+    }
     final ids = {for (final s in widget.streams) s.id};
     _order.removeWhere((id) => !ids.contains(id));
     _corners.removeWhere((id, _) => !ids.contains(id));
@@ -176,6 +229,8 @@ class _KioskStreamLayerState extends ConsumerState<KioskStreamLayer> {
       }
     }
     if (!ids.contains(_maximized)) _maximized = null;
+    _frames.removeWhere((id, _) => !ids.contains(id));
+    _gestures.removeWhere((id) => !ids.contains(id));
     // A ▶ brings its window up from under a maximized one.
     final reveal = ref.watch(kioskStreamsProvider.select((s) => s.reveal));
     if (reveal != _reveal) {
@@ -184,17 +239,29 @@ class _KioskStreamLayerState extends ConsumerState<KioskStreamLayer> {
     }
   }
 
+  /// Whether another window, later in the stack, lies over [id]'s.
+  bool _covered(String id) {
+    final mine = _frames[id];
+    if (mine == null || mine.isEmpty) return false;
+    final above = _order.skip(_order.indexOf(id) + 1);
+    return above.any((other) {
+      final theirs = _frames[other];
+      return theirs != null && !theirs.isEmpty && theirs.overlaps(mine);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    _sync();
     final settings = ref.watch(settingsProvider).value;
+    final single = (settings?.kioskStreamMax ?? 1) <= 1;
+    _sync(single: single);
     final content = ref.watch(kioskStreamContentProvider);
     final close = ref.read(kioskStreamsProvider.notifier).close;
     final corner = settings?.kioskStreamCorner ?? KioskCorner.bl;
     final width = settings?.kioskStreamWidth ?? 35;
     final byId = {for (final s in widget.streams) s.id: s};
     final streams = [for (final id in _order) byId[id]!];
-    if ((settings?.kioskStreamMax ?? 1) <= 1) {
+    if (single) {
       return KioskStreamWindow(
         matches: streams,
         content: content,
@@ -216,7 +283,8 @@ class _KioskStreamLayerState extends ConsumerState<KioskStreamLayer> {
             content: content,
             corner: corners[_corners[s.id]! % corners.length],
             widthPercent: width,
-            interactive: widget.interactive,
+            interactive:
+                widget.interactive && _gestures.isEmpty && !_covered(s.id),
             reveal: _reveal,
             onClose: close,
             hidden: _maximized != null && _maximized != s.id,
@@ -227,6 +295,14 @@ class _KioskStreamLayerState extends ConsumerState<KioskStreamLayer> {
                 _maximized = null;
               }
             }),
+            onFrame: (frame) {
+              if (_frames[s.id] != frame) setState(() => _frames[s.id] = frame);
+            },
+            onGesture: (runs) {
+              if (runs ? _gestures.add(s.id) : _gestures.remove(s.id)) {
+                setState(() {});
+              }
+            },
           ),
       ],
     );
@@ -245,6 +321,8 @@ class KioskStreamWindow extends StatefulWidget {
     this.reveal,
     this.hidden = false,
     this.onMaximized,
+    this.onFrame,
+    this.onGesture,
   });
 
   /// The streams it turns through (one with a window per stream); never
@@ -272,12 +350,20 @@ class KioskStreamWindow extends StatefulWidget {
   /// The window took the whole area (true) or gave it back.
   final void Function(bool maximized)? onMaximized;
 
+  /// What the window covers now — its frame, the pill, the whole area
+  /// maximized, nothing hidden — after each change once no drag or resize
+  /// runs (the layer keeps players under it from taking touches).
+  final void Function(Rect frame)? onFrame;
+
+  /// A drag or a resize of the window starts (true) or ends.
+  final void Function(bool runs)? onGesture;
+
   static const titleHeight = 40.0;
   static const bottomHeight = 20.0;
   static const pillHeight = 36.0;
 
   /// Wide enough for the title bar's buttons and some of the title.
-  static const minWidth = 300.0;
+  static const minWidth = 360.0;
   static const margin = 8.0;
 
   /// The whole frame for a player [width] wide: the bars and 16:9.
@@ -297,6 +383,11 @@ class _KioskStreamWindowState extends State<KioskStreamWindow> {
 
   /// A drag or a resize is running: the player takes no touches.
   bool _gesture = false;
+
+  /// What [KioskStreamWindow.onFrame] and [KioskStreamWindow.onGesture]
+  /// were last told.
+  Rect? _toldFrame;
+  bool _toldGesture = false;
 
   /// The match shown, by id; the first one until a visitor turns.
   String? _shownId;
@@ -384,14 +475,41 @@ class _KioskStreamWindowState extends State<KioskStreamWindow> {
     setState(() => _shownId = widget.matches[(_index + direction) % n].id);
   }
 
-  /// Closes [id]: the window turns on to the next stream, if any is left.
-  void _close(String id) {
+  /// Closes [ids]: the window turns on to the next stream left, if any.
+  void _close(Set<String> ids) {
     final n = widget.matches.length;
-    final at = widget.matches.indexWhere((s) => s.id == id);
-    if (n > 1 && at >= 0) {
-      setState(() => _shownId = widget.matches[(at + 1) % n].id);
+    final at = _index;
+    for (var i = 1; i < n; i++) {
+      final next = widget.matches[(at + i) % n];
+      if (!ids.contains(next.id)) {
+        setState(() => _shownId = next.id);
+        break;
+      }
     }
-    widget.onClose(id);
+    ids.forEach(widget.onClose);
+  }
+
+  /// [videoId] has ended: every stream of it goes — two matches streamed
+  /// as one broadcast would otherwise turn to the same, ended player.
+  void _ended(String videoId) => _close({
+    for (final s in widget.matches)
+      if (youtubeVideoId(s.videoUrl ?? '') == videoId) s.id,
+  });
+
+  /// Tells the layer what changed, after the frame (never mid-build).
+  void _tell(Rect frame) {
+    if (_gesture != _toldGesture) {
+      final runs = _toldGesture = _gesture;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) widget.onGesture?.call(runs);
+      });
+    }
+    if (!_gesture && frame != _toldFrame) {
+      _toldFrame = frame;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) widget.onFrame?.call(frame);
+      });
+    }
   }
 
   void _moveBy(Offset delta) {
@@ -440,7 +558,19 @@ class _KioskStreamWindowState extends State<KioskStreamWindow> {
       final playerOf = widget.content(
         videoId,
         interactive: interactive,
-        onEnded: () => _close(shown.id),
+        onEnded: () => _ended(videoId),
+      );
+      _tell(
+        widget.hidden
+            ? Rect.zero
+            : _collapsed
+            ? Rect.fromLTWH(
+                rect.left,
+                rect.top,
+                rect.width,
+                KioskStreamWindow.pillHeight,
+              )
+            : frame,
       );
       if (widget.hidden) {
         // Another window has the whole area: the player runs on in a
@@ -485,10 +615,14 @@ class _KioskStreamWindowState extends State<KioskStreamWindow> {
               left: rect.left,
               top: rect.top,
               height: KioskStreamWindow.pillHeight,
-              child: _Pill(
-                title: title,
-                onTap: () => setState(() => _collapsed = false),
-                onClose: () => _close(shown.id),
+              // No wider than the window: its × stays on the screen.
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: rect.width),
+                child: _Pill(
+                  title: title,
+                  onTap: () => setState(() => _collapsed = false),
+                  onClose: () => _close({shown.id}),
+                ),
               ),
             )
           else ...[
@@ -507,10 +641,17 @@ class _KioskStreamWindowState extends State<KioskStreamWindow> {
                 // pan, the grip) mid-gesture at worst — a recognizer
                 // disposed that way never reports its end, so the flag
                 // goes with the change, or the player stays untouchable.
-                onCollapse: () => setState(() {
-                  _collapsed = true;
-                  _gesture = false;
-                }),
+                // Collapsed, a maximized window gives the area back — the
+                // other windows hidden under it come out.
+                onCollapse: () {
+                  final wasMaximized = _maximized;
+                  setState(() {
+                    _collapsed = true;
+                    _maximized = false;
+                    _gesture = false;
+                  });
+                  if (wasMaximized) widget.onMaximized?.call(false);
+                },
                 onMaximize: () {
                   setState(() {
                     _maximized = !_maximized;
@@ -518,7 +659,7 @@ class _KioskStreamWindowState extends State<KioskStreamWindow> {
                   });
                   widget.onMaximized?.call(_maximized);
                 },
-                onClose: () => _close(shown.id),
+                onClose: () => _close({shown.id}),
                 onDragStart: _maximized ? null : () => _gestureRuns(true),
                 onDrag: _moveBy,
                 onDragEnd: () => _gestureRuns(false),
@@ -720,25 +861,31 @@ class _Pill extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Tooltip(
-            message: 'Rozbalit stream',
-            child: InkWell(
-              borderRadius: radius,
-              onTap: onTap,
-              child: Padding(
-                padding: const EdgeInsets.only(left: 12, right: 4),
-                child: SizedBox(
-                  height: KioskStreamWindow.pillHeight,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.play_arrow, size: 20, color: scheme.primary),
-                      const SizedBox(width: 6),
-                      Text(
-                        title,
-                        style: Theme.of(context).textTheme.labelLarge,
-                      ),
-                    ],
+          Flexible(
+            child: Tooltip(
+              message: 'Rozbalit stream',
+              child: InkWell(
+                borderRadius: radius,
+                onTap: onTap,
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 12, right: 4),
+                  child: SizedBox(
+                    height: KioskStreamWindow.pillHeight,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.play_arrow, size: 20, color: scheme.primary),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.labelLarge,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),

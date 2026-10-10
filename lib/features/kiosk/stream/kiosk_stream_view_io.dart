@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
@@ -37,7 +39,9 @@ class _KioskStreamViewState extends State<KioskStreamView> {
       ..addJavaScriptChannel(
         kioskStreamChannel,
         onMessageReceived: (message) {
-          if (youtubeEndedId(message.message) != null) widget.onEnded?.call();
+          if (mounted && youtubeEndedId(message.message) != null) {
+            widget.onEnded?.call();
+          }
         },
       )
       // The embed's title, logo and „Watch on YouTube“ are links out of
@@ -63,6 +67,22 @@ class _KioskStreamViewState extends State<KioskStreamView> {
       ),
       baseUrl: kioskStreamHostOrigin,
     );
+  }
+
+  @override
+  void dispose() {
+    // Taking the view away does not stop its page (webview_flutter_android
+    // leaves the native view to the garbage collector): the stream would
+    // play on unseen and its channel call a window long closed. An empty
+    // page at the host's own origin stops it.
+    unawaited(_controller.removeJavaScriptChannel(kioskStreamChannel));
+    unawaited(
+      _controller.loadHtmlString(
+        '<!doctype html><title></title>',
+        baseUrl: kioskStreamHostOrigin,
+      ),
+    );
+    super.dispose();
   }
 
   @override
