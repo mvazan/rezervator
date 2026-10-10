@@ -112,6 +112,14 @@ void main() {
               '$variant: hint on $name');
         }
       });
+
+      test('the admin\'s note above the hint (0070) reads on its error '
+          'container', () {
+        // KioskWarning paints its own fill: 18px bold is just short of
+        // large text, so 4.5:1 — the icon shares the text's colour.
+        _expect(contrastRatio(scheme.onErrorContainer, scheme.errorContainer),
+            _textAA, '$variant: picker note on its container');
+      });
     });
   }
 }

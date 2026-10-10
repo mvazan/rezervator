@@ -22,6 +22,7 @@ import '../../data/providers.dart';
 import '../../domain/models.dart';
 import '../../domain/name_index.dart';
 import '../../domain/palette.dart';
+import 'kiosk_warning.dart';
 
 /// How many candidates the picker is willing to show as name tiles at once
 /// before falling back to next-letter prefix tiles.
@@ -48,6 +49,11 @@ const _tileGap = 12.0;
 const firstLetterHint =
     'Vyber první písmeno své přezdívky — nebo křestního jména, pokud '
     'přezdívku nemáš.';
+
+/// The widest the admin's note above the hint gets: two lines of its
+/// 18 px bold hold the column's 200 characters, and a wide screen does
+/// not stretch it into one line nobody reads to the end.
+const _noteMaxWidth = 1000.0;
 
 Future<PlayerName?> showNamePicker(
   BuildContext context, {
@@ -170,6 +176,11 @@ class _NamePickerState extends ConsumerState<NamePicker> {
       prefix: _prefix,
       capacity: _capacity,
     );
+    // The admin's note (0070) — by default that a training cannot be
+    // cancelled here, and where it can.
+    final note = ref.watch(
+      settingsProvider.select((s) => s.value?.kioskPickerNote),
+    );
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
@@ -210,6 +221,17 @@ class _NamePickerState extends ConsumerState<NamePicker> {
                             // name on the board (nameIndex), a nick when
                             // there is one, not by the surname.
                             if (_prefix.isEmpty) ...[
+                              // Read before a letter is tapped, so above
+                              // the hint; the later pages go without it.
+                              if (note != null) ...[
+                                ConstrainedBox(
+                                  constraints: const BoxConstraints(
+                                    maxWidth: _noteMaxWidth,
+                                  ),
+                                  child: KioskWarning(text: note),
+                                ),
+                                const SizedBox(height: 16),
+                              ],
                               Text(
                                 firstLetterHint,
                                 textAlign: TextAlign.center,
