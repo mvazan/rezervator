@@ -27,12 +27,32 @@ void main() {
   final one = [match('m1', v1)];
   final two = [match('m1', v1), match('m2', v2, home: 'Druzí')];
 
+  /// The latest player's „the video has ended“.
+  VoidCallback? ended;
+
   /// The player stand-in: the video and whether it takes touches.
-  Widget player(String videoId, {required bool interactive}) => Text(
-    'player $videoId ${interactive ? 'on' : 'off'}',
-    key: const ValueKey('player'),
-  );
+  Widget player(
+    String videoId, {
+    required bool interactive,
+    VoidCallback? onEnded,
+  }) {
+    ended = onEnded;
+    return Text(
+      'player $videoId ${interactive ? 'on' : 'off'}',
+      key: const ValueKey('player'),
+    );
+  }
+
   final playerFinder = find.byKey(const ValueKey('player'));
+
+  /// The streams closed (the ×, an end), in order.
+  late List<String> closed;
+  late List<bool> maximized;
+  setUp(() {
+    closed = [];
+    maximized = [];
+    ended = null;
+  });
 
   /// The window on a 1200 × 700 area.
   Widget app(
@@ -40,6 +60,8 @@ void main() {
     KioskCorner corner = KioskCorner.bl,
     int width = 35,
     bool interactive = true,
+    KioskStreamReveal? reveal,
+    bool hidden = false,
   }) => MaterialApp(
     home: Scaffold(
       body: KioskStreamWindow(
@@ -48,6 +70,10 @@ void main() {
         corner: corner,
         widthPercent: width,
         interactive: interactive,
+        reveal: reveal,
+        hidden: hidden,
+        onClose: closed.add,
+        onMaximized: maximized.add,
       ),
     ),
   );
@@ -141,6 +167,110 @@ void main() {
     await tester.tap(find.byTooltip('Zmenšit'));
     await tester.pumpAndSettle();
     expect(tester.getRect(playerFinder), before);
+    // The layer heard both.
+    expect(maximized, [true, false]);
+  });
+
+  testWidgets('the × closes the stream shown; with more, the window turns on '
+      'to the next one', (tester) async {
+    area(tester);
+    await tester.pumpWidget(app(two));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Zavřít stream'));
+    await tester.pump();
+    expect(closed, ['m1']);
+    // Before the list even shrinks, the next stream is on.
+    expect(find.text('player $v2 on'), findsOneWidget);
+
+    await tester.pumpWidget(app([two[1]]));
+    await tester.pumpAndSettle();
+    expect(find.text('player $v2 on'), findsOneWidget);
+    await tester.tap(find.byTooltip('Zavřít stream'));
+    await tester.pump();
+    expect(closed, ['m1', 'm2']);
+  });
+
+  testWidgets('the collapsed pill has its × too', (tester) async {
+    area(tester);
+    await tester.pumpWidget(app(one));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Sbalit'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Zavřít stream'));
+    await tester.pump();
+    expect(closed, ['m1']);
+  });
+
+  testWidgets('the end of the video closes it, and turns on to the next',
+      (tester) async {
+    area(tester);
+    await tester.pumpWidget(app(two));
+    await tester.pumpAndSettle();
+    expect(find.text('player $v1 on'), findsOneWidget);
+
+    ended!();
+    await tester.pump();
+    expect(closed, ['m1']);
+    expect(find.text('player $v2 on'), findsOneWidget);
+  });
+
+  testWidgets('a ▶ at one of its streams turns the window to it and expands '
+      'it', (tester) async {
+    area(tester);
+    await tester.pumpWidget(app(two));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Sbalit'));
+    await tester.pumpAndSettle();
+
+    await tester.pumpWidget(app(two, reveal: (id: 'm2', seq: 1)));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Rozbalit stream'), findsNothing);
+    expect(find.text('player $v2 on'), findsOneWidget);
+    expect(find.text('2/2'), findsOneWidget);
+  });
+
+  testWidgets('a window born with a ▶ opens on its match', (tester) async {
+    area(tester);
+    await tester.pumpWidget(app(two, reveal: (id: 'm2', seq: 3)));
+    await tester.pumpAndSettle();
+    expect(find.text('player $v2 on'), findsOneWidget);
+  });
+
+  testWidgets('a ▶ at another window\'s stream takes this one off the whole '
+      'area', (tester) async {
+    area(tester);
+    await tester.pumpWidget(app(one));
+    await tester.pumpAndSettle();
+    final before = tester.getRect(playerFinder);
+    await tester.tap(find.byTooltip('Na celou obrazovku'));
+    await tester.pumpAndSettle();
+
+    await tester.pumpWidget(app(one, reveal: (id: 'elsewhere', seq: 1)));
+    await tester.pumpAndSettle();
+    expect(tester.getRect(playerFinder), before);
+  });
+
+  testWidgets('hidden behind a maximized window: only the player, in a '
+      'pixel, taking no touches — the same element', (tester) async {
+    area(tester);
+    await tester.pumpWidget(app(one));
+    await tester.pumpAndSettle();
+    final element = tester.element(playerFinder);
+
+    await tester.pumpWidget(app(one, hidden: true));
+    await tester.pumpAndSettle();
+    expect(find.text('Domácí – Hosté'), findsNothing);
+    expect(find.byTooltip('Zavřít stream'), findsNothing);
+    expect(tester.getRect(playerFinder).size, const Size(1, 1));
+    expect(find.text('player $v1 off'), findsOneWidget);
+    expect(identical(tester.element(playerFinder), element), isTrue);
+
+    await tester.pumpWidget(app(one));
+    await tester.pumpAndSettle();
+    expect(find.text('player $v1 on'), findsOneWidget);
+    expect(identical(tester.element(playerFinder), element), isTrue);
   });
 
   testWidgets('collapse leaves a pill and keeps the very same player alive; '

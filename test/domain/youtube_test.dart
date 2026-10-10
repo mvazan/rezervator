@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/domain/youtube.dart';
 
@@ -39,22 +41,109 @@ void main() {
   });
 
   test('the embed address: privacy domain, muted autoplay, no fullscreen, '
-      'no related videos', () {
+      'no related videos, talking to the page that embeds it', () {
     expect(
-      youtubeEmbedUrl(id),
+      youtubeEmbedUrl(id, origin: 'https://rezervator.online'),
       'https://www.youtube-nocookie.com/embed/$id'
-      '?autoplay=1&mute=1&playsinline=1&controls=1&fs=0&rel=0&modestbranding=1',
+      '?autoplay=1&mute=1&playsinline=1&controls=1&fs=0&rel=0&modestbranding=1'
+      '&enablejsapi=1&origin=https%3A%2F%2Frezervator.online',
     );
+    expect(youtubeEmbedUrl(id, origin: 'x').startsWith(youtubeEmbedOrigin),
+        isTrue);
   });
 
   test('the host page embeds the address, lets it autoplay and sandboxes '
       'its links', () {
-    final page = kioskStreamHostPage(youtubeEmbedUrl(id));
-    expect(page, contains('src="${youtubeEmbedUrl(id)}"'));
+    final url = youtubeEmbedUrl(id, origin: kioskStreamHostOrigin);
+    final page = kioskStreamHostPage(url);
+    expect(page, contains('src="$url"'));
     expect(page, contains('allow="autoplay;'));
     expect(page, contains('sandbox="allow-scripts allow-same-origin'));
     expect(page, isNot(contains('allow-popups')));
     expect(page, isNot(contains('allow-top-navigation')));
     expect(kioskStreamHostOrigin, startsWith('https://'));
+  });
+
+  test('the host page says hello to the player and passes its state '
+      'changes to the app', () {
+    final page = kioskStreamHostPage(
+      youtubeEmbedUrl(id, origin: kioskStreamHostOrigin),
+    );
+    for (final hello in youtubeHello('1')) {
+      // As a JS string literal inside the page's hello list.
+      expect(page, contains(jsonEncode(hello)));
+    }
+    expect(page, contains("'$youtubeEmbedOrigin'"));
+    expect(page, contains('$kioskStreamChannel.postMessage'));
+  });
+
+  group('the player talking back', () {
+    String msg(Map<String, Object?> m) => jsonEncode(m);
+
+    test('hello: listening, then a subscription to state changes, both '
+        'carrying the id', () {
+      final hello = [for (final h in youtubeHello('7')) jsonDecode(h)];
+      expect(hello, [
+        {'event': 'listening', 'id': '7', 'channel': 'widget'},
+        {
+          'event': 'command',
+          'func': 'addEventListener',
+          'args': ['onStateChange'],
+          'id': '7',
+          'channel': 'widget',
+        },
+      ]);
+    });
+
+    test('ended: a state change to 0, or a delivery of player state 0', () {
+      expect(
+        youtubeEndedId(msg({'event': 'onStateChange', 'info': 0, 'id': '7'})),
+        '7',
+      );
+      expect(
+        youtubeEndedId(
+          msg({
+            'event': 'infoDelivery',
+            'info': {'playerState': 0, 'currentTime': 5400.2},
+            'id': 3,
+            'channel': 'widget',
+          }),
+        ),
+        '3',
+      );
+    });
+
+    test('any message with an id says the player heard the hello', () {
+      expect(youtubePlayerId(msg({'event': 'onReady', 'id': '7'})), '7');
+      expect(youtubePlayerId(msg({'event': 'initialDelivery', 'id': 2})), '2');
+      expect(youtubePlayerId(msg({'event': 'onReady'})), isNull);
+      expect(youtubePlayerId('nope'), isNull);
+      expect(youtubePlayerId(null), isNull);
+    });
+
+    test('anything else is not an end', () {
+      for (final data in <Object?>[
+        msg({'event': 'onStateChange', 'info': 1, 'id': '7'}),
+        msg({'event': 'onStateChange', 'info': 2, 'id': '7'}),
+        msg({
+          'event': 'infoDelivery',
+          'info': {'currentTime': 12.5},
+          'id': '7',
+        }),
+        msg({'event': 'onReady', 'id': '7'}),
+        msg({'event': 'onStateChange', 'info': 0}),
+        msg({
+          'event': 'infoDelivery',
+          'info': {'playerState': '0'},
+          'id': '7',
+        }),
+        '[0]',
+        'not json',
+        null,
+        42,
+      ]) {
+        expect(youtubeEndedId(data), isNull, reason: '$data');
+      }
+    });
   });
 }

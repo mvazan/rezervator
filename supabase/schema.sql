@@ -362,7 +362,7 @@ begin
     (match_id, tenant_id, status, match_type, discipline,
      home_points, away_points, home_total, away_total, home_fulls, away_fulls,
      home_spares, away_spares, home_errors, away_errors,
-     home_set_points, away_set_points, fetched_at)
+     home_set_points, away_set_points, fetched_at, decided_at)
   values
     (v_row.id, p_tenant, p_result->>'status',
      coalesce(p_result->>'match_type', ''), coalesce(p_result->>'discipline', ''),
@@ -371,7 +371,11 @@ begin
      (v_home->>'fulls')::integer, (v_away->>'fulls')::integer,
      (v_home->>'spares')::integer, (v_away->>'spares')::integer,
      (v_home->>'errors')::integer, (v_away->>'errors')::integer,
-     (v_home->>'set_points')::numeric, (v_away->>'set_points')::numeric, now())
+     (v_home->>'set_points')::numeric, (v_away->>'set_points')::numeric, now(),
+     -- clock_timestamp, not now(): two applies in one transaction (the
+     -- tenancy suite) must be able to tell a stamp kept from one re-set.
+     case when p_result->>'status' in ('finished', 'forfeit')
+          then clock_timestamp() end)
   on conflict (match_id) do update set
     status = excluded.status, match_type = excluded.match_type,
     discipline = excluded.discipline,
@@ -382,7 +386,8 @@ begin
     home_errors = excluded.home_errors, away_errors = excluded.away_errors,
     home_set_points = excluded.home_set_points,
     away_set_points = excluded.away_set_points,
-    fetched_at = now();
+    fetched_at = now(),
+    decided_at = coalesce(r.decided_at, excluded.decided_at);
 
   delete from match_player_results where match_id = v_row.id;
   insert into match_player_results
@@ -5428,6 +5433,7 @@ CREATE TABLE IF NOT EXISTS "public"."match_results" (
     "home_set_points" numeric,
     "away_set_points" numeric,
     "fetched_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "decided_at" timestamp with time zone,
     CONSTRAINT "match_results_status_check" CHECK (("status" = ANY (ARRAY['scheduled'::"text", 'preparation'::"text", 'in_progress'::"text", 'finished'::"text", 'forfeit'::"text"])))
 );
 
@@ -5685,7 +5691,10 @@ CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     "kiosk_font_size" smallint DEFAULT 11 NOT NULL,
     "kiosk_animations" boolean DEFAULT true NOT NULL,
     "kiosk_low_res" boolean DEFAULT false NOT NULL,
-    "kiosk_picker_note" "text" DEFAULT 'Na kiosku se z tréninku odhlásit nedá. Zruš rezervaci v aplikaci Rezervátor, na webu rezervator.online, u služby v kantýně nebo u správce kuželny.'::"text",
+    "kiosk_stream" boolean DEFAULT false NOT NULL,
+    "kiosk_stream_corner" "text" DEFAULT 'bl'::"text" NOT NULL,
+    "kiosk_stream_width" smallint DEFAULT 35 NOT NULL,
+    "kiosk_stream_max" smallint DEFAULT 1 NOT NULL,
     CONSTRAINT "schedule_settings_booking_horizon_days_check" CHECK ((("booking_horizon_days" >= 1) AND ("booking_horizon_days" <= 90))),
     CONSTRAINT "schedule_settings_duty_reminder_days_check" CHECK ((("duty_reminder_days" >= 1) AND ("duty_reminder_days" <= 14))),
     CONSTRAINT "schedule_settings_kiosk_ahead_check" CHECK ((("kiosk_weeks_ahead" >= 0) AND ("kiosk_weeks_ahead" <= 52))),
@@ -5699,8 +5708,10 @@ CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     CONSTRAINT "schedule_settings_kiosk_notices_mode_check" CHECK (("kiosk_notices_mode" = ANY (ARRAY['off'::"text", 'drawer'::"text", 'header'::"text", 'both'::"text"]))),
     CONSTRAINT "schedule_settings_kiosk_notices_rotation_check" CHECK ((("kiosk_notices_rotation_seconds" >= 3) AND ("kiosk_notices_rotation_seconds" <= 120))),
     CONSTRAINT "schedule_settings_kiosk_past_check" CHECK ((("kiosk_past_days" >= 0) AND ("kiosk_past_days" <= 60))),
-    CONSTRAINT "schedule_settings_kiosk_picker_note_check" CHECK ((("kiosk_picker_note" IS NULL) OR (("char_length"("btrim"("kiosk_picker_note")) >= 1) AND ("char_length"("btrim"("kiosk_picker_note")) <= 200)))),
     CONSTRAINT "schedule_settings_kiosk_share_check" CHECK ((("kiosk_notices_share" >= 10) AND ("kiosk_notices_share" <= 90))),
+    CONSTRAINT "schedule_settings_kiosk_stream_corner_check" CHECK (("kiosk_stream_corner" = ANY (ARRAY['tl'::"text", 'tr'::"text", 'bl'::"text", 'br'::"text"]))),
+    CONSTRAINT "schedule_settings_kiosk_stream_max_check" CHECK ((("kiosk_stream_max" >= 1) AND ("kiosk_stream_max" <= 4))),
+    CONSTRAINT "schedule_settings_kiosk_stream_width_check" CHECK ((("kiosk_stream_width" >= 20) AND ("kiosk_stream_width" <= 60))),
     CONSTRAINT "schedule_settings_kiosk_visible_days_check" CHECK ((("kiosk_visible_days" >= 2) AND ("kiosk_visible_days" <= 14))),
     CONSTRAINT "schedule_settings_kiosk_zapis_check" CHECK ((("kiosk_zapis_percent" >= 50) AND ("kiosk_zapis_percent" <= 100))),
     CONSTRAINT "schedule_settings_lane_count_check" CHECK ((("lane_count" >= 1) AND ("lane_count" <= 12))),

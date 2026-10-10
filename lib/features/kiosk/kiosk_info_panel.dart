@@ -1,6 +1,7 @@
 /// The kiosk's side drawer: the alley's active notices (they take turns when
 /// there are several; a tap reads one in full), the matches of the last and
-/// next weeks (a tap on a finished one opens its Zápis) — and, while a match
+/// next weeks (a tap on a finished one opens its Zápis, ▶ at one with a
+/// video its stream) — and, while a match
 /// is being played, that match across the whole drawer in the Souboje view
 /// (several live matches take turns too). Display only, like the board:
 /// nothing here books or writes. Closed it is gone entirely, leaving only a
@@ -136,6 +137,7 @@ class KioskDrawer extends ConsumerWidget {
     required this.open,
     required this.onOpenNotice,
     required this.onOpenMatch,
+    required this.onPlay,
     this.resetToken = 0,
     this.boardDays,
     this.showLive = true,
@@ -159,6 +161,9 @@ class KioskDrawer extends ConsumerWidget {
   final bool open;
   final void Function(Message notice) onOpenNotice;
   final void Function(PrioritySlot match) onOpenMatch;
+
+  /// ▶ at a match with a video: its stream (0072).
+  final void Function(PrioritySlot match) onPlay;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -190,6 +195,7 @@ class KioskDrawer extends ConsumerWidget {
         ? _MatchesCard(
             key: ValueKey(resetToken),
             onOpen: onOpenMatch,
+            onPlay: onPlay,
             boardDays: boardDays,
             // Back to the match being played, when one is.
             onShowLive: content.live.isEmpty || onShowLive == null
@@ -216,6 +222,7 @@ class KioskDrawer extends ConsumerWidget {
                 matches: content.live,
                 turn: liveTurn,
                 onOpenMatch: onOpenMatch,
+                onPlay: onPlay,
                 onShowList: matches == null || onShowLive == null
                     ? null
                     : () => onShowLive!(false),
@@ -656,11 +663,13 @@ class _MatchesCard extends ConsumerStatefulWidget {
   const _MatchesCard({
     super.key,
     required this.onOpen,
+    required this.onPlay,
     this.boardDays,
     this.onShowLive,
   });
 
   final void Function(PrioritySlot match) onOpen;
+  final void Function(PrioritySlot match) onPlay;
 
   /// Back to the match being played; null when none is.
   final VoidCallback? onShowLive;
@@ -830,7 +839,17 @@ class _MatchesCardState extends ConsumerState<_MatchesCard> {
     Widget row(PrioritySlot s) => SizedBox(
       key: _rowKeys.putIfAbsent(s.id, GlobalKey.new),
       height: _resultRowHeight,
-      child: _MatchRow(slot: s, result: results[s.id], onOpen: widget.onOpen),
+      child: _MatchRow(
+        slot: s,
+        result: results[s.id],
+        onOpen: widget.onOpen,
+        play: hasKioskVideo(s)
+            ? (
+                label: kioskStreamLabel(s, results[s.id], now),
+                onPlay: () => widget.onPlay(s),
+              )
+            : null,
+      ),
     );
     Widget more(String label, VoidCallback onTap) => SizedBox(
       height: _moreRowHeight,
@@ -889,11 +908,19 @@ class _MatchesCardState extends ConsumerState<_MatchesCard> {
 }
 
 class _MatchRow extends StatelessWidget {
-  const _MatchRow({required this.slot, required this.onOpen, this.result});
+  const _MatchRow({
+    required this.slot,
+    required this.onOpen,
+    this.result,
+    this.play,
+  });
 
   final PrioritySlot slot;
   final MatchResult? result;
   final void Function(PrioritySlot match) onOpen;
+
+  /// A match with a video: ▶ at the row's end, [label] its tooltip.
+  final ({String label, VoidCallback onPlay})? play;
 
   @override
   Widget build(BuildContext context) {
@@ -938,11 +965,25 @@ class _MatchRow extends StatelessWidget {
       ],
     );
     // Only a match with a score has a Zápis to open.
-    if (!hasScore) return row;
-    return InkWell(
-      onTap: () => onOpen(slot),
-      borderRadius: BorderRadius.circular(8),
-      child: row,
+    final body = !hasScore
+        ? row
+        : InkWell(
+            onTap: () => onOpen(slot),
+            borderRadius: BorderRadius.circular(8),
+            child: row,
+          );
+    final play = this.play;
+    if (play == null) return body;
+    return Row(
+      children: [
+        Expanded(child: body),
+        IconButton(
+          tooltip: play.label,
+          onPressed: play.onPlay,
+          color: scheme.primary,
+          icon: const Icon(Icons.play_circle_outline),
+        ),
+      ],
     );
   }
 }
@@ -955,6 +996,7 @@ class _LiveView extends ConsumerStatefulWidget {
     required this.matches,
     required this.turn,
     required this.onOpenMatch,
+    required this.onPlay,
     this.onShowList,
   });
 
@@ -963,6 +1005,9 @@ class _LiveView extends ConsumerStatefulWidget {
 
   /// A tap on the score: the match's Zápis.
   final void Function(PrioritySlot match) onOpenMatch;
+
+  /// ▶ at the match on screen, when it has a video: its stream.
+  final void Function(PrioritySlot match) onPlay;
 
   final List<PrioritySlot> matches;
   final Duration turn;
@@ -1153,6 +1198,14 @@ class _LiveViewState extends ConsumerState<_LiveView> {
                       ),
                     const Spacer(),
                     _LiveAge(slot: slot),
+                    if (hasKioskVideo(slot))
+                      IconButton(
+                        tooltip: 'Sledovat živě',
+                        visualDensity: VisualDensity.compact,
+                        color: scheme.primary,
+                        onPressed: () => widget.onPlay(slot),
+                        icon: const Icon(Icons.play_circle_outline),
+                      ),
                   ],
                 ),
                 const SizedBox(height: 8),

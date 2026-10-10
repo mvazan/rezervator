@@ -671,6 +671,18 @@ enum KioskCorner {
   bool get top => this == tl || this == tr;
   bool get left => this == tl || this == bl;
 
+  /// This corner, then the one beside it, the one above or below it, the
+  /// one across: where the kiosk's further stream windows appear (0072).
+  List<KioskCorner> get fromHere => [
+    this,
+    _at(top: top, left: !left),
+    _at(top: !top, left: left),
+    _at(top: !top, left: !left),
+  ];
+
+  static KioskCorner _at({required bool top, required bool left}) =>
+      top ? (left ? tl : tr) : (left ? bl : br);
+
   /// The stored name, or bottom left for anything else.
   static KioskCorner parse(String? name) =>
       values.where((c) => c.name == name).firstOrNull ?? bl;
@@ -717,6 +729,7 @@ class ScheduleSettings {
     this.kioskWarning,
     this.kioskBandFontSize = 10,
     this.kioskTodaysMatches = true,
+    this.kioskStreamMax = 1,
     this.kioskLiveLayout = MatchLayout.full,
     this.tenantId = '',
     this.dutyReminderEnabled = false,
@@ -768,8 +781,9 @@ class ScheduleSettings {
   /// it up: fewer pixels a frame, softer text (0065). Nothing in the app.
   final bool kioskLowRes;
 
-  /// The match on air with a YouTube link plays in a floating window on
-  /// the kiosk (0066); where it first appears and how wide, in percent of
+  /// The match on air with a YouTube link opens by itself in a floating
+  /// window on the kiosk (0066; a visitor's ▶ opens any match's video
+  /// regardless); where a window first appears and how wide, in percent of
   /// the screen (16:9 gives the height).
   final bool kioskStream;
   final KioskCorner kioskStreamCorner;
@@ -795,6 +809,10 @@ class ScheduleSettings {
   /// The kiosk's status bar lists today's matches beside the clock (0071);
   /// off = it says what it says on a day without a match.
   final bool kioskTodaysMatches;
+
+  /// How many stream windows at once, 1–4 (0072): 1 turns through the
+  /// open streams in one window, more give each its own.
+  final int kioskStreamMax;
 
   /// How often the kiosk asks for a fresh score of a match being played.
   final int kioskLiveRefreshSeconds;
@@ -934,6 +952,7 @@ class ScheduleSettings {
         },
         kioskBandFontSize: json['kiosk_band_font_size'] as int? ?? 10,
         kioskTodaysMatches: json['kiosk_todays_matches'] as bool? ?? true,
+        kioskStreamMax: json['kiosk_stream_max'] as int? ?? 1,
         kioskLiveLayout: parseMatchLayout(
           json['kiosk_live_layout'] as String?,
           allowZapis: false,

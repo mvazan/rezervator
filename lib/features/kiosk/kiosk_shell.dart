@@ -15,7 +15,8 @@ import '../../core/ui.dart';
 import '../../core/widgets/gradient_button.dart';
 import '../../data/clock.dart';
 import '../../data/providers.dart';
-import '../../domain/kiosk_panel.dart' show kioskNotices;
+import '../../domain/kiosk_panel.dart'
+    show hasKioskVideo, kioskNotices, kioskStreamLabel;
 import '../../domain/models.dart';
 import '../../domain/results.dart' show hasScoreData;
 import '../../domain/schedule.dart'
@@ -209,13 +210,23 @@ class _KioskShellState extends ConsumerState<KioskShell>
     ),
   );
 
-  /// A tap on a match of the board: only one with a score has a Zápis.
-  void _openMatchIfScored(PrioritySlot match) {
+  /// A tap on a match of the board or the header: one with a score opens
+  /// its Zápis; one without, but with a video, its stream.
+  void _openMatchOrStream(PrioritySlot match) {
     final result = ref.read(matchResultsProvider).value?[match.id];
-    if (hasScoreData(result)) _openMatch(match);
+    if (hasScoreData(result)) {
+      _openMatch(match);
+    } else if (hasKioskVideo(match)) {
+      _openStream(match);
+    }
   }
 
+  /// A visitor's ▶ (0072): [match]'s video in a stream window.
+  void _openStream(PrioritySlot match) =>
+      ref.read(kioskStreamsProvider.notifier).open(match.id);
+
   void _openMatch(PrioritySlot match) {
+    final now = ref.read(nowProvider).value ?? DateTime.now();
     unawaited(
       _modal(
         () => showKioskZapis(
@@ -226,31 +237,38 @@ class _KioskShellState extends ConsumerState<KioskShell>
               : Brightness.light,
           percent: ref.read(settingsProvider).value?.kioskZapisPercent ?? 80,
           onTouch: _touch,
+          // The Zápis closes and the stream opens beside the board.
+          play: hasKioskVideo(match)
+              ? (
+                  label: kioskStreamLabel(
+                    match,
+                    ref.read(matchResultsProvider).value?[match.id],
+                    now,
+                  ),
+                  onPlay: () => _openStream(match),
+                )
+              : null,
         ),
       ),
     );
   }
 
-  /// The stream window (0066) over [board] while a match with a video is
-  /// on air; [board] alone otherwise. Its own layer: the player and its
-  /// frame move without re-recording the board.
+  /// The stream windows (0066, 0072) over [board] while a stream is open;
+  /// [board] alone otherwise. Their own layer: the players and their
+  /// frames move without re-recording the board.
   Widget _withStream(Widget board) {
     final streams = ref.watch(kioskStreamProvider);
-    final settings = ref.watch(settingsProvider).value;
-    // The same tree with or without the window — [board] stays in its slot,
-    // so a stream starting or ending never re-inflates the board and the
-    // drawer (the notices' turn, the list's weeks, the live refresh).
+    // The same tree with or without the windows — [board] stays in its
+    // slot, so a stream opening or closing never re-inflates the board and
+    // the drawer (the notices' turn, the list's weeks, the live refresh).
     return Stack(
       fit: StackFit.expand,
       children: [
         board,
         if (streams.isNotEmpty)
           RepaintBoundary(
-            child: KioskStreamWindow(
-              matches: streams,
-              content: ref.watch(kioskStreamContentProvider),
-              corner: settings?.kioskStreamCorner ?? KioskCorner.bl,
-              widthPercent: settings?.kioskStreamWidth ?? 35,
+            child: KioskStreamLayer(
+              streams: streams,
               interactive: ref.watch(kioskModalsProvider) == 0,
             ),
           ),
@@ -272,7 +290,7 @@ class _KioskShellState extends ConsumerState<KioskShell>
     final board = KioskBoardView(
       key: _boardKey,
       selected: _selected,
-      onOpenMatch: _openMatchIfScored,
+      onOpenMatch: _openMatchOrStream,
       // The columns are sized on the whole screen, the drawer is a whole
       // number of them (kioskDrawerWidthFor): open or closed, the board
       // shows whole days, and the columns never resize mid-slide.
@@ -303,6 +321,7 @@ class _KioskShellState extends ConsumerState<KioskShell>
                 open: open,
                 onOpenNotice: _openNotice,
                 onOpenMatch: _openMatch,
+                onPlay: _openStream,
                 resetToken: _resets,
                 showLive: !_liveHidden,
                 onShowLive: (live) => setState(() => _liveHidden = !live),
@@ -371,7 +390,7 @@ class _KioskShellState extends ConsumerState<KioskShell>
                 onReserve: _openPicker,
                 onClearSelection: _clearSelection,
                 onOpenNotice: _openNotice,
-                onOpenMatch: _openMatchIfScored,
+                onOpenMatch: _openMatchOrStream,
               ),
               const KioskOfflineBanner(),
               // The idle bar: thin, filling from left to right until the reset.
@@ -422,7 +441,8 @@ class _StatusBar extends ConsumerWidget {
   final VoidCallback onClearSelection;
   final void Function(Message notice) onOpenNotice;
 
-  /// A tap on one of today's matches: its Zápis, once it has a score.
+  /// A tap on one of today's matches: its Zápis once it has a score, its
+  /// stream before that when it has a video.
   final void Function(PrioritySlot match) onOpenMatch;
 
   /// Today's matches the bar lists, start-ordered; Úklid children are
@@ -542,7 +562,8 @@ class _StatusBar extends ConsumerWidget {
                   if (warning != null)
                     Expanded(child: KioskWarning(text: warning)),
                   // Today's matches, one tap target each: a match with a score
-                  // opens its Zápis, as everywhere else on the kiosk.
+                  // opens its Zápis, as everywhere else on the kiosk; one
+                  // with a video and no score yet, its stream.
                   if (todays.isNotEmpty)
                     Expanded(
                       flex: notices.isEmpty ? 1 : 2,

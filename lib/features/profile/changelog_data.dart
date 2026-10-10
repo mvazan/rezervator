@@ -61,10 +61,11 @@ const appChangelog = <Release>[
     'Správa → Kiosk: nová sekce Optimalizace výkonu pro slabší displej — '
         'vypnutí dýchajícího tlačítka panelu a nižší rozlišení vykreslování '
         'na webu. Minulé dny na tabuli se kreslí levněji, vypadají stejně.',
-    'Kiosk: zápas, který má na webu ČKA video na YouTube, se během hraní '
-        'přehrává v plovoucím okně vedle tabule — jde posouvat, zvětšit na '
-        'celou obrazovku nebo sbalit, po skončení zápasu zmizí (Správa → '
-        'Kiosk → Stream zápasu).',
+    'Kiosk: zápas, který má na webu ČKA video na YouTube, si kdokoli pustí '
+        'tlačítkem ▶ — živě i ze záznamu — v plovoucím okně vedle tabule. '
+        'Okno jde posouvat, zvětšit na celou obrazovku, sbalit nebo křížkem '
+        'zavřít; po konci videa se zavře samo. Správa → Kiosk → Stream '
+        'zápasu: hraný zápas se může otevřít sám, oken může být víc najednou.',
     'Kiosk: vedle hodin může být dnešní počasí (teplota, předpověď, '
         'deštník při šanci na srážky) a kdo má svátek — Správa → Kiosk → '
         'Stavový řádek; místo pro počasí je kuželna nebo vyhledaná obec.',
@@ -81,8 +82,8 @@ const appChangelog = <Release>[
     'Kiosk: ve výběru jména upozornění, že se tam z tréninku odhlásit nedá '
         '(text nastaví správce ve Správě → Kiosk).',
   ], store: [
-    'Kiosk: stream zápasu, počasí, svátek a upozornění v záhlaví; dnešní '
-        'zápasy v záhlaví jdou skrýt.',
+    'Kiosk: video zápasu živě i ze záznamu; počasí, svátek a upozornění v '
+        'záhlaví; dnešní zápasy v záhlaví jdou skrýt.',
     'Kiosk: registrační čísla v zápisu, ＋ jako v appce, rada a upozornění '
         've výběru jména.',
     'Kiosk v aplikaci: displej nezhasne, lišty se schovají; přihlášení '

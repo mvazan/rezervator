@@ -186,11 +186,55 @@ List<PrioritySlot> kioskStreamMatches({
       if (s.type.isMatch &&
           s.parentId == null &&
           s.fromFederation &&
-          youtubeVideoId(s.videoUrl ?? '') != null &&
+          hasKioskVideo(s) &&
           onAir(s))
         s,
   ]..sort((a, b) {
       final byDay = a.date.compareTo(b.date);
       return byDay != 0 ? byDay : a.startsAt.compareTo(b.startsAt);
     });
+}
+
+/// Whether the kiosk can play [slot]'s video: a YouTube one.
+bool hasKioskVideo(PrioritySlot slot) =>
+    youtubeVideoId(slot.videoUrl ?? '') != null;
+
+/// What the kiosk's ▶ at [slot] says: live while it is being played (from
+/// an hour before the start, as [isLive]), a recording once decided, the
+/// video otherwise — a stream announced ahead.
+String kioskStreamLabel(PrioritySlot slot, MatchResult? result, DateTime now) =>
+    isLive(slot, result, now)
+    ? 'Sledovat živě'
+    : _decided(result)
+    ? 'Přehrát záznam'
+    : 'Pustit video';
+
+/// The streams the kiosk shows (0066, 0072): [live] — the matches on air
+/// the window opens by itself ([kioskStreamMatches], when the admin lets
+/// it) — less the [closed] ones, then those a visitor [opened], in the
+/// order they did; a stream opened by hand that is also live counts once,
+/// as opened. Slots gone or without a video drop out. One window ([max]
+/// 1) turns through them all; with more, each stream has its own and
+/// there are never more than [max]: what visitors opened comes first (the
+/// latest [max] of it), the live ones take the windows left.
+List<PrioritySlot> kioskVisibleStreams({
+  required List<PrioritySlot> slots,
+  required List<PrioritySlot> live,
+  required List<String> opened,
+  required Set<String> closed,
+  required int max,
+}) {
+  final byId = {for (final s in slots) s.id: s};
+  final manual = [
+    for (final id in opened) ?byId[id],
+  ].where(hasKioskVideo).toList();
+  final auto = [
+    for (final s in live)
+      if (!closed.contains(s.id) && !opened.contains(s.id)) s,
+  ];
+  if (max <= 1) return [...auto, ...manual];
+  final kept = manual.length > max
+      ? manual.sublist(manual.length - max)
+      : manual;
+  return [...auto.take(max - kept.length), ...kept];
 }

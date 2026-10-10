@@ -146,6 +146,22 @@ void main() {
       expect(column, ScheduleSettings.defaultPickerNote);
       expect(ScheduleSettings.defaultPickerNote.length, lessThanOrEqualTo(200));
     });
+
+    test('fromJson reads the stream windows at once (0072); one when absent',
+        () {
+      const base = {
+        'lane_count': 4,
+        'training_weekdays': [1, 2, 4],
+        'booking_horizon_days': 14,
+        'max_active_reservations': 3,
+      };
+      expect(
+        ScheduleSettings.fromJson({...base, 'kiosk_stream_max': 3})
+            .kioskStreamMax,
+        3,
+      );
+      expect(ScheduleSettings.fromJson(base).kioskStreamMax, 1);
+    });
   });
 
   group('canteen duty (0050)', () {

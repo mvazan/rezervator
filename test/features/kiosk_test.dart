@@ -1460,6 +1460,8 @@ void main() {
       createdAt: DateTime(2026, 9, int.tryParse(id) ?? 1),
       updatedAt: DateTime(2026, 9, 1),
     );
+    // Each stand-in player's „the video has ended“, by video id.
+    final streamEnded = <String, VoidCallback?>{};
     PrioritySlot fed(
       String id,
       Day date,
@@ -1538,6 +1540,7 @@ void main() {
       String? warning,
       bool todaysMatches = true,
       Set<int>? trainingWeekdays,
+      int streamMax = 1,
       Stream<Map<String, MatchResult>>? resultsStream,
       Map<String, List<MatchPlayerResult>> lineups = const {},
     }) => ProviderScope(
@@ -1581,16 +1584,20 @@ void main() {
               kioskNameday: nameday,
               kioskWarning: warning,
               kioskTodaysMatches: todaysMatches,
+              kioskStreamMax: streamMax,
             ),
           ),
         ),
         // The stream's player stands in as text: a platform view does not
         // run under flutter_test.
         kioskStreamContentProvider.overrideWithValue(
-          (videoId, {required interactive}) => Text(
-            'player $videoId ${interactive ? 'on' : 'off'}',
-            key: const ValueKey('player'),
-          ),
+          (videoId, {required interactive, onEnded}) {
+            streamEnded[videoId] = onEnded;
+            return Text(
+              'player $videoId ${interactive ? 'on' : 'off'}',
+              key: const ValueKey('player'),
+            );
+          },
         ),
         nowProvider.overrideWith((ref) => Stream.value(nowAt)),
         timeBlocksProvider.overrideWith((ref) => Stream.value(const [b1])),
@@ -1838,6 +1845,225 @@ void main() {
         );
         await tester.pumpAndSettle();
         expect(player, findsNothing);
+        await finish(tester);
+      });
+
+      const video2 = 'https://youtu.be/abcdefghijk';
+      const video3 = 'https://youtu.be/ABCDEFGHIJK';
+      // Finished three and two days back, each with its recording.
+      final recorded = [
+        fed('f1', day.addDays(-3), 'Hotovo', video: video2),
+        fed('f2', day.addDays(-2), 'Včera', video: video3),
+      ];
+      final decided = {
+        'f1': res('f1', 'finished', 6, 2),
+        'f2': res('f2', 'finished', 3, 5),
+      };
+
+      testWidgets('anyone plays a recording: ▶ at a finished match in the '
+          'drawer, the switch off; the × closes it', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(slots: [recorded.first], results: decided, drawerOpen: true),
+        );
+        await tester.pumpAndSettle();
+        expect(player, findsNothing);
+
+        await tester.tap(find.byTooltip('Přehrát záznam'));
+        await tester.pumpAndSettle();
+        expect(find.text('player abcdefghijk on'), findsOneWidget);
+
+        await tester.tap(find.byTooltip('Zavřít stream'));
+        await tester.pumpAndSettle();
+        expect(player, findsNothing);
+        await finish(tester);
+      });
+
+      testWidgets('the Zápis of a match with a video has its button: the '
+          'Zápis closes, the stream opens', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            slots: [recorded.first],
+            results: decided,
+            lineups: {'f1': lineup},
+            drawerOpen: true,
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('6 : 2'));
+        await tester.pumpAndSettle();
+        expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
+
+        await tester.tap(find.text('Přehrát záznam'));
+        await tester.pumpAndSettle();
+        expect(find.byType(LegacyScoreSheetPage), findsNothing);
+        expect(find.text('player abcdefghijk on'), findsOneWidget);
+        await finish(tester);
+      });
+
+      testWidgets('a tap on today\'s match without a score yet, but with a '
+          'video, opens its stream — in the header and on the board',
+          (tester) async {
+        fullHd(tester);
+        // 15:00, three hours ahead at the kiosk's noon: no score, not live.
+        final later = [fed('l', day, 'Odpoledne', hour: 15, video: video2)];
+        await tester.pumpWidget(app(slots: later));
+        await tester.pumpAndSettle();
+        expect(player, findsNothing);
+
+        // The header's line (the board's day header says it too, after).
+        await tester.tap(
+          find.textContaining('Odpoledne – Soupeř · 15:00').first,
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('player abcdefghijk on'), findsOneWidget);
+        await tester.tap(find.byTooltip('Zavřít stream'));
+        await tester.pumpAndSettle();
+        expect(player, findsNothing);
+
+        await tester.tap(
+          find
+              .descendant(
+                of: find.byType(CalendarEventBand),
+                matching: find.textContaining('Odpoledne'),
+              )
+              .first,
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('player abcdefghijk on'), findsOneWidget);
+        await finish(tester);
+      });
+
+      testWidgets('a live stream closed by the × does not open by itself '
+          'again; its ▶ does', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(stream: true, slots: onAir, results: playing, drawerOpen: true),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('player wOq9EODb8w8 on'), findsOneWidget);
+
+        await tester.tap(find.byTooltip('Zavřít stream'));
+        await tester.pumpAndSettle();
+        expect(player, findsNothing);
+
+        await tester.tap(find.byTooltip('Sledovat živě'));
+        await tester.pumpAndSettle();
+        expect(find.text('player wOq9EODb8w8 on'), findsOneWidget);
+        await finish(tester);
+      });
+
+      testWidgets('the end of the video closes its window', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(stream: true, slots: onAir, results: playing),
+        );
+        await tester.pumpAndSettle();
+        expect(player, findsOneWidget);
+
+        streamEnded['wOq9EODb8w8']!();
+        await tester.pumpAndSettle();
+        expect(player, findsNothing);
+        await finish(tester);
+      });
+
+      testWidgets('one window at once: a ▶ turns it to the new stream',
+          (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            stream: true,
+            slots: [...onAir, recorded.first],
+            results: {...playing, ...decided},
+            drawerOpen: true,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('player wOq9EODb8w8 on'), findsOneWidget);
+
+        await tester.tap(find.byTooltip('Přehrát záznam'));
+        await tester.pumpAndSettle();
+        expect(player, findsOneWidget);
+        expect(find.text('player abcdefghijk on'), findsOneWidget);
+        expect(find.text('2/2'), findsOneWidget);
+        await finish(tester);
+      });
+
+      testWidgets('two windows at once: each stream its own, side by side; '
+          'what a visitor opens comes before the live one', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            stream: true,
+            streamMax: 2,
+            slots: [...onAir, ...recorded],
+            results: {...playing, ...decided},
+            drawerOpen: true,
+          ),
+        );
+        await tester.pumpAndSettle();
+        final live = find.text('player wOq9EODb8w8 on');
+        // The list has the later match higher up: first ▶ = f2.
+        final first = find.text('player ABCDEFGHIJK on');
+        final second = find.text('player abcdefghijk on');
+        expect(live, findsOneWidget);
+
+        await tester.tap(find.byTooltip('Přehrát záznam').first);
+        await tester.pumpAndSettle();
+        expect(player, findsNWidgets(2));
+        expect(live, findsOneWidget);
+        expect(first, findsOneWidget);
+        // The admin's corner (bottom left), then the one beside it.
+        expect(tester.getRect(first).left,
+            greaterThan(tester.getRect(live).right));
+        expect(tester.getRect(first).bottom, tester.getRect(live).bottom);
+
+        // A second recording: the live one gives way, not the first.
+        await tester.tap(find.byTooltip('Přehrát záznam').last);
+        await tester.pumpAndSettle();
+        expect(player, findsNWidgets(2));
+        expect(live, findsNothing);
+        expect(first, findsOneWidget);
+        expect(second, findsOneWidget);
+
+        // Closed, it makes room: the live one is back.
+        await tester.tap(find.byTooltip('Zavřít stream').last);
+        await tester.pumpAndSettle();
+        expect(player, findsNWidgets(2));
+        expect(live, findsOneWidget);
+        await finish(tester);
+      });
+
+      testWidgets('one of two windows maximized: the other hides, its player '
+          'running on in a pixel', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            stream: true,
+            streamMax: 2,
+            slots: [...onAir, recorded.first],
+            results: {...playing, ...decided},
+            drawerOpen: true,
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip('Přehrát záznam'));
+        await tester.pumpAndSettle();
+        final before = tester.getRect(find.text('player abcdefghijk on'));
+
+        await tester.tap(find.byTooltip('Na celou obrazovku').first);
+        await tester.pumpAndSettle();
+        expect(find.byTooltip('Zavřít stream'), findsOneWidget);
+        expect(
+          tester.getRect(find.text('player abcdefghijk off')).size,
+          const Size(1, 1),
+        );
+
+        await tester.tap(find.byTooltip('Zmenšit'));
+        await tester.pumpAndSettle();
+        expect(find.byTooltip('Zavřít stream'), findsNWidgets(2));
+        expect(tester.getRect(find.text('player abcdefghijk on')), before);
         await finish(tester);
       });
     });
