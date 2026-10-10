@@ -294,6 +294,40 @@ void main() {
     expect(note, findsNothing);
     await finish(tester);
 
+    // The fixture has one player per letter, so 'A' above goes straight to
+    // the names; the later pages of letters must go without the note too.
+    // More than `_capacity` (24) players under 'A' keep the picker on
+    // letters for the second one.
+    final aPlayers = [
+      for (var i = 0; i < 25; i++)
+        PlayerName(
+          id: 'a$i',
+          displayName: 'A${String.fromCharCode(66 + i)} Hráč',
+        ),
+    ];
+    await tester.pumpWidget(
+      kioskApp(
+        roster: [...aPlayers, players[10], petr],
+        kioskPickerNote: ScheduleSettings.defaultPickerNote,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Rezervovat'));
+    await tester.pumpAndSettle();
+    expect(note, findsOneWidget);
+    expect(hint, findsOneWidget);
+    expect(find.text('B'), findsNothing);
+
+    await tester.tap(find.text('A'));
+    await tester.pumpAndSettle();
+    // Still letters — the second ones, AB…AZ — but no note, no hint.
+    expect(find.text('A…'), findsOneWidget);
+    expect(find.text('B'), findsOneWidget);
+    expect(find.text('Z'), findsOneWidget);
+    expect(note, findsNothing);
+    expect(hint, findsNothing);
+    await finish(tester);
+
     await tester.pumpWidget(
       kioskApp(kioskPickerNote: 'Zrušit jde jen v aplikaci.'),
     );
