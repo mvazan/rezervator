@@ -272,11 +272,12 @@ class KioskSettingsScreen extends ConsumerWidget {
           children: [
             _section(
               context,
-              'Upozornění',
-              'Krátké varování v záhlaví kiosku vedle hodin, s ikonou '
-                  'výstrahy — třeba „Dráha 3 je mimo provoz“. Platí, dokud '
-                  'ho neodstraníš.',
+              'Obrazovka kiosku',
+              'Tablet na zdi kuželny: jak vypadá tabule a co se stane, když '
+                  'se ho nikdo nedotýká.',
               [
+                // The warning first: it is what an admin comes here for
+                // in a hurry („Dráha 3 je mimo provoz“).
                 ListTile(
                   contentPadding: EdgeInsets.zero,
                   leading: Icon(
@@ -285,7 +286,13 @@ class KioskSettingsScreen extends ConsumerWidget {
                         ? null
                         : Theme.of(context).colorScheme.error,
                   ),
-                  title: Text(settings?.kioskWarning ?? 'Žádné upozornění'),
+                  title: const Text('Upozornění'),
+                  subtitle: Text(
+                    settings?.kioskWarning ??
+                        'Žádné. Varování s ikonou výstrahy v záhlaví kiosku; '
+                            'dokud visí, ostatní údaje v záhlaví ustoupí. '
+                            'Platí, dokud ho neodstraníš.',
+                  ),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -310,14 +317,6 @@ class KioskSettingsScreen extends ConsumerWidget {
                     ],
                   ),
                 ),
-              ],
-            ),
-            _section(
-              context,
-              'Obrazovka kiosku',
-              'Tablet na zdi kuželny: jak vypadá tabule a co se stane, když '
-                  'se ho nikdo nedotýká.',
-              [
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Tmavý režim'),

@@ -550,7 +550,16 @@ void main() {
       tall(tester);
       await tester.pumpWidget(app());
       await tester.pumpAndSettle();
-      expect(find.text('Žádné upozornění'), findsOneWidget);
+      expect(find.textContaining('Žádné. Varování'), findsOneWidget);
+      // In the screen section, first.
+      expect(
+        tester.getTopLeft(find.text('Upozornění')).dy,
+        greaterThan(tester.getTopLeft(find.text('Obrazovka kiosku')).dy),
+      );
+      expect(
+        tester.getTopLeft(find.text('Upozornění')).dy,
+        lessThan(tester.getTopLeft(find.text('Tmavý režim')).dy),
+      );
       expect(find.byTooltip('Odstranit upozornění'), findsNothing);
 
       await tester.tap(find.text('Přidat…'));

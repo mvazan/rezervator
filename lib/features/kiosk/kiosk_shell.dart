@@ -480,17 +480,23 @@ class _StatusBar extends ConsumerWidget {
     final scheme = Theme.of(context).colorScheme;
     final now = ref.watch(nowProvider).value ?? DateTime.now();
     final todayDay = Day.fromDateTime(now);
-    final info = _infoLine(ref, todayDay);
-    final todays = _todaysMatches(ref, todayDay);
+    // The admin's warning (0068): while it hangs, it is all the bar says
+    // beside the clock — today's matches, the info line and the notices
+    // step aside, so nobody reads past it.
+    final warning = ref.watch(settingsProvider).value?.kioskWarning;
+    final info = warning != null ? '' : _infoLine(ref, todayDay);
+    final todays = warning != null
+        ? const <PrioritySlot>[]
+        : _todaysMatches(ref, todayDay);
     // Kept listened to: a tap on a match reads it to decide whether there
     // is a Zápis, and with the drawer closed nothing else may hold it.
     ref.watch(matchResultsProvider);
     final infoStyle = TextStyle(fontSize: 14, color: scheme.onSurfaceVariant);
     final notices =
-        (ref.watch(settingsProvider).value?.kioskNoticesInHeader ?? true)
+        warning == null &&
+            (ref.watch(settingsProvider).value?.kioskNoticesInHeader ?? true)
         ? kioskNotices(ref.watch(messagesProvider).value ?? const [], now)
         : const <Message>[];
-    final warning = ref.watch(settingsProvider).value?.kioskWarning;
     final clock =
         '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
 
@@ -526,13 +532,9 @@ class _StatusBar extends ConsumerWidget {
               child: Row(
                 children: [
                   // The admin's warning first, with its icon (0068).
-                  if (warning != null) ...[
-                    Expanded(flex: 3, child: KioskWarning(text: warning)),
-                    if (todays.isNotEmpty ||
-                        info.isNotEmpty ||
-                        notices.isNotEmpty)
-                      const SizedBox(width: 24),
-                  ],
+                  // The admin's warning: alone in the bar's middle.
+                  if (warning != null)
+                    Expanded(child: KioskWarning(text: warning)),
                   // Today's matches, one tap target each: a match with a score
                   // opens its Zápis, as everywhere else on the kiosk.
                   if (todays.isNotEmpty)

@@ -1,6 +1,7 @@
 /// The admin's warning in the kiosk's status bar (0068): a warning icon and
-/// the text from Správa → Kiosk → Upozornění, on the error container so it
-/// reads as a warning in both kiosk themes.
+/// the text from Správa → Kiosk → Obrazovka kiosku → Upozornění, on the
+/// error container so it reads as a warning in both kiosk themes. Alone in
+/// the bar's middle while it hangs (the shell hides the rest), centred.
 library;
 
 import 'package:flutter/material.dart';
@@ -17,7 +18,7 @@ class KioskWarning extends StatelessWidget {
       label: 'Upozornění: $text',
       excludeSemantics: true,
       child: Align(
-        alignment: Alignment.centerLeft,
+        alignment: Alignment.center,
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
@@ -29,7 +30,7 @@ class KioskWarning extends StatelessWidget {
             children: [
               Icon(
                 Icons.warning_amber_rounded,
-                size: 28,
+                size: 32,
                 color: scheme.onErrorContainer,
               ),
               const SizedBox(width: 10),
@@ -39,7 +40,7 @@ class KioskWarning extends StatelessWidget {
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontSize: 16,
+                    fontSize: 18,
                     fontWeight: FontWeight.w700,
                     color: scheme.onErrorContainer,
                   ),
