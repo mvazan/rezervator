@@ -53,6 +53,7 @@ const appChangelog = <Release>[
     'Kiosk: zápis zápasu ukazuje i registrační čísla hráčů.',
     'Ikony v textu (⛔ blokace, 🏆 zápas, 🔒 pronájem, 👍/👎/💬 u zpráv a '
         'další) se kreslí z obrázků jako 🏠 — na webu vypadají všude stejně.',
+    'Kiosk: volné místo v kalendáři značí stejné ＋ jako v kalendáři appky.',
   ]),
   Release('2.0.7', '9. 10. 2026', [
     'Notifikace o rezervaci, kterou za vás udělal kiosk, spoluhráč ze '

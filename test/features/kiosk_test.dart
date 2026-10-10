@@ -208,9 +208,9 @@ void main() {
     await tester.pumpAndSettle();
 
     // Today is the board's first (always-built) column, so the + cell is
-    // already in the tree — the board renders free lanes as a literal '＋'
-    // character (spec §1), not the Material add icon.
-    final addCell = find.text('＋').first;
+    // already in the tree — the board marks a free lane with the Material
+    // add icon (a bundled font: the same in every row on the web).
+    final addCell = find.byIcon(Icons.add).first;
     await tester.ensureVisible(addCell);
     await tester.pumpAndSettle();
     await tester.tap(addCell);
@@ -258,7 +258,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       await selectAnna();
-      expect(find.text('＋'), findsNothing);
+      expect(find.byIcon(Icons.add), findsNothing);
       expect(
         find.textContaining('Máš maximální počet rezervací (1)'),
         findsOneWidget,
@@ -271,7 +271,7 @@ void main() {
       await tester.pumpWidget(kioskApp(maxActiveReservations: 1));
       await tester.pumpAndSettle();
       await selectAnna();
-      expect(find.text('＋'), findsWidgets);
+      expect(find.byIcon(Icons.add), findsWidgets);
       expect(find.textContaining('maximální počet rezervací'), findsNothing);
       await finish(tester);
     },
@@ -306,8 +306,8 @@ void main() {
       );
 
       // Same steps as test d: today's column is always built, free lanes
-      // render as a literal '＋'.
-      final addCell = find.text('＋').first;
+      // show the add icon.
+      final addCell = find.byIcon(Icons.add).first;
       await tester.ensureVisible(addCell);
       await tester.pumpAndSettle();
       await tester.tap(addCell);
