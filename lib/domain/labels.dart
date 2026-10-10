@@ -11,6 +11,15 @@ import 'schedule.dart';
 String slotEventLabel(PrioritySlot m) =>
     '${m.type.isMatch ? '🏆' : '⛔'} ${m.title}';
 
+/// A match band's text in lines — the home team, a dash, the away team —
+/// so a narrow column never breaks a team's name in half to fit „A – B“
+/// on two lines. Null for anything but a match with both teams (a
+/// blockage, a match typed with one name): those keep [slotEventLabel].
+List<String>? matchBandLines(PrioritySlot m) =>
+    m.type.isMatch && m.homeTeam.isNotEmpty && m.awayTeam.isNotEmpty
+    ? ['🏆 ${m.homeTeam}', '–', m.awayTeam]
+    : null;
+
 /// '🔒 {renterName}', plus ' (výjimka)' for an occurrence an exception row
 /// reshaped (fewer lanes / other times than the series).
 String rentalLabel(Rental r) =>

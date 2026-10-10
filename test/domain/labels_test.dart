@@ -37,6 +37,27 @@ void main() {
     note: '',
   );
 
+  group('matchBandLines', () {
+    test('a match: home, a dash, away — one per line', () {
+      expect(matchBandLines(match), ['🏆 KK Vracov', '–', 'KK Slavoj']);
+    });
+
+    test('a blockage, or a match with one name, keeps the one-line label',
+        () {
+      expect(matchBandLines(blockage), isNull);
+      final oneName = PrioritySlot(
+        id: 'm2',
+        date: tuesday,
+        startsAt: const HourMinute(17, 0),
+        endsAt: const HourMinute(18, 30),
+        type: PrioritySlot.fallbackMatchType,
+        homeTeam: '',
+        awayTeam: 'Turnaj',
+      );
+      expect(matchBandLines(oneName), isNull);
+    });
+  });
+
   group('slotEventLabel', () {
     test('a match gets the trophy and its team title', () {
       expect(slotEventLabel(match), '🏆 KK Vracov – KK Slavoj');
