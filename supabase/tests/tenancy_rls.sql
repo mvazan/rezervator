@@ -11716,6 +11716,29 @@ begin
   raise notice 'OK: a new kuželna starts with no training day (0063)';
 end $$;
 
+-- 0072: one stream window by default; one to four.
+do $$
+declare
+  v_t uuid;
+begin
+  insert into tenants (name) values ('Nová kuželna 0072') returning id into v_t;
+  if (select kiosk_stream_max from schedule_settings where tenant_id = v_t) <> 1 then
+    raise exception 'FAIL: a new kuželna does not start with one stream window';
+  end if;
+  begin
+    update schedule_settings set kiosk_stream_max = 5 where tenant_id = v_t;
+    raise exception 'FAIL: five stream windows were accepted';
+  exception when check_violation then null;
+  end;
+  begin
+    update schedule_settings set kiosk_stream_max = 0 where tenant_id = v_t;
+    raise exception 'FAIL: no stream window was accepted';
+  exception when check_violation then null;
+  end;
+  update schedule_settings set kiosk_stream_max = 4 where tenant_id = v_t;
+  raise notice 'OK: one to four stream windows, one by default (0072)';
+end $$;
+
 -- 0064: a notice is hidden from, or shown on, the kiosk by its alley's admin
 -- only; the kiosk still READS it (the app does the hiding, see the
 -- migration), and the public overview hands out none of the new settings.
