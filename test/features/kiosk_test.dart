@@ -1541,6 +1541,111 @@ void main() {
         await finish(tester);
       });
 
+      testWidgets('a stream starting leaves the drawer as it was: the same '
+          'element, nothing of its state lost', (tester) async {
+        fullHd(tester);
+        final results = StreamController<Map<String, MatchResult>>();
+        addTearDown(results.close);
+        // 15:00: three hours ahead at the kiosk's noon — on air only once
+        // the site says it is being played.
+        await tester.pumpWidget(
+          app(
+            stream: true,
+            slots: [fed('m', day, 'Domácí', hour: 15, video: video)],
+            resultsStream: results.stream,
+            notices: [notice('1', 'Brigáda')],
+            drawerOpen: true,
+          ),
+        );
+        results.add(const {});
+        await tester.pumpAndSettle();
+        expect(player, findsNothing);
+        final drawer = tester.element(find.byType(KioskDrawer));
+
+        results.add({'m': res('m', 'in_progress', 0, 0)});
+        await tester.pumpAndSettle();
+        expect(player, findsOneWidget);
+        expect(identical(tester.element(find.byType(KioskDrawer)), drawer), isTrue);
+        await finish(tester);
+      });
+
+      testWidgets('the player takes no touches while the name picker is open',
+          (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(stream: true, slots: onAir, results: playing),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Rezervovat'));
+        await tester.pumpAndSettle();
+        expect(find.byType(NamePicker), findsOneWidget);
+        expect(find.text('player wOq9EODb8w8 off'), findsOneWidget);
+
+        await tester.tap(find.byTooltip('Zavřít'));
+        await tester.pumpAndSettle();
+        expect(find.text('player wOq9EODb8w8 on'), findsOneWidget);
+        await finish(tester);
+      });
+
+      testWidgets('the player takes no touches while the booking confirm is '
+          'open', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(stream: true, slots: onAir, results: playing),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Rezervovat'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('A'));
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find.descendant(
+            of: find.byType(NamePicker),
+            matching: find.text(anna.displayName),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('player wOq9EODb8w8 on'), findsOneWidget);
+
+        // A free lane far from the window (the last ＋ is in the last day).
+        final addCell = find.byIcon(Icons.add).last;
+        await tester.ensureVisible(addCell);
+        await tester.tap(addCell);
+        await tester.pumpAndSettle();
+        expect(find.text('Rezervovat termín?'), findsOneWidget);
+        expect(find.text('player wOq9EODb8w8 off'), findsOneWidget);
+
+        await tester.tap(find.text('Zrušit'));
+        await tester.pumpAndSettle();
+        expect(find.text('player wOq9EODb8w8 on'), findsOneWidget);
+        await finish(tester);
+      });
+
+      testWidgets('the player takes no touches while the Zápis is open',
+          (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            stream: true,
+            slots: [...onAir, fed('f', day.addDays(-3), 'Hotovo')],
+            results: {...playing, 'f': res('f', 'finished', 6, 2)},
+            lineups: {'f': lineup},
+            drawerOpen: true,
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('6 : 2'));
+        await tester.pumpAndSettle();
+        expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
+        expect(find.text('player wOq9EODb8w8 off'), findsOneWidget);
+
+        await tester.tapAt(const Offset(20, 20));
+        await tester.pumpAndSettle();
+        expect(find.byType(LegacyScoreSheetPage), findsNothing);
+        expect(find.text('player wOq9EODb8w8 on'), findsOneWidget);
+        await finish(tester);
+      });
+
       testWidgets('the window goes with the match: decided, and its result '
           'read more than half an hour ago', (tester) async {
         fullHd(tester);

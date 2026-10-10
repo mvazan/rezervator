@@ -234,21 +234,24 @@ class _KioskShellState extends ConsumerState<KioskShell>
   /// frame move without re-recording the board.
   Widget _withStream(Widget board) {
     final streams = ref.watch(kioskStreamProvider);
-    if (streams.isEmpty) return board;
     final settings = ref.watch(settingsProvider).value;
+    // The same tree with or without the window — [board] stays in its slot,
+    // so a stream starting or ending never re-inflates the board and the
+    // drawer (the notices' turn, the list's weeks, the live refresh).
     return Stack(
       fit: StackFit.expand,
       children: [
         board,
-        RepaintBoundary(
-          child: KioskStreamWindow(
-            matches: streams,
-            content: ref.watch(kioskStreamContentProvider),
-            corner: settings?.kioskStreamCorner ?? KioskCorner.bl,
-            widthPercent: settings?.kioskStreamWidth ?? 35,
-            interactive: ref.watch(kioskModalsProvider) == 0,
+        if (streams.isNotEmpty)
+          RepaintBoundary(
+            child: KioskStreamWindow(
+              matches: streams,
+              content: ref.watch(kioskStreamContentProvider),
+              corner: settings?.kioskStreamCorner ?? KioskCorner.bl,
+              widthPercent: settings?.kioskStreamWidth ?? 35,
+              interactive: ref.watch(kioskModalsProvider) == 0,
+            ),
           ),
-        ),
       ],
     );
   }
