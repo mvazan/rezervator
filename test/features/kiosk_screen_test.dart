@@ -422,6 +422,23 @@ void main() {
     expect(find.widgetWithText(TextField, 'Velikost zápisu'), findsOneWidget);
   });
 
+  testWidgets('the bands\' font size: 8–24 px, the app\'s 10 by default, '
+      'PATCHes its own column', (tester) async {
+    tall(tester);
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+    final field = find.widgetWithText(TextField, 'Písmo zápasů a pronájmů');
+    await tester.ensureVisible(field);
+    expect(tester.widget<TextField>(field).controller!.text, '10');
+    await tester.enterText(field, '16');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(
+      jsonDecode(requests.lastWhere((r) => r.method == 'PATCH').body),
+      {'kiosk_band_font_size': 16},
+    );
+  });
+
   testWidgets('the days on the screen: 2–14, a week by default', (
     tester,
   ) async {

@@ -10566,6 +10566,24 @@ end $$;
 -- public_week, which 0064's version would otherwise have replaced.
 \ir ../migrations/0064_kiosk_panel.sql
 \ir ../migrations/0065_kiosk_performance.sql
+\ir ../migrations/0069_kiosk_band_font.sql
+
+-- 0069: the kiosk's band text size stays in its range and off the public
+-- overview.
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+begin
+  begin
+    update schedule_settings set kiosk_band_font_size = 30 where tenant_id = v_a;
+    raise exception 'FAIL: a band font size of 30 px was accepted (0069)';
+  exception when check_violation then null;
+  end;
+  if public_week('kuzelna-a', current_date)->'settings' ? 'kiosk_band_font_size' then
+    raise exception 'FAIL: the public overview hands out the band font size (0069)';
+  end if;
+  raise notice 'OK: the band font size keeps to 8–24 px and off the public overview (0069)';
+end $$;
 
 -- 0052 One device token, one profile ----------------------------------------
 -- 20. notify pushes to every profile holding a token, so a token the last
