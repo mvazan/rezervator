@@ -64,6 +64,8 @@ const appChangelog = <Release>[
     'Kiosk: správce může v záhlaví vedle hodin vyvěsit upozornění s ikonou '
         'výstrahy (Správa → Kiosk → Obrazovka kiosku); dokud visí, zbytek '
         'záhlaví ustoupí.',
+    'Kiosk: správce může dnešní zápasy v záhlaví skrýt (Správa → Kiosk → '
+        'Obrazovka kiosku).',
   ], store: [
     'Kiosk: zápis zápasu ukazuje registrační čísla hráčů.',
     'Emoji v textu se kreslí z obrázků — všude stejně.',
@@ -72,6 +74,7 @@ const appChangelog = <Release>[
         'účet se přihlásí tlačítkem „Přihlásit kiosk“.',
     'Správa → Kiosk: volby Optimalizace výkonu pro slabší displej.',
     'Kiosk: upozornění od správce v záhlaví.',
+    'Kiosk: správce může dnešní zápasy v záhlaví skrýt.',
   ]),
   Release('2.0.7', '9. 10. 2026', [
     'Notifikace o rezervaci, kterou za vás udělal kiosk, spoluhráč ze '
