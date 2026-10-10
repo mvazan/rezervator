@@ -60,7 +60,8 @@ class _WeatherPlaceDialogState extends ConsumerState<WeatherPlaceDialog> {
 
   Future<void> _search() async {
     final query = _query.text;
-    if (query.trim().length < 2) return;
+    // One search at a time: an older answer must not land over a newer one.
+    if (_searching || query.trim().length < 2) return;
     setState(() {
       _searching = true;
       _error = null;
@@ -109,6 +110,7 @@ class _WeatherPlaceDialogState extends ConsumerState<WeatherPlaceDialog> {
             TextField(
               controller: _query,
               autofocus: alley == null,
+              readOnly: _searching,
               textInputAction: TextInputAction.search,
               decoration: InputDecoration(
                 labelText: 'Hledat obec nebo město',

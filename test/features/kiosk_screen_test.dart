@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -331,6 +332,29 @@ void main() {
       });
     });
 
+    testWidgets('switching the weather on again keeps the place the admin '
+        'picked — the venue does not overwrite it', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(
+        app(
+          alleyVenue: sokol,
+          settings: const ScheduleSettings(
+            laneCount: 4,
+            trainingWeekdays: {1, 2, 4},
+            bookingHorizonDays: 14,
+            maxActiveReservations: 3,
+            kioskWeatherPlace: 'Brno, Jihomoravský',
+            kioskWeatherLat: 49.19522,
+            kioskWeatherLon: 16.60796,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(SwitchListTile, 'Počasí'));
+      await tester.pumpAndSettle();
+      expect(lastPatch(), {'kiosk_weather': true});
+    });
+
     testWidgets('without a known venue the switch only turns it on; the row '
         'says the place is missing', (tester) async {
       tall(tester);
@@ -350,11 +374,20 @@ void main() {
         asked = req.url;
         return http.Response.bytes(
           utf8.encode(jsonEncode({
+            // Czech order differs from code units twice here: „Ch“ comes
+            // after „H“, „Č“ before „D“.
             'results': [
               {
-                'name': 'Želešice',
-                'latitude': 49.1167,
-                'longitude': 16.5814,
+                'name': 'Chrlice',
+                'latitude': 49.13,
+                'longitude': 16.65,
+                'country_code': 'CZ',
+                'admin1': 'Jihomoravský',
+              },
+              {
+                'name': 'Dubňany',
+                'latitude': 48.92,
+                'longitude': 17.09,
                 'country_code': 'CZ',
                 'admin1': 'Jihomoravský',
               },
@@ -362,6 +395,20 @@ void main() {
                 'name': 'Brno',
                 'latitude': 49.19522,
                 'longitude': 16.60796,
+                'country_code': 'CZ',
+                'admin1': 'Jihomoravský',
+              },
+              {
+                'name': 'Hodonín',
+                'latitude': 48.85,
+                'longitude': 17.13,
+                'country_code': 'CZ',
+                'admin1': 'Jihomoravský',
+              },
+              {
+                'name': 'Čejč',
+                'latitude': 48.95,
+                'longitude': 16.96,
                 'country_code': 'CZ',
                 'admin1': 'Jihomoravský',
               },
@@ -403,7 +450,13 @@ void main() {
         ))
           ((t.title! as Text).data!),
       ];
-      expect(labels, ['Brno, Jihomoravský', 'Želešice, Jihomoravský']);
+      expect(labels, [
+        'Brno, Jihomoravský',
+        'Čejč, Jihomoravský',
+        'Dubňany, Jihomoravský',
+        'Hodonín, Jihomoravský',
+        'Chrlice, Jihomoravský',
+      ]);
 
       await tester.tap(find.text('Brno, Jihomoravský'));
       await tester.pumpAndSettle();
@@ -412,6 +465,44 @@ void main() {
         'kiosk_weather_lat': 49.19522,
         'kiosk_weather_lon': 16.60796,
       });
+    });
+
+    testWidgets('one search at a time: Enter again while one runs asks '
+        'nothing more', (tester) async {
+      tall(tester);
+      var asked = 0;
+      final answer = Completer<http.Response>();
+      await tester.pumpWidget(
+        app(
+          settings: weatherOn,
+          openMeteo: MockClient((_) {
+            asked++;
+            return answer.future;
+          }),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Vybrat…'));
+      await tester.tap(find.text('Vybrat…'));
+      await tester.pumpAndSettle();
+      final field = find.widgetWithText(TextField, 'Hledat obec nebo město');
+      await tester.enterText(field, 'Brno');
+      await tester.testTextInput.receiveAction(TextInputAction.search);
+      await tester.pump();
+      // Back into the field (the search took the focus) and Enter again.
+      await tester.tap(field);
+      await tester.pump();
+      await tester.testTextInput.receiveAction(TextInputAction.search);
+      await tester.pump();
+      await tester.tap(find.byTooltip('Hledat'));
+      await tester.pump();
+      expect(asked, 1);
+
+      answer.complete(
+        http.Response.bytes(utf8.encode(jsonEncode({'results': []})), 200),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Nic nenalezeno.'), findsOneWidget);
     });
 
     testWidgets('a failed search says so and keeps the dialog', (tester) async {

@@ -143,4 +143,54 @@ void main() {
     expect(places.first.lat, 49.19522);
     expect(parseGeocoding({}), isEmpty);
   });
+
+  test('geocoding: villages of one name in one region are told apart by the '
+      'district; a district that repeats the name is left out', () {
+    Map<String, Object> village(String district, double lat) => {
+      'name': 'Lhota',
+      'latitude': lat,
+      'longitude': 14.1,
+      'country_code': 'CZ',
+      'admin1': 'Středočeský kraj',
+      'admin2': district,
+    };
+    final places = parseGeocoding({
+      'results': [
+        village('Kladno', 50.1),
+        village('Praha-východ', 50.0),
+        {
+          'name': 'Brno',
+          'latitude': 49.19,
+          'longitude': 16.6,
+          'country_code': 'CZ',
+          'admin1': 'Jihomoravský',
+          'admin2': 'Město Brno',
+        },
+      ],
+    });
+    expect([for (final p in places) p.label], [
+      'Lhota, okres Kladno, Středočeský kraj',
+      'Lhota, okres Praha-východ, Středočeský kraj',
+      'Brno, Jihomoravský',
+    ]);
+  });
+
+  test('geocoding: places that still read the same get their coordinates', () {
+    final twin = {
+      'name': 'Lhota',
+      'longitude': 14.1,
+      'country_code': 'CZ',
+      'admin1': 'Středočeský kraj',
+    };
+    final places = parseGeocoding({
+      'results': [
+        {...twin, 'latitude': 50.1},
+        {...twin, 'latitude': 50.0},
+      ],
+    });
+    expect([for (final p in places) p.label], [
+      'Lhota, Středočeský kraj (50.10, 14.10)',
+      'Lhota, Středočeský kraj (50.00, 14.10)',
+    ]);
+  });
 }

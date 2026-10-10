@@ -177,28 +177,58 @@ Uri openMeteoGeocodingUri(String query) =>
       'format': 'json',
     });
 
-/// Open-Meteo's geocoding answer as places: „name, region“ (and the
-/// country when it is not Czechia), in the order the service ranks them.
+/// Open-Meteo's geocoding answer as places: „name, district, region“ (the
+/// district — „okres Kladno“ — tells apart the many villages of one name
+/// in one region; left out when it only repeats the name, „Město Brno“),
+/// the country when it is not Czechia, in the order the service ranks
+/// them. Two places that still read the same get their coordinates.
 List<WeatherPlace> parseGeocoding(Map<String, dynamic> json) {
   final results = json['results'];
   if (results is! List) return const [];
-  return [
+  final places = [
     for (final r in results)
       if (r is Map &&
           r['name'] is String &&
           r['latitude'] is num &&
           r['longitude'] is num)
         WeatherPlace(
-          label: [
-            r['name'] as String,
-            if (r['admin1'] case final String region
-                when region.isNotEmpty && region != r['name'])
-              region,
-            if (r['country_code'] != 'CZ')
-              if (r['country'] case final String country) country,
-          ].join(', '),
+          label: _placeLabel(r),
           lat: (r['latitude'] as num).toDouble(),
           lon: (r['longitude'] as num).toDouble(),
         ),
   ];
+  final seen = <String, int>{};
+  for (final p in places) {
+    seen[p.label] = (seen[p.label] ?? 0) + 1;
+  }
+  return [
+    for (final p in places)
+      (seen[p.label] ?? 0) > 1
+          ? WeatherPlace(
+              label:
+                  '${p.label} (${p.lat.toStringAsFixed(2)}, '
+                  '${p.lon.toStringAsFixed(2)})',
+              lat: p.lat,
+              lon: p.lon,
+            )
+          : p,
+  ];
+}
+
+String _placeLabel(Map<dynamic, dynamic> r) {
+  final name = r['name'] as String;
+  final czech = r['country_code'] == 'CZ';
+  return [
+    name,
+    if (r['admin2'] case final String district
+        when district.isNotEmpty &&
+            !district.contains(name) &&
+            district != r['admin1'])
+      czech ? 'okres $district' : district,
+    if (r['admin1'] case final String region
+        when region.isNotEmpty && region != name)
+      region,
+    if (!czech)
+      if (r['country'] case final String country) country,
+  ].join(', ');
 }
