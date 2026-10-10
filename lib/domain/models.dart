@@ -691,6 +691,7 @@ class ScheduleSettings {
     this.kioskAnimations = true,
     this.kioskLowRes = false,
     this.kioskWarning,
+    this.kioskTodaysMatches = true,
     this.kioskLiveLayout = MatchLayout.full,
     this.tenantId = '',
     this.dutyReminderEnabled = false,
@@ -745,6 +746,10 @@ class ScheduleSettings {
   /// A warning the admin typed for the kiosk's status bar (0068) — shown
   /// with a warning icon beside the clock; null = none.
   final String? kioskWarning;
+
+  /// The kiosk's status bar lists today's matches beside the clock (0071);
+  /// off = it says what it says on a day without a match.
+  final bool kioskTodaysMatches;
 
   /// How often the kiosk asks for a fresh score of a match being played.
   final int kioskLiveRefreshSeconds;
@@ -855,6 +860,7 @@ class ScheduleSettings {
           final String w when w.trim().isNotEmpty => w.trim(),
           _ => null,
         },
+        kioskTodaysMatches: json['kiosk_todays_matches'] as bool? ?? true,
         kioskLiveLayout: parseMatchLayout(
           json['kiosk_live_layout'] as String?,
           allowZapis: false,

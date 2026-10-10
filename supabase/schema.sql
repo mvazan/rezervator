@@ -5686,6 +5686,7 @@ CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     "kiosk_animations" boolean DEFAULT true NOT NULL,
     "kiosk_low_res" boolean DEFAULT false NOT NULL,
     "kiosk_warning" "text",
+    "kiosk_todays_matches" boolean DEFAULT true NOT NULL,
     CONSTRAINT "schedule_settings_booking_horizon_days_check" CHECK ((("booking_horizon_days" >= 1) AND ("booking_horizon_days" <= 90))),
     CONSTRAINT "schedule_settings_duty_reminder_days_check" CHECK ((("duty_reminder_days" >= 1) AND ("duty_reminder_days" <= 14))),
     CONSTRAINT "schedule_settings_kiosk_ahead_check" CHECK ((("kiosk_weeks_ahead" >= 0) AND ("kiosk_weeks_ahead" <= 52))),

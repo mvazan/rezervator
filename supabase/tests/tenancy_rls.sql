@@ -10594,6 +10594,37 @@ begin
   raise notice 'OK: the kiosk warning is some text or none and stays off the public overview (0068)';
 end $$;
 
+-- 0071: today's matches in the kiosk's status bar — on for a new alley
+-- (its settings row comes from seed_tenant_defaults), and on or off the
+-- public overview still hands out its six settings, nothing more. Run
+-- again first: the migration is re-runnable.
+\ir ../migrations/0071_kiosk_todays_matches.sql
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_new constant uuid := '00000000-0000-0000-0000-000000000071';
+  v_keys text[];
+begin
+  insert into tenants (id, name) values (v_new, 'Kuželna (0071)');
+  if (select kiosk_todays_matches from schedule_settings
+       where tenant_id = v_new) is distinct from true then
+    raise exception 'FAIL: a new alley''s kiosk does not show today''s matches (0071)';
+  end if;
+  update schedule_settings set kiosk_todays_matches = false
+   where tenant_id = v_a;
+  v_keys := array(select jsonb_object_keys(
+                           public_week('kuzelna-a', current_date)->'settings')
+                  order by 1);
+  if v_keys <> array['booking_horizon_days', 'kiosk_dark', 'kiosk_fit_day',
+                      'lane_count', 'max_active_reservations',
+                      'training_weekdays'] then
+    raise exception 'FAIL: public_week''s settings keys changed — kiosk_todays_matches may be reaching anon (0071): %', v_keys;
+  end if;
+  update schedule_settings set kiosk_todays_matches = true
+   where tenant_id = v_a;
+  raise notice 'OK: today''s matches are on for a new alley and stay off the public overview (0071)';
+end $$;
+
 -- 0052 One device token, one profile ----------------------------------------
 -- 20. notify pushes to every profile holding a token, so a token the last
 -- account on a device kept (signed out offline, session expired, an older

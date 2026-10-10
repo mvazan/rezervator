@@ -52,6 +52,27 @@ void main() {
       expect(settings(null).kioskWarning, isNull);
     });
 
+    test('fromJson: today\'s matches in the kiosk header — on when absent', () {
+      ScheduleSettings settings(Map<String, dynamic> extra) =>
+          ScheduleSettings.fromJson({
+            'lane_count': 6,
+            'training_weekdays': [1, 3],
+            'booking_horizon_days': 7,
+            'max_active_reservations': 2,
+            ...extra,
+          });
+      expect(settings({}).kioskTodaysMatches, isTrue);
+      expect(
+        settings({'kiosk_todays_matches': false}).kioskTodaysMatches,
+        isFalse,
+      );
+      expect(
+        settings({'kiosk_todays_matches': true}).kioskTodaysMatches,
+        isTrue,
+      );
+      expect(ScheduleSettings.defaults.kioskTodaysMatches, isTrue);
+    });
+
     test('fromJson reads kiosk_dark when present', () {
       final s = ScheduleSettings.fromJson({
         'lane_count': 6,
