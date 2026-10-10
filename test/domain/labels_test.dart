@@ -38,8 +38,13 @@ void main() {
   );
 
   group('matchBandLines', () {
-    test('a match: home, a dash, away — one per line', () {
-      expect(matchBandLines(match), ['🏆 KK Vracov', '–', 'KK Slavoj']);
+    test('a match: the cup, home, a dash, away — the names may wrap', () {
+      expect(matchBandLines(match), [
+        (text: '🏆', wraps: false),
+        (text: 'KK Vracov', wraps: true),
+        (text: '–', wraps: false),
+        (text: 'KK Slavoj', wraps: true),
+      ]);
     });
 
     test('a blockage, or a match with one name, keeps the one-line label',

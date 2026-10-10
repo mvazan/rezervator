@@ -70,8 +70,9 @@ const appChangelog = <Release>[
         'Stavový řádek; místo pro počasí je kuželna nebo vyhledaná obec.',
     'Kiosk: výběr jména radí, které písmeno vybrat — první písmeno '
         'přezdívky, nebo křestního jména, když přezdívka není.',
-    'Kalendář a kiosk: zápas v rozvrhu píše domácí, pomlčku a hosty pod '
-        'sebe — název týmu se už nerozdělí v půlce.',
+    'Kalendář a kiosk: zápas v rozvrhu píše pohár, domácí, pomlčku a hosty '
+        'pod sebe — dlouhý název týmu se zalomí do více řádků, nerozdělí se '
+        'v půlce. Velikost písma pásů na tabuli kiosku nastaví správce.',
     'Kiosk: správce může v záhlaví vedle hodin vyvěsit upozornění s ikonou '
         'výstrahy (Správa → Kiosk → Obrazovka kiosku); dokud visí, zbytek '
         'záhlaví ustoupí.',

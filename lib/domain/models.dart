@@ -714,6 +714,7 @@ class ScheduleSettings {
     this.kioskWeatherLon,
     this.kioskNameday = false,
     this.kioskWarning,
+    this.kioskBandFontSize = 10,
     this.kioskLiveLayout = MatchLayout.full,
     this.tenantId = '',
     this.dutyReminderEnabled = false,
@@ -785,6 +786,9 @@ class ScheduleSettings {
   /// A warning the admin typed for the kiosk's status bar (0068) — shown
   /// with a warning icon beside the clock; null = none.
   final String? kioskWarning;
+  /// The px size of the bands' text (matches, blockages, rentals) on the
+  /// kiosk board (0069); the app keeps 10.
+  final int kioskBandFontSize;
 
   /// How often the kiosk asks for a fresh score of a match being played.
   final int kioskLiveRefreshSeconds;
@@ -905,6 +909,7 @@ class ScheduleSettings {
           final String w when w.trim().isNotEmpty => w.trim(),
           _ => null,
         },
+        kioskBandFontSize: json['kiosk_band_font_size'] as int? ?? 10,
         kioskLiveLayout: parseMatchLayout(
           json['kiosk_live_layout'] as String?,
           allowZapis: false,

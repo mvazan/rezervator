@@ -508,6 +508,8 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
                               // hooks, rows resolved by _laneRow.
                               final column = ScheduleDayColumn(
                                 onOpenMatch: widget.onOpenMatch,
+                                bandFontSize: settings.kioskBandFontSize
+                                    .toDouble(),
                                 day: days[index],
                                 window: window,
                                 pxPerMinute: pxPerMinute,

@@ -399,6 +399,20 @@ class KioskSettingsScreen extends ConsumerWidget {
                 _number(
                   context,
                   settings,
+                  'Písmo zápasů a pronájmů',
+                  settings?.kioskBandFontSize ?? 10,
+                  'kiosk_band_font_size',
+                  unit: 'px',
+                  min: 8,
+                  max: 24,
+                  helper:
+                      'Pásy zápasů, blokací a pronájmů na tabuli; appka má '
+                      '10. Kde se pás vejde, má zápas pohár, domácí, '
+                      'pomlčku a hosty pod sebou a dlouhý název se zalomí.',
+                ),
+                _number(
+                  context,
+                  settings,
                   'Dní na obrazovce',
                   settings?.kioskVisibleDays ?? 7,
                   'kiosk_visible_days',
