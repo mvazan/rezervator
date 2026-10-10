@@ -11,11 +11,10 @@ alter table schedule_settings
     check (kiosk_warning is null
            or char_length(btrim(kiosk_warning)) between 1 and 200);
 
--- The public overview (0043) keeps handing out only what it always did:
--- the kiosk's choices are the admin's, not anon's. The columns of the
--- stream window (0066) and the status line (0067), parallel branches, are
--- masked here too, and theirs mask this one: whichever runs last, none of
--- the three reaches anon.
+-- The public overview (0043) keeps handing out only what it always did,
+-- now as an allow-list of its six settings: no kiosk option — these, nor
+-- those of the parallel kiosk branches (0066–0069) — ever reaches anon,
+-- whichever of those migrations runs last.
 create or replace function public_week(p_slug text, p_monday date) returns jsonb
     language plpgsql stable security definer set search_path = public as $$
 declare
@@ -27,27 +26,16 @@ declare
 begin
   return jsonb_build_object(
     'tenant_name', (select name from tenants where id = v_tenant),
-    'settings', (select to_jsonb(s) - 'tenant_id'
-                          - 'duty_reminder_enabled' - 'duty_reminder_days'
-                          - 'kiosk_notices_mode' - 'kiosk_show_matches'
-                          - 'kiosk_show_upcoming' - 'kiosk_live_mode'
-                          - 'kiosk_drawer_open' - 'kiosk_drawer_columns'
-                          - 'kiosk_notices_share' - 'kiosk_zapis_percent'
-                          - 'kiosk_weeks_back' - 'kiosk_weeks_ahead'
-                          - 'kiosk_panel_enabled' - 'kiosk_past_days'
-                          - 'kiosk_notices_rotation_seconds'
-                          - 'kiosk_live_rotation_seconds'
-                          - 'kiosk_idle_seconds'
-                          - 'kiosk_live_layout' - 'kiosk_follow_board'
-                          - 'kiosk_live_refresh_seconds'
-                          - 'kiosk_visible_days' - 'kiosk_font_size'
-                          - 'kiosk_animations' - 'kiosk_low_res'
-                          - 'kiosk_stream' - 'kiosk_stream_corner'
-                          - 'kiosk_stream_width'
-                          - 'kiosk_weather' - 'kiosk_weather_place'
-                          - 'kiosk_weather_lat' - 'kiosk_weather_lon'
-                          - 'kiosk_nameday'
-                          - 'kiosk_warning'
+    -- An allow-list, not a mask: the six settings the public board reads
+    -- (the tenancy suite pins the set), so a column added later — every
+    -- kiosk option is the admin's — never reaches anon by default.
+    'settings', (select jsonb_build_object(
+                          'lane_count', s.lane_count,
+                          'training_weekdays', s.training_weekdays,
+                          'booking_horizon_days', s.booking_horizon_days,
+                          'max_active_reservations', s.max_active_reservations,
+                          'kiosk_dark', s.kiosk_dark,
+                          'kiosk_fit_day', s.kiosk_fit_day)
                    from schedule_settings s where s.tenant_id = v_tenant),
     'blocks', coalesce((
       select jsonb_agg(to_jsonb(b) - 'tenant_id')
