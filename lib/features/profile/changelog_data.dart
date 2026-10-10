@@ -62,7 +62,8 @@ const appChangelog = <Release>[
         'vypnutí dýchajícího tlačítka panelu a nižší rozlišení vykreslování '
         'na webu. Minulé dny na tabuli se kreslí levněji, vypadají stejně.',
     'Kiosk: zápas, který má na webu ČKA video na YouTube, si kdokoli pustí '
-        'tlačítkem ▶ — živě i ze záznamu — v plovoucím okně vedle tabule. '
+        'tlačítkem ▶ — živě i ze záznamu, i v zápasech dne na tabuli — '
+        'v plovoucím okně vedle tabule. '
         'Okno jde posouvat, zvětšit na celou obrazovku, sbalit nebo křížkem '
         'zavřít; po konci videa se zavře samo. Správa → Kiosk → Stream '
         'zápasu: hraný zápas se může otevřít sám, oken může být víc najednou.',

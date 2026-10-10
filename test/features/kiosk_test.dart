@@ -1374,9 +1374,10 @@ void main() {
 
   testWidgets(
     's: the day dialog opens non-interactively from the kiosk header — '
-    'score shows, but no video button and no tap-through (PR B fix round 1: '
-    'the 60 s idle-reset Listener never sees touches on a pushed route, and '
-    'an external video browser on a kiosk tablet is undesirable)',
+    'score shows, a video not on YouTube has no button and no tap-through '
+    'to the app\'s detail (PR B fix round 1: the 60 s idle-reset Listener '
+    'never sees touches on a pushed route, and an external video browser on '
+    'a kiosk tablet is undesirable)',
     (tester) async {
       final match = PrioritySlot(
         type: PrioritySlot.fallbackMatchType,
@@ -1438,9 +1439,17 @@ void main() {
         find.descendant(of: dialog, matching: find.text('5 : 3')),
         findsOneWidget,
       );
-      // No video control at all — the fallback trophy/block icon instead.
+      // A video the kiosk cannot play (not YouTube): no video control at
+      // all — the fallback trophy instead.
       expect(find.byIcon(Icons.play_circle_fill), findsNothing);
       expect(find.byIcon(Icons.videocam), findsNothing);
+      expect(
+        find.descendant(
+          of: dialog,
+          matching: find.byIcon(Icons.emoji_events_outlined),
+        ),
+        findsOneWidget,
+      );
 
       // Tapping the match row never leaves the kiosk for the app's match
       // detail: it opens the kiosk's own Zápis modal (no players here, so
@@ -1670,6 +1679,13 @@ void main() {
       // 11:00–14:00, being played at the kiosk's noon.
       final onAir = [fed('m', day, 'Domácí', hour: 11, video: video)];
       final playing = {'m': res('m', 'in_progress', 2, 1)};
+      // A day's list with the match on air: its live badge pulses for as
+      // long as the list is open, and pumpAndSettle would run on to the idle
+      // reset — which closes every route by itself.
+      Future<void> pumpDialog(WidgetTester tester) async {
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+      }
 
       testWidgets('with the switch on, the match on air with a video plays '
           'in the window; off, or without a video, nothing', (tester) async {
@@ -1852,6 +1868,35 @@ void main() {
         await finish(tester);
       });
 
+      testWidgets('the player takes no touches while a day\'s matches are '
+          'open from the board\'s header', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(stream: true, slots: onAir, results: playing),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('player wOq9EODb8w8 on'), findsOneWidget);
+
+        // The status bar names today's match too: the board's header it is.
+        await tester.tap(
+          find
+              .descendant(
+                of: find.byType(BoardColumnHeader),
+                matching: find.textContaining('Domácí'),
+              )
+              .first,
+        );
+        await pumpDialog(tester);
+        expect(find.byType(AlertDialog), findsOneWidget);
+        expect(find.text('player wOq9EODb8w8 off'), findsOneWidget);
+
+        await tester.tap(find.text('Zavřít'));
+        await pumpDialog(tester);
+        expect(find.byType(AlertDialog), findsNothing);
+        expect(find.text('player wOq9EODb8w8 on'), findsOneWidget);
+        await finish(tester);
+      });
+
       testWidgets('the window goes with the match: decided, and its result '
           'read more than half an hour ago', (tester) async {
         fullHd(tester);
@@ -1961,6 +2006,56 @@ void main() {
               .first,
         );
         await tester.pumpAndSettle();
+        expect(find.text('player abcdefghijk on'), findsOneWidget);
+        await finish(tester);
+      });
+
+      testWidgets('a day\'s matches from the board\'s header have the app\'s '
+          'video control: a tap closes the list and plays the match on the '
+          'kiosk', (tester) async {
+        fullHd(tester);
+        // The match on air (the switch off: no window by itself) and one
+        // finished this morning, each with its video.
+        await tester.pumpWidget(
+          app(
+            slots: [...onAir, fed('r', day, 'Ráno', hour: 8, video: video2)],
+            results: {...playing, 'r': res('r', 'finished', 6, 2)},
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(player, findsNothing);
+
+        final header = find
+            .descendant(
+              of: find.byType(BoardColumnHeader),
+              matching: find.textContaining('Domácí'),
+            )
+            .first;
+        final dialog = find.byType(AlertDialog);
+        Finder inDialog(IconData icon) =>
+            find.descendant(of: dialog, matching: find.byIcon(icon));
+        await tester.tap(header);
+        await pumpDialog(tester);
+        // Live: the red camera; the recording: the play button — no trophy.
+        expect(inDialog(Icons.videocam), findsOneWidget);
+        expect(inDialog(Icons.play_circle_fill), findsOneWidget);
+        expect(inDialog(Icons.emoji_events_outlined), findsNothing);
+
+        await tester.tap(inDialog(Icons.videocam));
+        await pumpDialog(tester);
+        expect(dialog, findsNothing);
+        await tester.pumpAndSettle();
+        expect(find.text('player wOq9EODb8w8 on'), findsOneWidget);
+
+        // The recording turns the window to it; its Zápis stays shut (the
+        // button's tap is not the row's).
+        await tester.tap(header);
+        await pumpDialog(tester);
+        await tester.tap(inDialog(Icons.play_circle_fill));
+        await pumpDialog(tester);
+        expect(dialog, findsNothing);
+        await tester.pumpAndSettle();
+        expect(find.text('Zápis zápasu zatím není k dispozici.'), findsNothing);
         expect(find.text('player abcdefghijk on'), findsOneWidget);
         await finish(tester);
       });
