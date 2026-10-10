@@ -3,6 +3,7 @@
 /// admin's browser ask it directly.
 library;
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -53,24 +54,56 @@ Future<List<WeatherPlace>> searchWeatherPlaces(
   return parseGeocoding(json);
 }
 
-/// The weather now and then every [every]: [fetch] once at once, then on
-/// a timer (cancelled with the subscription — no timer outlives the
-/// kiosk). A failed or empty answer keeps the last good one; the status
-/// line drops it once stale ([freshWeather]).
+/// How soon a failed ask is repeated, doubling up to [weatherRetryMax] —
+/// a kiosk that started before its Wi-Fi, or lost it a while, gets its
+/// weather back within minutes, not at the next half hour.
+const weatherRetry = Duration(minutes: 1);
+const weatherRetryMax = Duration(minutes: 10);
+
+/// The weather now and then every [every]: [fetch] at once, then on a
+/// timer (cancelled with the subscription — no timer outlives the kiosk).
+/// A failed or empty answer keeps the last good one (the status line
+/// drops it once stale, [freshWeather]) and is asked again after [retry],
+/// doubling up to [retryMax]; a good one goes back to [every].
 Stream<KioskWeather?> weatherStream(
   Future<KioskWeather?> Function() fetch, {
   Duration every = weatherEvery,
-}) async* {
+  Duration retry = weatherRetry,
+  Duration retryMax = weatherRetryMax,
+}) {
+  late final StreamController<KioskWeather?> out;
+  Timer? timer;
   KioskWeather? last;
-  Future<KioskWeather?> tick() async {
+  var backoff = retry;
+  var cancelled = false;
+
+  Future<void> tick() async {
+    KioskWeather? fresh;
     try {
-      last = await fetch() ?? last;
+      fresh = await fetch();
     } catch (_) {
       // The network or the service is down: the last answer stands.
     }
-    return last;
+    if (cancelled) return;
+    last = fresh ?? last;
+    out.add(last);
+    final Duration next;
+    if (fresh != null) {
+      backoff = retry;
+      next = every;
+    } else {
+      next = backoff;
+      backoff = backoff * 2 < retryMax ? backoff * 2 : retryMax;
+    }
+    timer = Timer(next, tick);
   }
 
-  yield await tick();
-  yield* Stream.periodic(every).asyncMap((_) => tick());
+  out = StreamController<KioskWeather?>(
+    onListen: tick,
+    onCancel: () {
+      cancelled = true;
+      timer?.cancel();
+    },
+  );
+  return out.stream;
 }

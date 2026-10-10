@@ -67,20 +67,22 @@ void main() {
     expect(searchWeatherPlaces(down, 'Brno'), throwsStateError);
   });
 
-  test('weatherStream: at once, then on the timer; a failure keeps the last '
-      'answer; the timer dies with the subscription', () {
+  KioskWeather w(double t) => KioskWeather(
+    temperature: t,
+    kind: WeatherKind.clear,
+    isDay: true,
+    fetchedAt: DateTime(2026, 10, 10),
+  );
+
+  test('weatherStream: at once, then every half hour; a failure keeps the '
+      'last answer and is asked again soon; the timer dies with the '
+      'subscription', () {
     fakeAsync((async) {
-      var calls = 0;
-      final answers = <KioskWeather?>[];
-      KioskWeather w(double t) => KioskWeather(
-        temperature: t,
-        kind: WeatherKind.clear,
-        isDay: true,
-        fetchedAt: DateTime(2026, 10, 10),
-      );
+      final asks = <Duration>[];
+      final answers = <double?>[];
       Future<KioskWeather?> fetch() async {
-        calls++;
-        return switch (calls) {
+        asks.add(async.elapsed);
+        return switch (asks.length) {
           1 => w(10),
           2 => throw StateError('offline'),
           3 => null,
@@ -90,20 +92,45 @@ void main() {
 
       final sub = weatherStream(
         fetch,
-        every: const Duration(minutes: 30),
-      ).listen(answers.add);
-      async.flushMicrotasks();
-      expect([for (final a in answers) a?.temperature], [10]);
-
-      async.elapse(const Duration(minutes: 30));
-      async.elapse(const Duration(minutes: 30));
-      async.elapse(const Duration(minutes: 30));
-      expect([for (final a in answers) a?.temperature], [10, 10, 10, 14]);
+      ).listen((a) => answers.add(a?.temperature));
+      async.elapse(const Duration(hours: 2));
+      // 0: 10°; 30 min: offline; 31: a bad answer; 33: 14° — then the half
+      // hour again: 63, 93.
+      expect(asks.map((d) => d.inMinutes), [0, 30, 31, 33, 63, 93]);
+      expect(answers, [10, 10, 10, 14, 14, 14]);
 
       sub.cancel();
       async.elapse(const Duration(hours: 2));
-      expect(calls, 4);
+      expect(asks, hasLength(6));
       expect(async.pendingTimers, isEmpty);
+    });
+  });
+
+  test('weatherStream: a kiosk that starts offline asks again after 1, 2, '
+      '4, 8 minutes, then every ten — the weather is back at the next ask', () {
+    fakeAsync((async) {
+      final asks = <int>[];
+      var online = false;
+      final answers = <double?>[];
+      Future<KioskWeather?> fetch() async {
+        asks.add(async.elapsed.inMinutes);
+        if (!online) throw StateError('offline');
+        return w(8);
+      }
+
+      final sub = weatherStream(
+        fetch,
+      ).listen((a) => answers.add(a?.temperature));
+      async.elapse(const Duration(minutes: 40));
+      // 1, 2, 4, 8, then 10 at most.
+      expect(asks, [0, 1, 3, 7, 15, 25, 35]);
+      expect(answers.every((a) => a == null), isTrue);
+
+      online = true;
+      async.elapse(const Duration(minutes: 10));
+      expect(asks.last, 45);
+      expect(answers.last, 8);
+      sub.cancel();
     });
   });
 }
