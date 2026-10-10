@@ -115,14 +115,26 @@ class _KioskStreamWindowState extends State<KioskStreamWindow> {
     return Rect.fromLTWH(left, top, w, h);
   }
 
-  /// [r] inside [area]: no wider than the area (the height follows the
-  /// width), then shifted in. A window taller than the area at the
-  /// minimum width overflows at the bottom rather than shrinking further.
+  /// [r] inside [area]: no wider than the area and no taller either (the
+  /// height follows the width, so the width is bounded by the height that
+  /// fits — a grip dragged far right must not push the bottom bar, and
+  /// the grip with it, out of reach), then shifted in. A window taller
+  /// than the area at the minimum width overflows at the bottom rather
+  /// than shrinking further.
   Rect _fit(Rect r, Size area) {
+    final tallest =
+        (area.height -
+            KioskStreamWindow.titleHeight -
+            KioskStreamWindow.bottomHeight) *
+        16 /
+        9;
     final w = r.width
         .clamp(
           KioskStreamWindow.minWidth,
-          math.max(KioskStreamWindow.minWidth, area.width),
+          math.max(
+            KioskStreamWindow.minWidth,
+            math.min(area.width, tallest),
+          ),
         )
         .toDouble();
     final h = KioskStreamWindow.heightFor(w);
@@ -236,8 +248,18 @@ class _KioskStreamWindowState extends State<KioskStreamWindow> {
                 count: widget.matches.length,
                 maximized: _maximized,
                 onTurn: _turn,
-                onCollapse: () => setState(() => _collapsed = true),
-                onMaximize: () => setState(() => _maximized = !_maximized),
+                // Either one takes the gesture surfaces away (the bar's
+                // pan, the grip) mid-gesture at worst — a recognizer
+                // disposed that way never reports its end, so the flag
+                // goes with the change, or the player stays untouchable.
+                onCollapse: () => setState(() {
+                  _collapsed = true;
+                  _gesture = false;
+                }),
+                onMaximize: () => setState(() {
+                  _maximized = !_maximized;
+                  _gesture = false;
+                }),
                 onDragStart: _maximized ? null : () => _gestureRuns(true),
                 onDrag: _moveBy,
                 onDragEnd: () => _gestureRuns(false),
@@ -385,8 +407,11 @@ class _BottomBar extends StatelessWidget {
           onPanUpdate: (d) => onResize(d.delta.dx),
           onPanEnd: (_) => onResizeEnd(),
           onPanCancel: onResizeEnd,
+          // Manual: a long-press tooltip would race the pan for a finger
+          // that lands on the grip and pauses before it drags.
           child: Tooltip(
             message: 'Změnit velikost',
+            triggerMode: TooltipTriggerMode.manual,
             child: SizedBox(
               width: 48,
               height: KioskStreamWindow.bottomHeight,

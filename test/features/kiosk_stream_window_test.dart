@@ -196,6 +196,62 @@ void main() {
     expect(tester.getRect(playerFinder), moved);
   });
 
+  testWidgets('a maximize or a collapse mid-drag ends the gesture: the player '
+      'takes touches again', (tester) async {
+    area(tester);
+    await tester.pumpWidget(app(one));
+    await tester.pumpAndSettle();
+    final drag = await tester.startGesture(
+      tester.getCenter(find.text('Domácí – Hosté')),
+    );
+    await drag.moveBy(const Offset(30, 30));
+    await tester.pump();
+    expect(find.text('player $v1 off'), findsOneWidget);
+
+    // A second finger: the bar loses its pan mid-gesture.
+    await tester.tap(find.byTooltip('Na celou obrazovku'));
+    await tester.pumpAndSettle();
+    expect(find.text('player $v1 on'), findsOneWidget);
+    await drag.up();
+    await tester.pumpAndSettle();
+    expect(find.text('player $v1 on'), findsOneWidget);
+  });
+
+  testWidgets('a finger that rests on the grip and then drags still resizes '
+      '— no long-press tooltip takes the gesture', (tester) async {
+    area(tester);
+    await tester.pumpWidget(app(one));
+    await tester.pumpAndSettle();
+    final before = tester.getRect(playerFinder);
+
+    final grip = await tester.startGesture(
+      tester.getCenter(find.byTooltip('Změnit velikost')),
+    );
+    await tester.pump(const Duration(milliseconds: 600));
+    await grip.moveBy(const Offset(100, 0));
+    await tester.pump();
+    await grip.up();
+    await tester.pumpAndSettle();
+    expect(tester.getRect(playerFinder).width, before.width + 100);
+  });
+
+  testWidgets('the grip cannot make the window taller than the area: the '
+      'bottom bar and the grip stay within reach', (tester) async {
+    area(tester);
+    await tester.pumpWidget(app(one));
+    await tester.pumpAndSettle();
+
+    await tester.drag(find.byTooltip('Změnit velikost'), const Offset(2000, 0));
+    await tester.pumpAndSettle();
+    final rect = tester.getRect(playerFinder);
+    expect(rect.width, closeTo((700 - 60) * 16 / 9, 0.01));
+    expect(rect.bottom + KioskStreamWindow.bottomHeight, lessThanOrEqualTo(700));
+    expect(
+      tester.getRect(find.byTooltip('Změnit velikost')).bottom,
+      lessThanOrEqualTo(700),
+    );
+  });
+
   testWidgets('the player takes no touches during a drag or a resize, nor '
       'while a route sits above the kiosk', (tester) async {
     area(tester);
