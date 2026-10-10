@@ -65,7 +65,7 @@ const appChangelog = <Release>[
         'výstrahy (Správa → Kiosk → Obrazovka kiosku); dokud visí, zbytek '
         'záhlaví ustoupí.',
     'Kiosk: správce může dnešní zápasy v záhlaví skrýt (Správa → Kiosk → '
-        'Obrazovka kiosku).',
+        'Stavový řádek).',
   ], store: [
     'Kiosk: zápis zápasu ukazuje registrační čísla hráčů.',
     'Emoji v textu se kreslí z obrázků — všude stejně.',

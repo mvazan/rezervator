@@ -421,8 +421,10 @@ void main() {
     expect(lastPatch(), {'kiosk_low_res': true});
   });
 
-  testWidgets('today\'s matches in the header: on by default, right below '
-      'the warning; the switch PATCHes its own column', (tester) async {
+  testWidgets('today\'s matches in the header: on by default, in the '
+      'Stavový řádek section; the switch PATCHes its own column', (
+    tester,
+  ) async {
     tall(tester);
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
@@ -436,11 +438,11 @@ void main() {
     expect(tester.widget<SwitchListTile>(todays).value, isTrue);
     expect(
       tester.getTopLeft(todays).dy,
-      greaterThan(tester.getTopLeft(find.text('Upozornění')).dy),
+      greaterThan(tester.getTopLeft(find.text('Stavový řádek')).dy),
     );
     expect(
       tester.getTopLeft(todays).dy,
-      lessThan(tester.getTopLeft(find.text('Tmavý režim')).dy),
+      lessThan(tester.getTopLeft(find.text('Nástěnka')).dy),
     );
 
     await tester.ensureVisible(todays);
@@ -614,6 +616,7 @@ void main() {
     double top(String text) => tester.getTopLeft(find.text(text)).dy;
     final order = [
       top('Obrazovka kiosku'),
+      top('Stavový řádek'),
       top('Nástěnka'),
       top('Postranní panel'),
       top('Hraný zápas'),

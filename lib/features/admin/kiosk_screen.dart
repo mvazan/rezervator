@@ -275,14 +275,6 @@ class KioskSettingsScreen extends ConsumerWidget {
                     ],
                   ),
                 ),
-                _switch(
-                  context,
-                  settings,
-                  'Dnešní zápasy v záhlaví',
-                  settings?.kioskTodaysMatches ?? true,
-                  'kiosk_todays_matches',
-                  subtitle: 'Vypnuto = záhlaví kiosku dnešní zápasy neukazuje.',
-                ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Tmavý režim'),
@@ -398,6 +390,21 @@ class KioskSettingsScreen extends ConsumerWidget {
                     min: 1,
                     max: 60,
                   ),
+              ],
+            ),
+            _section(
+              context,
+              'Stavový řádek',
+              'Co kiosk ukáže vedle hodin: dnešní zápasy.',
+              [
+                _switch(
+                  context,
+                  settings,
+                  'Dnešní zápasy v záhlaví',
+                  settings?.kioskTodaysMatches ?? true,
+                  'kiosk_todays_matches',
+                  subtitle: 'Vypnuto = záhlaví kiosku dnešní zápasy neukazuje.',
+                ),
               ],
             ),
             _section(
