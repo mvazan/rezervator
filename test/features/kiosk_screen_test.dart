@@ -68,7 +68,7 @@ void main() {
   // The page is long (the panel options sit above the address): a tall
   // window keeps every section built.
   void tall(WidgetTester tester) {
-    tester.view.physicalSize = const Size(800, 4200);
+    tester.view.physicalSize = const Size(800, 5600);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
   }
