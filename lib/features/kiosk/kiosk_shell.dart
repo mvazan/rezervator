@@ -386,18 +386,24 @@ class _StatusBar extends ConsumerWidget {
   /// A tap on one of today's matches: its Zápis, once it has a score.
   final void Function(PrioritySlot match) onOpenMatch;
 
-  /// Today's matches, start-ordered; Úklid children are plumbing (their
-  /// match already announces).
-  List<PrioritySlot> _todaysMatches(WidgetRef ref, Day todayDay) =>
-      ref
-          .watch(prioritySlotsProvider)
-          .where((m) => m.date == todayDay && m.parentId == null)
-          .toList()
-        ..sort((a, b) => a.startsAt.compareTo(b.startsAt));
+  /// Today's matches the bar lists, start-ordered; Úklid children are
+  /// plumbing (their match already announces). None while the admin keeps
+  /// them out of the header (0071): the bar then reads as on a day without
+  /// a match.
+  List<PrioritySlot> _todaysMatches(WidgetRef ref, Day todayDay) {
+    if (!(ref.watch(settingsProvider).value?.kioskTodaysMatches ?? true)) {
+      return const [];
+    }
+    return ref
+        .watch(prioritySlotsProvider)
+        .where((m) => m.date == todayDay && m.parentId == null)
+        .toList()
+      ..sort((a, b) => a.startsAt.compareTo(b.startsAt));
+  }
 
   String _infoLine(WidgetRef ref, Day todayDay) {
     // Today's matches are not a line of text: [build] lists them, each
-    // one tappable.
+    // one tappable. Hidden by the admin, they leave the line its say.
     if (_todaysMatches(ref, todayDay).isNotEmpty) return '';
 
     final settings =
@@ -490,7 +496,6 @@ class _StatusBar extends ConsumerWidget {
             Expanded(
               child: Row(
                 children: [
-                  // The admin's warning first, with its icon (0068).
                   // The admin's warning: alone in the bar's middle.
                   if (warning != null)
                     Expanded(child: KioskWarning(text: warning)),

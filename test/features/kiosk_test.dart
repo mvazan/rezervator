@@ -1354,6 +1354,8 @@ void main() {
       bool fitDay = true,
       bool animations = true,
       String? warning,
+      bool todaysMatches = true,
+      Set<int>? trainingWeekdays,
       Stream<Map<String, MatchResult>>? resultsStream,
       Map<String, List<MatchPlayerResult>> lineups = const {},
     }) => ProviderScope(
@@ -1362,7 +1364,7 @@ void main() {
           (ref) => Stream.value(
             ScheduleSettings(
               laneCount: settings.laneCount,
-              trainingWeekdays: settings.trainingWeekdays,
+              trainingWeekdays: trainingWeekdays ?? settings.trainingWeekdays,
               bookingHorizonDays: settings.bookingHorizonDays,
               maxActiveReservations: settings.maxActiveReservations,
               kioskDrawerOpen: drawerOpen,
@@ -1393,6 +1395,7 @@ void main() {
               kioskFitDay: fitDay,
               kioskAnimations: animations,
               kioskWarning: warning,
+              kioskTodaysMatches: todaysMatches,
             ),
           ),
         ),
@@ -1493,6 +1496,47 @@ void main() {
       expect(find.byType(KioskHeadline), findsNothing);
       // The board's own day header still names the match; the bar does not.
       expect(matchLabels(), without - 1);
+      await finish(tester);
+    });
+
+    testWidgets('today\'s matches in the status bar: there by default; '
+        'switched off, the bar reads as on a day without a match — the '
+        'warning still wins', (tester) async {
+      fullHd(tester);
+      // The status bar's match list is its only Wrap.
+      final inBar = find.descendant(
+        of: find.byType(Wrap),
+        matching: findEmojiTextContaining('Domácí – Soupeř'),
+      );
+      // Thursday is no training day here: without a match, the bar says
+      // when the next one is.
+      final nextTraining = findEmojiTextContaining('Další trénink');
+      Widget kiosk({bool todaysMatches = true, String? warning}) => app(
+        slots: [fed('m', day, 'Domácí')],
+        trainingWeekdays: const {1, 2, 3, 5, 6, 7},
+        todaysMatches: todaysMatches,
+        warning: warning,
+      );
+
+      await tester.pumpWidget(kiosk());
+      await tester.pumpAndSettle();
+      expect(inBar, findsOneWidget);
+      expect(nextTraining, findsNothing);
+      await finish(tester);
+
+      await tester.pumpWidget(kiosk(todaysMatches: false));
+      await tester.pumpAndSettle();
+      expect(inBar, findsNothing);
+      expect(nextTraining, findsOneWidget);
+      await finish(tester);
+
+      await tester.pumpWidget(
+        kiosk(todaysMatches: false, warning: 'Dráha 3 je mimo provoz.'),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Dráha 3 je mimo provoz.'), findsOneWidget);
+      expect(inBar, findsNothing);
+      expect(nextTraining, findsNothing);
       await finish(tester);
     });
 
