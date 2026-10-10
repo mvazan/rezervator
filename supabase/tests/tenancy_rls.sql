@@ -10567,6 +10567,59 @@ end $$;
 \ir ../migrations/0064_kiosk_panel.sql
 \ir ../migrations/0065_kiosk_performance.sql
 
+-- 0070: the note above the kiosk picker's first letters. The alleys that
+-- already exist get the default text too — the column is dropped and 0070
+-- run over the suite's alleys again (rolled back with the rest), then once
+-- more to show it re-runs — and so does a new alley.
+alter table schedule_settings drop column kiosk_picker_note;
+\ir ../migrations/0070_kiosk_picker_note.sql
+\ir ../migrations/0070_kiosk_picker_note.sql
+insert into tenants (id, name) values
+  ('00000000-0000-0000-0000-000000000070', 'Kuželna N (0070)');
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+  v_b constant uuid := '00000000-0000-0000-0000-000000000002';
+  v_n constant uuid := '00000000-0000-0000-0000-000000000070';
+  v_note text;
+  v_keys text[];
+begin
+  select kiosk_picker_note into v_note from schedule_settings where tenant_id = v_n;
+  if v_note is null
+     or v_note not like 'Na kiosku se z tréninku odhlásit nedá. %' then
+    raise exception 'FAIL: a new alley did not get the default picker note (0070): %', v_note;
+  end if;
+  if exists (select 1 from schedule_settings
+              where tenant_id in (v_a, v_b)
+                and kiosk_picker_note is distinct from v_note) then
+    raise exception 'FAIL: an existing alley did not get the default picker note (0070)';
+  end if;
+  begin
+    update schedule_settings set kiosk_picker_note = '   ' where tenant_id = v_a;
+    raise exception 'FAIL: a blank picker note was accepted (0070)';
+  exception when check_violation then null;
+  end;
+  begin
+    update schedule_settings set kiosk_picker_note = repeat('x', 201)
+     where tenant_id = v_a;
+    raise exception 'FAIL: a picker note over 200 characters was accepted (0070)';
+  exception when check_violation then null;
+  end;
+  update schedule_settings set kiosk_picker_note = 'Zrušit jde jen v aplikaci.'
+   where tenant_id = v_a;
+  if public_week('kuzelna-a', current_date)->'settings' ? 'kiosk_picker_note' then
+    raise exception 'FAIL: the public overview hands out the picker note (0070)';
+  end if;
+  v_keys := array(select jsonb_object_keys(public_week('kuzelna-a', current_date)->'settings') order by 1);
+  if v_keys <> array['booking_horizon_days', 'kiosk_dark', 'kiosk_fit_day',
+                      'lane_count', 'max_active_reservations', 'training_weekdays'] then
+    raise exception 'FAIL: public_week''s settings are not the six allow-listed ones (0070): %', v_keys;
+  end if;
+  update schedule_settings set kiosk_picker_note = null where tenant_id = v_a;
+  update schedule_settings set kiosk_picker_note = v_note where tenant_id = v_a;
+  raise notice 'OK: every alley starts with the picker note, it is some text or none, and public_week hands out only its six settings (0070)';
+end $$;
+
 -- 0052 One device token, one profile ----------------------------------------
 -- 20. notify pushes to every profile holding a token, so a token the last
 -- account on a device kept (signed out offline, session expired, an older

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/domain/models.dart';
 
@@ -73,6 +75,39 @@ void main() {
       final old = ScheduleSettings.fromJson(base);
       expect(old.dutyReminderEnabled, isFalse);
       expect(old.dutyReminderDays, 1);
+    });
+
+    test('fromJson: the kiosk picker note (0070) trimmed; blank or absent '
+        'is none', () {
+      const base = {
+        'lane_count': 4,
+        'training_weekdays': [1, 2, 4],
+        'booking_horizon_days': 14,
+        'max_active_reservations': 3,
+      };
+      ScheduleSettings settings(Object? note) =>
+          ScheduleSettings.fromJson({...base, 'kiosk_picker_note': note});
+      expect(
+        settings('  Zrušit jde jen v aplikaci. ').kioskPickerNote,
+        'Zrušit jde jen v aplikaci.',
+      );
+      expect(settings('   ').kioskPickerNote, isNull);
+      expect(settings(null).kioskPickerNote, isNull);
+      expect(ScheduleSettings.fromJson(base).kioskPickerNote, isNull);
+    });
+
+    test('the default picker note is the column\'s default, letter for '
+        'letter', () {
+      // Every alley starts with it (0070); Správa → Kiosk offers the Dart
+      // copy back — the two must not drift apart.
+      final sql = File(
+        'supabase/migrations/0070_kiosk_picker_note.sql',
+      ).readAsStringSync();
+      final column = RegExp(
+        r"kiosk_picker_note text\s+default '([^']+)'",
+      ).firstMatch(sql)!.group(1);
+      expect(column, ScheduleSettings.defaultPickerNote);
+      expect(ScheduleSettings.defaultPickerNote.length, lessThanOrEqualTo(200));
     });
   });
 

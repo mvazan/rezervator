@@ -3446,21 +3446,16 @@ declare
 begin
   return jsonb_build_object(
     'tenant_name', (select name from tenants where id = v_tenant),
-    'settings', (select to_jsonb(s) - 'tenant_id'
-                          - 'duty_reminder_enabled' - 'duty_reminder_days'
-                          - 'kiosk_notices_mode' - 'kiosk_show_matches'
-                          - 'kiosk_show_upcoming' - 'kiosk_live_mode'
-                          - 'kiosk_drawer_open' - 'kiosk_drawer_columns'
-                          - 'kiosk_notices_share' - 'kiosk_zapis_percent'
-                          - 'kiosk_weeks_back' - 'kiosk_weeks_ahead'
-                          - 'kiosk_panel_enabled' - 'kiosk_past_days'
-                          - 'kiosk_notices_rotation_seconds'
-                          - 'kiosk_live_rotation_seconds'
-                          - 'kiosk_idle_seconds'
-                          - 'kiosk_live_layout' - 'kiosk_follow_board'
-                          - 'kiosk_live_refresh_seconds'
-                          - 'kiosk_visible_days' - 'kiosk_font_size'
-                          - 'kiosk_animations' - 'kiosk_low_res'
+    -- An allow-list, not a mask: the six settings the public board reads
+    -- (the tenancy suite pins the set), so a column added later — every
+    -- kiosk option is the admin's — never reaches anon by default.
+    'settings', (select jsonb_build_object(
+                          'lane_count', s.lane_count,
+                          'training_weekdays', s.training_weekdays,
+                          'booking_horizon_days', s.booking_horizon_days,
+                          'max_active_reservations', s.max_active_reservations,
+                          'kiosk_dark', s.kiosk_dark,
+                          'kiosk_fit_day', s.kiosk_fit_day)
                    from schedule_settings s where s.tenant_id = v_tenant),
     'blocks', coalesce((
       select jsonb_agg(to_jsonb(b) - 'tenant_id')
@@ -5690,6 +5685,7 @@ CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     "kiosk_font_size" smallint DEFAULT 11 NOT NULL,
     "kiosk_animations" boolean DEFAULT true NOT NULL,
     "kiosk_low_res" boolean DEFAULT false NOT NULL,
+    "kiosk_picker_note" "text" DEFAULT 'Na kiosku se z tréninku odhlásit nedá. Zruš rezervaci v aplikaci Rezervátor, na webu rezervator.online, u služby v kantýně nebo u správce kuželny.'::"text",
     CONSTRAINT "schedule_settings_booking_horizon_days_check" CHECK ((("booking_horizon_days" >= 1) AND ("booking_horizon_days" <= 90))),
     CONSTRAINT "schedule_settings_duty_reminder_days_check" CHECK ((("duty_reminder_days" >= 1) AND ("duty_reminder_days" <= 14))),
     CONSTRAINT "schedule_settings_kiosk_ahead_check" CHECK ((("kiosk_weeks_ahead" >= 0) AND ("kiosk_weeks_ahead" <= 52))),
@@ -5703,6 +5699,7 @@ CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     CONSTRAINT "schedule_settings_kiosk_notices_mode_check" CHECK (("kiosk_notices_mode" = ANY (ARRAY['off'::"text", 'drawer'::"text", 'header'::"text", 'both'::"text"]))),
     CONSTRAINT "schedule_settings_kiosk_notices_rotation_check" CHECK ((("kiosk_notices_rotation_seconds" >= 3) AND ("kiosk_notices_rotation_seconds" <= 120))),
     CONSTRAINT "schedule_settings_kiosk_past_check" CHECK ((("kiosk_past_days" >= 0) AND ("kiosk_past_days" <= 60))),
+    CONSTRAINT "schedule_settings_kiosk_picker_note_check" CHECK ((("kiosk_picker_note" IS NULL) OR (("char_length"("btrim"("kiosk_picker_note")) >= 1) AND ("char_length"("btrim"("kiosk_picker_note")) <= 200)))),
     CONSTRAINT "schedule_settings_kiosk_share_check" CHECK ((("kiosk_notices_share" >= 10) AND ("kiosk_notices_share" <= 90))),
     CONSTRAINT "schedule_settings_kiosk_visible_days_check" CHECK ((("kiosk_visible_days" >= 2) AND ("kiosk_visible_days" <= 14))),
     CONSTRAINT "schedule_settings_kiosk_zapis_check" CHECK ((("kiosk_zapis_percent" >= 50) AND ("kiosk_zapis_percent" <= 100))),

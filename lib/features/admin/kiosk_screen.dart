@@ -10,6 +10,7 @@ import '../../domain/models.dart';
 import '../auth/update_screen.dart' show UpdateScreen;
 import 'widgets/admin_scaffold.dart';
 import 'widgets/copyable_address.dart';
+import 'widgets/kiosk_text_dialog.dart';
 import 'widgets/number_setting_field.dart';
 
 /// Admin: kiosk-specific settings (the board theme) and the kiosk accounts
@@ -183,7 +184,7 @@ class KioskSettingsScreen extends ConsumerWidget {
   Future<void> _panel(
     BuildContext context,
     ScheduleSettings settings,
-    Map<String, Object> changes,
+    Map<String, Object?> changes,
   ) => tryAction(
     context,
     () => Api.setKioskPanel(changes, tenantId: settings.tenantId),
@@ -195,6 +196,23 @@ class KioskSettingsScreen extends ConsumerWidget {
   /// web app lives, because a phone has no address to offer a tablet.
   String _kioskUrl() =>
       kioskUrlFrom(kIsWeb ? Uri.base : Uri.parse(UpdateScreen.webUrl));
+
+  /// The note above the name picker's first letters (0070), typed in a
+  /// dialog — a new one starts from the default text; saved trimmed.
+  Future<void> _editPickerNote(
+    BuildContext context,
+    ScheduleSettings settings,
+  ) async {
+    final text = await showKioskTextDialog(
+      context,
+      title: 'Upozornění při rezervaci',
+      label: 'Text upozornění',
+      initial: settings.kioskPickerNote ?? ScheduleSettings.defaultPickerNote,
+      defaultText: ScheduleSettings.defaultPickerNote,
+    );
+    if (text == null || !context.mounted) return;
+    await _panel(context, settings, {'kiosk_picker_note': text});
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -218,6 +236,46 @@ class KioskSettingsScreen extends ConsumerWidget {
               'Tablet na zdi kuželny: jak vypadá tabule a co se stane, když '
                   'se ho nikdo nedotýká.',
               [
+                // Booking is what the kiosk is for, and the screen has no
+                // section of its own for it: its note comes first.
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(
+                    Icons.warning_amber_rounded,
+                    color: settings?.kioskPickerNote == null
+                        ? null
+                        : Theme.of(context).colorScheme.error,
+                  ),
+                  title: const Text('Upozornění při rezervaci'),
+                  subtitle: Text(
+                    settings?.kioskPickerNote ??
+                        'Žádné. Upozornění nad písmeny při výběru jména na '
+                            'kiosku.',
+                  ),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextButton(
+                        onPressed: settings == null
+                            ? null
+                            : () => _editPickerNote(context, settings),
+                        child: Text(
+                          settings?.kioskPickerNote == null
+                              ? 'Přidat…'
+                              : 'Upravit…',
+                        ),
+                      ),
+                      if (settings?.kioskPickerNote != null)
+                        IconButton(
+                          tooltip: 'Odstranit upozornění',
+                          icon: const Icon(Icons.delete_outline),
+                          onPressed: () => _panel(context, settings!, {
+                            'kiosk_picker_note': null,
+                          }),
+                        ),
+                    ],
+                  ),
+                ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Tmavý režim'),
