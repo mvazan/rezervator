@@ -41,6 +41,7 @@ void main() {
     bool disableAnimations = false,
     ThemeData? theme,
     int? colorId,
+    bool pulse = true,
   }) {
     final content = InkWell(
       onTap: onRowOpen,
@@ -54,6 +55,7 @@ void main() {
             fallback: fallback,
             colorId: colorId,
             launch: launch ?? (_) {},
+            pulse: pulse,
           ),
           const Text('Domácí – Hosté'),
         ],
@@ -293,6 +295,26 @@ void main() {
     // Stop the repeating animation before the test ends, or pumpAndSettle
     // in a later test sharing the binding could hang.
     await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('pulse off (the kiosk\'s animations off): the live badge '
+      'stays still — no controller, nothing running — and still launches',
+      (tester) async {
+    final launched = <String>[];
+    await tester.pumpWidget(wrap(
+      slot: slot(videoUrl: 'https://vysledky.kuzelky.cz/video/m1'),
+      matchResult: result(MatchStatus.inProgress),
+      pulse: false,
+      launch: launched.add,
+    ));
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(find.byIcon(Icons.videocam), findsOneWidget);
+    expect(tester.hasRunningAnimations, isFalse);
+    final state = tester.state(find.byType(MatchLeading)) as dynamic;
+    expect(state.debugHasPulseController, isFalse);
+    await tester.tap(find.byIcon(Icons.videocam));
+    expect(launched, ['https://vysledky.kuzelky.cz/video/m1']);
   });
 
   testWidgets('a live match WITHOUT disableAnimations does run the pulse',

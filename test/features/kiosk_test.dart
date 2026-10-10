@@ -14,6 +14,7 @@ import 'package:rezervator/features/clubhouse/match_detail_screen.dart';
 import 'package:rezervator/features/clubhouse/widgets/duel_card.dart';
 import 'package:rezervator/features/clubhouse/widgets/legacy_score_sheet.dart';
 import 'package:rezervator/features/clubhouse/widgets/match_scoreboard.dart';
+import 'package:rezervator/features/clubhouse/widgets/match_video_icon.dart';
 import 'package:rezervator/features/kiosk/kiosk_board_view.dart';
 import 'package:rezervator/features/schedule/widgets/slot_tile.dart';
 import 'package:rezervator/features/kiosk/kiosk_connection.dart';
@@ -1861,6 +1862,38 @@ void main() {
         await finish(tester);
       });
 
+      testWidgets('with the animations off the live badge in the day\'s list '
+          'stays still', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(slots: onAir, results: playing, animations: false),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find
+              .descendant(
+                of: find.byType(BoardColumnHeader),
+                matching: find.textContaining('Domácí'),
+              )
+              .first,
+        );
+        // Settles: nothing repeats.
+        await tester.pumpAndSettle();
+        final badge = find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.byType(MatchLeading),
+        );
+        expect(
+          find.descendant(of: badge, matching: find.byIcon(Icons.videocam)),
+          findsOneWidget,
+        );
+        expect(
+          (tester.state(badge) as dynamic).debugHasPulseController,
+          isFalse,
+        );
+        await finish(tester);
+      });
+
       testWidgets('a live stream closed by the × does not open by itself '
           'again; its ▶ does', (tester) async {
         fullHd(tester);
@@ -1877,6 +1910,52 @@ void main() {
         await tester.tap(find.byTooltip('Sledovat živě'));
         await tester.pumpAndSettle();
         expect(find.text('player wOq9EODb8w8 on'), findsOneWidget);
+        await finish(tester);
+      });
+
+      testWidgets('the match being played in the drawer has the live badge '
+          'of everywhere else — pulsing, still with the animations off; a '
+          'tap opens its stream', (tester) async {
+        fullHd(tester);
+        // Played, with players: the drawer shows it across.
+        Widget kiosk({required bool animations}) => app(
+          slots: onAir,
+          results: playing,
+          lineups: {'m': lineup},
+          animations: animations,
+        );
+        final badge = find.descendant(
+          of: find.byType(KioskDrawer),
+          matching: find.byType(MatchLeading),
+        );
+        bool pulsing(WidgetTester tester) =>
+            (tester.state(badge) as dynamic).debugHasPulseController as bool;
+
+        await tester.pumpWidget(kiosk(animations: true));
+        // The ring repeats: frames by hand, pumpAndSettle would wait forever.
+        for (var i = 0; i < 10; i++) {
+          await tester.pump(const Duration(milliseconds: 100));
+        }
+        expect(liveView, findsOneWidget);
+        expect(badge, findsOneWidget);
+        expect(
+          find.descendant(of: badge, matching: find.byIcon(Icons.videocam)),
+          findsOneWidget,
+        );
+        expect(pulsing(tester), isTrue);
+        expect(player, findsNothing);
+
+        await tester.tap(badge);
+        for (var i = 0; i < 10; i++) {
+          await tester.pump(const Duration(milliseconds: 100));
+        }
+        expect(find.text('player wOq9EODb8w8 on'), findsOneWidget);
+        await finish(tester);
+
+        await tester.pumpWidget(kiosk(animations: false));
+        await tester.pumpAndSettle();
+        expect(badge, findsOneWidget);
+        expect(pulsing(tester), isFalse);
         await finish(tester);
       });
 
