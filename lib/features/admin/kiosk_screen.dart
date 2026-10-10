@@ -247,6 +247,9 @@ class KioskSettingsScreen extends ConsumerWidget {
                         'Žádné. Varování s ikonou výstrahy v záhlaví kiosku; '
                             'dokud visí, ostatní údaje v záhlaví ustoupí. '
                             'Platí, dokud ho neodstraníš.',
+                    // The whole text is one tap away, under „Upravit…“.
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
                   ),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
