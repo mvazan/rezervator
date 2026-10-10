@@ -7,10 +7,12 @@ import '../../core/kiosk_url.dart';
 import '../../core/ui.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
+import '../../domain/weather.dart' show WeatherPlace;
 import '../auth/update_screen.dart' show UpdateScreen;
 import 'widgets/admin_scaffold.dart';
 import 'widgets/copyable_address.dart';
 import 'widgets/number_setting_field.dart';
+import 'widgets/weather_place_dialog.dart';
 
 /// Admin: kiosk-specific settings (the board theme) and the kiosk accounts
 /// themselves. The accounts live here, not among Hráči: a kiosk is the
@@ -190,6 +192,48 @@ class KioskSettingsScreen extends ConsumerWidget {
     errorText: friendlyDbError,
   );
 
+  /// [place] as the three columns that keep it.
+  static Map<String, Object> _placeColumns(WeatherPlace place) => {
+    'kiosk_weather_place': place.label,
+    'kiosk_weather_lat': place.lat,
+    'kiosk_weather_lon': place.lon,
+  };
+
+  /// The alley's own venue as a weather place — the admin reads the
+  /// federation settings (the kiosk cannot), null when unknown.
+  static WeatherPlace? _alleyPlace(WidgetRef ref) {
+    final slug = ref.watch(federationSyncProvider).value?.venueSlug ?? '';
+    if (slug.isEmpty) return null;
+    return venueWeatherPlace(
+      (ref.watch(venuesProvider).value ?? const <Venue>[])
+          .where((v) => v.slug == slug)
+          .firstOrNull,
+    );
+  }
+
+  /// „Počasí“: on with the place it needs — the alley's venue when none was
+  /// picked yet and the venue is known; off keeps the place for next time.
+  Future<void> _weather(
+    BuildContext context,
+    ScheduleSettings settings,
+    bool on,
+    WeatherPlace? alley,
+  ) => _panel(context, settings, {
+    'kiosk_weather': on,
+    if (on && settings.kioskWeatherLat == null && alley != null)
+      ..._placeColumns(alley),
+  });
+
+  Future<void> _pickPlace(
+    BuildContext context,
+    ScheduleSettings settings,
+    WeatherPlace? alley,
+  ) async {
+    final place = await showWeatherPlaceDialog(context, alley: alley);
+    if (place == null || !context.mounted) return;
+    await _panel(context, settings, _placeColumns(place));
+  }
+
   /// Where the app is running (the web build knows; an alley hosting its
   /// own copy under a sub-path included) — or, on Android, where the public
   /// web app lives, because a phone has no address to offer a tablet.
@@ -202,6 +246,7 @@ class KioskSettingsScreen extends ConsumerWidget {
       for (final p in ref.watch(profilesProvider).value ?? const <Profile>[])
         if (p.role == Role.kiosk) p,
     ];
+    final alley = _alleyPlace(ref);
     return AdminScaffold(
       title: 'Kiosk',
       body: AsyncBody(
@@ -333,6 +378,56 @@ class KioskSettingsScreen extends ConsumerWidget {
                     min: 1,
                     max: 60,
                   ),
+              ],
+            ),
+            _section(
+              context,
+              'Stavový řádek',
+              'Co kiosk ukáže vedle hodin: dnešní počasí a kdo má svátek.',
+              [
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Počasí'),
+                  subtitle: const Text(
+                    'Teplota a dnešní předpověď pro vybrané místo, '
+                    'obnovuje se každou půlhodinu. Data: Open-Meteo.com '
+                    '(CC BY 4.0).',
+                  ),
+                  value: settings?.kioskWeather ?? false,
+                  onChanged: settings == null
+                      ? null
+                      : (on) => _weather(context, settings, on, alley),
+                ),
+                if (settings?.kioskWeather ?? false)
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.place_outlined),
+                    title: const Text('Místo pro počasí'),
+                    subtitle: Text(
+                      settings?.kioskWeatherPlace ??
+                          'Není vybrané — kiosk počasí neukáže.',
+                    ),
+                    trailing: TextButton(
+                      onPressed: settings == null
+                          ? null
+                          : () => _pickPlace(context, settings, alley),
+                      child: Text(
+                        settings?.kioskWeatherPlace == null
+                            ? 'Vybrat…'
+                            : 'Změnit…',
+                      ),
+                    ),
+                  ),
+                _switch(
+                  context,
+                  settings,
+                  'Svátek',
+                  settings?.kioskNameday ?? false,
+                  'kiosk_nameday',
+                  subtitle:
+                      'Kdo má dnes svátek, podle českého kalendáře; ve '
+                      'státní svátek bez jména jeho název.',
+                ),
               ],
             ),
             _section(

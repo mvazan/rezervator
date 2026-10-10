@@ -690,6 +690,11 @@ class ScheduleSettings {
     this.kioskFontSize = 11,
     this.kioskAnimations = true,
     this.kioskLowRes = false,
+    this.kioskWeather = false,
+    this.kioskWeatherPlace,
+    this.kioskWeatherLat,
+    this.kioskWeatherLon,
+    this.kioskNameday = false,
     this.kioskLiveLayout = MatchLayout.full,
     this.tenantId = '',
     this.dutyReminderEnabled = false,
@@ -740,6 +745,17 @@ class ScheduleSettings {
   /// The web kiosk draws at devicePixelRatio 1 and lets the display scale
   /// it up: fewer pixels a frame, softer text (0065). Nothing in the app.
   final bool kioskLowRes;
+
+  /// Today's weather beside the kiosk's clock (0067), for the place the
+  /// admin picked — the label it shows and its coordinates (both or
+  /// neither). The kiosk asks Open-Meteo itself.
+  final bool kioskWeather;
+  final String? kioskWeatherPlace;
+  final double? kioskWeatherLat;
+  final double? kioskWeatherLon;
+
+  /// Whose name day it is, beside the kiosk's clock (0067).
+  final bool kioskNameday;
 
   /// How often the kiosk asks for a fresh score of a match being played.
   final int kioskLiveRefreshSeconds;
@@ -846,6 +862,11 @@ class ScheduleSettings {
         kioskFontSize: json['kiosk_font_size'] as int? ?? 11,
         kioskAnimations: json['kiosk_animations'] as bool? ?? true,
         kioskLowRes: json['kiosk_low_res'] as bool? ?? false,
+        kioskWeather: json['kiosk_weather'] as bool? ?? false,
+        kioskWeatherPlace: json['kiosk_weather_place'] as String?,
+        kioskWeatherLat: (json['kiosk_weather_lat'] as num?)?.toDouble(),
+        kioskWeatherLon: (json['kiosk_weather_lon'] as num?)?.toDouble(),
+        kioskNameday: json['kiosk_nameday'] as bool? ?? false,
         kioskLiveLayout: parseMatchLayout(
           json['kiosk_live_layout'] as String?,
           allowZapis: false,

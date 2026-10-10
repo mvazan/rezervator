@@ -1,0 +1,16 @@
+# Počasí a svátek na kiosku
+
+Requested by the user on 2026-10-10: beside the kiosk's clock, before „Rezervovat“, an option to show today's weather and whose name day it is. Separate branch from main (`kiosk-weather-nameday`); migration `0067_kiosk_weather_nameday.sql` — `0066` is the stream window's on the parallel branch `kiosk-stream`.
+
+## Decided
+
+- **Where:** a column right of the clock and date in the kiosk's status bar (`KioskDayInfo`): line 1 the weather — icon, the temperature now (big, like the clock's weight), today's high / low, an umbrella with the chance when it is 30 % or more; line 2 the name day („Svátek: Radmila“, „Svátek: Adam a Eva“; a public holiday without a name shows its name — „Nový rok“). Nothing at all when both are off or there is nothing to show.
+- **Both are admin options, off by default:** Správa → Kiosk → new section „Stavový řádek“ (after „Obrazovka kiosku“): switch „Počasí“ with the place row, switch „Svátek“.
+- **Weather source: Open-Meteo** — free, no key, no account, CORS for the web kiosk, CC BY 4.0 (the admin section names it). The kiosk asks it itself (web and app); no backend function. Every 30 minutes; a failed ask keeps the last answer; an answer older than 3 hours is not shown (a morning's rain is not shown at night).
+- **The place:** the kiosk cannot read the federation settings (admin-only RLS), so the admin's choice is stored in `schedule_settings` (label + coordinates). Switching „Počasí“ on with no place takes the alley's own venue (`federation_sync.venue_slug` → `venues.lat/lng`, which the federation fills — TJ Sokol Brno IV has them) automatically; „Změnit…“ opens a dialog with the venue first and a search by name (Open-Meteo geocoding, Czech names, results Czech-sorted per the list rule). Without a place the row says the kiosk shows no weather.
+- **Name days: the Czech calendar, bundled** (`lib/domain/namedays.dart`, a const table of 366 days, February 29 included) — no network, no outage, no stale data at midnight. The data is cross-checked from independent sources (Czech Wikipedia day pages, svatkyapi.cz, two MIT npm datasets); the main name(s) of each day as printed calendars show them, not every variant.
+- Settings (0067): `kiosk_weather`, `kiosk_weather_place`, `kiosk_weather_lat`, `kiosk_weather_lon` (both or neither, on Earth, label 1–200 characters), `kiosk_nameday`. `public_week` masks them — and the stream window's 0066 columns too, so whichever branch merges last, neither set reaches anon (the tenancy suite's key guard would also catch it).
+
+## Tests
+
+Weather parsing (codes, Czech words, degrees with a real minus and no „−0“, missing figures, staleness, the URIs, geocoding labels), the Open-Meteo client (MockClient: request, error answer, UTF-8, short query, failure) and the stream (fakeAsync: at once, on the timer, failure keeps the last, no timer after cancel); name-day lookups (ordinary day, several names, holiday only, February 29, every day of a leap year present); the admin section (venue taken on switch-on, no venue, search + pick with Czech sorting, failed search, name-day switch); the kiosk status bar (weather and name day shown when on, hidden when off, stale weather hidden, umbrella threshold); migration constraints and the public overview in the tenancy suite.

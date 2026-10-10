@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:rezervator/data/open_meteo.dart';
 import 'package:rezervator/data/providers.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/admin/kiosk_screen.dart';
@@ -69,6 +70,8 @@ void main() {
     Future<String> Function(String)? resetPassword,
     ScheduleSettings? settings,
     bool? panelEnabled,
+    Venue? alleyVenue,
+    http.Client? openMeteo,
   }) {
     final shown = settings ??
         (panelEnabled == null
@@ -86,6 +89,14 @@ void main() {
         settingsProvider.overrideWith((ref) => Stream.value(shown)),
         clubsProvider.overrideWith((ref) => Stream.value(const [])),
         profilesProvider.overrideWith((ref) => Stream.value(roster)),
+        if (alleyVenue != null) ...[
+          federationSyncProvider.overrideWith(
+            (ref) => Stream.value(FederationSync(venueSlug: alleyVenue.slug)),
+          ),
+          venuesProvider.overrideWith((ref) => Stream.value([alleyVenue])),
+        ],
+        if (openMeteo != null)
+          openMeteoClientProvider.overrideWithValue(openMeteo),
       ],
       child: MaterialApp(
         localizationsDelegates: GlobalMaterialLocalizations.delegates,
@@ -280,6 +291,162 @@ void main() {
     expect(find.text('Kioskové účty'), findsOneWidget);
     expect(find.textContaining('Nastavit jako kiosk'), findsOneWidget);
     expect(find.text('Vrátit mezi hráče'), findsNothing);
+  });
+
+  group('status line', () {
+    Map<String, dynamic> lastPatch() => jsonDecode(
+          requests.lastWhere((r) => r.method == 'PATCH').body,
+        ) as Map<String, dynamic>;
+    final sokol = Venue(
+      id: 'v1',
+      slug: 'tj-sokol-brno-iv',
+      name: 'TJ Sokol Brno IV',
+      address: 'Štolcova 551/8, 61800 Brno',
+      lat: 49.1891783,
+      lng: 16.6354503,
+      fetchedAt: DateTime(2026, 9, 1),
+    );
+    const weatherOn = ScheduleSettings(
+      laneCount: 4,
+      trainingWeekdays: {1, 2, 4},
+      bookingHorizonDays: 14,
+      maxActiveReservations: 3,
+      kioskWeather: true,
+    );
+
+    testWidgets('switching the weather on takes the alley\'s venue as its '
+        'place when none was picked', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(app(alleyVenue: sokol));
+      await tester.pumpAndSettle();
+      expect(find.text('Místo pro počasí'), findsNothing);
+
+      await tester.tap(find.widgetWithText(SwitchListTile, 'Počasí'));
+      await tester.pumpAndSettle();
+      expect(lastPatch(), {
+        'kiosk_weather': true,
+        'kiosk_weather_place': 'TJ Sokol Brno IV, Štolcova 551/8, 61800 Brno',
+        'kiosk_weather_lat': 49.1891783,
+        'kiosk_weather_lon': 16.6354503,
+      });
+    });
+
+    testWidgets('without a known venue the switch only turns it on; the row '
+        'says the place is missing', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(SwitchListTile, 'Počasí'));
+      await tester.pumpAndSettle();
+      expect(lastPatch(), {'kiosk_weather': true});
+    });
+
+    // A fresh tree: a second pumpWidget never swaps the overrides.
+    testWidgets('a place found by name: the results Czech-sorted, the pick '
+        'PATCHes the three columns', (tester) async {
+      tall(tester);
+      Uri? asked;
+      final openMeteo = MockClient((req) async {
+        asked = req.url;
+        return http.Response.bytes(
+          utf8.encode(jsonEncode({
+            'results': [
+              {
+                'name': 'Želešice',
+                'latitude': 49.1167,
+                'longitude': 16.5814,
+                'country_code': 'CZ',
+                'admin1': 'Jihomoravský',
+              },
+              {
+                'name': 'Brno',
+                'latitude': 49.19522,
+                'longitude': 16.60796,
+                'country_code': 'CZ',
+                'admin1': 'Jihomoravský',
+              },
+            ],
+          })),
+          200,
+        );
+      });
+      await tester.pumpWidget(
+        app(settings: weatherOn, alleyVenue: sokol, openMeteo: openMeteo),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Není vybrané — kiosk počasí neukáže.'),
+        findsOneWidget,
+      );
+
+      await tester.ensureVisible(find.text('Vybrat…'));
+      await tester.tap(find.text('Vybrat…'));
+      await tester.pumpAndSettle();
+      // The alley's venue is offered first.
+      expect(
+        find.text('TJ Sokol Brno IV, Štolcova 551/8, 61800 Brno'),
+        findsOneWidget,
+      );
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Hledat obec nebo město'),
+        'Brn',
+      );
+      await tester.testTextInput.receiveAction(TextInputAction.search);
+      await tester.pumpAndSettle();
+      expect(asked?.queryParameters['name'], 'Brn');
+      final labels = [
+        for (final t in tester.widgetList<ListTile>(
+          find.descendant(
+            of: find.byType(ListView).last,
+            matching: find.byType(ListTile),
+          ),
+        ))
+          ((t.title! as Text).data!),
+      ];
+      expect(labels, ['Brno, Jihomoravský', 'Želešice, Jihomoravský']);
+
+      await tester.tap(find.text('Brno, Jihomoravský'));
+      await tester.pumpAndSettle();
+      expect(lastPatch(), {
+        'kiosk_weather_place': 'Brno, Jihomoravský',
+        'kiosk_weather_lat': 49.19522,
+        'kiosk_weather_lon': 16.60796,
+      });
+    });
+
+    testWidgets('a failed search says so and keeps the dialog', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(
+        app(
+          settings: weatherOn,
+          openMeteo: MockClient((_) async => http.Response('', 503)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Vybrat…'));
+      await tester.tap(find.text('Vybrat…'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Hledat obec nebo město'),
+        'Brno',
+      );
+      await tester.testTextInput.receiveAction(TextInputAction.search);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Hledání se nepovedlo'), findsOneWidget);
+      expect(find.text('Místo pro počasí'), findsWidgets);
+      expect(requests.where((r) => r.method == 'PATCH'), isEmpty);
+    });
+
+    testWidgets('the name day switch PATCHes kiosk_nameday', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+      final nameday = find.widgetWithText(SwitchListTile, 'Svátek');
+      await tester.ensureVisible(nameday);
+      await tester.tap(nameday);
+      await tester.pumpAndSettle();
+      expect(lastPatch(), {'kiosk_nameday': true});
+    });
   });
 
   testWidgets('the panel options PATCH their own columns', (tester) async {
