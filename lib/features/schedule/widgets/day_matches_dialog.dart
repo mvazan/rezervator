@@ -40,6 +40,8 @@ import '../../../core/push_screen.dart';
 /// match with a YouTube video ([hasKioskVideo]; any other keeps the
 /// trophy): a tap closes the dialog and plays it in the kiosk's stream
 /// window. Only without [interactive] — the app keeps the browser.
+/// [pulseLive] false keeps the live badge still (the kiosk's „Animace na
+/// pozadí“ off).
 Future<void> showDayMatchesDialog(
   BuildContext context,
   Day date,
@@ -48,6 +50,7 @@ Future<void> showDayMatchesDialog(
   bool interactive = true,
   void Function(PrioritySlot match)? onOpenMatch,
   void Function(PrioritySlot match)? onPlayVideo,
+  bool pulseLive = true,
 }) {
   if (events.isEmpty) return Future.value();
   // Captured before the dialog opens: the same Navigator that will host the
@@ -81,6 +84,7 @@ Future<void> showDayMatchesDialog(
                         m,
                         m.fromFederation ? results[m.id] : null,
                         now,
+                        pulseLive,
                         interactive
                             ? launch
                             // The kiosk: the video plays in its own window.
@@ -132,6 +136,7 @@ Widget _eventRow(
   PrioritySlot m,
   MatchResult? result,
   DateTime now,
+  bool pulseLive,
   void Function(String url)? launch,
   VoidCallback? onOpen,
 ) {
@@ -154,6 +159,7 @@ Widget _eventRow(
           color: scheme.onSurfaceVariant,
         ),
         launch: launch ?? launchWeb,
+        pulse: pulseLive,
       ),
       const SizedBox(width: 10),
       Expanded(

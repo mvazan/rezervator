@@ -29,6 +29,7 @@ import '../clubhouse/widgets/duel_card.dart';
 import '../clubhouse/widgets/duels_compact.dart';
 import '../clubhouse/widgets/match_scoreboard.dart';
 import '../clubhouse/widgets/match_title.dart';
+import '../clubhouse/widgets/match_video_icon.dart';
 import '../clubhouse/widgets/team_totals_card.dart';
 import '../schedule/widgets/calendar_board.dart' show calendarRulerWidth;
 
@@ -264,7 +265,7 @@ class KioskDrawerButton extends StatefulWidget {
   final bool open;
   final VoidCallback onTap;
 
-  /// Off = a still button (the admin's „Dýchající tlačítko panelu“, 0065):
+  /// Off = a still button (the admin's „Animace na pozadí“, 0065):
   /// every breath repaints the screen, which a slow display feels.
   final bool breathe;
 
@@ -1198,14 +1199,26 @@ class _LiveViewState extends ConsumerState<_LiveView> {
                       ),
                     const Spacer(),
                     _LiveAge(slot: slot),
-                    if (hasKioskVideo(slot))
-                      IconButton(
-                        tooltip: 'Sledovat živě',
-                        visualDensity: VisualDensity.compact,
-                        color: scheme.primary,
-                        onPressed: () => widget.onPlay(slot),
-                        icon: const Icon(Icons.play_circle_outline),
+                    // The live badge everywhere else has: the pulsing red
+                    // camera — still with the admin's animations off.
+                    if (hasKioskVideo(slot)) ...[
+                      const SizedBox(width: 8),
+                      MatchLeading(
+                        slot: slot,
+                        result: ref.watch(
+                          matchResultsProvider.select((r) => r.value?[slot.id]),
+                        ),
+                        now: ref.watch(nowProvider).value ?? DateTime.now(),
+                        linksEnabled: true,
+                        fallback: const SizedBox.shrink(),
+                        launch: (_) => widget.onPlay(slot),
+                        pulse: ref.watch(
+                          settingsProvider.select(
+                            (s) => s.value?.kioskAnimations ?? true,
+                          ),
+                        ),
                       ),
+                    ],
                   ],
                 ),
                 const SizedBox(height: 8),

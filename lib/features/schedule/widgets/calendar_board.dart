@@ -410,6 +410,7 @@ class BoardColumnHeader extends StatelessWidget {
     this.watch,
     this.onOpenMatch,
     this.onPlayVideo,
+    this.pulseLive = true,
   });
 
   final Day date;
@@ -445,6 +446,10 @@ class BoardColumnHeader extends StatelessWidget {
   /// The kiosk's: the video control of a match in the day's list plays it
   /// in the kiosk's stream window (see [showDayMatchesDialog]).
   final void Function(PrioritySlot match)? onPlayVideo;
+
+  /// The live badge in the day's list pulses (see [showDayMatchesDialog]);
+  /// the kiosk's „Animace na pozadí“.
+  final bool pulseLive;
 
   @override
   Widget build(BuildContext context) {
@@ -501,6 +506,7 @@ class BoardColumnHeader extends StatelessWidget {
                               interactive: interactive,
                               onOpenMatch: onOpenMatch,
                               onPlayVideo: onPlayVideo,
+                              pulseLive: pulseLive,
                             ),
                     child: Column(
                       children: [

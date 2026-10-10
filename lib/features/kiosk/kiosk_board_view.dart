@@ -440,6 +440,7 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
                             height: headerHeight,
                             onOpenMatch: widget.onOpenMatch,
                             onPlayVideo: widget.onPlayVideo,
+                            pulseLive: settings.kioskAnimations,
                             // Never a tap-through to MatchDetailScreen or the
                             // browser's video button here: the kiosk's own
                             // 60 s idle-reset Listener doesn't see touches on
