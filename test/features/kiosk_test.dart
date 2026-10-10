@@ -1718,6 +1718,13 @@ void main() {
         await tester.tap(find.text('6 : 2'));
         await tester.pumpAndSettle();
         expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
+        // Above the sheet, not over its corner (the away team's totals).
+        expect(
+          tester.getRect(find.text('Přehrát záznam')).bottom,
+          lessThanOrEqualTo(
+            tester.getRect(find.byType(LegacyScoreSheetPage)).top,
+          ),
+        );
 
         await tester.tap(find.text('Přehrát záznam'));
         await tester.pumpAndSettle();
