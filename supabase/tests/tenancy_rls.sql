@@ -10574,6 +10574,40 @@ end $$;
 \ir ../migrations/0064_kiosk_panel.sql
 \ir ../migrations/0065_kiosk_performance.sql
 \ir ../migrations/0066_kiosk_stream.sql
+\ir ../migrations/0067_kiosk_weather_nameday.sql
+
+-- 0067: the weather's place comes whole — both coordinates or neither, on
+-- Earth — and none of the status line's settings reach the public overview.
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+begin
+  begin
+    update schedule_settings set kiosk_weather_lat = 49.19 where tenant_id = v_a;
+    raise exception 'FAIL: a latitude without a longitude was accepted (0067)';
+  exception when check_violation then null;
+  end;
+  begin
+    update schedule_settings
+       set kiosk_weather_lat = 91, kiosk_weather_lon = 16 where tenant_id = v_a;
+    raise exception 'FAIL: a latitude past the pole was accepted (0067)';
+  exception when check_violation then null;
+  end;
+  update schedule_settings
+     set kiosk_weather = true, kiosk_nameday = true,
+         kiosk_weather_place = 'Brno, Jihomoravský',
+         kiosk_weather_lat = 49.19522, kiosk_weather_lon = 16.60796
+   where tenant_id = v_a;
+  if exists (select 1 from jsonb_object_keys(public_week('kuzelna-a', current_date)->'settings') k
+              where k like 'kiosk\_weather%' or k = 'kiosk_nameday') then
+    raise exception 'FAIL: the public overview hands out the status line settings (0067)';
+  end if;
+  update schedule_settings
+     set kiosk_weather = false, kiosk_nameday = false, kiosk_weather_place = null,
+         kiosk_weather_lat = null, kiosk_weather_lon = null
+   where tenant_id = v_a;
+  raise notice 'OK: the weather''s place comes whole, the status line stays off the public overview (0067)';
+end $$;
 
 -- 0052 One device token, one profile ----------------------------------------
 -- 20. notify pushes to every profile holding a token, so a token the last

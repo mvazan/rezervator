@@ -708,6 +708,11 @@ class ScheduleSettings {
     this.kioskStream = false,
     this.kioskStreamCorner = KioskCorner.bl,
     this.kioskStreamWidth = 35,
+    this.kioskWeather = false,
+    this.kioskWeatherPlace,
+    this.kioskWeatherLat,
+    this.kioskWeatherLon,
+    this.kioskNameday = false,
     this.kioskLiveLayout = MatchLayout.full,
     this.tenantId = '',
     this.dutyReminderEnabled = false,
@@ -765,6 +770,16 @@ class ScheduleSettings {
   final bool kioskStream;
   final KioskCorner kioskStreamCorner;
   final int kioskStreamWidth;
+  /// Today's weather beside the kiosk's clock (0067), for the place the
+  /// admin picked — the label it shows and its coordinates (both or
+  /// neither). The kiosk asks Open-Meteo itself.
+  final bool kioskWeather;
+  final String? kioskWeatherPlace;
+  final double? kioskWeatherLat;
+  final double? kioskWeatherLon;
+
+  /// Whose name day it is, beside the kiosk's clock (0067).
+  final bool kioskNameday;
 
   /// How often the kiosk asks for a fresh score of a match being played.
   final int kioskLiveRefreshSeconds;
@@ -876,6 +891,11 @@ class ScheduleSettings {
           json['kiosk_stream_corner'] as String?,
         ),
         kioskStreamWidth: json['kiosk_stream_width'] as int? ?? 35,
+        kioskWeather: json['kiosk_weather'] as bool? ?? false,
+        kioskWeatherPlace: json['kiosk_weather_place'] as String?,
+        kioskWeatherLat: (json['kiosk_weather_lat'] as num?)?.toDouble(),
+        kioskWeatherLon: (json['kiosk_weather_lon'] as num?)?.toDouble(),
+        kioskNameday: json['kiosk_nameday'] as bool? ?? false,
         kioskLiveLayout: parseMatchLayout(
           json['kiosk_live_layout'] as String?,
           allowZapis: false,

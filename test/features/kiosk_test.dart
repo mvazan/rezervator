@@ -1366,6 +1366,7 @@ void main() {
       bool fitDay = true,
       bool animations = true,
       bool stream = false,
+      bool nameday = false,
       Stream<Map<String, MatchResult>>? resultsStream,
       Map<String, List<MatchPlayerResult>> lineups = const {},
     }) => ProviderScope(
@@ -1405,6 +1406,7 @@ void main() {
               kioskFitDay: fitDay,
               kioskAnimations: animations,
               kioskStream: stream,
+              kioskNameday: nameday,
             ),
           ),
         ),
@@ -1664,6 +1666,30 @@ void main() {
         expect(player, findsNothing);
         await finish(tester);
       });
+    });
+
+    testWidgets('the name day sits in the status bar between the clock and '
+        '„Rezervovat“ — only when the admin wants it', (tester) async {
+      fullHd(tester);
+      await tester.pumpWidget(app(nameday: true));
+      await tester.pumpAndSettle();
+      // Thursday 8 October: Věra.
+      final nameday = find.text('Svátek: Věra');
+      expect(nameday, findsOneWidget);
+      expect(
+        tester.getTopLeft(nameday).dx,
+        greaterThan(tester.getTopRight(find.text('12:00')).dx),
+      );
+      expect(
+        tester.getTopRight(nameday).dx,
+        lessThan(tester.getTopLeft(find.text('Rezervovat')).dx),
+      );
+      await finish(tester);
+
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+      expect(find.text('Svátek: Věra'), findsNothing);
+      await finish(tester);
     });
 
     testWidgets('closed by default: only the button shows, tap opens it, tap '
