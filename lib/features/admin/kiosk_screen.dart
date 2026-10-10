@@ -270,7 +270,7 @@ class KioskSettingsScreen extends ConsumerWidget {
                       ),
                       if (settings?.kioskPickerNote != null)
                         IconButton(
-                          tooltip: 'Odstranit upozornění',
+                          tooltip: 'Odstranit upozornění při rezervaci',
                           icon: const Icon(Icons.delete_outline),
                           onPressed: () => _panel(context, settings!, {
                             'kiosk_picker_note': null,

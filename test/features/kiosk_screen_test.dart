@@ -17,6 +17,13 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 /// PATCHes `schedule_settings.kiosk_dark` — asserted here by inspecting the
 /// stubbed HTTP request rather than hitting a real backend.
 void main() {
+  /// [text] inside the admin tile titled [title] — the warning and the
+  /// booking note each have their own „Přidat…“ and „Upravit…“.
+  Finder inTile(String title, String text) => find.descendant(
+    of: find.widgetWithText(ListTile, title),
+    matching: find.text(text),
+  );
+
   const admin = Profile(
     id: 'admin1',
     displayName: 'Správce',
@@ -441,7 +448,7 @@ void main() {
         find.text('Žádné. Upozornění nad písmeny při výběru jména na kiosku.'),
         findsOneWidget,
       );
-      expect(find.byTooltip('Odstranit upozornění'), findsNothing);
+      expect(find.byTooltip('Odstranit upozornění při rezervaci'), findsNothing);
       double top(Finder f) => tester.getTopLeft(f).dy;
       expect(
         top(find.text('Upozornění při rezervaci')),
@@ -452,7 +459,7 @@ void main() {
         lessThan(top(find.text('Tmavý režim'))),
       );
 
-      await tester.tap(find.text('Přidat…'));
+      await tester.tap(inTile('Upozornění při rezervaci', 'Přidat…'));
       await tester.pumpAndSettle();
       expect(
         find.descendant(
@@ -504,14 +511,14 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Zrušit jde jen v aplikaci.'), findsOneWidget);
 
-      await tester.tap(find.text('Upravit…'));
+      await tester.tap(inTile('Upozornění při rezervaci', 'Upravit…'));
       await tester.pumpAndSettle();
       expect(fieldText(tester), 'Zrušit jde jen v aplikaci.');
       await tester.tap(find.text('Zrušit'));
       await tester.pumpAndSettle();
       expect(requests.where((r) => r.method == 'PATCH'), isEmpty);
 
-      await tester.tap(find.text('Upravit…'));
+      await tester.tap(inTile('Upozornění při rezervaci', 'Upravit…'));
       await tester.pumpAndSettle();
       await tester.enterText(field(), '  Zrušit jde v aplikaci i na webu. ');
       await tester.pump();
@@ -521,7 +528,7 @@ void main() {
         'kiosk_picker_note': 'Zrušit jde v aplikaci i na webu.',
       });
 
-      await tester.tap(find.byTooltip('Odstranit upozornění'));
+      await tester.tap(find.byTooltip('Odstranit upozornění při rezervaci'));
       await tester.pumpAndSettle();
       expect(lastPatch(), {'kiosk_picker_note': null});
     });
