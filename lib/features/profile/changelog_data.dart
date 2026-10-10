@@ -68,6 +68,8 @@ const appChangelog = <Release>[
     'Kiosk: vedle hodin může být dnešní počasí (teplota, předpověď, '
         'deštník při šanci na srážky) a kdo má svátek — Správa → Kiosk → '
         'Stavový řádek; místo pro počasí je kuželna nebo vyhledaná obec.',
+    'Kiosk: výběr jména radí, které písmeno vybrat — první písmeno '
+        'přezdívky, nebo křestního jména, když přezdívka není.',
   ], store: [
     'Kiosk: zápis zápasu ukazuje registrační čísla hráčů.',
     'Emoji v textu se kreslí z obrázků — všude stejně.',
@@ -77,6 +79,7 @@ const appChangelog = <Release>[
     'Správa → Kiosk: volby Optimalizace výkonu pro slabší displej.',
     'Kiosk: stream zápasu z YouTube v plovoucím okně vedle tabule.',
     'Kiosk: počasí a svátek vedle hodin.',
+    'Kiosk: výběr jména radí, které písmeno vybrat.',
   ]),
   Release('2.0.7', '9. 10. 2026', [
     'Notifikace o rezervaci, kterou za vás udělal kiosk, spoluhráč ze '

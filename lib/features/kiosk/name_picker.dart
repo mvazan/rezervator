@@ -42,6 +42,13 @@ const _maxNameColumns = 4;
 
 const _tileGap = 12.0;
 
+/// Above the first letters: which one to tap. The picker files a player
+/// under the name the board shows ([PlayerName.boardName]) — the nick, or
+/// the full name, which starts with the first name, when there is no nick.
+const firstLetterHint =
+    'Vyber první písmeno své přezdívky — nebo křestního jména, pokud '
+    'přezdívku nemáš.';
+
 Future<PlayerName?> showNamePicker(
   BuildContext context, {
   Brightness brightness = Brightness.dark,
@@ -196,6 +203,23 @@ class _NamePickerState extends ConsumerState<NamePicker> {
                             if (exactMatches.isNotEmpty) ...[
                               _nameGrid(
                                   context, exactMatches, constraints.maxWidth),
+                              const SizedBox(height: 24),
+                            ],
+                            // The first letters only: which letter is
+                            // „mine“ is not obvious — the index goes by the
+                            // name on the board (nameIndex), a nick when
+                            // there is one, not by the surname.
+                            if (_prefix.isEmpty) ...[
+                              Text(
+                                firstLetterHint,
+                                textAlign: TextAlign.center,
+                                style: Theme.of(context).textTheme.titleLarge
+                                    ?.copyWith(
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.onSurfaceVariant,
+                                    ),
+                              ),
                               const SizedBox(height: 24),
                             ],
                             Wrap(
