@@ -73,16 +73,14 @@ const appChangelog = <Release>[
     'Kalendář a kiosk: zápas v rozvrhu píše domácí, pomlčku a hosty pod '
         'sebe — název týmu se už nerozdělí v půlce.',
   ], store: [
-    'Kiosk: zápis zápasu ukazuje registrační čísla hráčů.',
-    'Emoji v textu se kreslí z obrázků — všude stejně.',
-    'Kiosk: volné místo značí ＋ jako v kalendáři appky.',
-    'Kiosk v aplikaci: displej nezhasne, systémové lišty se schovají; kiosk '
-        'účet se přihlásí tlačítkem „Přihlásit kiosk“.',
-    'Správa → Kiosk: volby Optimalizace výkonu pro slabší displej.',
-    'Kiosk: stream zápasu z YouTube v plovoucím okně vedle tabule.',
-    'Kiosk: počasí a svátek vedle hodin.',
-    'Kiosk: výběr jména radí, které písmeno vybrat.',
+    'Kiosk: stream zápasu z YouTube, počasí a svátek vedle hodin.',
+    'Kiosk: registrační čísla v zápisu, ＋ jako v appce, rada ve výběru '
+        'jména.',
+    'Kiosk v aplikaci: displej nezhasne, lišty se schovají; přihlášení '
+        'tlačítkem „Přihlásit kiosk“.',
+    'Správa → Kiosk: Optimalizace výkonu pro slabší displej.',
     'Zápas v rozvrhu: domácí, pomlčka a hosté pod sebou.',
+    'Emoji v textu z obrázků — všude stejně.',
   ]),
   Release('2.0.7', '9. 10. 2026', [
     'Notifikace o rezervaci, kterou za vás udělal kiosk, spoluhráč ze '
