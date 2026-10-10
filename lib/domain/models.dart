@@ -661,6 +661,21 @@ MatchLayout parseMatchLayout(
   return found == MatchLayout.zapis && !allowZapis ? fallback : found;
 }
 
+/// Where the kiosk's stream window first appears (0066).
+enum KioskCorner {
+  tl,
+  tr,
+  bl,
+  br;
+
+  bool get top => this == tl || this == tr;
+  bool get left => this == tl || this == bl;
+
+  /// The stored name, or bottom left for anything else.
+  static KioskCorner parse(String? name) =>
+      values.where((c) => c.name == name).firstOrNull ?? bl;
+}
+
 class ScheduleSettings {
   const ScheduleSettings({
     required this.laneCount,
@@ -690,6 +705,9 @@ class ScheduleSettings {
     this.kioskFontSize = 11,
     this.kioskAnimations = true,
     this.kioskLowRes = false,
+    this.kioskStream = false,
+    this.kioskStreamCorner = KioskCorner.bl,
+    this.kioskStreamWidth = 35,
     this.kioskLiveLayout = MatchLayout.full,
     this.tenantId = '',
     this.dutyReminderEnabled = false,
@@ -740,6 +758,13 @@ class ScheduleSettings {
   /// The web kiosk draws at devicePixelRatio 1 and lets the display scale
   /// it up: fewer pixels a frame, softer text (0065). Nothing in the app.
   final bool kioskLowRes;
+
+  /// The match on air with a YouTube link plays in a floating window on
+  /// the kiosk (0066); where it first appears and how wide, in percent of
+  /// the screen (16:9 gives the height).
+  final bool kioskStream;
+  final KioskCorner kioskStreamCorner;
+  final int kioskStreamWidth;
 
   /// How often the kiosk asks for a fresh score of a match being played.
   final int kioskLiveRefreshSeconds;
@@ -846,6 +871,11 @@ class ScheduleSettings {
         kioskFontSize: json['kiosk_font_size'] as int? ?? 11,
         kioskAnimations: json['kiosk_animations'] as bool? ?? true,
         kioskLowRes: json['kiosk_low_res'] as bool? ?? false,
+        kioskStream: json['kiosk_stream'] as bool? ?? false,
+        kioskStreamCorner: KioskCorner.parse(
+          json['kiosk_stream_corner'] as String?,
+        ),
+        kioskStreamWidth: json['kiosk_stream_width'] as int? ?? 35,
         kioskLiveLayout: parseMatchLayout(
           json['kiosk_live_layout'] as String?,
           allowZapis: false,
