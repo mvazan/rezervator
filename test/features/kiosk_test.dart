@@ -228,7 +228,12 @@ void main() {
     await finish(tester);
   });
 
-  testWidgets('b2: above the first letters the picker says which letter to '
+  // A letter of the picker as the tile it paints: SizedBox → Ink (the
+  // decoration) → InkWell, as in name_picker_test.dart.
+  Finder letterTile(String letter) =>
+      find.ancestor(of: find.text(letter), matching: find.byType(Ink));
+
+  testWidgets('b2: under the first letters the picker says which letter to '
       'pick — not once a letter is picked, nor when it lists names at once', (
     tester,
   ) async {
@@ -242,11 +247,15 @@ void main() {
 
     final hint = find.text(firstLetterHint);
     expect(hint, findsOneWidget);
-    // Above the letters.
+    // Under the letters — the last row too — and still on the screen.
     expect(
-      tester.getBottomLeft(hint).dy,
-      lessThan(tester.getTopLeft(find.text('A')).dy),
+      tester.getTopLeft(hint).dy,
+      greaterThan(tester.getBottomLeft(letterTile('Z')).dy),
     );
+    expect(tester.getBottomLeft(hint).dy, lessThanOrEqualTo(1080));
+    // Centred under them, as the letters are.
+    expect(tester.getCenter(hint).dx, closeTo(960, 1));
+    expect(tester.takeException(), isNull);
 
     await tester.tap(find.text('A'));
     await tester.pumpAndSettle();
@@ -263,9 +272,9 @@ void main() {
     await finish(tester);
   });
 
-  testWidgets('b3: the admin\'s note (0070) stands above the hint on the '
-      'first letters — the default text or the admin\'s own; none, nothing; '
-      'gone once a letter is picked', (tester) async {
+  testWidgets('b3: the admin\'s note (0070) stands above the first letters, '
+      'the hint under them — the default text or the admin\'s own; none, '
+      'nothing; gone once a letter is picked', (tester) async {
     tester.view.physicalSize = const Size(1920, 1080);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -282,8 +291,14 @@ void main() {
     expect(find.text(ScheduleSettings.defaultPickerNote), findsOneWidget);
     expect(
       tester.getBottomLeft(note).dy,
-      lessThan(tester.getTopLeft(hint).dy),
+      lessThan(tester.getTopLeft(letterTile('A')).dy),
     );
+    expect(
+      tester.getTopLeft(hint).dy,
+      greaterThan(tester.getBottomLeft(letterTile('Z')).dy),
+    );
+    // The note does not push the hint off the kiosk's screen.
+    expect(tester.getBottomLeft(hint).dy, lessThanOrEqualTo(1080));
     // Not stretched across a wide screen: centred, at most 1000 px.
     expect(tester.getSize(note).width, lessThanOrEqualTo(1000));
     expect(tester.getCenter(note).dx, closeTo(960, 1));
@@ -352,8 +367,8 @@ void main() {
     await finish(tester);
   });
 
-  testWidgets('b3: on a phone the note keeps to the screen above the hint '
-      'and the letters', (tester) async {
+  testWidgets('b3: on a phone the note keeps to the screen above the '
+      'letters, and the hint under them scrolls into view', (tester) async {
     tester.view.physicalSize = const Size(375, 812);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -386,8 +401,24 @@ void main() {
     expect(tester.getTopRight(note).dx, lessThanOrEqualTo(375));
     expect(
       tester.getBottomLeft(note).dy,
-      lessThan(tester.getTopLeft(find.text(firstLetterHint)).dy),
+      lessThan(tester.getTopLeft(letterTile('A')).dy),
     );
+
+    // Two letters a row: the hint is far below the fold, and the page
+    // scrolls down to it.
+    final hint = find.text(firstLetterHint);
+    expect(
+      tester.getTopLeft(hint).dy,
+      greaterThan(tester.getBottomLeft(letterTile('Z')).dy),
+    );
+    expect(tester.getTopLeft(hint).dy, greaterThan(812));
+    await tester.scrollUntilVisible(hint, 300);
+    await tester.pumpAndSettle();
+    expect(hint.hitTestable(), findsOneWidget);
+    expect(tester.getTopLeft(hint).dx, greaterThanOrEqualTo(0));
+    expect(tester.getTopRight(hint).dx, lessThanOrEqualTo(375));
+    expect(tester.getBottomLeft(hint).dy, lessThanOrEqualTo(812));
+    expect(tester.takeException(), isNull);
     await finish(tester);
   });
 

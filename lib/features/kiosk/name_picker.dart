@@ -43,14 +43,14 @@ const _maxNameColumns = 4;
 
 const _tileGap = 12.0;
 
-/// Above the first letters: which one to tap. The picker files a player
+/// Under the first letters: which one to tap. The picker files a player
 /// under the name the board shows ([PlayerName.boardName]) — the nick, or
 /// the full name, which starts with the first name, when there is no nick.
 const firstLetterHint =
     'Vyber první písmeno své přezdívky — nebo křestního jména, pokud '
     'přezdívku nemáš.';
 
-/// The widest the admin's note above the hint gets: a wide screen does not
+/// The widest the admin's note above the letters gets: a wide screen does not
 /// stretch it into one line nobody reads to the end (two lines of its
 /// 18 px bold hold the column's 200 characters at this width).
 const _noteMaxWidth = 1000.0;
@@ -222,34 +222,17 @@ class _NamePickerState extends ConsumerState<NamePicker> {
                                   context, exactMatches, constraints.maxWidth),
                               const SizedBox(height: 24),
                             ],
-                            // The first letters only: which letter is
-                            // „mine“ is not obvious — the index goes by the
-                            // name on the board (nameIndex), a nick when
-                            // there is one, not by the surname.
-                            if (_prefix.isEmpty) ...[
-                              // Read before a letter is tapped, so above
-                              // the hint; the later pages go without it.
-                              if (note != null) ...[
-                                ConstrainedBox(
-                                  constraints: const BoxConstraints(
-                                    maxWidth: _noteMaxWidth,
-                                  ),
-                                  child: KioskWarning(
-                                    text: note,
-                                    maxLines: _noteMaxLines,
-                                  ),
+                            // Read before a letter is tapped, so above the
+                            // letters; the later pages go without it.
+                            if (_prefix.isEmpty && note != null) ...[
+                              ConstrainedBox(
+                                constraints: const BoxConstraints(
+                                  maxWidth: _noteMaxWidth,
                                 ),
-                                const SizedBox(height: 16),
-                              ],
-                              Text(
-                                firstLetterHint,
-                                textAlign: TextAlign.center,
-                                style: Theme.of(context).textTheme.titleLarge
-                                    ?.copyWith(
-                                      color: Theme.of(
-                                        context,
-                                      ).colorScheme.onSurfaceVariant,
-                                    ),
+                                child: KioskWarning(
+                                  text: note,
+                                  maxLines: _noteMaxLines,
+                                ),
                               ),
                               const SizedBox(height: 24),
                             ],
@@ -266,6 +249,26 @@ class _NamePickerState extends ConsumerState<NamePicker> {
                                   ),
                               ],
                             ),
+                            // The first letters only: which letter is
+                            // „mine“ is not obvious — the index goes by the
+                            // name on the board (nameIndex), a nick when
+                            // there is one, not by the surname. Under the
+                            // letters, not over them: the letters are what
+                            // the page is for, the hint is for whoever does
+                            // not see theirs at a glance.
+                            if (_prefix.isEmpty) ...[
+                              const SizedBox(height: 24),
+                              Text(
+                                firstLetterHint,
+                                textAlign: TextAlign.center,
+                                style: Theme.of(context).textTheme.titleLarge
+                                    ?.copyWith(
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.onSurfaceVariant,
+                                    ),
+                              ),
+                            ],
                           ],
                         ),
                       NamesNode(:final players) =>
