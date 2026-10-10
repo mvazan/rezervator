@@ -26,6 +26,7 @@ class ZapisPage extends ConsumerWidget {
     this.competitionSlug,
     this.withRegnums = false,
     this.backButton = false,
+    this.hideSystemBars = true,
   });
 
   final PrioritySlot slot;
@@ -46,6 +47,11 @@ class ZapisPage extends ConsumerWidget {
   /// sideways Zápis stands in for the match detail, so it goes back to
   /// where the match was opened from. Either one pops the route.
   final bool backButton;
+
+  /// Passed on to the sheet (`LegacyScoreSheetPage.hideSystemBars`): hide
+  /// the system bars while it is up. The kiosk passes false — its shell
+  /// keeps them hidden itself.
+  final bool hideSystemBars;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -97,6 +103,7 @@ class ZapisPage extends ConsumerWidget {
       players: players,
       showCloseButton: closeButton || backButton,
       backButton: backButton,
+      hideSystemBars: hideSystemBars,
     );
   }
 }

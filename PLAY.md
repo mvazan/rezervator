@@ -124,6 +124,34 @@ psaní changelogu, ne až po vydání. Bez souhrnu by `store_notes.dart` záznam
 zkrátil sám: nechá z každé odrážky první větu a pak odebírá odrážky od konce
 — tak se u 1.2.8 do Play nedostaly Skupiny.
 
+## APK na vyžádání (kiosk)
+
+Kiosk může běžet i jako nainstalovaná aplikace (přihlášení kiosk účtem → místo
+appky se ukáže kiosk) — na Android displeji jede plynuleji než web
+v prohlížeči; aplikace sama drží obrazovku zapnutou a schová systémové lišty.
+Kiosk účet se v aplikaci přihlásí tlačítkem **„Přihlásit kiosk“** dole na
+přihlašovací obrazovce (e-mail + heslo jako na webu na `#/kiosk-login`).
+APK libovolné větve, tagu nebo commitu postaví ručně spuštěný workflow
+**Actions → APK → Run workflow** (`ref` = větev/tag/commit; prázdné = větev
+vybraná v dialogu). Výsledek je artefakt `rezervator-<verze>-<commit>.apk`,
+uložený 30 dní. Každé vydání má navíc své APK na stránce Releases
+(`release.yml`).
+
+Oba podepisuje tenhle upload keystore, takže se instalují přes sebe (Android
+odmítne aktualizaci pod jiným klíčem). Kontrola `min_build` platí i tu: po
+vydání, které ji zvedne, je třeba na displej nahrát nové APK (ze stránky
+Releases).
+
+Instalace na displej s iiSignage² (např. iiyama TW3226AS-B3P): v CMS
+iiyama-cms.com nahrát APK v **Resource management → Material management**,
+vložit ho do programu (**Content management → Program production → More →
+Apk**, Trigger method „auto trigger“, pole „Automatically exit APK without
+operation(s)“ nechat prázdné) a program publikovat na terminál. Bez CMS:
+otevřít odkaz ze stránky Releases v Chrome na displeji (repozitář je veřejný),
+nebo APK z USB klíče ve správci souborů — Android se zeptá na povolení
+instalace z neznámých zdrojů. Pak v nastavení displeje „lock application“
+(kiosk mode) a časy zapnutí/vypnutí.
+
 ## Demo přístup pro recenzenty Google Play
 
 Aplikace se přihlašuje jen e-mailovým odkazem (magic link), takže recenzent

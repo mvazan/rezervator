@@ -308,6 +308,31 @@ void main() {
     expect(lastPatch(), {'kiosk_drawer_open': true});
   });
 
+  testWidgets('the performance options PATCH their own columns: the breathing '
+      'on by default, the low resolution off', (tester) async {
+    tall(tester);
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+
+    Map<String, dynamic> lastPatch() => jsonDecode(
+          requests.lastWhere((r) => r.method == 'PATCH').body,
+        ) as Map<String, dynamic>;
+
+    final breathing =
+        find.widgetWithText(SwitchListTile, 'Dýchající tlačítko panelu');
+    await tester.ensureVisible(breathing);
+    await tester.tap(breathing);
+    await tester.pumpAndSettle();
+    expect(lastPatch(), {'kiosk_animations': false});
+
+    final lowRes =
+        find.widgetWithText(SwitchListTile, 'Nižší rozlišení (jen web)');
+    await tester.ensureVisible(lowRes);
+    await tester.tap(lowRes);
+    await tester.pumpAndSettle();
+    expect(lastPatch(), {'kiosk_low_res': true});
+  });
+
   /// Types [text] into the number field [label] and presses Enter.
   Future<void> enter(WidgetTester tester, String label, String text) async {
     final field = find.widgetWithText(TextField, label);

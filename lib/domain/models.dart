@@ -688,6 +688,8 @@ class ScheduleSettings {
     this.kioskIdleSeconds = 60,
     this.kioskVisibleDays = 7,
     this.kioskFontSize = 11,
+    this.kioskAnimations = true,
+    this.kioskLowRes = false,
     this.kioskLiveLayout = MatchLayout.full,
     this.tenantId = '',
     this.dutyReminderEnabled = false,
@@ -730,6 +732,14 @@ class ScheduleSettings {
   /// The match list follows the board: a visitor who scrolls the board to
   /// other days sees the list turn to their matches (0064).
   final bool kioskFollowBoard;
+
+  /// The drawer button breathes — a glow every few seconds. Off for a slow
+  /// display, where the glow repaints the screen for nothing (0065).
+  final bool kioskAnimations;
+
+  /// The web kiosk draws at devicePixelRatio 1 and lets the display scale
+  /// it up: fewer pixels a frame, softer text (0065). Nothing in the app.
+  final bool kioskLowRes;
 
   /// How often the kiosk asks for a fresh score of a match being played.
   final int kioskLiveRefreshSeconds;
@@ -834,6 +844,8 @@ class ScheduleSettings {
         kioskIdleSeconds: json['kiosk_idle_seconds'] as int? ?? 60,
         kioskVisibleDays: json['kiosk_visible_days'] as int? ?? 7,
         kioskFontSize: json['kiosk_font_size'] as int? ?? 11,
+        kioskAnimations: json['kiosk_animations'] as bool? ?? true,
+        kioskLowRes: json['kiosk_low_res'] as bool? ?? false,
         kioskLiveLayout: parseMatchLayout(
           json['kiosk_live_layout'] as String?,
           allowZapis: false,

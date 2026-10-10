@@ -232,6 +232,9 @@ neukazuje seznam hráčů ani rozvrh správy — jen svůj vlastní rozvrh a tla
    je jediná, která na GitHub Pages (statický hosting bez server-side
    rewrite pravidel) skutečně zafunguje. Adresa bez `#` by po refresh/přímém
    vstupu skončila 404 dřív, než se appka vůbec stihne načíst.
+   Bez prohlížeče: nainstalovaná Android aplikace (APK ze stránky Releases
+   nebo z workflow APK, viz PLAY.md) má tenhle formulář pod tlačítkem
+   **„Přihlásit kiosk“** dole na přihlašovací obrazovce.
 3. Přihlas se e-mailem a heslem z kroku 1 (samostatný formulář — kiosek
    nepoužívá magic linky jako běžní hráči, protože jde o sdílené zařízení
    bez vlastní schránky). Appka po přihlášení nikoho nezná (žádný profil

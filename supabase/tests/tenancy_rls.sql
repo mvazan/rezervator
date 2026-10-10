@@ -10562,8 +10562,10 @@ begin
 end $$;
 
 -- Running 0051 again put back its two read-rule functions: bring back the
--- kiosk's notices (0064), which later checks rely on.
+-- kiosk's notices (0064), which later checks rely on — and 0065's
+-- public_week, which 0064's version would otherwise have replaced.
 \ir ../migrations/0064_kiosk_panel.sql
+\ir ../migrations/0065_kiosk_performance.sql
 
 -- 0052 One device token, one profile ----------------------------------------
 -- 20. notify pushes to every profile holding a token, so a token the last

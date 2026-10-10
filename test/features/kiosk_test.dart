@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/core/theme.dart';
@@ -16,6 +17,7 @@ import 'package:rezervator/features/clubhouse/widgets/match_scoreboard.dart';
 import 'package:rezervator/features/kiosk/kiosk_board_view.dart';
 import 'package:rezervator/features/schedule/widgets/slot_tile.dart';
 import 'package:rezervator/features/kiosk/kiosk_connection.dart';
+import 'package:rezervator/features/kiosk/kiosk_display.dart';
 import 'package:rezervator/features/kiosk/kiosk_info_panel.dart';
 import 'package:rezervator/features/kiosk/kiosk_shell.dart';
 import 'package:rezervator/features/kiosk/kiosk_headline.dart';
@@ -23,6 +25,24 @@ import 'package:rezervator/features/kiosk/name_picker.dart';
 import 'package:rezervator/features/schedule/widgets/calendar_board.dart';
 import 'package:rezervator/features/schedule/widgets/schedule_day_column.dart';
 import '../support/emoji_finders.dart';
+
+/// Stands in for the display: records the shell's holds and releases, in
+/// order.
+class _DisplayRecorder extends KioskDisplay {
+  final log = <String>[];
+
+  @override
+  Future<void> hold() async => log.add('hold');
+
+  @override
+  Future<void> release() async => log.add('release');
+
+  @override
+  void lowRes(bool on) => log.add('lowRes:$on');
+
+  @override
+  void forgetLowRes() => log.add('forgetLowRes');
+}
 
 void main() {
   const settings = ScheduleSettings(
@@ -93,6 +113,8 @@ void main() {
     bool kioskDark = true,
     bool kioskFitDay = true,
     int? maxActiveReservations,
+    KioskDisplay? display,
+    bool kioskLowRes = false,
   }) {
     final effectiveRoster = roster ?? players;
     final effSettings = ScheduleSettings(
@@ -103,6 +125,7 @@ void main() {
           maxActiveReservations ?? settings.maxActiveReservations,
       kioskDark: kioskDark,
       kioskFitDay: kioskFitDay,
+      kioskLowRes: kioskLowRes,
     );
     return ProviderScope(
       overrides: [
@@ -122,6 +145,7 @@ void main() {
           ]),
         ),
         playersProvider.overrideWith((ref) async => effectiveRoster),
+        if (display != null) kioskDisplayProvider.overrideWithValue(display),
       ],
       child: MaterialApp(theme: theme, home: const KioskShell()),
     );
@@ -150,6 +174,36 @@ void main() {
       await finish(tester);
     },
   );
+
+  testWidgets('the shell holds the display while it is up — screen on and '
+      'bars hidden on the way in, given back on the way out', (tester) async {
+    final display = _DisplayRecorder();
+    await tester.pumpWidget(kioskApp(display: display));
+    await tester.pumpAndSettle();
+    // The settings arrive after the first frame: the admin's „Nižší
+    // rozlišení“ (off here) reaches the display as they do.
+    expect(display.log, ['hold', 'lowRes:false']);
+
+    // On the way out the stored low-res choice goes too: the browser is
+    // no longer the kiosk's.
+    await finish(tester);
+    expect(display.log, [
+      'hold',
+      'lowRes:false',
+      'release',
+      'forgetLowRes',
+    ]);
+  });
+
+  testWidgets('the admin\'s „Nižší rozlišení“ reaches the display as soon as '
+      'the settings do', (tester) async {
+    final display = _DisplayRecorder();
+    await tester.pumpWidget(kioskApp(display: display, kioskLowRes: true));
+    await tester.pumpAndSettle();
+    expect(display.log, ['hold', 'lowRes:true']);
+
+    await finish(tester);
+  });
 
   testWidgets('b: tapping Rezervovat opens picker with first-letter tiles', (
     tester,
@@ -1298,6 +1352,7 @@ void main() {
       int visibleDays = 7,
       int fontSize = 11,
       bool fitDay = true,
+      bool animations = true,
       Stream<Map<String, MatchResult>>? resultsStream,
       Map<String, List<MatchPlayerResult>> lineups = const {},
     }) => ProviderScope(
@@ -1335,6 +1390,7 @@ void main() {
               kioskVisibleDays: visibleDays,
               kioskFontSize: fontSize,
               kioskFitDay: fitDay,
+              kioskAnimations: animations,
             ),
           ),
         ),
@@ -2161,6 +2217,48 @@ void main() {
       await finish(tester);
     });
 
+    testWidgets('the Zápis leaves the system bars to the shell: nothing hidden '
+        'on opening, nothing brought back on closing', (tester) async {
+      fullHd(tester);
+      final calls = <MethodCall>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async {
+          if (call.method.startsWith('SystemChrome.setEnabledSystemUI')) {
+            calls.add(call);
+          }
+          return null;
+        },
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          null,
+        ),
+      );
+      await tester.pumpWidget(
+        app(
+          slots: [fed('m', day.addDays(-3), 'Domácí')],
+          results: {'m': res('m', 'finished', 6, 2)},
+          lineups: {'m': lineup},
+          drawerOpen: true,
+        ),
+      );
+      await tester.pumpAndSettle();
+      // The shell's own hold on the display, nothing else.
+      final atRest = calls.length;
+
+      await tester.tap(find.text('6 : 2'));
+      await tester.pumpAndSettle();
+      expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
+      await tester.tapAt(const Offset(20, 20));
+      await tester.pumpAndSettle();
+      expect(find.byType(LegacyScoreSheetPage), findsNothing);
+      expect(calls, hasLength(atRest));
+
+      await finish(tester);
+    });
+
     testWidgets('at 100 % the Zápis fills the screen and has a ×', (
       tester,
     ) async {
@@ -2720,6 +2818,74 @@ void main() {
 
       expect(await canReach(0), isFalse);
       expect(await canReach(3), isTrue);
+    });
+
+    testWidgets('a day gone by is washed with the background, not drawn '
+        'through an Opacity layer', (tester) async {
+      fullHd(tester);
+      await tester.pumpWidget(app(pastDays: 3));
+      await tester.pumpAndSettle();
+      await tester.drag(find.byType(ListView).last, const Offset(900, 0));
+      await tester.pumpAndSettle();
+      expect(find.text('út 6.10.'), findsOneWidget);
+
+      expect(find.byType(PastDayWash), findsNWidgets(3));
+      expect(
+        find.byWidgetPredicate((w) => w is Opacity && w.opacity < 1),
+        findsNothing,
+      );
+      await finish(tester);
+    });
+
+    testWidgets('the drawer button breathes on a layer of its own — and keeps '
+        'still when the admin turns the animation off', (tester) async {
+      fullHd(tester);
+      double alpha() => tester
+          .widget<Icon>(
+            find.descendant(
+              of: find.byType(KioskDrawerButton),
+              matching: find.byType(Icon),
+            ),
+          )
+          .color!
+          .a;
+      Future<void> midBreath(Widget tree) async {
+        await tester.pumpWidget(tree);
+        await tester.pump();
+        // Half-way through the first breath the glow peaks.
+        await tester.pump(KioskDrawerButton.pulse ~/ 2);
+      }
+
+      await midBreath(app(notices: [notice('1', 'Brigáda')]));
+      expect(alpha(), greaterThan(0.6));
+      expect(
+        find.descendant(
+          of: find.byType(KioskDrawerButton),
+          matching: find.byType(RepaintBoundary),
+        ),
+        findsOneWidget,
+      );
+      await finish(tester);
+
+      await midBreath(
+        app(notices: [notice('1', 'Brigáda')], animations: false),
+      );
+      expect(alpha(), closeTo(0.4, 0.001));
+      await finish(tester);
+    });
+
+    testWidgets('the board and the drawer sit on layers of their own', (
+      tester,
+    ) async {
+      fullHd(tester);
+      await tester.pumpWidget(app(notices: [notice('1', 'Brigáda')]));
+      await tester.pumpAndSettle();
+      RepaintBoundary nearest(Finder of) => tester.widget<RepaintBoundary>(
+        find.ancestor(of: of, matching: find.byType(RepaintBoundary)).first,
+      );
+      expect(nearest(find.byType(KioskBoardView)).child, isA<KioskBoardView>());
+      expect(nearest(find.byType(KioskDrawer)).child, isA<KioskDrawer>());
+      await finish(tester);
     });
 
     for (final panel in [true, false]) {

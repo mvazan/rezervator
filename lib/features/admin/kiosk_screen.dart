@@ -588,6 +588,39 @@ class KioskSettingsScreen extends ConsumerWidget {
                   ],
                 ],
               ),
+            _section(
+              context,
+              'Optimalizace výkonu',
+              'Pro slabší displej, na kterém se kiosk zadrhává (třeba Android '
+                  's kioskem v prohlížeči). Každá volba ubere kreslení za '
+                  'drobnost ve vzhledu.',
+              [
+                _switch(
+                  context,
+                  settings,
+                  'Dýchající tlačítko panelu',
+                  settings?.kioskAnimations ?? true,
+                  'kiosk_animations',
+                  subtitle:
+                      'Tlačítko panelu se každé čtyři sekundy rozzáří; při tom '
+                      'se překresluje celá obrazovka, i když se kiosku nikdo '
+                      'nedotýká. Vypnuto = tlačítko je v klidu.',
+                ),
+                _switch(
+                  context,
+                  settings,
+                  'Nižší rozlišení (jen web)',
+                  settings?.kioskLowRes ?? false,
+                  'kiosk_low_res',
+                  subtitle:
+                      'Kiosk v prohlížeči se vykreslí v menším rozlišení a '
+                      'displej ho roztáhne — až 2× méně pixelů, trochu měkčí '
+                      'písmo. Pomůže, když displej hlásí devicePixelRatio nad '
+                      '1; při 1 nic nezmění. Nainstalované aplikace se '
+                      'netýká. Kiosk se po změně sám obnoví.',
+                ),
+              ],
+            ),
             Text(
               'Adresa pro tablet',
               style: Theme.of(context).textTheme.titleMedium,

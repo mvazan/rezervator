@@ -1507,6 +1507,7 @@ class LegacyScoreSheetPage extends StatefulWidget {
     required this.players,
     this.showCloseButton = true,
     this.backButton = false,
+    this.hideSystemBars = true,
   });
 
   final PrioritySlot slot;
@@ -1520,6 +1521,12 @@ class LegacyScoreSheetPage extends StatefulWidget {
   /// `ZapisPage.backButton`); either one pops the route.
   final bool backButton;
 
+  /// Hide the status and navigation bars while the sheet is up and bring
+  /// them back on the way out — the app's landscape Zápis. Off in the
+  /// kiosk, whose shell keeps them hidden for its whole stay
+  /// (`KioskDisplay`); the sheet's leaving would bring them back.
+  final bool hideSystemBars;
+
   @override
   State<LegacyScoreSheetPage> createState() => _LegacyScoreSheetPageState();
 }
@@ -1530,16 +1537,20 @@ class _LegacyScoreSheetPageState extends State<LegacyScoreSheetPage> {
   @override
   void initState() {
     super.initState();
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    if (widget.hideSystemBars) {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    }
   }
 
   @override
   void dispose() {
-    // Flutter's own default: both bars shown.
-    SystemChrome.setEnabledSystemUIMode(
-      SystemUiMode.manual,
-      overlays: SystemUiOverlay.values,
-    );
+    if (widget.hideSystemBars) {
+      // Flutter's own default: both bars shown.
+      SystemChrome.setEnabledSystemUIMode(
+        SystemUiMode.manual,
+        overlays: SystemUiOverlay.values,
+      );
+    }
     super.dispose();
   }
 

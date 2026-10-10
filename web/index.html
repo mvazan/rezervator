@@ -33,6 +33,18 @@
   <link rel="manifest" href="manifest.json">
 </head>
 <body>
+  <script>
+    // The kiosk's „Nižší rozlišení“ (Správa → Kiosk → Optimalizace výkonu):
+    // Flutter reads devicePixelRatio as it boots, so the kiosk stores the
+    // choice (lib/core/web/kiosk_low_res_web.dart) and it is applied here,
+    // before flutter_bootstrap.js. The page then draws at 1 pixel per CSS
+    // pixel and the display scales it up.
+    try {
+      if (localStorage.getItem('rezervator.kiosk.lowRes') === '1') {
+        Object.defineProperty(window, 'devicePixelRatio', { get: () => 1 });
+      }
+    } catch (e) {}
+  </script>
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>

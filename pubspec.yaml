@@ -56,6 +56,7 @@ dependencies:
   # tranzitivně; v testech ten samý balík dodává MockClient.
   http: ^1.2.0
   font_awesome_flutter: ^11.0.0
+  wakelock_plus: ^1.6.1
 
 dev_dependencies:
   flutter_test:
@@ -71,6 +72,7 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
   flutter_launcher_icons: ^0.14.4
+  wakelock_plus_platform_interface: ^1.5.1
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
