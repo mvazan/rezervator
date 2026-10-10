@@ -3,6 +3,8 @@
 /// řádek). Nothing at all when neither is on, or there is nothing to say.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -45,11 +47,39 @@ IconData weatherIcon(WeatherKind kind, {required bool isDay}) =>
       WeatherKind.thunderstorm => Icons.thunderstorm,
     };
 
-class KioskDayInfo extends ConsumerWidget {
+class KioskDayInfo extends ConsumerStatefulWidget {
   const KioskDayInfo({super.key});
 
+  /// How long a tap on the weather shows its source in place of the name
+  /// day.
+  static const sourceFor = Duration(seconds: 8);
+
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<KioskDayInfo> createState() => _KioskDayInfoState();
+}
+
+class _KioskDayInfoState extends ConsumerState<KioskDayInfo> {
+  /// A visitor tapped the weather: its source shows for a while (no
+  /// watermark in the header otherwise — the credit is a tap away).
+  Timer? _source;
+
+  @override
+  void dispose() {
+    _source?.cancel();
+    super.dispose();
+  }
+
+  void _showSource() {
+    _source?.cancel();
+    setState(() {
+      _source = Timer(KioskDayInfo.sourceFor, () {
+        if (mounted) setState(() => _source = null);
+      });
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final settings = ref.watch(settingsProvider).value;
     final now = ref.watch(nowProvider).value ?? DateTime.now();
     final weather = (settings?.kioskWeather ?? false)
@@ -76,14 +106,19 @@ class KioskDayInfo extends ConsumerWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             if (weather != null)
-              FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: Alignment.centerLeft,
-                child: _Weather(weather: weather, quiet: quiet),
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: _showSource,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: _Weather(weather: weather, quiet: quiet),
+                ),
               ),
-            if (nameDay != null)
+            if ((_source != null && weather != null ? weatherSource : nameDay)
+                case final line?)
               Text(
-                nameDay,
+                line,
                 style: quiet,
                 maxLines: 1,
                 softWrap: false,
@@ -120,7 +155,7 @@ class _Weather extends StatelessWidget {
       if (rainy) 'srážky $chance %',
     ].join(', ');
     return Semantics(
-      label: 'Počasí: $label',
+      label: 'Počasí: $label. $weatherSource',
       excludeSemantics: true,
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -145,12 +180,6 @@ class _Weather extends StatelessWidget {
             const SizedBox(width: 2),
             Text('$chance %', style: quiet),
           ],
-          // The source, where the weather is shown (CC BY 4.0).
-          const SizedBox(width: 10),
-          Text(
-            'Open-Meteo.com',
-            style: quiet.copyWith(fontSize: 10),
-          ),
         ],
       ),
     );

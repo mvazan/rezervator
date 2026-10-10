@@ -390,8 +390,9 @@ class KioskSettingsScreen extends ConsumerWidget {
                   title: const Text('Počasí'),
                   subtitle: const Text(
                     'Teplota a dnešní předpověď pro vybrané místo, '
-                    'obnovuje se každou půlhodinu. Data: Open-Meteo.com '
-                    '(CC BY 4.0).',
+                    'obnovuje se každou půlhodinu. Data: ČHMÚ (model '
+                    'ALADIN) přes Open-Meteo.com (CC BY 4.0); zdroj kiosk '
+                    'ukáže po ťuknutí na počasí.',
                   ),
                   value: settings?.kioskWeather ?? false,
                   onChanged: settings == null

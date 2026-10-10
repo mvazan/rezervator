@@ -107,6 +107,8 @@ void main() {
     expect(uri.queryParameters['daily'], contains('temperature_2m_max'));
     expect(uri.queryParameters['timezone'], 'Europe/Prague');
     expect(uri.queryParameters['forecast_days'], '1');
+    // ČHMÚ's ALADIN, the Czech model.
+    expect(uri.queryParameters['models'], 'chmi_aladin_seamless');
   });
 
   test('geocoding: Czech names, the region, the country only abroad', () {

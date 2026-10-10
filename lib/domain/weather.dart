@@ -152,7 +152,18 @@ Uri openMeteoForecastUri(double lat, double lon) =>
           'temperature_2m_max,temperature_2m_min,precipitation_probability_max',
       'timezone': 'Europe/Prague',
       'forecast_days': '1',
+      // ČHMÚ's ALADIN model: 1 km over Czechia, the Central Europe domain
+      // around it; Open-Meteo serves it like any other model.
+      'models': weatherModel,
     });
+
+/// The forecast model Open-Meteo is asked for: ČHMÚ's ALADIN (Czech
+/// Hydrometeorological Institute), 1 km over Czechia.
+const weatherModel = 'chmi_aladin_seamless';
+
+/// Where the weather comes from, as the kiosk credits it on a tap (both
+/// the model's maker and the service are CC BY: credit where it is shown).
+const weatherSource = 'Zdroj: ČHMÚ (model ALADIN) přes Open-Meteo.com';
 
 /// A place the admin can pick for the weather.
 class WeatherPlace {
