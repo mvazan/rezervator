@@ -525,8 +525,9 @@ class _StatusBar extends ConsumerWidget {
                 ),
               ],
             ),
-            // Today's weather and name day, when the admin wants them.
-            const KioskDayInfo(),
+            // Today's weather and name day, when the admin wants them —
+            // and no warning hangs: it is then all the bar says.
+            if (warning == null) const KioskDayInfo(),
             const SizedBox(width: 16),
             Expanded(
               child: Row(

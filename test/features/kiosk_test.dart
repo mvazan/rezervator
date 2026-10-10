@@ -17,6 +17,7 @@ import 'package:rezervator/features/clubhouse/widgets/match_scoreboard.dart';
 import 'package:rezervator/features/kiosk/kiosk_board_view.dart';
 import 'package:rezervator/features/schedule/widgets/slot_tile.dart';
 import 'package:rezervator/features/kiosk/kiosk_connection.dart';
+import 'package:rezervator/features/kiosk/kiosk_day_info.dart';
 import 'package:rezervator/features/kiosk/kiosk_display.dart';
 import 'package:rezervator/features/kiosk/kiosk_info_panel.dart';
 import 'package:rezervator/features/kiosk/kiosk_shell.dart';
@@ -1786,6 +1787,23 @@ void main() {
       expect(find.byType(KioskHeadline), findsNothing);
       // The board's own day header still names the match; the bar does not.
       expect(matchLabels(), without - 1);
+      await finish(tester);
+    });
+
+    testWidgets('while a warning hangs, the weather and the name day step '
+        'aside too', (tester) async {
+      fullHd(tester);
+      await tester.pumpWidget(app(nameday: true));
+      await tester.pumpAndSettle();
+      expect(find.text('Svátek: Věra'), findsOneWidget);
+      await finish(tester);
+
+      await tester.pumpWidget(
+        app(nameday: true, warning: 'Dráha 3 je mimo provoz.'),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Dráha 3 je mimo provoz.'), findsOneWidget);
+      expect(find.byType(KioskDayInfo), findsNothing);
       await finish(tester);
     });
 
