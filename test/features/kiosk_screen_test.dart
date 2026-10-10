@@ -319,7 +319,7 @@ void main() {
         ) as Map<String, dynamic>;
 
     final breathing =
-        find.widgetWithText(SwitchListTile, 'Dýchající tlačítko panelu');
+        find.widgetWithText(SwitchListTile, 'Animace na pozadí');
     await tester.ensureVisible(breathing);
     await tester.tap(breathing);
     await tester.pumpAndSettle();

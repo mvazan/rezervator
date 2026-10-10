@@ -690,13 +690,14 @@ class KioskSettingsScreen extends ConsumerWidget {
                 _switch(
                   context,
                   settings,
-                  'Dýchající tlačítko panelu',
+                  'Animace na pozadí',
                   settings?.kioskAnimations ?? true,
                   'kiosk_animations',
                   subtitle:
-                      'Tlačítko panelu se každé čtyři sekundy rozzáří; při tom '
-                      'se překresluje celá obrazovka, i když se kiosku nikdo '
-                      'nedotýká. Vypnuto = tlačítko je v klidu.',
+                      'Tlačítko panelu se každé čtyři sekundy rozzáří a ikona '
+                      'živého přenosu pulzuje; při tom se překresluje celá '
+                      'obrazovka, i když se kiosku nikdo nedotýká. Vypnuto = '
+                      'obojí je v klidu.',
                 ),
                 _switch(
                   context,

@@ -766,8 +766,10 @@ class ScheduleSettings {
   /// other days sees the list turn to their matches (0064).
   final bool kioskFollowBoard;
 
-  /// The drawer button breathes — a glow every few seconds. Off for a slow
-  /// display, where the glow repaints the screen for nothing (0065).
+  /// The kiosk's animations on their own: the drawer button breathes — a
+  /// glow every few seconds (0065) — and the live-stream badge pulses (the
+  /// live view, the day's list). Off for a slow display, where they repaint
+  /// the screen for nothing.
   final bool kioskAnimations;
 
   /// The web kiosk draws at devicePixelRatio 1 and lets the display scale
