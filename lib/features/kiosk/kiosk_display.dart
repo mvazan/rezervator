@@ -47,15 +47,16 @@ class KioskDisplay {
   ]);
 
   /// Runs the steps in order; one the platform refuses (no wake lock there,
-  /// no plugin under a test) does not stop the next.
+  /// a browser that denies it, no plugin under a test) does not stop the
+  /// next, nor the kiosk. Whatever the refusal is wrapped in — a
+  /// PlatformException, a MissingPluginException, a bare JS error from the
+  /// web plugin — it ends here.
   static Future<void> _each(List<Future<void> Function()> steps) async {
     for (final step in steps) {
       try {
         await step();
-      } on PlatformException {
+      } catch (_) {
         // Best effort — see the library doc.
-      } on MissingPluginException {
-        // Same.
       }
     }
   }
