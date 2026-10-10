@@ -81,7 +81,7 @@ void main() {
     expect(find.text('Svátek: Radmila'), findsOneWidget);
     expect(
       find.bySemanticsLabel(
-        'Počasí: Sněžení, −3°, dnes nejvýš 1°, nejníž −7°',
+        'Počasí: Sněžení, −3°, dnes nejvýš 1°, nejníž −7°. $weatherSource',
       ),
       findsOneWidget,
     );
@@ -116,20 +116,24 @@ void main() {
     expect(find.text('Svátek: Radmila'), findsOneWidget);
   });
 
-  testWidgets('the weather names its source; the name day alone does not', (
-    tester,
-  ) async {
+  testWidgets('no source in the header; a tap on the weather shows it in '
+      'place of the name day for a while', (tester) async {
     await tester.pumpWidget(
       app(settings(weather: true, nameday: true), w: weather()),
     );
     await tester.pumpAndSettle();
-    expect(find.text('Open-Meteo.com'), findsOneWidget);
-    await tester.pumpWidget(const SizedBox.shrink());
-
-    await tester.pumpWidget(app(settings(nameday: true), w: weather()));
-    await tester.pumpAndSettle();
+    expect(find.text(weatherSource), findsNothing);
+    expect(find.textContaining('Open-Meteo'), findsNothing);
     expect(find.text('Svátek: Radmila'), findsOneWidget);
-    expect(find.text('Open-Meteo.com'), findsNothing);
+
+    await tester.tap(find.text('−3°'));
+    await tester.pump();
+    expect(find.text(weatherSource), findsOneWidget);
+    expect(find.text('Svátek: Radmila'), findsNothing);
+
+    await tester.pump(KioskDayInfo.sourceFor);
+    expect(find.text(weatherSource), findsNothing);
+    expect(find.text('Svátek: Radmila'), findsOneWidget);
   });
 
   testWidgets('a narrow kiosk with large text: the column keeps to a quarter '
