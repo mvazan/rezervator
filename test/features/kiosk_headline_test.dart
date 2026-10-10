@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rezervator/domain/models.dart';
 import 'package:rezervator/features/kiosk/kiosk_headline.dart';
@@ -68,6 +69,13 @@ void main() {
       expect(find.text(from), findsNothing);
       expect(tester.getCenter(find.text(to)), toAt);
       expect(tester.getCenter(find.text(counter)), counterAt);
+      // And where it stays is the middle of the bar: icon, title and
+      // counter centred together (the padding is the same on both sides).
+      final line = find.ancestor(of: find.text(to), matching: find.byType(Row));
+      expect(
+        tester.getCenter(line.first).dx,
+        closeTo(tester.getCenter(find.byType(KioskHeadline)).dx, 0.5),
+      );
     }
 
     await turn(long, short, '2/2');
@@ -92,5 +100,13 @@ void main() {
     expect(tester.takeException(), isNull);
     final bar = tester.getRect(find.byType(KioskHeadline));
     expect(tester.getRect(find.text('1/2')).right, lessThan(bar.right));
+    final title = tester.renderObject<RenderParagraph>(
+      find.descendant(
+        of: find.textContaining('Zámek kuželny'),
+        matching: find.byType(RichText),
+      ),
+    );
+    expect(title.didExceedMaxLines, isTrue);
+    expect(title.overflow, TextOverflow.ellipsis);
   });
 }
