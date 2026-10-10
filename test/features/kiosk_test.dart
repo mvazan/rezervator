@@ -1353,6 +1353,7 @@ void main() {
       int fontSize = 11,
       bool fitDay = true,
       bool animations = true,
+      String? warning,
       Stream<Map<String, MatchResult>>? resultsStream,
       Map<String, List<MatchPlayerResult>> lineups = const {},
     }) => ProviderScope(
@@ -1391,6 +1392,7 @@ void main() {
               kioskFontSize: fontSize,
               kioskFitDay: fitDay,
               kioskAnimations: animations,
+              kioskWarning: warning,
             ),
           ),
         ),
@@ -1435,6 +1437,31 @@ void main() {
     // A notice title is in the status bar too; these tests are the drawer's.
     Finder drawerText(String t) =>
         find.descendant(of: find.byType(KioskDrawer), matching: find.text(t));
+
+    testWidgets('the admin\'s warning sits in the status bar between the '
+        'clock and „Rezervovat“, with its icon; none, nothing', (tester) async {
+      fullHd(tester);
+      await tester.pumpWidget(app(warning: 'Dráha 3 je mimo provoz.'));
+      await tester.pumpAndSettle();
+      final text = find.text('Dráha 3 je mimo provoz.');
+      final icon = find.byIcon(Icons.warning_amber_rounded);
+      expect(text, findsOneWidget);
+      expect(icon, findsOneWidget);
+      expect(
+        tester.getTopLeft(icon).dx,
+        greaterThan(tester.getTopRight(find.text('12:00')).dx),
+      );
+      expect(
+        tester.getTopRight(text).dx,
+        lessThan(tester.getTopLeft(find.text('Rezervovat')).dx),
+      );
+      await finish(tester);
+
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+      expect(icon, findsNothing);
+      await finish(tester);
+    });
 
     testWidgets('closed by default: only the button shows, tap opens it, tap '
         'closes it', (tester) async {

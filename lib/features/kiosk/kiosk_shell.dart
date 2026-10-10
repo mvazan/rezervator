@@ -25,6 +25,7 @@ import 'kiosk_info_panel.dart';
 import 'kiosk_connection.dart';
 import 'kiosk_display.dart';
 import 'kiosk_headline.dart';
+import 'kiosk_warning.dart';
 import 'kiosk_zapis_page.dart';
 import 'name_picker.dart';
 import '../../core/widgets/emoji_text.dart';
@@ -450,6 +451,7 @@ class _StatusBar extends ConsumerWidget {
         (ref.watch(settingsProvider).value?.kioskNoticesInHeader ?? true)
         ? kioskNotices(ref.watch(messagesProvider).value ?? const [], now)
         : const <Message>[];
+    final warning = ref.watch(settingsProvider).value?.kioskWarning;
     final clock =
         '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
 
@@ -482,6 +484,14 @@ class _StatusBar extends ConsumerWidget {
             Expanded(
               child: Row(
                 children: [
+                  // The admin's warning first, with its icon (0068).
+                  if (warning != null) ...[
+                    Expanded(flex: 3, child: KioskWarning(text: warning)),
+                    if (todays.isNotEmpty ||
+                        info.isNotEmpty ||
+                        notices.isNotEmpty)
+                      const SizedBox(width: 24),
+                  ],
                   // Today's matches, one tap target each: a match with a score
                   // opens its Zápis, as everywhere else on the kiosk.
                   if (todays.isNotEmpty)
