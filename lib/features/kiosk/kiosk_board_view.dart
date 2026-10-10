@@ -496,52 +496,54 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
                               columnWidth: columnWidth,
                             ),
                             itemCount: days.length,
-                            itemBuilder: (context, index) => SizedBox(
-                              width: columnWidth,
+                            itemBuilder: (context, index) {
                               // The kiosk column is read-only: no admin
                               // hooks, rows resolved by _laneRow.
-                              child: Container(
-                                margin: const EdgeInsets.symmetric(
-                                  horizontal: 2,
-                                ),
-                                clipBehavior: Clip.antiAlias,
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                // A day gone by reads quieter than today and
-                                // what is ahead.
-                                child: Opacity(
-                                  opacity: index < todayIndex ? 0.65 : 1,
-                                  child: ScheduleDayColumn(
-                                    onOpenMatch: widget.onOpenMatch,
-                                    day: days[index],
-                                    window: window,
-                                    pxPerMinute: pxPerMinute,
-                                    halfHourMarks: halfHourMarks,
-                                    nowMinute:
-                                        index == todayIndex &&
-                                            now.minutesFromMidnight >=
-                                                window.startMinute &&
-                                            now.minutesFromMidnight <
-                                                window.endMinute
-                                        ? now.minutesFromMidnight
-                                        : null,
-                                    laneRow: (context, day, block, lane) =>
-                                        _laneRow(
-                                          day,
-                                          block,
-                                          lane,
-                                          settings: settings,
-                                          nameById: nameById,
-                                          clubColorById: clubColorById,
-                                          interactive: interactive,
-                                          selectedCount: selectedCount,
-                                          textScale: rowTextScale,
-                                        ),
+                              final column = ScheduleDayColumn(
+                                onOpenMatch: widget.onOpenMatch,
+                                day: days[index],
+                                window: window,
+                                pxPerMinute: pxPerMinute,
+                                halfHourMarks: halfHourMarks,
+                                nowMinute:
+                                    index == todayIndex &&
+                                        now.minutesFromMidnight >=
+                                            window.startMinute &&
+                                        now.minutesFromMidnight <
+                                            window.endMinute
+                                    ? now.minutesFromMidnight
+                                    : null,
+                                laneRow: (context, day, block, lane) =>
+                                    _laneRow(
+                                      day,
+                                      block,
+                                      lane,
+                                      settings: settings,
+                                      nameById: nameById,
+                                      clubColorById: clubColorById,
+                                      interactive: interactive,
+                                      selectedCount: selectedCount,
+                                      textScale: rowTextScale,
+                                    ),
+                              );
+                              return SizedBox(
+                                width: columnWidth,
+                                child: Container(
+                                  margin: const EdgeInsets.symmetric(
+                                    horizontal: 2,
                                   ),
+                                  clipBehavior: Clip.antiAlias,
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  // A day gone by reads quieter than today
+                                  // and what is ahead.
+                                  child: index < todayIndex
+                                      ? PastDayWash(child: column)
+                                      : column,
                                 ),
-                              ),
-                            ),
+                              );
+                            },
                           ),
                           ),
                         ),
@@ -630,4 +632,31 @@ class KioskBoardViewState extends ConsumerState<KioskBoardView> {
         );
     }
   }
+}
+
+/// A day gone by, drawn quieter: the background washed over it, one
+/// rectangle. Opacity gives the same pixels — 0.65 × the column + 0.35 × the
+/// background either way — but through an offscreen layer per column every
+/// frame, which a slow display feels (0065).
+class PastDayWash extends StatelessWidget {
+  const PastDayWash({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Stack(
+    fit: StackFit.passthrough,
+    children: [
+      child,
+      Positioned.fill(
+        child: IgnorePointer(
+          child: ColoredBox(
+            color: Theme.of(
+              context,
+            ).scaffoldBackgroundColor.withValues(alpha: 0.35),
+          ),
+        ),
+      ),
+    ],
+  );
 }

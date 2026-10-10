@@ -78,6 +78,10 @@ class _KioskShellState extends ConsumerState<KioskShell>
     super.initState();
     _display = ref.read(kioskDisplayProvider);
     unawaited(_display.hold());
+    // The admin's „Nižší rozlišení“ as the shell comes up; build's listener
+    // follows later changes (and the settings' first arrival).
+    final lowRes = ref.read(settingsProvider).value?.kioskLowRes;
+    if (lowRes != null) _display.lowRes(lowRes);
     _touch(byHand: false);
   }
 
@@ -242,23 +246,29 @@ class _KioskShellState extends ConsumerState<KioskShell>
         (settings?.kioskDrawerOpen ?? false) || content.live.isNotEmpty;
     final open = _drawerOverride ?? restingOpen;
     void toggle() => setState(() => _drawerOverride = !open);
+    // The board and the drawer each on their own layer: the drawer's turns
+    // (a notice, the live match) do not re-record the board, nor the
+    // board's scroll the drawer. On the web the GPU still redraws every
+    // layer each frame — this spares the Dart side (0065).
     return Stack(
       children: [
         Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Expanded(child: board),
-            KioskDrawer(
-              content: content,
-              open: open,
-              onOpenNotice: _openNotice,
-              onOpenMatch: _openMatch,
-              resetToken: _resets,
-              showLive: !_liveHidden,
-              onShowLive: (live) => setState(() => _liveHidden = !live),
-              boardDays: (settings?.kioskFollowBoard ?? true)
-                  ? _boardDays
-                  : null,
+            Expanded(child: RepaintBoundary(child: board)),
+            RepaintBoundary(
+              child: KioskDrawer(
+                content: content,
+                open: open,
+                onOpenNotice: _openNotice,
+                onOpenMatch: _openMatch,
+                resetToken: _resets,
+                showLive: !_liveHidden,
+                onShowLive: (live) => setState(() => _liveHidden = !live),
+                boardDays: (settings?.kioskFollowBoard ?? true)
+                    ? _boardDays
+                    : null,
+              ),
             ),
           ],
         ),
@@ -271,7 +281,11 @@ class _KioskShellState extends ConsumerState<KioskShell>
           bottom: 0,
           right: (open ? drawerWidth : 0) + KioskDrawerButton.margin,
           child: Center(
-            child: KioskDrawerButton(open: open, onTap: toggle),
+            child: KioskDrawerButton(
+              open: open,
+              onTap: toggle,
+              breathe: settings?.kioskAnimations ?? true,
+            ),
           ),
         ),
       ],
@@ -280,6 +294,12 @@ class _KioskShellState extends ConsumerState<KioskShell>
 
   @override
   Widget build(BuildContext context) {
+    // The admin flips „Nižší rozlišení“ (or the settings arrive): the display
+    // stores it and, on the web, reloads when it differs from what this
+    // start was given.
+    ref.listen(settingsProvider.select((s) => s.value?.kioskLowRes), (_, on) {
+      if (on != null) _display.lowRes(on);
+    });
     // The kiosk is a shared, always-on tablet whose brightness is an admin
     // choice (spec §4), independent of the device's system brightness and of
     // the rest of the app (which follows light/dark via MaterialApp.theme/

@@ -247,10 +247,19 @@ class KioskDrawer extends ConsumerWidget {
 /// — a soft glow and a little more opacity — so a tablet on the wall shows
 /// that there is something to open, without ever moving.
 class KioskDrawerButton extends StatefulWidget {
-  const KioskDrawerButton({super.key, required this.open, required this.onTap});
+  const KioskDrawerButton({
+    super.key,
+    required this.open,
+    required this.onTap,
+    this.breathe = true,
+  });
 
   final bool open;
   final VoidCallback onTap;
+
+  /// Off = a still button (the admin's „Dýchající tlačítko panelu“, 0065):
+  /// every breath repaints the screen, which a slow display feels.
+  final bool breathe;
 
   static const size = 56.0;
   static const margin = 8.0;
@@ -274,7 +283,22 @@ class _KioskDrawerButtonState extends State<KioskDrawerButton>
   @override
   void initState() {
     super.initState();
-    _breathe();
+    if (widget.breathe) _breathe();
+  }
+
+  @override
+  void didUpdateWidget(KioskDrawerButton old) {
+    super.didUpdateWidget(old);
+    if (old.breathe == widget.breathe) return;
+    if (widget.breathe) {
+      _breathe();
+    } else {
+      // Mid-breath: stopped, and no rest timer follows a breath that never
+      // finished (whenComplete waits for the finish).
+      _rest?.cancel();
+      _controller.stop();
+      _controller.value = 0;
+    }
   }
 
   /// One breath, then a rest on a timer (not a repeating animation, which
@@ -306,27 +330,31 @@ class _KioskDrawerButtonState extends State<KioskDrawerButton>
           width: KioskDrawerButton.size,
           height: KioskDrawerButton.size,
           child: Center(
-            child: AnimatedBuilder(
-              animation: _controller,
-              builder: (context, child) {
-                // 0 → 1 → 0 over one breath.
-                final glow = math.sin(_controller.value * math.pi);
-                return Icon(
-                  widget.open
-                      ? Icons.keyboard_double_arrow_right
-                      : Icons.keyboard_double_arrow_left,
-                  size: 44,
-                  color: scheme.onSurfaceVariant.withValues(
-                    alpha: 0.4 + 0.35 * glow,
-                  ),
-                  shadows: [
-                    Shadow(
-                      color: scheme.primary.withValues(alpha: 0.75 * glow),
-                      blurRadius: 4 + 16 * glow,
+            // Its own layer: a breath repaints the icon, not the board and
+            // the drawer under it.
+            child: RepaintBoundary(
+              child: AnimatedBuilder(
+                animation: _controller,
+                builder: (context, child) {
+                  // 0 → 1 → 0 over one breath; 0 while the button is still.
+                  final glow = math.sin(_controller.value * math.pi);
+                  return Icon(
+                    widget.open
+                        ? Icons.keyboard_double_arrow_right
+                        : Icons.keyboard_double_arrow_left,
+                    size: 44,
+                    color: scheme.onSurfaceVariant.withValues(
+                      alpha: 0.4 + 0.35 * glow,
                     ),
-                  ],
-                );
-              },
+                    shadows: [
+                      Shadow(
+                        color: scheme.primary.withValues(alpha: 0.75 * glow),
+                        blurRadius: 4 + 16 * glow,
+                      ),
+                    ],
+                  );
+                },
+              ),
             ),
           ),
         ),

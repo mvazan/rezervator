@@ -13,8 +13,15 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
+import '../../core/web/kiosk_low_res.dart';
+
 class KioskDisplay {
   const KioskDisplay();
+
+  /// The admin's „Nižší rozlišení“ (0065): the web kiosk draws at
+  /// devicePixelRatio 1 and reloads when the choice changes; nothing in
+  /// the app (see core/web/kiosk_low_res.dart).
+  void lowRes(bool on) => setKioskLowRes(on);
 
   /// On entering the kiosk: screen on, bars hidden.
   Future<void> hold() => _each([

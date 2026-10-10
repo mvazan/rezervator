@@ -36,6 +36,9 @@ class _DisplayRecorder extends KioskDisplay {
 
   @override
   Future<void> release() async => log.add('release');
+
+  @override
+  void lowRes(bool on) => log.add('lowRes:$on');
 }
 
 void main() {
@@ -108,6 +111,7 @@ void main() {
     bool kioskFitDay = true,
     int? maxActiveReservations,
     KioskDisplay? display,
+    bool kioskLowRes = false,
   }) {
     final effectiveRoster = roster ?? players;
     final effSettings = ScheduleSettings(
@@ -118,6 +122,7 @@ void main() {
           maxActiveReservations ?? settings.maxActiveReservations,
       kioskDark: kioskDark,
       kioskFitDay: kioskFitDay,
+      kioskLowRes: kioskLowRes,
     );
     return ProviderScope(
       overrides: [
@@ -172,10 +177,22 @@ void main() {
     final display = _DisplayRecorder();
     await tester.pumpWidget(kioskApp(display: display));
     await tester.pumpAndSettle();
-    expect(display.log, ['hold']);
+    // The settings arrive after the first frame: the admin's „Nižší
+    // rozlišení“ (off here) reaches the display as they do.
+    expect(display.log, ['hold', 'lowRes:false']);
 
     await finish(tester);
-    expect(display.log, ['hold', 'release']);
+    expect(display.log, ['hold', 'lowRes:false', 'release']);
+  });
+
+  testWidgets('the admin\'s „Nižší rozlišení“ reaches the display as soon as '
+      'the settings do', (tester) async {
+    final display = _DisplayRecorder();
+    await tester.pumpWidget(kioskApp(display: display, kioskLowRes: true));
+    await tester.pumpAndSettle();
+    expect(display.log, ['hold', 'lowRes:true']);
+
+    await finish(tester);
   });
 
   testWidgets('b: tapping Rezervovat opens picker with first-letter tiles', (
@@ -1325,6 +1342,7 @@ void main() {
       int visibleDays = 7,
       int fontSize = 11,
       bool fitDay = true,
+      bool animations = true,
       Stream<Map<String, MatchResult>>? resultsStream,
       Map<String, List<MatchPlayerResult>> lineups = const {},
     }) => ProviderScope(
@@ -1362,6 +1380,7 @@ void main() {
               kioskVisibleDays: visibleDays,
               kioskFontSize: fontSize,
               kioskFitDay: fitDay,
+              kioskAnimations: animations,
             ),
           ),
         ),
@@ -2789,6 +2808,74 @@ void main() {
 
       expect(await canReach(0), isFalse);
       expect(await canReach(3), isTrue);
+    });
+
+    testWidgets('a day gone by is washed with the background, not drawn '
+        'through an Opacity layer', (tester) async {
+      fullHd(tester);
+      await tester.pumpWidget(app(pastDays: 3));
+      await tester.pumpAndSettle();
+      await tester.drag(find.byType(ListView).last, const Offset(900, 0));
+      await tester.pumpAndSettle();
+      expect(find.text('út 6.10.'), findsOneWidget);
+
+      expect(find.byType(PastDayWash), findsNWidgets(3));
+      expect(
+        find.byWidgetPredicate((w) => w is Opacity && w.opacity < 1),
+        findsNothing,
+      );
+      await finish(tester);
+    });
+
+    testWidgets('the drawer button breathes on a layer of its own — and keeps '
+        'still when the admin turns the animation off', (tester) async {
+      fullHd(tester);
+      double alpha() => tester
+          .widget<Icon>(
+            find.descendant(
+              of: find.byType(KioskDrawerButton),
+              matching: find.byType(Icon),
+            ),
+          )
+          .color!
+          .a;
+      Future<void> midBreath(Widget tree) async {
+        await tester.pumpWidget(tree);
+        await tester.pump();
+        // Half-way through the first breath the glow peaks.
+        await tester.pump(KioskDrawerButton.pulse ~/ 2);
+      }
+
+      await midBreath(app(notices: [notice('1', 'Brigáda')]));
+      expect(alpha(), greaterThan(0.6));
+      expect(
+        find.descendant(
+          of: find.byType(KioskDrawerButton),
+          matching: find.byType(RepaintBoundary),
+        ),
+        findsOneWidget,
+      );
+      await finish(tester);
+
+      await midBreath(
+        app(notices: [notice('1', 'Brigáda')], animations: false),
+      );
+      expect(alpha(), closeTo(0.4, 0.001));
+      await finish(tester);
+    });
+
+    testWidgets('the board and the drawer sit on layers of their own', (
+      tester,
+    ) async {
+      fullHd(tester);
+      await tester.pumpWidget(app(notices: [notice('1', 'Brigáda')]));
+      await tester.pumpAndSettle();
+      RepaintBoundary nearest(Finder of) => tester.widget<RepaintBoundary>(
+        find.ancestor(of: of, matching: find.byType(RepaintBoundary)).first,
+      );
+      expect(nearest(find.byType(KioskBoardView)).child, isA<KioskBoardView>());
+      expect(nearest(find.byType(KioskDrawer)).child, isA<KioskDrawer>());
+      await finish(tester);
     });
 
     for (final panel in [true, false]) {
