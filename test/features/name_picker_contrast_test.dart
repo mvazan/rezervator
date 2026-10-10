@@ -99,6 +99,19 @@ void main() {
         expect(contrastRatio(scheme.outlineVariant, page), lessThan(_uiAA),
             reason: '$variant: outlineVariant is the one that would NOT do');
       });
+
+      test('the hint above the first letters reads as normal text on the '
+          'picker', () {
+        // titleLarge is 22px regular — normal text to WCAG, so 4.5:1, on
+        // the fullscreen dialog's surface and on the raised surface alike.
+        for (final (name, bg) in [
+          ('surface', scheme.surface),
+          ('surfaceContainerHigh', scheme.surfaceContainerHigh),
+        ]) {
+          _expect(contrastRatio(scheme.onSurfaceVariant, bg), _textAA,
+              '$variant: hint on $name');
+        }
+      });
     });
   }
 }

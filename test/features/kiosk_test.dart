@@ -225,6 +225,41 @@ void main() {
     await finish(tester);
   });
 
+  testWidgets('b2: above the first letters the picker says which letter to '
+      'pick — not once a letter is picked, nor when it lists names at once', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1920, 1080);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(kioskApp());
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Rezervovat'));
+    await tester.pumpAndSettle();
+
+    final hint = find.text(firstLetterHint);
+    expect(hint, findsOneWidget);
+    // Above the letters.
+    expect(
+      tester.getBottomLeft(hint).dy,
+      lessThan(tester.getTopLeft(find.text('A')).dy),
+    );
+
+    await tester.tap(find.text('A'));
+    await tester.pumpAndSettle();
+    expect(hint, findsNothing);
+    await finish(tester);
+
+    // Few players: their names straight away, no letters to explain.
+    await tester.pumpWidget(kioskApp(roster: [anna, petr]));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Rezervovat'));
+    await tester.pumpAndSettle();
+    expect(find.text(anna.displayName), findsOneWidget);
+    expect(hint, findsNothing);
+    await finish(tester);
+  });
+
   testWidgets(
     'c: drilling to a name and tapping it shows the Rezervuje: banner',
     (tester) async {
