@@ -23,8 +23,12 @@ jobs:
         with:
           channel: stable
           cache: true
+      # --wasm: the skwasm renderer (Dart compiled to WebAssembly) where the
+      # browser has WasmGC (Chrome 119+), the dart2js + CanvasKit build it
+      # also emits everywhere else — flutter_bootstrap.js picks. GitHub Pages
+      # sets no COOP/COEP headers, so skwasm runs single-threaded there.
       - run: >
-          flutter build web --release
+          flutter build web --release --wasm
           --base-href /
           --dart-define=SUPABASE_URL=${{ secrets.SUPABASE_URL }}
           --dart-define=SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}
