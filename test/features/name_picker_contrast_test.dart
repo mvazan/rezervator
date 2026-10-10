@@ -100,7 +100,7 @@ void main() {
             reason: '$variant: outlineVariant is the one that would NOT do');
       });
 
-      test('the hint under the first letters reads as normal text on the '
+      test('the hint above the first letters reads as normal text on the '
           'picker', () {
         // titleLarge is 22px regular — normal text to WCAG, so 4.5:1, on
         // the fullscreen dialog's surface and on the raised surface alike.
@@ -113,7 +113,7 @@ void main() {
         }
       });
 
-      test('the admin\'s note above the letters (0070) reads on its error '
+      test('the admin\'s note under the letters (0070) reads on its error '
           'container', () {
         // KioskWarning paints its own fill: 18px bold is just short of
         // large text, so 4.5:1 — the icon shares the text's colour.

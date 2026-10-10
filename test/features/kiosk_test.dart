@@ -233,7 +233,7 @@ void main() {
   Finder letterTile(String letter) =>
       find.ancestor(of: find.text(letter), matching: find.byType(Ink));
 
-  testWidgets('b2: under the first letters the picker says which letter to '
+  testWidgets('b2: above the first letters the picker says which letter to '
       'pick — not once a letter is picked, nor when it lists names at once', (
     tester,
   ) async {
@@ -247,15 +247,11 @@ void main() {
 
     final hint = find.text(firstLetterHint);
     expect(hint, findsOneWidget);
-    // Under the letters — the last row too — and still on the screen.
+    // Above the letters.
     expect(
-      tester.getTopLeft(hint).dy,
-      greaterThan(tester.getBottomLeft(letterTile('Z')).dy),
+      tester.getBottomLeft(hint).dy,
+      lessThan(tester.getTopLeft(find.text('A')).dy),
     );
-    expect(tester.getBottomLeft(hint).dy, lessThanOrEqualTo(1080));
-    // Centred under them, as the letters are.
-    expect(tester.getCenter(hint).dx, closeTo(960, 1));
-    expect(tester.takeException(), isNull);
 
     await tester.tap(find.text('A'));
     await tester.pumpAndSettle();
@@ -272,8 +268,8 @@ void main() {
     await finish(tester);
   });
 
-  testWidgets('b3: the admin\'s note (0070) stands above the first letters, '
-      'the hint under them — the default text or the admin\'s own; none, '
+  testWidgets('b3: the admin\'s note (0070) stands under the first letters, '
+      'the hint above them — the default text or the admin\'s own; none, '
       'nothing; gone once a letter is picked', (tester) async {
     tester.view.physicalSize = const Size(1920, 1080);
     tester.view.devicePixelRatio = 1;
@@ -290,15 +286,16 @@ void main() {
     expect(note, findsOneWidget);
     expect(find.text(ScheduleSettings.defaultPickerNote), findsOneWidget);
     expect(
-      tester.getBottomLeft(note).dy,
+      tester.getBottomLeft(hint).dy,
       lessThan(tester.getTopLeft(letterTile('A')).dy),
     );
+    // Under the letters — the last row too — and still on the kiosk's
+    // screen, no scrolling to it.
     expect(
-      tester.getTopLeft(hint).dy,
+      tester.getTopLeft(note).dy,
       greaterThan(tester.getBottomLeft(letterTile('Z')).dy),
     );
-    // The note does not push the hint off the kiosk's screen.
-    expect(tester.getBottomLeft(hint).dy, lessThanOrEqualTo(1080));
+    expect(tester.getBottomLeft(note).dy, lessThanOrEqualTo(1080));
     // Not stretched across a wide screen: centred, at most 1000 px.
     expect(tester.getSize(note).width, lessThanOrEqualTo(1000));
     expect(tester.getCenter(note).dx, closeTo(960, 1));
@@ -367,8 +364,8 @@ void main() {
     await finish(tester);
   });
 
-  testWidgets('b3: on a phone the note keeps to the screen above the '
-      'letters, and the hint under them scrolls into view', (tester) async {
+  testWidgets('b3: on a phone the note under the letters scrolls into view '
+      'and keeps to the screen', (tester) async {
     tester.view.physicalSize = const Size(375, 812);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -397,27 +394,22 @@ void main() {
     final note = find.byType(KioskWarning);
     expect(note, findsOneWidget);
     expect(tester.takeException(), isNull);
-    expect(tester.getTopLeft(note).dx, greaterThanOrEqualTo(0));
-    expect(tester.getTopRight(note).dx, lessThanOrEqualTo(375));
     expect(
-      tester.getBottomLeft(note).dy,
+      tester.getBottomLeft(find.text(firstLetterHint)).dy,
       lessThan(tester.getTopLeft(letterTile('A')).dy),
     );
-
-    // Two letters a row: the hint is far below the fold, and the page
+    // Two letters a row: the note is far below the fold, and the page
     // scrolls down to it.
-    final hint = find.text(firstLetterHint);
     expect(
-      tester.getTopLeft(hint).dy,
+      tester.getTopLeft(note).dy,
       greaterThan(tester.getBottomLeft(letterTile('Z')).dy),
     );
-    expect(tester.getTopLeft(hint).dy, greaterThan(812));
-    await tester.scrollUntilVisible(hint, 300);
+    await tester.scrollUntilVisible(note, 300);
     await tester.pumpAndSettle();
-    expect(hint.hitTestable(), findsOneWidget);
-    expect(tester.getTopLeft(hint).dx, greaterThanOrEqualTo(0));
-    expect(tester.getTopRight(hint).dx, lessThanOrEqualTo(375));
-    expect(tester.getBottomLeft(hint).dy, lessThanOrEqualTo(812));
+    expect(note.hitTestable(), findsOneWidget);
+    expect(tester.getTopLeft(note).dx, greaterThanOrEqualTo(0));
+    expect(tester.getTopRight(note).dx, lessThanOrEqualTo(375));
+    expect(tester.getBottomLeft(note).dy, lessThanOrEqualTo(812));
     expect(tester.takeException(), isNull);
     await finish(tester);
   });

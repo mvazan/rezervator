@@ -197,7 +197,7 @@ class KioskSettingsScreen extends ConsumerWidget {
   String _kioskUrl() =>
       kioskUrlFrom(kIsWeb ? Uri.base : Uri.parse(UpdateScreen.webUrl));
 
-  /// The note above the name picker's first letters (0070), typed in a
+  /// The note under the name picker's first letters (0070), typed in a
   /// dialog — a new one starts from the default text; saved trimmed.
   Future<void> _editPickerNote(
     BuildContext context,
@@ -249,7 +249,7 @@ class KioskSettingsScreen extends ConsumerWidget {
                   title: const Text('Upozornění při rezervaci'),
                   subtitle: Text(
                     settings?.kioskPickerNote ??
-                        'Žádné. Upozornění nad písmeny při výběru jména na '
+                        'Žádné. Upozornění pod písmeny při výběru jména na '
                             'kiosku.',
                     // The whole text is one tap away, under „Upravit…“.
                     maxLines: 3,
