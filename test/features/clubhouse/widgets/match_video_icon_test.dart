@@ -317,6 +317,33 @@ void main() {
     expect(launched, ['https://vysledky.kuzelky.cz/video/m1']);
   });
 
+  testWidgets('the pulse switched off while the badge is up stops the ring; '
+      'on again, it runs again', (tester) async {
+    final live = slot(videoUrl: 'https://vysledky.kuzelky.cz/video/m1');
+    await tester.pumpWidget(wrap(
+      slot: live,
+      matchResult: result(MatchStatus.inProgress),
+    ));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(tester.hasRunningAnimations, isTrue);
+
+    await tester.pumpWidget(wrap(
+      slot: live,
+      matchResult: result(MatchStatus.inProgress),
+      pulse: false,
+    ));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(tester.hasRunningAnimations, isFalse);
+
+    await tester.pumpWidget(wrap(
+      slot: live,
+      matchResult: result(MatchStatus.inProgress),
+    ));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(tester.hasRunningAnimations, isTrue);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('a live match WITHOUT disableAnimations does run the pulse',
       (tester) async {
     await tester.pumpWidget(wrap(

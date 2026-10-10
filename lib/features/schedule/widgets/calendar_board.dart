@@ -448,7 +448,7 @@ class BoardColumnHeader extends StatelessWidget {
   final void Function(PrioritySlot match)? onPlayVideo;
 
   /// The live badge in the day's list pulses (see [showDayMatchesDialog]);
-  /// the kiosk's „Animace na pozadí“.
+  /// the kiosk's „Opakující se animace“.
   final bool pulseLive;
 
   @override

@@ -59,8 +59,9 @@ const appChangelog = <Release>[
     'Aplikace pro Android: kiosk účet se přihlásí přes „Přihlásit kiosk“ '
         'dole na přihlašovací obrazovce (na webu má kiosk svou adresu).',
     'Správa → Kiosk: nová sekce Optimalizace výkonu pro slabší displej — '
-        'vypnutí dýchajícího tlačítka panelu a nižší rozlišení vykreslování '
-        'na webu. Minulé dny na tabuli se kreslí levněji, vypadají stejně.',
+        'vypnutí opakujících se animací (dýchající tlačítko panelu, pulzující '
+        'ikona živého přenosu) a nižší rozlišení vykreslování na webu. Minulé '
+        'dny na tabuli se kreslí levněji, vypadají stejně.',
     'Kiosk: zápas, který má na webu ČKA video na YouTube, si kdokoli pustí '
         'tlačítkem ▶ — živě i ze záznamu, i v zápasech dne na tabuli — '
         'v plovoucím okně vedle tabule. '

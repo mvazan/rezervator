@@ -265,7 +265,7 @@ class KioskDrawerButton extends StatefulWidget {
   final bool open;
   final VoidCallback onTap;
 
-  /// Off = a still button (the admin's „Animace na pozadí“, 0065):
+  /// Off = a still button (the admin's „Opakující se animace“, 0065):
   /// every breath repaints the screen, which a slow display feels.
   final bool breathe;
 
@@ -1198,11 +1198,13 @@ class _LiveViewState extends ConsumerState<_LiveView> {
                         ),
                       ),
                     const Spacer(),
-                    _LiveAge(slot: slot),
+                    // Gives way first in a narrow drawer: the badge beside
+                    // it is the stream's only way in.
+                    Flexible(child: _LiveAge(slot: slot)),
                     // The live badge everywhere else has: the pulsing red
                     // camera — still with the admin's animations off.
                     if (hasKioskVideo(slot)) ...[
-                      const SizedBox(width: 8),
+                      const SizedBox(width: 4),
                       MatchLeading(
                         slot: slot,
                         result: ref.watch(
@@ -1284,9 +1286,13 @@ class _LiveAge extends ConsumerWidget {
       children: [
         Icon(Icons.refresh, size: 14, color: scheme.onSurfaceVariant),
         const SizedBox(width: 4),
-        Text(
-          freshnessLabel(fetched, now),
-          style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+        Flexible(
+          child: Text(
+            freshnessLabel(fetched, now),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+          ),
         ),
       ],
     );

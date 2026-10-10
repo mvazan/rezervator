@@ -927,7 +927,7 @@ class KioskSettingsScreen extends ConsumerWidget {
                 _switch(
                   context,
                   settings,
-                  'Animace na pozadí',
+                  'Opakující se animace',
                   settings?.kioskAnimations ?? true,
                   'kiosk_animations',
                   subtitle:
