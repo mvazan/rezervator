@@ -10609,6 +10609,34 @@ begin
   raise notice 'OK: the weather''s place comes whole, the status line stays off the public overview (0067)';
 end $$;
 
+\ir ../migrations/0068_kiosk_warning.sql
+
+-- 0068: the kiosk's warning — some text or none, never blank or a page
+-- long — stays off the public overview.
+do $$
+declare
+  v_a constant uuid := '00000000-0000-0000-0000-00000000000a';
+begin
+  begin
+    update schedule_settings set kiosk_warning = '   ' where tenant_id = v_a;
+    raise exception 'FAIL: a blank warning was accepted (0068)';
+  exception when check_violation then null;
+  end;
+  begin
+    update schedule_settings set kiosk_warning = repeat('x', 201)
+     where tenant_id = v_a;
+    raise exception 'FAIL: a warning over 200 characters was accepted (0068)';
+  exception when check_violation then null;
+  end;
+  update schedule_settings set kiosk_warning = 'Dráha 3 je mimo provoz.'
+   where tenant_id = v_a;
+  if public_week('kuzelna-a', current_date)->'settings' ? 'kiosk_warning' then
+    raise exception 'FAIL: the public overview hands out the kiosk warning (0068)';
+  end if;
+  update schedule_settings set kiosk_warning = null where tenant_id = v_a;
+  raise notice 'OK: the kiosk warning is some text or none and stays off the public overview (0068)';
+end $$;
+
 -- 0052 One device token, one profile ----------------------------------------
 -- 20. notify pushes to every profile holding a token, so a token the last
 -- account on a device kept (signed out offline, session expired, an older

@@ -1402,6 +1402,7 @@ void main() {
       bool animations = true,
       bool stream = false,
       bool nameday = false,
+      String? warning,
       Stream<Map<String, MatchResult>>? resultsStream,
       Map<String, List<MatchPlayerResult>> lineups = const {},
     }) => ProviderScope(
@@ -1442,6 +1443,7 @@ void main() {
               kioskAnimations: animations,
               kioskStream: stream,
               kioskNameday: nameday,
+              kioskWarning: warning,
             ),
           ),
         ),
@@ -1724,6 +1726,31 @@ void main() {
       await tester.pumpWidget(app());
       await tester.pumpAndSettle();
       expect(find.text('Svátek: Věra'), findsNothing);
+      await finish(tester);
+    });
+
+    testWidgets('the admin\'s warning sits in the status bar between the '
+        'clock and „Rezervovat“, with its icon; none, nothing', (tester) async {
+      fullHd(tester);
+      await tester.pumpWidget(app(warning: 'Dráha 3 je mimo provoz.'));
+      await tester.pumpAndSettle();
+      final text = find.text('Dráha 3 je mimo provoz.');
+      final icon = find.byIcon(Icons.warning_amber_rounded);
+      expect(text, findsOneWidget);
+      expect(icon, findsOneWidget);
+      expect(
+        tester.getTopLeft(icon).dx,
+        greaterThan(tester.getTopRight(find.text('12:00')).dx),
+      );
+      expect(
+        tester.getTopRight(text).dx,
+        lessThan(tester.getTopLeft(find.text('Rezervovat')).dx),
+      );
+      await finish(tester);
+
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+      expect(icon, findsNothing);
       await finish(tester);
     });
 

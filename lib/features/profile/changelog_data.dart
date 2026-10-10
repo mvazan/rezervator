@@ -72,8 +72,10 @@ const appChangelog = <Release>[
         'přezdívky, nebo křestního jména, když přezdívka není.',
     'Kalendář a kiosk: zápas v rozvrhu píše domácí, pomlčku a hosty pod '
         'sebe — název týmu se už nerozdělí v půlce.',
+    'Kiosk: správce může v záhlaví vedle hodin vyvěsit upozornění s ikonou '
+        'výstrahy (Správa → Kiosk → Upozornění).',
   ], store: [
-    'Kiosk: stream zápasu z YouTube, počasí a svátek vedle hodin.',
+    'Kiosk: stream zápasu, počasí, svátek a upozornění v záhlaví.',
     'Kiosk: registrační čísla v zápisu, ＋ jako v appce, rada ve výběru '
         'jména.',
     'Kiosk v aplikaci: displej nezhasne, lišty se schovají; přihlášení '

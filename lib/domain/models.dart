@@ -713,6 +713,7 @@ class ScheduleSettings {
     this.kioskWeatherLat,
     this.kioskWeatherLon,
     this.kioskNameday = false,
+    this.kioskWarning,
     this.kioskLiveLayout = MatchLayout.full,
     this.tenantId = '',
     this.dutyReminderEnabled = false,
@@ -780,6 +781,10 @@ class ScheduleSettings {
 
   /// Whose name day it is, beside the kiosk's clock (0067).
   final bool kioskNameday;
+
+  /// A warning the admin typed for the kiosk's status bar (0068) — shown
+  /// with a warning icon beside the clock; null = none.
+  final String? kioskWarning;
 
   /// How often the kiosk asks for a fresh score of a match being played.
   final int kioskLiveRefreshSeconds;
@@ -896,6 +901,10 @@ class ScheduleSettings {
         kioskWeatherLat: (json['kiosk_weather_lat'] as num?)?.toDouble(),
         kioskWeatherLon: (json['kiosk_weather_lon'] as num?)?.toDouble(),
         kioskNameday: json['kiosk_nameday'] as bool? ?? false,
+        kioskWarning: switch (json['kiosk_warning']) {
+          final String w when w.trim().isNotEmpty => w.trim(),
+          _ => null,
+        },
         kioskLiveLayout: parseMatchLayout(
           json['kiosk_live_layout'] as String?,
           allowZapis: false,

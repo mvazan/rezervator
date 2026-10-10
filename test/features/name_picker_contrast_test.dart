@@ -112,6 +112,15 @@ void main() {
               '$variant: hint on $name');
         }
       });
+
+      test('the status bar\'s warning (0068): its text and icon read on the '
+          'error container', () {
+        _expect(
+          contrastRatio(scheme.onErrorContainer, scheme.errorContainer),
+          _textAA,
+          '$variant: warning text on its container',
+        );
+      });
     });
   }
 }
