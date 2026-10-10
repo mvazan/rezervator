@@ -46,4 +46,15 @@ void main() {
       '?autoplay=1&mute=1&playsinline=1&controls=1&fs=0&rel=0&modestbranding=1',
     );
   });
+
+  test('the host page embeds the address, lets it autoplay and sandboxes '
+      'its links', () {
+    final page = kioskStreamHostPage(youtubeEmbedUrl(id));
+    expect(page, contains('src="${youtubeEmbedUrl(id)}"'));
+    expect(page, contains('allow="autoplay;'));
+    expect(page, contains('sandbox="allow-scripts allow-same-origin'));
+    expect(page, isNot(contains('allow-popups')));
+    expect(page, isNot(contains('allow-top-navigation')));
+    expect(kioskStreamHostOrigin, startsWith('https://'));
+  });
 }

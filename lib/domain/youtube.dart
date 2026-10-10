@@ -35,3 +35,22 @@ String? youtubeVideoId(String url) {
 String youtubeEmbedUrl(String id) =>
     'https://www.youtube-nocookie.com/embed/$id'
     '?autoplay=1&mute=1&playsinline=1&controls=1&fs=0&rel=0&modestbranding=1';
+
+/// The https origin the app's player gives its host page (`baseUrl` of
+/// `loadHtmlString`): a top-level load of the embed address carries no
+/// Referer, and YouTube refuses that (player error 153); as an iframe of a
+/// page with an origin it plays like on the web.
+const kioskStreamHostOrigin = 'https://rezervator.online';
+
+/// The one-line page the app's player loads around [embedUrl]: the embed
+/// fills it, sandboxed so the player's own links (the title, the logo,
+/// „Watch on YouTube“) open nothing — no popups, no navigation out.
+String kioskStreamHostPage(String embedUrl) =>
+    '<!doctype html><html><head>'
+    '<meta name="viewport" content="width=device-width, initial-scale=1">'
+    '</head><body style="margin:0;background:#000">'
+    '<iframe src="$embedUrl" '
+    'allow="autoplay; encrypted-media; picture-in-picture" '
+    'sandbox="allow-scripts allow-same-origin allow-presentation" '
+    'style="border:0;width:100vw;height:100vh"></iframe>'
+    '</body></html>';
