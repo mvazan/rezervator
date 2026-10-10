@@ -63,6 +63,8 @@ const appChangelog = <Release>[
         'na webu. Minulé dny na tabuli se kreslí levněji, vypadají stejně.',
     'Kiosk: výběr jména radí, které písmeno vybrat — první písmeno '
         'přezdívky, nebo křestního jména, když přezdívka není.',
+    'Kiosk: ve výběru jména upozornění, že se tam z tréninku odhlásit nedá '
+        '(text nastaví správce ve Správě → Kiosk).',
   ], store: [
     'Kiosk: zápis zápasu ukazuje registrační čísla hráčů.',
     'Emoji v textu se kreslí z obrázků — všude stejně.',
@@ -70,7 +72,8 @@ const appChangelog = <Release>[
     'Kiosk v aplikaci: displej nezhasne, systémové lišty se schovají; kiosk '
         'účet se přihlásí tlačítkem „Přihlásit kiosk“.',
     'Správa → Kiosk: volby Optimalizace výkonu pro slabší displej.',
-    'Kiosk: výběr jména radí, které písmeno vybrat.',
+    'Kiosk: výběr jména radí, které písmeno vybrat, a upozorní, že se tam '
+        'z tréninku odhlásit nedá.',
   ]),
   Release('2.0.7', '9. 10. 2026', [
     'Notifikace o rezervaci, kterou za vás udělal kiosk, spoluhráč ze '
