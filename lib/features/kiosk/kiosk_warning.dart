@@ -2,14 +2,19 @@
 /// the text from Správa → Kiosk → Obrazovka kiosku → Upozornění, on the
 /// error container so it reads as a warning in both kiosk themes. Alone in
 /// the bar's middle while it hangs (the shell hides the rest), centred.
+/// The name picker shows the admin's booking note (0070) the same way,
+/// with more lines to spare.
 library;
 
 import 'package:flutter/material.dart';
 
 class KioskWarning extends StatelessWidget {
-  const KioskWarning({super.key, required this.text});
+  const KioskWarning({super.key, required this.text, this.maxLines = 2});
 
   final String text;
+
+  /// The most lines before an ellipsis: two in the status bar.
+  final int maxLines;
 
   @override
   Widget build(BuildContext context) {
@@ -37,7 +42,7 @@ class KioskWarning extends StatelessWidget {
               Flexible(
                 child: Text(
                   text,
-                  maxLines: 2,
+                  maxLines: maxLines,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontSize: 18,

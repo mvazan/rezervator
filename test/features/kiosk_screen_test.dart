@@ -731,6 +731,34 @@ void main() {
     expect(lastPatch(), {'kiosk_stream_width': 50});
   });
 
+  testWidgets('today\'s matches in the header: on by default, right below '
+      'the warning; the switch PATCHes its own column', (tester) async {
+    tall(tester);
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+
+    Map<String, dynamic> lastPatch() => jsonDecode(
+          requests.lastWhere((r) => r.method == 'PATCH').body,
+        ) as Map<String, dynamic>;
+
+    final todays =
+        find.widgetWithText(SwitchListTile, 'Dnešní zápasy v záhlaví');
+    expect(tester.widget<SwitchListTile>(todays).value, isTrue);
+    expect(
+      tester.getTopLeft(todays).dy,
+      greaterThan(tester.getTopLeft(find.text('Upozornění')).dy),
+    );
+    expect(
+      tester.getTopLeft(todays).dy,
+      lessThan(tester.getTopLeft(find.text('Tmavý režim')).dy),
+    );
+
+    await tester.ensureVisible(todays);
+    await tester.tap(todays);
+    await tester.pumpAndSettle();
+    expect(lastPatch(), {'kiosk_todays_matches': false});
+  });
+
   /// Types [text] into the number field [label] and presses Enter.
   Future<void> enter(WidgetTester tester, String label, String text) async {
     final field = find.widgetWithText(TextField, label);

@@ -76,8 +76,11 @@ const appChangelog = <Release>[
     'Kiosk: správce může v záhlaví vedle hodin vyvěsit upozornění s ikonou '
         'výstrahy (Správa → Kiosk → Obrazovka kiosku); dokud visí, zbytek '
         'záhlaví ustoupí.',
+    'Kiosk: správce může dnešní zápasy v záhlaví skrýt (Správa → Kiosk → '
+        'Obrazovka kiosku).',
   ], store: [
-    'Kiosk: stream zápasu, počasí, svátek a upozornění v záhlaví.',
+    'Kiosk: stream zápasu, počasí, svátek a upozornění v záhlaví; dnešní '
+        'zápasy v záhlaví jdou skrýt.',
     'Kiosk: registrační čísla v zápisu, ＋ jako v appce, rada ve výběru '
         'jména.',
     'Kiosk v aplikaci: displej nezhasne, lišty se schovají; přihlášení '

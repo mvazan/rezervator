@@ -715,6 +715,7 @@ class ScheduleSettings {
     this.kioskNameday = false,
     this.kioskWarning,
     this.kioskBandFontSize = 10,
+    this.kioskTodaysMatches = true,
     this.kioskLiveLayout = MatchLayout.full,
     this.tenantId = '',
     this.dutyReminderEnabled = false,
@@ -789,6 +790,10 @@ class ScheduleSettings {
   /// The px size of the bands' text (matches, blockages, rentals) on the
   /// kiosk board (0069); the app keeps 10.
   final int kioskBandFontSize;
+
+  /// The kiosk's status bar lists today's matches beside the clock (0071);
+  /// off = it says what it says on a day without a match.
+  final bool kioskTodaysMatches;
 
   /// How often the kiosk asks for a fresh score of a match being played.
   final int kioskLiveRefreshSeconds;
@@ -910,6 +915,7 @@ class ScheduleSettings {
           _ => null,
         },
         kioskBandFontSize: json['kiosk_band_font_size'] as int? ?? 10,
+        kioskTodaysMatches: json['kiosk_todays_matches'] as bool? ?? true,
         kioskLiveLayout: parseMatchLayout(
           json['kiosk_live_layout'] as String?,
           allowZapis: false,
