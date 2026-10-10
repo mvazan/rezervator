@@ -366,4 +366,99 @@ void main() {
       );
     });
   });
+
+  group('kioskStreamLabel', () {
+    const video = 'https://youtu.be/wOq9EODb8w8';
+    final m = match('m', today, video: video);
+
+    test('live while it is being played (or an hour before), a recording '
+        'once decided, the video otherwise', () {
+      expect(kioskStreamLabel(m, null, DateTime(2026, 10, 8, 13, 30)),
+          'Sledovat živě');
+      expect(
+        kioskStreamLabel(
+          m,
+          result('m', MatchStatus.inProgress),
+          DateTime(2026, 10, 8, 15),
+        ),
+        'Sledovat živě',
+      );
+      expect(
+        kioskStreamLabel(
+          m,
+          result('m', MatchStatus.finished),
+          DateTime(2026, 10, 8, 15),
+        ),
+        'Přehrát záznam',
+      );
+      expect(kioskStreamLabel(m, null, DateTime(2026, 10, 1, 15)),
+          'Pustit video');
+    });
+
+    test('only a YouTube video plays on the kiosk', () {
+      expect(hasKioskVideo(m), isTrue);
+      expect(hasKioskVideo(match('x', today)), isFalse);
+      expect(
+        hasKioskVideo(match('v', today, video: 'https://vimeo.com/123456789')),
+        isFalse,
+      );
+    });
+  });
+
+  group('kioskVisibleStreams', () {
+    const video = 'https://youtu.be/wOq9EODb8w8';
+    final slots = [
+      for (final id in ['a', 'b', 'c', 'd', 'e']) match(id, today, video: video),
+      match('novideo', today),
+    ];
+    PrioritySlot slot(String id) => slots.firstWhere((s) => s.id == id);
+
+    List<String> visible({
+      List<String> live = const [],
+      List<String> opened = const [],
+      Set<String> closed = const {},
+      int max = 1,
+    }) => [
+      for (final s in kioskVisibleStreams(
+        slots: slots,
+        live: [for (final id in live) slot(id)],
+        opened: opened,
+        closed: closed,
+        max: max,
+      ))
+        s.id,
+    ];
+
+    test('the live ones first, then what visitors opened, in order', () {
+      expect(visible(live: ['a', 'b'], opened: ['d', 'c']), ['a', 'b', 'd', 'c']);
+    });
+
+    test('a live one a visitor opened counts as theirs, once', () {
+      expect(visible(live: ['a', 'b'], opened: ['a']), ['b', 'a']);
+    });
+
+    test('closed live ones stay closed; opened ones without a video or a '
+        'slot are left out', () {
+      expect(
+        visible(live: ['a', 'b'], opened: ['novideo', 'gone'], closed: {'a'}),
+        ['b'],
+      );
+    });
+
+    test('one window turns through all of them', () {
+      expect(
+        visible(live: ['a', 'b'], opened: ['c', 'd', 'e']),
+        ['a', 'b', 'c', 'd', 'e'],
+      );
+    });
+
+    test('with more windows, what visitors opened comes first: the live '
+        'ones get the windows left', () {
+      expect(visible(live: ['a', 'b'], opened: ['c'], max: 2), ['a', 'c']);
+      expect(visible(live: ['a', 'b'], opened: ['c', 'd'], max: 2), ['c', 'd']);
+      expect(visible(live: ['a', 'b', 'c'], max: 2), ['a', 'b']);
+      // Never more than the windows, the latest opened kept.
+      expect(visible(opened: ['c', 'd', 'e'], max: 2), ['d', 'e']);
+    });
+  });
 }

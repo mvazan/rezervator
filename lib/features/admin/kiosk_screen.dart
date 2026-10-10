@@ -591,75 +591,91 @@ class KioskSettingsScreen extends ConsumerWidget {
             _section(
               context,
               'Stream zápasu',
-              'Zápas, který má na webu ČKA video (YouTube), se během hraní '
-                  'přehrává v plovoucím okně vedle tabule — potichu; zvuk si '
-                  'návštěvník pustí v přehrávači. Okno jde posouvat, zvětšit '
-                  'na celou obrazovku nebo sbalit; po skončení zápasu zmizí.',
+              'Zápas, který má na webu ČKA video (YouTube), si kdokoli pustí '
+                  'na kiosku tlačítkem ▶ u zápasu — živě i ze záznamu — v '
+                  'plovoucím okně vedle tabule, potichu; zvuk si pustí v '
+                  'přehrávači. Okno jde posouvat, zvětšit na celou obrazovku, '
+                  'sbalit nebo křížkem zavřít; po konci videa se zavře samo. '
+                  'Doba nečinnosti okna nechá, kde je návštěvník nechal.',
               [
                 _switch(
                   context,
                   settings,
-                  'Stream zápasu na kiosku',
+                  'Živý přenos otevřít sám',
                   settings?.kioskStream ?? false,
                   'kiosk_stream',
                   subtitle:
-                      'Od hodiny před začátkem do půl hodiny po zapsání '
-                      'výsledku. Doba nečinnosti okno nechá, kde ho '
-                      'návštěvník nechal.',
+                      'Hraný zápas s videem se otevře bez dotyku: od hodiny '
+                      'před začátkem do půl hodiny po zapsání výsledku. '
+                      'Zavřený se sám znovu neotevře. Vypnuto = jen '
+                      'tlačítkem ▶.',
                 ),
-                if (settings?.kioskStream ?? false) ...[
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8, bottom: 12),
-                    child: DropdownButtonFormField<KioskCorner>(
-                      initialValue:
-                          settings?.kioskStreamCorner ?? KioskCorner.bl,
-                      decoration: const InputDecoration(
-                        labelText: 'Kde se okno objeví',
-                        helperText:
-                            'Panel je vpravo; vlevo dole mu okno nepřekáží.',
-                        border: OutlineInputBorder(),
-                      ),
-                      items: const [
-                        DropdownMenuItem(
-                          value: KioskCorner.tl,
-                          child: Text('Vlevo nahoře'),
-                        ),
-                        DropdownMenuItem(
-                          value: KioskCorner.tr,
-                          child: Text('Vpravo nahoře'),
-                        ),
-                        DropdownMenuItem(
-                          value: KioskCorner.bl,
-                          child: Text('Vlevo dole'),
-                        ),
-                        DropdownMenuItem(
-                          value: KioskCorner.br,
-                          child: Text('Vpravo dole'),
-                        ),
-                      ],
-                      onChanged: settings == null
-                          ? null
-                          : (c) => c == null
-                                ? null
-                                : _panel(context, settings, {
-                                    'kiosk_stream_corner': c.name,
-                                  }),
+                Padding(
+                  padding: const EdgeInsets.only(top: 8, bottom: 12),
+                  child: DropdownButtonFormField<KioskCorner>(
+                    initialValue: settings?.kioskStreamCorner ?? KioskCorner.bl,
+                    decoration: const InputDecoration(
+                      labelText: 'Kde se okno objeví',
+                      helperText:
+                          'Panel je vpravo; vlevo dole mu okno nepřekáží. '
+                          'Další okna do dalších rohů.',
+                      border: OutlineInputBorder(),
                     ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: KioskCorner.tl,
+                        child: Text('Vlevo nahoře'),
+                      ),
+                      DropdownMenuItem(
+                        value: KioskCorner.tr,
+                        child: Text('Vpravo nahoře'),
+                      ),
+                      DropdownMenuItem(
+                        value: KioskCorner.bl,
+                        child: Text('Vlevo dole'),
+                      ),
+                      DropdownMenuItem(
+                        value: KioskCorner.br,
+                        child: Text('Vpravo dole'),
+                      ),
+                    ],
+                    onChanged: settings == null
+                        ? null
+                        : (c) => c == null
+                              ? null
+                              : _panel(context, settings, {
+                                  'kiosk_stream_corner': c.name,
+                                }),
                   ),
-                  _number(
-                    context,
-                    settings,
-                    'Šířka okna',
-                    settings?.kioskStreamWidth ?? 35,
-                    'kiosk_stream_width',
-                    unit: '%',
-                    min: 20,
-                    max: 60,
-                    helper:
-                        'Procenta šířky obrazovky; výška podle videa 16:9. '
-                        'Návštěvník si okno přesune nebo zvětší sám.',
-                  ),
-                ],
+                ),
+                _number(
+                  context,
+                  settings,
+                  'Šířka okna',
+                  settings?.kioskStreamWidth ?? 35,
+                  'kiosk_stream_width',
+                  unit: '%',
+                  min: 20,
+                  max: 60,
+                  helper:
+                      'Procenta šířky obrazovky; výška podle videa 16:9. '
+                      'Návštěvník si okno přesune nebo zvětší sám.',
+                ),
+                _number(
+                  context,
+                  settings,
+                  'Oken najednou',
+                  settings?.kioskStreamMax ?? 1,
+                  'kiosk_stream_max',
+                  unit: '',
+                  min: 1,
+                  max: 4,
+                  helper:
+                      'Při 1 se mezi puštěnými streamy listuje šipkami v '
+                      'okně. Víc = každý stream ve svém okně; další ▶ '
+                      'zavře nejstarší. Každé okno je další přehrávač — '
+                      'na slabším displeji raději 1.',
+                ),
               ],
             ),
             _section(

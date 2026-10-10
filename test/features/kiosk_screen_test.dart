@@ -333,10 +333,10 @@ void main() {
     expect(lastPatch(), {'kiosk_low_res': true});
   });
 
-  testWidgets('the stream options: the switch PATCHes kiosk_stream, the corner '
-      'and the width show only with it on and PATCH their own columns', (
-    tester,
-  ) async {
+  testWidgets('the stream options: the switch PATCHes kiosk_stream, the '
+      'corner, the width and the windows at once PATCH their own columns — '
+      'all of them shown with the switch off too, a visitor opens streams '
+      'regardless', (tester) async {
     tall(tester);
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
@@ -345,37 +345,14 @@ void main() {
           requests.lastWhere((r) => r.method == 'PATCH').body,
         ) as Map<String, dynamic>;
 
-    // Off by default: no corner, no width.
-    expect(find.text('Kde se okno objeví'), findsNothing);
-    expect(find.text('Šířka okna'), findsNothing);
-    final stream = find.widgetWithText(SwitchListTile, 'Stream zápasu na kiosku');
+    final stream = find.widgetWithText(
+      SwitchListTile,
+      'Živý přenos otevřít sám',
+    );
     await tester.ensureVisible(stream);
     await tester.tap(stream);
     await tester.pumpAndSettle();
     expect(lastPatch(), {'kiosk_stream': true});
-  });
-
-  // Its own test: a second pumpWidget never swaps the ProviderScope's
-  // overrides, so the switched-on settings need a fresh tree.
-  testWidgets('with the stream on, the corner and the width PATCH their own '
-      'columns', (tester) async {
-    tall(tester);
-    await tester.pumpWidget(
-      app(
-        settings: const ScheduleSettings(
-          laneCount: 4,
-          trainingWeekdays: {1, 2, 4},
-          bookingHorizonDays: 14,
-          maxActiveReservations: 3,
-          kioskStream: true,
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    Map<String, dynamic> lastPatch() => jsonDecode(
-          requests.lastWhere((r) => r.method == 'PATCH').body,
-        ) as Map<String, dynamic>;
 
     await tester.ensureVisible(find.text('Kde se okno objeví'));
     await tester.tap(find.text('Vlevo dole'));
@@ -390,6 +367,13 @@ void main() {
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
     expect(lastPatch(), {'kiosk_stream_width': 50});
+
+    final windows = find.widgetWithText(TextField, 'Oken najednou');
+    await tester.ensureVisible(windows);
+    await tester.enterText(windows, '3');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(lastPatch(), {'kiosk_stream_max': 3});
   });
 
   /// Types [text] into the number field [label] and presses Enter.
