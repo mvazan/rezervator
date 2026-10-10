@@ -61,10 +61,11 @@ const appChangelog = <Release>[
     'Správa → Kiosk: nová sekce Optimalizace výkonu pro slabší displej — '
         'vypnutí dýchajícího tlačítka panelu a nižší rozlišení vykreslování '
         'na webu. Minulé dny na tabuli se kreslí levněji, vypadají stejně.',
-    'Kiosk: zápas, který má na webu ČKA video na YouTube, se během hraní '
-        'přehrává v plovoucím okně vedle tabule — jde posouvat, zvětšit na '
-        'celou obrazovku nebo sbalit, po skončení zápasu zmizí (Správa → '
-        'Kiosk → Stream zápasu).',
+    'Kiosk: zápas, který má na webu ČKA video na YouTube, si kdokoli pustí '
+        'tlačítkem ▶ — živě i ze záznamu — v plovoucím okně vedle tabule. '
+        'Okno jde posouvat, zvětšit na celou obrazovku, sbalit nebo křížkem '
+        'zavřít; po konci videa se zavře samo. Správa → Kiosk → Stream '
+        'zápasu: hraný zápas se může otevřít sám, oken může být víc najednou.',
   ], store: [
     'Kiosk: zápis zápasu ukazuje registrační čísla hráčů.',
     'Emoji v textu se kreslí z obrázků — všude stejně.',
@@ -72,7 +73,8 @@ const appChangelog = <Release>[
     'Kiosk v aplikaci: displej nezhasne, systémové lišty se schovají; kiosk '
         'účet se přihlásí tlačítkem „Přihlásit kiosk“.',
     'Správa → Kiosk: volby Optimalizace výkonu pro slabší displej.',
-    'Kiosk: stream zápasu z YouTube v plovoucím okně vedle tabule.',
+    'Kiosk: živě i ze záznamu — video zápasu z YouTube v plovoucím okně '
+        'vedle tabule.',
   ]),
   Release('2.0.7', '9. 10. 2026', [
     'Notifikace o rezervaci, kterou za vás udělal kiosk, spoluhráč ze '
