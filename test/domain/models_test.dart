@@ -36,6 +36,22 @@ void main() {
       expect(s.kioskDark, isTrue); // absent → default true
     });
 
+    test('fromJson: the kiosk warning trimmed; blank or absent is none', () {
+      ScheduleSettings settings(Object? warning) => ScheduleSettings.fromJson({
+        'lane_count': 6,
+        'training_weekdays': [1, 3],
+        'booking_horizon_days': 7,
+        'max_active_reservations': 2,
+        'kiosk_warning': warning,
+      });
+      expect(
+        settings('  Dráha 3 je mimo provoz. ').kioskWarning,
+        'Dráha 3 je mimo provoz.',
+      );
+      expect(settings('   ').kioskWarning, isNull);
+      expect(settings(null).kioskWarning, isNull);
+    });
+
     test('fromJson reads kiosk_dark when present', () {
       final s = ScheduleSettings.fromJson({
         'lane_count': 6,

@@ -282,6 +282,78 @@ void main() {
     expect(find.text('Vrátit mezi hráče'), findsNothing);
   });
 
+  group('warning', () {
+    Map<String, dynamic> lastPatch() => jsonDecode(
+          requests.lastWhere((r) => r.method == 'PATCH').body,
+        ) as Map<String, dynamic>;
+
+    testWidgets('none yet: „Přidat…“ asks for the text, blank cannot be '
+        'saved, the text is saved trimmed', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+      expect(find.text('Žádné upozornění'), findsOneWidget);
+      expect(find.byTooltip('Odstranit upozornění'), findsNothing);
+
+      await tester.tap(find.text('Přidat…'));
+      await tester.pumpAndSettle();
+      final save = find.widgetWithText(FilledButton, 'Uložit');
+      expect(tester.widget<FilledButton>(save).onPressed, isNull);
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Text upozornění'),
+        '   ',
+      );
+      await tester.pump();
+      expect(tester.widget<FilledButton>(save).onPressed, isNull);
+
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Text upozornění'),
+        '  Dráha 3 je mimo provoz. ',
+      );
+      await tester.pump();
+      await tester.tap(save);
+      await tester.pumpAndSettle();
+      expect(lastPatch(), {'kiosk_warning': 'Dráha 3 je mimo provoz.'});
+    });
+
+    testWidgets('a warning set: shown, „Upravit…“ starts from it, the bin '
+        'removes it', (tester) async {
+      tall(tester);
+      await tester.pumpWidget(
+        app(
+          settings: const ScheduleSettings(
+            laneCount: 4,
+            trainingWeekdays: {1, 2, 4},
+            bookingHorizonDays: 14,
+            maxActiveReservations: 3,
+            kioskWarning: 'Dráha 3 je mimo provoz.',
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Dráha 3 je mimo provoz.'), findsOneWidget);
+
+      await tester.tap(find.text('Upravit…'));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<TextField>(
+              find.widgetWithText(TextField, 'Text upozornění'),
+            )
+            .controller!
+            .text,
+        'Dráha 3 je mimo provoz.',
+      );
+      await tester.tap(find.text('Zrušit'));
+      await tester.pumpAndSettle();
+      expect(requests.where((r) => r.method == 'PATCH'), isEmpty);
+
+      await tester.tap(find.byTooltip('Odstranit upozornění'));
+      await tester.pumpAndSettle();
+      expect(lastPatch(), {'kiosk_warning': null});
+    });
+  });
+
   testWidgets('the panel options PATCH their own columns', (tester) async {
     tall(tester);
     await tester.pumpWidget(app());

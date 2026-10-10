@@ -690,6 +690,7 @@ class ScheduleSettings {
     this.kioskFontSize = 11,
     this.kioskAnimations = true,
     this.kioskLowRes = false,
+    this.kioskWarning,
     this.kioskLiveLayout = MatchLayout.full,
     this.tenantId = '',
     this.dutyReminderEnabled = false,
@@ -740,6 +741,10 @@ class ScheduleSettings {
   /// The web kiosk draws at devicePixelRatio 1 and lets the display scale
   /// it up: fewer pixels a frame, softer text (0065). Nothing in the app.
   final bool kioskLowRes;
+
+  /// A warning the admin typed for the kiosk's status bar (0068) — shown
+  /// with a warning icon beside the clock; null = none.
+  final String? kioskWarning;
 
   /// How often the kiosk asks for a fresh score of a match being played.
   final int kioskLiveRefreshSeconds;
@@ -846,6 +851,10 @@ class ScheduleSettings {
         kioskFontSize: json['kiosk_font_size'] as int? ?? 11,
         kioskAnimations: json['kiosk_animations'] as bool? ?? true,
         kioskLowRes: json['kiosk_low_res'] as bool? ?? false,
+        kioskWarning: switch (json['kiosk_warning']) {
+          final String w when w.trim().isNotEmpty => w.trim(),
+          _ => null,
+        },
         kioskLiveLayout: parseMatchLayout(
           json['kiosk_live_layout'] as String?,
           allowZapis: false,

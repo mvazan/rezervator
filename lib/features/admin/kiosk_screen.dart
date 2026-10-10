@@ -183,12 +183,25 @@ class KioskSettingsScreen extends ConsumerWidget {
   Future<void> _panel(
     BuildContext context,
     ScheduleSettings settings,
-    Map<String, Object> changes,
+    Map<String, Object?> changes,
   ) => tryAction(
     context,
     () => Api.setKioskPanel(changes, tenantId: settings.tenantId),
     errorText: friendlyDbError,
   );
+
+  /// The warning's text, typed in a dialog (0068); saved trimmed.
+  Future<void> _editWarning(
+    BuildContext context,
+    ScheduleSettings settings,
+  ) async {
+    final text = await showDialog<String>(
+      context: context,
+      builder: (_) => _WarningDialog(initial: settings.kioskWarning ?? ''),
+    );
+    if (text == null || !context.mounted) return;
+    await _panel(context, settings, {'kiosk_warning': text});
+  }
 
   /// Where the app is running (the web build knows; an alley hosting its
   /// own copy under a sub-path included) — or, on Android, where the public
@@ -212,6 +225,48 @@ class KioskSettingsScreen extends ConsumerWidget {
         builder: (settings) => ListView(
           padding: padWithSystemInset(context, const EdgeInsets.all(16)),
           children: [
+            _section(
+              context,
+              'Upozornění',
+              'Krátké varování v záhlaví kiosku vedle hodin, s ikonou '
+                  'výstrahy — třeba „Dráha 3 je mimo provoz“. Platí, dokud '
+                  'ho neodstraníš.',
+              [
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(
+                    Icons.warning_amber_rounded,
+                    color: settings?.kioskWarning == null
+                        ? null
+                        : Theme.of(context).colorScheme.error,
+                  ),
+                  title: Text(settings?.kioskWarning ?? 'Žádné upozornění'),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextButton(
+                        onPressed: settings == null
+                            ? null
+                            : () => _editWarning(context, settings),
+                        child: Text(
+                          settings?.kioskWarning == null
+                              ? 'Přidat…'
+                              : 'Upravit…',
+                        ),
+                      ),
+                      if (settings?.kioskWarning != null)
+                        IconButton(
+                          tooltip: 'Odstranit upozornění',
+                          icon: const Icon(Icons.delete_outline),
+                          onPressed: () => _panel(context, settings!, {
+                            'kiosk_warning': null,
+                          }),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
             _section(
               context,
               'Obrazovka kiosku',
@@ -670,6 +725,61 @@ class KioskSettingsScreen extends ConsumerWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// The kiosk warning's text: one or a few lines, at most 200 characters
+/// (the column's check, 0068). Pops the trimmed text, null when cancelled.
+class _WarningDialog extends StatefulWidget {
+  const _WarningDialog({required this.initial});
+
+  final String initial;
+
+  @override
+  State<_WarningDialog> createState() => _WarningDialogState();
+}
+
+class _WarningDialogState extends State<_WarningDialog> {
+  late final _text = TextEditingController(text: widget.initial);
+
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final text = _text.text.trim();
+    return AlertDialog(
+      title: const Text('Upozornění na kiosku'),
+      content: SizedBox(
+        width: 480,
+        child: TextField(
+          controller: _text,
+          autofocus: true,
+          maxLength: 200,
+          minLines: 1,
+          maxLines: 3,
+          decoration: const InputDecoration(
+            labelText: 'Text upozornění',
+            hintText: 'Třeba: Dráha 3 je mimo provoz.',
+            border: OutlineInputBorder(),
+          ),
+          onChanged: (_) => setState(() {}),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Zrušit'),
+        ),
+        FilledButton(
+          onPressed: text.isEmpty ? null : () => Navigator.pop(context, text),
+          child: const Text('Uložit'),
+        ),
+      ],
     );
   }
 }
