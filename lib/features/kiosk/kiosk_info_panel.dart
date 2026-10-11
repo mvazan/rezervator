@@ -157,7 +157,7 @@ class KioskDrawer extends ConsumerWidget {
     required this.open,
     required this.onOpenNotice,
     required this.onOpenMatch,
-    required this.onPlay,
+    this.onPlay,
     this.resetToken = 0,
     this.boardDays,
     this.showLive = true,
@@ -182,8 +182,9 @@ class KioskDrawer extends ConsumerWidget {
   final void Function(Message notice) onOpenNotice;
   final void Function(PrioritySlot match) onOpenMatch;
 
-  /// ▶ at a match with a video: its stream (0072).
-  final void Function(PrioritySlot match) onPlay;
+  /// ▶ at a match with a video: its stream (0072); null while the admin
+  /// has the streams off — no ▶ and no live badge.
+  final void Function(PrioritySlot match)? onPlay;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -846,13 +847,15 @@ class _MatchesCard extends ConsumerStatefulWidget {
   const _MatchesCard({
     super.key,
     required this.onOpen,
-    required this.onPlay,
+    this.onPlay,
     this.boardDays,
     this.onShowLive,
   });
 
   final void Function(PrioritySlot match) onOpen;
-  final void Function(PrioritySlot match) onPlay;
+
+  /// ▶ at a match with a video; null = no ▶ (the streams off).
+  final void Function(PrioritySlot match)? onPlay;
 
   /// Back to the match being played; null when none is.
   final VoidCallback? onShowLive;
@@ -992,6 +995,7 @@ class _MatchesCardState extends ConsumerState<_MatchesCard> {
         ref.watch(matchResultsProvider).value ?? const <String, MatchResult>{};
     final window = _window(_extraBack, _extraAhead, watch: true);
     final matches = window.matches;
+    final onPlay = widget.onPlay;
 
     // Like Výsledky: opens with the first coming match at the bottom edge
     // and as many played (and playing) ones as fit above it. Afterwards the
@@ -1026,10 +1030,10 @@ class _MatchesCardState extends ConsumerState<_MatchesCard> {
         slot: s,
         result: results[s.id],
         onOpen: widget.onOpen,
-        play: hasKioskVideo(s)
+        play: onPlay != null && hasKioskVideo(s)
             ? (
                 label: kioskStreamLabel(s, results[s.id], now),
-                onPlay: () => widget.onPlay(s),
+                onPlay: () => onPlay(s),
               )
             : null,
       ),
@@ -1179,7 +1183,7 @@ class _LiveView extends ConsumerStatefulWidget {
     required this.matches,
     required this.turn,
     required this.onOpenMatch,
-    required this.onPlay,
+    this.onPlay,
     this.onShowList,
   });
 
@@ -1189,8 +1193,9 @@ class _LiveView extends ConsumerStatefulWidget {
   /// A tap on the score: the match's Zápis.
   final void Function(PrioritySlot match) onOpenMatch;
 
-  /// ▶ at the match on screen, when it has a video: its stream.
-  final void Function(PrioritySlot match) onPlay;
+  /// ▶ at the match on screen, when it has a video: its stream; null =
+  /// no badge (the streams off).
+  final void Function(PrioritySlot match)? onPlay;
 
   final List<PrioritySlot> matches;
   final Duration turn;
@@ -1296,6 +1301,7 @@ class _LiveViewState extends ConsumerState<_LiveView> {
         : -1;
     if (lockedAt >= 0) _index = lockedAt;
     final slot = matches[_index.clamp(0, matches.length - 1)];
+    final onPlay = widget.onPlay;
     final current = ValueKey(slot.id);
     final locked = lockedAt >= 0;
     return Listener(
@@ -1385,7 +1391,7 @@ class _LiveViewState extends ConsumerState<_LiveView> {
                     Flexible(child: _LiveAge(slot: slot)),
                     // The live badge everywhere else has: the pulsing red
                     // camera — still with the admin's animations off.
-                    if (hasKioskVideo(slot)) ...[
+                    if (onPlay != null && hasKioskVideo(slot)) ...[
                       const SizedBox(width: 4),
                       MatchLeading(
                         slot: slot,
@@ -1395,7 +1401,7 @@ class _LiveViewState extends ConsumerState<_LiveView> {
                         now: ref.watch(nowProvider).value ?? DateTime.now(),
                         linksEnabled: true,
                         fallback: const SizedBox.shrink(),
-                        launch: (_) => widget.onPlay(slot),
+                        launch: (_) => onPlay(slot),
                         pulse: ref.watch(
                           settingsProvider.select(
                             (s) => s.value?.kioskAnimations ?? true,

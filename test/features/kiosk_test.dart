@@ -1578,6 +1578,9 @@ void main() {
       bool todaysMatches = true,
       Set<int>? trainingWeekdays,
       int streamMax = 1,
+      bool streamEnabled = true,
+      // The admin flipping the streams' master switch while the kiosk runs.
+      Stream<bool>? streamSwitch,
       Stream<Map<String, MatchResult>>? resultsStream,
       Map<String, List<MatchPlayerResult>> lineups = const {},
       bool dutyHeader = false,
@@ -1589,54 +1592,54 @@ void main() {
       List<DutyAssignment> dutyAssignments = const [],
     }) => ProviderScope(
       overrides: [
-        settingsProvider.overrideWith(
-          (ref) => Stream.value(
-            ScheduleSettings(
-              laneCount: settings.laneCount,
-              trainingWeekdays: trainingWeekdays ?? settings.trainingWeekdays,
-              bookingHorizonDays: settings.bookingHorizonDays,
-              maxActiveReservations: settings.maxActiveReservations,
-              kioskDrawerOpen: drawerOpen,
-              kioskNoticesMode: switch ((showNotices, headerNotices)) {
-                (true, true) => KioskNoticesMode.both,
-                (true, false) => KioskNoticesMode.drawer,
-                (false, true) => KioskNoticesMode.header,
-                (false, false) => KioskNoticesMode.off,
-              },
-              kioskShowMatches: showMatches,
-              kioskShowUpcoming: showUpcoming,
-              kioskLiveMode: liveMode,
-              kioskWeeksBack: weeksBack,
-              kioskWeeksAhead: weeksAhead,
-              kioskDrawerColumns: drawerColumns,
-              kioskNoticesShare: share,
-              kioskZapisPercent: zapisPercent,
-              kioskNoticesRotationSeconds: noticeRotation,
-              kioskLiveRotationSeconds: liveRotation,
-              kioskPanelEnabled: panelEnabled,
-              kioskPastDays: pastDays,
-              kioskIdleSeconds: idleSeconds,
-              kioskFollowBoard: followBoard,
-              kioskLiveRefreshSeconds: liveRefresh,
-              kioskLiveLayout: liveLayout,
-              kioskVisibleDays: visibleDays,
-              kioskFontSize: fontSize,
-              kioskBandFontSize: bandFontSize,
-              kioskFitDay: fitDay,
-              kioskAnimations: animations,
-              kioskStream: stream,
-              kioskNameday: nameday,
-              kioskWarning: warning,
-              kioskTodaysMatches: todaysMatches,
-              kioskStreamMax: streamMax,
-              kioskDutyHeader: dutyHeader,
-              kioskDutyBoard: dutyBoard,
-              kioskDutyDrawer: dutyDrawer,
-              kioskDutyShare: dutyShare,
-              kioskDutyBandPosition: dutyBandPosition,
-            ),
-          ),
-        ),
+        settingsProvider.overrideWith((ref) {
+          ScheduleSettings shown(bool streamOn) => ScheduleSettings(
+            laneCount: settings.laneCount,
+            trainingWeekdays: trainingWeekdays ?? settings.trainingWeekdays,
+            bookingHorizonDays: settings.bookingHorizonDays,
+            maxActiveReservations: settings.maxActiveReservations,
+            kioskDrawerOpen: drawerOpen,
+            kioskNoticesMode: switch ((showNotices, headerNotices)) {
+              (true, true) => KioskNoticesMode.both,
+              (true, false) => KioskNoticesMode.drawer,
+              (false, true) => KioskNoticesMode.header,
+              (false, false) => KioskNoticesMode.off,
+            },
+            kioskShowMatches: showMatches,
+            kioskShowUpcoming: showUpcoming,
+            kioskLiveMode: liveMode,
+            kioskWeeksBack: weeksBack,
+            kioskWeeksAhead: weeksAhead,
+            kioskDrawerColumns: drawerColumns,
+            kioskNoticesShare: share,
+            kioskZapisPercent: zapisPercent,
+            kioskNoticesRotationSeconds: noticeRotation,
+            kioskLiveRotationSeconds: liveRotation,
+            kioskPanelEnabled: panelEnabled,
+            kioskPastDays: pastDays,
+            kioskIdleSeconds: idleSeconds,
+            kioskFollowBoard: followBoard,
+            kioskLiveRefreshSeconds: liveRefresh,
+            kioskLiveLayout: liveLayout,
+            kioskVisibleDays: visibleDays,
+            kioskFontSize: fontSize,
+            kioskBandFontSize: bandFontSize,
+            kioskFitDay: fitDay,
+            kioskAnimations: animations,
+            kioskStream: stream,
+            kioskNameday: nameday,
+            kioskWarning: warning,
+            kioskTodaysMatches: todaysMatches,
+            kioskStreamMax: streamMax,
+            kioskStreamEnabled: streamOn,
+            kioskDutyHeader: dutyHeader,
+            kioskDutyBoard: dutyBoard,
+            kioskDutyDrawer: dutyDrawer,
+            kioskDutyShare: dutyShare,
+            kioskDutyBandPosition: dutyBandPosition,
+          );
+          return streamSwitch?.map(shown) ?? Stream.value(shown(streamEnabled));
+        }),
         // The stream's player stands in as text: a platform view does not
         // run under flutter_test.
         kioskStreamContentProvider.overrideWithValue(
@@ -2189,6 +2192,162 @@ void main() {
         streamEnded['wOq9EODb8w8']!();
         await tester.pumpAndSettle();
         expect(player, findsNothing);
+        await finish(tester);
+      });
+
+      testWidgets('streams off: no window by itself, no ▶ at the drawer\'s '
+          'matches, no button in the Zápis', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            streamEnabled: false,
+            stream: true,
+            slots: [...onAir, recorded.first],
+            results: {...playing, ...decided},
+            lineups: {'f1': lineup},
+            drawerOpen: true,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(drawerText('6 : 2'), findsOneWidget);
+        expect(player, findsNothing);
+        expect(find.byTooltip('Sledovat živě'), findsNothing);
+        expect(find.byTooltip('Přehrát záznam'), findsNothing);
+        expect(
+          find.descendant(
+            of: find.byType(KioskDrawer),
+            matching: find.byIcon(Icons.play_circle_outline),
+          ),
+          findsNothing,
+        );
+
+        await tester.tap(find.text('6 : 2'));
+        await tester.pumpAndSettle();
+        expect(find.byType(LegacyScoreSheetPage), findsOneWidget);
+        expect(find.text('Přehrát záznam'), findsNothing);
+        expect(find.byIcon(Icons.play_circle_outline), findsNothing);
+        await finish(tester);
+      });
+
+      testWidgets('streams off: the match being played in the drawer has no '
+          'live badge', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            streamEnabled: false,
+            slots: onAir,
+            results: playing,
+            lineups: {'m': lineup},
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(liveView, findsOneWidget);
+        expect(
+          find.descendant(
+            of: find.byType(KioskDrawer),
+            matching: find.byType(MatchLeading),
+          ),
+          findsNothing,
+        );
+        expect(player, findsNothing);
+        await finish(tester);
+      });
+
+      testWidgets('streams off: a day\'s matches from the board\'s header '
+          'show the trophy, no video control', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            streamEnabled: false,
+            slots: [...onAir, fed('r', day, 'Ráno', hour: 8, video: video2)],
+            results: {...playing, 'r': res('r', 'finished', 6, 2)},
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find
+              .descendant(
+                of: find.byType(BoardColumnHeader),
+                matching: find.textContaining('Domácí'),
+              )
+              .first,
+        );
+        await tester.pumpAndSettle();
+        final dialog = find.byType(AlertDialog);
+        Finder inDialog(IconData icon) =>
+            find.descendant(of: dialog, matching: find.byIcon(icon));
+        expect(inDialog(Icons.emoji_events_outlined), findsNWidgets(2));
+        expect(inDialog(Icons.videocam), findsNothing);
+        expect(inDialog(Icons.play_circle_fill), findsNothing);
+
+        await tester.tap(find.text('Zavřít'));
+        await tester.pumpAndSettle();
+        expect(player, findsNothing);
+        await finish(tester);
+      });
+
+      testWidgets('streams off: a tap on today\'s match without a score, but '
+          'with a video, does nothing — in the header and on the board',
+          (tester) async {
+        fullHd(tester);
+        final later = [fed('l', day, 'Odpoledne', hour: 15, video: video2)];
+        await tester.pumpWidget(app(streamEnabled: false, slots: later));
+        await tester.pumpAndSettle();
+
+        await tester.tap(
+          find.textContaining('Odpoledne – Soupeř · 15:00').first,
+        );
+        await tester.pumpAndSettle();
+        expect(player, findsNothing);
+        expect(find.byType(AlertDialog), findsNothing);
+
+        await tester.tap(
+          find
+              .descendant(
+                of: find.byType(CalendarEventBand),
+                matching: find.textContaining('Odpoledne'),
+              )
+              .first,
+        );
+        await tester.pumpAndSettle();
+        expect(player, findsNothing);
+        expect(find.byType(AlertDialog), findsNothing);
+        await finish(tester);
+      });
+
+      testWidgets('the admin switching the streams off closes every window — '
+          'the match on air and a visitor\'s; on again, only the one on air '
+          'comes back', (tester) async {
+        fullHd(tester);
+        final on = StreamController<bool>();
+        addTearDown(on.close);
+        await tester.pumpWidget(
+          app(
+            stream: true,
+            streamMax: 2,
+            slots: [...onAir, recorded.first],
+            results: {...playing, ...decided},
+            drawerOpen: true,
+            streamSwitch: on.stream,
+          ),
+        );
+        on.add(true);
+        await tester.pumpAndSettle();
+        expect(find.textContaining('player wOq9EODb8w8'), findsOneWidget);
+        await tester.tap(find.byTooltip('Přehrát záznam'));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('player abcdefghijk'), findsOneWidget);
+
+        on.add(false);
+        await tester.pumpAndSettle();
+        expect(player, findsNothing);
+        expect(find.byTooltip('Přehrát záznam'), findsNothing);
+
+        // What the visitor opened is forgotten with the switch.
+        on.add(true);
+        await tester.pumpAndSettle();
+        expect(find.textContaining('player wOq9EODb8w8'), findsOneWidget);
+        expect(find.textContaining('player abcdefghijk'), findsNothing);
         await finish(tester);
       });
 

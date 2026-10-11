@@ -69,6 +69,11 @@ class KioskStreams {
 class KioskStreamsNotifier extends Notifier<KioskStreams> {
   @override
   KioskStreams build() {
+    // The admin switching the streams off (or on again) starts afresh:
+    // what visitors opened before does not come back with the switch.
+    ref.watch(
+      settingsProvider.select((s) => s.value?.kioskStreamEnabled ?? true),
+    );
     // Fewer windows than streams opened (the admin lowered the count): the
     // oldest ones close, or they would come back when a window closes.
     ref.listen(
@@ -139,10 +144,12 @@ final kioskStreamsProvider =
       KioskStreamsNotifier.new,
     );
 
-/// The streams the windows show now ([kioskVisibleStreams]): the match on
-/// air by itself only with the admin's switch on.
+/// The streams the windows show now ([kioskVisibleStreams]): none while
+/// the admin has the streams off (0072) — a window open then closes; the
+/// match on air by itself only with the admin's switch on.
 final kioskStreamProvider = Provider<List<PrioritySlot>>((ref) {
   final settings = ref.watch(settingsProvider).value;
+  if (!(settings?.kioskStreamEnabled ?? true)) return const [];
   final slots = ref.watch(prioritySlotsProvider);
   final streams = ref.watch(kioskStreamsProvider);
   return kioskVisibleStreams(

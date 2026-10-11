@@ -67,7 +67,8 @@ const appChangelog = <Release>[
         'v plovoucím okně vedle tabule. '
         'Okno jde posouvat, zvětšit na celou obrazovku, sbalit nebo křížkem '
         'zavřít; po konci videa se zavře samo. Správa → Kiosk → Stream '
-        'zápasu: hraný zápas se může otevřít sám, oken může být víc najednou.',
+        'zápasu: hraný zápas se může otevřít sám, oken může být víc '
+        'najednou; správce může stream i celý vypnout.',
     'Kiosk: vedle hodin může být dnešní počasí (teplota, předpověď, '
         'deštník při šanci na srážky) a kdo má svátek — Správa → Kiosk → '
         'Stavový řádek; místo pro počasí je kuželna nebo vyhledaná obec.',

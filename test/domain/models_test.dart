@@ -233,6 +233,23 @@ void main() {
       );
       expect(KioskDutyBandPosition.parse(null), KioskDutyBandPosition.middle);
     });
+
+    test('fromJson reads the streams master switch (0072); on when absent',
+        () {
+      const base = {
+        'lane_count': 4,
+        'training_weekdays': [1, 2, 4],
+        'booking_horizon_days': 14,
+        'max_active_reservations': 3,
+      };
+      expect(
+        ScheduleSettings.fromJson({...base, 'kiosk_stream_enabled': false})
+            .kioskStreamEnabled,
+        isFalse,
+      );
+      expect(ScheduleSettings.fromJson(base).kioskStreamEnabled, isTrue);
+      expect(ScheduleSettings.defaults.kioskStreamEnabled, isTrue);
+    });
   });
 
   group('canteen duty (0050)', () {
