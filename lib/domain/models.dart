@@ -690,6 +690,10 @@ class ScheduleSettings {
     this.kioskFontSize = 11,
     this.kioskAnimations = true,
     this.kioskLowRes = false,
+    this.kioskDutyHeader = false,
+    this.kioskDutyBoard = false,
+    this.kioskDutyDrawer = false,
+    this.kioskDutyShare = 30,
     this.kioskLiveLayout = MatchLayout.full,
     this.tenantId = '',
     this.dutyReminderEnabled = false,
@@ -740,6 +744,19 @@ class ScheduleSettings {
   /// The web kiosk draws at devicePixelRatio 1 and lets the display scale
   /// it up: fewer pixels a frame, softer text (0065). Nothing in the app.
   final bool kioskLowRes;
+
+  /// The canteen duty on the kiosk (0073), each place switched on by
+  /// itself: today's duty under the clock in the status bar, a tap shows
+  /// the plan ([kioskDutyHeader]); a band across a duty's days in the
+  /// board's day headers ([kioskDutyBoard]); a card with the duty and the
+  /// plan in the side drawer ([kioskDutyDrawer]).
+  final bool kioskDutyHeader;
+  final bool kioskDutyBoard;
+  final bool kioskDutyDrawer;
+
+  /// Percent of the drawer's height the duty card takes (0073); the
+  /// notices and the matches share the rest as before.
+  final int kioskDutyShare;
 
   /// How often the kiosk asks for a fresh score of a match being played.
   final int kioskLiveRefreshSeconds;
@@ -846,6 +863,10 @@ class ScheduleSettings {
         kioskFontSize: json['kiosk_font_size'] as int? ?? 11,
         kioskAnimations: json['kiosk_animations'] as bool? ?? true,
         kioskLowRes: json['kiosk_low_res'] as bool? ?? false,
+        kioskDutyHeader: json['kiosk_duty_header'] as bool? ?? false,
+        kioskDutyBoard: json['kiosk_duty_board'] as bool? ?? false,
+        kioskDutyDrawer: json['kiosk_duty_drawer'] as bool? ?? false,
+        kioskDutyShare: json['kiosk_duty_share'] as int? ?? 30,
         kioskLiveLayout: parseMatchLayout(
           json['kiosk_live_layout'] as String?,
           allowZapis: false,
