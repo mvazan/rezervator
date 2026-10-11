@@ -94,6 +94,7 @@ const appChangelog = <Release>[
   ], store: [
     'Kiosk: video zápasu živě i ze záznamu; počasí, svátek a upozornění v '
         'záhlaví; dnešní zápasy v záhlaví jdou skrýt.',
+    'Kiosk: kdo slouží na kantýně.',
     'Kiosk: registrační čísla v zápisu, ＋ jako v appce, rada a upozornění '
         've výběru jména.',
     'Kiosk v aplikaci: displej nezhasne, lišty se schovají; přihlášení '
