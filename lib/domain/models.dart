@@ -719,6 +719,7 @@ class ScheduleSettings {
     this.kioskFontSize = 11,
     this.kioskAnimations = true,
     this.kioskLowRes = false,
+    this.kioskStreamEnabled = true,
     this.kioskStream = false,
     this.kioskStreamCorner = KioskCorner.bl,
     this.kioskStreamWidth = 35,
@@ -775,6 +776,10 @@ class ScheduleSettings {
   /// The web kiosk draws at devicePixelRatio 1 and lets the display scale
   /// it up: fewer pixels a frame, softer text (0065). Nothing in the app.
   final bool kioskLowRes;
+
+  /// The kiosk's streams at all (0072): off, no match has a ▶ and no
+  /// stream window opens, whatever the settings below say.
+  final bool kioskStreamEnabled;
 
   /// The match on air with a YouTube link opens by itself in a floating
   /// window on the kiosk (0066; a visitor's ▶ opens any match's video
@@ -893,6 +898,7 @@ class ScheduleSettings {
         kioskFontSize: json['kiosk_font_size'] as int? ?? 11,
         kioskAnimations: json['kiosk_animations'] as bool? ?? true,
         kioskLowRes: json['kiosk_low_res'] as bool? ?? false,
+        kioskStreamEnabled: json['kiosk_stream_enabled'] as bool? ?? true,
         kioskStream: json['kiosk_stream'] as bool? ?? false,
         kioskStreamCorner: KioskCorner.parse(
           json['kiosk_stream_corner'] as String?,
