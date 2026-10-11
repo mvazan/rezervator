@@ -2,8 +2,9 @@
 /// read from the plan of Správa → Služby. The admin switches each place on
 /// separately (Správa → Kiosk → Služby v kantýně): the status bar's line
 /// under the date ([KioskDutyLine]), a band across the board's day headers
-/// and a card in the side drawer. A tap on any of them opens the plan
-/// ([showKioskDutyDialog]). Display only — duties are edited in the app.
+/// and a card in the side drawer. A tap on the line or the band opens the
+/// plan ([showKioskDutyDialog]); the card lists it itself. Display only —
+/// duties are edited in the app.
 library;
 
 import 'package:flutter/material.dart';

@@ -3589,6 +3589,269 @@ void main() {
 
         await finish(tester);
       });
+
+      // „V panelu“: the drawer's cards, each found by its title.
+      const dutyTitle = 'SLUŽBA V KANTÝNĚ';
+      Finder cardTitled(String title) => find
+          .ancestor(of: drawerText(title), matching: find.byType(Container))
+          .first;
+      Finder inCard(String t) =>
+          find.descendant(of: cardTitled(dutyTitle), matching: find.text(t));
+      final withoutNow = [
+        for (final a in assignments)
+          if (a.periodId != 'now') a,
+      ];
+
+      testWidgets('„V panelu“: a card on top of the drawer — who serves now, '
+          'then the next five; the switch off, none', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            notices: [notice('1', 'Brigáda')],
+            drawerOpen: true,
+            dutyPeriods: periods,
+            dutyAssignments: assignments,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(drawerText('Brigáda'), findsOneWidget);
+        expect(drawerText(dutyTitle), findsNothing);
+        await finish(tester);
+
+        await tester.pumpWidget(
+          app(
+            notices: [notice('1', 'Brigáda')],
+            drawerOpen: true,
+            dutyDrawer: true,
+            dutyShare: 60,
+            dutyPeriods: periods,
+            dutyAssignments: assignments,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(drawerText(dutyTitle), findsOneWidget);
+        expect(
+          find.descendant(
+            of: cardTitled(dutyTitle),
+            matching: find.byIcon(Icons.local_cafe_outlined),
+          ),
+          findsOneWidget,
+        );
+        expect(inCard('Teď slouží'), findsOneWidget);
+        expect(inCard(both), findsOneWidget);
+        expect(inCard('po 5. 10. – ne 11. 10.'), findsOneWidget);
+        expect(inCard('Další'), findsOneWidget);
+        // The five weeks ahead, top to bottom, range left of the names; the
+        // sixth is not listed and the one over is gone.
+        double? lastTop;
+        for (var i = 0; i < 5; i++) {
+          final range = inCard(dutyRangeLabel(ahead[i]));
+          final names = inCard(players[i + 1].displayName);
+          expect(range, findsOneWidget);
+          expect(names, findsOneWidget);
+          expect(
+            tester.getRect(range).right,
+            lessThan(tester.getRect(names).left),
+          );
+          final top = tester.getRect(range).top;
+          if (lastTop != null) expect(top, greaterThan(lastTop));
+          lastTop = top;
+        }
+        expect(inCard(dutyRangeLabel(ahead[5])), findsNothing);
+        expect(inCard(players[6].displayName), findsNothing);
+        expect(inCard(players[25].displayName), findsNothing);
+        expect(inCard(nothingAhead), findsNothing);
+        // Above the notices.
+        expect(
+          tester.getRect(cardTitled(dutyTitle)).bottom,
+          lessThan(tester.getRect(cardTitled('NÁSTĚNKA')).top),
+        );
+        // Only the card: the line and the band are switches of their own.
+        expect(find.byType(KioskDutyLine), findsNothing);
+        expect(find.byType(BoardBand), findsNothing);
+
+        await finish(tester);
+      });
+
+      testWidgets('nobody on today\'s duty, or nobody ahead: the card says '
+          'so', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            notices: [notice('1', 'Brigáda')],
+            drawerOpen: true,
+            dutyDrawer: true,
+            dutyShare: 60,
+            dutyPeriods: periods,
+            dutyAssignments: withoutNow,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(inCard('Dnes nikdo neslouží.'), findsOneWidget);
+        expect(inCard('Teď slouží'), findsNothing);
+        expect(inCard(both), findsNothing);
+        expect(inCard('Další'), findsOneWidget);
+        expect(inCard('BB Hráč'), findsOneWidget);
+        await finish(tester);
+
+        await tester.pumpWidget(
+          app(
+            notices: [notice('1', 'Brigáda')],
+            drawerOpen: true,
+            dutyDrawer: true,
+            dutyPeriods: [current, over],
+            dutyAssignments: assignments,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(inCard(both), findsOneWidget);
+        expect(inCard('Další'), findsNothing);
+        expect(inCard(nothingAhead), findsOneWidget);
+
+        await finish(tester);
+      });
+
+      testWidgets('the card takes the admin\'s share of the drawer; the '
+          'notices and the matches split the rest as before', (tester) async {
+        fullHd(tester);
+        for (final dutyShare in [30, 60]) {
+          await tester.pumpWidget(
+            app(
+              notices: [notice('1', 'Brigáda')],
+              slots: [fed('next', day.addDays(1), 'Příští')],
+              drawerOpen: true,
+              dutyDrawer: true,
+              dutyShare: dutyShare,
+              dutyPeriods: periods,
+              dutyAssignments: assignments,
+            ),
+          );
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull);
+          final drawer = tester.getRect(find.byType(KioskDrawer));
+          final duty = tester.getRect(cardTitled(dutyTitle));
+          final notices = tester.getRect(cardTitled('NÁSTĚNKA'));
+          final matches = tester.getRect(cardTitled('ZÁPASY'));
+          expect(duty.top, closeTo(drawer.top + 12, 0.01));
+          expect(notices.top, closeTo(duty.bottom + 12, 0.01));
+          expect(matches.bottom, closeTo(drawer.bottom - 12, 0.01));
+          final rest = matches.bottom - notices.top;
+          expect(
+            duty.height / rest,
+            closeTo(dutyShare / (100 - dutyShare), 0.001),
+          );
+          // The notices keep their 40 % of what is left.
+          expect(
+            notices.height / (notices.height + matches.height),
+            closeTo(0.4, 0.001),
+          );
+          await finish(tester);
+        }
+      });
+
+      testWidgets('with nothing else to show the card alone makes the drawer '
+          'and fills it; nothing planned, no card and no drawer', (
+        tester,
+      ) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            dutyDrawer: true,
+            dutyPeriods: periods,
+            dutyAssignments: assignments,
+          ),
+        );
+        await tester.pumpAndSettle();
+        // It rests closed, as the admin set the drawer.
+        expect(openButton, findsOneWidget);
+        await tester.tap(openButton);
+        await tester.pumpAndSettle();
+        final drawer = tester.getRect(find.byType(KioskDrawer));
+        final card = tester.getRect(cardTitled(dutyTitle));
+        expect(card.top, closeTo(drawer.top + 12, 0.01));
+        expect(card.bottom, closeTo(drawer.bottom - 12, 0.01));
+        expect(drawerText('NÁSTĚNKA'), findsNothing);
+        expect(drawerText('ZÁPASY'), findsNothing);
+        await finish(tester);
+
+        // Only a duty that is over: nothing to say, no drawer.
+        await tester.pumpWidget(
+          app(
+            dutyDrawer: true,
+            dutyPeriods: [over],
+            dutyAssignments: assignments,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(openButton, findsNothing);
+        expect(closeButton, findsNothing);
+
+        await finish(tester);
+      });
+
+      testWidgets('a card too short for the plan scrolls; the idle reset '
+          'brings it back to the top', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            notices: [notice('1', 'Brigáda')],
+            slots: [fed('next', day.addDays(1), 'Příští')],
+            drawerOpen: true,
+            dutyDrawer: true,
+            dutyShare: 10,
+            dutyPeriods: periods,
+            dutyAssignments: assignments,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        final card = tester.getRect(cardTitled(dutyTitle));
+        final last = inCard(players[5].displayName);
+        expect(tester.getRect(last).top, greaterThan(card.bottom));
+
+        await tester.drag(
+          find.descendant(
+            of: cardTitled(dutyTitle),
+            matching: find.byType(Scrollable),
+          ),
+          const Offset(0, -600),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.getRect(last).bottom, lessThanOrEqualTo(card.bottom));
+
+        await tester.pump(const Duration(seconds: 61));
+        await tester.pumpAndSettle();
+        expect(tester.getRect(last).top, greaterThan(card.bottom));
+
+        await finish(tester);
+      });
+
+      testWidgets('a match being played takes the whole drawer, the card '
+          'too; the list of matches brings it back', (tester) async {
+        fullHd(tester);
+        await tester.pumpWidget(
+          app(
+            slots: [fed('m', day, 'Hrají')],
+            results: {'m': res('m', 'in_progress', 2, 1)},
+            lineups: {'m': lineup},
+            dutyDrawer: true,
+            dutyPeriods: periods,
+            dutyAssignments: assignments,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(liveView, findsOneWidget);
+        expect(drawerText(dutyTitle), findsNothing);
+
+        await tester.tap(find.byTooltip('Všechny zápasy'));
+        await tester.pumpAndSettle();
+        expect(liveView, findsNothing);
+        expect(drawerText(dutyTitle), findsOneWidget);
+        expect(drawerText('ZÁPASY'), findsOneWidget);
+
+        await finish(tester);
+      });
     });
   });
 

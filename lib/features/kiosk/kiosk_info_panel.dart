@@ -1,7 +1,8 @@
-/// The kiosk's side drawer: the alley's active notices (they take turns when
-/// there are several; a tap reads one in full), the matches of the last and
-/// next weeks (a tap on a finished one opens its Zápis) — and, while a match
-/// is being played, that match across the whole drawer in the Souboje view
+/// The kiosk's side drawer: who serves in the canteen and who comes next
+/// (0073, on top), the alley's active notices (they take turns when there
+/// are several; a tap reads one in full), the matches of the last and next
+/// weeks (a tap on a finished one opens its Zápis) — and, while a match is
+/// being played, that match across the whole drawer in the Souboje view
 /// (several live matches take turns too). Display only, like the board:
 /// nothing here books or writes. Closed it is gone entirely, leaving only a
 /// button floating at the screen's edge. The admin picks what it lists and
@@ -20,6 +21,7 @@ import '../../core/widgets/emoji_text.dart';
 import '../../data/clock.dart';
 import '../../data/providers.dart';
 import '../../domain/duels.dart';
+import '../../domain/duties.dart' show KioskDutyEntry;
 import '../../domain/kiosk_panel.dart';
 import '../../domain/models.dart';
 import '../../domain/palette.dart';
@@ -30,6 +32,7 @@ import '../clubhouse/widgets/match_scoreboard.dart';
 import '../clubhouse/widgets/match_title.dart';
 import '../clubhouse/widgets/team_totals_card.dart';
 import '../schedule/widgets/calendar_board.dart' show calendarRulerWidth;
+import 'kiosk_duty.dart' show kioskDutyPlanProvider;
 
 /// The drawer's width for a screen [screenWidth] wide: [columns] of the
 /// board's [visibleDays] day columns (the board sizes them on the whole
@@ -107,11 +110,22 @@ final kioskPanelContentProvider = Provider<KioskPanelContent?>((ref) {
         weeksAhead: settings?.kioskWeeksAhead ?? 1,
         showUpcoming: settings?.kioskShowUpcoming ?? true,
       ).matches.isNotEmpty;
-  if (live.isEmpty && notices.isEmpty && !hasMatches) return null;
+  // The canteen duty's card (0073) — the plan is read only with it on. A
+  // plan with nobody now and nobody ahead has nothing to say.
+  final plan = (settings?.kioskDutyDrawer ?? false)
+      ? ref.watch(kioskDutyPlanProvider)
+      : null;
+  final duty = plan != null && (plan.now != null || plan.next.isNotEmpty)
+      ? plan
+      : null;
+  if (live.isEmpty && notices.isEmpty && !hasMatches && duty == null) {
+    return null;
+  }
   return KioskPanelContent(
     notices: notices,
     hasMatches: hasMatches,
     live: live,
+    duty: duty,
   );
 });
 
@@ -120,6 +134,7 @@ class KioskPanelContent {
     required this.notices,
     required this.hasMatches,
     required this.live,
+    this.duty,
   });
 
   final List<Message> notices;
@@ -127,6 +142,10 @@ class KioskPanelContent {
 
   /// Matches being played, with data; non-empty = the drawer shows only them.
   final List<PrioritySlot> live;
+
+  /// The canteen duty's plan for the card on top (0073, „V panelu“); null
+  /// with the card off or nothing planned.
+  final ({KioskDutyEntry? now, List<KioskDutyEntry> next})? duty;
 }
 
 class KioskDrawer extends ConsumerWidget {
@@ -197,6 +216,24 @@ class KioskDrawer extends ConsumerWidget {
                 : () => onShowLive!(true),
           )
         : null;
+    final plan = content.duty;
+    final duty = plan == null
+        ? null
+        // A new key after every idle reset, as the matches: scrolled down,
+        // the plan starts over at the top.
+        : _DutyCard(key: ValueKey(resetToken), plan: plan);
+    final dutyShare = settings?.kioskDutyShare ?? 30;
+    // The notices and the matches, split between them as the admin set it.
+    final rest = [
+      if (notices != null && matches != null) ...[
+        Expanded(flex: share, child: notices),
+        const SizedBox(height: 12),
+        Expanded(flex: 100 - share, child: matches),
+      ] else if (matches != null)
+        Expanded(child: matches)
+      else if (notices != null)
+        Flexible(child: notices),
+    ];
     return AnimatedContainer(
       duration: const Duration(milliseconds: 250),
       curve: Curves.easeOutCubic,
@@ -225,14 +262,22 @@ class KioskDrawer extends ConsumerWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    if (notices != null && matches != null) ...[
-                      Expanded(flex: share, child: notices),
+                    // The canteen duty on top, its share of the height (the
+                    // rest keeps its own split below); alone it fills.
+                    if (duty != null && rest.isNotEmpty) ...[
+                      Expanded(flex: dutyShare, child: duty),
                       const SizedBox(height: 12),
-                      Expanded(flex: 100 - share, child: matches),
-                    ] else if (matches != null)
-                      Expanded(child: matches)
-                    else if (notices != null)
-                      Flexible(child: notices),
+                      Expanded(
+                        flex: 100 - dutyShare,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: rest,
+                        ),
+                      ),
+                    ] else if (duty != null)
+                      Expanded(child: duty)
+                    else
+                      ...rest,
                   ],
                 ),
               ),
@@ -436,6 +481,115 @@ class _Card extends StatelessWidget {
           const SizedBox(height: 10),
           fill ? Expanded(child: child) : Flexible(child: child),
         ],
+      ),
+    );
+  }
+}
+
+/// The canteen duty (0073, „V panelu“): who serves now, large on the duty's
+/// tint (the status bar's line and the board's band wear it too), or that
+/// nobody does today — then the next ones in date order, each its range on
+/// the left and its names on the right. It fills its slot of the drawer and
+/// scrolls when the slot is too short for the plan.
+class _DutyCard extends StatelessWidget {
+  const _DutyCard({super.key, required this.plan});
+
+  final ({KioskDutyEntry? now, List<KioskDutyEntry> next}) plan;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final now = plan.now;
+    final muted = TextStyle(fontSize: 15, color: scheme.onSurfaceVariant);
+    return _Card(
+      icon: Icons.local_cafe_outlined,
+      title: 'SLUŽBA V KANTÝNĚ',
+      fill: true,
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (now == null)
+              Text('Dnes nikdo neslouží.', style: muted)
+            else
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: scheme.secondaryContainer,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Teď slouží',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: scheme.onSecondaryContainer,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      now.who,
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                        color: scheme.onSecondaryContainer,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      now.range,
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: scheme.onSecondaryContainer,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            const SizedBox(height: 14),
+            if (plan.next.isEmpty)
+              Text('Další služby zatím nejsou naplánované.', style: muted)
+            else ...[
+              Text(
+                'Další',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 4),
+              for (final (i, entry) in plan.next.indexed) ...[
+                if (i > 0) const Divider(height: 1),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(entry.range, style: const TextStyle(fontSize: 15)),
+                      const SizedBox(width: 12),
+                      // A long list of names wraps under itself; the range
+                      // keeps its line.
+                      Expanded(
+                        child: Text(
+                          entry.who,
+                          textAlign: TextAlign.end,
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ],
+        ),
       ),
     );
   }
