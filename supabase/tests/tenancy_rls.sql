@@ -11716,12 +11716,16 @@ begin
   raise notice 'OK: a new kuželna starts with no training day (0063)';
 end $$;
 
--- 0072: one stream window by default; one to four.
+-- 0072: the streams on by default; one stream window by default; one to
+-- four.
 do $$
 declare
   v_t uuid;
 begin
   insert into tenants (name) values ('Nová kuželna 0072') returning id into v_t;
+  if not (select kiosk_stream_enabled from schedule_settings where tenant_id = v_t) then
+    raise exception 'FAIL: a new kuželna starts with the kiosk streams off';
+  end if;
   if (select kiosk_stream_max from schedule_settings where tenant_id = v_t) <> 1 then
     raise exception 'FAIL: a new kuželna does not start with one stream window';
   end if;
@@ -11736,7 +11740,7 @@ begin
   exception when check_violation then null;
   end;
   update schedule_settings set kiosk_stream_max = 4 where tenant_id = v_t;
-  raise notice 'OK: one to four stream windows, one by default (0072)';
+  raise notice 'OK: streams on, one to four stream windows, one by default (0072)';
 end $$;
 
 -- 0064: a notice is hidden from, or shown on, the kiosk by its alley's admin

@@ -5694,6 +5694,7 @@ CREATE TABLE IF NOT EXISTS "public"."schedule_settings" (
     "kiosk_stream" boolean DEFAULT false NOT NULL,
     "kiosk_stream_corner" "text" DEFAULT 'bl'::"text" NOT NULL,
     "kiosk_stream_width" smallint DEFAULT 35 NOT NULL,
+    "kiosk_stream_enabled" boolean DEFAULT true NOT NULL,
     "kiosk_stream_max" smallint DEFAULT 1 NOT NULL,
     CONSTRAINT "schedule_settings_booking_horizon_days_check" CHECK ((("booking_horizon_days" >= 1) AND ("booking_horizon_days" <= 90))),
     CONSTRAINT "schedule_settings_duty_reminder_days_check" CHECK ((("duty_reminder_days" >= 1) AND ("duty_reminder_days" <= 14))),
